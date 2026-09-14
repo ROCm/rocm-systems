@@ -47,6 +47,10 @@ static std::vector<size_t> g_rmaCallocCounts;
 // mis-sized in either direction and the read-back would still find its own
 // writes.
 static std::vector<size_t> g_rmaStackCounts;
+// ...and which arena each came from. Sizes alone cannot tell memScoped from
+// memPermanent, and the fixture constructs and destructs both the same way, so
+// swapping them would leave every count identical.
+static std::vector<const void*> g_rmaStackArenas;
 template <typename T>
 static ncclResult_t RmaMicroCalloc(const char* file, int line, const char* fn, T** ptr,
                                    size_t nelem) {
@@ -60,6 +64,7 @@ static ncclResult_t RmaMicroCalloc(const char* file, int line, const char* fn, T
 template <typename T>
 static T* RmaMicroStackAlloc(struct ncclMemoryStack* me, size_t n = 1) {
   g_rmaStackCounts.push_back(n);
+  g_rmaStackArenas.push_back(me);
   return ncclMemoryStackAlloc<T>(me, n);
 }
 #define ncclMemoryStackAlloc RmaMicroStackAlloc
@@ -94,7 +99,14 @@ hipEvent_t const kCeEvent = reinterpret_cast<hipEvent_t>(0xEEEEull);
 // load-bearing: per-launcher counters could not tell a correct interleaving on
 // the mixed path from a scrambled one.
 struct LaunchLog {
-  enum Which { kProxyPut, kCePut, kProxyWait, kCeWait, kEventRecord, kStreamWait };
+  enum Which {
+    kProxyPut,
+    kCePut,
+    kProxyWait,
+    kCeWait,
+    kEventRecord,
+    kStreamWait,
+  };
 
   struct Entry {
     Which which;
@@ -184,6 +196,7 @@ protected:
     g_rmaCallocFailAt = -1;
     g_rmaCallocCounts.clear();
     g_rmaStackCounts.clear();
+    g_rmaStackArenas.clear();
     g_rmaFreeCalls = 0;
     ResetRmaFakes();
     ResetHipFakes();
@@ -475,9 +488,14 @@ TEST_F(RmaWaitSignalTest, NoTasks_IsANoOp) {
 
 // --- ncclRmaPut (rma.cc:57) ------------------------------------------------
 //
-// Same four-arm shape as ncclRmaWaitSignal, covered separately rather than by a
-// shared parameterised body: the two functions are duplicated source, so one
-// test driving both would still pass if a copy called the other's launchers.
+// Same four-arm shape as ncclRmaWaitSignal, and deliberately a separate suite.
+// Not because a shared body would miss a cross-wired launcher -- AllHooks
+// records all four and each test compares a whole log_.Sequence() against an
+// explicit enum list, so a Put calling the Wait launcher fails the vector either
+// way. The reason is that parameterising would take the function under test and
+// its expected enums from the same tuple, so one wrong entry would be
+// self-consistent and pass. The two functions are duplicated production source
+// that can drift apart independently, and these expectations stay literal.
 
 class RmaPutTest : public RmaTestBase {
 protected:
@@ -993,6 +1011,12 @@ TEST_F(RmaScheduleTest, WaitSignal_AllPeersLsa_ProducesOnlyCeTask) {
   EXPECT_EQ(ce->signalMode, NCCL_SIGNAL);
   // The rmaArgs cell, then both CE arrays sized for the whole peer list.
   EXPECT_EQ(g_rmaStackCounts, (std::vector<size_t>{1, 3, 3}));
+  // All three come from the scoped arena, which is released per plan; taking
+  // them from memPermanent instead would outlive the plan and leave the counts
+  // unchanged.
+  EXPECT_EQ(g_rmaStackArenas, (std::vector<const void*>{&comm_->memScoped,
+                                                       &comm_->memScoped,
+                                                       &comm_->memScoped}));
   ASSERT_EQ(ce->npeers, 3);
   EXPECT_EQ(std::vector<int>(ce->peers, ce->peers + 3), (std::vector<int>{1, 2, 3}));
   EXPECT_EQ(std::vector<int>(ce->nsignals, ce->nsignals + 3), (std::vector<int>{10, 11, 12}));
@@ -1026,7 +1050,9 @@ TEST_F(RmaScheduleTest, WaitSignal_NoPeersLsa_ProducesOnlyProxyTask) {
   EXPECT_EQ(std::vector<int>(proxy->nsignals, proxy->nsignals + 2), (std::vector<int>{10, 11}));
   // Both arrays must be sized for every peer on the original task.
   EXPECT_EQ(g_rmaCallocCounts, (std::vector<size_t>{2, 2}));
-
+  // Ownership transfers to the task here, so nothing is released: a free() added
+  // to this arm would still read {7, 8} back out of unscrubbed heap and pass.
+  EXPECT_EQ(g_rmaFreeCalls, 0);
 }
 
 // Both arms taken. The interleaved order catches a split that lets the peer and
@@ -1064,6 +1090,7 @@ TEST_F(RmaScheduleTest, WaitSignal_MixedPeers_SplitsPreservingSignalPairing) {
   // mis-size to npeersCe would pass there and fail here.
   EXPECT_EQ(g_rmaCallocCounts, (std::vector<size_t>{4, 4}));
   EXPECT_EQ(g_rmaStackCounts, (std::vector<size_t>{1, 4, 4}));
+  EXPECT_EQ(g_rmaFreeCalls, 0);  // both sides in use, so neither array is released
   // The split consumes one queued task even though it emits two.
   EXPECT_EQ(comm_->planner.nTasksRma, 0);
 
@@ -1117,6 +1144,12 @@ TEST_F(RmaScheduleTest, WaitSignal_FirstCallocFails_ReturnsError) {
   EXPECT_TRUE(ncclIntruQueueEmpty(&plan_->rmaTaskQueueProxy));
   // The fail label frees both pointers even though neither was allocated.
   EXPECT_EQ(g_rmaFreeCalls, 2);
+  // The fail label leaves the plan half-built: the task was dequeued at
+  // rma.cc:159 and is neither re-queued nor returned to the pool, the decrement
+  // at rma.cc:236 is unreachable, and isRma was already set at rma.cc:162.
+  EXPECT_TRUE(ncclIntruQueueEmpty(&ctxQueues_[0]));
+  EXPECT_EQ(comm_->planner.nTasksRma, 1);
+  EXPECT_TRUE(plan_->isRma);
 }
 
 // Second ncclCalloc fails: the arm that actually needs the free() pair.
@@ -1129,6 +1162,12 @@ TEST_F(RmaScheduleTest, WaitSignal_SecondCallocFails_FreesFirstAllocation) {
   // The name of this test is the assertion: the first allocation must be
   // released by the fail label, not leaked.
   EXPECT_EQ(g_rmaFreeCalls, 2);
+  // The fail label leaves the plan half-built: the task was dequeued at
+  // rma.cc:159 and is neither re-queued nor returned to the pool, the decrement
+  // at rma.cc:236 is unreachable, and isRma was already set at rma.cc:162.
+  EXPECT_TRUE(ncclIntruQueueEmpty(&ctxQueues_[0]));
+  EXPECT_EQ(comm_->planner.nTasksRma, 1);
+  EXPECT_TRUE(plan_->isRma);
 }
 
 // lsaAccessible on the put path routes to the CE queue.
@@ -1389,8 +1428,10 @@ protected:
     args.nRmaTasksProxy = 1;
     args.nRmaTasksCe = 1;
     plan_->rmaArgs = &args;
-    return put ? ncclRmaPut(comm_.get(), plan_.get(), kMainStream)
-               : ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream);
+    const ncclResult_t ret = put ? ncclRmaPut(comm_.get(), plan_.get(), kMainStream)
+                                 : ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream);
+    plan_->rmaArgs = nullptr;  // args is a local; plan_ outlives this frame
+    return ret;
   }
 
   void TearDown() override {
@@ -1507,8 +1548,6 @@ TEST_F(RmaDebugLoggingTest, SingleTransportArmsUnwindUnderEveryDebugState) {
     for (bool put : {false, true}) {
       for (bool proxyOnly : {false, true}) {
         SetDebug(d);
-        LaunchLog log;
-        AllHooks hooks(log);
         ncclRmaArgs args{};
         args.func = put ? ncclFuncPutSignal : ncclFuncWaitSignal;
         args.nRmaTasksProxy = proxyOnly ? 1 : 0;
