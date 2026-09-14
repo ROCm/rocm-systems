@@ -110,6 +110,17 @@ jobs:
           echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
+      - name: Install GCC Toolset
+        if: ${{ matrix.is_rhel && matrix.os_major == '8' }}
+        shell: bash
+        run: |
+          dnf install -y \
+            gcc-toolset-11-binutils \
+            gcc-toolset-11-gcc \
+            gcc-toolset-11-gcc-c++ \
+            gcc-toolset-11-gcc-gfortran
+          echo "/opt/rh/gcc-toolset-11/root/usr/bin" >> $GITHUB_PATH
+
       - name: Install compiler packages (Jammy)
         if: ${{ matrix.apt_install_compiler }}
         timeout-minutes: 25
