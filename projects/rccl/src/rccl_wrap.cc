@@ -732,10 +732,43 @@ size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceSca
 
 RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 1);
 
+// Minimum number of bytes each rank must contribute before an AllGather is
+// allowed to take the hierarchical path.
+//
+// The size check below is an upper bound only, so without this every AllGather
+// smaller than the tier size selected the two-stage path, down to and including
+// the 8-byte-per-rank one PyTorch DDP issues from verify_params_across_processes
+// at wrap time. A two-stage algorithm plus a shuffle cannot beat a single small
+// transfer, and measurement agrees: at 22 nodes / 176 ranks on MI350X the two
+// paths differ by at most a few percent of a sub-millisecond operation below
+// ~6 MB gathered, in both directions run to run, while the win the feature
+// exists for sits around 23 MB gathered.
+//
+// The bound is per-rank rather than on the total gathered size on purpose.
+// msgSize is count * typeSize * nRanks, so a fixed total-byte floor drifts
+// against the bootstrap traffic it exists to exclude: 8 B/rank gathers to 512 B
+// at 64 ranks but 2 KB at 256 ranks. A 1 KB total floor would therefore stop
+// excluding the bootstrap somewhere around 16 nodes, which is where the
+// hierarchy starts being built and so the only scale at which the gate matters.
+// Per-rank is scale-invariant: 8 B against 1 KB is a 128x margin at every node
+// count, and 1 KB/rank remains three orders of magnitude below the region where
+// the hierarchical path is actually faster.
+//
+// Set to 0 to restore the previous upper-bound-only behaviour.
+RCCL_PARAM(HierarchicalAllGatherMinBytesPerRank, "HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK", 1024);
+
 bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
   if (comm->nNodes < 8) return false;
   if (rcclParamHierarchicalAllGather() != 1) return false;
   if (!comm->hierarchicalCommsInitialized) return false;
+
+  // msgSize is the total gathered size; recover this rank's own contribution to
+  // compare against the floor.
+  int64_t minBytesPerRank = rcclParamHierarchicalAllGatherMinBytesPerRank();
+  if (minBytesPerRank > 0 && comm->nRanks > 0 &&
+      msgSize / (size_t)comm->nRanks < (size_t)minBytesPerRank) {
+    return false;
+  }
 
   size_t threshold = rcclHierarchicalTempBufferSize(comm->nNodes, /*allGather=*/true, /*reduceScatter=*/false);
   return threshold > 0 && msgSize <= threshold;
