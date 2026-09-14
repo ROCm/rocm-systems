@@ -36,7 +36,7 @@ protected:
         test_profile_config.handle = 100;
 
         test_agent                    = std::make_shared<rocprofsys::agent>();
-        test_agent->type              = agent_type::GPU;
+        test_agent->type              = agent_type::gpu;
         test_agent->handle            = 42;
         test_agent->device_id         = 0;
         test_agent->device_type_index = 0;

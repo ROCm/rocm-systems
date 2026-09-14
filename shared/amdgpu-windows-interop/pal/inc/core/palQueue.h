@@ -99,10 +99,11 @@ enum class SubmitOptMode : uint32
 /// @note The "wait" flags are ignored on platforms which do not support them.
 enum RemapFlags : uint32
 {
-    RemapWaitNone   = 0x0, ///< Do not wait.
-    RemapWaitBefore = 0x1, ///< Wait for prior queue operations to complete before executing paging operations.
-    RemapWaitAfter  = 0x2, ///< Wait for paging operations to complete before executing subsequent queue operations.
-    RemapAllFlags   = 0x3, ///< Clients should NOT use it, for internal static_assert purpose only.
+    RemapWaitNone              = 0x0, ///< Do not wait.
+    RemapWaitBefore            = 0x1, ///< Wait for prior queue operations to complete before executing paging ops.
+    RemapWaitAfter             = 0x2, ///< Wait for paging operations to complete before executing subsequent queue ops.
+    RemapForceConsecutiveWaits = 0x4, ///< Disallow an optimization where we skip syncs for consecutive paging calls.
+    RemapAllFlags              = 0x7, ///< Clients should NOT use it, for internal static_assert purpose only.
 };
 
 /// Enumerates vcn instance affinity statuses
