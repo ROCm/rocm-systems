@@ -1551,6 +1551,36 @@ std::vector<uint32_t> independent_wmma_kernel() {
   return code;
 }
 
+TEST(ExecutionPluginTest, SynchronousObserverDisablesActualMmaOffload) {
+  if (matrix_coexecution::mode() != 4 || matrix_coexecution::width() <= 1 ||
+      matrix_coexecution::shared_helper_limit().value_or(4) == 0)
+    GTEST_SKIP() << "requires mode 4 with shared helpers";
+  PluginFixture f(1, "cdna5", 32, 128);
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto async_observer = std::make_unique<AsyncEventPlugin>();
+  auto *async_events = async_observer.get();
+  ASSERT_TRUE(f.plugin_group_->add(std::move(async_observer)));
+  auto sync_observer = std::make_unique<OrderingPlugin>();
+  auto *sync_events = sync_observer.get();
+  ASSERT_TRUE(f.plugin_group_->add(std::move(sync_observer)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+  const auto code = independent_wmma_kernel();
+  f.run_kernel(code.data(), code.size(), 32, 32);
+  f.shutdown();
+  EXPECT_EQ(async_events->issued, 0u);
+  EXPECT_EQ(async_events->retired, 0u);
+  unsigned before = 0, after = 0;
+  for (const auto &event : sync_events->events) {
+    if (!event.mnemonic.starts_with("v_wmma_"))
+      continue;
+    before += event.kind == HookEvent::BEFORE_INSTRUCTION;
+    after += event.kind == HookEvent::AFTER_INSTRUCTION;
+  }
+  EXPECT_EQ(before, 2u);
+  EXPECT_EQ(after, before);
+}
+
 enum class AsyncFailurePoint { HelperRegisterRead, Issue, Retirement };
 
 struct AsyncFailureObservation {

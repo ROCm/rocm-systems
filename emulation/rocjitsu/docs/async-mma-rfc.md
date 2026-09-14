@@ -62,7 +62,10 @@ even with 32 independent ALU steps per load and was removed.
 Sparse and block-scaled/multi-block MFMA need separate
 semantic and real-kernel qualification.
 
-Throughput and kernel logging opt into explicit async issue/retirement events.
+Keep synchronous before/after hooks separate from async issue/retirement: their
+state-inspection guarantees differ. Plugins opt in once; any plugin requiring
+synchronous observation disables offload for the group. Throughput and kernel
+logging handle both pairs, including synchronous fallback.
 Callbacks run on the issuer; register hooks can run concurrently on helpers.
 Throughput retains counts and dispatch timing, marks affected handler timing
 invalid and emits null timing-derived values. ConSan keeps synchronous execution:

@@ -72,6 +72,12 @@ double nanoseconds_to_seconds(uint64_t nanoseconds) {
   return static_cast<double>(nanoseconds) / 1.0e9;
 }
 
+InstructionFamily count_instruction(ThroughputWavefrontState &state, const Instruction &inst) {
+  const InstructionFamily family = ThroughputPlugin::classify(inst);
+  ++state.counts[family_index(family)];
+  return family;
+}
+
 } // namespace
 
 ThroughputPlugin::ThroughputPlugin(const char * /*config_json*/) : ExecutionPlugin("throughput") {}
@@ -160,8 +166,7 @@ void ThroughputPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
 void ThroughputPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
                                                         amdgpu::Wavefront &wf) {
   auto *state = static_cast<ThroughputWavefrontState *>(wf.plugin_state(slot_index()));
-  const InstructionFamily family = classify(inst);
-  ++state->counts[family_index(family)];
+  const InstructionFamily family = count_instruction(*state, inst);
   state->active_family = family;
   // Start after classification and accounting so their profiler cost is not
   // charged to the simulated instruction.
@@ -172,8 +177,7 @@ void ThroughputPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const I
 void ThroughputPlugin::onAmdgpuAsyncInstructionIssued(uint64_t /*pc*/, const Instruction &inst,
                                                       amdgpu::Wavefront &wf) {
   auto *state = static_cast<ThroughputWavefrontState *>(wf.plugin_state(slot_index()));
-  const auto family = family_index(classify(inst));
-  ++state->counts[family];
+  const auto family = family_index(count_instruction(*state, inst));
   ++state->untimed_instructions[family];
 }
 
