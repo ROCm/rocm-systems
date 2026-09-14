@@ -175,22 +175,26 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
       bool remoteMulti = ncclIbCtsRemoteMultiSeg(comm, slot, r);
       if (remoteMulti) {
         uint32_t remoteSegments = side[r].nSegments;
-        if (remoteSegments > NCCL_IB_MAX_SEGMENTS || remDevIdx < 0 || remDevIdx >= NCCL_IB_MAX_DEVS_PER_NIC) {
+        uint64_t starts[NCCL_IB_MAX_SEGMENTS];
+        uint32_t rkeys[NCCL_IB_MAX_SEGMENTS];
+        const uint32_t nCopy =
+          (remoteSegments >= 1 && remoteSegments <= NCCL_IB_MAX_SEGMENTS && remDevIdx >= 0 &&
+           remDevIdx < NCCL_IB_MAX_DEVS_PER_NIC)
+            ? remoteSegments
+            : 0;
+        for (uint32_t s = 0; s < nCopy; s++) {
+          starts[s] = side[r].segStart[s];
+          rkeys[s] = side[r].segRkeys[s][remDevIdx];
+        }
+        if (!ncclIbCtsRemoteLayoutValid(remoteSegments, remDevIdx, NCCL_IB_MAX_DEVS_PER_NIC, NCCL_IB_MAX_SEGMENTS,
+                                        nCopy ? starts : NULL, nCopy ? rkeys : NULL)) {
           WARN("NET/IB: received invalid segment layout (nSegments=%u remDevIdx=%d)", remoteSegments, remDevIdx);
           return ncclInternalError;
         }
         nRemote = (int)remoteSegments;
         for (int s = 0; s < nRemote; s++) {
-          rVA[s] = side[r].segStart[s];
-          if (s > 0 && rVA[s] <= rVA[s - 1]) {
-            WARN("NET/IB: received non-monotonic segment layout at segment %d", s);
-            return ncclInternalError;
-          }
-          if (side[r].segRkeys[s][remDevIdx] == 0) {
-            WARN("NET/IB: received a zero rkey for segment %d device %d", s, remDevIdx);
-            return ncclInternalError;
-          }
-          rOff[s] = side[r].segStart[s] - side[r].segStart[0];
+          rVA[s] = starts[s];
+          rOff[s] = starts[s] - starts[0];
         }
         if (remoteBase < side[r].segStart[0]) return ncclInternalError;
         remoteReqOff = remoteBase - side[r].segStart[0];
