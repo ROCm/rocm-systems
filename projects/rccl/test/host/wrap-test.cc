@@ -1151,6 +1151,24 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xDelegatesThenP2pDisa
       });
 }
 
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xSingleNodeDelegatesToProtocolSelector) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx120xSingleNodeDelegatesToProtocolSelector",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        SetMicroEnvAbsent("NCCL_P2P_DISABLE");
+        ncclComm* comm = MakeCommWithArch("gfx1200");
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+        ncclTaskColl info{};
+        info.func = ncclFuncAllGather;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        rcclUpdateCollectiveProtocol(comm, /*nBytes=*/1024, &info);
+        EXPECT_EQ(NCCL_PROTO_LL, info.protocol);
+        DeleteCommWithArch(comm);
+      });
+}
+
 // Resolves the open question flagged above: a multi-node gfx120x comm still
 // matches this branch's own condition (it doesn't require single-node), but
 // the ONLY protocol-setting call inside it is nested in `if (nNodes == 1)`.
@@ -1897,6 +1915,20 @@ TEST(WrapMicrotestIsolated, UseAllGatherDirect_Gfx950WithinAutoThresholdReturnsT
         comm->nNodes = 1; // auto threshold -> 8MiB
         comm->nRanks = 8; // rankMultiple == 0
         size_t msgSize = 1024;
+        EXPECT_TRUE(rcclUseAllGatherDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseAllGatherDirect_UserThresholdBypassesAllAutomaticClamps) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseAllGatherDirect_UserThresholdBypassesAllAutomaticClamps",
+      []() {
+        SetMicroEnv("RCCL_DIRECT_ALLGATHER_THRESHOLD", "16777216"); // explicit 16MiB
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 1; // automatic gfx950 threshold would clamp to 8MiB
+        comm->nRanks = 8;
+        size_t msgSize = 12 << 20;
         EXPECT_TRUE(rcclUseAllGatherDirect(comm, msgSize));
         DeleteCommWithArch(comm);
       });
@@ -4251,6 +4283,41 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchChosen) {
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
                                                     /*query=*/true, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllGather_CaptureExcludesCeForceScratch) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_CaptureExcludesCeForceScratch",
+      []() {
+        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                       ncclSymRegType_t) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        uint8_t scratch[64];
+        comm->ddaScratch = scratch;
+        comm->ddaScratchBytes = sizeof(scratch);
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                    /*query=*/true, /*graphCapturingHint=*/true, &decision));
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllGather_CaptureExcludesCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_CaptureExcludesCeRegistered",
+      []() {
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                    /*query=*/true, /*graphCapturingHint=*/true, &decision));
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
