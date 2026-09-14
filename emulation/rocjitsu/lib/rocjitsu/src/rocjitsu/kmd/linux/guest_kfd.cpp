@@ -1540,8 +1540,11 @@ kfd_process_device_apertures GuestKfd::guest_apertures() const {
   apertures.lds_limit = apertures.lds_base + 0xFFFFFFFFULL;
   apertures.scratch_base = 0x2000000000000ULL + ordinal * aperture_stride;
   apertures.scratch_limit = apertures.scratch_base + 0xFFFFFFFFULL;
-  apertures.gpuvm_base = 0x1000000000ULL;
-  apertures.gpuvm_limit = 0x3FFFFFFFFFFFULL;
+  // Guest GPU addresses are host pointers. Advertise the full lower canonical
+  // CPU range, as SimulatedKfd does, including ASan's high-address allocations.
+  // A smaller limit makes ROCr reserve an SVM aperture below its shadow memory.
+  apertures.gpuvm_base = 0x10000ULL;
+  apertures.gpuvm_limit = 0x7FFFFFFFFFFFULL;
   apertures.gpu_id = guest_.gpu_id;
   return apertures;
 }

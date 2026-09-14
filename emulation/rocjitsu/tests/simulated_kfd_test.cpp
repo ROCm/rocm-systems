@@ -1029,6 +1029,47 @@ TEST_F(SimulatedKfdTest, GuestOpenSurvivesExecutionPrimaryOverwrite) {
   EXPECT_EQ(::close(pipefd[1]), 0);
 }
 
+TEST_F(SimulatedKfdTest, GuestGpuVmApertureCoversHostUserAddressSpace) {
+  rj_vm_t *raw_vm = nullptr;
+  ASSERT_EQ(rj_vm_create(CONFIG_PATH.c_str(), RJ_VM_MODE_LOCAL, &raw_vm), ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
+  auto *execution_driver = vm->vm->driver();
+  ASSERT_NE(execution_driver, nullptr);
+
+  rocjitsu::config::DbtGuestConfig config;
+  config.enabled = true;
+  config.guest_isa = "gfx950";
+  config.host.isa = "gfx950";
+  config.host.gpu_id = execution_driver->gpu_id();
+  config.host.backend = rocjitsu::config::DbtExecutionBackend::Simulator;
+  config.guest_device = vm->loaded.device;
+  config.guest_device.gpu_id += 1;
+  config.guest_device.drm_render_minor += 1;
+  const auto guest_gpu_id = config.guest_device.gpu_id;
+  rocjitsu::GuestKfd guest(std::move(config), execution_driver);
+  ASSERT_TRUE(guest.prepare_for_discovery());
+  const int app_fd = guest.open();
+  ASSERT_GE(app_fd, 0);
+
+  kfd_ioctl_get_process_apertures_new_args args{};
+  EXPECT_EQ(guest.ioctl(AMDKFD_IOC_GET_PROCESS_APERTURES_NEW, &args), 0);
+  std::vector<kfd_process_device_apertures> apertures(args.num_of_nodes);
+  args.kfd_process_device_apertures_ptr = reinterpret_cast<uint64_t>(apertures.data());
+  EXPECT_EQ(guest.ioctl(AMDKFD_IOC_GET_PROCESS_APERTURES_NEW, &args), 0);
+  bool found = false;
+  for (const auto &aperture : apertures) {
+    if (aperture.gpu_id != guest_gpu_id)
+      continue;
+    found = true;
+    EXPECT_LE(aperture.gpuvm_base, uint64_t{0x10000});
+    EXPECT_GE(aperture.gpuvm_limit, (uint64_t{1} << 47) - 1);
+    EXPECT_LE(reinterpret_cast<uintptr_t>(apertures.data()), aperture.gpuvm_limit);
+  }
+  EXPECT_TRUE(found);
+  EXPECT_EQ(::close(app_fd), 0);
+  EXPECT_EQ(guest.close(), 0);
+}
+
 // A caller-visible WAIT_EVENTS on the hardware path is served as MANY bounded ioctls.
 // That is invisible to the caller until a final close lands between two slices: the
 // connection the wait had already started on would be gone, and the next slice would
