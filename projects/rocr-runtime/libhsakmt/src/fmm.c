@@ -249,8 +249,11 @@ typedef struct {
 	/* specifies the alignment size as PAGE_SIZE * 2^alignment_order */
 	uint32_t alignment_order;
 
-	/* DEBUG/TEMPORARY: whether to skip the SVM host unregister */
-	bool skip_svm_host_unregister;
+	/* DEBUG/TEMPORARY: whether to perform the SVM host unregister. Off by
+	 * default, so deregistration stays the no-op it was until the path has
+	 * more mileage; HSA_SVM_HOST_UNREGISTER_DEBUG opts in.
+	 */
+	bool svm_host_unregister;
 } svm_t;
 
 /*
@@ -362,7 +365,7 @@ int hsakmt_kfdcontext_init_fmm_context(HsaKFDContext *ctx)
 	ctx->fmm_context->svm.reserve_svm = false;
 	ctx->fmm_context->svm.disable_cache = false;
 	ctx->fmm_context->svm.alignment_order = 0;
-	ctx->fmm_context->svm.skip_svm_host_unregister = false;
+	ctx->fmm_context->svm.svm_host_unregister = false;
 
 	rbtree_init(&ctx->fmm_context->svm_api_range_tree);
 	pthread_mutex_init(&ctx->fmm_context->svm_api_mutex, NULL);
@@ -1415,7 +1418,7 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	HSAuint64 aligned_size = PAGE_ALIGN_UP(page_offset + size);
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 	uint32_t num_gpus = fmm_ctx->all_gpu_id_array_size / sizeof(uint32_t);
-	uint32_t access_attrs = fmm_ctx->svm.skip_svm_host_unregister ? 0 : num_gpus;
+	uint32_t access_attrs = fmm_ctx->svm.svm_host_unregister ? num_gpus : 0;
 	uint32_t num_attrs = access_attrs + 2;
 	uint32_t i;
 	bool locked = false, tracked = false;
@@ -1435,9 +1438,9 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	 * ACCESS_IN_PLACE, not ACCESS: userptr memory can't migrate, so ACCESS
 	 * would fail the restore path and still fault.
 	 *
-	 * HSA_SKIP_SVM_HOST_UNREGISTER_DEBUG skips ACCESS_IN_PLACE restore and
-	 * range tracking so unregister can be A/B tested against the prior
-	 * coherency-flags-only register path.
+	 * Without HSA_SVM_HOST_UNREGISTER_DEBUG there is no ACCESS_IN_PLACE
+	 * restore and no range tracking, which is the prior
+	 * coherency-flags-only register path and the default.
 	 */
 	s_attr = num_attrs * sizeof(struct kfd_ioctl_svm_attribute);
 	args = malloc(sizeof(*args) + s_attr);
@@ -1469,7 +1472,7 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	 * grant. Ungated, the revoke can reach the kernel after the grant and
 	 * leave this live registration without GPU access.
 	 */
-	if (!fmm_ctx->svm.skip_svm_host_unregister) {
+	if (fmm_ctx->svm.svm_host_unregister) {
 		pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
 		locked = true;
 		tracked = svm_api_range_get_locked(fmm_ctx, address, (void *)aligned_addr,
@@ -3223,7 +3226,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	uint32_t num_of_sysfs_nodes;
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 	char *disableCache, *pagedUserptr, *checkUserptr, *guardPagesStr, *reserveSvm;
-	char *maxVaAlignStr, *mfmaHighPrecisionModeStr, *skipSvmHostUnregisterStr;
+	char *maxVaAlignStr, *mfmaHighPrecisionModeStr, *svmHostUnregisterStr;
 	unsigned int guardPages = 1;
 	uint64_t svm_base = 0, svm_limit = 0;
 	uint32_t svm_alignment = 0, mfma_high_precision_mode = 0;
@@ -3259,12 +3262,14 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 		guardPages = 1;
 
 	/*
-	 * DEBUG/TEMPORARY: If HSA_SKIP_SVM_HOST_UNREGISTER_DEBUG is set to a
-	 * non-0 value, skip the SVM host unregister.
+	 * DEBUG/TEMPORARY: the SVM host unregister is off unless
+	 * HSA_SVM_HOST_UNREGISTER_DEBUG is set to a non-0 value. Left off,
+	 * deregistering an SVM-API host range stays the no-op it has always
+	 * been and register only sets the coherency flags.
 	 */
-	skipSvmHostUnregisterStr = getenv("HSA_SKIP_SVM_HOST_UNREGISTER_DEBUG");
-	fmm_ctx->svm.skip_svm_host_unregister =
-		(skipSvmHostUnregisterStr && strcmp(skipSvmHostUnregisterStr, "0"));
+	svmHostUnregisterStr = getenv("HSA_SVM_HOST_UNREGISTER_DEBUG");
+	fmm_ctx->svm.svm_host_unregister =
+		(svmHostUnregisterStr && strcmp(svmHostUnregisterStr, "0"));
 
 	mfmaHighPrecisionModeStr = getenv("HSA_HIGH_PRECISION_MODE");
 	mfma_high_precision_mode = (mfmaHighPrecisionModeStr &&
@@ -4819,7 +4824,7 @@ HSAKMT_STATUS hsakmt_fmm_deregister_memory(HsaKFDContext *ctx, void *address)
 			struct svm_revoke_range *rr = NULL;
 			int nr, i;
 
-			if (fmm_ctx->svm.skip_svm_host_unregister)
+			if (!fmm_ctx->svm.svm_host_unregister)
 				return HSAKMT_STATUS_SUCCESS;
 
 			/* Revoke only the sub-ranges no surviving registration
