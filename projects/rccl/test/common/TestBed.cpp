@@ -292,7 +292,19 @@ namespace RcclUnitTesting
         }
         else 
         {
+          // No child exists to close its inherited descriptors. Close all
+          // descriptors owned by the parent for this failed fork, then remove
+          // the never-forked child so teardown does not write to or wait on it.
+          TestBedChild* failedChild = childList[childId];
+          close(failedChild->parentWriteFd);
+          close(failedChild->parentReadFd);
+          close(failedChild->childWriteFd);
+          close(failedChild->childReadFd);
+          delete failedChild;
+          childList.resize(childId);
+          this->numActiveChildren = childId;
           TEST_ERROR("fork() failed when creating child process %d", childId);
+          FAIL() << "fork() failed when creating child process " << childId;
         }
       }
     }
@@ -349,9 +361,10 @@ namespace RcclUnitTesting
       int const numCollSize = this->numCollectivesInGroup.size();
       PIPE_WRITE(childId, numCollSize);
       if (numCollSize > 0) {
-        write(childList[childId]->parentWriteFd,
-          this->numCollectivesInGroup.data(),
-          numCollSize * sizeof(int));
+        ASSERT_EQ(safe_pipe_write(childList[childId]->parentWriteFd,
+                                  this->numCollectivesInGroup.data(),
+                                  numCollSize * sizeof(int)),
+                  numCollSize * sizeof(int));
       }
 
       // Send the RCCL communication with blocking or non-blocking option
@@ -368,9 +381,10 @@ namespace RcclUnitTesting
       int const numStreamsSize = this->numStreamsPerGroup.size();
       PIPE_WRITE(childId, numStreamsSize);
       if (numStreamsSize > 0) {
-        write(childList[childId]->parentWriteFd,
-        this->numStreamsPerGroup.data(),
-        numStreamsSize * sizeof(int));
+        ASSERT_EQ(safe_pipe_write(childList[childId]->parentWriteFd,
+                                  this->numStreamsPerGroup.data(),
+                                  numStreamsSize * sizeof(int)),
+                  numStreamsSize * sizeof(int));
       }
 
       // Send the GPUs this child uses
@@ -1159,13 +1173,6 @@ namespace RcclUnitTesting
               isCorrect = false;
               continue;
             }
-            // ====================================================================
-            // DEBUG: Force GPU execution to complete & flush stdout print buffers
-            // ====================================================================
-            if (!isMultiProcess) {
-              hipDeviceSynchronize(); 
-              fflush(stdout);
-            }
             this->ValidateResults(isCorrect);
             if (!isCorrect)
             {
@@ -1205,11 +1212,12 @@ namespace RcclUnitTesting
       // 1. Send CHILD_STOP command to the child
        int const cmd = TestBedChild::CHILD_STOP;
        PIPE_WRITE(childId, cmd);
-       PIPE_CHECK(childId);
        // 2. Wait for child process to exit cleanly before closing pipes
        int status;
        waitpid(child->pid, &status, 0); 
        // 3. Close pipes and delete object
+       close(child->parentWriteFd);
+       close(child->parentReadFd);
        delete child;
        this->childList[childId] = nullptr;
      }

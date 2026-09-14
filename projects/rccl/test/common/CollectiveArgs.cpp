@@ -19,14 +19,13 @@ namespace RcclUnitTesting
                                   int             const  streamIdx,
                                   OptionalColArgs const  &optionalColArgs)
   {
-    // Free scalar based on previous scalarMode
-    if (optionalColArgs.scalarMode != -1)
+    // Free scalar based on the previous scalarMode, including when the new
+    // arguments disable scalar mode.
+    if (this->localScalar.ptr != nullptr)
     {
-      if (this->localScalar.ptr != nullptr)
-      {
-        if (this->options.scalarMode == 0) CHECK_CALL(this->localScalar.FreeGpuMem());
-        if (this->options.scalarMode == 1) CHECK_HIP(hipHostFree(this->localScalar.ptr));
-      }
+      if (this->options.scalarMode == 0) CHECK_CALL(this->localScalar.FreeGpuMem());
+      if (this->options.scalarMode == 1) CHECK_HIP(hipHostFree(this->localScalar.ptr));
+      this->localScalar.Attach(nullptr);
     }
 
     this->globalRank        = globalRank;
@@ -38,7 +37,7 @@ namespace RcclUnitTesting
     this->numOutputElements = numOutputElements;
     if (this->inputGpu.ptr != nullptr || this->outputGpu.ptr != nullptr) 
     {
-      this->AttachMem();
+      CHECK_CALL(this->AttachMem());
     }
     this->streamIdx         = streamIdx;
     this->options           = optionalColArgs;
@@ -217,7 +216,7 @@ namespace RcclUnitTesting
     if (this->inPlace)
     {
       if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
-        this->outputGpu.FreeGpuMem();
+        this->outputGpu.FreeGpuMem(this->userRegistered);
       else
         this->inputGpu.FreeGpuMem(this->userRegistered);
     }
@@ -231,7 +230,7 @@ namespace RcclUnitTesting
     this->expected.FreeCpuMem();
     if (this->expectedGpu.ptr != nullptr)
     {
-      this->expectedGpu.FreeGpuMem();
+      this->expectedGpu.FreeGpuMem(this->userRegistered);
     }
 
     if (this->localScalar.ptr != nullptr)

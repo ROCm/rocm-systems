@@ -3972,13 +3972,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
                                 &recvReg));
           if (sendReg) NCCLCHECK(ncclRegLocalIsValid(sendReg, &sendLocalValid));
           if (recvReg) NCCLCHECK(ncclRegLocalIsValid(recvReg, &recvLocalValid));   
-
-          /**
-           * To do : using allowUB = (captured || (sendLocalValid && recvLocalValid)); for alltoall, 
-           * with symmetric memory, in Graphmode, with sequence of buffer sizes where max is not aligned 
-           * to 128 bytes, results in data validation errors. setting this to false, until it is resolved.
-           */
-          
+                
           allowUB = (captured || (sendLocalValid && recvLocalValid));
           for (int r = 0; r < comm->nRanks; r++) {
             NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI,

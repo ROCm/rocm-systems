@@ -254,8 +254,11 @@ namespace RcclUnitTesting
     this->numCollectivesInGroup.resize(numCollSize);
     if (numCollSize > 0)
     {
-      read(this->childReadFd, this->numCollectivesInGroup.data(),
-      numCollSize * sizeof(int));
+      if (safe_pipe_read(this->childReadFd,
+                         this->numCollectivesInGroup.data(),
+                         numCollSize * sizeof(int)) !=
+          static_cast<ssize_t>(numCollSize * sizeof(int)))
+        return TEST_FAIL;
     }
     PIPE_READ(this->useBlocking);
     int allocTypeInt = 0;
@@ -270,8 +273,11 @@ namespace RcclUnitTesting
     this->numStreamsPerGroup.resize(numStreamsSize);
     if (numStreamsSize > 0)
     {
-      read(this->childReadFd, this->numStreamsPerGroup.data(),
-      numStreamsSize * sizeof(int));
+      if (safe_pipe_read(this->childReadFd,
+                         this->numStreamsPerGroup.data(),
+                         numStreamsSize * sizeof(int)) !=
+          static_cast<ssize_t>(numStreamsSize * sizeof(int)))
+        return TEST_FAIL;
     }
 
     // Read GPUs and prepare storage
