@@ -293,23 +293,12 @@ private:
 
    // Per-kernel scratch buffers for the batched output path, one per batched kernel.
    // Filled per group in FinalizeDecodeBatched; each device buffer grows on demand.
-   BatchedKernelParams<YUV444ToRGBBatchParams>            b_yuv444_rgb_;
-   BatchedKernelParams<YUV440ToRGBBatchParams>            b_yuv440_rgb_;
-   BatchedKernelParams<YUYVToRGBBatchParams>              b_yuyv_rgb_;
-   BatchedKernelParams<NV12ToRGBBatchParams>              b_nv12_rgb_;
-   BatchedKernelParams<YUV400ToRGBBatchParams>            b_yuv400_rgb_;
    BatchedKernelParams<RGBAToRGBBatchParams>              b_rgba_rgb_;
-   BatchedKernelParams<YUV444ToRGBPlanarBatchParams>      b_yuv444_rgbp_;
-   BatchedKernelParams<YUV440ToRGBPlanarBatchParams>      b_yuv440_rgbp_;
-   BatchedKernelParams<YUYVToRGBPlanarBatchParams>        b_yuyv_rgbp_;
-   BatchedKernelParams<NV12ToRGBPlanarBatchParams>        b_nv12_rgbp_;
-   BatchedKernelParams<YUV400ToRGBPlanarBatchParams>      b_yuv400_rgbp_;
    BatchedKernelParams<PackedYUYVToPlanarYUVBatchParams>  b_yuyv_yuvp_;
    BatchedKernelParams<InterleavedUVToPlanarUVBatchParams> b_nv12_uvp_;
    BatchedKernelParams<YFromPackedYUYVBatchParams>        b_yuyv_y_;
-   // Unified chroma->RGB / chroma->RGB_PLANAR buffers: cover NV12/YUV444/YUV440/YUYV/YUV400
-   // in a single kernel each. The per-format buffers above are retained for A/B comparison
-   // but the decoder currently routes these five formats through the unified buffers.
+   // Unified YUV->RGB / YUV->RGB_PLANAR buffers: a single kernel each handles all of
+   // NV12/YUV444/YUV440/YUYV/YUV400, selected per image by a surface-layout tag.
    BatchedKernelParams<YUVToRGBBatchParams>            b_yuv_rgb_;
    BatchedKernelParams<YUVToRGBPlanarBatchParams>      b_yuv_rgbp_;
 };
