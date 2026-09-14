@@ -137,6 +137,17 @@ TEST(NetIbMultiSeg, TrailingSegmentMayBeSmaller) {
     EXPECT_TRUE(ncclIbSegmentsUniform(4, len.data()));
 }
 
+TEST(NetIbMultiSeg, TrailingSegmentMayNotBeLarger) {
+    std::vector<size_t> len = {kSeg, kSeg, kSeg, kSeg * 2};
+    EXPECT_FALSE(ncclIbSegmentsUniform(4, len.data()));
+}
+
+TEST(NetIbMultiSeg, SingleOrEmptyLayoutIsUniform) {
+    std::vector<size_t> len = {kSeg};
+    EXPECT_TRUE(ncclIbSegmentsUniform(1, len.data()));
+    EXPECT_TRUE(ncclIbSegmentsUniform(0, nullptr));
+}
+
 TEST(NetIbMultiSeg, NonUniformInteriorRejected) {
     std::vector<size_t> len = {kSeg, kSeg / 2, kSeg, kSeg};
     EXPECT_FALSE(ncclIbSegmentsUniform(4, len.data()));
@@ -390,4 +401,18 @@ TEST(NetIbCtsLayout, RejectsNullTables) {
     const uint32_t rkeys[] = {1u, 2u};
     EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(2, 0, 2, NCCL_IB_MAX_SEGMENTS, nullptr, rkeys));
     EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(2, 0, 2, NCCL_IB_MAX_SEGMENTS, start, nullptr));
+}
+
+TEST(NetIbCtsLayout, AcceptsSegmentCountAtCap) {
+    std::vector<uint64_t> start(NCCL_IB_MAX_SEGMENTS);
+    std::vector<uint32_t> rkeys(NCCL_IB_MAX_SEGMENTS, 1u);
+    for (int s = 0; s < NCCL_IB_MAX_SEGMENTS; s++) start[s] = kBase + (uint64_t)s * kSeg;
+    EXPECT_TRUE(
+        ncclIbCtsRemoteLayoutValid(NCCL_IB_MAX_SEGMENTS, 0, 2, NCCL_IB_MAX_SEGMENTS, start.data(), rkeys.data()));
+}
+
+TEST(NetIbCtsLayout, AcceptsLastDeviceIndex) {
+    const uint64_t start[] = {kBase, kBase + kSeg};
+    const uint32_t rkeys[] = {1u, 2u};
+    EXPECT_TRUE(ncclIbCtsRemoteLayoutValid(2, /*remDevIdx=*/1, /*maxDevs=*/2, NCCL_IB_MAX_SEGMENTS, start, rkeys));
 }
