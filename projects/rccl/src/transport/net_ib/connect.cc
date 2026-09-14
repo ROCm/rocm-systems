@@ -661,9 +661,8 @@ static ncclResult_t ncclIbSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
-  // GIN data requests can keep a full segmented payload plus a trailing signal
-  // outstanding. Classic NET/IB uses fewer entries but shares this QP path.
-  qpCreateAttrs.maxSendWorkRequest = std::max(2 * NET_IB_MAX_REQUESTS, NCCL_RMA_MAX_SIGNAL_WRS);
+  // GIN iput can post NCCL_RMA_MAX_SIGNAL_WRS on top of the classic 2*MAX data budget.
+  qpCreateAttrs.maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
     // For example, if there are 2 devices and 4 QPs, the QPs will be created
@@ -1296,8 +1295,8 @@ static ncclResult_t ncclIbReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       qpCreateAttrs.cq = rCommDev->base.cq;
       qpCreateAttrs.pd = rCommDev->base.pd;
       qpCreateAttrs.maxRecvWorkRequest = 0;
-      // One logical GIN flush can post one read per registered segment.
-      qpCreateAttrs.maxSendWorkRequest = std::max(NET_IB_MAX_REQUESTS, NCCL_RMA_MAX_FLUSH_WRS);
+      // GIN flush posts one RDMA read per segment on top of NET_IB_MAX_REQUESTS.
+      qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_FLUSH_WRS;
       qpCreateAttrs.qpContext = &rComm->base.stats;
       NCCLCHECK(ncclIbQpCreate(&rCommDev->gpuFlush.qp, &qpCreateAttrs));
       INFO(NCCL_NET,
