@@ -90,6 +90,9 @@ TEST(WaitcheckDlopenTest, AnalyzeManyBuffersAcrossRepeatedLoadUnloadCycles) {
 
   ASSERT_FALSE(is_object_loaded("librocjitsu.so"));
   ASSERT_FALSE(is_object_loaded("libhsa-runtime64.so"));
+  // Shared ASan exports an hsa_init interceptor even when ROCr is not loaded.
+  // Loading waitcheck must not introduce an HSA implementation of its own.
+  const auto initial_hsa_init = dlsym(RTLD_DEFAULT, "hsa_init");
 
   for (size_t cycle = 0; cycle < kCycles; ++cycle) {
     void *handle = dlopen(ROCJITSU_WAITCHECK_LIBRARY_PATH, RTLD_NOW | RTLD_LOCAL);
@@ -97,7 +100,7 @@ TEST(WaitcheckDlopenTest, AnalyzeManyBuffersAcrossRepeatedLoadUnloadCycles) {
     EXPECT_TRUE(is_object_loaded("librocjitsu_waitcheck.so"));
     EXPECT_FALSE(is_object_loaded("librocjitsu.so"));
     EXPECT_FALSE(is_object_loaded("libhsa-runtime64.so"));
-    EXPECT_EQ(dlsym(handle, "hsa_init"), nullptr);
+    EXPECT_EQ(dlsym(handle, "hsa_init"), initial_hsa_init);
     EXPECT_EQ(dlsym(handle, "rj_vm_create"), nullptr);
 
     const OptionsInit options_init = load_symbol<OptionsInit>(handle, "rj_waitcheck_options_init");

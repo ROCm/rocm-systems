@@ -2135,14 +2135,24 @@ TEST(HsaHooksUnitTest, ConSanExitFinalizationRetainsCachedRuntimeCallbacks) {
   EXPECT_EXIT(
       {
         ScopedEnvVar mode("RJ_CONSAN_MODE", "supercollider");
+        static FakeApiTable *api = nullptr;
+        static InstalledDbiHook *hook = nullptr;
+        // Run fixture cleanup after both the tool and the cached HIP callback.
+        // Keeping these objects alive until then must not leak them at exit.
+        std::atexit([] {
+          delete hook;
+          delete api;
+          hook = nullptr;
+          api = nullptr;
+        });
         // Model a HIP exit handler registered before HSA loads the tool.
         static decltype(hsa_executable_destroy) *cached_destroy = nullptr;
         std::atexit([] {
           if (cached_destroy(hsa_executable_t{7}) != HSA_STATUS_SUCCESS)
             std::_Exit(3);
         });
-        auto *api = new FakeApiTable;
-        auto *hook = new InstalledDbiHook(*api);
+        api = new FakeApiTable;
+        hook = new InstalledDbiHook(*api);
         if (!hook->installed())
           std::_Exit(2);
         cached_destroy = api->core.hsa_executable_destroy_fn;
