@@ -601,6 +601,7 @@ if(BUILD_TESTS)
       DdaAlltoAllThresholdTests.cpp
       DdaIpcEligibilityTests.cpp
       DdaNranksRelax_test.cpp
+      DdaNranksRelaxConsensusTests.cpp
       DdaFabricEligibilityTests.cpp
       CeAllReduceEligibilityTests.cpp
       CeAlltoAllvEligibilityTests.cpp

@@ -435,13 +435,15 @@ intended for debugging and development purposes.
           any single-node communicator of 2 to 8 ranks can use the low-latency DDA
           IPC path, which is otherwise restricted to the full 8-rank clique.
           Only affects ``gfx942``/``gfx950`` and only the IPC AllReduce path;
-          the default (``0``) remains bit-identical to prior behaviour. Benefits
+          the default (``0``) remains bit-identical to prior behavior. Benefits
           latency-bound low-rank AllReduce (largest gains at odd/non-power-of-two
           rank counts, where the ring is least efficient) and is neutral at 8 ranks.
         | Must be set to the same value on every rank of a communicator. The
-          variable is read per process, so a communicator in which only some ranks
-          set it will have those ranks take the DDA IPC path while the rest do not,
-          and the mismatched ranks will block during communicator initialization.
+          variable is read per process, so RCCL checks agreement across ranks
+          during communicator initialization and fails communicator creation
+          with an error naming the disagreeing ranks and hosts if it does not
+          match, rather than allowing ranks to diverge into and out of the DDA
+          IPC path and hang waiting for each other.
         | With the knob enabled at 2 to 7 ranks, results are **not** bit-identical
           to the ring path: the DDA IPC kernels reduce in strict rank order rather
           than the ring's chunk-rotated order, and floating-point addition is not

@@ -1224,6 +1224,11 @@
           "test_filter": "Rcclwrap.*"
         },
         {
+          "name": "RcclAllReduceDdaDecision",
+          "description": "DDA-vs-ring AllReduce decision unit tests, including the RCCL_DDA_NRANKS_RELAX minRanks floor",
+          "test_filter": "RcclAllReduceDdaDecision.*"
+        },
+        {
           "name": "TransportTest",
           "description": "Transport layer tests",
           "test_filter": "TransportTest.*"
@@ -1242,6 +1247,11 @@
           "name": "DdaNranksRelaxTest",
           "description": "Low-rank (2..8) DDA IPC AllReduce eligibility tests (RCCL_DDA_NRANKS_RELAX)",
           "test_filter": "DdaNranksRelaxTest.*:DdaNranksRelaxIsolatedTest.*"
+        },
+        {
+          "name": "DdaNranksRelaxConsensusTest",
+          "description": "RCCL_DDA_NRANKS_RELAX per-rank agreement check (hang-prevention gate)",
+          "test_filter": "DdaNranksRelaxConsensus.*"
         },
         {
           "name": "DdaAlltoAllThresholdTest",

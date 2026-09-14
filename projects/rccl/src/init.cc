@@ -45,6 +45,7 @@
 #include <sys/resource.h>
 #include <unistd.h>
 #include "graph/topo.h"
+#include "algorithms/dda/ipc/dda_nranks_relax_consensus.h"
 #include "graph/rome_topo_consensus.h"
 #include "graph/xml.h"
 #include "archinfo.h"
@@ -1513,6 +1514,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     int localCollNetCount;
     int isAllNvlink;
     bool nicFused;
+    bool ddaNranksRelax;
   };
 
   int nChannelsOrig;
@@ -2006,6 +2008,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   allGather3Data[rank].cpuArch = comm->cpuArch;
   allGather3Data[rank].cpuVendor = comm->cpuVendor;
   allGather3Data[rank].romeTopoModelIdx = comm->topo->romeTopoModelIdx;
+  allGather3Data[rank].ddaNranksRelax = ncclDdaNranksRelaxEnabled();
   (void)getHostName(allGather3Data[rank].hostname, sizeof(allGather3Data[rank].hostname), '\0');
   allGather3Data[rank].p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
   allGather3Data[rank].p2pMaxPeers = comm->p2pMaxPeers;
@@ -2036,6 +2039,17 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
                     [&](int r) { return comm->peerInfo[r].hostHash; }),
                   ret, fail);
   }
+
+  // RCCL_DDA_NRANKS_RELAX is read per process, so it is not guaranteed uniform
+  // across ranks the way comm->nRanks is. Check it here, against data every
+  // rank already populated above and just exchanged, rather than inside
+  // ncclDdaIpcCommInit(): that function is only entered on the branch it
+  // itself gates, so a mismatch there would mean only some ranks reach its
+  // bootstrap allgather -- exactly the hang this check exists to prevent.
+  NCCLCHECKGOTO(ncclCheckDdaNranksRelaxConsensus(
+                  nranks, [&](int r) { return allGather3Data[r].ddaNranksRelax; },
+                  [&](int r) { return allGather3Data[r].hostname; }),
+                ret, fail);
 
   // Determine nNodes, firstRanks, ...
   NCCLCHECKGOTO(ncclCalloc(&nodesFirstRank, nranks), ret, fail);
