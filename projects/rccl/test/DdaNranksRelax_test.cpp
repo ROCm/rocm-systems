@@ -25,6 +25,9 @@
 #include "common/ProcessIsolatedTestRunner.hpp"
 
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/all_gather/dda_all_gather.h"
+#include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
+#include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "gtest/gtest.h"
 
@@ -145,7 +148,7 @@ TEST(DdaNranksRelaxIsolatedTest, RelaxedPathAdmitsTwoThroughEightRanks)
             EXPECT_TRUE(ncclDdaNranksRelaxEnabled());
 
             // With relax on, every single-node count in [2, kDdaNranks] is eligible
-            // (each has a template instantiation in the dispatch switch).
+            // (kDdaNranks uses the specialised kernel, the rest the NRANKS == 0 one).
             for (int nRanks = 2; nRanks <= nccl_dda_detail::kDdaNranks; ++nRanks)
             {
                 mockComm.comm.nRanks = nRanks;
@@ -154,7 +157,20 @@ TEST(DdaNranksRelaxIsolatedTest, RelaxedPathAdmitsTwoThroughEightRanks)
                     << "nRanks=" << nRanks << " should be eligible with relax on";
             }
 
-            // Counts outside [2, kDdaNranks] stay ineligible (no instantiation).
+            // This PR relaxes only the AllReduce IPC floor: AllGather,
+            // ReduceScatter and AllToAll must stay 8-rank-only even with the
+            // knob on, so the scope split holds without relying on inspecting
+            // rcclDdaEnabled()'s minRanks argument at each call site.
+            mockComm.comm.nRanks = 4;
+            EXPECT_FALSE(ncclAllGatherDdaIpcEligible(mockComm.get(), sendbuff, recvbuff, count, ncclFloat32))
+                << "AllGather must stay 8-rank-only even with relax on";
+            EXPECT_FALSE(
+                ncclReduceScatterDdaIpcEligible(mockComm.get(), sendbuff, recvbuff, count, ncclFloat32, ncclSum))
+                << "ReduceScatter must stay 8-rank-only even with relax on";
+            EXPECT_FALSE(ncclAllToAllDdaIpcEligible(mockComm.get(), sendbuff, recvbuff, count, ncclFloat32))
+                << "AllToAll must stay 8-rank-only even with relax on";
+
+            // Counts outside [2, kDdaNranks] stay ineligible.
             for (int nRanks : {1, 9, 16})
             {
                 mockComm.comm.nRanks = nRanks;
@@ -194,6 +210,38 @@ TEST(DdaNranksRelaxIsolatedTest, RelaxedPathAdmitsTwoThroughEightRanks)
                           ncclInvalidUsage)
                     << "nRanks=" << nRanks << " must be refused by the dispatch gate";
             }
+        },
+        {{"RCCL_DDA_NRANKS_RELAX", "1"}});
+}
+
+// The isolated test above only ever uses count=1024 (4 KiB), always below
+// kDdaFlatTreeThresholdBytes (256 KiB), so the tree branch's
+// `count % comm->nRanks` divisibility check is never exercised at a relaxed
+// (non-8) rank count -- that branch only runs above the threshold, and 8 was
+// the only rank count reachable there before this PR. Pin it directly at
+// nRanks=3: one count that divides evenly (eligible) and one immediately
+// above it that does not (ineligible), both otherwise identical.
+TEST(DdaNranksRelaxIsolatedTest, TreeThresholdDivisibilityAtRelaxedRankCount)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "TreeThresholdDivisibilityAtRelaxedRankCount",
+        []()
+        {
+            void*          sendbuff = reinterpret_cast<void*>(0x10);
+            void*          recvbuff = reinterpret_cast<void*>(0x20);
+            DdaIpcMockComm mockComm;
+            mockComm.comm.nRanks = 3;
+
+            // 196608 floats = 786432 B (> 256 KiB, tree path); 196608 % 3 == 0
+            // and the per-rank slice (65536 floats = 262144 B) is 16-byte aligned.
+            EXPECT_TRUE(ncclAllReduceDdaIpcEligible(
+                mockComm.get(), sendbuff, recvbuff, 196608, ncclFloat32, ncclSum))
+                << "196608 % 3 == 0 should be eligible for the tree path";
+
+            // One count higher: same size class, but 196612 % 3 == 1.
+            EXPECT_FALSE(ncclAllReduceDdaIpcEligible(
+                mockComm.get(), sendbuff, recvbuff, 196612, ncclFloat32, ncclSum))
+                << "196612 % 3 == 1 must not be eligible for the tree path";
         },
         {{"RCCL_DDA_NRANKS_RELAX", "1"}});
 }

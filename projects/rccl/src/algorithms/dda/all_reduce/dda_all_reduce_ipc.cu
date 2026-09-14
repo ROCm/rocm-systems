@@ -81,11 +81,11 @@ static ncclResult_t ncclAllReduceDdaIpcLaunch(const void* sendbuff, void* recvbu
   if (treeOk) {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, count * sizeof(T), cudaMemcpyDeviceToDevice, stream));
     dda::common::ddaAllReduceTreeIpc<T, NRANKS, false><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, comm->nRanks,
+      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks,
       barrierHost, nullptr);
   } else {
     dda::common::ddaAllReduceFlatIpc<T, NRANKS, false><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, comm->nRanks,
+      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, nRanks,
       barrierHost, nullptr);
   }
 
@@ -128,7 +128,8 @@ bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
   }
   // IPC path: requires its own handler + barrier state, a single node, and a
   // supported participant count (kDdaNranks by default; any 2..kDdaNranks when
-  // RCCL_DDA_NRANKS_RELAX=1). The IPC kernels fix the rank count at compile time.
+  // RCCL_DDA_NRANKS_RELAX=1). Only kDdaNranks gets a compile-time specialisation;
+  // every other count uses the NRANKS == 0 runtime kernel.
   if (comm->ddaIpcMemHandler == nullptr || comm->ddaIpcBarrierState == nullptr) {
     return false;
   }

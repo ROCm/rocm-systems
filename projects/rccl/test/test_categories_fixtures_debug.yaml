@@ -29,6 +29,7 @@ test_categories:
       - "DdaNranksRelaxIsolatedTest.*"
       - "DdaCollectivesNranksRelaxTest.*"
       - "DdaCollectivesNranksRelaxIsolatedTest.*"
+      - "DdaNranksRelaxConsensus.*"
       - "DdaFabricEligibilityTest.*"
       - "CeAllReduceEligibilityTest.*"
       - "RcclCeAllReduceEligibility.*"
