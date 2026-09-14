@@ -776,6 +776,17 @@ protected:
         ncclNetHandle_t handle;
         memset(&handle, 0, sizeof(handle));
 
+        // The handle travels with a status word, the way SetupConnection's handshake and the
+        // threaded probe's both do. Sending the zeroed handle on a listen failure and
+        // leaving the peer to have connect reject it is not safe: interpreting a handle that
+        // was never filled in can block rather than fail, which is exactly why the threaded
+        // setup sends a listenerReady flag. Sent either way, so the peer is never left
+        // waiting for a message that is not coming.
+        struct CastHandshake {
+            int             listening;
+            ncclNetHandle_t handle;
+        } msg{};
+
         if (rank == 0) {
             const ncclResult_t listenRet = CreateListenComm(dev, &handle, listenComm);
             const bool listening = listenRet == ncclSuccess && *listenComm != nullptr;
@@ -784,7 +795,9 @@ protected:
                               << "), so the peer has nothing to connect to";
             }
 
-            MPI_Send(&handle, sizeof(handle), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
+            msg.listening = listening ? 1 : 0;
+            if (listening) memcpy(msg.handle, handle, sizeof(handle));
+            MPI_Send(&msg, sizeof(msg), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
 
             if (listening) {
                 for (int i = 0; i < kMaxRetryAttempts && *recvComm == nullptr; i++) {
@@ -800,19 +813,25 @@ protected:
                 }
             }
         } else {
-            MPI_Recv(&handle, sizeof(handle), MPI_BYTE, peer, 0, MPI_COMM_WORLD,
-                     MPI_STATUS_IGNORE);
+            MPI_Recv(&msg, sizeof(msg), MPI_BYTE, peer, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-            for (int i = 0; i < kMaxRetryAttempts && *sendComm == nullptr; i++) {
-                if (ConnectToRemote(dev, &handle, sendComm) != ncclSuccess) {
-                    ADD_FAILURE() << "IB-CAST connect failed on rank 1";
-                    break;
+            if (!msg.listening) {
+                // The peer has already reported why. Not attempting the connect is the
+                // point: there is no listener, and the handle carries nothing to interpret.
+                ADD_FAILURE() << "IB-CAST connect skipped on rank 1: the peer's listen failed";
+            } else {
+                memcpy(handle, msg.handle, sizeof(handle));
+                for (int i = 0; i < kMaxRetryAttempts && *sendComm == nullptr; i++) {
+                    if (ConnectToRemote(dev, &handle, sendComm) != ncclSuccess) {
+                        ADD_FAILURE() << "IB-CAST connect failed on rank 1";
+                        break;
+                    }
+                    if (*sendComm == nullptr) usleep(kPollIntervalUs);
                 }
-                if (*sendComm == nullptr) usleep(kPollIntervalUs);
-            }
-            if (*sendComm == nullptr) {
-                ADD_FAILURE() << "IB-CAST connect produced no communicator on rank 1 after "
-                              << kMaxRetryAttempts << " attempts";
+                if (*sendComm == nullptr) {
+                    ADD_FAILURE() << "IB-CAST connect produced no communicator on rank 1 after "
+                                  << kMaxRetryAttempts << " attempts";
+                }
             }
         }
 
