@@ -9,6 +9,7 @@
 #include "comm.h"
 #include "net.h"
 #include "rccl_ib_multiseg.h"
+#include "net_ib/multiseg.h"
 #include "graph.h"
 #include "proxy.h"
 #include "collectives.h"
@@ -2503,22 +2504,18 @@ static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* 
   }
 
   // Uniform-segment guard: interior segments must be equal; the trailing segment
-  // may be smaller. Otherwise boundaries are irregular and a step could straddle
-  // (matches ncclIbSegmentsUniform in net_ib/multiseg.h). Non-uniform layouts
-  // such as DeepEP [GPU][CPU] (unequal sizes) decline here so the collective
-  // falls back to staging; GIN/RMA is the path that registers those windows.
-  for (int s = 1; s < nSeg; s++) {
-    bool last = (s == nSeg - 1);
-    if ((!last && segLens[s] != segLens[0]) || (last && segLens[s] > segLens[0])) {
-      INFO(NCCL_NET | NCCL_REG,
-           "Buffer %p (size %zu) has non-uniform segments; declining NET user-buffer registration (staging fallback)",
-           buffer, totalSize);
-      ret = ncclInvalidUsage;
-      goto fail;
-    }
+  // may be smaller. Non-uniform layouts such as DeepEP [GPU][CPU] decline here
+  // so the collective falls back to staging; GIN/RMA registers those windows.
+  if (!ncclIbSegmentsUniform(nSeg, segLens)) {
+    INFO(NCCL_NET | NCCL_REG,
+         "Buffer %p (size %zu) has non-uniform segments; declining NET user-buffer registration (staging fallback)",
+         buffer, totalSize);
+    ret = ncclInvalidUsage;
+    goto fail;
   }
 
-  NCCLCHECKGOTO(ncclIbRegMrDmaBufMultiSeg(netComm, nSeg, segAddrs, segLens, segOffsets, segFds, NCCL_PTR_CUDA, handle),
+  NCCLCHECKGOTO(ncclIbRegMrDmaBufMultiSeg(netComm, nSeg, segAddrs, segLens, segOffsets, segFds, NCCL_PTR_CUDA,
+                                          handle),
                 ret, fail);
 
 fail:
