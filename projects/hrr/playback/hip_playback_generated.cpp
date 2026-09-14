@@ -139,7 +139,7 @@ static hipError_t playback_hipChooseDevice(PlaybackContext& ctx, const uint8_t* 
   hipDeviceProp_t _d_prop{};
   if (a->prop_present)
     std::memcpy(&_d_prop, a->prop_bytes, sizeof(_d_prop));
-  hipError_t _r = (hipError_t)hipChooseDevice(&_out_device, (a->prop_present ? (const hipDeviceProp_t*)&_d_prop : (const hipDeviceProp_t*)nullptr));
+  hipError_t _r = (hipError_t)hipChooseDevice(&_out_device, (a->prop_present ? (const hipDeviceProp_tR0600*)&_d_prop : (const hipDeviceProp_tR0600*)nullptr));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipChooseDevice", a->ret);
     return hipSuccess;
