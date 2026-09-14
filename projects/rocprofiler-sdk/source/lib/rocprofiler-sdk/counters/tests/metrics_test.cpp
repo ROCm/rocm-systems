@@ -418,7 +418,7 @@ namespace
 void
 expect_validation_error(std::string_view yaml, std::string_view expected)
 {
-    auto error = counters::validateExtraCounterYAML(YAML::Load(std::string{yaml}));
+    auto error = counters::validate_extra_counter_yaml(YAML::Load(std::string{yaml}));
     ASSERT_TRUE(error.has_value()) << yaml;
     EXPECT_NE(error->find(expected), std::string::npos) << *error;
 }
@@ -657,7 +657,7 @@ TEST(metrics, validate_expression_cannot_have_event_or_block)
 
 TEST(metrics, validate_canonical_documented_yaml)
 {
-    auto error = counters::validateExtraCounterYAML(YAML::Load(R"(
+    auto error = counters::validate_extra_counter_yaml(YAML::Load(R"(
 rocprofiler-sdk:
   counters-schema-version: 1
   counters:
@@ -680,7 +680,7 @@ rocprofiler-sdk:
 
 TEST(metrics, validate_backward_compatible_omissions)
 {
-    auto error = counters::validateExtraCounterYAML(YAML::Load(R"(
+    auto error = counters::validate_extra_counter_yaml(YAML::Load(R"(
 rocprofiler-sdk:
   counters:
     - name: T
@@ -694,7 +694,7 @@ rocprofiler-sdk:
 
 TEST(metrics, validate_architecture_specific_definitions)
 {
-    auto error = counters::validateExtraCounterYAML(YAML::Load(R"(
+    auto error = counters::validate_extra_counter_yaml(YAML::Load(R"(
 rocprofiler-sdk:
   counters:
     - name: MULTI
