@@ -38,13 +38,16 @@ struct ThroughputWavefrontState final : WavefrontState {
   std::chrono::steady_clock::time_point instruction_begin{};
   InstructionFamily active_family = InstructionFamily::Other;
   bool instruction_active = false;
+  // Keep new accounting after the hot synchronous fields: moving those fields
+  // across a cache line measurably slowed even ordinary instruction execution.
   UntimedInstructions untimed_instructions{};
 };
 
 /// Reports simulator throughput in executed wave instructions per host second.
 ///
-/// One instruction is counted each time a wavefront reaches the before-execute
-/// hook. It is not multiplied by the number of active lanes.
+/// Count at synchronous before-execute or asynchronous issue, once per wave
+/// instruction rather than per lane. Untimed async work invalidates its family
+/// execution timing; counts and dispatch throughput remain available.
 class ThroughputPlugin final : public ExecutionPlugin {
 public:
   /// @param config_json Plugin configuration object as a JSON string (unused;

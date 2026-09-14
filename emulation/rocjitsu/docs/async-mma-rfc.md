@@ -19,7 +19,7 @@ additional cores. Coroutines alone would not provide that parallelism.
 
 | Mechanism | Why it is needed |
 |---|---|
-| **Persistent shared pool; immediate fallback** | Avoid per-job thread creation and per-CU pools. Exhaustion needs at most two atomic loads; reservation retries are bounded. On failure, resolve dependencies and execute inline without waiting for unrelated jobs. |
+| **Persistent shared pool; immediate fallback** | Avoid per-job thread creation and per-CU pools. Exhaustion reads a fork guard and at most two capacity words; reservation retries are bounded. On failure, resolve dependencies and execute inline without waiting for unrelated jobs. |
 | **Short warm wait, then sleep** | Poll for 512 pauses, then use a private Linux futex (`atomic::wait` fallback). Warm empty-job latency falls **10.51 to 1.00 us**. Sleep-intent bits prevent missed/redundant wakeups; idle helpers park. |
 | **Small payload, stable storage** | Publish instruction/wave pointers and FP environment; no matrix copy. Allocate lazy registers before publication, retain instructions until completion, and destroy them on their allocating thread. |
 | **Scoreboard; independent completion** | Track register reads/writes and aliases. Enforce read-after-write, write-after-read and write-after-write dependencies, while allowing shared inputs. Reclaim completed jobs without waiting for an older unrelated MMA. |
@@ -90,7 +90,9 @@ negative means faster:
 
 Unrestricted K128 reduces dispatch **1.248 to 0.961 s**, wall **3.880 to 3.590 s**.
 Admission cuts IREE submissions **40,344 to 3,142**; dependent HIP submits none
-and returns to approximately ordinary performance.
+and approaches ordinary performance. A later six-round check still found about
+0.9% dispatch / 0.6% wall overhead on that chain with zero offloads: cached
+admission and the async issue path are not free.
 
 **Use admission for K32, unrestricted offload for K64/K128.** The table tests
 admission on all sizes (mode 3); the proposed policy gates only K32:

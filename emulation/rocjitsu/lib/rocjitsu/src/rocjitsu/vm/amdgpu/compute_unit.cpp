@@ -156,7 +156,8 @@ static std::unique_ptr<ComputeUnitCore> create_functional_cu(std::string name,
                                                     MmaAdmissionCache::configured_limit())
               : nullptr;
       bool step() override {
-        return this->template step_impl<true>(admission.get(), Isa::ASYNC_MMA_WAVE_SIZE);
+        return this->template step_impl<true>(admission.get(), Isa::ASYNC_MMA_WAVE_SIZE,
+                                              HasAccVgpr<Isa>);
       }
     };
     const int mode = matrix_coexecution::mode();
@@ -746,8 +747,8 @@ void AsyncInstructionWindow::retire_arithmetic(void *owner, Instruction *inst, u
                                                bool failed) {
   auto &window = *static_cast<AsyncInstructionWindow *>(owner);
   std::unique_ptr<Instruction> owned(inst);
-  window.cu_.plugin_group().onAmdgpuAsyncInstructionRetired(pc, *inst, window.wf_, failed);
   ++async_execution::stats.retired_mma;
+  window.cu_.plugin_group().onAmdgpuAsyncInstructionRetired(pc, *inst, window.wf_, failed);
 }
 
 void AsyncInstructionWindow::materialize() {
@@ -845,15 +846,20 @@ bool ComputeUnitCore::try_issue_adjacent_mma_batch(Wavefront *active, Instructio
         active->clear_instruction_execution_error();
         const bool parallel = matrix_coexecution::mode() == 3;
         const uint64_t first_pc = active->pc;
+        unsigned issued = 0, retired = 0;
         try {
           if (parallel) {
-            for (unsigned i = 0; i != count; ++i)
-              plugin_group_->onAmdgpuAsyncInstructionIssued(first_pc + i * 8, *instructions[i],
-                                                            *active);
+            while (issued != count) {
+              const unsigned index = issued++;
+              plugin_group_->onAmdgpuAsyncInstructionIssued(first_pc + index * 8,
+                                                            *instructions[index], *active);
+            }
             matrix_coexecution::execute_batch({instructions.data(), count}, active);
-            for (unsigned i = 0; i != count; ++i)
-              plugin_group_->onAmdgpuAsyncInstructionRetired(first_pc + i * 8, *instructions[i],
-                                                             *active, false);
+            while (retired != count) {
+              const unsigned index = retired++;
+              plugin_group_->onAmdgpuAsyncInstructionRetired(first_pc + index * 8,
+                                                             *instructions[index], *active, false);
+            }
           } else {
             for (unsigned i = 0; i != count; ++i) {
               plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *instructions[i],
@@ -864,6 +870,16 @@ bool ComputeUnitCore::try_issue_adjacent_mma_batch(Wavefront *active, Instructio
             }
           }
         } catch (...) {
+          // execute_batch joins all published jobs before propagating failure.
+          // Notify every issued instruction even if another observer throws.
+          while (retired != issued) {
+            const unsigned index = retired++;
+            try {
+              plugin_group_->onAmdgpuAsyncInstructionRetired(first_pc + index * 8,
+                                                             *instructions[index], *active, true);
+            } catch (...) {
+            }
+          }
           throw;
         }
         assert(!active->instruction_execution_failed());
@@ -880,7 +896,7 @@ bool ComputeUnitCore::try_issue_adjacent_mma_batch(Wavefront *active, Instructio
 }
 
 void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCache *admission,
-                                              unsigned wave_size) {
+                                              unsigned wave_size, bool has_accvgprs) {
   const int mode = matrix_coexecution::mode();
   // The default gfx1250 allowlist has a cheap encoding filter. On a cache hit,
   // non-candidates use the ordinary issue body, including its fetchability and
@@ -908,7 +924,7 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
   }
   AsyncInstructionWindowStorage storage;
   storage.admission = admission;
-  storage.has_accvgprs = wave_size == 64;
+  storage.has_accvgprs = has_accvgprs;
   try {
     unsigned issued = 0;
     do {
@@ -1387,7 +1403,8 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 
 template <bool EnableAsync>
 [[gnu::always_inline]] inline bool ComputeUnitCore::step_impl(MmaAdmissionCache *admission,
-                                                              unsigned async_wave_size) {
+                                                              unsigned async_wave_size,
+                                                              bool has_accvgprs) {
   // A wave reaching s_endpgm in this loop retires its workgroup; the guard sends
   // the CP its completion after the lock is released. See WaveStateGuard.
   WaveStateGuard wave_state_lock(*this);
@@ -1407,7 +1424,7 @@ template <bool EnableAsync>
       }
       const bool single_step = wf->debug_single_step();
       if constexpr (EnableAsync) {
-        issue_async_instruction(wf.get(), admission, async_wave_size);
+        issue_async_instruction(wf.get(), admission, async_wave_size, has_accvgprs);
         if (wf->is_halted()) {
           matrix_coexecution::stats.flush();
           if (admission)

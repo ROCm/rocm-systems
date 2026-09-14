@@ -85,6 +85,7 @@ RJ_DIAGNOSTIC_POP
 #include <memory>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -1549,6 +1550,144 @@ std::vector<uint32_t> independent_wmma_kernel() {
   code.push_back(cdna5::build_sopp(cdna5::kSEndpgmSopp, {})[0]);
   return code;
 }
+
+enum class AsyncFailurePoint { HelperRegisterRead, Issue, Retirement };
+
+struct AsyncFailureObservation {
+  static constexpr unsigned all_plugins = 0b111;
+  struct Record {
+    const Instruction *instruction = nullptr;
+    unsigned issued = 0, retired = 0, failed = 0;
+    bool destroyed = false;
+  };
+  std::thread::id issuer = std::this_thread::get_id();
+  std::atomic<bool> injected{false};
+  std::map<uint64_t, Record> records;
+};
+
+// These WMMA handlers have no dynamic instruction state. Attach a test-only
+// lifetime probe to verify retirement before the actual decoded object dies.
+class AsyncDestructionProbe final : public DynamicInstState {
+public:
+  AsyncDestructionProbe(AsyncFailureObservation &observations, uint64_t pc)
+      : observations_(observations), pc_(pc) {}
+  ~AsyncDestructionProbe() override {
+    EXPECT_EQ(std::this_thread::get_id(), observations_.issuer);
+    auto &record = observations_.records.at(pc_);
+    EXPECT_EQ(record.issued, AsyncFailureObservation::all_plugins);
+    EXPECT_EQ(record.retired, record.issued)
+        << "destroyed an instruction before notifying observers";
+    EXPECT_FALSE(record.destroyed);
+    record.destroyed = true;
+  }
+
+private:
+  AsyncFailureObservation &observations_;
+  uint64_t pc_;
+};
+
+class AsyncFailurePlugin final : public ExecutionPlugin {
+public:
+  AsyncFailurePlugin(AsyncFailureObservation &observations, unsigned index, AsyncFailurePoint point)
+      : ExecutionPlugin(std::format("async-failure-{}", index)), observations_(observations),
+        index_(index), point_(point) {}
+  bool supports_async_instructions() const override { return true; }
+  bool observes_sgpr_reads() const override { return false; }
+  void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &inst, Wavefront &) override {
+    EXPECT_EQ(std::this_thread::get_id(), observations_.issuer);
+    auto &record = observations_.records[pc];
+    EXPECT_FALSE(record.destroyed);
+    EXPECT_EQ(record.issued & (1u << index_), 0u);
+    record.issued |= 1u << index_;
+    if (index_ == 0) {
+      record.instruction = &inst;
+      EXPECT_EQ(inst.data(), nullptr);
+      const_cast<Instruction &>(inst).set_data(
+          std::make_unique<AsyncDestructionProbe>(observations_, pc));
+    }
+    inject(AsyncFailurePoint::Issue);
+  }
+  void onAmdgpuAsyncInstructionRetired(uint64_t pc, const Instruction &inst, Wavefront &,
+                                       bool failed) override {
+    EXPECT_EQ(std::this_thread::get_id(), observations_.issuer);
+    auto &record = observations_.records.at(pc);
+    EXPECT_EQ(record.instruction, &inst);
+    EXPECT_FALSE(record.destroyed);
+    EXPECT_EQ(inst.mnemonic(), "v_wmma_f32_16x16x64_fp8_fp8");
+    EXPECT_EQ(record.retired & (1u << index_), 0u);
+    record.retired |= 1u << index_;
+    if (failed)
+      record.failed |= 1u << index_;
+    inject(AsyncFailurePoint::Retirement);
+  }
+  void onAmdgpuReadVgprLanes(const Wavefront *, uint32_t, uint64_t, uint8_t) override {
+    if (std::this_thread::get_id() != observations_.issuer)
+      inject(AsyncFailurePoint::HelperRegisterRead);
+  }
+
+private:
+  void inject(AsyncFailurePoint point) {
+    // The first and last plugins never throw. The middle plugin must not keep
+    // later observers from receiving the matching lifecycle notifications.
+    if (index_ == 1 && point_ == point && !observations_.injected.exchange(true))
+      throw std::runtime_error("injected async plugin failure");
+  }
+  AsyncFailureObservation &observations_;
+  unsigned index_;
+  AsyncFailurePoint point_;
+};
+
+class AsyncPluginFailureTest : public ::testing::TestWithParam<AsyncFailurePoint> {};
+
+TEST_P(AsyncPluginFailureTest, RetiresEveryIssuedInstructionBeforeDestruction) {
+  const int mode = matrix_coexecution::mode();
+  if ((mode != 3 && mode != 4) || matrix_coexecution::width() <= 1 ||
+      matrix_coexecution::shared_helper_limit().value_or(4) == 0)
+    GTEST_SKIP() << "requires mode 3 or 4 with helpers";
+  AsyncFailureObservation observations;
+  PluginFixture f(1, "cdna5", 32, 128);
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  for (unsigned index = 0; index != 3; ++index)
+    ASSERT_TRUE(f.plugin_group_->add(
+        std::make_unique<AsyncFailurePlugin>(observations, index, GetParam())));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+  const auto code = independent_wmma_kernel();
+  EXPECT_THROW(f.run_kernel(code.data(), code.size(), 32, 32), std::runtime_error);
+  EXPECT_TRUE(observations.injected.load());
+  ASSERT_FALSE(observations.records.empty());
+  if (mode == 3 && GetParam() != AsyncFailurePoint::Issue)
+    EXPECT_EQ(observations.records.size(), 2u);
+  unsigned failed_instructions = 0;
+  for (const auto &[pc, record] : observations.records) {
+    SCOPED_TRACE(pc);
+    EXPECT_EQ(record.issued, AsyncFailureObservation::all_plugins);
+    EXPECT_EQ(record.retired, record.issued);
+    EXPECT_TRUE(record.destroyed);
+    if (record.failed) {
+      EXPECT_EQ(record.failed, AsyncFailureObservation::all_plugins);
+      ++failed_instructions;
+    }
+  }
+  if (GetParam() == AsyncFailurePoint::HelperRegisterRead)
+    EXPECT_GT(failed_instructions, 0u);
+  f.shutdown();
+}
+
+INSTANTIATE_TEST_SUITE_P(CallbackFailures, AsyncPluginFailureTest,
+                         ::testing::Values(AsyncFailurePoint::HelperRegisterRead,
+                                           AsyncFailurePoint::Issue, AsyncFailurePoint::Retirement),
+                         [](const ::testing::TestParamInfo<AsyncFailurePoint> &info) {
+                           switch (info.param) {
+                           case AsyncFailurePoint::HelperRegisterRead:
+                             return "HelperRegisterRead";
+                           case AsyncFailurePoint::Issue:
+                             return "Issue";
+                           case AsyncFailurePoint::Retirement:
+                             return "Retirement";
+                           }
+                           return "Unknown";
+                         });
 
 TEST(ThroughputPluginTest, AsyncMmaCountsHaveExplicitlyUnavailableHandlerTiming) {
   if (matrix_coexecution::mode() != 4 || matrix_coexecution::width() <= 1 ||

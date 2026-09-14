@@ -166,17 +166,14 @@ public:
   }
 
   void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf) {
-    dispatch_with_optional_plugin_lock([&]() {
-      for (auto &entry : plugins_)
-        entry.plugin->onAmdgpuAsyncInstructionIssued(pc, inst, wf);
-    });
+    dispatch_async_hook(
+        [&](ExecutionPlugin &plugin) { plugin.onAmdgpuAsyncInstructionIssued(pc, inst, wf); });
   }
 
   void onAmdgpuAsyncInstructionRetired(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
                                        bool failed) {
-    dispatch_with_optional_plugin_lock([&]() {
-      for (auto &entry : plugins_)
-        entry.plugin->onAmdgpuAsyncInstructionRetired(pc, inst, wf, failed);
+    dispatch_async_hook([&](ExecutionPlugin &plugin) {
+      plugin.onAmdgpuAsyncInstructionRetired(pc, inst, wf, failed);
     });
   }
 
@@ -321,6 +318,27 @@ private:
       dispatch_with_plugin_lock(std::forward<Callback>(callback));
     else
       std::forward<Callback>(callback)();
+  }
+
+  // A failed observer must not prevent its peers from receiving the paired
+  // lifetime events before the instruction is destroyed. Preserve the first
+  // exception, but finish notification before returning to issuer cleanup.
+  template <typename Callback> void dispatch_async_hook(Callback &&callback) {
+    dispatch_with_optional_plugin_lock([&]() {
+      size_t index = 0;
+      try {
+        for (; index != plugins_.size(); ++index)
+          callback(*plugins_[index].plugin);
+      } catch (...) {
+        for (++index; index != plugins_.size(); ++index) {
+          try {
+            callback(*plugins_[index].plugin);
+          } catch (...) {
+          }
+        }
+        throw;
+      }
+    });
   }
 
   // Infrequent hooks may synchronously fire hot register hooks. Recursive
