@@ -127,9 +127,11 @@ class TestVendoredImportSurface:
 
 class TestTypingSurface:
     def test_exports_cuda_core_1_0_names(self):
+        # Shapes, not identity: the resolver cannot return None, so presence
+        # alone would pass even if the two names resolved to each other.
         typing_mod = importlib.import_module("cuda.core.typing")
-        assert typing_mod.IsStreamType is not None
-        assert typing_mod.DevicePointerType is not None
+        assert "__cuda_stream__" in typing_mod.IsStreamType.__dict__
+        assert set(typing_mod.DevicePointerType.__args__) == {int, type(None)}
 
     def test_pre_1_0_names_are_aliases(self):
         typing_mod = importlib.import_module("cuda.core.typing")

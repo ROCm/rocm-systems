@@ -155,8 +155,6 @@ def _nccl_ep_importable() -> bool:
     CUDA major. Extracted as a separate function so tests can monkey-patch it
     directly instead of manipulating ``sys.modules``.
     """
-    if _ep_bindings is None:
-        return False
     try:
         import nccl.ep  # noqa: F401
     except ImportError:
@@ -165,7 +163,10 @@ def _nccl_ep_importable() -> bool:
 
 
 def _nccl_ep_library_info() -> LibraryInfo | None:
-    if not _nccl_ep_importable():
+    # The bindings are optional: they are not built on ROCm. Checked here
+    # rather than in the probe above, which callers may patch, because this
+    # is the only place the extension is dereferenced.
+    if _ep_bindings is None or not _nccl_ep_importable():
         return None
     version = _decode_version(_ep_bindings.get_version())
     path = _resolve_so_path("libnccl_ep.so")

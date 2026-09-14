@@ -34,6 +34,8 @@ class IsStreamType(Protocol):
 # a typing-only alias, so a permissive Union is fine.
 DevicePointerType = Union[int, None]
 
-# Pre-1.0 cuda.core spellings.
+# Pre-1.0 cuda.core spellings, served for callers pinned to an older drop.
+# The shim itself uses the 1.0 names, so these two are safe to drop once no
+# vendored source spells them that way.
 IsStreamT = IsStreamType
 DevicePointerT = DevicePointerType
