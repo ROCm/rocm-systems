@@ -307,6 +307,11 @@ private:
    BatchedKernelParams<PackedYUYVToPlanarYUVBatchParams>  b_yuyv_yuvp_;
    BatchedKernelParams<InterleavedUVToPlanarUVBatchParams> b_nv12_uvp_;
    BatchedKernelParams<YFromPackedYUYVBatchParams>        b_yuyv_y_;
+   // Unified chroma->RGB / chroma->RGB_PLANAR buffers: cover NV12/YUV444/YUV440/YUYV/YUV400
+   // in a single kernel each. The per-format buffers above are retained for A/B comparison
+   // but the decoder currently routes these five formats through the unified buffers.
+   BatchedKernelParams<YUVToRGBBatchParams>            b_yuv_rgb_;
+   BatchedKernelParams<YUVToRGBPlanarBatchParams>      b_yuv_rgbp_;
 };
 
 #endif //ROC_JPEG_DECODER_H_
