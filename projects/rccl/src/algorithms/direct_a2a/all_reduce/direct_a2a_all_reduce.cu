@@ -122,15 +122,12 @@ ncclResult_t directA2aOneShot(const void* sendbuff, void* recvbuff, size_t count
   rccl::Recorder::instance().skip(false);
   NCCLCHECK(ret);
 
-  INFO(NCCL_COLL, "AllReduce: taking standalone DIRECT_A2A one-shot path: rank=%d/%d count=%zu datatype=%d bytes=%zu",
-       comm->rank, comm->nRanks, count, (int)datatype, bytes);
   return launchDirectA2aSumByType(comm->directA2aScratch, recvbuff, count, comm->nRanks, datatype, stream);
 }
 
 ncclResult_t directA2aTwoShot(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                               ncclComm* comm, cudaStream_t stream) {
   const size_t typeSize = ncclTypeSize(datatype);
-  const size_t bytes = count * typeSize;
   const size_t ownedCount = directA2aChunkCount(count, comm->nRanks, comm->rank);
   const size_t ownedOffset = directA2aChunkOffset(count, comm->nRanks, comm->rank);
   const size_t ownedBytes = ownedCount * typeSize;
@@ -186,8 +183,6 @@ ncclResult_t directA2aTwoShot(const void* sendbuff, void* recvbuff, size_t count
 
   CUDACHECK(cudaMemcpyAsync(static_cast<char*>(recvbuff) + ownedOffset * typeSize, reducedShard, ownedBytes,
                             cudaMemcpyDeviceToDevice, stream));
-  INFO(NCCL_COLL, "AllReduce: taking standalone DIRECT_A2A two-shot path: rank=%d/%d count=%zu datatype=%d bytes=%zu",
-       comm->rank, comm->nRanks, count, (int)datatype, bytes);
   return ncclSuccess;
 }
 
@@ -263,7 +258,10 @@ ncclResult_t rcclDirectA2aAllReduce(const void* sendbuff, void* recvbuff, size_t
   if (!rcclDirectA2aAllReduceEligible(comm, count, datatype, op)) return ncclInvalidUsage;
 
   const size_t bytes = count * ncclTypeSize(datatype);
-  if (bytes <= directA2aOneShotThreshold(comm->nRanks)) {
+  const bool oneShot = bytes <= directA2aOneShotThreshold(comm->nRanks);
+  INFO(NCCL_COLL, "AllReduce: taking standalone DIRECT_A2A %s path: rank=%d/%d count=%zu datatype=%d bytes=%zu",
+       oneShot ? "one-shot" : "two-shot", comm->rank, comm->nRanks, count, (int)datatype, bytes);
+  if (oneShot) {
     return directA2aOneShot(sendbuff, recvbuff, count, datatype, comm, stream);
   }
   return directA2aTwoShot(sendbuff, recvbuff, count, datatype, comm, stream);
