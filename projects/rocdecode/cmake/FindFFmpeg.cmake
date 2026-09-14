@@ -51,8 +51,10 @@ find_package_handle_standard_args(
 # so a later configure pointing at a different root would keep the first root's
 # headers and libraries: the shortcut immediately below skips discovery outright
 # once FFMPEG_LIBRARIES is set. Drop the cached results when the root changes so
-# the new one is actually picked up.
-if(WIN32 AND DEFINED FFMPEG_ROOT AND NOT "${FFMPEG_ROOT}" STREQUAL "${_FFMPEG_CACHED_ROOT}")
+# the new one is actually picked up. An unset root is a state like any other --
+# comparing the value rather than testing DEFINED means clearing the root also
+# invalidates, instead of leaving the deleted root's libraries cached.
+if(WIN32 AND NOT "${FFMPEG_ROOT}" STREQUAL "${_FFMPEG_CACHED_ROOT}")
   unset(AVCODEC_INCLUDE_DIR CACHE)
   unset(AVCODEC_LIBRARY CACHE)
   unset(AVFORMAT_INCLUDE_DIR CACHE)
@@ -68,6 +70,13 @@ endif()
 if(FFMPEG_LIBRARIES AND FFMPEG_INCLUDE_DIR)
   set(FFMPEG_FOUND TRUE)
 else()
+  # find_package_handle_standard_args ran above against whatever was still
+  # cached, so FFMPEG_FOUND can be TRUE here -- notably right after the block
+  # above invalidated a stale root. Discovery below only ever sets it TRUE, so
+  # without this reset a partially populated root would keep that stale TRUE and
+  # cache NOTFOUND component paths into FFMPEG_LIBRARIES.
+  set(FFMPEG_FOUND FALSE)
+
   # use pkg-config to get the directories and then use these values
   # in the FIND_PATH() and FIND_LIBRARY() calls
   if(NOT WIN32)
@@ -95,10 +104,18 @@ else()
   else()
     # On Windows, allow FFMPEG_ROOT to point to a pre-built FFmpeg installation
     # (e.g. -DFFMPEG_ROOT=C:/ffmpeg). All three components come from one prefix.
-    foreach(_comp AVCODEC AVFORMAT AVUTIL)
-      set(_${_comp}_SEARCH_INCLUDE ${FFMPEG_ROOT}/include)
-      set(_${_comp}_SEARCH_LIB ${FFMPEG_ROOT}/lib)
-    endforeach()
+    if(FFMPEG_ROOT)
+      foreach(_comp AVCODEC AVFORMAT AVUTIL)
+        set(_${_comp}_SEARCH_INCLUDE ${FFMPEG_ROOT}/include)
+        set(_${_comp}_SEARCH_LIB ${FFMPEG_ROOT}/lib)
+      endforeach()
+      # An explicit root means that installation and no other. Without this, a
+      # component missing from the root would be satisfied from CMAKE_PREFIX_PATH
+      # or the system paths, silently combining two FFmpeg installations -- and
+      # the version gate below only parses the selected avcodec headers, so the
+      # ABI mismatch would not surface until link or run time.
+      set(_FFMPEG_FIND_OPTS NO_DEFAULT_PATH)
+    endif()
   endif()
 
   # AVCODEC
@@ -106,11 +123,13 @@ else()
     NAMES libavcodec/avcodec.h
     PATHS ${_AVCODEC_SEARCH_INCLUDE}
     PATH_SUFFIXES ffmpeg libav
+    ${_FFMPEG_FIND_OPTS}
   )
   mark_as_advanced(AVCODEC_INCLUDE_DIR)
   find_library(AVCODEC_LIBRARY
     NAMES avcodec
     PATHS ${_AVCODEC_SEARCH_LIB}
+    ${_FFMPEG_FIND_OPTS}
   )
   mark_as_advanced(AVCODEC_LIBRARY)
 
@@ -119,11 +138,13 @@ else()
     NAMES libavformat/avformat.h
     PATHS ${_AVFORMAT_SEARCH_INCLUDE}
     PATH_SUFFIXES ffmpeg libav
+    ${_FFMPEG_FIND_OPTS}
   )
   mark_as_advanced(AVFORMAT_INCLUDE_DIR)
   find_library(AVFORMAT_LIBRARY
     NAMES avformat
     PATHS ${_AVFORMAT_SEARCH_LIB}
+    ${_FFMPEG_FIND_OPTS}
   )
   mark_as_advanced(AVFORMAT_LIBRARY)
 
@@ -132,11 +153,13 @@ else()
     NAMES libavutil/avutil.h
     PATHS ${_AVUTIL_SEARCH_INCLUDE}
     PATH_SUFFIXES ffmpeg libav
+    ${_FFMPEG_FIND_OPTS}
   )
   mark_as_advanced(AVUTIL_INCLUDE_DIR)
   find_library(AVUTIL_LIBRARY
     NAMES avutil
     PATHS ${_AVUTIL_SEARCH_LIB}
+    ${_FFMPEG_FIND_OPTS}
   )
   mark_as_advanced(AVUTIL_LIBRARY)
 
