@@ -118,6 +118,8 @@ ncclResult_t IbCastRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, si
                                        int* segFds, int type, void** mhandle) {
   ncclResult_t ret = ncclSuccess;
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
+  struct ncclIbMrHandle* mhandleWrapper = NULL;
+  *mhandle = NULL;
   if (nSeg < 1 || nSeg > NCCL_IB_MAX_SEGMENTS) {
     WARN("NET/IB: multi-segment registration with %d segments exceeds NCCL_IB_MAX_SEGMENTS=%d", nSeg,
          NCCL_IB_MAX_SEGMENTS);
@@ -140,11 +142,7 @@ ncclResult_t IbCastRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, si
       return ncclInvalidUsage;
     }
   }
-  struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)calloc(1, sizeof(struct ncclIbMrHandle));
-  if (mhandleWrapper == nullptr) {
-    WARN("Failed to allocate IB MR handle wrapper");
-    return ncclSystemError;
-  }
+  NCCLCHECK(ncclCalloc(&mhandleWrapper, 1));
   mhandleWrapper->nSegments = nSeg;
   for (int s = 0; s < nSeg; s++) {
     mhandleWrapper->segStart[s] = (uintptr_t)segAddrs[s];
