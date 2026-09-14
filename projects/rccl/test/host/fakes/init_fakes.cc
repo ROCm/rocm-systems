@@ -19,38 +19,6 @@
 // moved to env_fakes.cc so every microtest binary shares ONE env implementation:
 // a second, map-only copy cannot intercept production raw getenv() call sites.
 
-namespace {
-bool g_gethostnameFail = false;
-bool g_dladdrFail = false;
-size_t g_lastGethostnameLen = 0;
-}  // namespace
-
-void SetGethostnameFail(bool fail) { g_gethostnameFail = fail; }
-void SetDladdrFail(bool fail) { g_dladdrFail = fail; }
-size_t LastGethostnameLen() { return g_lastGethostnameLen; }
-
-extern "C" int gethostname(char* name, size_t len) {
-  using Fn = int (*)(char*, size_t);
-  static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "gethostname"));
-  g_lastGethostnameLen = len;
-  if (g_gethostnameFail) {
-    errno = ENAMETOOLONG;
-    return -1;
-  }
-  return real ? real(name, len) : -1;
-}
-
-extern "C" int dladdr(const void* addr, Dl_info* info) {
-  using Fn = int (*)(const void*, Dl_info*);
-  static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "dladdr"));
-  if (g_dladdrFail) return 0;
-  return real ? real(addr, info) : 0;
-}
-
-int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }
-int64_t ncclParamNvtxDisable() { return g_loadParam("NVTX_DISABLE", 0); }
-int64_t ncclParamPatEnable() { return g_loadParam("PAT_ENABLE", 0); }
-int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_REG_ENABLE", 0); }
 int64_t ncclParamEnqueueRearchEnable() { return g_loadParam("ENQUEUE_REARCH_ENABLE", 0); }
 int64_t ncclParamRasDiagnostics() { return g_loadParam("RUN_RAS_DIAGNOSTICS", 0); }
 int64_t ncclParamDiagnostics() { return g_loadParam("RUN_DIAGNOSTICS", 0); }

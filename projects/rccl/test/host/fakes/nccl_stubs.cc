@@ -166,7 +166,6 @@ ncclResult_t ncclGpuCftSupport(struct ncclComm* comm, int* gpuCftSupport) {
   if (gpuCftSupport) *gpuCftSupport = 0;
   return ncclSuccess;
 }
-}
 // Omitted when RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering is defined -- the
 // unit under test emits this via NCCL_PARAM (enqueue.cc:1986). Reads the env
 // rather than a hardcoded 0, which forced config.graphStreamOrdering on every

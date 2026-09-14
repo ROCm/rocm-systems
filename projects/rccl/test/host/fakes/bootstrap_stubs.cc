@@ -68,7 +68,7 @@ ncclResult_t bootstrapInit(int nHandles, void* handle, struct ncclComm* comm, st
   return g_bootstrapInit(nHandles, handle, comm, parent);
 }
 
-ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, int nranks, int tag) { ::abort(); }
+ncclResult_t bootstrapIntraNodeBarrier(void*, int*, int, int, int) { return ncclSuccess; }
 
 static ncclResult_t DefaultBootstrapSplit(uint64_t, struct ncclComm*, struct ncclComm*, int, int, int*) { ::abort(); }
 std::function<ncclResult_t(uint64_t, struct ncclComm*, struct ncclComm*, int, int, int*)> g_bootstrapSplit =
