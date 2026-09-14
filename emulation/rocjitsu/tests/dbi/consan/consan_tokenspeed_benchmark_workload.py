@@ -20,6 +20,99 @@ from consan_gluon_benchmark_workload import _instrumentation_control
 RESULT_MARKER = "CONSAN_BENCHMARK_RESULT="
 
 
+def _prepare_qwen(config):
+    """Production model forwards, with a CPU greedy-token output oracle.
+
+    Prefill overwrites all six live cache positions with prefix length zero.
+    Decode always rewrites position six, attending to the same six-token
+    prefix populated once during setup. Neither operation advances the cache
+    length between Run1 and Run2. Scheduler and HTTP time are outside scope.
+    """
+    import torch
+    from transformers import AutoModelForCausalLM
+    from tokenspeed.runtime.utils.server_args import ServerArgs, PortArgs
+    from tokenspeed.runtime.configs.model_config import ModelConfig
+    from tokenspeed.runtime.execution.distributed_initializer import (
+        DistributedConfig, DistributedInitializer,
+    )
+    from tokenspeed.runtime.execution.model_runner import ModelRunner
+    from tokenspeed.runtime.execution.context import ForwardContext
+    from tokenspeed.runtime.execution.forward_batch_info import ForwardMode
+    from tokenspeed.runtime.layers.attention.registry import create_attn_components
+    from tokenspeed.runtime.layers.paged_attention import bind_cache_groups
+
+    prompt = [9707, 11, 358, 1079, 264, 3465]
+    cpu_model = AutoModelForCausalLM.from_pretrained(
+        config["model"], local_files_only=True, dtype=torch.float32,
+        attn_implementation="eager",
+    ).eval()
+    with torch.inference_mode():
+        prefill = cpu_model(torch.tensor([prompt]), use_cache=True)
+        first_token = int(prefill.logits[0, -1].argmax())
+        cached = cpu_model(torch.tensor([[first_token]]),
+                           past_key_values=prefill.past_key_values, use_cache=True)
+        second_token = int(cached.logits[0, -1].argmax())
+    del cpu_model, prefill, cached
+    config["oracle"] = {"implementation": "HF CPU FP32 eager greedy tokens",
+                        "input_ids": prompt, "prefill": first_token,
+                        "cached_decode": second_token}
+
+    args = ServerArgs(model=config["model"], dtype="bfloat16", max_model_len=512,
+                      max_total_tokens=1024, max_num_seqs=1,
+                      gpu_memory_utilization=0.10, enforce_eager=True,
+                      enable_prefix_caching=False, disable_kvstore=True,
+                      disable_overlap_schedule=True, attention_backend="mha")
+    args.mapping.rank = 0
+    model_config = ModelConfig(args.model, dtype=args.dtype,
+                              context_length=args.max_model_len,
+                              model_override_args=args.hf_overrides, server_args=args)
+    memory = DistributedInitializer.initialize(DistributedConfig.from_server_args(
+        args, PortArgs.init_new(args), 0, 0, model_config.hidden_size, 512))
+    runner = ModelRunner(model_config, args, 0, 0)
+    runner.prepare_communication_runtime(512)
+    backend, pool, _, _, storage = create_attn_components(args, model_config, 0, 0, memory)
+    bind_cache_groups(runner.model, pool)
+    backend.init_cuda_graph_state(1)
+    config["cache_storage"] = storage
+    tables = {gid: torch.ones((1, 1), dtype=torch.int32, device="cuda")
+              for gid in backend.group_ids}
+    req = torch.tensor([0], dtype=torch.int64, device="cuda")
+    length = torch.tensor([len(prompt)], dtype=torch.int32, device="cuda")
+    length_cpu = torch.tensor([len(prompt)], dtype=torch.int32)
+    zero = torch.tensor([0], dtype=torch.int32, device="cuda")
+    zero_cpu = torch.tensor([0], dtype=torch.int32)
+    ids = torch.tensor(prompt, device="cuda")
+    positions = torch.arange(len(prompt), device="cuda")
+    extend_ctx = ForwardContext(backend, pool, 1, 1, len(prompt), ForwardMode.EXTEND,
+        gather_ids=torch.tensor([len(prompt) - 1], device="cuda"), all_extend=True)
+
+    def prefill_op():
+        backend.init_forward_metadata(1, 1, req, length, ForwardMode.EXTEND,
+            block_tables=tables, extend_seq_lens=length, extend_seq_lens_cpu=length_cpu,
+            extend_prefix_lens=zero, extend_prefix_lens_cpu=zero_cpu,
+            extend_with_prefix=False)
+        return runner.forward(extend_ctx, ids, positions).next_token_logits.argmax(-1)
+
+    if config["operation"] == "qwen-prefill":
+        return prefill_op, torch.tensor([first_token], dtype=torch.float32), 0, 0
+
+    # Populate the real cache outside the measured single-token decode tick.
+    with torch.inference_mode():
+        assert prefill_op().cpu().tolist() == [first_token]
+    decode_id = torch.tensor([first_token], device="cuda")
+    decode_pos = torch.tensor([len(prompt)], device="cuda")
+    decode_length = torch.tensor([len(prompt) + 1], dtype=torch.int32, device="cuda")
+    decode_ctx = ForwardContext(backend, pool, 1, 0, 1, ForwardMode.DECODE,
+                                all_decode_or_idle=True)
+
+    def decode_op():
+        backend.refresh_decode_metadata(1, 1, req, decode_length,
+            forward_mode=ForwardMode.DECODE, block_tables=tables)
+        return runner.forward(decode_ctx, decode_id, decode_pos).next_token_logits.argmax(-1)
+
+    return decode_op, torch.tensor([second_token], dtype=torch.float32), 0, 0
+
+
 def _prepare(config):
     import torch
     import tokenspeed_kernel as tk
@@ -28,6 +121,8 @@ def _prepare(config):
         return torch.randn(shape, dtype=torch.bfloat16)
 
     operation = config["operation"]
+    if operation in ("qwen-prefill", "qwen-decode"):
+        return _prepare_qwen(config)
     if operation == "gemm":
         from tokenspeed_kernel_amd.ops.gfx950.gemm.fp16.mm import (
             gluon_mm_a16w16_mfma_lds_mediumm_gfx950,

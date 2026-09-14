@@ -68,6 +68,48 @@ def _run(
 
 
 class ConSanBenchmarkTest(unittest.TestCase):
+    def test_source_identity_tracks_dirty_code_but_not_markdown_or_commit_bookkeeping(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                subprocess.run(("git", "-C", directory, "-c", "user.name=Test",
+                                "-c", "user.email=test@example.invalid", *args),
+                               check=True, capture_output=True)
+            git("init")
+            (root / "code.py").write_text("value = 1\n")
+            (root / "STATUS.md").write_text("pending\n")
+            git("add", ".")
+            git("commit", "-m", "initial")
+            initial = benchmark._git_identity(root)
+            (root / "STATUS.md").write_text("accepted\n")
+            self.assertEqual(initial["execution_tree_sha256"], benchmark._git_identity(root)["execution_tree_sha256"])
+            (root / "code.py").write_text("value = 2\n")
+            dirty = benchmark._git_identity(root)
+            self.assertNotEqual(initial["execution_tree_sha256"], dirty["execution_tree_sha256"])
+            git("add", ".")
+            git("commit", "-m", "record tested code")
+            committed = benchmark._git_identity(root)
+            self.assertEqual(dirty["execution_tree_sha256"], committed["execution_tree_sha256"])
+            self.assertNotEqual(initial["commit"], committed["commit"])
+
+    def test_workload_identity_uses_executables_not_ledger_commit_or_selection(self) -> None:
+        workload = benchmark.WORKLOADS[3]
+        identity = {"source": {"commit": "before", "dirty": False, "execution_tree_sha256": "code"},
+                    "hook_sha256": "hook", "payload_sha256": {"gluon": "payload"}}
+        expected = benchmark._workload_identity(identity, workload)
+        changed = {**identity, "source": {"commit": "ledger-commit", "dirty": True, "execution_tree_sha256": "code"},
+                   "payload_sha256": {"gluon": "payload", "tokenspeed": "another-payload"}}
+        self.assertEqual(expected, benchmark._workload_identity(changed, workload))
+        self.assertNotEqual(expected, benchmark._workload_identity(
+            {**identity, "source": {"execution_tree_sha256": "changed-code"}}, workload))
+        for key, value in (("hook_sha256", "new-hook"),
+                           ("payload_sha256", {"gluon": "new-payload"}),
+                           ("python_environment", {"torch": "changed"})):
+            self.assertNotEqual(expected, benchmark._workload_identity({**identity, key: value}, workload))
+        different_input = benchmark.Workload(workload.id, workload.description,
+            workload.primary_metric, {**workload.config, "elements": 42}, workload.payload)
+        self.assertNotEqual(expected, benchmark._workload_identity(identity, different_input))
+
     def test_target_corpus_preserves_rdna_and_preallocates_cdna_rows(self) -> None:
         self.assertEqual(benchmark._target_workloads("gfx1201"), benchmark.WORKLOADS)
         cdna = benchmark._target_workloads("gfx950")

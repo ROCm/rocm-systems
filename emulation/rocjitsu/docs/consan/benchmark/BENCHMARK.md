@@ -190,11 +190,17 @@ written only after the process exits successfully, its oracle passes, and (for
 an instrumented audited cell) coverage is accepted. Keep partial logs for
 timeouts and failures.
 
-The fingerprint must cover at least the RocJITsu commit and dirty state, Aorta
-commit and dirty state, hook and runner hashes, payload hashes, target,
-controlled environment, exact command, allowlist, profiler, and external
-benchmark executable. Changing any of these invalidates the affected cached
-cell. The status file is a concise projection of accepted artifacts, not an
+Each checkpoint retains the RocJITsu commit and dirty state as provenance.
+Its reuse fingerprint covers the actual source tree (including staged,
+unstaged, and untracked code), Aorta identity for Aorta payloads, hook and runner
+hashes, Python support/payload hashes, installed package versions and RECORD
+hashes, runtime paths, target, controlled environment, exact command, allowlist,
+profiler, and the applicable external benchmark executable. Markdown-only
+ledger updates and committing unchanged code do not change the executable
+fingerprint. Code changes do. Fingerprints are per workload, so changing the
+selected subset cannot itself invalidate a completed cell. Old checkpoints
+without these identities must be rerun; they are not migrated by assumption.
+The status file is a concise projection of accepted artifacts, not an
 independent source of truth.
 
 ## Current corpus
@@ -224,6 +230,25 @@ All workloads must fit a 16 GiB GPU without multi-GPU sharding. Prefer distinct
 generators and execution shapes over redundant model-size variants. Revisit the
 corpus when an added workload supplies a new instruction, synchronization,
 addressing, dispatch, or generator family at acceptable cost.
+
+The gfx950 corpus adds eight TokenSpeed rows: medium-M and large-M BF16 Gluon
+GEMM, Gluon attention prefill and decode, Qwen3-0.6B prefill and cached decode,
+Triton FP8 block-scaled GEMM, and Gluon BF16 MoE. These use local installations,
+not Aorta's container ROCm stack. Import TokenSpeed before initializing HSA:
+its Proton registration can replace legacy interception if imported later.
+
+For Qwen, pass `--qwen-model /path/to/local/Qwen3-0.6B` (or set
+`CONSAN_BENCHMARK_QWEN_MODEL`) consistently across focused/resumed invocations.
+Checkpoint files are content-hashed. The operations use TokenSpeed's production
+BF16 model runner, MHA backend, and a 1024-token cache on one GPU with graphs
+and prefix reuse disabled. Prefill processes the fixed six-token prompt
+`[9707,11,358,1079,264,3465]`; cached decode processes its first generated token
+at position six. Both operations include metadata preparation and greedy token
+selection, excluding scheduler and HTTP overhead. Prefill rewrites every live
+prefix position; decode rewrites the same next position against the unchanged
+prefix on each run. Decode cache population happens during setup. A separate
+Hugging Face CPU FP32 eager model computes the exact greedy-token output oracle
+in each process. These are complete model operations, not serving throughput.
 
 ## Bringing up another physical target
 

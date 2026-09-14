@@ -220,6 +220,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--qwen-model", type=Path,
+                        default=os.environ.get("CONSAN_BENCHMARK_QWEN_MODEL"),
+                        help="local Qwen3-0.6B checkpoint for the two Qwen rows")
     parser.add_argument("--status", type=Path)
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument(
@@ -253,10 +256,36 @@ def _git_identity(checkout: Path) -> dict[str, Any]:
         )
         return result.stdout.strip()
 
+    # Stable across commits of the same code and across documentation updates.
+    # Start with index blob identities, then substitute actual unstaged content.
+    entries = {}
+    for line in git("ls-files", "--stage").splitlines():
+        metadata, name = line.split("\t", 1)
+        if not name.endswith(".md"):
+            entries[name] = metadata.split()[:2]
+    untracked = git("ls-files", "--others", "--exclude-standard").splitlines()
+    for name in set(git("diff", "--name-only").splitlines() + untracked):
+        if name.endswith(".md"):
+            continue
+        path = checkout / name
+        if not path.exists() and not path.is_symlink():
+            entries.pop(name, None)
+        elif path.is_file() or path.is_symlink():
+            content = os.readlink(path).encode() if path.is_symlink() else path.read_bytes()
+            blob = hashlib.sha1(b"blob " + str(len(content)).encode() + b"\0" + content).hexdigest()
+            mode = "120000" if path.is_symlink() else ("100755" if path.stat().st_mode & 0o111 else "100644")
+            entries[name] = [mode, blob]
     return {
         "path": str(checkout.resolve()),
         "commit": git("rev-parse", "HEAD"),
         "dirty": bool(git("status", "--porcelain")),
+        "execution_tree_sha256": hashlib.sha256(json.dumps(entries, sort_keys=True).encode()).hexdigest(),
+        "diff_sha256": hashlib.sha256(git("diff", "--binary", "HEAD").encode()).hexdigest(),
+        "untracked_sha256": {
+            name: _sha256(checkout / name)
+            for name in git("ls-files", "--others", "--exclude-standard").splitlines()
+            if (checkout / name).is_file()
+        },
     }
 
 
@@ -266,6 +295,41 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _workload_identity(identity: dict[str, Any], workload: Workload) -> dict[str, Any]:
+    """Executable inputs, independent of the selected subset and ledger commits.
+
+    Source checkout metadata remains in provenance. The loaded hook's content
+    identifies compiled ConSan; Python sources and environment have their own
+    content identities. A documentation commit cannot change these executables.
+    """
+    result = dict(identity)
+    if "source" in result:
+        result["source"] = {"execution_tree_sha256": result["source"]["execution_tree_sha256"]}
+    if "payload_sha256" in result:
+        result["payload_sha256"] = {workload.payload: result["payload_sha256"][workload.payload]}
+    if workload.payload != "aorta":
+        result.pop("aorta", None)
+    if workload.payload != "hipblaslt":
+        result.pop("hipblaslt_bench_sha256", None)
+    result["workload"] = {"id": workload.id, "config": workload.config}
+    return result
+
+
+def _python_environment_identity(python: Path) -> dict[str, Any]:
+    # Read installed metadata without importing GPU libraries or initializing HSA.
+    script = """
+import hashlib, importlib.metadata, json, sys
+packages = {}
+for dist in importlib.metadata.distributions():
+    name = dist.metadata['Name'].lower().replace('_', '-')
+    record = dist.read_text('RECORD') or ''
+    packages[name] = {'version': dist.version, 'record_sha256': hashlib.sha256(record.encode()).hexdigest()}
+print(json.dumps({'executable': sys.executable, 'version': sys.version, 'packages': packages}))
+"""
+    result = subprocess.run((str(python), "-c", script), check=True, capture_output=True, text=True)
+    return json.loads(result.stdout)
 
 
 def _clean_environment(
@@ -483,7 +547,7 @@ def _run_one_impl(
         or name == "HIP_TARGET"
     }
     fingerprint_payload = {
-        "run_identity": args.run_identity,
+        "run_identity": _workload_identity(args.run_identity, workload),
         "command": command,
         "environment": controlled_environment,
         "kernel_allowlist_sha256": (
@@ -562,7 +626,8 @@ def _run_one_impl(
         result["coverage"] = _coverage_summary(output)
     _atomic_write(
         checkpoint_path,
-        json.dumps({"fingerprint": fingerprint, "result": result}, indent=2) + "\n",
+        json.dumps({"fingerprint": fingerprint, "inputs": fingerprint_payload,
+                    "provenance": args.run_identity, "result": result}, indent=2) + "\n",
     )
     print(f"pass {workload.id} {label} wall_ms={wall_ms:.1f}", flush=True)
     _cell_progress(args, workload, label, mode, "accepted", result)
@@ -871,15 +936,30 @@ def _main(argv: list[str]) -> int:
     if args.rocprofv3 is None:
         raise BenchmarkError(f"set ${ROCPROFV3_ENV} or pass --rocprofv3")
     args.rocprofv3 = args.rocprofv3.resolve()
+    available = _target_workloads(args.target)
     selected = [
         workload
-        for workload in _target_workloads(args.target)
+        for workload in available
         if args.workload is None or workload.id in args.workload
     ]
     if not selected:
         raise BenchmarkError("no workloads selected")
     if args.workload and set(args.workload) - {workload.id for workload in selected}:
         raise BenchmarkError("selected workload is not supported on this target")
+    if args.qwen_model is not None or any(w.config.get("operation", "").startswith("qwen-") for w in selected):
+        if args.qwen_model is None or not args.qwen_model.is_dir():
+            raise BenchmarkError("pass --qwen-model with a local Qwen3-0.6B checkpoint")
+        model = args.qwen_model.resolve()
+        model_hashes = {str(path.relative_to(model)): _sha256(path)
+                        for path in sorted(model.rglob("*"))
+                        if path.is_file() and ".cache" not in path.relative_to(model).parts}
+        available = [Workload(w.id, w.description, w.primary_metric,
+                            {**w.config, "model": str(model), "model_sha256": model_hashes},
+                            w.payload)
+                    if w.config.get("operation", "").startswith("qwen-") else w
+                    for w in available]
+        selected_ids = {w.id for w in selected}
+        selected = [w for w in available if w.id in selected_ids]
     if args.hipblaslt_bench is not None:
         args.hipblaslt_bench = args.hipblaslt_bench.resolve()
     for path, description in (
@@ -912,9 +992,19 @@ def _main(argv: list[str]) -> int:
         "rocprofv3_sha256": _sha256(args.rocprofv3),
         "runner_sha256": _sha256(Path(__file__)),
         "converter_sha256": _sha256(converter),
+        "python_environment": _python_environment_identity(args.python),
+        "runtime_environment": {
+            name: value for name, value in os.environ.items()
+            if name in ("PATH", "LD_LIBRARY_PATH", "LD_PRELOAD", "ROCM_PATH", "HIP_PATH",
+                        "TRITON_LIBHIP_PATH", "HSA_OVERRIDE_GFX_VERSION", "HIP_VISIBLE_DEVICES",
+                        "ROCR_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES")
+        },
         "payload_sha256": {
             workload.payload: _sha256(_payload_program(workload))
-            for workload in selected
+            for workload in _target_workloads(args.target)
+        },
+        "python_support_sha256": {
+            path.name: _sha256(path) for path in sorted(Path(__file__).parent.glob("*.py"))
         },
     }
     if args.hipblaslt_bench is not None:
@@ -925,7 +1015,6 @@ def _main(argv: list[str]) -> int:
         args.status = args.status.resolve()
 
     suite_start = time.perf_counter()
-    workload_summaries = []
     status_projection = {
         "target": args.target,
         "workloads": [
@@ -936,8 +1025,17 @@ def _main(argv: list[str]) -> int:
     progress_path = args.output_dir / "progress.json"
     if args.resume and progress_path.is_file():
         previous = json.loads(progress_path.read_text(encoding="utf-8"))
-        if previous.get("run_identity") == args.run_identity:
-            status_projection = previous["projection"]
+        previous_rows = {row["id"]: row for row in previous["projection"]["workloads"]}
+        current_workloads = {w.id: w for w in available}
+        for index, row in enumerate(status_projection["workloads"]):
+            old = previous_rows.get(row["id"])
+            workload = current_workloads[row["id"]]
+            if old and old.get("identity") == _workload_identity(args.run_identity, workload):
+                status_projection["workloads"][index] = old
+    for row in status_projection["workloads"]:
+        workload = next((w for w in selected if w.id == row["id"]), None)
+        if workload is not None:
+            row["identity"] = _workload_identity(args.run_identity, workload)
     args.status_projection = status_projection
     _write_progress(args)
     status_rows = {
@@ -997,15 +1095,16 @@ def _main(argv: list[str]) -> int:
             audit_sites=False,
             label="native-validation",
         )
-        workload_summaries.append(
-            _summarize_workload(
-                workload,
-                native_reference,
-                native_validation,
-                modes,
-                kernel_allowlist,
-            )
+        completed = _summarize_workload(
+            workload,
+            native_reference,
+            native_validation,
+            modes,
+            kernel_allowlist,
         )
+        completed["provenance"] = args.run_identity
+        status_rows[workload.id]["summary"] = completed
+        _write_progress(args)
 
     suite_seconds = time.perf_counter() - suite_start
     summary = {
@@ -1026,7 +1125,8 @@ def _main(argv: list[str]) -> int:
                 "sha256": args.run_identity["rocprofv3_sha256"],
             },
         },
-        "workloads": workload_summaries,
+        "workloads": [row["summary"] for row in status_projection["workloads"]
+                      if "summary" in row],
     }
     _atomic_write(
         args.output_dir / "summary.json", json.dumps(summary, indent=2) + "\n"
