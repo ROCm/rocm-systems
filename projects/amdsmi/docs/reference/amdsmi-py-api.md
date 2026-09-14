@@ -604,6 +604,28 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_gpu_is_apu
+
+Returns `True` for the GPU component of an APU and `False` for a discrete GPU.
+The input is a GPU `processor_handle` from `amdsmi_get_processor_handles()`.
+Identification uses the native Linux amdgpu driver's fusion flag without creating
+a HIP context or comparing memory sizes.
+
+APU GPU handles remain `AmdSmiProcessorType.AMD_GPU` for compatibility with GPU APIs.
+`amdsmi_get_processor_handles_by_type(socket, AmdSmiProcessorType.AMD_APU)` does not
+enumerate separate APU handles. Unsupported processor categories return an empty
+`processor_handles` list and `processor_count` of zero in the returned dictionary,
+rather than the GPU list; `UNKNOWN` is not a wildcard.
+
+Raises `AmdSmiParameterException` for an incorrectly typed handle and
+`AmdSmiLibraryException` for library errors. `AMDSMI_STATUS_NOT_SUPPORTED` means
+identification is unavailable, including on WSL or with an older library that lacks
+the query. Do not interpret this exception as `False` or infer APU status from
+legacy WSL ASIC flags. Other query errors are propagated.
+
+APU identification does not imply that every memory query reports the entire
+unified pool: a BIOS VRAM carveout can coexist with shared system memory.
+
 ### amdsmi_get_gpu_asic_info
 
 Description: Returns asic information for the given GPU
@@ -629,6 +651,7 @@ Field | Content
 `num_of_compute_units` | number of compute units on asic
 `target_graphics_version` | hardware graphics version
 `subsystem_id` |  subsystem id
+`flags` | Native Linux DRM `ids_flags` (bit 0 is the fusion/APU flag); backend-dependent elsewhere. Prefer `amdsmi_get_gpu_is_apu()` for identification.
 
 Exceptions that can be thrown by `amdsmi_get_gpu_asic_info` function:
 

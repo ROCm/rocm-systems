@@ -10,6 +10,7 @@ from .amdsmi_interface import amdsmi_shut_down
 
 # Device Discovery
 from .amdsmi_interface import amdsmi_get_processor_type
+from .amdsmi_interface import amdsmi_get_gpu_is_apu
 from .amdsmi_interface import amdsmi_get_processor_handles
 from .amdsmi_interface import amdsmi_get_socket_handles
 from .amdsmi_interface import amdsmi_get_socket_info
