@@ -42,6 +42,7 @@ struct State {
   int connCheckVerifyCalls = 0;
   std::vector<unsigned long long> connCheckWriteStamps;
   void* lsaSelfAddr = reinterpret_cast<void*>(0x70001000ULL);
+  uintptr_t lsaInputBase = 0;
 };
 
 struct FakeSdmaOpaque {
@@ -158,12 +159,14 @@ ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, in
 
 ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr) {
   (void)devr;
-  (void)addr;
   if (GinAnvilPluginStubs::g.lsaAddrFail) {
     *outAddr = nullptr;
     return ncclSuccess;
   }
-  *outAddr = GinAnvilPluginStubs::g.lsaSelfAddr;
+  uintptr_t input = reinterpret_cast<uintptr_t>(addr);
+  if (GinAnvilPluginStubs::g.lsaInputBase == 0) GinAnvilPluginStubs::g.lsaInputBase = input;
+  uintptr_t offset = input - GinAnvilPluginStubs::g.lsaInputBase;
+  *outAddr = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(GinAnvilPluginStubs::g.lsaSelfAddr) + offset);
   return ncclSuccess;
 }
 
