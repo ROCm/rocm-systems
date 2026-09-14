@@ -1616,6 +1616,75 @@ TEST_F(GinMPIDeviceTests, Barrier_TwoRanks) {
   MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// AICOMRCCL-2339 regression: each logical context must have independent
+// signal cells. Rank 1 deliberately arrives late at the second barrier. Before
+// the fix, both contexts incremented one shared cell during the first barrier,
+// so rank 0's second wait matched that stale count and returned immediately.
+__global__ void allContextsConsecutiveBarrierKernel(
+    int rank, uint64_t delayCycles, uint64_t* secondBarrierCycles, struct ncclDevComm devComm) {
+  ncclGinBarrierSession<ncclCoopCta> bar{
+      ncclCoopCta(), ncclGinAllContexts(devComm), ncclTeamTagWorld{}, /*barrierIndex=*/0};
+  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+
+  if (rank == 1) {
+    uint64_t start = clock64();
+    while (clock64() - start < delayCycles) {}
+  }
+  ncclCoopCta().sync();
+
+  uint64_t start = clock64();
+  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  if (threadIdx.x == 0) *secondBarrierCycles = clock64() - start;
+}
+
+TEST_F(GinMPIDeviceTests, Barrier_AllContextsConsecutiveSignalsDoNotAlias_SingleNode) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    GTEST_SKIP() << "AICOMRCCL-2339 is specific to the Anvil-SDMA backend";
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+  if (nodeLocalRanks() != 2)
+    GTEST_SKIP() << "Requires both ranks on one node";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t comm = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+  int rank = -1;
+  ncclCommUserRank(comm, &rank);
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.ginContextCount = 2;
+  reqs.worldGinBarrierCount = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+  ASSERT_GE((int)devComm.ginContextCount, 2);
+
+  uint64_t* dCycles = nullptr;
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dCycles, sizeof(uint64_t)));
+  auto cyclesCleanup = makeScopeGuard([&]() {
+    if (dCycles) (void)hipFree(dCycles);
+  });
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dCycles, 0, sizeof(uint64_t)));
+
+  constexpr uint64_t kDelayCycles = 100000000;
+  MPI_Barrier(MPI_COMM_WORLD);
+  allContextsConsecutiveBarrierKernel<<<1, kGinKernelThreads, 0, stream>>>(
+      rank, kDelayCycles, dCycles, devComm);
+  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+  uint64_t elapsed = 0;
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&elapsed, dCycles, sizeof(elapsed), hipMemcpyDeviceToHost));
+  if (rank == 0) {
+    EXPECT_GE(elapsed, kDelayCycles / 4)
+        << "second AllContexts barrier returned before delayed peer arrival";
+  }
+  MPI_Barrier(MPI_COMM_WORLD);
+}
+
 // Same barrier as barrier2RanksKernel but over the world team, so every rank
 // has 3 peers instead of 1.
 __global__ void barrier4RanksKernel(int iters, struct ncclDevComm devComm) {

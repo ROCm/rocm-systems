@@ -385,6 +385,37 @@ TEST_F(GinAnvilSdmaTemplateTest, CounterSignal_GetReset) {
   EXPECT_EQ(d_outSig.download(), 0ULL);
 }
 
+// AICOMRCCL-2339: the Anvil device dispatch must select the GPU context
+// indexed by ncclGinCtx::contextId instead of always using array element zero.
+__global__ void kernelSignalContextSelection(ncclGinAnvilSdmaGPUContext* contexts) {
+  if (threadIdx.x != 0) return;
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = contexts;
+  ginCtx.contextId = 0;
+  ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0).ptr[0] = 11;
+  ginCtx.contextId = 1;
+  ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0).ptr[0] = 22;
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, SignalApis_SelectLogicalContext) {
+  DeviceBuffer<uint64_t> d_signals(2);
+  d_signals.zero();
+  ncclGinAnvilSdmaGPUContext hostCtx[2]{};
+  for (int i = 0; i < 2; i++) {
+    hostCtx[i].layoutMagic = NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
+    hostCtx[i].signals = d_signals.ptr + i;
+    hostCtx[i].nSignals = 1;
+  }
+  DeviceBuffer<ncclGinAnvilSdmaGPUContext> d_contexts(2);
+  d_contexts.copyFrom(hostCtx, 2);
+
+  kernelSignalContextSelection<<<1, 1>>>(d_contexts.ptr);
+  syncAndCheck();
+  auto signals = d_signals.copyTo();
+  EXPECT_EQ(signals[0], 11ULL);
+  EXPECT_EQ(signals[1], 22ULL);
+}
+
 // H10: invalid ctx on getters returns nullptr / no-op.
 __global__ void kernelInvalidCtxApis(bool* ok) {
   ncclGinCtx ginCtx{};
