@@ -2528,8 +2528,8 @@ class TestDerivePacked:
         [
             ('add', 'packed_add_bf16'),
             ('mul', 'packed_mul_bf16'),
-            ('min', 'f32_to_bf16_rne'),
-            ('max', 'f32_to_bf16_rne'),
+            ('min', 'packed_select_bf16'),
+            ('max', 'packed_select_bf16'),
         ],
     )
     def test_pk_binop_bf16_generator_uses_bf16_helpers(self, operation, helper):
@@ -3224,3 +3224,33 @@ class TestDeriveFlatLoadD16:
         assert sem is not None
         assert sem.semantic_class == 'flat_load'
         assert sem.d16_hi and not sem.d16_lo
+
+
+@pytest.mark.parametrize(
+    ('name', 'encoding', 'width', 'source_dwords'),
+    [
+        ('DS_CMPST_F32', 'ENC_DS', 4, 2),
+        ('DS_CMPST_RTN_F64', 'ENC_DS', 8, 4),
+        ('DS_CMPSTORE_RTN_F32', 'ENC_DS', 4, 2),
+        ('DS_CMPSTORE_F64', 'ENC_DS', 8, 4),
+        ('GLOBAL_ATOMIC_CMPSWAP_F32', 'ENC_FLAT', 4, 2),
+        ('GLOBAL_ATOMIC_CMPSWAP_F64', 'ENC_FLAT', 8, 4),
+        ('BUFFER_ATOMIC_FCMPSWAP', 'ENC_MUBUF', 4, 2),
+        ('BUFFER_ATOMIC_FCMPSWAP_X2', 'ENC_MUBUF', 8, 4),
+    ],
+)
+def test_floating_compare_swap_retains_type_and_payload(
+    name, encoding, width, source_dwords
+):
+    semantics = derive_semantics(name, encoding)
+    assert semantics.operation == 'fcmpswap'
+    assert semantics.elem_size == width
+    assert semantics.num_elems == source_dwords
+
+
+@pytest.mark.parametrize('encoding', ['ENC_DS', 'ENC_VDS'])
+def test_conditional_exchange_has_one_qword_payload(encoding):
+    semantics = derive_semantics('DS_CONDXCHG32_RTN_B64', encoding)
+    assert semantics.operation == 'condxchg32'
+    assert semantics.elem_size == 8
+    assert semantics.num_elems == 2

@@ -1115,28 +1115,60 @@ if(ENABLE_CODE_COVERAGE)
 
   message(STATUS "Code coverage is enabled with build type '${CMAKE_BUILD_TYPE}'.")
 
+  # Host-only and host+device coverage instrument with the same two flags and
+  # differ only in whether the instrumentation is restricted to host code.
+  # Device coverage (ROCm 7.15+) drops -Xarch_host so the flags also reach the
+  # device compilation; host-only keeps -Xarch_host so device code is untouched.
+  if(ENABLE_FULL_COVERAGE)
+    message(STATUS "Device-side coverage is enabled (host + device instrumented).")
+    set(_coverage_instr_flags
+      -fprofile-instr-generate
+      -fcoverage-mapping)
+  else()
+    set(_coverage_instr_flags
+      "SHELL:-Xarch_host -fprofile-instr-generate"
+      "SHELL:-Xarch_host -fcoverage-mapping")
+  endif()
   target_compile_options(rccl PRIVATE
     -fvisibility=default
-    "SHELL:-Xarch_host -fprofile-instr-generate"
-    "SHELL:-Xarch_host -fcoverage-mapping")
+    ${_coverage_instr_flags})
 
   set(COVERAGE_SHARED_LINKER_FLAGS
     -fprofile-generate
     -Wl,--enable-new-dtags,--build-id=sha1,--rpath,$ORIGIN
   )
 
-  set(COVERAGE_EXE_LINKER_FLAGS
-    -fprofile-generate
-    -Wl,--enable-new-dtags,--build-id=sha1,--rpath,$ORIGIN/../lib
-  )
-
   target_link_options(rccl PRIVATE ${COVERAGE_SHARED_LINKER_FLAGS})
-  target_link_options(rccl PRIVATE ${COVERAGE_EXE_LINKER_FLAGS})
 
   # Expose explicit profile-flush wrappers so test harnesses that bypass
   # atexit() handlers (e.g. ProcessIsolatedTestRunner using _exit()) can
   # still flush librccl's private LLVM profile runtime instance.
   target_sources(rccl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/misc/coverage_flush.cc)
+
+  # Force-link the HIP device-data drain symbol so the host profile RT's
+  # InstrProfilingPlatformROCm.cpp.o gets pulled in (it's only included on
+  # demand). That .o registers the atexit hook which walks loaded HSA code
+  # objects, reads each device.elf's __llvm_prf_cnts via HSA introspection,
+  # and merges device counters into the same .profraw the host writes.
+  # Without this, .profraw contains host counters only and llvm-cov reports
+  # 0% on every device kernel.
+  #
+  # We add it on librccl's link rather than relying on the clang driver
+  # heuristic (the driver only force-links it for explicit `-x hip` link
+  # invocations; .o-only links from rccl-tests and friends don't qualify).
+  # One reference anywhere in the process is sufficient — once librccl is
+  # loaded, the atexit handler is registered for the whole process.
+  if(ENABLE_FULL_COVERAGE)
+    # Newer compiler-rt packages keep the ROCm collector and its interception
+    # dependencies in a self-contained companion archive. Explicitly link it
+    # for this object-only host link; older packages leave this path empty and
+    # continue to use the generic profile runtime.
+    if(RCCL_HOST_ROCM_PROFILE_RT)
+      target_link_libraries(rccl PRIVATE "${RCCL_HOST_ROCM_PROFILE_RT}")
+    endif()
+    target_link_options(rccl PRIVATE
+      "LINKER:-u,__llvm_profile_hip_collect_device_data")
+  endif()
 elseif(BUILD_TESTS) # Enable default/hidden visibility based on build type and ROCM_VERSION
   if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
     target_compile_options(rccl PRIVATE -fvisibility=default)
@@ -1216,6 +1248,26 @@ if(RCCL_ROCPROFILER_REGISTER)
   target_link_libraries(
       rccl PRIVATE rocprofiler-register::rocprofiler-register)
 endif()
+
+# Poison the __hip_atomic_* builtins
+#==================================================================================================
+# RCCL spells device atomics with the Clang scoped-atomic builtins so that memory
+# scope is explicit at every call site. Force-include (rather than #include) the
+# poison header so it also covers hipified and generated sources, and set it here,
+# before DeviceLinker.cmake snapshots COMPILE_OPTIONS, so the per-kernel device
+# compiles inherit it too. See src/include/poison_hip_atomics.h for the coverage
+# this does and does not give.
+if(RCCL_POISON_HIP_ATOMICS)
+  # Joined --include=<file> rather than separate-argument -include <file>: as a
+  # single token it needs no cooperation from anything that forwards flags one
+  # at a time, so it survives rccl-device-compile's catch-all for unrecognized
+  # `-*` tokens as-is. That script also parses the separate-argument spelling
+  # (see the -include/-imacros branch in parse_compiler_flags), so either form
+  # works today; the joined one is used because it does not depend on that.
+  target_compile_options(rccl PRIVATE --include=${RCCL_SOURCE_DIR}/src/include/poison_hip_atomics.h)
+  message(STATUS "RCCL_POISON_HIP_ATOMICS enabled - __hip_atomic_* builtins rejected in RCCL sources")
+endif()
+
 # Device Linker: include pipeline and wire up dependencies
 # (placed after all target_compile_definitions so DeviceLinker.cmake
 #  can read the rccl target's definitions directly)
