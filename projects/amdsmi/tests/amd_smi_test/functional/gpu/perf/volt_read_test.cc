@@ -66,7 +66,8 @@ void TestVoltRead::Run(void) {
         if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
           ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
           IF_VERB(STANDARD) {
-            std::cout << "\t**" << label << ": " << "Not supported on this machine" << std::endl;
+            std::cout << "\t**" << label << ": "
+                      << "Not supported on this machine" << std::endl;
           }
 
           // Verify api support checking functionality is working

@@ -84,12 +84,11 @@ Suite names are the only selection mechanism — `<Component><Type>[<Operation>]
                             ReadOnly              ReadWrite
                           (no root)              (root req'd)
 
-  Currently registered:
-    GpuUnit          GpuFunctionalReadOnly     GpuFunctionalReadWrite
-    SystemUnit       SystemFunctionalReadOnly
-                     IfoeFunctionalReadOnly
-                     WslFunctionalReadOnly   (gated)
 ```
+
+Suite names follow `<Component><Type>[<Operation>]`. For the authoritative list,
+run `amdsmitst --gtest_list_tests`; the convention itself is defined in
+[the test design doc](../docs/conceptual/test-design.md).
 
 ## Python — three runners over one shared engine
 
@@ -198,6 +197,8 @@ tests/
 ```
 
 # API Summary Report
+
+For build and run instructions for the C++ test binary see [`amd_smi_test/README.md`](amd_smi_test/README.md).
 ## Overview
 The API summary report is generated from reading the amdsmi.h header file and the output from the python and C++ tests.  The python script, api_summary.py, will build a table from the available test log files.
 

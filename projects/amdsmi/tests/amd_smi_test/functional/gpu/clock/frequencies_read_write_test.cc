@@ -13,6 +13,7 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "api_test_framework.h"
 #include "test_common.h"
 
 TestFrequenciesReadWrite::TestFrequenciesReadWrite() : TestBase() {

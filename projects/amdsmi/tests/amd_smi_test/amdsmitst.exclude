@@ -47,14 +47,20 @@ $BLACKLIST_ALL_ASICS\
 "GpuFunctionalReadOnly.TestVoltCurvRead:"\
 "GpuFunctionalReadOnly.TestFrequenciesRead:"\
 "GpuFunctionalReadWrite.FanReadWrite:"\
+"GpuFunctionalReadWrite.FanSpeed_SetVerifyRestore:"\
 "GpuFunctionalReadWrite.TestFrequenciesReadWrite:"\
+"GpuFunctionalReadWrite.ClkFreq_SetVerifyRestore:"\
 "GpuFunctionalReadWrite.TestPciReadWrite:"\
-"GpuFunctionalReadWrite.TestPowerReadWrite"
+"GpuFunctionalReadWrite.PciBandwidth_SetVerifyRestore:"\
+"GpuFunctionalReadWrite.TestPowerReadWrite:"\
+"GpuFunctionalReadWrite.PowerCap_SetVerifyRestore:"\
+"GpuFunctionalReadWrite.PowerProfile_SetVerifyRestore"
 
 # SWDEV-319795
 FILTER[sienna_cichlid]=\
 $BLACKLIST_ALL_ASICS\
-"GpuFunctionalReadWrite.TestPerfLevelReadWrite"
+"GpuFunctionalReadWrite.TestPerfLevelReadWrite:"\
+"GpuFunctionalReadWrite.PerfLevel_SetVerifyRestore"
 
 # SWDEV-321166
 FILTER[virtualization]=\
@@ -62,9 +68,13 @@ $BLACKLIST_ALL_ASICS\
 "GpuFunctionalReadOnly.TestOverdriveRead:"\
 "GpuFunctionalReadOnly.TestGPUBusyRead:"\
 "GpuFunctionalReadWrite.FanReadWrite:"\
+"GpuFunctionalReadWrite.FanSpeed_SetVerifyRestore:"\
 "GpuFunctionalReadWrite.TestOverdriveReadWrite:"\
+"GpuFunctionalReadWrite.OverdriveLevel_SetVerifyRestore:"\
 "GpuFunctionalReadWrite.TestPowerReadWrite:"\
-"GpuFunctionalReadWrite.TestPowerCapReadWrite"
+"GpuFunctionalReadWrite.TestPowerCapReadWrite:"\
+"GpuFunctionalReadWrite.PowerCap_SetVerifyRestore:"\
+"GpuFunctionalReadWrite.PowerProfile_SetVerifyRestore"
 
 # SWDEV-391407 and PLAT-156250
 # aqua_vanjaram and later systems show 'ip discovery' in

@@ -2951,7 +2951,7 @@ struct_amdsmi_hsmp_metrics_table_t._fields_ = [
 ]
 
 amdsmi_hsmp_metrics_table_t = struct_amdsmi_hsmp_metrics_table_t
-amdsmi_hsmp_freqlimit_src_names = ['cHTC-Active', 'PROCHOT', 'TDC limit', 'PPT Limit', 'OPN Max', 'Reliability Limit', 'APML Agent', 'HSMP Agent'] # Variable ctypes.POINTER(ctypes.c_char) * 8
+amdsmi_hsmp_freqlimit_src_names = ['cHTC-Active', 'PROCHOT', 'TDC Limit (CPU rail)', 'PPT Limit', 'OPN Max', 'Reliability Limit', 'APML Agent', 'HSMP Agent', 'VRHOT(Voltage Regulator Hot)', 'TDC Limit (VDD_MEM_S3 rail)', 'SOC and DIMM Power Limit'] # Variable ctypes.POINTER(ctypes.c_char) * 11
 class struct_amdsmi_cpu_info_t(Structure):
     pass
 

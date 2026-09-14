@@ -14,6 +14,7 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/fdinfo.h"
+#include "api_test_framework.h"
 #include "test_common.h"
 
 TestProcessListRead::TestProcessListRead() : TestBase() {
@@ -60,7 +61,7 @@ void TestProcessListRead::Run(void) {
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_process_list", "gpu=" + std::to_string(i), VERB(STANDARD));
     err = amdsmi_get_gpu_process_list(processor_handles_[i], nullptr, nullptr);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-    EXPECT_EQ(err, AMDSMI_STATUS_INVAL);
+    AMDSMI_EXPECT_NULL_ARG(err);
 
     // First call with count 0 reports how many processes are on this GPU.
     uint32_t num_procs = 0;
