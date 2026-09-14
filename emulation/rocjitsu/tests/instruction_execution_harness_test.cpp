@@ -12,10 +12,13 @@
 #include "decode_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
@@ -29,22 +32,30 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -71,6 +82,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cfenv>
 #include <cmath>
 #include <cstdint>
 #include <exception>
@@ -7068,6 +7080,232 @@ TEST(Gfx1250DsSwizzleTest, VdsBroadcastReadsAddrSource) {
     wf->halt();
 }
 
+TEST(Gfx1250AtomicReturnTest, PackedHalfAddPreservesComponentsAcrossMemoryForms) {
+  struct Case {
+    uint32_t old_value, source, expected;
+    bool input_denorm = false;
+    bool output_denorm = false;
+    uint32_t flushed_value = 0;
+  };
+  const std::array f16_cases{
+      Case{0x46004500, 0x40003c00, 0x48004600},
+      Case{0x3c013c00, 0x10001000, 0x3c023c00},
+      Case{0x00010001, 0x00010001, 0x00020002, true, true},
+      Case{0x04010401, 0x84008400, 0x00010001, false, true},
+      Case{0x7bff7bff, 0x7bff7bff, 0x7c007c00},
+      Case{0x80008000, 0x80008000, 0x80008000},
+      Case{0x7c007c00, 0x3c003c00, 0x7c007c00},
+      Case{0x7e027e00, 0x7e043c00, 0x7e027e00},
+      Case{0x3c00fc01, 0xfc023c00, 0xfe02fe01},
+      Case{0x7c00fc00, 0xfc007c00, 0xfe00fe00},
+      Case{0x00013c00, 0x00013c00, 0x00024000, true, true, 0x00004000},
+  };
+  const std::array bf16_cases{
+      Case{0x40c040a0, 0x40003f80, 0x410040c0},
+      Case{0x3f813f80, 0x3b803b80, 0x3f823f80},
+      Case{0x00010001, 0x00010001, 0x00020002, true, true},
+      Case{0x00810081, 0x80808080, 0x00010001, false, true},
+      Case{0x7f7f7f7f, 0x7f7f7f7f, 0x7f807f80},
+      Case{0x80008000, 0x80008000, 0x80008000},
+      Case{0x7f807f80, 0x3f803f80, 0x7f807f80},
+      Case{0x7fc27fc0, 0x7fc43f80, 0x7fc27fc0},
+      Case{0x3f80ff81, 0xff823f80, 0xffc2ffc1},
+      Case{0x7f80ff80, 0xff807f80, 0xffc0ffc0},
+      Case{0x00013f80, 0x00013f80, 0x00024000, true, true, 0x00004000},
+  };
+  enum class Form { Global, Buffer, Flat, Ds };
+  struct FormCase {
+    Form form;
+    const char *name;
+  };
+  const std::array forms{FormCase{Form::Global, "global"}, FormCase{Form::Buffer, "buffer"},
+                         FormCase{Form::Flat, "flat"}, FormCase{Form::Ds, "ds"}};
+  for (bool bf16 : {false, true}) {
+    for (const FormCase &form_case : forms) {
+      const Form form = form_case.form;
+      for (bool returns : {false, true}) {
+        amdgpu::GpuMemory memory("packed_atomic");
+        amdgpu::L2Cache l2("packed_atomic_l2");
+        amdgpu::ComputeUnitCore::Config cfg{};
+        cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+        cfg.num_wf_slots = 1;
+        cfg.sgprs_per_wf = 106;
+        cfg.vgprs_per_wf = 256;
+        cfg.lds_size_kb = 64;
+        Gfx1250MemoryTestCu cu("packed_atomic_cu", cfg, &memory, &l2);
+        amdgpu::Wavefront *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+        ASSERT_NE(wf, nullptr);
+        wf->set_exec(1);
+        std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+        ASSERT_NE(decoder, nullptr);
+        const uint32_t vb = wf->vgpr_alloc().base;
+        const uint32_t sb = wf->sgpr_alloc().base;
+        constexpr uint64_t kAddr = 0x1000;
+        const uint8_t th = returns ? 1 : 0;
+        const uint16_t atomic_op =
+            bf16 ? cdna5::kGlobalAtomicPkAddBf16Vglobal : cdna5::kGlobalAtomicPkAddF16Vglobal;
+        std::array<uint32_t, 3> words{};
+        if (form == Form::Global) {
+          words = cdna5::build_vglobal(
+              atomic_op, {.saddr = 4, .vdst = 0, .scope = 2, .th = th, .vsrc = 1, .vaddr = 2});
+        } else if (form == Form::Buffer) {
+          words = cdna5::build_vbuffer(atomic_op, {.soffset = amdgpu::kModernNullSelector,
+                                                   .vdata = 1,
+                                                   .rsrc = 4,
+                                                   .scope = 2,
+                                                   .th = th,
+                                                   .offen = 1,
+                                                   .vaddr = 2});
+        } else if (form == Form::Flat) {
+          words = cdna5::build_vflat(atomic_op, {.saddr = amdgpu::kModernNullSelector,
+                                                 .vdst = 0,
+                                                 .scope = 2,
+                                                 .th = th,
+                                                 .vsrc = 1,
+                                                 .vaddr = 2});
+        } else {
+          const uint16_t ds_op =
+              bf16 ? (returns ? cdna5::kDsPkAddRtnBf16Vds : cdna5::kDsPkAddBf16Vds)
+                   : (returns ? cdna5::kDsPkAddRtnF16Vds : cdna5::kDsPkAddF16Vds);
+          const std::array<uint32_t, 2> ds =
+              cdna5::build_vds(ds_op, {.addr = 2, .data0 = 1, .vdst = 0});
+          std::copy(ds.begin(), ds.end(), words.begin());
+        }
+        cu.write_sgpr(sb + 4, kAddr);
+        cu.write_sgpr(sb + 5, 0);
+        cu.write_sgpr(sb + 6, 4096);
+        cu.write_sgpr(sb + 7, 0);
+        cu.write_vgpr(vb + 2, 0, (form == Form::Flat || form == Form::Ds) ? kAddr : 0);
+        cu.write_vgpr(vb + 3, 0, 0);
+        const uint32_t dst = form == Form::Buffer ? 1 : 0;
+        for (const Case &c : bf16 ? bf16_cases : f16_cases) {
+          for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+            SCOPED_TRACE(::testing::Message()
+                         << "bf16=" << bf16 << " form=" << form_case.name << " returns=" << returns
+                         << " denorm=" << denorm << " old=" << std::hex << c.old_value);
+            // Atomics ignore round/VALU overflow controls. Opposing F32 and
+            // F16/F64 denorm fields also distinguish which field DS captures.
+            wf->set_mode_raw(0xf | ((denorm ^ 3u) << 4) | (denorm << 6) |
+                             amdgpu::Wavefront::FP16_OVFL_BIT);
+            if (form == Form::Ds)
+              cu.lds().write32(kAddr, c.old_value);
+            else
+              memory.write32(kAddr, c.old_value);
+            cu.write_vgpr(vb, 0, 0xdeadbeef);
+            cu.write_vgpr(vb + 1, 0, c.source);
+            cu.write_vgpr(vb + dst, 1, 0xdeadbeef);
+            std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+            ASSERT_NE(inst, nullptr);
+            cu.execute_and_route(inst.release(), *wf);
+            uint32_t expected = c.expected;
+            if (form == Form::Ds &&
+                ((c.input_denorm && !(denorm & 1u)) || (c.output_denorm && !(denorm & 2u))))
+              expected = c.flushed_value;
+            EXPECT_EQ(form == Form::Ds ? cu.lds().read32(kAddr) : memory.read32(kAddr), expected);
+            EXPECT_EQ(cu.read_vgpr(vb + dst, 0),
+                      returns ? c.old_value : (form == Form::Buffer ? c.source : 0xdeadbeef));
+            EXPECT_EQ(cu.read_vgpr(vb + dst, 1), 0xdeadbeefu);
+          }
+        }
+        wf->halt();
+      }
+    }
+  }
+}
+
+TEST(Rdna4AtomicReturnTest, FlatPackedHalfAddPreservesLdsDenormals) {
+  class TestCu : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, rdna4::Isa> {
+  public:
+    using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, rdna4::Isa>;
+    using amdgpu::ComputeUnitCore::route_memory_inst;
+    using Base::Base;
+    using Base::execute_instruction;
+  };
+  for (bool bf16 : {false, true}) {
+    for (bool returns : {false, true}) {
+      amdgpu::GpuMemory memory("flat_packed_lds");
+      amdgpu::L2Cache l2("flat_packed_lds_l2");
+      l2.set_backing_memory(&memory);
+      amdgpu::ComputeUnitCore::Config config{};
+      config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 106;
+      config.vgprs_per_wf = 256;
+      config.lds_size_kb = 64;
+      TestCu cu("flat_packed_lds_cu", config, &memory, &l2);
+      cu.set_memory(&memory);
+      cu.set_l2(&l2);
+      constexpr uint64_t kSharedBase = 0x100000000;
+      constexpr uint32_t kOffset = 0x80;
+      constexpr uint32_t kLdsBase = 0x100;
+      cu.set_apertures(kSharedBase, kSharedBase + 0xFFFF, 0, 0);
+      amdgpu::Wavefront *wave = cu.dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(1);
+      wave->set_lds_base(kLdsBase);
+      const uint32_t vgpr_base = wave->vgpr_alloc().base;
+      std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+      ASSERT_NE(decoder, nullptr);
+      struct Case {
+        uint32_t old_value;
+        uint32_t source;
+        uint32_t expected;
+        bool input_denorm;
+      };
+      const std::array<Case, 2> cases = {{
+          {0x00010001, 0x00010001, 0x00020002, true},
+          {bf16 ? 0x00810081u : 0x04010401u, bf16 ? 0x80808080u : 0x84008400u, 0x00010001, false},
+      }};
+      for (bool direct_ds : {false, true}) {
+        for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+          for (const Case &test : cases) {
+            SCOPED_TRACE(::testing::Message()
+                         << "bf16=" << bf16 << " returns=" << returns << " ds=" << direct_ds
+                         << " mode=" << denorm << " input_denorm=" << test.input_denorm);
+            wave->set_mode_raw((denorm << 6) | ((denorm ^ 3u) << 4));
+            cu.lds().write32(kLdsBase + kOffset, test.old_value);
+            memory.write32(kSharedBase + kOffset, 0xDEADBEEF);
+            cu.write_vgpr(vgpr_base, 0, 0xDEADBEEF);
+            cu.write_vgpr(vgpr_base, 1, 0xDEADBEEF);
+            cu.write_vgpr(vgpr_base + 1, 0, test.source);
+            cu.write_vgpr(vgpr_base + 2, 0, kOffset);
+            cu.write_vgpr(vgpr_base + 3, 0, kSharedBase >> 32);
+            std::array<uint32_t, 3> words{};
+            if (direct_ds) {
+              const uint16_t opcode =
+                  bf16 ? (returns ? rdna4::kDsPkAddRtnBf16Vds : rdna4::kDsPkAddBf16Vds)
+                       : (returns ? rdna4::kDsPkAddRtnF16Vds : rdna4::kDsPkAddF16Vds);
+              const std::array<uint32_t, 2> ds =
+                  rdna4::build_vds(opcode, {.addr = 2, .data0 = 1, .vdst = 0});
+              std::copy(ds.begin(), ds.end(), words.begin());
+            } else {
+              const uint16_t opcode =
+                  bf16 ? rdna4::kFlatAtomicPkAddBf16Vflat : rdna4::kFlatAtomicPkAddF16Vflat;
+              words = rdna4::build_vflat(opcode, {.saddr = amdgpu::kModernNullSelector,
+                                                  .vdst = 0,
+                                                  .scope = 2,
+                                                  .th = static_cast<uint8_t>(returns ? 1 : 0),
+                                                  .vsrc = 1,
+                                                  .vaddr = 2});
+            }
+            std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+            ASSERT_NE(inst, nullptr);
+            cu.execute_instruction(inst.get(), *wave);
+            cu.route_memory_inst(inst.release(), *wave);
+            const bool flush =
+                direct_ds && (!(denorm & 2u) || (test.input_denorm && !(denorm & 1u)));
+            EXPECT_EQ(cu.lds().read32(kLdsBase + kOffset), flush ? 0u : test.expected);
+            EXPECT_EQ(memory.read32(kSharedBase + kOffset), 0xDEADBEEFu);
+            EXPECT_EQ(cu.read_vgpr(vgpr_base, 0), returns ? test.old_value : 0xDEADBEEFu);
+            EXPECT_EQ(cu.read_vgpr(vgpr_base, 1), 0xDEADBEEFu);
+          }
+        }
+      }
+      wave->halt();
+    }
+  }
+}
+
 TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32ReturnsOldValue) {
   amdgpu::GpuMemory gpu_mem("gfx1250_atomic_add_mem");
   amdgpu::L2Cache l2("gfx1250_atomic_add_l2");
@@ -8268,3 +8506,122 @@ TEST(Cdna5VopdCndmaskTest, Wave32LaneMaskIgnoresTheNeighbouringScalar) {
   if (!wf->is_halted())
     wf->halt();
 }
+
+namespace {
+TEST(RdnaDot2Bf16ExecutionTest, RoundingAndDenormalsAcrossTargets) {
+  struct Case {
+    const char *name;
+    uint32_t left;
+    uint32_t right;
+    uint16_t accumulator;
+    uint16_t expected;
+  };
+  const std::array cases{
+      Case{"round_product", 0xbfed, 0x4007, 0, 0xc07a},
+      Case{"tie_even_lower", 0x3f80, 0x3f80, 0x3b80, 0x3f80},
+      Case{"tie_even_upper", 0x3f81, 0x3f80, 0x3b80, 0x3f82},
+      Case{"flush_low_input", 0x0040, 0x4000, 0, 0},
+      Case{"flush_high_input", 0x00400000, 0x40000000, 0, 0},
+      Case{"flush_accumulator", 0, 0, 0x0040, 0},
+      Case{"flush_output", 0x0080, 0x3f00, 0, 0},
+      Case{"flush_negative_output", 0x8080, 0x3f00, 0, 0x8000},
+      Case{"finite_control", 0x3f80, 0x4000, 0x4040, 0x40a0},
+      Case{"infinity", 0x7f80, 0x3f80, 0, 0x7f80},
+  };
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    amdgpu::GpuMemory memory("dot2_policy_memory");
+    amdgpu::L2Cache cache("dot2_policy_cache");
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 106;
+    config.vgprs_per_wf = 256;
+    config.lds_size_kb = 64;
+    std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit =
+        amdgpu::ComputeUnitCore::create("dot2_policy", config, &memory, &cache);
+    std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+    amdgpu::Wavefront *wave = compute_unit->dispatch_wf(0, 0, 106, 256);
+    wave->set_exec(1);
+    const uint32_t base = wave->vgpr_alloc().base;
+    for (uint32_t mode : {0u, 0xffu}) {
+      wave->set_mode_raw(mode);
+      for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+        for (const Case &test : cases) {
+          SCOPED_TRACE(test.name);
+          SCOPED_TRACE(static_cast<int>(arch));
+          SCOPED_TRACE(mode);
+          SCOPED_TRACE(host_round);
+          compute_unit->write_vgpr(base, 0, test.left);
+          compute_unit->write_vgpr(base + 1, 0, test.right);
+          compute_unit->write_vgpr(base + 2, 0, test.accumulator);
+          compute_unit->write_vgpr(base + 3, 0, 0xcafe0000);
+          const std::array<uint32_t, 2> words =
+              encode_vop3(/*op=*/rdna4::kVDot2Bf16Bf16Vop3, /*vdst=*/3,
+                          /*src0=*/vgpr_src(0), /*src1=*/vgpr_src(1), /*src2=*/vgpr_src(2));
+          std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+          ASSERT_NE(instruction, nullptr);
+          const int saved_round = std::fegetround();
+          ASSERT_EQ(std::fesetround(host_round), 0);
+          compute_unit->execute_instruction(instruction.get(), *wave);
+          const int restored_round = std::fegetround();
+          std::fesetround(saved_round);
+          EXPECT_EQ(restored_round, host_round);
+          EXPECT_EQ(compute_unit->read_vgpr(base + 3, 0), 0xcafe0000u | test.expected);
+        }
+      }
+    }
+    wave->halt();
+  }
+}
+} // namespace
+
+namespace {
+template <typename ComputeUnit> void check_flat_atomic_lds_policy(rj_code_arch_t arch) {
+  amdgpu::GpuMemory memory("flat_atomic_policy_memory");
+  amdgpu::L2Cache cache("flat_atomic_policy_cache");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = arch;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  ComputeUnit compute_unit("flat_atomic_policy", config, &memory, &cache);
+  constexpr uint64_t kSharedBase = 0x100000000ULL;
+  compute_unit.set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
+  amdgpu::Wavefront *wave = compute_unit.dispatch_wf(0, 0, 106, 256);
+  wave->set_exec(1);
+  wave->set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
+  const uint32_t base = wave->vgpr_alloc().base;
+  std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+  const bool modern = arch == ROCJITSU_CODE_ARCH_CDNA5;
+  std::array<uint32_t, 3> words{};
+  if (modern) {
+    words =
+        cdna5::build_vflat(cdna5::kFlatAtomicAddF32Vflat,
+                           {.saddr = 124, .vdst = 6, .scope = 2, .th = 1, .vsrc = 0, .vaddr = 2});
+  } else {
+    const std::array<uint32_t, 2> legacy_words = cdna4::build_flat(
+        cdna4::kFlatAtomicAddF32Flat, {.sc0 = 1, .addr = 2, .data = 0, .saddr = 127, .vdst = 6});
+    std::copy(legacy_words.begin(), legacy_words.end(), words.begin());
+  }
+  for (uint32_t mode : {0u, 0xf0u}) {
+    wave->set_mode_raw(mode);
+    wave->lds().write32(0x100, 1);
+    compute_unit.write_vgpr(base, 0, 1);
+    compute_unit.write_vgpr(base + 2, 0, 0x100);
+    compute_unit.write_vgpr(base + 3, 0, static_cast<uint32_t>(kSharedBase >> 32));
+    std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+    ASSERT_NE(instruction, nullptr);
+    compute_unit.execute_and_route(instruction.release(), *wave);
+    EXPECT_EQ(wave->lds().read32(0x100), modern || mode ? 2u : 0u);
+    EXPECT_EQ(compute_unit.read_vgpr(base + 6, 0), 1u);
+  }
+  wave->halt();
+}
+
+TEST(AtomicPolicyRoutingTest, FlatLdsUsesTargetPolicy) {
+  check_flat_atomic_lds_policy<Cdna4MemoryTestCu>(ROCJITSU_CODE_ARCH_CDNA4);
+  check_flat_atomic_lds_policy<Gfx1250MemoryTestCu>(ROCJITSU_CODE_ARCH_CDNA5);
+}
+} // namespace

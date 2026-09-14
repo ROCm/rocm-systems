@@ -2531,6 +2531,13 @@ protected:
       context_save_address);
   }
 
+  /* Number of COMPUTE_RELAUNCH registers.  */
+  virtual size_t num_compute_relaunch_states () const { return 1; }
+
+  /* Displacement between the bottom of one wave's save area and the top of
+     the next wave's save area.  */
+  virtual int context_save_area_adjustment () const { return 64; }
+
   std::optional<amdgpu_regnum_t>
   scalar_operand_to_regnum (int operand, bool priv = false) const override;
   size_t scalar_register_count () const override { return 102; }
@@ -3345,7 +3352,7 @@ gfx9_architecture_t::control_stack_iterate (
   const
 {
   size_t wave_count = 0;
-  std::vector<uint32_t> state{ 0 };
+  std::vector<uint32_t> state (num_compute_relaunch_states (), 0);
 
   agent_address_t last_wave_area = wave_area_address;
 
@@ -3360,16 +3367,19 @@ gfx9_architecture_t::control_stack_iterate (
         }
       else if (compute_relaunch_is_state (relaunch))
         {
-          state[0] = relaunch;
+          for (size_t j = 0; j < state.size (); ++j)
+            state[j] = control_stack[i + j];
+
+          i += state.size () - 1;
         }
       else
         {
-          auto cwsr_record = make_cwsr_record (queue, xcc_id, relaunch, state,
-                                               last_wave_area - 64);
+          auto cwsr_record
+            = make_cwsr_record (queue, xcc_id, relaunch, state,
+                                last_wave_area
+                                - context_save_area_adjustment ());
 
-          last_wave_area
-            = cwsr_record->register_address (amdgpu_regnum_t::v0_64).value ();
-
+          last_wave_area = cwsr_record->begin ();
           wave_callback (std::move (cwsr_record));
           ++wave_count;
         }
@@ -4416,6 +4426,12 @@ protected:
       compute_relaunch_state[1], context_save_address);
   }
 
+  /* On gfx10 and above, there are 2 COMPUTE_RELAUNCH registers for state.  */
+  size_t num_compute_relaunch_states () const override { return 2; }
+
+  /* On gfx10 and above, waves are packed back-to-back with no gap.  */
+  int context_save_area_adjustment () const override { return 0; }
+
   std::optional<amdgpu_regnum_t>
   scalar_operand_to_regnum (int operand, bool priv = false) const override;
   size_t scalar_register_count () const override { return 106; }
@@ -4475,14 +4491,6 @@ public:
              std::vector<uint64_t> /* instruction_information  */>
   classify_instruction (agent_address_t address,
                         const instruction_t &instruction) const override;
-
-  size_t control_stack_iterate (
-    compute_queue_t &queue, uint32_t xcc_id, const uint32_t *control_stack,
-    size_t control_stack_words, agent_address_t wave_area_address,
-    amd_dbgapi_size_t wave_area_size,
-    const std::function<void (
-      std::unique_ptr<const architecture_t::cwsr_record_t>)> &wave_callback)
-    const override;
 
   bool can_halt_at_endpgm () const override { return false; }
   size_t largest_instruction_size () const override { return 20; }
@@ -5308,56 +5316,6 @@ gfx10_architecture_t::classify_instruction (
     }
 
   return gfx9_architecture_t::classify_instruction (address, instruction);
-}
-
-size_t
-gfx10_architecture_t::control_stack_iterate (
-  compute_queue_t &queue, uint32_t xcc_id, const uint32_t *control_stack,
-  size_t control_stack_words, agent_address_t wave_area_address,
-  amd_dbgapi_size_t wave_area_size,
-  const std::function<void (
-    std::unique_ptr<const architecture_t::cwsr_record_t>)> &wave_callback)
-  const
-{
-  size_t wave_count = 0;
-  std::vector<uint32_t> state{ 0, 0 };
-
-  agent_address_t last_wave_area = wave_area_address;
-
-  for (size_t i = 2; /* Skip the 2 PM4 packets at the top of the stack.  */
-       i < control_stack_words; ++i)
-    {
-      uint32_t relaunch = control_stack[i];
-
-      if (compute_relaunch_is_event (relaunch))
-        {
-          /* Skip events.  */
-        }
-      else if (compute_relaunch_is_state (relaunch))
-        {
-          state[0] = relaunch;
-          /* On gfx10 and gfx11, there are 2 COMPUTE_RELAUNCH registers for
-             state.  */
-          state[1] = control_stack[++i];
-        }
-      else
-        {
-          auto cwsr_record = make_cwsr_record (queue, xcc_id, relaunch, state,
-                                               last_wave_area);
-
-          last_wave_area = cwsr_record->begin ();
-          wave_callback (std::move (cwsr_record));
-          ++wave_count;
-        }
-    }
-
-  /* After iterating the control stack, we should have consumed all the data in
-     the wave save area, and last_wave_area should point to the bottom of the
-     wave save area.  */
-  if (last_wave_area != (wave_area_address - wave_area_size))
-    fatal_error ("Corrupted control stack or wave save area");
-
-  return wave_count;
 }
 
 class gfx10_1_t : public gfx10_architecture_t
@@ -7683,6 +7641,7 @@ protected:
                     const std::vector<uint32_t> &compute_relaunch_state,
                     agent_address_t context_save_address) const override
   {
+    dbgapi_assert (compute_relaunch_state.size () == 2);
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       compute_relaunch_state[1], context_save_address);

@@ -372,7 +372,7 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
     try
     {
         agent_ptr =
-            &m_agent_manager->get_agent_by_type_index(gpu_pmc.device_id, agent_type::GPU);
+            &m_agent_manager->get_agent_by_type_index(gpu_pmc.device_id, agent_type::gpu);
     } catch(const std::out_of_range& e)
     {
         LOG_WARNING("GPU PMC sample skipped: agent lookup failed for device_id={}: {}",
@@ -562,7 +562,7 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& nic_sample)
     try
     {
         agent_ptr =
-            &m_agent_manager->get_agent_by_id(nic_sample.device_id, agent_type::NIC);
+            &m_agent_manager->get_agent_by_id(nic_sample.device_id, agent_type::nic);
     } catch(const std::out_of_range& e)
     {
         LOG_WARNING("NIC PMC sample skipped: agent lookup failed for device_id={}: {}",
@@ -651,7 +651,7 @@ rocpd_processor_t::handle(
     try
     {
         agent_ptr = &m_agent_manager->get_agent_by_type_index(gpu_perf_counter.device_id,
-                                                              agent_type::GPU);
+                                                              agent_type::gpu);
     } catch(const std::out_of_range& e)
     {
         LOG_WARNING("GPU perf-counter sample skipped: agent lookup failed for "
@@ -749,7 +749,7 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
     const agent* agent_ptr = nullptr;
     try
     {
-        agent_ptr = &m_agent_manager->get_agent_by_type_index(device_id, agent_type::CPU);
+        agent_ptr = &m_agent_manager->get_agent_by_type_index(device_id, agent_type::cpu);
     } catch(const std::out_of_range& e)
     {
         LOG_WARNING("CPU PMC sample skipped: agent lookup failed for device_id={}: {}",
@@ -1283,8 +1283,8 @@ rocpd_processor_t::post_process_metadata()
     for(const auto& pmc_info : pmc_info_list)
     {
         constexpr std::array<agent_type, 2> cpu_gpu_types = {
-            agent_type::GPU,
-            agent_type::CPU,
+            agent_type::gpu,
+            agent_type::cpu,
         };
 
         const bool is_cpu_gpu_agent =

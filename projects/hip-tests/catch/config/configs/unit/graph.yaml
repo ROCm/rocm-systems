@@ -1429,8 +1429,6 @@ graph:
     tags: [node]
   Unit_hipStreamEndCapture_later_and_add_a_node_inbetween:
     <<: *level_2
-    # AIRUNTIME-2335: temporarily disabled (intermittent failure in CI)
-    disabled: [amd_windows, amd_wsl]
     tags: [node]
   Unit_hipStreamEndCapture_first_and_add_a_node_later:
     <<: *level_2
