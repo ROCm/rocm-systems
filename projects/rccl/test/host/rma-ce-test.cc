@@ -393,6 +393,210 @@ TEST_F(RmaCePutLaunchTest, PutLaunch_ChosenPathFails_PropagatesUnchanged) {
   EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSystemError);
 }
 
+// ---------------------------------------------------------------------------
+// ncclRmaCePutLaunchNonPersist (rma_ce.cc:247)
+// ---------------------------------------------------------------------------
+
+// What the unit submits, in order. The batch params are reused between rounds,
+// so the ops are snapshotted at launch rather than inspected afterwards.
+struct SubmittedOp {
+  void* src;
+  void* dst;
+  size_t size;
+};
+struct Submission {
+  enum Kind { kSeqStage, kBatch };
+  Kind kind;
+  std::vector<SubmittedOp> ops;   // kBatch
+  std::vector<uint64_t> values;   // kSeqStage: the staged sequence numbers
+};
+
+// Drives one non-persistent put launch and records everything it enqueued.
+// Tasks are grouped by peer and issued a round at a time, one task per peer per
+// round, so the shape of this log is the unit's contract.
+class RmaCeNonPersistTest : public RmaCeInitTest {
+protected:
+  std::unique_ptr<ncclKernelPlan> plan_;
+  ncclRmaArgs args_{};
+  std::vector<Submission> log_;
+  // Peer addresses handed back per (win, offset) lookup, so a test can tell the
+  // data destination from the signal destination.
+  uint64_t peerData_[8]{};
+  uint64_t peerSignal_[8]{};
+  std::vector<uint64_t> srcBuf_;
+
+  void SetUp() override {
+    RmaCeInitTest::SetUp();
+    ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
+
+    ncclMemoryStackConstruct(&comm_->memPermanent);
+    ncclMemoryPoolConstruct(&comm_->memPool_ncclTaskRma);
+    srcBuf_.assign(8, 0);
+
+    plan_ = std::make_unique<ncclKernelPlan>();
+    plan_->rmaArgs = &args_;
+    plan_->persistent = false;
+    args_.ctx = 0;
+
+    // Resolve a peer address per lookup. The signal lookup is the one made
+    // against the context's own signals window; anything else is data.
+    // Offset the returned address by the requested window offset, as the real
+    // lookup does -- otherwise a unit that passed the wrong offset would still
+    // land on the address a test expects.
+    ncclRmaCeCtx* ceCtx = Ctx(0);
+    g_devrGetLsaRankPtr = [this, ceCtx](ncclComm*, ncclDevrWindow* win, size_t offset, int lsaRank,
+                                        void** outPtr) {
+      char* base = (win == ceCtx->signalsWin) ? reinterpret_cast<char*>(&peerSignal_[lsaRank])
+                                              : reinterpret_cast<char*>(&peerData_[lsaRank]);
+      *outPtr = base + offset;
+      return ncclSuccess;
+    };
+    g_ceLaunchBatchOps = [this](ncclComm*, ncclCeBatchOpsParams* p, hipStream_t,
+                                ncclCeCollArgs*) {
+      Submission s{Submission::kBatch, {}, {}};
+      for (size_t i = 0; i < p->numOps; i++) s.ops.push_back({p->srcs[i], p->dsts[i], p->sizes[i]});
+      log_.push_back(std::move(s));
+      return ncclSuccess;
+    };
+    g_cuStreamBatchMemOp = [this](hipStream_t, unsigned int numOps,
+                                  hipStreamBatchMemOpParams* ops) {
+      Submission s{Submission::kSeqStage, {}, {}};
+      for (unsigned int i = 0; i < numOps; i++) s.values.push_back(ops[i].writeValue.value64);
+      log_.push_back(std::move(s));
+      return ncclSuccess;
+    };
+  }
+
+  void TearDown() override {
+    ncclMemoryStackDestruct(&comm_->memPermanent);
+    RmaCeInitTest::TearDown();
+  }
+
+  // Queue one CE task. bytes == 0 means signal-only; signal == false means data-only.
+  void PushTask(int peer, size_t bytes, bool signal, size_t winOffset = 0) {
+    auto* t = ncclMemoryPoolAlloc<ncclTaskRma>(&comm_->memPool_ncclTaskRma, &comm_->memPermanent);
+    t->peer = peer;
+    t->count = bytes;
+    t->datatype = ncclUint8;  // one byte per element, so count is the byte count
+    t->srcBuff = srcBuf_.data();
+    t->peerWinOffset = winOffset;
+    t->signalMode = signal ? NCCL_SIGNAL : NCCL_SIGNAL_NONE;
+    ncclIntruQueueEnqueue(&plan_->rmaTaskQueueCe, t);
+    args_.nRmaTasksCe++;
+  }
+
+  // The batches in submission order, ignoring the staging writes.
+  std::vector<std::vector<SubmittedOp>> Batches() const {
+    std::vector<std::vector<SubmittedOp>> out;
+    for (const auto& s : log_) {
+      if (s.kind == Submission::kBatch) out.push_back(s.ops);
+    }
+    return out;
+  }
+};
+
+// A data-carrying task becomes one copy from the task's own buffer to the peer
+// address resolved for it, sized by count and datatype.
+TEST_F(RmaCeNonPersistTest, NonPersist_OneDataTask_CopiesTaskBufferToResolvedPeer) {
+  // Non-zero window offset, so the destination is pinned to the task's offset
+  // rather than just to the peer.
+  PushTask(/*peer=*/2, /*bytes=*/64, /*signal=*/false, /*winOffset=*/8);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  auto batches = Batches();
+  ASSERT_EQ(batches.size(), 2u);           // data batch, then signal batch
+  ASSERT_EQ(batches[0].size(), 1u);
+  EXPECT_EQ(batches[0][0].src, srcBuf_.data());
+  EXPECT_EQ(batches[0][0].dst, reinterpret_cast<char*>(&peerData_[2]) + 8);
+  EXPECT_EQ(batches[0][0].size, 64u);
+  EXPECT_TRUE(batches[1].empty());         // nothing signalled
+}
+
+// Tasks for different peers travel together: one round, one op per peer.
+TEST_F(RmaCeNonPersistTest, NonPersist_TasksForDifferentPeers_BatchedIntoOneRound) {
+  PushTask(/*peer=*/1, 32, false);
+  PushTask(/*peer=*/3, 48, false);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  auto batches = Batches();
+  ASSERT_EQ(batches.size(), 2u);
+  ASSERT_EQ(batches[0].size(), 2u);
+  EXPECT_EQ(batches[0][0].dst, &peerData_[1]);
+  EXPECT_EQ(batches[0][1].dst, &peerData_[3]);
+}
+
+// Two tasks for the same peer cannot share a batch, because a batched copy does
+// not order its own operations. They are issued a round apart instead.
+TEST_F(RmaCeNonPersistTest, NonPersist_TasksForSamePeer_IssuedInSeparateRounds) {
+  PushTask(/*peer=*/1, 32, false);
+  PushTask(/*peer=*/1, 48, false);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  auto batches = Batches();
+  ASSERT_EQ(batches.size(), 4u);           // two rounds of (data, signal)
+  ASSERT_EQ(batches[0].size(), 1u);
+  EXPECT_EQ(batches[0][0].size, 32u);
+  ASSERT_EQ(batches[2].size(), 1u);
+  EXPECT_EQ(batches[2][0].size, 48u);
+}
+
+// The sequence number is staged to device memory before the batch that copies it
+// onward, because the copy reads the staged slot.
+TEST_F(RmaCeNonPersistTest, NonPersist_SignallingTask_StagesSequenceBeforeCopyingIt) {
+  PushTask(/*peer=*/2, 16, /*signal=*/true);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  ASSERT_EQ(log_.size(), 3u);
+  EXPECT_EQ(log_[0].kind, Submission::kSeqStage);
+  EXPECT_EQ(log_[1].kind, Submission::kBatch);   // data
+  EXPECT_EQ(log_[2].kind, Submission::kBatch);   // signal
+  ASSERT_EQ(log_[2].ops.size(), 1u);
+  EXPECT_EQ(log_[2].ops[0].dst, &peerSignal_[2]);
+  EXPECT_EQ(log_[2].ops[0].size, sizeof(uint64_t));
+}
+
+// The sequence a peer is signalled with advances per round, so a receiver can
+// tell a repeated signal from a new one.
+TEST_F(RmaCeNonPersistTest, NonPersist_RepeatedSignalsToSamePeer_AdvanceTheSequence) {
+  PushTask(/*peer=*/1, 0, true);
+  PushTask(/*peer=*/1, 0, true);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  std::vector<uint64_t> staged;
+  for (const auto& s : log_) {
+    if (s.kind == Submission::kSeqStage) staged.insert(staged.end(), s.values.begin(), s.values.end());
+  }
+  EXPECT_EQ(staged, (std::vector<uint64_t>{1, 2}));
+}
+
+// A task carrying no bytes is signal-only: nothing is copied for it.
+TEST_F(RmaCeNonPersistTest, NonPersist_ZeroByteTask_EnqueuesNoDataCopy) {
+  PushTask(/*peer=*/2, /*bytes=*/0, /*signal=*/true);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  auto batches = Batches();
+  ASSERT_EQ(batches.size(), 2u);
+  EXPECT_TRUE(batches[0].empty());        // no data op
+  EXPECT_EQ(batches[1].size(), 1u);       // signal still sent
+}
+
+// An unresolvable peer address is rejected rather than copied into.
+TEST_F(RmaCeNonPersistTest, NonPersist_PeerAddressUnresolved_ReturnsInvalidArgument) {
+  g_devrGetLsaRankPtr = [](ncclComm*, ncclDevrWindow*, size_t, int, void** outPtr) {
+    *outPtr = nullptr;
+    return ncclSuccess;
+  };
+  PushTask(/*peer=*/1, 32, false);
+
+  EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclInvalidArgument);
+}
+
 // Both entry points refuse to touch a communicator whose CE state was never
 // brought up, rather than dereferencing it.
 TEST_F(RmaCeLaunchTest, PutLaunch_CeNotInitialised_ReturnsInternalError) {
