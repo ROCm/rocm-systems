@@ -99,7 +99,7 @@ def validate_stochastic_samples_csv(df: pd.DataFrame):
 
     # validating issued instructions for uncovered types
     valid_samples_issued = valid_samples[
-        valid_samples["Wave_Issued_Instruction"] is True
+        valid_samples["Wave_Issued_Instruction"].eq(True)
     ].copy()
     validate_issued_instruction_type_no_inst(valid_samples_issued)
     validate_issued_instruction_type_other(valid_samples_issued)
