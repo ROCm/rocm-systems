@@ -76,9 +76,11 @@ static void RmaMicroFree(void* p) {
 
 #include RMA_CC_PATH
 
-// Counting free() is only meaningful for the unit under test; past this point
-// the tests' own cleanup should not land in g_rmaFreeCalls.
+// These overrides are only meaningful for the unit under test; past this point
+// the tests' own allocations and cleanup should not land in the counters.
 #undef free
+#undef ncclCalloc
+#undef ncclMemoryStackAlloc
 
 namespace {
 
@@ -187,6 +189,16 @@ protected:
     ResetHipFakes();
   }
 };
+
+// Fail the nth call of a seam and succeed otherwise. Hand-rolling this counter
+// per test is what MICROTEST_README asks to be a named factory instead.
+template <typename... Args>
+static std::function<hipError_t(Args...)> FailsOnCall(int nth) {
+  auto calls = std::make_shared<int>(0);
+  return [calls, nth](Args...) {
+    return ++*calls == nth ? hipErrorInvalidValue : hipSuccess;
+  };
+}
 
 // Success hooks on every launcher and HIP ordering seam, recording into `log`.
 // Bundled because each launch test needs the whole set live.
@@ -342,13 +354,10 @@ TEST_F(RmaWaitSignalTest, BothProxyAndCe_CeLaunchFails_SkipsClosingFence) {
 TEST_F(RmaWaitSignalTest, BothProxyAndCe_ClosingEventRecordFails) {
   SetCounts(1, 1);
   AllHooks hooks(log_);
-  int calls = 0;
-  ScopedHook record(g_hipEventRecord, [&calls](hipEvent_t, hipStream_t) {
-    return ++calls == 2 ? hipErrorInvalidValue : hipSuccess;
-  });
+  ScopedHook record(g_hipEventRecord, FailsOnCall<hipEvent_t, hipStream_t>(2));
 
   EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclUnhandledCudaError);
-  EXPECT_EQ(calls, 2);
+  EXPECT_EQ(record.calls, 2);
   EXPECT_EQ(log_.CountOf(LaunchLog::kCeWait), 1);
   EXPECT_EQ(log_.CountOf(LaunchLog::kStreamWait), 1);  // closing wait not reached
 }
@@ -357,13 +366,10 @@ TEST_F(RmaWaitSignalTest, BothProxyAndCe_ClosingEventRecordFails) {
 TEST_F(RmaWaitSignalTest, BothProxyAndCe_ClosingStreamWaitFails) {
   SetCounts(1, 1);
   AllHooks hooks(log_);
-  int calls = 0;
-  ScopedHook wait(g_hipStreamWaitEvent, [&calls](hipStream_t, hipEvent_t, unsigned int) {
-    return ++calls == 2 ? hipErrorInvalidValue : hipSuccess;
-  });
+  ScopedHook wait(g_hipStreamWaitEvent, FailsOnCall<hipStream_t, hipEvent_t, unsigned int>(2));
 
   EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclUnhandledCudaError);
-  EXPECT_EQ(calls, 2);
+  EXPECT_EQ(wait.calls, 2);
   EXPECT_EQ(log_.CountOf(LaunchLog::kCeWait), 1);
   // Without this the test cannot tell a skipped closing record from a present
   // one: the injected hook fires on the closing wait either way.
@@ -581,13 +587,10 @@ TEST_F(RmaPutTest, BothProxyAndCe_CeLaunchFails_SkipsClosingFence) {
 TEST_F(RmaPutTest, BothProxyAndCe_ClosingEventRecordFails) {
   SetCounts(1, 1);
   AllHooks hooks(log_);
-  int calls = 0;
-  ScopedHook record(g_hipEventRecord, [&calls](hipEvent_t, hipStream_t) {
-    return ++calls == 2 ? hipErrorInvalidValue : hipSuccess;
-  });
+  ScopedHook record(g_hipEventRecord, FailsOnCall<hipEvent_t, hipStream_t>(2));
 
   EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclUnhandledCudaError);
-  EXPECT_EQ(calls, 2);
+  EXPECT_EQ(record.calls, 2);
   EXPECT_EQ(log_.CountOf(LaunchLog::kCePut), 1);
   EXPECT_EQ(log_.CountOf(LaunchLog::kStreamWait), 1);  // closing wait not reached
 }
@@ -596,13 +599,10 @@ TEST_F(RmaPutTest, BothProxyAndCe_ClosingEventRecordFails) {
 TEST_F(RmaPutTest, BothProxyAndCe_ClosingStreamWaitFails) {
   SetCounts(1, 1);
   AllHooks hooks(log_);
-  int calls = 0;
-  ScopedHook wait(g_hipStreamWaitEvent, [&calls](hipStream_t, hipEvent_t, unsigned int) {
-    return ++calls == 2 ? hipErrorInvalidValue : hipSuccess;
-  });
+  ScopedHook wait(g_hipStreamWaitEvent, FailsOnCall<hipStream_t, hipEvent_t, unsigned int>(2));
 
   EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclUnhandledCudaError);
-  EXPECT_EQ(calls, 2);
+  EXPECT_EQ(wait.calls, 2);
   EXPECT_EQ(log_.CountOf(LaunchLog::kCePut), 1);
   // Without this the test cannot tell a skipped closing record from a present one.
   EXPECT_EQ(log_.CountOf(LaunchLog::kEventRecord), 2);
@@ -839,6 +839,8 @@ protected:
   }
 
   void TearDown() override {
+    // Idempotent, and runs even when a fatal assertion cut the test body short.
+    ReleaseProxyWaitArrays(plan_.get());
     comm_->planner.rmaTaskQueues = nullptr;  // borrowed from ctxQueues_
     comm_->devrState.lsaRankList = nullptr;  // borrowed from lsaRanks_
     RmaTestBase::TearDown();
@@ -854,6 +856,9 @@ protected:
   // Size the per-context queues the way init.cc does.
   void SetNumRmaCtx(int n) {
     comm_->config.numRmaCtx = n;
+    // Discards whatever was queued, so the planner's count goes with it --
+    // otherwise a second call mid-test leaves nTasksRma counting dropped tasks.
+    comm_->planner.nTasksRma = 0;
     ctxQueues_.clear();
     ctxQueues_.resize(n > 0 ? n : 0);
     for (auto& q : ctxQueues_) ncclIntruQueueConstruct(&q);
@@ -953,6 +958,22 @@ TEST_F(RmaScheduleTest, PicksLowestNonEmptyContext) {
   EXPECT_EQ(comm_->planner.nTasksRma, 1);
 }
 
+// The scan runs to the last context, not one short of it. Every other test seeds
+// a lower context, where an off-by-one upper bound still finds the task.
+TEST_F(RmaScheduleTest, PicksTaskOnTheLastContext) {
+  EnqueuePut(/*ctx=*/3, /*peer=*/0);
+
+  ASSERT_EQ(scheduleRmaTasksToPlan(comm_.get(), plan_.get()), ncclSuccess);
+
+  // Fatal: a scan that stopped short leaves ctx == -1 and rmaArgs null, and the
+  // dereference below would crash rather than report.
+  ASSERT_TRUE(plan_->isRma);
+  ASSERT_NE(plan_->rmaArgs, nullptr);
+  EXPECT_EQ(plan_->rmaArgs->ctx, 3);
+  EXPECT_EQ(plan_->rmaArgs->nRmaTasks, 1);
+  EXPECT_EQ(comm_->planner.nTasksRma, 0);
+}
+
 // Every peer LSA-accessible: npeersProxy == 0, so the proxy arrays are freed.
 TEST_F(RmaScheduleTest, WaitSignal_AllPeersLsa_ProducesOnlyCeTask) {
   ncclTaskRma* orig = EnqueueWait(/*ctx=*/0, {1, 2, 3});
@@ -1006,7 +1027,6 @@ TEST_F(RmaScheduleTest, WaitSignal_NoPeersLsa_ProducesOnlyProxyTask) {
   // Both arrays must be sized for every peer on the original task.
   EXPECT_EQ(g_rmaCallocCounts, (std::vector<size_t>{2, 2}));
 
-  ReleaseProxyWaitArrays(plan_.get());
 }
 
 // Both arms taken. The interleaved order catches a split that lets the peer and
@@ -1039,12 +1059,14 @@ TEST_F(RmaScheduleTest, WaitSignal_MixedPeers_SplitsPreservingSignalPairing) {
   EXPECT_EQ(std::vector<int>(proxy->peers, proxy->peers + 2), (std::vector<int>{9, 8}));
   EXPECT_EQ(std::vector<int>(proxy->nsignals, proxy->nsignals + 2), (std::vector<int>{10, 12}));
 
-  // Sized for the whole peer list, not just the proxy share of it.
+  // Sized for the whole peer list, not just each side's share of it. This is the
+  // case that discriminates: the all-LSA test has npeersCe == npeers, so a
+  // mis-size to npeersCe would pass there and fail here.
   EXPECT_EQ(g_rmaCallocCounts, (std::vector<size_t>{4, 4}));
+  EXPECT_EQ(g_rmaStackCounts, (std::vector<size_t>{1, 4, 4}));
   // The split consumes one queued task even though it emits two.
   EXPECT_EQ(comm_->planner.nTasksRma, 0);
 
-  ReleaseProxyWaitArrays(plan_.get());
 }
 
 // npeers == 0: both arms skipped, so the plan is RMA but carries no work.
@@ -1072,7 +1094,6 @@ TEST_F(RmaScheduleTest, WaitSignal_EmptyLsaTeam_RoutesEveryPeerToProxy) {
   EXPECT_EQ(plan_->rmaArgs->nRmaTasksCe, 0);
   EXPECT_EQ(plan_->rmaArgs->nRmaTasksProxy, 1);
 
-  ReleaseProxyWaitArrays(plan_.get());
 }
 
 // A match on the last list entry: a scan stopping one short would misroute it.
@@ -1338,6 +1359,10 @@ protected:
     savedNoWarn_ = ncclDebugNoWarn;
     ncclDebugLevel = NCCL_LOG_INFO;
     ncclDebugMask = ~0ULL;  // every subsystem, so NCCL_COLL passes the mask test
+    // Establish it rather than inherit it: the tests below that do not call
+    // SetDebug exist to take NCCLCHECKGOTO's `ncclDebugNoWarn == 0` arm, and
+    // none of them asserts on log output, so a stale 1 would silently skip it.
+    ncclDebugNoWarn = 0;
   }
 
   void SetDebug(const DebugState& d) {
@@ -1348,13 +1373,9 @@ protected:
 
   // Run one mixed-path call with a chosen check site forced to fail.
   ncclResult_t RunMixed(bool put, const FailAt& f) {
-    int records = 0, waits = 0;
-    ScopedHook rec(g_hipEventRecord, [&](hipEvent_t, hipStream_t) {
-      return ++records == f.eventRecord ? hipErrorInvalidValue : hipSuccess;
-    });
-    ScopedHook wt(g_hipStreamWaitEvent, [&](hipStream_t, hipEvent_t, unsigned int) {
-      return ++waits == f.streamWait ? hipErrorInvalidValue : hipSuccess;
-    });
+    ScopedHook rec(g_hipEventRecord, FailsOnCall<hipEvent_t, hipStream_t>(f.eventRecord));
+    ScopedHook wt(g_hipStreamWaitEvent,
+                  FailsOnCall<hipStream_t, hipEvent_t, unsigned int>(f.streamWait));
     using LaunchFn = std::function<ncclResult_t(ncclComm*, ncclKernelPlan*, hipStream_t)>;
     LaunchFn fail = [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInternalError; };
     LaunchFn ok = [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclSuccess; };
@@ -1399,7 +1420,6 @@ TEST_F(RmaDebugLoggingTest, WaitSignalSplitSummaryIsLogged) {
   ASSERT_EQ(scheduleRmaTasksToPlan(comm_.get(), plan_.get()), ncclSuccess);
 
   EXPECT_EQ(plan_->rmaArgs->nRmaTasks, 2);
-  ReleaseProxyWaitArrays(plan_.get());
 }
 
 // NCCLCHECKGOTO's `ncclDebugNoWarn == 0` guard, taken on a launcher failure.
