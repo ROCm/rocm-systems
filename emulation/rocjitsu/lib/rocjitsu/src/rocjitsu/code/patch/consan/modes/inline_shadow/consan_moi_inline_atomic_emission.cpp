@@ -10,6 +10,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_dynamic_record_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
+#include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_memory_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
@@ -1874,25 +1875,13 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
                   *target),
           "ConSan MOI inline atomic patch could not load private owner state");
     } else if (private_state.resident_wave_owner) {
-      const uint16_t owner_sgpr = private_state.resident_wave_owner->destination_sgpr;
-      if (private_state.resident_wave_owner_is_borrowed) {
-        require_emission.append(
-            "ConSan MOI inline atomic patch could not save borrowed owner state",
-            instrumentation::build_v_writelane_b32(private_temporary, owner_sgpr, 0u, arch));
-      }
-      const ConSanTargetProfile *target = consan_target_profile(arch);
-      require_emission(target != nullptr && consan_detail::append_moi_resident_wave_owner(
-                                                words, *private_state.resident_wave_owner, *target),
-                       "ConSan MOI inline atomic patch could not derive resident-wave owner");
-      words.push_back(build_v_mov_b32_e32(materialized_owner, owner_sgpr, arch));
-      if (private_state.resident_wave_owner_is_borrowed) {
-        const auto restore_owner =
-            instrumentation::build_v_readlane_b32(owner_sgpr, private_temporary, 0u, arch);
-        const auto wait_owner = instrumentation::build_valu_to_salu_dependency_wait(arch);
-        require_emission.append(
-            "ConSan MOI inline atomic patch could not restore borrowed owner state", restore_owner,
-            wait_owner);
-      }
+      require_emission(
+          consan_moi_impl::append_inline_shadow_resident_owner(
+              words, *private_state.resident_wave_owner, materialized_owner,
+              private_state.resident_wave_owner_is_borrowed ? std::optional{private_temporary}
+                                                            : std::nullopt,
+              arch, errors),
+          "ConSan MOI inline atomic patch could not materialize its resident-wave owner");
     } else {
       errors.emplace_back("ConSan MOI inline atomic patch has no private owner derivation");
       return std::nullopt;

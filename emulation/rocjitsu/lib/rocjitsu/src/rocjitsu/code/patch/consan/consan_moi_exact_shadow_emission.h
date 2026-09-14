@@ -48,6 +48,14 @@ struct MoiInlineShadowOwnerFieldPlan {
   bool borrowed_resident_wave_owner_sgpr = false;
 };
 
+/// Materialize a resident-wave owner while preserving a borrowed scalar and
+/// inactive lanes in its temporary VGPR, including an empty incoming EXEC.
+[[nodiscard]] bool
+append_inline_shadow_resident_owner(std::vector<uint32_t> &words,
+                                    const consan_detail::MoiResidentWaveOwnerRequest &request,
+                                    uint16_t result_vgpr, std::optional<uint16_t> backup_vgpr,
+                                    rj_code_arch_t arch, std::vector<std::string> &errors);
+
 /// Exact epoch representation selected for one InlineShadow body.
 struct MoiInlineShadowEpochFieldPlan {
   std::optional<uint16_t> epoch_vgpr;

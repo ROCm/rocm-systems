@@ -474,6 +474,47 @@ bool apply_moi_descriptor_requirements(
       moi_descriptor_mutation_policy(capabilities, arch), arch, subject, errors);
 }
 
+[[nodiscard]] bool
+append_inline_shadow_resident_owner(std::vector<uint32_t> &words,
+                                    const consan_detail::MoiResidentWaveOwnerRequest &request,
+                                    uint16_t result_vgpr, std::optional<uint16_t> backup_vgpr,
+                                    rj_code_arch_t arch, std::vector<std::string> &errors) {
+  const size_t guard_index = words.size();
+  if (backup_vgpr) {
+    const auto guard = instrumentation::build_s_cbranch_execz(0, arch);
+    if (!guard)
+      return false;
+    words.push_back(*guard);
+    // v_writelane ignores EXEC and would corrupt an inactive spill victim.
+    // Broadcast only into active lanes and restore from the first active lane.
+    words.push_back(build_v_mov_b32_e32(*backup_vgpr, request.destination_sgpr, arch));
+  }
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr ||
+      !consan_detail::append_moi_resident_wave_owner(words, request, *target)) {
+    errors.emplace_back("ConSan MOI inline-shadow could not derive its resident-wave owner");
+    return false;
+  }
+  words.push_back(build_v_mov_b32_e32(result_vgpr, request.destination_sgpr, arch));
+  if (backup_vgpr) {
+    const auto restore =
+        instrumentation::build_v_readfirstlane_b32(request.destination_sgpr, *backup_vgpr, arch);
+    const auto wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
+    if (!restore || !wait) {
+      errors.emplace_back("ConSan MOI inline-shadow could not restore its borrowed owner scalar");
+      return false;
+    }
+    words.push_back(*restore);
+    words.push_back(*wait);
+    const auto guard = instrumentation::build_s_cbranch_execz(
+        static_cast<int16_t>(words.size() - guard_index - 1u), arch);
+    if (!guard)
+      return false;
+    words[guard_index] = *guard;
+  }
+  return true;
+}
+
 [[nodiscard]] bool append_inline_shadow_owner_field(
     std::vector<uint32_t> &words, const MoiInlineShadowOwnerFieldPlan &plan, uint16_t low_vgpr,
     uint16_t tmp_vgpr, uint16_t owner_backup_vgpr, rj_code_arch_t arch,
@@ -518,40 +559,16 @@ bool apply_moi_descriptor_requirements(
                           "RJ_CONSAN_MOI_OWNER_SGPR");
       return false;
     }
-    if (plan.borrowed_resident_wave_owner_sgpr) {
-      const auto save = instrumentation::build_v_writelane_b32(
-          owner_backup_vgpr, *plan.resident_wave_owner_sgpr, 0u, arch);
-      if (!save) {
-        errors.emplace_back(
-            "ConSan MOI inline-shadow probe could not save its borrowed owner scalar");
-        return false;
-      }
-      words.insert(words.end(), save->begin(), save->end());
-    }
-    const ConSanTargetProfile *target = consan_target_profile(arch);
     const consan_detail::MoiResidentWaveOwnerRequest owner_request{
         .destination_sgpr = *plan.resident_wave_owner_sgpr,
         .one_based = true,
     };
-    if (target == nullptr ||
-        !consan_detail::append_moi_resident_wave_owner(words, owner_request, *target)) {
-      errors.emplace_back(
-          "ConSan MOI inline-shadow probe could not encode its resident-wave owner");
+    if (!append_inline_shadow_resident_owner(words, owner_request, tmp_vgpr,
+                                             plan.borrowed_resident_wave_owner_sgpr
+                                                 ? std::optional{owner_backup_vgpr}
+                                                 : std::nullopt,
+                                             arch, errors))
       return false;
-    }
-    words.push_back(build_v_mov_b32_e32(tmp_vgpr, *plan.resident_wave_owner_sgpr, arch));
-    if (plan.borrowed_resident_wave_owner_sgpr) {
-      const auto restore = instrumentation::build_v_readlane_b32(*plan.resident_wave_owner_sgpr,
-                                                                 owner_backup_vgpr, 0u, arch);
-      const auto wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
-      if (!restore || !wait) {
-        errors.emplace_back(
-            "ConSan MOI inline-shadow probe could not restore its borrowed owner scalar");
-        return false;
-      }
-      words.insert(words.end(), restore->begin(), restore->end());
-      words.push_back(*wait);
-    }
     break;
   }
   }

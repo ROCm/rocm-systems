@@ -4,6 +4,7 @@
 #include "consan_test_support.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
+#include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_emission.h"
 #include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/isa/decoder.h"
@@ -629,6 +630,64 @@ TEST(ConSan, Gfx950DirectLdsAddressPreservesInactiveSpillVictims) {
       EXPECT_EQ(wave->m0(), m0);
       EXPECT_EQ(wave->vcc(), 0x1234567887654321ull);
       EXPECT_TRUE(wave->read_scc());
+    }
+  }
+  wave->halt();
+}
+
+TEST(ConSan, InlineBorrowedOwnerPreservesInactiveLanesAndEmptyExec) {
+  amdgpu::GpuMemory memory("consan_inline_owner_mem");
+  amdgpu::L2Cache l2("consan_inline_owner_l2");
+  l2.set_backing_memory(&memory);
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("consan_inline_owner", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  const consan_moi_impl::MoiInlineShadowOwnerFieldPlan plan{
+      .owner_vgpr = std::nullopt,
+      .persistent_owner_sgpr = std::nullopt,
+      .automatic_private_epoch = true,
+      .private_owner_source = ConSanMoiOwnerSource::HwId,
+      .resident_wave_owner_sgpr = 30u,
+      .borrowed_resident_wave_owner_sgpr = true,
+  };
+  std::vector<uint32_t> words;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(consan_moi_impl::append_inline_shadow_owner_field(words, plan, 20u, 22u, 21u,
+                                                                config.arch, std::nullopt, errors))
+      << testing::PrintToString(errors);
+  for (size_t i = 0; i < words.size(); ++i)
+    memory.write32(i * sizeof(uint32_t), words[i]);
+  for (const uint64_t exec :
+       {uint64_t{0}, uint64_t{1} << 31u, uint64_t{1} << 63u, ~uint64_t{1}, ~uint64_t{0}}) {
+    SCOPED_TRACE(exec);
+    for (uint32_t lane = 0; lane < 64u; ++lane) {
+      cu->write_vgpr(wave->vgpr_alloc().base + 20u, lane, 0u);
+      cu->write_vgpr(wave->vgpr_alloc().base + 21u, lane, 0xabcdef00u + lane);
+      cu->write_vgpr(wave->vgpr_alloc().base + 22u, lane, 0x12345600u + lane);
+    }
+    wave->pc = 0u;
+    wave->set_exec(exec);
+    wave->debug_write_sgpr(30u, 0xfedcba98u);
+    size_t steps = 0;
+    while (wave->pc < words.size() * sizeof(uint32_t)) {
+      ASSERT_LT(steps++, words.size());
+      cu->step();
+    }
+    cu->flush_all();
+    EXPECT_EQ(wave->debug_read_sgpr(30u), 0xfedcba98u);
+    EXPECT_EQ(wave->exec(), exec);
+    for (uint32_t lane = 0; lane < 64u; ++lane) {
+      if ((exec >> lane) & 1u)
+        continue;
+      EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 21u, lane), 0xabcdef00u + lane);
+      EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 22u, lane), 0x12345600u + lane);
     }
   }
   wave->halt();

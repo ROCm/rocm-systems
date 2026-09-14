@@ -5351,15 +5351,14 @@ TEST(ConSanMoi, InlineShadowPrivateEpochUsesDimensionIndependentResidentWaveOwne
   const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
   const auto get_hw_id =
       hwreg ? build_s_getreg_b32(owner_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4) : std::nullopt;
-  const auto save_owner = instrumentation::build_v_writelane_b32(
-      /*owner backup=*/4u, owner_sgpr, 0u, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto restore_owner = instrumentation::build_v_readlane_b32(owner_sgpr, /*owner backup=*/4u,
-                                                                   0u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto save_owner = build_v_mov_b32_e32(
+      /*owner backup=*/4u, owner_sgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore_owner = instrumentation::build_v_readfirstlane_b32(
+      owner_sgpr, /*owner backup=*/4u, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(get_hw_id);
-  ASSERT_TRUE(save_owner);
   ASSERT_TRUE(restore_owner);
   std::vector<uint32_t> expected_owner;
-  expected_owner.insert(expected_owner.end(), save_owner->begin(), save_owner->end());
+  expected_owner.push_back(save_owner);
   expected_owner.push_back(*get_hw_id);
   expected_owner.push_back(build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4));
   expected_owner.push_back(build_s_add_u32(owner_sgpr, owner_sgpr, scalar_positive_inline_u32(1),
@@ -5369,7 +5368,7 @@ TEST(ConSanMoi, InlineShadowPrivateEpochUsesDimensionIndependentResidentWaveOwne
       *instrumentation::build_salu_to_valu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4));
   expected_owner.push_back(
       build_v_mov_b32_e32(/*owner field=*/5u, owner_sgpr, ROCJITSU_CODE_ARCH_RDNA4));
-  expected_owner.insert(expected_owner.end(), restore_owner->begin(), restore_owner->end());
+  expected_owner.push_back(*restore_owner);
   expected_owner.push_back(
       *instrumentation::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_TRUE(contains_subsequence(words, expected_owner));
