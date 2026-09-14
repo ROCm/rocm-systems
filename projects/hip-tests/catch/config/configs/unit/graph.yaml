@@ -699,6 +699,18 @@ graph:
   Unit_hipStreamBeginCapture_Negative_SelfWaitOnInvalidatedForkedStream:
     <<: *level_2
     tags: [capture]
+  Unit_hipStreamBeginCapture_Positive_CycleAmongForkedStreams:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_CrossCaptureWaitIsRejected:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_BeginCaptureOnInvalidatedStream:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Positive_DestroyNestedForkDuringCapture:
+    <<: *level_2
+    tags: [capture]
   Unit_hipGraphAddMemcpyNode1D_Functional:
     <<: *level_2
     tags: [node]
