@@ -132,8 +132,9 @@ class VersionInfo:
     """Build/load info for ``libnccl.so``."""
 
     nccl_ep: LibraryInfo | None
-    """Build/load info for ``libnccl_ep.so``, or None on CUDA-12 hosts where
-    ``libnccl_ep.so`` cannot load."""
+    """Build/load info for ``libnccl_ep.so``, or None where it is unavailable:
+    CUDA-12 hosts, where the library cannot load, and ROCm, where the bindings
+    are not built at all."""
 
 
 def _nccl_library_info() -> LibraryInfo:
