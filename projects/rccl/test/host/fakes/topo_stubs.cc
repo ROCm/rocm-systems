@@ -118,3 +118,5 @@ ncclResult_t ncclTopoPreset(struct ncclComm*, struct ncclTopoGraph* (&)[7], stru
 ncclResult_t rcclCheckRomeTopoModelIdxConsensus(int, std::function<int(int)>,
                                                 std::function<const char*(int)>,
                                                 std::function<unsigned long(int)>) { ::abort(); }
+ncclResult_t ncclCheckDdaNranksRelaxConsensus(int, std::function<bool(int)>,
+                                              std::function<const char*(int)>) { ::abort(); }
