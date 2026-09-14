@@ -44,8 +44,7 @@
 /** Force ncclCeLaunchBatchOps() to return ncclSystemError. */
 #define CE_FAULT_LAUNCH_OP 0x04U
 
-/** Reproduce the pre-fix CE AllReduce bug that omitted recvbuff's
- * window-relative base offset when addressing remote LSA peers. */
+/** Omit recv window base in CE Phase 3 (legacy: rank * shardBytes, no window offset). */
 #define CE_FAULT_LEGACY_RECV_OFFSET 0x08U
 
 // ---------------------------------------------------------------------------
