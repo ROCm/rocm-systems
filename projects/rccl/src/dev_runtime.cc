@@ -2021,12 +2021,13 @@ ncclResult_t ncclCommWindowRegister_impl(struct ncclComm* comm, void* userPtr, s
     return ncclInvalidArgument;
   }
 
-  // RCCL: NCCL_WIN_ENABLE=0 opts out of window-backed paths, and the non-sym
-  // fallback taken when symmetricSupport is off cannot back cuMem/VMM buffers
-  // (cudaIpcGetMemHandle rejects them). Decline the registration instead of
-  // failing callers that register symmetric buffers unconditionally; their
-  // collectives then run on unregistered buffers.
-  if (!ncclParamWinEnable()) {
+  // RCCL: NCCL_WIN_ENABLE=0 opts out of symmetric-window paths, and the
+  // non-sym fallback cannot back cuMem/VMM buffers (cudaIpcGetMemHandle rejects
+  // them). Decline the registration instead of failing callers that register
+  // symmetric buffers unconditionally; their collectives run on unregistered
+  // buffers.  Host-RMA windows (comm->hostRmaSupport) are independent of
+  // NCCL_WIN_ENABLE and must still be registered on RMA-capable comms.
+  if (!ncclParamWinEnable() && !comm->hostRmaSupport) {
     INFO(NCCL_INIT, "%s: NCCL_WIN_ENABLE=0, skipping registration of %p (%zu bytes)", __func__, userPtr, userSize);
     return ncclSuccess;
   }
