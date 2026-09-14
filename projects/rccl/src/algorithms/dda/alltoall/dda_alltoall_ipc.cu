@@ -13,6 +13,7 @@
 #include "debug.h"
 #include "algorithms/dda/ipc/ipc_gpu_barrier.h"
 #include "algorithms/dda/dda_init_detail.h"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
 
 #include <cuda_runtime.h>
 
@@ -27,9 +28,9 @@ using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_detail::kDdaNranks;
 
-template <typename T>
-static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
-                                            cudaStream_t stream) {
+template <typename T, int NRANKS>
+static ncclResult_t ncclAllToAllDdaIpcLaunch(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
+                                             cudaStream_t stream) {
   if (comm->ddaIpcMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaIpcBarrierState == nullptr) {
     return ncclInvalidUsage;
@@ -55,16 +56,37 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
   if (dda::common::ddaAlltoAllSingleBlockGrid(count, sizeof(T))) {
-    dda::common::ddaAllToAllIpc<T, kDdaNranks, false, true><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+    dda::common::ddaAllToAllIpc<T, NRANKS, false, true><<<grid, block, 0, stream>>>(
+      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, comm->nRanks,
+      barrierHost);
   } else {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
-    dda::common::ddaAllToAllIpc<T, kDdaNranks, false, false><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+    dda::common::ddaAllToAllIpc<T, NRANKS, false, false><<<grid, block, 0, stream>>>(
+      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, comm->nRanks,
+      barrierHost);
   }
   CUDACHECK(cudaGetLastError());
 
   return ncclSuccess;
+}
+
+// Dispatch to the template instantiation for the active participant count.
+// Only the default kDdaNranks clique gets a compile-time specialisation, keeping
+// that path bit- and perf-identical to baseline; every other supported count uses
+// the NRANKS_CT == 0 runtime kernel. Specialising all seven would compile one
+// kernel per count per type for each DEFAULT_GPUS target, for a path that is
+// default-off and confined to gfx942/gfx950.
+template <typename T>
+static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
+                                            cudaStream_t stream) {
+  if (!ncclDdaIpcNranksSupported(comm->nRanks)) {
+    WARN("DDA IPC alltoall: unsupported nRanks %d", comm->nRanks);
+    return ncclInvalidUsage;
+  }
+  if (comm->nRanks == kDdaNranks) {
+    return ncclAllToAllDdaIpcLaunch<T, kDdaNranks>(sendbuff, recvbuff, count, comm, stream);
+  }
+  return ncclAllToAllDdaIpcLaunch<T, 0>(sendbuff, recvbuff, count, comm, stream);
 }
 
 } // namespace
@@ -84,7 +106,7 @@ bool ncclAllToAllDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recv
   if (comm->nNodes != 1) {
     return false;
   }
-  if (comm->nRanks != nccl_dda_detail::kDdaNranks) {
+  if (!ncclDdaIpcNranksSupported(comm->nRanks)) {
     return false;
   }
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {

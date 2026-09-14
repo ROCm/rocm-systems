@@ -88,6 +88,13 @@ extern int g_rcclCheckRomeTopoModelIdxConsensusCalls;
 extern int g_rcclRomeConsensusNranks;
 extern int g_rcclRomeConsensusIdx0;
 extern std::string g_rcclRomeConsensusHost0;
+// RCCL_DDA_NRANKS_RELAX per-rank agreement check, right after the Rome one it
+// mirrors. What its two lambdas answer for rank 0.
+extern ncclResult_t g_ncclCheckDdaNranksRelaxConsensusResult;
+extern int g_ncclCheckDdaNranksRelaxConsensusCalls;
+extern int g_ncclDdaNranksRelaxConsensusNranks;
+extern bool g_ncclDdaNranksRelaxConsensusValue0;
+extern std::string g_ncclDdaNranksRelaxConsensusHost0;
 // src/graph/connect.cc. init.cc:2215, gated on comm->topo->treeDefined. The graph :2215 passed is
 // recorded because only the tree graph is correct there and a result-only seam cannot see a swap.
 extern ncclResult_t g_ncclTreeBasePostsetResult;

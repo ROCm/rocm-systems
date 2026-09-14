@@ -15,13 +15,21 @@
 
 namespace dda::common {
 
+// NRANKS semantics match the CollCommon helpers:
+//   - NRANKS  > 0 : compile-time clique size; the peer loop is fully unrolled and
+//                   nRanksRuntime is ignored.
+//   - NRANKS == 0 : runtime fallback; the clique size comes from nRanksRuntime and
+//                   the peer loop is partially unrolled 8-wide, so one instantiation
+//                   covers every supported clique size.
 template <typename T, int NRANKS, bool hasAcc>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
   __global__ void ddaAllGatherIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
-                                  const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier) {
+                                  const T* __restrict__ sendbuff, int selfRank, int nRanksRuntime,
+                                  IpcGpuBarrier barrier) {
 
+  const int nRanks = (NRANKS > 0) ? NRANKS : nRanksRuntime;
   const size_t countPerRank = count;
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
   const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
@@ -36,7 +44,7 @@ __launch_bounds__(512)
 
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
-  allGather<T, NRANKS>(ipcbuffs, recvbuff, selfRank, NRANKS, idxStart, idxEnd, idxStride, false);
+  allGather<T, NRANKS>(ipcbuffs, recvbuff, selfRank, nRanks, idxStart, idxEnd, idxStride, false);
 
   // barrier to ensure remote ranks won't free their buffers until I'm done
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();

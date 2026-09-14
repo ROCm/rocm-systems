@@ -11,14 +11,42 @@
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
+#include "param.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/ipc/ipc_mem_handler.h"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
 
 #include <cuda_runtime.h>
 
 using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_detail::kDdaNranks;
+
+// Relax DDA IPC eligibility beyond exactly kDdaNranks (8) ranks, for every DDA IPC
+// collective (AllReduce / AllGather / ReduceScatter / AllToAll). When 0 (default) the
+// classic 8-rank-only gate is enforced and behaviour is bit- and perf-identical to
+// baseline. When 1, any single-node comm of 2..kDdaNranks ranks is eligible. Read per
+// process, so it must be set identically on every rank of a communicator. Defined here
+// alongside the DDA IPC comm-init gate so the host init unit tests link it without
+// pulling in the all-reduce compute TU.
+RCCL_PARAM(DdaNranksRelax, "DDA_NRANKS_RELAX", 0);
+
+bool ncclDdaNranksRelaxEnabled() {
+  return rcclParamDdaNranksRelax() != 0;
+}
+
+// Single source of truth for the supported DDA IPC participant counts. Both the
+// comm-init gate below and the per-collective eligibility gates call this, so the
+// two cannot drift apart and allocate IPC resources that eligibility then refuses.
+bool ncclDdaIpcNranksSupported(int nRanks) {
+  if (nRanks == kDdaNranks) {
+    return true;
+  }
+  if (!ncclDdaNranksRelaxEnabled()) {
+    return false;
+  }
+  return nRanks >= 2 && nRanks <= kDdaNranks;
+}
 
 #define HIP_CALL(cmd) \
   do { \
@@ -34,19 +62,20 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
   // Skip DDA if:
-  // - nRanks is not exactly kDdaNranks (currently hardcoded to 8)
+  // - nRanks is not a supported DDA IPC participant count (kDdaNranks by default;
+  //   any 2..kDdaNranks when RCCL_DDA_NRANKS_RELAX=1)
   // - multi-node runs
   // - not using 1 process per GPU
   // - MNNVL (fabric-based P2P)
   // - the arch is not one the DDA algorithm actually runs on. The dispatch path
-  //   (rcclDdaEnabled() in collectives.cc) only enables DDA on gfx942/gfx950; on
+  //   (rcclDdaEnabled() in rccl_wrap.cc) only enables DDA on gfx942/gfx950; on
   //   every other arch the algorithm is never selected, so allocating the IPC
   //   scratch/barrier here is not necessary. On gfx12xx (RDNA4) the
   //   uncached-memory IPC export fails (hipIpcGetMemHandle -> hipErrorInvalidValue),
   //   which aborts comm init entirely. Gate init to match dispatch.
   const bool ddaArchSupported =
     comm->archName != nullptr && (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950"));
-  if (comm->nRanks != kDdaNranks || comm->nNodes != 1 || comm->bootstrap == nullptr || comm->directMode ||
+  if (!ncclDdaIpcNranksSupported(comm->nRanks) || comm->nNodes != 1 || comm->bootstrap == nullptr || comm->directMode ||
       comm->MNNVL || !ddaArchSupported) {
     return ncclSuccess;
   }
@@ -109,6 +138,9 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
+  // Peer table is sized for kDdaNranks (the max) but only comm->nRanks entries
+  // are populated/copied when RCCL_DDA_NRANKS_RELAX shrinks the participant set.
+  const int nActiveRanks = comm->nRanks;
   void* peerDev = nullptr;
   cudaError_t ce = cudaMalloc(&peerDev, kDdaNranks * sizeof(void*));
   if (ce != cudaSuccess) {
@@ -118,8 +150,26 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  void* h_ptrs[kDdaNranks];
-  for (int i = 0; i < kDdaNranks; ++i) {
+  // Zero the full peer table so any slot past the live prefix (nActiveRanks) reads
+  // as null rather than uninitialized device memory when RCCL_DDA_NRANKS_RELAX
+  // shrinks the participant set below kDdaNranks.
+  //
+  // The host-side h_ptrs below is value-initialised, so copying the full table
+  // instead of the live prefix would leave the same nulls in the tail with one
+  // fewer CUDA call. The explicit device-side zero is kept anyway: it makes the
+  // tail defined at the point of allocation rather than as a side effect of how
+  // much of h_ptrs is later copied.
+  cudaError_t mce = cudaMemset(peerDev, 0, kDdaNranks * sizeof(void*));
+  if (mce != cudaSuccess) {
+    CUDACHECKIGNORE(cudaFree(peerDev));
+    delete handler;
+    CUDACHECKIGNORE(cudaFree(scratch));
+    WARN("ncclDdaIpcCommInit: cudaMemset(peer table) failed (%s)", cudaGetErrorString(mce));
+    return ncclSuccess;
+  }
+
+  void* h_ptrs[kDdaNranks] = {};
+  for (int i = 0; i < nActiveRanks; ++i) {
     void* p = nullptr;
     res = handler->getPeerDeviceMemPtr(i, &p);
     if (res != ncclSuccess) {
@@ -132,7 +182,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     h_ptrs[i] = p;
   }
 
-  ce = cudaMemcpy(peerDev, h_ptrs, kDdaNranks * sizeof(void*), cudaMemcpyHostToDevice);
+  ce = cudaMemcpy(peerDev, h_ptrs, nActiveRanks * sizeof(void*), cudaMemcpyHostToDevice);
   if (ce != cudaSuccess) {
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
@@ -149,7 +199,9 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  cudaError_t ddaCe = cudaMemcpy(comm->ddaPeerPtrsHost, h_ptrs, kDdaNranks * sizeof(void*), cudaMemcpyHostToHost);
+  // Only nActiveRanks entries of h_ptrs are populated; the calloc'd tail stays
+  // null for <8-rank comms (the CE consumer reads comm->nRanks peer bases).
+  cudaError_t ddaCe = cudaMemcpy(comm->ddaPeerPtrsHost, h_ptrs, nActiveRanks * sizeof(void*), cudaMemcpyHostToHost);
   if (ddaCe != cudaSuccess) {
     free(comm->ddaPeerPtrsHost);
     comm->ddaPeerPtrsHost = nullptr;
@@ -161,7 +213,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   }
 
   const int nBlocksMax = ddaMaxNBlocksForScratch();
-  auto barrierPair = dda::common::IpcGpuBarrier::mallocAndInit(kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap);
+  auto barrierPair = dda::common::IpcGpuBarrier::mallocAndInit(nActiveRanks, nBlocksMax, comm->rank, comm->bootstrap);
   if (!barrierPair.first) {
     free(comm->ddaPeerPtrsHost);
     comm->ddaPeerPtrsHost = nullptr;

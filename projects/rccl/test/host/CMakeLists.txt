@@ -666,6 +666,7 @@ add_test_executable(rccl-HostUnitTests
   ${RCCL_HIPIFY_DIR}/src/misc/kernel_config.cc
   ${RCCL_HIPIFY_DIR}/src/misc/alt_rsmi.cc
   ${RCCL_HIPIFY_DIR}/src/graph/rome_topo_consensus.cc
+  ${RCCL_HIPIFY_DIR}/src/algorithms/dda/ipc/dda_nranks_relax_consensus.cc
 )
 
 target_include_directories(rccl-HostUnitTests PRIVATE

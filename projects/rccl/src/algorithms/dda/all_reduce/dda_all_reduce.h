@@ -14,7 +14,19 @@
 
 struct ncclComm;
 
-// IPC path (single node, fixed kDdaNranks ranks).
+// True when RCCL_DDA_NRANKS_RELAX=1 (allow 2..8-rank DDA IPC for every DDA IPC
+// collective). Default 0. Read per process: must match on every rank of a comm.
+bool ncclDdaNranksRelaxEnabled();
+
+// Single source of truth for "is nRanks a supported single-node DDA IPC
+// participant count": exactly kDdaNranks always; any 2..kDdaNranks when
+// RCCL_DDA_NRANKS_RELAX=1. Shared by the DDA IPC collectives (AllReduce /
+// AllGather / ReduceScatter / AllToAll) and by the comm-init gate, which must
+// agree with them -- otherwise comm init allocates IPC resources that the
+// eligibility gate then refuses.
+bool ncclDdaIpcNranksSupported(int nRanks);
+
+// IPC path (single node, kDdaNranks ranks by default; any 2..kDdaNranks when relax is set).
 bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op);
 
