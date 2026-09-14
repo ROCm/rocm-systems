@@ -253,7 +253,7 @@ bool rcclDirectA2aAllReduceEligible(ncclComm* comm, size_t count, ncclDataType_t
     return (size_t)comm->nRanks * bytes <= comm->directA2aScratchBytes;
   }
 
-  const size_t maxChunkCount = (count + (size_t)comm->nRanks - 1) / (size_t)comm->nRanks;
+  const size_t maxChunkCount = divUp(count, (size_t)comm->nRanks);
   const size_t maxChunkBytes = maxChunkCount * typeSize;
   return ((size_t)comm->nRanks + 1) * maxChunkBytes <= comm->directA2aScratchBytes;
 }
