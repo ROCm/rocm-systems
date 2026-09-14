@@ -5163,6 +5163,8 @@ def test_gfx1251_packed_u64_decode_rejects_undefined_layouts_and_register_tuples
         body = _generated_decode_body(source, class_name)
         assert 'has an invalid packed U64 element layout' in body
         assert 'has an invalid unused src2 encoding' in body
+        assert '->neg & 4u) != 0u' in body
+        assert '->neg_hi & 4u) != 0u' in body
         assert 'does not support combined source negation and clamp' not in body
         assert 'vdst register tuple that exceeds the selector range' in body
         assert 'src0 register tuple that exceeds the selector range' in body
@@ -5173,6 +5175,8 @@ def test_gfx1251_packed_u64_decode_rejects_undefined_layouts_and_register_tuples
         assert 'invalid src0 packed U64 source selector' in body
         assert 'invalid src1 packed U64 source selector' in body
         for operand_name in ('src0', 'src1'):
+            assert f'{operand_name} != 104u' in body
+            assert f'{operand_name} == 104u' in body
             assert f'{operand_name} == 124u' in body
             assert f'{operand_name} >= 240u' in body
             assert f'{operand_name} <= 248u' in body
@@ -5194,6 +5198,10 @@ def test_gfx1251_packed_u64_decode_rejects_undefined_layouts_and_register_tuples
     assert 'invalid src0 packed U64 source selector' in lshl
     assert 'invalid src1 packed U64 source selector' in lshl
     assert 'invalid src2 packed U64 source selector' in lshl
+    assert 'src0 != 104u' in lshl
+    assert 'src0 == 104u' in lshl
+    assert 'src2 != 104u' in lshl
+    assert 'src2 == 104u' in lshl
     assert 'src1 == 230u' in lshl
     assert 'src1 >= 235u' in lshl
     assert 'src1 <= 236u' in lshl

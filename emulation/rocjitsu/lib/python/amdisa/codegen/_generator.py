@@ -10393,7 +10393,9 @@ class CodeGenerator:
                         )
                         if inst_sem.semantic_class == 'pk_binop_u64':
                             factory_validation_parts.append(
-                                f'if ({raw_inst}->src2 != 128u) '
+                                f'if ({raw_inst}->src2 != 128u || '
+                                f'({raw_inst}->neg & 4u) != 0u || '
+                                f'({raw_inst}->neg_hi & 4u) != 0u) '
                                 f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
                                 'unused src2 encoding";'
                             )
@@ -10422,8 +10424,16 @@ class CodeGenerator:
                             elif opnd.operand_type == 'OPR_SRC':
                                 max_sgpr = 106 - register_count
                                 max_vgpr = 512 - register_count
+                                invalid_sgpr_span = f'{raw_value} > {max_sgpr}u'
+                                if opnd.size == 128:
+                                    # SGPR104_128 is a named VS_128 member:
+                                    # s104:s105 provide the scalar U64 value,
+                                    # while vcc_lo:vcc_hi complete the tuple.
+                                    invalid_sgpr_span = (
+                                        f'({invalid_sgpr_span} && {raw_value} != 104u)'
+                                    )
                                 invalid_span = (
-                                    f'({raw_value} <= 105u && {raw_value} > {max_sgpr}u) || '
+                                    f'({raw_value} <= 105u && {invalid_sgpr_span}) || '
                                     f'({raw_value} >= 256u && {raw_value} > {max_vgpr}u)'
                                 )
                                 invalid_alignment = (
@@ -10449,6 +10459,7 @@ class CodeGenerator:
                                 if opnd.size == 128:
                                     valid_width_specific = (
                                         f'({raw_value} <= 100u && ({raw_value} % 4u) == 0u) || '
+                                        f'{raw_value} == 104u || '
                                         f'({raw_value} >= 108u && {raw_value} <= 120u && '
                                         f'(({raw_value} - 108u) % 4u) == 0u) || '
                                         f'{raw_value} == 124u || '

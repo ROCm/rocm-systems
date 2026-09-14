@@ -1791,6 +1791,59 @@ TEST(Gfx1251PackedU64ExecutionTest, AddAndSubtractHaveExecutionCallbacks) {
   }
 }
 
+TEST(Gfx1251PackedU64ExecutionTest, ExecutesSgpr104CompositeInEveryPackedU64Position) {
+  struct SourceCase {
+    std::string_view name;
+    std::array<uint32_t, 2> words;
+    bool is_lshl_add;
+    PackedU64Pair expected;
+  };
+  // Exact encodings produced by public LLVM MC for the SGPR104_128 composite
+  // in every VSrc_v2b64 position accepted by the three instructions.
+  // https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/lib/Target/AMDGPU/SIRegisterInfo.td#L451-L456
+  constexpr std::array kCases{
+      SourceCase{"add-src0", {0xCC4C4004u, 0x1A021868u}, false, {8u, 12u}},
+      SourceCase{"add-src1", {0xCC4C4004u, 0x1A00D108u}, false, {16u, 18u}},
+      SourceCase{"sub-src0",
+                 {0xCC4D4004u, 0x1A021868u},
+                 false,
+                 {2u, std::numeric_limits<uint64_t>::max() - 1u}},
+      SourceCase{"sub-src1", {0xCC4D4004u, 0x1A00D108u}, false, {6u, 8u}},
+      SourceCase{"lshl-add-src0", {0xCC7E4004u, 0x1C421868u}, true, {13u, 24u}},
+      SourceCase{"lshl-add-src2", {0xCC7E4004u, 0x19A21908u}, true, {27u, 57u}},
+  };
+
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint64_t kVccPoison = 0xdeadbeefcafef00dULL;
+  write_wave_sgpr(*cu, *wf, 104, 5u);
+  write_wave_sgpr(*cu, *wf, 105, 0u);
+  wf->set_vcc_raw(kVccPoison);
+  write_vgpr_packed_u64(*cu, *wf, 8, 0, {11u, 13u});
+  write_vgpr_packed_u64(*cu, *wf, 16, 0, {3u, 4u});
+
+  for (const auto &test_case : kCases) {
+    SCOPED_TRACE(test_case.name);
+    if (test_case.is_lshl_add)
+      write_vgpr_packed_u32(*cu, *wf, 12, 0, {1u, 2u});
+    else
+      write_vgpr_packed_u64(*cu, *wf, 12, 0, {3u, 7u});
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, test_case.words.data()));
+    ASSERT_NE(decoded, nullptr);
+    ASSERT_NE(decoded->execute, nullptr);
+    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), test_case.expected);
+    EXPECT_EQ(wf->vcc(), kVccPoison);
+  }
+}
+
 TEST(Gfx1251PackedU64ExecutionTest, AddAndSubtractWrapPerElementAndHonorExec) {
   // Exact public LLVM gfx1251_asm_vop3p.s VGPR encodings.
   constexpr std::array<uint32_t, 2> kAdd{0xCC4C4004u, 0x1A021908u};
@@ -2176,8 +2229,6 @@ TEST(Gfx1251PackedU64ExecutionTest, ValidatesLayoutsRegisterTuplesAndSourceSelec
       cdna5::Vop3pBuilderFields{
           .vdst = 4, .opsel_hi_2 = 1, .src0 = 509, .src1 = 268, .src2 = 128, .opsel_hi = 3},
       cdna5::Vop3pBuilderFields{
-          .vdst = 4, .opsel_hi_2 = 1, .src0 = 264, .src1 = 104, .src2 = 128, .opsel_hi = 3},
-      cdna5::Vop3pBuilderFields{
           .vdst = 3, .opsel_hi_2 = 1, .src0 = 264, .src1 = 268, .src2 = 128, .opsel_hi = 3},
       cdna5::Vop3pBuilderFields{
           .vdst = 4, .opsel_hi_2 = 1, .src0 = 265, .src1 = 268, .src2 = 128, .opsel_hi = 3},
@@ -2235,8 +2286,8 @@ TEST(Gfx1251PackedU64ExecutionTest, ValidatesLayoutsRegisterTuplesAndSourceSelec
 
   // Always provide a third word: selector 255 consumes it as a literal, and
   // shorter buffers make this boundary loop undefined under ASan.
-  constexpr std::array<uint16_t, 6> kValidV2B64Selectors{
-      124, 128, 208, 240, 248, 255,
+  constexpr std::array<uint16_t, 7> kValidV2B64Selectors{
+      104, 124, 128, 208, 240, 248, 255,
   };
   for (const uint16_t selector : kValidV2B64Selectors) {
     SCOPED_TRACE(selector);
@@ -2284,6 +2335,32 @@ TEST(Gfx1251PackedU64ExecutionTest, ValidatesLayoutsRegisterTuplesAndSourceSelec
   for (const auto &words : kValidRawB64Words) {
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
     EXPECT_NE(decoded, nullptr);
+  }
+
+  // src2 is fixed to the zero selector for packed add/sub. Its modifier bits
+  // are reserved and LLVM MC rejects either bit in both opcodes.
+  for (const uint32_t opcode : {cdna5::kVPkAddNcU64Vop3p, cdna5::kVPkSubNcU64Vop3p}) {
+    for (const auto modifiers : std::array{
+             cdna5::Vop3pBuilderFields{.vdst = 4,
+                                       .neg_hi = 4,
+                                       .opsel_hi_2 = 1,
+                                       .src0 = 264,
+                                       .src1 = 268,
+                                       .src2 = 128,
+                                       .opsel_hi = 3},
+             cdna5::Vop3pBuilderFields{.vdst = 4,
+                                       .opsel_hi_2 = 1,
+                                       .src0 = 264,
+                                       .src1 = 268,
+                                       .src2 = 128,
+                                       .opsel_hi = 3,
+                                       .neg = 4},
+         }) {
+      SCOPED_TRACE(opcode);
+      SCOPED_TRACE(modifiers.neg_hi != 0 ? "neg_hi_src2" : "neg_src2");
+      const auto words = cdna5::build_vop3p(opcode, modifiers);
+      EXPECT_EQ(decode_valid(*decoder, words.data()), nullptr);
+    }
   }
 
   const auto lshl_with_modifier = cdna5::build_vop3p(
