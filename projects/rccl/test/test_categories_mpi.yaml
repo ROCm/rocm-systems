@@ -194,6 +194,65 @@ test_categories:
       - "NCCL_DEBUG=INFO"
       - "NCCL_LAUNCH_MODE=GROUP"
       - "RCCL_PAT_SHARED_QPS=0"
+  # The QP-sharing functional gate. The same five tests run at three values of
+  # RCCL_IB_COMM_NGROUPS: expectations are derived from ngroups by the reference
+  # model (test/transport/NetIbMPI/QpShareRefModel.hpp), so no test is pinned to
+  # a value and none skips outside one. RCCL_PARAM caches both tunables per
+  # process, which is why ngroups varies across categories rather than within a
+  # test.
+  quick_env_qpshare_ngroups1:
+    description: "QP sharing gate, maximum concentration: NGROUPS=1 puts every connection in group 0, so the whole functional set runs on one shared QP. DEPTH_MULTIPLIER=8 is pinned rather than left at the default so that the shared QP's CQ and work-queue sizing is not close to the queue-depth limit at these connection counts."
+    test_patterns: &qpshare_functional_tests
+      - "NetIbMPITest.QpShareAlgoLayoutSweep:NetIbMPITest.QpShareAlgoChurnLayout:NetIbMPITest.QpShareDataAllConnsTransfer:NetIbMPITest.QpShareDataUnsharedGroups:NetIbMPITest.QpShareDataFlushRouting"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_IB_MERGE_NICS=0"
+      - "NCCL_NET_FORCE_MERGE="
+      - "RCCL_IB_COMM_NGROUPS=1"
+      - "RCCL_IB_QP_DEPTH_MULTIPLIER=8"
+      - "NCCL_GDR_FLUSH_DISABLE=0"
+  quick_env_qpshare_ngroups2:
+    description: "QP sharing gate, smallest mixed configuration: NGROUPS=2 places a PRIMARY-only group beside a PRIMARY+SECONDARY group — the smallest value at which group-index arithmetic has more than one possible answer. Same five functional tests."
+    test_patterns: *qpshare_functional_tests
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_IB_MERGE_NICS=0"
+      - "NCCL_NET_FORCE_MERGE="
+      - "RCCL_IB_COMM_NGROUPS=2"
+      - "RCCL_IB_QP_DEPTH_MULTIPLIER=8"
+      - "NCCL_GDR_FLUSH_DISABLE=0"
+  quick_env_qpshare_ngroups16:
+    description: "QP sharing gate, wide configuration: at NGROUPS=16 the connection counts straddle the shared and unshared regimes within one run, and the layout sweep reaches 33 connections across 16 groups. Same five functional tests. The qpshare_heap_poison category below runs the churn test from this set again under glibc heap poisoning, which makes the group teardown path exercise freed memory deterministically rather than by timing."
+    test_patterns: *qpshare_functional_tests
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_IB_MERGE_NICS=0"
+      - "NCCL_NET_FORCE_MERGE="
+      - "RCCL_IB_COMM_NGROUPS=16"
+      - "RCCL_IB_QP_DEPTH_MULTIPLIER=8"
+      - "NCCL_GDR_FLUSH_DISABLE=0"
+  quick_env_qpshare_depth_ceiling:
+    description: "QP sharing depth-multiplier sizing. The shared CQ is sized 3 × NET_IB_MAX_REQUESTS(256) × NCCL_IB_QPS_PER_CONNECTION × RCCL_IB_QP_DEPTH_MULTIPLIER entries, so the multiplier and the QP count multiply into the same device limit and both are pinned here. 96 with QPS=1 requests a CQ far larger than the default and covers how the transport sizes that CQ against the device's queried max_cqe. QPSHARE_TEST_NCONNS=2 keeps the run to the sizing question rather than connection volume. The usable multiplier is a function of the device's max_cqe and so is hardware-dependent; this value probes the sizing path and is not a portable constant."
+    test_patterns:
+      - "NetIbMPITest.QpShareDataAllConnsTransfer"
+    exclude_windows: *mpi_exclude_windows
+    # Deliberately NOT *mpi_quick_labels: what this configuration can allocate
+    # depends on the device's max_cqe, so it is not a portable smoke/precheck
+    # gate. Selectable and excludable via the qpshare label instead.
+    labels: &qpshare_labels
+      - "rccl"
+      - "mpi"
+      - "qpshare"
+    env_variables:
+      - "NCCL_IB_MERGE_NICS=0"
+      - "NCCL_NET_FORCE_MERGE="
+      - "RCCL_IB_COMM_NGROUPS=1"
+      - "RCCL_IB_QP_DEPTH_MULTIPLIER=96"
+      - "NCCL_IB_QPS_PER_CONNECTION=1"
+      - "QPSHARE_TEST_NCONNS=2"
   standard:
     description: "MPI regression — all transport / IB / implicit-launch / UBR / graph-capture suites (same patterns as comprehensive; lighter env)."
     test_patterns: &mpi_all_patterns
@@ -382,6 +441,55 @@ test_categories:
       - "RCCL_LL128_FORCE_ENABLE=1"
       - "NCCL_PROTO=LL128"
       - "NCCL_ALGO=Tree"
+  # The stress tests are split across two categories on purpose. The ctest
+  # generator joins a category's test_patterns with ':' into ONE --gtest_filter,
+  # i.e. one process (shared/ctest/parse_test_categories.py, positive_string),
+  # and gtest runs registration order, not filter order. Connection churn is
+  # long-running and is the one test here whose failure mode can take the
+  # process down, so keeping it in its own category is what keeps the batch
+  # result independently reported and lets it carry its own timeout -- do not
+  # merge these back together.
+  qpshare_stress:
+    description: "QP sharing scale and resource lifetime, everything except connection churn: many-connection load, shared-RQ saturation, and batch create/destroy under sharing. NGROUPS=2 with DEPTH_MULTIPLIER=64 and one QP per connection, so the shared QP carries the queue depth the default connection counts require. Scale with QPSHARE_TEST_NCONNS and QPSHARE_TEST_ITERS. RDMA object counts are compared against a pre-batch baseline at each checkpoint."
+    test_patterns:
+      - "NetIbMPITest.QpShareStressManyConns:NetIbMPITest.QpShareStressSharedRqSaturation:NetIbMPITest.QpShareStressBatchCreateDestroy"
+    exclude_windows: *mpi_exclude_windows
+    labels: *qpshare_labels
+    env_variables:
+      - "NCCL_IB_MERGE_NICS=0"
+      - "NCCL_NET_FORCE_MERGE="
+      - "RCCL_IB_COMM_NGROUPS=2"
+      - "RCCL_IB_QP_DEPTH_MULTIPLIER=64"
+      - "NCCL_IB_QPS_PER_CONNECTION=1"
+  qpshare_stress_churn:
+    description: "QP sharing sequential connection churn, isolated in its own category so it runs in a separate process and its result is reported independently. QPSHARE_TEST_ITERS connect/transfer/close cycles (default 2048) with exactly one connection live at a time, so every cycle is fully torn down before the next begins and each teardown reaches the group-release path. RDMA object counts and the comm's pool state are checkpointed every quarter of the run against a pre-churn baseline. Long-running by design; sharing depth is 1 by construction, so this covers the create/destroy lifecycle of a shared group rather than concurrent occupancy."
+    test_patterns:
+      - "NetIbMPITest.QpShareStressConnectionChurn"
+    exclude_windows: *mpi_exclude_windows
+    labels: *qpshare_labels
+    env_variables:
+      - "NCCL_IB_MERGE_NICS=0"
+      - "NCCL_NET_FORCE_MERGE="
+      - "RCCL_IB_COMM_NGROUPS=2"
+      - "RCCL_IB_QP_DEPTH_MULTIPLIER=64"
+      - "NCCL_IB_QPS_PER_CONNECTION=1"
+  # Same test and tunables as quick_env_qpshare_ngroups16; the only difference
+  # is MALLOC_PERTURB_=165. Since a stale read into freed memory otherwise
+  # usually finds that memory intact, the poison is what makes the group
+  # teardown path exercise it deterministically rather than by timing.
+  qpshare_heap_poison:
+    description: "QP sharing group teardown under glibc heap poisoning. MALLOC_PERTURB_=165 makes glibc overwrite freed heap with 0xa5, so any read through a pointer into a freed comm returns poison rather than whatever the allocator happened to leave behind. Interleaved create/destroy across 16 groups exercises the shared-QP group teardown path against pointers that may outlive the comm they point into. Worth pairing with two controls: the same filter without MALLOC_PERTURB_, and non-sharing NetIb tests with the poison on. MALLOC_PERTURB_ is a glibc feature and is inert on other allocators, so on a non-glibc platform this category is equivalent to quick_env_qpshare_ngroups16."
+    test_patterns:
+      - "NetIbMPITest.QpShareAlgoChurnLayout"
+    exclude_windows: *mpi_exclude_windows
+    labels: *qpshare_labels
+    env_variables:
+      - "NCCL_IB_MERGE_NICS=0"
+      - "NCCL_NET_FORCE_MERGE="
+      - "RCCL_IB_COMM_NGROUPS=16"
+      - "RCCL_IB_QP_DEPTH_MULTIPLIER=8"
+      - "NCCL_GDR_FLUSH_DISABLE=0"
+      - "MALLOC_PERTURB_=165"
 
 execution_settings:
   mpi_launch:
@@ -400,6 +508,10 @@ execution_settings:
     quick_env_netib_xfer_trace: 1200
     quick_env_netib_xfer_log_ranks: 1200
     quick_env_pat_shared_qps_off: 1200
+    quick_env_qpshare_ngroups1: 1200
+    quick_env_qpshare_ngroups2: 1200
+    quick_env_qpshare_ngroups16: 1200
+    quick_env_qpshare_depth_ceiling: 1200
     standard: 1200
     comprehensive: 1200
     comprehensive_disable_env: 1200
@@ -411,3 +523,6 @@ execution_settings:
     full_pow2_tree_ll: 1200
     full_pow2_ring_ll128: 1200
     full_pow2_tree_ll128: 1200
+    qpshare_stress: 3600
+    qpshare_stress_churn: 3600
+    qpshare_heap_poison: 1200
