@@ -13,7 +13,7 @@ created in the *current working directory*. The directory is reused across runs 
 work is incremental:
 
   1. Resolve the latest nightly ROCm multi-arch tarball from
-     https://rocm.nightlies.amd.com/tarball-multi-arch/. It is downloaded and
+     https://nightly.repo.amd.com/rocm/core/tarball/. It is downloaded and
      (re)extracted into ``<workdir>/rocm`` (ROCM_PATH, providing
      ``bin/rocprof-sys-*``) ONLY when a newer nightly is available than the one
      already extracted.
@@ -94,8 +94,8 @@ from typing import NoReturn
 # Constants
 # --------------------------------------------------------------------------- #
 
-NIGHTLY_TARBALL_INDEX = "https://rocm.nightlies.amd.com/tarball-multi-arch/"
-NIGHTLY_TARBALL_BASE = "https://rocm.nightlies.amd.com/tarball-multi-arch"
+NIGHTLY_TARBALL_INDEX = "https://nightly.repo.amd.com/rocm/core/tarball/"
+NIGHTLY_TARBALL_BASE = "https://nightly.repo.amd.com/rocm/core/tarball"
 ROCM_SYSTEMS_REPO = "https://github.com/ROCm/rocm-systems.git"
 PROJECT_SUBDIR = "projects/rocprofiler-systems"
 
