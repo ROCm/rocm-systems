@@ -13,12 +13,28 @@
 #include "nccl.h"
 
 #include "fail_loud.h"
+#include "register_stubs.h"
 
-ncclResult_t ncclRegisterCollBuffers(struct ncclComm*, struct ncclTaskColl*, void**, void**,
-                                     struct ncclIntruQueue<struct ncclCommCallback,
-                                                           &ncclCommCallback::next>*,
-                                     bool*) {
+// First call in ncclTasksRegAndEnqueue's task loop, so the rest of that loop is
+// unreachable while it aborts. Hookable seam, defaulting to the fail-loud floor.
+static ncclResult_t DefaultRegisterCollBuffers(struct ncclComm*, struct ncclTaskColl*, void**,
+                                              void**,
+                                              struct ncclIntruQueue<struct ncclCommCallback,
+                                                                    &ncclCommCallback::next>*,
+                                              bool*) {
   FailLoudUnfaked("register_stubs", "ncclRegisterCollBuffers");
+}
+
+ncclRegisterCollBuffersFn g_ncclRegisterCollBuffers = DefaultRegisterCollBuffers;
+
+void ResetRegisterStubs() { g_ncclRegisterCollBuffers = DefaultRegisterCollBuffers; }
+
+ncclResult_t ncclRegisterCollBuffers(struct ncclComm* comm, struct ncclTaskColl* task,
+                                     void** regBufSend, void** regBufRecv,
+                                     struct ncclIntruQueue<struct ncclCommCallback,
+                                                           &ncclCommCallback::next>* cleanupQueue,
+                                     bool* needConnect) {
+  return g_ncclRegisterCollBuffers(comm, task, regBufSend, regBufRecv, cleanupQueue, needConnect);
 }
 ncclResult_t ncclRegisterCollNvlsBuffers(struct ncclComm*, struct ncclTaskColl*, void**, void**,
                                          struct ncclIntruQueue<struct ncclCommCallback,

@@ -118,7 +118,7 @@ Enable the race detector and direct output to files:
 
 ``` bash
 RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
-  rocjitsu --config configs/amdgpu_cdna4_kmd.json -- ./my_app
+  rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./my_app
 # Race reports are written to /tmp/output/race.log
 ```
 
@@ -139,7 +139,7 @@ MMA (matrix multiply-accumulate) instruction usage:
 The plugin name for file sinks is `logging`.
 
 ``` bash
-RJ_LOG=1 rocjitsu --config configs/amdgpu_cdna4_kmd.json -- ./my_app
+RJ_LOG=1 rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./my_app
 ```
 
 ## Usage examples
@@ -147,21 +147,21 @@ RJ_LOG=1 rocjitsu --config configs/amdgpu_cdna4_kmd.json -- ./my_app
 Interactive use with default stderr output:
 
 ``` bash
-RJ_RACE=1 rocjitsu --config configs/amdgpu_cdna4_kmd.json -- ./my_app
+RJ_RACE=1 rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./my_app
 ```
 
 Save race reports to files for CI or scripted workflows:
 
 ``` bash
 RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
-  rocjitsu --config configs/amdgpu_cdna4_kmd.json -- ./my_app
+  rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./my_app
 ```
 
 Send output to both stderr and a file simultaneously:
 
 ``` bash
 RJ_RACE=1 RJ_SINKS=stderr,file RJ_SINK_DIR=/tmp/output \
-  rocjitsu --config configs/amdgpu_cdna4_kmd.json -- ./my_app
+  rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./my_app
 ```
 
 ## Related pages
