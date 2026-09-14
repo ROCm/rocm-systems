@@ -66,25 +66,38 @@ struct production_pmc_registrar
 {
     void register_gpu_pmc(std::uint32_t rccl_device_idx)
     {
-        constexpr size_t EVENT_CODE  = 0;
-        constexpr size_t INSTANCE_ID = 0;
-        constexpr auto*  LONG_DESCRIPTION =
+        constexpr size_t k_event_code  = 0;
+        constexpr size_t k_instance_id = 0;
+        constexpr auto*  k_long_description =
             "Per-GPU RCCL communication data with transfer_bytes in extdata JSON";
-        constexpr auto* COMPONENT   = "";
-        constexpr auto* BLOCK       = "";
-        constexpr auto* EXPRESSION  = "";
-        constexpr auto* MSG         = "bytes";
-        constexpr auto* TARGET_ARCH = "GPU";
+        constexpr auto* k_component   = "";
+        constexpr auto* k_block       = "";
+        constexpr auto* k_expression  = "";
+        constexpr auto* k_msg         = "bytes";
+        constexpr auto* k_target_arch = "GPU";
 
         auto register_rccl_info = [&](const char* direction_label,
                                       const char* description) {
             const std::string label =
                 fmt::format("{} GPU {}", direction_label, rccl_device_idx);
             trace_cache::get_metadata_registry().add_pmc_info(
-                { agent_type::GPU, rccl_device_idx, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-                  label.c_str(), description,
-                  trait::name<category::comm_data>::description, LONG_DESCRIPTION,
-                  COMPONENT, MSG, trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
+                { .type             = agent_type::gpu,
+                  .agent_type_index = rccl_device_idx,
+                  .target_arch      = k_target_arch,
+                  .event_code       = k_event_code,
+                  .instance_id      = k_instance_id,
+                  .name             = label,
+                  .symbol           = description,
+                  .description      = trait::name<category::comm_data>::description,
+                  .long_description = k_long_description,
+                  .component        = k_component,
+                  .units            = k_msg,
+                  .value_type       = trace_cache::ABSOLUTE,
+                  .block            = k_block,
+                  .expression       = k_expression,
+                  .is_constant      = 0,
+                  .is_derived       = 0,
+                  .extdata          = "{}" });
         };
 
         register_rccl_info(rccl_send::label,
@@ -229,7 +242,7 @@ cache_rccl_comm_data_events(std::uint32_t rccl_device_idx, size_t bytes,
         static_cast<size_t>(category_enum_id<category::comm_data>::value), Track::label,
         timestamp_ns, event_metadata.c_str(), stack_id, parent_stack_id, correlation_id,
         call_stack, line_info, rccl_device_idx,
-        static_cast<std::uint8_t>(agent_type::GPU), pmc_label.c_str(),
+        static_cast<std::uint8_t>(agent_type::gpu), pmc_label.c_str(),
         static_cast<double>(cumulative), std::nullopt });
 }
 
