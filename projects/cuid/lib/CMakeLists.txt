@@ -22,11 +22,6 @@ message("")
 set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(INC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-# When built as part of the top-level project, OpenSSL is already resolved
-# (either from the system or via FetchContent). QUIET prevents a redundant
-# hard failure when targets are already available through FetchContent.
-find_package(OpenSSL QUIET)
-
 set(CUID_SOURCES
     ${SRC_DIR}/cuid.cc
     ${SRC_DIR}/cuid_util.cc
@@ -39,6 +34,7 @@ set(CUID_SOURCES
     ${SRC_DIR}/cuid_platform.cc
     ${SRC_DIR}/cuid_file.cc
     ${SRC_DIR}/hmac.cc
+    ${SRC_DIR}/sha256.cc
     ${SRC_DIR}/pci_util.cc
     ${SRC_DIR}/acpi_parser.cc
     ${SRC_DIR}/smbios_util.cc
@@ -57,6 +53,7 @@ set(CUID_HEADERS
     ${SRC_DIR}/cuid_platform.h
     ${SRC_DIR}/cuid_file.h
     ${SRC_DIR}/hmac.h
+    ${SRC_DIR}/sha256.h
     ${SRC_DIR}/ipc_protocol.h
     ${SRC_DIR}/pci_util.h
     ${SRC_DIR}/acpi_parser.h
@@ -69,24 +66,17 @@ add_library(amdcuid_static STATIC ${CUID_SOURCES} ${CUID_HEADERS})
 
 set_property(TARGET amdcuid_static PROPERTY POSITION_INDEPENDENT_CODE ON)
 
-target_include_directories(
-    amdcuid_static
-    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
+target_include_directories(amdcuid_static PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 # Pass the version-independent shared config directory to the library at compile
 # time. All installed versions of the library must agree on this path so that
 # the HMAC key is shared and CUIDs remain stable across version upgrades.
-target_compile_definitions(
-    amdcuid_static
-    PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
-)
+target_compile_definitions(amdcuid_static PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}")
 
+# SHA-256/HMAC comes from src/sha256.cc, so the only external dependency left
+# is the platform CSPRNG: bcrypt on Windows, getrandom(2)//dev/urandom on POSIX.
 if(WIN32)
     target_link_libraries(amdcuid_static PUBLIC bcrypt)
-else()
-    target_link_libraries(amdcuid_static PUBLIC OpenSSL::Crypto)
 endif()
 
 # Static library
@@ -103,11 +93,7 @@ install(
 
 # Install public headers
 set(PUBLIC_HEADERS ${INC_DIR}/amd_cuid.h)
-install(
-    FILES ${PUBLIC_HEADERS}
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${AMDCUID}
-    COMPONENT ${LIB_COMPONENT}
-)
+install(FILES ${PUBLIC_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${AMDCUID} COMPONENT ${LIB_COMPONENT})
 
 if(UNIX AND NOT APPLE)
     configure_file(

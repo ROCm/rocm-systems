@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/env_vars.hpp"
+#include "common/string_utility.hpp"
 
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -32,37 +33,6 @@ std::string
 include_process_id_in_filename(std::string_view filename);
 }  // namespace logger_detail
 
-namespace
-{
-
-inline __attribute__((always_inline)) auto
-to_lower(std::string_view s)
-{
-    std::string result;
-    result.reserve(s.size());
-    for(const char c : s)
-    {
-        result += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    }
-    return result;
-}
-
-inline bool
-parse_boolean_env(const char* env)
-{
-    if(!env)
-    {
-        return false;
-    }
-    constexpr std::array<const char*, 4> true_values = { "1", "on", "true", "yes" };
-
-    auto lower = to_lower(env);
-    return std::any_of(true_values.begin(), true_values.end(),
-                       [&](const std::string& value) { return value == lower; });
-}
-
-}  // namespace
-
 struct logger_settings_t
 {
     logger_settings_t()
@@ -71,10 +41,13 @@ struct logger_settings_t
     {
         const char* rocprofsys_monochrome_env = std::getenv(env_vars::MONOCHROME);
         const char* monochrome_env            = std::getenv("MONOCHROME");
-        if(rocprofsys_monochrome_env || monochrome_env)
+        if(rocprofsys_monochrome_env)
         {
-            m_monochrome = parse_boolean_env(rocprofsys_monochrome_env) ||
-                           parse_boolean_env(monochrome_env);
+            m_monochrome = utility::string::to_bool(rocprofsys_monochrome_env);
+        }
+        if(monochrome_env)
+        {
+            m_monochrome = m_monochrome || utility::string::to_bool(monochrome_env);
         }
     }
 
@@ -90,7 +63,7 @@ struct logger_settings_t
 
     spdlog::level::level_enum parse_level(std::string_view level)
     {
-        const auto lower = to_lower(level);
+        const auto lower = utility::string::to_lower(level);
 
         if(lower == "trace") return spdlog::level::trace;
         if(lower == "debug") return spdlog::level::debug;

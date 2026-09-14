@@ -15,6 +15,14 @@ There are two modes of counter collection service:
 
 This topic explains how to setup dispatch and device counting and use common counter collection APIs. For details on the APIs including the less commonly used counter collection APIs, see the API library. For fully functional examples of both dispatch and device counting, see `Samples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk/samples>`_.
 
+When a tool needs more counters than fit in one hardware pass, it can collect groups across
+successive application runs, rotate groups across successive dispatches, or **replay each dispatch**
+in-process with device memory restored between passes. Kernel replay is a callback tracing domain
+(:ref:`kernel-replay-sdk-api`), not a third counting mode: dispatch counting still supplies the
+counter records; replay decides how many times the dispatch runs. Custom tools subscribe
+to the domain directly (:ref:`using-kernel-replay`). ``rocprofv3`` exposes that as
+``--replay-mode kernel --kernel-replay-beta-enabled`` (:ref:`using-kernel-replay-rocprofv3`).
+
 Definitions
 -----------
 

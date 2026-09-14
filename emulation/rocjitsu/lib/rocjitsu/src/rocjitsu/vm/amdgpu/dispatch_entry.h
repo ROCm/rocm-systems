@@ -175,7 +175,12 @@ struct DispatchEntry {
   /// What this entry carries. Every site that queues an entry must set it.
   DispatchPacketKind kind = DispatchPacketKind::Unset;
   bool host_signal = false;
-  bool barrier_bit = false;
+  /// Header barrier bit: this packet waits for all earlier packets in its queue.
+  bool wait_for_predecessors = false;
+  /// Packet-type ordering: following packets cannot pass this packet.
+  bool blocks_following = false;
+  /// Completion hooks and signal have already been delivered.
+  bool completion_notified = false;
   bool execution_begun = false;
   /// The packet carried an acquire fence of at least agent scope. Recorded on the
   /// entry so that every XCD running part of the grid can invalidate its own caches

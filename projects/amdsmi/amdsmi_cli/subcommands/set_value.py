@@ -1215,24 +1215,21 @@ class SetValueCommands:
                         str(json.dumps(accelerator_set_choices, indent=4)),
                     )
                     if args.compute_partition in accelerator_profiles["profile_types"]:
-                        compute_partition = amdsmi_interface.AmdSmiComputePartitionType[
-                            args.compute_partition
-                        ]
                         index = accelerator_profiles["profile_types"].index(args.compute_partition)
                         attempted_to_set = f"Attempted to set accelerator partition to {args.compute_partition} (profile #{accelerator_profiles['profile_indices'][int(index)]}) on {gpu_string}"
                         user_requested_partition_args = f"{args.compute_partition} (profile #{accelerator_profiles['profile_indices'][int(index)]})"
-                        amdsmi_interface.amdsmi_set_gpu_compute_partition(
-                            args.gpu, compute_partition
+                        amdsmi_interface.amdsmi_set_gpu_accelerator_partition_profile(
+                            args.gpu, int(accelerator_profiles["profile_indices"][index])
                         )
                     elif args.compute_partition in accelerator_profiles["profile_indices"]:
-                        compute_partition = int(args.compute_partition)
+                        accelerator_partition = int(args.compute_partition)
                         index = accelerator_profiles["profile_indices"].index(
                             args.compute_partition
                         )
                         attempted_to_set = f"Attempted to set accelerator partition to {accelerator_profiles['profile_types'][int(index)]} (profile #{args.compute_partition}) on {gpu_string}"
                         user_requested_partition_args = f"{accelerator_profiles['profile_types'][int(index)]} (profile #{args.compute_partition})"
                         amdsmi_interface.amdsmi_set_gpu_accelerator_partition_profile(
-                            args.gpu, compute_partition
+                            args.gpu, accelerator_partition
                         )
                     else:
                         raise ValueError(

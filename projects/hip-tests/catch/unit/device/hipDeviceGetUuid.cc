@@ -179,7 +179,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetUuid_From_RocmInfo) {
     size_t start = 0;  // The devices will be reported from 0..
     std::map<int, std::string> uuid_map_copy;
     for (auto device : visible_devices) {
-      uuid_map_copy[start] = uuid_map[device];
+      uuid_map_copy[start++] = uuid_map[device];
     }
     uuid_map = uuid_map_copy;
   }
