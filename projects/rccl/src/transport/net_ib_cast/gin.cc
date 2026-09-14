@@ -604,8 +604,9 @@ ncclResult_t IbCastRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t s
   int registered = 0;
 
   *mhandle = NULL;
-  NCCLCHECK(ncclCalloc(&ginMrHandle, 1));
   NCCLCHECKGOTO(ncclCalloc(&registrations, cComm->nranks), ret, fail);
+  ret = ncclCalloc(&ginMrHandle, 1);
+  if (ret != ncclSuccess) goto reconcile;
   // calloc zeroes nSegments; fail paths below only dereg `registered` complete
   // handles, so a half-built ncclIbMrHandle is never passed to deregMr.
 
@@ -697,7 +698,7 @@ reconcile:
   localRegistration.version = IBCAST_RMA_REGISTRATION_VERSION;
   localRegistration.status = ret;
   localRegistration.nSegments = nSeg;
-  if (nSeg >= 1 && nSeg <= NCCL_RMA_MAX_SEGMENTS)
+  if (ginMrHandle && nSeg >= 1 && nSeg <= NCCL_RMA_MAX_SEGMENTS)
     memcpy(localRegistration.segOff, ginMrHandle->segOff, sizeof(size_t) * (nSeg + 1));
   NCCLCHECKGOTO(cComm->allGather(cComm, &localRegistration, registrations, sizeof(localRegistration)), ret, fail);
 
@@ -859,6 +860,30 @@ static void IbCastRmaReleaseWrs(struct ncclIbRequest* req) {
   }
 }
 
+// On a prefix post, keep the request so CQ can return credits for accepted WRs.
+static ncclResult_t IbCastRmaPostWrs(struct ncclIbQp* qp, struct ncclIbRequest* req, struct ibv_send_wr* wr, int nWr) {
+  if (nWr <= 0) return ncclSuccess;
+  struct ibv_send_wr* bad_wr = nullptr;
+  ncclResult_t ret = wrap_ibv_post_send(qp->qp, wr, &bad_wr);
+  if (ret == ncclSuccess) return ncclSuccess;
+  int posted = 0;
+  for (struct ibv_send_wr* cur = wr; cur && posted < nWr; cur = cur->next) {
+    if (cur == bad_wr) break;
+    posted++;
+  }
+  if (posted == 0) {
+    IbCastRmaReleaseWrs(req);
+    return ret;
+  }
+  int unposted = nWr - posted;
+  if (unposted > 0 && req->rmaNwrs >= unposted) {
+    req->base->rmaWrsOutstanding -= unposted;
+    req->rmaNwrs -= unposted;
+  }
+  WARN("NET/IB-CAST/RMA: ibv_post_send failed after %d/%d WRs; leaving request for CQ drain", posted, nWr);
+  return ret;
+}
+
 ncclResult_t IbCastRmaIbProxyIPut(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
                                   uint64_t dstOff, void* dstMhandle, uint32_t rank, uint32_t optFlags,
                                   void** request) {
@@ -905,16 +930,12 @@ ncclResult_t IbCastRmaIbProxyIPut(void* ginCtx, int context, uint64_t srcOff, vo
   }
   if (nWr > 0) IbCastAddEvent(req, qp->devIndex);
 
-  if (nWr > 0) {
-    struct ibv_send_wr* bad_wr;
-    ret = wrap_ibv_post_send(qp->qp, &wr[0], &bad_wr);
-    if (ret != ncclSuccess) {
-      IbCastRmaReleaseWrs(req);
-      (void)IbCastFreeRequest(req);
-      return ret;
-    }
+  ret = IbCastRmaPostWrs(qp, req, &wr[0], nWr);
+  if (ret != ncclSuccess) {
+    if (req->rmaNwrs == 0) (void)IbCastFreeRequest(req);
+    else *request = req;
+    return ret;
   }
-
   *request = req;
   return ncclSuccess;
 }
@@ -965,16 +986,12 @@ ncclResult_t IbCastRmaIbProxyIGet(void* ginCtx, int context, uint64_t remoteOffs
   }
   if (nWr > 0) IbCastAddEvent(req, qp->devIndex);
 
-  if (nWr > 0) {
-    struct ibv_send_wr* bad_wr;
-    ret = wrap_ibv_post_send(qp->qp, &wr[0], &bad_wr);
-    if (ret != ncclSuccess) {
-      IbCastRmaReleaseWrs(req);
-      (void)IbCastFreeRequest(req);
-      return ret;
-    }
+  ret = IbCastRmaPostWrs(qp, req, &wr[0], nWr);
+  if (ret != ncclSuccess) {
+    if (req->rmaNwrs == 0) (void)IbCastFreeRequest(req);
+    else *request = req;
+    return ret;
   }
-
   *request = req;
   return ncclSuccess;
 }
@@ -1067,11 +1084,10 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
     return ret;
   }
   IbCastAddEvent(req, devIndex);
-  struct ibv_send_wr* bad_wr;
-  ret = wrap_ibv_post_send(qp->qp, nPut > 0 ? &wr[0] : sigWr, &bad_wr);
+  ret = IbCastRmaPostWrs(qp, req, nPut > 0 ? &wr[0] : sigWr, nPut + 1);
   if (ret != ncclSuccess) {
-    IbCastRmaReleaseWrs(req);
-    (void)IbCastFreeRequest(req);
+    if (req->rmaNwrs == 0) (void)IbCastFreeRequest(req);
+    else *request = req;
     return ret;
   }
   *request = req;
@@ -1144,17 +1160,13 @@ ncclResult_t IbCastRmaIbProxyIFlush(void* ginCtx, int context, void* mhandle, ui
 
   TRACE(NCCL_NET, "NET/IB: %s: Posting %d-segment flush request (req=%p, comm=%p)", __func__, nWr, req, req->base);
   TIME_START(4);
-  if (nWr > 0) {
-    struct ibv_send_wr* bad_wr;
-    ret = wrap_ibv_post_send(qp->qp, &wr[0], &bad_wr);
-    if (ret != ncclSuccess) {
-      IbCastRmaReleaseWrs(req);
-      (void)IbCastFreeRequest(req);
-      return ret;
-    }
-  }
+  ret = IbCastRmaPostWrs(qp, req, &wr[0], nWr);
   TIME_STOP(4);
-
+  if (ret != ncclSuccess) {
+    if (req->rmaNwrs == 0) (void)IbCastFreeRequest(req);
+    else *request = req;
+    return ret;
+  }
   *request = req;
   return ncclSuccess;
 }
