@@ -661,6 +661,12 @@ ncclResult_t IbCastRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t s
       segPtr += thisLen;
       remaining -= thisLen;
     }
+    if (remaining != 0) {
+      WARN("NET/IB-CAST/RMA: enumerated %d/%d segments for buffer %p but %zu bytes remain unregistered", registered,
+           nSeg, data, remaining);
+      ret = ncclInvalidUsage;
+      goto reconcile;
+    }
     INFO(NCCL_NET | NCCL_REG, "NET/IB-CAST/RMA: registered multi-segment buffer %p size %zu as %d DMA-BUF MRs", data,
          size, nSeg);
 #else
