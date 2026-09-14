@@ -2974,4 +2974,160 @@ TEST(RcclDdaTierThresholds, Gfx1250_EnvZeroDisablesLlTier)
 
 }
 
+
+// ---------------------------------------------------------------------------
+// rcclSelectAlltoAll: decision per size-band (query=true, no GPU required).
+//
+// Tests exercise the priority chain for gfx1250 (fabric LL/LL128/VMM tiers)
+// and gfx950/gfx942 (DDA-IPC tier), then the direct p2p fallback for an arch
+// that has no DDA.
+//
+// CE_REGISTERED is excluded: ncclCeAvailable calls ncclCeImplemented which
+// calls hipDriverGetVersion() -- not available in a no-GPU unit-test process.
+// That path is covered by CE integration tests.
+//
+// The helper extends InitDdaDecisionComm with the fabric-resource sentinels
+// that the DDA eligibility predicates require.
+namespace
+{
+void InitA2ADecisionComm(ncclComm& comm, const char* arch, int nRanks)
+{
+    InitDdaDecisionComm(comm, arch, nRanks, /*nNodes=*/1, /*symmetricSupport=*/false);
+    comm.archThresholds        = rcclGetArchThresholds(arch);
+    // Sentinel pointers satisfy the non-null checks in the fabric eligibility
+    // predicates (the values are never dereferenced by query=true calls).
+    comm.bootstrap             = reinterpret_cast<void*>(0x1);
+    comm.ddaFabricMemHandler   = reinterpret_cast<ncclFabricMemHandler*>(0x2);
+    comm.ddaScratch            = reinterpret_cast<void*>(0x3);
+    comm.ddaPeerPtrsDev        = reinterpret_cast<void*>(0x4);
+    comm.ddaScratchBytes       = std::numeric_limits<size_t>::max();
+    comm.ddaFabricMaxBlocks    = DDA_FABRIC_MAXBLOCKS;
+    comm.ddaFabricBarrierState =
+        reinterpret_cast<nccl_dda_detail::DdaFabricBarrierState*>(0x5);
+    comm.ddaLLEpochDev         = reinterpret_cast<uint32_t*>(0x6);
+    comm.ddaLLEpochLen         = DDA_FABRIC_MAXBLOCKS;
+}
+
+ncclResult_t SelectA2A(ncclComm& comm, size_t totalBytes, rcclCollDecision& out)
+{
+    // count is per-peer bytes / sizeof(float); totalBytes = count * sizeof(float) * nRanks
+    size_t count = totalBytes / sizeof(float) / comm.nRanks;
+    return rcclSelectAlltoAll(&comm, /*sendbuff=*/nullptr, /*recvbuff=*/nullptr,
+                              count, ncclFloat32, /*stream=*/nullptr,
+                              /*query=*/true, /*graphCapturingHint=*/false, &out);
+}
+} // namespace
+
+// gfx1250, message at the DDA-LL ceiling (ddaLLMax[A2A] = 64 KiB total):
+// rcclSelectAlltoAll must choose RCCL_DDA_FABRIC_LL.
+TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
+{
+    ncclComm            comm{};
+    InitA2ADecisionComm(comm, "gfx1250", 4);
+    const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx1250");
+    ASSERT_NE(tbl, nullptr);
+    const size_t llMax = tbl->ddaLLMax[ncclFuncAlltoAll];
+    ASSERT_GT(llMax, 0ul) << "gfx1250 must have a non-zero LL cap for AlltoAll";
+
+    // Message at the ceiling; per-rank chunk is 16-byte aligned (LL eligibility).
+    rcclCollDecision dec{};
+    ASSERT_EQ(SelectA2A(comm, llMax, dec), ncclSuccess);
+    EXPECT_EQ(dec.algo, RCCL_DDA_FABRIC_LL);
+}
+
+// gfx1250, message just above the LL ceiling and within the LL128 band
+// (ddaLL128Max[A2A] = 1 MiB total):
+// rcclSelectAlltoAll must choose RCCL_DDA_FABRIC_LL128.
+TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
+{
+    ncclComm            comm{};
+    InitA2ADecisionComm(comm, "gfx1250", 4);
+    const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx1250");
+    ASSERT_NE(tbl, nullptr);
+    const size_t llMax    = tbl->ddaLLMax[ncclFuncAlltoAll];
+    const size_t ll128Max = tbl->ddaLL128Max[ncclFuncAlltoAll];
+    ASSERT_GT(ll128Max, llMax) << "gfx1250 LL128 cap must exceed LL cap for AlltoAll";
+
+    // One 16*nRanks step above the LL ceiling, still within LL128.
+    // The alignment ensures each per-rank chunk is a multiple of 16 bytes
+    // (required by both LL128 and LL eligibility predicates).
+    const size_t align      = 16u * (size_t)comm.nRanks;
+    const size_t totalBytes = ((llMax + align) / align) * align;
+    ASSERT_LE(totalBytes, ll128Max);
+
+    rcclCollDecision dec{};
+    ASSERT_EQ(SelectA2A(comm, totalBytes, dec), ncclSuccess);
+    EXPECT_EQ(dec.algo, RCCL_DDA_FABRIC_LL128);
+}
+
+// gfx1250, message above all DDA caps (ddaVmmMax[A2A] = 0 disables VMM;
+// ddaLL128Max[A2A] = 1 MiB): anything above 1 MiB falls to Direct p2p.
+TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
+{
+    ncclComm            comm{};
+    InitA2ADecisionComm(comm, "gfx1250", 4);
+    const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx1250");
+    ASSERT_NE(tbl, nullptr);
+    ASSERT_EQ(tbl->ddaVmmMax[ncclFuncAlltoAll], 0ul)
+        << "gfx1250 VMM must be disabled for AlltoAll";
+    const size_t ll128Max = tbl->ddaLL128Max[ncclFuncAlltoAll];
+
+    const size_t align      = 16u * (size_t)comm.nRanks;
+    const size_t totalBytes = ((ll128Max + align) / align) * align;
+
+    rcclCollDecision dec{};
+    ASSERT_EQ(SelectA2A(comm, totalBytes, dec), ncclSuccess);
+    EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
+}
+
+// gfx950, message at its DDA-IPC ceiling (ddaVmmMax[A2A] = 4 MiB):
+// rcclSelectAlltoAll must choose RCCL_DDA_IPC.
+TEST(RcclAlltoAllDecision, Gfx950_DdaIpc_Band)
+{
+    ncclComm            comm{};
+    InitA2ADecisionComm(comm, "gfx950", 8);
+    const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx950");
+    ASSERT_NE(tbl, nullptr);
+    const size_t ddaMax = tbl->ddaVmmMax[ncclFuncAlltoAll];
+    ASSERT_GT(ddaMax, 0ul) << "gfx950 must have a non-zero DDA-IPC cap for AlltoAll";
+
+    rcclCollDecision dec{};
+    ASSERT_EQ(SelectA2A(comm, ddaMax, dec), ncclSuccess);
+    EXPECT_EQ(dec.algo, RCCL_DDA_IPC);
+}
+
+// gfx950, message above its 4 MiB DDA-IPC cap: falls to RCCL_DIRECT_ALLTOALL.
+TEST(RcclAlltoAllDecision, Gfx950_AboveDdaCap_DirectFallback)
+{
+    ncclComm            comm{};
+    InitA2ADecisionComm(comm, "gfx950", 8);
+    const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx950");
+    ASSERT_NE(tbl, nullptr);
+    const size_t ddaMax = tbl->ddaVmmMax[ncclFuncAlltoAll];
+
+    const size_t align      = 16u * (size_t)comm.nRanks;
+    const size_t totalBytes = ((ddaMax + align) / align) * align;
+
+    rcclCollDecision dec{};
+    ASSERT_EQ(SelectA2A(comm, totalBytes, dec), ncclSuccess);
+    EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
+}
+
+// An arch with no DDA support (gfx90a): any size must fall straight to
+// RCCL_DIRECT_ALLTOALL because rcclDdaEnabled returns false for unknown archs.
+TEST(RcclAlltoAllDecision, UnsupportedArch_DirectFallback)
+{
+    ncclComm comm{};
+    // No fabric resources needed: rcclDdaEnabled exits before any eligibility
+    // predicate is reached.
+    InitDdaDecisionComm(comm, "gfx90a", 8, /*nNodes=*/1, /*symmetricSupport=*/false);
+
+    rcclCollDecision dec{};
+    ASSERT_EQ(rcclSelectAlltoAll(&comm, nullptr, nullptr, /*count=*/1024,
+                                 ncclFloat32, nullptr, /*query=*/true,
+                                 /*graphCapturingHint=*/false, &dec),
+              ncclSuccess);
+    EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
+}
+
 } // namespace RcclUnitTesting
