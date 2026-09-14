@@ -810,6 +810,44 @@ static ncclResult_t ncclRmaIbProxyGetRecvComm(struct ncclRmaIbProxyCtx* rmaProxy
   return ncclSuccess;
 }
 
+// wrap_ibv_post_send returns ncclSystemError on any nonzero ibv_post_send, including
+// after a prefix of the chain is accepted. Only the last WR is signaled, so
+// NCCLCHECK-and-return would leak the request slot and leave unsignaled WRs
+// without a CQE owner. Count how many WRs the HCA accepted.
+static ncclResult_t ncclRmaPostWrs(struct ncclIbQp* qp, struct ibv_send_wr* wr, int nWr, int* posted) {
+  *posted = 0;
+  if (nWr <= 0) return ncclSuccess;
+  struct ibv_send_wr* bad_wr = NULL;
+  ncclResult_t ret = wrap_ibv_post_send(qp->qp, wr, &bad_wr);
+  if (ret == ncclSuccess) {
+    *posted = nWr;
+    return ncclSuccess;
+  }
+  int nPosted = 0;
+  for (struct ibv_send_wr* cur = wr; cur && nPosted < nWr; cur = cur->next) {
+    if (cur == bad_wr) break;
+    nPosted++;
+  }
+  *posted = nPosted;
+  if (nPosted > 0) {
+    WARN("NET/IB/RMA: ibv_post_send failed after %d/%d WRs; leaving request for CQ drain", nPosted, nWr);
+  }
+  return ret;
+}
+
+// If nothing posted, free the slot and leave *request unset. If a prefix posted,
+// keep the request so Test() can drain the CQE (or wait for the signaled tail).
+static ncclResult_t ncclRmaCompletePostedRequest(struct ncclIbRequest* req, int devIndex, ncclResult_t postRet,
+                                                int posted, void** request) {
+  if (posted > 0) ncclIbAddEvent(req, devIndex);
+  if (postRet != ncclSuccess && posted == 0) {
+    (void)ncclIbFreeRequest(req);
+    return postRet;
+  }
+  *request = req;
+  return postRet;
+}
+
 ncclResult_t ncclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
                                 uint64_t dstOff, void* dstMhandle, uint32_t rank, uint32_t optFlags, void** request) {
   (void)optFlags;
@@ -849,17 +887,12 @@ ncclResult_t ncclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void
     wr[i].wr_id = req - comm->base.reqs;
     wr[i].send_flags = ncclRmaWrIsSignaled(i, nWr) ? IBV_SEND_SIGNALED : 0;
   }
-  if (nWr > 0) ncclIbAddEvent(req, qp->devIndex);
 
   // size==0 yields nWr==0: nothing to post; the request completes in test()
   // (events[0]==0). Posting wr[0] here would submit an uninitialized WR.
-  if (nWr > 0) {
-    struct ibv_send_wr* bad_wr;
-    NCCLCHECK(wrap_ibv_post_send(qp->qp, &wr[0], &bad_wr));
-  }
-
-  *request = req;
-  return ncclSuccess;
+  int posted = 0;
+  ncclResult_t postRet = ncclRmaPostWrs(qp, &wr[0], nWr, &posted);
+  return ncclRmaCompletePostedRequest(req, qp->devIndex, postRet, posted, request);
 }
 
 ncclResult_t ncclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset, void* remoteMhandle, size_t size,
@@ -903,16 +936,11 @@ ncclResult_t ncclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset
     wr[i].wr_id = req - comm->base.reqs;
     wr[i].send_flags = ncclRmaWrIsSignaled(i, nWr) ? IBV_SEND_SIGNALED : 0;
   }
-  if (nWr > 0) ncclIbAddEvent(req, qp->devIndex);
 
   // size==0 yields nWr==0: nothing to post; the request completes in test().
-  if (nWr > 0) {
-    struct ibv_send_wr* bad_wr;
-    NCCLCHECK(wrap_ibv_post_send(qp->qp, &wr[0], &bad_wr));
-  }
-
-  *request = req;
-  return ncclSuccess;
+  int posted = 0;
+  ncclResult_t postRet = ncclRmaPostWrs(qp, &wr[0], nWr, &posted);
+  return ncclRmaCompletePostedRequest(req, qp->devIndex, postRet, posted, request);
 }
 
 ncclResult_t ncclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
@@ -1004,12 +1032,9 @@ ncclResult_t ncclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff
 
   if (nPut > 0) wr[nPut - 1].next = sigWr;
 
-  // Send the put and the signal in one go
-  struct ibv_send_wr* bad_wr;
-  NCCLCHECK(wrap_ibv_post_send(qp->qp, nPut > 0 ? &wr[0] : sigWr, &bad_wr));
-  ncclIbAddEvent(req, qp->devIndex);
-  *request = req;
-  return ncclSuccess;
+  int posted = 0;
+  ncclResult_t postRet = ncclRmaPostWrs(qp, nPut > 0 ? &wr[0] : sigWr, nPut + 1, &posted);
+  return ncclRmaCompletePostedRequest(req, qp->devIndex, postRet, posted, request);
 }
 
 ncclResult_t ncclRmaIbProxyTest(void* collComm, void* request, int* done) {
@@ -1106,18 +1131,12 @@ ncclResult_t ncclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint
     wr[i].wr_id = req - comm->base.reqs;
     wr[i].send_flags = ncclRmaWrIsSignaled(i, nWr) ? IBV_SEND_SIGNALED : 0;
   }
-  if (nWr > 0) ncclIbAddEvent(req, qp->devIndex);
-
   TRACE(NCCL_NET, "NET/IB: %s: Posting %d-segment flush request (req=%p, comm=%p)", __func__, nWr, req, req->base);
   TIME_START(4);
-  if (nWr > 0) {
-    struct ibv_send_wr* bad_wr;
-    NCCLCHECK(wrap_ibv_post_send(qp->qp, &wr[0], &bad_wr));
-  }
+  int posted = 0;
+  ncclResult_t postRet = ncclRmaPostWrs(qp, &wr[0], nWr, &posted);
   TIME_STOP(4);
-
-  *request = req;
-  return ncclSuccess;
+  return ncclRmaCompletePostedRequest(req, qp->devIndex, postRet, posted, request);
 }
 
 // No support for NCCL_IB_SPLIT_DATA_ON_QPS or NCCL_IB_MERGE_NICS
