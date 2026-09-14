@@ -118,7 +118,7 @@ struct hipfile_traits
         }
 
         const auto filter = get_device_filter<Settings>();
-        if(filter.mode == device_selection_mode::NONE)
+        if(filter.mode == device_selection_mode::none)
         {
             LOG_DEBUG("{} sampling disabled via configuration", device_name);
             return entries;
@@ -147,8 +147,8 @@ struct hipfile_traits
         {
             const auto index = device->get_index();
 
-            const bool should_include = (filter.mode == device_selection_mode::ALL) ||
-                                        (filter.mode == device_selection_mode::SPECIFIC &&
+            const bool should_include = (filter.mode == device_selection_mode::all) ||
+                                        (filter.mode == device_selection_mode::specific &&
                                          filter.indices.count(index) > 0);
 
             if(!should_include)

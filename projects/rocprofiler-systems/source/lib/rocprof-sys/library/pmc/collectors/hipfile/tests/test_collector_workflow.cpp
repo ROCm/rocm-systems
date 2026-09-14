@@ -123,7 +123,7 @@ struct stub_settings
     static void reset()
     {
         gpu_filter      = device_filter{};
-        gpu_filter.mode = device_selection_mode::ALL;
+        gpu_filter.mode = device_selection_mode::all;
         set_visible_identity(2);
         hipfile_metrics.value = ALL_HIPFILE_METRICS;
         perfetto_legacy       = false;

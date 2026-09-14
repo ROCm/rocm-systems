@@ -58,7 +58,7 @@ struct stub_settings
     static void reset()
     {
         gpu_filter      = device_filter{};
-        gpu_filter.mode = device_selection_mode::ALL;
+        gpu_filter.mode = device_selection_mode::all;
         visible_type_indices.clear();
         hipfile_metrics.value = ALL_HIPFILE_METRICS;
     }
@@ -126,7 +126,7 @@ TEST_F(HipFileTraitsTest, no_visible_gpus_enumerates_nothing)
 TEST_F(HipFileTraitsTest, disabled_filter_enumerates_nothing)
 {
     stub_settings::set_visible_identity(4);
-    stub_settings::gpu_filter.mode = device_selection_mode::NONE;
+    stub_settings::gpu_filter.mode = device_selection_mode::none;
 
     EXPECT_TRUE(enumerate().empty());
 }
@@ -142,7 +142,7 @@ TEST_F(HipFileTraitsTest, no_metrics_enabled_enumerates_nothing)
 TEST_F(HipFileTraitsTest, specific_filter_selects_requested_ordinals)
 {
     stub_settings::set_visible_identity(4);
-    stub_settings::gpu_filter.mode    = device_selection_mode::SPECIFIC;
+    stub_settings::gpu_filter.mode    = device_selection_mode::specific;
     stub_settings::gpu_filter.indices = { 1, 3 };
 
     const auto entries = enumerate();
@@ -155,7 +155,7 @@ TEST_F(HipFileTraitsTest, specific_filter_selects_requested_ordinals)
 TEST_F(HipFileTraitsTest, specific_filter_ignores_out_of_range_ordinals)
 {
     stub_settings::set_visible_identity(2);
-    stub_settings::gpu_filter.mode    = device_selection_mode::SPECIFIC;
+    stub_settings::gpu_filter.mode    = device_selection_mode::specific;
     stub_settings::gpu_filter.indices = { 0, test_values::out_of_range_ordinal };
 
     const auto entries = enumerate();
@@ -259,7 +259,7 @@ TEST_F(HipFileTraitsTest, sampling_gpus_filter_uses_profiler_index_not_hipfile_s
 {
     stub_settings::visible_type_indices    = { test_values::gpu_index_four,
                                                test_values::filter_index };
-    stub_settings::gpu_filter.mode         = device_selection_mode::SPECIFIC;
+    stub_settings::gpu_filter.mode         = device_selection_mode::specific;
     stub_settings::gpu_filter.indices      = { test_values::gpu_index_four };
     m_provider->backend->gpu(0).read_bytes = test_values::read_bytes_filtered;
     m_provider->backend->gpu(1).read_bytes = test_values::read_bytes_excluded;

@@ -64,7 +64,7 @@ struct cache_policy
             // ABSOLUTE is accurate for both shapes here: the counters are cumulative
             // totals and the bandwidths are instantaneous rates. Neither is a delta.
             trace_cache::get_metadata_registry().add_pmc_info(
-                { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+                { agent_type::gpu, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
                   pmc_name(metric.suffix), metric.suffix,
                   trait::name<category::hipfile>::description, LONG_DESCRIPTION,
                   COMPONENT, metric.unit, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
