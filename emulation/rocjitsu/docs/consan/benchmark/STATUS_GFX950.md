@@ -14,9 +14,21 @@ by its ratio to the matching uninstrumented second run.
 | hipBLASLt/Tensile verified FP16 GEMM (512×512×512) | 0.0000133 s | 0.0000115 s (1×) | 4.8 s | 0.0000165 s (1.44×) | 8.85 s | 0.00498 s (435×) | 7.8 s | 0.000382 s (33.4×) | 14.9 s | 7.52 s (656,000×) | [native-validation: resumed](</home/benjacob/consan-gfx950-benchmark-full/hipblaslt-tensile-gemm--native-validation.log>) |
 | TokenSpeed Gluon BF16 GEMM medium-M (128×4096×4096) | 0.124 s | 0.000628 s (1×) | 1.28 s | 0.00122 s (1.94×) | 6.22 s | 0.293 s (467×) | 5.38 s | 0.00536 s (8.54×) | 102 s | 96 s (153,000×) | [native-validation: accepted](</home/benjacob/consan-gfx950-benchmark-full/tokenspeed-bf16-gemm-mediumm--native-validation.log>) |
 | TokenSpeed Gluon BF16 GEMM large-M (4096×4096×4096) | 0.121 s | 0.000649 s (1×) | 1.32 s | 0.00177 s (2.73×) | 8.58 s | 1.72 s (2,660×) | 5.39 s | 0.0213 s (32.8×) | timeout (600 s) | timeout (600 s) | [native-validation: accepted](</home/benjacob/consan-gfx950-benchmark-full/tokenspeed-bf16-gemm-largem--native-validation.log>) |
-| TokenSpeed Gluon attention prefill | 0.126 s | 0.000624 s (1×) | 1.37 s | 0.000818 s (1.31×) | 28.5 s | 7.05 s (11,300×) | 5.4 s | 0.00282 s (4.52×) | failed | failed | [native-validation: accepted](</home/benjacob/consan-gfx950-benchmark-full/tokenspeed-attention-prefill--native-validation.log>) |
+| TokenSpeed Gluon attention prefill | 0.126 s | 0.000624 s (1×) | 1.37 s | 0.000818 s (1.31×) | 28.5 s | 7.05 s (11,300×) | 5.4 s | 0.00282 s (4.52×) | 20.6 s | 15.1 s (24,200×) | [native-validation: resumed](</home/benjacob/consan-gfx950-benchmark-full/tokenspeed-attention-prefill--native-validation.log>) |
 | TokenSpeed Gluon attention decode | 0.128 s | 0.000664 s (1×) | 1.33 s | 0.000687 s (1.04×) | 5.71 s | 0.0178 s (26.8×) | 5.35 s | 0.000687 s (1.04×) | 5.62 s | 0.105 s (158×) | [native-validation: accepted](</home/benjacob/consan-gfx950-benchmark-full/tokenspeed-attention-decode--native-validation.log>) |
 | TokenSpeed Qwen3-0.6B prefill | 3.77 s | 0.0255 s (1×) | 173 s | 0.0275 s (1.08×) | 285 s | 8.01 s (314×) | 232 s | 0.0463 s (1.81×) | timeout (600 s) | timeout (600 s) | [native-validation: accepted](</home/benjacob/consan-gfx950-benchmark-full/tokenspeed-qwen-prefill--native-validation.log>) |
 | TokenSpeed Qwen3-0.6B real cached decode | 0.0384 s | 0.0255 s (1×) | 171 s | 0.0267 s (1.05×) | 281 s | 6.73 s (264×) | 227 s | 0.0417 s (1.64×) | timeout (600 s) | timeout (600 s) | [native-validation: accepted](</home/benjacob/consan-gfx950-benchmark-full/tokenspeed-qwen-decode--native-validation.log>) |
 | TokenSpeed Triton FP8 block-scaled GEMM | 0.105 s | 0.000722 s (1×) | 1.28 s | 0.00073 s (1.01×) | 5.45 s | 0.00741 s (10.3×) | 5.32 s | 0.000725 s (1×) | 5.44 s | 0.0314 s (43.5×) | [native-validation: accepted](</home/benjacob/consan-gfx950-benchmark-full/tokenspeed-fp8-blockscale-gemm--native-validation.log>) |
 | TokenSpeed Gluon BF16 MoE | 0.109 s | 0.000676 s (1×) | not applicable (no admitted sites) | not applicable (no admitted sites) | not applicable (no admitted sites) | not applicable (no admitted sites) | not applicable (no admitted sites) | not applicable (no admitted sites) | not applicable (no admitted sites) | not applicable (no admitted sites) | [native-validation: accepted](</home/benjacob/consan-gfx950-benchmark-full/tokenspeed-bf16-moe--native-validation.log>) |
+
+All 13 rows have completed the campaign: **45 passing mode cells, three
+600-second timeouts, and four inapplicable cells**. All final native checks
+passed. The failed InlineShadow attention cell was fixed and rerun; completed
+measurements retain their original source/hook provenance across fixes.
+
+BF16 MoE's profiled kernels have no admitted instrumentation sites; its four
+numerical runs passed with zero probes. No instrumentation overhead is claimed
+for those cells. Passing cells require numerical correctness and complete static
+instrumentation; dynamic-analysis limitations remain recorded in the artifacts.
+See [campaign details](GFX950.md) for the environment, reproduction command,
+retention policy, and evidence locations.
