@@ -54,6 +54,8 @@ if str(_TEST_DIR) not in sys.path:
 
 from mutate_and_test import (  # noqa: E402
     DEFAULT_ARCH,
+    MUTATION_KIND_MEMORY,
+    MUTATION_KIND_WAIT,
     KernelBuilder,
     KernelBuilderConfig,
     MutantResult,
@@ -64,6 +66,7 @@ from mutate_and_test import (  # noqa: E402
     find_tool,
     process_shader,
     select_rocm_path,
+    shader_mutation_kinds,
     shader_required_archs,
     shader_supports_arch,
     write_csv_report,
@@ -183,7 +186,17 @@ def _assert_mutation_ground_truth(report: ShaderReport, artifact_dir: Path) -> N
             f"  [{i}] {mutant.wait_instruction!r}: "
             f"hazard_count={mutant.hazard_count}, baseline={baseline_hazard_count}"
         )
-        if mutant.exit_code != 0:
+        if mutant.kind == MUTATION_KIND_MEMORY:
+            # A load->store mutation genuinely changes the computed result, so
+            # the kernel's own host-side check fails and the process exits
+            # non-zero. Unlike a stripped wait -- where the deterministic
+            # simulator returns the expected result and exit 0 -- that
+            # divergence IS the kill, not a crash to diagnose. The detection
+            # signal is the plugin's hazard count: it must exceed the baseline.
+            if mutant.hazard_count <= baseline_hazard_count:
+                outcome = "output matched" if mutant.stdout_match else "output diverged"
+                missed.append(f"{detail} ({outcome})")
+        elif mutant.exit_code != 0:
             crashed.append(f"{detail}, exit_code={mutant.exit_code!r}")
         elif mutant.hazard_count <= baseline_hazard_count:
             outcome = "output matched" if mutant.stdout_match else "output diverged"
@@ -223,6 +236,14 @@ def test_kernel_mutation_pipeline_runs(
             f"{', '.join(shader_required_archs(shader_path))}, not {target_arch}"
         )
 
+    # A kernel declares which mutation path exercises it with a ``// mutate:``
+    # line; without one it defaults to wait-stripping. Resolve it here so the
+    # pytest driver runs the same path the CLI (__main__) does, rather than
+    # forcing every kernel through wait-stripping regardless of annotation.
+    kinds = shader_mutation_kinds(shader_path)
+    mutate_waits = MUTATION_KIND_WAIT in kinds
+    mutate_memory = MUTATION_KIND_MEMORY in kinds
+
     report = process_shader(
         kernel_builder_for_shader,
         extra_cxxflags=None,
@@ -231,6 +252,8 @@ def test_kernel_mutation_pipeline_runs(
         timeout=120,
         excluded_waits=DEFAULT_EXCLUDED_WAITS,
         subprocess_output=False,
+        mutate_waits=mutate_waits,
+        mutate_memory=mutate_memory,
     )
     mutation_session_reports.append(report)
 
@@ -243,7 +266,18 @@ def test_kernel_mutation_pipeline_runs(
         f"baseline run failed exit={report.baseline_exit_code!r}; "
         "GPU/runtime may be required for some shaders."
     )
-    assert len(report.mutants) == len(report.waits_found)
+    # Each enabled path contributes its own mutants; a disabled one contributes
+    # none. Count by kind so a memory-annotated kernel is not held to the
+    # wait-count invariant (and vice versa).
+    wait_mutants = [m for m in report.mutants if m.kind == MUTATION_KIND_WAIT]
+    memory_mutants = [m for m in report.mutants if m.kind == MUTATION_KIND_MEMORY]
+    assert len(wait_mutants) == (len(report.waits_found) if mutate_waits else 0)
+    if not mutate_memory:
+        assert not memory_mutants
+    assert report.mutants, (
+        f"{shader_path.stem!r} produced no mutants for kinds "
+        f"{sorted(kinds)}; check its // mutate: annotation and the assembly."
+    )
     for m in report.mutants:
         assert m.shader == shader_path.stem
 

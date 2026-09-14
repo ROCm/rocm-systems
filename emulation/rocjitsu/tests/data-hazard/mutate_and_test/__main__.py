@@ -39,10 +39,13 @@ from .pipeline import (
     DEFAULT_ARCH,
     DEFAULT_EXCLUDED_WAITS,
     DEFAULT_TIMEOUT,
+    MUTATION_KIND_MEMORY,
+    MUTATION_KIND_WAIT,
     discover_shaders,
     find_tool,
     process_shader,
     select_rocm_path,
+    shader_mutation_kinds,
     shader_required_archs,
     shader_supports_arch,
 )
@@ -157,6 +160,17 @@ def main() -> int:
         "Excluded by default because XCNT tracks address translation "
         "(XNACK replay), not data completion, so removing it does not "
         "produce data hazards detectable by this plugin.",
+    )
+    parser.add_argument(
+        "--mutate-memory",
+        action="store_true",
+        help="Force sub-dword load->store mutation on for every shader, "
+        "regardless of its '// mutate:' annotation. Each byte/short load is "
+        "flipped to a store to the same address (read->write), which turns an "
+        "all-reads kernel racy and exercises the global shadow's sub-dword "
+        "tracking. Without this flag, a shader runs whichever paths its "
+        "'// mutate:' comment names (default: wait-stripping only). Most "
+        "useful with --hazard-detection.",
     )
     parser.add_argument(
         "--subprocess-output",
@@ -298,6 +312,15 @@ def main() -> int:
             print(f"Processing: {shader.name}")
             print(f"{'─' * 60}")
 
+            # A shader's '// mutate:' comment selects which paths run; the
+            # --mutate-memory flag forces the memory path on everywhere.
+            kinds = set(shader_mutation_kinds(shader))
+            if args.mutate_memory:
+                kinds.add(MUTATION_KIND_MEMORY)
+            mutate_waits = MUTATION_KIND_WAIT in kinds
+            mutate_memory = MUTATION_KIND_MEMORY in kinds
+            print(f"Mutation paths: {', '.join(sorted(kinds)) or '(none)'}")
+
             config = KernelBuilderConfig(
                 tools=tools,
                 shader_cpp=shader,
@@ -321,6 +344,8 @@ def main() -> int:
                 benchmarker=benchmarker,
                 benchmark_enabled=benchmark_enabled,
                 perf_collector=perf_collector,
+                mutate_waits=mutate_waits,
+                mutate_memory=mutate_memory,
             )
             reports.append(rpt)
 
