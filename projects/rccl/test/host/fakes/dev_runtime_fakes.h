@@ -16,6 +16,7 @@
 
 struct ncclComm;
 struct ncclDevrWindow;
+struct ncclWindow_vidmem;
 
 extern bool g_devrWindowIsMultiSegment;  // UNDRIVEN
 extern bool g_devrWindowHasSysmemSegment;  // UNDRIVEN
@@ -30,6 +31,14 @@ extern std::function<ncclResult_t(struct ncclComm*, int /*peerWorldRank*/,
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclDevrWindow*, size_t /*offset*/,
                                   int /*lsaRank*/, void** /*outPtr*/)>
     g_devrGetLsaRankPtr;
+
+// Registers a symmetric window and hands back the device-side handle. Fail-loud
+// by default: a unit that registers a window and is not told what came back has
+// no defined behaviour, so a test must say. Owned here rather than in a
+// collective floor because dev_runtime.cc defines it.
+extern std::function<ncclResult_t(struct ncclComm*, void* /*ptr*/, size_t /*size*/,
+                                  int /*winFlags*/, struct ncclWindow_vidmem** /*outWin*/)>
+    g_devrWindowRegisterInGroup;
 
 void ResetDevRuntimeFakes();
 

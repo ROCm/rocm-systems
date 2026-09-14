@@ -56,8 +56,9 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm*, struct ncclKernelPlan*) { ::abor
 // dev_runtime.h
 ncclResult_t ncclDevrCommCreateInternal(struct ncclComm*, struct ncclDevCommRequirements*,
                                         struct ncclDevComm*, bool, struct ncclDevCommCompat*) { ::abort(); }
-ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm*, void*, size_t, int,
-                                           struct ncclWindow_vidmem**) { ::abort(); }
+// ncclDevrWindowRegisterInGroup moved to dev_runtime_fakes.cc, which owns
+// dev_runtime.cc's symbols, and became a seam: rma_ce.cc registers its signal
+// window through it, so tests need to hand back a window they control.
 void freeDevCommRequirements(struct ncclDevCommRequirements*) { ::abort(); }
 
 // mem_manager.h

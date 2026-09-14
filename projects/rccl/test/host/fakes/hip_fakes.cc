@@ -488,7 +488,9 @@ hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPrio
 }
 
 hipError_t hipStreamDestroy(hipStream_t)     { return hipSuccess; }  // benign teardown (ncclDestroySideStream)
-hipError_t hipStreamSynchronize(hipStream_t) { return hipErrorInvalidValue; }
+// Joins the async-ops knob rather than carrying its own: same hipErrorInvalidValue
+// default, and a unit that drives one of these generally drives all of them.
+hipError_t hipStreamSynchronize(hipStream_t) { return g_hipAsyncOpsResult; }
 
 hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode*)
 {

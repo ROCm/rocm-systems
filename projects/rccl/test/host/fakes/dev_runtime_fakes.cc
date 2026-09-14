@@ -8,6 +8,7 @@
 // nccl_stubs.cc as part of that fail-loud floor; move them here when one of them
 // needs a seam.
 
+#include "fail_loud.h"
 #include "dev_runtime_fakes.h"
 
 struct ncclDevrWindow;
@@ -50,7 +51,20 @@ ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow*
   return g_devrGetLsaRankPtr(comm, winHost, offset, lsaRank, outPtr);
 }
 
+static ncclResult_t DefaultDevrWindowRegisterInGroup(struct ncclComm*, void*, size_t, int,
+                                                     struct ncclWindow_vidmem**) {
+  FailLoudUnfaked("dev_runtime_fakes", "ncclDevrWindowRegisterInGroup");
+}
+std::function<ncclResult_t(struct ncclComm*, void*, size_t, int, struct ncclWindow_vidmem**)>
+    g_devrWindowRegisterInGroup = DefaultDevrWindowRegisterInGroup;
+
+ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* ptr, size_t size,
+                                           int winFlags, struct ncclWindow_vidmem** outWin) {
+  return g_devrWindowRegisterInGroup(comm, ptr, size, winFlags, outWin);
+}
+
 void ResetDevRuntimeFakes() {
+  g_devrWindowRegisterInGroup = DefaultDevrWindowRegisterInGroup;
   g_devrInitOnce       = DefaultDevrInitOnce;
   g_devrWorldToLsaRank = DefaultDevrWorldToLsaRank;
   g_devrGetLsaRankPtr  = DefaultDevrGetLsaRankPtr;
