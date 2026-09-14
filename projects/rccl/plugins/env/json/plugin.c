@@ -43,11 +43,11 @@ static int      jsonLoaded = 0;
 
 static ncclDebugLogger_t logFunction = NULL;
 
-static void skipWhitespace(const char **p) {
+static void skipWhitespace(const char** p) {
   while (**p && isspace((unsigned char)**p)) (*p)++;
 }
 
-static int parseString(const char **p, char *out, int maxLen) {
+static int parseString(const char** p, char* out, int maxLen) {
   skipWhitespace(p);
   if (**p != '"') return -1;
   (*p)++;
@@ -66,9 +66,9 @@ static int parseString(const char **p, char *out, int maxLen) {
   return 0;
 }
 
-static int parseJson(const char *buf) {
+static int parseJson(const char* buf) {
   numEntries = 0;
-  const char *p = buf;
+  const char* p = buf;
   skipWhitespace(&p);
   if (*p != '{') return -1;
   p++;
@@ -77,9 +77,8 @@ static int parseJson(const char *buf) {
     skipWhitespace(&p);
     if (*p == '}') break;
 
-    // Members after the first must be separated by exactly one comma, and a comma has to
-    // be followed by another member. Without this a file with a missing or trailing comma
-    // parsed as valid and applied part of its settings with no error.
+    // Members after the first must be separated by a comma. A missing comma
+    // would otherwise glue adjacent members together and skip keys.
     if (numEntries > 0) {
       if (*p != ',') return -1;
       p++;
@@ -108,11 +107,11 @@ static int parseJson(const char *buf) {
   return (*p == '\0') ? 0 : -1;
 }
 
-static int loadJsonFile(const char *path) {
-  FILE *f = fopen(path, "r");
+static int loadJsonFile(const char* path) {
+  FILE* f = fopen(path, "r");
   if (!f) return -1;
 
-  char *buf = (char *)malloc(MAX_FILE_SIZE + 2);
+  char* buf = (char*)malloc(MAX_FILE_SIZE + 2);
   if (!buf) { fclose(f); return -1; }
 
   size_t n = fread(buf, 1, MAX_FILE_SIZE + 1, f);
@@ -127,11 +126,11 @@ static int loadJsonFile(const char *path) {
 }
 
 static ncclResult_t ncclEnvJsonInit(uint8_t ncclMajor, uint8_t ncclMinor,
-                                    uint8_t ncclPatch, const char *suffix,
+                                    uint8_t ncclPatch, const char* suffix,
                                     ncclDebugLogger_t logFn) {
   logFunction = logFn;
 
-  const char *jsonPath = getenv("NCCL_ENV_JSON_FILE");
+  const char* jsonPath = getenv("NCCL_ENV_JSON_FILE");
   if (jsonPath && strlen(jsonPath) > 0) {
     if (loadJsonFile(jsonPath) == 0) {
       jsonLoaded = 1;
@@ -160,7 +159,7 @@ static ncclResult_t ncclEnvJsonFinalize(void) {
   return ncclSuccess;
 }
 
-static const char *ncclEnvJsonGetEnv(const char *name) {
+static const char* ncclEnvJsonGetEnv(const char* name) {
   if (jsonLoaded) {
     for (int i = 0; i < numEntries; i++) {
       if (strcmp(entries[i].key, name) == 0) {
@@ -172,8 +171,8 @@ static const char *ncclEnvJsonGetEnv(const char *name) {
 }
 
 const ncclEnv_v2_t ncclEnvPlugin_v2 = {
-    .name     = "ncclEnvJson",
-    .init     = ncclEnvJsonInit,
-    .finalize = ncclEnvJsonFinalize,
-    .getEnv   = ncclEnvJsonGetEnv,
+  .name     = "ncclEnvJson",
+  .init     = ncclEnvJsonInit,
+  .finalize = ncclEnvJsonFinalize,
+  .getEnv   = ncclEnvJsonGetEnv,
 };

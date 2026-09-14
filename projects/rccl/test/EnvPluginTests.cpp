@@ -12,10 +12,9 @@
 #include "common/ProcessIsolatedTestRunner.hpp"
 
 #include <cstdio>
+#include <dlfcn.h>
 #include <filesystem>
 #include <string>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 namespace RcclUnitTesting {
@@ -57,9 +56,9 @@ TEST(EnvPluginTests, InternalPlugin_ReturnsNullForUnset) {
       {{"NCCL_ENV_PLUGIN", "none"}});
 }
 
-TEST(EnvPluginTests, InternalPlugin_GetEnvUsedByParamMacro) {
+TEST(EnvPluginTests, InternalPlugin_GetEnvWithoutPluginInit) {
   RUN_ISOLATED_TEST_WITH_ENV(
-      "InternalPlugin_GetEnvUsedByParamMacro",
+      "InternalPlugin_GetEnvWithoutPluginInit",
       []() {
         setenv("NCCL_DEBUG", "INFO", 1);
         initEnv();
@@ -119,7 +118,6 @@ class TempPath {
   ~TempPath() { remove(path_.c_str()); }
   TempPath(const TempPath&) = delete;
   TempPath& operator=(const TempPath&) = delete;
-  const char* c_str() const { return path_.c_str(); }
   const std::string& str() const { return path_; }
 
  private:
@@ -141,6 +139,12 @@ TEST(EnvPluginTests, ExternalPlugin_ExamplePlugin_Loaded) {
 
         setenv("NCCL_ENV_PLUGIN", pluginPath.c_str(), 1);
         setenv("RCCL_TEST_EXAMPLE_KEY", "example_via_ext_plugin", 1);
+
+        void* handle = dlopen(pluginPath.c_str(), RTLD_NOW);
+        ASSERT_NE(handle, nullptr) << "dlopen failed: " << dlerror();
+        ASSERT_NE(dlsym(handle, "ncclEnvPlugin_v2"), nullptr)
+            << "librccl-env-example.so does not export ncclEnvPlugin_v2";
+        dlclose(handle);
 
         initEnv();
         ASSERT_FALSE(ncclEnvPluginInitialized());
@@ -248,10 +252,12 @@ TEST(EnvPluginTests, ExternalPlugin_JsonPlugin_UnsetKeyReturnsNull) {
         fclose(f);
 
         unsetenv("NCCL_TEST_JSON_MISSING_12345");
+        unsetenv("OTHER_KEY");
         setenv("NCCL_ENV_PLUGIN", pluginPath.c_str(), 1);
         setenv("NCCL_ENV_JSON_FILE", jsonPath.c_str(), 1);
 
         initEnv();
+        ASSERT_STREQ(ncclGetEnv("OTHER_KEY"), "other_value");
         const char* val = ncclGetEnv("NCCL_TEST_JSON_MISSING_12345");
         ASSERT_TRUE(ncclEnvPluginInitialized());
         ASSERT_EQ(val, nullptr);
@@ -297,9 +303,9 @@ TEST(EnvPluginTests, ExternalPlugin_JsonPlugin_MalformedJson_FallsBackToGetenv) 
       });
 }
 
-// Verifies that librccl-env-json.so treats a JSON file whose root is not an
-// object (e.g. an array) as a load failure and falls back to getenv().
-// Covers the `*p != '{'` branch in loadJsonFile.
+// Verifies that librccl-env-json.so treats a file that does not start with '{'
+// as a load failure. The leading junk character is followed by otherwise valid
+// members so a parser that skipped the '{' guard would still serve from_json.
 TEST(EnvPluginTests, ExternalPlugin_JsonPlugin_NotAnObject_FallsBackToGetenv) {
   RUN_ISOLATED_TEST(
       "ExternalPlugin_JsonPlugin_NotAnObject_FallsBackToGetenv",
@@ -315,7 +321,7 @@ TEST(EnvPluginTests, ExternalPlugin_JsonPlugin_NotAnObject_FallsBackToGetenv) {
         const std::string& jsonPath = jsonFile.str();
         FILE* f = fopen(jsonPath.c_str(), "w");
         ASSERT_NE(f, nullptr) << "Failed to create temp JSON file: " << jsonPath;
-        fprintf(f, "[\"NCCL_ALGO\", \"Ring\"]");
+        fprintf(f, "?\"NCCL_TEST_JSON_NOTOBJ\": \"from_json\"}");
         fclose(f);
 
         setenv("NCCL_TEST_JSON_NOTOBJ", "from_getenv", 1);
@@ -440,6 +446,138 @@ TEST(EnvPluginTests, ExternalPlugin_JsonPlugin_UnreadableFile_FallsBackToGetenv)
         ASSERT_STREQ(val, "from_getenv");
 
         unsetenv("NCCL_TEST_JSON_NOPERM");
+      });
+}
+
+// A 4096-character value exceeds MAX_VAL_LEN-1 (4095) and must reject the file
+// rather than silently truncating, which would misconfigure keys such as
+// NCCL_SOCKET_IFNAME.
+TEST(EnvPluginTests, ExternalPlugin_JsonPlugin_ValueTooLong_FallsBackToGetenv) {
+  RUN_ISOLATED_TEST(
+      "ExternalPlugin_JsonPlugin_ValueTooLong_FallsBackToGetenv",
+      []() {
+        std::string pluginPath = getTestPluginPath("librccl-env-json.so");
+        if (!std::filesystem::exists(pluginPath)) {
+          GTEST_SKIP() << "librccl-env-json.so not found at " << pluginPath
+                       << " — rebuild with -DBUILD_TESTS=ON -DBUILD_PLUGIN_EXAMPLES=ON";
+        }
+
+        TempPath jsonFile(std::string("/tmp/rccl_test_json_longval_") +
+                          std::to_string(getpid()) + ".json");
+        const std::string& jsonPath = jsonFile.str();
+        FILE* f = fopen(jsonPath.c_str(), "w");
+        ASSERT_NE(f, nullptr) << "Failed to create temp JSON file: " << jsonPath;
+        std::string longVal(4096, 'a');
+        fprintf(f, "{\"NCCL_TEST_JSON_LONGVAL\": \"%s\"}", longVal.c_str());
+        fclose(f);
+
+        setenv("NCCL_TEST_JSON_LONGVAL", "from_getenv", 1);
+        setenv("NCCL_ENV_PLUGIN", pluginPath.c_str(), 1);
+        setenv("NCCL_ENV_JSON_FILE", jsonPath.c_str(), 1);
+
+        initEnv();
+        const char* val = ncclGetEnv("NCCL_TEST_JSON_LONGVAL");
+        ASSERT_NE(val, nullptr);
+        ASSERT_STREQ(val, "from_getenv");
+
+        unsetenv("NCCL_TEST_JSON_LONGVAL");
+      });
+}
+
+// The documented 4095-character value bound is inclusive and must still be applied.
+TEST(EnvPluginTests, ExternalPlugin_JsonPlugin_ValueAtLimit_IsApplied) {
+  RUN_ISOLATED_TEST(
+      "ExternalPlugin_JsonPlugin_ValueAtLimit_IsApplied",
+      []() {
+        std::string pluginPath = getTestPluginPath("librccl-env-json.so");
+        if (!std::filesystem::exists(pluginPath)) {
+          GTEST_SKIP() << "librccl-env-json.so not found at " << pluginPath
+                       << " — rebuild with -DBUILD_TESTS=ON -DBUILD_PLUGIN_EXAMPLES=ON";
+        }
+
+        TempPath jsonFile(std::string("/tmp/rccl_test_json_maxval_") +
+                          std::to_string(getpid()) + ".json");
+        const std::string& jsonPath = jsonFile.str();
+        FILE* f = fopen(jsonPath.c_str(), "w");
+        ASSERT_NE(f, nullptr) << "Failed to create temp JSON file: " << jsonPath;
+        std::string maxVal(4095, 'b');
+        fprintf(f, "{\"NCCL_TEST_JSON_MAXVAL\": \"%s\"}", maxVal.c_str());
+        fclose(f);
+
+        setenv("NCCL_TEST_JSON_MAXVAL", "from_getenv", 1);
+        setenv("NCCL_ENV_PLUGIN", pluginPath.c_str(), 1);
+        setenv("NCCL_ENV_JSON_FILE", jsonPath.c_str(), 1);
+
+        initEnv();
+        const char* val = ncclGetEnv("NCCL_TEST_JSON_MAXVAL");
+        ASSERT_NE(val, nullptr);
+        ASSERT_STREQ(val, maxVal.c_str());
+
+        unsetenv("NCCL_TEST_JSON_MAXVAL");
+      });
+}
+
+// Trailing junk after the closing brace must reject the file.
+TEST(EnvPluginTests, ExternalPlugin_JsonPlugin_TrailingJunk_FallsBackToGetenv) {
+  RUN_ISOLATED_TEST(
+      "ExternalPlugin_JsonPlugin_TrailingJunk_FallsBackToGetenv",
+      []() {
+        std::string pluginPath = getTestPluginPath("librccl-env-json.so");
+        if (!std::filesystem::exists(pluginPath)) {
+          GTEST_SKIP() << "librccl-env-json.so not found at " << pluginPath
+                       << " — rebuild with -DBUILD_TESTS=ON -DBUILD_PLUGIN_EXAMPLES=ON";
+        }
+
+        TempPath jsonFile(std::string("/tmp/rccl_test_json_junk_") +
+                          std::to_string(getpid()) + ".json");
+        const std::string& jsonPath = jsonFile.str();
+        FILE* f = fopen(jsonPath.c_str(), "w");
+        ASSERT_NE(f, nullptr) << "Failed to create temp JSON file: " << jsonPath;
+        fprintf(f, "{\"NCCL_TEST_JSON_JUNK\": \"from_json\"} junk");
+        fclose(f);
+
+        setenv("NCCL_TEST_JSON_JUNK", "from_getenv", 1);
+        setenv("NCCL_ENV_PLUGIN", pluginPath.c_str(), 1);
+        setenv("NCCL_ENV_JSON_FILE", jsonPath.c_str(), 1);
+
+        initEnv();
+        const char* val = ncclGetEnv("NCCL_TEST_JSON_JUNK");
+        ASSERT_NE(val, nullptr);
+        ASSERT_STREQ(val, "from_getenv");
+
+        unsetenv("NCCL_TEST_JSON_JUNK");
+      });
+}
+
+// A missing colon between key and value must reject the file.
+TEST(EnvPluginTests, ExternalPlugin_JsonPlugin_MissingColon_FallsBackToGetenv) {
+  RUN_ISOLATED_TEST(
+      "ExternalPlugin_JsonPlugin_MissingColon_FallsBackToGetenv",
+      []() {
+        std::string pluginPath = getTestPluginPath("librccl-env-json.so");
+        if (!std::filesystem::exists(pluginPath)) {
+          GTEST_SKIP() << "librccl-env-json.so not found at " << pluginPath
+                       << " — rebuild with -DBUILD_TESTS=ON -DBUILD_PLUGIN_EXAMPLES=ON";
+        }
+
+        TempPath jsonFile(std::string("/tmp/rccl_test_json_nocolon_") +
+                          std::to_string(getpid()) + ".json");
+        const std::string& jsonPath = jsonFile.str();
+        FILE* f = fopen(jsonPath.c_str(), "w");
+        ASSERT_NE(f, nullptr) << "Failed to create temp JSON file: " << jsonPath;
+        fprintf(f, "{\"NCCL_TEST_JSON_NOCOLON\" \"from_json\"}");
+        fclose(f);
+
+        setenv("NCCL_TEST_JSON_NOCOLON", "from_getenv", 1);
+        setenv("NCCL_ENV_PLUGIN", pluginPath.c_str(), 1);
+        setenv("NCCL_ENV_JSON_FILE", jsonPath.c_str(), 1);
+
+        initEnv();
+        const char* val = ncclGetEnv("NCCL_TEST_JSON_NOCOLON");
+        ASSERT_NE(val, nullptr);
+        ASSERT_STREQ(val, "from_getenv");
+
+        unsetenv("NCCL_TEST_JSON_NOCOLON");
       });
 }
 

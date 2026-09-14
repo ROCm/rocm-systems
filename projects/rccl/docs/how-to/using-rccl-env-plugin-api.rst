@@ -197,6 +197,9 @@ values:
    stored with the backslash dropped, so ``\n`` becomes the letter ``n`` rather
    than a newline. Write values literally instead of relying on escapes.
 
+   Keys must be unique. If a key is repeated, the first occurrence wins;
+   later duplicates are stored but never returned.
+
    The whole file is rejected if it breaks any of these rules, including
    exceeding the entry limit; RCCL then logs a warning and reads every variable
    from the process environment instead. It is never applied in part.
@@ -246,7 +249,8 @@ Usage
 
       * - | ``NCCL_ENV_JSON_FILE``
           | Path to the JSON configuration file used by ``librccl-env-json.so``.
-        - | String: absolute path to a JSON file.
+        - | String: path to a JSON file. Relative paths are resolved from the
+          | process working directory.
           | Default: unset (plugin falls back to ``getenv()`` for all lookups).
 
 .. note::
@@ -336,7 +340,14 @@ Expected output on successful load:
    NCCL INFO Successfully loaded external env plugin /path/to/librccl-env-json.so
    NCCL INFO ENV/Plugin: ncclEnvJson loaded 2 entries from /etc/rccl/config.json
 
-If the plugin fails to load (wrong path, or neither plugin symbol exported):
+If the plugin fails to load because the path cannot be opened:
+
+.. code-block:: text
+
+   NCCL INFO NCCL_ENV_PLUGIN set by environment to /path/to/librccl-env-json.so
+   NCCL INFO ENV/Plugin: Could not find: /path/to/librccl-env-json.so
+
+If the file opens but exports neither plugin symbol:
 
 .. code-block:: text
 
