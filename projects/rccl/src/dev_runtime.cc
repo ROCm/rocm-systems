@@ -727,9 +727,14 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
                                     mem->winFlags, mem->maxGlobalNumSegments > 1, ptrType),
                     ret, fail);
       mem->ginSegmentInfos[segment].segmentSize = mem->segmentSizes[segment];
-      // Device put-fence checks HOST_NUMA; store AMD host as that enum.
-      mem->ginSegmentInfos[segment].memType =
-        ncclSymIsHostSegment(locType) ? CU_MEM_LOCATION_TYPE_HOST_NUMA : locType;
+      // Device put-fence checks HOST_NUMA. On ROCm < 7.12 that enumerator is a
+      // #define int, so the ternary with locType would promote to int and fail
+      // to assign to hipMemLocationType.
+      mem->ginSegmentInfos[segment].memType = locType;
+      if (ncclSymIsHostSegment(locType)) {
+        mem->ginSegmentInfos[segment].memType =
+          static_cast<CUmemLocationType>(CU_MEM_LOCATION_TYPE_HOST_NUMA);
+      }
       numSegmentsRegistered++;
       offset += mem->segmentSizes[segment];
     }
