@@ -187,17 +187,22 @@ jobs:
         shell: bash
         run: |
           apt-get update
-          apt install -y pkg-config
+          apt install -y pkg-config python3-dev
           echo "✅ ROCm Dependencies Installed!"
 
       - name: Install Latest Nightly ROCm
+        shell: bash
         run: |
-          set -e
-          mkdir ${{ env.ROCM_PATH }}
-          TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '*([0-9]+\.[0-9]+\.[0-9]+)*')
-          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-multiarch.tar.gz -C ${{ env.ROCM_PATH }}
-          rm ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-multiarch.tar.gz
-          echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+          set -euo pipefail
+          mkdir -p "${{ env.ROCM_PATH }}"
+          tarball=$(ls /opt/rocm-*-multiarch.tar.gz | head -n 1)
+          tar -xf "${tarball}" -C "${{ env.ROCM_PATH }}"
+          rm -f "${tarball}"
+          ROCM_PACKAGE_VERSION=$(python3 -c "import json; m=json.load(open('${{ env.ROCM_PATH }}/share/therock/therock_manifest.json')); print(m['rocm_package_version'].split('+')[0])")
+          ROCM_VERSION=$(python3 -c "import json; print(json.load(open('${{ env.ROCM_PATH }}/share/therock/therock_manifest.json'))['rocm_version'])")
+          echo "ROCM_PACKAGE_VERSION=${ROCM_PACKAGE_VERSION}" >> "${GITHUB_ENV}"
+          echo "ROCM_VERSION=${ROCM_VERSION}" >> "${GITHUB_ENV}"
+          echo "ROCm ${ROCM_PACKAGE_VERSION} installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
 
       - name: Output TheRock Manifest
@@ -219,6 +224,124 @@ jobs:
             sleep 10
           done
           echo "✅ pip requirements installed!"
+
+      - name: Install PyTorch (TheRock nightlies)
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.system.arch }}" in
+            gfx950)  DEVICE_EXTRA="device-gfx950" ;;
+            gfx1151) DEVICE_EXTRA="device-gfx1151" ;;
+            gfx94X)  DEVICE_EXTRA="device-gfx942" ;;
+            gfx90a)  DEVICE_EXTRA="device-gfx90a" ;;
+            *)
+              echo "::error::No PyTorch device mapping for arch ${{ matrix.system.arch }}"
+              exit 1
+              ;;
+          esac
+
+          TORCH_VERSION=$(python3 <<'PY'
+          import os
+          import re
+          import subprocess
+          import sys
+
+          SUPPORTED_TORCH_RELEASES = frozenset({(2, 13), (2, 14)})
+
+          def torch_release(version: str) -> tuple[int, int]:
+              base = version.split("+", 1)[0]
+              major, minor, *_ = base.split(".")
+              return int(major), int(minor)
+
+          def torch_sort_key(version: str) -> tuple[int, ...]:
+              base = version.split("+", 1)[0]
+              return tuple(int(part) for part in base.split("."))
+
+          def rocm_suffix(version: str) -> str:
+              return version.split("+rocm", 1)[1]
+
+          rocm_tag = os.environ["ROCM_PACKAGE_VERSION"]
+          rocm_base = os.environ["ROCM_VERSION"]
+          proc = subprocess.run(
+              [
+                  "pip",
+                  "index",
+                  "versions",
+                  "torch",
+                  "--index-url",
+                  "https://rocm.nightlies.amd.com/whl-multi-arch/",
+              ],
+              capture_output=True,
+              text=True,
+              check=True,
+          )
+          all_versions = sorted(
+              set(re.findall(r"(\d+\.\d+\.\d+\+rocm[^\s,]+)", proc.stdout)),
+              key=lambda version: (rocm_suffix(version), torch_sort_key(version)),
+              reverse=True,
+          )
+          supported_versions = [
+              version
+              for version in all_versions
+              if torch_release(version) in SUPPORTED_TORCH_RELEASES
+          ]
+          if not supported_versions:
+              raise SystemExit(
+                  "No supported torch wheel (2.13.x or 2.14.x) found on "
+                  "https://rocm.nightlies.amd.com/whl-multi-arch/"
+              )
+
+          exact = [
+              version
+              for version in supported_versions
+              if version.endswith(f"+rocm{rocm_tag}")
+          ]
+          if exact:
+              print(exact[0])
+              sys.exit(0)
+
+          fallback = [
+              version
+              for version in supported_versions
+              if rocm_suffix(version).startswith(rocm_base)
+          ]
+          if not fallback:
+              raise SystemExit(
+                  "No supported torch wheel (2.13.x or 2.14.x) found for "
+                  f"ROCm package version {rocm_tag!r} or ROCm line {rocm_base!r}"
+              )
+
+          chosen = fallback[0]
+          print(
+              f"::warning::No exact torch wheel for ROCm {rocm_tag!r}; "
+              f"falling back to {chosen} (same ROCm line {rocm_base!r})",
+              file=sys.stderr,
+          )
+          print(chosen)
+          PY
+          )
+          echo "Installing torch ${TORCH_VERSION} for ROCm ${ROCM_PACKAGE_VERSION} (${DEVICE_EXTRA})"
+
+          torch_installed=0
+          for i in 1 2 3; do
+            if pip install --break-system-packages \
+              --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
+              "torch[${DEVICE_EXTRA}]==${TORCH_VERSION}" --timeout 120; then
+              torch_installed=1
+              break
+            fi
+            if [ "$i" -lt 3 ]; then
+              echo "⚠️ PyTorch install attempt $i failed, retrying..."
+              sleep 10
+            fi
+          done
+          if [ "$torch_installed" -ne 1 ]; then
+            echo "::error::PyTorch install failed after 3 attempts"
+            exit 1
+          fi
+
+          python3 -c "import torch; print(f'torch {torch.__version__}, cuda={torch.cuda.is_available()}')"
+          echo "✅ PyTorch installed!"
 
       - name: Configure, Build, and Test
         id: test
@@ -244,6 +367,7 @@ jobs:
             -DENABLE_TESTS=ON \
             -DINSTALL_TESTS=ON \
             -DPYTEST_NUMPROCS=8 \
+            -DTORCH_TRACE_PYTHON=/usr/bin/python3 \
             -- \
             -L full \
             -LE full_rocprofiler_compute_ci_exclude
