@@ -931,7 +931,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     return ncclSuccess;
   }
 
-  // gfx1151 full-mesh NET fast path, new in this change (no pre-refactor
+  // (3.5) gfx1151 full-mesh NET fast path, new in this change (no pre-refactor
   // equivalent). Gated on: not symmetric, not graph-captured, not implicit
   // launch order, not inside a group, plus the standalone eligibility check
   // (arch/ranks/op/scratch).
