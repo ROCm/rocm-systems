@@ -1529,6 +1529,56 @@ mod tests {
         }
     }
 
+    /// An install upgraded from the previous release can start its
+    /// builtin profiles.
+    ///
+    /// The documents in `builtin/legacy/` are what that release actually
+    /// wrote, and every one of them has SDMA engines with no queue count
+    /// — the pair rocjitsu refuses to load. So this is the whole upgrade
+    /// in one test: seed those documents, run the startup pass every
+    /// command runs, and ask the backend whether the profile it would
+    /// build is one it can use. `mi350x` is `--profile`'s own default,
+    /// so a "no" here is a machine that cannot run anything until its
+    /// owner works out which file to delete.
+    #[test]
+    fn builtin_profiles_work_after_upgrading_from_the_previous_release() {
+        let _guard = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        for (name, document) in [
+            ("mi300x", include_str!("../../builtin/legacy/mi300x.json")),
+            ("mi350x", include_str!("../../builtin/legacy/mi350x.json")),
+            ("mi450x", include_str!("../../builtin/legacy/mi450x.json")),
+        ] {
+            let seeded: serde_json::Value = serde_json::from_str(document).unwrap();
+            // The precondition that makes this an upgrade at all.
+            assert!(
+                seeded["vm"]["gpu"]["device"]["num_sdma_engines"]
+                    .as_u64()
+                    .is_some_and(|engines| engines > 0)
+                    && seeded["vm"]["gpu"]["device"]
+                        .get("num_sdma_queues_per_engine")
+                        .is_none(),
+                "{name}: fixture is not an agent the previous release left unusable"
+            );
+            mirage_core::state::write_json(&mirage_core::paths::agent_path(name), &seeded).unwrap();
+        }
+
+        mirage_builtin::ensure_agents(false).unwrap();
+        mirage_builtin::ensure_topologies(false).unwrap();
+
+        for (name, profile) in mirage_builtin::profiles() {
+            if profile.emulator.emulator != "rocjitsu" {
+                continue;
+            }
+            check_config(&profile.emulator)
+                .unwrap_or_else(|error| panic!("builtin profile {name} cannot be used: {error}"));
+        }
+
+        mirage_core::paths::clear_test_root();
+    }
+
     /// The positive control for the check above: a name mirage does not
     /// know is still forwarded, at every depth, and the check does not
     /// write its own defaults over what the document left out.
