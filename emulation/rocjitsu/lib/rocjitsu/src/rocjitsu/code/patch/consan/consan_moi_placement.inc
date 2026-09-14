@@ -2192,6 +2192,13 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
                                                     operating_point, expected_count);
 }
 
+// GCC 13 loses std::optional engagement facts across the component search
+// loops. Every selected/spill payload below is guarded before use; suppress
+// this optimizer false positive only for this function and compiler version.
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
 [[nodiscard]] bool configure_automatic_moi_transient_sgpr_assignments(
     ConSanMoiOperatingPoint &options, const MoiResourceProblem &problem,
     std::span<const ConSanCandidateResourcePlan> site_plans, std::vector<std::string> &warnings,
@@ -2513,6 +2520,10 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       "ConSan MOI assigned owner-local transient SGPR windows to independent owner components");
   return true;
 }
+
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+#pragma GCC diagnostic pop
+#endif
 
 [[nodiscard]] bool configure_automatic_moi_exec_save_sgprs(
     ConSanMoiOperatingPoint &options, const MoiResourceProblem &problem,

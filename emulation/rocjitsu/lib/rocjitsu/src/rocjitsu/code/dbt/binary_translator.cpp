@@ -4112,7 +4112,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       uint64_t source_end = 0;
       uint64_t target_begin = 0;
     };
-    std::optional<ActiveClientPreservedSourceSpan> active_client_source_span;
+    ActiveClientPreservedSourceSpan active_client_source_span;
     // reachable_kernel_blocks() materializes reached indices in source order.
     // Pool preservation relies on that ordering while one copied pool spans
     // several reachable slot blocks.
@@ -4121,20 +4121,20 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     }));
     for (BasicBlock *block : scope.blocks) {
       uint64_t client_consumed_source_end = 0;
-      if (active_client_source_span &&
-          block->start_offset() >= active_client_source_span->source_end)
-        active_client_source_span.reset();
+      if (active_client_source_span.source_end != 0 &&
+          block->start_offset() >= active_client_source_span.source_end)
+        active_client_source_span = {};
       std::optional<ActiveGeneratedIslandPool> block_generated_island_pool;
       if (active_generated_island_pool &&
           block->start_offset() < active_generated_island_pool->source_end) {
         block_generated_island_pool = active_generated_island_pool;
       }
       const uint64_t block_target_start =
-          active_client_source_span &&
-                  block->start_offset() >= active_client_source_span->source_begin &&
-                  block->start_offset() < active_client_source_span->source_end
-              ? active_client_source_span->target_begin +
-                    (block->start_offset() - active_client_source_span->source_begin)
+          active_client_source_span.source_end != 0 &&
+                  block->start_offset() >= active_client_source_span.source_begin &&
+                  block->start_offset() < active_client_source_span.source_end
+              ? active_client_source_span.target_begin +
+                    (block->start_offset() - active_client_source_span.source_begin)
           : block_generated_island_pool
               ? block_generated_island_pool->target_begin +
                     (block->start_offset() - block_generated_island_pool->source_begin)
@@ -4151,13 +4151,13 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         uint64_t target_offset = kernel_text.size();
         const uint32_t inst_size = inst.size();
 
-        if (active_client_source_span && offset < active_client_source_span->source_end) {
+        if (active_client_source_span.source_end != 0 && offset < active_client_source_span.source_end) {
           target_offset_by_source_offset.emplace(
-              offset, active_client_source_span->target_begin +
-                          (offset - active_client_source_span->source_begin));
+              offset, active_client_source_span.target_begin +
+                          (offset - active_client_source_span.source_begin));
           continue;
         }
-        active_client_source_span.reset();
+        active_client_source_span = {};
         if (offset < client_consumed_source_end)
           continue;
 
@@ -4892,9 +4892,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       if (skip_scope)
         break;
       const bool block_end_consumed_by_client_span =
-          active_client_source_span &&
-          block->end_offset() > active_client_source_span->source_begin &&
-          block->end_offset() < active_client_source_span->source_end;
+          active_client_source_span.source_end != 0 &&
+          block->end_offset() > active_client_source_span.source_begin &&
+          block->end_offset() < active_client_source_span.source_end;
       if (block->has_implicit_terminator() && !block_end_consumed_by_client_span) {
         // Materialize the CFG boundary as part of the translated block. Like
         // any other target-side expansion, the terminator belongs in relocated
@@ -4929,8 +4929,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           block->end_offset() <= active_marked_long_transfer->source_end;
       placement.target_end =
           block_end_consumed_by_client_span
-              ? active_client_source_span->target_begin +
-                    (block->end_offset() - active_client_source_span->source_begin)
+              ? active_client_source_span.target_begin +
+                    (block->end_offset() - active_client_source_span.source_begin)
           : ends_inside_marked_window
               ? active_marked_long_transfer->target_begin +
                     (block->end_offset() - active_marked_long_transfer->source_begin)

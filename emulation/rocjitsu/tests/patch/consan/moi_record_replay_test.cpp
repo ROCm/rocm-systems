@@ -6290,6 +6290,57 @@ TEST(ConSanMoi, RecordReplaySpillBackedRelocatedSiteBodiesDoNotOverlap) {
   expect_record_replay_text_transaction(result);
 }
 
+TEST(ConSanMoi, Cdna4TransientSpillPlacementRetainsSgprZero) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto access = build_cdna4_ds_store_b32(/*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, kArch);
+  const auto barrier = build_cdna4_s_barrier(kArch);
+  ASSERT_TRUE(access && barrier);
+
+  std::vector<uint32_t> words(access->begin(), access->end());
+  words.push_back(*barrier);
+  // Leave only the spill-setup state, one dispatch-ID pair, and physical VCC
+  // unused. The test gives the kernel a 104-register allocation so s98:s99
+  // are physical VCC and must remain unavailable even without guest uses.
+  constexpr std::array<uint16_t, 8> kUnreferenced = {
+      0u, 4u, 5u, 6u, 20u, 21u, 98u, 99u,
+  };
+  for (uint16_t sgpr = 0u; sgpr < 102u; ++sgpr) {
+    if (std::ranges::find(kUnreferenced, sgpr) == kUnreferenced.end())
+      words.push_back(build_s_mov_b32(/*sdst=*/10u, sgpr, kArch));
+  }
+  words.push_back(build_s_endpgm(kArch));
+
+  MoiOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.set_moi_owner_epoch_vgprs(40u, 41u);
+  options.moi_dispatch_identity.set_sgpr(20u);
+  options.moi_init_owner_epoch = true;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
+  options.max_patches = 8u;
+
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(words, "cdna4_scalar_spill_barrier");
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12u);
+  });
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u)
+      << testing::PrintToString(result.warnings);
+  const ConSanMoiTransientSgprAssignment assignment =
+      test_moi_transient_sgpr_assignments(result).front();
+  EXPECT_TRUE(assignment.spill_backed);
+  ASSERT_TRUE(assignment.scalar_spill_setup);
+  // A selected scalar register numbered zero is present, not missing state.
+  EXPECT_EQ(assignment.scalar_spill_setup->temporaries.scc_save_sgpr, 0u);
+  EXPECT_NE(assignment.scalar_spill_setup->temporaries.frame_base_sgpr, 0u);
+}
+
 TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const auto access = build_cdna4_ds_store_b32(/*vaddr=*/2, /*vdata=*/3, /*byte_offset=*/0, kArch);
@@ -12113,7 +12164,8 @@ TEST(ConSanMoi, Gfx1250RecordReplayWrapsGeneratedBufferPollingAcquireLoop) {
       << " fences=" << testing::PrintToString(result.program_inventory.sync().moi_fence_candidates)
       << " decisions=" << testing::PrintToString(result.observation_plan().atomic_site_decisions);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
-  const ConSanSyncSequence &sequence = result.program_inventory.sync().sync_sequences.front();
+  const auto sequence_view = result.program_inventory.sync().sync_sequences;
+  const ConSanSyncSequence &sequence = sequence_view.front();
   EXPECT_EQ(sequence.kind, ConSanSyncKind::OrdinaryMemory);
   EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(sequence.begin_text_offset, kAcquireWord * sizeof(uint32_t));

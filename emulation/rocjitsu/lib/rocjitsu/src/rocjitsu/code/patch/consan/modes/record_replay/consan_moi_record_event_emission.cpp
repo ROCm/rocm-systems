@@ -111,12 +111,12 @@ using consan_moi_detail::kFenceRecordLayout;
   const bool preserve_vgpr_bank_dynamically =
       target != nullptr && target->has_selectable_vgpr_bank &&
       options.selectable_vgpr_bank_save_sgpr && scalar_spill == nullptr;
-  const std::optional<uint16_t> vgpr_msb_mode =
+  const uint16_t vgpr_msb_mode =
       target != nullptr && target->has_selectable_vgpr_bank && !preserve_vgpr_bank_dynamically
           ? consan_selectable_vgpr_bank_mode_at(arch, bytes, container.text_file_offset,
-                                                container.entry_text_offset, site.file_offset)
-          : std::nullopt;
-  const bool select_low_vgpr_bank = vgpr_msb_mode.value_or(0u) != 0u;
+                                                container.entry_text_offset, site.file_offset).value_or(0u)
+          : 0u;
+  const bool select_low_vgpr_bank = vgpr_msb_mode != 0u;
   const std::optional<uint16_t> vgpr_msb_hwreg =
       preserve_vgpr_bank_dynamically
           ? build_hwreg_imm(amdgpu::MODE_HWREG, amdgpu::VGPR_MSB_MODE_SHIFT, /*size_bits=*/8u)
@@ -137,7 +137,7 @@ using consan_moi_detail::kFenceRecordLayout;
                             instrumentation::build_s_set_vgpr_msb(/*mode=*/0u, arch));
   } else if (select_low_vgpr_bank) {
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        static_cast<uint8_t>(*vgpr_msb_mode), 0u, arch));
+        static_cast<uint8_t>(vgpr_msb_mode), 0u, arch));
   }
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
@@ -203,7 +203,7 @@ using consan_moi_detail::kFenceRecordLayout;
                                 *options.selectable_vgpr_bank_save_sgpr, *vgpr_msb_hwreg, arch));
   } else if (select_low_vgpr_bank) {
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        0u, static_cast<uint8_t>(*vgpr_msb_mode), arch));
+        0u, static_cast<uint8_t>(vgpr_msb_mode), arch));
   }
   if (expert_scheduling)
     words.insert(words.end(), expert_scheduling->begin(), expert_scheduling->end());
@@ -580,12 +580,12 @@ using consan_moi_detail::kFenceRecordLayout;
                                               scalar_spill == nullptr;
   const bool preserve_guest_output_vgpr_bank =
       preserve_vgpr_bank_dynamically && source.relocates_polling_loop();
-  const std::optional<uint16_t> vgpr_msb_mode =
+  const uint16_t vgpr_msb_mode =
       target->has_selectable_vgpr_bank && !preserve_vgpr_bank_dynamically
           ? consan_selectable_vgpr_bank_mode_at(arch, bytes, container.text_file_offset,
-                                                container.entry_text_offset, patch_file_offset)
-          : std::nullopt;
-  const bool select_low_vgpr_bank = vgpr_msb_mode.value_or(0u) != 0u;
+                                                container.entry_text_offset, patch_file_offset).value_or(0u)
+          : 0u;
+  const bool select_low_vgpr_bank = vgpr_msb_mode != 0u;
   const std::optional<uint16_t> vgpr_msb_hwreg =
       preserve_vgpr_bank_dynamically
           ? build_hwreg_imm(amdgpu::MODE_HWREG, amdgpu::VGPR_MSB_MODE_SHIFT, /*size_bits=*/8u)
@@ -607,7 +607,7 @@ using consan_moi_detail::kFenceRecordLayout;
                             instrumentation::build_s_set_vgpr_msb(/*mode=*/0u, arch));
   } else if (select_low_vgpr_bank) {
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        static_cast<uint8_t>(*vgpr_msb_mode), 0u, arch));
+        static_cast<uint8_t>(vgpr_msb_mode), 0u, arch));
   }
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
@@ -725,7 +725,7 @@ using consan_moi_detail::kFenceRecordLayout;
                                 *options.selectable_vgpr_bank_save_sgpr, *vgpr_msb_hwreg, arch));
   } else if (select_low_vgpr_bank) {
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        0u, static_cast<uint8_t>(*vgpr_msb_mode), arch));
+        0u, static_cast<uint8_t>(vgpr_msb_mode), arch));
   }
   words.insert(words.end(), displaced_tail_words.begin(), displaced_tail_words.end());
   if (!sequence.finish())

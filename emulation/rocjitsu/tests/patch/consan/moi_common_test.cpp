@@ -1394,7 +1394,7 @@ TEST(ConSanMoi, PrivateWorkgroupSourceAppliesPackedCoordinateExtraction) {
 }
 
 TEST(ConSanMoi, ScalarPersistentTemporaryValidationIsNoopWhenDisabled) {
-  MoiOptions disabled;
+  MoiOptions disabled{};
   std::vector<std::string> errors;
   EXPECT_TRUE(consan_detail::validate_scalar_state_temporaries(
       disabled.moi_persistent_sgprs, moi_owner_epoch_vgpr_sources(disabled.moi_owner_epoch_vgprs),

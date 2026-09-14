@@ -706,8 +706,8 @@ TEST(ConSanProgramInventory, RealSynchronizationInventoryUsesTypedStableMemberId
     }
   }
   ASSERT_EQ(result.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
-  const ConSanBarrierLifecycleGroup &group =
-      result.program_inventory.sync().barrier_lifecycle_groups.front();
+  const auto lifecycle_groups = result.program_inventory.sync().barrier_lifecycle_groups;
+  const ConSanBarrierLifecycleGroup &group = lifecycle_groups.front();
   EXPECT_TRUE(group.admissible());
   EXPECT_EQ(group.member_event_ids.size(), 5u);
   EXPECT_TRUE(std::ranges::all_of(group.member_event_ids,
@@ -1014,7 +1014,8 @@ TEST(ConSanProgramInventory, TwoAddressRangesDecodeElementWidthScaleAndStableOrd
     builder.add_kernel(std::move(kernel));
     builder.publish_decoded_accesses(bytes);
 
-    const ConSanProgramSite &site = builder.view().access_sites().front();
+    const auto access_sites = builder.view().access_sites();
+    const ConSanProgramSite &site = access_sites.front();
     ASSERT_EQ(site.ranges.size(), 2u);
     EXPECT_EQ(site.ranges[0].static_byte_offset, 3 * test.scale);
     EXPECT_EQ(site.ranges[1].static_byte_offset, 5 * test.scale);

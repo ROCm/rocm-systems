@@ -1650,7 +1650,8 @@ TEST(ConSanMoi, Gfx1250SampledAssignsDistinctWindowsToGeneratedBufferPollingLoop
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 2u);
   for (size_t index = 0; index < 2u; ++index) {
-    const ConSanSyncSequence &sequence = result.program_inventory.sync().sync_sequences[index];
+    const auto sequence_view = result.program_inventory.sync().sync_sequences;
+    const ConSanSyncSequence &sequence = sequence_view[index];
     EXPECT_EQ(sequence.kind, ConSanSyncKind::OrdinaryMemory);
     EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::Acquire);
     ASSERT_TRUE(sequence.acquire_polling_loop_header_text_offset);
