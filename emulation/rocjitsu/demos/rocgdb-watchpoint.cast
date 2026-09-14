@@ -8,7 +8,7 @@
 [1.136597, "o", "\u001b[1m/home/arosa/rocm-systems/emulation/rocjitsu/demos/../tests/rocgdb/add_one.hip:33:3: \u001b[0m\u001b[0;1;35mwarning: \u001b[0m\u001b[1mignoring return value of type 'hipError_t' declared with 'nodiscard' attribute [-Wunused-value]\u001b[0m\r\n   33 |   hipFree(d);\u001b[0m\r\n      | \u001b[0;1;32m  ^~~~~~~~~~\r\n\u001b[0m"]
 [1.190908, "o", "1 warning generated when compiling for host.\r\n"]
 [1.225168, "o", "\r\n\u001b[1;36m# Set a hardware watchpoint on the device buffer and catch the GPU store:\u001b[0m\r\n"]
-[1.225987, "o", "+ /home/arosa/rocm-systems/emulation/mirage/target/debug/mirage run --profile mi350x --gdb --gdb-ex 'break add_one.hip:27' --gdb-ex 'break add_one' --gdb-ex run --gdb-ex 'set $waddr = (unsigned long)d' --gdb-ex continue --gdb-ex 'watch *(int*)$waddr' --gdb-ex continue --gdb-ex continue -- /tmp/tmp.aZNGXRzm1I/add_one\r\n"]
+[1.225987, "o", "+ /home/arosa/rocm-systems/emulation/rocjitsu/cli/target/debug/rocjitsu run --profile mi350x --gdb --gdb-ex 'break add_one.hip:27' --gdb-ex 'break add_one' --gdb-ex run --gdb-ex 'set $waddr = (unsigned long)d' --gdb-ex continue --gdb-ex 'watch *(int*)$waddr' --gdb-ex continue --gdb-ex continue -- /tmp/tmp.aZNGXRzm1I/add_one\r\n"]
 [2.338152, "o", "Breakpoint 1 at 0x21394a: file /home/arosa/rocm-systems/emulation/rocjitsu/demos/../tests/rocgdb/add_one.hip, line 27.\r\nFunction \"add_one\" not defined.\r\nBreakpoint 2 (add_one) pending.\r\n"]
 [2.537729, "o", "[Thread debugging using libthread_db enabled]\r\nUsing host libthread_db library \"/lib/x86_64-linux-gnu/libthread_db.so.1\".\r\n"]
 [2.637869, "o", "[New Thread 0x7ffff27ff6c0 (LWP 1824780)]\r\n[New Thread 0x7ffff1ffe6c0 (LWP 1824781)]\r\n"]

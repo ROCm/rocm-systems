@@ -56,3 +56,15 @@ repos:
     rev: 0.25.1
     hooks:
       - id: gersemi
+
+  # rustfmt for the rocjitsu CLI. A local hook using whichever toolchain
+  # is installed, rather than a pinned mirror repo, so pre-commit formats
+  # with the same rustfmt that `cargo fmt` and the ctest case use — three
+  # versions disagreeing about the same files is worse than none.
+  - repo: local
+    hooks:
+      - id: rustfmt
+        name: rustfmt
+        entry: rustfmt --edition 2024
+        language: system
+        files: ^emulation/rocjitsu/cli/.*\.rs$

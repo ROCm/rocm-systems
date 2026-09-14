@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Run each official gdb.rocm test in a fresh verified Mirage daemon session."""
+"""Run each official gdb.rocm test in a fresh verified RocJITsu daemon session."""
 
 from __future__ import annotations
 
@@ -25,14 +25,14 @@ import time
 # in, an environment variable, or a command-line flag -- in that order of
 # increasing precedence. Nothing is hard-coded to one developer's checkout, so
 # the same run is reproducible in CI and in a second worktree.
-SESSION_ROOT = Path(f"/run/user/{os.getuid()}/mirage/session")
+SESSION_ROOT = Path(f"/run/user/{os.getuid()}/rocjitsu/session")
 
 # Resolved by configure() before main() does any work.
 ROOT = Path()
 SUITE_ROOT = Path()
 TESTSUITE = Path()
 TEST_DIR = Path()
-MIRAGE = Path()
+ROCJITSU = Path()
 ROCJITSU = Path()
 VENV = Path()
 SDK = Path()
@@ -57,17 +57,18 @@ def find_sdk_package(venv: Path, package: str) -> Path:
 
 
 def configure(args: argparse.Namespace) -> None:
-    global ROOT, SUITE_ROOT, TESTSUITE, TEST_DIR, MIRAGE, ROCJITSU, VENV, SDK, CORE, GDB
+    global ROOT, SUITE_ROOT, TESTSUITE, TEST_DIR, ROCJITSU, ROCJITSU, VENV, SDK, CORE, GDB
     ROOT = (args.root or env_path("ROCM_SYSTEMS_ROOT", default_root())).resolve()
     SUITE_ROOT = (
         args.rocgdb_suite or env_path("ROCGDB_SUITE", Path("/tmp/ROCgdb-tests"))
     ).resolve()
     TESTSUITE = SUITE_ROOT / "gdb/testsuite"
     TEST_DIR = TESTSUITE / "gdb.rocm"
-    MIRAGE = args.mirage or ROOT / "emulation/mirage/target/debug/mirage"
+    ROCJITSU = args.rocjitsu or ROOT / "emulation/rocjitsu/cli/target/debug/rocjitsu"
     ROCJITSU = args.rocjitsu or ROOT / "emulation/rocjitsu/build/librocjitsu.so"
     VENV = (
-        args.venv or env_path("ROCM_SDK_VENV", ROOT / "emulation/mirage/.venv-mi350")
+        args.venv
+        or env_path("ROCM_SDK_VENV", ROOT / "emulation/rocjitsu/cli/.venv-mi350")
     ).resolve()
     SDK = find_sdk_package(VENV, "_rocm_sdk_devel")
     CORE = find_sdk_package(VENV, "_rocm_sdk_core")
@@ -119,7 +120,7 @@ def fresh_session(before: set[Path]) -> Path | None:
 
     Picking "newest by mtime" instead looks correct until something else on the
     machine creates a session mid-test -- a second copy of this script, or a
-    stray `mirage run`. The newest directory is then somebody else's, and the
+    stray `rocjitsu run`. The newest directory is then somebody else's, and the
     run both mis-attributes the health check and stops a session it does not
     own, which shows up as an unrelated test failing with an empty gdb.sum.
     Identify the session positively, and refuse to guess when ambiguous.
@@ -131,7 +132,7 @@ def fresh_session(before: set[Path]) -> Path | None:
         print(
             "warning: several sessions appeared during one test "
             f"({', '.join(path.name for path in appeared)}); "
-            "another mirage run is active and results are not trustworthy",
+            "another rocjitsu run is active and results are not trustworthy",
             file=sys.stderr,
         )
         return None
@@ -185,7 +186,7 @@ def snapshot_session(session_dir: Path, output: Path) -> dict[str, object]:
         pass
 
     stop = subprocess.run(
-        [str(MIRAGE), "session", "stop", session_id],
+        [str(ROCJITSU), "session", "stop", session_id],
         cwd=ROOT,
         text=True,
         stdout=subprocess.PIPE,
@@ -214,7 +215,7 @@ def parse_summary(path: Path) -> tuple[collections.Counter[str], bool]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run each official gdb.rocm test in a fresh verified Mirage daemon session."
+        description="Run each official gdb.rocm test in a fresh verified RocJITsu daemon session."
     )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--timeout", type=int, default=600)
@@ -223,7 +224,7 @@ def main() -> int:
     parser.add_argument("--rocgdb-suite", type=Path, help="ROCgdb source checkout")
     parser.add_argument("--gdb", type=Path, help="ROCgdb binary to drive")
     parser.add_argument("--venv", type=Path, help="venv holding the ROCm SDK wheels")
-    parser.add_argument("--mirage", type=Path, help="mirage binary")
+    parser.add_argument("--rocjitsu", type=Path, help="rocjitsu binary")
     parser.add_argument("--rocjitsu", type=Path, help="librocjitsu.so under test")
     parser.add_argument(
         "--tests",
@@ -245,7 +246,7 @@ def main() -> int:
     args = parser.parse_args()
     configure(args)
 
-    required = [TEST_DIR, MIRAGE, ROCJITSU, SDK, CORE, GDB]
+    required = [TEST_DIR, ROCJITSU, ROCJITSU, SDK, CORE, GDB]
     missing = [str(path) for path in required if not path.exists()]
     if missing:
         print("missing required paths:", *missing, sep="\n", file=sys.stderr)
@@ -281,8 +282,8 @@ def main() -> int:
         "workspace_branch": git("branch", "--show-current", cwd=ROOT),
         "rocgdb_commit": git("rev-parse", "HEAD", cwd=SUITE_ROOT),
         "rocgdb_gdb": str(GDB),
-        "mirage": str(MIRAGE),
-        "mirage_sha256": sha256(MIRAGE),
+        "rocjitsu": str(ROCJITSU),
+        "rocjitsu_sha256": sha256(ROCJITSU),
         "rocjitsu": str(ROCJITSU),
         "rocjitsu_sha256": sha256(ROCJITSU),
         "sdk": str(SDK),
@@ -322,7 +323,7 @@ def main() -> int:
             "-k",
             "10",
             str(args.timeout),
-            str(MIRAGE),
+            str(ROCJITSU),
             "run",
             "--daemon",
             "--keep-session",

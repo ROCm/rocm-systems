@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MIT
 #
 # Run one or more gdb.rocm files repeatedly, serially, and report how many
-# iterations were clean. Concurrent Mirage sessions collide, so iterations never
+# iterations were clean. Concurrent RocJITsu sessions collide, so iterations never
 # overlap -- and neither may two copies of this script, which the lock below
 # enforces across processes.
 #
@@ -34,7 +34,7 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd) || exit 1
 mkdir -p "$outdir" || exit 1
 
 # Serialize against any other copy of this script. Overlapping runs create
-# overlapping Mirage sessions, which collide and report failures that are not
+# overlapping RocJITsu sessions, which collide and report failures that are not
 # real -- the one thing a flake count must not do.
 exec 9>"$outdir/.repeat.lock"
 if ! flock -n 9; then

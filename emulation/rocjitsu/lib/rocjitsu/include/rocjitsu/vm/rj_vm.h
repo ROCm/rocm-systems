@@ -166,7 +166,7 @@ RJ_API_EXPORT rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_
 /// @details Parses the `plugins` and `sinks` sections of the
 /// config and attaches the resulting plugin group to the VM's SoC. This is the
 /// C-API equivalent of what the LD_PRELOAD interposer and the rocjitsu CLI do
-/// through the C++ PluginLoader, so a C-API host (e.g. the mirage daemon) can
+/// through the C++ PluginLoader, so a C-API host (e.g. the rocjitsu daemon) can
 /// enable plugins without linking the simulator's C++ ABI. Call once after
 /// rj_vm_create / rj_vm_create_from_string and before rj_vm_run. A config with
 /// no `plugins` attaches an empty group (near-zero overhead). This function must

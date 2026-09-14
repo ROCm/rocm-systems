@@ -99,21 +99,21 @@ plugin's configuration:
 The bundled plugins are `race` (`RaceDetectorPlugin`), `logging`
 (`KernelLoggingPlugin`), and `throughput` (`ThroughputPlugin`).
 
-### Enabling plugins from the mirage CLI
+### Enabling plugins from the rocjitsu CLI
 
-When launching a workload through mirage, plugins can be selected on the
+When launching a workload through rocjitsu, plugins can be selected on the
 command line with `--plugin <name>` instead of editing a config file.
-mirage injects each selected plugin into the rocjitsu config it synthesises
+rocjitsu injects each selected plugin into the rocjitsu config it synthesises
 for the run (and, for containerised profiles, bind-mounts the plugin's
 `.so` next to the interposer). The flag is repeatable and merges with any
 plugins the profile already enables:
 
 ```bash
 # Enable the race detector and the kernel logger for a single run.
-mirage run --plugin race --plugin logging -- ./my_app
+rocjitsu run --plugin race --plugin logging -- ./my_app
 
 # Same, when starting a session.
-mirage session start --profile mi350x --plugin race
+rocjitsu session start --profile mi350x --plugin race
 ```
 
 Each `--plugin` enables the plugin with its schema defaults. Plugins that
@@ -216,8 +216,8 @@ Send output to both stderr and a file simultaneously:
 }
 ```
 
-> Note: plugins can also be selected on the mirage command line with
-> `mirage run --plugin <name>` (see "Enabling plugins from the mirage
+> Note: plugins can also be selected on the rocjitsu command line with
+> `rocjitsu run --plugin <name>` (see "Enabling plugins from the rocjitsu
 > CLI" above). Sink selection is still driven entirely by the config file
 > shown here.
 

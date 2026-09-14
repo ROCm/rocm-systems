@@ -358,13 +358,13 @@ class ConfigureCITest(unittest.TestCase):
     ):
         """PR with only skippable RCCL doc paths should skip both regular and RCCL CI."""
         args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
-    
+
         mock_get_modified.return_value = [
             "projects/rccl/README.md",
             "projects/rccl/docs/install/building-installing.rst",
             "projects/rccl/.readthedocs.yaml",
         ]
-    
+
         outputs = therock_configure_ci.run(args)
         projects = json.loads(outputs["projects"])
         self.assertEqual(len(projects), 0)
@@ -471,7 +471,9 @@ class ConfigureCITest(unittest.TestCase):
         self.assertEqual(outputs["run_linux_rccl_ci"], "false")
 
     @patch("therock_configure_ci.get_modified_paths")
-    def test_hipfile_pr_builds_storage_libs_and_rocprofiler_sdk(self, mock_get_modified):
+    def test_hipfile_pr_builds_storage_libs_and_rocprofiler_sdk(
+        self, mock_get_modified
+    ):
         """PR with hipfile changes should build storage_libs and rocprofiler-sdk."""
         args = {
             "is_pull_request": True,
@@ -523,9 +525,7 @@ class ConfigureCITest(unittest.TestCase):
         project_to_run, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 1)
         self.assertIn("DTHEROCK_ENABLE_ALL=ON", project_to_run[0]["cmake_options"])
-        tests = {
-            t.strip() for t in project_to_run[0]["projects_to_test"].split(",")
-        }
+        tests = {t.strip() for t in project_to_run[0]["projects_to_test"].split(",")}
         self.assertEqual(
             tests,
             {
@@ -547,24 +547,60 @@ class ConfigureCITest(unittest.TestCase):
         # Keys of TheRock's fetch_test_configurations.test_matrix. Kept in sync
         # manually since TheRock is not checked out during unit tests.
         valid_test_targets = {
-            "sanity", "hip-tests", "hipfile", "rocblas", "rocroller",
-            "tensilelite", "origami", "hipblas", "amdsmi", "hipblaslt",
-            "hipsolver", "rocsolver", "rocprim", "hipcub", "rocgdb-cpu",
-            "rocgdb-gpu", "rocgdb-corefile", "rocr-debug-agent", "rocthrust", "hipsparse",
-            "rocsparse", "hipsparselt", "rocrand", "hiprand", "rocfft",
-            "hipfft", "miopen", "rccl", "rocshmem", "rocprofiler-sdk",
-            "hipdnn", "hipdnn_install", "hipdnn-integration-tests",
-            "hipdnn-samples", "miopenprovider", "hipblasltprovider",
-            "hipkernelprovider", "rocwmma", "rocalution",
-            "rocprofiler-compute", "rocprofiler-systems", "libhipcxx_amdclang",
-            "libhipcxx_hiprtc", "hipthreads", "hipthreads_examples",
-            "rocdecode", "rocjpeg", "aqlprofile", "rocrtst", "hiptensor",
+            "sanity",
+            "hip-tests",
+            "hipfile",
+            "rocblas",
+            "rocroller",
+            "tensilelite",
+            "origami",
+            "hipblas",
+            "amdsmi",
+            "hipblaslt",
+            "hipsolver",
+            "rocsolver",
+            "rocprim",
+            "hipcub",
+            "rocgdb-cpu",
+            "rocgdb-gpu",
+            "rocgdb-corefile",
+            "rocr-debug-agent",
+            "rocthrust",
+            "hipsparse",
+            "rocsparse",
+            "hipsparselt",
+            "rocrand",
+            "hiprand",
+            "rocfft",
+            "hipfft",
+            "miopen",
+            "rccl",
+            "rocshmem",
+            "rocprofiler-sdk",
+            "hipdnn",
+            "hipdnn_install",
+            "hipdnn-integration-tests",
+            "hipdnn-samples",
+            "miopenprovider",
+            "hipblasltprovider",
+            "hipkernelprovider",
+            "rocwmma",
+            "rocalution",
+            "rocprofiler-compute",
+            "rocprofiler-systems",
+            "libhipcxx_amdclang",
+            "libhipcxx_hiprtc",
+            "hipthreads",
+            "hipthreads_examples",
+            "rocdecode",
+            "rocjpeg",
+            "aqlprofile",
+            "rocrtst",
+            "hiptensor",
         }
         amdsmi_tests = {
             t.strip()
-            for t in therock_matrix.project_map["amdsmi"][
-                "projects_to_test"
-            ].split(",")
+            for t in therock_matrix.project_map["amdsmi"]["projects_to_test"].split(",")
         }
         self.assertTrue(amdsmi_tests <= valid_test_targets, amdsmi_tests)
 
@@ -573,9 +609,9 @@ class ConfigureCITest(unittest.TestCase):
         for group in ("core", "all", "nightly"):
             tests = {
                 t.strip()
-                for t in therock_matrix.project_map[group][
-                    "projects_to_test"
-                ].split(",")
+                for t in therock_matrix.project_map[group]["projects_to_test"].split(
+                    ","
+                )
             }
             self.assertIn("amdsmi", tests, group)
 

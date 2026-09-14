@@ -5,13 +5,13 @@
 #
 # Demo: catch a GPU memory-access fault (SIGSEGV) with ROCgdb, entirely in
 # software with no AMD GPU. See rocgdb-fault.md. Regenerate the .cast with:
-#   emulation/mirage/scripts/record_demo.sh emulation/rocjitsu/demos/rocgdb-fault.sh
+#   emulation/rocjitsu/cli/scripts/record_demo.sh emulation/rocjitsu/demos/rocgdb-fault.sh
 
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 kernel="$here/../tests/rocgdb/bad_access.hip"
-mirage="${MIRAGE_BIN:-mirage}"
+rocjitsu="${ROCJITSU_BIN:-rocjitsu}"
 
 say() { printf '\n\033[1;36m# %s\033[0m\n' "$*"; }
 
@@ -26,7 +26,7 @@ app="$tmp/bad_access"
 
 say "Run it under ROCgdb — the emulator faults the wave on the wild store:"
 ( set -x
-  "$mirage" run --profile mi350x --gdb \
+  "$rocjitsu" run --profile mi350x --gdb \
     --gdb-ex 'run' \
     --gdb-ex 'backtrace' \
     --gdb-ex 'info registers pc' \

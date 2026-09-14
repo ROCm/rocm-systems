@@ -17,20 +17,17 @@
   - [amdisa](emulation/rocjitsu/lib/python/amdisa/) — Python codegen that consumes AMD machine-readable ISA specs to auto-generate decoders, semantics, encoding/legalization tables, and cross-ISA translators. Key modules: [parser.py](emulation/rocjitsu/lib/python/amdisa/parser.py), [semantics.py](emulation/rocjitsu/lib/python/amdisa/semantics.py), [encoding_translator_codegen.py](emulation/rocjitsu/lib/python/amdisa/encoding_translator_codegen.py), [legalization_codegen.py](emulation/rocjitsu/lib/python/amdisa/legalization_codegen.py), [cross_isa.py](emulation/rocjitsu/lib/python/amdisa/cross_isa.py), [codegen/](emulation/rocjitsu/lib/python/amdisa/codegen/).
   - [rocjitsu_vllm](emulation/rocjitsu/lib/python/rocjitsu_vllm/) — Python integration glue for running vLLM on top of rocjitsu.
   - [configs](emulation/rocjitsu/configs/), [schemas](emulation/rocjitsu/schemas/), [scripts](emulation/rocjitsu/scripts/), [tests](emulation/rocjitsu/tests/) — Topology/profile configs, schema definitions, build/dev scripts, and test suites.
-- [Mirage](emulation/mirage/) — iOS-simulator-inspired UX and CLI that drives rocjitsu (named profiles, persistent sessions, containers, topology editor, session dashboard, interactive terminal). A Rust workspace whose top-level [`mirage`](emulation/mirage/src/) binary composes the crates below. See the [Mirage](#mirage) section for the architecture.
-  - [core](emulation/mirage/core/) — Shared library: profile/session/topology/agent stores, the control-plane trait, KMD/library discovery, and container env wiring. See [discovery.rs](emulation/mirage/core/src/discovery.rs), [profile.rs](emulation/mirage/core/src/profile.rs), [ctl.rs](emulation/mirage/core/src/ctl.rs), [container.rs](emulation/mirage/core/src/container.rs).
-  - [ctl](emulation/mirage/ctl/) — User-facing control plane: parses and dispatches every `mirage` subcommand (profile/topology/agent/session/exec/run/…). Entry point [lib.rs](emulation/mirage/ctl/src/lib.rs).
-  - [host](emulation/mirage/host/) — Per-session host process that boots a session, brings up containers, hosts the emulator daemon, and runs/streams executions across nodes and ranks. See [lib.rs](emulation/mirage/host/src/lib.rs) and [main.rs](emulation/mirage/host/src/main.rs).
-  - [container](emulation/mirage/container/) — Drives the `docker`/`podman` CLI to realise the containerised parts of a session: image build/pull, networks, node launch. See [lib.rs](emulation/mirage/container/src/lib.rs).
-  - [builtin](emulation/mirage/builtin/) — Built-in agents and topologies (e.g. MI300X/MI350X) preloaded into the user config. See [agents.rs](emulation/mirage/builtin/src/agents.rs) and [profiles.rs](emulation/mirage/builtin/src/profiles.rs).
+- [CLI](emulation/rocjitsu/cli/) — iOS-simulator-inspired UX that drives the emulator (named profiles, persistent sessions, containers). A Rust workspace whose top-level [`rocjitsu`](emulation/rocjitsu/cli/src/) binary composes the crates below. See the [CLI](#cli) section for the architecture.
+  - [core](emulation/rocjitsu/cli/core/) (`rj_core`) — Shared library: profile/session/topology/agent stores, the control-plane trait, KMD/library discovery, and container env wiring. See [discovery.rs](emulation/rocjitsu/cli/core/src/discovery.rs), [profile.rs](emulation/rocjitsu/cli/core/src/profile.rs), [ctl.rs](emulation/rocjitsu/cli/core/src/ctl.rs), [container.rs](emulation/rocjitsu/cli/core/src/container.rs).
+  - [ctl](emulation/rocjitsu/cli/ctl/) (`rj_ctl`) — User-facing control plane: parses and dispatches every `rocjitsu` subcommand (profile/topology/agent/session/exec/run/…). Entry point [lib.rs](emulation/rocjitsu/cli/ctl/src/lib.rs).
+  - [supervisor](emulation/rocjitsu/cli/supervisor/) (`rj_supervisor`) — Per-session supervisor that boots a session, brings up containers, hosts the emulator daemon, and runs/streams executions across nodes and ranks. See [session.rs](emulation/rocjitsu/cli/supervisor/src/session.rs) and [run.rs](emulation/rocjitsu/cli/supervisor/src/run.rs).
+  - [container](emulation/rocjitsu/cli/container/) (`rj_container`) — Drives the `docker`/`podman` CLI to realise the containerised parts of a session: image build/pull, networks, node launch. See [lib.rs](emulation/rocjitsu/cli/container/src/lib.rs).
+  - [builtin](emulation/rocjitsu/cli/builtin/) (`rj_builtin`) — Built-in agents and topologies (e.g. MI300X/MI350X) preloaded into the user config. See [agents.rs](emulation/rocjitsu/cli/builtin/src/agents.rs) and [profiles.rs](emulation/rocjitsu/cli/builtin/src/profiles.rs).
   - Emulator backends — pluggable engines registered via `inventory`, selected per profile by `kind`:
-    - [rocjitsu](emulation/mirage/rocjitsu/) — rocjitsu integration: synthesizes the sim config, hosts the in-process emulator daemon, and the `rocjitsu-dbt` translation backend. See [lib.rs](emulation/mirage/rocjitsu/src/lib.rs), [daemon.rs](emulation/mirage/rocjitsu/src/daemon.rs), [dbt.rs](emulation/mirage/rocjitsu/src/dbt.rs).
-    - [rocjitsu_sys](emulation/mirage/rocjitsu_sys/) — Runtime (dlopen) FFI bindings to the rocjitsu VM C API (`rj_vm_*`). See [lib.rs](emulation/mirage/rocjitsu_sys/src/lib.rs).
-    - [hotswap](emulation/mirage/hotswap/) — HotSwap backend: load-time ISA rewriter that runs a guest-built workload on the host GPU. See [lib.rs](emulation/mirage/hotswap/src/lib.rs).
-    - [noop](emulation/mirage/noop/) — Pass-through backend that runs the workload directly with no GPU emulation. See [lib.rs](emulation/mirage/noop/src/lib.rs).
-  - [daemon](emulation/mirage/daemon/) — Optional HTTP/WebSocket server exposing the control plane as a REST API (off by default). See [api.rs](emulation/mirage/daemon/src/api.rs) and [server.rs](emulation/mirage/daemon/src/server.rs).
-  - [dashboard](emulation/mirage/dashboard/) — React + Vite single-page app (topology editor, session dashboard, interactive terminals) bundled into the daemon. Source under [web/src/](emulation/mirage/dashboard/web/src/).
-  - [scripts](emulation/mirage/scripts/), [tests](emulation/mirage/tests/), [docs](emulation/mirage/docs/), [cmake](emulation/mirage/cmake/) — Build/dev and Dockerized-build scripts, end-to-end and ML test fixtures, design docs, and the CMake wrapper over cargo.
+    - [rocjitsu](emulation/rocjitsu/cli/rocjitsu/) (`rj_backend_rocjitsu`) — Emulator integration: synthesizes the sim config, hosts the emulator daemon, and the DBT translation and guest backends. See [lib.rs](emulation/rocjitsu/cli/rocjitsu/src/lib.rs), [dbt.rs](emulation/rocjitsu/cli/rocjitsu/src/dbt.rs), [guest.rs](emulation/rocjitsu/cli/rocjitsu/src/guest.rs).
+    - [hotswap](emulation/rocjitsu/cli/hotswap/) (`rj_backend_hotswap`) — HotSwap backend: load-time ISA rewriter that runs a guest-built workload on the host GPU. See [lib.rs](emulation/rocjitsu/cli/hotswap/src/lib.rs).
+  - [rocjitsu_sys](emulation/rocjitsu/cli/rocjitsu_sys/) — Runtime (dlopen) FFI bindings to the emulator's C API (`rj_vm_*`), and the one crate in the workspace permitted to write `unsafe`. See [lib.rs](emulation/rocjitsu/cli/rocjitsu_sys/src/lib.rs).
+  - [scripts](emulation/rocjitsu/cli/scripts/), [tests](emulation/rocjitsu/cli/tests/), [docs](emulation/rocjitsu/cli/docs/), [cmake](emulation/rocjitsu/cli/cmake/) — Build/dev and Dockerized-build scripts, end-to-end and ML test fixtures, design docs, and the CMake wrapper over cargo.
 
 ## Rocjitsu
 
@@ -139,56 +136,39 @@ flowchart TB
     class AMDISA amdisa
 ```
 
-##
+## CLI
 
-## Mirage
+An iOS-simulator-inspired UX that makes the emulator easy to drive. Where the engine above is the raw emulation core, the CLI is the control plane around it: it turns a one-off `LD_PRELOAD` invocation into a managed, reproducible workflow with named configs, persistent sessions, and containers.
 
-An iOS-simulator-inspired UX and CLI that makes rocjitsu easy to drive. Where rocjitsu is the raw emulation engine, Mirage is the control plane around it: it turns a one-off `LD_PRELOAD` invocation into a managed, reproducible workflow with named configs, persistent sessions, containers, and a dashboard.
+The CLI exists to:
 
-Mirage exists to:
-
-- **Drive the emulator.** A single `mirage run` boots an emulated GPU and launches your unmodified ROCm workload on it — Mirage discovers the rocjitsu KMD interposer, synthesizes the simulation config from your profile, hosts the emulator daemon, and injects the right environment so the app "sees" the virtual hardware.
-- **Support complex topologies.** Describe multi-GPU, multi-node systems (e.g. MI300X/MI350X/MI450X) declaratively. The topology editor and `--num-nodes` / `--gpus-per-node` / `--nproc_per_node` flags let you stand up large virtual clusters, and Mirage wires up rendezvous (`MASTER_ADDR`, `WORLD_SIZE`, `RANK`, per-node `NCCL_HOSTID`, …) so distributed frameworks like torchrun and RCCL run unchanged.
-- **Support containers and reproducible runs.** A profile is a self-contained, on-disk description of a workload. Executions run inside containers with pinned images so a run can be replayed identically on another machine, and Mirage handles image bring-up, mounts, and host/glibc compatibility automatically.
-- **Make it easier to debug and run.** Persistent sessions, a session dashboard with live metrics, interactive terminals into running sessions, and streamed build/boot logs replace the manual dance of preloading libraries and hand-editing JSON configs.
+- **Drive the emulator.** A single `rocjitsu run` boots an emulated GPU and launches your unmodified ROCm workload on it — it discovers the KMD interposer, synthesizes the simulation config from your profile, hosts the emulator daemon, and injects the right environment so the app "sees" the virtual hardware.
+- **Support complex topologies.** Describe multi-GPU, multi-node systems (e.g. MI300X/MI350X/MI450X) declaratively. The `--num-nodes` / `--gpus-per-node` / `--nproc-per-node` flags let you stand up large virtual clusters, and the CLI wires up rendezvous (`MASTER_ADDR`, `WORLD_SIZE`, `RANK`, per-node `NCCL_HOSTID`, …) so distributed frameworks like torchrun and RCCL run unchanged.
+- **Support containers and reproducible runs.** A profile is a self-contained, on-disk description of a workload. Executions run inside containers with pinned images so a run can be replayed identically on another machine, and the CLI handles image bring-up, mounts, and host/glibc compatibility automatically.
+- **Make it easier to debug and run.** Persistent sessions, `rocjitsu exec` into a live session from another terminal, and streamed build/boot logs replace the manual dance of preloading libraries and hand-editing JSON configs.
 
 ```mermaid
 flowchart TB
-    subgraph MIRAGE["Mirage"]
-        subgraph UI["UI"]
-            TOPOE["Topology Editor"]
-            TERM["Interactive Terminal"]
-            DASHBOARD["Session Dashboard"]
-        end
-
+    subgraph CLI["rocjitsu CLI"]
         TOPO["Topology"]
-
         SIM["Emulator"]
         PLUGINS["Plugins"]
+        PROFILE["Profile"]
+        SESSION["Session"]
+        EXECUTION["Execution"]
+        CONTAINERS["Containers"]
         TOPO --> PROFILE
         SIM --> PROFILE
         PLUGINS --> PROFILE
-        PROFILE["Profile"]
-        SESSION["Session"]
-        METRICS["Metrics"]
-        SESSION --> METRICS
-        METRICS --> DASHBOARD
-        EXECUTION["Execution "]
         PROFILE --> SESSION --> EXECUTION
-        SESSION --> DASHBOARD
-        CONTAINERS["Containers"]
         EXECUTION --> CONTAINERS
         EXECUTION --> SIM
-        EXECUTION --> TERM
-        TERM --> EXECUTION
-        SIM --> METRICS
-        TOPOE --> TOPO
     end
 ```
 
 ### Concepts
 
-Mirage models a workload as a small set of layered, persistent objects:
+The CLI models a workload as a small set of layered, persistent objects:
 
 | term | definition |
 | --- | --- |

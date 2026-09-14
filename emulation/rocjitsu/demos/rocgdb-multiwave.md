@@ -20,13 +20,13 @@ kernels rather than single-wave toys.
 
 ## Run it
 
-Record (builds a portable mirage + rocjitsu, then captures the `.cast`):
+Record (builds a portable rocjitsu + rocjitsu, then captures the `.cast`):
 
-    emulation/mirage/scripts/record_demo.sh emulation/rocjitsu/demos/rocgdb-multiwave.sh
+    emulation/rocjitsu/cli/scripts/record_demo.sh emulation/rocjitsu/demos/rocgdb-multiwave.sh
 
-Or run against an already-built `mirage`:
+Or run against an already-built `rocjitsu`:
 
-    MIRAGE_BIN=/path/to/mirage bash emulation/rocjitsu/demos/rocgdb-multiwave.sh
+    ROCJITSU_BIN=/path/to/rocjitsu bash emulation/rocjitsu/demos/rocgdb-multiwave.sh
 
 Requires `hipcc` and `rocgdb` on `PATH` (from a ROCm install).
 

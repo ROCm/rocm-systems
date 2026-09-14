@@ -50,10 +50,23 @@ foreach(_required IN ITEMS TEST_LAUNCHER TEST_CONFIG)
     endif()
 endforeach()
 
+# `--in-process` emulates inside the workload's own process, which is what
+# every case reached through this script is written against: an interposer
+# loaded into the test binary, and a device that binary stands up itself.
+# The launcher's own default is a daemon, and rightly so — that is what lets
+# several processes share one emulated machine — but it moves the emulator
+# out of the process under test and into a forked one, which is a different
+# thing to be testing and is covered by `daemon_test.cpp` on purpose.
+#
+# It is not only a question of coverage. A plugin's file sink is opened by
+# whichever process runs the VM, and a daemon opens it before the workload
+# starts: `LoggingTest.dispatch_logged` removes a stale log and then looks
+# for a fresh one, and under a daemon it deleted the very file the daemon
+# was already writing into.
 execute_process(
     COMMAND
-        "${TEST_LAUNCHER}" --config "${TEST_CONFIG}" -- "${TEST_EXECUTABLE}"
-        "--gtest_filter=${TEST_FILTER}"
+        "${TEST_LAUNCHER}" --in-process --config "${TEST_CONFIG}" --
+        "${TEST_EXECUTABLE}" "--gtest_filter=${TEST_FILTER}"
     RESULT_VARIABLE _run_result
     OUTPUT_VARIABLE _run_output
     ERROR_VARIABLE _run_errors

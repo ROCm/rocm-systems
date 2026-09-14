@@ -419,9 +419,16 @@ add_subdirectory(tools)
 add_subdirectory(tools/rj-ip-discovery)
 add_subdirectory(fuzz/decode)
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_subdirectory(tools/rocjitsu)
-endif()
+# The rocjitsu CLI, which is a Rust workspace with its own cargo wrapper.
+#
+# Brought into this build rather than left to a developer to build by
+# hand because the test suite launches almost everything through it: the
+# `${RJ_CLI_LOCAL} --config <cfg> -- <app>` form is how a test gets a
+# workload in front of the emulator at all. It sets `RJ_CLI_BIN` and
+# `RJ_CLI_TARGET`, or leaves both unset when cargo is missing, which is
+# what `tests/` gates on.
+add_subdirectory(cli)
+
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()
@@ -456,10 +463,7 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # rj_pretranslate ships because the tier it fills is only worth having if an
     # image build or a post-install step can fill it.
-    install(
-        TARGETS rocjitsu_bin rj_pretranslate
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    )
+    install(TARGETS rj_pretranslate RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     # And the wrapper ships with it. rj_pretranslate takes standalone code
     # objects; the script is the only piece that knows how to find them inside
     # fat binaries, offload bundles and KPACK archives, and the tool's own help
