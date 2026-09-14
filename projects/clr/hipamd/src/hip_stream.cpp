@@ -73,6 +73,19 @@ void Stream::ResetCaptureState(bool preserveInvalidated) {
 }
 
 // ================================================================================================
+void Stream::InvalidateCapture() {
+  auto* owner = reinterpret_cast<hip::Stream*>(captureOwner_);
+  if (owner == nullptr) {
+    return;
+  }
+  owner->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+  for (auto stream : owner->captureStreams_) {
+    reinterpret_cast<hip::Stream*>(stream)->SetCaptureStatus(
+        hipStreamCaptureStatusInvalidated);
+  }
+}
+
+// ================================================================================================
 hipError_t Stream::EndCapture(bool preserveInvalidated) {
   if (originStream_) {
     // Swap the participant set out before walking it, so each participant is free to erase
@@ -532,6 +545,21 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
             event);
     if (waitStream == nullptr) {
       return hipErrorInvalidHandle;
+    }
+    // Waiting on an event recorded in a different capture would splice two independent
+    // graphs together. Reject it rather than merging them. This has to come before the
+    // AddCrossCapturedNode below, which would otherwise pull the other graph's nodes into
+    // this stream's dependency set and produce a node with a cross-graph edge.
+    //
+    // The status test is load-bearing, not just an early out: capture IDs are unique for the
+    // life of the process but are never cleared when a capture ends, so a stream that has
+    // finished one still carries its old ID. Only a stream that is currently taking part in
+    // a capture has an ID worth comparing.
+    if (waitStream->GetCaptureStatus() != hipStreamCaptureStatusNone &&
+        waitStream->GetCaptureID() != eventStream->GetCaptureID()) {
+      waitStream->InvalidateCapture();
+      eventStream->InvalidateCapture();
+      return hipErrorStreamCaptureMerge;
     }
     // A stream is enrolled in a capture the first time it is pulled in, and is never
     // re-enrolled afterwards. That single condition subsumes the three it replaces, each of

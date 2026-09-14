@@ -484,6 +484,9 @@ namespace hip {
     void AddCaptureStream(hipStream_t s) { captureStreams_.insert(s); }
     /// Remove a stream from this capture. Only meaningful on the origin stream.
     void EraseCaptureStream(hipStream_t s) { captureStreams_.erase(s); }
+    /// Mark the whole capture this stream belongs to as invalidated: the origin and every
+    /// stream enrolled in it. Callable from the origin or from any participant.
+    void InvalidateCapture();
 
     // --- Execution context (green context) lifecycle ---
     /// Marks the stream as detached: its owning ExecutionCtx has been
