@@ -188,9 +188,22 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
       uint64_t remoteReqOff = 0;
       bool remoteMulti = ncclIbCtsRemoteMultiSeg(comm, slot, r);
       if (remoteMulti) {
-        nRemote = side[r].nSegments;
+        uint32_t remoteSegments = side[r].nSegments;
+        if (remoteSegments > NCCL_IB_MAX_SEGMENTS || remDevIdx < 0 || remDevIdx >= NCCL_IB_MAX_DEVS_PER_NIC) {
+          WARN("NET/IB: received invalid segment layout (nSegments=%u remDevIdx=%d)", remoteSegments, remDevIdx);
+          return ncclInternalError;
+        }
+        nRemote = (int)remoteSegments;
         for (int s = 0; s < nRemote; s++) {
           rVA[s] = side[r].segStart[s];
+          if (s > 0 && rVA[s] <= rVA[s - 1]) {
+            WARN("NET/IB: received non-monotonic segment layout at segment %d", s);
+            return ncclInternalError;
+          }
+          if (side[r].segRkeys[s][remDevIdx] == 0) {
+            WARN("NET/IB: received a zero rkey for segment %d device %d", s, remDevIdx);
+            return ncclInternalError;
+          }
           rOff[s] = side[r].segStart[s] - side[r].segStart[0];
         }
         if (remoteBase < side[r].segStart[0]) return ncclInternalError;
