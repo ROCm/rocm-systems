@@ -584,6 +584,10 @@ endif()
 # Like collectives.cc, it cannot be built with --offload-host-only on the
 # main rccl target or __hip_fatbin_* stays undefined in librccl.so.
 # ===========================================================================
+# ===========================================================================
+# direct_a2a_all_reduce.cu.cpp: contains a device kernel, same constraint as
+# the object below.
+# ===========================================================================
 set(DIRECT_A2A_ALL_REDUCE_FAT_OBJ "${DEVICE_BUILD_DIR}/direct_a2a_all_reduce.o")
 set(DDA_ALL_REDUCE_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_ipc.o")
 set(DDA_REDUCE_SCATTER_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_reduce_scatter_ipc.o")
