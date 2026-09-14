@@ -127,6 +127,27 @@ TEST(NetIbMultiSeg, OverlappingRangeZeroLengthIsEmpty) {
               0);
 }
 
+TEST(NetIbMultiSeg, ZeroLengthWrUsesContainingSegment) {
+    Layout L = MakeUniform(kBase, kSeg, 4);
+    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(), kBase), 0);
+    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(), kBase + kSeg), 1);
+    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(),
+                                              kBase + 2 * kSeg + 64),
+              2);
+}
+
+TEST(NetIbMultiSeg, ZeroLengthWrAtLastExclusiveEndUsesLastMr) {
+    Layout L = MakeUniform(kBase, kSeg, 4);
+    uintptr_t end = kBase + 4 * kSeg;
+    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(), end), 3);
+    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(), end + 1), -1);
+    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(), kBase - 1), -1);
+}
+
+TEST(NetIbMultiSeg, ZeroLengthWrNullOrEmptyLayout) {
+    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(0, nullptr, nullptr, kBase), -1);
+}
+
 TEST(NetIbMultiSeg, UniformLayoutAccepted) {
     std::vector<size_t> len(4, kSeg);
     EXPECT_TRUE(ncclIbSegmentsUniform(4, len.data()));
