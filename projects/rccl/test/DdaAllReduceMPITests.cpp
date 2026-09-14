@@ -185,8 +185,6 @@ TEST_F(DdaMPI_AllReduce, LLTwoShotMultiRank)
     if(!validateTestPrerequisites(kMinProcessesForMPI))
         GTEST_SKIP() << "Need at least 2 MPI ranks";
 
-    MPIHelpers::MpiEnvGuard llTwoShotGuard("RCCL_DDA_LL_TWOSHOT_THRESHOLD", "2097152");
-
     int nRanks = MPIEnvironment::world_size;
     const size_t count = twoShotCountForRanks(nRanks);
     if(count == 0)
@@ -213,7 +211,7 @@ TEST_F(DdaMPI_AllReduce, LLTwoShotMultiRank)
 // Run in a process that already touched those thresholds, the guards are inert
 // and the COLL-log assertion reports whichever tier actually claimed the message.
 
-// 256 KiB of f32 is inside the 32 MiB LL128 one-shot threshold and inside a slot
+// 256 KiB of f32 is inside the 4 MiB LL128 one-shot threshold and inside a slot
 // at any supported rank count, so with the LL tiers switched off it is the LL128
 // one-shot tier that claims it.
 TEST_F(DdaMPI_AllReduce, LL128OneShotMultiRank)

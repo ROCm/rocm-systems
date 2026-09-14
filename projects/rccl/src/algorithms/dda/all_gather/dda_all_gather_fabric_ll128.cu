@@ -70,9 +70,8 @@ static inline std::pair<dim3, dim3> ddaAllGatherFabricLL128Geom(ncclComm* comm, 
   const size_t warps = threads / (unsigned)kDdaLL128Warp;
   const int nPeers = comm->nRanks - 1;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
-  if (nBlocksMax < 1) {
-    nBlocksMax = 1;
-  }
+  if (nBlocksMax < 1) nBlocksMax = 1;
+  if (nBlocksMax < nPeers) nBlocksMax = nPeers;
   const unsigned blocksPerPeer =
     ddaLL128AGBlocksPerPeer(ddaLL128Slices(perRankBytes), warps, nPeers, (size_t)nBlocksMax);
   return std::make_pair(dim3((unsigned)nPeers, blocksPerPeer), dim3(threads));

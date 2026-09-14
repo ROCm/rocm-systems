@@ -11,7 +11,7 @@
  * all_reduce_dda_ll128.h. They share a scratch layout and epoch counter, so
  * keeping the launchers in one translation unit also keeps the invariants that
  * tie them (the static_assert below) next to the code it constrains. LL128
- * one-shot uses the same DDA_LL enable and its own threshold.
+ * one-shot and two-shot uses the same DDA_LL enable and its own threshold.
  * See LICENSE.txt for license information.
  ************************************************************************/
 
@@ -75,7 +75,7 @@ static_assert(kDdaLLArTwoShotSlotStridePkts == kDdaLLArSlotStridePkts / 2,
 // low (LL serves tiny messages where latency, not occupancy, dominates).
 static inline std::pair<dim3, dim3> ddaAllReduceFabricLLGeom(ncclComm* comm, size_t count, int typeSize) {
   const size_t nPk = ((size_t)count * (size_t)typeSize) >> 3; // 8 payload bytes per packet
-  const unsigned threads = 256;
+  const unsigned threads = 512;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
   if (nBlocksMax < 1) {
     nBlocksMax = 1;

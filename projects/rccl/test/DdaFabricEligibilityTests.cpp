@@ -531,20 +531,21 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL_TwoShotClaimsPastOneShotThreshold)
         mockComm_.get(), sendbuff_, recvbuff_, 262176, ncclFloat32, ncclSum));
 }
 
-// 4194304 floats is exactly the default 16 MiB DDA_LL_TWOSHOT_THRESHOLD, the top
+// 524288 floats is exactly the default 2 MiB DDA_LL_TWOSHOT_THRESHOLD, the top
 // of the LL range, which the tier takes with <=.
 TEST_F(DdaFabricEligibilityTest, AllReduceLL_AtTwoShotThresholdEligible)
 {
     EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 4194304, ncclFloat32, ncclSum));
+        mockComm_.get(), sendbuff_, recvbuff_, 524288, ncclFloat32, ncclSum));
 }
 
-// 128 bytes past the two-shot threshold: neither tier claims it and the message
-// falls through to LL128 / Simple.
+// 128 bytes past the two-shot threshold: neither LL tier claims it and the message
+// falls through to LL128 / Simple. The count stays a multiple of 16 * nRanks so
+// the rejection is attributable to the threshold and not to the shard shape rules.
 TEST_F(DdaFabricEligibilityTest, AllReduceLL_PastBothThresholds)
 {
     EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 4194336, ncclFloat32, ncclSum));
+        mockComm_.get(), sendbuff_, recvbuff_, 524320, ncclFloat32, ncclSum));
 }
 
 // The gate above only reports the disjunction of the two tiers. These call each
@@ -720,7 +721,7 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_EligibleBfloat16)
 // A two-shot slot holds half what a one-shot slot does, because a bank has to
 // carry two staging areas instead of one. Only the shard has to fit, though, so
 // on the same scratch the tier still reaches nRanks/2 times further overall:
-// here one-shot tops out at four slices of message and two-shot takes four
+// here one-shot tops out at eight slices of message and two-shot takes four
 // slices per rank.
 TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_HalvedSlotStillReachesFurther)
 {

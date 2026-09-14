@@ -74,12 +74,12 @@ constexpr int kDdaLL128ArTwoShotPeerBatch = 8;
 // its contribution seeds the accumulator straight from sendbuff.
 //
 // A warp owns the same slice index in every phase, and phase 1 only ever reads
-// peer shards while phase 2 only ever touches the self shard, so an in-place call
+// peer shards while phase 3 only ever touches the self shard, so an in-place call
 // (sendbuff aliasing recvbuff) never has one warp's write land on a range another
 // warp still has to read.
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
-__launch_bounds__(1024)
+__launch_bounds__(512)
 #endif
   __global__ void ddaAllReduceTwoShotLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
                                            T* __restrict__ recvbuff, // local user output
@@ -206,6 +206,10 @@ __launch_bounds__(1024)
       ddaLL128StoreRegs<int8_t>(dstBytes + (size_t)peer * shardBytes + sliceByte, vr, eltInSlice, lane, flagLane);
     }
   }
+
+#if defined(__gfx1250__)
+  asm volatile("s_wait_storecnt 0x0" ::: "memory");
+#endif
 
   ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
 }
