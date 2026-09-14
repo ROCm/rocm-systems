@@ -280,7 +280,7 @@ class MIOpenHandler(DatabaseHandler):
         return None
 
 
-class HipKernelProviderRockeHandler(DatabaseHandler):
+class HipKernelProviderArchContentHandler(DatabaseHandler):
     """Handler for hipKernelProvider per-architecture kernel content.
 
     Content lives under a container in the plugin engines dir: ``arch_content``
@@ -374,7 +374,7 @@ AVAILABLE_HANDLERS = {
     "hipsparselt": HipSparseLtHandler,
     "aotriton": AotritonHandler,
     "miopen": MIOpenHandler,
-    "hipkernelprovider": HipKernelProviderRockeHandler,
+    "hipkernelprovider": HipKernelProviderArchContentHandler,
     "hotswap_cache": HotswapCacheHandler,
 }
 

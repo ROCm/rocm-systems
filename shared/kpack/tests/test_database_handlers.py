@@ -10,7 +10,7 @@ from rocm_kpack.database_handlers import (
     HipSparseLtHandler,
     AotritonHandler,
     MIOpenHandler,
-    HipKernelProviderRockeHandler,
+    HipKernelProviderArchContentHandler,
     HotswapCacheHandler,
     WHEEL_TYPE_PRESETS,
     get_database_handlers,
@@ -796,8 +796,8 @@ class TestMIOpenHandler:
         assert result is None
 
 
-class TestHipKernelProviderRockeHandler:
-    """Tests for HipKernelProviderRockeHandler detection logic."""
+class TestHipKernelProviderArchContentHandler:
+    """Tests for HipKernelProviderArchContentHandler detection logic."""
 
     _ARCH_CONTENT_DIR = "lib/hipdnn_plugins/engines/arch_content/some-producer"
     _TEST_ARCH_CONTENT_DIR = (
@@ -806,7 +806,7 @@ class TestHipKernelProviderRockeHandler:
 
     @pytest.fixture
     def handler(self):
-        return HipKernelProviderRockeHandler()
+        return HipKernelProviderArchContentHandler()
 
     @pytest.fixture
     def prefix_root(self, tmp_path):
@@ -1097,7 +1097,7 @@ class TestDatabaseHandlerRegistry:
         assert isinstance(handlers[2], HipSparseLtHandler)
         assert isinstance(handlers[3], AotritonHandler)
         assert isinstance(handlers[4], MIOpenHandler)
-        assert isinstance(handlers[5], HipKernelProviderRockeHandler)
+        assert isinstance(handlers[5], HipKernelProviderArchContentHandler)
         assert isinstance(handlers[6], HotswapCacheHandler)
 
     def test_wheel_type_preset(self):
