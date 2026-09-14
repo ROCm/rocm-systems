@@ -31,6 +31,7 @@ target_include_directories(hrr_reader PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<INSTALL_INTERFACE:include/hrr/playback>
 )
+target_compile_definitions(hrr_reader PRIVATE HIP_ABI_IMPL)
 target_compile_definitions(hrr_reader PRIVATE
   HRR_API_ARGS_IMPLEMENTATION
   $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
@@ -54,6 +55,7 @@ if(HRR_BUILD_PLAYBACK)
   target_include_directories(hrr-playback PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
   )
+  target_compile_definitions(hrr-playback PRIVATE HIP_ABI_IMPL)
   target_compile_definitions(hrr-playback PRIVATE
     __HIP_PLATFORM_AMD__
     "HRR_BUILD_TYPE=\"$<IF:$<BOOL:$<CONFIG>>,$<CONFIG>,unknown>\""
