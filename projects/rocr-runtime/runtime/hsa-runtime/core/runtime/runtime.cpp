@@ -4387,13 +4387,6 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     drm_owner = agent_for_drm;
     alloc_node_id = agent_for_drm->node_id();
     alloc_flags |= MemoryRegion::AllocateGTTAccess;
-
-    { // debugging
-      int drm_owner_fd = -1;
-      agent_for_drm->driver().GetDeviceFd(alloc_node_id, &drm_owner_fd);
-      std::cout << "VMemoryHandleCreate(): drm_owner node " << alloc_node_id
-                << " mmap_fd = " << drm_owner_fd << std::endl;
-    }
   }
 
   hsa_status_t status = region->Allocate(size, alloc_flags, alloc_node_id, &driver_handle);
@@ -4410,10 +4403,6 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
       region->Free(driver_handle);
       return ret;
     }
-
-    std::cout << "VMemoryHandleCreate(): node " << agent_for_drm->node_id()
-              << " mmap_offset = 0x" << std::hex << driver_handle.mmap_offset << std::dec
-              << std::endl;
 
     auto memoryHandle =
         std::make_unique<MemoryHandle>(region, flags_unused, driver_handle, alloc_flags);
@@ -4625,10 +4614,6 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
     core::Agent* agent = memHandle->drmAgent();
     int mmap_fd = -1;
     agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
-
-    std::cout << "EnableAccess(): imported = " << memHandle->imported << " node "
-              << agent->node_id() << " mmap_fd = " << mmap_fd << " mmap_offset = 0x" << std::hex
-              << memHandle->driver_handle.mmap_offset << std::dec << std::endl;
 
     if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
                              memHandle->driver_handle.mmap_offset)) {
