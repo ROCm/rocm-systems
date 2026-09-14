@@ -15,8 +15,9 @@ using ::testing::_;
 using ::testing::Return;
 using ::testing::StrictMock;
 
-using MockBackend =
-    ::testing::StrictMock<rocprofsys::backends::rocprofiler_sdk::testing::mock_backend>;
+using MockBackendImpl = ::testing::StrictMock<
+    rocprofsys::backends::rocprofiler_sdk::testing::mock_backend_impl>;
+using MockBackend = rocprofsys::backends::rocprofiler_sdk::testing::mock_backend;
 
 namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing
 {
@@ -24,6 +25,10 @@ namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing
 class SdkPmcDeviceTest : public ::testing::Test
 {
 protected:
+    // `mock_impl` is the GMock object EXPECT_CALL binds to. `mock_backend` is the
+    // stateless handle passed as device<Backend>'s Backend argument; its static
+    // methods forward to whichever impl is bound via MockBackend::bind().
+    std::shared_ptr<MockBackendImpl>   mock_impl;
     std::shared_ptr<MockBackend>       mock_backend;
     std::shared_ptr<rocprofsys::agent> test_agent;
     MockBackend::context_id_t          test_context{};
@@ -31,6 +36,8 @@ protected:
 
     void SetUp() override
     {
+        mock_impl = std::make_shared<MockBackendImpl>();
+        MockBackend::bind(mock_impl);
         mock_backend               = std::make_shared<MockBackend>();
         test_context.handle        = 1;
         test_profile_config.handle = 100;
@@ -44,6 +51,8 @@ protected:
         test_agent->product_name      = "GPU 0";
         test_agent->vendor_name       = "AMD";
     }
+
+    void TearDown() override { MockBackend::unbind(); }
 };
 
 TEST_F(SdkPmcDeviceTest, DeviceProperties)
@@ -101,9 +110,9 @@ TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
     records[1].id            = 20;
     records[1].counter_value = 100.0;
 
-    EXPECT_CALL(*mock_backend, start_context(_)).WillOnce(Return());
+    EXPECT_CALL(*mock_impl, start_context(_)).WillOnce(Return());
 
-    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
+    EXPECT_CALL(*mock_impl, sample_device_counting_service(_, _, _, _, _))
         .WillOnce([&](MockBackend::context_id_t, MockBackend::user_data_t,
                       MockBackend::counter_flag_t, MockBackend::counter_record_t* out,
                       size_t* count) {
@@ -113,7 +122,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
             return MockBackend::status_success;
         });
 
-    EXPECT_CALL(*mock_backend, query_record_counter_id(_, _))
+    EXPECT_CALL(*mock_impl, query_record_counter_id(_, _))
         .WillOnce(
             [](MockBackend::counter_record_t record, MockBackend::counter_id_t* out) {
                 out->handle = 10;
@@ -182,9 +191,9 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
         records[i].counter_value = static_cast<double>(10 * (i + 1));
     }
 
-    EXPECT_CALL(*mock_backend, start_context(_)).WillOnce(Return());
+    EXPECT_CALL(*mock_impl, start_context(_)).WillOnce(Return());
 
-    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
+    EXPECT_CALL(*mock_impl, sample_device_counting_service(_, _, _, _, _))
         .WillOnce([&](MockBackend::context_id_t, MockBackend::user_data_t,
                       MockBackend::counter_flag_t, MockBackend::counter_record_t* out,
                       size_t* count) {
@@ -194,7 +203,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
             return MockBackend::status_success;
         });
 
-    EXPECT_CALL(*mock_backend, query_record_counter_id(_, _))
+    EXPECT_CALL(*mock_impl, query_record_counter_id(_, _))
         .Times(4)
         .WillRepeatedly(
             [](MockBackend::counter_record_t record, MockBackend::counter_id_t* out) {
@@ -235,9 +244,9 @@ TEST_F(SdkPmcDeviceTest, CounterIdDecodedFromInstanceId)
     record.id            = sdk_instance_id;
     record.counter_value = 99.0;
 
-    EXPECT_CALL(*mock_backend, start_context(_)).WillOnce(Return());
+    EXPECT_CALL(*mock_impl, start_context(_)).WillOnce(Return());
 
-    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
+    EXPECT_CALL(*mock_impl, sample_device_counting_service(_, _, _, _, _))
         .WillOnce([&](MockBackend::context_id_t, MockBackend::user_data_t,
                       MockBackend::counter_flag_t, MockBackend::counter_record_t* out,
                       size_t* count) {
@@ -246,7 +255,7 @@ TEST_F(SdkPmcDeviceTest, CounterIdDecodedFromInstanceId)
             return MockBackend::status_success;
         });
 
-    EXPECT_CALL(*mock_backend, query_record_counter_id(_, _))
+    EXPECT_CALL(*mock_impl, query_record_counter_id(_, _))
         .WillOnce([](MockBackend::counter_record_t, MockBackend::counter_id_t* out) {
             out->handle = plain_counter_handle;
             return MockBackend::status_success;
@@ -275,10 +284,10 @@ TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
     record.id            = 5;
     record.counter_value = 1.0;
 
-    EXPECT_CALL(*mock_backend, start_context(_)).WillOnce(Return());
+    EXPECT_CALL(*mock_impl, start_context(_)).WillOnce(Return());
 
     // Two successive sample calls; each must return correct data.
-    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
+    EXPECT_CALL(*mock_impl, sample_device_counting_service(_, _, _, _, _))
         .Times(2)
         .WillRepeatedly([&](MockBackend::context_id_t, MockBackend::user_data_t,
                             MockBackend::counter_flag_t,
@@ -288,7 +297,7 @@ TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
             return MockBackend::status_success;
         });
 
-    EXPECT_CALL(*mock_backend, query_record_counter_id(_, _))
+    EXPECT_CALL(*mock_impl, query_record_counter_id(_, _))
         .Times(2)
         .WillRepeatedly(
             [](MockBackend::counter_record_t, MockBackend::counter_id_t* out) {
@@ -312,9 +321,9 @@ TEST_F(SdkPmcDeviceTest, SampleFailureReturnsEmpty)
     device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
                             {});
 
-    EXPECT_CALL(*mock_backend, start_context(_)).WillOnce(Return());
+    EXPECT_CALL(*mock_impl, start_context(_)).WillOnce(Return());
 
-    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
+    EXPECT_CALL(*mock_impl, sample_device_counting_service(_, _, _, _, _))
         .WillOnce(Return(MockBackend::status_error));
 
     const enabled_metrics enabled{ {} };
@@ -328,9 +337,9 @@ TEST_F(SdkPmcDeviceTest, SampleWithZeroRecords)
     device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
                             {});
 
-    EXPECT_CALL(*mock_backend, start_context(_)).WillOnce(Return());
+    EXPECT_CALL(*mock_impl, start_context(_)).WillOnce(Return());
 
-    EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
+    EXPECT_CALL(*mock_impl, sample_device_counting_service(_, _, _, _, _))
         .WillOnce([](MockBackend::context_id_t, MockBackend::user_data_t,
                      MockBackend::counter_flag_t, MockBackend::counter_record_t*,
                      size_t* count) {

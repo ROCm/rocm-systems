@@ -8,6 +8,8 @@
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "logger/debug.hpp"
 
+#include "policies/rocprofiler-sdk/domain_service.hpp"
+
 #include <algorithm>
 #include <cassert>
 #include <concepts>
@@ -23,53 +25,7 @@
 namespace rocprofsys::pmc::collectors::gpu_perf_counter
 {
 
-// Contract the GPU perf-counter collector requires of its backend (rocprofiler-sdk).
-template <typename Backend>
-concept backend_contract = requires(
-    Backend backend, typename Backend::context_id_t context,
-    typename Backend::agent_id_t agent, typename Backend::buffer_id_t buffer,
-    typename Backend::user_data_t user_data, typename Backend::counter_flag_t flags,
-    typename Backend::counter_record_t  record,
-    typename Backend::counter_record_t* records,
-    typename Backend::counter_id_t* counter_id, typename Backend::counter_id_t counter,
-    typename Backend::counter_id_t*                counters,
-    typename Backend::counter_config_id_t*         config,
-    typename Backend::available_counters_cb_t      counter_cb,
-    typename Backend::device_counting_service_cb_t service_cb, size_t* record_count,
-    void* data) {
-    {
-        Backend::make_agent_id(std::uint64_t{})
-    } -> std::same_as<typename Backend::agent_id_t>;
-    { backend.create_context(&context) } -> std::same_as<void>;
-    { backend.start_context(context) } -> std::same_as<void>;
-    { backend.stop_context(context) } -> std::same_as<void>;
-    {
-        backend.sample_device_counting_service(context, user_data, flags, records,
-                                               record_count)
-    } -> std::same_as<typename Backend::status_t>;
-    {
-        backend.query_record_counter_id(record, counter_id)
-    } -> std::same_as<typename Backend::status_t>;
-    {
-        backend.query_counter_details(counter)
-    } -> std::same_as<std::vector<counter_metadata>>;
-    {
-        backend.iterate_agent_supported_counters(agent, counter_cb, data)
-    } -> std::same_as<typename Backend::status_t>;
-    {
-        backend.create_counter_config(agent, counters, size_t{}, config)
-    } -> std::same_as<typename Backend::status_t>;
-    {
-        backend.configure_device_counting_service(context, buffer, agent, service_cb,
-                                                  data)
-    } -> std::same_as<typename Backend::status_t>;
-    // Status/flag constants read directly by device<Backend> during sampling.
-    { Backend::flag_none } -> std::convertible_to<typename Backend::counter_flag_t>;
-    { Backend::status_success } -> std::convertible_to<typename Backend::status_t>;
-    { Backend::status_hsa_not_loaded } -> std::convertible_to<typename Backend::status_t>;
-};
-
-template <backend_contract Backend>
+template <policies::rocprofiler_sdk::domain_service_backend Backend>
 class device
 {
 public:

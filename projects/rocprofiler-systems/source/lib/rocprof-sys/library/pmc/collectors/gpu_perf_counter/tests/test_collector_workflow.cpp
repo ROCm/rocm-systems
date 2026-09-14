@@ -16,7 +16,8 @@
 #include <vector>
 
 using namespace rocprofsys::pmc::collectors::gpu_perf_counter;
-using MockBackend = rocprofsys::backends::rocprofiler_sdk::testing::mock_backend;
+using MockBackend     = rocprofsys::backends::rocprofiler_sdk::testing::mock_backend;
+using MockBackendImpl = rocprofsys::backends::rocprofiler_sdk::testing::mock_backend_impl;
 using MockBackendFactory =
     rocprofsys::backends::rocprofiler_sdk::testing::mock_backend_factory;
 using MockProvider =
@@ -123,10 +124,10 @@ struct counter_setup
 };
 
 static void
-setup_provider_expectations(std::shared_ptr<MockBackend>& mock,
-                            std::uint64_t                 agent_handle,
-                            std::vector<counter_setup>&   counters,
-                            std::uint32_t                 context_handle_out)
+setup_provider_expectations(std::shared_ptr<MockBackendImpl>& mock,
+                            std::uint64_t                     agent_handle,
+                            std::vector<counter_setup>&       counters,
+                            std::uint32_t                     context_handle_out)
 {
     EXPECT_CALL(
         *mock,
@@ -190,12 +191,12 @@ setup_provider_expectations(std::shared_ptr<MockBackend>& mock,
 class SdkPmcCollectorWorkflowTest : public ::testing::Test
 {
 protected:
-    std::shared_ptr<MockBackend> mock;
+    std::shared_ptr<MockBackendImpl> mock;
 
     void SetUp() override
     {
         get_captured_samples().clear();
-        mock = std::make_shared<MockBackend>();
+        mock = std::make_shared<MockBackendImpl>();
         MockBackendFactory::set_mock(mock);
 
         ON_CALL(*mock, query_record_counter_id(_, _))

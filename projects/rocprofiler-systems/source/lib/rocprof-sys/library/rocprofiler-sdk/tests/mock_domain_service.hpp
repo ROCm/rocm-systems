@@ -68,6 +68,28 @@ struct agent_id_t
     std::uint64_t handle = 0;
 };
 
+// domain_service_backend's device-counting (GPU perf-counter) surface. buffered_domain/
+// callback_domain/registry/domain_service tests never exercise it, so these are
+// trivial stand-ins kept only to satisfy the concept.
+using status_t       = int;
+using counter_flag_t = int;
+struct counter_record_t
+{
+    std::uint64_t id = 0;
+};
+struct counter_id_t
+{
+    std::uint64_t handle = 0;
+};
+struct counter_config_id_t
+{
+    std::uint64_t handle = 0;
+};
+struct counter_metadata_t
+{};
+using available_counters_cb_t      = void (*)();
+using device_counting_service_cb_t = void (*)();
+
 struct address_t
 {
     std::uint64_t value = 0;
@@ -214,10 +236,24 @@ struct mock_sdk
     using on_records_cb_t           = test_support::on_records_cb_t;
     using on_record_cb_t            = test_support::on_record_cb_t;
     using tracing_names_t           = test_support::tracing_names_t;
+    using agent_id_t                = test_support::agent_id_t;
+
+    // domain_service_backend's device-counting surface; see test_support definitions.
+    using status_t                     = test_support::status_t;
+    using counter_flag_t               = test_support::counter_flag_t;
+    using counter_record_t             = test_support::counter_record_t;
+    using counter_id_t                 = test_support::counter_id_t;
+    using counter_config_id_t          = test_support::counter_config_id_t;
+    using counter_metadata_t           = test_support::counter_metadata_t;
+    using available_counters_cb_t      = test_support::available_counters_cb_t;
+    using device_counting_service_cb_t = test_support::device_counting_service_cb_t;
 
     // NOLINTBEGIN(readability-identifier-naming)
     static constexpr std::size_t     compile_time_version                    = 90909;
     static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS                  = 1;
+    static constexpr counter_flag_t  flag_none                               = 0;
+    static constexpr status_t        status_success                          = 0;
+    static constexpr status_t        status_hsa_not_loaded                   = 1;
     static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS = 20;
     static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_PAGE_FAULT     = 21;
     static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE   = 22;
@@ -240,6 +276,42 @@ struct mock_sdk
 
     static void create_context(context_id_t* context) { g_mock->create_context(context); }
     static void start_context(context_id_t context) { g_mock->start_context(context); }
+
+    // domain_service_backend's device-counting surface: never exercised by
+    // buffered_domain/callback_domain/registry/domain_service tests, so these are
+    // trivial no-op stubs rather than g_mock forwards.
+    static void       stop_context(context_id_t /*context*/) {}
+    static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
+    static status_t   sample_device_counting_service(context_id_t, user_data_t,
+                                                     counter_flag_t, counter_record_t*,
+                                                     std::size_t*)
+    {
+        return status_success;
+    }
+    static status_t query_record_counter_id(counter_record_t, counter_id_t*)
+    {
+        return status_success;
+    }
+    static std::vector<counter_metadata_t> query_counter_details(counter_id_t)
+    {
+        return {};
+    }
+    static status_t iterate_agent_supported_counters(agent_id_t, available_counters_cb_t,
+                                                     void*)
+    {
+        return status_success;
+    }
+    static status_t create_counter_config(agent_id_t, counter_id_t*, std::size_t,
+                                          counter_config_id_t*)
+    {
+        return status_success;
+    }
+    static status_t configure_device_counting_service(context_id_t, buffer_id_t,
+                                                      agent_id_t,
+                                                      device_counting_service_cb_t, void*)
+    {
+        return status_success;
+    }
 
     // NOLINTNEXTLINE(readability-function-size)
     static void create_buffer(context_id_t context, std::size_t buffer_size,

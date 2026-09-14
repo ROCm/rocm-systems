@@ -50,6 +50,7 @@ struct backend
     using counter_id_t                 = Wrapper::counter_id;
     using counter_config_id_t          = Wrapper::counter_config_id;
     using counter_record_t             = Wrapper::counter_record;
+    using counter_metadata_t           = counter_metadata;
     using counter_instance_id_t        = Wrapper::counter_instance_id_t;
     using counter_flag_t               = Wrapper::counter_flag_t;
     using user_data_t                  = Wrapper::user_data_t;
