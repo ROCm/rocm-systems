@@ -21,18 +21,6 @@ class Bench_gfx9(benchmark_base.Bench_base):
         self.WAVEFRONT_SIZE = 64
         self.MATRIX_OPS_TYPE = "MFMA"
 
-        self.matrix_kernel_selector = {
-            "F4": "mfma_f8f6f4<FP4_E2M1>",
-            "F6": "mfma_f8f6f4<FP6_E2M3>",
-            "F6F4": "mfma_f8f6f4<FP6_FP4_MIXED>",
-            "F8": "mfma_f8",
-            "F16": "mfma_f16",
-            "BF16": "mfma_bf16",
-            "F32": "mfma_f32",
-            "F64": "mfma_f64",
-            "I8": "mfma_i8",
-        }
-
         self.tests = {
             "HBM": super().hbm_bw_benchmark,
             "MALL": super().mall_bw_bench,
