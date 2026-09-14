@@ -44,15 +44,6 @@
 
 #ifdef MPI_TESTS_ENABLED
 
-// Portability shim: hipMemLocationTypeHost was added after ROCm 7.0.x. On older
-// headers the enum only defines Invalid/Device, so provide the CUDA-equivalent
-// value (CU_MEM_LOCATION_TYPE_HOST == 2) to keep this file compiling there. A
-// macro (not a constexpr) is used because the enum's declared value range is
-// [0,1], which makes a constexpr cast of 2 an invalid constant expression.
-#if !defined(ROCM_VERSION) || ROCM_VERSION < 70100
-#define hipMemLocationTypeHost (static_cast<hipMemLocationType>(2))
-#endif
-
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
@@ -1839,7 +1830,7 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_Lsa)
      MultiSegmentBuffer buf;
      ASSERT_NO_FATAL_FAILURE(
          createMixedMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, kNumHostSegments, buf));
-     if (buf.totalSize == 0) {
+     if (!MPIHelpers::allRanksTrue(buf.totalSize != 0)) {
          GTEST_SKIP() << "Host VMM (hipMemCreate with hipMemLocationTypeHost) not supported on this runtime";
      }
      auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
@@ -1914,7 +1905,7 @@ TEST_F(UBR_MultiSegment, DeepEP_ElasticWindowRegistration)
 
     MultiSegmentBuffer buf;
     ASSERT_NO_FATAL_FAILURE(createDeepEpElasticBuffer(dev, kGpuBytes, kCpuBytes, buf));
-    if (buf.totalSize == 0) {
+    if (!MPIHelpers::allRanksTrue(buf.totalSize != 0)) {
         GTEST_SKIP() << "DeepEP-style GPU+CPU VMM allocation unavailable on this runtime";
     }
     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
@@ -2093,7 +2084,7 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_Gating)
      MultiSegmentBuffer buf;
      ASSERT_NO_FATAL_FAILURE(
          createMixedMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, kNumHostSegments, buf));
-     if (buf.totalSize == 0) {
+     if (!MPIHelpers::allRanksTrue(buf.totalSize != 0)) {
          GTEST_SKIP() << "Host VMM (hipMemCreate with hipMemLocationTypeHost) not supported on this runtime";
      }
      auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
