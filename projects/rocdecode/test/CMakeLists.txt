@@ -245,8 +245,21 @@ add_test(
 )
 set_test_env(rocDecode_Negative_API_Tests)
 
+# 7 - videoDecodeCaps
+add_test(
+  NAME
+    video_decodeCaps
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeCaps"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeCaps"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecodecaps"
+)
+set_test_env(video_decodeCaps)
+
 if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
-  # 7 - videoDecode HEVC
+  # 8 - videoDecode HEVC
   add_test(
     NAME
       video_decode-HEVC
