@@ -1040,7 +1040,11 @@ Examples:
         feature_label="Memory Bandwidth Analysis",
         nargs=0,
         const=True,
-        help="\t\tEnable block 30 (memory bandwidth specific) for analysis mode.",
+        help=(
+            "\t\tEnable memory bandwidth guided analysis."
+            " Automatically detected when the workload"
+            " was profiled with --membw-analysis."
+        ),
     )
 
     analyze_group.add_argument(
