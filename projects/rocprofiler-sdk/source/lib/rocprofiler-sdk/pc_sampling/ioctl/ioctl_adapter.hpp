@@ -23,6 +23,7 @@
 #include <rocprofiler-sdk/fwd.h>
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter_types.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
 
 #include <vector>
@@ -47,6 +48,34 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
 
 int
 get_kfd_fd();
+
+/**
+ * @brief Check if PC sampling method is supported on the agent.
+ *
+ * The function complements the @ref is_pc_sampling_supported function.
+ * It introduces a strict check against the PC sampling IOCTL version
+ * that tells us whether a certain PC sampling method is safe to be used
+ * on the specific device architecture.
+ *
+ * @param method - PC sampling method to be checked
+ * @param agent - The agent to be checked
+ * @param pcs_ioctl_version - The PC sampling IOCTL version
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS - The method is supported
+ * Other values inform users about the reason why the method is not supported.
+ */
+rocprofiler_status_t
+is_pc_sampling_method_supported(rocprofiler_pc_sampling_method_t method,
+                                const rocprofiler_agent_t*       agent,
+                                uint32_t                         pcs_ioctl_version);
+
+/**
+ * @brief Same as @ref is_pc_sampling_method_supported.
+ */
+rocprofiler_status_t
+is_pc_sampling_method_supported(rocprofiler_ioctl_pc_sampling_method_kind_t ioctl_method,
+                                const rocprofiler_agent_t*                  agent,
+                                uint32_t                                    pcs_ioctl_version);
 }  // namespace ioctl
 }  // namespace pc_sampling
 }  // namespace rocprofiler

@@ -225,19 +225,41 @@ order. `dispatch_wf()`
 self-schedules the CU's tick via `schedule_work()`; there is no separate
 `activate()` call.
 
-Each CU runs its dispatched wavefronts independently. The CU is
-self-driving: `dispatch_wf()` calls `schedule_work()`, which schedules a
-tick event (only when the CU has runnable wavefronts) that calls
-`execute_quantum()`. A quantum executes up to `kFunctionalQuantum`
-instructions, but may yield early when a wavefront requests it (e.g.
-`s_sleep`, a vendor-dependency retry). The tick reschedules itself at
-`now + max(1, last_quantum_executed_)` — i.e. by the work actually
-executed, so an early yield resumes promptly instead of leaping a full
-quantum, while `max(1, ...)` keeps the event strictly in the future.
-Since functional mode is 1 CPI, ticks advance proportionally to
-instruction count. The quantum allows CU events to interleave,
-guaranteeing forward progress for inter-CU synchronization patterns such
-as spin-locks or semaphore acquire/release on global memory.
+Each CU runs its dispatched wavefronts independently. With serial CU dispatch,
+the CU is self-driving: `dispatch_wf()` calls `schedule_work()`, which schedules
+a tick event (only when the CU has runnable wavefronts) that calls
+`execute_quantum()`. With pooled functional dispatch, the CP owns the
+continuation event, gathers its runnable CUs, and submits one `run_quantum()`
+task per CU to the SoC's shared host pool. Pool workers mutate only their
+assigned CU state; the CP waits for the batch and then performs queue
+advancement, completion publication, cache maintenance, and cross-CU effects on
+its engine thread.
+
+The pool is host acceleration machinery, not part of the modeled GPU topology.
+Its thread budget includes the calling CP thread plus retained workers, and
+changing that budget must not change the observable result of a race-free
+workload. Hot-hook callback serialization is enforced inside
+`ExecutionPluginGroup`; replacing a plugin group neither changes the dispatch
+budget nor reconstructs the pool.
+
+One pool is shared by all CPs in an SoC, so retained worker counts do not
+multiply with the XCD count. The current pool carries one pool-wide submission
+state, however, and therefore serializes complete batches from same-SoC CPs.
+Simdojo's `num_threads` can still run those CP control paths on separate XCD
+partitions, but it does not multiply the pool's same-SoC CU execution width.
+Different SoCs own independent pools.
+
+A functional quantum is a number of CU `step()` iterations rather than a count
+of individual instructions. Each step visits the runnable wavefronts resident
+on that CU and can issue one instruction for each of them. A quantum executes up
+to `kFunctionalQuantum` such iterations, but may yield early when a wavefront
+requests it (for example, `s_sleep` or a vendor-dependency retry). The next CU
+or CP continuation is scheduled at `now + max(1, last_quantum_executed_)` -- by
+the work actually executed -- so an early yield resumes promptly instead of
+leaping a full quantum, while `max(1, ...)` keeps the event strictly in the
+future. The quantum allows CU events to interleave, guaranteeing forward
+progress for inter-CU synchronization patterns such as spin-locks or semaphore
+acquire/release on global memory.
 
 A wavefront that reaches `s_endpgm` halts: it frees its SGPR/VGPR
 resources immediately and notifies the CP of workgroup completion (there
@@ -261,7 +283,8 @@ producer writes an AQL packet into the ring, then rings the doorbell
                 cu->dispatch_wf(wg_id, pc, sgprs, vgprs)
                   └── find idle slot, allocate SGPR/VGPR blocks
                       initialize wavefront state (pc, wg_id)
-                      schedule_work() -> tick event (self-driving)
+                      serial: schedule_work() -> CU tick event
+                      pooled: CP continuation -> shared SoC pool -> CU quantum
 ```
 
 The in-flight record the CP builds from that packet is a `DispatchEntry`, which

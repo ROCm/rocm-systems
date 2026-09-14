@@ -4,6 +4,10 @@
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
 
+#include <atomic>
+#include <mutex>
+#include <thread>
+
 namespace {
 
 using namespace rocjitsu;
@@ -13,18 +17,47 @@ class BarrierSpanPlugin final : public ExecutionPlugin {
 public:
   BarrierSpanPlugin() : ExecutionPlugin("barrier_span") {}
 
+  struct Resolution {
+    size_t span_size = 0;
+    std::vector<uint32_t> workgroup_ids;
+    std::thread::id callback_thread;
+    uint32_t active_instructions = 0;
+  };
+
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
+                                        amdgpu::Wavefront &) override {
+    active_instructions_.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &,
+                                       amdgpu::Wavefront &) override {
+    active_instructions_.fetch_sub(1, std::memory_order_relaxed);
+  }
+
   void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) override {
-    span_sizes.push_back(wavefronts.size());
+    Resolution resolution;
+    resolution.span_size = wavefronts.size();
+    resolution.callback_thread = std::this_thread::get_id();
+    resolution.active_instructions = active_instructions_.load(std::memory_order_relaxed);
     std::vector<uint32_t> workgroups;
     for (const auto *wf : wavefronts)
       workgroups.push_back(wf->wg_id());
     std::ranges::sort(workgroups);
     workgroups.erase(std::unique(workgroups.begin(), workgroups.end()), workgroups.end());
-    workgroup_ids.push_back(std::move(workgroups));
+    resolution.workgroup_ids = std::move(workgroups);
+    std::lock_guard<std::mutex> lock(mutex_);
+    resolutions_.push_back(std::move(resolution));
   }
 
-  std::vector<size_t> span_sizes;
-  std::vector<std::vector<uint32_t>> workgroup_ids;
+  std::vector<Resolution> resolutions() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return resolutions_;
+  }
+
+private:
+  std::atomic<uint32_t> active_instructions_{0};
+  mutable std::mutex mutex_;
+  std::vector<Resolution> resolutions_;
 };
 
 class ForceScalarGuard {
@@ -87,6 +120,63 @@ TEST(Gfx1250SimulationTest, VClsI32CountsLeadingSignBits) {
 
     check_encoding(vop1, "v_cls_i32_e32");
     check_encoding(vop3, "v_cls_i32");
+  }
+}
+
+TEST(Gfx1250SimulationTest, PackedBf16ArithmeticRoundsOnceAndHonorsOverflowMode) {
+  struct Case {
+    uint16_t opcode;
+    uint16_t a, b, c;
+    uint16_t expected, saturated;
+  };
+  constexpr std::array cases{
+      // Exact midpoint rounds down to even, or up when the retained bit is odd.
+      Case{cdna5::kVPkAddBf16Vop3p, 0x3f80, 0x3b80, 0, 0x3f80, 0x3f80},
+      Case{cdna5::kVPkAddBf16Vop3p, 0x3f81, 0x3b80, 0, 0x3f82, 0x3f82},
+      Case{cdna5::kVPkMulBf16Vop3p, 0xbfed, 0x4007, 0, 0xc07a, 0xc07a},
+      Case{cdna5::kVPkMulBf16Vop3p, 0x8000, 0x3f80, 0, 0x8000, 0x8000},
+      Case{cdna5::kVPkMulBf16Vop3p, 0x0001, 0x3f80, 0, 0x0001, 0x0001},
+      Case{cdna5::kVPkMulBf16Vop3p, 0x7f7f, 0x4000, 0, 0x7f80, 0x7f7f},
+      Case{cdna5::kVPkMulBf16Vop3p, 0xff7f, 0x4000, 0, 0xff80, 0xff7f},
+      Case{cdna5::kVPkMulBf16Vop3p, 0x7f80, 0x3f80, 0, 0x7f80, 0x7f80},
+      Case{cdna5::kVPkAddBf16Vop3p, 0x7f7f, 0x7f7f, 0, 0x7f80, 0x7f7f},
+      // Tiny addend breaks an otherwise exact BF16 midpoint. Rounding via F32 loses it.
+      Case{cdna5::kVPkFmaBf16Vop3p, 0x3fc0, 0x3f83, 0x0001, 0x3fc5, 0x3fc5},
+      Case{cdna5::kVPkFmaBf16Vop3p, 0x7f7f, 0x4000, 0xff7f, 0x7f7f, 0x7f7f},
+      Case{cdna5::kVPkFmaBf16Vop3p, 0x7f7f, 0x4000, 0x0000, 0x7f80, 0x7f7f},
+  };
+  Gfx1250Sim sim;
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  const uint32_t vb = wf->vgpr_alloc().base;
+  wf->set_exec(1);
+  auto pack = [](uint16_t low, uint16_t high) { return uint32_t{low} | (uint32_t{high} << 16); };
+  for (const Case &c : cases) {
+    SCOPED_TRACE(c.opcode);
+    SCOPED_TRACE(c.a);
+    const std::array<uint32_t, 2> words = cdna5::build_vop3p(
+        c.opcode,
+        {.vdst = 3, .opsel_hi_2 = 1, .src0 = 256, .src1 = 257, .src2 = 258, .opsel_hi = 3});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    // Use distinct halves and an inactive lane to cover packing and EXEC.
+    sim.cu()->write_vgpr(vb, 0, pack(c.a, 0x4000));
+    sim.cu()->write_vgpr(vb + 1, 0, pack(c.b, 0x4000));
+    sim.cu()->write_vgpr(vb + 2, 0, pack(c.c, 0));
+    for (uint32_t round_mode = 0; round_mode < 4; ++round_mode) {
+      for (bool overflow : {false, true}) {
+        // All MODE rounding fields vary; denorm flushing is requested throughout.
+        wf->set_mode_raw(round_mode | (round_mode << 2) |
+                         (overflow ? amdgpu::Wavefront::FP16_OVFL_BIT : 0));
+        sim.cu()->write_vgpr(vb + 3, 1, 0xdeadbeef);
+        sim.cu()->execute_instruction(inst.get(), *wf);
+        EXPECT_EQ(sim.cu()->read_vgpr(vb + 3, 0),
+                  pack(overflow ? c.saturated : c.expected, 0x4080));
+        EXPECT_EQ(sim.cu()->read_vgpr(vb + 3, 1), 0xdeadbeefu);
+      }
+    }
   }
 }
 
@@ -618,7 +708,7 @@ TEST(Gfx1250SimulationTest, AqlDescriptorAllocatesNamedBarriersForTwoWaveKernel)
     EXPECT_EQ(wf.sgpr(4), 0x01000021u);
 }
 
-TEST(Gfx1250SimulationTest, ClusterBarrierSynchronizesWorkgroupsAcrossComputeUnits) {
+TEST(Gfx1250SimulationTest, ParallelClusterBarrierSynchronizesWorkgroupsAcrossComputeUnits) {
   constexpr auto read_first_workitem =
       cdna5::build_vop1(cdna5::kVReadfirstlaneB32Vop1, {.src0 = 256, .vdst = 4});
   constexpr auto is_first_wave =
@@ -638,11 +728,14 @@ TEST(Gfx1250SimulationTest, ClusterBarrierSynchronizesWorkgroupsAcrossComputeUni
   auto plugin = std::make_unique<BarrierSpanPlugin>();
   auto *barrier_span = plugin.get();
   ASSERT_TRUE(sim.plugin_group->add(std::move(plugin)));
+  sim.cp()->set_dispatch_threads(2);
+  ASSERT_EQ(sim.cp()->dispatch_threads(), 2u);
   uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 104, 32, 2, false,
                                             false, false, 0, 0, 0, 0, 0, 1);
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
                            /*workgroup_size_x=*/64);
+  const auto cp_thread = std::this_thread::get_id();
   step_until_xcd_halted(sim);
 
   ASSERT_EQ(sim.snapshot->snapshots().size(), 4u);
@@ -653,9 +746,12 @@ TEST(Gfx1250SimulationTest, ClusterBarrierSynchronizesWorkgroupsAcrossComputeUni
     EXPECT_EQ((state >> 16) & 0x7fu, 0u);
     EXPECT_TRUE(member_count == 1 || member_count == 2);
   }
-  ASSERT_EQ(barrier_span->span_sizes.size(), 1u);
-  EXPECT_EQ(barrier_span->span_sizes[0], 4u);
-  EXPECT_EQ(barrier_span->workgroup_ids[0], (std::vector<uint32_t>{0, 1}));
+  const auto resolutions = barrier_span->resolutions();
+  ASSERT_EQ(resolutions.size(), 1u);
+  EXPECT_EQ(resolutions[0].span_size, 4u);
+  EXPECT_EQ(resolutions[0].workgroup_ids, (std::vector<uint32_t>{0, 1}));
+  EXPECT_EQ(resolutions[0].callback_thread, cp_thread);
+  EXPECT_EQ(resolutions[0].active_instructions, 0u);
 }
 
 TEST(Gfx1250SimulationTest, ClusterBarrierCompletesAfterWorkgroupTerminatesEarly) {

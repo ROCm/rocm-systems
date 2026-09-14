@@ -42,7 +42,7 @@ must supply the VM handle, a file path, and the current simulation tick.
 
     ``` c
     rj_vm_t *vm = NULL;
-    rj_status_t status = rj_vm_create("configs/amdgpu_cdna4.json",
+    rj_status_t status = rj_vm_create("configs/gfx950_mi355x.json",
                                        RJ_VM_MODE_DEFAULT, &vm);
 
     uint64_t tick = 0;

@@ -20,7 +20,6 @@
 #include "library/thread_info.hpp"
 #include <cstdint>
 
-#include <timemory/macros.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/sampling/overflow.hpp>
@@ -66,7 +65,7 @@ ROCPROFSYS_DEFINE_CONCRETE_TRAIT(provide_backtrace, causal::sampling::causal_sam
                                  std::false_type)
 
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(buffer_size, causal::sampling::causal_sampler_t,
-                                 TIMEMORY_ESC(std::integral_constant<size_t, 4096>))
+                                 std::integral_constant<size_t, 4096>)
 
 namespace rocprofsys
 {
@@ -300,7 +299,7 @@ configure(bool _setup, std::int64_t _tid)
         _causal->set_verbose(_verbose);
         _causal->set_offload(&causal_offload_buffer);
 
-        if(get_causal_backend() == state::process::CausalBackend::Perf)
+        if(get_causal_backend() == state::process::CausalBackend::perf)
         {
             auto _perf_error = _activate_perf_backend();
             if(_perf_error)
@@ -310,7 +309,7 @@ configure(bool _setup, std::int64_t _tid)
                 std::exit(1);
             }
         }
-        else if(get_causal_backend() == state::process::CausalBackend::Timer)
+        else if(get_causal_backend() == state::process::CausalBackend::timer)
         {
             if(!_activate_timer_backend())
             {
@@ -318,7 +317,7 @@ configure(bool _setup, std::int64_t _tid)
                 std::exit(1);
             }
         }
-        else if(get_causal_backend() == state::process::CausalBackend::Auto)
+        else if(get_causal_backend() == state::process::CausalBackend::automatic)
         {
             auto _perf_error = _activate_perf_backend();
             if(!_perf_error)

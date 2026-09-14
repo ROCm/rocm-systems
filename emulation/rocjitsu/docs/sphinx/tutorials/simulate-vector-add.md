@@ -40,7 +40,7 @@ hipcc -o /tmp/vector_add vector_add.hip --offload-arch=gfx950
 ```{note}
 The `--offload-arch` value must match the architecture declared in the
 JSON configuration file you use to create the virtual machine. The
-pre-built `configs/amdgpu_cdna4_kmd.json` targets CDNA4 (gfx950).
+pre-built `configs/gfx950_mi355x_kmd.json` targets CDNA4 (gfx950).
 ```
 
 ## Run the kernel in local mode
@@ -51,7 +51,7 @@ in-process simulation engine:
 
 ``` bash
 build/tools/rocjitsu/rocjitsu \
-  --config configs/amdgpu_cdna4_kmd.json \
+  --config configs/gfx950_mi355x_kmd.json \
   -- /tmp/vector_add
 ```
 
@@ -98,7 +98,7 @@ variable before launching:
 
 ``` bash
 RJ_LOG_GROUPS=vm,cp build/tools/rocjitsu/rocjitsu \
-  --config configs/amdgpu_cdna4_kmd.json \
+  --config configs/gfx950_mi355x_kmd.json \
   -- /tmp/vector_add
 ```
 
@@ -116,7 +116,7 @@ sequence is:
 #include "rocjitsu/vm/rj_vm.h"
 
 rj_vm_t *vm = NULL;
-rj_status_t st = rj_vm_create("configs/amdgpu_cdna4_kmd.json",
+rj_status_t st = rj_vm_create("configs/gfx950_mi355x_kmd.json",
                                RJ_VM_MODE_DEFAULT, &vm);
 if (st != ROCJITSU_STATUS_SUCCESS) {
     fprintf(stderr, "rj_vm_create failed: %d\n", st);

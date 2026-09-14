@@ -98,6 +98,7 @@ add_subdirectory(perf-common)
 add_subdirectory(kernel-replay-perf)
 add_subdirectory(queue-hooks-perf)
 add_subdirectory(openmp-tools)
+add_subdirectory(openmp-tools-coexist)
 add_subdirectory(rocdecode)
 add_subdirectory(rocjpeg)
 add_subdirectory(hipfile)
@@ -125,6 +126,9 @@ add_subdirectory(late-start-tracing)
 
 # multiple anytime tool configuration validation tests
 add_subdirectory(multi-tool-test)
+
+# duplicate rocprofiler-sdk initialization validation test
+add_subdirectory(duplicate-sdk-initialization)
 
 # anytime tool configuration (force_configure) validation tests
 add_subdirectory(anytime-tool-config)
