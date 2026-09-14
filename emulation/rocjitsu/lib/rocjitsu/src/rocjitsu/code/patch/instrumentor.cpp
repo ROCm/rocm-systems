@@ -332,9 +332,9 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
     fail("InstrumentationPoint::probe_args requires a probe_obj / probe_symbol");
     return std::nullopt;
   }
-  // TODO: consume force_full_exec when EXEC policy management is implemented
-  if (pt.force_full_exec) {
-    fail("InstrumentationPoint::force_full_exec must be false temporarily");
+  // Likewise, the inline nop has no envelope whose mask could be widened.
+  if (pt.probe_obj == nullptr && pt.force_full_exec) {
+    fail("InstrumentationPoint::force_full_exec requires a probe_obj / probe_symbol");
     return std::nullopt;
   }
 
@@ -718,14 +718,30 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   };
   const rj_code_target_id_t destination_target = effective_target(obj_);
 
-  // Store probe objects, symbols, and declared argument counts together in
-  // probe_keys. The count is part of the convention the body was verified
-  // against, so two sites calling one probe with different counts get distinct
-  // ProbeCallables. The argument values stay per-site and are not in the key.
+  // A probe is identified by the object it came from and the symbol inside it,
+  // and its body is copied into the cave once per identity. The rest of the call
+  // shape (how many argument dwords, where each one comes from, which lanes the
+  // body runs on) describes that one body, so it is recorded on the
+  // ProbeCallable rather than keyed here. Two points naming one probe and
+  // declaring it differently are not two probes; they are one probe declared
+  // twice, and the second declaration is rejected. Only the immediate *values*
+  // are genuinely per-site.
+  //
+  // Whichever point resolves first supplies the declaration. Nothing here can do
+  // better: a body reveals neither its arity nor its mask policy, so the two
+  // declarations are equally credible and the diagnostic names the conflict
+  // instead of blaming the later point.
   struct ProbeKey {
     const AmdGpuCodeObject *obj;
     std::string symbol;
-    size_t num_args;
+  };
+  // The shape half of a point's argument list, which belongs to the probe.
+  auto arg_sources_of = [](const InstrumentationPoint &pt) {
+    std::vector<ProbeArgSource> sources;
+    sources.reserve(pt.probe_args.size());
+    for (const ProbeArgValue &arg : pt.probe_args)
+      sources.push_back(arg.source);
+    return sources;
   };
   std::vector<ProbeKey> probe_keys;
   // Helper function to get a probe index for a given InstrumentationPoint
@@ -733,10 +749,30 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   // probe_keys and out.probes.
   auto resolve_probe_index = [&](const InstrumentationPoint &pt,
                                  std::string &perr) -> std::optional<size_t> {
+    const std::vector<ProbeArgSource> sources = arg_sources_of(pt);
     for (size_t i = 0; i < probe_keys.size(); ++i) {
-      if (probe_keys[i].obj == pt.probe_obj && probe_keys[i].symbol == pt.probe_symbol &&
-          probe_keys[i].num_args == pt.probe_args.size())
-        return i;
+      if (probe_keys[i].obj != pt.probe_obj || probe_keys[i].symbol != pt.probe_symbol)
+        continue;
+      const ProbeCallable &declared = out.probes[i];
+      if (static_cast<size_t>(declared.abi.num_arg_vgprs) != pt.probe_args.size()) {
+        perr = "probe '" + pt.probe_symbol + "' was already declared with " +
+               std::to_string(declared.abi.num_arg_vgprs) +
+               " argument dwords; this point declares " + std::to_string(pt.probe_args.size());
+        return std::nullopt;
+      }
+      if (declared.arg_sources != sources) {
+        perr =
+            "probe '" + pt.probe_symbol + "' was already declared with different argument sources";
+        return std::nullopt;
+      }
+      if (declared.force_full_exec != pt.force_full_exec) {
+        perr = std::string("probe '") + pt.probe_symbol + "' was already declared with " +
+               (declared.force_full_exec ? "force_full_exec" : "the anchor mask") +
+               "; this point declares " +
+               (pt.force_full_exec ? "force_full_exec" : "the anchor mask");
+        return std::nullopt;
+      }
+      return i;
     }
     // Bounded before the narrowing cast below, which would wrap a large count
     // into a small in-range one.
@@ -772,8 +808,10 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
              " argument dwords) does not supply it";
       return std::nullopt;
     }
+    callable->arg_sources = sources;
+    callable->force_full_exec = pt.force_full_exec;
     out.probes.push_back(std::move(*callable));
-    probe_keys.push_back({pt.probe_obj, pt.probe_symbol, pt.probe_args.size()});
+    probe_keys.push_back({pt.probe_obj, pt.probe_symbol});
     return out.probes.size() - 1;
   };
 
@@ -992,6 +1030,21 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
                                   std::to_string(vgpr_bounds.ordinary_bound) + " ordinary VGPRs");
           continue;
         }
+        // A Wave32 kernel's EXEC is one dword; exec_hi is not part of the mask
+        // the guest ran under, so handing it to a probe would deliver whatever
+        // the register happens to hold. The probe's own signature is already
+        // wave-size specific (uint32_t or uint64_t at compile time), so this is
+        // the caller declaring the wrong one, not a gap to paper over.
+        if (kernel_wavefront_size(arch_, kernels.front().descriptor) == 32 &&
+            std::any_of(site.probe_args.begin(), site.probe_args.end(), [](const ProbeArgValue &a) {
+              return a.source == ProbeArgSource::AnchorExecHi;
+            })) {
+          result.errors.push_back(
+              "probe call at anchor_offset " + std::to_string(site.anchor_offset) +
+              " passes the high dword of the anchor EXEC mask, but the kernel is Wave32 and "
+              "has no such dword");
+          continue;
+        }
       }
 
       // Callee clobbers (probe body) + liveness at the anchor feed envelope
@@ -1037,6 +1090,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // never lands past its .sgpr_count
       plan.kernel_sgpr_count = *kernel_sgpr_count;
       plan.probe_args = site.probe_args;
+      plan.force_full_exec = probe.force_full_exec;
       // Given liveness, clobbers, and calling convention, select registers
       // for trampoline and determine how big the trampoline will be
       if (!TrampolineBuilder::plan_probe_call(plan, probe.abi, live, summary->ordinary_clobbers,

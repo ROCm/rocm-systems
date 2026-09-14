@@ -94,12 +94,27 @@ struct TrampolinePlan {
   /// the patched kernel's actual count.
   uint32_t kernel_sgpr_count = REGISTER_SET_ALLOCATABLE_SGPRS;
 
-  /// Immediate argument dwords to materialize into the ABI's argument VGPRs
-  /// before the call, in order from arg_vgpr_base. An emit-time input rather
-  /// than a resource decision: plan_probe_call only counts the words it takes
-  /// and reserves the registers, and requires the size to match the ABI's
-  /// declared count. Empty for a probe called with no arguments.
-  std::vector<uint32_t> probe_args;
+  /// Argument dwords to materialize into the ABI's argument VGPRs before the
+  /// call, in order from arg_vgpr_base. Mostly an emit-time input rather than a
+  /// resource decision: plan_probe_call counts the words each source takes and
+  /// reserves the registers, and requires the size to match the ABI's declared
+  /// count. Empty for a probe called with no arguments.
+  ///
+  /// Passing any argument at all obliges the planner to reserve an EXEC temp,
+  /// even at a site that would not otherwise need one: the writes run inside a
+  /// full-mask window so every lane's copy is defined, and the anchor mask has
+  /// to be restorable from somewhere. An EXEC-sourced argument then reads that
+  /// same temp rather than `exec`, which the widen has already overwritten.
+  std::vector<ProbeArgValue> probe_args;
+
+  /// Run the probe body under EXEC = -1 instead of the anchor mask. The envelope
+  /// opens a full-mask window for the spill stores and argument writes either
+  /// way; this holds it open across the call rather than restoring the anchor
+  /// mask first. A masked site emits three EXEC writes (widen, anchor-mask
+  /// restore, re-widen for the spill loads); a full-exec site emits two, the
+  /// restore being what it drops. The re-widen stays either way, since the probe
+  /// may have narrowed EXEC while it ran.
+  bool force_full_exec = false;
 
   bool is_probe_call = false;    ///< True once plan_probe_call() populated these.
   uint16_t link_pair_base = 30;  ///< Return-link pair, derived from the probe cc.

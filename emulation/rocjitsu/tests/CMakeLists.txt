@@ -463,6 +463,7 @@ add_executable(
     patch/error_report_test.cpp
     dbi/dbi_spill_sim_test.cpp
     dbi/dbi_arg_sim_test.cpp
+    dbi/dbi_mask_sim_test.cpp
     code/code_object_target_id_test.cpp
     code/amdgpu_code_object_test.cpp
     code/relocation_function_table_test.cpp
