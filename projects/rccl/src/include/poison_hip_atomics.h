@@ -32,6 +32,15 @@
 #include <hip/hip_runtime.h>
 #endif
 
+// The Anvil-SDMA backend deliberately calls rocSHMEM device code. Parse that
+// external header before poisoning the HIP builtins so its implementation is
+// outside this RCCL-only check; the include guard keeps it from being parsed
+// again when gin_anvil_sdma.h includes it. RCCL code following that include is
+// still checked. Only the two explicitly opted-in GIN-SDMA TUs take this arm.
+#if defined(NCCL_GIN_ANVIL_SDMA_ENABLE) && NCCL_GIN_ANVIL_SDMA_ENABLE
+#include "sdma/anvil_device.hpp"
+#endif
+
 // clang-format off
 // clang-format has no notion of a line-continued #pragma: it joins the whole
 // directive onto one ~300-column line.  Keep it off across this block so the

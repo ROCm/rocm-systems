@@ -955,10 +955,15 @@ if(BUILD_TESTS)
     target_include_directories(${test_executable} PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
     target_compile_definitions(${test_executable} PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
 
-    # Belt-and-suspenders: Anvil-SDMA device headers are opt-in per TU. Keep the
-    # explicit 0 on non-stub tests so ENABLE_ROCSHMEM_GIN cannot leak them back in.
-    if(ENABLE_ROCSHMEM_GIN AND NOT "${test_executable}" IN_LIST RCCL_ANVIL_SDMA_STUB_TARGETS)
-      target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
+    # Belt-and-suspenders: Anvil-SDMA device headers are opt-in. Stub-backed
+    # tests need an explicit 1 now that gin_device_common.h defaults to 0;
+    # everything else stays explicitly opted out.
+    if(ENABLE_ROCSHMEM_GIN)
+      if("${test_executable}" IN_LIST RCCL_ANVIL_SDMA_STUB_TARGETS)
+        target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=1)
+      else()
+        target_compile_definitions(${test_executable} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
+      endif()
     endif()
     if(ENABLE_DEVICE_LINKER)
       # Mirror the rccl library define so device-linker-specific test expectations compile in.
@@ -1060,9 +1065,9 @@ if(BUILD_TESTS)
     # rocshmem::envvar::log_flags undefined at load time. Link host rocSHMEM
     # into the Fixtures binary so the executable satisfies those symbols when
     # the dynamic loader brings in librccl.so.
-    if(ENABLE_ROCSHMEM_GIN AND GIN_ANVIL_UNIT_TESTS AND NOT ENABLE_ROCSHMEM
-       AND ROCSHMEM_INSTALL_DIR AND ("${test_executable}" STREQUAL "rccl-UnitTestsFixtures"
-                                     OR "${test_executable}" STREQUAL "rccl-UnitTestsFixturesDebug"))
+    if(ENABLE_ROCSHMEM_GIN AND NOT ENABLE_ROCSHMEM AND ROCSHMEM_INSTALL_DIR
+       AND (("${test_executable}" STREQUAL "rccl-UnitTestsFixtures" AND GIN_ANVIL_UNIT_TESTS)
+            OR "${test_executable}" STREQUAL "rccl-UnitTestsFixturesDebug"))
       set(_ROCSHMEM_FIXTURES_OFFLOAD_FLAGS "")
       foreach(_g IN LISTS GPU_TARGETS)
         if(_g)
