@@ -613,27 +613,17 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     const uint64_t total_scratch = per_wave_size * scratch_slots;
     if (scratch_pool > std::numeric_limits<uint64_t>::max() - (total_scratch - 1u))
       throw std::runtime_error("kernel dispatch private segment wraps the simulator address space");
-    const uint64_t scratch_end = scratch_pool + total_scratch - 1u;
     if (scratch_slot >= scratch_slots ||
         scratch_slot > std::numeric_limits<uint64_t>::max() / per_wave_size)
       throw std::runtime_error("kernel dispatch scratch slot exceeds its allocation");
     const uint64_t wave_scratch = scratch_pool + scratch_slot * per_wave_size;
-    // Every XCD must activate a potentially reserved USERPTR tail before its
-    // first wave can touch it. Only shard zero owns grid workgroup zero, so a
-    // grid-ordinal check would skip this on every peer shard.
-    const bool first_partition_wave = pkt.dispatched_wgs == 0 && wf_index_in_wg == 0;
-    const bool backing_incomplete =
-        memory_ && (!memory_->has_page_table_mapping(scratch_pool, pkt.process_id) ||
-                    !memory_->has_page_table_mapping(scratch_end, pkt.process_id));
-    // USERPTR page-table entries can span a reserved host VA whose inaccessible
-    // tail has not been activated yet. Provision once at dispatch entry even
-    // when both endpoint PTEs exist; later waves retain the mapping check as a
-    // fail-safe for nonstandard scheduling.
-    // Bare simulator fixtures intentionally rely on sparse guest memory and do
-    // not install a host-backing allocator. Provision only when the embedding
-    // runtime supplied one; its callback remains authoritative for success.
+    // Test actual accessible backing, including reserved USERPTR tails. The
+    // merged HostExtent model distinguishes a PTE from readable host storage
+    // and also recognizes valid identity mappings shared by peer XCDs.
     const bool should_provision =
-        scratch_allocator_ && (backing_incomplete || first_partition_wave);
+        scratch_allocator_ && memory_ &&
+        !memory_->has_host_backing(wave_scratch, pkt.process_id,
+                                   static_cast<size_t>(per_wave_size));
     if (should_provision) {
       if (total_scratch > static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
           !scratch_allocator_(pkt.process_id, scratch_pool, static_cast<size_t>(total_scratch))) {

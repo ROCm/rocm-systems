@@ -4,6 +4,7 @@
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
@@ -46,6 +47,7 @@ void write_address(uint32_t *packet, uint32_t lo_dw, uint32_t hi_dw, const void 
 TEST(Cdna4SdmaTest, ProducerPacketsUseOss7Dialect) {
   auto loaded = config::load_config(std::string(CONFIG_DIR) + "/gfx950_mi355x.json",
                                     rocjitsu::kEmbeddedSchema);
+  auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   auto *cp = loaded.soc()->xcd(0)->command_processor();
   ASSERT_EQ(cp->sdma_packet_dialect(), amdgpu::SdmaPacketDialect::Oss7);
@@ -53,6 +55,10 @@ TEST(Cdna4SdmaTest, ProducerPacketsUseOss7Dialect) {
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
+  if (loaded.engine_config.num_threads > 1) {
+    ASSERT_TRUE(amdgpu::partition_topology_by_xcds(
+        engine->topology(), soc, loaded.engine_config.num_threads));
+  }
   engine->create();
   memory->set_passthrough(true);
 
