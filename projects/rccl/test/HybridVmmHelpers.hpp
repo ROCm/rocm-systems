@@ -15,6 +15,13 @@
 #include <hip/hip_runtime.h>
 #include <mpi.h>
 
+// hipMemLocationTypeHost is missing before ROCm 7.0.1 (CUDA HOST == 2).
+#if !defined(ROCM_VERSION) || ROCM_VERSION < 70100
+#ifndef hipMemLocationTypeHost
+#define hipMemLocationTypeHost (static_cast<hipMemLocationType>(2))
+#endif
+#endif
+
 #include <unistd.h>
 
 #include <cstdint>
