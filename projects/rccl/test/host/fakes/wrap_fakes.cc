@@ -103,6 +103,13 @@ static int64_t DefaultParamLaunchOrderImplicit() { return 0; }  // enqueue.cc:19
 std::function<int64_t()> g_paramLaunchOrderImplicit = DefaultParamLaunchOrderImplicit;
 int64_t ncclParamLaunchOrderImplicit() { return g_paramLaunchOrderImplicit(); }
 
+// init.cc owns NCCL_PARAM(P2pDisable), but rccl_wrap.cc consults its accessor
+// while applying gfx120x protocol tuning. Keep the production default and let
+// the protocol test override it explicitly.
+static int64_t DefaultParamP2pDisable() { return 0; }  // init.cc:137
+std::function<int64_t()> g_paramP2pDisable = DefaultParamP2pDisable;
+int64_t ncclParamP2pDisable() { return g_paramP2pDisable(); }
+
 // The settable env-var fake (SetMicroEnv/SetMicroEnvAbsent/ClearMicroEnv,
 // the bare-getenv() link-level interposer, and ncclGetEnv) is NOT defined
 // here: fakes/env_fakes.cc is the shared owner of src/misc/param.cc + getenv
@@ -134,6 +141,11 @@ int64_t ncclParamLaunchOrderImplicit() { return g_paramLaunchOrderImplicit(); }
 // (FakeTableDrift_UnrollCountMatchesProduction in wrap-test.cc), not a
 // static_assert, for the same reason as the enum-count checks below.
 const bool ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS] = {true, true, true, true, true, true};
+
+// A nullptr means an unroll factor is not restricted to a single architecture.
+// The generated production table is build-target-specific; the host-only test
+// build intentionally models the unrestricted case for every generated entry.
+char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS] = {};
 
 // ncclCommCount: real behaviour by default (de-risks future tests),
 // but a controllable seam so rcclGetAlgoInfo's NCCLCHECK(ncclCommCount(...))

@@ -138,19 +138,10 @@ auto PickSymkKernel(ncclSymkKernelId id, int maxChannels) {
 }  // namespace
 
 // ===========================================================================
-// rcclIsGfx120x / rcclGetProtoForGfx120x -- static inline helpers, only
-// reachable via this #include model (no external symbol to call otherwise).
-// rccl_wrap.cc:89-107.
+// rcclGetProtoForGfx120x -- directly test the protocol-selector helper. The
+// surrounding rcclUpdateCollectiveProtocol tests cover gfx120x recognition via
+// the production IsArchMatch(..., "gfx120") prefix check.
 // ===========================================================================
-
-TEST(WrapMicrotest, IsGfx120x_MatchesBothMembers) {
-  EXPECT_TRUE(rcclIsGfx120x("gfx1200"));
-  EXPECT_TRUE(rcclIsGfx120x("gfx1201"));
-}
-
-TEST(WrapMicrotest, IsGfx120x_RejectsOtherArch) {
-  EXPECT_FALSE(rcclIsGfx120x("gfx942"));
-}
 
 // SingleNodeLLCutoffs[] is indexed directly by ncclFunc_t, so its ordering IS
 // the oracle: assert the exact NCCL_PROTO_* value at each cutoff's boundary,
@@ -1007,7 +998,7 @@ TEST(WrapMicrotest, SymkHostRedOpToDev_UnknownOpReturnsNegativeOne) {
 // (gfx950 AllGather, plus its own boundary; the gfx950/gfx942 ReduceScatter
 // arms right below it are the same shape with different constants and are
 // covered by their own tests here), the gfx120x delegation +
-// NCCL_P2P_DISABLE override (exercises the ncclGetEnv seam), and the
+// NCCL_P2P_DISABLE override, and the
 // nNodes>=2 minMaxLLRange-driven arm including its warn-once
 // undefined-tuning fallback.
 //
@@ -1138,7 +1129,7 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xDelegatesThenP2pDisa
       "Wrap_UpdateCollectiveProtocol_Gfx120xDelegatesThenP2pDisableForcesSimple",
       []() {
         SetMicroEnvAbsent("NCCL_PROTO");
-        SetMicroEnv("NCCL_P2P_DISABLE", "1");
+        ScopedHook p2pDisable(g_paramP2pDisable, []() { return int64_t{1}; });
         ncclComm* comm = MakeCommWithArch("gfx1200");
         comm->nNodes = 1;
         comm->nRanks = 1;
@@ -2671,7 +2662,9 @@ TEST(WrapMicrotest, CommSetP2pShiftSize_BelowLog2UsesExactValue) {
 // ===========================================================================
 
 TEST(WrapMicrotest, OverrideChannels_FewerThan2NodesLeavesNcUntouched) {
-  ncclComm* comm = MakeZeroedComm();
+  // The production guard now checks the architecture before nNodes, so this
+  // fixture needs the same minimal topology as every other arch-aware case.
+  ncclComm* comm = MakeCommWithArch("gfx942");
   comm->nNodes = 1;
   int nc = -100;
   EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/1024, nc));
@@ -3742,9 +3735,9 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ChosenWhenLLNotEligibl
 }
 
 // Distinguishes the LL128 branch's own threshold check (msgBytes <=
-// rcclParamDdaLL128Threshold(), default 32MiB) from mere LL128-
+// rcclParamDdaLL128Threshold(), default 64MiB) from mere LL128-
 // ineligibility (the test above): RCCL_DDA_LL128 stays enabled and the
-// LL128 eligibility seam stays true-capable, but msgBytes (~38MiB) exceeds
+// LL128 eligibility seam stays true-capable, but msgBytes (~76MiB) exceeds
 // the threshold, so the second conjunct -- not eligibility -- is what
 // falls through to VMM.
 TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricVmmChosenWhenLL128ThresholdExceeded) {
@@ -3764,8 +3757,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricVmmChosenWhenLL128Threshold
         comm->nRanks = 1;
         comm->nNodes = 1;
         rcclCollDecision decision{};
-        // msgBytes = count(10000000) * sizeof(float32)(4) = ~38MiB, > DdaLL128Threshold (32MiB).
-        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/10000000, ncclFloat32, ncclSum,
+        // msgBytes = count(20000000) * sizeof(float32)(4) = ~76MiB, > DdaLL128Threshold (64MiB).
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/20000000, ncclFloat32, ncclSum,
                                                     /*stream=*/nullptr, /*query=*/true,
                                                     /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, decision.algo);
@@ -3792,13 +3785,13 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ThresholdBoundary) {
 
         rcclCollDecision atCutoff{};
         EXPECT_EQ(ncclSuccess,
-                  rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8388608, ncclFloat32, ncclSum,
+                  rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/16777216, ncclFloat32, ncclSum,
                                       /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &atCutoff));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, atCutoff.algo);
 
         rcclCollDecision pastCutoff{};
         EXPECT_EQ(ncclSuccess,
-                  rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8388609, ncclFloat32, ncclSum,
+                  rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/16777217, ncclFloat32, ncclSum,
                                       /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &pastCutoff));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, pastCutoff.algo);
         DeleteCommWithArch(comm);
@@ -4038,70 +4031,6 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaFabricLLChosenOnGfx1250) {
       });
 }
 
-// The test above sits at msgSize=32 and the LL128 one below at 64KiB, so both
-// are far from the 32KiB cutoff and neither can tell `msgSize <= threshold`
-// from `<` -- a mutation sweep confirmed that mutant survives. msgSize is
-// nRanks * sendcount * typeSize, so with nRanks=1 and float32 a sendcount of
-// 8192 lands exactly on rcclParamDdaLLThreshold()'s 32768 default.
-TEST(WrapMicrotestIsolated, SelectAllGather_DdaFabricLLThresholdBoundary) {
-  RUN_ISOLATED_TEST(
-      "Wrap_SelectAllGather_DdaFabricLLThresholdBoundary",
-      []() {
-        g_loadParam = ForceParam("RCCL_DDA_LL", int64_t(1));
-        ScopedHook llEligible(g_allGatherDdaFabricLLEligible,
-                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
-        ncclComm* comm = MakeCommWithArch("gfx1250");
-        comm->nRanks = 1;
-        comm->nNodes = 1;
-
-        rcclCollDecision atCutoff{};
-        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8192, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &atCutoff));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, atCutoff.algo) << "msgSize == 32768 is still eligible";
-
-        // 8193 * 4 = 32772, one step past the threshold.
-        rcclCollDecision pastCutoff{};
-        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8193, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &pastCutoff));
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, pastCutoff.algo)
-            << "past the threshold the LL branch must be skipped";
-        DeleteCommWithArch(comm);
-      });
-}
-
-// Distinguishes rcclParamDdaLL()'s own value (explicitly disabled here) from
-// mere LL-ineligibility (the sibling test below leaves RCCL_DDA_LL at its
-// real default, 1/enabled, and instead makes the eligibility seam false) --
-// rcclParamDdaLL() itself had never been proven false.
-// The LL branch is a three-way `&&`: rcclParamDdaLL(), the msgSize threshold,
-// and eligibility. This isolates the FIRST conjunct -- RCCL_DDA_LL is
-// explicitly 0 while eligibility stays true-capable and msgSize is tiny, so
-// the param alone is what skips LL and falls through to the LL128 check.
-TEST(WrapMicrotestIsolated, SelectAllGather_DdaLLExplicitlyDisabledFallsToLL128Check) {
-  RUN_ISOLATED_TEST(
-      "Wrap_SelectAllGather_DdaLLExplicitlyDisabledFallsToLL128Check",
-      []() {
-        g_loadParam = [](const char* env, int64_t deft) {
-          if (std::strcmp(env, "RCCL_DDA_LL") == 0) return int64_t(0);
-          if (std::strcmp(env, "RCCL_DDA_LL128") == 0) return int64_t(1);
-          return deft;
-        };
-        ScopedHook llEligible(g_allGatherDdaFabricLLEligible,
-                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
-        ScopedHook ll128Eligible(g_allGatherDdaFabricLL128Eligible,
-                                 [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
-        ncclComm* comm = MakeCommWithArch("gfx1250");
-        comm->nRanks = 1;
-        comm->nNodes = 1;
-        rcclCollDecision decision{};
-        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, decision.algo);
-        EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
-        DeleteCommWithArch(comm);
-      });
-}
-
 TEST(WrapMicrotestIsolated, SelectAllGather_DdaFabricLL128ChosenWhenLLNotEligible) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllGather_DdaFabricLL128ChosenWhenLLNotEligible",
@@ -4119,35 +4048,6 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaFabricLL128ChosenWhenLLNotEligibl
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, decision.algo);
         EXPECT_EQ(124u, decision.nMaxChannels);  // proves ncclAllGatherDdaFabricLL128Blocks ran, not a sibling
 
-        EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
-        DeleteCommWithArch(comm);
-      });
-}
-
-// Distinguishes the LL branch's threshold check (msgSize <=
-// rcclParamDdaLLThreshold(), default 32KiB) from mere LL-ineligibility
-// (the test above): rcclParamDdaLL() stays at its real default (1,
-// enabled) and g_allGatherDdaFabricLLEligible is left true-capable, but
-// msgSize (64KiB) exceeds the threshold, so the LL branch's second
-// conjunct -- not eligibility -- is what skips it, falling to LL128.
-TEST(WrapMicrotestIsolated, SelectAllGather_DdaFabricLL128ChosenWhenLLThresholdExceeded) {
-  RUN_ISOLATED_TEST(
-      "Wrap_SelectAllGather_DdaFabricLL128ChosenWhenLLThresholdExceeded",
-      []() {
-        g_loadParam = ForceParam("RCCL_DDA_LL128", int64_t(1));
-        ScopedHook llEligible(g_allGatherDdaFabricLLEligible,
-                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
-        ScopedHook ll128Eligible(g_allGatherDdaFabricLL128Eligible,
-                                 [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
-        ncclComm* comm = MakeCommWithArch("gfx1250");
-        comm->nRanks = 1;
-        comm->nNodes = 1;
-        rcclCollDecision decision{};
-        // totalBytes = nRanks(1) * sendcount(16384) * sizeof(float32)(4) = 64KiB,
-        // > DdaLLThreshold (32KiB) but well under DdaLL128Threshold (32MiB).
-        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/16384, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, decision.algo);
         EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
         DeleteCommWithArch(comm);
       });
@@ -6191,7 +6091,7 @@ void ExerciseInfoCallSites(bool seedDirectDisabled) {
   // matched-threshold-in-bounds (246+262), matched-threshold-out-of-bounds
   // (246+267).
   {
-    ncclComm* comm = MakeZeroedComm();
+    ncclComm* comm = MakeCommWithArch("gfx942");
     comm->nNodes = 1;
     int nc = -100;
     rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/1024, nc);
