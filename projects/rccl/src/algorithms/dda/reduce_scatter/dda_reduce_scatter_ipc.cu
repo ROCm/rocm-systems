@@ -29,8 +29,8 @@ using nccl_dda_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_detail::kDdaNranks;
 
 template <typename T, int NRANKS>
-static ncclResult_t ncclReduceScatterDdaIpcLaunch(const void* sendbuff, void* recvbuff, size_t recvcount, ncclComm* comm,
-                                                  cudaStream_t stream) {
+static ncclResult_t ncclReduceScatterDdaIpcLaunch(const void* sendbuff, void* recvbuff, size_t recvcount,
+                                                  ncclComm* comm, cudaStream_t stream) {
   if (comm->ddaIpcMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaIpcBarrierState == nullptr) {
     return ncclInvalidUsage;
