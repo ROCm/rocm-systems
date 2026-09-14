@@ -1411,6 +1411,10 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_SelfWaitOnCaptureStream) {
   constexpr size_t kExpectedEdges = 1;
   constexpr int kExpectedIncrements = 2;
 
+  // Running the whole binary in one process, an earlier test can leave a stale error in this
+  // thread's last-error slot. Consume it so the checks below only report this test's launches.
+  (void)hipGetLastError();
+
   LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
   StreamsGuard streams(1);
   EventsGuard events(1);
