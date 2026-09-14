@@ -3687,8 +3687,12 @@
           "test_filter": "UBR_MultiSegment.Symmetric_LsaGin"
         },
         {
-          "name": "DeepEP_Hybrid_Positive_And_Stress",
-          "test_filter": "UBR_MultiSegment.DeepEP_HybridWindowRegistrationAndHandleReuse:RmaMultiSegmentMPITest.DeepEP_HybridImportedCpuSegmentIGet:RmaMultiSegmentMPITest.DeepEP_HybridMultiNodeIGetStress:RmaMultiSegmentMPITest.DeepEP_HybridOutOfRangeIGetRejected"
+          "name": "DeepEP_Hybrid_Window_Registration",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridWindowRegistrationAndHandleReuse"
+        },
+        {
+          "name": "DeepEP_Hybrid_Rma_Positive_And_Stress",
+          "test_filter": "RmaMultiSegmentMPITest.DeepEP_HybridImportedCpuSegmentIGet:RmaMultiSegmentMPITest.DeepEP_HybridMultiNodeIGetStress:RmaMultiSegmentMPITest.DeepEP_HybridOutOfRangeIGetRejected"
         },
         {
           "name": "DeepEP_Hybrid_Elastic_Gating",
