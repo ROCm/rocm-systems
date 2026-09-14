@@ -52,73 +52,77 @@ if(FFMPEG_LIBRARIES AND FFMPEG_INCLUDE_DIR)
 else()
   # use pkg-config to get the directories and then use these values
   # in the FIND_PATH() and FIND_LIBRARY() calls
-  find_package(PkgConfig)
-  if(PKG_CONFIG_FOUND)
-    pkg_check_modules(_FFMPEG_AVCODEC libavcodec)
-    pkg_check_modules(_FFMPEG_AVFORMAT libavformat)
-    pkg_check_modules(_FFMPEG_AVUTIL libavutil)
+  if(NOT WIN32)
+    find_package(PkgConfig)
+    if(PKG_CONFIG_FOUND)
+      pkg_check_modules(_FFMPEG_AVCODEC libavcodec)
+      pkg_check_modules(_FFMPEG_AVFORMAT libavformat)
+      pkg_check_modules(_FFMPEG_AVUTIL libavutil)
+    endif()
   endif()
 
-  # AVCODEC
-  find_path(AVCODEC_INCLUDE_DIR 
-    NAMES libavcodec/avcodec.h
-    PATHS ${_FFMPEG_AVCODEC_INCLUDE_DIRS}
+  if(NOT WIN32)
+    # Union of all three components' pkg-config dirs: avformat/avutil may live
+    # under a different prefix than avcodec.
+    set(_FFMPEG_SEARCH_INCLUDE
+      ${_FFMPEG_AVCODEC_INCLUDE_DIRS}
+      ${_FFMPEG_AVFORMAT_INCLUDE_DIRS}
+      ${_FFMPEG_AVUTIL_INCLUDE_DIRS}
       /usr/local/include
       /usr/include
       /opt/local/include
-      /sw/include
+      /sw/include)
+    set(_FFMPEG_SEARCH_LIB
+      ${_FFMPEG_AVCODEC_LIBRARY_DIRS}
+      ${_FFMPEG_AVFORMAT_LIBRARY_DIRS}
+      ${_FFMPEG_AVUTIL_LIBRARY_DIRS}
+      /usr/local/lib
+      /usr/lib
+      /opt/local/lib
+      /sw/lib)
+  else()
+    # On Windows, allow FFMPEG_ROOT to point to a pre-built FFmpeg installation
+    # (e.g. -DFFMPEG_ROOT=C:/ffmpeg)
+    set(_FFMPEG_SEARCH_INCLUDE ${FFMPEG_ROOT}/include)
+    set(_FFMPEG_SEARCH_LIB ${FFMPEG_ROOT}/lib)
+  endif()
+
+  # AVCODEC
+  find_path(AVCODEC_INCLUDE_DIR
+    NAMES libavcodec/avcodec.h
+    PATHS ${_FFMPEG_SEARCH_INCLUDE}
     PATH_SUFFIXES ffmpeg libav
   )
   mark_as_advanced(AVCODEC_INCLUDE_DIR)
   find_library(AVCODEC_LIBRARY
     NAMES avcodec
-    PATHS ${_FFMPEG_AVCODEC_LIBRARY_DIRS}
-      /usr/local/lib
-      /usr/lib
-      /opt/local/lib
-      /sw/lib
+    PATHS ${_FFMPEG_SEARCH_LIB}
   )
   mark_as_advanced(AVCODEC_LIBRARY)
 
   # AVFORMAT
-  find_path(AVFORMAT_INCLUDE_DIR 
+  find_path(AVFORMAT_INCLUDE_DIR
     NAMES libavformat/avformat.h
-    PATHS ${_FFMPEG_AVFORMAT_INCLUDE_DIRS}
-      /usr/local/include
-      /usr/include
-      /opt/local/include
-      /sw/include
+    PATHS ${_FFMPEG_SEARCH_INCLUDE}
     PATH_SUFFIXES ffmpeg libav
   )
   mark_as_advanced(AVFORMAT_INCLUDE_DIR)
   find_library(AVFORMAT_LIBRARY
     NAMES avformat
-    PATHS ${_FFMPEG_AVFORMAT_LIBRARY_DIRS}
-      /usr/local/lib
-      /usr/lib
-      /opt/local/lib
-      /sw/lib
+    PATHS ${_FFMPEG_SEARCH_LIB}
   )
   mark_as_advanced(AVFORMAT_LIBRARY)
 
   # AVUTIL
-  find_path(AVUTIL_INCLUDE_DIR 
+  find_path(AVUTIL_INCLUDE_DIR
     NAMES libavutil/avutil.h
-    PATHS ${_FFMPEG_AVUTIL_INCLUDE_DIRS}
-      /usr/local/include
-      /usr/include
-      /opt/local/include
-      /sw/include
+    PATHS ${_FFMPEG_SEARCH_INCLUDE}
     PATH_SUFFIXES ffmpeg libav
   )
   mark_as_advanced(AVUTIL_INCLUDE_DIR)
   find_library(AVUTIL_LIBRARY
     NAMES avutil
-    PATHS ${_FFMPEG_AVUTIL_LIBRARY_DIRS}
-      /usr/local/lib
-      /usr/lib
-      /opt/local/lib
-      /sw/lib
+    PATHS ${_FFMPEG_SEARCH_LIB}
   )
   mark_as_advanced(AVUTIL_LIBRARY)
 
@@ -126,7 +130,7 @@ else()
     set(FFMPEG_FOUND TRUE)
   endif()
   
-  if(_FFMPEG_AVCODEC_VERSION VERSION_LESS 58.18.100 OR _FFMPEG_AVFORMAT_VERSION VERSION_LESS 58.12.100 OR _FFMPEG_AVUTIL_VERSION VERSION_LESS 56.14.100)
+  if(NOT WIN32 AND (_FFMPEG_AVCODEC_VERSION VERSION_LESS 58.18.100 OR _FFMPEG_AVFORMAT_VERSION VERSION_LESS 58.12.100 OR _FFMPEG_AVUTIL_VERSION VERSION_LESS 56.14.100))
     if(FFMPEG_FOUND)
       message("-- ${White}FFMPEG   required min version - 4.0.4 Found:${FFMPEG_VERSION}")
       message("-- ${White}AVCODEC  required min version - 58.18.100 Found:${_FFMPEG_AVCODEC_VERSION}${ColourReset}")
@@ -137,6 +141,42 @@ else()
     message( "-- ${Yellow}NOTE: FindFFmpeg failed to find -- FFMPEG${ColourReset}" )
   endif()
   
+  # When pkg-config is not available (e.g. Windows), parse the version from headers
+  if(FFMPEG_FOUND AND NOT _FFMPEG_AVCODEC_VERSION AND AVCODEC_INCLUDE_DIR)
+    # LIBAVCODEC_VERSION_MAJOR moved to version_major.h in FFmpeg 5.1; older
+    # releases only have version.h. file(STRINGS) is a fatal error on a missing
+    # file, so both reads must be guarded by EXISTS.
+    if(EXISTS "${AVCODEC_INCLUDE_DIR}/libavcodec/version_major.h")
+      file(STRINGS "${AVCODEC_INCLUDE_DIR}/libavcodec/version_major.h" _avcodec_major_line
+           REGEX "^#define[ \t]+LIBAVCODEC_VERSION_MAJOR[ \t]+[0-9]+")
+    endif()
+    if(NOT _avcodec_major_line AND EXISTS "${AVCODEC_INCLUDE_DIR}/libavcodec/version.h")
+      file(STRINGS "${AVCODEC_INCLUDE_DIR}/libavcodec/version.h" _avcodec_major_line
+           REGEX "^#define[ \t]+LIBAVCODEC_VERSION_MAJOR[ \t]+[0-9]+")
+    endif()
+    # MINOR/MICRO always stay in version.h. They are needed in full: downstream
+    # gates compare against 58.134.100 and 60.31.100, so a major-only "60.0.0"
+    # would misclassify FFmpeg 6.1 (60.31.102) as pre-6.1.
+    if(EXISTS "${AVCODEC_INCLUDE_DIR}/libavcodec/version.h")
+      file(STRINGS "${AVCODEC_INCLUDE_DIR}/libavcodec/version.h" _avcodec_minor_line
+           REGEX "^#define[ \t]+LIBAVCODEC_VERSION_MINOR[ \t]+[0-9]+")
+      file(STRINGS "${AVCODEC_INCLUDE_DIR}/libavcodec/version.h" _avcodec_micro_line
+           REGEX "^#define[ \t]+LIBAVCODEC_VERSION_MICRO[ \t]+[0-9]+")
+    endif()
+    if(_avcodec_major_line)
+      string(REGEX REPLACE ".*LIBAVCODEC_VERSION_MAJOR[ \t]+([0-9]+).*" "\\1" _avcodec_major "${_avcodec_major_line}")
+      set(_avcodec_minor 0)
+      set(_avcodec_micro 0)
+      if(_avcodec_minor_line)
+        string(REGEX REPLACE ".*LIBAVCODEC_VERSION_MINOR[ \t]+([0-9]+).*" "\\1" _avcodec_minor "${_avcodec_minor_line}")
+      endif()
+      if(_avcodec_micro_line)
+        string(REGEX REPLACE ".*LIBAVCODEC_VERSION_MICRO[ \t]+([0-9]+).*" "\\1" _avcodec_micro "${_avcodec_micro_line}")
+      endif()
+      set(_FFMPEG_AVCODEC_VERSION "${_avcodec_major}.${_avcodec_minor}.${_avcodec_micro}" CACHE INTERNAL "")
+    endif()
+  endif()
+
   if(FFMPEG_FOUND)
     set(FFMPEG_INCLUDE_DIR ${AVFORMAT_INCLUDE_DIR} CACHE INTERNAL "")
     set(FFMPEG_LIBRARIES
