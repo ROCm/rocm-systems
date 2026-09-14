@@ -2975,7 +2975,9 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team, int src_pe,
   RMA_SIGNAL_SUFFIX_DEF(uint32_t, uint32, SUFFIX)              \
   RMA_SIGNAL_SUFFIX_DEF(uint64_t, uint64, SUFFIX)              \
   RMA_SIGNAL_SUFFIX_DEF(size_t, size, SUFFIX)                  \
-  RMA_SIGNAL_SUFFIX_DEF(ptrdiff_t, ptrdiff, SUFFIX)
+  RMA_SIGNAL_SUFFIX_DEF(ptrdiff_t, ptrdiff, SUFFIX)            \
+  RMA_SIGNAL_SUFFIX_DEF(__half, half, SUFFIX)                  \
+  RMA_SIGNAL_SUFFIX_DEF(__hip_bfloat16, bfloat16, SUFFIX)
 
 RMA_SIGNAL_GEN(_wg)
 RMA_SIGNAL_GEN()
@@ -3060,6 +3062,8 @@ WAIT_GEN(long long)
 WAIT_GEN(unsigned int)
 WAIT_GEN(unsigned long)
 WAIT_GEN(unsigned long long)
+WAIT_GEN(__half)
+WAIT_GEN(__hip_bfloat16)
 
 INT_REDUCTION_DEF_GEN(int, int)
 INT_REDUCTION_DEF_GEN(short, short)
@@ -3168,7 +3172,18 @@ WAIT_DEF_GEN(unsigned short, ushort)
 WAIT_DEF_GEN(unsigned int, uint)
 WAIT_DEF_GEN(unsigned long, ulong)
 WAIT_DEF_GEN(unsigned long long, ulonglong)
+WAIT_DEF_GEN(int8_t, int8)
+WAIT_DEF_GEN(int16_t, int16)
+WAIT_DEF_GEN(int32_t, int32)
+WAIT_DEF_GEN(int64_t, int64)
+WAIT_DEF_GEN(uint8_t, uint8)
+WAIT_DEF_GEN(uint16_t, uint16)
+WAIT_DEF_GEN(uint32_t, uint32)
 WAIT_DEF_GEN(uint64_t, uint64)
+WAIT_DEF_GEN(size_t, size)
+WAIT_DEF_GEN(ptrdiff_t, ptrdiff)
+WAIT_DEF_GEN(__half, half)
+WAIT_DEF_GEN(__hip_bfloat16, bfloat16)
 
 INT_REDUCTION_ON_STREAM_KERNEL_GEN(int, int)
 INT_REDUCTION_ON_STREAM_KERNEL_GEN(long, long)
