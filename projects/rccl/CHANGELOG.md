@@ -9,6 +9,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Added scalable AllGatherV pattern: grouped `ncclBroadcast` calls with distinct roots are fused into a single ring kernel, improving performance at large scale. Gated by `NCCL_ALLGATHERV_ENABLE` (default off).
 * Added multi-node multi-segment symmetric-window registration and transfers for the InfiniBand GIN proxy/RMA path. Contiguous virtual ranges backed by multiple GPU or mixed GPU/host physical allocations are exported and registered per segment for GIN `iput`, `iget`, `iputSignal`, and `iflush`.
 * Added multi-segment DMA-BUF registration and transfer splitting to the classic NET/IB P2P path while preserving compatibility with legacy single-segment peers.
+* Added multi-segment DMA-BUF registration and transfer splitting to the CAST NET/IB P2P path while preserving compatibility with legacy single-segment peers.
 * Added Elastic Buffer support for symmetric windows spanning device and host/`HOST_NUMA` memory segments (`NCCL_ELASTIC_BUFFER_REGISTER`, `NCCL_SYM_REUSE_SYSMEM_HANDLES`).
 * Added `install.sh --all_unrolls` (`-DBUILD_ALL_UNROLLS=ON`) to generate every unroll factor (1, 2, 4, 8, 16, 32) for the targeted GPU architecture(s), for measuring unroll factors that the default per-arch matrix does not build. The flag also drops the per-architecture pin, so such a build accepts every `RCCL_UNROLL_FACTOR` value on any targeted architecture.
 * Added an experimental gfx1250 (MI450) Tensor Data Mover path for copy-shaped SIMPLE-protocol transfers. All collectives can reach it, but reduction collectives only qualify on slices that carry no reduction operation. Excluded from the default build: it requires `--enable-tdm-simple` at build time and `RCCL_TDM_SIMPLE_ENABLE=1` at runtime. Reduction into LDS staging buffers and double buffering are not yet implemented.
@@ -30,7 +31,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Known issues
 * The improved AllGatherV support breaks the NCCL profiler support for ncclBroadcast operations, limiting visibility to API events. `NCCL_ALLGATHERV_ENABLE=0` can be used as a workaround until it is fixed in a future release.
-* Multi-segment InfiniBand registration is not yet supported by CAST.
+* Multi-segment InfiniBand registration is not yet supported on the CAST GIN/RMA path.
 
 ## RCCL 2.30.4 for ROCm 7.14.0
 
