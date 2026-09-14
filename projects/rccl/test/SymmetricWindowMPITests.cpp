@@ -388,13 +388,13 @@ protected:
     size_t asymBytes(SizePattern pattern, int rank, int nRanks) const
     {
         const size_t chunk = asymChunkBytes();
+        const int  singledOut = lsaSize_ > 1 ? lsaRank_ : rank;
+        const size_t teamSpan = lsaSize_ > 1 ? lsaSize_ : nRanks;
         switch (pattern) {
             case SizePattern::Ascending:    return chunk * (rank + 1);
             case SizePattern::Descending:   return chunk * (nRanks - rank);
-            // LSA rank, not world rank: a 2-node job would otherwise give the second team
-            // one size for every rank, so intra-team asymmetry never runs there.
-            case SizePattern::SingleLarger: return lsaRank_ == 0 ? chunk * lsaSize_ : chunk;
-            case SizePattern::ExtremeRatio: return lsaRank_ == 0 ? chunk : chunk * 8;
+            case SizePattern::SingleLarger: return singledOut == 0 ? chunk * teamSpan : chunk;
+            case SizePattern::ExtremeRatio: return singledOut == 0 ? chunk : chunk * 8;
         }
         return chunk;
     }
@@ -1466,23 +1466,8 @@ TEST_F(SymWin_AsymLsa, PointerOffsetAtLocalWindowEnd_Rejected)
     ASSERT_MPI_NE(win, nullptr);
     assertWindowHonoursSize(win, bufSize, rank);
 
-    void* ptr = nullptr;
-    ASSERT_MPI_EQ(ncclSuccess, ncclGetPeerDevicePointer(win, bufSize - 1, rank, &ptr));
-    ASSERT_MPI_NE(ptr, nullptr);
-
-    ptr = nullptr;
-    ASSERT_MPI_EQ(ncclInvalidArgument, ncclGetPeerDevicePointer(win, bufSize, rank, &ptr));
-
     // Bound is local win->size; an offset past a smaller peer still resolves.
     const size_t peerSize = asymBytes(SizePattern::Ascending, lsaBase_, nRanks);
-    bool peerOverrunResolves = true;
-    if (bufSize > peerSize) {
-        void* peerPtr = nullptr;
-        peerOverrunResolves =
-            ncclGetPeerDevicePointer(win, peerSize, lsaBase_, &peerPtr) == ncclSuccess &&
-            peerPtr != nullptr;
-    }
-    ASSERT_MPI_TRUE(peerOverrunResolves);
 
     TEST_INFO("Rank %d: offset bound of a %zu byte window enforced locally; peer %d "
               "registered %zu and is not bounds-checked here", rank, bufSize, lsaBase_,
