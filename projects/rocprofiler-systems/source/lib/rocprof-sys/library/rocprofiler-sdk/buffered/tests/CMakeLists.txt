@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 add_library(
-    rocprofiler-sdk-kfd-events-unit-tests
+    buffered-domains-unit-tests
     OBJECT
     test_kfd_queue.cpp
     test_kfd_page_fault.cpp
@@ -15,7 +15,7 @@ add_library(
 )
 
 target_link_libraries(
-    rocprofiler-sdk-kfd-events-unit-tests
+    buffered-domains-unit-tests
     PRIVATE
         rocprofiler-systems-googletest-library
         rocprofiler-systems::rocprofiler-systems-core
@@ -26,7 +26,7 @@ target_link_libraries(
 )
 
 target_include_directories(
-    rocprofiler-sdk-kfd-events-unit-tests
+    buffered-domains-unit-tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/source/lib
         ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys
