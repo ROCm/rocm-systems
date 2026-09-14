@@ -12,6 +12,9 @@
  * - HIP error checking (HIP_CHECK, HIP_EXPECT, HIP_TEST_CHECK_GTEST_FAIL,
  *                        HIPCHECK, HIP_TEST_CHECK)
  * - NCCL error checking (RCCL_TEST_CHECK, RCCL_TEST_CHECK_GTEST_FAIL)
+ * - GTest helper control flow (RETURN_IF_GTEST_STOPPED,
+ *                               RETURN_FALSE_IF_GTEST_STOPPED,
+ *                               GTEST_SKIP_OR_RETURN, RUN_HELPER_OR_STOP)
  *
  * MPI-only (requires MPI_TESTS_ENABLED):
  * - MPI error checking (MPICHECK with 3 overload variants)
@@ -211,6 +214,67 @@
         }                                                                                      \
     }                                                                                          \
     while(0)
+
+/**
+ * @def RETURN_IF_GTEST_STOPPED
+ * @brief Return from a void function after a helper used ASSERT_* or GTEST_SKIP().
+ *
+ * Google Test's ASSERT_* and GTEST_SKIP() only return from the function that
+ * invoked them. A caller that continues will run on with uninitialized state
+ * (null comms, etc.) and often SIGSEGV. TEST_F/TEST_P bodies can instead wrap
+ * a void helper in ASSERT_NO_FATAL_FAILURE(helper()); use this macro in loops,
+ * SetUp(), or other void helpers that cannot.
+ */
+#define RETURN_IF_GTEST_STOPPED()                                       \
+    do                                                                  \
+    {                                                                   \
+        if(::testing::Test::HasFatalFailure() || ::testing::Test::IsSkipped()) \
+            return;                                                     \
+    } while(0)
+
+/**
+ * @def RETURN_FALSE_IF_GTEST_STOPPED
+ * @brief Same as RETURN_IF_GTEST_STOPPED for bool setup helpers.
+ *
+ * Bool helpers cannot use ASSERT_NO_FATAL_FAILURE: that macro returns void.
+ */
+#define RETURN_FALSE_IF_GTEST_STOPPED()                                 \
+    do                                                                  \
+    {                                                                   \
+        if(::testing::Test::HasFatalFailure() || ::testing::Test::IsSkipped()) \
+            return false;                                               \
+    } while(0)
+
+/**
+ * @def GTEST_SKIP_OR_RETURN
+ * @brief Honor a bool setup helper from a TEST_F/TEST_P body.
+ *
+ * If @p reason is non-empty, GTEST_SKIP with that message. Otherwise return
+ * (a fatal assertion in the helper already failed the test).
+ *
+ * Usage: if (!setupHelper()) GTEST_SKIP_OR_RETURN(skipReason_);
+ */
+#define GTEST_SKIP_OR_RETURN(reason)                                    \
+    do                                                                  \
+    {                                                                   \
+        if(!(reason).empty()) GTEST_SKIP() << (reason);                 \
+        return;                                                         \
+    } while(0)
+
+/**
+ * @def RUN_HELPER_OR_STOP
+ * @brief Run a void helper that may ASSERT_* or GTEST_SKIP(), then return if stopped.
+ *
+ * ASSERT_NO_FATAL_FAILURE only stops on fatal failures, not on GTEST_SKIP().
+ * Use this when the helper can skip or fail. Wrap template-argument commas:
+ * RUN_HELPER_OR_STOP((foo<A, B>()));
+ */
+#define RUN_HELPER_OR_STOP(stmt)                                        \
+    do                                                                  \
+    {                                                                   \
+        stmt;                                                           \
+        RETURN_IF_GTEST_STOPPED();                                      \
+    } while(0)
 
 // ============================================================================
 // MPI-only macros — require MPI_TESTS_ENABLED
