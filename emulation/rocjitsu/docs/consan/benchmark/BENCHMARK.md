@@ -219,6 +219,16 @@ The last two are kernel workloads, not end-to-end Aorta models. They close a
 generator-provenance gap without pretending that PyTorch's runtime-selected GEMM
 provider proves Gluon or Tensile coverage.
 
+The Aorta adapter checks every model forward against a CPU FP32 copy of the
+actual BF16 weights and identical input tokens, outside the timed interval.
+It requires exact greedy-token agreement, relative L2 logit error at most 1%,
+and maximum absolute error at most 1% of the reference logit's peak magnitude.
+These normalized checks accommodate BF16 rounding around zero while testing
+the complete output tensor; finite values and repeatable checksums alone do
+not establish correctness. Native gfx950 reconnaissance found approximately
+0.54% relative L2 error against FP32 for these three shapes, with all greedy
+tokens equal. The bound remains fixed across native and instrumented runs.
+
 Aorta's TokenSpeed recipes provide real Qwen and additional Gluon/Triton/Torch
 paths, but the pinned stack currently accepts gfx950/gfx1250 rather than
 gfx1201. TokenSpeed may therefore be included on gfx950 and omitted on gfx1201.

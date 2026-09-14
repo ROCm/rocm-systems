@@ -15,6 +15,34 @@ import time
 RESULT_MARKER = "CONSAN_BENCHMARK_RESULT="
 
 
+def _check_cpu_reference(reference_model, captured):
+    import torch
+
+    if not captured:
+        raise RuntimeError("Aorta operation produced no model outputs for its CPU oracle")
+    metrics = {"cpu_oracle_max_abs_error": 0.0, "cpu_oracle_relative_l2": 0.0,
+               "cpu_oracle_peak_relative_error": 0.0, "cpu_oracle_error_bound": 0.01,
+               "cpu_oracle_greedy_tokens_checked": 0}
+    with torch.inference_mode():
+        for model_input, actual in captured:
+            expected = reference_model(model_input.cpu()).float()
+            observed = actual.cpu().float()
+            if observed.shape != expected.shape or not torch.isfinite(observed).all() or not torch.isfinite(expected).all():
+                raise AssertionError("CPU oracle requires matching finite logit tensors")
+            error = observed - expected
+            maximum_error = float(error.abs().max())
+            relative_l2 = float(error.norm()) / max(float(expected.norm()), 1e-12)
+            peak_relative = maximum_error / max(float(expected.abs().max()), 1e-12)
+            if relative_l2 > 0.01 or peak_relative > 0.01:
+                raise AssertionError(f"CPU FP32 logit oracle failed: relative_l2={relative_l2}, peak_relative={peak_relative}")
+            torch.testing.assert_close(observed.argmax(-1), expected.argmax(-1), atol=0, rtol=0)
+            metrics["cpu_oracle_max_abs_error"] = max(metrics["cpu_oracle_max_abs_error"], maximum_error)
+            metrics["cpu_oracle_relative_l2"] = max(metrics["cpu_oracle_relative_l2"], relative_l2)
+            metrics["cpu_oracle_peak_relative_error"] = max(metrics["cpu_oracle_peak_relative_error"], peak_relative)
+            metrics["cpu_oracle_greedy_tokens_checked"] += expected.argmax(-1).numel()
+    return metrics
+
+
 def _instrumentation_control():
     if "RJ_CONSAN_MODE" not in os.environ:
         return (lambda: 0), (lambda: None), (lambda: None)
@@ -69,6 +97,8 @@ def _main(argv: list[str]) -> int:
     sys.path.insert(0, str(source_dir))
     import torch
     from aorta.workloads.inference import InferenceWorkload
+    from aorta.workloads.inference import _build_model
+    torch.set_num_threads(16)
 
     instrumentation_nanoseconds, begin_analysis, end_analysis = _instrumentation_control()
     instrumentation_begin = instrumentation_nanoseconds()
@@ -79,6 +109,15 @@ def _main(argv: list[str]) -> int:
     workload = InferenceWorkload(config)
     setup_start = time.perf_counter()
     workload.setup()
+    # Use the exact BF16 weights with CPU FP32 operations as a numerical
+    # reference. Construct on CPU instead of cloning GPU parameters, which
+    # would introduce extra device kernels into the discovery allowlist.
+    reference_model = _build_model(workload._cfg.model, workload._cfg.request.prompt_len).float().eval()
+    reference_model.load_state_dict({name: value.detach().cpu()
+                                    for name, value in workload._model.state_dict().items()})
+    captured = []
+    capture_handle = workload._model.register_forward_hook(
+        lambda module, inputs, output: captured.append((inputs[0].detach(), output.detach())))
     torch.cuda.synchronize()
     setup_ms = (time.perf_counter() - setup_start) * 1000.0
     input_generator = getattr(workload, "_input_gen", None)
@@ -92,6 +131,7 @@ def _main(argv: list[str]) -> int:
         results = []
         runs = []
         for run_index in range(2):
+            captured.clear()
             if run_index == 0:
                 begin_analysis()
             input_generator.set_state(input_state)
@@ -105,7 +145,9 @@ def _main(argv: list[str]) -> int:
                     end_analysis()
             run_ms = (time.perf_counter() - run_start) * 1000.0
             instrumentation_after = instrumentation_nanoseconds()
+            oracle_metrics = _check_cpu_reference(reference_model, captured)
             result_payload = asdict(result)
+            result_payload["metrics"].update(oracle_metrics)
             results.append(result_payload)
             runs.append(
                 {
@@ -160,6 +202,7 @@ def _main(argv: list[str]) -> int:
         print(RESULT_MARKER + json.dumps(payload, sort_keys=True), flush=True)
         return 0 if combined_result["passed"] else 2
     finally:
+        capture_handle.remove()
         workload.cleanup()
 
 
