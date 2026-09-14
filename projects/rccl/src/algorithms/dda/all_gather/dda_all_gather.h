@@ -26,6 +26,21 @@ bool ncclAllGatherDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
 ncclResult_t ncclAllGatherDdaIpc(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
                                  ncclComm* comm, cudaStream_t stream);
 
+// Functor form of the entry point above. rcclAddonLaunch() takes a callable and
+// brackets it with the launch contract, so every DDA all-gather entry point that
+// runs on the user's stream has one; see enqueue.h.
+struct ncclAllGatherDdaIpcFn {
+  const void* sendbuff;
+  void* recvbuff;
+  size_t sendcount;
+  ncclDataType_t datatype;
+  ncclComm* comm;
+  cudaStream_t stream;
+  ncclResult_t operator()() const {
+    return ncclAllGatherDdaIpc(sendbuff, recvbuff, sendcount, datatype, comm, stream);
+  }
+};
+
 // Total CTAs (grid blocks) each DDA allgather launcher would use for the given
 // operands. Mirrors the launch grid math so reporting reflects real occupancy.
 uint32_t ncclAllGatherDdaIpcBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype);
@@ -46,6 +61,18 @@ bool ncclAllGatherDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* 
 ncclResult_t ncclAllGatherDdaFabric(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
                                     ncclComm* comm, cudaStream_t stream);
 
+struct ncclAllGatherDdaFabricFn {
+  const void* sendbuff;
+  void* recvbuff;
+  size_t sendcount;
+  ncclDataType_t datatype;
+  ncclComm* comm;
+  cudaStream_t stream;
+  ncclResult_t operator()() const {
+    return ncclAllGatherDdaFabric(sendbuff, recvbuff, sendcount, datatype, comm, stream);
+  }
+};
+
 /**
  * Check if the LL-protocol DDA allgather is eligible for the fabric/VMM path.
  */
@@ -58,6 +85,18 @@ bool ncclAllGatherDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
 ncclResult_t ncclAllGatherDdaFabricLL(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
                                       ncclComm* comm, cudaStream_t stream);
 
+struct ncclAllGatherDdaFabricLLFn {
+  const void* sendbuff;
+  void* recvbuff;
+  size_t sendcount;
+  ncclDataType_t datatype;
+  ncclComm* comm;
+  cudaStream_t stream;
+  ncclResult_t operator()() const {
+    return ncclAllGatherDdaFabricLL(sendbuff, recvbuff, sendcount, datatype, comm, stream);
+  }
+};
+
 /**
  * Check if the LL128-protocol DDA allgather is eligible for the fabric/VMM path.
  */
@@ -69,5 +108,17 @@ bool ncclAllGatherDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
  */
 ncclResult_t ncclAllGatherDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t sendcount,
                                          ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream);
+
+struct ncclAllGatherDdaFabricLL128Fn {
+  const void* sendbuff;
+  void* recvbuff;
+  size_t sendcount;
+  ncclDataType_t datatype;
+  ncclComm* comm;
+  cudaStream_t stream;
+  ncclResult_t operator()() const {
+    return ncclAllGatherDdaFabricLL128(sendbuff, recvbuff, sendcount, datatype, comm, stream);
+  }
+};
 
 #endif

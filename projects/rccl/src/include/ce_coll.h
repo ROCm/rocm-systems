@@ -197,6 +197,23 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
                              ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
                              struct ncclDevrWindow* recvWin = nullptr);
 
+// Functor form of the entry point above, for the 2-shot path that ncclAllReduce
+// launches on the user's stream. rcclAddonLaunch() takes a callable and brackets
+// it with the launch contract; see enqueue.h. The plan-driven caller in
+// ce_coll.cc runs under doLaunches() and calls the entry point directly.
+struct ncclCeAllReduceFn {
+  struct ncclComm* comm;
+  const void* sendbuff;
+  void* recvbuff;
+  size_t count;
+  ncclDataType_t datatype;
+  ncclRedOp_t op;
+  cudaStream_t stream;
+  ncclResult_t operator()() const {
+    return ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream);
+  }
+};
+
 // Reduce-kernel block count for a per-rank chunk of `chunkElems` elements
 // (chunkElems = count / nRanks). Mirrors the geometry ncclCeLaunchLocalReduce
 // launches; for host-side impl-selection reporting. Returns 0 if chunkElems==0.

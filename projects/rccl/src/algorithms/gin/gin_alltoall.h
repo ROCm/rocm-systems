@@ -31,6 +31,20 @@ bool ncclAllToAllGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* rec
 ncclResult_t ncclAllToAllGinSdma(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                  ncclComm* comm, cudaStream_t stream);
 
+// Functor form of the entry point above. rcclAddonLaunch() takes a callable and
+// brackets it with the launch contract; see enqueue.h.
+struct ncclAllToAllGinSdmaFn {
+  const void* sendbuff;
+  void* recvbuff;
+  size_t count;
+  ncclDataType_t datatype;
+  ncclComm* comm;
+  cudaStream_t stream;
+  ncclResult_t operator()() const {
+    return ncclAllToAllGinSdma(sendbuff, recvbuff, count, datatype, comm, stream);
+  }
+};
+
 ncclResult_t ncclGinA2AFinalize(ncclComm* comm);
 
 #else

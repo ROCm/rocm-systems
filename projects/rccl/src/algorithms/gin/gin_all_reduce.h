@@ -58,6 +58,21 @@ bool ncclAllReduceGinSdmaYieldToDda(ncclComm* comm, const void* sendbuff, void* 
 ncclResult_t ncclAllReduceGinSdma(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                   ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
+// Functor form of the entry point above. rcclAddonLaunch() takes a callable and
+// brackets it with the launch contract; see enqueue.h.
+struct ncclAllReduceGinSdmaFn {
+  const void* sendbuff;
+  void* recvbuff;
+  size_t count;
+  ncclDataType_t datatype;
+  ncclRedOp_t op;
+  ncclComm* comm;
+  cudaStream_t stream;
+  ncclResult_t operator()() const {
+    return ncclAllReduceGinSdma(sendbuff, recvbuff, count, datatype, op, comm, stream);
+  }
+};
+
 ncclResult_t ncclGinAllReduceFinalize(ncclComm* comm);
 
 #else

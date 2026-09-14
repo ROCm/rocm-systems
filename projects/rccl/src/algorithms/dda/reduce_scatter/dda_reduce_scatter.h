@@ -24,6 +24,22 @@ bool ncclReduceScatterDdaIpcEligible(ncclComm* comm, const void* sendbuff, void*
 ncclResult_t ncclReduceScatterDdaIpc(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
                                      ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
+// Functor form of the entry point above. rcclAddonLaunch() takes a callable and
+// brackets it with the launch contract, so every DDA reduce-scatter entry point
+// that runs on the user's stream has one; see enqueue.h.
+struct ncclReduceScatterDdaIpcFn {
+  const void* sendbuff;
+  void* recvbuff;
+  size_t recvcount;
+  ncclDataType_t datatype;
+  ncclRedOp_t op;
+  ncclComm* comm;
+  cudaStream_t stream;
+  ncclResult_t operator()() const {
+    return ncclReduceScatterDdaIpc(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+  }
+};
+
 /**
  * Check if DDA reduce-scatter is eligible for the fabric/VMM path (runtime
  * nRanks up to kDdaMaxNranks, single- or multi-node within an MNNVL clique).
@@ -37,12 +53,38 @@ bool ncclReduceScatterDdaFabricEligible(ncclComm* comm, const void* sendbuff, vo
 ncclResult_t ncclReduceScatterDdaFabric(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
                                         ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
+struct ncclReduceScatterDdaFabricFn {
+  const void* sendbuff;
+  void* recvbuff;
+  size_t recvcount;
+  ncclDataType_t datatype;
+  ncclRedOp_t op;
+  ncclComm* comm;
+  cudaStream_t stream;
+  ncclResult_t operator()() const {
+    return ncclReduceScatterDdaFabric(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+  }
+};
+
 // LL-protocol fabric path (small-shard fast lane, 16B lines, no barrier).
 bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                           ncclDataType_t datatype, ncclRedOp_t op);
 
 ncclResult_t ncclReduceScatterDdaFabricLL(const void* sendbuff, void* recvbuff, size_t recvcount,
                                           ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
+
+struct ncclReduceScatterDdaFabricLLFn {
+  const void* sendbuff;
+  void* recvbuff;
+  size_t recvcount;
+  ncclDataType_t datatype;
+  ncclRedOp_t op;
+  ncclComm* comm;
+  cudaStream_t stream;
+  ncclResult_t operator()() const {
+    return ncclReduceScatterDdaFabricLL(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+  }
+};
 
 // LL128-protocol fabric path (mid-shard fast lane, 128B lines, no barrier).
 bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
@@ -51,5 +93,18 @@ bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuf
 ncclResult_t ncclReduceScatterDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t recvcount,
                                              ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
                                              cudaStream_t stream);
+
+struct ncclReduceScatterDdaFabricLL128Fn {
+  const void* sendbuff;
+  void* recvbuff;
+  size_t recvcount;
+  ncclDataType_t datatype;
+  ncclRedOp_t op;
+  ncclComm* comm;
+  cudaStream_t stream;
+  ncclResult_t operator()() const {
+    return ncclReduceScatterDdaFabricLL128(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+  }
+};
 
 #endif

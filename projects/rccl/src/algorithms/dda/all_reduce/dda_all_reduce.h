@@ -21,12 +21,41 @@ bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
 ncclResult_t ncclAllReduceDdaIpc(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                  ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
+// Functor form of the entry point above. rcclAddonLaunch() takes a callable and
+// brackets it with the launch contract, so every DDA all-reduce entry point that
+// runs on the user's stream has one; see enqueue.h.
+struct ncclAllReduceDdaIpcFn {
+  const void* sendbuff;
+  void* recvbuff;
+  size_t count;
+  ncclDataType_t datatype;
+  ncclRedOp_t op;
+  ncclComm* comm;
+  cudaStream_t stream;
+  ncclResult_t operator()() const {
+    return ncclAllReduceDdaIpc(sendbuff, recvbuff, count, datatype, op, comm, stream);
+  }
+};
+
 // Fabric path (runtime nRanks up to kDdaMaxNranks, single- or multi-node).
 bool ncclAllReduceDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                     ncclDataType_t datatype, ncclRedOp_t op);
 
 ncclResult_t ncclAllReduceDdaFabric(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                     ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
+
+struct ncclAllReduceDdaFabricFn {
+  const void* sendbuff;
+  void* recvbuff;
+  size_t count;
+  ncclDataType_t datatype;
+  ncclRedOp_t op;
+  ncclComm* comm;
+  cudaStream_t stream;
+  ncclResult_t operator()() const {
+    return ncclAllReduceDdaFabric(sendbuff, recvbuff, count, datatype, op, comm, stream);
+  }
+};
 
 // LL-protocol fabric path (small-message fast lane, flag-based sync, no barrier).
 //
@@ -50,12 +79,38 @@ bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
 ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                       ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
+struct ncclAllReduceDdaFabricLLFn {
+  const void* sendbuff;
+  void* recvbuff;
+  size_t count;
+  ncclDataType_t datatype;
+  ncclRedOp_t op;
+  ncclComm* comm;
+  cudaStream_t stream;
+  ncclResult_t operator()() const {
+    return ncclAllReduceDdaFabricLL(sendbuff, recvbuff, count, datatype, op, comm, stream);
+  }
+};
+
 // LL128-protocol fabric path (mid-message fast lane, 128B lines, no barrier).
 bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                          ncclDataType_t datatype, ncclRedOp_t op);
 
 ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                          ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
+
+struct ncclAllReduceDdaFabricLL128Fn {
+  const void* sendbuff;
+  void* recvbuff;
+  size_t count;
+  ncclDataType_t datatype;
+  ncclRedOp_t op;
+  ncclComm* comm;
+  cudaStream_t stream;
+  ncclResult_t operator()() const {
+    return ncclAllReduceDdaFabricLL128(sendbuff, recvbuff, count, datatype, op, comm, stream);
+  }
+};
 
 // Total CTAs (grid blocks) each DDA allreduce launcher would use for the given
 // operands. Mirrors the launch grid math so reporting reflects real occupancy.
