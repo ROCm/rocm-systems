@@ -450,6 +450,8 @@ fail:
   return ret;
 }
 
+// RCCL: a peer can own a later host segment, so reuse the local handle only
+// when that segment exists on this rank.
 static ncclResult_t symMemoryImportAndMapSegmentsForRank(struct ncclComm* comm, int r, symLsaMessage* messages,
                                                          int maxSegments, int numSegments,
                                                          CUmemGenericAllocationHandle* memHandles, int nLocalHandles,
@@ -519,7 +521,7 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   // TODO(ROCM-29810): Remove when the runtime preserves imported VMM location metadata.
-  // Imported host VMM reads as device, so propagate the one host owner's type; scan maxSegments so all ranks agree.
+  // RCCL: imported host VMM reads as device, so propagate the one host owner's type; scan maxSegments so all ranks agree.
   if (ncclParamSymReuseSysmemHandles()) {
     for (int segment = 0; segment < maxSegments; segment++) {
       int nHost = 0, nDevice = 0;
@@ -809,7 +811,7 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     return ncclSuccess;
   }
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // One HIP DMA-BUF covers only the first segment; with =0 fail closed instead of a partial MR.
+  // RCCL: one HIP DMA-BUF covers only the first segment; with =0 fail closed instead of a partial MR.
   if (mem->maxGlobalNumSegments > 1 && !mem->globalHasSysmemSegment && !ncclParamMultiSegmentRegister()) {
     WARN("Window %p spans %d physical segments; GIN needs NCCL_MULTI_SEGMENT_REGISTER=1 to register it",
          mem->primaryAddr, mem->maxGlobalNumSegments);
