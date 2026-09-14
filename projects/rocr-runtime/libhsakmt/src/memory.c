@@ -1105,6 +1105,38 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaHandleImportDesc* import_des
 	return HSAKMT_STATUS_SUCCESS;
 }
 
+HSAKMT_STATUS HSAKMTAPI hsaKmtQueryDmaBufInfoCtx(HsaKFDContext *ctx,
+						 int DMABufFd,
+						 HsaDmaBufInfo *Info)
+{
+	struct kfd_ioctl_get_dmabuf_info_args args = {};
+
+	CHECK_KFD_OPEN();
+
+	if (DMABufFd < 0 || !Info)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	pr_debug("[%s] dmabuf fd %d\n", __func__, DMABufFd);
+
+	args.dmabuf_fd = (__u32)DMABufFd;
+	/* Metadata is not needed here; ask only for size/gpu_id/flags. */
+	args.metadata_ptr = 0;
+	args.metadata_size = 0;
+
+	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_GET_DMABUF_INFO, &args))
+		return HSAKMT_STATUS_NOT_SUPPORTED;
+
+	Info->Size  = args.size;
+	Info->GpuId = args.gpu_id;
+	Info->Flags = args.flags;
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtQueryDmaBufInfo(int DMABufFd, HsaDmaBufInfo *Info)
+{
+	return hsaKmtQueryDmaBufInfoCtx(&hsakmt_primary_kfd_ctx, DMABufFd, Info);
+}
+
 HSAuint64 MapDrmPerm(HsaMemoryMapFlags flags) {
   switch (flags) {
   case HSA_MEMORY_ACCESS_RO:
