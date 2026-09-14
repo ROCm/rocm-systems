@@ -578,6 +578,7 @@ add_executable(
     dbi/dbi_spill_sim_test.cpp
     code/code_object_target_id_test.cpp
     code/major_image_ownership_test.cpp
+    code/code_object_patcher_ownership_test.cpp
     code/relocation_function_table_test.cpp
     dbt/semantic_scratch_test.cpp
     dbt/waitcnt_translator_test.cpp
@@ -3265,6 +3266,9 @@ if(RJ_ENABLE_HIP_TESTS)
     foreach(_rj_sanitizer_flag IN LISTS RJ_SANITIZER_COMPILE_OPTIONS)
         list(APPEND RJ_HIP_SANITIZER_FLAGS -Xarch_host ${_rj_sanitizer_flag})
     endforeach()
+    # Custom HIP link commands must use the same host C++ runtime search paths
+    # as CMake-built support libraries (notably Google Test).
+    separate_arguments(RJ_HIP_HOST_LINK_FLAGS NATIVE_COMMAND "${CMAKE_EXE_LINKER_FLAGS}")
     set(RJ_HIP_SANITIZER_LINK_FLAGS)
     foreach(_rj_sanitizer_flag IN LISTS RJ_SANITIZER_LINK_OPTIONS)
         list(
@@ -3338,7 +3342,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 ${HIP_EXTRA_LIBS} -L${GTEST_LIB_DIR} -lgtest
                 -L${RJ_HSA_LIBRARY_DIR} -lamdhip64 -lpthread
                 -Wl,-rpath,${GTEST_LIB_DIR} -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
-                ${RJ_HIP_SANITIZER_LINK_FLAGS}
+                ${RJ_HIP_HOST_LINK_FLAGS} ${RJ_HIP_SANITIZER_LINK_FLAGS}
             DEPENDS
                 ${HIP_TEST_OBJ}
                 ${HIP_TEST_SRC}
@@ -3921,7 +3925,7 @@ if(RJ_ENABLE_HIP_TESTS AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
             "-I$<JOIN:$<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>,;-I>"
             -o ${CVT_NARROW_BIN}
             ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
-            -Wl,-rpath,${ROCM_PATH}/lib ${RJ_HIP_SANITIZER_LINK_FLAGS}
+            -Wl,-rpath,${ROCM_PATH}/lib ${RJ_HIP_HOST_LINK_FLAGS} ${RJ_HIP_SANITIZER_LINK_FLAGS}
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp ${AMDCXX}
         COMMENT "Building hip_cvt_narrow_test with amdclang++ -x hip (gfx950)"
         VERBATIM
