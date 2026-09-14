@@ -93,6 +93,7 @@ TEST(RmaSegmentMathTest, PrefixPostCountsWrsBeforeBadWr)
     EXPECT_EQ(Posted(&wr[0], 3, &wr[0]), 0);
     EXPECT_EQ(Posted(&wr[0], 3, &wr[1]), 1);
     EXPECT_EQ(Posted(&wr[0], 3, &wr[2]), 2);
+    EXPECT_EQ(Posted(&wr[0], 2, nullptr), 2);
     EXPECT_EQ(Posted(&wr[0], 0, &wr[0]), 0);
     EXPECT_EQ(Posted(nullptr, 3, &wr[0]), 0);
 }
