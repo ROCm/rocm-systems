@@ -35,3 +35,10 @@ Do not discard completed cells or retry the capped large-M InlineShadow cell.
 The first post-reset full RecordReplay attempt still faults, while an immediate
 standalone native HIP check passes. Thus GPU recovery did not resolve the
 RecordReplay issue; instrumentation isolation continues on the recovered GPU.
+
+The RecordReplay fault was subsequently isolated on the recovered GPU and
+fixed in local commits `4019621084` (CDNA4 restored-SGPR dependency waits)
+and `06b163da1d` (empty-wave scalar-spill bypass). Both have host regressions;
+the full physical attention reproducer now passes its CPU numerical oracle
+with 124/124 accesses and 12/12 barriers instrumented. GPU-state recovery and
+these instrumentation fixes are distinct findings.
