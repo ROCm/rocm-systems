@@ -622,33 +622,81 @@ inline auto amdSmiFabricInfoV1(const FabricInfoT& info) {
 // 16-GPU runtime.
 constexpr unsigned char kAmdSmiFabricBufferCanary = 0xA5;
 
+// Must cover the declared struct: amdSmiFabricInfoBufferAsInfo casts the array to amdsmi_fabric_info_t*.
+// No slack past that, so on a non-extended header the detector's top window is empty and sees no over-write.
+constexpr size_t kAmdSmiFabricInfoBufferSize =
+  kAmdSmiFabricHeaderIsExtended ? sizeof(amdsmi_fabric_info_t) : kAmdSmiFabricInfo16GpuSize;
+
 struct alignas(amdsmi_fabric_info_t) amdSmiFabricInfoBuffer {
-  unsigned char bytes[kAmdSmiFabricInfo16GpuSize];
+  unsigned char bytes[kAmdSmiFabricInfoBufferSize];
 };
 
 enum class amdSmiFabricRuntimeLayout {
   EightGpu,
   SixteenGpu,
+  ExtendedUnion,
   Unknown,
 };
 
+// Zero the request header so it matches the per-device call; the payload stays canary by design.
 inline void amdSmiPrepareFabricInfoBuffer(amdSmiFabricInfoBuffer& buffer) {
   memset(buffer.bytes, kAmdSmiFabricBufferCanary, sizeof(buffer.bytes));
+  memset(buffer.bytes, 0, kAmdSmiFabricV1PayloadBegin);
 }
 
 inline amdsmi_fabric_info_t* amdSmiFabricInfoBufferAsInfo(amdSmiFabricInfoBuffer& buffer) {
   return reinterpret_cast<amdsmi_fabric_info_t*>(buffer.bytes);
 }
 
-inline amdSmiFabricRuntimeLayout amdSmiDetectFabricRuntimeLayout(const amdSmiFabricInfoBuffer& buffer) {
-  bool tailIsCanary = true;
-  bool tailIsZero = true;
-  for (size_t i = kAmdSmiFabricInfo8GpuSize; i < kAmdSmiFabricInfo16GpuSize; ++i) {
-    tailIsCanary &= buffer.bytes[i] == kAmdSmiFabricBufferCanary;
-    tailIsZero &= buffer.bytes[i] == 0;
+inline bool amdSmiFabricWindowAllCanary(const amdSmiFabricInfoBuffer& buffer, size_t begin, size_t end) {
+  for (size_t i = begin; i < end; ++i) {
+    if (buffer.bytes[i] != kAmdSmiFabricBufferCanary) {
+      return false;
+    }
   }
-  if (tailIsCanary) return amdSmiFabricRuntimeLayout::EightGpu;
-  if (tailIsZero) return amdSmiFabricRuntimeLayout::SixteenGpu;
+  return true;
+}
+
+inline bool amdSmiFabricWindowNoCanary(const amdSmiFabricInfoBuffer& buffer, size_t begin, size_t end) {
+  for (size_t i = begin; i < end; ++i) {
+    if (buffer.bytes[i] == kAmdSmiFabricBufferCanary) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static_assert(kAmdSmiFabricV1PayloadBegin < kAmdSmiFabricV1PayloadEnd &&
+                kAmdSmiFabricV1PayloadEnd < kAmdSmiFabricReserved8GpuEnd &&
+                kAmdSmiFabricReserved8GpuEnd < kAmdSmiFabricInfo8GpuSize &&
+                kAmdSmiFabricInfo8GpuSize < kAmdSmiFabricReserved16GpuEnd &&
+                kAmdSmiFabricReserved16GpuEnd < kAmdSmiFabricInfo16GpuSize &&
+                kAmdSmiFabricInfo16GpuSize <= kAmdSmiFabricInfoBufferSize,
+              "fabric probe windows are out of order");
+
+// Write extents: 256 = 27.x field-wise, 288 = 8-GPU whole-object, 320 = 16-GPU whole-object.
+// Confirmation reads only the reserved windows, which every writer zero-fills. The v1 payload is
+// live data that can legitimately hold a 0xA5 byte, so it is only tested for having been touched.
+inline amdSmiFabricRuntimeLayout amdSmiDetectFabricRuntimeLayout(const amdSmiFabricInfoBuffer& buffer) {
+  const bool wroteV1 =
+    !amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricV1PayloadBegin, kAmdSmiFabricV1PayloadEnd);
+  const bool wrote8GpuTail =
+    amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricReserved8GpuEnd);
+  const bool wrote16GpuTail =
+    amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricReserved16GpuEnd);
+  const bool nothingBeyond16Gpu =
+    amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricInfo16GpuSize, kAmdSmiFabricInfoBufferSize);
+
+  if (wroteV1 && amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricInfo8GpuSize)) {
+    return amdSmiFabricRuntimeLayout::ExtendedUnion;
+  }
+  if (wroteV1 && wrote8GpuTail &&
+      amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricInfo8GpuSize, kAmdSmiFabricInfo16GpuSize)) {
+    return amdSmiFabricRuntimeLayout::EightGpu;
+  }
+  if (wroteV1 && wrote8GpuTail && wrote16GpuTail && nothingBeyond16Gpu) {
+    return amdSmiFabricRuntimeLayout::SixteenGpu;
+  }
   return amdSmiFabricRuntimeLayout::Unknown;
 }
 
