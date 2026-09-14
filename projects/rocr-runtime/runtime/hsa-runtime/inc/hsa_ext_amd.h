@@ -4736,7 +4736,7 @@ hsa_status_t hsa_amd_vmem_get_access(void* va, hsa_access_permission_t* perms,
  *
  * @param[out] dmabuf_fd shareable handle
  * @param[in] handle previously allocated virtual memory handle
- * @param[in] flags Currently unsupported
+ * @param[in] flags Bitmask of hsa_amd_dma_buf_mapping_type_t flags.
  *
  * @retval ::HSA_STATUS_SUCCESS
  *

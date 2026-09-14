@@ -104,7 +104,7 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_svm_attributes_get)
   GET_ROCR_SYMBOL(hsa_amd_svm_prefetch_async)
   GET_ROCR_SYMBOL(hsa_amd_svm_discard_batch_async)
-  GET_ROCR_SYMBOL(hsa_amd_portable_export_dmabuf)
+  GET_ROCR_SYMBOL(hsa_amd_portable_export_dmabuf_v2)
   GET_ROCR_SYMBOL(hsa_amd_portable_close_dmabuf)
   GET_ROCR_SYMBOL(hsa_amd_vmem_address_reserve)
   GET_ROCR_SYMBOL(hsa_amd_vmem_address_free)

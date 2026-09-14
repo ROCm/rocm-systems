@@ -27,6 +27,7 @@
 #define CUDA_12000 12000
 #define CUDA_12020 12020
 #define CUDA_12030 12030
+#define CUDA_12080 12080
 #define CUDA_13000 13000
 
 #ifdef __cplusplus
@@ -286,6 +287,11 @@ typedef enum cudaMemRangeAttribute hipMemRangeAttribute;
 typedef enum CUmemRangeHandleType_enum hipMemRangeHandleType;
 #define hipMemRangeHandleTypeDmaBufFd CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD
 #define hipMemRangeHandleTypeMax CU_MEM_RANGE_HANDLE_TYPE_MAX
+#endif
+
+#if CUDA_VERSION >= CUDA_12080
+typedef enum CUmemRangeFlags_enum hipMemRangeFlags;
+#define hipMemRangeFlagDmaBufMappingTypePcie CU_MEM_RANGE_FLAG_DMA_BUF_MAPPING_TYPE_PCIE
 #endif
 
 #define hipSurfaceBoundaryMode cudaSurfaceBoundaryMode

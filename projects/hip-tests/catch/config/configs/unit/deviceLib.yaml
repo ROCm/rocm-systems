@@ -94,6 +94,9 @@ deviceLib:
   Unit_deviceAllocationFollowedByDeviceReset:
     <<: *level_2
     tags: [memory]
+  Unit_deviceAllocationAfterDeviceReset:
+    <<: *level_2
+    tags: [memory]
   Unit_AtomicFunctions_Inc:
     <<: *level_2
     tags: [atomics, P0]
