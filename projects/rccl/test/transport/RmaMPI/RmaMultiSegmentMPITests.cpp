@@ -273,9 +273,9 @@ TEST_F(RmaMultiSegmentMPITest, Reproducer_MultiSegmentRegistrationAndTransfer)
         FillBuf(sb->ptr, kSize, /*seed=*/0xA0);
 
     void *sendMh = nullptr, *sendGh = nullptr, *recvMh = nullptr, *recvGh = nullptr;
-    EXPECT_EQ(ncclSuccess, RegMr(sb->ptr, kSize, &sendMh, &sendGh))
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, kSize, &sendMh, &sendGh))
         << "multi-segment send buffer registration failed (the AIRUNTIME-2351 bug)";
-    EXPECT_EQ(ncclSuccess, RegMr(rb->ptr, kSize, &recvMh, &recvGh))
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, kSize, &recvMh, &recvGh))
         << "multi-segment recv buffer registration failed (the AIRUNTIME-2351 bug)";
 
     // Confirm the per-segment path fired; otherwise the feature isn't exercised.
@@ -1060,7 +1060,8 @@ TEST_F(RmaMultiSegmentMPITest, RegisterAsymmetricSegmentCountRejected)
 
     // If enumeration happened to return identical counts there is no asymmetry
     // to reject (registration succeeds on both ranks); skip rather than misfire.
-    if (SyncSkip(r == ncclSuccess))
+    // Skip only if every rank succeeded (identical enumeration). any-rank skip hid unilateral success.
+    if (MPIHelpers::allRanksTrue(r == ncclSuccess))
         GTEST_SKIP() << "ranks enumerated identical segment counts; no asymmetry";
 
     EXPECT_EQ(r, ncclInvalidUsage)
