@@ -555,9 +555,76 @@ TEST(ConSan, Gfx950DirectLdsAddressExecutesMaskedM0OffsetAndPhysicalLaneStride) 
       }
       cu->flush_all();
       for (uint32_t lane = 0; lane < 64u; ++lane)
-        EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 20u, lane),
-                  (m0 & 0x3fffcu) + offset + lane * 16u)
-            << "lane=" << lane;
+        if ((exec >> lane) & 1u)
+          EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 20u, lane),
+                    (m0 & 0x3fffcu) + offset + lane * 16u)
+              << "lane=" << lane;
+      EXPECT_EQ(wave->exec(), exec);
+      EXPECT_EQ(wave->m0(), m0);
+      EXPECT_EQ(wave->vcc(), 0x1234567887654321ull);
+      EXPECT_TRUE(wave->read_scc());
+    }
+  }
+  wave->halt();
+}
+
+TEST(ConSan, Gfx950DirectLdsAddressPreservesInactiveSpillVictims) {
+  ConSanProgramSite site;
+  site.lowering.form.emplace();
+  auto &form = *site.lowering.form;
+  form.kind = ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed;
+  form.direct_m0_address_mask = 0x3fffcu;
+  amdgpu::GpuMemory memory("consan_direct_lds_address_mem");
+  amdgpu::L2Cache l2("consan_direct_lds_address_l2");
+  l2.set_backing_memory(&memory);
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("consan_direct_lds_address", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  constexpr uint64_t exec = 0x8000000180000001ull;
+  constexpr uint32_t m0 = 0xa5fc0207u;
+  for (const uint32_t width : {96u, 128u}) {
+    for (const int32_t offset : {-16, 0, 48}) {
+      SCOPED_TRACE(std::to_string(width) + ":" + std::to_string(offset));
+      form.element_width_bits = width;
+      form.immediate_byte_offset = offset;
+      std::vector<uint32_t> words;
+      ASSERT_TRUE(consan_moi_impl::append_materialize_direct_to_lds_address(words, site, 20u, 21u,
+                                                                            30u, config.arch));
+      for (size_t i = 0; i < words.size(); ++i)
+        memory.write32(i * sizeof(uint32_t), words[i]);
+      for (uint32_t lane = 0; lane < 64u; ++lane) {
+        cu->write_vgpr(wave->vgpr_alloc().base + 20u, lane, 0xabcdef00u + lane);
+        cu->write_vgpr(wave->vgpr_alloc().base + 21u, lane, 0x12345600u + lane);
+      }
+      wave->pc = 0u;
+      wave->set_exec(exec);
+      wave->set_m0(m0);
+      wave->set_vcc(0x1234567887654321ull);
+      wave->write_scc(true);
+      size_t steps = 0;
+      while (wave->pc < words.size() * sizeof(uint32_t)) {
+        ASSERT_LT(steps++, words.size());
+        cu->step();
+      }
+      cu->flush_all();
+      for (uint32_t lane = 0; lane < 64u; ++lane)
+        if ((exec >> lane) & 1u)
+          EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 20u, lane),
+                    (m0 & 0x3fffcu) + offset + lane * 16u)
+              << "lane=" << lane;
+      for (uint32_t lane = 0; lane < 64u; ++lane) {
+        if ((exec >> lane) & 1u)
+          continue;
+        EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 20u, lane), 0xabcdef00u + lane);
+        EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 21u, lane), 0x12345600u + lane);
+      }
       EXPECT_EQ(wave->exec(), exec);
       EXPECT_EQ(wave->m0(), m0);
       EXPECT_EQ(wave->vcc(), 0x1234567887654321ull);

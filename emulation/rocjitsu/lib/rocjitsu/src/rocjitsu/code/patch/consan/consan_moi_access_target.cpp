@@ -92,7 +92,7 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
 
 [[nodiscard]] bool append_materialize_direct_to_lds_address(
     std::vector<uint32_t> &words, const ConSanProgramSite &site, uint16_t result_vgpr,
-    uint16_t temporary_vgpr, uint16_t exec_save_sgpr, rj_code_arch_t arch) {
+    uint16_t temporary_vgpr, uint16_t /*exec_save_sgpr*/, rj_code_arch_t arch) {
   if (!site.lowering.form)
     return false;
   const ConSanAccessLoweringForm &form = *site.lowering.form;
@@ -112,9 +112,9 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
                                                                        : 0u;
   if (lane_stride_shift == 0u)
     return false;
-  const auto save_exec = instrumentation::build_s_mov_b64(exec_save_sgpr, kAmdGpuExecLo, arch);
-  const auto activate_all_lanes =
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, kScalarInlineNegativeOneOperand, arch);
+  // MBCNT counts the explicit all-ones source mask, so it already produces
+  // physical lane IDs under partial EXEC. Expanding EXEC would overwrite
+  // inactive spill victims that were never saved by the caller.
   const auto lane_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
       result_vgpr, kScalarInlineNegativeOneOperand, scalar_positive_inline_u32(0u), arch);
   const auto lane_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
@@ -131,13 +131,9 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
       result_vgpr, vector_source_vgpr(temporary_vgpr), result_vgpr, arch);
   const auto offset = instrumentation::build_v_mov_b32_literal(
       temporary_vgpr, static_cast<uint32_t>(form.immediate_byte_offset.value_or(0)), arch);
-  const auto restore_exec = instrumentation::build_s_mov_b64(kAmdGpuExecLo, exec_save_sgpr, arch);
-  if (!save_exec || !activate_all_lanes || !lane_lo || !lane_hi || !scale || !mask || !add ||
-      !add_offset || !offset || !restore_exec) {
+  if (!lane_lo || !lane_hi || !scale || !mask || !add || !add_offset || !offset) {
     return false;
   }
-  words.push_back(*save_exec);
-  words.push_back(*activate_all_lanes);
   words.insert(words.end(), lane_lo->begin(), lane_lo->end());
   words.insert(words.end(), lane_hi->begin(), lane_hi->end());
   words.push_back(*scale);
@@ -148,7 +144,6 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
     words.insert(words.end(), offset->begin(), offset->end());
     words.insert(words.end(), add_offset->begin(), add_offset->end());
   }
-  words.push_back(*restore_exec);
   return true;
 }
 
