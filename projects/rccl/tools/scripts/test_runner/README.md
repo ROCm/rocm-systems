@@ -1518,7 +1518,7 @@ When the same configuration can be specified in multiple places, the priority is
 
 ## Unit Tests
 
-The runner ships with unit tests under `tools/scripts/test_runner/tests/` covering coverage build-flag selection, config env-var expansion, workspace/profraw handling, the device-coverage CMake probe, and the `rccl-device-compile` link driver. They use only the Python standard library (`unittest`), so no extra dependencies are required.
+The runner ships with unit tests under `tools/scripts/test_runner/tests/` covering coverage build-flag selection, config env-var expansion, workspace/profraw handling, the device-coverage CMake probe, the `rccl-device-compile` link driver, gtest result inference, and distinct-host counting. They use only the Python standard library (`unittest`), so no extra dependencies are required.
 
 Run them from the `test_runner` directory. This `unittest discover` invocation is the canonical, supported entry point:
 

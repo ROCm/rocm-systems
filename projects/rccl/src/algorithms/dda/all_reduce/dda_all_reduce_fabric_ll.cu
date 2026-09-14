@@ -107,15 +107,18 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   switch (nRanks) {
   case 4:
     dda::common::ddaAllReduceFlatLL<T, 4><<<grid, block, 0, stream>>>(
-      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen);
+      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen,
+      comm->abortFlagDev);
     break;
   case 8:
     dda::common::ddaAllReduceFlatLL<T, 8><<<grid, block, 0, stream>>>(
-      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen);
+      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen,
+      comm->abortFlagDev);
     break;
   default:
     dda::common::ddaAllReduceFlatLL<T, 0><<<grid, block, 0, stream>>>(
-      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen);
+      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen,
+      comm->abortFlagDev);
     break;
   }
 
@@ -161,15 +164,18 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
   switch (nRanks) {
   case 4:
     dda::common::ddaAllReduceTwoShotLL<T, 4><<<grid, block, 0, stream>>>(
-      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen);
+      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen,
+      comm->abortFlagDev);
     break;
   case 8:
     dda::common::ddaAllReduceTwoShotLL<T, 8><<<grid, block, 0, stream>>>(
-      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen);
+      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen,
+      comm->abortFlagDev);
     break;
   default:
     dda::common::ddaAllReduceTwoShotLL<T, 0><<<grid, block, 0, stream>>>(
-      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen);
+      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen,
+      comm->abortFlagDev);
     break;
   }
 

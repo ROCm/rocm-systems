@@ -18,6 +18,7 @@
  * - MPI-aware assertions (ASSERT_MPI_*)
  * - Rank-local MPI checks (ASSERT_MPI_*_ON_RANK)
  * - MPI-coordinated skip reasons (mpiCoordinatedSkipReason)
+ * - GIN communicator skip (SKIP_IF_GIN_UNSUPPORTED)
  * - Debug logging (TEST_WARN, TEST_INFO, TEST_ABORT, TEST_TRACE)
  */
 
@@ -295,6 +296,30 @@ inline std::string mpiCoordinatedSkipReason(bool localSkip, const char* localRea
         return localReason ? localReason : "skip";
     return "Skipping: prerequisite failed on another rank";
 }
+
+/**
+ * @def SKIP_IF_GIN_UNSUPPORTED
+ * @brief Skip from the current test when the communicator has no GIN backend.
+ *
+ * GTEST_SKIP() in a helper only returns from the helper, so the calling test
+ * would continue and fail ncclDevCommCreate. Expand this after
+ * createTestCommunicator() in the TEST body (or the run* that is the test).
+ *
+ * Skips only when getActiveCommunicator() is non-null AND
+ * comm->globalGinSupport == NCCL_GIN_CONNECTION_NONE. Requires comm.h at the
+ * expansion site. Does not replace ginProxyTestSkipReason env gates.
+ */
+#define SKIP_IF_GIN_UNSUPPORTED()                                                     \
+    do                                                                                \
+    {                                                                                 \
+        ncclComm_t skipGinComm = getActiveCommunicator();                             \
+        if(skipGinComm != nullptr &&                                                  \
+           skipGinComm->globalGinSupport == NCCL_GIN_CONNECTION_NONE)                 \
+        {                                                                             \
+            GTEST_SKIP()                                                              \
+                << "GIN not supported on this communicator (plugin missing or NET backend has no GIN)"; \
+        }                                                                             \
+    } while(0)
 
 // Debug Logging Macros (TEST_*)
 

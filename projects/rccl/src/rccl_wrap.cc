@@ -231,6 +231,7 @@ ncclResult_t rcclGetAlgoProtoIndex(const char* envStr, const char* algoProtoStri
 extern int64_t ncclParamMinNchannels();
 extern int64_t ncclParamMaxNchannels();
 extern int64_t rcclParamForceCe();
+extern int64_t ncclParamSymCeThreshold();
 RCCL_PARAM(ChannelTuningEnable, "CHANNEL_TUNING_ENABLE", 1);
 
 ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t nBytes, int& nc) {
@@ -966,28 +967,33 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 
   // (3) Eager CE 2-shot (staging buffer). Requires !symEligible and an
   // initialized ceARTmpBuf (first call, before init, falls through to enqueue).
-  if (!symEligible && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
+  // gfx1250 DDA fabric claims this size range; skip CE 2-shot so an unregistered
+  // rank cannot take CE while the registered peer takes DDA (same mixed-reg hang).
+  const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
+  const bool ddaEnabled = rcclDdaEnabled(comm, msgBytes, 8388608);
+  if (!(ddaFabricArch1250 && ddaEnabled) && !symEligible && ceAllReduceAllowed &&
+      comm->ceColl.ceARTmpBuf != NULL) {
     decision->algo = RCCL_CE_2SHOT;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     return ncclSuccess;
   }
 
-  // (4) DDA fast paths. develop's shared gate: !symEligible, and either gfx1250
-  // (fabric, full range) or CE is not going to service this call (!ceAllReduceAllowed),
-  // subject to rcclDdaEnabled thresholds -- all folded into the helper.
+  // (4) DDA fast paths. Shared gate is rcclAllReduceShouldTakeDdaPath: gfx1250
+  // fabric is rank-symmetric (arch + size); other arches still require
+  // !symEligible and !ceAllReduceAllowed.
   //
   // GIN AllReduce is selected first in this function and requires symmetric
   // windows. By default it only claims messages >= 256 MiB, so DDA must still be
   // allowed for smaller symmetric AllReduces (otherwise they would hit the
   // symmetric kernel instead of DDA). FORCE_ENABLE=1 keeps the original
-  // !symEligible gate because GIN already returned above for those sizes.
+  // !symEligible gate on non-gfx1250 because GIN already returned above for
+  // those sizes.
   bool ddaSymEligible = symEligible;
 #if defined(ENABLE_ROCSHMEM_GIN)
   if (ncclAllReduceGinSdmaYieldToDda(comm, sendbuff, recvbuff, count, datatype, op)) {
     ddaSymEligible = false;
   }
 #endif
-  const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
   if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, ddaSymEligible, ceAllReduceAllowed)) {
     if (ddaFabricArch1250) {
       // Small-message fast lane: LL protocol (no GPU barrier).
@@ -1098,16 +1104,18 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   const size_t totalBytes = (size_t)comm->nRanks * sendcount * typeSize;
   size_t msgSize = totalBytes;
 
-  // (1) DDA fast paths. Symmetric-registered buffers defer to the symmetric
-  // kernel (extracted downstream), so DDA is gated on !symEligible, as before.
+  // (1) DDA fast paths. IPC (non-gfx1250) still yields to the symmetric kernel
+  // on registered windows. gfx1250 fabric matches ReduceScatter: do not gate on
+  // !symEligible, which is rank-local and splits mixed registration.
   const bool symEligible =
     isSymmetricKernelRequested(comm, ncclFuncAllGather, (int)ncclDevSum, datatype, sendcount, sendbuff, recvbuff);
-  // symEligible gates DDA below; the symk report itself is deferred until after
-  // the CE-registered check so it loses to CE exactly as dispatch does
-  // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so
-  // symk never reclaims it), mirroring rcclSelectAllReduce.
-  if (!symEligible && rcclDdaEnabled(comm, totalBytes, 8388608)) {
-    if (IsArchMatch(comm->archName, "gfx1250")) {
+  const bool ddaFabricArch = IsArchMatch(comm->archName, "gfx1250");
+  // The symk report itself is deferred until after the CE-registered check so it
+  // loses to CE exactly as dispatch does (taskAppend appends the CE task before
+  // ncclMakeSymmetricTaskList runs, so symk never reclaims it), mirroring
+  // rcclSelectAllReduce.
+  if ((!symEligible || ddaFabricArch) && rcclDdaEnabled(comm, totalBytes, 8388608)) {
+    if (ddaFabricArch) {
       if (ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
@@ -1201,6 +1209,12 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     const bool ceAvailable =
       !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
     if (ceAvailable && !hasSysmemSegment && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
+      decision->algo = RCCL_CE_REGISTERED;
+      return ncclSuccess;
+    }
+    // Mirror taskAppend's AllGather CE fallback (SYM_CE_THRESHOLD, minCompCap>=100, all-direct NVLink).
+    if (ceAvailable && comm->symmetricSupport && sendcount > (size_t)ncclParamSymCeThreshold() &&
+        comm->minCompCap >= 100 && comm->isAllDirectNvlink) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }

@@ -204,12 +204,16 @@ void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);
 // Pure query: is CE AllReduce currently allowed on this comm?
 bool rcclCeAllReduceAllowed(struct ncclComm* comm);
 // Decides whether ncclAllReduce_impl takes the DDA path for this call. Mirrors the guard in
-// collectives.cc exactly: DDA runs when the buffers are not symmetric-kernel eligible, CE AllReduce
-// will not service the call per the caller-computed `ceAllReduceAllowed` (non-gfx1250 only; gfx1250
-// always keeps the DDA fabric path), and DDA is enabled for this arch/size. Host-side and GPU-free so
-// the dispatch decision can be unit tested.
+// collectives.cc exactly. Non-gfx1250: DDA runs when buffers are not symmetric-kernel eligible and
+// CE AllReduce will not service the call (`ceAllReduceAllowed`). gfx1250 fabric DDA is rank-symmetric
+// (arch + size + DDA enable) and must not gate on !symEligible: that lookup is local to each rank's
+// windows, so mixed registration split DDA vs enqueue. Host-side and GPU-free so the dispatch
+// decision can be unit tested.
 bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, ncclDataType_t datatype,
                                     bool symEligible, bool ceAllReduceAllowed);
+// True when DDA / CE 2-shot / GIN-SDMA early-returns must yield to ncclEnqueueCheck
+// so NCCL_CHECK_MODE pointer checks and the suspend guard still run.
+bool rcclCollectiveMustUseEnqueuePath(struct ncclComm* comm);
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);

@@ -109,17 +109,17 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   case 4:
     dda::common::ddaAllGatherFabricLL128<T, 4>
       <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), perRankBytes,
-                                   comm->rank, nRanks, epochDev, epochLen, slices, slotWords);
+                                   comm->rank, nRanks, epochDev, epochLen, slices, slotWords, comm->abortFlagDev);
     break;
   case 8:
     dda::common::ddaAllGatherFabricLL128<T, 8>
       <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), perRankBytes,
-                                   comm->rank, nRanks, epochDev, epochLen, slices, slotWords);
+                                   comm->rank, nRanks, epochDev, epochLen, slices, slotWords, comm->abortFlagDev);
     break;
   default:
     dda::common::ddaAllGatherFabricLL128<T, 0>
       <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), perRankBytes,
-                                   comm->rank, nRanks, epochDev, epochLen, slices, slotWords);
+                                   comm->rank, nRanks, epochDev, epochLen, slices, slotWords, comm->abortFlagDev);
     break;
   }
 
