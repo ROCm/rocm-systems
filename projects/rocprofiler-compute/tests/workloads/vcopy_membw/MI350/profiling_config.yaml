@@ -1,0 +1,10 @@
+bench_only: false
+config_dir: /app/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs
+experimental: true
+filter_blocks: []
+format_rocprof_output: rocpd
+iteration_multiplexing: null
+membw_analysis: true
+ml_api_trace: false
+output_directory: workloads/vcopy_membw
+pc_sampling: false
