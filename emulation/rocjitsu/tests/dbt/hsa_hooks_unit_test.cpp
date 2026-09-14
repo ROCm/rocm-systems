@@ -7384,8 +7384,9 @@ TEST(HsaHooksUnitTest, ConSanAutomaticEpochAnalysisSelectionDiscardsUnselectedEp
           static_cast<rocjitsu::ConSanMoiReportHeader *>(g_core_memory_allocations.front());
 
       for (size_t epoch = 0; epoch < test.epoch_count; ++epoch) {
-        if (epoch == test.window_epoch)
+        if (epoch == test.window_epoch) {
           ASSERT_EQ(hook.begin_epoch_analysis_window(), 0u);
+        }
         const hsa_signal_t signal{7100u + epoch};
         set_fake_signal_value(signal, 1);
         hsa_kernel_dispatch_packet_t packet{};
@@ -7400,8 +7401,9 @@ TEST(HsaHooksUnitTest, ConSanAutomaticEpochAnalysisSelectionDiscardsUnselectedEp
                                                         UINT64_MAX, HSA_WAIT_STATE_BLOCKED),
                   0);
         EXPECT_EQ(header->event_counter, 0u);
-        if (epoch == test.window_epoch)
+        if (epoch == test.window_epoch) {
           ASSERT_EQ(hook.end_epoch_analysis_window(), 0u);
+        }
       }
       EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
     }

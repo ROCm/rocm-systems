@@ -304,7 +304,8 @@ TEST(ConSanMoi, Gfx1201InlineShadowAccessSuspendsDistantGuestExpertScheduling) {
   std::vector<uint32_t> words = {(*expert)[0], (*expert)[1]};
   words.insert(words.end(), 16u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   const uint64_t access_offset = words.size() * sizeof(uint32_t);
-  words.insert(words.end(), kLdsStore.begin(), kLdsStore.end());
+  words.push_back(kLdsStore[0]);
+  words.push_back(kLdsStore[1]);
   words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
 
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);

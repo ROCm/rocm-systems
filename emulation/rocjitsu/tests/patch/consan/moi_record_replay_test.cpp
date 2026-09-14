@@ -7259,7 +7259,8 @@ TEST(ConSanMoi, Gfx1201AccessRecordSuspendsDistantGuestExpertScheduling) {
   std::vector<uint32_t> text_words = {(*expert)[0], (*expert)[1]};
   text_words.insert(text_words.end(), 16u, 0xBF800000u); // s_nop 0
   const uint64_t access_offset = text_words.size() * sizeof(uint32_t);
-  text_words.insert(text_words.end(), kLdsLoad.begin(), kLdsLoad.end());
+  text_words.push_back(kLdsLoad[0]);
+  text_words.push_back(kLdsLoad[1]);
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
 
   MoiOptions options = moi_options();

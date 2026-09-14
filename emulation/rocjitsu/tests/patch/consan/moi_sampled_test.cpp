@@ -876,14 +876,13 @@ TEST(ConSanMoi, Cdna4DirectSampledProbeEmitsNativePublicationRecipes) {
   for (const bool high_word : {false, true}) {
     SCOPED_TRACE(high_word ? "dispatch high word" : "dispatch low word");
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
-    const uint16_t source_sgpr = static_cast<uint16_t>(
-        *test_moi_dispatch_id_sgpr(result) + (high_word ? 1u : 0u));
+    const uint16_t source_sgpr =
+        static_cast<uint16_t>(*test_moi_dispatch_id_sgpr(result) + (high_word ? 1u : 0u));
     const uint32_t materialize =
         build_v_mov_b32_e32(value_vgpr, source_sgpr, ROCJITSU_CODE_ARCH_CDNA4);
     EXPECT_NE(std::find(rewritten_words.begin(), rewritten_words.end(), materialize),
               rewritten_words.end())
-        << "expected=" << materialize
-        << " words=" << testing::PrintToString(rewritten_words);
+        << "expected=" << materialize << " words=" << testing::PrintToString(rewritten_words);
   }
   EXPECT_GE(std::count(rewritten_words.begin(), rewritten_words.end(), 0xbf8c0f70u), 1);
   EXPECT_TRUE(
@@ -1987,8 +1986,7 @@ TEST(ConSanMoi, Cdna4SampledBarrierPublishesSelectedEpochTransition) {
   text_words[400] = *barrier;
   for (uint16_t vgpr = 0u; vgpr < 16u; ++vgpr) {
     text_words[410u + vgpr] =
-        build_v_mov_b32_e32(/*vdst=*/15u, vector_source_vgpr(vgpr),
-                            ROCJITSU_CODE_ARCH_CDNA4);
+        build_v_mov_b32_e32(/*vdst=*/15u, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_CDNA4);
   }
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
@@ -1998,20 +1996,18 @@ TEST(ConSanMoi, Cdna4SampledBarrierPublishesSelectedEpochTransition) {
   options.moi_report_buffer_size = direct_sampled_report_bytes(2);
   options.max_patches = 3;
 
-  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
-      text_words, "sampled_barrier", /*vgpr_granulated=*/3u);
+  std::vector<uint8_t> bytes =
+      make_cdna4_lds_code_object(text_words, "sampled_barrier", /*vgpr_granulated=*/3u);
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3,
-                    kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3u);
   });
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified()) << "warnings=" << testing::PrintToString(result.warnings)
                                  << " errors=" << testing::PrintToString(result.errors);
-  const auto patch =
-      std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
-                        &ConSanPatchInfo::kind);
+  const auto patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(patch->relocated_guest_instruction_offset);
   ASSERT_GT(patch->spilled_vgpr_count, 0u);
@@ -2026,10 +2022,8 @@ TEST(ConSanMoi, Cdna4SampledBarrierPublishesSelectedEpochTransition) {
   // A barrier needs no temporary registers. Save the borrowed VGPR window
   // after it so address-free scratch state never crosses the workgroup
   // synchronization point; the long Sampled probe and restoration follow.
-  EXPECT_EQ(cave[guest_index + 1u],
-            *build_cdna4_s_wait_vmcnt0(ROCJITSU_CODE_ARCH_CDNA4));
-  EXPECT_EQ(cave[guest_index + 2u],
-            *build_cdna4_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(cave[guest_index + 1u], *build_cdna4_s_wait_vmcnt0(ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(cave[guest_index + 2u], *build_cdna4_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -3991,8 +3985,7 @@ TEST(ConSanMoi, CdnaStrideOnePrivateStateMirrorsKernargPreloadEntry) {
                           &ConSanPatchInfo::kind);
     ASSERT_NE(prologue, result.patches.end());
     ASSERT_TRUE(prologue->dispatch_id_prologue);
-    EXPECT_EQ(prologue->dispatch_id_prologue->capture.sgpr(),
-              test_moi_dispatch_id_sgpr(result));
+    EXPECT_EQ(prologue->dispatch_id_prologue->capture.sgpr(), test_moi_dispatch_id_sgpr(result));
     EXPECT_TRUE(prologue->dispatch_id_prologue->preload.identity_salt_sgpr.has_value());
     ASSERT_TRUE(prologue->dispatch_id_primary_prologue_offset);
     ASSERT_TRUE(prologue->dispatch_id_secondary_prologue_offset);
@@ -4071,8 +4064,7 @@ TEST(ConSanMoi, CdnaStrideOneDynamicStackRedirectsBothKernargPreloadEntries) {
         result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
     ASSERT_NE(prologue, result.patches.end());
     ASSERT_TRUE(prologue->dispatch_id_prologue);
-    EXPECT_EQ(prologue->dispatch_id_prologue->capture.sgpr(),
-              test_moi_dispatch_id_sgpr(result));
+    EXPECT_EQ(prologue->dispatch_id_prologue->capture.sgpr(), test_moi_dispatch_id_sgpr(result));
     EXPECT_TRUE(prologue->dispatch_id_prologue->preload.identity_salt_sgpr.has_value());
     EXPECT_EQ(prologue->anchor_offset, original_entry);
     EXPECT_EQ(prologue->original_size, 0u);
@@ -6678,7 +6670,8 @@ TEST(ConSanMoi, Gfx1201SampledAccessSuspendsDistantGuestExpertScheduling) {
   std::vector<uint32_t> words = {(*expert)[0], (*expert)[1]};
   words.insert(words.end(), 16u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   const uint64_t access_offset = words.size() * sizeof(uint32_t);
-  words.insert(words.end(), kLdsLoad.begin(), kLdsLoad.end());
+  words.push_back(kLdsLoad[0]);
+  words.push_back(kLdsLoad[1]);
   words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
 
   MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
