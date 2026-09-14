@@ -1210,9 +1210,15 @@ protected:
 
     // One transfer on the worker's own connection, without touching buffer
     // contents. For GPU buffers, or when the caller verifies the payload itself.
+    // outstanding, when given, is set if this returns with the request still in flight. A
+    // wait that times out does not cancel the work, so a caller holding the buffer and its
+    // registration must keep them rather than let its guards free memory the device can
+    // still touch; the guards differ between callers -- host here, device there -- so the
+    // helper reports the state and each caller releases what it holds.
     ThreadResult WorkerSendRecvRaw(int rank, ConnectionPair& pair, void* buffer, size_t size,
                                    int tag, void* mhandle, int timeoutMs = kDefaultTimeoutMs,
-                                   int* receivedSize = nullptr, bool busyPoll = false) {
+                                   int* receivedSize = nullptr, bool busyPoll = false,
+                                   bool* outstanding = nullptr) {
         void* request = nullptr;
         ThreadResult result =
             (rank == 0)
@@ -1224,7 +1230,10 @@ protected:
         int sizes[1] = {0};
         result = busyPoll ? WorkerWaitBusy(request, sizes, timeoutMs)
                           : WorkerWait(request, sizes, timeoutMs);
-        if (!result.ok) return result;
+        if (!result.ok) {
+            if (outstanding) *outstanding = true;
+            return result;
+        }
         if (receivedSize) *receivedSize = sizes[0];
         return result;
     }
@@ -1235,7 +1244,8 @@ protected:
     // failure rather than a silent pass.
     ThreadResult WorkerSendRecvPattern(int rank, ConnectionPair& pair, void* buffer, size_t size,
                                        int tag, void* mhandle, int seed,
-                                       int timeoutMs = kDefaultTimeoutMs) {
+                                       int timeoutMs = kDefaultTimeoutMs,
+                                       bool* outstanding = nullptr) {
         if (rank == 0) {
             memset(buffer, 0, size);
         } else {
@@ -1244,7 +1254,8 @@ protected:
 
         int received = 0;
         ThreadResult result = WorkerSendRecvRaw(rank, pair, buffer, size, tag, mhandle,
-                                               timeoutMs, &received);
+                                               timeoutMs, &received, /*busyPoll=*/false,
+                                               outstanding);
         if (!result.ok) return result;
 
         if (rank == 0) {

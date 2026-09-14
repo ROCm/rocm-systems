@@ -517,7 +517,15 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
 
                     int sizes[1] = {0};
                     result = WorkerWait(request, sizes, kStressTimeoutMs);
-                    if (!result.ok) return result;
+                    if (!result.ok) {
+                        // A timed-out wait does not cancel the work, so the buffer and its
+                        // registration are kept rather than freed under a live request.
+                        result.msg += "; the buffer and its registration are retained, since "
+                                      "the request may still reference them";
+                        h.mhandleGuard.release();
+                        h.bufferGuard.release();
+                        return result;
+                    }
 
                     if (rank != 0) continue;
                     if (sizes[0] != static_cast<int>(sz)) {
@@ -1961,9 +1969,21 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
                         return result;
                     }
 
+                    // The guards here own device memory, so the helper reports the state
+                    // and this body keeps what it holds.
+                    bool outstanding = false;
                     result = WorkerSendRecvRaw(rank, pair, devBuf, sz, cycle, mh,
-                                               kLargeTransferTimeoutMs);
-                    if (!result.ok) return result;
+                                               kLargeTransferTimeoutMs, /*receivedSize=*/nullptr,
+                                               /*busyPoll=*/false, &outstanding);
+                    if (!result.ok) {
+                        if (outstanding) {
+                            result.msg += "; the GPU buffer and its registration are retained, "
+                                          "since the request may still reference them";
+                            mhGuard.release();
+                            devGuard.release();
+                        }
+                        return result;
+                    }
 
                     if (rank == 0) {
                         void* flushRequest = nullptr;
@@ -1979,7 +1999,16 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
                         if (flushRequest) {
                             int flushed[1] = {0};
                             result = WorkerWait(flushRequest, flushed, kLargeTransferTimeoutMs);
-                            if (!result.ok) return result;
+                            if (!result.ok) {
+                                // Same reason as the transfer above: the flush request may
+                                // still be reading this buffer when the wait gives up.
+                                result.msg += "; the GPU buffer and its registration are "
+                                              "retained, since the flush may still reference "
+                                              "them";
+                                mhGuard.release();
+                                devGuard.release();
+                                return result;
+                            }
                         }
                         if (!verifyBufferData<uint8_t>(devBuf, sz, makeBytePattern(seed))) {
                             result.ok = false;
