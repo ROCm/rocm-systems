@@ -19,8 +19,9 @@
  THE SOFTWARE. */
 
 /* Unit tests for the memory I/O C API entry points
-   (amd_dbgapi_read_memory and amd_dbgapi_write_memory) at the
-   argument-validation layer that does not need a real process or wave:
+   (amd_dbgapi_read_memory, amd_dbgapi_write_memory, and
+   amd_dbgapi_set_memory_precision) at the argument-validation layer
+   that does not need a real process or wave:
 
      * amd_dbgapi_read_memory
          - NOT_INITIALIZED when called before amd_dbgapi_initialize
@@ -29,6 +30,11 @@
      * amd_dbgapi_write_memory
          - NOT_INITIALIZED when called before amd_dbgapi_initialize
          - INVALID_PROCESS_ID for an arbitrary handle once initialized
+
+     * amd_dbgapi_set_memory_precision
+         - NOT_INITIALIZED when called before amd_dbgapi_initialize
+         - INVALID_PROCESS_ID for an arbitrary handle once initialized
+         - Accepts valid enum values (NONE and PRECISE)
 
    These tests share the global detail::is_initialized flag with the rest
    of the process, so they use scoped_init_t to manage initialization.
@@ -45,9 +51,10 @@
    valid pointers.
 
    Additional argument validation (INVALID_ADDRESS_SPACE_ID, INVALID_WAVE_ID,
-   INVALID_LANE_ID) cannot be tested in a pure unit-test environment because
-   the validation order checks process validity first, and without a real
-   process in the global process map, all calls return INVALID_PROCESS_ID
+   INVALID_LANE_ID for read/write; INVALID_ARGUMENT for invalid
+   memory_precision enum) cannot be tested in a pure unit-test environment
+   because the validation order checks process validity first, and without a
+   real process in the global process map, all calls return INVALID_PROCESS_ID
    before reaching the other validation checks.  */
 
 #include "amd-dbgapi.h"
@@ -195,5 +202,50 @@ TEST (MemoryIO, WriteMemoryInvalidProcessId)
                                       AMD_DBGAPI_LANE_NONE,
                                       amd::dbgapi::address_space_t::global ().id (),
                                       0x1000, &size, data),
+             AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID);
+}
+
+/* ------------------------------------------------------------------ */
+/* amd_dbgapi_set_memory_precision                                    */
+/* ------------------------------------------------------------------ */
+
+TEST (MemoryIO, SetMemoryPrecisionNotInitialized)
+{
+  EXPECT_EQ (amd_dbgapi_set_memory_precision (
+               amd_dbgapi_process_id_t{ 1 },
+               AMD_DBGAPI_MEMORY_PRECISION_NONE),
+             AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED);
+}
+
+TEST (MemoryIO, SetMemoryPrecisionInvalidProcessId)
+{
+  scoped_init_t init;
+  ASSERT_EQ (init.init_status, AMD_DBGAPI_STATUS_SUCCESS);
+
+  EXPECT_EQ (amd_dbgapi_set_memory_precision (
+               amd_dbgapi_process_id_t{ 0xdead },
+               AMD_DBGAPI_MEMORY_PRECISION_NONE),
+             AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID);
+}
+
+/* Valid enum values (NONE and PRECISE) should be accepted by enum
+   validation.  Without a valid process, both calls fail with
+   INVALID_PROCESS_ID (not INVALID_ARGUMENT), confirming the enum
+   validation passed.  */
+TEST (MemoryIO, SetMemoryPrecisionAcceptsValidEnums)
+{
+  scoped_init_t init;
+  ASSERT_EQ (init.init_status, AMD_DBGAPI_STATUS_SUCCESS);
+
+  /* Both valid values should pass enum validation and fail only on
+     process lookup (INVALID_PROCESS_ID), not on INVALID_ARGUMENT.  */
+  EXPECT_EQ (amd_dbgapi_set_memory_precision (
+               amd_dbgapi_process_id_t{ 1 },
+               AMD_DBGAPI_MEMORY_PRECISION_NONE),
+             AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID);
+
+  EXPECT_EQ (amd_dbgapi_set_memory_precision (
+               amd_dbgapi_process_id_t{ 1 },
+               AMD_DBGAPI_MEMORY_PRECISION_PRECISE),
              AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID);
 }
