@@ -25,6 +25,7 @@
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
+#include "rccl_common.h"
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -49,9 +50,24 @@ constexpr size_t kTwoShotBaseCount = 262176;
 constexpr char kOneShotLogNeedle[] = "taking DDA fabric LL one-shot path";
 constexpr char kTwoShotLogNeedle[] = "taking DDA fabric LL two-shot path";
 
-constexpr size_t kContractCount  = 1024 * 1024;
-constexpr int    kContractIters  = 4;
-constexpr char   kIpcLogNeedle[] = "AllReduce impl selected: algo DDA-IPC";
+constexpr size_t kContractCount = 1024 * 1024;
+constexpr int    kContractIters = 4;
+
+// The addon backends launch on the user's stream themselves and carry the launch contract in their
+// wrapper; every other backend reaches doLaunches and gets it there.
+bool launchesOnUserStream(int algo)
+{
+    switch(algo)
+    {
+    case RCCL_CE_2SHOT:
+    case RCCL_DDA_FABRIC_LL:
+    case RCCL_DDA_FABRIC_LL128:
+    case RCCL_DDA_FABRIC_VMM:
+    case RCCL_DDA_IPC:
+    case RCCL_GIN_SDMA: return true;
+    default: return false;
+    }
+}
 
 bool isGfx1250Device()
 {
@@ -174,17 +190,33 @@ protected:
             TEST_INFO("%s: DDA LL path confirmed via COLL log", testId);
     }
 
-    // Rank 0 alone logs the selected backend, and a backend other than DDA IPC still has to honour
-    // the launch contract, so this reports which tier ran rather than asserting one.
-    void reportSelectedTier(const char* testId)
+    // Rank 0 alone names the backend these operands reach. Every backend has to honour the launch
+    // contract, so this reports which one ran rather than requiring a particular one.
+    void reportSelectedTier(const char* testId, const void* sendBuf, void* recvBuf, size_t count)
     {
         if(getTestMpiRank() != 0)
             return;
 
-        if(logContainsNeedle(*logCtx_, kIpcLogNeedle))
-            TEST_INFO("%s: ran on the DDA IPC tier", testId);
+        int                algo = -1, protocol = -1, maxChannels = -1;
+        const ncclResult_t res
+            = rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, count, ncclFloat32,
+                                  ncclSum, sendBuf, recvBuf, /*graphCapturing=*/0, &algo, &protocol,
+                                  &maxChannels);
+        if(res != ncclSuccess)
+        {
+            TEST_WARN("%s: rcclGetCollImplInfo failed: %s", testId, ncclGetErrorString(res));
+            return;
+        }
+
+        const char* algoName = nullptr;
+        rcclGetAlgoName(algo, &algoName);
+        if(launchesOnUserStream(algo))
+            TEST_INFO("%s: ran on %s", testId, algoName ? algoName : "?");
         else
-            TEST_WARN("%s: DDA IPC was not selected; the contract was checked on another backend", testId);
+            TEST_WARN("%s: ran on %s, which takes the launch contract from doLaunches instead of the"
+                      " addon wrapper",
+                      testId,
+                      algoName ? algoName : "?");
     }
 };
 
@@ -266,7 +298,8 @@ TEST_F(DdaMPI_AllReduce, ForeignCurrentDeviceUngrouped)
                                         [expectedSum](size_t) { return expectedSum; }))
         << "Rank " << rank << ": AllReduce issued with a foreign current device wrote wrong data";
 
-    reportSelectedTier("DdaMPI_AllReduce/ForeignCurrentDeviceUngrouped");
+    reportSelectedTier("DdaMPI_AllReduce/ForeignCurrentDeviceUngrouped", sendBuf, recvBuf,
+                       kContractCount);
 }
 
 // AICOMRCCL-2184: consecutive collectives on one communicator are ordered against each other even
@@ -316,7 +349,8 @@ TEST_F(DdaMPI_AllReduce, StreamAlternationUngrouped)
                                         [expectedSum](size_t) { return expectedSum; }))
         << "Rank " << rank << ": AllReduce across alternating streams wrote wrong data";
 
-    reportSelectedTier("DdaMPI_AllReduce/StreamAlternationUngrouped");
+    reportSelectedTier("DdaMPI_AllReduce/StreamAlternationUngrouped", sendBuf, recvBuf,
+                       kContractCount);
 }
 
 #endif // MPI_TESTS_ENABLED
