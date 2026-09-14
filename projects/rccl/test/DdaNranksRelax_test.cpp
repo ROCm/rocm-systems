@@ -25,9 +25,6 @@
 #include "common/ProcessIsolatedTestRunner.hpp"
 
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
-#include "algorithms/dda/all_gather/dda_all_gather.h"
-#include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
-#include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "gtest/gtest.h"
 
@@ -157,18 +154,10 @@ TEST(DdaNranksRelaxIsolatedTest, RelaxedPathAdmitsTwoThroughEightRanks)
                     << "nRanks=" << nRanks << " should be eligible with relax on";
             }
 
-            // This PR relaxes only the AllReduce IPC floor: AllGather,
-            // ReduceScatter and AllToAll must stay 8-rank-only even with the
-            // knob on, so the scope split holds without relying on inspecting
-            // rcclDdaEnabled()'s minRanks argument at each call site.
-            mockComm.comm.nRanks = 4;
-            EXPECT_FALSE(ncclAllGatherDdaIpcEligible(mockComm.get(), sendbuff, recvbuff, count, ncclFloat32))
-                << "AllGather must stay 8-rank-only even with relax on";
-            EXPECT_FALSE(
-                ncclReduceScatterDdaIpcEligible(mockComm.get(), sendbuff, recvbuff, count, ncclFloat32, ncclSum))
-                << "ReduceScatter must stay 8-rank-only even with relax on";
-            EXPECT_FALSE(ncclAllToAllDdaIpcEligible(mockComm.get(), sendbuff, recvbuff, count, ncclFloat32))
-                << "AllToAll must stay 8-rank-only even with relax on";
+            // AllGather, ReduceScatter and AllToAll are also relaxed by this
+            // branch (DdaNranksRelaxCollectives_test.cpp verifies that
+            // directly for all four counts); the 8-rank-only invariant that
+            // held for them on the AllReduce-only PR does not apply here.
 
             // Counts outside [2, kDdaNranks] stay ineligible.
             for (int nRanks : {1, 9, 16})
