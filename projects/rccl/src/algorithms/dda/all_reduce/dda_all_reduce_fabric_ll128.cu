@@ -130,6 +130,9 @@ bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
                                          ncclDataType_t datatype, ncclRedOp_t op) {
   (void)sendbuff;
   (void)recvbuff;
+  if (!rcclParamDdaLL128()) {
+    return false;
+  }
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
