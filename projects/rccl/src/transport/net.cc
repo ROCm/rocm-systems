@@ -2578,7 +2578,8 @@ peermem:
   }
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
-  if (needReg && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
+  // HSA DMA-BUF is whole-range (first VMM segment only); skip it for multi-seg.
+  if (needReg && numSegments <= 1 && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
     if (ncclHsaRegMrDmaBuf(proxyState->ncclNet->regMrDmaBuf, resources->netSendComm, (void*)info->buffer, info->size,
                            NCCL_PTR_CUDA, &handle)) {
       needReg = false;
@@ -2666,7 +2667,8 @@ peermem:
   }
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
-  if (needReg && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
+  // HSA DMA-BUF is whole-range (first VMM segment only); skip it for multi-seg.
+  if (needReg && numSegments <= 1 && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
     if (ncclHsaRegMrDmaBuf(proxyState->ncclNet->regMrDmaBuf, resources->netRecvComm, (void*)info->buffer, info->size,
                            NCCL_PTR_CUDA, &handle)) {
       needReg = false;
