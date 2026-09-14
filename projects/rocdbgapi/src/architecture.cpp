@@ -3369,7 +3369,9 @@ gfx9_architecture_t::cwsr_record_t::register_address (
                  * sgpr_size));
     }
 
-  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= amdgpu_regnum_t::v255_64
+  if (lane_count () == 64
+      && regnum >= amdgpu_regnum_t::v0_64
+      && regnum <= amdgpu_regnum_t::v255_64
       && ((regnum - amdgpu_regnum_t::v0_64)
           < utils::narrow<amdgpu_regdiff_t> (vgpr_count ())))
     {
