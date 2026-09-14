@@ -126,7 +126,10 @@ else()
   )
   mark_as_advanced(AVUTIL_LIBRARY)
 
-  if(AVCODEC_LIBRARY AND AVFORMAT_LIBRARY)
+  # All three are required: FFMPEG_LIBRARIES below links avutil as well, so
+  # accepting a prefix without it would configure cleanly and then fail at link
+  # time on a literal AVUTIL_LIBRARY-NOTFOUND.
+  if(AVCODEC_LIBRARY AND AVFORMAT_LIBRARY AND AVUTIL_LIBRARY)
     set(FFMPEG_FOUND TRUE)
   endif()
   
