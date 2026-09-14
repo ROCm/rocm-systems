@@ -241,6 +241,11 @@ struct KernelTextLayout {
   /// getpc/add/setpc sequence. The SGPR pair named here is descriptor-grown
   /// scratch and is never a guest live register.
   std::optional<uint16_t> long_branch_sgpr;
+  /// Prefer allocating the descriptor-backed pair before consuming a
+  /// speculative SGPR-free island. Instruction clients cause islands to be
+  /// emitted before their final scalar requirements are known; this bit keeps
+  /// those islands as a fallback when a pair remains available after emission.
+  bool prefer_long_branch_sgpr = false;
   /// Non-executed SOPP branch slots available for SGPR-free long direct branches.
   ///
   /// Full-SGPR kernels cannot build an arbitrary target PC in a scratch scalar

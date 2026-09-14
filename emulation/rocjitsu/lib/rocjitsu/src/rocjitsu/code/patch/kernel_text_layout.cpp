@@ -970,6 +970,12 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
     std::vector<uint32_t> words = fixup.translated_words;
     if (!patch_pcrel_branch_offset(*fixup.inst, words, new_delta, arch)) {
       if (!layout.long_branch_sgpr) {
+        if (layout.prefer_long_branch_sgpr) {
+          return relocation_error(
+              fixup.source_inst_offset,
+              "out-of-range direct branch prefers descriptor-backed SGPR scratch",
+              TextLayoutFailureCategory::ResourceLimit, TextLayoutFailureReason::BranchOutOfRange);
+        }
         const uint64_t first_branch_pc = (fixup.inst->flags() & BRANCH) != 0
                                              ? fixup.target_inst_offset
                                              : fixup.target_inst_offset + sizeof(uint32_t);
@@ -1169,6 +1175,12 @@ TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
       // Special scalar carriers such as VCC and TTMP must not be repurposed as
       // an ordinary long-branch scratch pair. An unconditional island chain is
       // the SGPR-free fallback; call-like transfers need a reserved pair.
+      if (layout.prefer_long_branch_sgpr) {
+        return relocation_error(
+            fixup.source_call_offset,
+            "out-of-range recovered branch prefers descriptor-backed SGPR scratch",
+            TextLayoutFailureCategory::ResourceLimit, TextLayoutFailureReason::BranchOutOfRange);
+      }
       std::optional<BranchIslandChain> chain;
       if (!fixup.is_call) {
         chain = allocate_branch_island_chain(fixup.target_window_offset, *target_target,

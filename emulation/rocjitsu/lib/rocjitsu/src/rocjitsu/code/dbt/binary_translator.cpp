@@ -5036,6 +5036,12 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         return patched;
       return patch_recovered_indirect_fixups(kernel_text, layout, host_arch_);
     };
+    // Client callbacks require speculative island pools because their final
+    // SGPR demand is not known until body emission. Once it is known, retain
+    // the ordinary descriptor-backed long-transfer ABI whenever a safe pair
+    // still exists; the speculative pools remain the full-pressure fallback.
+    layout.prefer_long_branch_sgpr =
+        next_long_branch_sgpr_pair(kernel_context, source_sgpr_extent, host_arch_).has_value();
     TextRelocationResult patched_control_flow = patch_control_flow();
     constexpr uint64_t kDirectGrowthWords = kMaxDirectBranchTransferWords - 1;
     constexpr uint64_t kRecoveredGrowthWords = kMaxRecoveredIndirectTransferWords - 1;

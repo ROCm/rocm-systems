@@ -3731,7 +3731,8 @@ TEST(BinaryTranslatorE2E, FullSgprConditionalPreservesPoolAfterUnconditionalBran
   const size_t translated_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
   const uint32_t marker = rocjitsu::build_s_nop(rocjitsu::kBranchIslandPoolMarkerNopImmediate,
                                                 ROCJITSU_CODE_ARCH_CDNA3);
-  const uint32_t skip_pool = rocjitsu::build_s_branch(16, ROCJITSU_CODE_ARCH_CDNA3);
+  const uint32_t skip_pool = rocjitsu::build_s_branch(
+      static_cast<int16_t>(rocjitsu::kDirectBranchIslandPoolSlots), ROCJITSU_CODE_ARCH_CDNA3);
   const uint32_t skip_over_pool =
       rocjitsu::build_s_branch(static_cast<int16_t>(rocjitsu::kGeneratedIslandPoolHeaderWords +
                                                     rocjitsu::kDirectBranchIslandPoolSlots),
