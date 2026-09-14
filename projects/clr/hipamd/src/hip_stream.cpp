@@ -105,9 +105,10 @@ void Stream::Detach() {
       captureStatus_ == hipStreamCaptureStatusInvalidated) {
     captureStatus_ = hipStreamCaptureStatusInvalidated;
 
-    if (captureOwner_ != nullptr) {
+    if (captureOwner_ != nullptr && !originStream_) {
       reinterpret_cast<hip::Stream*>(captureOwner_)->EraseCaptureStream(
           reinterpret_cast<hipStream_t>(this));
+      // A participant only aliases the origin's graph, so drop the pointer without freeing.
       ClearCaptureGraph();
     }
 

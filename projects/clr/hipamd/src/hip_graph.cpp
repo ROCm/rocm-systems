@@ -1206,6 +1206,9 @@ hipError_t hipStreamBeginCapture_common(hipStream_t stream, hipStreamCaptureMode
   s->SetCaptureID();
   s->SetCaptureMode(mode);
   s->SetOriginStream();
+  // The origin owns its own capture, so GetCaptureOwner() resolves to the origin from any
+  // stream taking part, including the origin itself.
+  s->SetCaptureOwner(stream);
   if (mode != hipStreamCaptureModeRelaxed) {
     hip::tls.capture_streams_.push_back(s);
   }
