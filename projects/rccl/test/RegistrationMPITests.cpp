@@ -127,6 +127,12 @@ public:
         return hasPattern("NET register userbuff");
     }
 
+    bool hasNETRegistrationWithSegments(int n) const
+    {
+        const std::regex re("NET register userbuff[^\\n]*numSegments " + std::to_string(n) + "\\b");
+        return std::regex_search(m_content, re);
+    }
+
     bool hasAnyRegistrationSuccess() const
     {
         return hasIPCRegistration() || hasIPCReuse() || hasNETRegistration() || hasNETReuse();
@@ -893,22 +899,6 @@ class UBR_MultiSegment : public RegistrationTestBase
 protected:
     using T = RegTestConfig::DefaultType;
 
-    // Multi-segment registration currently relies on dmabuf support from the
-    // runtime/HSA layer for the inter-node (NET/GIN) path. Until that lands,
-    // restrict every UBR_MultiSegment test to a single node so the multi-node
-    // tests are not exercised.
-    void SetUp() override
-    {
-        RegistrationTestBase::SetUp();
-        if (::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure()) {
-            return;
-        }
-        if (MPITestConstants::detectNodeCount() != 1) {
-            GTEST_SKIP() << "UBR_MultiSegment is limited to single node until "
-                            "dmabuf support is available from the HIP/HSA layer";
-        }
-    }
-
     // Rank-local GTEST_SKIP after alloc failure hangs peers. Callers must
     // GTEST_SKIP from the TEST body with the returned reason.
     std::string skipUnlessAllRanksAllocated(bool allocated, const char* msg)
@@ -1247,9 +1237,8 @@ TEST_F(UBR_MultiSegment, Generic)
     REGLogChecker checker = getLogChecker();
     TEST_INFO("SpansMultipleSegments: %s (log size: %zu bytes)",
               checker.getSummary().c_str(), checker.getContentLength());
-    ASSERT_TRUE(checker.hasNumSegments(kNumSegments))
-        << "Expected NET 'numSegments " << kNumSegments
-        << "' for the complete ncclCommRegister range";
+    ASSERT_TRUE(checker.hasNETRegistrationWithSegments(kNumSegments))
+        << "Expected NET register userbuff with numSegments " << kNumSegments;
 }
 
 /**
