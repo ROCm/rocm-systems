@@ -2131,6 +2131,26 @@ TEST(HsaHooksUnitTest, ConSanProcessExitFinalizesWithoutRuntimeUnload) {
       ::testing::ExitedWithCode(0), "ConSan analysis verdict");
 }
 
+TEST(HsaHooksUnitTest, ConSanExitFinalizationRetainsCachedRuntimeCallbacks) {
+  EXPECT_EXIT(
+      {
+        ScopedEnvVar mode("RJ_CONSAN_MODE", "supercollider");
+        // Model a HIP exit handler registered before HSA loads the tool.
+        static decltype(hsa_executable_destroy) *cached_destroy = nullptr;
+        std::atexit([] {
+          if (cached_destroy(hsa_executable_t{7}) != HSA_STATUS_SUCCESS)
+            std::_Exit(3);
+        });
+        auto *api = new FakeApiTable;
+        auto *hook = new InstalledDbiHook(*api);
+        if (!hook->installed())
+          std::_Exit(2);
+        cached_destroy = api->core.hsa_executable_destroy_fn;
+        std::exit(0);
+      },
+      ::testing::ExitedWithCode(0), "ConSan analysis verdict");
+}
+
 TEST(HsaHooksUnitTest, ConSanRepeatedUnloadDoesNotEmitAnotherVerdict) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", "supercollider");
   FakeApiTable api;

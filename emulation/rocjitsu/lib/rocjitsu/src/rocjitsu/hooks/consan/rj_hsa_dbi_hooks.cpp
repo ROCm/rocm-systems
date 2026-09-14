@@ -2407,7 +2407,7 @@ public:
                    : ConSanEpochCheckpointStatus::ReportSnapshotFailed;
   }
 
-  void uninstall() {
+  void uninstall(bool process_exit = false) {
     std::lock_guard lock(mutex_);
     // Runtime unload and the process-exit fallback must finalize exactly once.
     if (!active_)
@@ -2485,7 +2485,7 @@ public:
         std::_Exit(91);
       }
     }
-    clear_unlocked();
+    clear_unlocked(process_exit);
     if (supercollider_active || sc_report_summary.buffer_count != 0 ||
         !sc_report_summary.complete()) {
       std::fprintf(stderr,
@@ -2914,12 +2914,14 @@ private:
     return true;
   }
 
-  void clear_unlocked() {
+  void clear_unlocked(bool retain_runtime_functions = false) {
     active_ = false;
     g_log_level.store(kLogDisabled, std::memory_order_relaxed);
-    table_ = nullptr;
-    core_ = nullptr;
-    amd_ext_ = nullptr;
+    if (!retain_runtime_functions) {
+      table_ = nullptr;
+      core_ = nullptr;
+      amd_ext_ = nullptr;
+    }
     config_.reset();
     moi_require_records_ = false;
     moi_require_diagnostics_ = false;
@@ -2929,11 +2931,15 @@ private:
     moi_runtime_sample_stride_ = 1u;
     moi_runtime_sample_offset_ = 0u;
     fault_load_selector_.reset();
+    // HIP can cache wrapper pointers and invoke them in later exit handlers.
+    // Keep their original runtime functions callable after exit finalization.
+    if (!retain_runtime_functions) {
 #define RJ_DBI_CLEAR_CORE(name, field, wrapper, type, install_if) name##_.clear();
-    RJ_DBI_HSA_CORE_FUNCTIONS(RJ_DBI_CLEAR_CORE)
+      RJ_DBI_HSA_CORE_FUNCTIONS(RJ_DBI_CLEAR_CORE)
 #undef RJ_DBI_CLEAR_CORE
-    original_loader_create_from_file_with_offset_size_ = nullptr;
-    amd_queue_create_.clear();
+      original_loader_create_from_file_with_offset_size_ = nullptr;
+      amd_queue_create_.clear();
+    }
     intercept_dispatch_segments_ = false;
     intercept_dispatch_packets_ = false;
   }
@@ -2967,8 +2973,9 @@ private:
 #undef RJ_DBI_HSA_CORE_FUNCTIONS
 
 RjDbiHsaLayer &layer() {
-  static RjDbiHsaLayer state;
-  return state;
+  // Cached runtime callbacks may outlive C++ static destruction ordering.
+  static auto *state = new RjDbiHsaLayer;
+  return *state;
 }
 
 void try_automatic_moi_epoch_checkpoint() {
@@ -5258,10 +5265,10 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
   if (!layer().install(table, *config))
     return false;
   // Some applications retain an HSA reference until process exit, so ROCR
-  // never invokes OnUnload. Register after layer construction so this runs
-  // before its destruction. The DSO is retained above for process lifetime.
+  // never invokes OnUnload. The layer and DSO remain available for cached
+  // runtime callbacks in later process-exit handlers.
   static const bool exit_handler_registered =
-      std::atexit([] { layer().uninstall(); }) == 0;
+      std::atexit([] { layer().uninstall(/*process_exit=*/true); }) == 0;
   if (!exit_handler_registered) {
     layer().uninstall();
     return false;
