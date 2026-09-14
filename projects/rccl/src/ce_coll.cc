@@ -2368,6 +2368,8 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     size_t recvWindowOffset = (size_t)((uint8_t*)recvbuff - (uint8_t*)recvWin->userPtr);
 #ifdef ENABLE_FAULT_INJECTION
     if (comm->ceColl.ceFaults & CE_FAULT_LEGACY_RECV_OFFSET) {
+      // WARN only: BEFORE needs AllReduce to finish with a corrupted recv window.
+      WARN("CE: fault injection: CE_FAULT_LEGACY_RECV_OFFSET omitting recv window base (rank %d)", comm->rank);
       recvWindowOffset = 0;
     }
 #endif

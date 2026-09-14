@@ -34,6 +34,7 @@
 #ifdef ENABLE_FAULT_INJECTION
 #include "ce_fault_inject.h"
 #endif
+#include <cctype>
 #include <cstdlib>
 #include <regex>
 #include <sstream>
@@ -53,6 +54,18 @@
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
+
+// NCCL_CTA_POLICY accepts the documented alias ZERO as well as the integer 2.
+static bool envCtaPolicyIsZero()
+{
+    const char* p = std::getenv("NCCL_CTA_POLICY");
+    if (p == nullptr || p[0] == '\0') return false;
+    if (std::atoi(p) == 2) return true;
+    std::string s(p);
+    for (char& c : s)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return s == "ZERO";
+}
 
 // Test Configuration
 namespace RegTestConfig {
@@ -884,6 +897,14 @@ protected:
         }
     }
 
+    // Rank-local GTEST_SKIP after alloc failure hangs peers in WindowRegister.
+    void skipUnlessAllRanksAllocated(bool allocated, const char* msg)
+    {
+        if (!MPIHelpers::allRanksTrue(allocated)) {
+            GTEST_SKIP() << msg;
+        }
+    }
+
     struct MultiSegmentBuffer
     {
         hipDeviceptr_t                                vaBase      = 0;
@@ -1246,9 +1267,8 @@ TEST_F(UBR_MultiSegment, Generic)
      if (ceAllReduce == nullptr || std::atoi(ceAllReduce) != 1) {
          GTEST_SKIP() << "CE receive-offset regression requires RCCL_CE_ALLREDUCE=1";
      }
-     const char* ctaPolicy = std::getenv("NCCL_CTA_POLICY");
-     if (ctaPolicy == nullptr || std::atoi(ctaPolicy) != 2) {
-         GTEST_SKIP() << "CE receive-offset regression requires NCCL_CTA_POLICY=2 (ZERO)";
+     if (!envCtaPolicyIsZero()) {
+         GTEST_SKIP() << "CE receive-offset regression requires NCCL_CTA_POLICY=2 or ZERO";
      }
      ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
  
@@ -1271,9 +1291,8 @@ TEST_F(UBR_MultiSegment, Generic)
  
      MultiSegmentBuffer buf;
      ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, buf));
-     if (buf.totalSize == 0) {
-         GTEST_SKIP() << "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime";
-     }
+     skipUnlessAllRanksAllocated(buf.totalSize != 0,
+         "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
      auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
  
      const size_t halfSize = buf.totalSize / 2;
@@ -1282,6 +1301,9 @@ TEST_F(UBR_MultiSegment, Generic)
      void*  sendBuf = base;
      void*  recvBuf = base + halfSize;
      size_t count   = halfSize / sizeof(T);
+     if (nRanks <= 0 || count % static_cast<size_t>(nRanks) != 0) {
+         GTEST_SKIP() << "CE shard path requires count divisible by nRanks";
+     }
  
      ncclWindow_t win = nullptr;
      ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &win, NCCL_WIN_COLL_SYMMETRIC));
@@ -1309,10 +1331,8 @@ TEST_F(UBR_MultiSegment, Generic)
 /**
  * @brief BEFORE control for the symmetric LSA receive-offset corruption.
  *
- * CE_FAULT_LEGACY_RECV_OFFSET restores the old Phase-3 address calculation:
- * rank * chunkBytes, with no offset from the window base to recvBuf. The remote
- * shards consequently land in the send half of the window and recvBuf remains
- * incomplete. The test passes only when that pre-fix corruption is observed.
+ * CE_FAULT_LEGACY_RECV_OFFSET: Phase 3 uses rank * shardBytes with no window
+ * offset, so remote shards land in the send half and recvBuf stays zero.
  *
  * Symmetric_Lsa is the corresponding AFTER regression: the same non-zero
  * recvBuf offset must produce a fully correct AllReduce without fault injection.
@@ -1329,9 +1349,8 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult)
     if (ceAllReduce == nullptr || std::atoi(ceAllReduce) != 1) {
         GTEST_SKIP() << "BEFORE control requires RCCL_CE_ALLREDUCE=1";
     }
-    const char* ctaPolicy = std::getenv("NCCL_CTA_POLICY");
-    if (ctaPolicy == nullptr || std::atoi(ctaPolicy) != 2) {
-        GTEST_SKIP() << "BEFORE control requires NCCL_CTA_POLICY=2 (ZERO)";
+    if (!envCtaPolicyIsZero()) {
+        GTEST_SKIP() << "BEFORE control requires NCCL_CTA_POLICY=2 or ZERO";
     }
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -1345,16 +1364,23 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult)
     constexpr int kNumSegments = 4;
     MultiSegmentBuffer buf;
     ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, buf));
-    if (buf.totalSize == 0) {
-        GTEST_SKIP() << "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime";
-    }
+    skipUnlessAllRanksAllocated(buf.totalSize != 0,
+        "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+
+    int rank = 0;
+    int nRanks = 0;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
 
     const size_t halfSize = buf.totalSize / 2;
     char* base = reinterpret_cast<char*>(buf.vaBase);
     void* sendBuf = base;
     void* recvBuf = base + halfSize;
     const size_t count = halfSize / sizeof(T);
+    if (nRanks <= 0 || count % static_cast<size_t>(nRanks) != 0) {
+        GTEST_SKIP() << "CE shard path requires count divisible by nRanks";
+    }
 
     ncclWindow_t win = nullptr;
     ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(
@@ -1364,10 +1390,6 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult)
     });
     ASSERT_MPI_NE(win, nullptr);
 
-    int rank = 0;
-    int nRanks = 0;
-    ncclCommUserRank(getActiveCommunicator(), &rank);
-    ncclCommCount(getActiveCommunicator(), &nRanks);
     initSendBuffer<T>(sendBuf, count, rank);
     ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, halfSize));
 
@@ -1382,6 +1404,8 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult)
         getActiveCommunicator(), getActiveStream()));
     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
+    EXPECT_TRUE(verifyBufferData<T>(recvBuf, count, [](size_t) { return T{}; }))
+        << "legacy offset must leave recvBuf zero (remote shards wrote into the send half)";
     EXPECT_FALSE(verifyAllReduceResult<T>(recvBuf, count, nRanks))
         << "BEFORE control did not reproduce the legacy receive-window offset corruption";
 }
