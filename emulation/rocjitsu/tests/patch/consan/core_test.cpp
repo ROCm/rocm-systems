@@ -1328,6 +1328,17 @@ TEST(ConSan, ConflictingAliasedFunctionSizesFallBackToNextDistinctEntry) {
   EXPECT_EQ(inferred->code_size, next->entry_text_offset - inferred->entry_text_offset);
 }
 
+TEST(ConSan, ElfFixtureAcceptsEmptyInstructionSpans) {
+  const std::array<uint32_t, 1> end = {0xBFB00000u};
+  for (const auto kernel : {std::span<const uint32_t>{}, std::span<const uint32_t>{end}}) {
+    const auto bytes = make_rdna4_code_object_with_local_function(kernel, {}, {});
+    AmdGpuCodeObject object(bytes.data(), bytes.size());
+    ASSERT_TRUE(object.is_valid());
+    ASSERT_EQ(object.text_sections().size(), 1u);
+    EXPECT_EQ(object.text_sections().front()->size(), kernel.size_bytes());
+  }
+}
+
 TEST(ConSan, SkipsEmptyTargetSelectionKernelAtTextEnd) {
   const std::array<uint32_t, 3> kernel_words = {
       0xD8340000u,

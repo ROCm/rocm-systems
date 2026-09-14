@@ -1318,7 +1318,8 @@ std::vector<uint8_t> make_rdna4_lds_code_object(
   ehdr.e_shstrndx = 5;
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
-  std::memcpy(image.data() + text_offset, text_words.data(), text_size);
+  if (text_size != 0)
+    std::memcpy(image.data() + text_offset, text_words.data(), text_size);
 
   static_assert(sizeof(KD) == kernel_descriptor_size);
   KD kernel_descriptor{};
@@ -1492,7 +1493,8 @@ std::vector<uint8_t> make_rdna4_many_kernel_lds_code_object(uint32_t kernel_coun
   ehdr.e_shnum = section_count;
   ehdr.e_shstrndx = 5u;
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
-  std::memcpy(image.data() + text_offset, text_words.data(), text_size);
+  if (text_size != 0)
+    std::memcpy(image.data() + text_offset, text_words.data(), text_size);
 
   std::vector<Elf64_Sym> symbols(symbol_count);
   for (uint32_t kernel_index = 0; kernel_index < kernel_count; ++kernel_index) {
@@ -1831,8 +1833,10 @@ std::vector<uint8_t> make_rdna4_code_object_with_local_function(
   ehdr.e_shstrndx = 5;
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
-  std::memcpy(image.data() + text_offset, kernel_words.data(), kernel_size);
-  std::memcpy(image.data() + text_offset + kernel_size, function_words.data(), function_size);
+  if (kernel_size != 0)
+    std::memcpy(image.data() + text_offset, kernel_words.data(), kernel_size);
+  if (function_size != 0)
+    std::memcpy(image.data() + text_offset + kernel_size, function_words.data(), function_size);
   if (tail_size != 0)
     std::memcpy(image.data() + text_offset + kernel_size + function_size, tail_words.data(),
                 tail_size);
