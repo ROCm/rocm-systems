@@ -1284,13 +1284,24 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     std::vector<void*> listenComms(kNConns, nullptr);
     std::vector<void*> sendComms(kNConns, nullptr);
     std::vector<void*> recvComms(kNConns, nullptr);
-    // Closes whatever is still open on any exit from here, the teardown's own failures
-    // included: otherwise a setup or close failure returns from this body and leaves the
-    // connections already built open for the rest of the process, which is the
-    // contamination the helper stopped creating inside itself. The teardown nulls each
-    // slot as it closes it, so this never closes anything twice.
+    // Declared here rather than beside their registration loops so the guard below can
+    // release them: closing a communicator releases the plugin's own memory regions, not
+    // the ones a test registered, and the IB-CAST registration cache is per device -- so
+    // a wrapper left behind outlives this test, and its cache reference with it.
+    std::vector<void*> mhandles(kNConns, nullptr);
+    std::vector<void*> rampHandles(kNConns, nullptr);
+
+    // Releases whatever is still held on any exit from here, the teardown's own failures
+    // included: otherwise a setup, registration or close failure returns from this body
+    // and leaves connections open and memory still registered for the rest of the
+    // process, which is the contamination the helper stopped creating inside itself.
+    // Registrations go before the communicator they belong to. The teardown nulls each
+    // slot as it releases it, so nothing is released twice.
     auto connsScope = makeScopeGuard([&]() {
         for (int c = 0; c < kNConns; c++) {
+            void* comm = (rank == 0) ? recvComms[c] : sendComms[c];
+            if (comm && rampHandles[c]) DeregisterMemory(comm, rampHandles[c]);
+            if (comm && mhandles[c])    DeregisterMemory(comm, mhandles[c]);
             if (recvComms[c])   CloseRecvComm(recvComms[c]);
             if (sendComms[c])   CloseSendComm(sendComms[c]);
             if (listenComms[c]) CloseListenComm(listenComms[c]);
@@ -1324,7 +1335,6 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
         memset(recvBufs[c].data(), 0, kBufSz);
     }
 
-    std::vector<void*> mhandles(kNConns, nullptr);
     for (int c = 0; c < kNConns; c++) {
         void* comm   = (rank == 0) ? recvComms[c] : sendComms[c];
         char* regBuf = (rank == 0) ? recvBufs[c].data() : sendBufs[c].data();
@@ -1450,7 +1460,6 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
         memset(rampRecv[c].data(), 0, kRampBufSz);
     }
 
-    std::vector<void*> rampHandles(kNConns, nullptr);
     for (int c = 0; c < kNConns; c++) {
         void* comm   = (rank == 0) ? recvComms[c] : sendComms[c];
         char* regBuf = (rank == 0) ? rampRecv[c].data() : rampSend[c].data();
@@ -1490,9 +1499,13 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     // leaves behind.
     for (int c = 0; c < kNConns; c++) {
         void* comm = (rank == 0) ? recvComms[c] : sendComms[c];
-        EXPECT_EQ(DeregisterMemory(comm, rampHandles[c]), ncclSuccess)
+        const ncclResult_t deregRamp = DeregisterMemory(comm, rampHandles[c]);
+        rampHandles[c] = nullptr;
+        const ncclResult_t deregMsg = DeregisterMemory(comm, mhandles[c]);
+        mhandles[c] = nullptr;
+        EXPECT_EQ(deregRamp, ncclSuccess)
             << "deregistering the ramp buffer failed on conn " << c;
-        EXPECT_EQ(DeregisterMemory(comm, mhandles[c]), ncclSuccess)
+        EXPECT_EQ(deregMsg, ncclSuccess)
             << "deregistering the phase-1 buffer failed on conn " << c;
         if (rank == 0) {
             const ncclResult_t closedRecv = CloseRecvComm(recvComms[c]);
