@@ -143,7 +143,7 @@ Panel Config:
         # === Cache Hierarchy: GL0 (L0) -> GL1 (L1) -> GL2 (L2) ===
         # GL0: Vector L0 Cache (per CU)
         GL0 Hit Rate:
-          value: ROUND(SUM(TX_VMW_REQ_sum - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum) * 100, 0)
+          value: 100 * SUM(TX_VMW_REQ_sum - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum)
           unit: Percent
           peak: 100
           pct_of_peak: false
@@ -154,7 +154,7 @@ Panel Config:
           pct_of_peak: true
         # GL1: Level-1 Graphics Buffer (Arbiter + 12 channels/SE)
         GL1A Busy Rate:
-          value: ROUND(SUM(GL1A_BUSY_sum) / SUM(GL1A_CYCLE_sum) * 100, 0)
+          value: 100 * SUM(GL1A_BUSY_sum) / SUM(GL1A_CYCLE_sum)
           unit: Percent
           peak: 100
           pct_of_peak: false
