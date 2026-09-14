@@ -450,6 +450,18 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
         }
       }
       if (foundHost) {
+        int nHost = 0, nDevice = 0;
+        for (int r = 0; r < devr->lsaSize; r++) {
+          if (segment >= segmentCounts[r]) continue;
+          if (ncclSymIsHostSegment(messages[r * maxSegments + segment].type)) nHost++;
+          else nDevice++;
+        }
+        // HIP reports imported host VMM as device. Rewrite that 1-host case; reject true mixed owners.
+        if (nHost > 1 && nDevice > 0) {
+          WARN("Symmetric LSA segment %d mixes host and device owners", segment);
+          ret = ncclInvalidUsage;
+          goto fail;
+        }
         for (int r = 0; r < devr->lsaSize; r++) {
           if (segment < segmentCounts[r]) {
             messages[r * maxSegments + segment].type = hostType;
@@ -715,7 +727,9 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
                                     mem->winFlags, mem->maxGlobalNumSegments > 1, ptrType),
                     ret, fail);
       mem->ginSegmentInfos[segment].segmentSize = mem->segmentSizes[segment];
-      mem->ginSegmentInfos[segment].memType = locType;
+      // Device put-fence checks HOST_NUMA; store AMD host as that enum.
+      mem->ginSegmentInfos[segment].memType =
+        ncclSymIsHostSegment(locType) ? CU_MEM_LOCATION_TYPE_HOST_NUMA : locType;
       numSegmentsRegistered++;
       offset += mem->segmentSizes[segment];
     }
@@ -1352,6 +1366,12 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
                                    &hasSysmemSegment);
       if (probeRet == ncclSuccess) {
         NCCLCHECKGOTO(ncclDevrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment), ret, fail_locReg);
+        // Non-sym IPC uses cudaIpcGetMemHandle, which cannot export host VMM for LSA>1.
+        if (hasSysmemSegment && comm->localRanks > 1) {
+          WARN("Host-backed VMM cannot be exported via IPC for an LSA team of %d", comm->localRanks);
+          ret = ncclInvalidArgument;
+          goto fail_locReg;
+        }
       }
     }
     NCCLCHECKGOTO(windowRegisterNonSym(comm, userPtr, userSize, winFlags, localRegHandle, outWinDev), ret, fail_locReg);
