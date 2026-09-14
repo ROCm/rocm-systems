@@ -330,3 +330,23 @@ concurrently.
    consume `onAmdgpuReadSgpr`.
 7. Enable it by adding `"myname": { ... }` to the `plugins` section of
    the config file.
+
+## Asynchronous arithmetic
+
+Plugins default to synchronous execution. `supports_async_instructions()` opts
+into separate `onAmdgpuAsyncInstructionIssued` and
+`onAmdgpuAsyncInstructionRetired` callbacks, replacing the ordinary before/after
+pair for offloaded instructions. The group samples this capability on `add()`;
+all contained plugins must opt in.
+
+Both callbacks run on the issuer. The issue notification follows acceptance;
+helper register hooks may already have run. Retirement follows joining and
+carries the original PC and failure status. Independent jobs may retire out of
+order; only the completed instruction's destinations are guaranteed ready.
+Other wave state may reflect later instructions. Holding the callback mutex does
+not restore program ordering or provide a complete architectural snapshot.
+
+Throughput and kernel logging support this contract. ConSan keeps synchronous
+execution until its dependency-event access and diagnostic context support
+concurrent register hooks within one wave. Plugins and the host must be rebuilt
+together, as for other execution-plugin interface changes.

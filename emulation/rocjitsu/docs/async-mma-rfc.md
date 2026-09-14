@@ -20,16 +20,16 @@ additional cores. Coroutines alone would not provide that parallelism.
 | Mechanism | Why it is needed |
 |---|---|
 | **Persistent shared pool; immediate fallback** | Avoid per-job thread creation and per-CU pools. Exhaustion needs at most two atomic loads; reservation retries are bounded. On failure, resolve dependencies and execute inline without waiting for unrelated jobs. |
-| **Short warm wait, then sleep** | Poll for 512 pauses, then use a private Linux futex (`atomic::wait` fallback). Warm empty-job latency falls **10.51 → 1.00 µs**. Sleep-intent bits prevent missed/redundant wakeups; idle helpers park. |
+| **Short warm wait, then sleep** | Poll for 512 pauses, then use a private Linux futex (`atomic::wait` fallback). Warm empty-job latency falls **10.51 to 1.00 us**. Sleep-intent bits prevent missed/redundant wakeups; idle helpers park. |
 | **Small payload, stable storage** | Publish instruction/wave pointers and FP environment; no matrix copy. Allocate lazy registers before publication, retain instructions until completion, and destroy them on their allocating thread. |
 | **Scoreboard; independent completion** | Track register reads/writes and aliases. Enforce read-after-write, write-after-read and write-after-write dependencies, while allowing shared inputs. Reclaim completed jobs without waiting for an older unrelated MMA. |
-| **Bounded windows** | Drain at control flow, mode changes, unsupported operations and CU rescheduling. This bounds lifetimes and execution-state changes, at the cost of some overlap. |
+| **Bounded windows** | Drain at control flow, mode changes, wait-idle, unsupported operations and CU rescheduling. The prototype issues at most 32 instructions from one wave per step, then joins; it does not overlap different waves on one CU. |
 | **K32 admission; reserve issuer work** | Decode up to eight following instructions without executing them; stop at dependencies or unsafe boundaries. Offload an independent group's prefix and reserve its final MMA for the issuer. Preserve the earliest reservation to avoid offloading all useful work. |
-| **Cache lookahead decodes and accepted/rejected plans** | Unchanged loops reuse verdicts: speculative construction scales with distinct code per CU. Revalidate bytes after I-cache invalidation. Warm lookup: **7–8 ns/site**. Ordinary execution decoding is unchanged. |
+| **Cache lookahead decodes and accepted/rejected plans** | Unchanged loops reuse verdicts within a bounded per-CU working set (16K plans, 64K decodes). Cache pressure clears retained history; revisits rebuild. Revalidate bytes after I-cache invalidation. Warm lookup: **7-8 ns/site**. Ordinary execution decoding is unchanged. |
 | **ISA gating; lazy activation** | Unsupported targets retain ordinary execution. Create/poll windows only after an offload opportunity; otherwise avoid full scoreboard costs. Whole-binary layout effects can still change timings. |
 
 Cold wakeups and immediate joins still cost more than warm empty transport:
-dense K128 submit-and-join overhead measured **3.44 µs** with warm waits.
+dense K128 submit-and-join overhead measured **3.44 us** with warm waits.
 
 ## Which operations qualify?
 
@@ -43,14 +43,14 @@ min(handler time, independent issuer work before the next wait)
 An operation also needs these properties:
 
 - **Expensive execution and overlap.** Dense K32/K64/K128 callbacks measured
-  roughly 32/61/122 µs. Immediate consumers can erase the gain; GPU latency or
+  roughly 32/61/122 us. Immediate consumers can erase the gain; GPU latency or
   K alone cannot determine eligibility.
 - **Pure register semantics.** Dependencies must be enumerable and independent
   operations must commute. The prototype requires full EXEC, fixed mode and
   direct register addressing.
 - **No precise rollback or per-instruction observation.** Unexpected failures
   drain outstanding jobs but cannot undo later results. Debugging, traps and
-  architectural observer plugins disable this path.
+  plugins requiring ordered architectural snapshots disable this path.
 - **Spare CPU capacity.** Helpers have a tunable shared budget. Added-core gains
   do not establish efficiency at a fixed core count.
 
@@ -62,12 +62,19 @@ even with 32 independent ALU steps per load and was removed.
 Sparse and block-scaled/multi-block MFMA need separate
 semantic and real-kernel qualification.
 
+Throughput and kernel logging opt into explicit async issue/retirement events.
+Callbacks run on the issuer; register hooks can run concurrently on helpers.
+Throughput retains counts and dispatch timing, marks affected handler timing
+invalid and emits null timing-derived values. ConSan keeps synchronous execution:
+its dependency-event reads can race with wait retirement, and diagnostics need
+the originating instruction context.
+
 ## Evidence and proposed policy
 
 Six rotated rounds, **eight CU workers in every policy**, plus four shared
-helpers for async, on reserved physical cores 80–95 via `agent-reserved-run`.
+helpers for async, on reserved physical cores 80-95 via `agent-reserved-run`.
 Host: Threadripper PRO 9995WX; Clang 23, `-O2`, no LTO; measured 2026-09-13.
-Gluon uses original 1024³ GEMMs; K32 is f16/bf16, K64/K128 FP8. Dispatch is
+Gluon uses original 1024 x 1024 x 1024 GEMMs; K32 is f16/bf16, K64/K128 FP8. Dispatch is
 throughput-plugin active time; process wall includes startup and numerical
 checks. Entries are **dispatch / wall changes versus ordinary execution**;
 negative means faster:
@@ -81,15 +88,25 @@ negative means faster:
 | IREE K32 f16 | +3.9% / +2.8% | **-2.3% / -1.0%** |
 | HIP K32 dependent chain | +8.3% / +6.8% | **+0.3% / 0.0%** |
 
-Unrestricted K128 reduces dispatch **1.248 → 0.961 s**, wall **3.880 → 3.590 s**.
-Admission cuts IREE submissions **40,344 → 3,142**; dependent HIP submits none
+Unrestricted K128 reduces dispatch **1.248 to 0.961 s**, wall **3.880 to 3.590 s**.
+Admission cuts IREE submissions **40,344 to 3,142**; dependent HIP submits none
 and returns to approximately ordinary performance.
 
 **Use admission for K32, unrestricted offload for K64/K128.** The table tests
-admission on all sizes; the proposed policy gates only K32.
+admission on all sizes (mode 3); the proposed policy gates only K32:
+
+```sh
+RJ_MATRIX_COEXEC=4 RJ_ASYNC_WMMA_MIN_K=32 RJ_MMA_ADMISSION=2 \
+RJ_MMA_SHARED_HELPERS=4 RJ_MMA_HELPERS=7 RJ_MMA_LOOKAHEAD=8
+```
+
+The measured admission column uses the same helper limits and lookahead.
+Mode 4 alone enables neither K32 nor admission.
 Large-MMA admission differences are small and have overlapping ranges.
 
 All **162 timed processes** passed numerical checks and identical instruction
 signatures. Broader Gluon suites did not establish an aggregate win; K32 Gluon
-uses 5–6% more CPU time. Whole-machine scaling, hardware numerics, full-runtime
-concurrency qualification and concurrent-VM/fork lifecycle remain outstanding.
+uses 5-6% more CPU time. Whole-machine scaling, hardware numerics, full-runtime
+concurrency qualification and concurrent-VM scaling remain outstanding. Inherited
+helpers fail closed after fork; the child executes synchronously. The shared pool
+has process lifetime, including detached-runtime teardown.

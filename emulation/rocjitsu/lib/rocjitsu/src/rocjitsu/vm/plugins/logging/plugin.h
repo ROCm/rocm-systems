@@ -21,6 +21,11 @@ public:
   ~KernelLoggingPlugin() override;
 
   bool observes_sgpr_reads() const override { return false; }
+  bool supports_async_instructions() const override { return true; }
+  void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &inst,
+                                      Wavefront &wf) override {
+    onAmdgpuAfterExecuteInstruction(pc, inst, wf);
+  }
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
   void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,

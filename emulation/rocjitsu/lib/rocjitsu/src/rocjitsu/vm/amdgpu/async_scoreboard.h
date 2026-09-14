@@ -3,114 +3,51 @@
 
 #pragma once
 
-#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/log.h"
 
+#include <algorithm>
+#include <array>
 #include <bitset>
+#include <cstdlib>
+#include <memory>
+#include <optional>
+#include <string_view>
 
 namespace rocjitsu::amdgpu {
+class ComputeUnitCore;
 class MmaAdmissionCache;
 namespace async_execution {
-namespace mc = matrix_coexecution;
-inline unsigned window_limit() {
+inline unsigned issue_limit() {
   static const unsigned value = [] {
     const char *text = std::getenv("RJ_ASYNC_WINDOW");
     return static_cast<unsigned>(std::clamp(text ? std::atoi(text) : 32, 1, 256));
   }();
   return value;
 }
-struct Access {
-  std::bitset<512> reads, writes;
-  bool conflicts(const Access &next) const {
-    return (writes & (next.reads | next.writes)).any() || (reads & next.writes).any();
-  }
-};
-inline bool ordinary_memory(std::string_view name) {
-  return name.starts_with("global_load_") || name.starts_with("global_store_") ||
-         name.starts_with("buffer_load_") || name.starts_with("buffer_store_");
-}
+using Access = async_mma_policy::Access;
+using async_mma_policy::footprint;
 inline bool safe_inline(const Instruction &inst) {
-  if (inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR |
-                      BARRIER | WRITES_EXEC))
-    return false;
-  const auto name = inst.mnemonic();
-  if (name == "s_delay_alu" || name == "s_nop" || name == "v_nop")
-    return true;
-  if (mc::async_candidate(name) || ordinary_memory(name))
-    return true;
-  if (inst.is_waitcnt())
-    return !name.starts_with("s_wait_alu");
-  // Explicitly exclude instructions with hidden EXEC, MODE, cache, scheduling,
-  // register-allocation or cross-lane register-index side effects.
-  constexpr std::string_view prefixes[] = {
-      "s_mov_",     "s_add_",      "s_addc_",     "s_sub_",     "s_subb_", "s_mul_",    "s_mad_",
-      "s_and_",     "s_or_",       "s_xor_",      "s_lshl_",    "s_lshr_", "s_ashr_",   "s_cmp_",
-      "s_cselect_", "v_mov_",      "v_add_",      "v_addc_",    "v_sub_",  "v_subrev_", "v_mul_",
-      "v_mad_",     "v_fma_",      "v_lshl",      "v_lshr",     "v_ashr",  "v_and_",    "v_or_",
-      "v_xor_",     "v_cvt_",      "v_cmp_",      "v_cndmask_", "v_max_",  "v_min_",    "v_bfe_",
-      "v_bfi_",     "v_alignbit_", "v_alignbyte_"};
-  if (!std::ranges::any_of(prefixes, [&](auto prefix) { return name.starts_with(prefix); }))
-    return false;
-  for (int i = 0; i != inst.num_dst_operands(); ++i) {
-    const auto *op = inst.dst_operand(i);
-    // Ordinary SGPRs only. Fieldless SCC/VCC are permitted by the whitelist;
-    // WMMA workers do not read them. Explicit special-register writes drain.
-    if (op && !op->is_vgpr() && !op->is_fieldless() &&
-        (op->encoding_value() < 0 || op->encoding_value() + (op->size_bits() + 31) / 32 > 102))
-      return false;
-  }
-  return true;
+  return async_mma_policy::safe_inline(inst, matrix_coexecution::async_candidate);
 }
-inline std::optional<Access> footprint(const Instruction &inst, uint32_t num_vgprs,
-                                       bool has_accvgprs = false) {
-  Access access;
-  for (bool dst : {false, true}) {
-    const int count = dst ? inst.num_dst_operands() : inst.num_src_operands();
-    for (int i = 0; i != count; ++i) {
-      const auto *op = dst ? inst.dst_operand(i) : inst.src_operand(i);
-      if (!op || !op->is_vgpr())
-        continue;
-      // is_vgpr() describes selector capability, including scalar and inline
-      // encodings. Resolve the actual register and packed-half aliases using
-      // the ISA adapter; the queue itself stays independent of the ISA.
-      const auto ref = op->to_register_ref();
-      if (!ref || (ref->cls != RegClass::VGPR && ref->cls != RegClass::ACC_VGPR))
-        continue;
-      const bool acc = ref->cls == RegClass::ACC_VGPR;
-      const uint32_t limit = acc ? (has_accvgprs ? 256 : 0) : std::min(256u, num_vgprs);
-      const uint32_t index = ref->index, width = ref->width;
-      if (index >= limit || width > limit - index)
-        return std::nullopt;
-      const uint32_t reg = index + (acc ? 256 : 0);
-      for (uint32_t r = reg; r != reg + width; ++r) {
-        (dst ? access.writes : access.reads).set(r);
-        // A store's encoding can describe its data as a destination operand.
-        if (inst.is_memory_op())
-          access.reads.set(r);
-      }
-    }
-  }
-  return access;
-}
-struct Stats {
+class Stats {
+public:
   uint64_t windows = 0, mma = 0, inline_overlap = 0;
   uint64_t hazards = 0, boundaries = 0, full = 0, retired_mma = 0;
   ~Stats() { flush(); }
   void flush() {
     if (windows)
-      std::fprintf(stderr,
-                   "RJ_ASYNC windows=%llu mma=%llu inline_overlap=%llu "
-                   "hazards=%llu boundaries=%llu full=%llu retired_mma=%llu\n",
-                   (unsigned long long)windows, (unsigned long long)mma,
-                   (unsigned long long)inline_overlap, (unsigned long long)hazards,
-                   (unsigned long long)boundaries, (unsigned long long)full,
-                   (unsigned long long)retired_mma);
+      util::Logger::warn("RJ_ASYNC windows=", windows, " mma=", mma,
+                         " inline_overlap=", inline_overlap, " hazards=", hazards,
+                         " boundaries=", boundaries, " full=", full, " retired_mma=", retired_mma);
     windows = mma = inline_overlap = hazards = boundaries = full = retired_mma = 0;
   }
 };
 inline thread_local Stats stats;
 } // namespace async_execution
 
+/// @brief Bounded job queue with issuer-thread retirement.
 // Publication follows issue order. Completion can require an ordered prefix
 // or release independent arithmetic dependencies individually. Retirement
 // always runs on the instruction allocator's owner.
@@ -118,7 +55,7 @@ class AsyncInstructionQueue {
 public:
   using Access = async_execution::Access;
   using Pool = matrix_coexecution::SharedPool;
-  using Retire = void (*)(void *, Instruction *, bool);
+  using Retire = void (*)(void *, Instruction *, uint64_t, bool);
   enum class Completion { Ordered, Independent };
   AsyncInstructionQueue(void *owner, Retire retire, Completion completion,
                         Pool &pool = matrix_coexecution::shared_pool())
@@ -126,13 +63,14 @@ public:
   ~AsyncInstructionQueue() { assert(empty()); }
   bool empty() const { return count_ == 0; }
   size_t size() const { return count_; }
-  bool submit(Instruction *owned, Instruction &work, void *context, const Access &access) {
+  bool submit(Instruction *owned, Instruction &work, void *context, const Access &access,
+              uint64_t pc = 0) {
     if (count_ == entries_.size())
       return false;
     auto ticket = pool_.submit(work, context);
     if (!ticket)
       return false;
-    entries_[count_++] = {owned, ticket, access};
+    entries_[count_++] = {owned, ticket, access, pc};
     return true;
   }
   void poll() {
@@ -177,12 +115,13 @@ private:
     Instruction *inst = nullptr;
     Pool::Ticket ticket;
     Access access;
+    uint64_t pc = 0;
   };
   void retire(size_t index) {
     auto &entry = entries_[index];
     auto error = pool_.finish(entry.ticket);
     try {
-      retire_(owner_, entry.inst, bool(error));
+      retire_(owner_, entry.inst, entry.pc, bool(error));
     } catch (...) {
       if (!error)
         error = std::current_exception();
@@ -202,7 +141,7 @@ private:
   std::exception_ptr error_;
 };
 
-// A bounded same-wave execution window. Instruction-family policy chooses
+/// @brief A bounded same-wave execution window. Instruction-family policy chooses
 // queues and work; AsyncInstructionQueue supplies the common execution/retirement
 // protocol. Draining before CU rescheduling keeps decoder pools, wave storage
 // and data caches owned by the issuing thread for this initial prototype.
@@ -210,9 +149,7 @@ class AsyncInstructionWindow {
   using Access = async_execution::Access;
 
 public:
-  AsyncInstructionWindow(ComputeUnitCore &cu, Wavefront &wf)
-      : cu_(cu), wf_(wf), has_accvgprs_(cu.arch() == ROCJITSU_CODE_ARCH_CDNA3 ||
-                                        cu.arch() == ROCJITSU_CODE_ARCH_CDNA4) {}
+  AsyncInstructionWindow(ComputeUnitCore &cu, Wavefront &wf, bool has_accvgprs = false);
   bool pending() const { return arithmetic_ && !arithmetic_->empty(); }
   bool stopped() const { return stopped_; }
   void reserve_issuer(uint64_t pc) { issuer_pc_ = std::min(issuer_pc_, pc); }
@@ -272,7 +209,7 @@ public:
     materialize();
     if (!arithmetic_)
       arithmetic_.emplace(this, retire_arithmetic, AsyncInstructionQueue::Completion::Independent);
-    if (arithmetic_->size() < limit && arithmetic_->submit(inst, *inst, &wf_, *access)) {
+    if (arithmetic_->size() < limit && arithmetic_->submit(inst, *inst, &wf_, *access, wf_.pc)) {
       ++ae::stats.mma;
       started();
       return true;
@@ -301,28 +238,14 @@ public:
   }
 
 private:
-  static void retire_arithmetic(void *, Instruction *inst, bool) {
-    delete inst;
-    ++async_execution::stats.retired_mma;
-  }
+  static void retire_arithmetic(void *owner, Instruction *inst, uint64_t pc, bool failed);
   void started() {
     if (!started_) {
       started_ = true;
       ++async_execution::stats.windows;
     }
   }
-  void materialize() {
-    if (materialized_)
-      return;
-    // Inline instructions can touch new registers before jobs finish. Allocate
-    // all lazy chunks before that can race with worker register-file access.
-    for (uint32_t reg = 0; reg != wf_.num_vgprs(); ++reg)
-      (void)cu_.raw_vgpr_data(wf_.vgpr_alloc().base + reg);
-    if (has_accvgprs_)
-      for (uint32_t reg = 256; reg != 512; ++reg)
-        (void)cu_.raw_vgpr_data(wf_.vgpr_alloc().base + reg);
-    materialized_ = true;
-  }
+  void materialize();
   void check_errors() {
     auto error = arithmetic_ ? arithmetic_->take_error() : std::exception_ptr{};
     if (error) {
@@ -344,5 +267,6 @@ private:
 struct AsyncInstructionWindowStorage {
   std::optional<AsyncInstructionWindow> window;
   MmaAdmissionCache *admission = nullptr;
+  bool has_accvgprs = false;
 };
 } // namespace rocjitsu::amdgpu

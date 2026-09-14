@@ -3,25 +3,28 @@
 
 #pragma once
 
+#include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/isa/instruction.h"
+#include "util/log.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <bit>
 #include <cfenv>
-#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
 #if defined(__linux__)
 #include <linux/futex.h>
+#include <pthread.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #endif
@@ -113,11 +116,7 @@ inline void relax_cpu() {
 }
 
 inline bool candidate(std::string_view mnemonic) {
-  return ((mnemonic.starts_with("v_wmma_f32_16x16x64_") ||
-           mnemonic.starts_with("v_wmma_f32_16x16x128_")) &&
-          (mnemonic.ends_with("fp8_fp8") || mnemonic.ends_with("fp8_bf8") ||
-           mnemonic.ends_with("bf8_fp8") || mnemonic.ends_with("bf8_bf8"))) ||
-         mnemonic == "v_wmma_f32_32x16x128_f4";
+  return async_mma_policy::large_candidate(mnemonic);
 }
 
 // The smaller shapes and MFMA families remain separate opt-in experiments.
@@ -136,24 +135,28 @@ inline unsigned mfma_families() {
   return value;
 }
 inline bool async_candidate(std::string_view name) {
-  if (candidate(name))
+  if (async_mma_policy::large_candidate(name))
     return true;
-  if (name == "v_wmma_f32_16x16x32_f16" || name == "v_wmma_f32_16x16x32_bf16")
-    return min_wmma_k() <= 32;
-  if (name == "v_wmma_f32_16x16x16_f16" || name == "v_wmma_f32_16x16x16_bf16")
-    return min_wmma_k() <= 16;
-  const auto families = mfma_families();
-  if ((families & 1u) &&
-      (name == "v_mfma_f32_32x32x4_2b_f16" || name == "v_mfma_f32_16x16x4_4b_f16" ||
-       name == "v_mfma_f32_4x4x4_16b_f16" || name == "v_mfma_f32_32x32x1_2b_f32" ||
-       name == "v_mfma_f32_16x16x1_4b_f32"))
-    return true;
-  if ((families & 2u) &&
-      (name == "v_mfma_scale_f32_16x16x128_f8f6f4" || name == "v_mfma_scale_f32_32x32x64_f8f6f4"))
-    return true;
-  return (families & 4u) &&
-         (name == "v_mfma_f32_32x32x8_f16" || name == "v_mfma_f32_16x16x16_f16" ||
-          name == "v_mfma_f32_32x32x16_f16" || name == "v_mfma_f32_16x16x32_f16");
+  if (unsigned k = async_mma_policy::wmma_k(name))
+    return min_wmma_k() <= k;
+  return async_mma_policy::mfma_candidate(name, mfma_families());
+}
+
+// A fork child has none of the parent's helper threads. Disable offload there
+// with a load, avoiding a getpid syscall on every issue. Register before the
+// first helper starts; failure to register also leaves execution synchronous.
+inline constinit std::atomic<bool> helpers_disabled{false};
+static_assert(std::atomic<bool>::is_always_lock_free);
+inline bool helpers_enabled() { return !helpers_disabled.load(std::memory_order_relaxed); }
+inline void register_helper_fork_guard() {
+  if (!helpers_enabled())
+    return;
+#if defined(__linux__)
+  static const int status = pthread_atfork(
+      nullptr, nullptr, [] { helpers_disabled.store(true, std::memory_order_relaxed); });
+  if (status != 0)
+    helpers_disabled.store(true, std::memory_order_relaxed);
+#endif
 }
 
 struct Range {
@@ -181,7 +184,8 @@ inline bool independent(const Footprint &a, const Footprint &b) {
   return true;
 }
 
-struct Stats {
+class Stats {
+public:
   uint64_t candidates = 0;
   uint64_t adjacent = 0;
   uint64_t conflicts = 0;
@@ -193,23 +197,15 @@ struct Stats {
   uint64_t shared_probes = 0;
   std::array<uint64_t, 9> widths{};
   void flush() {
-    if (candidates)
-      std::fprintf(
-          stderr,
-          "RJ_COEXEC candidates=%llu adjacent=%llu conflicts=%llu batches=%llu "
-          "covered=%llu width2=%llu width3=%llu width4=%llu width5=%llu width6=%llu "
-          "width7=%llu width8=%llu shared_submitted=%llu shared_inline=%llu "
-          "shared_full=%llu shared_probes=%llu\n",
-          static_cast<unsigned long long>(candidates), static_cast<unsigned long long>(adjacent),
-          static_cast<unsigned long long>(conflicts), static_cast<unsigned long long>(batches),
-          static_cast<unsigned long long>(covered), static_cast<unsigned long long>(widths[2]),
-          static_cast<unsigned long long>(widths[3]), static_cast<unsigned long long>(widths[4]),
-          static_cast<unsigned long long>(widths[5]), static_cast<unsigned long long>(widths[6]),
-          static_cast<unsigned long long>(widths[7]), static_cast<unsigned long long>(widths[8]),
-          static_cast<unsigned long long>(shared_submitted),
-          static_cast<unsigned long long>(shared_inline),
-          static_cast<unsigned long long>(shared_full),
-          static_cast<unsigned long long>(shared_probes));
+    if (candidates && helpers_enabled())
+      util::Logger::warn(std::format("RJ_COEXEC candidates={} adjacent={} conflicts={} batches={} "
+                                     "covered={} width2={} width3={} width4={} width5={} width6={} "
+                                     "width7={} width8={} shared_submitted={} shared_inline={} "
+                                     "shared_full={} shared_probes={}",
+                                     candidates, adjacent, conflicts, batches, covered, widths[2],
+                                     widths[3], widths[4], widths[5], widths[6], widths[7],
+                                     widths[8], shared_submitted, shared_inline, shared_full,
+                                     shared_probes));
     candidates = adjacent = conflicts = batches = covered = 0;
     widths.fill(0);
     shared_submitted = shared_inline = shared_full = shared_probes = 0;
@@ -222,6 +218,7 @@ inline thread_local Stats stats;
 // Instructions remain allocated and destroyed by the original decoder thread.
 // The caller validates disjoint register accesses and materializes destinations
 // before publication. All jobs complete before the CU can be rescheduled.
+/// @brief Persistent worker executing one published instruction at a time.
 class Helper {
 public:
   Helper() : thread_([this] { work(); }) {}
@@ -328,7 +325,22 @@ private:
 };
 
 inline void execute_private_batch(std::span<Instruction *> instructions, void *wave) {
-  thread_local std::vector<std::unique_ptr<Helper>> helpers;
+  register_helper_fork_guard();
+  if (!helpers_enabled()) {
+    for (auto *instruction : instructions)
+      instruction->execute(*instruction, wave);
+    return;
+  }
+  struct PrivateHelpers {
+    std::vector<std::unique_ptr<Helper>> slots;
+    ~PrivateHelpers() {
+      if (!helpers_enabled())
+        for (auto &helper : slots)
+          (void)helper.release();
+    }
+  };
+  thread_local PrivateHelpers storage;
+  auto &helpers = storage.slots;
   while (helpers.size() + 1 < instructions.size())
     helpers.push_back(std::make_unique<Helper>());
   for (size_t i = 0; i + 1 < instructions.size(); ++i)
@@ -353,6 +365,7 @@ inline void execute_private_batch(std::span<Instruction *> instructions, void *w
 // reuse a helper's payload while its previous owner still reads completion.
 // There is no pending-job queue and no wait for capacity. Two bitmap words
 // cover the entire pool; an exhausted pool needs no atomic RMW.
+/// @brief Shared CPU budget with bounded nonblocking reservation.
 class SharedPool {
   struct Slot {
     Helper helper;
@@ -366,11 +379,16 @@ public:
     explicit operator bool() const { return slot != nullptr; }
   };
 
+  /// Claim a helper without waiting, or return an empty ticket for inline execution.
   Ticket submit(Instruction &instruction, void *context) {
     return {try_submit(instruction, context)};
   }
-  static bool ready(Ticket ticket) { return ticket.slot->helper.ready(); }
+  /// A true result permits finish() without waiting for the helper.
+  static bool ready(Ticket ticket) { return !helpers_enabled() || ticket.slot->helper.ready(); }
+  /// Join a claimed job and release its slot; consume each ticket exactly once.
   std::exception_ptr finish(Ticket ticket) {
+    if (!helpers_enabled())
+      return std::make_exception_ptr(std::runtime_error("MMA helper unavailable after fork"));
     auto error = ticket.slot->helper.wait();
     release(ticket.slot);
     return error;
@@ -378,6 +396,9 @@ public:
 
   explicit SharedPool(unsigned count) {
     assert(count <= 128);
+    register_helper_fork_guard();
+    if (!helpers_enabled())
+      count = 0;
     slots_.reserve(count);
     for (unsigned i = 0; i != count; ++i)
       slots_.push_back(std::make_unique<Slot>(i));
@@ -388,7 +409,18 @@ public:
     }
   }
 
+  ~SharedPool() {
+    // Inherited std::thread objects cannot be joined or destroyed in the child.
+    // Leave their storage to process teardown; the parent's ownership is intact.
+    if (!helpers_enabled())
+      for (auto &slot : slots_)
+        (void)slot.release();
+  }
+
+  /// Cheap advisory capacity check. A following submit() may still lose a race.
   bool available() const {
+    if (!helpers_enabled())
+      return false;
     return free_[0].load(std::memory_order_relaxed) != 0 ||
            (slots_.size() > 64 && free_[1].load(std::memory_order_relaxed) != 0);
   }
@@ -433,6 +465,8 @@ public:
 
 private:
   Slot *try_submit(Instruction &instruction, void *wave) {
+    if (!helpers_enabled())
+      return nullptr;
     // One or two loads detect an exhausted pool. Reservation is bounded even
     // under contention: after two failed CAS attempts per word, run inline.
     // A conservative miss is allowed; waiting for worker capacity is not.
@@ -463,8 +497,17 @@ private:
 };
 
 inline SharedPool &shared_pool() {
-  static SharedPool pool(shared_helper_limit().value_or(4));
-  return pool;
+  if (!helpers_enabled()) {
+    // Avoid an inherited initialization guard if another thread forked while
+    // the original pool was still being constructed.
+    static SharedPool disabled(0);
+    return disabled;
+  }
+  // In-process interposition can leave a detached issuer active during static
+  // teardown. Keep its process-wide CPU budget alive until process termination;
+  // explicitly constructed pools still join their helpers at scope exit.
+  static auto *pool = new SharedPool(shared_helper_limit().value_or(4));
+  return *pool;
 }
 
 inline void execute_batch(std::span<Instruction *> instructions, void *wave) {

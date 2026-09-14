@@ -103,6 +103,7 @@ public:
     p->slot_index_ = static_cast<uint32_t>(plugins_.size());
     serialize_hot_hooks_ |= p->requires_serial_hot_hooks();
     observes_sgpr_reads_ |= p->observes_sgpr_reads();
+    supports_async_instructions_ &= p->supports_async_instructions();
     SinkBundle sink = build_sink_bundle(p->name() + ".log");
     if (auto *configured_sink = sink.get())
       p->sink_ = configured_sink;
@@ -118,15 +119,8 @@ public:
   uint32_t num_plugins() const { return static_cast<uint32_t>(plugins_.size()); }
   bool empty() const { return plugins_.empty(); }
 
-  // Prototype batching preserves instruction counts and dispatch wall time,
-  // but reports the batch's elapsed handler time on its first instruction.
-  // Other observers require individual architectural snapshots and are excluded.
-  bool permits_matrix_coexecution_prototype() const {
-    for (const auto &entry : plugins_)
-      if (entry.plugin->name() != "throughput")
-        return false;
-    return true;
-  }
+  /// True only when every plugin opts into the async observation contract.
+  bool supports_async_instructions() const { return supports_async_instructions_; }
 
   /// Whether high-frequency callbacks are serialized for this group. Plugin
   /// policy is sampled when each plugin is added so hot dispatch stays O(1).
@@ -168,6 +162,21 @@ public:
     dispatch_with_optional_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuAfterExecuteInstruction(pc, inst, wf);
+    });
+  }
+
+  void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf) {
+    dispatch_with_optional_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuAsyncInstructionIssued(pc, inst, wf);
+    });
+  }
+
+  void onAmdgpuAsyncInstructionRetired(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
+                                       bool failed) {
+    dispatch_with_optional_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuAsyncInstructionRetired(pc, inst, wf, failed);
     });
   }
 
@@ -323,6 +332,7 @@ private:
   uint64_t callback_lock_acquisitions_ = 0;
   bool serialize_hot_hooks_ = false;
   bool observes_sgpr_reads_ = false;
+  bool supports_async_instructions_ = true;
 
   /// Internal fanout over sinks whose lifetime is guaranteed by the owning
   /// group or SinkBundle. It is deliberately not part of the public sink API.
