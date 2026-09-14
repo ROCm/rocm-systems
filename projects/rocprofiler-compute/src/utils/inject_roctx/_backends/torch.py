@@ -24,7 +24,7 @@ from utils.inject_roctx._backends.torch_cpp_loader import (
     load as load_torch_trace_collector,
 )
 from utils.inject_roctx.registry import register
-from utils.logger import console_error, console_log, console_warning
+from utils.logger import console_log, console_warning
 
 _BACKEND_NAME = "torch"
 
@@ -265,7 +265,11 @@ def _initialize_c_tier() -> bool:
     try:
         module = _STATE.load_torch_trace_collector()
     except CollectorUnavailableError as exc:
-        console_error("ml api trace", str(exc))
+        console_warning(
+            "ml api trace",
+            f"{exc} Falling back to the Python tier.",
+        )
+        module = None
     except Exception as exc:
         console_warning(
             "ml api trace",
