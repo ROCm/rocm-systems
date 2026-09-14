@@ -296,6 +296,37 @@ The trace decoder provides decoded information through a callback:
         }
     }
 
+Hidden latency analysis
++++++++++++++++++++++++
+
+The Trace Decoder can optionally estimate how many of each instruction's cycles overlapped concurrent activity on another instruction pipe. The analysis is off by default, because the decoder has to retain each shader engine's instruction-pipe activity across wave callbacks. Request it on the decoder before decoding:
+
+.. code-block:: cpp
+
+    ROCPROFILER_CALL(
+        rocprofiler_thread_trace_decoder_set_analysis(
+            decoder, ROCPROFILER_THREAD_TRACE_DECODER_ANALYSIS_HIDDEN_LATENCY),
+        "hidden latency analysis");
+
+Results arrive through the same callback as every other record, after the rest of the records for that decode:
+
+.. code-block:: cpp
+
+    case ROCPROFILER_THREAD_TRACE_DECODER_RECORD_HIDDEN_LATENCY:
+    {
+        auto* hidden =
+            static_cast<rocprofiler_thread_trace_decoder_hidden_latency_t*>(trace_events);
+        for(uint64_t i = 0; i < trace_size; ++i)
+        {
+            // hidden[i] reports idle, stall and issue cycles for one (SIMD, PC) pair
+        }
+        break;
+    }
+
+Sum over SIMDs for a per-program-counter total. Each ``rocprofiler_trace_decode`` call must cover exactly one capture from one shader engine: concurrency is scoped to ``(shader engine, SIMD)`` and SIMD IDs repeat in every shader engine, so merging captures would treat unrelated waves as competing for the same pipe. A decode spanning more than one capture reports ``ROCPROFILER_THREAD_TRACE_DECODER_INFO_ANALYSIS_MULTIPLE_BUFFERS``.
+
+This requires ROCprof Trace Decoder 0.2.3 or newer. Older libraries return ``ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI``.
+
 Trace Decoder info events
 +++++++++++++++++++++++++++
 
