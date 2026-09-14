@@ -1078,12 +1078,17 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx950ReduceScatterSmallSiz
         ncclTaskColl info{};
         info.func = ncclFuncReduceScatter;
         info.protocol = NCCL_PROTO_SIMPLE;
-        rcclUpdateCollectiveProtocol(comm, /*nBytes=*/1048576, &info); // exactly at the 1MiB threshold
+#if defined(ENABLE_WARP_SPEED)
+        constexpr size_t kThreshold = 131072;
+#else
+        constexpr size_t kThreshold = 1048576;
+#endif
+        rcclUpdateCollectiveProtocol(comm, /*nBytes=*/kThreshold, &info);
         EXPECT_EQ(NCCL_PROTO_LL, info.protocol);
         ncclTaskColl pastThreshold{};
         pastThreshold.func = ncclFuncReduceScatter;
         pastThreshold.protocol = NCCL_PROTO_SIMPLE;
-        rcclUpdateCollectiveProtocol(comm, /*nBytes=*/1048577, &pastThreshold);
+        rcclUpdateCollectiveProtocol(comm, /*nBytes=*/kThreshold + 1, &pastThreshold);
         EXPECT_EQ(NCCL_PROTO_SIMPLE, pastThreshold.protocol);
         DeleteCommWithArch(comm);
       });
