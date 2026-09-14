@@ -1651,7 +1651,7 @@ __global__ void allContextsConsecutiveBarrierKernel(
     ncclGinCtx ginCtx{};
     ginCtx.handle = devComm.ginHandles[0];
     ginCtx.contextId = ctx;
-    ginCtx.backend = devComm.ginNetDeviceTypes[0];
+    ginCtx.backend = NCCL_NET_DEVICE_GIN_ANVIL_SDMA;
     ginCtx.rank = devComm.rank;
     ginCtx.nRanks = devComm.nRanks;
     observation->ctxSignalPtrs[ctx] =
