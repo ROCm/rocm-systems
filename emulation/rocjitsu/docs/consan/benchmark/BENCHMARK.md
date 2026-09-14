@@ -9,6 +9,8 @@ The active performance targets are [gfx950](STATUS_GFX950.md) and
 [gfx1201](STATUS_GFX1201.md). Benchmark ledgers name concrete targets because
 performance does not generalize across every product in an architecture family.
 The other `STATUS_*.md` files are placeholders, not required targets.
+The prepared MI350X campaign invocation and evidence layout are in
+[`GFX950.md`](GFX950.md).
 
 ## Measurement contract
 
