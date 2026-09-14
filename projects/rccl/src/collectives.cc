@@ -424,7 +424,9 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
       return ncclAllGatherDdaIpc(sendbuff, recvbuff, sendcount, datatype, comm, stream);
     });
   case RCCL_HIERARCHICAL_ALLGATHER:
-    return ncclHierarchicalAllGather_Impl(sendbuff, recvbuff, sendcount, datatype, comm, stream);
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclHierarchicalAllGather_Impl(sendbuff, recvbuff, sendcount, datatype, comm, stream);
+    });
   case RCCL_DIRECT_ALLGATHER:
     INFO(NCCL_TUNING,
          "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff "
@@ -1198,7 +1200,9 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
       return ncclReduceScatterDdaIpc(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
     });
   case RCCL_HIERARCHICAL_REDUCESCATTER:
-    return ncclHierarchicalReduceScatter_Impl(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+    return rcclAddonLaunch(comm, stream, [&] {
+      return ncclHierarchicalReduceScatter_Impl(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+    });
   case RCCL_DIRECT_REDUCESCATTER:
     INFO(NCCL_TUNING,
          "RCCL DIRECT REDUCE-SCATTER recvcount=%zu msgSize=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p "
