@@ -62,10 +62,11 @@ The `ASYNC_MMA_WAVE_SIZE` ISA property selects eligible CU step/issue adapters a
 compile time: zero disables the adapter, 32 enables gfx1250/gfx1201 wave32, and
 64 enables gfx942/gfx950 wave64. `HAS_WMMA_K64` retains its separate meaning.
 The factory creates an async `step()` override only when the target's instruction
-family is selected. Enabling only the original K>=64 experiment still leaves
-gfx1201/gfx942/gfx950 on their ordinary entry. Ordinary CUs inherit that entry;
+family is selected. Mode 4 selects CDNA4 FP16, FP8/BF8 and scaled MFMA with
+cached admission; gfx1201/gfx942 still require explicit family selection. Ordinary CUs inherit that entry;
 unsupported ISAs and clocked execution have no async environment lookups, queue
-checks, helper initialization or per-wave statistics. The active window is constructed lazily on the issuing stack after decoding
+checks, helper initialization or per-wave statistics. Cached encoding filters also bypass the async entry for non-MFMA instructions on
+CDNA4 and non-candidates in the gfx1250 dense allowlist. The active window is constructed lazily on the issuing stack after decoding
 an eligible MMA and checking helper availability. Ineligible instructions skip
 queue construction, polling and draining. The window is passed only to the async specialization. Admission adds one
 epoch word to the shared instruction cache, updated only on invalidation;
@@ -82,22 +83,17 @@ with untimed async work emits `execution_timing_valid: false` and null
 `execution_seconds`/`execution_mips`. Async callbacks run on the issuer, while
 register hooks may run concurrently on helpers for the same wave.
 
-The original arithmetic selection is f32-output FP8/BF8 16x16x64/128 WMMA and
-32x16x128 FP4 WMMA. Separate controls add f32-output f16/bf16 K=32/K=16 WMMA,
-multi-block MFMA, scaled MFMA, and regular f16 MFMA controls. Multi-block means
-one ISA instruction computes several matrices, such as `32x32x4_2B`; it does
-not mean submitting several decoded instructions as one helper job.
+Mode 4 selects f32-output FP8/BF8 16x16x64/128 and FP4 32x16x128 WMMA on
+gfx1250, and dense FP16, FP8/BF8 and scaled/unscaled f8f6f4 MFMA on gfx950.
+CDNA4 uses [cached lookahead admission](mma-admission.md) by default: offload
+only when another independent MMA can stay on the issuer. The host handler
+must be long enough to amortize handoff and lost locality; neither K nor GPU
+latency alone establishes profitability.
 
-Keep the default arithmetic allowlist limited to the large gfx1250 shapes.
-This is a conservative instruction-cost policy: the host handler must be long
-enough to amortize publication, completion and lost locality. K alone is not a
-cost estimate across instruction families, and a long handler still needs
-independent work to overlap. K32 stays synchronous unless explicitly enabled
-for an experiment; its synthetic gain did not generalize to the source-built
-IREE kernel. K16 and MFMA extensions likewise remain separate opt-ins. The optional [cached lookahead admission](mma-admission.md) prototype now
-refines K32 profitability by requiring another independent MMA for the issuer.
-It remains a separate opt-in while evaluating workload and CPU-placement
-sensitivity.
+Separate controls add f16/bf16 K32/K16 WMMA, other MFMA targets, and multi-block
+MFMA. Multi-block means one ISA instruction computes several matrices, such as
+`32x32x4_2B`; it does not mean several decoded instructions form one helper job.
+These remain explicit experiments. Cached admission can also gate K32 WMMA.
 
 Supported scalar/vector arithmetic can run between these operations. The
 scoreboard resolves actual ISA register selectors, including inline constants
@@ -130,13 +126,16 @@ and architectural tracing with jobs in flight remain unqualified.
 | `RJ_MMA_HELPERS` | Outstanding background MMAs per wave, 0–7 | 1 |
 | `RJ_ASYNC_WINDOW` | Maximum issued instructions before draining, 1–256 | 32 |
 | `RJ_ASYNC_WMMA_MIN_K` | Additional f16/bf16 WMMA selection: 32 enables K32; 16 enables K16 too; original large shapes remain eligible | 64 |
-| `RJ_MMA_ADMISSION` | Cached lookahead: 0 off; 1 observe K32; 2 gate K32; 3 gate all selected MMA | 0 |
+| `RJ_MMA_ADMISSION` | Cached lookahead: 0 off; 1 observe K32; 2 gate K32; 3 gate all selected MMA | 3 on CDNA4; 0 otherwise |
 | `RJ_MMA_LOOKAHEAD` | Following instructions examined by admission, 1–16 | 8 |
-| `RJ_ASYNC_MFMA` | Bitmask: 1 multi-block f16/f32; 2 scaled f8f6f4; 4 regular f16 control shapes | 0 |
+| `RJ_ASYNC_MFMA` | Bitmask: 1 multi-block f16/f32; 2 scaled f8f6f4; 4 dense f16; 8 FP8/BF8 and unscaled f8f6f4 | 14 on CDNA4; 0 otherwise |
 | `RJ_MMA_WAIT` | 0 atomic wait; 1 private Linux futex | 1 on Linux |
 | `RJ_MMA_SPINS` | Bounded pause iterations before blocking | 512 |
 | `RJ_MMA_IDLE_SPINS` | Override the helper's idle warm period | `RJ_MMA_SPINS` |
 | `RJ_MMA_COMPLETION_SPINS` | Override the issuer's completion warm period | `RJ_MMA_SPINS` |
+
+Explicit zero overrides disable the corresponding family or admission policy.
+Multi-block MFMA remains a separate experiment.
 
 `RJ_ASYNC` counters report submitted MMA jobs, ordinary instructions issued
 while work remains pending, dependency waits, boundary drains, capacity

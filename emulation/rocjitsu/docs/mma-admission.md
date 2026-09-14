@@ -39,11 +39,12 @@ and sharing immutable entries among CUs are not implemented.
 ## Controls
 
 All async execution remains disabled by default. K32 also remains an explicit
-opt-in. The original large-WMMA selection and memory execution are unchanged.
+opt-in. CDNA4 MFMA uses cached admission when mode 4 is enabled.
+The original large-WMMA selection and memory execution are unchanged.
 
 | Variable | Meaning | Default |
 |---|---|---|
-| `RJ_MMA_ADMISSION` | 0 disabled; 1 observe K32 plans without gating; 2 gate K32; 3 gate every selected MMA family | 0 |
+| `RJ_MMA_ADMISSION` | 0 disabled; 1 observe K32 plans without gating; 2 gate K32; 3 gate every selected MMA family | 3 on CDNA4; 0 otherwise |
 | `RJ_MMA_LOOKAHEAD` | Maximum following instructions examined, clamped to 1–16 | 8 |
 
 For example, combine these with the existing scoreboard controls:

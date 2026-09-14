@@ -150,19 +150,23 @@ static std::unique_ptr<ComputeUnitCore> create_functional_cu(std::string name,
     // zero needs no runtime async check even on an eligible ISA.
     struct Asynchronous final : Base {
       using Base::Base;
-      std::unique_ptr<MmaAdmissionCache> admission =
-          MmaAdmissionCache::configured_mode() && matrix_coexecution::mode() == 4
-              ? std::make_unique<MmaAdmissionCache>(MmaAdmissionCache::configured_mode(),
-                                                    MmaAdmissionCache::configured_limit())
-              : nullptr;
+      std::unique_ptr<MmaAdmissionCache> admission = [this] {
+        const int mode = MmaAdmissionCache::configured_mode(
+            async_mma_policy::default_admission_mode(this->arch()));
+        return mode && matrix_coexecution::mode() == 4
+                   ? std::make_unique<MmaAdmissionCache>(mode,
+                                                         MmaAdmissionCache::configured_limit())
+                   : nullptr;
+      }();
       bool step() override {
         return this->template step_impl<true>(admission.get(), Isa::ASYNC_MMA_WAVE_SIZE,
                                               HasAccVgpr<Isa>);
       }
     };
     const int mode = matrix_coexecution::mode();
-    const bool enabled = async_mma_policy::enabled<Isa>(mode, matrix_coexecution::min_wmma_k(),
-                                                        matrix_coexecution::mfma_families());
+    const bool enabled = async_mma_policy::enabled<Isa>(
+        mode, matrix_coexecution::min_wmma_k(),
+        matrix_coexecution::mfma_families(async_mma_policy::default_mfma_families(config.arch)));
     if (enabled)
       return std::make_unique<Asynchronous>(std::move(name), config, memory, l2);
   }
@@ -898,7 +902,8 @@ bool ComputeUnitCore::try_issue_adjacent_mma_batch(Wavefront *active, Instructio
 void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCache *admission,
                                               unsigned wave_size, bool has_accvgprs) {
   const int mode = matrix_coexecution::mode();
-  // The default gfx1250 allowlist has a cheap encoding filter. On a cache hit,
+  // CDNA4 MFMA and the default gfx1250 allowlist have cheap encoding filters.
+  // On a cache hit,
   // non-candidates use the ordinary issue body, including its fetchability and
   // debugger checks. A miss or an experimental family uses full decoding below.
   // This hint never executes a cached word or bypasses instruction validation.

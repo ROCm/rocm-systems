@@ -14,6 +14,16 @@
 
 namespace rocjitsu::amdgpu::async_mma_policy {
 
+// Qualified CDNA4 families: scaled MFMA, dense FP16 and FP8/BF8. Multi-block
+// MFMA remains an explicit experiment because real-kernel gains were marginal.
+inline constexpr unsigned cdna4_mfma_families = 2u | 4u | 8u;
+constexpr unsigned default_mfma_families(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? cdna4_mfma_families : 0;
+}
+constexpr int default_admission_mode(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? 3 : 0;
+}
+
 // Instruction semantics and target eligibility live together; configuration,
 // helper ownership and queue scheduling remain in the execution adapter.
 template <GpuIsa Isa> constexpr bool enabled(int mode, unsigned min_k, unsigned mfma_bits) {
@@ -54,6 +64,12 @@ inline bool mfma_candidate(std::string_view name, unsigned mfma_bits) {
   if ((mfma_bits & 2u) &&
       (name == "v_mfma_scale_f32_16x16x128_f8f6f4" || name == "v_mfma_scale_f32_32x32x64_f8f6f4"))
     return true;
+  if ((mfma_bits & 8u) &&
+      (name == "v_mfma_f32_16x16x128_f8f6f4" || name == "v_mfma_f32_32x32x64_f8f6f4" ||
+       ((name.starts_with("v_mfma_f32_16x16x32_") || name.starts_with("v_mfma_f32_32x32x16_")) &&
+        (name.ends_with("fp8_fp8") || name.ends_with("fp8_bf8") || name.ends_with("bf8_fp8") ||
+         name.ends_with("bf8_bf8")))))
+    return true;
   return (mfma_bits & 4u) &&
          (name == "v_mfma_f32_32x32x8_f16" || name == "v_mfma_f32_16x16x16_f16" ||
           name == "v_mfma_f32_32x32x16_f16" || name == "v_mfma_f32_16x16x32_f16");
@@ -72,12 +88,16 @@ inline bool needs_admission(int mode, std::string_view name) {
 }
 
 constexpr bool has_encoding_hint(rj_code_arch_t arch, unsigned min_k) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA5 && min_k >= 32;
+  return arch == ROCJITSU_CODE_ARCH_CDNA4 || (arch == ROCJITSU_CODE_ARCH_CDNA5 && min_k >= 32);
 }
 
-// A rejection is conclusive only for the default CDNA5 dense allowlist. Other
-// architectures and experimental K16 paths always require ordinary decoding.
+// Reject non-MFMA encodings on CDNA4, and non-candidates in the CDNA5 dense
+// allowlist. Other targets and CDNA5 K16 paths require ordinary decoding.
 inline bool encoding_may_be_candidate(rj_code_arch_t arch, uint32_t word, unsigned min_k) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    // VOP3P_MFMA, including the scaled-MFMA extension prefix. This deliberately
+    // accepts unselected opcodes; decoded eligibility remains authoritative.
+    return word >> 23 == 423;
   if (!has_encoding_hint(arch, min_k))
     return true;
   const uint32_t opcode = word >> 16;
