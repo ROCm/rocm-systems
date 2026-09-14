@@ -21,6 +21,7 @@
 // ncclAsyncLaunch). Deduplicating that properly is AICOMRCCL-1688.
 
 #include <cstdlib>
+#include <functional>
 
 #include "nccl.h"
 #include "comm.h"
@@ -33,6 +34,7 @@
 #include "dev_runtime.h"
 #include "transport.h"
 #include "os.h"
+#include "nccl_stubs.h"
 #include "allocator.h"
 
 // enqueue.h
@@ -91,10 +93,15 @@ ncclResult_t ncclMemAlloc(void** ptr, size_t size) {
   return *ptr ? ncclSuccess : ncclSystemError;
 }
 
-ncclResult_t ncclMemFree(void* ptr) {
+// Routed through the seam nccl_stubs.h already declares, so a test drives the
+// same knob here as it would in the targets that link nccl_stubs.cc.
+static ncclResult_t DefaultNcclMemFree(void* ptr) {
   ::free(ptr);
   return ncclSuccess;
 }
+std::function<ncclResult_t(void*)> g_ncclMemFree = DefaultNcclMemFree;
+
+ncclResult_t ncclMemFree(void* ptr) { return g_ncclMemFree(ptr); }
 
 // No device object in a host-only build, so the identity mapping is the honest
 // answer: the pointer handed in is the one that comes back.
@@ -104,4 +111,19 @@ ncclResult_t ncclShadowPoolToHost(struct ncclShadowPool*, void* devObj, void** o
 }
 
 // api_trace.h
-ncclResult_t ncclCommWindowDeregister(ncclComm_t, ncclWindow_t) { return ncclSuccess; }
+static ncclResult_t DefaultNcclCommWindowDeregister(ncclComm_t, ncclWindow_t) {
+  return ncclSuccess;
+}
+std::function<ncclResult_t(ncclComm_t, ncclWindow_t)>
+    g_ncclCommWindowDeregister = DefaultNcclCommWindowDeregister;
+
+ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
+  return g_ncclCommWindowDeregister(comm, win);
+}
+
+// Restore the two seams above. Named for this file rather than folded into
+// another module's reset, since this floor is local to this binary.
+void ResetCollectiveStubs() {
+  g_ncclMemFree              = DefaultNcclMemFree;
+  g_ncclCommWindowDeregister = DefaultNcclCommWindowDeregister;
+}

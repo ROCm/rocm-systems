@@ -39,6 +39,16 @@ extern std::function<ncclResult_t(struct ncclComm*)> g_ncclTunerPluginUnload;
 // src/misc/mem_manager.cc: commFree releases the single-node size arrays here.
 extern std::function<ncclResult_t(void*)> g_ncclMemFree;
 
+// ncclCommWindowDeregister. Releasing a registered window is pure side effect --
+// nothing on the comm changes -- so a unit that is supposed to deregister one can
+// only be pinned by observing the call. Defined alongside ncclMemFree in whichever
+// floor the linking target uses.
+extern std::function<ncclResult_t(ncclComm_t /*comm*/, ncclWindow_t /*win*/)>
+    g_ncclCommWindowDeregister;
+
+// Restores the two seams above in the binaries whose floor is collective_stubs.cc.
+void ResetCollectiveStubs();
+
 // src/symmetric.cc: commFree tears down symmetric-memory resources here.
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclSymkFinalize;
 

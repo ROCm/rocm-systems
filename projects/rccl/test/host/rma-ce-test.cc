@@ -14,6 +14,7 @@
 #include "fakes/ce_fakes.h"
 #include "fakes/dev_runtime_fakes.h"
 #include "fakes/hip_fakes.h"
+#include "fakes/nccl_stubs.h"
 #include "fakes/rma_fakes.h"
 
 #include "nccl.h"
@@ -206,6 +207,116 @@ TEST_F(RmaCeInitTest, Init_EventCreateFails_LeavesUninitialised) {
 
   EXPECT_EQ(ncclRmaCeInit(comm_.get()), ncclUnhandledCudaError);
   EXPECT_FALSE(comm_->rmaState.rmaCeState.initialized);
+}
+
+// ---------------------------------------------------------------------------
+// ncclRmaCeFinalize (rma_ce.cc:105)
+// ---------------------------------------------------------------------------
+
+// Tears down exactly what ncclRmaCeInit builds, so the fixture builds it with the
+// real thing rather than a hand-assembled imitation -- a teardown test whose
+// input was not produced by the matching setup proves little.
+class RmaCeFinalizeTest : public RmaCeInitTest {
+protected:
+  std::vector<void*> freed_;
+  std::vector<ncclWindow_t> deregistered_;
+
+  void SetUp() override {
+    RmaCeInitTest::SetUp();
+    g_ncclMemFree = [this](void* p) {
+      freed_.push_back(p);
+      return ncclSuccess;
+    };
+    g_ncclCommWindowDeregister = [this](ncclComm_t, ncclWindow_t win) {
+      deregistered_.push_back(win);
+      return ncclSuccess;
+    };
+    // ncclCudaFree looks up an allocation's base and size for its accounting
+    // before releasing it. Report each pointer as its own base.
+    g_hipMemGetAddressRange = [](hipDeviceptr_t* base, size_t* size, hipDeviceptr_t ptr) {
+      if (base) *base = ptr;
+      if (size) *size = 0;
+      return hipSuccess;
+    };
+  }
+
+  void TearDown() override {
+    ResetCollectiveStubs();
+    RmaCeInitTest::TearDown();
+  }
+};
+
+// The whole point: after teardown the comm reports no CE state, so a later
+// ncclRmaCeInit starts clean and the launch entry points refuse work again.
+TEST_F(RmaCeFinalizeTest, Finalize_AfterInit_ResetsStateToUninitialised) {
+  ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
+
+  ASSERT_EQ(ncclRmaCeFinalize(comm_.get()), ncclSuccess);
+
+  EXPECT_FALSE(comm_->rmaState.rmaCeState.initialized);
+  EXPECT_EQ(comm_->rmaState.rmaCeState.rmaCeCtxCount, 0);
+  EXPECT_EQ(comm_->rmaState.rmaCeState.rmaCeCtxs, nullptr);
+}
+
+// The stream and event are owned by this state, so they are released and the
+// handles cleared -- leaving a dangling handle behind would outlive the comm.
+TEST_F(RmaCeFinalizeTest, Finalize_AfterInit_ClearsStreamAndEvent) {
+  ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
+  ASSERT_NE(comm_->rmaState.rmaCeState.ceStream, nullptr);
+
+  ASSERT_EQ(ncclRmaCeFinalize(comm_.get()), ncclSuccess);
+
+  EXPECT_EQ(comm_->rmaState.rmaCeState.ceStream, nullptr);
+  EXPECT_EQ(comm_->rmaState.rmaCeState.ceEvent, nullptr);
+}
+
+// Releasing the signal window is pure side effect, so it is pinned by observing
+// the call. The handle deregistered must be the one the window was registered
+// under, not the host shadow the unit reads its fields from.
+TEST_F(RmaCeFinalizeTest, Finalize_AfterInit_DeregistersAndFreesEverySignalWindow) {
+  comm_->config.numRmaCtx = 3;
+  ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
+  std::vector<void*> signalsDev{Ctx(0)->signalsDev, Ctx(1)->signalsDev, Ctx(2)->signalsDev};
+
+  ASSERT_EQ(ncclRmaCeFinalize(comm_.get()), ncclSuccess);
+
+  // Every context, in order -- not just the first, and not one repeated.
+  EXPECT_EQ(deregistered_.size(), 3u);
+  EXPECT_EQ(freed_, signalsDev);
+}
+
+// Finalizing a comm that was never initialised is not an error: every field it
+// would release is null, so the guards skip and it reports success.
+TEST_F(RmaCeFinalizeTest, Finalize_NeverInitialised_IsANoOpSuccess) {
+  EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclSuccess);
+
+  EXPECT_FALSE(comm_->rmaState.rmaCeState.initialized);
+  EXPECT_TRUE(freed_.empty());
+  EXPECT_TRUE(deregistered_.empty());
+}
+
+// Deferred init tasks are owned by the comm and outlive nothing, so teardown
+// drains the queue rather than leaving entries pointing at freed state.
+TEST_F(RmaCeFinalizeTest, Finalize_PendingInitTasks_DrainsTheQueue) {
+  ncclIntruQueueConstruct(&comm_->rmaCeInitTaskQueue);
+  for (int i = 0; i < 2; i++) {
+    auto* task = static_cast<ncclRmaCeInitTask*>(::calloc(1, sizeof(ncclRmaCeInitTask)));
+    ncclIntruQueueEnqueue(&comm_->rmaCeInitTaskQueue, task);
+  }
+
+  ASSERT_EQ(ncclRmaCeFinalize(comm_.get()), ncclSuccess);
+
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm_->rmaCeInitTaskQueue));
+}
+
+// A failed deregistration stops teardown and surfaces, rather than carrying on
+// and reporting the state as cleanly torn down.
+TEST_F(RmaCeFinalizeTest, Finalize_DeregisterFails_PropagatesAndLeavesStateMarked) {
+  ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
+  g_ncclCommWindowDeregister = [](ncclComm_t, ncclWindow_t) { return ncclInternalError; };
+
+  EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclInternalError);
+  EXPECT_TRUE(comm_->rmaState.rmaCeState.initialized);
 }
 
 // ---------------------------------------------------------------------------
