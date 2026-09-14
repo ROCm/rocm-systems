@@ -2013,42 +2013,45 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                             // [8] AlltoAll        -- not used
   },
   // symMaxR2: suppress symk in favour of CE-registered when recv is registered and
-  // msg > threshold. kThreshUnlimited = no suppression; non-zero literal = byte cap.
+  // msg > threshold. kThreshUnlimited = no suppression; non-zero literal = byte cap;
+  // 0 = always suppress (symk not used for this collective on gfx1250).
   .symMaxR2 = {
-    kThreshUnlimited,     // [0] Broadcast      -- not used
-    kThreshUnlimited,     // [1] Reduce          -- not used
+    0,                    // [0] Broadcast      -- not used on gfx1250
+    0,                    // [1] Reduce          -- not used on gfx1250
     2ULL*1024*1024,       // [2] AllGather
     kThreshUnlimited,     // [3] ReduceScatter
     kThreshUnlimited,     // [4] AllReduce
-    kThreshUnlimited,     // [5] SendRecv        -- not used
-    kThreshUnlimited,     // [6] Send            -- not used
-    kThreshUnlimited,     // [7] Recv            -- not used
-    kThreshUnlimited,     // [8] AlltoAll        -- not used
+    0,                    // [5] SendRecv        -- not used on gfx1250
+    0,                    // [6] Send            -- not used on gfx1250
+    0,                    // [7] Recv            -- not used on gfx1250
+    0,                    // [8] AlltoAll        -- not used on gfx1250
   },
-  // Graph capture: CE is blocked, so symk or DDA wins. kThreshUnlimited = no suppression; non-zero
-  // literal byte cap above which symk is withdrawn so DDA can win instead.
+  // Graph capture: CE is blocked, so symk or DDA wins. kThreshUnlimited = no suppression;
+  // non-zero literal = byte cap above which symk is withdrawn so DDA can win instead;
+  // 0 = always suppress (symk not used for this collective on gfx1250).
   .symMaxR2Graph = {
-    kThreshUnlimited,     // [0] Broadcast      -- not used
-    kThreshUnlimited,     // [1] Reduce          -- not used
+    0,                    // [0] Broadcast      -- not used on gfx1250
+    0,                    // [1] Reduce          -- not used on gfx1250
     2ULL*1024*1024,       // [2] AllGather
     kThreshUnlimited,     // [3] ReduceScatter
     kThreshUnlimited,     // [4] AllReduce
-    kThreshUnlimited,     // [5] SendRecv        -- not used
-    kThreshUnlimited,     // [6] Send            -- not used
-    kThreshUnlimited,     // [7] Recv            -- not used
-    kThreshUnlimited,     // [8] AlltoAll        -- not used
+    0,                    // [5] SendRecv        -- not used on gfx1250
+    0,                    // [6] Send            -- not used on gfx1250
+    0,                    // [7] Recv            -- not used on gfx1250
+    0,                    // [8] AlltoAll        -- not used on gfx1250
   },
   // symMinR2: suppress symk below this size for R2 buffers so DDA wins in that sub-range.
+  // kThreshUnlimited = always suppress (totalBytes < SIZE_MAX always true) for unused collectives.
   .symMinR2 = {
-    0,                    // [0] Broadcast      -- not used
-    0,                    // [1] Reduce          -- not used
+    kThreshUnlimited,     // [0] Broadcast      -- not used on gfx1250
+    kThreshUnlimited,     // [1] Reduce          -- not used on gfx1250
     128ULL*1024,          // [2] AllGather
     2ULL*1024*1024,       // [3] ReduceScatter
     8ULL*1024*1024,       // [4] AllReduce
-    0,                    // [5] SendRecv        -- not used
-    0,                    // [6] Send            -- not used
-    0,                    // [7] Recv            -- not used
-    0,                    // [8] AlltoAll        -- not used
+    kThreshUnlimited,     // [5] SendRecv        -- not used on gfx1250
+    kThreshUnlimited,     // [6] Send            -- not used on gfx1250
+    kThreshUnlimited,     // [7] Recv            -- not used on gfx1250
+    kThreshUnlimited,     // [8] AlltoAll        -- not used on gfx1250
   },
 
   // Per-size unroll breakpoints for gfx1250 (validate from AICOMRCCL-1756).
