@@ -95,7 +95,7 @@ struct DdaFabricMaxBlocksOverride {
 };
 
 inline int ddaFabricMaxNBlocksForScratch(int cuCount, const char* overrideValue,
-                                        DdaFabricMaxBlocksOverride* parsedOverride = nullptr) {
+                                         DdaFabricMaxBlocksOverride* parsedOverride = nullptr) {
   int maxBlocks = cuCount;
   if (maxBlocks < 1) {
     maxBlocks = 1;

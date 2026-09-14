@@ -91,6 +91,9 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   if (parsedOverride.specified && !parsedOverride.valid) {
     WARN("Ignoring invalid RCCL_DDA_FABRIC_MAXBLOCKS='%s'; using CU-derived cap %d.",
          fabricMaxBlocksOverride, localBlocksMax);
+  } else if (parsedOverride.valid && parsedOverride.requested < 1) {
+    WARN("RCCL_DDA_FABRIC_MAXBLOCKS=%ld is below the minimum; using 1.",
+         parsedOverride.requested);
   } else if (parsedOverride.valid && parsedOverride.requested > localBlocksMax) {
     WARN("RCCL_DDA_FABRIC_MAXBLOCKS=%ld exceeds CU-derived cap (%d); using %d. "
          "The override can only lower the block count, not raise it.",
@@ -99,6 +102,9 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
 
   std::vector<int> blockCaps(nRanks, 0);
   blockCaps[comm->rank] = localBlocksMax;
+  // Fabric cliques are normally homogeneous, but harvested or disabled CUs
+  // can produce different local caps. Every rank must launch the same number
+  // of blocks because the barrier pairs participants by blockIdx.
   // Do not locally degrade on a bootstrap collective error: failures need not
   // be observed identically by every rank, and rank-divergent fallback could
   // deadlock the later fabric pointer exchanges.

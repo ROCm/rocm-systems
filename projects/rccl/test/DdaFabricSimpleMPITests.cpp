@@ -38,15 +38,13 @@ using namespace RCCLTestHelpers;
 
 namespace
 {
-constexpr size_t kAllReduceCount     = 8 * 1024 * 1024 + 1; // Just above 32 MiB per rank
-constexpr size_t kAllGatherCount     = 32 * 1024;       // 1 MiB total at 8 ranks
+constexpr size_t kAllReduceCount     = 8 * 1024 * 1024 + 1;
 constexpr size_t kReduceScatterCount = 32 * 1024;       // 1 MiB input at 8 ranks
 constexpr size_t kAllToAllCount      = 32 * 1024;       // 1 MiB input at 8 ranks
 constexpr int    kRepeatedIterations = 10;
 
-// AllReduce exceeds both its 16 MiB LL and 32 MiB LL128 thresholds.
-constexpr size_t kAllReduceBarrierStressCount =
-    32 * 1024 * 1024 / sizeof(float) + 1;
+// AllReduce exceeds its 16 MiB LL two-shot threshold; the fixture pins LL128 off.
+constexpr size_t kAllReduceBarrierStressCount = kAllReduceCount;
 
 // A shard just above the 512 KiB LL128 hard cap remains small enough to expose
 // publication races in ReduceScatter. AllToAll is additionally capped by its
@@ -193,8 +191,18 @@ protected:
 
     void runAllGather(bool inPlace)
     {
-        const size_t sendBytes = kAllGatherCount * sizeof(float);
-        const size_t totalCount = kAllGatherCount * static_cast<size_t>(nRanks_);
+        // AllGather's LL128 predicate uses total bytes and ignores RCCL_DDA_LL128.
+        // Exceed the configured threshold while retaining 16-byte alignment.
+        constexpr size_t countAlignment = 16 / sizeof(float);
+        const size_t ll128ThresholdBytes =
+            static_cast<size_t>(rcclParamDdaLL128Threshold());
+        const size_t count =
+            (ll128ThresholdBytes
+             / (static_cast<size_t>(nRanks_) * sizeof(float) * countAlignment)
+             + 1)
+            * countAlignment;
+        const size_t sendBytes = count * sizeof(float);
+        const size_t totalCount = count * static_cast<size_t>(nRanks_);
         const size_t totalBytes = totalCount * sizeof(float);
 
         void* recvBuf = nullptr;
@@ -203,7 +211,7 @@ protected:
         ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, totalBytes));
 
         void* sendBuf = static_cast<float*>(recvBuf)
-                      + static_cast<size_t>(rank_) * kAllGatherCount;
+                      + static_cast<size_t>(rank_) * count;
         void* separateSendBuf = nullptr;
         if(!inPlace)
         {
@@ -214,21 +222,21 @@ protected:
 
         ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<float>(
             sendBuf,
-            kAllGatherCount,
+            count,
             [this](size_t i) { return static_cast<float>(rank_ * 100000 + i); }));
 
         ASSERT_MPI_EQ(ncclSuccess,
                       ncclAllGather(sendBuf,
                                     recvBuf,
-                                    kAllGatherCount,
+                                    count,
                                     ncclFloat32,
                                     getActiveCommunicator(),
                                     getActiveStream()));
         ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
         ASSERT_MPI_TRUE(verifyBufferData<float>(
-            recvBuf, totalCount, [](size_t i) {
-                const size_t src = i / kAllGatherCount;
-                const size_t idx = i % kAllGatherCount;
+            recvBuf, totalCount, [count](size_t i) {
+                const size_t src = i / count;
+                const size_t idx = i % count;
                 return static_cast<float>(src * 100000 + idx);
             }));
         expectPath(kAllGatherNeedle);
@@ -417,7 +425,7 @@ TEST_F(DdaMPI_FabricSimple, AlternatingCollectivesOnSameCommunicator)
 
 // ---------------------------------------------------------------------------
 // Barrier stress tests repeatedly exercise the SIMPLE synchronization path.
-// AllReduce uses the smallest naturally SIMPLE payload above its LL range;
+// AllReduce uses a payload above its LL range while the fixture disables LL128;
 // ReduceScatter and AllToAll can use smaller 512 KiB shards/chunks.
 // ---------------------------------------------------------------------------
 
