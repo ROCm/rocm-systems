@@ -3212,6 +3212,34 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_MinNchannelsIsAFloorOnTheShrink) {
       << "NCCL_MIN_NCHANNELS must floor the shrink; unclamped was " << unclamped;
 }
 
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_PatMaxNchannelsClampsTheChannelCount) {
+  AlgoInfoComm cc;
+  cc.get()->nChannels = 8;
+  auto task = CostTask(ncclFuncAllGather);
+  CostTable tbl;
+  tbl.t[NCCL_ALGO_PAT][NCCL_PROTO_SIMPLE] = 0.5f;
+  g_paramMaxNchannels = 3;
+
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, /*nBytes=*/2 << 20, tbl.ptr(),
+                                         /*simInfo=*/nullptr));
+  EXPECT_EQ(NCCL_ALGO_PAT, task.algorithm);
+  EXPECT_EQ(3, task.nMaxChannels) << "positive NCCL_MAX_NCHANNELS must clamp PAT's channel count";
+}
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_PatUnsetMaxNchannelsDoesNotClamp) {
+  AlgoInfoComm cc;
+  cc.get()->nChannels = 8;
+  auto task = CostTask(ncclFuncAllGather);
+  CostTable tbl;
+  tbl.t[NCCL_ALGO_PAT][NCCL_PROTO_SIMPLE] = 0.5f;
+  g_paramMaxNchannels = -2;
+
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, /*nBytes=*/2 << 20, tbl.ptr(),
+                                         /*simInfo=*/nullptr));
+  EXPECT_EQ(NCCL_ALGO_PAT, task.algorithm);
+  EXPECT_EQ(8, task.nMaxChannels) << "the production -2 sentinel must leave PAT's channel count alone";
+}
+
 // Guards the fix for the &tablePtr defect: topoGetAlgoInfo must read the cost
 // table it was handed. updateCollCostTable is driven first because it owns the
 // only ncclTopoGetAlgoTime call site (:2539), so it is what makes the scripted
