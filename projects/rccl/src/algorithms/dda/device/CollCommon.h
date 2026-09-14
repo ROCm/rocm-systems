@@ -222,6 +222,14 @@ inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, siz
 // example: 128 MiB at 16 MiB for 4 ranks
 constexpr size_t kDdaLLMaxBytes = (size_t)(16) * 1024 * 1024;      // 16M
 
+// Scratch is double buffered under a single epoch counter, so a bank is half of
+// it, floored to 16B. Every LL/LL128 tier that derives its slot stride from the
+// bank rather than a fixed constant puts bank 1 at the same byte offset, which
+// is what stops one tier landing on flag words another is still polling.
+constexpr size_t ddaBankSize(size_t bytes) {
+  return (bytes / 2) / 16 * 16;
+}
+
 // 16-byte LL line: two (4B data, 4B flag) pairs carrying 8B of payload.
 union LLPacket16 {
   struct {

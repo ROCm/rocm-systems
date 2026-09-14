@@ -42,10 +42,8 @@ RCCL_PARAM_DECLARE(DdaLL128TwoShotThreshold);
 
 namespace {
 
-using dda::common::kDdaLLArSlotStridePkts;
-using dda::common::kDdaLLArTwoShotSlotStridePkts;
-using dda::common::kDdaLLMaxBytes;
-using dda::common::LLPacket16;
+using dda::common::ddaLLArSlotPkts;
+using dda::common::ddaLLArTwoShotSlotPkts;
 
 using dda::common::ddaBankSize;
 using dda::common::ddaLL128ArSlotWords;
@@ -53,23 +51,6 @@ using dda::common::ddaLL128ArTwoShotSlotWords;
 using dda::common::ddaLL128Slices;
 using dda::common::kDdaLL128Warp;
 using dda::common::kDdaLL128WireWordsPerSlice;
-
-// LL scratch footprint: 2 banks * nRanks slots * slotStride packets * 16B.
-static inline size_t ddaLLArScratchSize(int nRanks) {
-  return (size_t)2 * (size_t)nRanks * kDdaLLArSlotStridePkts * sizeof(LLPacket16);
-}
-
-// Two-shot footprint, 2 banks * nRanks slots * slotStride packets * 16B  * 2 phases.
-static inline size_t ddaLLArTwoShotScratchSize(int nRanks) {
-  return (size_t)2 * (size_t)nRanks * kDdaLLArTwoShotSlotStridePkts * sizeof(LLPacket16) * 2;
-}
-
-// The two tiers stage through one scratch under one epoch, so bank 1 has to
-// start at the same offset for both; otherwise a launch of one could write over
-// lines the other is still polling an epoch later.
-static_assert(kDdaLLArTwoShotSlotStridePkts == kDdaLLArSlotStridePkts / 2,
-              "LL all-reduce tiers share one scratch and epoch; \
-              keep LL-ts slot half of LL because the scratch is used in two phases");
 
 // Single source of the launch geometry: 1-D grid over 8-byte LL packets, capped
 // low (LL serves tiny messages where latency, not occupancy, dominates).
@@ -111,6 +92,7 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   // across all LL operation types and cannot alias scratch banks.
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
+  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
 
   INFO(NCCL_COLL, "DDA fabric AllReduce LL: nRanks=%d bytes=%zu nPk=%zu grid=%u block=%u", nRanks, bytes, nPk, grid.x,
        block.x);
@@ -120,15 +102,18 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   switch (nRanks) {
   case 4:
     dda::common::ddaAllReduceFlatLL<T, 4><<<grid, block, 0, stream>>>(
-      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen);
+      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen,
+      bankSize);
     break;
   case 8:
     dda::common::ddaAllReduceFlatLL<T, 8><<<grid, block, 0, stream>>>(
-      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen);
+      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen,
+      bankSize);
     break;
   default:
     dda::common::ddaAllReduceFlatLL<T, 0><<<grid, block, 0, stream>>>(
-      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen);
+      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen,
+      bankSize);
     break;
   }
 
@@ -283,6 +268,7 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
   // one monotonic flag is what keeps either from accepting a line the other left.
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
+  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
 
   INFO(NCCL_COLL, "DDA fabric AllReduce LL two-shot: nRanks=%d bytes=%zu nPk=%zu grid=%u block=%u", nRanks, bytes, nPk,
        grid.x, block.x);
@@ -292,15 +278,18 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
   switch (nRanks) {
   case 4:
     dda::common::ddaAllReduceTwoShotLL<T, 4><<<grid, block, 0, stream>>>(
-      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen);
+      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen,
+      bankSize);
     break;
   case 8:
     dda::common::ddaAllReduceTwoShotLL<T, 8><<<grid, block, 0, stream>>>(
-      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen);
+      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen,
+      bankSize);
     break;
   default:
     dda::common::ddaAllReduceTwoShotLL<T, 0><<<grid, block, 0, stream>>>(
-      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen);
+      peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank, nRanks, epochDev, epochLen,
+      bankSize);
     break;
   }
 
@@ -350,11 +339,10 @@ bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
   if (bytes % 16 != 0) {
     return false;
   }
-  // expand from 8B to 16B
-  if (bytes * 2 > kDdaLLMaxBytes) {
-    return false;
-  }
-  if (ddaLLArScratchSize(comm->nRanks) > comm->ddaScratchBytes) {
+  // One packet carries 8B of payload, so the whole message has to fit the slot
+  // the bank gives each rank. A bank too small for one packet per rank takes the
+  // tier out entirely.
+  if ((bytes >> 3) > ddaLLArSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
     return false;
   }
 
@@ -406,12 +394,9 @@ bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
     return false;
   }
 
-  // expand from 8B to 16B and two copy phases
-  if (bytesPerRank * 2 * 2 > kDdaLLMaxBytes) {
-    return false;
-  }
-
-  if (ddaLLArTwoShotScratchSize(comm->nRanks) > comm->ddaScratchBytes) {
+  // A two-shot slot is half the one-shot's because a bank carries two staging
+  // areas, so only the shard has to fit that halved slot.
+  if ((bytesPerRank >> 3) > ddaLLArTwoShotSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
     return false;
   }
 
