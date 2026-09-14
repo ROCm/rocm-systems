@@ -451,6 +451,10 @@ aux_source_directory(${ROCRTST_ROOT}/suites/negative negativeSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/stress stressSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/test_common testCommonSources)
 
+# This pure helper suite has its own CPU-only target below. Keep it out of the
+# legacy aggregate to avoid duplicate registration and internal-header coupling.
+list(FILTER functionalSources EXCLUDE REGEX ".*/doorbell_type_test\\.cc$")
+
 # Optional: enable NUMA async copy test (memory_async_copy_numa.cc)
 # Force disabled by default to avoid building the NUMA test source.
 set(ENABLE_COPY_NUMA OFF CACHE BOOL "Build Memory_Async_Copy_NUMA test" FORCE)

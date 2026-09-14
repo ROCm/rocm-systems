@@ -8,10 +8,9 @@
  * Standalone unit tests for doorbell type validation logic.
  * Can be compiled and run without ROCm/HSA runtime installed.
  *
- * When built as part of rocrtst, these TESTs are auto-registered with gtest
- * and run from the rocrtst64 binary's main(). No main() is defined here so
- * that this file can be linked into rocrtst64 without a duplicate-symbol
- * clash against suites/test_common/main.cc.
+ * The rocrtst CMake build compiles this file into a dedicated CPU-only target
+ * and deliberately excludes it from the legacy rocrtst64 aggregate. No main()
+ * is defined here because the target links the bundled gtest_main library.
  *
  * For a standalone hardware-free build, link against the bundled gtest_main
  * (the `gtest-all.cpp` amalgamation in this tree is stale — it #includes .cc
@@ -21,6 +20,7 @@
  * From projects/rocr-runtime/rocrtst/suites/functional/:
  *
  * Build:  g++ -std=c++17 -I../../gtest/include -I../../gtest \
+ *           -I../../../runtime/hsa-runtime \
  *           -o doorbell_type_test doorbell_type_test.cc \
  *           ../../gtest/src/gtest.cpp \
  *           ../../gtest/src/gtest-port.cpp \
