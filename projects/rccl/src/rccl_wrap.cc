@@ -788,13 +788,12 @@ inline size_t funcThresholdFromTable(const size_t* caps, ncclFunc_t func) {
 }
 
 // R2 symmetric-kernel size cap. Graph capture uses symMaxR2Graph; eager uses
-// symMaxR2. 0 in the arch table means no suppression (SIZE_MAX returned);
-// non-zero values are literal byte thresholds.
+// symMaxR2. kThreshUnlimited (SIZE_MAX) means no suppression; non-zero literal = byte cap.
+// Table entries use kThreshUnlimited explicitly -- 0 is not used in these arrays.
 inline size_t rcclSymMaxR2CapTab(const rcclArchThresholds* table, ncclFunc_t func, bool graphMode) {
   if (table == nullptr) return SIZE_MAX;
   const size_t* caps = graphMode ? table->symMaxR2Graph : table->symMaxR2;
-  const size_t v = funcThresholdFromTable(caps, func);
-  return v == 0 ? SIZE_MAX : v;
+  return funcThresholdFromTable(caps, func);
 }
 inline size_t rcclSymMaxR2Cap(const ncclComm* comm, ncclFunc_t func, bool graphMode) {
   return rcclSymMaxR2CapTab(extAlgoArchTable(comm), func, graphMode);
@@ -1351,7 +1350,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // CE-registered at (5) rather than being claimed by a staging-buffer or fabric path.
   // symMaxR2 / symMaxR2Graph from the arch table only withdraws symk as the final
   // choice once recv is registered and the message exceeds the CE/symk crossover
-  // size, letting CE-registered win instead.  0 means no suppression.
+  // size, letting CE-registered win instead.  kThreshUnlimited means no suppression.
   const bool recvRegistered = (winRegType == ncclSymSendRegRecvReg ||
                                 winRegType == ncclSymSendNonregRecvReg);
   const size_t symMaxR2 = rcclSymMaxR2CapTab(archTable, ncclFuncAllReduce, ceCapturing);

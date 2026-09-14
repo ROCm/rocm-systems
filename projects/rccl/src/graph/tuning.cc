@@ -2019,31 +2019,31 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                             // [8] AlltoAll        -- not used
   },
   // symMaxR2: suppress symk in favour of CE-registered when recv is registered and
-  // msg > threshold.
-  // AR set to 256 KiB and AG to 4 MiB -- CE outperforms symk above these on gfx1250
-  // (tune from perf data). All other collectives: 0 (no suppression).
+  // msg > threshold. kThreshUnlimited = no suppression; non-zero literal = byte cap.
+  // AG: CE-registered wins above 2 MiB. AR/RS: kThreshUnlimited (symMinR2 handles the lower bound).
   .symMaxR2 = {
-    0,                    // [0] Broadcast      -- not used
-    0,                    // [1] Reduce          -- not used
-    2ULL*1024*1024,       // [2] AllGather  -- CE-registered wins above 2 MiB for R2 (suppress symk)
-    0,                    // [3] ReduceScatter   -- no suppression needed; symMinR2 handles lower bound
-    0,                    // [4] AllReduce       -- CE-registered wins above 0 B (suppress symk for all R2 AR)
-    0,                    // [5] SendRecv        -- not used
-    0,                    // [6] Send            -- not used
-    0,                    // [7] Recv            -- not used
-    0,                    // [8] AlltoAll        -- not used
+    kThreshUnlimited,     // [0] Broadcast      -- not used
+    kThreshUnlimited,     // [1] Reduce          -- not used
+    2ULL*1024*1024,       // [2] AllGather       -- suppress symk above 2 MiB; CE-registered wins
+    kThreshUnlimited,     // [3] ReduceScatter   -- no upper suppression; symMinR2 handles lower bound
+    kThreshUnlimited,     // [4] AllReduce       -- no upper suppression; symMinR2 handles lower bound
+    kThreshUnlimited,     // [5] SendRecv        -- not used
+    kThreshUnlimited,     // [6] Send            -- not used
+    kThreshUnlimited,     // [7] Recv            -- not used
+    kThreshUnlimited,     // [8] AlltoAll        -- not used
   },
-  // Graph capture: CE is blocked, so do not withdraw symk (0 = no suppression = SIZE_MAX).
+  // Graph capture: CE is blocked, so symk or DDA wins. kThreshUnlimited = no suppression; non-zero
+  // literal byte cap above which symk is withdrawn so DDA can win instead.
   .symMaxR2Graph = {
-    0,                    // [0] Broadcast      -- not used
-    0,                    // [1] Reduce          -- not used
-    2ULL*1024*1024,                    // [2] AllGather       -- keep symk in graph mode
-    0,                            // [3] ReduceScatter   -- keep symk in graph mode
-    0,            // [4] AllReduce       -- keep symk in graph mode (CE blocked)
-    0,                    // [5] SendRecv        -- not used
-    0,                    // [6] Send            -- not used
-    0,                    // [7] Recv            -- not used
-    0,                    // [8] AlltoAll        -- not used
+    kThreshUnlimited,     // [0] Broadcast      -- not used
+    kThreshUnlimited,     // [1] Reduce          -- not used
+    2ULL*1024*1024,       // [2] AllGather       -- suppress symk above 2 MiB; DDA wins above (CE blocked in graph mode)
+    kThreshUnlimited,     // [3] ReduceScatter   -- no suppression; symMinR2 still applies
+    kThreshUnlimited,     // [4] AllReduce       -- no suppression (CE blocked; symk wins above symMinR2)
+    kThreshUnlimited,     // [5] SendRecv        -- not used
+    kThreshUnlimited,     // [6] Send            -- not used
+    kThreshUnlimited,     // [7] Recv            -- not used
+    kThreshUnlimited,     // [8] AlltoAll        -- not used
   },
   // symMinR2: suppress symk below this size for R2 buffers so DDA wins in that sub-range.
   // RS: DDA/SIMPLE beats SYM up to ~2 MiB (9_2 sweep); SYM wins 4 MiB+. Floor at 2 MiB.
@@ -2074,8 +2074,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .ceNonRegMin = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .ceNonRegMax = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
   .ceRegMax    = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
-  .symMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
-  .symMaxR2Graph = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .symMaxR2    = {kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited},
+  .symMaxR2Graph = {kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited},
   .symMinR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .unrollMapAR  = nullptr,
   .unrollMapAG  = nullptr,
@@ -2091,8 +2091,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .ceNonRegMin = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .ceNonRegMax = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
   .ceRegMax    = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
-  .symMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
-  .symMaxR2Graph = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .symMaxR2    = {kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited},
+  .symMaxR2Graph = {kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited},
   .symMinR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .unrollMapAR  = nullptr,
   .unrollMapAG  = nullptr,

@@ -249,6 +249,10 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
 // 0 disables that tier for that collective. No parallel built-in defaults:
 // an unset env var uses this table, and an arch with no table gets 0.
 enum { RCCL_DDA_FUNC_COUNT = ncclFuncAlltoAll + 1 };
+// Sentinel for symMaxR2/symMaxR2Graph: no upper-bound suppression (keep symk at all sizes).
+// Use this instead of 0 in symMaxR2 arrays -- 0 in a DDA array means disabled, which is
+// inconsistent with the no-suppression meaning needed for symMaxR2 unused/uncapped slots.
+static constexpr size_t kThreshUnlimited = SIZE_MAX;
 struct rcclArchThresholds {
   // DDA tier upper bounds, per collective.  gfx1250 uses fabric LL/LL128/VMM;
   // gfx942/gfx950 use ddaVmmMax as the DDA-IPC cap (LL/LL128 unused, stay 0).
@@ -290,12 +294,12 @@ struct rcclArchThresholds {
   // Above this size CE is faster than symk; setting this withdraws symk as the final
   // choice in rcclSelectAllReduce so CE-registered can win. It does not unblock the
   // CE 2-shot or DDA branches, which stay gated on whether symk was requested at all.
-  // 0 means no suppression (symk may win at any size for that collective).
-  // Only AllReduce is relevant today; other collectives default to 0.
+  // kThreshUnlimited means no suppression (symk may win at any size for that collective).
+  // Unused collectives default to kThreshUnlimited.
   size_t symMaxR2[RCCL_DDA_FUNC_COUNT];
   // Graph-mode variant of symMaxR2 (graphCapturingHint / stream capture). CE is
   // graph-unsafe, so graph mode typically wants no suppression (keep symk).
-  // 0 means no suppression, same convention as symMaxR2 -- not "inherit eager".
+  // kThreshUnlimited means no suppression, same convention as symMaxR2 -- not "inherit eager".
   size_t symMaxR2Graph[RCCL_DDA_FUNC_COUNT];
   // Symmetric kernel lower-bound per collective when recv buffer is registered (R2).
   // Below this size DDA is faster than symk; setting this suppresses symk so DDA
