@@ -873,18 +873,18 @@ inline size_t rcclCeNonRegMin(const ncclComm* comm, ncclFunc_t func) {
   return rcclCeNonRegMinTab(extAlgoArchTable(comm), func);
 }
 
+// Returns true when the message is within the CE-registered (2-shot) AllGather
+// window. Does not check symk eligibility -- callers gate on !symEligible explicitly.
 inline bool rcclAllGatherCeRegisteredWindowTab(const rcclArchThresholds* table, size_t totalBytes,
-                                               ncclSymRegType_t winRegType, bool graphMode) {
+                                               ncclSymRegType_t winRegType) {
   const bool recvReg = (winRegType == ncclSymSendRegRecvReg || winRegType == ncclSymSendNonregRecvReg);
   if (!recvReg) return false;
-  const size_t symMax = rcclSymMaxR2CapTab(table, ncclFuncAllGather, graphMode);
-  if (symMax == 0 || totalBytes <= symMax) return false;
   const size_t regMax = rcclCeRegMaxTab(table, ncclFuncAllGather);
   return regMax == kThreshUnlimited || totalBytes <= regMax;
 }
 bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes,
-                                            ncclSymRegType_t winRegType, bool graphMode) {
-  return rcclAllGatherCeRegisteredWindowTab(extAlgoArchTable(comm), totalBytes, winRegType, graphMode);
+                                            ncclSymRegType_t winRegType) {
+  return rcclAllGatherCeRegisteredWindowTab(extAlgoArchTable(comm), totalBytes, winRegType);
 }
 
 
@@ -1699,14 +1699,14 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       decision->algo = RCCL_CE_SCRATCH;
       return ncclSuccess;
     }
-    // Branch #3: CE via registered symmetric windows. Taken either when the size
-    // falls in the (symMaxR2, ceRegMax] window from the arch table, or when
-    // CTAPolicy=ZERO forces CE for every size.
+    // Branch #3: CE via registered symmetric windows. Taken when symk is not
+    // eligible and the size is within ceRegMax, or when CTAPolicy=ZERO forces
+    // CE for every size.
     const bool ceAvailable =
       !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType, sendWin, recvWin);
     if (ceAvailable && !hasSysmemSegment &&
         ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) ||
-         rcclAllGatherCeRegisteredWindowTab(archTable, totalBytes, winRegType, ceCapturing))) {
+         (!symEligible && rcclAllGatherCeRegisteredWindowTab(archTable, totalBytes, winRegType)))) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
