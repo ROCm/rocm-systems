@@ -16,10 +16,14 @@ test_categories:
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
       - "RmaProxyProgressTest.*"
-      # These patterns become CMake regexes, not globs, so "Rma*Test" would mean
-      # "Rm" + zero-or-more "a" + "Test" and match nothing. Covers every
-      # rma-test.cc suite; new ones must keep the Rma...Test naming.
-      - "Rma.*Test\\..*"
+      # One literal entry per suite. Entries here are read as gtest filters in
+      # places and compiled to CMake regexes in others, so anything but a literal
+      # prefix behaves differently in the two. Add a line when adding a suite.
+      - "RmaWaitSignalTest.*"
+      - "RmaPutTest.*"
+      - "RmaLaunchTest.*"
+      - "RmaScheduleTest.*"
+      - "RmaDebugLoggingTest.*"
       - "GroupEndInternalTest.*"
       - "Devcomm*"
     exclude_windows:
