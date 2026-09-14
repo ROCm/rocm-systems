@@ -150,9 +150,10 @@ static inline int ncclRmaSegmentCountsMatch(int lhsSegments, int rhsSegments) {
 
 static inline int ncclRmaLayoutsMatch(int lhsSegments, const size_t* lhsOffsets, int rhsSegments,
                                       const size_t* rhsOffsets) {
-  if (lhsSegments != rhsSegments || lhsSegments < 1 || lhsSegments > NCCL_RMA_MAX_SEGMENTS) return 0;
-  for (int s = 0; s <= lhsSegments; s++)
+  if (!ncclRmaSegmentCountsMatch(lhsSegments, rhsSegments)) return 0;
+  for (int s = 0; s <= lhsSegments; s++) {
     if (lhsOffsets[s] != rhsOffsets[s]) return 0;
+  }
   return 1;
 }
 
