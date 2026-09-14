@@ -7,8 +7,8 @@ Limitations
 **********************************
 
 hipFile requires a direct path from the GPU to the storage device. The
-filesystem must ultimately be backed by a local NVMe device, either sitting
-directly on the device's partition or stacked on it through LVM (see below).
+filesystem must be backed by a local NVMe device, that either resides on the
+device's partition or is stacked on it through LVM (see below).
 Any other interposing block layer between the filesystem and the device breaks
 the direct path and forces a fallback to compatibility (POSIX) mode. This
 includes, but is not limited to:
