@@ -446,6 +446,7 @@ jobs:
         uses: ./.github/actions/rocprofiler-sdk-util
         with:
           rocm-path: ${{ env.ROCM_PATH }}
+          python-venv-path: projects/rocprofiler-sdk/${{ env.PYTHON_VENV_PATH }}
           gpu-target: ${{ matrix.system.gpu-target }}
           compiler-launcher: /usr/local/bin/sccache
           enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}

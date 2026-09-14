@@ -6,6 +6,10 @@ inputs:
     description: 'Path to ROCm installation'
     required: false
     default: '/opt/rocm'
+  python-venv-path:
+    description: 'Python virtual environment with the pinned cmake, relative to the workspace'
+    required: false
+    default: ''
   gpu-target:
     description: 'GPU target (e.g., gfx94X, gfx110X, gfx120X)'
     required: true
@@ -77,9 +81,13 @@ runs:
     - name: Setup environment variables
       shell: bash
       run: |
+        PYTHON_VENV_BIN=""
+        if [ -n "${{ inputs.python-venv-path }}" ]; then
+          PYTHON_VENV_BIN="${GITHUB_WORKSPACE}/${{ inputs.python-venv-path }}/bin"
+        fi
         echo "PKG_CONFIG_PATH=/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}" >> $GITHUB_ENV
         echo "LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib64:${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
-        echo "PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:$HOME/.local/bin:${PATH}" >> $GITHUB_ENV
+        echo "PATH=${PYTHON_VENV_BIN:+${PYTHON_VENV_BIN}:}${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:$HOME/.local/bin:${PATH}" >> $GITHUB_ENV
 
     - name: Setup ccache
       if: ${{ inputs.enable-ccache == 'true' }}
