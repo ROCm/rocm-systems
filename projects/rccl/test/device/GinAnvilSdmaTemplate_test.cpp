@@ -387,33 +387,47 @@ TEST_F(GinAnvilSdmaTemplateTest, CounterSignal_GetReset) {
 
 // AICOMRCCL-2339: the Anvil device dispatch must select the GPU context
 // indexed by ncclGinCtx::contextId instead of always using array element zero.
-__global__ void kernelSignalContextSelection(ncclGinAnvilSdmaGPUContext* contexts) {
+__global__ void kernelSignalContextSelection(ncclGinAnvilSdmaGPUContext* contexts, uint64_t* counters) {
   if (threadIdx.x != 0) return;
   ncclGinCtx ginCtx{};
   ginCtx.handle = contexts;
+
   ginCtx.contextId = 0;
   ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0).ptr[0] = 11;
+  ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
+      ginCtx, ncclGinSignalDescriptor{NCCL_GIN_SIGNAL_TYPE_INDEXED, {.indexedSignal = {.signalId = 0}}});
+  ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0).ptr[0] = 101;
+
   ginCtx.contextId = 1;
   ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0).ptr[0] = 22;
+  ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0);
+  ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0).ptr[0] = 202;
 }
 
 TEST_F(GinAnvilSdmaTemplateTest, SignalApis_SelectLogicalContext) {
   DeviceBuffer<uint64_t> d_signals(2);
+  DeviceBuffer<uint64_t> d_counters(2);
   d_signals.zero();
+  d_counters.zero();
   ncclGinAnvilSdmaGPUContext hostCtx[2]{};
   for (int i = 0; i < 2; i++) {
     hostCtx[i].layoutMagic = NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
     hostCtx[i].signals = d_signals.ptr + i;
+    hostCtx[i].counters = d_counters.ptr + i;
     hostCtx[i].nSignals = 1;
+    hostCtx[i].nCounters = 1;
   }
   DeviceBuffer<ncclGinAnvilSdmaGPUContext> d_contexts(2);
   d_contexts.copyFrom(hostCtx, 2);
 
-  kernelSignalContextSelection<<<1, 1>>>(d_contexts.ptr);
+  kernelSignalContextSelection<<<1, 1>>>(d_contexts.ptr, d_counters.ptr);
   syncAndCheck();
   auto signals = d_signals.copyTo();
-  EXPECT_EQ(signals[0], 11ULL);
+  auto counters = d_counters.copyTo();
+  EXPECT_EQ(signals[0], 0ULL);
   EXPECT_EQ(signals[1], 22ULL);
+  EXPECT_EQ(counters[0], 101ULL);
+  EXPECT_EQ(counters[1], 202ULL);
 }
 
 // H10: invalid ctx on getters returns nullptr / no-op.

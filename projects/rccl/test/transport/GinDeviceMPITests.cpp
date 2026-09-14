@@ -1620,8 +1620,14 @@ TEST_F(GinMPIDeviceTests, Barrier_TwoRanks) {
 // signal cells. Rank 1 deliberately arrives late at the second barrier. Before
 // the fix, both contexts incremented one shared cell during the first barrier,
 // so rank 0's second wait matched that stale count and returned immediately.
+struct AllContextsBarrierObservation {
+  uint64_t secondBarrierCycles;
+  uint64_t ctxPeerSignals[2];
+  uint64_t* ctxSignalPtrs[2];
+};
+
 __global__ void allContextsConsecutiveBarrierKernel(
-    int rank, uint64_t delayCycles, uint64_t* secondBarrierCycles, struct ncclDevComm devComm) {
+    int rank, uint64_t delayCycles, AllContextsBarrierObservation* observation, struct ncclDevComm devComm) {
   ncclGinBarrierSession<ncclCoopCta> bar{
       ncclCoopCta(), ncclGinAllContexts(devComm), ncclTeamTagWorld{}, /*barrierIndex=*/0};
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
@@ -1634,7 +1640,23 @@ __global__ void allContextsConsecutiveBarrierKernel(
 
   uint64_t start = clock64();
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
-  if (threadIdx.x == 0) *secondBarrierCycles = clock64() - start;
+  if (threadIdx.x != 0) return;
+
+  observation->secondBarrierCycles = clock64() - start;
+  const int peer = 1 - rank;
+  const uint32_t sigIndex = devComm.worldGinBarrier.signal0 + peer;
+  for (int ctx = 0; ctx < 2; ctx++) {
+    ncclGin gin{devComm, ctx};
+    observation->ctxPeerSignals[ctx] = gin.readSignal(sigIndex, 64, cuda::memory_order_relaxed);
+    ncclGinCtx ginCtx{};
+    ginCtx.handle = devComm.ginHandles[0];
+    ginCtx.contextId = ctx;
+    ginCtx.backend = devComm.ginNetDeviceTypes[0];
+    ginCtx.rank = devComm.rank;
+    ginCtx.nRanks = devComm.nRanks;
+    observation->ctxSignalPtrs[ctx] =
+        ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, sigIndex).ptr;
+  }
 }
 
 TEST_F(GinMPIDeviceTests, Barrier_AllContextsConsecutiveSignalsDoNotAlias_SingleNode) {
@@ -1663,24 +1685,29 @@ TEST_F(GinMPIDeviceTests, Barrier_AllContextsConsecutiveSignalsDoNotAlias_Single
   });
   ASSERT_GE((int)devComm.ginContextCount, 2);
 
-  uint64_t* dCycles = nullptr;
-  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dCycles, sizeof(uint64_t)));
-  auto cyclesCleanup = makeScopeGuard([&]() {
-    if (dCycles) (void)hipFree(dCycles);
+  AllContextsBarrierObservation* dObservation = nullptr;
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dObservation, sizeof(AllContextsBarrierObservation)));
+  auto observationCleanup = makeScopeGuard([&]() {
+    if (dObservation) (void)hipFree(dObservation);
   });
-  ASSERT_MPI_EQ(hipSuccess, hipMemset(dCycles, 0, sizeof(uint64_t)));
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dObservation, 0, sizeof(AllContextsBarrierObservation)));
 
   constexpr uint64_t kDelayCycles = 100000000;
   MPI_Barrier(MPI_COMM_WORLD);
   allContextsConsecutiveBarrierKernel<<<1, kGinKernelThreads, 0, stream>>>(
-      rank, kDelayCycles, dCycles, devComm);
+      rank, kDelayCycles, dObservation, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
-  uint64_t elapsed = 0;
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&elapsed, dCycles, sizeof(elapsed), hipMemcpyDeviceToHost));
+  AllContextsBarrierObservation observation{};
+  ASSERT_MPI_EQ(hipSuccess,
+                hipMemcpy(&observation, dObservation, sizeof(observation), hipMemcpyDeviceToHost));
   if (rank == 0) {
-    EXPECT_GE(elapsed, kDelayCycles / 4)
+    EXPECT_GE(observation.secondBarrierCycles, kDelayCycles / 4)
         << "second AllContexts barrier returned before delayed peer arrival";
+    EXPECT_EQ(observation.ctxPeerSignals[0], 2u);
+    EXPECT_EQ(observation.ctxPeerSignals[1], 2u);
+    EXPECT_NE(observation.ctxSignalPtrs[0], observation.ctxSignalPtrs[1])
+        << "logical contexts must not alias the same signal cell";
   }
   MPI_Barrier(MPI_COMM_WORLD);
 }

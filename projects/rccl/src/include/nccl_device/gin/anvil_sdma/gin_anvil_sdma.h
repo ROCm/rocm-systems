@@ -29,6 +29,8 @@ NCCL_DEVICE_INLINE bool anvilCtxValid(ncclGinAnvilSdmaGPUContext* rsCtx) {
   return rsCtx != nullptr && loadConst(&rsCtx->layoutMagic) == NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
 }
 
+// Logical contexts index distinct GPU-context slots. Counters are sliced per
+// context (countersDev + contextId * nCounters), matching proxy/gdaki.
 NCCL_DEVICE_INLINE ncclGinAnvilSdmaGPUContext* anvilGpuCtx(ncclGinCtx ctx) {
   return &reinterpret_cast<ncclGinAnvilSdmaGPUContext*>(ctx.handle)[ctx.contextId];
 }
