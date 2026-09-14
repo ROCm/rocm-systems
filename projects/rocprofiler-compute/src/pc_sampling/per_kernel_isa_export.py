@@ -15,7 +15,7 @@ import csv
 import re
 from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import Any, NamedTuple, Optional
+from typing import Any, List, NamedTuple, Optional, Tuple
 
 from utils.logger import console_debug, console_warning
 
@@ -51,7 +51,7 @@ TRAILING_COLUMNS = (
 )
 
 # (workload name, workload sub-name, kernel uuid, short name, code object id, pid)
-FileKey = tuple[str, str, int, Optional[str], int, int]
+FileKey = Tuple[str, str, int, Optional[str], int, int]
 
 
 class WorkloadIsaExport(NamedTuple):
@@ -62,8 +62,8 @@ class WorkloadIsaExport(NamedTuple):
     """
 
     workload_id: int
-    stall_reasons: list[str]
-    isa_rows: Iterator[tuple[Any, ...]]
+    stall_reasons: List[str]
+    isa_rows: Iterator[Tuple[Any, ...]]
 
 
 def export_per_kernel_isa_files(
@@ -93,7 +93,7 @@ def export_per_kernel_isa_files(
     return per_kernel_directory
 
 
-def _build_isa_header(stall_reasons: Iterable[str]) -> list[str]:
+def _build_isa_header(stall_reasons: Iterable[str]) -> List[str]:
     """Return the column names of one workload's ISA files.
 
     A workload's stall reasons vary with how it was sampled, so the columns
@@ -112,7 +112,7 @@ def _resolve_isa_export_path(per_kernel_directory: Path, file_key: FileKey) -> P
 
     The folder leads with the kernel's short name so it reads as the kernel it
     holds. Two kernels can share a short name, so the kernel uuid follows it to
-    keep the folder unique and to map it back to its ``kernel.csv`` row.
+    keep the folder unique and to map it back to its kernel.csv row.
     """
     (
         workload_name,
@@ -136,7 +136,7 @@ def _sanitize_short_name(short_name: Optional[str]) -> Optional[str]:
     """Reduce a kernel's short name to a path component.
 
     A short name is the identifier a C++ signature demangles down to, which can
-    still hold characters a path cannot, such as the ``/`` of ``operator/``.
+    still hold characters a path cannot, such as the / of operator/.
     """
     if short_name is None:
         return None
@@ -150,8 +150,8 @@ def _sanitize_short_name(short_name: Optional[str]) -> Optional[str]:
 
 def _write_per_kernel_isa_files(
     per_kernel_directory: Path,
-    isa_rows: Iterator[tuple[Any, ...]],
-    stall_reasons: list[str],
+    isa_rows: Iterator[Tuple[Any, ...]],
+    stall_reasons: List[str],
 ) -> int:
     """Write one workload's grouped ISA rows, returning the file count.
 
@@ -175,14 +175,14 @@ def _write_per_kernel_isa_files(
 
 
 def _group_rows_by_file(
-    isa_rows: Iterator[tuple[Any, ...]],
-) -> Iterator[tuple[FileKey, list[tuple[Any, ...]]]]:
+    isa_rows: Iterator[Tuple[Any, ...]],
+) -> Iterator[Tuple[FileKey, List[Tuple[Any, ...]]]]:
     """Split the ordered row stream into the rows of one file at a time.
 
     Only the file being written is held, so the whole result set never is.
     """
     current_key = None
-    current_rows: list[tuple[Any, ...]] = []
+    current_rows: List[Tuple[Any, ...]] = []
     for row in isa_rows:
         file_key: FileKey = row[:FILE_KEY_COLUMN_COUNT]
         if file_key != current_key:

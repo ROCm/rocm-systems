@@ -3043,7 +3043,7 @@ def make_csv_run_analyzer(tmp_path, tool_data_per_workload, **filters):
 def read_per_kernel_isa_file(result_path, kernel_row, code_object_id=5, pid=42):
     """Return one exported ISA file as its header and its rows.
 
-    The folder is named after the kernel's row in ``kernel.csv``.
+    The folder is named after the kernel's row in kernel.csv.
     """
     export_path = (
         result_path

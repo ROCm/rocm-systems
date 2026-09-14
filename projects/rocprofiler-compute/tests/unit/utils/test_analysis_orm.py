@@ -4,6 +4,7 @@
 """Unit tests for analysis_orm.py static methods."""
 
 import json
+from typing import Optional
 
 import numpy as np
 import pytest
@@ -79,7 +80,7 @@ def add_kernel_with_durations(
     workload: Workload,
     name: str,
     durations: list[int],
-    short_name: str | None = None,
+    short_name: Optional[str] = None,
 ) -> Kernel:
     """Add a kernel to *workload* with one dispatch per entry in *durations*."""
     kernel = Kernel(kernel_name=name, short_name=short_name, workload=workload)
