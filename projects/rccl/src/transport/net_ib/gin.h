@@ -44,6 +44,24 @@ static inline int ncclRmaSignalOffsetValid(size_t signalOff, size_t segmentEnd) 
          sizeof(uint64_t) <= segmentEnd - signalOff;
 }
 
+// Count WRs the HCA accepted when ibv_post_send fails at badWr. Walk a
+// next-linked chain of nWr entries. badWr == NULL counts the whole chain.
+static inline int ncclRmaPostedWrCount(const void* wr, int nWr, const void* badWr, size_t nextOffset) {
+  int posted = 0;
+  const char* cur = (const char*)wr;
+  while (cur != NULL && posted < nWr) {
+    if (cur == (const char*)badWr) break;
+    posted++;
+    cur = *(char* const*)(cur + nextOffset);
+  }
+  return posted;
+}
+
+// A failed handle calloc must not memcpy segOff before the status AllGather.
+static inline int ncclRmaRegistrationHandleReady(const void* handle, int nSeg) {
+  return handle != NULL && nSeg >= 1 && nSeg <= NCCL_RMA_MAX_SEGMENTS;
+}
+
 struct ncclGinIbCollComm {
   void* ctx;
   int rank;

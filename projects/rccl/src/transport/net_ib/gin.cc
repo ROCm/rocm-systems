@@ -691,7 +691,7 @@ reconcile:
   // complete status and layout in one fixed-size record.
   localRegistration.status = ret;
   localRegistration.nSegments = nSeg;
-  if (rmaMrHandle && nSeg >= 1 && nSeg <= NCCL_RMA_MAX_SEGMENTS)
+  if (ncclRmaRegistrationHandleReady(rmaMrHandle, nSeg))
     memcpy(localRegistration.segOff, rmaMrHandle->segOff, sizeof(size_t) * (nSeg + 1));
   NCCLCHECKGOTO(cComm->allGather(cComm, &localRegistration, registrations, sizeof(struct ncclRmaIbProxyRegistration)),
                 ret, fail);
@@ -815,14 +815,9 @@ static ncclResult_t ncclRmaPostWrs(struct ncclIbQp* qp, struct ibv_send_wr* wr, 
     *posted = nWr;
     return ncclSuccess;
   }
-  int nPosted = 0;
-  for (struct ibv_send_wr* cur = wr; cur && nPosted < nWr; cur = cur->next) {
-    if (cur == bad_wr) break;
-    nPosted++;
-  }
-  *posted = nPosted;
-  if (nPosted > 0) {
-    WARN("NET/IB/RMA: ibv_post_send failed after %d/%d WRs; leaving request for CQ drain", nPosted, nWr);
+  *posted = ncclRmaPostedWrCount(wr, nWr, bad_wr, offsetof(struct ibv_send_wr, next));
+  if (*posted > 0) {
+    WARN("NET/IB/RMA: ibv_post_send failed after %d/%d WRs; leaving request for CQ drain", *posted, nWr);
   }
   return ret;
 }
