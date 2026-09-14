@@ -229,24 +229,6 @@ inline void FreeMultiSegmentVmm(MultiSegmentVmmBuffer& b)
     b = MultiSegmentVmmBuffer{};
 }
 
-// RAII wrapper so a test body can early-return / ASSERT without leaking VMM.
-class MultiSegmentVmmGuard
-{
-public:
-    MultiSegmentVmmGuard() = default;
-    explicit MultiSegmentVmmGuard(MultiSegmentVmmBuffer buf) : buf_(std::move(buf)) {}
-    ~MultiSegmentVmmGuard() { FreeMultiSegmentVmm(buf_); }
-
-    MultiSegmentVmmGuard(const MultiSegmentVmmGuard&)            = delete;
-    MultiSegmentVmmGuard& operator=(const MultiSegmentVmmGuard&) = delete;
-
-    MultiSegmentVmmBuffer&       get()       { return buf_; }
-    const MultiSegmentVmmBuffer& get() const { return buf_; }
-
-private:
-    MultiSegmentVmmBuffer buf_;
-};
-
 } // namespace RCCLRmaTests
 
 #endif // RCCL_HAS_RMA_IB_PROXY
