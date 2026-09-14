@@ -220,3 +220,39 @@ conflicts with the conditions of the GPLv2, you may retroactively and
 prospectively choose to deem waived or otherwise exclude such Section(s) of
 the License, but only in their entirety and only with respect to the Combined
 Software.
+
+==============================================================================
+OdinLink-Five userspace (RCCL net plugin + libodl_tb5) is under the MIT License:
+==============================================================================
+
+OdinLink-Five (https://github.com/Geramy/OdinLink-Five) - MIT License
+
+Only the userspace net plugin and library under plugins/net/odinlink-tb5/ are
+vendored here. The kernel driver odl_tb5.ko is GPL-2.0 and is not included.
+
+MIT License
+
+Copyright (c) OdinLink-Five contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+See:
+
+    plugins/net/odinlink-tb5
+    plugins/net/odinlink-tb5/LICENSE
