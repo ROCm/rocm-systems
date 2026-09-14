@@ -989,7 +989,7 @@ void rcclApplyUnrollForSize(ncclComm* comm, ncclFunc_t func, size_t msgBytes) {
     }
     if (map[i].maxBytes == SIZE_MAX) return;  // terminal entry (safety)
   }
-  }
+}
 
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold) {
   if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) {
