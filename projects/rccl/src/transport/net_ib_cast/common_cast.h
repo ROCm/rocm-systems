@@ -213,6 +213,7 @@ struct ncclProfilerInfo {
 #define NCCL_NET_IB_REQ_FLUSH 3
 #define NCCL_NET_IB_REQ_GIN_IPUT 4
 #define NCCL_NET_IB_REQ_GIN_IGET 5
+#define NCCL_NET_IB_REQ_FAILED 6
 extern const char* IbCastReqTypeStr[];
 
 struct ncclIbQpSchedParms {
@@ -829,6 +830,14 @@ ncclResult_t IbCastDmaBufSupport(int dev);
 
 void IbCastAddEvent(struct ncclIbRequest* req, int devIndex);
 void IbCastAddEventCTS(struct ncclIbRequest* req, int devIndex);
+
+static inline bool IbCastRequestHasEvents(struct ncclIbRequest* r) {
+  for (int i = 0; i < NCCL_IB_MAX_DEVS_PER_NIC; i++) {
+    if (r->events[i] != 0) return true;
+  }
+  return false;
+}
+
 ncclResult_t IbCastGetGidIndex(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
                                int* gidIndex);
 ncclResult_t IbCastGetRequest(struct ncclIbNetCommBase* base, struct ncclIbRequest** req);
