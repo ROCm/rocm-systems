@@ -328,8 +328,8 @@ constexpr index_sequence<Ints...> make_index_sequence_value(index_sequence<Ints.
 // most of the time, but gets specialized for __half
 template <typename T>
 struct ExclusiveScanIdentity {
-  static constexpr T maximum() { return __hip_internal::numeric_limits<T>::max(); }
-  static constexpr T minimum() { return __hip_internal::numeric_limits<T>::min(); }
+  static constexpr T maximum() { return (__hip_internal::numeric_limits<T>::max)(); }
+  static constexpr T minimum() { return (__hip_internal::numeric_limits<T>::min)(); }
 };
 
 template <>
