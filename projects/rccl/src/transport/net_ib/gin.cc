@@ -612,28 +612,67 @@ static ncclResult_t ncclRmaIbProxyCommitWrs(struct ncclRmaIbProxyCtx* ctx, int n
   return ncclSuccess;
 }
 
+// wrap_ibv_post_send returns ncclSystemError on any nonzero ibv_post_send, including
+// after a prefix of the chain is accepted. Only the last WR is signaled, so
+// NCCLCHECK-and-return would leak the request slot and leave unsignaled WRs
+// without a CQE owner. Count how many WRs the HCA accepted.
+static ncclResult_t ncclRmaPostWrs(struct ncclIbQp* qp, struct ibv_send_wr* wr, int nWr, int* posted) {
+  *posted = 0;
+  if (nWr <= 0) return ncclSuccess;
+  struct ibv_send_wr* bad_wr = NULL;
+  ncclResult_t ret = wrap_ibv_post_send(qp->qp, wr, &bad_wr);
+  if (ret == ncclSuccess) {
+    *posted = nWr;
+    return ncclSuccess;
+  }
+  int nPosted = 0;
+  for (struct ibv_send_wr* cur = wr; cur && nPosted < nWr; cur = cur->next) {
+    if (cur == bad_wr) break;
+    nPosted++;
+  }
+  *posted = nPosted;
+  if (nPosted > 0) {
+    WARN("NET/IB/RMA: ibv_post_send failed after %d/%d WRs; leaving request for CQ drain", nPosted, nWr);
+  }
+  return ret;
+}
+
 // Queue a segment-split chain behind earlier batched WRs. A chain longer than
 // the batch posts directly after the batch so WRs reach the QP in request-id order.
-static ncclResult_t ncclRmaIbProxyQueueWrs(struct ncclRmaIbProxyCtx* ctx, struct ibv_qp* qp, struct ibv_send_wr* wr,
-                                           struct ibv_sge* sge, int nWr, bool aggregate) {
+static ncclResult_t ncclRmaIbProxyQueueWrs(struct ncclRmaIbProxyCtx* ctx, struct ncclIbQp* qp, struct ibv_send_wr* wr,
+                                           struct ibv_sge* sge, int nWr, bool aggregate, int* posted) {
+  *posted = 0;
   if (nWr == 0) return ncclSuccess;
   if (nWr <= ctx->wrBatchsize) {
     struct ibv_send_wr* slotWr;
     struct ibv_sge* slotSge;
-    NCCLCHECK(ncclRmaIbProxyReserveWrs(ctx, qp, nWr, &slotWr, &slotSge));
+    NCCLCHECK(ncclRmaIbProxyReserveWrs(ctx, qp->qp, nWr, &slotWr, &slotSge));
     for (int i = 0; i < nWr; i++) {
       slotWr[i] = wr[i];
       slotSge[i] = sge[i];
       slotWr[i].sg_list = &slotSge[i];
     }
+    // Once queued, a failed doorbell may already have handed these WRs to the QP.
+    *posted = nWr;
     return ncclRmaIbProxyCommitWrs(ctx, nWr, aggregate);
   }
   NCCLCHECK(ncclRmaIbProxyPostBatch(ctx));
   wr[nWr - 1].send_flags |= IBV_SEND_SIGNALED;
   wr[nWr - 1].next = NULL;
-  struct ibv_send_wr* bad_wr;
-  NCCLCHECK(wrap_ibv_post_send(qp, &wr[0], &bad_wr));
-  return ncclSuccess;
+  return ncclRmaPostWrs(qp, wr, nWr, posted);
+}
+
+// If nothing posted, release the slot and its sequence id and leave *request unset.
+// If a prefix posted, keep the request so Test() can drain the CQ.
+static ncclResult_t ncclRmaCompletePostedRequest(struct ncclIbRequest* req, uint64_t* postedSeq, ncclResult_t postRet,
+                                                 int posted, void** request) {
+  if (postRet != ncclSuccess && posted == 0) {
+    if (req->id == *postedSeq) (*postedSeq)--;
+    (void)ncclIbFreeRequest(req);
+    return postRet;
+  }
+  *request = req;
+  return postRet;
 }
 
 ncclResult_t ncclRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* config, void** rmaCtx) {
@@ -994,11 +1033,11 @@ ncclResult_t ncclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void
   // No WR for size==0: complete with the previous request on this comm.
   if (nWr == 0) req->id = --comm->ginSeq.posted;
 
-  NCCLCHECK(ncclRmaIbProxyQueueWrs(rmaProxyCtx, qp->qp, wr, sge, nWr, optFlags & ncclRmaOptFlagsAggregateRequests));
+  int posted = 0;
+  ncclResult_t postRet =
+    ncclRmaIbProxyQueueWrs(rmaProxyCtx, qp, wr, sge, nWr, optFlags & ncclRmaOptFlagsAggregateRequests, &posted);
   ncclIbAddEvent(req, qp->devIndex);
-
-  *request = req;
-  return ncclSuccess;
+  return ncclRmaCompletePostedRequest(req, &comm->ginSeq.posted, postRet, posted, request);
 }
 
 ncclResult_t ncclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset, void* remoteMhandle, size_t size,
@@ -1042,10 +1081,10 @@ ncclResult_t ncclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset
   // No WR for size==0: complete with the previous request on this comm.
   if (nWr == 0) req->id = --comm->ginSeq.posted;
 
-  NCCLCHECK(ncclRmaIbProxyQueueWrs(rmaProxyCtx, qp->qp, wr, sge, nWr, optFlags & ncclRmaOptFlagsAggregateRequests));
-
-  *request = req;
-  return ncclSuccess;
+  int posted = 0;
+  ncclResult_t postRet =
+    ncclRmaIbProxyQueueWrs(rmaProxyCtx, qp, wr, sge, nWr, optFlags & ncclRmaOptFlagsAggregateRequests, &posted);
+  return ncclRmaCompletePostedRequest(req, &comm->ginSeq.posted, postRet, posted, request);
 }
 
 ncclResult_t ncclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
@@ -1134,10 +1173,10 @@ ncclResult_t ncclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff
   if (nPut > 0) wr[nPut - 1].next = signalWr;
 
   // Send the put and the signal in one go
-  NCCLCHECK(ncclRmaIbProxyQueueWrs(rmaProxyCtx, qp->qp, wr, sge, nPut + 1,
-                                   optFlags & ncclRmaOptFlagsAggregateRequests));
-  *request = req;
-  return ncclSuccess;
+  int posted = 0;
+  ncclResult_t postRet =
+    ncclRmaIbProxyQueueWrs(rmaProxyCtx, qp, wr, sge, nPut + 1, optFlags & ncclRmaOptFlagsAggregateRequests, &posted);
+  return ncclRmaCompletePostedRequest(req, &comm->ginSeq.posted, postRet, posted, request);
 }
 
 ncclResult_t ncclRmaIbProxyTest(void* collComm, void* request, int* done) {
@@ -1258,14 +1297,10 @@ ncclResult_t ncclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint
 
   TRACE(NCCL_NET, "NET/IB: %s: Posting %d-segment flush request (req=%p, comm=%p)", __func__, nWr, req, req->base);
   TIME_START(4);
-  if (nWr > 0) {
-    struct ibv_send_wr* bad_wr;
-    NCCLCHECK(wrap_ibv_post_send(qp->qp, &wr[0], &bad_wr));
-  }
+  int posted = 0;
+  ncclResult_t postRet = ncclRmaPostWrs(qp, &wr[0], nWr, &posted);
   TIME_STOP(4);
-
-  *request = req;
-  return ncclSuccess;
+  return ncclRmaCompletePostedRequest(req, &comm->ginSeq.posted, postRet, posted, request);
 }
 
 // No support for NCCL_IB_SPLIT_DATA_ON_QPS or NCCL_IB_MERGE_NICS
