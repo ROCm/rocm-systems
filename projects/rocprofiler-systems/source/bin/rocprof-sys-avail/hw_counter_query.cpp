@@ -126,7 +126,7 @@ query_gpu_hw_counters()
     auto result = std::vector<hardware_counter_info>{};
 
     auto& agent_mngr   = get_agent_manager_instance();
-    auto  gpu_agents_v = agent_mngr.get_agents_by_type(agent_type::GPU);
+    auto  gpu_agents_v = agent_mngr.get_agents_by_type(agent_type::gpu);
     if(gpu_agents_v.empty()) return result;
 
     // Build the (device_type_index, agent*) pairs that get_agent_counter_info expects
