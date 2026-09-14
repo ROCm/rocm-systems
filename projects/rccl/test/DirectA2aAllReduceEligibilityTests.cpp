@@ -8,13 +8,22 @@
 #include "algorithms/direct_a2a/all_reduce/direct_a2a_all_reduce.h"
 #include "gtest/gtest.h"
 
+#include <cstdlib>
 #include <cstring>
 
 namespace RcclUnitTesting {
 
 class DirectA2aAllReduceEligibilityTest : public ::testing::Test {
 protected:
-  DirectA2aAllReduceEligibilityTest() { reset(); }
+  DirectA2aAllReduceEligibilityTest() {
+    // Eligibility asserts against compile-time maxima. Clear the runtime
+    // overrides before the first RCCL_PARAM read so an exported
+    // RCCL_DIRECT_A2A_MAX_BYTES (or its neighbours) cannot shrink the fixture.
+    unsetenv("RCCL_DIRECT_A2A_ENABLE");
+    unsetenv("RCCL_DIRECT_A2A_ONESHOT_THRESHOLD");
+    unsetenv("RCCL_DIRECT_A2A_MAX_BYTES");
+    reset();
+  }
 
   void reset() {
     std::memset(static_cast<void*>(&comm_), 0, sizeof(comm_));
