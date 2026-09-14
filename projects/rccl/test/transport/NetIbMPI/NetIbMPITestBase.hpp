@@ -1848,26 +1848,44 @@ protected:
         return result;
     }
 
-    // Drives this rank's own side of the connection to error, which retires whatever
-    // work is outstanding on it with a flush status. The two sides learn their queue
-    // pair count differently: the sender can be asked, while the receiver cannot, so
-    // that walk stops at the first index the API refuses. It used to walk a fixed
-    // eight, which is exactly what NCCL_IB_QPS_PER_CONNECTION=4 gives on the two-member
-    // merged device these suites use -- no headroom, so raising that parameter would
-    // have left the higher queue pairs unflushed and the memory still referenced.
-    void WorkerFlushOwnSideQps(ConnectionPair& pair, int rank) {
+    // Drives this rank's own side of the connection to error, which retires whatever work
+    // is outstanding on it with a flush status. Reports whether every queue pair it should
+    // have reached was reached: a queue pair that could not be driven still holds its work,
+    // so a caller that is about to release memory has to know.
+    //
+    // The two sides learn their count differently. The sender can be asked. The receiver
+    // cannot, so that walk reads the plugin's answers: ncclInvalidArgument means the index
+    // is past the count (net_ib_cast/p2p.cc:1320) and ends the walk, while any other error
+    // is a failed ibv_modify_qp on a queue pair that exists and must not be mistaken for
+    // the end of the range. It used to stop on either, and before that it walked a fixed
+    // eight -- exactly what NCCL_IB_QPS_PER_CONNECTION=4 gives on the two-member merged
+    // device these suites use, so raising that parameter left higher queue pairs holding
+    // the memory. The bound is still there for a plugin that answers every index.
+    ThreadResult WorkerFlushOwnSideQps(ConnectionPair& pair, int rank) {
+        ThreadResult result;
+        auto note = [&](int qp, const std::string& why) {
+            if (!result.ok) return;   // the first one is the useful one
+            result.ok = false;
+            result.msg = "queue pair " + std::to_string(qp) + " could not be driven to error ("
+                         + why + "), so its work may still reference the buffer";
+        };
         if (rank == 1) {
             int nqps = 0;
             if (!WorkerCastLiveNqps(pair.sendComm, &nqps).ok || nqps <= 0) nqps = 1;
-            for (int qp = 0; qp < nqps; qp++) WorkerCastDriveQpToError(pair.sendComm, qp);
+            for (int qp = 0; qp < nqps; qp++) {
+                const ThreadResult driven = WorkerCastDriveQpToError(pair.sendComm, qp);
+                if (!driven.ok) note(qp, driven.msg);
+            }
         } else {
-            // Bounded as well as stopping at the first refusal: the API refusing an
-            // index past the count is what ends this walk, and a plugin that answered
-            // every index would otherwise spin here forever.
             for (int qp = 0; qp < kQpProbeLimit; qp++) {
-                if (ncclIbCastFaultDriveRecvQpToError(pair.recvComm, qp) != ncclSuccess) break;
+                const ncclResult_t ret = ncclIbCastFaultDriveRecvQpToError(pair.recvComm, qp);
+                if (ret == ncclSuccess) continue;
+                if (ret == ncclInvalidArgument) break;      // past the connection's count
+                note(qp, "ncclIbCastFaultDriveRecvQpToError returned "
+                             + std::to_string(static_cast<int>(ret)));
             }
         }
+        return result;
     }
 
     // For a failure where a request may still be live and the test cannot reach it:
@@ -1880,7 +1898,8 @@ protected:
     ThreadResult WorkerRetainAfterAbandonedRequest(ThreadResult failure, ConnectionPair& pair,
                                                    int rank, NetMHandleWorkerGuard* registration,
                                                    HostBufferAutoGuard* allocation) {
-        WorkerFlushOwnSideQps(pair, rank);
+        const ThreadResult flushed = WorkerFlushOwnSideQps(pair, rank);
+        if (!flushed.ok) failure.msg += "; " + flushed.msg;
         failure.msg += "; the buffer and its registration are retained, since a request may "
                        "still reference them";
         if (registration) registration->release();
@@ -1933,13 +1952,19 @@ protected:
                 // live count, so the receiver walks the same span it was told to expect;
                 // driving a queue pair that does not exist is harmless here, and using
                 // the send-side call on a receive communicator would flush nothing.
-                WorkerFlushOwnSideQps(pair, rank);
+                const ThreadResult flushed = WorkerFlushOwnSideQps(pair, rank);
                 const int live = waitAll();
-                if (live > 0) {
-                    failure.msg += "; " + std::to_string(live)
-                                   + " request(s) never completed even after flushing, so the "
-                                     "buffer and its registration are retained rather than "
-                                     "released";
+                // A flush that could not reach a queue pair is its own reason to keep the
+                // memory: the requests may read as retired while that queue pair still
+                // holds work.
+                if (live > 0 || !flushed.ok) {
+                    if (!flushed.ok) failure.msg += "; " + flushed.msg;
+                    if (live > 0) {
+                        failure.msg += "; " + std::to_string(live)
+                                       + " request(s) never completed even after flushing";
+                    }
+                    failure.msg += "; the buffer and its registration are retained rather "
+                                   "than released";
                     if (registration) registration->release();
                     if (allocation) allocation->release();
                 }
