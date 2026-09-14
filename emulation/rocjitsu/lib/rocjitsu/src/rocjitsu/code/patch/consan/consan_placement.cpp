@@ -350,10 +350,11 @@ choose_scratch_vgpr(const ConSanProgramSite &access, std::optional<uint16_t> req
 
 [[nodiscard]] std::optional<uint16_t> choose_spill_scratch_vgpr(const ConSanProgramSite &access,
                                                                 uint16_t allocation_count,
-                                                                uint16_t required_vgprs) {
+                                                                uint16_t required_vgprs,
+                                                                uint16_t alignment) {
   for (uint32_t candidate = 0;
        candidate + required_vgprs <= allocation_count && candidate + required_vgprs <= 256u;
-       ++candidate) {
+       candidate += std::max<uint16_t>(alignment, 1u)) {
     if (access_scratch_tuple_base_is_valid(access, static_cast<uint16_t>(candidate)) &&
         !is_forbidden_scratch_vgpr_run(access, static_cast<uint16_t>(candidate), required_vgprs))
       return static_cast<uint16_t>(candidate);

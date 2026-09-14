@@ -67,7 +67,8 @@ choose_scratch_vgpr(const ConSanProgramSite &access, std::optional<uint16_t> req
                     std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs);
 [[nodiscard]] std::optional<uint16_t> choose_spill_scratch_vgpr(const ConSanProgramSite &access,
                                                                 uint16_t allocation_count,
-                                                                uint16_t required_vgprs);
+                                                                uint16_t required_vgprs,
+                                                                uint16_t alignment = 1u);
 
 [[nodiscard]] std::vector<BasicBlock *>
 block_ptrs_for(const std::vector<std::unique_ptr<BasicBlock>> &blocks);

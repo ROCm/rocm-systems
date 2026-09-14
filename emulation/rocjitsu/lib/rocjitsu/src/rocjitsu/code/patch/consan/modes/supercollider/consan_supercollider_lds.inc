@@ -254,6 +254,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                               : min_auto_scratch_vgpr.value_or(0u);
     const uint16_t access_scratch_alignment =
         access_scratch_tuple_base_is_valid(site, 1u) ? 1u : 2u;
+    // Spill fallback must preserve this alignment too: an odd base changes
+    // the report layout and can move the saved address outside its spill.
     const uint16_t scratch_alignment = reuse_readback_for_report && target.requires_even_vgpr_tuples
                                            ? std::max<uint16_t>(access_scratch_alignment, 2u)
                                            : access_scratch_alignment;
@@ -301,7 +303,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
           }
         }
         const auto spill_scratch =
-            choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs);
+            choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs,
+                                      scratch_alignment);
         const auto private_limit = consan_address_free_private_limit(arch);
         if (spill_scratch && private_limit && saved_frame_base_sgpr && saved_scc_sgpr) {
           scratch_vgpr = *spill_scratch;
@@ -340,7 +343,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         }
       } else {
         const auto spill_scratch =
-            choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs);
+            choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs,
+                                      scratch_alignment);
         const auto private_limit = consan_address_free_private_limit(arch);
         if (spill_scratch && private_limit) {
           scratch_vgpr = *spill_scratch;
