@@ -2865,6 +2865,9 @@ TEST(Rcclwrap, UnrollFactor_AcceptsUsableUnroll)
 
 // Per-tier DDA caps: the arch table is the default, RCCL_DDA_* is the override.
 // Isolated because the env lookups behind these accessors are cached per process.
+// Pins the concrete gfx1250 AllReduce thresholds so that a silent zero-out
+// of the table row is caught. Values must match rcclArchThresholds_gfx1250
+// in tuning.cc.
 TEST(RcclDdaTierThresholds, Gfx1250_NoEnv_UsesArchTable)
 {
     RUN_ISOLATED_TEST_WITH_ENV(
@@ -2875,12 +2878,14 @@ TEST(RcclDdaTierThresholds, Gfx1250_NoEnv_UsesArchTable)
             InitDdaDecisionComm(*comm, "gfx1250", 8, 1, /*symmetricSupport=*/false);
             comm->archThresholds = rcclGetArchThresholds("gfx1250");
             ASSERT_NE(comm->archThresholds, nullptr);
+            // LL and LL128 ceilings for AR are both 32 MiB on gfx1250;
+            // VMM ceiling is 16 MiB (above this, Ring/CE takes over).
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce),
-                      comm->archThresholds->ddaLLMax[ncclFuncAllReduce]);
+                      32ULL * 1024 * 1024);
             EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce),
-                      comm->archThresholds->ddaLL128Max[ncclFuncAllReduce]);
+                      32ULL * 1024 * 1024);
             EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncAllReduce),
-                      comm->archThresholds->ddaVmmMax[ncclFuncAllReduce]);
+                      16ULL * 1024 * 1024);
         },
         {});
 }
