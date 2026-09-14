@@ -1097,14 +1097,18 @@ void GpuAgent::PreloadBlits() {
 
 void GpuAgent::ReleaseResources() {
   if (this->Enabled()) {
-    // Stop any PC sampling session left active by a client at shutdown time
-    // to prevent a shutdown race condition between GpuAgent's members and 
-    // the client's atexit-based cleanup.
-    for (pcs_data_t* pcs_data : {&pcs_hosttrap_data_, &pcs_stochastic_data_}) {
-      if (pcs_data->session != nullptr && pcs_data->session->isActive()) {
-        PcSamplingStop(*pcs_data->session);
-      }
-    }
+    // Any PC sampling session a client left active at shutdown time (e.g. racing its own
+    // atexit-based cleanup instead of calling hsa_ven_amd_pcs_stop() itself first) has already
+    // been stopped by PcsRuntime::StopActiveSessions(), called from
+    // PcsRuntime::DestroySingleton() via Runtime::Unload()'s earlier UnloadExtensions() call -
+    // well before this per-agent loop runs. Stopping it there instead of here is required, not
+    // just earlier: pcs_hosttrap_data_.session/pcs_stochastic_data_.session point into
+    // PcsRuntime's pc_sampling_ map, which DestroySingleton() also frees, so stopping from here
+    // would dereference an already-destroyed PcSamplingSession. Routing the stop through
+    // PcsRuntime also lets it take pc_sampling_lock_ - the same lock guarding every
+    // hsa_ven_amd_pcs_* entry point - so it can't race a concurrent client call into
+    // hsa_ven_amd_pcs_stop() on the same session and double-join its threads. See
+    // AIPROFSDK-1047.
 
     this->Disable();
 

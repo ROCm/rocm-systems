@@ -98,11 +98,24 @@ void PcsRuntime::DestroySingleton() {
     return;
   }
 
+  instance->StopActiveSessions();
+
   get_instance().store(NULL, std::memory_order_release);
   delete instance;
 }
 
 void ReleasePcSamplingRsrcs() { PcsRuntime::DestroySingleton(); }
+
+void PcsRuntime::StopActiveSessions() {
+  std::lock_guard<std::mutex> lock(pc_sampling_lock_);
+  for (auto& entry : pc_sampling_) {
+    PcSamplingSession& session = entry.second;
+    if (!session.isActive()) continue;
+
+    AMD::GpuAgentInt* gpu_agent = static_cast<AMD::GpuAgentInt*>(session.agent);
+    gpu_agent->PcSamplingStop(session);
+  }
+}
 
 bool PcsRuntime::SessionsActive() const {
   return pc_sampling_.size() > 0;
