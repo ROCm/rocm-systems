@@ -590,7 +590,7 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     }
     uint64_t wave_scratch = scratch_pool + scratch_slot * per_wave_size;
 
-    if (memory_ && memory_->resolve_host_ptr(wave_scratch, pkt.process_id) == nullptr &&
+    if (memory_ && !memory_->has_host_backing(wave_scratch, pkt.process_id, per_wave_size) &&
         scratch_allocator_) {
       // Size against the whole grid, not this XCD's share: every XCD of a
       // fanned-out dispatch shares the allocation. CDNA5 uses the complete
@@ -620,10 +620,10 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     util::Logger::cp([&](auto &os) {
       os << std::format(
           "SCRATCH wf{} pool={:#x} wave_scratch={:#x} per_wave={} priv_size={} "
-          "backing_addr={:#x} mapped={}",
+          "backing_addr={:#x} host_backed={}",
           wf->wf_id(), scratch_pool, wave_scratch, per_wave_size, pkt.private_segment_fixed_size,
           pkt.scratch_backing_addr,
-          memory_ ? (memory_->resolve_host_ptr(wave_scratch, pkt.process_id) != nullptr) : false);
+          memory_ ? memory_->has_host_backing(wave_scratch, pkt.process_id, per_wave_size) : false);
     });
 
     if (flat_scratch_init_sgpr >= 0) {

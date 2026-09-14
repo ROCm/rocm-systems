@@ -557,11 +557,12 @@ get_thread_status()
     return _v;
 }
 
-InstrumentMode&
+instrument_mode&
 get_instrumented()
 {
-    static auto _v = get_env(env_vars::INSTRUMENT_MODE, InstrumentMode::None);
-    return _v;
+    static auto s_instrumented =
+        get_env(env_vars::INSTRUMENT_MODE, instrument_mode::none);
+    return s_instrumented;
 }
 
 // ensure finalization is called
@@ -636,7 +637,7 @@ extern "C"
                               fmt::format(R"("{}", "{}", "{}")", a, b, c).c_str());
             return;
         }
-        else if(dl::get_inited() && dl::get_active())
+        if(dl::get_inited() && dl::get_active())
         {
             ROCPROFSYS_DL_LOG(2, "%s(%s) ignored :: already initialized and active\n",
                               __FUNCTION__,
@@ -644,20 +645,22 @@ extern "C"
             return;
         }
 
-        if(dl::get_instrumented() < dl::InstrumentMode::PythonProfile)
+        if(dl::get_instrumented() < dl::instrument_mode::python_profile)
+        {
             dl::rocprofsys_preinit();
+        }
 
-        bool _invoked = false;
-        ROCPROFSYS_DL_INVOKE_STATUS(_invoked, get_indirect().rocprofsys_init_f, a, b, c);
+        bool invoked = false;
+        ROCPROFSYS_DL_INVOKE_STATUS(invoked, get_indirect().rocprofsys_init_f, a, b, c);
 
-        if(_invoked)
+        if(invoked)
         {
             dl::get_active()           = true;
             dl::get_inited()           = true;
             dl::_rocprofsys_dl_verbose = dl::get_rocprofsys_dl_env();
 
-            if(dl::get_instrumented() >= dl::InstrumentMode::None &&
-               dl::get_instrumented() < dl::InstrumentMode::PythonProfile)
+            if(dl::get_instrumented() >= dl::instrument_mode::none &&
+               dl::get_instrumented() < dl::instrument_mode::python_profile)
             {
                 dl::rocprofsys_postinit((c) ? std::string{ c } : std::string{});
             }
@@ -672,16 +675,17 @@ extern "C"
                               __FUNCTION__);
             return;
         }
-        else if(dl::get_finied() && !dl::get_active())
+
+        if(dl::get_finied() && !dl::get_active())
         {
             ROCPROFSYS_DL_LOG(2, "%s() ignored :: already finalized but not active\n",
                               __FUNCTION__);
             return;
         }
 
-        bool _invoked = false;
-        ROCPROFSYS_DL_INVOKE_STATUS(_invoked, get_indirect().rocprofsys_finalize_f);
-        if(_invoked)
+        bool invoked = false;
+        ROCPROFSYS_DL_INVOKE_STATUS(invoked, get_indirect().rocprofsys_finalize_f);
+        if(invoked)
         {
             dl::get_active() = false;
             dl::get_finied() = true;
@@ -690,7 +694,10 @@ extern "C"
 
     void rocprofsys_push_trace(const char* name)
     {
-        if(!dl::get_active()) return;
+        if(!dl::get_active())
+        {
+            return;
+        }
         if(dl::get_thread_enabled())
         {
             ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_trace_f, name);
@@ -932,15 +939,15 @@ extern "C"
     void rocprofsys_set_instrumented(int _mode)
     {
         ROCPROFSYS_DL_LOG(2, "%s(%i)\n", __FUNCTION__, _mode);
-        auto _mode_v = static_cast<dl::InstrumentMode>(_mode);
-        if(_mode_v < dl::InstrumentMode::None || _mode_v >= dl::InstrumentMode::Last)
+        auto _mode_v = static_cast<dl::instrument_mode>(_mode);
+        if(_mode_v < dl::instrument_mode::none || _mode_v >= dl::instrument_mode::last)
         {
             ROCPROFSYS_DL_LOG(-127,
                               "%s(mode=%i) invoked with invalid instrumentation mode. "
                               "mode should be %i >= mode < %i\n",
                               __FUNCTION__, _mode,
-                              static_cast<int>(dl::InstrumentMode::None),
-                              static_cast<int>(dl::InstrumentMode::Last));
+                              static_cast<int>(dl::instrument_mode::none),
+                              static_cast<int>(dl::instrument_mode::last));
         }
         dl::get_instrumented() = _mode_v;
     }
@@ -1224,9 +1231,9 @@ rocprofsys_preinit()
 {
     switch(get_instrumented())
     {
-        case InstrumentMode::None:
-        case InstrumentMode::BinaryRewrite:
-        case InstrumentMode::ProcessCreate:
+        case instrument_mode::none:
+        case instrument_mode::binary_rewrite:
+        case instrument_mode::process_create:
         {
             auto _use_mpip = get_env(env_vars::USE_MPIP, false);
             auto _use_mpi  = get_env(env_vars::USE_MPI, _use_mpip);
@@ -1245,21 +1252,21 @@ rocprofsys_preinit()
             }
             break;
         }
-        case InstrumentMode::PythonProfile:
-        case InstrumentMode::Last: break;
+        case instrument_mode::python_profile:
+        case instrument_mode::last: break;
     }
 }
 
 void
 rocprofsys_postinit(std::string _exe)
 {
-    const InstrumentMode instrumentMode = get_instrumented();
+    const instrument_mode instrumentMode = get_instrumented();
 
     switch(instrumentMode)
     {
-        case InstrumentMode::None:
-        case InstrumentMode::BinaryRewrite:
-        case InstrumentMode::ProcessCreate:
+        case instrument_mode::none:
+        case instrument_mode::binary_rewrite:
+        case instrument_mode::process_create:
         {
             if(_exe.empty())
                 _exe = path::read_symlink(fmt::format("/proc/{}/exe", getpid()));
@@ -1271,12 +1278,12 @@ rocprofsys_postinit(std::string _exe)
                 rocprofsys_push_trace(path::filename(_exe).c_str());
             break;
         }
-        case InstrumentMode::PythonProfile:
+        case instrument_mode::python_profile:
         {
             rocprofsys_init_tooling();
             break;
         }
-        case InstrumentMode::Last: break;
+        case instrument_mode::last: break;
     }
 }
 
@@ -1288,7 +1295,7 @@ rocprofsys_preload()
 
     auto _link_map = get_link_map(nullptr);
     auto _instr_mode =
-        get_env(env_vars::INSTRUMENT_MODE, dl::InstrumentMode::BinaryRewrite);
+        get_env(env_vars::INSTRUMENT_MODE, dl::instrument_mode::binary_rewrite);
     for(const auto& itr : _link_map)
     {
         if(itr.find("librocprof-sys-rt.so") != std::string::npos ||
@@ -1327,20 +1334,20 @@ verify_instrumented_preloaded()
     // LD_PRELOAD
     switch(dl::get_instrumented())
     {
-        case dl::InstrumentMode::None:
-        case dl::InstrumentMode::ProcessCreate:
-        case dl::InstrumentMode::PythonProfile:
+        case dl::instrument_mode::none:
+        case dl::instrument_mode::process_create:
+        case dl::instrument_mode::python_profile:
         {
             return;
         }
-        case dl::InstrumentMode::BinaryRewrite:
+        case dl::instrument_mode::binary_rewrite:
         {
             break;
         }
-        case dl::InstrumentMode::Last:
+        case dl::instrument_mode::last:
         {
             throw std::runtime_error(
-                "Invalid instrumentation type: InstrumentMode::Last");
+                "Invalid instrumentation type: instrument_mode::last");
         }
     }
 
@@ -1489,7 +1496,7 @@ extern "C"
 
     //     auto _mode = get_env("ROCPROFSYS_MODE", get_default_mode());
     //     rocprofsys_init(_mode.c_str(),
-    //                     dl::get_instrumented() == dl::InstrumentMode::BinaryRewrite,
+    //                     dl::get_instrumented() == dl::instrument_mode::binary_rewrite,
     //                     argv[0]);
 
     //     return ret;
@@ -1573,7 +1580,7 @@ extern "C"
 
         auto _mode = get_env(rocprofsys::env_vars::MODE, get_default_mode());
         rocprofsys_init(_mode.c_str(),
-                        dl::get_instrumented() == dl::InstrumentMode::BinaryRewrite,
+                        dl::get_instrumented() == dl::instrument_mode::binary_rewrite,
                         argv[0]);
 
         const int ret = (*::rocprofsys::dl::main_real)(argc, argv, envp);
