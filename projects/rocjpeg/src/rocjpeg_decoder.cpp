@@ -260,7 +260,6 @@ RocJpegStatus RocJpegDecoder::FinalizeDecode(VASurfaceID current_surface_id, con
         is_roi_valid = false;
     }
 
-
     switch (decode_params->output_format) {
         case ROCJPEG_OUTPUT_NATIVE:
             // Copy the native decoded output buffers from interop memory directly to the destination buffers
@@ -998,17 +997,7 @@ RocJpegStatus RocJpegDecoder::GetYOutputFormat(HipInteropDeviceMem& hip_interop_
  * @brief Clears every batched-param scratch buffer at the start of a group.
  */
 void RocJpegDecoder::ResetBatchedParams() {
-    b_yuv444_rgb_.Reset();
-    b_yuv440_rgb_.Reset();
-    b_yuyv_rgb_.Reset();
-    b_nv12_rgb_.Reset();
-    b_yuv400_rgb_.Reset();
     b_rgba_rgb_.Reset();
-    b_yuv444_rgbp_.Reset();
-    b_yuv440_rgbp_.Reset();
-    b_yuyv_rgbp_.Reset();
-    b_nv12_rgbp_.Reset();
-    b_yuv400_rgbp_.Reset();
     b_yuyv_yuvp_.Reset();
     b_nv12_uvp_.Reset();
     b_yuyv_y_.Reset();
@@ -1020,17 +1009,7 @@ void RocJpegDecoder::ResetBatchedParams() {
  * @brief Uploads and launches one batched kernel per non-empty scratch buffer.
  */
 RocJpegStatus RocJpegDecoder::LaunchBatchedParams() {
-    CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuv444_rgb_,   ColorConvertYUV444ToRGBBatched));
-    CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuv440_rgb_,   ColorConvertYUV440ToRGBBatched));
-    CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuyv_rgb_,     ColorConvertYUYVToRGBBatched));
-    CHECK_ROCJPEG(LaunchBatchedBuffer(b_nv12_rgb_,     ColorConvertNV12ToRGBBatched));
-    CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuv400_rgb_,   ColorConvertYUV400ToRGBBatched));
     CHECK_ROCJPEG(LaunchBatchedBuffer(b_rgba_rgb_,     ColorConvertRGBAToRGBBatched));
-    CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuv444_rgbp_,  ColorConvertYUV444ToRGBPlanarBatched));
-    CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuv440_rgbp_,  ColorConvertYUV440ToRGBPlanarBatched));
-    CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuyv_rgbp_,    ColorConvertYUYVToRGBPlanarBatched));
-    CHECK_ROCJPEG(LaunchBatchedBuffer(b_nv12_rgbp_,    ColorConvertNV12ToRGBPlanarBatched));
-    CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuv400_rgbp_,  ColorConvertYUV400ToRGBPlanarBatched));
     CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuyv_yuvp_,    ConvertPackedYUYVToPlanarYUVBatched));
     CHECK_ROCJPEG(LaunchBatchedBuffer(b_nv12_uvp_,     ConvertInterleavedUVToPlanarUVBatched));
     CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuyv_y_,       ExtractYFromPackedYUYVBatched));
