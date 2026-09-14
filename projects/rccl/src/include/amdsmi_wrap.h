@@ -500,6 +500,12 @@ constexpr size_t kAmdSmiFabricInfo16GpuSize = 320;
 constexpr size_t kAmdSmiFabricState8GpuOffset = 208;
 constexpr size_t kAmdSmiFabricState16GpuOffset = 240;
 
+constexpr size_t kAmdSmiFabricV1PayloadEnd = 256;
+constexpr size_t kAmdSmiFabricV1PayloadBegin = kAmdSmiFabricV1PayloadEnd - 244;
+constexpr size_t kAmdSmiFabricReserved8GpuEnd = 284;
+constexpr size_t kAmdSmiFabricReserved16GpuEnd = 316;
+constexpr bool kAmdSmiFabricHeaderIsExtended = sizeof(amdsmi_fabric_info_t) > kAmdSmiFabricInfo16GpuSize;
+
 // Compat types (AMDSMI_FABRIC_DIRECT=0) declare amdsmi_fabric_info_v1_t here and
 // can assert the full v1 field layout. Installed amd_smi.h can expose
 // amdsmi_fabric_info_t without v1 (ROCm 7.14 telemetry headers); naming v1_t
@@ -512,16 +518,27 @@ constexpr bool amdSmiFabricLayoutIs8Gpu =
   offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState8GpuOffset &&
   offsetof(amdsmi_fabric_info_t, reserved) == 224;
 
-constexpr bool amdSmiFabricLayoutIs16Gpu =
-  sizeof(amdsmi_fabric_info_v1_t) == 244 && sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo16GpuSize &&
+constexpr bool amdSmiFabricV1WindowIsAt16GpuOffsets =
+  sizeof(amdsmi_fabric_info_v1_t) == 244 &&
   offsetof(amdsmi_fabric_info_v1_t, addr_mode) == kAmdSmiFabricState16GpuOffset - sizeof(uint32_t) &&
-  offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState16GpuOffset &&
-  offsetof(amdsmi_fabric_info_t, reserved) == 256;
+  offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState16GpuOffset;
 
-static_assert(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu, "unsupported amdsmi fabric layout");
+constexpr bool amdSmiFabricLayoutIs16Gpu =
+  amdSmiFabricV1WindowIsAt16GpuOffsets && sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo16GpuSize &&
+  offsetof(amdsmi_fabric_info_t, reserved) == kAmdSmiFabricV1PayloadEnd;
+
+constexpr bool amdSmiFabricLayoutIsExtendedUnion =
+  amdSmiFabricV1WindowIsAt16GpuOffsets && kAmdSmiFabricHeaderIsExtended &&
+  offsetof(amdsmi_fabric_info_t, reserved) >= kAmdSmiFabricV1PayloadEnd;
+
+static_assert(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu || amdSmiFabricLayoutIsExtendedUnion,
+              "unsupported amdsmi fabric layout");
 #else
 constexpr bool amdSmiFabricLayoutIs8Gpu = sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo8GpuSize;
 constexpr bool amdSmiFabricLayoutIs16Gpu = sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo16GpuSize;
+constexpr bool amdSmiFabricLayoutIsExtendedUnion = kAmdSmiFabricHeaderIsExtended;
+static_assert(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu || amdSmiFabricLayoutIsExtendedUnion,
+              "unsupported amdsmi fabric layout");
 #endif
 
 /*************************************************************************

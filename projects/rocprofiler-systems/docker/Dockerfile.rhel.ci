@@ -12,8 +12,8 @@ SHELL [ "/bin/bash", "-c" ]
 
 ENV PATH=/usr/lib64/openmpi/bin:/usr/local/bin:${PATH}
 
-# Dyninst needs GCC >= 10; RHEL 8 base is GCC 8 — use gcc-toolset on el8 only (install step below).
-ARG GCC_TOOLSET_VERSION=10
+# ROCm Systems Profiler needs GCC >= 11 for C++20; RHEL 8 base is GCC 8 — use gcc-toolset on el8 only (install step below).
+ARG GCC_TOOLSET_VERSION=11
 
 ARG EXTRA_PACKAGES=""
 ARG ELFUTILS_DOWNLOAD_VERSION="0.188"
@@ -77,7 +77,7 @@ RUN if [ -n "${GPU_TYPE}" ]; then \
             tail -1 | \
             sed 's/.*"name": "\([^"]*\)".*/\1/'); \
         test -n "${TARBALL}" || { echo "Error: no therock-dist-linux-${GPU_TYPE}-* tarball found" >&2; exit 1; }; \
-        VERSION=$(echo "${TARBALL}" | sed -nE 's/.*([0-9]+\.[0-9]+\.[0-9]+).*/\1/p'); \
+        VERSION=$(echo "${TARBALL}" | sed -nE 's/.*-([0-9]+\.[0-9]+\.[0-9]+).*/\1/p'); \
         test -n "${VERSION}" || { echo "Error: could not extract version from '${TARBALL}'" >&2; exit 1; }; \
         curl -fSL "https://nightly.repo.amd.com/rocm/core/tarball/${TARBALL}" \
             -o "/opt/rocm-${VERSION}-${GPU_TYPE}.tar.gz"; \

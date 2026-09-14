@@ -87,6 +87,10 @@ void run_vector_add(uint32_t dispatch_threads, VectorAddRunResult &result) {
   auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
+  // Vary only the CPU-side dispatch pool: pin a single engine worker so the
+  // comparison across dispatch_threads is not confounded by the config's
+  // one-partition-per-XCD default.
+  loaded.engine_config.num_threads = 1;
   soc->set_dispatch_threads(dispatch_threads);
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
@@ -377,6 +381,9 @@ std::optional<unsigned> run_fanout_with_primed_peer_caches(uint32_t acquire_scop
   auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
+  // Primes peer caches by hand and installs no partition policy, so pin one
+  // worker rather than taking the config's one-partition-per-XCD default.
+  loaded.engine_config.num_threads = 1;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());

@@ -5,32 +5,18 @@
 /// @brief Value-correctness check for VOP3P packed-16 sources fed by an inline
 /// FLOAT constant (encoding values 240..248).
 ///
-/// A VOP3P source is built 32 bits wide, so Operand::read_lane resolves an
-/// inline float constant through the single-precision table and 1.0 arrives as
-/// 0x3F800000. The packed halves then take the low 16 bits (0x0000) and the
-/// instruction adds / multiplies by ZERO. ROCm clang emits
-/// "v_pk_add_f16 v2, v2, 1.0 op_sel_hi:[1,0]" for half2 x + 1.0h: the cleared
-/// OPSEL_HI bit points the HIGH lane at the LOW half, which is only correct
-/// when the 16-bit pattern lives there, so both halves read 0 and the add is a
-/// no-op copy.
+/// Packed F16 narrows inline float constants into the low half: inline 1.0
+/// becomes 0x00003C00, so both results select that half with OPSEL. Packed BF16
+/// preserves the FP32 pattern, 0x3F800000, and selects the upper half instead.
+/// Treating BF16 like F16 makes correctly encoded instructions consume zero.
 ///
-/// The neighbouring vop3p_pk_binary_fp16_simd_correctness test only compares
-/// the SIMD fast path against the scalar body with VGPR sources, so it cannot
-/// see this; these cases assert ABSOLUTE results. Two controls pin the
-/// rewrite's boundaries: an inline INTEGER constant is not a float constant and
-/// stays as it is, and a 32-bit LITERAL whose value happens to land in 240..248
-/// must read back verbatim -- the rewrite keys off the instruction's
-/// source-selector field, which is 255 for a literal, not off the operand's
-/// encoding value, where an IsaOperand keeps the literal's value.
+/// These tests assert absolute results, including integer and literal controls.
+/// Literal values must remain verbatim even when their bits resemble an inline
+/// source selector; narrowing is keyed on the selector, not the operand value.
 ///
-/// The same 32-bit read feeds v_dot2_f32_{f16,bf16}, whose two packed halves
-/// are 16-bit even though the accumulator and the destination are f32, so the
-/// dot cases below assert the narrowing reaches those too.
-///
-/// The packed adds and the integer control run on RDNA4, except v_pk_add_bf16,
-/// which only decodes on CDNA5 (gfx1250). The dots run one case per body: RDNA4 carries
-/// its own generated dot2 bodies and every other target shares one template, so
-/// v_dot2_f32_f16 runs on RDNA4 and v_dot2_f32_bf16 on RDNA3.
+/// Packed BF16 cases run on CDNA5 (gfx1250). F16 and integer controls run on
+/// RDNA4, with additional CDNA coverage for 16-bit source operands. DOT cases
+/// exercise their separate inline handling on RDNA3 and RDNA4.
 
 #include "util/simd_test_hooks.h"
 
@@ -101,12 +87,15 @@ struct Fixture {
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
 
-  // Seeds every lane of v0 with the same packed pair, runs the encoding, and
+  // Seeds every lane of v0 through v2, runs the encoding, and
   // returns the per-lane destination.
-  std::array<uint32_t, WF_SIZE> run(const uint32_t *words, uint32_t src_value) {
+  std::array<uint32_t, WF_SIZE> run(const uint32_t *words, uint32_t src0_value,
+                                    uint32_t src1_value = 0, uint32_t src2_value = 0) {
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-      cu->write_vgpr(vb + kSrcVgpr, lane, src_value);
+      cu->write_vgpr(vb + kSrcVgpr, lane, src0_value);
+      cu->write_vgpr(vb + 1, lane, src1_value);
+      cu->write_vgpr(vb + 2, lane, src2_value);
       cu->write_vgpr(vb + kDstVgpr, lane, DST_SENTINEL);
     }
     wf->set_exec(kExec);
@@ -155,16 +144,120 @@ TEST(Vop3pPkInlineConstantCorrectness, AddF16InlineOneReachesBothHalves) {
   expect_all_active(out, 0x40004000u, "v_pk_add_f16 v4, v0, 1.0 op_sel_hi:[1,0]");
 }
 
-// Same shape for packed BF16, whose 1.0 is 0x3F80 rather than 0x3C00.
+// CDNA5 ISA section 7.7.2: BF16 selects the upper half of the FP32 inline
+// constant, whereas F16 selects the low half of a narrowed F16 constant.
 TEST(Vop3pPkInlineConstantCorrectness, AddBf16InlineOneReachesBothHalves) {
-  const auto words =
-      cdna5::build_vop3p(cdna5::kVPkAddBf16Vop3p,
-                         {.vdst = kDstVgpr, .src0 = 256, .src1 = kInlineOneFloat, .opsel_hi = 1});
+  const std::array<uint32_t, 2> words = cdna5::build_vop3p(
+      cdna5::kVPkAddBf16Vop3p,
+      {.vdst = kDstVgpr, .opsel = 2, .src0 = 256, .src1 = kInlineOneFloat, .opsel_hi = 3});
   Fixture fx(ROCJITSU_CODE_ARCH_CDNA5);
-  ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
-  const auto out = fx.run(words.data(), 0x3F803F80u);
-  expect_all_active(out, 0x40004000u, "v_pk_add_bf16 v4, v0, 1.0 op_sel_hi:[1,0]");
+  const std::array<uint32_t, WF_SIZE> out = fx.run(words.data(), 0x3F803F80u);
+  expect_all_active(out, 0x40004000u, "v_pk_add_bf16 v4, v0, 1.0 op_sel:[0,1]");
+}
+
+TEST(Vop3pPkInlineConstantCorrectness, FmaBf16InlineHalfSelectionForEachSource) {
+  // Both settings currently use scalar execution; retain coverage for future SIMD bodies.
+  ForceScalarGuard guard;
+  for (bool force_scalar : {false, true}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_NE(fx.wf, nullptr);
+    for (uint32_t source = 0; source < 3; ++source) {
+      for (uint8_t low_select : {0, 1}) {
+        for (uint8_t high_select : {0, 1}) {
+          SCOPED_TRACE(::testing::Message()
+                       << "scalar=" << force_scalar << " source=" << source
+                       << " low=" << unsigned(low_select) << " high=" << unsigned(high_select));
+          std::array<uint16_t, 3> sources = {256, 257, 258};
+          sources[source] = kInlineOneFloat;
+          const uint8_t high_mask = (7u & ~(1u << source)) | (high_select << source);
+          const std::array<uint32_t, 2> words = cdna5::build_vop3p(
+              cdna5::kVPkFmaBf16Vop3p, {.vdst = kDstVgpr,
+                                        .opsel = static_cast<uint8_t>(low_select << source),
+                                        .opsel_hi_2 = static_cast<uint8_t>(high_mask >> 2),
+                                        .src0 = sources[0],
+                                        .src1 = sources[1],
+                                        .src2 = sources[2],
+                                        .opsel_hi = static_cast<uint8_t>(high_mask & 3)});
+          // For v0=2, v1=3, v2=4, substituting 1 gives 7, 6, 7;
+          // substituting the zero low half gives 4, 4, 6.
+          constexpr std::array<uint16_t, 3> with_one = {0x40E0, 0x40C0, 0x40E0};
+          constexpr std::array<uint16_t, 3> with_zero = {0x4080, 0x4080, 0x40C0};
+          const uint32_t expected_low = low_select ? with_one[source] : with_zero[source];
+          const uint32_t expected_high = high_select ? with_one[source] : with_zero[source];
+          const std::array<uint32_t, WF_SIZE> out =
+              fx.run(words.data(), 0x40004000, 0x40404040, 0x40804080);
+          expect_all_active(out, expected_low | (expected_high << 16), "packed BF16 FMA inline");
+        }
+      }
+    }
+  }
+}
+
+TEST(Vop3pPkInlineConstantCorrectness, Bf16BinaryInlineHalfSelection) {
+  ForceScalarGuard guard;
+  struct Case {
+    uint16_t opcode;
+    uint32_t other;
+    uint16_t with_one;
+    uint16_t with_zero;
+  };
+  constexpr std::array<Case, 4> cases = {{
+      {cdna5::kVPkAddBf16Vop3p, 0x40004000, 0x4040, 0x4000},
+      {cdna5::kVPkMulBf16Vop3p, 0x40004000, 0x4000, 0x0000},
+      {cdna5::kVPkMinNumBf16Vop3p, 0x40004000, 0x3F80, 0x0000},
+      {cdna5::kVPkMaxNumBf16Vop3p, 0xC000C000, 0x3F80, 0x0000},
+  }};
+  for (bool force_scalar : {false, true}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_NE(fx.wf, nullptr);
+    for (const Case &test : cases) {
+      for (uint32_t source = 0; source < 2; ++source) {
+        for (uint8_t low_select : {0, 1}) {
+          for (uint8_t high_select : {0, 1}) {
+            SCOPED_TRACE(::testing::Message()
+                         << "opcode=" << test.opcode << " source=" << source
+                         << " low=" << unsigned(low_select) << " high=" << unsigned(high_select));
+            const std::array<uint32_t, 2> words = cdna5::build_vop3p(
+                test.opcode, {.vdst = kDstVgpr,
+                              .opsel = static_cast<uint8_t>(low_select << source),
+                              .src0 = source == 0 ? kInlineOneFloat : uint16_t{256},
+                              .src1 = source == 1 ? kInlineOneFloat : uint16_t{256},
+                              .opsel_hi = static_cast<uint8_t>((3u & ~(1u << source)) |
+                                                               (high_select << source))});
+            const uint32_t expected_low = low_select ? test.with_one : test.with_zero;
+            const uint32_t expected_high = high_select ? test.with_one : test.with_zero;
+            const std::array<uint32_t, WF_SIZE> out = fx.run(words.data(), test.other);
+            expect_all_active(out, expected_low | (expected_high << 16),
+                              "packed BF16 binary inline");
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(Vop3pPkInlineConstantCorrectness, FmaBf16RegisterAndLiteralPreserveBothHalves) {
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(fx.wf, nullptr);
+  for (uint8_t select : {0, 1}) {
+    for (uint16_t source : {uint16_t{258}, kLiteral}) {
+      const std::array<uint32_t, 2> base =
+          cdna5::build_vop3p(cdna5::kVPkFmaBf16Vop3p, {.vdst = kDstVgpr,
+                                                       .opsel = static_cast<uint8_t>(select << 2),
+                                                       .opsel_hi_2 = select,
+                                                       .src0 = 256,
+                                                       .src1 = 257,
+                                                       .src2 = source,
+                                                       .opsel_hi = 3});
+      const std::array<uint32_t, 3> words = {base[0], base[1], 0x3F804000};
+      const std::array<uint32_t, WF_SIZE> out =
+          fx.run(words.data(), 0x40004000, 0x40404040, 0x3F804000);
+      expect_all_active(out, select ? 0x40E040E0 : 0x41004100, "packed BF16 register/literal");
+    }
+  }
 }
 
 // A source declared 16 bits wide is a different case: CDNA2 builds every packed
@@ -221,6 +314,8 @@ TEST(Vop3pPkInlineConstantCorrectness, AddF16LiteralValuedLikeInlineConstantIsVe
   Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
+  // The literal is a half subnormal; preserve inputs for this source-decoding test.
+  fx.wf->set_mode_raw(0xf0);
   const auto out = fx.run(words.data(), 0x08000800u);
   expect_all_active(out, 0x08790879u, "v_pk_add_f16 v4, v0, lit(0xF2) op_sel_hi:[1,0]");
 }

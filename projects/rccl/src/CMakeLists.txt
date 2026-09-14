@@ -226,6 +226,7 @@ set(SRC_FILES
   algorithms/dda/ipc/ipc_init.h
   algorithms/dda/ipc/ipc_mem_handler.h
   include/ipcsocket.h
+  include/rccl_graph_gen.h
   include/kernel_config.h
   include/latency_profiler/CollTrace.h
   include/latency_profiler/CollTraceEvent.h

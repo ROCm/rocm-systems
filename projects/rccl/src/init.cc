@@ -139,6 +139,7 @@ NCCL_PARAM(MaxP2pPeers, "P2P_MAX_PEERS", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(SetCpuStackSize, "SET_CPU_STACK_SIZE", 1);
 NCCL_PARAM(MultiRankGpuEnable, "MULTI_RANK_GPU_ENABLE", 0);
 NCCL_PARAM(LaunchOrderImplicit, "LAUNCH_ORDER_IMPLICIT", NCCL_CONFIG_UNDEF_INT);
+NCCL_PARAM(P2pDisable, "P2P_DISABLE", 0);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
 extern int64_t ncclParamPatEnable();
