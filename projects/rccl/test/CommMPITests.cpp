@@ -1457,6 +1457,15 @@ protected:
         return MPIHelpers::getEnvParam<int>("NCCL_GRAPH_STREAM_ORDERING",
                                             NCCL_CONFIG_UNDEF_INT);
     }
+
+    // envConfigOverride() lets NCCL_GRAPH_MIXING_SUPPORT 0/1 overwrite graphUsageMode (0->0,
+    // 1->2), so the value set by applyConfig() would not stick.
+    static bool mixingEnvOverridesUsageMode()
+    {
+        const int mixing = MPIHelpers::getEnvParam<int>("NCCL_GRAPH_MIXING_SUPPORT",
+                                                        NCCL_CONFIG_UNDEF_INT);
+        return mixing == 0 || mixing == 1;
+    }
 };
 
 /**
@@ -1474,6 +1483,11 @@ TEST_F(GraphStreamOrderingConfigMPITest, ConfigOverrideAppliesGraphStreamOrderin
     {
         GTEST_SKIP() << "NCCL_GRAPH_STREAM_ORDERING must not be set; upstream NCCL "
                         "envConfigOverride() overrides explicit ncclConfig_t graphStreamOrdering.";
+    }
+    if(mixingEnvOverridesUsageMode())
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_MIXING_SUPPORT must not be set to 0 or 1; it overwrites "
+                        "the graphUsageMode this test configures.";
     }
 
     configured_graph_stream_ordering_ = 0;
@@ -1502,6 +1516,11 @@ TEST_F(GraphStreamOrderingConfigMPITest, IncompatibleMixingFallsBackToEnabledOrd
                         "graphStreamOrdering=1 before the incompatible-mixing fallback, which "
                         "would then not be exercised.";
     }
+    if(mixingEnvOverridesUsageMode())
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_MIXING_SUPPORT must not be set to 0 or 1; it overwrites "
+                        "the graphUsageMode this test configures.";
+    }
 
     configured_graph_stream_ordering_ = 0;
     configured_graph_usage_mode_      = 2;
@@ -1526,6 +1545,11 @@ TEST_F(GraphStreamOrderingConfigMPITest, EnvOverrideAppliesGraphStreamOrdering)
     if(expected != 0 && expected != 1)
     {
         GTEST_SKIP() << "NCCL_GRAPH_STREAM_ORDERING must be set to 0 or 1";
+    }
+    if(mixingEnvOverridesUsageMode())
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_MIXING_SUPPORT must not be set to 0 or 1; it overwrites "
+                        "the graphUsageMode this test configures.";
     }
 
     // Set config to the opposite value; upstream NCCL envConfigOverride() must win.
@@ -1560,6 +1584,11 @@ TEST_F(GraphStreamOrderingConfigMPITest, DisabledOrderingGraphCaptureSmoke)
     {
         GTEST_SKIP() << "NCCL_GRAPH_STREAM_ORDERING must be unset or 0; value 1 overrides config "
                         "graphStreamOrdering=0 in upstream NCCL.";
+    }
+    if(mixingEnvOverridesUsageMode())
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_MIXING_SUPPORT must not be set to 0 or 1; it overwrites "
+                        "the graphUsageMode this test configures.";
     }
 
     configured_graph_stream_ordering_ = 0;
