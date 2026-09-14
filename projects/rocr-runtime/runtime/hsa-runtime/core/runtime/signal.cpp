@@ -49,6 +49,11 @@
 #include <numeric>
 #include <vector>
 
+#if defined(__linux__)
+extern "C" void __lsan_register_root_region(const void*, size_t) __attribute__((weak));
+extern "C" void __lsan_unregister_root_region(const void*, size_t) __attribute__((weak));
+#endif
+
 #include "core/util/timer.h"
 #include "core/inc/runtime.h"
 #if defined(_WIN32)
@@ -70,7 +75,13 @@ void SharedSignalPool_t::clear() {
                   capacity - free_list_.size());
   }
 
-  for (auto& block : block_list_) free_()(block.first);
+  for (auto& block : block_list_) {
+#if defined(__linux__)
+    if (__lsan_register_root_region && __lsan_unregister_root_region)
+      __lsan_unregister_root_region(block.first, block.second * sizeof(SharedSignal));
+#endif
+    free_()(block.first);
+  }
   block_list_.clear();
   free_list_.clear();
 }
@@ -89,6 +100,15 @@ SharedSignal* SharedSignalPool_t::alloc() {
 
     MAKE_NAMED_SCOPE_GUARD(throwGuard, [&]() { free_()(block); });
     block_list_.push_back(std::make_pair(block, block_size_));
+#if defined(__linux__)
+    if (__lsan_register_root_region && __lsan_unregister_root_region) {
+      // Driver allocations contain the owning pointers to host Signal objects.
+      // LSan cannot discover this memory through its heap allocator. Clear
+      // unused slots so only live objects contribute roots.
+      memset(static_cast<void*>(block), 0, block_size_ * sizeof(SharedSignal));
+      __lsan_register_root_region(block, block_size_ * sizeof(SharedSignal));
+    }
+#endif
     throwGuard.Dismiss();
 
 
@@ -109,6 +129,10 @@ void SharedSignalPool_t::free(SharedSignal* ptr) {
   if (ptr == nullptr) return;
 
   ptr->~SharedSignal();
+#if defined(__linux__)
+  if (__lsan_register_root_region && __lsan_unregister_root_region)
+    memset(static_cast<void*>(ptr), 0, sizeof(SharedSignal));
+#endif
   std::lock_guard<HybridMutex> lock(lock_);
 
   ifdebug {

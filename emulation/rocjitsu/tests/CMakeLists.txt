@@ -2133,7 +2133,12 @@ if(HSA_RUNTIME64)
     if(RJ_INSTALL_TESTS)
         rj_install_test_target(hsa_init_test)
     endif()
-    foreach(_hsa_test IN ITEMS InitSucceeded GpuAgentFound)
+    set(_hsa_tests InitSucceeded GpuAgentFound)
+    if(RJ_ENABLE_ASAN AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_compile_definitions(hsa_init_test PRIVATE RJ_TEST_LEAK_SANITIZER=1)
+        list(APPEND _hsa_tests LiveSignalsRemainReachableForLeakSanitizer)
+    endif()
+    foreach(_hsa_test IN LISTS _hsa_tests)
         rj_add_test(
             NAME "HsaTest.${_hsa_test}"
             COMMAND

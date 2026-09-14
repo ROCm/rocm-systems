@@ -11,6 +11,10 @@
 
 #include <gtest/gtest.h>
 
+#if defined(RJ_TEST_LEAK_SANITIZER)
+#include <sanitizer/lsan_interface.h>
+#endif
+
 class HsaTest : public ::testing::Test {
 protected:
   static void SetUpTestSuite() {
@@ -36,6 +40,18 @@ TEST_F(HsaTest, GpuAgentFound) {
       &gpu_count);
   EXPECT_GE(gpu_count, 1) << "Expected at least one GPU agent";
 }
+
+#if defined(RJ_TEST_LEAK_SANITIZER)
+TEST_F(HsaTest, LiveSignalsRemainReachableForLeakSanitizer) {
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(0, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  // The signal handle points into driver-managed memory, which in turn owns
+  // the host Signal object. Both remain live during this leak check.
+  EXPECT_EQ(__lsan_do_recoverable_leak_check(), 0);
+  ASSERT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(__lsan_do_recoverable_leak_check(), 0);
+}
+#endif
 
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
