@@ -203,135 +203,178 @@ TEST(ParameterApiTests, Bind_PrivateKey_HandleReadsValue) {
 
 // ===========================================================================
 // Typed integer accessors
+//
+// ncclParamGetI8..GetU64 are all generated from one NCCL_PARAM_DEFINE_TYPED_GETTER macro in
+// src/param/c_api.cc, so these tests are parameterized over the same eight widths.
 // ===========================================================================
 
-TEST(ParameterApiTests, GetI32_MatchingType_ReturnsValue) {
+namespace {
+
+// One row per width for the typed-getter suite. Omitting a row for a type listed in ParamIntTypes
+// is a compile error, so a width cannot silently drop out of the suite.
+template <typename T>
+struct TypedParamTraits;
+
+// kSample values are distinct per width and mid-range on purpose: an all-ones or max-value sample
+// would also satisfy the wrap/overflow tests below, hiding a getter hardwired to those bits.
+template <>
+struct TypedParamTraits<int8_t> {
+  static constexpr const char* kName = "I8";
+  static constexpr const char* kKey = "NCCL_TEST_PARAM_I8";
+  static constexpr const char* kCrossKey = "NCCL_TEST_PARAM_I16";
+  static constexpr const char* kSampleText = "97";
+  static constexpr int8_t kSample = 97;
+  static ncclResult_t Get(ncclParamHandle_t h, int8_t* out) { return ncclParamGetI8(h, out); }
+};
+
+template <>
+struct TypedParamTraits<int16_t> {
+  static constexpr const char* kName = "I16";
+  static constexpr const char* kKey = "NCCL_TEST_PARAM_I16";
+  static constexpr const char* kCrossKey = "NCCL_TEST_PARAM_I32";
+  static constexpr const char* kSampleText = "12345";
+  static constexpr int16_t kSample = 12345;
+  static ncclResult_t Get(ncclParamHandle_t h, int16_t* out) { return ncclParamGetI16(h, out); }
+};
+
+template <>
+struct TypedParamTraits<int32_t> {
+  static constexpr const char* kName = "I32";
+  static constexpr const char* kKey = "NCCL_TEST_PARAM_I32";
+  static constexpr const char* kCrossKey = "NCCL_TEST_PARAM_I8";
+  static constexpr const char* kSampleText = "1234567";
+  static constexpr int32_t kSample = 1234567;
+  static ncclResult_t Get(ncclParamHandle_t h, int32_t* out) { return ncclParamGetI32(h, out); }
+};
+
+template <>
+struct TypedParamTraits<int64_t> {
+  static constexpr const char* kName = "I64";
+  static constexpr const char* kKey = "NCCL_TEST_PARAM_I64";
+  static constexpr const char* kCrossKey = "NCCL_TEST_PARAM_I32";
+  static constexpr const char* kSampleText = "9000000000";
+  static constexpr int64_t kSample = 9000000000LL;
+  static ncclResult_t Get(ncclParamHandle_t h, int64_t* out) { return ncclParamGetI64(h, out); }
+};
+
+template <>
+struct TypedParamTraits<uint8_t> {
+  static constexpr const char* kName = "U8";
+  static constexpr const char* kKey = "NCCL_TEST_PARAM_U8";
+  static constexpr const char* kCrossKey = "NCCL_TEST_PARAM_U16";
+  static constexpr const char* kSampleText = "200";
+  static constexpr uint8_t kSample = 200;
+  static ncclResult_t Get(ncclParamHandle_t h, uint8_t* out) { return ncclParamGetU8(h, out); }
+};
+
+template <>
+struct TypedParamTraits<uint16_t> {
+  static constexpr const char* kName = "U16";
+  static constexpr const char* kKey = "NCCL_TEST_PARAM_U16";
+  static constexpr const char* kCrossKey = "NCCL_TEST_PARAM_U32";
+  static constexpr const char* kSampleText = "40000";
+  static constexpr uint16_t kSample = 40000;
+  static ncclResult_t Get(ncclParamHandle_t h, uint16_t* out) { return ncclParamGetU16(h, out); }
+};
+
+template <>
+struct TypedParamTraits<uint32_t> {
+  static constexpr const char* kName = "U32";
+  static constexpr const char* kKey = "NCCL_TEST_PARAM_U32";
+  static constexpr const char* kCrossKey = "NCCL_TEST_PARAM_U8";
+  static constexpr const char* kSampleText = "4000000000";
+  static constexpr uint32_t kSample = 4000000000u;
+  static ncclResult_t Get(ncclParamHandle_t h, uint32_t* out) { return ncclParamGetU32(h, out); }
+};
+
+template <>
+struct TypedParamTraits<uint64_t> {
+  static constexpr const char* kName = "U64";
+  static constexpr const char* kKey = "NCCL_TEST_PARAM_U64";
+  static constexpr const char* kCrossKey = "NCCL_TEST_PARAM_U32";
+  static constexpr const char* kSampleText = "12297829382473034410";
+  static constexpr uint64_t kSample = 12297829382473034410ULL;
+  static ncclResult_t Get(ncclParamHandle_t h, uint64_t* out) { return ncclParamGetU64(h, out); }
+};
+
+} // namespace
+
+template <typename T>
+class ParameterApiTypedTests : public ::testing::Test {};
+
+using ParamIntTypes =
+    ::testing::Types<int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t>;
+TYPED_TEST_SUITE(ParameterApiTypedTests, ParamIntTypes);
+
+TYPED_TEST(ParameterApiTypedTests, MatchingType_ReturnsValue) {
+  using Traits = TypedParamTraits<TypeParam>;
   RUN_ISOLATED_TEST_WITH_ENV(
-      "GetI32_MatchingType",
+      std::string("GetTyped_MatchingType_") + Traits::kName,
       []() {
         ncclParamHandle_t h = nullptr;
-        ASSERT_EQ(ncclParamBind(&h, kI32Key), ncclSuccess);
-        int32_t v = 0;
-        ASSERT_EQ(ncclParamGetI32(h, &v), ncclSuccess);
-        ASSERT_EQ(v, 42);
+        ASSERT_EQ(ncclParamBind(&h, Traits::kKey), ncclSuccess);
+        TypeParam v = 0;
+        ASSERT_EQ(Traits::Get(h, &v), ncclSuccess);
+        ASSERT_EQ(v, Traits::kSample);
       },
-      {{"NCCL_TEST_PARAM_I32", "42"}});
-}
-
-TEST(ParameterApiTests, GetI32_Unset_ReturnsDefault) {
-  RUN_ISOLATED_TEST("GetI32_Unset_ReturnsDefault", []() {
-    ncclParamHandle_t h = nullptr;
-    ASSERT_EQ(ncclParamBind(&h, kI32Key), ncclSuccess);
-    int32_t v = 0;
-    ASSERT_EQ(ncclParamGetI32(h, &v), ncclSuccess);
-    ASSERT_EQ(v, 7) << "default value from DEFINE_NCCL_PARAM";
-  });
-}
-
-// A handle bound to a bool param cannot be read as I32 (typeId guard).
-TEST(ParameterApiTests, GetI32_TypeMismatch_ReturnsInvalidArg) {
-  RUN_ISOLATED_TEST("GetI32_TypeMismatch", []() {
-    ncclParamHandle_t h = nullptr;
-    ASSERT_EQ(ncclParamBind(&h, kDumpAllKey), ncclSuccess); // bool param
-    int32_t v = 0;
-    ASSERT_EQ(ncclParamGetI32(h, &v), ncclInvalidArgument);
-  });
-}
-
-// Reading an I8 param through the I32 accessor is a typeId mismatch.
-TEST(ParameterApiTests, GetI32_CrossWidth_ReturnsInvalidArg) {
-  RUN_ISOLATED_TEST("GetI32_CrossWidth", []() {
-    ncclParamHandle_t h = nullptr;
-    ASSERT_EQ(ncclParamBind(&h, kI8Key), ncclSuccess);
-    int32_t v = 0;
-    ASSERT_EQ(ncclParamGetI32(h, &v), ncclInvalidArgument);
-  });
-}
-
-TEST(ParameterApiTests, GetI32_NullArgs) {
-  RUN_ISOLATED_TEST("GetI32_NullArgs", []() {
-    ncclParamHandle_t h = nullptr;
-    ASSERT_EQ(ncclParamBind(&h, kI32Key), ncclSuccess);
-    int32_t v = 0;
-    ASSERT_EQ(ncclParamGetI32(nullptr, &v), ncclInvalidArgument);
-    ASSERT_EQ(ncclParamGetI32(h, nullptr), ncclInvalidArgument);
-  });
-}
-
-TEST(ParameterApiTests, GetU32_MatchingType_ReturnsValue) {
-  RUN_ISOLATED_TEST_WITH_ENV(
-      "GetU32_MatchingType",
-      []() {
-        ncclParamHandle_t h = nullptr;
-        ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_U32"), ncclSuccess);
-        uint32_t v = 0;
-        ASSERT_EQ(ncclParamGetU32(h, &v), ncclSuccess);
-        ASSERT_EQ(v, 4000000000u);
-      },
-      {{"NCCL_TEST_PARAM_U32", "4000000000"}});
-}
-
-TEST(ParameterApiTests, GetI64_MatchingType_ReturnsValue) {
-  RUN_ISOLATED_TEST_WITH_ENV(
-      "GetI64_MatchingType",
-      []() {
-        ncclParamHandle_t h = nullptr;
-        ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_I64"), ncclSuccess);
-        int64_t v = 0;
-        ASSERT_EQ(ncclParamGetI64(h, &v), ncclSuccess);
-        ASSERT_EQ(v, static_cast<int64_t>(9000000000LL));
-      },
-      {{"NCCL_TEST_PARAM_I64", "9000000000"}});
-}
-
-TEST(ParameterApiTests, GetI16_MatchingType_ReturnsValue) {
-  RUN_ISOLATED_TEST_WITH_ENV(
-      "GetI16_MatchingType",
-      []() {
-        ncclParamHandle_t h = nullptr;
-        ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_I16"), ncclSuccess);
-        int16_t v = 0;
-        ASSERT_EQ(ncclParamGetI16(h, &v), ncclSuccess);
-        ASSERT_EQ(v, static_cast<int16_t>(32767));
-      },
-      {{"NCCL_TEST_PARAM_I16", "32767"}});
+      {{Traits::kKey, Traits::kSampleText}});
 }
 
 // clearVariable, not plain RUN_ISOLATED_TEST: the child inherits the parent environment, so an
-// exported NCCL_TEST_PARAM_I16 would otherwise turn "unset" into whatever the developer had set.
-TEST(ParameterApiTests, GetI16_Unset_ReturnsDefault) {
+// exported key would otherwise turn "unset" into whatever the developer happened to have set.
+TYPED_TEST(ParameterApiTypedTests, Unset_ReturnsDefault) {
+  using Traits = TypedParamTraits<TypeParam>;
   RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig(
-                         "GetI16_Unset_ReturnsDefault",
+                         std::string("GetTyped_Unset_") + Traits::kName,
                          []() {
                            ncclParamHandle_t h = nullptr;
-                           ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_I16"), ncclSuccess);
-                           int16_t v = 0;
-                           ASSERT_EQ(ncclParamGetI16(h, &v), ncclSuccess);
-                           ASSERT_EQ(v, 7) << "default value from DEFINE_NCCL_PARAM";
+                           ASSERT_EQ(ncclParamBind(&h, Traits::kKey), ncclSuccess);
+                           TypeParam v = 0;
+                           ASSERT_EQ(Traits::Get(h, &v), ncclSuccess);
+                           ASSERT_EQ(v, static_cast<TypeParam>(7))
+                               << "default value from DEFINE_NCCL_PARAM";
                          })
-                         .clearVariable("NCCL_TEST_PARAM_I16"));
+                         .clearVariable(Traits::kKey));
 }
 
-TEST(ParameterApiTests, GetU16_MatchingType_ReturnsValue) {
-  RUN_ISOLATED_TEST_WITH_ENV(
-      "GetU16_MatchingType",
-      []() {
-        ncclParamHandle_t h = nullptr;
-        ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_U16"), ncclSuccess);
-        uint16_t v = 0;
-        ASSERT_EQ(ncclParamGetU16(h, &v), ncclSuccess);
-        ASSERT_EQ(v, static_cast<uint16_t>(65535));
-      },
-        ASSERT_EQ(v, static_cast<uint16_t>(40000));
-        ASSERT_EQ(v, static_cast<uint16_t>(40000));
-        ASSERT_EQ(v, static_cast<uint16_t>(40000));
-      },
-      {{"NCCL_TEST_PARAM_U16", "40000"}});
+TYPED_TEST(ParameterApiTypedTests, NullArgs) {
+  using Traits = TypedParamTraits<TypeParam>;
+  RUN_ISOLATED_TEST(std::string("GetTyped_NullArgs_") + Traits::kName, []() {
+    ncclParamHandle_t h = nullptr;
+    ASSERT_EQ(ncclParamBind(&h, Traits::kKey), ncclSuccess);
+    TypeParam v = 0;
+    ASSERT_EQ(Traits::Get(nullptr, &v), ncclInvalidArgument);
+    ASSERT_EQ(Traits::Get(h, nullptr), ncclInvalidArgument);
+  });
 }
 
-TEST(ParameterApiTests, GetU64_MatchingType_ReturnsValue) {
+// A handle bound to a bool param cannot be read through any integer getter (typeId guard).
+TYPED_TEST(ParameterApiTypedTests, TypeMismatch_ReturnsInvalidArg) {
+  using Traits = TypedParamTraits<TypeParam>;
+  RUN_ISOLATED_TEST(std::string("GetTyped_TypeMismatch_") + Traits::kName, []() {
+    ncclParamHandle_t h = nullptr;
+    ASSERT_EQ(ncclParamBind(&h, kDumpAllKey), ncclSuccess); // bool param
+    TypeParam v = 0;
+    ASSERT_EQ(Traits::Get(h, &v), ncclInvalidArgument);
+  });
+}
+
+// Reading a param of a different width through this getter is a typeId mismatch.
+TYPED_TEST(ParameterApiTypedTests, CrossWidth_ReturnsInvalidArg) {
+  using Traits = TypedParamTraits<TypeParam>;
+  RUN_ISOLATED_TEST(std::string("GetTyped_CrossWidth_") + Traits::kName, []() {
+    ncclParamHandle_t h = nullptr;
+    ASSERT_EQ(ncclParamBind(&h, Traits::kCrossKey), ncclSuccess);
+    TypeParam v = 0;
+    ASSERT_EQ(Traits::Get(h, &v), ncclInvalidArgument);
+  });
+}
+
+// Kept standalone: the typed MatchingType case deliberately uses a mid-range U64 sample, so the
+// ULLONG_MAX round-trip would otherwise no longer be pinned anywhere.
+TEST(ParameterApiTests, GetU64_Max_RoundTripsExactly) {
   RUN_ISOLATED_TEST_WITH_ENV(
-      "GetU64_MatchingType",
+      "GetU64_Max",
       []() {
         ncclParamHandle_t h = nullptr;
         ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_U64"), ncclSuccess);
