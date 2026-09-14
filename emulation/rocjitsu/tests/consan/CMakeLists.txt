@@ -5099,7 +5099,10 @@ function(rj_add_consan_hip_tests)
                 FILTER "${RJ_CONSAN_LDS_MOI_AUTO_REPEATED_DISPATCH_TEST}"
                 TIMEOUT 30
                 PASS_REGEX
-                    "committed_records=8.*dispatch_tokens=4/2048.*record_replay_flags=0x0"
+                    "committed_records=2.*dispatch_tokens=1/2048.*record_replay_flags=0x0"
+                ALSO_PASS_REGEX
+                    "completed_epochs=4 discarded_epochs=0"
+                    "visible_evidence=8 dynamic_incomplete=0"
                 FAIL_REGEX "record_replay_bank_saturated=true"
                 ENVIRONMENT
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
