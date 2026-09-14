@@ -58,11 +58,12 @@ TEST(RmaSegmentMathTest, SignalAtomicMustBeAlignedWithinSegment)
     EXPECT_FALSE(ncclRmaSignalOffsetValid(/*signalOff=*/8, /*segmentEnd=*/12));
 }
 
-TEST(RmaSegmentMathTest, WorkRequestDepthsCoverMaximumChains)
+TEST(RmaSegmentMathTest, HandleReportsSegmentCount)
 {
-    EXPECT_EQ(NCCL_RMA_MAX_DATA_WRS, 2 * NCCL_RMA_MAX_SEGMENTS);
-    EXPECT_EQ(NCCL_RMA_MAX_SIGNAL_WRS, NCCL_RMA_MAX_DATA_WRS + 1);
-    EXPECT_EQ(NCCL_RMA_MAX_FLUSH_WRS, NCCL_RMA_MAX_SEGMENTS);
+    EXPECT_EQ(ncclRmaHandleNSegments(nullptr), 0);
+    ncclRmaIbProxyMrHandle handle{};
+    handle.nSegments = 4;
+    EXPECT_EQ(ncclRmaHandleNSegments(&handle), 4);
 }
 
 namespace {
@@ -100,16 +101,10 @@ TEST(RmaSegmentMathTest, PrefixPostCountsWrsBeforeBadWr)
 
 TEST(RmaSegmentMathTest, PrefixPostKeepsRequestOnlyWhenSomethingPosted)
 {
-    EXPECT_TRUE(ncclRmaPostedWrCount(nullptr, 0, nullptr, 0) == 0);
-    FakeWr wr[2];
-    wr[0] = {0, &wr[1]};
-    wr[1] = {1, nullptr};
-    const int postedPrefix = Posted(&wr[0], 2, &wr[1]);
-    const int postedNone = Posted(&wr[0], 2, &wr[0]);
-    EXPECT_EQ(postedPrefix, 1);
-    EXPECT_EQ(postedNone, 0);
-    EXPECT_TRUE(postedPrefix > 0);
-    EXPECT_FALSE(postedNone > 0);
+    EXPECT_EQ(ncclRmaPostedRequestStatus(ncclSystemError, /*posted=*/1), ncclSuccess);
+    EXPECT_EQ(ncclRmaPostedRequestStatus(ncclSystemError, /*posted=*/0), ncclSystemError);
+    EXPECT_EQ(ncclRmaPostedRequestStatus(ncclSuccess, /*posted=*/0), ncclSuccess);
+    EXPECT_EQ(ncclRmaPostedRequestStatus(ncclSuccess, /*posted=*/2), ncclSuccess);
 }
 
 // A failed handle calloc must still reach the status AllGather. memcpy of
