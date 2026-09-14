@@ -397,7 +397,7 @@ TEST(ConSanMoiAutoReportPlan, InlineLdsUsesPerLayoutDispatchBanking) {
   const uint32_t expected_dispatch_banks =
       consan_moi_inline_exact_dispatch_bank_count_for_lds(kFullLdsBytes);
   EXPECT_EQ(plan.layout.inline_exact_dispatch_bank_count, expected_dispatch_banks);
-  EXPECT_EQ(expected_dispatch_banks, 32u);
+  EXPECT_EQ(expected_dispatch_banks, 64u);
   EXPECT_EQ(plan.layout.exact_shadow_entry_capacity, kFullLdsBytes * expected_dispatch_banks);
   EXPECT_LE(plan.required_bytes, kConSanMoiOrdinaryAutoReportBufferCeilingBytes);
 }
@@ -433,7 +433,7 @@ TEST(ConSanMoiAutoReportPlan, InlineCanonicalLayoutRoundTripsDispatchBankedLayou
                                                    plan.required_bytes)
                    .valid);
   corrupt = *candidate_layout;
-  corrupt.inline_exact_dispatch_bank_count /= 2u;
+  corrupt.inline_exact_dispatch_bank_count = 3u;
   EXPECT_FALSE(revalidate_consan_moi_report_layout(corrupt, ConSanMoiEngine::InlineShadow,
                                                    plan.required_bytes)
                    .valid);

@@ -1007,15 +1007,18 @@ function(rj_add_consan_device_conformance_cases)
                     PASS_REGEX "raw_dispatch_ids=1,1 same_kernel=1 same_kernarg=0 round=1"
                 )
                 if(_mode_value STREQUAL "record-replay")
-                    # Four submissions must remain four retained launch
-                    # identities. The former queue-blind path reported one.
+                    # Epoch recycling analyzes each synchronized round before
+                    # clearing its evidence. Each round must retain both queue
+                    # identities, and all four rounds must be completed.
                     list(
                         APPEND _correct_pass_regex_args
-                        ALSO_PASS_REGEX "dispatch_tokens=4/"
+                        ALSO_PASS_REGEX "dispatch_tokens=2/"
+                        ALSO_PASS_REGEX "completed_epochs=4"
                     )
                     list(
                         APPEND _incorrect_pass_regex_args
-                        ALSO_PASS_REGEX "dispatch_tokens=4/"
+                        ALSO_PASS_REGEX "dispatch_tokens=2/"
+                        ALSO_PASS_REGEX "completed_epochs=4"
                     )
                 endif()
             endif()
@@ -1046,14 +1049,37 @@ function(rj_add_consan_device_conformance_cases)
                     PASS_REGEX "${_hip_integration_regex}"
                 )
                 if(_mode_value STREQUAL "record-replay")
+                    set(_epoch_dispatch_count ${_hip_launch_count})
+                    set(_completed_epoch_count)
+                    if(_workload_name STREQUAL "GraphReplay")
+                        # Three stream synchronizations each retire the two
+                        # graph launches performed since the prior checkpoint.
+                        set(_epoch_dispatch_count 2)
+                        set(_completed_epoch_count 3)
+                    elseif(_workload_name STREQUAL "GraphParameterUpdate")
+                        # Each of the two synchronized graph launches is its
+                        # own analyzed and recycled epoch.
+                        set(_epoch_dispatch_count 1)
+                        set(_completed_epoch_count 2)
+                    endif()
                     list(
                         APPEND _correct_pass_regex_args
-                        ALSO_PASS_REGEX "dispatch_tokens=${_hip_launch_count}/"
+                        ALSO_PASS_REGEX "dispatch_tokens=${_epoch_dispatch_count}/"
                     )
                     list(
                         APPEND _incorrect_pass_regex_args
-                        ALSO_PASS_REGEX "dispatch_tokens=${_hip_launch_count}/"
+                        ALSO_PASS_REGEX "dispatch_tokens=${_epoch_dispatch_count}/"
                     )
+                    if(_completed_epoch_count)
+                        list(
+                            APPEND _correct_pass_regex_args
+                            ALSO_PASS_REGEX "completed_epochs=${_completed_epoch_count}"
+                        )
+                        list(
+                            APPEND _incorrect_pass_regex_args
+                            ALSO_PASS_REGEX "completed_epochs=${_completed_epoch_count}"
+                        )
+                    endif()
                 endif()
             endif()
 
