@@ -179,15 +179,14 @@ void rcclSetP2pNetChunkSize(struct ncclComm*, int& sz) { sz = 1 << 17; }
 size_t rcclHierarchicalTempBufferSize(int, bool, bool) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclHierarchicalTempBufferSize");
 }
-bool rcclCanUseWarpSpeedAuto(struct ncclComm*, int) {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclCanUseWarpSpeedAuto");
-}
+// init.cc consults both helpers when ENABLE_WARP_SPEED is inherited from the
+// parent RCCL build. Keep the production defaults: force-enable is off and an
+// otherwise-unconfigured host-only communicator is not auto-eligible.
+bool rcclCanUseWarpSpeedAuto(struct ncclComm*, int) { return false; }
 ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCommSetP2pShiftSize");
 }
-int64_t rcclParamWarpSpeedForceEnable() {                      // rccl_wrap.cc:78
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclParamWarpSpeedForceEnable");
-}
+int64_t rcclParamWarpSpeedForceEnable() { return 0; }          // rccl_wrap.cc:78 production default
 int64_t rcclParamHierarchicalAllGather() {                     // rccl_wrap.cc:704
   FailLoudUnfaked("rccl_wrap_fakes", "rcclParamHierarchicalAllGather");
 }

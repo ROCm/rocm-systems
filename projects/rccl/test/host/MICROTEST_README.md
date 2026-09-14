@@ -40,6 +40,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `FreshRegistration*`.
   - `rma/rma_proxy_progress.cc` (`RMA_PROXY_PROGRESS_CC_PATH`, from
     `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
+  - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suite
+    `GroupEndInternalTest.*`.
   - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
     (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
     `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
@@ -53,6 +55,23 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     every header declaring a renamed name must precede it and the undef half
     must immediately follow the unit -- see `fakes/libc_seam.h:9-19`) instead
     of the shared `fakes/nccl_fakes.cc` the other units in this binary use.
+  - `rccl_wrap.cc` (`WRAP_CC_PATH`, from `wrap-test.cc`); suites
+    `WrapMicrotest.*`, `WrapMicrotestIsolated.*`. Shared dependency seams live
+    in their production-TU owners (`ce_fakes.cc`, `dev_runtime_fakes.cc`,
+    `sym_kernels_fakes.cc`, etc.); `wrap_fakes.cc` contains only link-closure
+    seams without an existing shared owner. Real
+    `archinfo.cc` is compiled alongside it for `IsArchMatch`
+    (`rcclIsArchSupportedForFunc` et al. need the real prefix-match
+    behaviour) -- the same real-oracle-TU technique
+    `rccl-UnitTestsMicroInit` uses, with `--gc-sections` dropping the deep
+    deps it pulls in. **Do not add an `IsArchMatch` fake to this binary**:
+    it is a duplicate-symbol error against that TU. `p2p_fakes.cc`'s
+    former hardcoded-false stub was removed for exactly this reason.
+    Every function is now covered; see `wrap-test.cc`'s header comment for
+    the per-function breakdown. One deliberate, permanent exclusion: the
+    `#ifdef ENABLE_WARP_SPEED` cluster (~10 functions) is compiled out of
+    this binary entirely, so no seam can reach it without changing the
+    binary's own build configuration.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file
@@ -182,8 +201,15 @@ target instead produces the same symbol faked three times in three files, each
 slightly weaker than the others, which is what `rccl::Recorder` and `ncclGetEnv`
 had become before this map existed.
 
+`src/rccl_wrap.cc` has two rows because it is both a unit under test
+(`rccl-UnitTestsMicro` compiles it and fakes its dependencies) and a
+dependency of another unit (`rccl-UnitTestsMicroEnqueue` doesn't compile it,
+so it fakes the file's own entry points). The two never define the same
+symbol.
+
 | Production TU | Fakes file |
 |---|---|
+| `src/algorithms/dda/*.cc` | `fakes/dda_fakes.cc` |
 | `src/bootstrap.cc` | `fakes/bootstrap_stubs.cc` |
 | `src/ce_coll.cc` | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
@@ -205,7 +231,8 @@ had become before this map existed.
 | `src/plugin/env.cc` | `fakes/env_plugin_fakes.cc` |
 | `src/plugin/gin.cc`, `src/gin/gin_host.cc` | `fakes/gin_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
-| `src/rccl_wrap.cc` | `fakes/rccl_wrap_fakes.cc` |
+| `src/rccl_wrap.cc`'s own public entry points (targets that don't compile the real file, e.g. `rccl-UnitTestsMicroEnqueue`) | `fakes/rccl_wrap_fakes.cc` |
+| `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
 | `src/register/*.cc` | `fakes/register_stubs.cc` |
 | `src/scheduler/*.cc` and the deep launch paths | `fakes/sched_stubs.cc` |
@@ -230,7 +257,7 @@ and that default silently selects which production arm runs. Driving a seam mean
 marker. The marker travels with the declaration rather than a block comment so it cannot drift from
 what it describes. Call *counters* do not take the marker unless the counter itself is unread.
 
-Four things do NOT follow the TU-per-file rule, deliberately:
+Five things do NOT follow the TU-per-file rule, deliberately:
 
 - `fakes/collective_stubs.cc` is a fail-loud floor for the collective *launch*
   pipeline (`ncclLaunchKernel` and friends), which `enqueue.cc` itself defines.
@@ -242,6 +269,10 @@ Four things do NOT follow the TU-per-file rule, deliberately:
   `ncclOsSetAffinity` entries. It cannot link `os_fakes.cc` alongside them, so
   the `rccl-UnitTestsMicro` target keeps that pair target-shaped; every other
   target gets them from `os_fakes.cc`.
+- `transport_stubs.cc` and `collective_stubs.cc` both provide eight fail-loud
+  collective-transport setup symbols. `rccl-UnitTestsMicro` needs both floors,
+  so `RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR` omits the transport copy in
+  that target to avoid fakes-versus-fakes duplicate definitions.
 - A handful of `NCCL_PARAM` bodies stay in `fakes/init_fakes.cc` rather than
   their owner's fakes file, because that file links into a target whose unit
   under test defines the same symbol (`ncclParamLaunchOrderImplicit` versus

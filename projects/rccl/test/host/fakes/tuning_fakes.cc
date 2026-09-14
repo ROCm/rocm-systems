@@ -31,8 +31,8 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
   return g_topoGetAlgoTime(comm, coll, algorithm, protocol, nBytes, numPipeOps, time);
 }
 
-int64_t g_paramMinNchannels = 0;
-int64_t g_paramMaxNchannels = MAXCHANNELS;
+int64_t g_paramMinNchannels = -2;
+int64_t g_paramMaxNchannels = -2;
 int64_t ncclParamMinNchannels() { return g_paramMinNchannels; }
 int64_t ncclParamMaxNchannels() { return g_paramMaxNchannels; }
 // Referenced by init.cc but not declared inside it, so the redirected NCCL_PARAM does not cover it.
@@ -48,8 +48,8 @@ int rcclGetTuningIndexForArch(const char* gfxarch) {
 void ResetTuningFakes() {
   g_topoGetAlgoTime = DefaultTopoGetAlgoTime;
   g_topoGetAlgoTimeCalls = 0;
-  g_paramMinNchannels = 0;
-  g_paramMaxNchannels = MAXCHANNELS;
+  g_paramMinNchannels = -2;
+  g_paramMaxNchannels = -2;
   g_tuningIndexValue = 0;
   g_tuningIndexLastArch.clear();
 }
