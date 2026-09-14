@@ -29,6 +29,7 @@ target_sources(
 )
 
 add_subdirectory(buffered)
+add_subdirectory(callback)
 
 if(ROCPROFSYS_BUILD_TESTING)
     add_subdirectory(tests)

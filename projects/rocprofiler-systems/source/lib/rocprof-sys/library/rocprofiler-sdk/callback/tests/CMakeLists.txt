@@ -1,21 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-add_library(
-    buffered-domains-unit-tests
-    OBJECT
-    test_kfd_queue.cpp
-    test_kfd_page_fault.cpp
-    test_kfd_page_migrate.cpp
-    test_kfd_event_queue.cpp
-    test_kfd_event_unmap_from_gpu.cpp
-    test_kfd_event_dropped_events.cpp
-    test_kfd_event_page_fault.cpp
-    test_kfd_event_page_migrate.cpp
-)
+add_library(callback-domains-unit-tests OBJECT test_code_object.cpp)
 
 target_link_libraries(
-    buffered-domains-unit-tests
+    callback-domains-unit-tests
     PRIVATE
         rocprofiler-systems-googletest-library
         rocprofiler-systems-common-library
@@ -23,7 +12,7 @@ target_link_libraries(
 )
 
 target_include_directories(
-    buffered-domains-unit-tests
+    callback-domains-unit-tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/source/lib
         ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys
