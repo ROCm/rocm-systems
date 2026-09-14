@@ -46,7 +46,6 @@ struct ncclReg {
   uint32_t state;
   // net reg
   struct ncclRegNetHandles* netHandleHead;
-  int netNSegments; // 0 = unset; cached after a successful full-range NET register
   // nvls reg
   // Committed arena registration, owned here: NVLS_REG_COMPLETE implies non-NULL.
   struct ncclMcArenaReg* nvlsUbReg;
@@ -60,6 +59,8 @@ struct ncclReg {
   struct ncclPeerRegIpcAddr regIpcAddrs;
   struct ncclIpcRegInfo** ipcInfos;  // Dynamically allocated, sized to ipcInfosSize
   int ipcInfosSize;                  // Size of ipcInfos array (localRanks or nRanks for cross-clique)
+  // RCCL: NET segment cache, written only by rcclNetRegSegmentCount / rcclNetRegCommit (rccl_wrap.cc).
+  struct { int nSegments; bool allPeers; } rcclNet;
 };
 
 struct ncclRegCache {
