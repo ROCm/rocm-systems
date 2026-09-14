@@ -10,6 +10,9 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <optional>
@@ -17,7 +20,8 @@
 #include <vector>
 
 #include "ScopedHook.h"
-#include "fakes/p2p_fakes.h"
+#include "fakes/nccl_fakes.h"
+#include "fakes/hip_fakes.h"
 
 // Pull in alloc.h NOW so its macros (ncclCudaCallocAsync etc.) are visible
 // to be #undef'd. p2p.cc's transitive includes would otherwise be the first
@@ -30,9 +34,23 @@
 // would cache their default on first call). See param_redirect.h.
 #include "fakes/param_redirect.h"
 
+// Controllable seams for the two header-only alloc.h templates. Declared
+// here (defined below, after P2P_CC_PATH) because these hooks and the
+// honest-emulator machinery behind them are used only by this test file;
+// the generic, cross-module fakes live under fakes/.
+extern std::function<ncclResult_t(void** ptr, std::size_t nbytes, hipStream_t)>
+    g_fakeCudaCallocAsync;
+extern std::function<ncclResult_t(void* dst, void* src, std::size_t nbytes, hipStream_t)>
+    g_fakeCudaMemcpyAsync;
+
+// Restore every hook this file drives (plus, transitively, the nccl* and HIP
+// hooks) to its default. Called from the file-wide fixture's TearDown().
+// Defined below, after P2P_CC_PATH.
+static void ResetP2pFakes();
+
 // Macro shim: replace the header-only function templates ncclCudaCallocAsync
 // and ncclCudaMemcpyAsync from alloc.h with thin trampolines that route
-// through hookable fakes in fakes/p2p_fakes.cc. Without this, p2p.cc's call
+// through hookable fakes defined in this file. Without this, p2p.cc's call
 // sites bind directly to the templates, which hit real HIP runtime (no GPU
 // in this binary by design).
 //
@@ -86,10 +104,91 @@
 #include P2P_CC_PATH
 
 // ===========================================================================
+// p2p.cc link-satisfying stubs + this file's controllable alloc seams.
+//
+// Defined here (not in a shared fakes/ .cc) because they are used only by
+// this test: the arch/topo/busId stubs satisfy symbols that p2p.cc alone
+// references, and the ncclCudaCallocAsync / ncclCudaMemcpyAsync emulators
+// back the macro shims above. They must land after #include P2P_CC_PATH so
+// the production types they mention (allocationTracker, the alloc.h
+// templates, etc.) are already in scope.
+// ---------------------------------------------------------------------------
+
+// allocTracker is an array of per-device counters in alloc.h; size it to the
+// same MAX_ALLOC_TRACK_NGPU the header uses. Zero-initialised.
+struct allocationTracker allocTracker[32 /* MAX_ALLOC_TRACK_NGPU */] = {};
+
+// Arch / topology / busId helpers p2p.cc references but doesn't define here.
+bool IsArchMatch(char const* /*arch*/, char const* /*target*/)
+{
+    return false;
+}
+
+ncclResult_t busIdToInt64(const char* /*busId*/, int64_t* id)
+{
+    if (id) *id = 0;
+    return ncclSuccess;
+}
+
+ncclResult_t getBusId(int /*cudaDev*/, int64_t* busId)
+{
+    if (busId) *busId = 0;
+    return ncclSuccess;
+}
+
+// Controllable seams: ncclCudaCallocAsync / ncclCudaMemcpyAsync. Substitutes
+// for the header-only function templates in alloc.h -- the shim macros above
+// route those call sites here, type-erased to (void*, nbytes), so the test
+// binary never reaches real HIP runtime.
+//
+// Defaults behave like an honest emulator: heap-allocate zeroed memory and
+// memcpy bytes between host pointers. ResetP2pFakes() frees any allocations
+// the default hook handed out so individual tests don't have to. Tests that
+// install their own hook also take responsibility for any memory they hand out.
+namespace {
+std::vector<void*> g_fakeAllocations;
+
+ncclResult_t DefaultFakeCudaCallocAsync(void** ptr, std::size_t nbytes,
+                                        hipStream_t /*stream*/)
+{
+    if (ptr == nullptr) return ncclInvalidArgument;
+    void* p = std::calloc(1, nbytes);
+    if (p == nullptr && nbytes > 0) return ncclSystemError;
+    g_fakeAllocations.push_back(p);
+    *ptr = p;
+    return ncclSuccess;
+}
+
+ncclResult_t DefaultFakeCudaMemcpyAsync(void* dst, void* src,
+                                        std::size_t nbytes,
+                                        hipStream_t /*stream*/)
+{
+    if (nbytes > 0 && (dst == nullptr || src == nullptr)) return ncclInvalidArgument;
+    if (nbytes > 0) std::memcpy(dst, src, nbytes);
+    return ncclSuccess;
+}
+}  // namespace
+
+std::function<ncclResult_t(void**, std::size_t, hipStream_t)>
+    g_fakeCudaCallocAsync = DefaultFakeCudaCallocAsync;
+std::function<ncclResult_t(void*, void*, std::size_t, hipStream_t)>
+    g_fakeCudaMemcpyAsync = DefaultFakeCudaMemcpyAsync;
+
+static void ResetP2pFakes()
+{
+    g_fakeCudaCallocAsync = DefaultFakeCudaCallocAsync;
+    g_fakeCudaMemcpyAsync = DefaultFakeCudaMemcpyAsync;
+    ResetNcclFakes();  // restore the nccl* hooks owned by nccl_fakes.cc
+    ResetHipFakes();   // restore the HIP hooks owned by hip_fakes.cc
+    for (void* p : g_fakeAllocations) std::free(p);
+    g_fakeAllocations.clear();
+}
+
+// ===========================================================================
 // Default fixture for every test in this file.
 //
 // Several tests install per-test hooks into the controllable seams declared
-// in fakes/p2p_fakes.h (e.g. g_strongStreamAcquire). ResetP2pFakes() puts
+// above (e.g. g_strongStreamAcquire). ResetP2pFakes() puts
 // every hook back to its default in TearDown so tests don't leak state into
 // each other. Tests that don't currently install hooks still use this
 // fixture -- it's the file-wide default so adding a hook to a test that
