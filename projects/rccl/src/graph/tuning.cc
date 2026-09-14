@@ -2062,12 +2062,34 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
 static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .ddaLLMax    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .ddaLL128Max = {0, 0, 0, 0, 0, 0, 0, 0, 0},
-  .ddaVmmMax   = {0, 0, 128ULL*1024*1024,  128ULL*1024*1024,  128ULL*1024*1024,  0, 0, 0, 4ULL*1024*1024},
-  .ceNonRegMin = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ddaVmmMax      = {0, 0, 128ULL*1024*1024,  128ULL*1024*1024,  128ULL*1024*1024,  0, 0, 0, 4ULL*1024*1024},
+  .ddaVmmMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ddaVmmMaxGraph = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ceNonRegMin    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .ceNonRegMax = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
   .ceRegMax    = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
-  .symMaxR2    = {kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited},
-  .symMaxR2Graph = {kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited},
+  .symMaxR2 = {
+    kThreshUnlimited,     // [0] Broadcast      -- not used
+    kThreshUnlimited,     // [1] Reduce          -- not used
+    kThreshUnlimited,     // [2] AllGather
+    kThreshUnlimited,     // [3] ReduceScatter
+    kThreshUnlimited,     // [4] AllReduce
+    kThreshUnlimited,     // [5] SendRecv        -- not used
+    kThreshUnlimited,     // [6] Send            -- not used
+    kThreshUnlimited,     // [7] Recv            -- not used
+    kThreshUnlimited,     // [8] AlltoAll        -- not used
+  },
+  .symMaxR2Graph = {
+    kThreshUnlimited,     // [0] Broadcast      -- not used
+    kThreshUnlimited,     // [1] Reduce          -- not used
+    kThreshUnlimited,     // [2] AllGather
+    kThreshUnlimited,     // [3] ReduceScatter
+    kThreshUnlimited,     // [4] AllReduce
+    kThreshUnlimited,     // [5] SendRecv        -- not used
+    kThreshUnlimited,     // [6] Send            -- not used
+    kThreshUnlimited,     // [7] Recv            -- not used
+    kThreshUnlimited,     // [8] AlltoAll        -- not used
+  },
   .symMinR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .unrollMapAR  = nullptr,
   .unrollMapAG  = nullptr,
@@ -2079,12 +2101,34 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
 static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .ddaLLMax    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .ddaLL128Max = {0, 0, 0, 0, 0, 0, 0, 0, 0},
-  .ddaVmmMax   = {0, 0, 8ULL*1024*1024,    8ULL*1024*1024,    8ULL*1024*1024,    0, 0, 0, 4ULL*1024*1024},
-  .ceNonRegMin = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ddaVmmMax      = {0, 0, 8ULL*1024*1024,    8ULL*1024*1024,    8ULL*1024*1024,    0, 0, 0, 4ULL*1024*1024},
+  .ddaVmmMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ddaVmmMaxGraph = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ceNonRegMin    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .ceNonRegMax = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
   .ceRegMax    = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
-  .symMaxR2    = {kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited},
-  .symMaxR2Graph = {kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited, kThreshUnlimited},
+  .symMaxR2 = {
+    kThreshUnlimited,     // [0] Broadcast      -- not used
+    kThreshUnlimited,     // [1] Reduce          -- not used
+    kThreshUnlimited,     // [2] AllGather
+    kThreshUnlimited,     // [3] ReduceScatter
+    kThreshUnlimited,     // [4] AllReduce
+    kThreshUnlimited,     // [5] SendRecv        -- not used
+    kThreshUnlimited,     // [6] Send            -- not used
+    kThreshUnlimited,     // [7] Recv            -- not used
+    kThreshUnlimited,     // [8] AlltoAll        -- not used
+  },
+  .symMaxR2Graph = {
+    kThreshUnlimited,     // [0] Broadcast      -- not used
+    kThreshUnlimited,     // [1] Reduce          -- not used
+    kThreshUnlimited,     // [2] AllGather
+    kThreshUnlimited,     // [3] ReduceScatter
+    kThreshUnlimited,     // [4] AllReduce
+    kThreshUnlimited,     // [5] SendRecv        -- not used
+    kThreshUnlimited,     // [6] Send            -- not used
+    kThreshUnlimited,     // [7] Recv            -- not used
+    kThreshUnlimited,     // [8] AlltoAll        -- not used
+  },
   .symMinR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .unrollMapAR  = nullptr,
   .unrollMapAG  = nullptr,
