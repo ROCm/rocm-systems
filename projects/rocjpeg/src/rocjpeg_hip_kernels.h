@@ -370,6 +370,193 @@ void ColorConvertNV12ToRGBBatched(hipStream_t stream,
     uint32_t max_width_comp, uint32_t max_height_comp,
     const NV12ToRGBBatchParams *d_params, uint32_t n_images);
 
+// ---- Auto-generated batched param structs + prototypes ----
+
+struct YUV444ToRGBBatchParams {
+    uint8_t *dst_image;
+    uint32_t dst_image_stride_in_bytes;
+    uint32_t dst_image_stride_in_bytes_comp;
+    const uint8_t *src_y_image;
+    const uint8_t *src_u_image;
+    const uint8_t *src_v_image;
+    uint32_t src_yuv_image_stride_in_bytes;
+    uint32_t dst_width_comp;
+    uint32_t dst_height_comp;
+    uint32_t src_yuv_image_stride_in_bytes_comp;
+};
+void ColorConvertYUV444ToRGBBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YUV444ToRGBBatchParams *d_params, uint32_t n_images);
+
+struct YUV444ToRGBPlanarBatchParams {
+    uint8_t *dst_image_r;
+    uint8_t *dst_image_g;
+    uint8_t *dst_image_b;
+    uint32_t dst_image_stride_in_bytes;
+    uint32_t dst_image_stride_in_bytes_comp;
+    const uint8_t *src_y_image;
+    const uint8_t *src_u_image;
+    const uint8_t *src_v_image;
+    uint32_t src_yuv_image_stride_in_bytes;
+    uint32_t dst_width_comp;
+    uint32_t dst_height_comp;
+    uint32_t src_yuv_image_stride_in_bytes_comp;
+};
+void ColorConvertYUV444ToRGBPlanarBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YUV444ToRGBPlanarBatchParams *d_params, uint32_t n_images);
+
+struct YUV440ToRGBBatchParams {
+    uint8_t *dst_image;
+    uint32_t dst_image_stride_in_bytes;
+    uint32_t dst_image_stride_in_bytes_comp;
+    const uint8_t *src_y_image;
+    const uint8_t *src_u_image;
+    const uint8_t *src_v_image;
+    uint32_t src_yuv_image_stride_in_bytes;
+    uint32_t dst_width_comp;
+    uint32_t dst_height_comp;
+    uint32_t src_yuv_image_stride_in_bytes_comp;
+};
+void ColorConvertYUV440ToRGBBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YUV440ToRGBBatchParams *d_params, uint32_t n_images);
+
+struct YUV440ToRGBPlanarBatchParams {
+    uint8_t *dst_image_r;
+    uint8_t *dst_image_g;
+    uint8_t *dst_image_b;
+    uint32_t dst_image_stride_in_bytes;
+    uint32_t dst_image_stride_in_bytes_comp;
+    const uint8_t *src_y_image;
+    const uint8_t *src_u_image;
+    const uint8_t *src_v_image;
+    uint32_t src_yuv_image_stride_in_bytes;
+    uint32_t dst_width_comp;
+    uint32_t dst_height_comp;
+    uint32_t src_yuv_image_stride_in_bytes_comp;
+};
+void ColorConvertYUV440ToRGBPlanarBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YUV440ToRGBPlanarBatchParams *d_params, uint32_t n_images);
+
+struct YUYVToRGBBatchParams {
+    uint8_t *dst_image;
+    uint32_t dst_image_stride_in_bytes;
+    uint32_t dst_image_stride_in_bytes_comp;
+    const uint8_t *src_image;
+    uint32_t src_image_stride_in_bytes;
+    uint32_t src_image_stride_in_bytes_comp;
+    uint32_t dst_width_comp;
+    uint32_t dst_height_comp;
+};
+void ColorConvertYUYVToRGBBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YUYVToRGBBatchParams *d_params, uint32_t n_images);
+
+struct YUYVToRGBPlanarBatchParams {
+    uint8_t *dst_image_r;
+    uint8_t *dst_image_g;
+    uint8_t *dst_image_b;
+    uint32_t dst_image_stride_in_bytes;
+    uint32_t dst_image_stride_in_bytes_comp;
+    const uint8_t *src_image;
+    uint32_t src_image_stride_in_bytes;
+    uint32_t src_image_stride_in_bytes_comp;
+    uint32_t dst_width_comp;
+    uint32_t dst_height_comp;
+};
+void ColorConvertYUYVToRGBPlanarBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YUYVToRGBPlanarBatchParams *d_params, uint32_t n_images);
+
+struct NV12ToRGBPlanarBatchParams {
+    uint8_t *dst_image_r;
+    uint8_t *dst_image_g;
+    uint8_t *dst_image_b;
+    uint32_t dst_image_stride_in_bytes;
+    uint32_t dst_image_stride_in_bytes_comp;
+    const uint8_t *src_luma_image;
+    uint32_t src_luma_image_stride_in_bytes;
+    const uint8_t *src_chroma_image;
+    uint32_t src_chroma_image_stride_in_bytes;
+    uint32_t dst_width_comp;
+    uint32_t dst_height_comp;
+    uint32_t src_luma_image_stride_in_bytes_comp;
+};
+void ColorConvertNV12ToRGBPlanarBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const NV12ToRGBPlanarBatchParams *d_params, uint32_t n_images);
+
+struct YUV400ToRGBBatchParams {
+    uint8_t *dst_image;
+    uint32_t dst_image_stride_in_bytes;
+    uint32_t dst_image_stride_in_bytes_comp;
+    const uint8_t *src_luma_image;
+    uint32_t src_luma_image_stride_in_bytes;
+    uint32_t dst_width_comp;
+    uint32_t dst_height_comp;
+    uint32_t src_luma_image_stride_in_bytes_comp;
+};
+void ColorConvertYUV400ToRGBBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YUV400ToRGBBatchParams *d_params, uint32_t n_images);
+
+struct YUV400ToRGBPlanarBatchParams {
+    uint8_t *dst_image_r;
+    uint8_t *dst_image_g;
+    uint8_t *dst_image_b;
+    uint32_t dst_image_stride_in_bytes;
+    uint32_t dst_image_stride_in_bytes_comp;
+    const uint8_t *src_luma_image;
+    uint32_t src_luma_image_stride_in_bytes;
+    uint32_t dst_width_comp;
+    uint32_t dst_height_comp;
+    uint32_t src_luma_image_stride_in_bytes_comp;
+};
+void ColorConvertYUV400ToRGBPlanarBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YUV400ToRGBPlanarBatchParams *d_params, uint32_t n_images);
+
+struct RGBAToRGBBatchParams {
+    uint32_t dst_width;
+    uint32_t dst_height;
+    uint8_t *dst_image;
+    uint32_t dst_image_stride_in_bytes;
+    const uint8_t *src_image;
+    uint32_t src_image_stride_in_bytes;
+};
+void ColorConvertRGBAToRGBBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const RGBAToRGBBatchParams *d_params, uint32_t n_images);
+
+struct InterleavedUVToPlanarUVBatchParams {
+    uint32_t dst_width;
+    uint32_t dst_height;
+    uint8_t *dst_image1;
+    uint8_t *dst_image2;
+    uint32_t dst_image_stride_in_bytes;
+    const uint8_t *src_image;
+    uint32_t src_image_stride_in_bytes;
+};
+void ConvertInterleavedUVToPlanarUVBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const InterleavedUVToPlanarUVBatchParams *d_params, uint32_t n_images);
+
+struct YFromPackedYUYVBatchParams {
+    uint32_t dst_height;
+    uint8_t *destination_y;
+    uint32_t dst_luma_stride_in_bytes;
+    const uint8_t *src_image;
+    uint32_t src_image_stride_in_bytes;
+    uint32_t dst_width_comp;
+};
+void ExtractYFromPackedYUYVBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YFromPackedYUYVBatchParams *d_params, uint32_t n_images);
+
+struct PackedYUYVToPlanarYUVBatchParams {
+    uint32_t dst_height;
+    uint8_t *destination_y;
+    uint8_t *destination_u;
+    uint8_t *destination_v;
+    uint32_t dst_luma_stride_in_bytes;
+    uint32_t dst_chroma_stride_in_bytes;
+    const uint8_t *src_image;
+    uint32_t src_image_stride_in_bytes;
+    uint32_t dst_width_comp;
+};
+void ConvertPackedYUYVToPlanarYUVBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const PackedYUYVToPlanarYUVBatchParams *d_params, uint32_t n_images);
+
 /**
  * @brief Structure representing an array of 6 unsigned integers.
  *
