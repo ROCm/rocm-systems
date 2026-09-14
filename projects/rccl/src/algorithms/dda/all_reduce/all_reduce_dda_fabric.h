@@ -49,8 +49,6 @@ __launch_bounds__(512)
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
 }
 
-// Precondition: the host launcher has staged sendbuff to scratch and completed
-// launchFabricGpuBarrierPublish on the same stream.
 template <typename T, int NRANKS_CT, bool hasAcc>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
@@ -67,6 +65,10 @@ __launch_bounds__(512)
   const auto idxStart = gtIdx * countPerThread;
   const auto idxEnd = countPerRank;
   const size_t idxStride = gridDim.x * blockDim.x * countPerThread;
+
+  // Publish the stream-ordered scratch copy before any rank consumes peer
+  // scratch. Keeping this in the collective avoids an extra graph node.
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   // Two-shot: reduce-scatter this rank's shard, then all-gather. The unified
   // helpers fold nRanks to NRANKS_CT (full unroll) when specialized, else use

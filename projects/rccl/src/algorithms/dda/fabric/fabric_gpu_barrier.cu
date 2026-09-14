@@ -17,17 +17,6 @@
 
 namespace dda::common {
 
-namespace {
-
-constexpr int kFabricGpuBarrierPublishBlocks = 1;
-constexpr int kFabricGpuBarrierPublishThreads = 64;
-
-__global__ void fabricGpuBarrierPublish(FabricGpuBarrier barrier) {
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
-}
-
-} // namespace
-
 /* static */ __host__ std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier>
 FabricGpuBarrier::mallocAndInit(int nRanks, int nBlocks, int selfRank, void* bootstrap,
                                 struct ncclMemManager* manager) {
@@ -114,10 +103,6 @@ FabricGpuBarrier::mallocAndInit(int nRanks, int nBlocks, int selfRank, void* boo
   resources->selfFlagBuf = std::move(selfFlagBuf);
   resources->peerFlagsDev = std::move(peerFlagsDev);
   return {std::move(resources), barrier};
-}
-
-void launchFabricGpuBarrierPublish(FabricGpuBarrier barrier, cudaStream_t stream) {
-  fabricGpuBarrierPublish<<<kFabricGpuBarrierPublishBlocks, kFabricGpuBarrierPublishThreads, 0, stream>>>(barrier);
 }
 
 } // namespace dda::common
