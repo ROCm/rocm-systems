@@ -1,7 +1,8 @@
 # gfx950 native GPU fault investigation
 
-Fresh processes now report GPU illegal memory accesses with ConSan disabled.
-This prevents attributing the attention-prefill RecordReplay failure to ConSan.
+Fresh processes reported GPU illegal memory accesses with ConSan disabled.
+A GPU reset restored the standalone native HIP smoke test. The root cause
+of the GPU state failure is not yet established.
 Completed benchmark measurements and their original provenance are retained.
 
 Reproductions use `/home/benjacob/consan-prerequisites/env.sh`, the venv TheRock
@@ -23,9 +24,10 @@ Evidence: `/home/benjacob/consan-prerequisites/evidence/native-gpu-fault/`.
 Additional logs and dumped code objects are in
 `/home/benjacob/consan-gfx950-attention-prefill-repro/`.
 
-Other processes still hold GPU memory: PIDs 2509904, 2510869, and 2512712.
-No reset or interruption of these jobs has been performed. Approval has been
-requested before any recovery action that would interrupt those jobs.
+With explicit user approval, PIDs 2509904, 2510869, and 2512712 were stopped.
+AMD SMI confirmed no remaining GPU processes. Native HIP still failed.
+The authorized `amd-smi reset --gpureset --gpu 0` then succeeded, and the
+unchanged native HIP binary passed all 65536 CPU-oracle comparisons.
 After recovery, require a passing native HIP smoke and attention control,
 then resume remaining benchmark cells with `--timeout 600 --resume`.
 Do not discard completed cells or retry the capped large-M InlineShadow cell.
