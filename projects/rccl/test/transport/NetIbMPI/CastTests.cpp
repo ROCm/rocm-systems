@@ -1290,6 +1290,11 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     // a wrapper left behind outlives this test, and its cache reference with it.
     std::vector<void*> mhandles(kNConns, nullptr);
     std::vector<void*> rampHandles(kNConns, nullptr);
+    // Declared before the guard, and sized once their sizes are known, because
+    // destruction runs in reverse: declared after it, their storage would be freed while
+    // the guard's registrations still described it, and the guard would then deregister
+    // memory that no longer exists.
+    std::vector<std::vector<char>> sendBufs, recvBufs, rampSend, rampRecv;
 
     // Releases whatever is still held on any exit from here, the teardown's own failures
     // included: otherwise a setup, registration or close failure returns from this body
@@ -1326,8 +1331,8 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     const size_t kBufSz = static_cast<size_t>(kNMsgs) * kMsgSz;
 
     // One send/recv buffer pair per connection.
-    std::vector<std::vector<char>> sendBufs(kNConns, std::vector<char>(kBufSz));
-    std::vector<std::vector<char>> recvBufs(kNConns, std::vector<char>(kBufSz));
+    sendBufs.assign(kNConns, std::vector<char>(kBufSz));
+    recvBufs.assign(kNConns, std::vector<char>(kBufSz));
     for (int c = 0; c < kNConns; c++) {
         for (size_t i = 0; i < kBufSz; i++) {
             sendBufs[c][i] = static_cast<char>(((i + c) * 3 + 7)  & 0xFF);
@@ -1452,8 +1457,8 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     constexpr int kLargeRounds = 20;
     const size_t  kRampBufSz   = kRampSizes.back();   // one MR per conn, sized for largest
 
-    std::vector<std::vector<char>> rampSend(kNConns, std::vector<char>(kRampBufSz));
-    std::vector<std::vector<char>> rampRecv(kNConns, std::vector<char>(kRampBufSz));
+    rampSend.assign(kNConns, std::vector<char>(kRampBufSz));
+    rampRecv.assign(kNConns, std::vector<char>(kRampBufSz));
     for (int c = 0; c < kNConns; c++) {
         for (size_t i = 0; i < kRampBufSz; i++)
             rampSend[c][i] = static_cast<char>(((i + c) * 7 + 3) & 0xFF);
