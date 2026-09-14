@@ -77,6 +77,44 @@ def generate_signal_api():
 
     return "".join([signaling_api_dec(suffix) for suffix in suffixes])
 
+def fetch_api_dec(suffix):
+    return f"__device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch{suffix}(const uint64_t *sig_addr);\n"
+
+def generate_fetch_api():
+    suffixes = ["", "_wg", "_wave"]
+    return "".join([fetch_api_dec(suffix) for suffix in suffixes])
+
+def add_misc_apis():
+    return """/**
+ * @brief Kernel wrapper for putmem_signal operation on stream
+ *
+ * @param[in] dest      Destination address on remote PE
+ * @param[in] source    Source address on local PE
+ * @param[in] nelems    Size of the transfer in bytes
+ * @param[in] sig_addr  Address of signal variable on remote PE
+ * @param[in] signal    Signal value to write
+ * @param[in] sig_op    Signal operation (ROCSHMEM_SIGNAL_SET or
+ * ROCSHMEM_SIGNAL_ADD)
+ * @param[in] pe        PE of the remote process
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_putmem_signal_kernel(
+    void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+/**
+ * @brief Kernel wrapper for signal_wait_until operation on stream
+ *
+ * @param[in] sig_addr  Address of signal variable on the symmetric heap
+ * @param[in] cmp       Comparison operator
+ * @param[in] cmp_value Value to compare against
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_signal_wait_until_kernel(
+    uint64_t *sig_addr, int cmp, uint64_t cmp_value);
+"""
 
 def write_to_file(filename, content):
     with open(filename, 'w') as file:
@@ -94,7 +132,8 @@ namespace rocshmem {
 """
 
     expanded_code += generate_signal_api()
-
+    expanded_code += f"\n{generate_fetch_api()}\n"
+    expanded_code += add_misc_apis()
     expanded_code += """
 }  // namespace rocshmem
 
