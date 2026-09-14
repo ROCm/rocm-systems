@@ -37,3 +37,10 @@ sets:
   - 7.1.7: SGPRs
   - 7.1.8: LDS Allocation
   - 7.1.9: Scratch Allocation
+- title: AIPROFCOMP-78 bound-metric validation (single-pass)
+  set_option: aiprofcomp78_bounds
+  description: Co-located ratio partners for §3.5 hardware validation (1 pass on gfx942)
+  metric:
+  - 6.1.2: Workgroup Manager Utilization
+  - 5.1.0: CPF Utilization
+  - 15.4.0: Data-Return Busy
