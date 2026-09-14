@@ -108,7 +108,10 @@ option(
 )
 if(ROCJITSU_ENABLE_PFFM_PLUGIN)
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        message(FATAL_ERROR "ROCJITSU_ENABLE_PFFM_PLUGIN is supported only on Linux")
+        message(
+            FATAL_ERROR
+            "ROCJITSU_ENABLE_PFFM_PLUGIN is supported only on Linux"
+        )
     endif()
 endif()
 option(
