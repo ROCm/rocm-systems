@@ -34,6 +34,8 @@
 * `ROCSHMEM_SDMA_THRESHOLD` default changed from 256 to 1024 bytes.
   Wave and workgroup operations automatically scale the threshold by the wavefront size,
   avoiding SDMA for small-to-medium transfers where parallel IPC copy is faster.
+* The AMD Pensando IONIC GDA provider now requires
+  network driver and firmware support for CQ collapsing.
 
 ## rocSHMEM 3.7.0 for ROCm 10.1
 
