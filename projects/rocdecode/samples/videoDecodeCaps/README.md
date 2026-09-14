@@ -13,7 +13,7 @@ Unlike the other samples, this app does not decode a stream, so it needs no inpu
 
 ## Prerequisites
 
-See [rocDecode Prerequisites](../../README.md#prerequisites).
+* Install [rocDecode](https://rocm.docs.amd.com/projects/rocDecode/en/latest/install/rocDecode-build-and-install.html)
 
 ## Build
 

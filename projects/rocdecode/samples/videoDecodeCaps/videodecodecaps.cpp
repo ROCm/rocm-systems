@@ -24,7 +24,7 @@ THE SOFTWARE.
 #include <iomanip>
 #include <cstring>
 #include <cstdlib>
-#include <climits>
+#include <string>
 #include <vector>
 #include "hip/hip_runtime.h"
 #include "rocdecode/rocdecode.h"
@@ -135,8 +135,9 @@ int main(int argc, char **argv) {
             }
             char *end = nullptr;
             long parsed = strtol(argv[i], &end, 10);
-            if (*end != '\0' || end == argv[i] || parsed < 0 || parsed > INT_MAX) {
-                std::cerr << "Error: invalid device ID '" << argv[i] << "'; expected a non-negative integer." << std::endl;
+            // RocdecDecodeCaps::device_id is a uint8_t, so cap the valid range at 255.
+            if (*end != '\0' || end == argv[i] || parsed < 0 || parsed > 255) {
+                std::cerr << "Error: invalid device ID '" << argv[i] << "'; expected an integer in [0, 255]." << std::endl;
                 return 1;
             }
             device_id = static_cast<int>(parsed);
@@ -163,16 +164,19 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    char pci_bus_id[64] = {0};
+    if (hipDeviceGetPCIBusId(pci_bus_id, sizeof(pci_bus_id), device_id) != hipSuccess) {
+        std::cerr << "Error: Failed to query PCI bus ID for device " << device_id << std::endl;
+        return 1;
+    }
+
     std::cout << "Decoder capabilities for GPU device " << device_id << " - " << hip_dev_prop.name
-              << " [" << hip_dev_prop.gcnArchName << "] on PCI bus "
-              << std::setfill('0') << std::setw(2) << std::right << std::hex << hip_dev_prop.pciBusID << ":"
-              << std::setfill('0') << std::setw(2) << std::right << std::hex << hip_dev_prop.pciDomainID << "."
-              << hip_dev_prop.pciDeviceID << std::dec << std::setfill(' ') << std::endl << std::endl;
+              << " [" << hip_dev_prop.gcnArchName << "] on PCI bus " << pci_bus_id << std::endl << std::endl;
 
     std::cout << std::left
               << std::setw(12) << "Codec"
               << std::setw(16) << "Chroma"
-              << std::setw(12) << "Bit Depth"
+              << std::setw(15) << "Bit Depth"
               << std::setw(9)  << "Decoders"
               << std::setw(16) << "Min (WxH)"
               << std::setw(20) << "Max (WxH)"
@@ -231,7 +235,7 @@ int main(int argc, char **argv) {
             std::cout << std::left
                       << std::setw(12) << codec.name
                       << std::setw(16) << row.chroma
-                      << std::setw(12) << (BitDepthsString(row.bit_depths) + "-bit")
+                      << std::setw(15) << (BitDepthsString(row.bit_depths) + "-bit")
                       << std::setw(9)  << row.num_decoders
                       << std::setw(16) << row.min_res
                       << std::setw(20) << row.max_res
