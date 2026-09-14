@@ -15,12 +15,16 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <deque>
 #include <filesystem>
 #include <format>
+#include <iterator>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -39,6 +43,7 @@ namespace {
 using namespace observer_abi_v8;
 
 constexpr uint32_t kFfmHostApiVersion = 14;
+constexpr size_t kDefaultMaxStagedBytes = 256 * 1024 * 1024;
 static_assert(FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION == 8,
               "the pFFM adapter constructs FFM API v8 payloads");
 
@@ -108,7 +113,12 @@ private:
   util::LibraryHandle handle_ = nullptr;
 };
 
-std::string parse_library_path(const char *config_json) {
+struct AdapterConfig {
+  std::string library_path;
+  size_t max_staged_bytes = kDefaultMaxStagedBytes;
+};
+
+AdapterConfig parse_config(const char *config_json) {
   if (!config_json)
     throw std::invalid_argument("pFFM plugin configuration is null");
 
@@ -120,13 +130,29 @@ std::string parse_library_path(const char *config_json) {
   const auto root = flexbuffers::GetRoot(builder.GetBuffer());
   if (!root.IsMap())
     throw std::invalid_argument("pFFM plugin configuration must be an object");
-  const auto path = root.AsMap()["library_path"];
+  const auto config = root.AsMap();
+  const auto path = config["library_path"];
   if (!path.IsString() || path.AsString().size() == 0)
     throw std::invalid_argument("pFFM plugin requires a non-empty string 'library_path'");
-  std::string library_path(path.AsString().c_str(), path.AsString().size());
-  if (!std::filesystem::path(library_path).is_absolute())
+  AdapterConfig result;
+  result.library_path.assign(path.AsString().c_str(), path.AsString().size());
+  if (!std::filesystem::path(result.library_path).is_absolute())
     throw std::invalid_argument("pFFM plugin 'library_path' must be absolute");
-  return library_path;
+
+  const auto max_staged_bytes = config["max_staged_bytes"];
+  if (!max_staged_bytes.IsNull()) {
+    if (!max_staged_bytes.IsIntOrUint() ||
+        (max_staged_bytes.IsInt() && max_staged_bytes.AsInt64() <= 0)) {
+      throw std::invalid_argument("pFFM plugin 'max_staged_bytes' must be a positive integer");
+    }
+    const uint64_t value = max_staged_bytes.AsUInt64();
+    if (value == 0)
+      throw std::invalid_argument("pFFM plugin 'max_staged_bytes' must be a positive integer");
+    if (value > std::numeric_limits<size_t>::max())
+      throw std::invalid_argument("pFFM plugin 'max_staged_bytes' is too large");
+    result.max_staged_bytes = static_cast<size_t>(value);
+  }
+  return result;
 }
 
 uint64_t physical_wave_key(uint32_t compute_unit_id, uint32_t wavefront_id) {
@@ -257,7 +283,8 @@ struct InstructionEvent {
 struct TdmEvent {
   EntityId instruction_id = 0;
   FfmWaveInfo wave_info{};
-  std::vector<uint64_t> addresses;
+  std::unique_ptr<uint64_t[]> addresses;
+  uint32_t num_addresses = 0;
   uint32_t data_size_bytes = 0;
   bool is_read = false;
   bool is_write = false;
@@ -271,10 +298,33 @@ struct OrderedEvent {
   EventPayload payload;
 };
 
-// Keep epoch storage close to its logical size and make it possible to release
-// consumed events before the backend parses the dispatch. A single vector both
-// over-allocates very large traces and remains resident throughout replay.
+struct StagedEvent {
+  OrderedEvent event;
+  size_t dynamic_bytes = 0;
+};
+static_assert(std::is_nothrow_move_constructible_v<StagedEvent>);
+static_assert(std::is_nothrow_move_assignable_v<StagedEvent>);
+
+struct EventChunk {
+  std::vector<StagedEvent> events;
+  size_t capacity_bytes = 0;
+};
+
+// Match the original adapter's allocation granularity while charging each
+// retained chunk's actual capacity against the configured budget.
 constexpr size_t kEventChunkCapacity = 4096;
+
+size_t staged_dynamic_size(const OrderedEvent &event) {
+  if (const auto *tdm = std::get_if<TdmEvent>(&event.payload)) {
+    const uint64_t bytes = static_cast<uint64_t>(tdm->num_addresses) * sizeof(uint64_t);
+    if constexpr (sizeof(size_t) < sizeof(uint64_t)) {
+      if (bytes > std::numeric_limits<size_t>::max())
+        return std::numeric_limits<size_t>::max();
+    }
+    return static_cast<size_t>(bytes);
+  }
+  return 0;
+}
 
 struct PffmWavefrontState final : WavefrontState {
   FfmWaveInfo wave_info{};
@@ -345,13 +395,13 @@ FfmDispatchMetadata make_dispatch_metadata(const KernelDispatchInfo &info) {
 
 struct PffmPlugin::Impl {
   explicit Impl(PffmPlugin &owner, const char *config_json)
-      : owner(owner), library_path(parse_library_path(config_json)), library(library_path) {
+      : owner(owner), config(parse_config(config_json)), library(config.library_path) {
     const auto get_api = util::lookup_symbol<FfmObserverPluginGetApiFn>(
         library.get(), "ffm_observer_plugin_get_api");
     if (!get_api)
       throw std::runtime_error(
-          std::format("pFFM backend '{}' is missing ffm_observer_plugin_get_api: {}", library_path,
-                      util::last_library_error()));
+          std::format("pFFM backend '{}' is missing ffm_observer_plugin_get_api: {}",
+                      config.library_path, util::last_library_error()));
 
     FfmObserverPluginApi *raw_api = nullptr;
     for (uint32_t version = kFfmHostApiVersion;
@@ -405,11 +455,13 @@ struct PffmPlugin::Impl {
     if (shutdown_called)
       return;
 
-    for (auto &[dispatch_id, state] : dispatches) {
+    std::vector<uint32_t> incomplete_dispatches;
+    for (const auto &[dispatch_id, state] : dispatches)
       if (state.begun && !state.ended)
-        reject(dispatch_id, "dispatch was incomplete at plugin shutdown");
-    }
-    active_dispatches.clear();
+        incomplete_dispatches.push_back(dispatch_id);
+    for (uint32_t dispatch_id : incomplete_dispatches)
+      reject(dispatch_id, "dispatch was incomplete at plugin shutdown");
+    replay_blockers.clear();
     drain_epoch(/*shutdown=*/true);
     physical_waves.clear();
 
@@ -424,11 +476,15 @@ struct PffmPlugin::Impl {
       return;
     state.supported = false;
     state.rejection_reason = std::move(reason);
+    replay_blockers.erase(dispatch_id);
+    purge_events(dispatch_id);
+    drain_epoch(/*shutdown=*/false);
   }
 
   DispatchState *active_dispatch(uint32_t dispatch_id) {
     auto iter = dispatches.find(dispatch_id);
-    if (iter == dispatches.end() || !iter->second.begun || iter->second.ended)
+    if (iter == dispatches.end() || !iter->second.supported || !iter->second.begun ||
+        iter->second.ended)
       return nullptr;
     return &iter->second;
   }
@@ -459,8 +515,8 @@ struct PffmPlugin::Impl {
             FfmTdmMemoryAccess access{};
             access.instruction_id = payload.instruction_id;
             access.wave_info = payload.wave_info;
-            access.num_addresses = static_cast<uint32_t>(payload.addresses.size());
-            access.addresses = payload.addresses.data();
+            access.num_addresses = payload.num_addresses;
+            access.addresses = payload.addresses.get();
             access.data_size_bytes = payload.data_size_bytes;
             access.flags = encode_tdm_flags(payload.is_read, payload.is_write);
             api.on_tdm_memory_access(&access);
@@ -469,32 +525,131 @@ struct PffmPlugin::Impl {
         event.payload);
   }
 
-  void record_event(OrderedEvent event) {
-    if (events.empty() || events.back().size() == kEventChunkCapacity) {
-      events.emplace_back();
-      events.back().reserve(kEventChunkCapacity);
+  bool can_stage(uint32_t dispatch_id, size_t bytes) {
+    const auto iter = dispatches.find(dispatch_id);
+    if (iter == dispatches.end() || !iter->second.supported)
+      return false;
+    if (bytes > config.max_staged_bytes || staged_bytes > config.max_staged_bytes - bytes) {
+      reject(dispatch_id,
+             std::format("staging budget of {} bytes exceeded", config.max_staged_bytes));
+      return false;
     }
-    events.back().push_back(std::move(event));
+    return true;
+  }
+
+  bool has_staging_slot() const {
+    return !event_chunks.empty() &&
+           event_chunks.back().events.size() < event_chunks.back().events.capacity();
+  }
+
+  bool can_stage_event(uint32_t dispatch_id, size_t dynamic_bytes) {
+    const size_t slot_bytes = has_staging_slot() ? 0 : sizeof(StagedEvent);
+    if (slot_bytes > config.max_staged_bytes ||
+        dynamic_bytes > config.max_staged_bytes - slot_bytes) {
+      reject(dispatch_id,
+             std::format("staging budget of {} bytes exceeded", config.max_staged_bytes));
+      return false;
+    }
+    return can_stage(dispatch_id, slot_bytes + dynamic_bytes);
+  }
+
+  bool record_event(OrderedEvent event) {
+    const size_t dynamic_bytes = staged_dynamic_size(event);
+    if (!can_stage_event(event.dispatch_id, dynamic_bytes))
+      return false;
+
+    if (has_staging_slot()) {
+      event_chunks.back().events.push_back({std::move(event), dynamic_bytes});
+      staged_bytes += dynamic_bytes;
+      return true;
+    }
+
+    const size_t available_for_capacity = config.max_staged_bytes - staged_bytes - dynamic_bytes;
+    const size_t requested_capacity =
+        std::min(kEventChunkCapacity, available_for_capacity / sizeof(StagedEvent));
+    assert(requested_capacity != 0);
+
+    EventChunk chunk;
+    chunk.events.reserve(requested_capacity);
+    if (chunk.events.capacity() > available_for_capacity / sizeof(StagedEvent)) {
+      reject(event.dispatch_id,
+             std::format("staging budget of {} bytes exceeded", config.max_staged_bytes));
+      return false;
+    }
+    chunk.capacity_bytes = chunk.events.capacity() * sizeof(StagedEvent);
+    chunk.events.push_back({std::move(event), dynamic_bytes});
+    event_chunks.push_back(std::move(chunk));
+    staged_bytes += event_chunks.back().capacity_bytes + dynamic_bytes;
+    return true;
+  }
+
+  void release_chunk(size_t index) {
+    assert(index < event_chunks.size());
+    assert(event_chunks[index].events.empty());
+    assert(event_chunks[index].capacity_bytes <= staged_bytes);
+    staged_bytes -= event_chunks[index].capacity_bytes;
+    event_chunks.erase(event_chunks.begin() + index);
+  }
+
+  void compact_event_chunks() {
+    size_t index = 0;
+    while (index < event_chunks.size()) {
+      while (index + 1 < event_chunks.size() &&
+             event_chunks[index].events.size() < event_chunks[index].events.capacity()) {
+        auto &destination = event_chunks[index].events;
+        auto &source = event_chunks[index + 1].events;
+        const size_t move_count =
+            std::min(destination.capacity() - destination.size(), source.size());
+        destination.insert(destination.end(), std::make_move_iterator(source.begin()),
+                           std::make_move_iterator(source.begin() + move_count));
+        source.erase(source.begin(), source.begin() + move_count);
+        if (source.empty()) {
+          release_chunk(index + 1);
+          continue;
+        }
+      }
+      if (event_chunks[index].events.empty()) {
+        release_chunk(index);
+        continue;
+      }
+      ++index;
+    }
+  }
+
+  void purge_events(uint32_t dispatch_id) {
+    size_t removed_dynamic_bytes = 0;
+    for (EventChunk &chunk : event_chunks) {
+      std::erase_if(chunk.events, [&](const StagedEvent &staged) {
+        if (staged.event.dispatch_id != dispatch_id)
+          return false;
+        removed_dynamic_bytes += staged.dynamic_bytes;
+        return true;
+      });
+    }
+    assert(removed_dynamic_bytes <= staged_bytes);
+    staged_bytes -= removed_dynamic_bytes;
+    compact_event_chunks();
   }
 
   void drain_epoch(bool shutdown) {
-    if (!active_dispatches.empty())
+    if (!replay_blockers.empty())
       return;
 
-    while (!events.empty()) {
-      // Remove each chunk from the queue before invoking the backend so the
-      // consumed prefix is no longer resident. For a sequential dispatch, only
-      // this bounded chunk remains when its EndEvent makes pFFM parse the trace;
-      // an interleaved epoch may still retain later chunks to preserve order.
-      std::vector<OrderedEvent> chunk = std::move(events.front());
-      events.pop_front();
-      for (OrderedEvent &stored_event : chunk) {
-        OrderedEvent event = std::move(stored_event);
+    while (!event_chunks.empty()) {
+      EventChunk chunk = std::move(event_chunks.front());
+      event_chunks.pop_front();
+      assert(chunk.capacity_bytes <= staged_bytes);
+      staged_bytes -= chunk.capacity_bytes;
+      for (StagedEvent &staged : chunk.events) {
+        assert(staged.dynamic_bytes <= staged_bytes);
+        staged_bytes -= staged.dynamic_bytes;
+        OrderedEvent &event = staged.event;
         const auto iter = dispatches.find(event.dispatch_id);
         if (iter != dispatches.end() && iter->second.supported && iter->second.ended)
           replay(event);
       }
     }
+    assert(staged_bytes == 0);
 
     for (auto &[dispatch_id, state] : dispatches) {
       if (!state.supported && !state.diagnostic_emitted) {
@@ -504,7 +659,7 @@ struct PffmPlugin::Impl {
       }
     }
     for (auto iter = dispatches.begin(); iter != dispatches.end();) {
-      if (shutdown || iter->second.begun)
+      if (shutdown || iter->second.ended)
         iter = dispatches.erase(iter);
       else
         ++iter;
@@ -614,6 +769,12 @@ struct PffmPlugin::Impl {
       reject(access.dispatch_id, "memory observation has inconsistent lane masks");
       return;
     }
+    // FFM-v8 has no per-element validity field. Its native gfx1250 VBUFFER
+    // producer selects a lane when any component is in bounds, then reports
+    // the instruction's nominal dword width (including for partially-OOB
+    // B64/B96/B128 accesses). Validate RocJITsu's richer masks here, but
+    // intentionally forward request_lane_mask and the nominal width below to
+    // preserve the direct-FFM callback contract.
     for (uint64_t element_mask : access.element_lane_masks) {
       if ((element_mask & ~access.valid_lane_mask) != 0) {
         reject(access.dispatch_id, "memory observation has an invalid per-element lane mask");
@@ -758,16 +919,31 @@ struct PffmPlugin::Impl {
     const bool is_load = access.mnemonic == "tensor_load_to_lds";
     const bool is_store = access.mnemonic == "tensor_store_from_lds";
     if ((!is_load && !is_store) || access.is_load != is_load || access.addresses.empty() ||
-        !std::has_single_bit(access.element_size_bytes) || access.element_size_bytes > 8 ||
+        !access.addresses.valid() || !std::has_single_bit(access.element_size_bytes) ||
+        access.element_size_bytes > 8 ||
         access.addresses.size() > std::numeric_limits<uint32_t>::max()) {
       reject(access.dispatch_id, "tensor-DMA observation is malformed");
+      return;
+    }
+    if (access.addresses.size() > std::numeric_limits<size_t>::max() / sizeof(uint64_t)) {
+      reject(access.dispatch_id,
+             std::format("staging budget of {} bytes exceeded", config.max_staged_bytes));
+      return;
+    }
+    if (!can_stage_event(access.dispatch_id, access.addresses.size() * sizeof(uint64_t))) {
       return;
     }
 
     TdmEvent event;
     event.instruction_id = wave->current_instruction_id;
     event.wave_info = wave->wave_info;
-    event.addresses.assign(access.addresses.begin(), access.addresses.end());
+    event.num_addresses = static_cast<uint32_t>(access.addresses.size());
+    event.addresses = std::make_unique_for_overwrite<uint64_t[]>(event.num_addresses);
+    if (!access.addresses.copy_to(
+            std::span<uint64_t>(event.addresses.get(), event.num_addresses))) {
+      reject(access.dispatch_id, "tensor-DMA observation is malformed");
+      return;
+    }
     event.data_size_bytes = access.element_size_bytes;
     event.is_read = is_load;
     event.is_write = is_store;
@@ -776,15 +952,19 @@ struct PffmPlugin::Impl {
 
   PffmPlugin &owner;
   InstanceClaim instance_claim;
-  std::string library_path;
+  AdapterConfig config;
   RetainedSharedLibrary library;
   FfmObserverPluginApiPrefix api{};
   bool initialized = false;
   bool shutdown_called = false;
   std::unordered_map<uint32_t, DispatchState> dispatches;
-  std::unordered_set<uint32_t> active_dispatches;
+  // Only supported in-flight dispatches block ordered replay. Rejected
+  // dispatch state remains until its real end callback, but it retains no
+  // events and cannot indefinitely hold completed supported work.
+  std::unordered_set<uint32_t> replay_blockers;
   std::unordered_map<uint64_t, PffmWavefrontState *> physical_waves;
-  std::deque<std::vector<OrderedEvent>> events;
+  std::deque<EventChunk> event_chunks;
+  size_t staged_bytes = 0;
 };
 
 PffmPlugin::PffmPlugin(const char *config_json)
@@ -813,11 +993,15 @@ void PffmPlugin::onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
   DispatchState &state = impl_->dispatches[dispatch_id];
   if (!state.metadata_seen)
     impl_->reject(dispatch_id, "dispatch began without metadata");
-  if (state.begun && !state.ended)
+  if (state.begun && !state.ended) {
     impl_->reject(dispatch_id, "dispatch began more than once");
+    return;
+  }
   state.begun = true;
   state.ended = false;
-  impl_->active_dispatches.insert(dispatch_id);
+  if (!state.supported)
+    return;
+  impl_->replay_blockers.insert(dispatch_id);
   impl_->record_event({dispatch_id, BeginEvent{state.metadata}});
 }
 
@@ -828,13 +1012,16 @@ void PffmPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
     iter = impl_->dispatches.find(dispatch_id);
   }
   DispatchState &state = iter->second;
-  if (state.ended)
+  if (state.ended) {
     impl_->reject(dispatch_id, "dispatch ended more than once");
+    return;
+  }
   if (state.live_waves != 0)
     impl_->reject(dispatch_id, "dispatch ended with live wavefronts");
   state.ended = true;
-  impl_->record_event({dispatch_id, EndEvent{state.metadata}});
-  impl_->active_dispatches.erase(dispatch_id);
+  impl_->replay_blockers.erase(dispatch_id);
+  if (state.supported)
+    impl_->record_event({dispatch_id, EndEvent{state.metadata}});
   impl_->drain_epoch(/*shutdown=*/false);
 }
 
@@ -858,6 +1045,7 @@ void PffmPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
     impl_->reject(old_dispatch, "physical wavefront slot was reused before halt");
     impl_->reject(wf.dispatch_id(), "physical wavefront slot was reused before halt");
     impl_->physical_waves.erase(existing);
+    return;
   }
 
   auto state = std::make_unique<PffmWavefrontState>();
@@ -913,6 +1101,10 @@ void PffmPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction
 
 void PffmPlugin::record_instruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
                                     std::span<const uint32_t> fetch_window) {
+  const auto dispatch_iter = impl_->dispatches.find(wf.dispatch_id());
+  if (dispatch_iter != impl_->dispatches.end() && !dispatch_iter->second.supported)
+    return;
+
   const uint32_t compute_unit_id = static_cast<uint32_t>(wf.cu().id());
   PffmWavefrontState *wave = impl_->find_wave(compute_unit_id, wf.wf_id());
   if (!wave ||

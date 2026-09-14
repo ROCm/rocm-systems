@@ -15,7 +15,8 @@ namespace rocjitsu::plugins::pffm {
 class PffmPlugin final : public ExecutionPlugin {
 public:
   /// @param config_json Resolved plugin configuration containing the required
-  ///        string field `library_path`.
+  ///        string field `library_path` and optional positive integer
+  ///        `max_staged_bytes`.
   explicit PffmPlugin(const char *config_json);
   ~PffmPlugin() override;
 

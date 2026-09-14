@@ -208,6 +208,11 @@ std::string plugin_config(std::string_view library_path) {
 
 std::string plugin_config() { return plugin_config(PFFM_FAKE_BACKEND_PATH); }
 
+std::string plugin_config_with_staging_budget(uint64_t max_staged_bytes) {
+  return std::string{"{\"library_path\":"} + json_string(PFFM_FAKE_BACKEND_PATH) +
+         ",\"max_staged_bytes\":" + std::to_string(max_staged_bytes) + "}";
+}
+
 std::string read_file(const std::string &path) {
   std::ifstream input(path);
   return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
@@ -252,6 +257,16 @@ TEST(PffmPluginConfigTest, EscapesBackendPathAsJson) {
 TEST(PffmPluginConfigTest, RejectsRelativeBackendPath) {
   EXPECT_THROW(PffmPlugin(R"({"library_path":"relative/libgpucsim_ffm_plugin.so"})"),
                std::invalid_argument);
+}
+
+TEST(PffmPluginConfigTest, RejectsInvalidStagingBudgets) {
+  const std::string prefix = std::string{"{\"library_path\":"} +
+                             json_string(PFFM_FAKE_BACKEND_PATH) + ",\"max_staged_bytes\":";
+  for (std::string_view value : {"0", "-1", "1.5", "\"4096\""}) {
+    SCOPED_TRACE(value);
+    const std::string config = prefix + std::string(value) + "}";
+    EXPECT_THROW(PffmPlugin(config.c_str()), std::invalid_argument);
+  }
 }
 
 TEST_F(PffmPluginTest, NegotiatesV8AndForwardsOwnedFieldsInOrder) {
@@ -314,7 +329,7 @@ TEST_F(PffmPluginTest, NegotiatesV8AndForwardsOwnedFieldsInOrder) {
     tensor_access.process_id = wave.process_id();
     tensor_access.element_size_bytes = 4;
     tensor_access.is_load = true;
-    tensor_access.addresses = tensor_addresses;
+    tensor_access.addresses = std::span<const uint64_t>(tensor_addresses);
     plugin.onAmdgpuTensorDmaMemoryAccess(tensor_access);
     tensor_addresses[0] = 0xDEADBEEF;
 
@@ -394,7 +409,7 @@ TEST_F(PffmPluginTest, RejectsMalformedTensorDmaElementSize) {
     access.process_id = wave.process_id();
     access.element_size_bytes = 3;
     access.is_load = true;
-    access.addresses = addresses;
+    access.addresses = std::span<const uint64_t>(addresses);
     plugin.onAmdgpuTensorDmaMemoryAccess(access);
 
     const std::array<uint32_t, 1> end_words{0xBF810000};
@@ -914,6 +929,92 @@ TEST_F(PffmPluginTest, MatchesFfmRegularMemoryCallbackSizes) {
   }
 }
 
+TEST_F(PffmPluginTest, ForwardsNominalWidthsForPartialOobVbufferAccesses) {
+  WaveFixture fixture;
+  const std::string config = plugin_config();
+  PffmPlugin plugin(config.c_str());
+  plugin.onInit();
+
+  const KernelDispatchInfo info = dispatch_info(15);
+  plugin.onAmdgpuDispatchPacketProcessed(info);
+  plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+  Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  plugin.onAmdgpuWavefrontDispatched(wave);
+
+  struct PartialOobCase {
+    const char *mnemonic;
+    uint32_t elements;
+    uint32_t expected_size;
+    std::array<uint64_t, 4> element_lane_masks;
+  };
+  constexpr std::array<PartialOobCase, 3> cases{{
+      {"buffer_load_b64", 2, 8, {0x3, 0x1, 0, 0}},
+      {"buffer_load_b96", 3, 12, {0x3, 0x1, 0x1, 0}},
+      {"buffer_load_b128", 4, 16, {0x3, 0x3, 0x1, 0x1}},
+  }};
+
+  const std::array<uint32_t, 1> words{0xDEAD0015};
+  for (size_t i = 0; i < cases.size(); ++i) {
+    const auto &test = cases[i];
+    const uint64_t pc = 0x2500 + i * 4;
+    SyntheticInstruction instruction(test.mnemonic, words, MEMORY_OP);
+    plugin.onAmdgpuBeforeExecuteInstruction(pc, instruction, wave);
+
+    std::array<uint64_t, 32> addresses{};
+    addresses[0] = 0x2000 + i * 0x100;
+    addresses[1] = 0x3000 + i * 0x100;
+    MemoryAccessObservation access;
+    access.mnemonic = test.mnemonic;
+    access.pc = pc;
+    access.compute_unit_id = static_cast<uint32_t>(wave.cu().id());
+    access.dispatch_id = info.dispatch_id;
+    access.queue_id = wave.queue_id();
+    access.workgroup_id = wave.wg_id();
+    access.wavefront_id = wave.wf_id();
+    access.process_id = wave.process_id();
+    access.route = MemoryRoute::GLOBAL;
+    access.decoded_space = DecodedMemorySpace::GLOBAL;
+    access.is_load = true;
+    access.wavefront_size = 32;
+    access.element_size_bytes = 4;
+    access.elements_per_lane = test.elements;
+    access.active_lane_mask = 0x3;
+    access.architectural_exec_lane_mask = 0x3;
+    access.valid_lane_mask = 0x3;
+    access.request_lane_mask = 0x3;
+    access.addresses = addresses;
+    access.element_lane_masks =
+        std::span<const uint64_t>(test.element_lane_masks).first(test.elements);
+    plugin.onAmdgpuMemoryAccessRouted(access);
+  }
+
+  const std::array<uint32_t, 1> end_words{0xBF810000};
+  SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2600, end, wave);
+  plugin.onAmdgpuWavefrontHalted(wave);
+  plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+  plugin.onShutdown();
+
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_EQ(std::count_if(trace.begin(), trace.end(),
+                          [](const std::string &line) {
+                            return std::string_view(line).starts_with("memory 15 ");
+                          }),
+            cases.size());
+  for (size_t i = 0; i < cases.size(); ++i) {
+    const std::string prefix = "memory 15 0 0 0 0 " + std::to_string(i) + " 3 32 " +
+                               std::to_string(cases[i].expected_size) + " 5 0 1 0 " +
+                               std::to_string(0x2000 + i * 0x100) + " " +
+                               std::to_string(0x3000 + i * 0x100);
+    EXPECT_EQ(std::count_if(trace.begin(), trace.end(),
+                            [&](const std::string &line) {
+                              return std::string_view(line).starts_with(prefix);
+                            }),
+              1)
+        << cases[i].mnemonic;
+  }
+}
+
 TEST_F(PffmPluginTest, RejectsWholeDispatchWhenFlatAtomicResolvesToScratch) {
   WaveFixture fixture;
   const std::string config = plugin_config();
@@ -1021,7 +1122,7 @@ TEST_F(PffmPluginTest, ReplaysInterleavedDispatchesAsOneGloballyOrderedEpoch) {
   EXPECT_LT(end_first, end_second);
 }
 
-TEST_F(PffmPluginTest, ReplaysEventsAcrossStorageChunkBoundariesInOrder) {
+TEST_F(PffmPluginTest, ReplaysLargeEpochInOrder) {
   WaveFixture fixture;
   const std::string config = plugin_config();
   PffmPlugin plugin(config.c_str());
@@ -1060,6 +1161,282 @@ TEST_F(PffmPluginTest, ReplaysEventsAcrossStorageChunkBoundariesInOrder) {
   ASSERT_LT(last, trace.size());
   EXPECT_LT(first, last);
   EXPECT_LT(last, line_with_prefix(trace, "end 24 "));
+}
+
+TEST_F(PffmPluginTest, CompactsInterleavedChunksWithoutReorderingSurvivors) {
+  WaveFixture fixture;
+  const std::string config = plugin_config_with_staging_budget(8 * 1024 * 1024);
+  PffmPlugin plugin(config.c_str());
+  plugin.onInit();
+
+  for (uint32_t id : {33u, 34u}) {
+    plugin.onAmdgpuDispatchPacketProcessed(dispatch_info(id));
+    plugin.onAmdgpuDispatchExecutionBegin(id);
+  }
+  Wavefront &rejected_wave = fixture.wave(33, 0, {0, 0, 0}, 0);
+  Wavefront &supported_wave = fixture.wave(34, 1, {1, 0, 0}, 0);
+  plugin.onAmdgpuWavefrontDispatched(rejected_wave);
+  plugin.onAmdgpuWavefrontDispatched(supported_wave);
+
+  constexpr uint32_t kAddCount = 2050;
+  constexpr uint64_t kRejectedFirstPc = 0x10000;
+  constexpr uint64_t kSupportedFirstPc = 0x20000;
+  const std::array<uint32_t, 1> add_words{0x7E000200};
+  SyntheticInstruction add("v_add_f32", add_words);
+  for (uint32_t i = 0; i < kAddCount; ++i) {
+    plugin.onAmdgpuBeforeExecuteInstruction(kRejectedFirstPc + i * 4, add, rejected_wave);
+    plugin.onAmdgpuBeforeExecuteInstruction(kSupportedFirstPc + i * 4, add, supported_wave);
+  }
+
+  testing::internal::CaptureStderr();
+  SyntheticInstruction scratch("scratch_load_dword", add_words, MEMORY_OP);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x30000, scratch, rejected_wave);
+
+  const std::array<uint32_t, 1> end_words{0xBF810000};
+  SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+  const uint64_t supported_end_pc = kSupportedFirstPc + kAddCount * 4;
+  plugin.onAmdgpuBeforeExecuteInstruction(supported_end_pc, end, supported_wave);
+  plugin.onAmdgpuWavefrontHalted(supported_wave);
+  plugin.onAmdgpuDispatchExecutionEnd(34);
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  EXPECT_NE(diagnostic.find("dedicated SCRATCH instructions are not FFM-compatible"),
+            std::string::npos);
+  EXPECT_EQ(std::count(diagnostic.begin(), diagnostic.end(), '\n'), 1);
+
+  // The two dispatches cross the 4096-event chunk boundary before dispatch 33
+  // is rejected. Its removal compacts dispatch 34's records across chunks.
+  const auto trace = lines(read_file(trace_.path()));
+  const auto count_prefix = [&](std::string_view prefix) {
+    return std::count_if(trace.begin(), trace.end(), [&](const std::string &line) {
+      return std::string_view(line).starts_with(prefix);
+    });
+  };
+  EXPECT_EQ(count_prefix("instruction 34 "), kAddCount + 1);
+  EXPECT_EQ(count_prefix("begin 33 "), 0);
+  EXPECT_EQ(count_prefix("instruction 33 "), 0);
+  EXPECT_EQ(count_prefix("end 33 "), 0);
+  const size_t begin = line_with_prefix(trace, "begin 34 ");
+  const size_t first = line_with_prefix(trace, "instruction 34 1 0 0 0 0 " +
+                                                   std::to_string(kSupportedFirstPc) + " ");
+  const size_t last =
+      line_with_prefix(trace, "instruction 34 1 0 0 0 " + std::to_string(kAddCount) + " " +
+                                  std::to_string(supported_end_pc) + " ");
+  const size_t dispatch_end = line_with_prefix(trace, "end 34 ");
+  ASSERT_LT(begin, trace.size());
+  ASSERT_LT(first, trace.size());
+  ASSERT_LT(last, trace.size());
+  ASSERT_LT(dispatch_end, trace.size());
+  EXPECT_LT(begin, first);
+  EXPECT_LT(first, last);
+  EXPECT_LT(last, dispatch_end);
+
+  plugin.onAmdgpuWavefrontHalted(rejected_wave);
+  plugin.onAmdgpuDispatchExecutionEnd(33);
+  plugin.onShutdown();
+}
+
+TEST_F(PffmPluginTest, RejectsLongLivedDispatchAtStagingBudgetAndReusesBudget) {
+  WaveFixture fixture;
+  const std::string config = plugin_config_with_staging_budget(4096);
+  testing::internal::CaptureStderr();
+  {
+    PffmPlugin plugin(config.c_str());
+    plugin.onInit();
+
+    const KernelDispatchInfo rejected_info = dispatch_info(25);
+    plugin.onAmdgpuDispatchPacketProcessed(rejected_info);
+    plugin.onAmdgpuDispatchExecutionBegin(rejected_info.dispatch_id);
+    Wavefront &rejected_wave = fixture.wave(rejected_info.dispatch_id, 0, {0, 0, 0}, 0);
+    plugin.onAmdgpuWavefrontDispatched(rejected_wave);
+
+    const std::array<uint32_t, 1> add_words{0x7E000200};
+    SyntheticInstruction add("v_add_f32", add_words);
+    for (uint32_t i = 0; i < 512; ++i)
+      plugin.onAmdgpuBeforeExecuteInstruction(0x9000 + i * 4, add, rejected_wave);
+
+    plugin.onAmdgpuWavefrontHalted(rejected_wave);
+    plugin.onAmdgpuDispatchExecutionEnd(rejected_info.dispatch_id);
+
+    const KernelDispatchInfo supported_info = dispatch_info(26);
+    plugin.onAmdgpuDispatchPacketProcessed(supported_info);
+    plugin.onAmdgpuDispatchExecutionBegin(supported_info.dispatch_id);
+    Wavefront &supported_wave = fixture.wave(supported_info.dispatch_id, 1, {1, 0, 0}, 0);
+    plugin.onAmdgpuWavefrontDispatched(supported_wave);
+    const std::array<uint32_t, 1> end_words{0xBF810000};
+    SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+    plugin.onAmdgpuBeforeExecuteInstruction(0xA000, end, supported_wave);
+    plugin.onAmdgpuWavefrontHalted(supported_wave);
+    plugin.onAmdgpuDispatchExecutionEnd(supported_info.dispatch_id);
+    plugin.onShutdown();
+  }
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const size_t budget_diagnostic = diagnostic.find("staging budget of 4096 bytes exceeded");
+  ASSERT_NE(budget_diagnostic, std::string::npos);
+  EXPECT_EQ(diagnostic.find("staging budget", budget_diagnostic + 1), std::string::npos);
+
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_EQ(line_with_prefix(trace, "begin 25 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "instruction 25 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "end 25 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "begin 26 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "instruction 26 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "end 26 "), trace.size());
+}
+
+TEST_F(PffmPluginTest, RejectedDispatchDoesNotBlockOverlappingSupportedDispatch) {
+  WaveFixture fixture;
+  const std::string config = plugin_config_with_staging_budget(4096);
+  PffmPlugin plugin(config.c_str());
+  plugin.onInit();
+
+  for (uint32_t id : {27u, 28u}) {
+    plugin.onAmdgpuDispatchPacketProcessed(dispatch_info(id));
+    plugin.onAmdgpuDispatchExecutionBegin(id);
+  }
+  Wavefront &rejected_wave = fixture.wave(27, 0, {0, 0, 0}, 0);
+  Wavefront &supported_wave = fixture.wave(28, 1, {1, 0, 0}, 0);
+  plugin.onAmdgpuWavefrontDispatched(rejected_wave);
+  plugin.onAmdgpuWavefrontDispatched(supported_wave);
+
+  const std::array<uint32_t, 1> add_words{0x7E000200};
+  SyntheticInstruction add("v_add_f32", add_words);
+  testing::internal::CaptureStderr();
+  for (uint32_t i = 0; i < 128; ++i)
+    plugin.onAmdgpuBeforeExecuteInstruction(0xB000 + i * 4, add, rejected_wave);
+
+  const std::array<uint32_t, 1> end_words{0xBF810000};
+  SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+  plugin.onAmdgpuBeforeExecuteInstruction(0xC000, end, supported_wave);
+  plugin.onAmdgpuWavefrontHalted(supported_wave);
+  plugin.onAmdgpuDispatchExecutionEnd(28);
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  EXPECT_NE(diagnostic.find("staging budget of 4096 bytes exceeded"), std::string::npos);
+  EXPECT_EQ(std::count(diagnostic.begin(), diagnostic.end(), '\n'), 1);
+
+  // Dispatch 27 is still executing, but once rejected it must retain no
+  // events and must not hold dispatch 28's completed epoch in memory.
+  const auto partial_trace = lines(read_file(trace_.path()));
+  const size_t begin = line_with_prefix(partial_trace, "begin 28 ");
+  const size_t instruction = line_with_prefix(partial_trace, "instruction 28 ");
+  const size_t dispatch_end = line_with_prefix(partial_trace, "end 28 ");
+  ASSERT_LT(begin, partial_trace.size());
+  ASSERT_LT(instruction, partial_trace.size());
+  ASSERT_LT(dispatch_end, partial_trace.size());
+  EXPECT_LT(begin, instruction);
+  EXPECT_LT(instruction, dispatch_end);
+  EXPECT_EQ(line_with_prefix(partial_trace, "begin 27 "), partial_trace.size());
+  EXPECT_EQ(line_with_prefix(partial_trace, "instruction 27 "), partial_trace.size());
+  EXPECT_EQ(line_with_prefix(partial_trace, "end 27 "), partial_trace.size());
+
+  plugin.onAmdgpuWavefrontHalted(rejected_wave);
+  plugin.onAmdgpuDispatchExecutionEnd(27);
+  plugin.onShutdown();
+}
+
+TEST_F(PffmPluginTest, IgnoresCallbacksAfterEarlyDispatchRejection) {
+  WaveFixture fixture;
+  const std::string config = plugin_config_with_staging_budget(4096);
+  testing::internal::CaptureStderr();
+  {
+    PffmPlugin plugin(config.c_str());
+    plugin.onInit();
+
+    KernelDispatchInfo rejected_info = dispatch_info(29);
+    rejected_info.code_target = ROCJITSU_CODE_TARGET_GFX950;
+    plugin.onAmdgpuDispatchPacketProcessed(rejected_info);
+    plugin.onAmdgpuDispatchExecutionBegin(rejected_info.dispatch_id);
+    Wavefront &rejected_wave = fixture.wave(rejected_info.dispatch_id, 0, {0, 0, 0}, 0);
+    plugin.onAmdgpuWavefrontDispatched(rejected_wave);
+
+    const std::array<uint32_t, 1> add_words{0x7E000200};
+    SyntheticInstruction add("v_add_f32", add_words);
+    for (uint32_t i = 0; i < 512; ++i)
+      plugin.onAmdgpuBeforeExecuteInstruction(0xD000 + i * 4, add, rejected_wave);
+
+    const KernelDispatchInfo supported_info = dispatch_info(30);
+    plugin.onAmdgpuDispatchPacketProcessed(supported_info);
+    plugin.onAmdgpuDispatchExecutionBegin(supported_info.dispatch_id);
+    Wavefront &supported_wave = fixture.wave(supported_info.dispatch_id, 1, {1, 0, 0}, 0);
+    plugin.onAmdgpuWavefrontDispatched(supported_wave);
+    const std::array<uint32_t, 1> end_words{0xBF810000};
+    SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+    plugin.onAmdgpuBeforeExecuteInstruction(0xE000, end, supported_wave);
+    plugin.onAmdgpuWavefrontHalted(supported_wave);
+    plugin.onAmdgpuDispatchExecutionEnd(supported_info.dispatch_id);
+
+    const auto partial_trace = lines(read_file(trace_.path()));
+    EXPECT_NE(line_with_prefix(partial_trace, "begin 30 "), partial_trace.size());
+    EXPECT_NE(line_with_prefix(partial_trace, "instruction 30 "), partial_trace.size());
+    EXPECT_NE(line_with_prefix(partial_trace, "end 30 "), partial_trace.size());
+    EXPECT_EQ(line_with_prefix(partial_trace, "begin 29 "), partial_trace.size());
+    EXPECT_EQ(line_with_prefix(partial_trace, "instruction 29 "), partial_trace.size());
+    EXPECT_EQ(line_with_prefix(partial_trace, "end 29 "), partial_trace.size());
+
+    plugin.onAmdgpuWavefrontHalted(rejected_wave);
+    plugin.onAmdgpuDispatchExecutionEnd(rejected_info.dispatch_id);
+    plugin.onShutdown();
+  }
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const size_t target_diagnostic = diagnostic.find("code target is not gfx1250");
+  ASSERT_NE(target_diagnostic, std::string::npos);
+  EXPECT_EQ(diagnostic.find("code target is not gfx1250", target_diagnostic + 1),
+            std::string::npos);
+  EXPECT_EQ(diagnostic.find("staging budget"), std::string::npos);
+}
+
+TEST_F(PffmPluginTest, RejectsTensorDmaBeforeMaterializingAddressesOverBudget) {
+  WaveFixture fixture;
+  const std::string config = plugin_config_with_staging_budget(4096);
+  bool addresses_materialized = false;
+  struct AddressSource {
+    bool *materialized = nullptr;
+  } source{&addresses_materialized};
+  testing::internal::CaptureStderr();
+  {
+    PffmPlugin plugin(config.c_str());
+    plugin.onInit();
+
+    const KernelDispatchInfo info = dispatch_info(32);
+    plugin.onAmdgpuDispatchPacketProcessed(info);
+    plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+    Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+    plugin.onAmdgpuWavefrontDispatched(wave);
+
+    const std::array<uint32_t, 3> tensor_words{0xD0710001, 0x7C000000, 0x18140C00};
+    SyntheticInstruction tensor("tensor_load_to_lds", tensor_words, MEMORY_OP);
+    plugin.onAmdgpuBeforeExecuteInstruction(0xF000, tensor, wave);
+    TensorDmaMemoryAccessObservation access;
+    access.mnemonic = "tensor_load_to_lds";
+    access.pc = 0xF000;
+    access.compute_unit_id = static_cast<uint32_t>(wave.cu().id());
+    access.dispatch_id = info.dispatch_id;
+    access.queue_id = wave.queue_id();
+    access.workgroup_id = wave.wg_id();
+    access.wavefront_id = wave.wf_id();
+    access.process_id = wave.process_id();
+    access.element_size_bytes = 4;
+    access.is_load = true;
+    access.addresses = TensorDmaAddressView::deferred(
+        1024, &source, [](const void *context, std::span<uint64_t> destination) {
+          *static_cast<const AddressSource *>(context)->materialized = true;
+          std::fill(destination.begin(), destination.end(), 0x100000);
+          return true;
+        });
+    plugin.onAmdgpuTensorDmaMemoryAccess(access);
+
+    plugin.onAmdgpuWavefrontHalted(wave);
+    plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+    plugin.onShutdown();
+  }
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  EXPECT_FALSE(addresses_materialized);
+  EXPECT_NE(diagnostic.find("staging budget of 4096 bytes exceeded"), std::string::npos);
+  EXPECT_EQ(std::count(diagnostic.begin(), diagnostic.end(), '\n'), 1);
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_EQ(line_with_prefix(trace, "begin 32 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "instruction 32 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "tdm 32 "), trace.size());
+  EXPECT_EQ(line_with_prefix(trace, "end 32 "), trace.size());
 }
 
 TEST_F(PffmPluginTest, PreservesCollidingWrappedFfmWaveIdentities) {
@@ -1257,10 +1634,15 @@ TEST_F(PffmPluginTest, SequentialInstancesShutdownOnceWithoutUnloadingBackend) {
   EXPECT_EQ(line_with_prefix(trace, "unload"), trace.size());
 }
 
-TEST_F(PffmPluginTest, LoadsAsRocjitsuPluginWithRequiredConfig) {
-  const std::string config = std::string{"{\"plugins\":{\"pffm\":"} + plugin_config() + "}}";
+TEST_F(PffmPluginTest, LoadsAsRocjitsuPluginWithStagingBudgetSchema) {
+  const std::string config =
+      std::string{"{\"plugins\":{\"pffm\":"} + plugin_config_with_staging_budget(4096) + "}}";
   ExecutionPluginGroup group(PluginSinkConfig{});
-  ASSERT_EQ(PluginLoader::load_from_config(config, group, PFFM_PLUGIN_DIR), 1);
+  testing::internal::CaptureStderr();
+  const size_t loaded = PluginLoader::load_from_config(config, group, PFFM_PLUGIN_DIR);
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  ASSERT_EQ(loaded, 1);
+  EXPECT_EQ(diagnostic.find("not in schema"), std::string::npos);
   ASSERT_EQ(group.num_plugins(), 1u);
   group.onInit();
   group.onShutdown();
@@ -1471,7 +1853,7 @@ TEST_F(PffmPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
     tensor_access.process_id = wave.process_id();
     tensor_access.element_size_bytes = 4;
     tensor_access.is_load = true;
-    tensor_access.addresses = kTensorAddresses;
+    tensor_access.addresses = std::span<const uint64_t>(kTensorAddresses);
     plugin.onAmdgpuTensorDmaMemoryAccess(tensor_access);
 
     SyntheticInstruction wait("s_wait_loadcnt", kWaitEncoding);

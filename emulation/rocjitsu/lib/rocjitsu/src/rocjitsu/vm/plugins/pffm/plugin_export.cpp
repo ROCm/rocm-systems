@@ -9,4 +9,4 @@
 
 ROCJITSU_DEFINE_PLUGIN(
     rocjitsu::plugins::pffm::PffmPlugin, "pffm",
-    R"({"library_path":{"type":"string","description":"Path to libgpucsim_ffm_plugin.so"}})")
+    R"({"library_path":{"type":"string","description":"Path to libgpucsim_ffm_plugin.so"},"max_staged_bytes":{"type":"number","description":"Maximum charged bytes for staged event records","default":268435456}})")

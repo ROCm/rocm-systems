@@ -39,7 +39,7 @@ public:
   onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) override {
     if (inspect)
       inspect(access);
-    accesses.push_back({
+    auto &captured = accesses.emplace_back(CapturedTensorDmaAccess{
         .mnemonic = std::string(access.mnemonic),
         .pc = access.pc,
         .compute_unit_id = access.compute_unit_id,
@@ -50,8 +50,10 @@ public:
         .process_id = access.process_id,
         .element_size_bytes = access.element_size_bytes,
         .is_load = access.is_load,
-        .addresses = {access.addresses.begin(), access.addresses.end()},
+        .addresses = {},
     });
+    captured.addresses.resize(access.addresses.size());
+    EXPECT_TRUE(access.addresses.copy_to(captured.addresses));
   }
 
   std::function<void(const amdgpu::TensorDmaMemoryAccessObservation &)> inspect;
@@ -355,7 +357,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationIsOptInAndSuppressesEmptyTransfer
   const std::array<uint64_t, 2> mixed_addresses{0x1000, 0x1004};
   rocjitsu::amdgpu::TensorDmaMemoryAccessObservation mixed_observation{};
   mixed_observation.element_size_bytes = 4;
-  mixed_observation.addresses = mixed_addresses;
+  mixed_observation.addresses = std::span<const uint64_t>(mixed_addresses);
   mixed_group.onAmdgpuTensorDmaMemoryAccess(mixed_observation);
   EXPECT_TRUE(quiet_member_ptr->accesses.empty());
   ASSERT_EQ(enabled_member_ptr->accesses.size(), 1u);

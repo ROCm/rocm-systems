@@ -132,8 +132,8 @@ public:
   /// Called after one tensor DMA instruction and any descriptor-requested
   /// atomic-barrier arrival return normally. The observation contains only
   /// in-bounds global requests attempted, in execution order. It intentionally
-  /// does not filter memory access outcomes, matching FFM. Its address span is
-  /// borrowed and valid only during this callback.
+  /// does not filter memory access outcomes, matching the observer boundary.
+  /// Its deferred address view is borrowed and valid only during this callback.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void
