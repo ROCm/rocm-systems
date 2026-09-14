@@ -453,15 +453,16 @@ namespace hip {
     /// Inherit capture ID from the parent stream
     void SetCaptureID(uint64_t captureId) { captureID_ = captureId; }
     /// Reset capture parameters, optionally keeping an invalidated status observable.
+    /// The single entry point for capture teardown, on the origin and on participants alike.
     hipError_t EndCapture(bool preserveInvalidated = false);
     /// Set capture status
     void SetCaptureStatus(hipStreamCaptureStatus captureStatus) { captureStatus_ = captureStatus; }
     /// Set capture mode
     void SetCaptureMode(hipStreamCaptureMode captureMode) { captureMode_ = captureMode; }
-    /// Set parent stream
-    void SetParentStream(hipStream_t parentStream) { parentStream_ = parentStream; }
-    /// Get parent stream
-    hipStream_t GetParentStream() const { return parentStream_; }
+    /// Set the origin stream that owns the capture this stream takes part in
+    void SetCaptureOwner(hipStream_t captureOwner) { captureOwner_ = captureOwner; }
+    /// Get the origin stream that owns the capture this stream takes part in
+    hipStream_t GetCaptureOwner() const { return captureOwner_; }
     /// Get capture ID
     uint64_t GetCaptureID() const { return captureID_; }
     /// Associate an event with the current capture
@@ -479,10 +480,10 @@ namespace hip {
       std::scoped_lock lock(lock_);
       captureEvents_.erase(e);
     }
-    /// Register a parallel (forked) capture stream
-    void SetParallelCaptureStream(hipStream_t s) { parallelCaptureStreams_.insert(s); }
-    /// Remove a parallel capture stream
-    void EraseParallelCaptureStream(hipStream_t s) { parallelCaptureStreams_.erase(s); }
+    /// Enroll a stream in this capture. Only meaningful on the origin stream.
+    void AddCaptureStream(hipStream_t s) { captureStreams_.insert(s); }
+    /// Remove a stream from this capture. Only meaningful on the origin stream.
+    void EraseCaptureStream(hipStream_t s) { captureStreams_.erase(s); }
 
     // --- Execution context (green context) lifecycle ---
     /// Marks the stream as detached: its owning ExecutionCtx has been
@@ -502,6 +503,10 @@ namespace hip {
   private:
     ~Stream() = default;
 
+    /// Return this stream's own capture fields to defaults. Called only from EndCapture, so
+    /// that capture teardown keeps a single entry point.
+    void ResetCaptureState(bool preserveInvalidated);
+
     mutable std::recursive_mutex lock_;      //!< Guards captureEvents_ bookkeeping
     Device* device_;                         //!< Device that owns this stream
     Priority priority_;                      //!< Scheduling priority (High / Normal / Low)
@@ -518,10 +523,12 @@ namespace hip {
     hip::Graph* pCaptureGraph_ = nullptr;                 //!< Graph being constructed by capture
     hipStreamCaptureMode captureMode_{hipStreamCaptureModeGlobal}; //!< API restriction mode
     bool originStream_ = false;                           //!< True if this stream started capture
-    hipStream_t parentStream_ = nullptr;                  //!< Parent stream (null for origin)
+    hipStream_t captureOwner_ = nullptr;                  //!< Origin owning this capture; the
+                                                          //!< origin points at itself
     std::vector<hip::GraphNode*> lastCapturedNodes_;      //!< Last graph node(s) captured
     std::vector<hip::GraphNode*> removedDependencies_;    //!< Deps removed via UpdateCaptureDeps
-    std::unordered_set<hipStream_t> parallelCaptureStreams_; //!< Forked parallel capture branches
+    std::unordered_set<hipStream_t> captureStreams_;      //!< Streams enrolled in this capture,
+                                                          //!< excluding the origin. Origin only.
     std::unordered_set<hipEvent_t> captureEvents_;        //!< Events tied to this capture
     uint64_t captureID_ = 0;                              //!< Unique ID for this capture sequence
 

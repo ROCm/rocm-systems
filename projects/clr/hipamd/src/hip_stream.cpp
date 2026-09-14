@@ -63,7 +63,7 @@ hipError_t Stream::EndCapture(bool preserveInvalidated) {
     captureEvents_.clear();
   }
   // Recursively end capture on all parallel (forked) streams.
-  for (auto stream : parallelCaptureStreams_) {
+  for (auto stream : captureStreams_) {
     [[maybe_unused]] const auto err =
         reinterpret_cast<hip::Stream*>(stream)->EndCapture(preserveInvalidated);
     assert(err == hipSuccess);
@@ -74,9 +74,9 @@ hipError_t Stream::EndCapture(bool preserveInvalidated) {
                                        : hipStreamCaptureStatusNone;
   pCaptureGraph_ = nullptr;
   originStream_ = false;
-  parentStream_ = nullptr;
+  captureOwner_ = nullptr;
   lastCapturedNodes_.clear();
-  parallelCaptureStreams_.clear();
+  captureStreams_.clear();
 
   return hipSuccess;
 }
@@ -101,8 +101,8 @@ void Stream::Detach() {
       captureStatus_ == hipStreamCaptureStatusInvalidated) {
     captureStatus_ = hipStreamCaptureStatusInvalidated;
 
-    if (parentStream_ != nullptr) {
-      reinterpret_cast<hip::Stream*>(parentStream_)->EraseParallelCaptureStream(
+    if (captureOwner_ != nullptr) {
+      reinterpret_cast<hip::Stream*>(captureOwner_)->EraseCaptureStream(
           reinterpret_cast<hipStream_t>(this));
       ClearCaptureGraph();
     }
@@ -456,8 +456,8 @@ hipError_t hipStreamDestroy(hipStream_t stream) {
   }
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   if (s->GetCaptureStatus() != hipStreamCaptureStatusNone) {
-    if (s->GetParentStream() != nullptr) {
-      reinterpret_cast<hip::Stream*>(s->GetParentStream())->EraseParallelCaptureStream(stream);
+    if (s->GetCaptureOwner() != nullptr) {
+      reinterpret_cast<hip::Stream*>(s->GetCaptureOwner())->EraseCaptureStream(stream);
     }
     [[maybe_unused]] auto error = s->EndCapture();
   }
@@ -530,12 +530,12 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
     // Don't set when a stream waits on its own event, or when a forked stream joins back to
     // the parent.
     if (waitStream != eventStream && !waitStream->IsOriginStream() &&
-        waitStream != reinterpret_cast<hip::Stream*>(eventStream->GetParentStream())) {
+        waitStream != reinterpret_cast<hip::Stream*>(eventStream->GetCaptureOwner())) {
       waitStream->SetCaptureGraph(eventStream->GetCaptureGraph());
       waitStream->SetCaptureID(eventStream->GetCaptureID());
       waitStream->SetCaptureMode(eventStream->GetCaptureMode());
-      waitStream->SetParentStream(reinterpret_cast<hipStream_t>(eventStream));
-      eventStream->SetParallelCaptureStream(stream);
+      waitStream->SetCaptureOwner(reinterpret_cast<hipStream_t>(eventStream));
+      eventStream->AddCaptureStream(stream);
     }
     waitStream->AddCrossCapturedNode(e->GetNodesPrevToRecorded());
     return hipSuccess;
