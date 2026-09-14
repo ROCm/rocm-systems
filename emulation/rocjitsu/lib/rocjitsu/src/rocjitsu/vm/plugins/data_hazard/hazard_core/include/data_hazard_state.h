@@ -181,13 +181,16 @@ struct EngineGlobalAccessInfo {
   bool valid = false;
 };
 
-/// Accesses held for two distinct workgroups, which is all a conflicting access
-/// needs: if its own workgroup fills the first slot, the second is by
-/// construction a different one. A single slot would let the workgroup that
-/// accessed last overwrite the others and hide its own conflict with them. One
-/// entry exists per four bytes of a dispatch, so accesses are not retained per
-/// workgroup; the byte masks keep disjoint ones inside an entry apart.
-using EngineGlobalAccessSlots = std::array<EngineGlobalAccessInfo, 2>;
+/// Accesses held per four-byte entry so a later conflicting access can still
+/// find the one it races. One entry spans four bytes, and accesses narrower
+/// than a dword share it through their byte masks, so disjoint sub-dword
+/// accesses from different workgroups accumulate here without racing each
+/// other. Too few slots evict an earlier access before a later one can conflict
+/// with it, missing the race (writers self-report, but reads and atomics do
+/// not). Eight is the tight bound for a four-byte entry: each of the four bytes
+/// can be read by two foreign workgroups before a write to any one byte must
+/// still find that byte's partner reader.
+using EngineGlobalAccessSlots = std::array<EngineGlobalAccessInfo, 8>;
 
 struct EngineGlobalShadowEntry {
   EngineGlobalAccessSlots writers;

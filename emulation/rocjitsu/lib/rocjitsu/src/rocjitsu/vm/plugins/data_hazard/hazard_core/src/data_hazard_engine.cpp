@@ -277,8 +277,13 @@ uint8_t coverage_by_same_workgroup(const EngineGlobalAccessSlots &slots,
 
 /// Retains @p current while keeping the slots on distinct workgroups: a repeat
 /// from a workgroup already held widens that slot's byte coverage instead of
-/// consuming the slot holding the other workgroup, and a newcomer takes a free
-/// slot before displacing the second.
+/// consuming the slot holding another workgroup, and a newcomer takes a free
+/// slot before any is displaced. When every slot is full -- more distinct
+/// workgroups have touched the entry than it can hold before any synchronizing
+/// event -- the newcomer displaces the last slot, so the earlier accesses a
+/// future conflict is most likely to need stay retained. This is only reached
+/// once the whole array is exhausted, which for a four-byte entry means more
+/// distinct workgroups than its eight slots.
 void record_access(EngineGlobalAccessSlots &slots, const EngineInstructionContext &ctx,
                    const EngineGlobalAccessInfo &current) {
   for (auto &slot : slots) {
@@ -295,7 +300,7 @@ void record_access(EngineGlobalAccessSlots &slots, const EngineInstructionContex
       return;
     }
   }
-  slots[1] = current;
+  slots.back() = current;
 }
 
 EngineWarning make_global_race_warning(const EngineInstructionContext &ctx,

@@ -19,6 +19,24 @@ class WaitInstruction:
 
 
 @dataclass
+class MemoryMutation:
+    """A sub-dword load that can be rewritten in place as a store.
+
+    Turning a byte/short *read* into a *write* to the same address is the
+    single-edit that makes an otherwise race-free all-reads kernel racy: the
+    new writer must race the foreign readers of that byte. It exposes the
+    global shadow's sub-dword eviction gap the way removing an ``s_wait``
+    exposes a missing dependency.
+    """
+
+    line_number: int  # 0-based line index
+    load_mnemonic: str  # e.g. "flat_load_ubyte"
+    store_mnemonic: str  # e.g. "flat_store_byte"
+    full_line: str  # original line text
+    rewritten_line: str  # the store that replaces it (no trailing newline)
+
+
+@dataclass
 class MutantResult:
     """Result of building and running one mutant."""
 
@@ -26,6 +44,7 @@ class MutantResult:
     wait_index: int  # index into the shader's wait list
     wait_instruction: str  # e.g. "s_wait_loadcnt 0x0"
     wait_line: int  # line number in assembly
+    kind: str = "wait"  # "wait" (s_wait removal) or "memory" (load->store)
     compiled: bool = False
     linked: bool = False
     ran: bool = False

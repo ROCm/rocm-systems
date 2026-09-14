@@ -2312,6 +2312,150 @@ TEST(GenericDataHazardEngineTest, DisjointWriterDoesNotDisplaceTheWriterItDoesNo
   EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 0u);
 }
 
+namespace {
+
+/// One global access from a specific workgroup of dispatch 1.
+struct GlobalAccessStep {
+  EntityId workgroup;
+  uint64_t address;
+  uint32_t size_bytes;
+  bool is_read;
+  bool is_write;
+  bool is_atomic;
+};
+
+GlobalAccessStep read_byte(EntityId workgroup, uint64_t address) {
+  return GlobalAccessStep{workgroup, address, 1, true, false, false};
+}
+GlobalAccessStep write_byte(EntityId workgroup, uint64_t address) {
+  return GlobalAccessStep{workgroup, address, 1, false, true, false};
+}
+GlobalAccessStep atomic_byte(EntityId workgroup, uint64_t address) {
+  return GlobalAccessStep{workgroup, address, 1, true, true, true};
+}
+
+/// Replays a sequence of global accesses, each from its own workgroup and wave
+/// of dispatch 1, and returns the warnings raised. Distinct workgroups are what
+/// let the accesses conflict; a workgroup may appear more than once to issue a
+/// later access of its own.
+std::vector<EngineWarning> run_global_access_sequence(DataHazardEngine &engine,
+                                                      const std::vector<GlobalAccessStep> &steps) {
+  std::set<EntityId> started;
+  EntityId next_id = 1;
+  for (const auto &step : steps) {
+    if (started.insert(step.workgroup).second) {
+      engine.on_workgroup_begin(1, 0, step.workgroup);
+      engine.on_wave_begin(ExecutionKey{1, 0, step.workgroup, 0});
+    }
+
+    InstructionEvent inst;
+    inst.instruction = make_instruction(next_id, 0x100 * next_id);
+    inst.instruction.execution = ExecutionKey{1, 0, step.workgroup, 0};
+    engine.on_instruction(inst);
+
+    ResourceAccessEvent event;
+    event.instruction = inst.instruction;
+    event.resource_kind = ResourceKind::GlobalMemory;
+    event.address = step.address;
+    event.size_bytes = step.size_bytes;
+    event.is_read = step.is_read;
+    event.is_write = step.is_write;
+    event.is_atomic = step.is_atomic;
+    engine.on_resource_access(event);
+    ++next_id;
+  }
+  return engine.warning_snapshot();
+}
+
+} // namespace
+
+// Copilot's granule-eviction scenario for writers: three workgroups write the
+// disjoint bytes 0, 1 and 2 of the granule at 0x3000, so none of them race and
+// nothing flags the granule. A later read of byte 1 still races the write only
+// workgroup 1 made there -- unless recording the third write evicted it. Two
+// slots per granule cannot retain all three disjoint writers, so the race is
+// missed until the slot history grows.
+TEST(GenericDataHazardEngineTest, DisjointWritersSurviveUntilALaterReaderCanRaceThem) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings =
+      run_global_access_sequence(engine, {write_byte(0, 0x3000), write_byte(1, 0x3001),
+                                          write_byte(2, 0x3002), read_byte(3, 0x3001)});
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 3's read of byte 0x3001 races the write workgroup 1 made to it";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory RAW data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 1u)
+      << "the write it races with is the one a two-wide history drops";
+}
+
+// The same eviction exposes the reader history. Reads never race reads, so four
+// workgroups reading disjoint bytes flag nothing, and a write to byte 1 must
+// still find the read the history evicted. One reader per byte fits once the
+// array holds four.
+TEST(GenericDataHazardEngineTest, DisjointReadersSurviveUntilALaterWriterCanRaceThem) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings = run_global_access_sequence(
+      engine, {read_byte(0, 0x3000), read_byte(1, 0x3001), read_byte(2, 0x3002),
+               read_byte(3, 0x3003), write_byte(4, 0x3001)});
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 4's write to byte 0x3001 races the read workgroup 1 made to it";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory WAR data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 1u);
+}
+
+// Completeness for readers needs two foreign readers retained per byte, not two
+// per granule. When a workgroup writes a byte it also read, the race is with the
+// *other* workgroup that read that byte, never its own read. With all four bytes
+// read by two workgroups each, only eight reader slots keep every partner a
+// later write can hit -- four is not enough.
+TEST(GenericDataHazardEngineTest, EveryByteKeepsBothForeignReadersAgainstALaterWrite) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings =
+      run_global_access_sequence(engine, {read_byte(0, 0x3000), read_byte(1, 0x3000), // byte 0
+                                          read_byte(2, 0x3001), read_byte(3, 0x3001), // byte 1
+                                          read_byte(4, 0x3002), read_byte(5, 0x3002), // byte 2
+                                          read_byte(6, 0x3003), read_byte(7, 0x3003), // byte 3
+                                          write_byte(0, 0x3000)}); // workgroup 0 rewrites byte 0
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 0 writing byte 0x3000 races workgroup 1's read of the same byte";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory WAR data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 1u)
+      << "workgroup 0 does not race its own read; the partner reader must survive";
+}
+
+// Atomics share the readers' exposure: two atomics never race, so they never
+// flag the granule themselves. Three atomics to disjoint bytes must all be
+// retained so a later ordinary read of an evicted byte still races its atomic.
+TEST(GenericDataHazardEngineTest, DisjointAtomicsSurviveUntilAnOrdinaryAccessCanRaceThem) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings =
+      run_global_access_sequence(engine, {atomic_byte(0, 0x3000), atomic_byte(1, 0x3001),
+                                          atomic_byte(2, 0x3002), read_byte(3, 0x3001)});
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 3's ordinary read of byte 0x3001 races workgroup 1's atomic there";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory RAW data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 1u);
+}
+
 // A workgroup that wrote part of what it later reads is ordered against itself
 // over those bytes only. The rest of the read is still exposed, and dropping it
 // leaves a write from another workgroup with nothing to conflict with.

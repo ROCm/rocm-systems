@@ -21,7 +21,7 @@ from typing import Dict, List, Optional, Protocol, Tuple
 
 from .benchmark import Benchmarker, PerfCollector
 from .kernel_processor import KernelBuilder
-from .models import MutantResult, ShaderReport, WaitInstruction
+from .models import MemoryMutation, MutantResult, ShaderReport, WaitInstruction
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -34,6 +34,19 @@ DEFAULT_TIMEOUT = 240  # 4 minutes
 # with a `// requires: <arch>` comment; they are skipped on every other
 # architecture.
 REQUIRES_RE = re.compile(r"^\s*//\s*requires:\s*(.+)$", re.MULTILINE)
+
+# A shader picks which mutation paths run against it with a `// mutate: <kinds>`
+# comment, where kinds is a comma-separated subset of {wait, memory}. The
+# annotation is exclusive: it fully selects the paths, so a memory-mutation
+# kernel writes `// mutate: memory` and no waits are stripped from it. A shader
+# with no such comment defaults to wait-stripping only, which is how the whole
+# existing corpus behaves.
+MUTATE_RE = re.compile(r"^\s*//\s*mutate:\s*(.+)$", re.MULTILINE)
+
+MUTATION_KIND_WAIT = "wait"
+MUTATION_KIND_MEMORY = "memory"
+VALID_MUTATION_KINDS = frozenset({MUTATION_KIND_WAIT, MUTATION_KIND_MEMORY})
+DEFAULT_MUTATION_KINDS = frozenset({MUTATION_KIND_WAIT})
 
 # s_wait_xcnt tracks address translation (XNACK replay), not data completion.
 # Mutating it does not produce data hazards detectable by this plugin, so it
@@ -158,6 +171,123 @@ def create_mutant_asm(asm_path: Path, wait: WaitInstruction, output: Path) -> No
 
     original = lines[wait.line_number].rstrip()
     lines[wait.line_number] = f"\ts_nop 0  ; MUTANT: removed {original.strip()}\n"
+
+    with open(output, "w") as f:
+        f.writelines(lines)
+
+
+# ---------------------------------------------------------------------------
+# Memory mutation: sub-dword load -> store
+# ---------------------------------------------------------------------------
+
+# Sub-dword (byte / short) load mnemonics mapped to the store that writes the
+# same operand width. A byte read turned into a byte write to the same address
+# is the single edit that makes an all-reads kernel racy: the new writer must
+# race the byte's foreign readers. Full-dword loads are deliberately absent —
+# they cannot expose the sub-dword eviction gap. Legacy and _b8/_b16 spellings
+# both appear because the compiler emits either depending on the pointer type;
+# the store spelling is matched to the load's family (flat vs global) and era
+# (legacy byte/short vs bN). d16 half-register loads are omitted: their store
+# side writes only part of the data register and needs different operands.
+SUBDWORD_LOAD_TO_STORE = {
+    # byte, legacy spelling
+    "flat_load_ubyte": "flat_store_byte",
+    "flat_load_sbyte": "flat_store_byte",
+    "global_load_ubyte": "global_store_byte",
+    "global_load_sbyte": "global_store_byte",
+    # byte, bN spelling
+    "flat_load_u8": "flat_store_b8",
+    "flat_load_i8": "flat_store_b8",
+    "global_load_u8": "global_store_b8",
+    "global_load_i8": "global_store_b8",
+    # short, legacy spelling
+    "flat_load_ushort": "flat_store_short",
+    "flat_load_sshort": "flat_store_short",
+    "global_load_ushort": "global_store_short",
+    "global_load_sshort": "global_store_short",
+    # short, bN spelling
+    "flat_load_u16": "flat_store_b16",
+    "flat_load_i16": "flat_store_b16",
+    "global_load_u16": "global_store_b16",
+    "global_load_i16": "global_store_b16",
+}
+
+_SUBDWORD_LOAD_RE = re.compile(
+    r"^\s*(" + "|".join(re.escape(m) for m in SUBDWORD_LOAD_TO_STORE) + r")\b\s+(.*)$"
+)
+
+
+def _rewrite_load_to_store(store_mnemonic: str, operands: str) -> str:
+    """Rewrite a sub-dword load's operands for its store counterpart.
+
+    A load reads into its first operand from the address in the following
+    operand(s); the store writes the same register to the same address, so the
+    first two operands swap and everything after (a scalar base, ``offset:``,
+    cache flags) is preserved verbatim:
+
+        flat_load_ubyte  v0, v[0:1] offset:1 sc0 sc1
+            -> flat_store_byte v[0:1], v0 offset:1 sc0 sc1
+        global_load_ubyte v0, v2, s[0:1] offset:1
+            -> global_store_byte v2, v0, s[0:1] offset:1
+
+    The load's destination register is reused as the store's data source; its
+    contents do not matter to the shadow, which records only that the byte was
+    written.
+    """
+    parts = [p.strip() for p in operands.split(",")]
+    # Trailing modifiers (offset:, sc0, nt, ...) hang off the last operand with
+    # no comma, so split them away from that register token.
+    last_tokens = parts[-1].split()
+    regs = parts[:-1] + [last_tokens[0]]
+    modifiers = " ".join(last_tokens[1:])
+
+    vdst, vaddr, *rest = regs
+    new_operands = ", ".join([vaddr, vdst, *rest])
+    if modifiers:
+        new_operands += " " + modifiers
+    return f"{store_mnemonic} {new_operands}"
+
+
+def find_sub_dword_loads(asm_path: Path) -> List[MemoryMutation]:
+    """Parse an assembly file and return every sub-dword load it can flip to a store."""
+    mutations: List[MemoryMutation] = []
+    with open(asm_path) as f:
+        for idx, line in enumerate(f):
+            stripped = line.strip()
+            if stripped.startswith(";") or stripped.startswith("."):
+                continue
+            m = _SUBDWORD_LOAD_RE.match(stripped)
+            if not m:
+                continue
+            load_mnemonic = m.group(1)
+            store_mnemonic = SUBDWORD_LOAD_TO_STORE[load_mnemonic]
+            rewritten = _rewrite_load_to_store(store_mnemonic, m.group(2))
+            mutations.append(
+                MemoryMutation(
+                    line_number=idx,
+                    load_mnemonic=load_mnemonic,
+                    store_mnemonic=store_mnemonic,
+                    full_line=line.rstrip(),
+                    rewritten_line=rewritten,
+                )
+            )
+    return mutations
+
+
+def create_memory_mutant_asm(asm_path: Path, mem: MemoryMutation, output: Path) -> None:
+    """
+    Create a mutant assembly file with one sub-dword load rewritten as a store.
+    The original instruction is preserved as a comment for traceability.
+    """
+    with open(asm_path) as f:
+        lines = f.readlines()
+
+    # Preserve the original line's leading indentation.
+    original = lines[mem.line_number]
+    indent = original[: len(original) - len(original.lstrip())]
+    lines[mem.line_number] = (
+        f"{indent}{mem.rewritten_line}  ; MUTANT: load->store {mem.full_line.strip()}\n"
+    )
 
     with open(output, "w") as f:
         f.writelines(lines)
@@ -338,9 +468,7 @@ def _run_baseline(
         reason = (
             "TIMEOUT"
             if ec == -1
-            else (stderr or "could not be started")
-            if ec < 0
-            else f"exit {ec}"
+            else (stderr or "could not be started") if ec < 0 else f"exit {ec}"
         )
         report.error = f"baseline run failed: {reason}"
         print(f"  [SKIP] {report.error}", file=sys.stderr)
@@ -372,10 +500,97 @@ def _run_single_mutant(
         wait_index=i,
         wait_instruction=f"{wait.instruction} {wait.operand}",
         wait_line=wait.line_number,
+        kind="wait",
     )
 
     mut_asm = config.workdir / f"{shader_cpp.stem}_{tag}.s"
     create_mutant_asm(config.asm_file, wait, mut_asm)
+    return _build_run_and_evaluate_mutant(
+        kernel_builder,
+        mr,
+        i,
+        tag,
+        mut_asm,
+        baseline_stdout,
+        runner=runner,
+        verbose=verbose,
+        timeout=timeout,
+        subprocess_output=subprocess_output,
+        benchmarker=benchmarker,
+        benchmark_enabled=benchmark_enabled,
+        benchmark_label=benchmark_label,
+        perf_collector=perf_collector,
+    )
+
+
+def _run_single_memory_mutant(
+    kernel_builder: KernelBuilder,
+    i: int,
+    mem: MemoryMutation,
+    baseline_stdout: str,
+    runner: Optional[KernelRunner] = None,
+    verbose: bool = False,
+    timeout: int = 10,
+    subprocess_output: bool = False,
+    benchmarker: Optional[Benchmarker] = None,
+    benchmark_enabled: bool = False,
+    benchmark_label: str = "",
+    perf_collector: Optional[PerfCollector] = None,
+) -> MutantResult:
+    """Build, run, and evaluate a single load->store memory mutant."""
+    tag = f"mut{i}"
+    config = kernel_builder.config
+    shader_cpp = config.shader_cpp
+    mr = MutantResult(
+        shader=shader_cpp.stem,
+        wait_index=i,
+        wait_instruction=f"{mem.load_mnemonic}→{mem.store_mnemonic}",
+        wait_line=mem.line_number,
+        kind="memory",
+    )
+
+    mut_asm = config.workdir / f"{shader_cpp.stem}_{tag}.s"
+    create_memory_mutant_asm(config.asm_file, mem, mut_asm)
+    return _build_run_and_evaluate_mutant(
+        kernel_builder,
+        mr,
+        i,
+        tag,
+        mut_asm,
+        baseline_stdout,
+        runner=runner,
+        verbose=verbose,
+        timeout=timeout,
+        subprocess_output=subprocess_output,
+        benchmarker=benchmarker,
+        benchmark_enabled=benchmark_enabled,
+        benchmark_label=benchmark_label,
+        perf_collector=perf_collector,
+    )
+
+
+def _build_run_and_evaluate_mutant(
+    kernel_builder: KernelBuilder,
+    mr: MutantResult,
+    i: int,
+    tag: str,
+    mut_asm: Path,
+    baseline_stdout: str,
+    runner: Optional[KernelRunner] = None,
+    verbose: bool = False,
+    timeout: int = 10,
+    subprocess_output: bool = False,
+    benchmarker: Optional[Benchmarker] = None,
+    benchmark_enabled: bool = False,
+    benchmark_label: str = "",
+    perf_collector: Optional[PerfCollector] = None,
+) -> MutantResult:
+    """Build one already-written mutant assembly, run it, and score it.
+
+    Shared by the wait-removal and load->store mutant paths, which differ only
+    in how they produce *mut_asm*.
+    """
+    config = kernel_builder.config
     # Point the builder at the mutated assembly for this build
     original_asm = config.asm_file
     config.asm_file = mut_asm
@@ -387,7 +602,7 @@ def _run_single_mutant(
         mr.error = err
         if verbose:
             print(
-                f"  Mutant {i} ({wait.instruction} L{wait.line_number}): "
+                f"  Mutant {i} ({mr.wait_instruction} L{mr.wait_line}): "
                 f"BUILD FAIL — {err}"
             )
         return mr
@@ -412,7 +627,7 @@ def _run_single_mutant(
     mr.stderr = stderr
 
     if subprocess_output or ec not in (0, -1):
-        label = f"mut{i} ({wait.instruction} L{wait.line_number})"
+        label = f"mut{i} ({mr.wait_instruction} L{mr.wait_line})"
         if stdout:
             print(f"  [{label} stdout]\n{stdout}", flush=True)
         if stderr:
@@ -448,7 +663,7 @@ def _run_single_mutant(
 
     if verbose:
         print(
-            f"  Mutant {i} ({wait.instruction} L{wait.line_number}): "
+            f"  Mutant {i} ({mr.wait_instruction} L{mr.wait_line}): "
             f"{status}  exit={ec}  hazards={mr.hazard_count}"
         )
 
@@ -466,8 +681,16 @@ def process_shader(
     benchmarker: Optional[Benchmarker] = None,
     benchmark_enabled: bool = False,
     perf_collector: Optional[PerfCollector] = None,
+    mutate_waits: bool = True,
+    mutate_memory: bool = False,
 ) -> ShaderReport:
-    """Run the full mutation pipeline for one shader."""
+    """Run the full mutation pipeline for one shader.
+
+    ``mutate_waits`` and ``mutate_memory`` select which mutation paths run;
+    callers resolve them from the shader's ``// mutate:`` annotation (see
+    :func:`shader_mutation_kinds`). The defaults reproduce the historical
+    behavior — wait-stripping only — for drivers that do not pass them.
+    """
     config = kernel_builder.config
     report = ShaderReport(shader=config.shader_cpp.stem, asm_file="")
 
@@ -495,22 +718,48 @@ def process_shader(
     ):
         return report
 
-    for i, wait in enumerate(report.waits_found):
-        mr = _run_single_mutant(
-            kernel_builder,
-            i,
-            wait,
-            report.baseline_stdout,
-            runner=runner,
-            verbose=verbose,
-            timeout=timeout,
-            subprocess_output=subprocess_output,
-            benchmarker=benchmarker,
-            benchmark_enabled=benchmark_enabled,
-            benchmark_label=f"{report.shader}_mut{i}",
-            perf_collector=perf_collector,
-        )
-        report.mutants.append(mr)
+    if mutate_waits:
+        for i, wait in enumerate(report.waits_found):
+            mr = _run_single_mutant(
+                kernel_builder,
+                i,
+                wait,
+                report.baseline_stdout,
+                runner=runner,
+                verbose=verbose,
+                timeout=timeout,
+                subprocess_output=subprocess_output,
+                benchmarker=benchmarker,
+                benchmark_enabled=benchmark_enabled,
+                benchmark_label=f"{report.shader}_mut{i}",
+                perf_collector=perf_collector,
+            )
+            report.mutants.append(mr)
+
+    if mutate_memory:
+        # Memory mutants continue the same index sequence so each row's # stays
+        # unique across both mutation kinds.
+        mem_mutations = find_sub_dword_loads(asm_file)
+        if verbose:
+            print(f"  Found {len(mem_mutations)} sub-dword loads to flip to stores")
+        base = len(report.mutants)
+        for j, mem in enumerate(mem_mutations):
+            i = base + j
+            mr = _run_single_memory_mutant(
+                kernel_builder,
+                i,
+                mem,
+                report.baseline_stdout,
+                runner=runner,
+                verbose=verbose,
+                timeout=timeout,
+                subprocess_output=subprocess_output,
+                benchmarker=benchmarker,
+                benchmark_enabled=benchmark_enabled,
+                benchmark_label=f"{report.shader}_mut{i}",
+                perf_collector=perf_collector,
+            )
+            report.mutants.append(mr)
 
     return report
 
@@ -547,3 +796,41 @@ def shader_supports_arch(shader: Path, arch: str) -> bool:
     """True when ``shader`` can be built for ``arch``."""
     required = shader_required_archs(shader)
     return not required or arch in required
+
+
+def shader_mutation_kinds(shader: Path) -> "frozenset[str]":
+    """
+    Mutation paths a shader opts into, from its ``// mutate: <kinds>[, ...]`` line.
+
+    The annotation is exclusive: whatever it lists is exactly what runs, drawn
+    from ``{wait, memory}``. A shader with no annotation defaults to
+    :data:`DEFAULT_MUTATION_KINDS` (wait-stripping only), preserving the
+    behavior of the existing corpus. Unknown kinds are ignored with a warning
+    so a typo never silently disables every path.
+    """
+    try:
+        text = shader.read_text(errors="replace")
+    except OSError:
+        return DEFAULT_MUTATION_KINDS
+
+    matches = list(MUTATE_RE.finditer(text))
+    if not matches:
+        return DEFAULT_MUTATION_KINDS
+
+    kinds = set()
+    for match in matches:
+        for raw in match.group(1).split(","):
+            kind = raw.strip().lower()
+            if not kind:
+                continue
+            if kind in VALID_MUTATION_KINDS:
+                kinds.add(kind)
+            else:
+                print(
+                    f"  [WARN] {shader.name}: unknown mutate kind '{kind}' "
+                    f"(known: {', '.join(sorted(VALID_MUTATION_KINDS))})",
+                    file=sys.stderr,
+                )
+    # An annotation that named only unknown kinds still means the author chose
+    # to override the default; fall back rather than run nothing silently.
+    return frozenset(kinds) if kinds else DEFAULT_MUTATION_KINDS
