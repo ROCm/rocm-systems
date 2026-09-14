@@ -1695,6 +1695,10 @@ protected:
         ncclResult_t sendRet = ncclSuccess;
         bool         completed = false;
         int          fatalCount = 0;
+        // Set when the request was seen to finish. When it is false the helper has driven
+        // this communicator's queue pairs to error to retire the work instead; either way
+        // the caller's buffer is free to go.
+        bool         retired = false;
     };
 
     WorkerFaultSendOutcome WorkerCastFaultSend(void* sendComm, void* buffer, size_t size, int tag,
@@ -1727,25 +1731,36 @@ protected:
             }
         }
 
-        // Never returns with the request still outstanding. Its three callers read an
-        // uncompleted outcome as the signal they were looking for and return, and their
-        // guards would then deregister and free memory the NIC can still be writing into.
+        // Never returns with the request still able to reference the caller's buffer: the
+        // three callers read an uncompleted outcome as the signal they were looking for
+        // and return, and their guards would then deregister and free that memory.
         //
-        // An error from TestRequest ends it: the queue pair is in error and the work is
-        // flushed, which is the expected outcome once the injected fault fires -- so the
-        // usual path costs one poll and leaves the connection usable for the recovery
-        // checks that follow. Only a request that is neither done nor errored gets this
-        // side's queue pairs driven to error, and in that case the caller is failing.
+        // Polling cannot establish retirement here, and an earlier version of this that
+        // read an error as "retired" was wrong. IbCastTest checks the communicator's fatal
+        // counter before it looks at the request at all (net_ib_cast/p2p.cc:1211) and
+        // returns on the first error CQE before the remaining devices are polled (:1248),
+        // so once the injected fault has been counted every call returns an error and done
+        // is never set -- whatever the work is doing.
+        //
+        // So retirement is caused rather than observed: driving every queue pair of this
+        // communicator to error makes the hardware retire their work with a flush status,
+        // which is what the abandoned-request helpers do. A short poll first, because a
+        // request that did complete costs nothing to notice. All three callers clear the
+        // fault and stop using this communicator for traffic afterwards, so breaking its
+        // queue pairs costs them nothing.
         if (request != nullptr && !outcome.completed) {
             static constexpr int kSettlePolls = 100;  // 100 * 10ms = 1s
-            bool retired = false;
-            for (int poll = 0; poll < kSettlePolls && !retired; poll++) {
+            for (int poll = 0; poll < kSettlePolls; poll++) {
                 int done = 0;
                 int sizes[1] = {0};
-                if (TestRequest(request, &done, sizes) != ncclSuccess || done) retired = true;
-                else usleep(kPollIntervalUs);
+                if (TestRequest(request, &done, sizes) != ncclSuccess) break;
+                if (done) {
+                    outcome.retired = true;
+                    break;
+                }
+                usleep(kPollIntervalUs);
             }
-            if (!retired) {
+            if (!outcome.retired) {
                 int nqps = 0;
                 if (!WorkerCastLiveNqps(sendComm, &nqps).ok || nqps <= 0) nqps = 1;
                 for (int qp = 0; qp < nqps; qp++) WorkerCastDriveQpToError(sendComm, qp);
