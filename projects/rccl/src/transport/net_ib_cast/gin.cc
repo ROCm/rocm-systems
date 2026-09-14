@@ -415,8 +415,8 @@ static inline bool IbCastRmaRangeOk(const struct IbCastRmaProxyMrHandle* h, uint
 static ncclResult_t IbCastRmaBuildSegmentedWrs(struct ibv_send_wr* wr, struct ibv_sge* sge, int maxWr, int* nWr,
                                                enum ibv_wr_opcode opcode, uint64_t wrId, const struct ncclIbQp* qp,
                                                struct IbCastRmaProxyMrHandle* localH, int localRank, uint64_t localOff,
-                                               struct IbCastRmaProxyMrHandle* remoteH, int remoteRank, uint64_t remoteOff,
-                                               size_t size, const struct ibv_sge* flushSge) {
+                                               struct IbCastRmaProxyMrHandle* remoteH, int remoteRank,
+                                               uint64_t remoteOff, size_t size, const struct ibv_sge* flushSge) {
   int n = 0;
   uint64_t lOff = localOff, rOff = remoteOff;
   size_t rem = size;
@@ -698,7 +698,7 @@ reconcile:
   localRegistration.version = IBCAST_RMA_REGISTRATION_VERSION;
   localRegistration.status = ret;
   localRegistration.nSegments = nSeg;
-  if (ginMrHandle && nSeg >= 1 && nSeg <= NCCL_RMA_MAX_SEGMENTS)
+  if (ncclRmaRegistrationHandleReady(ginMrHandle, nSeg))
     memcpy(localRegistration.segOff, ginMrHandle->segOff, sizeof(size_t) * (nSeg + 1));
   NCCLCHECKGOTO(cComm->allGather(cComm, &localRegistration, registrations, sizeof(localRegistration)), ret, fail);
 
@@ -866,11 +866,7 @@ static ncclResult_t IbCastRmaPostWrs(struct ncclIbQp* qp, struct ncclIbRequest* 
   struct ibv_send_wr* bad_wr = nullptr;
   ncclResult_t ret = wrap_ibv_post_send(qp->qp, wr, &bad_wr);
   if (ret == ncclSuccess) return ncclSuccess;
-  int posted = 0;
-  for (struct ibv_send_wr* cur = wr; cur && posted < nWr; cur = cur->next) {
-    if (cur == bad_wr) break;
-    posted++;
-  }
+  int posted = ncclRmaPostedWrCount(wr, nWr, bad_wr, offsetof(struct ibv_send_wr, next));
   if (posted == 0) {
     IbCastRmaReleaseWrs(req);
     return ret;
@@ -1016,8 +1012,8 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
   if ((size > 0 && (!srcMrHandle || !dstMrHandle || !IbCastRmaRangeOk(srcMrHandle, srcOff, size) ||
                     !IbCastRmaRangeOk(dstMrHandle, dstOff, size))) ||
       !signalMrHandle || !IbCastRmaRangeOk(signalMrHandle, signalOff, sizeof(uint64_t))) {
-    WARN("NET/IB-CAST/RMA: iputSignal out of range (srcOff=%lu dstOff=%lu size=%zu signalOff=%lu)", srcOff, dstOff, size,
-         signalOff);
+    WARN("NET/IB-CAST/RMA: iputSignal out of range (srcOff=%lu dstOff=%lu size=%zu signalOff=%lu)", srcOff, dstOff,
+         size, signalOff);
     return ncclInvalidArgument;
   }
   int sig = IbCastRmaSegOf(signalMrHandle, signalOff);
