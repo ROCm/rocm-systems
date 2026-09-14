@@ -1361,6 +1361,9 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_FLUSH_WRS;
     qpCreateAttrs.qpContext = &comm->base.stats;
     NCCLCHECK(ncclIbQpCreate(flushQp, &qpCreateAttrs));
+    // Loopback flush QP: local and remote device indices are this recv device.
+    flushQp->devIndex = i;
+    flushQp->remDevIdx = i;
     INFO(NCCL_NET, "NET/IB: %s: Flush QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p",
          __func__, ibDev->portNum, rCommDev->base.ibDevN, ncclIbDevs[rCommDev->base.ibDevN].devName, ncclNIbDevs,
          ncclNMergedIbDevs, flushQp->qp->qp_num, (uint16_t)rCommDev->base.pkeyIndex, rCommDev->base.pd);
