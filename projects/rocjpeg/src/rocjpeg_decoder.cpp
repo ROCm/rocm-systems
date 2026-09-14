@@ -1012,6 +1012,8 @@ void RocJpegDecoder::ResetBatchedParams() {
     b_yuyv_yuvp_.Reset();
     b_nv12_uvp_.Reset();
     b_yuyv_y_.Reset();
+    b_yuv_rgb_.Reset();
+    b_yuv_rgbp_.Reset();
 }
 
 /**
@@ -1032,6 +1034,8 @@ RocJpegStatus RocJpegDecoder::LaunchBatchedParams() {
     CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuyv_yuvp_,    ConvertPackedYUYVToPlanarYUVBatched));
     CHECK_ROCJPEG(LaunchBatchedBuffer(b_nv12_uvp_,     ConvertInterleavedUVToPlanarUVBatched));
     CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuyv_y_,       ExtractYFromPackedYUYVBatched));
+    CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuv_rgb_,   ColorConvertYUVToRGBBatched));
+    CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuv_rgbp_,  ColorConvertYUVToRGBPlanarBatched));
     return ROCJPEG_STATUS_SUCCESS;
 }
 
@@ -1055,78 +1059,47 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGB(HipInteropDeviceMem& m
     }
     uint32_t width_comp  = (picture_width  + 7) / 8;
     uint32_t height_comp = (picture_height + 1) / 2;
+    // The five YUV surface formats share one unified batched kernel; only the
+    // per-image source layout (format tag + which src pointers are set) differs.
+    if (mem.surface_format == VA_FOURCC_444P || mem.surface_format == VA_FOURCC_422V ||
+        mem.surface_format == VA_FOURCC_YUY2 || mem.surface_format == VA_FOURCC_NV12 ||
+        mem.surface_format == VA_FOURCC_Y800) {
+        YUVToRGBBatchParams bp{};
+        bp.dst_image                        = destination->channel[0];
+        bp.dst_image_stride_in_bytes        = destination->pitch[0];
+        bp.dst_image_stride_in_bytes_comp   = destination->pitch[0] * 2;
+        bp.src_y_image                      = mem.hip_mapped_device_mem + roi_offset;
+        bp.src_y_image_stride_in_bytes      = mem.pitch[0];
+        bp.src_y_image_stride_in_bytes_comp = mem.pitch[0] * 2;
+        bp.dst_width_comp                   = width_comp;
+        bp.dst_height_comp                  = height_comp;
+        switch (mem.surface_format) {
+            case VA_FOURCC_444P:
+                bp.layout      = YUV_LAYOUT_YUV444;
+                bp.src_u_image = mem.hip_mapped_device_mem + roi_offset + mem.offset[1] + roi_offset;
+                bp.src_v_image = mem.hip_mapped_device_mem + roi_offset + mem.offset[2] + roi_offset;
+                break;
+            case VA_FOURCC_422V:
+                bp.layout      = YUV_LAYOUT_YUV440;
+                bp.src_u_image = mem.hip_mapped_device_mem + roi_offset + mem.offset[1];
+                bp.src_v_image = mem.hip_mapped_device_mem + roi_offset + mem.offset[2];
+                break;
+            case VA_FOURCC_YUY2:
+                bp.layout = YUV_LAYOUT_YUYV;
+                break;
+            case VA_FOURCC_NV12:
+                bp.layout                           = YUV_LAYOUT_NV12;
+                bp.src_chroma_image                 = mem.hip_mapped_device_mem + mem.offset[1] + roi_uv_offset;
+                bp.src_chroma_image_stride_in_bytes = mem.pitch[1];
+                break;
+            case VA_FOURCC_Y800:
+                bp.layout = YUV_LAYOUT_YUV400;
+                break;
+        }
+        b_yuv_rgb_.Add(bp, width_comp, height_comp);
+        return ROCJPEG_STATUS_SUCCESS;
+    }
     switch (mem.surface_format) {
-        case VA_FOURCC_444P: {
-            YUV444ToRGBBatchParams bp;
-            bp.dst_image                          = destination->channel[0];
-            bp.dst_image_stride_in_bytes          = destination->pitch[0];
-            bp.dst_image_stride_in_bytes_comp     = destination->pitch[0] * 2;
-            bp.src_y_image                        = mem.hip_mapped_device_mem + roi_offset;
-            bp.src_u_image                        = mem.hip_mapped_device_mem + roi_offset + mem.offset[1] + roi_offset;
-            bp.src_v_image                        = mem.hip_mapped_device_mem + roi_offset + mem.offset[2] + roi_offset;
-            bp.src_yuv_image_stride_in_bytes      = mem.pitch[0];
-            bp.dst_width_comp                     = width_comp;
-            bp.dst_height_comp                    = height_comp;
-            bp.src_yuv_image_stride_in_bytes_comp = mem.pitch[0] * 2;
-            b_yuv444_rgb_.Add(bp, width_comp, height_comp);
-            break;
-        }
-        case VA_FOURCC_422V: {
-            YUV440ToRGBBatchParams bp;
-            bp.dst_image                          = destination->channel[0];
-            bp.dst_image_stride_in_bytes          = destination->pitch[0];
-            bp.dst_image_stride_in_bytes_comp     = destination->pitch[0] * 2;
-            bp.src_y_image                        = mem.hip_mapped_device_mem + roi_offset;
-            bp.src_u_image                        = mem.hip_mapped_device_mem + roi_offset + mem.offset[1];
-            bp.src_v_image                        = mem.hip_mapped_device_mem + roi_offset + mem.offset[2];
-            bp.src_yuv_image_stride_in_bytes      = mem.pitch[0];
-            bp.dst_width_comp                     = width_comp;
-            bp.dst_height_comp                    = height_comp;
-            bp.src_yuv_image_stride_in_bytes_comp = mem.pitch[0] * 2;
-            b_yuv440_rgb_.Add(bp, width_comp, height_comp);
-            break;
-        }
-        case VA_FOURCC_YUY2: {
-            YUYVToRGBBatchParams bp;
-            bp.dst_image                        = destination->channel[0];
-            bp.dst_image_stride_in_bytes        = destination->pitch[0];
-            bp.dst_image_stride_in_bytes_comp   = destination->pitch[0] * 2;
-            bp.src_image                        = mem.hip_mapped_device_mem + roi_offset;
-            bp.src_image_stride_in_bytes        = mem.pitch[0];
-            bp.src_image_stride_in_bytes_comp   = mem.pitch[0] * 2;
-            bp.dst_width_comp                   = width_comp;
-            bp.dst_height_comp                  = height_comp;
-            b_yuyv_rgb_.Add(bp, width_comp, height_comp);
-            break;
-        }
-        case VA_FOURCC_NV12: {
-            NV12ToRGBBatchParams bp;
-            bp.dst_image                           = destination->channel[0];
-            bp.dst_image_stride_in_bytes           = destination->pitch[0];
-            bp.dst_image_stride_in_bytes_comp      = destination->pitch[0] * 2;
-            bp.src_luma_image                      = mem.hip_mapped_device_mem + roi_offset;
-            bp.src_luma_image_stride_in_bytes      = mem.pitch[0];
-            bp.src_luma_image_stride_in_bytes_comp = mem.pitch[0] * 2;
-            bp.src_chroma_image                    = mem.hip_mapped_device_mem + mem.offset[1] + roi_uv_offset;
-            bp.src_chroma_image_stride_in_bytes    = mem.pitch[1];
-            bp.dst_width_comp                      = width_comp;
-            bp.dst_height_comp                     = height_comp;
-            b_nv12_rgb_.Add(bp, width_comp, height_comp);
-            break;
-        }
-        case VA_FOURCC_Y800: {
-            YUV400ToRGBBatchParams bp;
-            bp.dst_image                           = destination->channel[0];
-            bp.dst_image_stride_in_bytes           = destination->pitch[0];
-            bp.dst_image_stride_in_bytes_comp      = destination->pitch[0] * 2;
-            bp.src_luma_image                      = mem.hip_mapped_device_mem + roi_offset;
-            bp.src_luma_image_stride_in_bytes      = mem.pitch[0];
-            bp.dst_width_comp                      = width_comp;
-            bp.dst_height_comp                     = height_comp;
-            bp.src_luma_image_stride_in_bytes_comp = mem.pitch[0] * 2;
-            b_yuv400_rgb_.Add(bp, width_comp, height_comp);
-            break;
-        }
         case VA_FOURCC_RGBA: {
             RGBAToRGBBatchParams bp;
             bp.dst_width                 = picture_width;
@@ -1164,88 +1137,48 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGBPlanar(HipInteropDevice
     }
     uint32_t width_comp  = (picture_width  + 7) / 8;
     uint32_t height_comp = (picture_height + 1) / 2;
+    // Same five YUV formats share one unified batched planar kernel.
+    if (mem.surface_format == VA_FOURCC_444P || mem.surface_format == VA_FOURCC_422V ||
+        mem.surface_format == VA_FOURCC_YUY2 || mem.surface_format == VA_FOURCC_NV12 ||
+        mem.surface_format == VA_FOURCC_Y800) {
+        YUVToRGBPlanarBatchParams bp{};
+        bp.dst_image_r                      = destination->channel[0];
+        bp.dst_image_g                      = destination->channel[1];
+        bp.dst_image_b                      = destination->channel[2];
+        bp.dst_image_stride_in_bytes        = destination->pitch[0];
+        bp.dst_image_stride_in_bytes_comp   = destination->pitch[0] * 2;
+        bp.src_y_image                      = mem.hip_mapped_device_mem + roi_offset;
+        bp.src_y_image_stride_in_bytes      = mem.pitch[0];
+        bp.src_y_image_stride_in_bytes_comp = mem.pitch[0] * 2;
+        bp.dst_width_comp                   = width_comp;
+        bp.dst_height_comp                  = height_comp;
+        switch (mem.surface_format) {
+            case VA_FOURCC_444P:
+                bp.layout      = YUV_LAYOUT_YUV444;
+                bp.src_u_image = mem.hip_mapped_device_mem + roi_offset + mem.offset[1] + roi_offset;
+                bp.src_v_image = mem.hip_mapped_device_mem + roi_offset + mem.offset[2] + roi_offset;
+                break;
+            case VA_FOURCC_422V:
+                bp.layout      = YUV_LAYOUT_YUV440;
+                bp.src_u_image = mem.hip_mapped_device_mem + roi_offset + mem.offset[1];
+                bp.src_v_image = mem.hip_mapped_device_mem + roi_offset + mem.offset[2];
+                break;
+            case VA_FOURCC_YUY2:
+                bp.layout = YUV_LAYOUT_YUYV;
+                break;
+            case VA_FOURCC_NV12:
+                bp.layout                           = YUV_LAYOUT_NV12;
+                bp.src_chroma_image                 = mem.hip_mapped_device_mem + mem.offset[1] + roi_uv_offset;
+                bp.src_chroma_image_stride_in_bytes = mem.pitch[1];
+                break;
+            case VA_FOURCC_Y800:
+                bp.layout = YUV_LAYOUT_YUV400;
+                break;
+        }
+        b_yuv_rgbp_.Add(bp, width_comp, height_comp);
+        return ROCJPEG_STATUS_SUCCESS;
+    }
     switch (mem.surface_format) {
-        case VA_FOURCC_444P: {
-            YUV444ToRGBPlanarBatchParams bp;
-            bp.dst_image_r                        = destination->channel[0];
-            bp.dst_image_g                        = destination->channel[1];
-            bp.dst_image_b                        = destination->channel[2];
-            bp.dst_image_stride_in_bytes          = destination->pitch[0];
-            bp.dst_image_stride_in_bytes_comp     = destination->pitch[0] * 2;
-            bp.src_y_image                        = mem.hip_mapped_device_mem + roi_offset;
-            bp.src_u_image                        = mem.hip_mapped_device_mem + roi_offset + mem.offset[1] + roi_offset;
-            bp.src_v_image                        = mem.hip_mapped_device_mem + roi_offset + mem.offset[2] + roi_offset;
-            bp.src_yuv_image_stride_in_bytes      = mem.pitch[0];
-            bp.dst_width_comp                     = width_comp;
-            bp.dst_height_comp                    = height_comp;
-            bp.src_yuv_image_stride_in_bytes_comp = mem.pitch[0] * 2;
-            b_yuv444_rgbp_.Add(bp, width_comp, height_comp);
-            break;
-        }
-        case VA_FOURCC_422V: {
-            YUV440ToRGBPlanarBatchParams bp;
-            bp.dst_image_r                        = destination->channel[0];
-            bp.dst_image_g                        = destination->channel[1];
-            bp.dst_image_b                        = destination->channel[2];
-            bp.dst_image_stride_in_bytes          = destination->pitch[0];
-            bp.dst_image_stride_in_bytes_comp     = destination->pitch[0] * 2;
-            bp.src_y_image                        = mem.hip_mapped_device_mem + roi_offset;
-            bp.src_u_image                        = mem.hip_mapped_device_mem + roi_offset + mem.offset[1];
-            bp.src_v_image                        = mem.hip_mapped_device_mem + roi_offset + mem.offset[2];
-            bp.src_yuv_image_stride_in_bytes      = mem.pitch[0];
-            bp.dst_width_comp                     = width_comp;
-            bp.dst_height_comp                    = height_comp;
-            bp.src_yuv_image_stride_in_bytes_comp = mem.pitch[0] * 2;
-            b_yuv440_rgbp_.Add(bp, width_comp, height_comp);
-            break;
-        }
-        case VA_FOURCC_YUY2: {
-            YUYVToRGBPlanarBatchParams bp;
-            bp.dst_image_r                      = destination->channel[0];
-            bp.dst_image_g                      = destination->channel[1];
-            bp.dst_image_b                      = destination->channel[2];
-            bp.dst_image_stride_in_bytes        = destination->pitch[0];
-            bp.dst_image_stride_in_bytes_comp   = destination->pitch[0] * 2;
-            bp.src_image                        = mem.hip_mapped_device_mem + roi_offset;
-            bp.src_image_stride_in_bytes        = mem.pitch[0];
-            bp.src_image_stride_in_bytes_comp   = mem.pitch[0] * 2;
-            bp.dst_width_comp                   = width_comp;
-            bp.dst_height_comp                  = height_comp;
-            b_yuyv_rgbp_.Add(bp, width_comp, height_comp);
-            break;
-        }
-        case VA_FOURCC_NV12: {
-            NV12ToRGBPlanarBatchParams bp;
-            bp.dst_image_r                         = destination->channel[0];
-            bp.dst_image_g                         = destination->channel[1];
-            bp.dst_image_b                         = destination->channel[2];
-            bp.dst_image_stride_in_bytes           = destination->pitch[0];
-            bp.dst_image_stride_in_bytes_comp      = destination->pitch[0] * 2;
-            bp.src_luma_image                      = mem.hip_mapped_device_mem + roi_offset;
-            bp.src_luma_image_stride_in_bytes      = mem.pitch[0];
-            bp.src_chroma_image                    = mem.hip_mapped_device_mem + mem.offset[1] + roi_uv_offset;
-            bp.src_chroma_image_stride_in_bytes    = mem.pitch[1];
-            bp.dst_width_comp                      = width_comp;
-            bp.dst_height_comp                     = height_comp;
-            bp.src_luma_image_stride_in_bytes_comp = mem.pitch[0] * 2;
-            b_nv12_rgbp_.Add(bp, width_comp, height_comp);
-            break;
-        }
-        case VA_FOURCC_Y800: {
-            YUV400ToRGBPlanarBatchParams bp;
-            bp.dst_image_r                         = destination->channel[0];
-            bp.dst_image_g                         = destination->channel[1];
-            bp.dst_image_b                         = destination->channel[2];
-            bp.dst_image_stride_in_bytes           = destination->pitch[0];
-            bp.dst_image_stride_in_bytes_comp      = destination->pitch[0] * 2;
-            bp.src_luma_image                      = mem.hip_mapped_device_mem + roi_offset;
-            bp.src_luma_image_stride_in_bytes      = mem.pitch[0];
-            bp.dst_width_comp                      = width_comp;
-            bp.dst_height_comp                     = height_comp;
-            bp.src_luma_image_stride_in_bytes_comp = mem.pitch[0] * 2;
-            b_yuv400_rgbp_.Add(bp, width_comp, height_comp);
-            break;
-        }
         case VA_FOURCC_RGBP:
             // Already-planar RGB: three plane copies, no kernel.
             for (uint8_t channel_index = 0; channel_index < 3; channel_index++) {
