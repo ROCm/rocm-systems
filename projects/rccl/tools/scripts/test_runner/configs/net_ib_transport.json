@@ -561,7 +561,8 @@
         "RCCL_FORCE_ENABLE_DMABUF": "1",
         "RCCL_IB_P2P_DISABLE_CTS": "1",
         "NCCL_IB_QPS_PER_CONNECTION": "2",
-        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "NCCL_GDR_FLUSH_DISABLE": "0"
       },
       "tests": [
         {
