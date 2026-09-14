@@ -91,7 +91,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   if (!plan.owner_epoch_vgprs.epoch || !plan.exec_save_sgpr || !plan.owner_epoch_vgprs.owner ||
       !plan.workitem_owner || candidate.owner_descriptor_file_offset == 0u ||
       static_cast<uint32_t>(plan.scratch_vgpr) + (scalar_persistent ? 9u : 7u) > kMaxVgprs ||
-      candidate.windows.empty() || candidate.sequence == nullptr || candidate.site == nullptr ||
+      candidate.sequence == nullptr || candidate.site == nullptr ||
       std::ranges::any_of(candidate.windows, [&](const SampledBarrierWindow &window) {
         return window.first_slot >= layout.sampled_sync_metadata_capacity ||
                window.bank_count == 0 ||
@@ -490,7 +490,7 @@ void try_apply_sampled_barrier_sync_patch(
       has_multi_range_window |= mapping.range_count > 1u;
     }
   }
-  if (selected_windows.empty() || layout.sampled_sync_metadata_capacity == 0) {
+  if (!selected_windows.empty() && layout.sampled_sync_metadata_capacity == 0) {
     result.warnings.emplace_back(
         "ConSan MOI sampled barrier sync found no selected Ready causal-window capacity");
     return;
@@ -591,6 +591,19 @@ void try_apply_sampled_barrier_sync_patch(
       }
       const auto owner_windows = windows_by_descriptor.find(owner_descriptor_file_offset);
       if (owner_windows == windows_by_descriptor.end()) {
+        const bool owner_has_access =
+            std::ranges::any_of(admitted, [&](const ConSanMoiCandidate &access) {
+              return std::ranges::any_of(access.site().execution_owners,
+                                         [&](const ConSanExecutionOwner &access_owner) {
+                                           return access_owner.kernel == owner.kernel;
+                                         });
+            });
+        // A barrier-only owner still advances its persistent epoch. There is
+        // no causal window to annotate, so the emitter takes its existing
+        // no-Ready-window path. Missing mappings for actual selected accesses
+        // remain a lowering failure rather than silently losing evidence.
+        if (!owner_has_access)
+          continue;
         every_owner_has_window = false;
         break;
       }
@@ -638,7 +651,7 @@ void try_apply_sampled_barrier_sync_patch(
                                    owner_lowering_failure);
       continue;
     }
-    if (!every_owner_has_window || windows.empty()) {
+    if (!every_owner_has_window) {
       result.warnings.emplace_back(
           "ConSan MOI sampled barrier sync has no preceding selected causal window for every "
           "owner in " +

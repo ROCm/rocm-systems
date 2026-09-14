@@ -1977,6 +1977,25 @@ TEST(ConSanMoi, Cdna4SampledAtomicReportsGuestOperandOverlapFallback) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
+TEST(ConSanMoi, Cdna4SampledBarrierOnlyObjectAdvancesEpochWithoutCausalWindows) {
+  const auto barrier = build_cdna4_s_barrier(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(barrier);
+  const std::array<uint32_t, 2> words = {*barrier, build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)};
+  auto options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_track_barriers = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(0);
+  const auto result =
+      test_lower_consan(make_cdna4_lds_code_object(words, "sampled_barrier_only"), options);
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  EXPECT_TRUE(result.program_inventory.access_sites().empty());
+  EXPECT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                               &ConSanPatchInfo::kind),
+            1);
+  EXPECT_TRUE(all_consan_intents_instrumented(result.coverage_ledger));
+}
+
 TEST(ConSanMoi, Cdna4SampledBarrierPublishesSelectedEpochTransition) {
   const auto barrier = build_cdna4_s_barrier(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(barrier);

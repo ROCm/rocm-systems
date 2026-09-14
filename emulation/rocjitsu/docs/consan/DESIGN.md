@@ -307,6 +307,10 @@ Sampled retains causal windows rather than a general event history. Selected
 access instances publish immutable watchpoint banks; qualified barrier and
 atomic metadata shares their causal identity. The host distinguishes
 conflicts, statistical misses, saturation, and true evidence loss.
+Barrier-only execution owners still retain a barrier probe and advance their
+persistent sampled epoch. They publish no causal-window metadata because they
+have no selected LDS window; missing mappings for selected accesses remain
+lowering failures.
 
 The default runtime stride is 256. When entry-captured identity and scalar
 resources allow it, ConSan places a uniform dispatch/workgroup gate before the
