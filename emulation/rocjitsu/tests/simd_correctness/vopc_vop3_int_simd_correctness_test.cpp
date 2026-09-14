@@ -19,6 +19,7 @@
 /// over the test loop so eq/lt/gt/le/ge/ne all fire on real boundary cases (incl.
 /// signed-negative vs unsigned wrap).
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -232,7 +233,7 @@ void check_case(const Case &c, uint64_t exec) {
     const uint32_t src1_vgpr = (c.width == Width::B64) ? 2u : 2u; // v2:v3 / v2
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_cmp_encode(c.opcode, /*vdst=*/kVccSdst, /*src0=*/256u, /*src1=*/256u + src1_vgpr, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     uint64_t vcc = fx.run(inst, c.width, rot, exec, vcc_in);
     delete inst;

@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -617,36 +618,6 @@ void BufferGl1InvMubuf::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_buffer_gl1_inv_mubuf(*this, wf);
 }
 
-void BufferLoadLdsU8Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
-void BufferLoadLdsI8Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
-void BufferLoadLdsU16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
-void BufferLoadLdsI16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
-void BufferLoadLdsB32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
-void BufferLoadLdsFormatXMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
 void BufferAtomicSwapB32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
@@ -747,7 +718,7 @@ void BufferAtomicCsubU32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
-  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->atomic_op = amdgpu::AtomicOp::SUB_CLAMP;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1306,7 +1277,10 @@ void BufferAtomicCmpswapF32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
-  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
+  d->atomic_op = amdgpu::AtomicOp::FCMPSWAP;
+  d->atomic_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_legacy_minmax = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1332,6 +1306,9 @@ void BufferAtomicMinF32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::FMIN;
+  d->atomic_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_legacy_minmax = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1355,6 +1332,9 @@ void BufferAtomicMaxF32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::FMAX;
+  d->atomic_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_legacy_minmax = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1378,6 +1358,9 @@ void BufferAtomicAddF32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_denorm_mode = 2;
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_legacy_minmax = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, *d);

@@ -47,8 +47,8 @@ add_custom_command(
     OUTPUT "${_SYNCKERNEL_BIN}"
     COMMAND
         ${CODEOBJ_AMDCLANGPP} -x hip -ggdb --offload-arch=${_SYNCKERNEL_ARCH}
-        --offload-device-only -c -fno-gpu-rdc --no-offload-new-driver -o
-        "${_SYNCKERNEL_BUNDLE}" "${_SYNCKERNEL_SRC}"
+        --offload-device-only -c -fno-gpu-rdc -o "${_SYNCKERNEL_BUNDLE}"
+        "${_SYNCKERNEL_SRC}"
     COMMAND
         ${CODEOBJ_OFFLOAD_BUNDLER} --type=o --input=${_SYNCKERNEL_BUNDLE}
         --output=${_SYNCKERNEL_BIN} --unbundle

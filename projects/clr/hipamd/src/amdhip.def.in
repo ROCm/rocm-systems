@@ -81,6 +81,7 @@ hipHostMalloc
 hipHostRegister
 hipHostUnregister
 hipInit
+hipInitDevice
 hipIpcCloseMemHandle
 hipIpcGetMemHandle
 hipIpcOpenMemHandle
@@ -561,4 +562,5 @@ hipExecutionCtxRecordEvent
 hipExecutionCtxSynchronize
 hipExecutionCtxWaitEvent
 hipMemGetDefaultMemPool
+hipKernelNameRefByPtr
 @HSA_EXPORTS@

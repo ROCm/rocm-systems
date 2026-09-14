@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# Copyright (C) Advanced Micro Devices. All rights reserved.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Build the GPU Agent compiler wrapper used by ``amdsmi-dme-ci.yml``.
 
 GPU Agent's Makefile compiles generated ``.pb.cc`` files with bare

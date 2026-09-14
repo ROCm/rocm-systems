@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/exp.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -35,7 +34,11 @@ ExpExp::ExpExp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeExpExp(const MachineInst *opcode) {
+DecodeResult decodeExpExp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Exp::validate_encoding("exp", reinterpret_cast<const Exp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ExpExp>(opcode);
 }
 } // namespace detail

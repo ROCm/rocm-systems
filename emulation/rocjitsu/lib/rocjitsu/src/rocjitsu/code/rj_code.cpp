@@ -5,9 +5,9 @@
 
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/target_registry.h"
-#include "util/except.h"
 
 #include <cstring>
+#include <new>
 #include <unordered_map>
 
 using namespace rocjitsu;
@@ -20,11 +20,10 @@ Decoder *create_decoder_for_target(rj_code_target_id_t target) {
   if (descriptor == nullptr)
     return nullptr;
 
-  static thread_local std::unordered_map<const IsaTargetDescriptor *, std::unique_ptr<Decoder>>
-      decoders;
-  std::unique_ptr<Decoder> &decoder = decoders[descriptor];
+  static thread_local std::unordered_map<rj_code_target_id_t, std::unique_ptr<Decoder>> decoders;
+  std::unique_ptr<Decoder> &decoder = decoders[target];
   if (!decoder)
-    decoder = descriptor->decoder_factory();
+    decoder = Decoder::create(registry, target);
   return decoder.get();
 }
 
@@ -33,6 +32,11 @@ rj_code_arch_t arch_for_target(rj_code_target_id_t target) {
   if (descriptor == nullptr)
     return ROCJITSU_CODE_ARCH_INVALID;
   return descriptor->architecture_id;
+}
+
+bool code_object_accepts_target(const AmdGpuCodeObject &object, rj_code_target_id_t target) {
+  const rj_code_target_id_t object_target = object.target_id();
+  return object_target == ROCJITSU_CODE_TARGET_INVALID || object_target == target;
 }
 
 } // namespace
@@ -119,6 +123,9 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   *inst_list = nullptr;
 
+  if (!code_object_accepts_target(*obj->co, target_id))
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+
   auto *decoder = create_decoder_for_target(target_id);
   if (!decoder)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
@@ -136,8 +143,10 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
       // at word zero for each section.
       std::size_t word_index = 0;
       while (word_index < inst_data_size) {
-        auto *raw_inst = decoder->decode(&inst_data[word_index]);
-        std::unique_ptr<Instruction> inst(raw_inst);
+        DecodeResult decoded = decoder->decode(&inst_data[word_index]);
+        if (decoded.failed())
+          return ROCJITSU_STATUS_ERROR;
+        std::unique_ptr<Instruction> inst = std::move(decoded).value();
         owned->list.push_back(*inst);
         word_index += static_cast<std::size_t>(inst->size()) / sizeof(uint32_t);
         owned->storage.push_back(std::move(inst));
@@ -145,7 +154,9 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
     }
 
     *inst_list = owned.release();
-  } catch (const util::InvalidInst &) {
+  } catch (const std::bad_alloc &) {
+    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
+  } catch (...) {
     return ROCJITSU_STATUS_ERROR;
   }
   return ROCJITSU_STATUS_SUCCESS;
@@ -180,6 +191,9 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   *list = nullptr;
 
+  if (!code_object_accepts_target(*obj->co, target_id))
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+
   auto *decoder = create_decoder_for_target(target_id);
   if (!decoder)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
@@ -191,12 +205,17 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
   try {
     Instruction::ScopedHeapAllocation heap_allocation;
     auto owned = std::make_unique<rj_code_basic_block_list_t>();
-    owned->blocks = BasicBlock::build(*obj->co, *decoder, arch);
+    auto blocks = BasicBlock::build(*obj->co, *decoder, arch);
+    if (blocks.failed())
+      return ROCJITSU_STATUS_ERROR;
+    owned->blocks = std::move(blocks).value();
     *list = owned.release();
-  } catch (const util::InvalidInst &) {
+    return ROCJITSU_STATUS_SUCCESS;
+  } catch (const std::bad_alloc &) {
+    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
+  } catch (...) {
     return ROCJITSU_STATUS_ERROR;
   }
-  return ROCJITSU_STATUS_SUCCESS;
 }
 
 void rj_code_basic_block_list_retain(rj_code_basic_block_list_t *list) {

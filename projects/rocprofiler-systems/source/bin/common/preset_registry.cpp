@@ -7,7 +7,7 @@
 #include "common/path.hpp"
 #include "embedded_presets.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <cerrno>
 #include <cstdlib>
@@ -116,7 +116,7 @@ std::string
 preset_registry::translate_legacy_flag(std::string_view arg) const
 {
     // Must start with "--" and not contain "="
-    if(arg.size() <= 2 || arg.compare(0, 2, "--") != 0 ||
+    if(arg.size() <= 2 || !arg.starts_with("--") ||
        arg.find('=') != std::string_view::npos)
         return {};
 
@@ -187,8 +187,7 @@ preset_registry::resolve_filepath(const std::string& name_or_path)
     auto filepath  = fmt::format("{}/{}.json", m_directory, name_or_path);
     auto resolved  = common::path::realpath(filepath);
     auto canon_dir = common::path::realpath(m_directory);
-    if(resolved.empty() || canon_dir.empty() ||
-       resolved.compare(0, canon_dir.size(), canon_dir) != 0)
+    if(resolved.empty() || canon_dir.empty() || !resolved.starts_with(canon_dir))
     {
         std::cerr << "[rocprof-sys] WARNING: Preset path '" << filepath
                   << "' resolves outside preset directory. Ignoring.\n";
@@ -290,6 +289,29 @@ preset_registry::is_section_enabled(std::string_view preset_name,
     const auto& json = it->second;
     if(!json.contains(section)) return default_value;
     return json[std::string{ section }].value("enabled", default_value);
+}
+
+bool
+preset_registry::is_rocpd_output_enabled(std::string_view preset_name,
+                                         bool             default_value) const
+{
+    auto iter = m_json_cache.find(std::string{ preset_name });
+    if(iter == m_json_cache.end())
+    {
+        return default_value;
+    }
+
+    const auto& json = iter->second;
+    if(!json.contains("output"))
+    {
+        return default_value;
+    }
+    const auto& output = json["output"];
+    if(!output.contains("rocpd_output"))
+    {
+        return default_value;
+    }
+    return output["rocpd_output"].value("enabled", default_value);
 }
 
 void
@@ -484,8 +506,7 @@ preset_registry::describe(std::string_view preset_name)
     }
 
     // Output: rocPD
-    if(preset_json.contains("output") && preset_json["output"].contains("rocpd_output") &&
-       preset_json["output"]["rocpd_output"].value("enabled", false))
+    if(is_rocpd_output_enabled(preset_name))
     {
         lines.emplace_back("rocPD Output:    ON");
     }

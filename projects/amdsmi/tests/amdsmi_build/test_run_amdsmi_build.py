@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the pure helpers in run_amdsmi_build.py.
 
 These tests deliberately avoid anything that requires root, a build env, or

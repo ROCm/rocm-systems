@@ -4,7 +4,11 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#include <alloc.h>
+#include "alloc.h"
+
+#include <unordered_map>
+#include <vector>
+
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
 
@@ -137,7 +141,69 @@ TEST(Alloc, ncclCuMemFreeAddr)
         }
     );
 }
+
+TEST(Alloc, ncclCuMemGetAddressRange)
+{
+    RUN_ISOLATED_TEST(
+        "ncclCuMemGetAddressRange",
+        []()
+        {
+            CUdeviceptr  base         = 0;
+            size_t       baseSize     = 0;
+            int          numSegments  = 0;
+            bool         hasSysmem    = false;
+            ncclResult_t result       = ncclCuMemGetAddressRange(
+                static_cast<CUdeviceptr>(0x1000), 4096, &base, &baseSize, &numSegments, &hasSysmem);
+            ASSERT_EQ(result, ncclInternalError);
+        }
+    );
+}
 #endif // ROCM_VERSION < 70000
+
+TEST(Alloc, ncclCudaHostCalloc)
+{
+    RUN_ISOLATED_TEST(
+        "ncclCudaHostCalloc",
+        []()
+        {
+            // Initialize HIP device in forked process
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+            constexpr size_t N   = 256;
+            float*           ptr = nullptr;
+
+            ncclResult_t result = ncclCudaHostCalloc(&ptr, N);
+            ASSERT_EQ(result, ncclSuccess);
+            ASSERT_NE(ptr, nullptr);
+
+            // Verify the allocation is host (CPU) memory, not device memory.
+            hipPointerAttribute_t attr;
+            ASSERT_EQ(hipPointerGetAttributes(&attr, ptr), hipSuccess);
+            EXPECT_EQ(attr.type, hipMemoryTypeHost)
+                << "ncclCudaHostCalloc should allocate host (CPU) memory";
+
+#if defined(HIP_HOST_UNCACHED_MEMORY)
+            // Verify the uncached flag was actually honored, not just requested.
+            unsigned int flags = 0;
+            ASSERT_EQ(hipHostGetFlags(&flags, ptr), hipSuccess);
+            EXPECT_TRUE(flags & hipHostMallocUncached)
+                << "HIP_HOST_UNCACHED_MEMORY is enabled but ncclCudaHostCalloc did not "
+                   "request uncached host memory (flags = "
+                << flags << ")";
+#endif
+
+            // The memory must be directly readable/writable from the CPU.
+            for(size_t i = 0; i < N; ++i)
+                EXPECT_EQ(ptr[i], 0.0f) << "Host memory not zero-initialized at index " << i;
+            for(size_t i = 0; i < N; ++i)
+                ptr[i] = static_cast<float>(i + 1);
+            for(size_t i = 0; i < N; ++i)
+                EXPECT_EQ(ptr[i], static_cast<float>(i + 1)) << "Host write/read mismatch at index " << i;
+
+            ASSERT_EQ(ncclCudaHostFree(ptr), ncclSuccess);
+        }
+    );
+}
 
 TEST(Alloc, NcclCudaMemcpy)
 {
@@ -234,6 +300,321 @@ TEST(Alloc, MemcpyNullSrcOrDstPointer)
                 << "Expected ncclUnhandledCudaError when dst is nullptr";
 
             ASSERT_EQ(hipFree(d_valid), hipSuccess);
+        }
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Scoped side-stream pool (alloc.h: ncclSideStreamAcquire / ncclSideStreamRelease
+// / getSideStream / ncclClampStreamPriority / ncclSideStreamScope).
+//
+// The feature under test: side streams are created on first acquire and
+// destroyed on last release so that no side stream (and thus no scarce GPU
+// hardware queue) persists through the steady-state collective phase. These
+// whitebox tests drive the internal pool API directly and inspect its state
+// via getSideStream(), which returns the pooled stream only while a scope is
+// active and nullptr otherwise.
+// ---------------------------------------------------------------------------
+
+// Core guarantee: with no active scope the pool holds nothing, so a side stream
+// never lingers to occupy a HW queue during collectives. Acquiring makes the
+// pooled stream visible; releasing the last ref destroys it and getSideStream
+// reports nullptr again.
+TEST(Alloc, SideStreamScopeGatesPool)
+{
+    RUN_ISOLATED_TEST(
+        "SideStreamScopeGatesPool",
+        []()
+        {
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+            constexpr int dev = 0;
+
+            // No scope active yet: pool must be empty.
+            hipStream_t stream = reinterpret_cast<hipStream_t>(0xdeadbeef);
+            ASSERT_EQ(getSideStream(&stream), ncclSuccess);
+            EXPECT_EQ(stream, nullptr) << "Side stream must not exist before any acquire";
+
+            // Acquire: stream is created and pooled.
+            ASSERT_EQ(ncclSideStreamAcquire(dev), ncclSuccess);
+            stream = nullptr;
+            ASSERT_EQ(getSideStream(&stream), ncclSuccess);
+            EXPECT_NE(stream, nullptr) << "Side stream must be available inside an active scope";
+
+            // Release the last ref: stream is destroyed, HW queue freed.
+            ASSERT_EQ(ncclSideStreamRelease(dev), ncclSuccess);
+            stream = reinterpret_cast<hipStream_t>(0xdeadbeef);
+            ASSERT_EQ(getSideStream(&stream), ncclSuccess);
+            EXPECT_EQ(stream, nullptr) << "Side stream must be destroyed after last release";
+        }
+    );
+}
+
+// Nested acquires for the same (dev, priority) share one pooled stream and it is
+// destroyed only when the final ref is released (reference counting).
+TEST(Alloc, SideStreamRefCountPooling)
+{
+    RUN_ISOLATED_TEST(
+        "SideStreamRefCountPooling",
+        []()
+        {
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+            constexpr int dev = 0;
+
+            ASSERT_EQ(ncclSideStreamAcquire(dev), ncclSuccess);
+            hipStream_t first = nullptr;
+            ASSERT_EQ(getSideStream(&first), ncclSuccess);
+            ASSERT_NE(first, nullptr);
+
+            // Second acquire reuses the same stream (no churn), bumping the refcount.
+            ASSERT_EQ(ncclSideStreamAcquire(dev), ncclSuccess);
+            hipStream_t second = nullptr;
+            ASSERT_EQ(getSideStream(&second), ncclSuccess);
+            EXPECT_EQ(second, first) << "Overlapping scopes must reuse the pooled stream";
+
+            // First release: refcount drops to 1, stream still alive.
+            ASSERT_EQ(ncclSideStreamRelease(dev), ncclSuccess);
+            hipStream_t stillHere = nullptr;
+            ASSERT_EQ(getSideStream(&stillHere), ncclSuccess);
+            EXPECT_EQ(stillHere, first) << "Stream must survive while a ref remains";
+
+            // Final release: refcount hits 0, stream destroyed.
+            ASSERT_EQ(ncclSideStreamRelease(dev), ncclSuccess);
+            hipStream_t gone = reinterpret_cast<hipStream_t>(0xdeadbeef);
+            ASSERT_EQ(getSideStream(&gone), ncclSuccess);
+            EXPECT_EQ(gone, nullptr) << "Stream must be destroyed once all refs are released";
+        }
+    );
+}
+
+// The RAII ncclSideStreamScope holds a ref for its lifetime and releases it on
+// destruction, so allocations inside the scope share the pooled stream and the
+// HW queue is freed as soon as the scope exits.
+TEST(Alloc, SideStreamScopeRAII)
+{
+    RUN_ISOLATED_TEST(
+        "SideStreamScopeRAII",
+        []()
+        {
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+            constexpr int dev = 0;
+
+            {
+                ncclSideStreamScope scope(dev);
+                hipStream_t         inScope = nullptr;
+                ASSERT_EQ(getSideStream(&inScope), ncclSuccess);
+                EXPECT_NE(inScope, nullptr) << "Scope must acquire the pooled stream on entry";
+            }
+
+            // Scope destroyed: pooled stream released and destroyed.
+            hipStream_t afterScope = reinterpret_cast<hipStream_t>(0xdeadbeef);
+            ASSERT_EQ(getSideStream(&afterScope), ncclSuccess);
+            EXPECT_EQ(afterScope, nullptr) << "Scope must release the pooled stream on exit";
+        }
+    );
+}
+
+// ncclClampStreamPriority folds an out-of-range priority into the device's
+// supported [greatest, least] window and leaves in-range values untouched.
+TEST(Alloc, ClampStreamPriority)
+{
+    RUN_ISOLATED_TEST(
+        "ClampStreamPriority",
+        []()
+        {
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+            int least = 0, greatest = 0;
+            ASSERT_EQ(hipDeviceGetStreamPriorityRange(&least, &greatest), hipSuccess);
+            // Convention: 'greatest' is the most-prioritized (numerically smallest).
+            ASSERT_LE(greatest, least);
+
+            // Below range clamps up to greatest; above range clamps down to least.
+            EXPECT_EQ(ncclClampStreamPriority(greatest - 100), greatest);
+            EXPECT_EQ(ncclClampStreamPriority(least + 100), least);
+
+            // Endpoints and any in-range value are returned unchanged.
+            EXPECT_EQ(ncclClampStreamPriority(greatest), greatest);
+            EXPECT_EQ(ncclClampStreamPriority(least), least);
+            EXPECT_EQ(ncclClampStreamPriority((greatest + least) / 2), (greatest + least) / 2);
+        }
+    );
+}
+
+// Keys with the same busId but different priorities must remain distinct.
+TEST(Alloc, SideStreamKeySeparatesPriorities)
+{
+    constexpr int64_t                                                        busId = 0x1234;
+    std::unordered_map<ncclSideStreamKey, int, ncclSideStreamKeyHash> streams;
+    streams.emplace(ncclSideStreamKey{busId, -1}, 1);
+    streams.emplace(ncclSideStreamKey{busId, 0}, 2);
+    ASSERT_EQ(streams.size(), 2);
+    EXPECT_EQ(streams.at(ncclSideStreamKey{busId, -1}), 1);
+    EXPECT_EQ(streams.at(ncclSideStreamKey{busId, 0}), 2);
+}
+
+#if ROCM_VERSION >= 70000
+// ---------------------------------------------------------------------------
+// Side-stream pool under the cuMem/VMM allocator (NCCL_CUMEM_ENABLE=1).
+//
+// With cuMem enabled every device allocation goes through ncclCuMemAlloc, whose
+// ROCM-20370 residue scrub must reuse the pooled side stream while a scope is
+// active (instead of creating/destroying a private stream per allocation) and
+// must not disturb the pool's contents or refcount. These tests drive the real
+// VMM path directly; they are skipped where cuMem is unavailable at runtime.
+// ---------------------------------------------------------------------------
+
+// A cuMem allocation issued inside an active scope reuses the pooled stream for
+// zeroing (no private stream churn), returns zeroed memory, and the stream is
+// still destroyed on scope exit so nothing lingers into the collective phase.
+TEST(Alloc, CuMemAllocReusesPooledSideStream)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "CuMemAllocReusesPooledSideStream",
+        []()
+        {
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+            if(!ncclCuMemEnable() || !ncclCuMemRuntimeSupported())
+            {
+                GTEST_SKIP() << "cuMem/VMM not available at runtime in this environment";
+            }
+
+            constexpr int    dev  = 0;
+            constexpr size_t size = 8192;
+
+            hipStream_t pooled = nullptr;
+            {
+                ncclSideStreamScope scope(dev);
+                ASSERT_EQ(getSideStream(&pooled), ncclSuccess);
+                ASSERT_NE(pooled, nullptr) << "Scope must pool a side stream";
+
+                for(int allocIdx = 0; allocIdx < 2; ++allocIdx)
+                {
+                    // Real VMM allocation while the scope is held: the internal zero
+                    // must reuse the pooled stream instead of creating a private one.
+                    void* ptr = nullptr;
+                    ASSERT_EQ(
+                        ncclCuMemAlloc(&ptr, /*handlep=*/nullptr, ncclCuMemHandleType, size, /*manager=*/nullptr),
+                        ncclSuccess
+                    );
+                    ASSERT_NE(ptr, nullptr);
+
+                    hipStream_t stillPooled = nullptr;
+                    ASSERT_EQ(getSideStream(&stillPooled), ncclSuccess);
+                    EXPECT_EQ(stillPooled, pooled)
+                        << "cuMem alloc " << allocIdx
+                        << " inside a scope must keep the same pooled side stream";
+
+                    // Buffer must come back zeroed (calloc semantics preserved even
+                    // though the redundant caller-side memset was removed).
+                    std::vector<unsigned char> host(size, 0xAB);
+                    ASSERT_EQ(hipMemcpy(host.data(), ptr, size, hipMemcpyDeviceToHost), hipSuccess);
+                    for(size_t i = 0; i < size; ++i)
+                    {
+                        ASSERT_EQ(host[i], 0u) << "cuMem buffer not zeroed at offset " << i;
+                    }
+
+                    ASSERT_EQ(ncclCuMemFree(ptr, /*manager=*/nullptr), ncclSuccess);
+                }
+            }
+
+            // Scope exited: the pooled stream must be destroyed, HW queue freed.
+            hipStream_t afterScope = reinterpret_cast<hipStream_t>(0xdeadbeef);
+            ASSERT_EQ(getSideStream(&afterScope), ncclSuccess);
+            EXPECT_EQ(afterScope, nullptr)
+                << "No side stream may survive a cuMem-path scope into the collective phase";
+        },
+        {{"NCCL_CUMEM_ENABLE", "1"}}
+    );
+}
+
+// With no active scope, a cuMem allocation falls back to a private stream and
+// must not create or leak an entry in the pool.
+TEST(Alloc, CuMemAllocNoScopeLeavesPoolEmpty)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "CuMemAllocNoScopeLeavesPoolEmpty",
+        []()
+        {
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+            if(!ncclCuMemEnable() || !ncclCuMemRuntimeSupported())
+            {
+                GTEST_SKIP() << "cuMem/VMM not available at runtime in this environment";
+            }
+
+            constexpr size_t size = 8192;
+
+            // No scope active: pool empty before.
+            hipStream_t before = reinterpret_cast<hipStream_t>(0xdeadbeef);
+            ASSERT_EQ(getSideStream(&before), ncclSuccess);
+            ASSERT_EQ(before, nullptr);
+
+            void* ptr = nullptr;
+            ASSERT_EQ(
+                ncclCuMemAlloc(&ptr, /*handlep=*/nullptr, ncclCuMemHandleType, size, /*manager=*/nullptr),
+                ncclSuccess
+            );
+            ASSERT_NE(ptr, nullptr);
+
+            // The fallback private stream must not have populated the pool.
+            hipStream_t after = reinterpret_cast<hipStream_t>(0xdeadbeef);
+            ASSERT_EQ(getSideStream(&after), ncclSuccess);
+            EXPECT_EQ(after, nullptr)
+                << "cuMem alloc without a scope must not create a pooled side stream";
+
+            std::vector<unsigned char> host(size, 0xAB);
+            ASSERT_EQ(hipMemcpy(host.data(), ptr, size, hipMemcpyDeviceToHost), hipSuccess);
+            for(size_t i = 0; i < size; ++i)
+            {
+                ASSERT_EQ(host[i], 0u) << "cuMem buffer not zeroed at offset " << i;
+            }
+
+            ASSERT_EQ(ncclCuMemFree(ptr, /*manager=*/nullptr), ncclSuccess);
+        },
+        {{"NCCL_CUMEM_ENABLE", "1"}}
+    );
+}
+#endif // ROCM_VERSION >= 70000
+
+// When the device supports multiple priorities, the pool creates and returns
+// separate streams for the same device at each priority.
+TEST(Alloc, SideStreamPoolSeparatesPriorities)
+{
+    RUN_ISOLATED_TEST(
+        "SideStreamPoolSeparatesPriorities",
+        []()
+        {
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+            constexpr int dev = 0;
+
+            int least = 0, greatest = 0;
+            ASSERT_EQ(hipDeviceGetStreamPriorityRange(&least, &greatest), hipSuccess);
+            ASSERT_LE(greatest, least);
+            if(greatest == least)
+            {
+                GTEST_SKIP() << "Device exposes only one stream priority";
+            }
+
+            ASSERT_EQ(ncclSideStreamAcquire(dev, greatest), ncclSuccess);
+            ASSERT_EQ(ncclSideStreamAcquire(dev, least), ncclSuccess);
+
+            hipStream_t greatestStream = nullptr;
+            hipStream_t leastStream    = nullptr;
+            ASSERT_EQ(getSideStream(&greatestStream, greatest), ncclSuccess);
+            ASSERT_EQ(getSideStream(&leastStream, least), ncclSuccess);
+            ASSERT_NE(greatestStream, nullptr);
+            ASSERT_NE(leastStream, nullptr);
+            EXPECT_NE(greatestStream, leastStream)
+                << "Same busId at different priorities must not share a stream";
+
+            ASSERT_EQ(ncclSideStreamRelease(dev, greatest), ncclSuccess);
+            ASSERT_EQ(ncclSideStreamRelease(dev, least), ncclSuccess);
+
+            greatestStream = reinterpret_cast<hipStream_t>(0xdeadbeef);
+            leastStream    = reinterpret_cast<hipStream_t>(0xdeadbeef);
+            ASSERT_EQ(getSideStream(&greatestStream, greatest), ncclSuccess);
+            ASSERT_EQ(getSideStream(&leastStream, least), ncclSuccess);
+            EXPECT_EQ(greatestStream, nullptr);
+            EXPECT_EQ(leastStream, nullptr);
         }
     );
 }

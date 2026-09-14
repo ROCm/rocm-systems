@@ -36,8 +36,8 @@ THE SOFTWARE.
 /// Whether a transfer primitive drains before returning (Sync) or leaves the
 /// transfer in flight for the caller to wait on later (Async).
 enum struct SyncPolicy : uint32_t {
-    Async,
-    Sync,
+  Async,
+  Sync,
 };
 
 constexpr SyncPolicy DEFAULT_SYNC_POLICY = SyncPolicy::Async;

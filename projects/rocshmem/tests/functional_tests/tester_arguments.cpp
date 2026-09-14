@@ -128,6 +128,17 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       batch = atoi(argv[i]);
     } else if (arg == "-noverif" || arg == "-nocheck") {
       verif = false;
+    } else if (arg == "--num-wf") {
+      i++;
+      if (argc < i + 1) {
+        fprintf(stderr, "Invalid arguments for --num-wf.\n");
+        exit(-1);
+      }
+      num_wf = atoi(argv[i]);
+      if (num_wf <= 0) {
+        fprintf(stderr, "--num-wf must be a positive integer.\n");
+        exit(-1);
+      }
     } else if (arg == "-localbuftype") {
       i++;
 
@@ -281,6 +292,7 @@ void TesterArguments::show_usage(std::string executable_name) {
   std::cout << "\t-nskip Set skip/warmup count\n";
   std::cout << "\t-b|-batch Set buffer rotation batch size (default: loop count)\n";
   std::cout << "\t-noverif|-nocheck disable buffer verification\n";
+  std::cout << "\t--num-wf <number of wave-fronts per workgroup> (detected at runtime via HIP, overwrites -z if used)\n";
 }
 
 void TesterArguments::get_arguments() {

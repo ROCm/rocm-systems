@@ -118,6 +118,7 @@ class Primitives<T, RedOp, Fan, Direct,
 
   template <int DirectRecv, int DirectSend, int Recv, int Send, int Src, int Dst>
   __device__ __forceinline__ void waitPeer(intptr_t srcIx, intptr_t dstIx, int offset, int nelts) {
+    sqtt_marker_enter("PRIM_SIMPLE_WAIT_PEER");
     const bool isSendNotRecv = (Send && Recv) ? (flags & RoleWaitSend) : Send;
     // Yes, for some template arguments this code will be unreachable.  That's fine.
     // coverity[dead_error_line]
@@ -185,6 +186,7 @@ class Primitives<T, RedOp, Fan, Direct,
       }
       step += StepPerSlice;
     }
+    sqtt_marker_exit("PRIM_SIMPLE_WAIT_PEER");
   }
 
   template <int Recv, int Send>
@@ -739,8 +741,10 @@ public:
     if (tid < 32 && ((1UL << tid) < nranks)) {
       int rank = ncclShmem.comm.rank;
       uint32_t delta = 1 << tid;
+      // When sharing, RS and AG both recv from rank-delta and send to rank+delta; otherwise AG mirrors RS.
+      const bool shared = ncclShmem.comm.patSharedQps != 0;
       // Load recv peer
-      int recvPeer = mode == primsModePatRs ? (rank - delta + nranks) % nranks : (rank + delta) % nranks;
+      int recvPeer = (shared || mode == primsModePatRs) ? (rank - delta + nranks) % nranks : (rank + delta) % nranks;
       struct ncclPatPeer* peer = ((struct ncclPatPeer*)recvPeers) + tid;
       struct ncclConnInfo* conn = peer->conn = channel->peers[recvPeer]->recv + connIndexRecv;
       peer->step = conn->step;
@@ -750,7 +754,7 @@ public:
       peer->accSize = 0;
       peer->connStepSize = conn->stepSize / sizeof(T);
       // Load send peer
-      int sendPeer = mode == primsModePatAg ? (rank - delta + nranks) % nranks : (rank + delta) % nranks;
+      int sendPeer = (!shared && mode == primsModePatAg) ? (rank - delta + nranks) % nranks : (rank + delta) % nranks;
       peer = ((struct ncclPatPeer*)sendPeers) + tid;
       conn = peer->conn = channel->peers[sendPeer]->send + connIndexSend;
       peer->step = conn->step;

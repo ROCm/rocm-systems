@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vinterp.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -28,7 +27,12 @@ VInterpP10F32Vinterp::VInterpP10F32Vinterp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVInterpP10F32Vinterp(const MachineInst *opcode) {
+DecodeResult decodeVInterpP10F32Vinterp(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vinterp::validate_encoding(
+      "v_interp_p10_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VInterpP10F32Vinterp>(opcode);
 }
 } // namespace detail
@@ -49,7 +53,12 @@ VInterpP2F32Vinterp::VInterpP2F32Vinterp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVInterpP2F32Vinterp(const MachineInst *opcode) {
+DecodeResult decodeVInterpP2F32Vinterp(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vinterp::validate_encoding(
+      "v_interp_p2_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VInterpP2F32Vinterp>(opcode);
 }
 } // namespace detail
@@ -70,7 +79,12 @@ VInterpP10F16F32Vinterp::VInterpP10F16F32Vinterp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVInterpP10F16F32Vinterp(const MachineInst *opcode) {
+DecodeResult decodeVInterpP10F16F32Vinterp(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vinterp::validate_encoding(
+      "v_interp_p10_f16_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VInterpP10F16F32Vinterp>(opcode);
 }
 } // namespace detail
@@ -91,7 +105,12 @@ VInterpP2F16F32Vinterp::VInterpP2F16F32Vinterp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVInterpP2F16F32Vinterp(const MachineInst *opcode) {
+DecodeResult decodeVInterpP2F16F32Vinterp(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vinterp::validate_encoding(
+      "v_interp_p2_f16_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VInterpP2F16F32Vinterp>(opcode);
 }
 } // namespace detail
@@ -118,7 +137,13 @@ VInterpP10RtzF16F32Vinterp::VInterpP10RtzF16F32Vinterp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVInterpP10RtzF16F32Vinterp(const MachineInst *opcode) {
+DecodeResult decodeVInterpP10RtzF16F32Vinterp(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vinterp::validate_encoding("v_interp_p10_rtz_f16_f32",
+                                 reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VInterpP10RtzF16F32Vinterp>(opcode);
 }
 } // namespace detail
@@ -139,7 +164,12 @@ VInterpP2RtzF16F32Vinterp::VInterpP2RtzF16F32Vinterp(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVInterpP2RtzF16F32Vinterp(const MachineInst *opcode) {
+DecodeResult decodeVInterpP2RtzF16F32Vinterp(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vinterp::validate_encoding(
+      "v_interp_p2_rtz_f16_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VInterpP2RtzF16F32Vinterp>(opcode);
 }
 } // namespace detail

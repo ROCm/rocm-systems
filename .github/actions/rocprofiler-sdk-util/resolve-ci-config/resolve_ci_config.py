@@ -23,10 +23,12 @@ def warn(message: str) -> None:
     print(f"::warning::{message}")
 
 
-def load_gpu_configs(config_path: Path) -> dict[str, dict[str, Any]]:
+def load_ci_configs(
+    config_path: Path,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     if not config_path.exists():
         warn("CI config checkout missing. Using fallback runner labels.")
-        return {}
+        return {}, {}
 
     sys.path.insert(0, str(config_path))
     try:
@@ -34,13 +36,29 @@ def load_gpu_configs(config_path: Path) -> dict[str, dict[str, Any]]:
 
         config = load_config_v1(config_path)
         all_families = config.get_gpu_families(TRIGGER_TYPES)
-        return {
+        gpu_configs = {
             family: all_families.get(family, {}).get("linux", {})
             for family in GPU_FAMILIES
         }
+        return gpu_configs, config.build_runners
     except Exception as exc:
         warn(f"Failed to load CI config: {exc}. Using fallback runner labels.")
-        return {}
+        return {}, {}
+
+
+def load_gpu_configs(config_path: Path) -> dict[str, dict[str, Any]]:
+    return load_ci_configs(config_path)[0]
+
+
+def get_linux_build_runner(build_runners: dict[str, Any], fallback: str) -> str:
+    return next(
+        (
+            runner["label"]
+            for runner in build_runners.get("linux", {}).get("default", [])
+            if runner.get("label") and runner.get("weight", 0) > 0
+        ),
+        fallback,
+    )
 
 
 def set_outputs(outputs: dict[str, str]) -> None:
@@ -51,9 +69,16 @@ def set_outputs(outputs: dict[str, str]) -> None:
 
 def main() -> None:
     config_path = Path(os.environ["CI_CONFIG_PATH"])
-    gpu_configs = load_gpu_configs(config_path)
+    gpu_configs, build_runners = load_ci_configs(config_path)
 
     outputs: dict[str, str] = {}
+    fallback_linux_build_runner = os.environ.get("FALLBACK_LINUX_BUILD_RUNNER", "")
+    linux_build_runner = get_linux_build_runner(
+        build_runners, fallback_linux_build_runner
+    )
+    outputs["linux_build_runner"] = linux_build_runner
+    print(f"Using Linux build runner: {linux_build_runner}")
+
     for family in GPU_FAMILIES:
         linux_config = gpu_configs.get(family, {})
         fallback_env = f"FALLBACK_{family.upper()}_RUNNER"

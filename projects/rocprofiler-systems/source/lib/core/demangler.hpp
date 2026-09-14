@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "core/state.hpp"
+
 #include <cstdlib>
 #include <cxxabi.h>
 #include <functional>
@@ -79,6 +81,7 @@ private:
 
     cache_result try_get_from_cache(std::string_view _mangled_name)
     {
+        auto _state_guard = state::thread::scoped(state::thread::Internal);
         const std::shared_lock<std::shared_mutex> _read_lock{ m_mutex };
 
         auto _it = m_cache.find(_mangled_name);
@@ -92,6 +95,7 @@ private:
 
     std::string demangle_and_cache(std::string_view _mangled_name)
     {
+        auto _state_guard = state::thread::scoped(state::thread::Internal);
         const std::unique_lock<std::shared_mutex> _write_lock{ m_mutex };
 
         auto _it = m_cache.find(_mangled_name);

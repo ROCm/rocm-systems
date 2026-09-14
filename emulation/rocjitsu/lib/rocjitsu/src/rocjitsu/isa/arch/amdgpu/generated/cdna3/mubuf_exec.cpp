@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx940_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -1178,6 +1179,9 @@ void BufferAtomicAddF32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.sc0 != 0);
   d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_denorm_mode = 2;
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_legacy_minmax = true;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1200,7 +1204,7 @@ void BufferAtomicPkAddF16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_op = amdgpu::AtomicOp::PK_ADD_F16;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1224,6 +1228,9 @@ void BufferAtomicAddF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.sc0 != 0);
   d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = 3;
+  d->atomic_legacy_minmax = true;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1249,6 +1256,9 @@ void BufferAtomicMinF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.sc0 != 0);
   d->atomic_op = amdgpu::AtomicOp::FMIN;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
+  d->atomic_legacy_minmax = true;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
   mubuf_calculate_addresses(inst_, wf, *d);
@@ -1274,6 +1284,9 @@ void BufferAtomicMaxF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.sc0 != 0);
   d->atomic_op = amdgpu::AtomicOp::FMAX;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
+  d->atomic_legacy_minmax = true;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
   mubuf_calculate_addresses(inst_, wf, *d);

@@ -234,7 +234,7 @@ def gen_vector_unary(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, std::bit_cast<uint32_t>(lo));'
         )
         L.append(
-            f'    amdgpu::RegisterAccess(wf.cu()).write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));'
+            f'    amdgpu::RegisterAccess(wf).write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));'
         )
     elif op == 'cvt_pk_f32_bf8':
         conv = fp8_helper_name(arch_name, 'util::bf8_e5m2_to_f32')
@@ -247,7 +247,7 @@ def gen_vector_unary(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, std::bit_cast<uint32_t>(lo));'
         )
         L.append(
-            f'    amdgpu::RegisterAccess(wf.cu()).write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));'
+            f'    amdgpu::RegisterAccess(wf).write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));'
         )
     elif op in (
         'not',
@@ -287,7 +287,7 @@ def gen_vector_unary(
             L.append('    int32_t sv = static_cast<int32_t>(s);')
             L.append('    uint32_t abs_val = sv < 0 ? ~s : s;')
             L.append(
-                f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, abs_val == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(abs_val)) - 1);'
+                f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, abs_val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(abs_val)));'
             )
         elif op in int_op_map:
             L.append(
@@ -422,9 +422,12 @@ def gen_vector_unary(
         expr = math_map_f16.get(op, f's /* TODO: {op} */')
         if is_vop3:
             L.append(f'    float result = {expr};')
-            L.extend(vop3_dst_mod('result'))
+            L.extend(vop3_dst_mod('result', omod_result_type='f16'))
             L.append(
                 '    uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());'
+            )
+            L.append(
+                '    result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
             )
             L.append(_write_vop3_true16_dst(dst[0], 'opsel', 'result_bits'))
         else:
@@ -618,9 +621,12 @@ def gen_vector_binop(
         expr = f_op_map.get(op, f'sv0 /* TODO: {op} */')
         if is_vop3:
             L.append(f'    float result = {expr};')
-            L.extend(vop3_dst_mod('result'))
+            L.extend(vop3_dst_mod('result', omod_result_type='f16'))
             L.append(
                 '    uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());'
+            )
+            L.append(
+                '    result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
             )
             L.append(_write_vop3_true16_dst(d, 'opsel', 'result_bits'))
         else:
@@ -1086,9 +1092,12 @@ def gen_vector_ternary(
         expr = f_map.get(op, f'a /* unhandled: {op} */')
         if is_vop3:
             L.append(f'    float result = {expr};')
-            L.extend(vop3_dst_mod('result'))
+            L.extend(vop3_dst_mod('result', omod_result_type='f16'))
             L.append(
                 '    uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());'
+            )
+            L.append(
+                '    result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
             )
             L.append(_write_vop3_true16_dst(d, 'opsel', 'result_bits'))
         else:
@@ -1234,7 +1243,7 @@ def gen_vector_ternary(
             L.append(
                 '      uint32_t ba = (a >> (i * 8)) & 0xFF, bb = (b >> (i * 8)) & 0xFF;'
             )
-            L.append('      if (ba != 0) sum += ba > bb ? ba - bb : bb - ba;')
+            L.append('      if (bb != 0) sum += ba > bb ? ba - bb : bb - ba;')
             L.append('    }')
             L.append(f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, sum + c);')
         elif op == 'lerp_u8':

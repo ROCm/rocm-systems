@@ -11,6 +11,7 @@
 /// identical inputs/EXEC -- and the result arrays are asserted equal with
 /// EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -165,7 +166,7 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(c.opcode, /*vdst=*/4, /*src0=*/256, /*src1=*/256 + src1_v, abs, neg, omod, clamp,
                 words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, c.f64, rot, exec);
     delete inst;

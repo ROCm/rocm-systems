@@ -26,6 +26,7 @@ test_categories:
       - "CommTests.*"
       - "EnqueueCountTests.*"
       - "DdaCollCommon.*"
+      - "CheapPostSendFenceTests.*"
       - "PackRoundtripTest.LdStVolatileGlobalPtr"
       - "PackRoundtripTest.LdStRelaxedSysGlobal"
       - "PackRoundtripTest.LdStAcquireReleaseSysGlobal"
@@ -37,6 +38,7 @@ test_categories:
       - "PackRoundtripTest.LoadStorePack_*"
       - "PackRoundtripTest.L2_StorePackBoundary"
       - "PackRoundtripTest.Store16Load16Global_Direct"
+      - "RcclEpLayoutTest.*"
       - "HierarchicalShuffleTest.*"
     exclude_windows:
       - "*"
@@ -54,6 +56,7 @@ test_categories:
       - "CommTests.*"
       - "EnqueueCountTests.*"
       - "DdaCollCommon.*"
+      - "CheapPostSendFenceTests.*"
       - "BitOpsTemplateAllIntTestsFixture.*"
       - "BitOpsTemplateUnsignedTestsFixture.*"
       - "PackRoundtripTest.*"
@@ -69,6 +72,8 @@ test_categories:
       - "u32fpDecode.*"
       - "getHash.*"
       - "eatHash.*"
+      - "RcclEpWaveTest.*"
+      - "RcclEpLayoutTest.*"
     exclude_windows:
       - "*"
     labels:

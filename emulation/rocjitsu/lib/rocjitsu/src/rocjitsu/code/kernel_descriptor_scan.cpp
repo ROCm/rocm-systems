@@ -173,13 +173,13 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
 
 uint8_t kernel_wavefront_size(rj_code_arch_t arch, const KD &desc) {
   // CDNA kernels are Wave64 in the code objects currently handled here.
-  if (arch_is_cdna(arch))
+  if (arch_is_cdna_4_or_lower(arch))
     return 64;
 
   // gfx1250 is Wave32-only. Do not interpret a missing legacy descriptor bit
   // as Wave64: older producers may omit the bit even though the hardware has
   // no Wave64 launch mode.
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return 32;
 
   // RDNA descriptors opt into Wave32 with ENABLE_WAVEFRONT_SIZE32. If the bit is
@@ -207,16 +207,40 @@ uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t
   // occupancy would mix two different hardware contracts.
   if (arch == ROCJITSU_CODE_ARCH_CDNA1)
     return 4;
-  if (arch_is_cdna(arch))
+  if (arch_is_cdna_4_or_lower(arch))
     return 8;
   // gfx1250 exposes four 256-VGPR banks selected by WAVE_MODE.VGPR_MSB. Its
   // AMDHSA descriptor allocates that combined Wave32 namespace in blocks of
   // 16 VGPRs, unlike the 8-VGPR Wave32 granule used by generic RDNA targets.
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return 16;
   if (arch_is_rdna(arch))
     return wavefront_size == 32 ? 8 : 4;
   return 1;
+}
+
+uint32_t kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, const KD &desc) {
+  // gfx1250 widens USER_SGPR_COUNT from the generic five-bit field at [5:1]
+  // to a six-bit field at [6:1], allowing valid counts such as 32.
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2,
+                           rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT);
+  }
+  return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2,
+                         rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
+}
+
+void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, KD &desc,
+                                           uint32_t user_sgpr_count) {
+  // Select the same architecture-specific field when rewriting descriptors so
+  // DBT and patching do not truncate gfx1250 counts above 31.
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2,
+                    rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT, user_sgpr_count);
+    return;
+  }
+  AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
+                  user_sgpr_count);
 }
 
 } // namespace rocjitsu

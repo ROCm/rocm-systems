@@ -30,31 +30,31 @@ set(SRC_FILES
   dev_runtime.cc
   dev_runtime_segments.cc
   dev_runtime_internal.h
-  dda_all_reduce_ipc.cu
-  dda_reduce_scatter_ipc.cu
-  dda_all_gather_ipc.cu
-  dda_alltoall_ipc.cu
-  dda_all_reduce_fabric.cu
-  dda_all_reduce_fabric_ll.cu
-  dda_all_reduce_fabric_ll128.cu
-  dda_reduce_scatter_fabric.cu
-  dda_all_gather_fabric.cu
-  dda_all_gather_fabric_ll.cu
-  dda_all_gather_fabric_ll128.cu
-  dda_alltoall_fabric.cu
-  dda_alltoall_fabric_ll.cu
-  dda_alltoall_fabric_ll128.cu
-  dda_reduce_scatter_fabric_ll.cu
-  dda_reduce_scatter_fabric_ll128.cu
-  device_buffer.cc
+  algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
+  algorithms/dda/reduce_scatter/dda_reduce_scatter_ipc.cu
+  algorithms/dda/all_gather/dda_all_gather_ipc.cu
+  algorithms/dda/alltoall/dda_alltoall_ipc.cu
+  algorithms/dda/all_reduce/dda_all_reduce_fabric.cu
+  algorithms/dda/all_reduce/dda_all_reduce_fabric_ll.cu
+  algorithms/dda/all_reduce/dda_all_reduce_fabric_ll128.cu
+  algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu
+  algorithms/dda/all_gather/dda_all_gather_fabric.cu
+  algorithms/dda/all_gather/dda_all_gather_fabric_ll.cu
+  algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu
+  algorithms/dda/alltoall/dda_alltoall_fabric.cu
+  algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu
+  algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu
+  algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu
+  algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu
+  algorithms/dda/device/device_buffer.cc
   enqueue.cc
-  fabric_gpu_barrier.cu
-  fabric_init.cu
-  fabric_mem_handler.cc
+  algorithms/dda/fabric/fabric_gpu_barrier.cu
+  algorithms/dda/fabric/fabric_init.cu
+  algorithms/dda/fabric/fabric_mem_handler.cc
   group.cc
-  ipc_gpu_barrier.cu
-  ipc_init.cu
-  ipc_mem_handler.cc
+  algorithms/dda/ipc/ipc_gpu_barrier.cu
+  algorithms/dda/ipc/ipc_init.cu
+  algorithms/dda/ipc/ipc_mem_handler.cc
   init.cc
   init_nvtx.cc
   mnnvl.cc
@@ -104,6 +104,7 @@ set(SRC_FILES
   device/symmetric/reduce_scatter_gin.cuh
   graph/connect.cc
   graph/paths.cc
+  graph/rccl_graph_gen.cc
   graph/rings.cc
   graph/rings.h
   graph/rome_models.cc
@@ -120,24 +121,29 @@ set(SRC_FILES
   include/alloc.h
   include/mem_manager.h
   include/allocator.h
-  include/algorithms/CollCommon.h
-  include/algorithms/CollCommon_ll128.h
-  include/algorithms/all_reduce/all_reduce_dda.h
-  include/algorithms/all_reduce/all_reduce_dda_ll.h
-  include/algorithms/all_reduce/all_reduce_dda_fabric_ll128.h
-  include/algorithms/reduce_scatter/reduce_scatter_dda.h
-  include/algorithms/all_gather/all_gather_dda.h
-  include/algorithms/alltoall/alltoall_dda.h
-  include/algorithms/all_reduce/all_reduce_dda_fabric.h
-  include/algorithms/reduce_scatter/reduce_scatter_dda_fabric.h
-  include/algorithms/all_gather/all_gather_dda_fabric.h
-  include/algorithms/all_gather/all_gather_dda_fabric_ll.h
-  include/algorithms/all_gather/all_gather_dda_fabric_ll128.h
-  include/algorithms/alltoall/alltoall_dda_fabric.h
-  include/algorithms/alltoall/alltoall_dda_fabric_ll.h
-  include/algorithms/alltoall/alltoall_dda_fabric_ll128.h
-  include/algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll.h
-  include/algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
+  algorithms/dda/device/CollCommon.h
+  algorithms/dda/device/CollCommon_ll128.h
+  algorithms/dda/all_reduce/all_reduce_dda.h
+  algorithms/dda/all_reduce/all_reduce_dda_ll.h
+  algorithms/dda/all_reduce/all_reduce_dda_ll_twoshot.h
+  algorithms/dda/all_reduce/all_reduce_dda_fabric_ll128.h
+  algorithms/dda/reduce_scatter/reduce_scatter_dda.h
+  algorithms/dda/all_gather/all_gather_dda.h
+  algorithms/dda/alltoall/alltoall_dda.h
+  algorithms/dda/all_reduce/all_reduce_dda_fabric.h
+  algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric.h
+  algorithms/dda/all_gather/all_gather_dda_fabric.h
+  algorithms/dda/all_gather/all_gather_dda_fabric_ll.h
+  algorithms/dda/all_gather/all_gather_dda_fabric_ll128.h
+  algorithms/dda/alltoall/alltoall_dda_fabric.h
+  algorithms/dda/alltoall/alltoall_dda_fabric_ll.h
+  algorithms/dda/alltoall/alltoall_dda_fabric_ll128.h
+  algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h
+  algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
+  algorithms/gin/gin_alltoall.h
+  algorithms/gin/gin_all_reduce.h
+  algorithms/gin/gin_all_reduce_policy.h
+  algorithms/gin/sdma/all_reduce_gin_sdma.h 
   include/alltoallv_meta.h
   include/alt_rsmi.h
   include/archinfo.h
@@ -160,20 +166,20 @@ set(SRC_FILES
   include/core.h
   include/cpuset.h
 # include/cudawrap.h
-  include/dda_all_reduce.h
-  include/dda_reduce_scatter.h
-  include/dda_all_gather.h
-  include/dda_alltoall.h
-  include/dda_init_detail.h
+  algorithms/dda/all_reduce/dda_all_reduce.h
+  algorithms/dda/reduce_scatter/dda_reduce_scatter.h
+  algorithms/dda/all_gather/dda_all_gather.h
+  algorithms/dda/alltoall/dda_alltoall.h
+  algorithms/dda/dda_init_detail.h
   include/debug.h
   include/dev_runtime.h
   include/device.h
   include/env.h
-  include/device_buffer.h
+  algorithms/dda/device/device_buffer.h
   include/enqueue.h
-  include/fabric_init.h
-  include/fabric_gpu_barrier.h
-  include/fabric_mem_handler.h
+  algorithms/dda/fabric/fabric_init.h
+  algorithms/dda/fabric/fabric_gpu_barrier.h
+  algorithms/dda/fabric/fabric_mem_handler.h
   include/gdr_peermem.h
   include/gdrwrap.h
   include/git_version.h
@@ -190,9 +196,9 @@ set(SRC_FILES
   include/ibvsymbols.h
   include/ibvwrap.h
   include/info.h
-  include/ipc_gpu_barrier.h
-  include/ipc_init.h
-  include/ipc_mem_handler.h
+  algorithms/dda/ipc/ipc_gpu_barrier.h
+  algorithms/dda/ipc/ipc_init.h
+  algorithms/dda/ipc/ipc_mem_handler.h
   include/ipcsocket.h
   include/mem_manager.h
   include/mnnvl.h
@@ -200,6 +206,7 @@ set(SRC_FILES
   include/nccl_device.h
   include/nccl_device/net_device.h
   include/net.h
+  include/net_telemetry.h
   include/nvmlwrap.h
   include/nvtx.h
   include/nvtx_payload_schemas.h
@@ -210,10 +217,12 @@ set(SRC_FILES
   include/proxy.h
   include/ras.h
   include/rccl_common.h
+  include/rccl_decision.h
   include/rccl_vars.h
   include/register.h
   include/register_inline.h
   include/rccl_float8.h
+  include/rccl_graph_gen.h
   include/rocmwrap.h
   include/roctx.h
   include/recorder.h
@@ -253,6 +262,7 @@ set(SRC_FILES
   include/nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h
   include/nccl_device/gin/rocshmem_gda/queue_pair_device.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_sdma.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_copy.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table_device.h
@@ -484,6 +494,7 @@ set(SRC_FILES
   transport/net_ib_cast/net_ib_cast_inspect.h
   transport/net_ib_cast/net_ib_fault_inject.h
   transport/net_ib/gdaki/gin_host_gdaki.h
+  transport/net_telemetry.cc
   transport/net_socket.cc
   transport/nvls.cc
   transport/p2p.cc
@@ -515,7 +526,8 @@ if(ENABLE_ROCSHMEM_GIN)
     src/gin/gin_rocshmem_gda_factory.cc
     src/gin/gin_plugin_anvil_sdma.cc
     src/gin/gin_anvil_ipc_table_host.cc
-    src/gin/gin_anvil_sdma_oss7_device.cc
+    src/algorithms/gin/sdma/gin_alltoall_sdma.cu
+    src/algorithms/gin/sdma/gin_all_reduce_sdma.cu 
   )
 endif()
 
@@ -594,13 +606,14 @@ foreach(SRC_FILE ${SRC_FILES})
   endif()
 endforeach()
 
-set(NCCL_DEVICE_HEADER "${PROJECT_BINARY_DIR}/include/rccl/nccl_device.h")
+set(NCCL_DEVICE_HEADER "${PROJECT_BINARY_DIR}/include/nccl_device.h")
+set(NCCL_DEVICE_HEADER_STAMP "${PROJECT_BINARY_DIR}/include/.nccl_device_headers.stamp")
 # Copy hip_compat.h as-is (no hipification — contains both CUDA and HIP paths)
 set(HIP_COMPAT_SRC "${RCCL_SOURCE_DIR}/src/include/nccl_device/hip_compat.h")
 set(HIP_COMPAT_DST "${HIPIFY_DIR}/src/include/nccl_device/hip_compat.h")
 add_custom_command(
   OUTPUT ${HIP_COMPAT_DST}
-  COMMAND ${CMAKE_COMMAND} -E copy ${HIP_COMPAT_SRC} ${HIP_COMPAT_DST}
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HIP_COMPAT_SRC} ${HIP_COMPAT_DST}
   MAIN_DEPENDENCY ${HIP_COMPAT_SRC}
   COMMENT "Copying hip_compat.h (no hipification)"
 )
@@ -620,9 +633,7 @@ add_custom_command(
 )
 list(APPEND HIP_SOURCES ${PROXY_TRACE_HDR_DST})
 
-# copy_directory_if_different was added in CMake 3.26.  On older toolchains
-# fall back to the unconditional copy_directory (same behaviour, just causes
-# unnecessary recompilation on no-op rebuilds).
+# copy_directory_if_different was added in CMake 3.26.
 if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.26")
   add_custom_command(
     OUTPUT ${NCCL_DEVICE_HEADER}
@@ -632,17 +643,23 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.26")
     DEPENDS ${NCCL_DEVICE_HIP_FILES}
     VERBATIM
   )
+  set(COPY_NCCL_DEVICE_HEADERS_OUTPUT ${NCCL_DEVICE_HEADER})
 else()
+  # On older CMake, copy_directory is unconditional and can retrigger rebuilds.
+  # Use a touched stamp to keep OUTPUT >= DEPENDS after successful staging.
   add_custom_command(
-    OUTPUT ${NCCL_DEVICE_HEADER}
+    OUTPUT ${NCCL_DEVICE_HEADER_STAMP}
     COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
-    COMMAND ${CMAKE_COMMAND} -E copy "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${HIPIFY_DIR}/src/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
+    COMMAND ${CMAKE_COMMAND} -E touch "${NCCL_DEVICE_HEADER_STAMP}"
     DEPENDS ${NCCL_DEVICE_HIP_FILES}
+    COMMENT "Staging nccl_device headers into include/"
     VERBATIM
   )
+  set(COPY_NCCL_DEVICE_HEADERS_OUTPUT ${NCCL_DEVICE_HEADER_STAMP})
 endif()
-add_custom_target(copy_nccl_device_headers DEPENDS ${NCCL_DEVICE_HEADER})
+add_custom_target(copy_nccl_device_headers DEPENDS ${COPY_NCCL_DEVICE_HEADERS_OUTPUT})
 
 # Adding custom target to hipify all the source files
 # This is required to make sure that all the hipified source files are
@@ -734,7 +751,7 @@ endif()
 
 # Execute the python script to generate required collective functions
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} OFF ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${ONLY_FUNCS}
+    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} "${IFC_ENABLED}" OFF "${BUILD_LOCAL_GPU_TARGET_ONLY}" "${ENABLE_ROCSHMEM}" "${BUILD_ALL_UNROLLS}" ${ONLY_FUNCS}
     WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
     RESULT_VARIABLE gen_py_result
     ERROR_VARIABLE gen_py_error
@@ -803,6 +820,10 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_ipc\\.cu\\.cpp$")
+  # Contains the GIN-SDMA alltoall __global__ kernel and its launch site, so it
+  # needs full HIP compilation rather than --offload-host-only.
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_alltoall_sdma\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_all_reduce_sdma\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll128\\.cu\\.cpp$")
@@ -914,10 +935,14 @@ else()
   message(STATUS "HIP_VMM_UNCACHED_MEMORY disabled")
 endif()
 
-# ==== rocSHMEM integration (optional) ====
-# ENABLE_ROCSHMEM: full rocshmem (device + host), links librocshmem.a into librccl.so
-# ENABLE_ROCSHMEM_GIN: GIN host code only (no device deps), rocshmem host symbols
-#   resolved at runtime from the executable that links librocshmem.a
+# ==== rocSHMEM integration (optional, mutually exclusive) ====
+# ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
+#   via -fgpu-rdc --hip-link.  Does not enable GIN plugins.
+# ENABLE_ROCSHMEM_GIN: GIN plugins (GDA, SDMA).  Device symbols (QueuePair)
+#   resolved via per-arch bitcode in the device linker pipeline +
+#   -mlink-builtin-bitcode for symmetric kernels.  Host symbols left unresolved
+#   (--allow-shlib-undefined), resolved at runtime from the executable.
+#   Does not enable alltoall_wg offload.
 if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   add_rocshmem_targets()
   # Ensure rocSHMEM is fully built/installed before compiling rccl
@@ -935,13 +960,11 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
     if (ROCSHMEM_BUILD_DIR)
       target_include_directories(rccl PRIVATE ${ROCSHMEM_BUILD_DIR})
     else()
-      target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/build/include/rocshmem)
+      target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/build/include ${ROCSHMEM_SOURCE_DIR}/build/include/rocshmem)
     endif()
   endif()
 endif()
 if (ENABLE_ROCSHMEM)
-  # Moved to where rocSHMEM target_links
-  ## target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
   target_link_libraries(rccl PRIVATE ${IBVERBS})
 endif()
 
@@ -1068,6 +1091,20 @@ if(QUIET_WARNINGS)
   target_compile_options(rccl PRIVATE -Wno-missing-braces)
 endif()
 
+## Add SQTT instrumentation support if enabled
+if(SQTT_ENABLED)
+  # Check if SQTT markers are already in source code
+  execute_process(
+    COMMAND grep -q "PRIM_SIMPLE_WAIT_PEER" "${CMAKE_CURRENT_SOURCE_DIR}/device/prims_simple.h"
+    RESULT_VARIABLE MARKERS_PRESENT
+    OUTPUT_QUIET ERROR_QUIET
+  )
+
+  target_compile_options(rccl PRIVATE "-fpass-plugin=/opt/rocm/lib/libsqttinstrumentpass.so")
+  target_compile_definitions(rccl PRIVATE SQTT_ENABLED=1)
+  message(STATUS "SQTT instrumentation pass plugin enabled for RCCL")
+endif()
+
 ## Set RCCL compile and linker options for unit tests and code coverage
 if(ENABLE_CODE_COVERAGE)
   if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
@@ -1078,28 +1115,60 @@ if(ENABLE_CODE_COVERAGE)
 
   message(STATUS "Code coverage is enabled with build type '${CMAKE_BUILD_TYPE}'.")
 
+  # Host-only and host+device coverage instrument with the same two flags and
+  # differ only in whether the instrumentation is restricted to host code.
+  # Device coverage (ROCm 7.15+) drops -Xarch_host so the flags also reach the
+  # device compilation; host-only keeps -Xarch_host so device code is untouched.
+  if(ENABLE_FULL_COVERAGE)
+    message(STATUS "Device-side coverage is enabled (host + device instrumented).")
+    set(_coverage_instr_flags
+      -fprofile-instr-generate
+      -fcoverage-mapping)
+  else()
+    set(_coverage_instr_flags
+      "SHELL:-Xarch_host -fprofile-instr-generate"
+      "SHELL:-Xarch_host -fcoverage-mapping")
+  endif()
   target_compile_options(rccl PRIVATE
     -fvisibility=default
-    "SHELL:-Xarch_host -fprofile-instr-generate"
-    "SHELL:-Xarch_host -fcoverage-mapping")
+    ${_coverage_instr_flags})
 
   set(COVERAGE_SHARED_LINKER_FLAGS
     -fprofile-generate
     -Wl,--enable-new-dtags,--build-id=sha1,--rpath,$ORIGIN
   )
 
-  set(COVERAGE_EXE_LINKER_FLAGS
-    -fprofile-generate
-    -Wl,--enable-new-dtags,--build-id=sha1,--rpath,$ORIGIN/../lib
-  )
-
   target_link_options(rccl PRIVATE ${COVERAGE_SHARED_LINKER_FLAGS})
-  target_link_options(rccl PRIVATE ${COVERAGE_EXE_LINKER_FLAGS})
 
   # Expose explicit profile-flush wrappers so test harnesses that bypass
   # atexit() handlers (e.g. ProcessIsolatedTestRunner using _exit()) can
   # still flush librccl's private LLVM profile runtime instance.
   target_sources(rccl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/misc/coverage_flush.cc)
+
+  # Force-link the HIP device-data drain symbol so the host profile RT's
+  # InstrProfilingPlatformROCm.cpp.o gets pulled in (it's only included on
+  # demand). That .o registers the atexit hook which walks loaded HSA code
+  # objects, reads each device.elf's __llvm_prf_cnts via HSA introspection,
+  # and merges device counters into the same .profraw the host writes.
+  # Without this, .profraw contains host counters only and llvm-cov reports
+  # 0% on every device kernel.
+  #
+  # We add it on librccl's link rather than relying on the clang driver
+  # heuristic (the driver only force-links it for explicit `-x hip` link
+  # invocations; .o-only links from rccl-tests and friends don't qualify).
+  # One reference anywhere in the process is sufficient — once librccl is
+  # loaded, the atexit handler is registered for the whole process.
+  if(ENABLE_FULL_COVERAGE)
+    # Newer compiler-rt packages keep the ROCm collector and its interception
+    # dependencies in a self-contained companion archive. Explicitly link it
+    # for this object-only host link; older packages leave this path empty and
+    # continue to use the generic profile runtime.
+    if(RCCL_HOST_ROCM_PROFILE_RT)
+      target_link_libraries(rccl PRIVATE "${RCCL_HOST_ROCM_PROFILE_RT}")
+    endif()
+    target_link_options(rccl PRIVATE
+      "LINKER:-u,__llvm_profile_hip_collect_device_data")
+  endif()
 elseif(BUILD_TESTS) # Enable default/hidden visibility based on build type and ROCM_VERSION
   if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
     target_compile_options(rccl PRIVATE -fvisibility=default)
@@ -1179,6 +1248,26 @@ if(RCCL_ROCPROFILER_REGISTER)
   target_link_libraries(
       rccl PRIVATE rocprofiler-register::rocprofiler-register)
 endif()
+
+# Poison the __hip_atomic_* builtins
+#==================================================================================================
+# RCCL spells device atomics with the Clang scoped-atomic builtins so that memory
+# scope is explicit at every call site. Force-include (rather than #include) the
+# poison header so it also covers hipified and generated sources, and set it here,
+# before DeviceLinker.cmake snapshots COMPILE_OPTIONS, so the per-kernel device
+# compiles inherit it too. See src/include/poison_hip_atomics.h for the coverage
+# this does and does not give.
+if(RCCL_POISON_HIP_ATOMICS)
+  # Joined --include=<file> rather than separate-argument -include <file>: as a
+  # single token it needs no cooperation from anything that forwards flags one
+  # at a time, so it survives rccl-device-compile's catch-all for unrecognized
+  # `-*` tokens as-is. That script also parses the separate-argument spelling
+  # (see the -include/-imacros branch in parse_compiler_flags), so either form
+  # works today; the joined one is used because it does not depend on that.
+  target_compile_options(rccl PRIVATE --include=${RCCL_SOURCE_DIR}/src/include/poison_hip_atomics.h)
+  message(STATUS "RCCL_POISON_HIP_ATOMICS enabled - __hip_atomic_* builtins rejected in RCCL sources")
+endif()
+
 # Device Linker: include pipeline and wire up dependencies
 # (placed after all target_compile_definitions so DeviceLinker.cmake
 #  can read the rccl target's definitions directly)
@@ -1237,19 +1326,40 @@ target_link_libraries(rccl PRIVATE   hsa-runtime64::hsa-runtime64)
 target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
 # librocm-core provides getROCmVersion() for reporting the runtime ROCm version.
 if(ROCM_MAJOR_VERSION GREATER_EQUAL 6)
-  target_link_libraries(rccl PRIVATE -L${ROCM_PATH}/lib -lrocm-core)
+  find_package(rocm-core QUIET)
+  if(TARGET rocm-core)
+    target_link_libraries(rccl PRIVATE rocm-core)
+  else()
+    find_library(ROCM_CORE_LIB NAMES rocm-core
+      HINTS "${ROCMCORE_PATH}" "${ROCM_PATH}"
+      PATH_SUFFIXES lib lib64)
+    if(NOT ROCM_CORE_LIB)
+      message(FATAL_ERROR "Could not find librocm-core")
+    endif()
+    target_link_libraries(rccl PRIVATE ${ROCM_CORE_LIB})
+  endif()
 endif()
 # Wrap fmt in $<BUILD_INTERFACE:...> so it's only used while building rccl
 # and is omitted from the exported rccl-targets export set. Without this,
 # a FetchContent-built fmt-header-only target leaks into rccl's link
 # interface and breaks install(EXPORT) for static builds.
 target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
+if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
+  # Resolve to a full path: nothing on the link line supplies ${ROCM_PATH}/lib, so a bare
+  # -lhsakmt would have no search path to resolve against.
+  find_library(HSAKMT_LIBRARY NAMES hsakmt
+    HINTS "${ROCM_PATH}"
+    PATH_SUFFIXES lib lib64)
+  if(NOT HSAKMT_LIBRARY)
+    message(FATAL_ERROR "Could not find libhsakmt")
+  endif()
+endif()
 if(ENABLE_ROCSHMEM)
   # librocshmem.a is compiled with -fgpu-rdc (relocatable device code).
   # --hip-link tells amdclang++ to perform the RDC device-link step as part
   # of the final librccl.so link.
   target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
-  target_link_libraries(rccl PRIVATE hsakmt)
+  target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
   target_link_libraries(rccl PRIVATE ${IBVERBS})
   set(_rocshmem_offload_arch_flags "")
   foreach(_gpu_raw ${GPU_TARGETS})
@@ -1259,10 +1369,58 @@ if(ENABLE_ROCSHMEM)
   list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
   target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
 elseif(ENABLE_ROCSHMEM_GIN)
-  # GIN-only: rocshmem device symbols (QueuePair methods for GDA backend)
-  # are left unresolved in librccl.so and resolved from the executable
-  # that links librocshmem.a. This avoids duplicating rocshmem device state
-  # (__constant__ memory) across librccl.so and the executable.
+  # GIN device templates (Put/Flush/etc.) reference rocshmem device symbols.
+  # With the device linker (default), per-arch .bc files are injected directly
+  # into the per-arch device link step via DeviceLinker.cmake.
+  #
+  # Pull the SDMA host objects out of librocshmem.a so apps running only SDMA do
+  # not have to link it. Seeding by symbol rather than by file survives renames.
+  # GDA stays unresolved, as it needs constmem registration this mode cannot do.
+  set(_gin_rocshmem_syms
+    gin_anvil_sdma_probe
+    gin_anvil_sdma_create
+    gin_anvil_sdma_destroy
+    gin_anvil_sdma_get_num_channels
+    gin_anvil_sdma_get_channel_stride
+    _ZN8rocshmem3ibvE)
+  set(_gin_rocshmem_undefine "")
+  foreach(_sym ${_gin_rocshmem_syms})
+    list(APPEND _gin_rocshmem_undefine -u ${_sym})
+  endforeach()
+
+  set(_gin_rocshmem_object "${CMAKE_CURRENT_BINARY_DIR}/rocshmem_host.o")
+  set(_gin_rocshmem_archive_name "librocshmem_gin_host.a")
+  set(_gin_rocshmem_archive "${CMAKE_CURRENT_BINARY_DIR}/${_gin_rocshmem_archive_name}")
+  if(TARGET rocshmem_static)
+    set(_gin_rocshmem_depends rocshmem_static)
+  else()
+    set(_gin_rocshmem_depends ${ROCSHMEM_LIBRARY})
+  endif()
+
+  add_custom_command(
+    OUTPUT  ${_gin_rocshmem_object}
+    COMMAND ${CMAKE_LINKER} -r ${_gin_rocshmem_undefine} ${ROCSHMEM_LIBRARY} -o ${_gin_rocshmem_object}
+    DEPENDS ${_gin_rocshmem_depends}
+    COMMENT "Extracting GIN host objects from librocshmem.a"
+    VERBATIM)
+
+  # An app linking rocshmem under -rdynamic would interpose our globals, so both
+  # modules would run destructors over one object and double free at exit.
+  # --exclude-libs keeps our copies local. It needs an archive, hence the wrapper.
+  add_custom_command(
+    OUTPUT  ${_gin_rocshmem_archive}
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${_gin_rocshmem_archive}
+    COMMAND ${CMAKE_AR} rcs ${_gin_rocshmem_archive} ${_gin_rocshmem_object}
+    DEPENDS ${_gin_rocshmem_object}
+    COMMENT "Packaging GIN host objects into ${_gin_rocshmem_archive_name}"
+    VERBATIM)
+  add_custom_target(gin_rocshmem_host_objects DEPENDS ${_gin_rocshmem_archive})
+
+  add_dependencies(rccl gin_rocshmem_host_objects)
+  target_link_libraries(rccl PRIVATE ${_gin_rocshmem_archive})
+  target_link_options(rccl PRIVATE "LINKER:--exclude-libs,${_gin_rocshmem_archive_name}")
+  # anvil.cpp calls hsaKmt* directly. hsa-runtime64 is already linked above.
+  target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
   target_link_options(rccl PRIVATE "LINKER:--allow-shlib-undefined")
 endif()
 

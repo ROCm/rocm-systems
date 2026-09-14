@@ -30,7 +30,16 @@ if(HIP_PLATFORM MATCHES "amd")
     --offload-arch=gfx10-1-generic
     --offload-arch=gfx10-3-generic
     --offload-arch=gfx11-generic
-    --offload-arch=gfx12-generic)
+    --offload-arch=gfx12-generic
+    --offload-arch=gfx12-5-generic)
+
+  # ASAN is only supported on xnack+ offload archs; clang skips it on the other
+  # generic targets and emits an -Woption-ignored warning. Suppress it under ASAN
+  # so -Werror does not fail the build.
+  set(ASAN_GENERIC_TARGET_FLAGS)
+  if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+    set(ASAN_GENERIC_TARGET_FLAGS -Wno-option-ignored)
+  endif()
 
   set(DISABLE_GENERIC_TARGET_ONLY)
 
@@ -84,13 +93,13 @@ if(HIP_PLATFORM MATCHES "amd")
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
   set_target_properties(hipSquareGenericTargetDefault PROPERTIES COMPILE_FLAGS "-mcode-object-version=6 ${DISABLE_GENERIC_TARGET_ONLY}")
-  target_compile_options(hipSquareGenericTargetDefault PUBLIC ${OFFLOAD_ARCH_GENERIC_STR})
+  target_compile_options(hipSquareGenericTargetDefault PUBLIC ${ASAN_GENERIC_TARGET_FLAGS} ${OFFLOAD_ARCH_GENERIC_STR})
 
   hip_add_exe_to_target(NAME hipSquareGenericTargetCompressed
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
   set_target_properties(hipSquareGenericTargetCompressed PROPERTIES COMPILE_FLAGS " -DGENERIC_COMPRESSED ${DISABLE_GENERIC_TARGET_ONLY} -mcode-object-version=6 --offload-compress")
-  target_compile_options(hipSquareGenericTargetCompressed PUBLIC ${OFFLOAD_ARCH_GENERIC_STR})
+  target_compile_options(hipSquareGenericTargetCompressed PUBLIC ${ASAN_GENERIC_TARGET_FLAGS} ${OFFLOAD_ARCH_GENERIC_STR})
 
   add_dependencies(hipSquareGenericTargetDefault hipSquareGenericTargetCompressed)
   if(BUILD_SHARED_LIBS)

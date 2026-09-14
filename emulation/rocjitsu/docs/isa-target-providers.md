@@ -32,6 +32,32 @@ The canonical string ID and aliases identify the target within the selected
 registry. The optional architecture and GPU bindings connect it to RocJITsu's
 closed public enums, offload-bundle processor names, and ELF machine values.
 
+One ISA family may bind multiple concrete targets to a variant-aware decoder
+factory. Each binding carries immutable instruction-feature and execution
+capabilities, and the descriptor names an explicit architecture-only default:
+
+```cpp
+std::unique_ptr<rocjitsu::Decoder>
+create_variant_decoder(const IsaGpuTargetDescription &gpu_target);
+
+inline constexpr IsaTargetDescriptor kTargetDescriptor{
+    .id = "vendor-family",
+    .aliases = kTargetAliases,
+    .architecture_id = ROCJITSU_CODE_ARCH_VENDOR_FAMILY,
+    .gpu_targets = kGpuTargets,
+    .default_gpu_target = ROCJITSU_CODE_TARGET_VENDOR_BASE,
+    .decoder_factory = &create_target_decoder,
+    .variant_decoder_factory = &create_variant_decoder,
+    .supports_execution = true,
+};
+```
+
+Registry construction rejects a variant factory without a valid default, or a
+default on a non-variant descriptor. String, public target-enum, ELF, and
+code-object lookups retain the concrete binding. Architecture-only decoder
+creation uses only the explicit default; it never picks the first binding by
+incidental array order.
+
 The header remains safe to include normally. An opt-in section after its
 include guard exposes the descriptor to registry composition:
 
@@ -116,7 +142,10 @@ if (registry.find(requested_target) == nullptr)
 `targets()` enumerates descriptors in the provider order passed to
 `rj_add_isa_target_registry()`. Built-in provider lists preserve the order in
 which their CMake subdirectories register them. `find()` accepts a canonical
-ID, alias, integrated architecture enum, or integrated GPU target.
+ID, alias, integrated architecture enum, or integrated GPU target. Use
+`find_gpu_target()` when target-level capability or identity is required;
+family-level `supports_execution` does not imply that every concrete binding
+implements execution.
 
 Direct registry construction accepts only const lvalue descriptor arrays. The
 array and every aliases/GPU metadata array referenced by it must remain alive
@@ -138,11 +167,24 @@ have a null execution callback. The aggregate
 for decoder-only consumers such as the fuzz target. The existing target names
 continue to compose both model and execution objects for simulator consumers.
 
+A full family provider can still expose a concrete model/decode-only variant.
+Such a binding has `execution_implemented == false`, receives no execution
+backend, and must be rejected by simulator configuration before topology or
+compute-unit construction. This permits tooling to decode the variant without
+advertising functional simulation.
+
 `rj_decode_fuzz` is the reference consumer of the aggregate registry.
 `DecodeFuzzModelOnly.SymbolBoundary` verifies that all ten model factories are
 present without execution or VM symbols. `ModelOnlyIsaTest.SymbolBoundary` and
 `Gfx1250B0ToA0Library.SymbolBoundary` retain the equivalent checks for the
 gfx1250-only binaries.
+
+Capabilities belong to the selected provider binding, not only to a GPU name.
+If the full provider can execute a concrete target but the model-only provider
+cannot, the model-only descriptor must publish its own binding with
+`execution_implemented == false`. Consumers may query the concrete binding
+directly and must receive the capability of the provider that is actually
+linked.
 
 ## Adding an NPI target
 

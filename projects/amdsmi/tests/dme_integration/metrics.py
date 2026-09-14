@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# Copyright (C) Advanced Micro Devices. All rights reserved.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Verify the Device Metrics Exporter Prometheus endpoint.
 
 Replaces the inline curl/grep loop in ``amdsmi-dme-ci.yml`` Phase 5 with
