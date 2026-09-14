@@ -374,36 +374,44 @@ TEST_F(DdaMPI_AllReduce, StreamAlternationUngrouped)
 
     const size_t bytes = kContractCount * sizeof(float);
 
-    void* sendBuf = nullptr;
-    ASSERT_EQ(hipSuccess, hipMalloc(&sendBuf, bytes));
-    DeviceBufferAutoGuard sendGuard(sendBuf);
+    void* bufA = nullptr;
+    ASSERT_EQ(hipSuccess, hipMalloc(&bufA, bytes));
+    DeviceBufferAutoGuard guardA(bufA);
 
-    void* recvBuf = nullptr;
-    ASSERT_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
-    DeviceBufferAutoGuard recvGuard(recvBuf);
+    void* bufB = nullptr;
+    ASSERT_EQ(hipSuccess, hipMalloc(&bufB, bytes));
+    DeviceBufferAutoGuard guardB(bufB);
 
-    fillRankScalar(sendBuf, kContractCount, rank);
-    ASSERT_EQ(hipSuccess, hipMemset(recvBuf, 0, bytes));
+    fillRankScalar(bufA, kContractCount, rank);
+    ASSERT_EQ(hipSuccess, hipMemset(bufB, 0, bytes));
 
+    // Each iteration reduces the previous one's output, so the final value depends on the order the
+    // iterations ran in. Reducing the same operand every time would pass under any interleaving.
     for(int iter = 0; iter < kContractIters; ++iter)
     {
-        hipStream_t stream = (iter % 2 == 0) ? getActiveStream() : altStream;
+        const bool  even   = (iter % 2 == 0);
+        hipStream_t stream = even ? getActiveStream() : altStream;
         ASSERT_EQ(ncclSuccess,
-                  ncclAllReduce(sendBuf, recvBuf, kContractCount, ncclFloat32, ncclSum,
-                                getActiveCommunicator(), stream))
+                  ncclAllReduce(even ? bufA : bufB, even ? bufB : bufA, kContractCount, ncclFloat32,
+                                ncclSum, getActiveCommunicator(), stream))
             << "Rank " << rank << ": iteration " << iter;
     }
 
     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
     ASSERT_EQ(hipSuccess, hipStreamSynchronize(altStream));
 
-    const float expectedSum = static_cast<float>(nRanks * (nRanks + 1) / 2);
-    ASSERT_TRUE(verifyBufferData<float>(recvBuf, kContractCount,
+    // Every rank contributes rank+1, so the first reduction yields nRanks*(nRanks+1)/2 and each
+    // later one multiplies that by nRanks.
+    float expectedSum = static_cast<float>(nRanks * (nRanks + 1) / 2);
+    for(int iter = 1; iter < kContractIters; ++iter)
+        expectedSum *= static_cast<float>(nRanks);
+
+    void* finalBuf = (kContractIters % 2 == 0) ? bufA : bufB;
+    ASSERT_TRUE(verifyBufferData<float>(finalBuf, kContractCount,
                                         [expectedSum](size_t) { return expectedSum; }))
         << "Rank " << rank << ": AllReduce across alternating streams wrote wrong data";
 
-    reportSelectedTier("DdaMPI_AllReduce/StreamAlternationUngrouped", sendBuf, recvBuf,
-                       kContractCount);
+    reportSelectedTier("DdaMPI_AllReduce/StreamAlternationUngrouped", bufA, bufB, kContractCount);
 }
 
 #endif // MPI_TESTS_ENABLED
