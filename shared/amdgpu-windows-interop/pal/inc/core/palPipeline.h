@@ -57,6 +57,7 @@ struct KernelArgument;
 namespace Pal
 {
 struct GpuMemSubAllocInfo;
+struct StateBlockIdentifier;
 enum class PrimitiveTopology : uint8;
 class ICodeObject;
 
@@ -100,6 +101,7 @@ enum class PointOrigin : uint32
     Count
 };
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1010
 /// Specifies primitive's shade mode.
 enum class ShadeMode : uint32
 {
@@ -107,6 +109,7 @@ enum class ShadeMode : uint32
     Flat    = 0x1,      ///< Flat shading mode, pixel shader input from provoking vertex
     Count
 };
+#endif
 
 /// Defines a logical operation applied between the color coming from the pixel shader and the current value in the
 /// target image.
@@ -238,20 +241,14 @@ union PipelineCreateFlags
 #else
         uint32 reserved971           :  1; ///< Reserved for future use.
 #endif
-#if PAL_BUILD_CODE_OBJECT_INTERFACE
-        uint32 disableCodeObjectReferencing : 1; ///< Indicates that this pipeline will not manage the reference
-                                                 ///  counter for the codeObjects.
-                                                 ///  It's the client's responsibility to ensure the codeObjects stay
-                                                 ///  alive during pipeline creation and execution.
-                                                 ///  This is useful for clients who want to manage the lifetime of the
-                                                 ///  code objects separately from the pipelines.
-#else
-        uint32 reserved1             :  1; ///< Reserved for future use.
-#endif
         uint32 disableAutoVrsFlatShadingOpt :  1; ///< If set, PAL must not auto-enable its internal VRS flat-shading
                                                   ///  optimization for this pipeline. When not set, PAL may, at its
                                                   ///  discretion, force a lower detail shading rate on eligible
                                                   ///  pipelines without any app opt-in.
+        uint32 condDebugUser         :  1; ///< If set, waves launched from this pipeline have debugging
+                                           ///  unconditionally enabled: the DebugBreak() shader intrinsic always
+                                           ///  triggers and code guarded by IsDebuggingEnabled() runs, regardless of
+                                           ///  whether a debugger is attached.
         uint32 reserved              : 28; ///< Reserved for future use.
     };
     uint32 u32All;                         ///< Flags packed as 32-bit uint.
@@ -414,6 +411,7 @@ struct ViewportInfo
                                     ///  0 to 1 or -1 to 1).
 };
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1010
 /// Specifies edgeRule for rasterization
 enum class EdgeRuleMode : uint32
 {
@@ -455,6 +453,42 @@ struct RasterizerState
     bool          dx10DiamondTestDisable; ///< Disable DX10 diamond test during line rasterization.
     EdgeRuleMode  edgeRule;
 };
+#else
+/// Specifies Rasterizer state in properties for creation of a graphics
+union RasterizerState
+{
+    struct
+    {
+        uint32          pointCoordOriginIsLl   : 1; ///< Controls texture coordinate orientation for point sprites.
+                                                    ///  0 means Top Left, 1 means Lower Left.
+        uint32          expandLineWidth        : 1; ///< If true, line prims will have their width expanded by 1/cos(a)
+                                                    ///  where a is the minimum angle from horizontal or vertical.
+                                                    ///  This can be used in conjunction with PS patching for a client
+                                                    ///  to implement line antialiasing.
+        uint32          shadeModeIsFlat        : 1; ///< Specifies shading mode, 0: Gouraud or 1: Flat
+        uint32          rasterizeLastLinePixel : 1; ///< Specifies whether to draw last pixel in a line.
+        uint32          outOfOrderPrimsEnable  : 1; ///< Enables out-of-order primitive rasterization.  PAL silently
+                                                    ///  ignores this if it is unsupported in hardware.
+        uint32          perpLineEndCapsEnable  : 1; ///< Forces the use of perpendicular line end caps as opposed to
+                                                    ///  axis-aligned line end caps during line rasterization.
+        BinningOverride binningOverride        : 2; ///< Binning setting for this pipeline.
+        DepthClampMode  depthClampMode         : 2; ///< Depth clamping behavior
+        uint32          dx10DiamondTestDisable : 1; ///< Disable DX10 diamond test during line rasterization.
+        uint32          reserved0              : 1;
+        uint32          edgeRuleIsOpenGl       : 1; ///< Edge rule (0: D3D compliant or 1: OGL compliant).
+        uint32          cullDistMaskValid      : 1; ///< If true, cullDistMask has valid data.
+        uint32          clipDistMaskValid      : 1; ///< If true, clipDistMask has valid data.
+        uint32          reserved1              : 1; ///< Reserved.
+
+        // Cull/clip masks purposely at the end of this 32b structure for Byte alignment.
+        uint32          cullDistMask           : 8; ///< Mask of which cullDistance exports to leave enabled.
+        uint32          clipDistMask           : 8; ///< Mask of which clipDistance exports to leave enabled.
+    };
+    uint32 u32All;
+};
+
+static_assert(sizeof(RasterizerState) == sizeof(uint32), "RasterizerState is an unexpected size!");
+#endif
 
 /// Specifies Per-MRT color target info in olor target state
 struct ColorTargetInfo
@@ -463,8 +497,10 @@ struct ColorTargetInfo
                                         ///  if no color target will be bound at this slot.
     uint8          channelWriteMask;    ///< Color target write mask.  Bit 0 controls the red channel, bit 1 is
                                         ///  green, bit 2 is blue, and bit 3 is alpha.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1008
     bool           forceAlphaToOne;     ///< Treat alpha as one regardless of the shader output.  Ignored unless
                                         ///  supportAlphaToOne is set in DeviceProperties.
+#endif
 };
 
 /// Specifies color target state in properties for creation of a graphics
@@ -616,10 +652,11 @@ struct PipelineInfo
         {
             struct
             {
-                uint32 perSampleShading : 1;    ///< Shader instructions want per-sample execution.
-                uint32 usesSampleMask   : 1;    ///< Shader is using sample mask.
-                uint32 enablePops       : 1;    ///< Primitive order pixel shader is enabled.
-                uint32 reserved         : 29;   ///< Reserved for future use.
+                uint32 perSampleShading  : 1;    ///< Shader instructions want per-sample execution.
+                uint32 usesSampleMask    : 1;    ///< Shader is using sample mask.
+                uint32 enablePops        : 1;    ///< Primitive order pixel shader is enabled.
+                uint32 usesSampleShading : 1;    ///< Shader is using sample shading.
+                uint32 reserved          : 28;   ///< Reserved for future use.
             };
             uint32 u32All;                      ///< All flags combined as a single uint32.
         } flags;
@@ -754,6 +791,14 @@ public:
     virtual Result QueryAllocationInfo(
         size_t*                    pNumEntries,
         GpuMemSubAllocInfo* const  pAllocInfoList) const = 0;
+
+    /// Retrieves the unique identifier for this pipeline.  Its contents are opaque to the client driver.
+    ///
+    /// This call is only supported on _compute_ pipelines.  Any attempt to call this on a _graphics_ pipeline is an
+    /// error, and an invalid identifier will be returned.
+    ///
+    /// @return The unique identifier data for this state block.
+    virtual StateBlockIdentifier GetUniqueIdentifier() const = 0;
 
     /// Gives the client access to the resource ID used for internal Pal events.
     /// EX: Resource Create, Resource Bind, Resource Destroy.
