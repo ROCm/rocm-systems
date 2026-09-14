@@ -2324,8 +2324,8 @@ static ncclResult_t netRegisterBuffer(ncclComm* comm, const void* userbuff, size
             regRecord->netHandleHead = netHandle;
             outHandle[p] = handle;
             *outRegBufFlag = 1;
-            INFO(NCCL_REG, "rank %d - NET register userbuff %p (handle %p), buffSize %ld regSize %ld numSegments %d",
-                 comm->rank, userbuff, handle, buffSize, regRecord->endAddr - regRecord->begAddr, numSegments);
+            INFO(NCCL_REG, "rank %d - NET register userbuff %p (handle %p), buffSize %ld", comm->rank, userbuff, handle,
+                 buffSize);
           } else {
             goto fail;
           }
@@ -2360,19 +2360,16 @@ ncclResult_t ncclNetLocalRegisterBuffer(ncclComm* comm, const void* userbuff, si
     NCCLCHECKGOTO(ncclRegFind(comm, userbuff, buffSize, &regRecord), ret, fail);
     NCCLCHECKGOTO(ncclRegLocalIsValid(regRecord, &isValid), ret, fail);
     if (isValid) {
-      int numSegments = regRecord->netNSegments;
-      // Count over the full registration, not the collective's send/recv slice.
-      // Cache only after every peer in this call registered; a later-peer fail is staging.
-      if (numSegments == 0) {
-        size_t regSize = regRecord->endAddr - regRecord->begAddr;
-        NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)regRecord->begAddr, regSize, (CUdeviceptr*)&base, &baseSize,
-                                           &numSegments));
-      }
+      // RCCL: count physical segments and skip NET registration when the switch is off.
+      int numSegments = 0;
+      NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)userbuff, buffSize, (CUdeviceptr*)&base, &baseSize,
+                                         &numSegments));
+      NCCLCHECK(rcclNetRegSegmentCount(comm, regRecord, &numSegments));
       if (numSegments > 1 && !ncclParamMultiSegmentRegister()) goto exit;
       NCCLCHECKGOTO(netRegisterBuffer(comm, userbuff, buffSize, peerConns, nPeers, regRecord, outRegBufFlag, outHandle,
                                       numSegments),
                     ret, fail);
-      if (*outRegBufFlag) regRecord->netNSegments = numSegments;
+      if (*outRegBufFlag) rcclNetRegCommit(comm, regRecord, numSegments);
     }
   }
 
@@ -2408,14 +2405,19 @@ ncclResult_t ncclNetGraphRegisterBuffer(
 
   *outRegBufFlag = 0;
   if (comm && userbuff && buffSize > 0 && nPeers > 0) {
+    // RCCL: count physical segments and skip graph NET registration when the switch is off.
     int numSegments = 0;
     NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)userbuff, buffSize, (CUdeviceptr*)&base, &baseSize, &numSegments));
     if (numSegments > 1 && !ncclParamMultiSegmentRegister()) goto exit;
     NCCLCHECKGOTO(ncclCommGraphRegister(comm, base, baseSize, (void**)&regRecord), ret, fail);
+    // ncclRegister may reuse a wider record, so count over the whole registration.
+    NCCLCHECKGOTO(rcclNetGraphRegSegmentCount(comm, regRecord, &numSegments), ret, fail);
+    if (numSegments > 1 && !ncclParamMultiSegmentRegister()) goto exit;
     NCCLCHECKGOTO(netRegisterBuffer(comm, userbuff, buffSize, peerConns, nPeers, regRecord, outRegBufFlag, outHandle,
                                     numSegments),
                   ret, fail);
     if (*outRegBufFlag) {
+      rcclNetRegCommit(comm, regRecord, numSegments);
       NCCLCHECKGOTO(ncclCalloc(&record, 1), ret, fail);
       record->base.fn = cleanupNet;
       record->comm = comm;
