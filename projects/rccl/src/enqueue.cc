@@ -499,7 +499,11 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       int regMode = (devWork.regUsed || devWork.netRegUsed) ? 1 : 2;
       int id = ncclDevFuncId(task->func, task->opDev.op, task->datatype, task->algorithm, task->protocol, accFlag,
                              task->pipeline, regMode);
-      if (id >= 0) task->devFuncId = id;
+      if (id < 0) {
+        WARN("%s: unsupported collective. Please ensure the collective has been enabled in build.", __func__);
+        return ncclInvalidUsage;
+      }
+      task->devFuncId = id;
     }
 
     if (task->regBufType & NCCL_NVLS_REG_BUFFER) {
@@ -1209,13 +1213,13 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   struct ncclProxyOp proxyOps[2] = {};
   int nProxyOps = selfSend ? 0 : 2;
   // Latency-bound send/recv uses one of two separately-generated kernel variants:
-  //   - LL128 kernel: only generated for gfx942/gfx950 (see reg_values_of() in the device codegen),
-  //     and only activated when this comm has LL128 enabled and NCCL_ALLOC_P2P_NET_LL_BUFFERS=1
+  //   - LL128 kernel: only activated on gfx942/gfx950 (it is also built for gfx1250 so its
+  //     table slot is not a nullptr), and only when this comm has LL128 enabled and NCCL_ALLOC_P2P_NET_LL_BUFFERS=1
   //     (which is also what makes the LL128 staging buffer available on network connections).
   //   - legacy LL kernel: every other arch/comm, or when NCCL_ALLOC_P2P_NET_LL_BUFFERS=0.
   // The choice is per-communicator, so all P2P ops in a plan agree on the kernel variant.
-  // cudaArch is 100*major + 10*minor: 940 = gfx942, 950 = gfx950 -- the only archs whose LL128
-  // send/recv kernel is generated (see reg_values_of("SendRecv") in the device codegen).
+  // cudaArch is 100*major + 10*minor: 940 = gfx942, 950 = gfx950 -- the only archs that
+  // activate the LL128 send/recv kernel.
   // LL128 send/recv requires ALL of:
   //   - ENABLE_LL128 compiled in: otherwise the reg=1 LL128 kernel is not built (see the arch guard
   //     in generate.py and DeviceLinker.cmake), yet the host func-id table still maps it, so
@@ -1225,7 +1229,8 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   //     send/recv stays consistent with the collective protocol choice.
   //   - NCCL_ALLOC_P2P_NET_LL_BUFFERS=1: the P2P opt-in that also makes the LL128 staging buffer
   //     available on network connections.
-  //   - gfx942/gfx950: the only archs whose LL128 send/recv kernel is generated.
+  //   - gfx942/gfx950: the only archs that activate the LL128 send/recv kernel. gfx1250
+  //     builds it so its table slot is a real function, but nothing selects it there.
 #if defined(ENABLE_LL128)
   bool useLL128SendRecv =
     comm->allocP2pNetLLBuffers && comm->topo->ll128Enabled && (comm->cudaArch == 940 || comm->cudaArch == 950);
@@ -1479,11 +1484,11 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     plan->channelMask.masks[channelId / 64] |= uint64_t(1) << (channelId % 64);
     // Add batch first.
     int funcIdx = ncclDevFuncId_P2p(useLL128SendRecv);
-    addWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeP2p, funcIdx, workOffset, p2pRound, batchP2P);
     if (funcIdx < 0) {
       WARN("%s: unsupported collective. Please ensure the collective has been enabled in build.", __func__);
       return ncclInvalidUsage;
     }
+    addWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeP2p, funcIdx, workOffset, p2pRound, batchP2P);
     // Add proxy ops.
     for (int dir = 0; dir < nProxyOps; dir++) {
       // Partition steps across channels.

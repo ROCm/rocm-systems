@@ -126,6 +126,7 @@ def test_otf2_data(
         "ompt": ("openmp", "ompt"),
         "rocshmem_api": ("rocshmem_api", "rocshmem_api"),
         "hipfile_api": ("hipfile_api", "hipfile_api"),
+        "hip_event": ("hip_event", "hip_event"),
     }
 
     # make sure they specified valid categories

@@ -62,7 +62,9 @@ void dfs_reverse_post_order(const BasicBlock &start,
 }
 
 [[nodiscard]] RegisterSet kill_defs(const InstDefUse &du, ExecState exec_before) {
-  RegisterSet kills = du.defs;
+  // Ordinary registers only: special singletons (EXEC/VCC/...) live in du.defs
+  // but are not part of scratch-allocation liveness and must not become kills.
+  RegisterSet kills = du.defs.ordinary_only();
   // Predicated defs preserve old values on at least one control-flow path, so
   // they can never be unconditional kills.
   if (du.has_predicated_def)
@@ -88,8 +90,11 @@ void dfs_reverse_post_order(const BasicBlock &start,
 [[nodiscard]] bool may_access_vgprs_indirectly(const Instruction &inst,
                                                std::span<const uint8_t> text, rj_code_arch_t arch) {
   const std::string_view mnemonic = inst.mnemonic();
-  // TODO: Move indirect-VGPR access properties into decoded instruction
-  // metadata so future ISA variants cannot bypass this completeness gate.
+  // TODO: Move indirect-access properties into decoded instruction metadata so
+  // future ISA variants cannot bypass this completeness gate. The scalar
+  // s_movrel* family displaces an SGPR index through M0 the same way and has no
+  // equivalent gate here, so consumers needing one scan mnemonics themselves
+  // (code/patch/probe_live_in.cpp).
   if (mnemonic.starts_with("v_movrel") || mnemonic.starts_with("v_swaprel")) {
     return true;
   }
@@ -161,9 +166,15 @@ LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, std::unique_ptr<Exec
   min_free_vgpr_ = options.min_free_vgpr;
   max_free_vgpr_ =
       static_cast<uint16_t>(std::min<size_t>(options.max_free_vgpr, REGISTER_SET_MAX_VGPRS));
+  // The flag is inert when an ExecMaskAnalysis is supplied, which would silently
+  // give a caller that set it the conservative answer instead.
+  assert(!(exec && options.exec_masked_defs_kill) &&
+         "exec_masked_defs_kill has no effect alongside an ExecMaskAnalysis");
+  exec_masked_defs_kill_ = options.exec_masked_defs_kill;
   // Own the EXEC-state analysis; the backward dataflow is deferred to the first
   // query (ensure_analyzed), which consults it for kills. May be null: kills then
-  // treat every EXEC-masked vector def as `Unknown` (conservative, never a kill).
+  // treat every EXEC-masked vector def as `Unknown` (conservative, never a kill)
+  // unless exec_masked_defs_kill declared the scope runs under one mask.
   exec_ = std::move(exec);
   deferred_blocks_.assign(blocks.begin(), blocks.end());
   scoped_blocks_.reserve(blocks.size());
@@ -215,8 +226,8 @@ void LivenessAnalysis::collect_global_register_usage(KernelBlockScope blocks,
         global_vgpr_usage_is_complete_ = false;
 
       const InstDefUse accesses(inst, gfx1250_vgpr_msb_.get(), UnknownVgprDefPolicy::ExpandAll);
-      globally_used_registers_ |= accesses.defs;
-      globally_used_registers_ |= accesses.uses;
+      globally_used_registers_ |= accesses.defs.ordinary_only();
+      globally_used_registers_ |= accesses.uses.ordinary_only();
     }
   }
 }
@@ -232,9 +243,12 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
   }
 
   // Without an EXEC-state analysis, treat every program point as `Unknown` so
-  // kill_defs never promotes an EXEC-masked vector def to a kill.
+  // kill_defs never promotes an EXEC-masked vector def to a kill, unless the
+  // caller declared the whole scope runs under one mask (exec_masked_defs_kill).
   const auto exec_before = [this](const Instruction &inst) {
-    return exec_ ? exec_->before(inst) : ExecState::Unknown;
+    if (exec_)
+      return exec_->before(inst);
+    return exec_masked_defs_kill_ ? ExecState::Full : ExecState::Unknown;
   };
 
   const bool filter_live_before = restrict_live_before_to_instructions;
@@ -289,7 +303,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
         ++requested_live_before_by_block[i];
       InstDefUse du(inst, gfx1250_vgpr_msb_.get());
       RegisterSet kills = kill_defs(du, exec_before(inst));
-      RegisterSet upward_uses = du.uses;
+      RegisterSet upward_uses = du.uses.ordinary_only();
       upward_uses -= state.kill;
       state.gen |= upward_uses;
       state.kill |= kills;
@@ -359,7 +373,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
       InstDefUse du(*inst, gfx1250_vgpr_msb_.get());
       RegisterSet kills = kill_defs(du, exec_before(*inst));
       live -= kills;
-      live |= du.uses;
+      live |= du.uses.ordinary_only();
       if (!filter_live_before || requested_live_before.contains(inst)) {
         live_before_.emplace(inst, live);
         if (filter_live_before && --remaining_requested == 0)

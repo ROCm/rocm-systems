@@ -912,7 +912,7 @@ def test_implicit_operand_accesses_covers_filters_merging_and_compat_insts():
         ''')
     parser.profile = SimpleNamespace(
         skip_encodings={'ENC_SKIP'},
-        skip_inst_encoding=lambda _name, condition: condition == 'skip_me',
+        skip_inst_encoding=lambda _name, condition, **_kwargs: condition == 'skip_me',
     )
     active = [
         ('READ', 'ENC_READ'),
@@ -927,6 +927,11 @@ def test_implicit_operand_accesses_covers_filters_merging_and_compat_insts():
             for name, encoding in active
         ]
     )
+
+    parser._unique_flat_segment_opcodes = {}
+    for form in parser.insts_node.iter('InstructionEncoding'):
+        opcode = elem_tree.SubElement(form, 'Opcode')
+        opcode.text = '0'
 
     assert parser.implicit_operand_accesses('OPR_SCC') == {
         ('READ', 'ENC_READ'): (True, False),
@@ -1755,7 +1760,7 @@ def test_vop3_mad_u64_u32_writes_explicit_sdst_carry():
 
     assert 'uint64_t carry = 0;' in body
     assert 'uint64_t product = s0 * s1;' in body
-    assert 'if (result < product)' in body
+    assert 'bool overflow = result < product;' in body
     assert 'carry |= 1ULL << lane;' in body
     assert 'amdgpu::write_wave_mask_scalar(sdst, wf, carry);' in body
     assert 'wf.set_vcc' not in body
@@ -1768,6 +1773,35 @@ def test_vop3_mad_u64_u32_writes_explicit_sdst_carry():
     )
     assert 'commit_result(carry);' in callback_body
     assert 'write_wave_mask_scalar' not in callback_body
+
+
+def test_vop3_mad_64_32_clamps_exact_result_without_changing_carry():
+    unsigned = gen_vector_mad_64_32(
+        ['vdst', 'sdst'],
+        ['src0', 'src1', 'src2'],
+        'u64',
+        integer_clamp=True,
+    )
+    signed = gen_vector_mad_64_32(
+        ['vdst', 'sdst'],
+        ['src0', 'src1', 'src2'],
+        'i64',
+        integer_clamp=True,
+    )
+
+    assert 'bool overflow = result < product;' in unsigned
+    assert 'inst_.clamp && overflow' in unsigned
+    assert unsigned.index('carry |= 1ULL << lane') < unsigned.index('inst_.clamp')
+    assert 'amdgpu::signed_add_overflows(product, s2)' in signed
+    assert 'inst_.clamp && overflow' in signed
+    assert '(product & (1ULL << 63))' in signed
+    assert signed.index('carry |= 1ULL << lane') < signed.index('inst_.clamp')
+    assert '__int128' not in unsigned
+    assert '__int128' not in signed
+
+    policy = Cdna4Profile().integer_clamp_dtypes
+    assert policy['V_MAD_U64_U32'] == 'u64'
+    assert policy['V_MAD_I64_I32'] == 'i64'
 
 
 def test_vector_cmp_class_writes_explicit_sdst_mask():
@@ -4077,6 +4111,135 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     assert 'src0.clear_delegate();' not in body
 
 
+def test_gfx1250_generator_wires_instruction_specific_integer_saturation():
+    isa_xml = _mrisa_dir() / 'amdgpu_isa_cdna5.xml'
+    parser = Parser(str(isa_xml), Cdna5Profile())
+    spec = parser.parse()
+    semantics = derive_all_semantics(spec)
+    generator = CodeGenerator(spec, '', semantics)
+
+    def generated_body(name: str, enc_name: str, *, result_writer=None) -> str:
+        enc = next(enc for enc in spec.inst_encodings if enc.enc_name == enc_name)
+        inst = next(inst for inst in enc.insts if inst.name == name)
+        generator._current_inst_fields = {field.name for field in enc.ucode_fields}
+        generator._current_operand_names = {operand.name for operand in inst.operands}
+        generator._current_enc = enc
+        return generator._gen_execute_body(
+            inst,
+            semantics.instructions[name],
+            enc.enc_name,
+            result_writer=result_writer,
+        )
+
+    vop3 = generated_body('V_ADD_NC_U32', 'ENC_VOP3')
+    assert 'vop3_integer_add<uint32_t>' in vop3
+    assert 'inst_.clamp' in vop3
+
+    subrev = generated_body('V_SUBREV_NC_U32', 'ENC_VOP3')
+    assert 'vop3_integer_sub<uint32_t>' in subrev
+    assert subrev.index('read_lane(src1, lane)') < subrev.index('read_lane(src0, lane)')
+    assert 'inst_.clamp' in subrev
+
+    add_u64 = generated_body('V_ADD_NC_U64', 'ENC_VOP3')
+    assert 'vop3_integer_add<uint64_t>' in add_u64
+    assert 'inst_.clamp' in add_u64
+
+    sub_u64 = generated_body('V_SUB_NC_U64', 'ENC_VOP3')
+    assert 'vop3_integer_sub<uint64_t>' in sub_u64
+    assert 'inst_.clamp' in sub_u64
+
+    expected_helpers = {
+        'V_ADD_MAX_I32': 'vop3_integer_add_minmax<int32_t, true>',
+        'V_ADD_MAX_U32': 'vop3_integer_add_minmax<uint32_t, true>',
+        'V_ADD_MIN_I32': 'vop3_integer_add_minmax<int32_t, false>',
+        'V_ADD_MIN_U32': 'vop3_integer_add_minmax<uint32_t, false>',
+    }
+    for name, helper in expected_helpers.items():
+        body = generated_body(name, 'ENC_VOP3')
+        assert helper in body
+        assert 'inst_.clamp' not in body
+
+    for name, enc_name, result_writer in (
+        ('V_MAD_NC_U64_U32', 'ENC_VOP3', None),
+        ('V_MAD_NC_I64_I32', 'ENC_VOP3', None),
+        ('V_MAD_CO_U64_U32', 'VOP3_SDST_ENC', 'commit_result'),
+        ('V_MAD_CO_I64_I32', 'VOP3_SDST_ENC', 'commit_result'),
+    ):
+        body = generated_body(name, enc_name, result_writer=result_writer)
+        assert 'bool overflow' in body
+        assert '__int128' not in body
+        assert 'inst_.clamp' in body
+
+    for name, helper in (
+        ('V_PK_MAD_I16', 'vop3_integer_mad<int16_t, 16>'),
+        ('V_PK_MAD_U16', 'vop3_integer_mad<uint16_t, 16>'),
+    ):
+        body = generated_body(name, 'ENC_VOP3P')
+        assert body.count(helper) == 2
+        assert body.count('inst_.clamp') == 2
+
+    for name in ('V_QSAD_PK_U16_U8', 'V_MQSAD_PK_U16_U8', 'V_MQSAD_U32_U8'):
+        body = generated_body(name, 'ENC_VOP3')
+        assert 'inst_.clamp' in body
+
+    vop2 = generated_body('V_ADD_NC_U32', 'ENC_VOP2')
+    assert 'vop3_integer_add' not in vop2
+    assert 'inst_.clamp' not in vop2
+
+    carry = generated_body(
+        'V_ADD_CO_U32', 'VOP3_SDST_ENC', result_writer='commit_result'
+    )
+    assert 'inst_.clamp && w > 0xFFFFFFFFULL ? UINT32_MAX' in carry
+    assert 'inst_.clamp' in carry
+    assert 'if (w > 0xFFFFFFFFULL) vcc |=' in carry
+
+
+def test_rdna4_generator_uses_instruction_policy_for_integer_clamp():
+    isa_xml = _mrisa_dir() / 'amdgpu_isa_rdna4.xml'
+    parser = Parser(str(isa_xml), Rdna4Profile())
+    spec = parser.parse()
+    semantics = derive_all_semantics(spec)
+    generator = CodeGenerator(spec, '', semantics)
+    enc = next(enc for enc in spec.inst_encodings if enc.enc_name == 'ENC_VOP3')
+    generator._current_inst_fields = {field.name for field in enc.ucode_fields}
+    generator._current_enc = enc
+
+    def generated_body(name: str) -> str:
+        inst = next(inst for inst in enc.insts if inst.name == name)
+        generator._current_operand_names = {operand.name for operand in inst.operands}
+        return generator._gen_execute_body(
+            inst, semantics.instructions[name], enc.enc_name
+        )
+
+    add3 = generated_body('V_ADD3_U32')
+    assert 'vop3_integer_' not in add3
+    assert 'inst_.clamp' not in add3
+
+    expected_helpers = {
+        'V_MUL_I32_I24': 'vop3_integer_mul<int32_t, 24>',
+        'V_MUL_U32_U24': 'vop3_integer_mul<uint32_t, 24>',
+        'V_MAD_I32_I24': 'vop3_integer_mad<int32_t, 24>',
+        'V_MAD_U32_U24': 'vop3_integer_mad<uint32_t, 24>',
+        'V_MAD_I16': 'vop3_integer_mad<int16_t, 16>',
+        'V_MAD_U16': 'vop3_integer_mad<uint16_t, 16>',
+        'V_MAD_I32_I16': 'vop3_integer_mad<int32_t, 16>',
+        'V_MAD_U32_U16': 'vop3_integer_mad<uint32_t, 16>',
+        'V_SAD_HI_U8': 'vop3_integer_sad_hi_u8',
+        'V_SAD_U8': 'vop3_integer_sad_u8',
+        'V_SAD_U16': 'vop3_integer_sad_u16',
+        'V_SAD_U32': 'vop3_integer_sad_u32',
+        'V_MSAD_U8': 'vop3_integer_msad_u8',
+    }
+    for name, helper in expected_helpers.items():
+        body = generated_body(name)
+        assert helper in body
+        assert 'inst_.clamp' in body
+
+    or3 = generated_body('V_OR3_B32')
+    assert 'vop3_integer_add3' not in or3
+    assert 'inst_.clamp' not in or3
+
+
 def test_noop_format_validation_is_inherited(amdgpu_generated_root: Path):
     encodings_h = (amdgpu_generated_root / 'rdna4' / 'encodings.h').read_text()
 
@@ -5893,7 +6056,7 @@ def test_generated_vop3_dot2_true16_uses_true16_helpers(
     assert 'uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);' in body
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
     assert 'util::f16_to_f32' in body
-    assert 'util::f32_to_f16_mode(result, wf.fp16_ovfl())' in body
+    assert 'amdgpu::fp_mode::dot2_f16(a0, b0, a1, b1, acc, wf.fp16_ovfl())' in body
     assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true)' in body
     assert 'throw util::UnimplementedInst' not in body
 
@@ -7307,6 +7470,22 @@ def test_generated_atomic_def_use_follows_return_control(
         assert 'src_operands_[0] = &vdata;' in cmpswap
         assert 'dst_operands_[num_dst_++] = &vdata_return;' in cmpswap
 
+    for arch, mnemonic, payload_bits, return_bits in (
+        ('rdna1', 'BufferAtomicFcmpswapMubuf', 64, 32),
+        ('rdna1', 'BufferAtomicFcmpswapX2Mubuf', 128, 64),
+        ('rdna2', 'BufferAtomicFcmpswapMubuf', 64, 32),
+        ('rdna2', 'BufferAtomicFcmpswapX2Mubuf', 128, 64),
+        ('rdna3', 'BufferAtomicCmpswapF32Mubuf', 64, 32),
+        ('rdna3_5', 'BufferAtomicCmpswapF32Mubuf', 64, 32),
+    ):
+        buffer = (amdgpu_generated_root / arch / 'mubuf.cpp').read_text()
+        cmpswap = buffer.split(f'{mnemonic}::{mnemonic}')[1]
+        cmpswap = cmpswap.split(f'void {mnemonic}::execute_impl')[0]
+        assert f'vdata({payload_bits}, OperandType::OPR_VGPR' in cmpswap
+        assert f'vdata_return({return_bits}, OperandType::OPR_VGPR' in cmpswap
+        assert 'src_operands_[0] = &vdata;' in cmpswap
+        assert 'dst_operands_[num_dst_++] = &vdata_return;' in cmpswap
+
 
 def test_generated_flat_saddr_null_selector_follows_encoding(
     amdgpu_generated_root: Path,
@@ -7528,3 +7707,57 @@ def test_cdna4_d16_load_does_not_preserve_destination(
     assert 'dst_operands_[0] = &vdata;' in ctor
     assert not re.search(r'src_operands_\[[^\]]*\]\s*=\s*&vdata;', ctor)
     assert f'void {class_name}::implicit_uses(RegisterSet &uses) const' not in cpp
+
+
+@pytest.mark.parametrize(
+    'arch,profile_type,instruction_name,operation',
+    [
+        ('cdna1', Cdna1Profile, 'GLOBAL_ATOMIC_PK_ADD_F16', 'pk_add_f16'),
+        ('cdna2', Cdna2Profile, 'GLOBAL_ATOMIC_PK_ADD_F16', 'pk_add_f16'),
+        ('cdna1', Cdna1Profile, 'GLOBAL_ATOMIC_ADD_F32', 'fadd'),
+        ('rdna2', Rdna2Profile, 'GLOBAL_ATOMIC_CSUB', 'sub_clamp'),
+        ('rdna3', Rdna3Profile, 'GLOBAL_ATOMIC_CSUB_U32', 'sub_clamp'),
+        ('rdna3_5', Rdna3_5Profile, 'GLOBAL_ATOMIC_CSUB_U32', 'sub_clamp'),
+    ],
+)
+def test_global_only_atomics_retain_segment_and_semantics(
+    arch, profile_type, instruction_name, operation
+):
+    spec = Parser(str(_mrisa_dir() / f'amdgpu_isa_{arch}.xml'), profile_type()).parse()
+    matches = [
+        inst
+        for enc in spec.inst_encodings
+        for inst in enc.insts
+        if inst.name == instruction_name
+    ]
+    assert len(matches) == 1
+    inst = matches[0]
+    assert inst.enc_name == 'ENC_FLAT'
+    assert inst.required_flat_segment == 2
+    sem = derive_all_semantics(spec).instructions[instruction_name]
+    assert sem.semantic_class == 'flat_atomic'
+    assert sem.operation == operation
+    assert sem.elem_size == 4
+    assert sem.num_elems == 1
+    assert any(
+        entry is not None
+        and (
+            entry.inst_name == inst.fmt_name
+            or f'decode{inst.fmt_name}' in (entry.sub_decode_funcs or [])
+        )
+        for entry in spec.primary_decode_table
+    )
+
+
+@pytest.mark.parametrize('profile_type', [Cdna5Profile, Rdna4Profile])
+@pytest.mark.parametrize('returning', [False, True])
+def test_ds_subtraction_keeps_underflow_policy(profile_type, returning):
+    suffix = '_RTN_U32' if returning else '_U32'
+    for name, operation in (
+        ('DS_SUB', 'sub'),
+        ('DS_COND_SUB', 'cond_sub'),
+        ('DS_SUB_CLAMP', 'sub_clamp'),
+    ):
+        sem = derive_semantics(name + suffix, 'ENC_VDS', profile_type())
+        assert sem is not None
+        assert sem.operation == operation

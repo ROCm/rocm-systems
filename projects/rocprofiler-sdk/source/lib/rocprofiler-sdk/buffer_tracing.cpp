@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
+#include "lib/rocprofiler-sdk/hip/event.hpp"
 #include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
@@ -121,6 +122,7 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCSHMEM_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCSHMEM_API_EXT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIPFILE_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIPFILE_API_EXT)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_EVENT)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -205,6 +207,9 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t           
             RETURN_STATUS_ON_FAIL(rocprofiler::kfd::init());
         }
     }
+
+    if(kind == ROCPROFILER_BUFFER_TRACING_HIP_EVENT)
+        rocprofiler::hip::event::set_service_configured(true);
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -311,6 +316,11 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
         case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
         {
             val = rocprofiler::kernel_dispatch::name_by_id(operation);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HIP_EVENT:
+        {
+            val = rocprofiler::hip::event::name_by_id(operation);
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_OMPT:
@@ -493,6 +503,11 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
             ops = rocprofiler::kernel_dispatch::get_ids();
             break;
         }
+        case ROCPROFILER_BUFFER_TRACING_HIP_EVENT:
+        {
+            ops = rocprofiler::hip::event::get_ids();
+            break;
+        }
         case ROCPROFILER_BUFFER_TRACING_OMPT:
         {
             ops = rocprofiler::ompt::get_ids();
@@ -593,6 +608,7 @@ rocprofiler_iterate_buffer_tracing_record_args(
         case ROCPROFILER_BUFFER_TRACING_RCCL_API:
         case ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API:
         case ROCPROFILER_BUFFER_TRACING_HIPFILE_API:
+        case ROCPROFILER_BUFFER_TRACING_HIP_EVENT:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }

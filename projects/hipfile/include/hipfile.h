@@ -698,6 +698,9 @@ typedef enum hipFileBatchMode {
  * @brief Input parameters for a batch IO request
  * @ingroup batch
  */
+// The field order is part of the public ABI and cannot be changed to
+// eliminate padding.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 typedef struct hipFileIOParams {
     hipFileBatchMode_t mode; //!< Mode of the batch IO request
     union {
@@ -732,11 +735,11 @@ typedef struct hipFileIOEvents {
 typedef void *hipFileBatchHandle_t;
 
 /*!
- * @brief Prepare the system to perform a batch IO operation
+ * @brief Prepare the system to perform batch IO operations
  * @ingroup batch
  *
  * @param [out] batch_idp \batch_handle_param
- * @param [in] max_nr     Maximum number of requests that can be submitted to this batch handle
+ * @param [in] max_nr     Size of the queue for this batch handle. Cannot exceed 128.
  *
  * @return \hipfile_error_return
  */
@@ -764,8 +767,6 @@ hipFileError_t hipFileBatchIOSubmit(hipFileBatchHandle_t batch_idp, unsigned nr,
  * @brief Poll for the status of completed batch IO operations
  * @ingroup batch
  *
- * \warn_not_implemented
- *
  * @param [in] batch_idp \batch_handle_param
  * @param [in] min_nr Minimum number of batch operation statuses that should be returned.
  *                    If `timeout` is exceeded, fewer statuses may be returned.
@@ -785,8 +786,6 @@ hipFileError_t hipFileBatchIOGetStatus(hipFileBatchHandle_t batch_idp, unsigned 
  * @brief Cancels all pending batch IO operations
  * @ingroup batch
  *
- * \warn_not_implemented
- *
  * @param [in] batch_idp \batch_handle_param
  *
  * @return \hipfile_error_return
@@ -797,8 +796,6 @@ hipFileError_t hipFileBatchIOCancel(hipFileBatchHandle_t batch_idp);
 /*!
  * @brief Destroys the batch IO handle and frees the associated resources
  * @ingroup batch
- *
- * \warn_not_implemented_void
  *
  * @param [in] batch_idp \batch_handle_param
  */
