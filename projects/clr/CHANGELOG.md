@@ -17,6 +17,8 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - Device Management: Support for the following APIs for parity with corresponding CUDA APIs.
       * `hipDeviceGetLuid` returns the locally unique identifier (LUID) and device node mask for the specified device.
       * `hipInitDevice` initializes the runtime state for the specified device without making it the current device for the calling thread. It also applies to the requested flags and ensures the device's default stream is created.
+* New HIP device attribute
+    - `hipDeviceAttributeHostAllocDmaBufSupported` is now supported, enabling host-allocated buffer sharing.
 * Support for host-NUMA virtual memory management (VMM) in `hipMemCreate()` and related VMM APIs. These APIs now support `hipMemLocationTypeHostNuma` and `hipMemLocationTypeHostNumaCurrent`, enabling allocations backed by physical host memory on the selected NUMA node. Previously, support was limited to GPU VMM pools with deferred host access. This enhancement aligns HIP behavior with the corresponding CUDA APIs and expands support for NUMA-aware memory allocation.
 * Support for coarse-grained memory coherency on Windows. In supported Windows configurations, applications can now leverage unified memory to reduce memory footprint by up to 30% by eliminating unnecessary host-device data copies. Components interacting with the device can directly access host memory pointers and enable coarse-grained memory coherency by registering and pinning the associated host allocations using `hipHostRegister()` with the `hipExtHostRegisterCoarseGrained` flag. This provides behavior on Windows that is consistent with the existing Linux implementation while improving memory efficiency. 
 
