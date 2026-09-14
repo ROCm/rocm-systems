@@ -47,6 +47,23 @@ struct CeAlltoAllvMockComm
         comm.config.CTAPolicy  = NCCL_CTA_POLICY_ZERO;
     }
 
+    // Multi-node local-only LSA so ncclHierCeAvailable can pass (bigSize skips CUDA init).
+    void configureHierEligible(int nNodes = 2, int localRanks = 4)
+    {
+        comm.nNodes           = nNodes;
+        comm.nRanks           = nNodes * localRanks;
+        comm.localRanks       = localRanks;
+        comm.rank             = 0;
+        comm.node             = 0;
+        comm.symmetricSupport = true;
+        comm.hostRmaSupport   = true;
+        comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        comm.config.numRmaCtx = 1;
+        comm.devrState.bigSize = 1;
+        comm.devrState.lsaSize = localRanks;
+        comm.devrState.lsaSelf = 0;
+    }
+
     ncclComm* get() { return &comm; }
 };
 

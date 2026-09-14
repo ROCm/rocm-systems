@@ -93,16 +93,6 @@ class GPUInfo:
         """
         return [f"rocprof-device-[0-9]-{name}*.txt" for name in self.counter_names]
 
-    @property
-    def unsupported_perf_counter_archs(self) -> set[str]:
-        """Detected architectures where GPU perf counter validation is unreliable.
-
-        Returns the intersection of the detected architectures with
-        ``UNSUPPORTED_PERF_COUNTER_GFX``.
-        https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/tests/rocprofv3/counter-collection/input1/validate.py#L83C4-L83C82
-        """
-        return set(UNSUPPORTED_PERF_COUNTER_GFX.intersection(self.architectures))
-
 
 def get_rocminfo(rocm_path: Optional[Path] = None) -> Optional[Path]:
     """Get the path to the rocminfo executable.
