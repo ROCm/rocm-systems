@@ -35,6 +35,53 @@ THE SOFTWARE.
 #include "rocjpeg_hip_kernels.h"
 
 /**
+ * @brief Reusable scratch buffer for one batched kernel's per-image parameter array.
+ *
+ * Accumulates a host vector of per-image parameter structs for a single group,
+ * tracks the maximum grid extents across the group, and lazily grows a device
+ * buffer that the params are uploaded into before the batched launch.
+ */
+template <typename T>
+class BatchedKernelParams {
+public:
+    ~BatchedKernelParams() { if (dev_) { (void)hipFree(dev_); } }
+
+    void Reset() { host_.clear(); max_gx_ = 0; max_gy_ = 0; }
+
+    // Append one image's params; gx/gy are that image's pre-block-division grid extents.
+    void Add(const T &params, uint32_t gx, uint32_t gy) {
+        host_.push_back(params);
+        if (gx > max_gx_) max_gx_ = gx;
+        if (gy > max_gy_) max_gy_ = gy;
+    }
+
+    bool Empty() const { return host_.empty(); }
+    uint32_t Count() const { return static_cast<uint32_t>(host_.size()); }
+    uint32_t MaxGx() const { return max_gx_; }
+    uint32_t MaxGy() const { return max_gy_; }
+
+    // Grow the device buffer on demand and upload the host params on the given stream.
+    hipError_t Upload(hipStream_t stream, T **dev_out) {
+        size_t bytes = host_.size() * sizeof(T);
+        if (host_.size() > capacity_) {
+            if (dev_) { (void)hipFree(dev_); dev_ = nullptr; }
+            hipError_t status = hipMalloc(reinterpret_cast<void **>(&dev_), bytes);
+            if (status != hipSuccess) return status;
+            capacity_ = host_.size();
+        }
+        *dev_out = dev_;
+        return hipMemcpyAsync(dev_, host_.data(), bytes, hipMemcpyHostToDevice, stream);
+    }
+
+private:
+    std::vector<T> host_;
+    T *dev_ = nullptr;
+    size_t capacity_ = 0;
+    uint32_t max_gx_ = 0;
+    uint32_t max_gy_ = 0;
+};
+
+/**
  * @class RocJpegDecoder
  * @brief The RocJpegDecoder class represents a JPEG decoder.
  *
@@ -214,6 +261,27 @@ private:
     */
    RocJpegStatus GetYOutputFormat(HipInteropDeviceMem& hip_interop, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid);
 
+   // Batched-path accumulators: mirror the per-image color-convert/output helpers above,
+   // but instead of launching a kernel per image they append params to the per-kernel
+   // scratch buffers below. Memcpy-only work (CopyChannel) is still issued inline.
+   RocJpegStatus AccumulateColorConvertToRGB(HipInteropDeviceMem& hip_interop, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid);
+   RocJpegStatus AccumulateColorConvertToRGBPlanar(HipInteropDeviceMem& hip_interop, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid);
+   RocJpegStatus AccumulatePlanarYUVOutputFormat(HipInteropDeviceMem& hip_interop, uint32_t picture_width, uint32_t picture_height, uint16_t chroma_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid);
+   RocJpegStatus AccumulateYOutputFormat(HipInteropDeviceMem& hip_interop, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid);
+   void ResetBatchedParams();
+   RocJpegStatus LaunchBatchedParams();
+
+   // Uploads one accumulated buffer (if non-empty) and issues its batched launch.
+   template <typename T>
+   RocJpegStatus LaunchBatchedBuffer(BatchedKernelParams<T> &buf,
+       void (*launch)(hipStream_t, uint32_t, uint32_t, const T *, uint32_t)) {
+       if (buf.Empty()) return ROCJPEG_STATUS_SUCCESS;
+       T *dev = nullptr;
+       CHECK_HIP(buf.Upload(hip_stream_, &dev));
+       launch(hip_stream_, buf.MaxGx(), buf.MaxGy(), dev, buf.Count());
+       return ROCJPEG_STATUS_SUCCESS;
+   }
+
    int num_devices_; // Number of available devices
    int device_id_; // ID of the device to be used
    hipDeviceProp_t hip_dev_prop_; // HIP device properties
@@ -222,11 +290,23 @@ private:
    RocJpegBackend backend_; // RocJpeg backend
    RocJpegVappiDecoder jpeg_vaapi_decoder_; // RocJpeg VAAPI decoder object
    std::unordered_map<RocJpegImage*, AsyncDecodeState> pending_decodes_; // Map of pending asynchronous decodes keyed by destination
-   // Scratch buffers for the batched NV12→RGB kernel parameter array.
-   // Host vector is filled per group in DecodeBatched; device buffer grows on demand.
-   std::vector<NV12ToRGBBatchParams> nv12_rgb_batch_params_host_;
-   NV12ToRGBBatchParams *nv12_rgb_batch_params_dev_ = nullptr;
-   size_t nv12_rgb_batch_params_dev_capacity_ = 0;
+
+   // Per-kernel scratch buffers for the batched output path, one per batched kernel.
+   // Filled per group in FinalizeDecodeBatched; each device buffer grows on demand.
+   BatchedKernelParams<YUV444ToRGBBatchParams>            b_yuv444_rgb_;
+   BatchedKernelParams<YUV440ToRGBBatchParams>            b_yuv440_rgb_;
+   BatchedKernelParams<YUYVToRGBBatchParams>              b_yuyv_rgb_;
+   BatchedKernelParams<NV12ToRGBBatchParams>              b_nv12_rgb_;
+   BatchedKernelParams<YUV400ToRGBBatchParams>            b_yuv400_rgb_;
+   BatchedKernelParams<RGBAToRGBBatchParams>              b_rgba_rgb_;
+   BatchedKernelParams<YUV444ToRGBPlanarBatchParams>      b_yuv444_rgbp_;
+   BatchedKernelParams<YUV440ToRGBPlanarBatchParams>      b_yuv440_rgbp_;
+   BatchedKernelParams<YUYVToRGBPlanarBatchParams>        b_yuyv_rgbp_;
+   BatchedKernelParams<NV12ToRGBPlanarBatchParams>        b_nv12_rgbp_;
+   BatchedKernelParams<YUV400ToRGBPlanarBatchParams>      b_yuv400_rgbp_;
+   BatchedKernelParams<PackedYUYVToPlanarYUVBatchParams>  b_yuyv_yuvp_;
+   BatchedKernelParams<InterleavedUVToPlanarUVBatchParams> b_nv12_uvp_;
+   BatchedKernelParams<YFromPackedYUYVBatchParams>        b_yuyv_y_;
 };
 
 #endif //ROC_JPEG_DECODER_H_
