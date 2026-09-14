@@ -1885,22 +1885,22 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
 // NCCL_UNROLL_16=4, NCCL_UNROLL_32=5. Terminal entry uses SIZE_MAX.
 // Default unroll on gfx1250 is UNROLL_32 (set by commSetUnrollFactor).
 static const rcclArchThresholds::rcclUnrollEntry kUnrollAR_gfx1250[] = {
-  {     32ULL*1024,       0 },  // <= 32 KiB  : NCCL_UNROLL_1  (LL lane, latency-bound)
-  {     32ULL*1024*1024,  1 },  // <= 32 MiB  : NCCL_UNROLL_2  (LL128 lane)
-  {    128ULL*1024*1024,  3 },  // <= 128 MiB : NCCL_UNROLL_8  (VMM lane)
-  { SIZE_MAX,             5 },  // >  128 MiB : NCCL_UNROLL_32 (Ring/CE, bandwidth-bound)
+  {     32ULL*1024,       0 },
+  {     32ULL*1024*1024,  1 },
+  {    128ULL*1024*1024,  3 },
+  { SIZE_MAX,             5 },
 };
 static const rcclArchThresholds::rcclUnrollEntry kUnrollAG_gfx1250[] = {
-  {     32ULL*1024,       0 },  // <= 32 KiB  : NCCL_UNROLL_1  (LL lane)
-  {     32ULL*1024*1024,  1 },  // <= 32 MiB  : NCCL_UNROLL_2  (LL128 lane)
-  {    128ULL*1024*1024,  3 },  // <= 128 MiB : NCCL_UNROLL_8  (VMM lane)
-  { SIZE_MAX,             5 },  // >  128 MiB : NCCL_UNROLL_32 (CE/Ring)
+  {     32ULL*1024,       0 },
+  {     32ULL*1024*1024,  1 },
+  {    128ULL*1024*1024,  3 },
+  { SIZE_MAX,             5 },
 };
 static const rcclArchThresholds::rcclUnrollEntry kUnrollRS_gfx1250[] = {
-  {     32ULL*1024,       0 },  // <= 32 KiB  : NCCL_UNROLL_1  (LL lane, per-rank shard)
-  {     32ULL*1024*1024,  1 },  // <= 32 MiB  : NCCL_UNROLL_2  (LL128 lane)
-  {    128ULL*1024*1024,  3 },  // <= 128 MiB : NCCL_UNROLL_8  (VMM lane)
-  { SIZE_MAX,             5 },  // >  128 MiB : NCCL_UNROLL_32 (Ring)
+  {     32ULL*1024,       0 },
+  {     32ULL*1024*1024,  1 },
+  {    128ULL*1024*1024,  3 },
+  { SIZE_MAX,             5 },
 };
 
 // gfx1250 placeholders -- validate against sweep data (AICOMRCCL-1756).
@@ -1910,39 +1910,39 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaLLMax = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    128ULL*1024,         // [2] AllGather       -- 128 KiB (kernel hard cap kDdaLLAgMaxPerRankBytes)
-    16ULL*1024*1024,     // [3] ReduceScatter   -- 16 MiB total (rsShardBytes<=4MiB at 4 ranks; DDA/LL wins up to 16 MiB)
-    32ULL*1024*1024,     // [4] AllReduce       -- 32 MiB (two-shot path; kDdaLLMaxBytes=32MiB)
+    128ULL*1024,         // [2] AllGather
+    16ULL*1024*1024,     // [3] ReduceScatter
+    32ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    64ULL*1024,         // [8] AlltoAll        -- 2MiB KiB total 
+    64ULL*1024,          // [8] AlltoAll
   },
   // ddaLL128Max: DDA LL128 tier ceiling per collective.
   // RCCL_PARAM(DdaLL128, ...) defaults to 1 (enabled); set RCCL_DDA_LL128=0 to disable.
   .ddaLL128Max = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    64ULL*1024*1024,     // [2] AllGather       -- 16 MiB per-rank (= 64 MiB total; DDA/LL128 wins 1M-64M per v6 data)
-    2ULL*1024*1024,      // [3] ReduceScatter   -- 2 MiB total (rsShardBytes<=512KiB at 4 ranks; unreachable while LL fires first)
-    32ULL*1024*1024,     // [4] AllReduce       -- 32 MiB
+    64ULL*1024*1024,     // [2] AllGather
+    2ULL*1024*1024,      // [3] ReduceScatter
+    32ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    1ULL*1024*1024,      // [8] AlltoAll        -- 128 MiB total 
+    1ULL*1024*1024,      // [8] AlltoAll
   },
   // ddaVmmMax: DDA VMM (fabric simple) tier ceiling per collective.
   // Messages above this fall to Ring/CE (or sym kernel for R2).
   .ddaVmmMax = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    0,                   // [2] AllGather       -- 0 = disabled; LL128 covers 1M-64M, Ring/Simple wins above
-    0,                   // [3] ReduceScatter   -- 0 = disabled; Ring/LL128 wins 8M-128M, Ring/Simple above
-    16ULL*1024*1024,     // [4] AllReduce       -- 16 MiB (Ring/Simple wins above; CE wins R2 4-256 MiB)
+    0,                   // [2] AllGather       -- 0 = disabled
+    0,                   // [3] ReduceScatter   -- 0 = disabled
+    16ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    0,      // [8] AlltoAll        -- 0 = disabled; LL/LL128 tiers cover <=128M, Ring above
+    0,                   // [8] AlltoAll        -- 0 = disabled
   },
   // ddaVmmMaxR2: DDA VMM cap when recv buffer is registered (R2 mode).
   // DDA is gated on !symEligible (AR: !symkRequested) on every arch, including
@@ -1951,13 +1951,13 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaVmmMaxR2 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    0,                   // [2] AllGather       -- 0; symEligible blocks DDA for R2 AG regardless
-    0,                   // [3] ReduceScatter   -- 0; symEligible=true for R2 blocks DDA regardless
-    4ULL*1024*1024,      // [4] AllReduce       -- R2 AR: symEligible blocks DDA, override unused
+    0,                   // [2] AllGather       -- not used
+    0,                   // [3] ReduceScatter   -- not used
+    4ULL*1024*1024,      // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    0,                   // [8] AlltoAll        -- no R2-specific override (use ddaVmmMax)
+    0,                   // [8] AlltoAll        -- not used
   },
   // ddaVmmMaxGraph: DDA VMM cap during graph capture (graphCapturingHint=true).
   // CE AllReduce is blocked by graphModeSeen latch during graph captures.
@@ -1966,53 +1966,47 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaVmmMaxGraph = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    0,                   // [2] AllGather       -- 0; no graph-specific VMM override for AG
-    0,                   // [3] ReduceScatter   -- no graph-specific override (placeholder)
-    256ULL*1024*1024,    // [4] AllReduce       -- extend to 256 MiB in graph mode (CE blocked)
+    0,                   // [2] AllGather       -- not used
+    0,                   // [3] ReduceScatter   -- not used
+    256ULL*1024*1024,    // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    0,                   // [8] AlltoAll        -- no graph-specific override
+    0,                   // [8] AlltoAll        -- not used
   },
-  // ceNonRegMin: lower bound for CE-Scratch window per collective.
-  // AG: CE-Scratch wins 8-32 MiB; Ring/LL is faster below 8 MiB.
-  // AR: no lower bound today -- rcclUseCeAr2Shot() only enforces the upper cap,
-  // so 2-shot covers everything up to ceNonRegMax[AR] once CE AllReduce is enabled.
+  // ceNonRegMin: lower bound for CE-Scratch window per collective (-R 0).
+  // 0 = disabled for that collective.
   .ceNonRegMin = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
-    0,                    // [2] AllGather       -- 0 = disabled; DDA/LL128 covers 1M-64M for R0
+    0,                    // [2] AllGather       -- 0 = disabled
     0,                    // [3] ReduceScatter   -- not used
-    0,                    // [4] AllReduce       -- floor enforced by rcclUseCeAr2Shot, not this gate
+    0,                    // [4] AllReduce       -- not used
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
     0,                    // [8] AlltoAll        -- not used
   },
-  // ceNonRegMax: upper bound for CE-Scratch window per collective.
-  // AG: CE-Scratch exits at 32 MiB; Ring/LL128 wins above.
-  // AR: 2-shot selector cap only (0 = 2-shot off). ceARTmpBuf stays at the
-  // default 256 MiB unless this entry is larger.
+  // ceNonRegMax: upper bound for CE-Scratch window per collective (-R 0).
+  // AR: 0 = 2-shot off. ceARTmpBuf stays at the default 256 MiB unless this entry is larger.
   .ceNonRegMax = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
-    0,                    // [2] AllGather       -- 0 = disabled; DDA/LL128 covers 1M-64M (v6 data)
+    0,                    // [2] AllGather       -- 0 = disabled
     0,                    // [3] ReduceScatter   -- not used
-    0,                    // [4] AllReduce       -- 2-shot off (staging stays at default 256 MiB)
+    0,                    // [4] AllReduce       -- 0 = 2-shot off
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
     0,                    // [8] AlltoAll        -- not used
   },
-  // ceRegMax: registered CE upper bound per collective.
-  // AG: 8 GiB cap for registered CE; the lower edge is symMaxR2[AG] (0 = no upper bound).
-  // AR: 8 GiB cap for registered CE (copies through user symmetric windows).
+  // ceRegMax: registered CE upper bound per collective (-R 2).
   .ceRegMax = {
     0,                             // [0] Broadcast      -- not used
     0,                             // [1] Reduce          -- not used
-    8ULL*1024*1024*1024,           // [2] AllGather       -- 8 GiB registered CE cap (R=2)
+    8ULL*1024*1024*1024,           // [2] AllGather
     0,                             // [3] ReduceScatter   -- not used
-    256ULL*1024*1024,             // [4] AllReduce       -- 8 GiB registered CE cap
+    256ULL*1024*1024,              // [4] AllReduce
     0,                             // [5] SendRecv        -- not used
     0,                             // [6] Send            -- not used
     0,                             // [7] Recv            -- not used
@@ -2020,13 +2014,12 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   },
   // symMaxR2: suppress symk in favour of CE-registered when recv is registered and
   // msg > threshold. kThreshUnlimited = no suppression; non-zero literal = byte cap.
-  // AG: CE-registered wins above 2 MiB. AR/RS: kThreshUnlimited (symMinR2 handles the lower bound).
   .symMaxR2 = {
     kThreshUnlimited,     // [0] Broadcast      -- not used
     kThreshUnlimited,     // [1] Reduce          -- not used
-    2ULL*1024*1024,       // [2] AllGather       -- suppress symk above 2 MiB; CE-registered wins
-    kThreshUnlimited,     // [3] ReduceScatter   -- no upper suppression; symMinR2 handles lower bound
-    kThreshUnlimited,     // [4] AllReduce       -- no upper suppression; symMinR2 handles lower bound
+    2ULL*1024*1024,       // [2] AllGather
+    kThreshUnlimited,     // [3] ReduceScatter
+    kThreshUnlimited,     // [4] AllReduce
     kThreshUnlimited,     // [5] SendRecv        -- not used
     kThreshUnlimited,     // [6] Send            -- not used
     kThreshUnlimited,     // [7] Recv            -- not used
@@ -2037,22 +2030,21 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .symMaxR2Graph = {
     kThreshUnlimited,     // [0] Broadcast      -- not used
     kThreshUnlimited,     // [1] Reduce          -- not used
-    2ULL*1024*1024,       // [2] AllGather       -- suppress symk above 2 MiB; DDA wins above (CE blocked in graph mode)
-    kThreshUnlimited,     // [3] ReduceScatter   -- no suppression; symMinR2 still applies
-    kThreshUnlimited,     // [4] AllReduce       -- no suppression (CE blocked; symk wins above symMinR2)
+    2ULL*1024*1024,       // [2] AllGather
+    kThreshUnlimited,     // [3] ReduceScatter
+    kThreshUnlimited,     // [4] AllReduce
     kThreshUnlimited,     // [5] SendRecv        -- not used
     kThreshUnlimited,     // [6] Send            -- not used
     kThreshUnlimited,     // [7] Recv            -- not used
     kThreshUnlimited,     // [8] AlltoAll        -- not used
   },
   // symMinR2: suppress symk below this size for R2 buffers so DDA wins in that sub-range.
-  // RS: DDA/SIMPLE beats SYM up to ~2 MiB (9_2 sweep); SYM wins 4 MiB+. Floor at 2 MiB.
   .symMinR2 = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
-    128ULL*1024,          // [2] AllGather       -- DDA/LL wins below 128 KiB for R2 (1KB-128KB range)
-    2ULL*1024*1024,       // [3] ReduceScatter   -- DDA wins below 2 MiB for R2
-    8ULL*1024*1024,       // [4] AllReduce       -- DDA wins below 1 MiB for R2 (tune from perf data)
+    128ULL*1024,          // [2] AllGather
+    2ULL*1024*1024,       // [3] ReduceScatter
+    8ULL*1024*1024,       // [4] AllReduce
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
