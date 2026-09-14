@@ -1763,7 +1763,10 @@ TEST(ConSanMoiHipTest, RuntimeSampledBackendRetainsAllWavesForSelectedAddress) {
   ReportEnvGuard report_env;
   ASSERT_TRUE(set_moi_report_buffer_env(d_report, kReportBytes));
 
-  moi_two_wave_lds_accesses<<<1, 64>>>(d_out);
+  // Sampled mode rotates the selected residue with the physical dispatch ID.
+  // Launch one complete stride of workgroups so exactly one workgroup is
+  // selected regardless of the runtime's initial dispatch-ID parity.
+  moi_two_wave_lds_accesses<<<2, 64>>>(d_out);
   HIP_ASSERT(hipGetLastError());
   const hipError_t sync = hipDeviceSynchronize();
   ASSERT_EQ(sync, hipSuccess) << "HIP error: " << hipGetErrorString(sync);
@@ -1796,7 +1799,7 @@ TEST(ConSanMoiHipTest, RuntimeSampledBackendRetainsAllWavesForSelectedAddress) {
       EXPECT_TRUE(entry.valid) << "slot=" << i;
       EXPECT_EQ(window.first_entry, i) << "slot=" << i;
       EXPECT_EQ(window.entry_count, 1u) << "slot=" << i;
-      EXPECT_EQ(window.workgroup_x, 0u) << "slot=" << i;
+      EXPECT_LT(window.workgroup_x, 2u) << "slot=" << i;
       EXPECT_EQ(window.workgroup_y, 0u) << "slot=" << i;
       EXPECT_EQ(window.workgroup_z, 0u) << "slot=" << i;
       EXPECT_EQ(window.epoch, entry.epoch) << "slot=" << i;
@@ -1807,6 +1810,10 @@ TEST(ConSanMoiHipTest, RuntimeSampledBackendRetainsAllWavesForSelectedAddress) {
     }
   }
   EXPECT_EQ(ready_windows, 2u);
+  const MoiSampledCausalWindow first_window = moi_sampled_window(report, 0);
+  const MoiSampledCausalWindow second_window = moi_sampled_window(report, 1);
+  EXPECT_EQ(first_window.workgroup_x, second_window.workgroup_x);
+  EXPECT_LT(first_window.workgroup_x, 2u);
   MoiReportHeader header;
   std::memcpy(&header, report.data(), sizeof(header));
   EXPECT_EQ(header.sampled_causal_window_count, 2u);
