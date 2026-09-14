@@ -619,10 +619,13 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     handle->owner = this;
     // hsaKmtHandleImport creates a distinct object per import, so this handle owns it.
     handle->owns_allocation = true;
-    
-    HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(gpu_agent.libThunkDev(), res.buf_handle,
-                                       &handle->mmap_offset));
-    
+
+    if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(gpu_agent.libThunkDev(), res.buf_handle,
+                                           &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
+      DestroyMemoryHandle(handle);
+      return HSA_STATUS_ERROR;
+    }
+
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareType::FABRIC_HANDLE: {
@@ -722,10 +725,6 @@ hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
   assert(targetHandle.size == size);
 
   handle->mmap_offset = targetHandle.mmap_offset;
-  if (handle->mmap_offset == 0) {
-    DestroyMemoryHandle(&targetHandle);
-    return HSA_STATUS_ERROR;
-  }
 
   // handle->handle is replaced by the imported BO; handle->size carries over from allocation.
   handle->handle = targetHandle.handle;
