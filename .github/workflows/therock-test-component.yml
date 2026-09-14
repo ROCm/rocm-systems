@@ -115,25 +115,6 @@ jobs:
             echo "KUBE_CPU_REQUEST not set, thread limits not configured"
           fi
 
-      - name: Start memory monitor
-        if: ${{ inputs.amdgpu_families == 'gfx125X-dcgpu' }}
-        run: |
-          (
-            while true; do
-              echo "=== $(date -Iseconds) ===" >> /tmp/memory_monitor.log
-              echo "--- System Memory ---" >> /tmp/memory_monitor.log
-              free -h >> /tmp/memory_monitor.log
-              echo "--- Per-process top memory (top 20) ---" >> /tmp/memory_monitor.log
-              ps aux --sort=-%mem | head -20 >> /tmp/memory_monitor.log
-              echo "--- GPU Memory (rocm-smi) ---" >> /tmp/memory_monitor.log
-              rocm-smi --showmeminfo vram 2>/dev/null >> /tmp/memory_monitor.log || true
-              rocm-smi --showpids 2>/dev/null >> /tmp/memory_monitor.log || true
-              echo "" >> /tmp/memory_monitor.log
-              sleep 10
-            done
-          ) &
-          echo $! > /tmp/memory_monitor.pid
-
       - name: Test
         timeout-minutes: ${{ fromJSON(inputs.component).timeout_minutes }}
         env:
@@ -147,42 +128,38 @@ jobs:
           AMD_LOG_LEVEL: ${{ inputs.amdgpu_families == 'gfx125X-dcgpu' && '3' || '' }}
         run: |
           if [[ "${{ inputs.amdgpu_families }}" == "gfx125X-dcgpu" ]]; then
+            # Start background memory monitor that outputs to stdout (visible in real-time)
+            (
+              while true; do
+                echo ""
+                echo "======== MEMORY MONITOR $(date -Iseconds) ========"
+                echo "--- System Memory ---"
+                free -h
+                echo "--- Per-process top memory (top 10) ---"
+                ps aux --sort=-%mem | head -11
+                echo "--- GPU Memory (rocm-smi) ---"
+                rocm-smi --showmeminfo vram 2>/dev/null || true
+                echo "--- cgroup memory ---"
+                echo -n "limit: "; cat /sys/fs/cgroup/memory.max 2>/dev/null || cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo "N/A"
+                echo -n "current: "; cat /sys/fs/cgroup/memory.current 2>/dev/null || cat /sys/fs/cgroup/memory/memory.usage_in_bytes 2>/dev/null || echo "N/A"
+                echo "=================================================="
+                sleep 10
+              done
+            ) &
+            MONITOR_PID=$!
+
+            # Run the test with memory_monitor.py wrapper
             python ./build_tools/memory_monitor.py --phase "Test ${{ fromJSON(inputs.component).job_name }}" -- \
               bash -c '${{ fromJSON(inputs.component).test_script }}'
+            TEST_EXIT_CODE=$?
+
+            # Cleanup monitor
+            kill $MONITOR_PID 2>/dev/null || true
+
+            exit $TEST_EXIT_CODE
           else
             ${{ fromJSON(inputs.component).test_script }}
           fi
-
-      - name: Collect OOM diagnostics
-        if: ${{ always() && inputs.amdgpu_families == 'gfx125X-dcgpu' }}
-        run: |
-          # Stop the memory monitor
-          kill $(cat /tmp/memory_monitor.pid 2>/dev/null) 2>/dev/null || true
-
-          echo "=== dmesg OOM messages ==="
-          dmesg | grep -i -E "(oom|killed|memory)" | tail -100 || true
-
-          echo "=== Memory monitor log (last 500 lines) ==="
-          tail -500 /tmp/memory_monitor.log 2>/dev/null || true
-
-          echo "=== Container cgroup memory limits ==="
-          echo "Memory limit:"
-          cat /sys/fs/cgroup/memory.max 2>/dev/null || cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || true
-          echo "Memory current usage:"
-          cat /sys/fs/cgroup/memory.current 2>/dev/null || cat /sys/fs/cgroup/memory/memory.usage_in_bytes 2>/dev/null || true
-          echo "Memory peak usage:"
-          cat /sys/fs/cgroup/memory.peak 2>/dev/null || cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes 2>/dev/null || true
-
-          echo "=== GPU state at exit ==="
-          rocm-smi --showall 2>/dev/null || true
-
-      - name: Upload memory diagnostics
-        if: ${{ always() && inputs.amdgpu_families == 'gfx125X-dcgpu' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: memory-diagnostics-${{ fromJSON(inputs.component).job_name }}-shard${{ matrix.shard }}-${{ github.run_id }}
-          path: /tmp/memory_monitor.log
-          retention-days: 7
 
       # GitHub's 'Complete job' step is unaware of launched executables
       # and will fail to clean up orphan processes.
