@@ -73,7 +73,7 @@ annotate_perfetto(::perfetto::EventContext&            ctx,
 }  // close annotate_perfetto
 
 [[nodiscard]] std::optional<std::pair<std::uint32_t, std::uint32_t>>
-parse_kfd_migration_node_pair(const std::string& args_str)
+parse_kfd_migration_node_pair(std::string_view args_str)
 {
     std::string src_agent;
     std::string dst_agent;
@@ -113,7 +113,7 @@ parse_kfd_migration_node_pair(const std::string& args_str)
 
 [[nodiscard]] std::optional<std::uint32_t>
 resolve_kfd_migration_gpu_bucket(
-    const std::string&                                   args_str,
+    std::string_view                                     args_str,
     const std::unordered_map<std::uint32_t, agent_type>& node_type_cache)
 {
     auto ids = parse_kfd_migration_node_pair(args_str);
@@ -346,9 +346,9 @@ void
 write_sampling_track_data(const struct backtrace_region_sample& _sample,
                           bool                                  use_annotations)
 {
-    auto _track_name = _sample.track_name;
+    auto _track_name = std::string(_sample.track_name);
     auto _thread_id  = _sample.thread_id;
-    auto _main_name  = _sample.name;
+    auto _main_name  = std::string(_sample.name);
 
     auto _track = get_track(Category{}, _track_name, _thread_id);
 
@@ -390,7 +390,7 @@ write_in_time_sample_data(CategoryT, const in_time_sample& _sample, bool use_ann
 {
     const auto event_metadata = nlohmann::json::parse(_sample.event_metadata);
 
-    const auto _track_name = _sample.track_name;
+    const auto _track_name = std::string(_sample.track_name);
     const auto _timestamp  = _sample.timestamp_ns;
 
     const std::string _name       = event_metadata.value("name", "");
@@ -811,7 +811,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
     const auto _beg_ts   = _rs.start_timestamp;
     const auto _end_ts   = _rs.end_timestamp;
     const auto _category = _rs.category;
-    const auto _name     = _rs.name;
+    const auto _name     = std::string(_rs.name);
 
     auto args = process_arguments_string(_rs.args_str);
 
@@ -1208,7 +1208,7 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
             } } }
     };
 
-    const auto _track_name = _pmc.track_name;
+    const auto _track_name = std::string(_pmc.track_name);
     const auto _value      = _pmc.value;
     const auto _beg_ts     = _pmc.timestamp_ns;
     const auto _device_id  = _pmc.device_id;
@@ -1455,8 +1455,10 @@ template <typename CategoryT>
 void
 perfetto_processor_t::emit_kfd_event(const kfd_sample& sample)
 {
-    const auto _track_hash = std::hash<std::string>{}(sample.track_name);
-    auto       _track      = get_track(CategoryT{}, sample.track_name, _track_hash);
+    const auto _track_name = std::string(sample.track_name);
+    const auto _name       = std::string(sample.name);
+    const auto _track_hash = std::hash<std::string>{}(_track_name);
+    auto       _track      = get_track(CategoryT{}, _track_name, _track_hash);
 
     auto add_annotations = [&](::perfetto::EventContext ctx) {
         if(!m_use_annotations) return;
@@ -1478,14 +1480,14 @@ perfetto_processor_t::emit_kfd_event(const kfd_sample& sample)
     if(sample.start_timestamp == sample.end_timestamp)
     {
         TRACE_EVENT_INSTANT(trait::name<CategoryT>::value,
-                            ::perfetto::DynamicString{ sample.name }, _track,
+                            ::perfetto::DynamicString{ _name }, _track,
                             sample.start_timestamp, add_annotations);
     }
     else
     {
-        core::perfetto::push_perfetto_track(CategoryT{}, sample.name.c_str(), _track,
+        core::perfetto::push_perfetto_track(CategoryT{}, _name.c_str(), _track,
                                             sample.start_timestamp, add_annotations);
-        core::perfetto::pop_perfetto_track(CategoryT{}, sample.name.c_str(), _track,
+        core::perfetto::pop_perfetto_track(CategoryT{}, _name.c_str(), _track,
                                            sample.end_timestamp);
     }
 }
