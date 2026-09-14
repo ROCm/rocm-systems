@@ -12,6 +12,7 @@
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
+#include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 #include "graph.h"
 #include "gtest/gtest.h"
@@ -1484,6 +1485,32 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PastThresholdRejected)
     const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks + 16;
     EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
+}
+
+
+// ReduceScatter LL
+//
+// kDdaLLRsMaxBytes (1 MiB per-rank) replaced the old `bytes * 2 > kDdaLLMaxBytes`
+// rule.  ncclReduceScatterDdaFabricLLEligible had no test callers at all, so
+// neither side of the boundary was pinned.
+
+TEST_F(DdaFabricEligibilityTest, ReduceScatterLL_AtCapEligible)
+{
+    // Per-rank shard exactly at kDdaLLRsMaxBytes must be accepted.
+    // kDdaLLRsMaxBytes is a multiple of 16, so the alignment gate passes.
+    const size_t perRankBytes = dda::common::kDdaLLRsMaxBytes;
+    const size_t recvcount    = perRankBytes / sizeof(float);
+    EXPECT_TRUE(ncclReduceScatterDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, recvcount, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, ReduceScatterLL_PastCapRejected)
+{
+    // One 16-byte step above kDdaLLRsMaxBytes must be rejected.
+    const size_t perRankBytes = dda::common::kDdaLLRsMaxBytes + 16;
+    const size_t recvcount    = perRankBytes / sizeof(float);
+    EXPECT_FALSE(ncclReduceScatterDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, recvcount, ncclFloat32, ncclSum));
 }
 
 } // namespace RcclUnitTesting
