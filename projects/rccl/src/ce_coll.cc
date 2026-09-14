@@ -49,6 +49,14 @@ static int ncclCeBatchAsyncSupported() {
 }
 #endif
 
+// ncclDevrGetLsaRankPtr takes an LSA-team index, not a world rank.
+static ncclResult_t ncclCePeerLsaPtr(struct ncclComm* comm, struct ncclDevrWindow* win, size_t offset, int worldRank,
+                                    void** outPtr) {
+  int lsaRank;
+  NCCLCHECK(ncclDevrWorldToLsaRank(comm, worldRank, &lsaRank));
+  return ncclDevrGetLsaRankPtr(comm, win, offset, lsaRank, outPtr);
+}
+
 static int ncclCeBatchAsyncEnable() {
   // Called once per CE collective; warn at most once to avoid flooding the log.
   static std::atomic<bool> warnedUnsupported{false};
@@ -1853,7 +1861,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
       mySlotOffset = (slot * (size_t)comm->nRanks + comm->rank) * sizeof(uint32_t);
       for (int r = 0; r < comm->nRanks; r++) {
         if (r != comm->rank) {
-          NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, mySlotOffset, r, &peerSig), ret, fail);
+          NCCLCHECKGOTO(ncclCePeerLsaPtr(comm, ceColl->signalWin, mySlotOffset, r, &peerSig), ret, fail);
           basePeerSignalAddr[r] = (uint32_t*)peerSig;
         }
       }
@@ -1884,7 +1892,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
       if (r == comm->rank) {
         dstPtr = tmpBuf + dstSlotOffsetBytes;
       } else {
-        NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->ceARTmpWin, dstSlotOffsetBytes, r, &dstPtr), ret, fail);
+        NCCLCHECKGOTO(ncclCePeerLsaPtr(comm, ceColl->ceARTmpWin, dstSlotOffsetBytes, r, &dstPtr), ret, fail);
       }
       batchOpsParams.srcs[batchOpsParams.numOps] = (void*)srcShard;
       batchOpsParams.dsts[batchOpsParams.numOps] = dstPtr;
@@ -1925,7 +1933,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
         if (r == comm->rank) {
           waits[r].waitValue.address = &signalBuffer[drainSlot * comm->nRanks + comm->rank];
         } else {
-          NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, slotOffset, r, &peerSig), ret, fail);
+          NCCLCHECKGOTO(ncclCePeerLsaPtr(comm, ceColl->signalWin, slotOffset, r, &peerSig), ret, fail);
           waits[r].waitValue.address = (uint32_t*)peerSig;
         }
       }
@@ -1958,7 +1966,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     for (int r = 1; r < comm->nRanks; r++) {
       int targetRank = (comm->rank + r) % comm->nRanks;
       void* peerRecvBuff;
-      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, recvWin, recvSlotOffset, targetRank, &peerRecvBuff), ret, fail);
+      NCCLCHECKGOTO(ncclCePeerLsaPtr(comm, recvWin, recvSlotOffset, targetRank, &peerRecvBuff), ret, fail);
       batchOpsParams.srcs[batchOpsParams.numOps] = (void*)outShard;
       batchOpsParams.dsts[batchOpsParams.numOps] = peerRecvBuff;
       batchOpsParams.sizes[batchOpsParams.numOps] = shardBytes;
