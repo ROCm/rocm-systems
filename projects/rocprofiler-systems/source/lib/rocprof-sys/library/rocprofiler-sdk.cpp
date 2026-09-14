@@ -169,6 +169,14 @@ struct external_dependencies
         trait::name<category::rocm_kfd_page_migrate>::value;
     static constexpr std::string_view k_kfd_page_migrate_category_description =
         trait::name<category::rocm_kfd_page_migrate>::description;
+    static constexpr std::string_view k_kfd_event_page_fault_category_name =
+        trait::name<category::rocm_kfd_event_page_fault>::value;
+    static constexpr std::string_view k_kfd_event_page_fault_category_description =
+        trait::name<category::rocm_kfd_event_page_fault>::description;
+    static constexpr std::string_view k_kfd_event_page_migrate_category_name =
+        trait::name<category::rocm_kfd_event_page_migrate>::value;
+    static constexpr std::string_view k_kfd_event_page_migrate_category_description =
+        trait::name<category::rocm_kfd_event_page_migrate>::description;
     static constexpr std::string_view k_kfd_queue_category_name =
         trait::name<category::rocm_kfd_queue>::value;
     static constexpr std::string_view k_kfd_queue_category_description =
@@ -2713,6 +2721,20 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     {
         domain_selection selection;
         selection.name = "kfd_page_migrate";
+        domain_selection_list.push_back(selection);
+    }
+
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT))
+    {
+        domain_selection selection;
+        selection.name = "kfd_event_page_fault";
+        domain_selection_list.push_back(selection);
+    }
+
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE))
+    {
+        domain_selection selection;
+        selection.name = "kfd_event_page_migrate";
         domain_selection_list.push_back(selection);
     }
 

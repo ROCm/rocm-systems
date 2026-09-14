@@ -193,6 +193,18 @@ concept domain_service_externals =
         {
             Externals::k_kfd_page_migrate_category_description
         } -> std::convertible_to<std::string_view>;
+        {
+            Externals::k_kfd_event_page_fault_category_name
+        } -> std::convertible_to<std::string_view>;
+        {
+            Externals::k_kfd_event_page_fault_category_description
+        } -> std::convertible_to<std::string_view>;
+        {
+            Externals::k_kfd_event_page_migrate_category_name
+        } -> std::convertible_to<std::string_view>;
+        {
+            Externals::k_kfd_event_page_migrate_category_description
+        } -> std::convertible_to<std::string_view>;
         { Externals::k_kfd_queue_category_name } -> std::convertible_to<std::string_view>;
         {
             Externals::k_kfd_queue_category_description

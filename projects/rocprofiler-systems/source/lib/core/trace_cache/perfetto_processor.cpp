@@ -1564,7 +1564,7 @@ perfetto_processor_t::handle(const kfd_sample& sample)
 {
     using handler_fn = void (perfetto_processor_t::*)(const kfd_sample&);
 
-    static const std::array<std::pair<std::string_view, handler_fn>, 6> dispatch{ {
+    static const std::array<std::pair<std::string_view, handler_fn>, 8> dispatch{ {
         { trait::name<category::rocm_kfd_page_fault>::value,
           &perfetto_processor_t::handle_kfd_page_fault },
         { trait::name<category::rocm_kfd_page_migrate>::value,
@@ -1579,6 +1579,10 @@ perfetto_processor_t::handle(const kfd_sample& sample)
         { trait::name<category::rocm_kfd_event_dropped_events>::value,
           &perfetto_processor_t::emit_kfd_event<
               category::rocm_kfd_event_dropped_events> },
+        { trait::name<category::rocm_kfd_event_page_fault>::value,
+          &perfetto_processor_t::emit_kfd_event<category::rocm_kfd_event_page_fault> },
+        { trait::name<category::rocm_kfd_event_page_migrate>::value,
+          &perfetto_processor_t::emit_kfd_event<category::rocm_kfd_event_page_migrate> },
     } };
 
     const auto entry =

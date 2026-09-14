@@ -678,6 +678,8 @@ tracing_config<SdkBackend, Externals>::get_supported_buffer_domains()
         supported.emplace(SdkBackend::BUFFER_TRACING_KFD_PAGE_FAULT);
         supported.emplace(SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE);
         supported.emplace(SdkBackend::BUFFER_TRACING_KFD_QUEUE);
+        supported.emplace(SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT);
+        supported.emplace(SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE);
         supported.emplace(SdkBackend::BUFFER_TRACING_KFD_EVENT_QUEUE);
         supported.emplace(SdkBackend::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU);
         supported.emplace(SdkBackend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
@@ -821,6 +823,8 @@ tracing_config<SdkBackend, Externals>::get_kfd_buffered_domain_aliases()
               SdkBackend::BUFFER_TRACING_KFD_PAGE_FAULT,
               SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE,
               SdkBackend::BUFFER_TRACING_KFD_QUEUE,
+              SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
+              SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
               SdkBackend::BUFFER_TRACING_KFD_EVENT_QUEUE,
               SdkBackend::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
               SdkBackend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
@@ -836,6 +840,14 @@ tracing_config<SdkBackend, Externals>::get_kfd_buffered_domain_aliases()
         {
             "kfd_queue",
             { SdkBackend::BUFFER_TRACING_KFD_QUEUE },
+        },
+        {
+            "kfd_event_page_fault",
+            { SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT },
+        },
+        {
+            "kfd_event_page_migrate",
+            { SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE },
         },
         {
             "kfd_event_queue",

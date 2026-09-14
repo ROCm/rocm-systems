@@ -428,7 +428,7 @@ TEST_F(domain_service_test, configure_calls_on_configure_when_domain_defines_it)
     expect_destroy_buffer(buffer);
 }
 
-TEST_F(domain_service_test, configure_skips_on_configure_when_domain_has_none)
+TEST_F(domain_service_test, configure_calls_on_configure_for_event_domain_that_defines_it)
 {
     g_buffer_table = mock_sdk::tracing_names_t{
         .entries = { { .name       = "kfd_event_page_fault",
@@ -448,9 +448,7 @@ TEST_F(domain_service_test, configure_skips_on_configure_when_domain_has_none)
         static_cast<mock_sdk::buffer_tracing_kind_t>(
             mock_sdk::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT),
         domains::buffered::k_kfd_event_page_fault<mock_sdk, externals>.on_records, { 0 });
-    // No expect_on_configure_ran(): kfd_event_page_fault has no on_configure callback,
-    // so StrictMock<gmock_externals> fails the test if add_string/get_agents_by_type
-    // are called here.
+    expect_on_configure_ran(externals::k_kfd_event_page_fault_category_name);
     expect_start_context(context);
 
     service.configure(

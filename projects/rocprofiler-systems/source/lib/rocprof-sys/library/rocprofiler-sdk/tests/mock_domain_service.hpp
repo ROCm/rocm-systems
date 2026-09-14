@@ -103,9 +103,26 @@ struct kfd_event_dropped_record
     std::uint64_t count     = 0;
 };
 struct kfd_event_page_fault_record
-{};
+{
+    std::uint32_t operation = 0;
+    std::int32_t  pid       = 0;
+    agent_id_t    agent_id{};
+    address_t     address{};
+    std::uint64_t timestamp = 0;
+};
 struct kfd_event_page_migrate_record
-{};
+{
+    std::uint32_t operation = 0;
+    std::int32_t  pid       = 0;
+    agent_id_t    src_agent{};
+    agent_id_t    dst_agent{};
+    agent_id_t    prefetch_agent{};
+    agent_id_t    preferred_agent{};
+    address_t     start_address{};
+    address_t     end_address{};
+    std::uint64_t timestamp  = 0;
+    std::int32_t  error_code = 0;
+};
 struct kfd_event_queue_record
 {
     std::uint32_t operation = 0;
@@ -577,6 +594,14 @@ struct externals
         "rocm_kfd_page_migrate";
     static constexpr std::string_view k_kfd_page_migrate_category_description =
         "KFD Page Migrate Events";
+    static constexpr std::string_view k_kfd_event_page_fault_category_name =
+        "rocm_kfd_event_page_fault";
+    static constexpr std::string_view k_kfd_event_page_fault_category_description =
+        "KFD Event Page Fault Events";
+    static constexpr std::string_view k_kfd_event_page_migrate_category_name =
+        "rocm_kfd_event_page_migrate";
+    static constexpr std::string_view k_kfd_event_page_migrate_category_description =
+        "KFD Event Page Migrate Events";
     static constexpr std::string_view k_kfd_queue_category_name = "rocm_kfd_queue";
     static constexpr std::string_view k_kfd_queue_category_description =
         "KFD Queue Events";

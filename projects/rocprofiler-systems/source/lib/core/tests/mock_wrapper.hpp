@@ -62,6 +62,8 @@ enum kind_buffer_tracing
     BUFFER_TRACING_KFD_PAGE_MIGRATE         = 29,
     BUFFER_TRACING_KFD_PAGE_FAULT           = 30,
     BUFFER_TRACING_KFD_QUEUE                = 31,
+    BUFFER_TRACING_KFD_EVENT_PAGE_FAULT     = 32,
+    BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE   = 33,
     BUFFER_TRACING_PAGE_MIGRATION           = 50,
 };
 
@@ -1121,6 +1123,10 @@ struct wrapper
         buffer_tracing_kind::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU;
     static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS =
         buffer_tracing_kind::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_PAGE_FAULT =
+        buffer_tracing_kind::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT;
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE =
+        buffer_tracing_kind::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE;
 
     // ─── Counter flag constants ───────────────────────────────────────────────
     static constexpr counter_flag_t COUNTER_FLAG_NONE = 0;
