@@ -1009,10 +1009,6 @@ inline size_t rcclDdaVmmThresholdCtxTab(const rcclArchThresholds* table, ncclFun
   }
   return funcThresholdFromTable(table->ddaVmmMax, func);
 }
-size_t rcclDdaVmmThresholdCtx(const ncclComm* comm, ncclFunc_t func,
-                               ncclSymRegType_t winRegType, bool graphMode) {
-  return rcclDdaVmmThresholdCtxTab(extAlgoArchTable(comm), func, winRegType, graphMode);
-}
 
 // Apply the per-size unroll factor from the arch table for `func` and `msgBytes`.
 // Sets comm->unroll to the matching breakpoint entry.  No-op when:
