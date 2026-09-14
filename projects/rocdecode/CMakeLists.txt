@@ -134,12 +134,12 @@ endif()
 
 # On Windows we don't need Libdrm_amdgpu (vaon12 replaces DRM)
 set(_deps_met FALSE)
-if(WIN32)
-  if(HIP_FOUND AND Libva_FOUND AND Threads_FOUND)
+if(NOT WIN32)
+  if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
     set(_deps_met TRUE)
   endif()
 else()
-  if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
+  if(HIP_FOUND AND Libva_FOUND AND Threads_FOUND)
     set(_deps_met TRUE)
   endif()
 endif()
@@ -160,13 +160,13 @@ if(_deps_met)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
   endif()
 
-  if(WIN32)
-    # vaon12: va_win32.lib instead of va-drm; d3d12/dxgi for CreateSharedHandle interop
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_WIN32_LIBRARY} d3d12 dxgi)
-  else()
+  if(NOT WIN32)
     # DRM_AMDGPU
     include_directories(${LIBDRM_AMDGPU_INCLUDE_DIR})
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBDRM_AMDGPU_LIBRARY})
+  else()
+    # vaon12: va_win32.lib instead of va-drm; d3d12/dxgi for CreateSharedHandle interop
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_WIN32_LIBRARY} d3d12 dxgi)
   endif()
 
   # rocprofiler
@@ -189,7 +189,10 @@ if(_deps_met)
   # rocdecode library
   add_library(${PROJECT_NAME} SHARED ${SOURCES})
 
-  if(WIN32)
+  if(NOT WIN32)
+    # --all-warnings/-Wall       -- Enable most warning messages
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
+  else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W3")
     target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
     # Suppress warnings from pre-existing code and external headers:
@@ -199,18 +202,15 @@ if(_deps_met)
     # C4244: narrowing conversion in parser files (pre-existing, also on Linux)
     # C4146: unary minus on unsigned in parser files (pre-existing, also on Linux)
     target_compile_options(${PROJECT_NAME} PRIVATE /wd4200 /wd4018 /wd4267 /wd4244 /wd4146)
-  else()
-    # --all-warnings/-Wall       -- Enable most warning messages
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
   endif()
   target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
 
   set_target_properties(${PROJECT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
   set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
-  if(WIN32)
-    set_target_properties(${PROJECT_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
-  else()
+  if(NOT WIN32)
     set_target_properties(${PROJECT_NAME} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
+  else()
+    set_target_properties(${PROJECT_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
   endif()
 
   if(USING_THE_ROCK AND NOT WIN32)
@@ -248,14 +248,14 @@ if(_deps_met)
   configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/api/rocdecode_version.h.in ${CMAKE_CURRENT_BINARY_DIR}/rocdecode_version.h @ONLY )
 
   # install rocdecode libs -- {ROCM_PATH}/lib
-  if(WIN32)
+  if(NOT WIN32)
+    install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_SKIP)
+    install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_ONLY)
+  else()
     install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
             LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
-  else()
-    install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_SKIP)
-    install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_ONLY)
   endif()
   # install rocdecode include files -- {ROCM_PATH}/include/rocdecode
   install(FILES api/rocdecode/rocdecode.h api/rocdecode/rocparser.h api/rocdecode/roc_bitstream_reader.h
