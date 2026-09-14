@@ -404,11 +404,17 @@ struct SubmittedOp {
   void* dst;
   size_t size;
 };
+// One entry of a stream batch-memory-op submission.
+struct MemOp {
+  unsigned operation;
+  const void* address;
+  uint64_t value;
+};
 struct Submission {
-  enum Kind { kSeqStage, kBatch };
+  enum Kind { kMemOps, kBatch };
   Kind kind;
-  std::vector<SubmittedOp> ops;   // kBatch
-  std::vector<uint64_t> values;   // kSeqStage: the staged sequence numbers
+  std::vector<SubmittedOp> ops;    // kBatch
+  std::vector<MemOp> memOps;       // kMemOps
 };
 
 // Drives one non-persistent put launch and records everything it enqueued.
@@ -460,8 +466,13 @@ protected:
     };
     g_cuStreamBatchMemOp = [this](hipStream_t, unsigned int numOps,
                                   hipStreamBatchMemOpParams* ops) {
-      Submission s{Submission::kSeqStage, {}, {}};
-      for (unsigned int i = 0; i < numOps; i++) s.values.push_back(ops[i].writeValue.value64);
+      Submission s{Submission::kMemOps, {}, {}};
+      for (unsigned int i = 0; i < numOps; i++) {
+        // The wait and write forms share a layout, so one read covers both.
+        s.memOps.push_back({ops[i].writeValue.operation,
+                            reinterpret_cast<const void*>(ops[i].writeValue.address),
+                            ops[i].writeValue.value64});
+      }
       log_.push_back(std::move(s));
       return ncclSuccess;
     };
@@ -551,7 +562,7 @@ TEST_F(RmaCeNonPersistTest, NonPersist_SignallingTask_StagesSequenceBeforeCopyin
   ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
 
   ASSERT_EQ(log_.size(), 3u);
-  EXPECT_EQ(log_[0].kind, Submission::kSeqStage);
+  EXPECT_EQ(log_[0].kind, Submission::kMemOps);
   EXPECT_EQ(log_[1].kind, Submission::kBatch);   // data
   EXPECT_EQ(log_[2].kind, Submission::kBatch);   // signal
   ASSERT_EQ(log_[2].ops.size(), 1u);
@@ -569,7 +580,7 @@ TEST_F(RmaCeNonPersistTest, NonPersist_RepeatedSignalsToSamePeer_AdvanceTheSeque
 
   std::vector<uint64_t> staged;
   for (const auto& s : log_) {
-    if (s.kind == Submission::kSeqStage) staged.insert(staged.end(), s.values.begin(), s.values.end());
+    for (const auto& op : s.memOps) staged.push_back(op.value);
   }
   EXPECT_EQ(staged, (std::vector<uint64_t>{1, 2}));
 }
@@ -588,6 +599,128 @@ TEST_F(RmaCeNonPersistTest, NonPersist_ZeroByteTask_EnqueuesNoDataCopy) {
 
 // An unresolvable peer address is rejected rather than copied into.
 TEST_F(RmaCeNonPersistTest, NonPersist_PeerAddressUnresolved_ReturnsInvalidArgument) {
+  g_devrGetLsaRankPtr = [](ncclComm*, ncclDevrWindow*, size_t, int, void** outPtr) {
+    *outPtr = nullptr;
+    return ncclSuccess;
+  };
+  PushTask(/*peer=*/1, 32, false);
+
+  EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclInvalidArgument);
+}
+
+// ---------------------------------------------------------------------------
+// ncclRmaCePutLaunchPersist (rma_ce.cc:162)
+// ---------------------------------------------------------------------------
+
+// The graph-captured sibling of the non-persistent path. Same recording fixture;
+// only the plan differs. It issues one batch pair per task in queue order rather
+// than grouping by peer into rounds, and it signals differently: an ack
+// handshake before the copies, and a device-resident constant written to the
+// graph signal slot instead of a staged sequence.
+class RmaCePersistTest : public RmaCeNonPersistTest {
+protected:
+  void SetUp() override {
+    RmaCeNonPersistTest::SetUp();
+    plan_->persistent = true;
+  }
+};
+
+// Data movement is the same as the non-persistent path: the task's own buffer to
+// the address resolved for its peer and window offset.
+TEST_F(RmaCePersistTest, Persist_OneDataTask_CopiesTaskBufferToResolvedPeer) {
+  PushTask(/*peer=*/2, /*bytes=*/64, /*signal=*/false, /*winOffset=*/8);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  auto batches = Batches();
+  ASSERT_EQ(batches.size(), 2u);
+  ASSERT_EQ(batches[0].size(), 1u);
+  EXPECT_EQ(batches[0][0].src, srcBuf_.data());
+  EXPECT_EQ(batches[0][0].dst, reinterpret_cast<char*>(&peerData_[2]) + 8);
+  EXPECT_EQ(batches[0][0].size, 64u);
+}
+
+// Under graph capture the sender waits for the receiver's ack and clears it
+// before writing, so a replayed graph cannot outrun the receiver. The handshake
+// is submitted before the copies it guards.
+TEST_F(RmaCePersistTest, Persist_SignallingTask_WaitsForAckAndClearsItBeforeCopying) {
+  PushTask(/*peer=*/3, /*bytes=*/32, /*signal=*/true);
+  const void* ackAddr = &Ctx(0)->graphAckDev[3];
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  ASSERT_GE(log_.size(), 1u);
+  ASSERT_EQ(log_[0].kind, Submission::kMemOps);
+  ASSERT_EQ(log_[0].memOps.size(), 2u);
+  EXPECT_EQ(log_[0].memOps[0].operation, hipStreamMemOpWaitValue64);
+  EXPECT_EQ(log_[0].memOps[0].address, ackAddr);
+  EXPECT_EQ(log_[0].memOps[0].value, 1u);
+  EXPECT_EQ(log_[0].memOps[1].operation, hipStreamMemOpWriteValue64);
+  EXPECT_EQ(log_[0].memOps[1].address, ackAddr);
+  EXPECT_EQ(log_[0].memOps[1].value, 0u);
+  // ...and the copies follow it.
+  EXPECT_EQ(log_[1].kind, Submission::kBatch);
+}
+
+// The graph signal is a copy of a device-resident constant into the peer's graph
+// signal slot -- a fixed value, not the advancing sequence the non-graph path
+// uses, because a captured graph replays the same ops every time.
+TEST_F(RmaCePersistTest, Persist_SignallingTask_CopiesDeviceConstantToGraphSignalSlot) {
+  PushTask(/*peer=*/1, /*bytes=*/0, /*signal=*/true);
+  ncclRmaCeCtx* ceCtx = Ctx(0);
+  const char* expectedDst = reinterpret_cast<char*>(&peerSignal_[1])
+                          + ceCtx->graphSignalOffset + comm_->rank * sizeof(uint64_t);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  auto batches = Batches();
+  ASSERT_EQ(batches.size(), 2u);
+  ASSERT_EQ(batches[1].size(), 1u);
+  EXPECT_EQ(batches[1][0].src, ceCtx->signalConstOneDev);
+  EXPECT_EQ(batches[1][0].dst, expectedDst);
+  EXPECT_EQ(batches[1][0].size, sizeof(uint64_t));
+}
+
+// A task that signals nothing needs no handshake, so none is submitted.
+TEST_F(RmaCePersistTest, Persist_NonSignallingTask_SubmitsNoAckHandshake) {
+  PushTask(/*peer=*/2, /*bytes=*/32, /*signal=*/false);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  for (const auto& s : log_) EXPECT_NE(s.kind, Submission::kMemOps);
+}
+
+// Tasks are issued one batch pair each, in queue order. Two tasks for the same
+// peer need no round logic here, because each pair is already ordered against
+// the next by the stream.
+TEST_F(RmaCePersistTest, Persist_TasksForSamePeer_IssueOneBatchPairEach) {
+  PushTask(/*peer=*/1, 32, false);
+  PushTask(/*peer=*/1, 48, false);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  auto batches = Batches();
+  ASSERT_EQ(batches.size(), 4u);
+  ASSERT_EQ(batches[0].size(), 1u);
+  EXPECT_EQ(batches[0][0].size, 32u);
+  ASSERT_EQ(batches[2].size(), 1u);
+  EXPECT_EQ(batches[2][0].size, 48u);
+}
+
+// A task carrying no bytes is signal-only here too.
+TEST_F(RmaCePersistTest, Persist_ZeroByteTask_EnqueuesNoDataCopy) {
+  PushTask(/*peer=*/2, /*bytes=*/0, /*signal=*/true);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  auto batches = Batches();
+  ASSERT_EQ(batches.size(), 2u);
+  EXPECT_TRUE(batches[0].empty());
+  EXPECT_EQ(batches[1].size(), 1u);
+}
+
+// An unresolvable peer address is rejected rather than copied into.
+TEST_F(RmaCePersistTest, Persist_PeerAddressUnresolved_ReturnsInvalidArgument) {
   g_devrGetLsaRankPtr = [](ncclComm*, ncclDevrWindow*, size_t, int, void** outPtr) {
     *outPtr = nullptr;
     return ncclSuccess;
