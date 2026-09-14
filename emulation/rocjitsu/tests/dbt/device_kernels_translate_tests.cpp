@@ -573,13 +573,7 @@ TEST(KernelDescriptorTranslator, RdnaWave64UsesAmdhsaDescriptorVgprEncoding) {
   }
 }
 
-// TODO: Re-enable after updating the stale entry-offset assertions.
-// BinaryTranslator replaces .text wholesale, so the first descriptor prologue
-// may validly remain at offset 0. Validate the prologue and its branch to the
-// relocated body instead of requiring the translated entry offset to increase.
-// https://github.com/ROCm/rocm-systems/issues/9791
-TEST(BinaryTranslatorE2E,
-     DISABLED_DescriptorPrologueRedirectsEntryWithoutOverwritingOriginalEntry) {
+TEST(BinaryTranslatorE2E, DescriptorPrologueBranchesToRelocatedBody) {
   Executable exec(kernel_path("vector_add"));
   ASSERT_TRUE(exec.is_valid());
   ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
@@ -619,8 +613,6 @@ TEST(BinaryTranslatorE2E,
       [kd_file_off](const auto &info) { return info.descriptor_file_offset == kd_file_off; });
   ASSERT_NE(translated_info, translated_infos.end());
 
-  EXPECT_GT(translated_info->entry_text_offset, original_info->entry_text_offset)
-      << "CDNA4 workgroup-id SGPRs must be materialized from RDNA4's TTMP launch payload";
   EXPECT_EQ(translated_info->entry_text_offset % 256, original_info->entry_text_offset % 256)
       << "The redirected descriptor entry remains a hardware launch address and must preserve the "
          "source entry alignment residue";
@@ -634,15 +626,31 @@ TEST(BinaryTranslatorE2E,
   const auto *text = translated_co.text_sections()[0];
   const auto *words = reinterpret_cast<const uint32_t *>(text->data());
 
-  ASSERT_EQ(original_info->entry_text_offset % sizeof(uint32_t), 0u);
   ASSERT_EQ(translated_info->entry_text_offset % sizeof(uint32_t), 0u);
-  ASSERT_LT(original_info->entry_text_offset, text->size());
-
-  std::unique_ptr<rocjitsu::Instruction> original_entry(
-      decode_valid(*decoder, &words[original_info->entry_text_offset / sizeof(uint32_t)]));
-  ASSERT_NE(original_entry, nullptr);
-  EXPECT_NE(std::string_view(original_entry->mnemonic()), "s_branch")
-      << "Original kernel entry should not be replaced by a prologue branch stub";
+  ASSERT_FALSE(original_info->prologue_words.empty());
+  const uint64_t branch_offset =
+      translated_info->entry_text_offset + original_info->prologue_words.size() * sizeof(uint32_t);
+  ASSERT_LE(branch_offset + sizeof(uint32_t), text->size());
+  for (size_t i = 0; i < original_info->prologue_words.size(); ++i) {
+    EXPECT_EQ(words[translated_info->entry_text_offset / sizeof(uint32_t) + i],
+              original_info->prologue_words[i]);
+  }
+  const auto body = std::find_if(
+      result.text_placements.begin(), result.text_placements.end(), [&](const auto &placement) {
+        return placement.source_offset == original_info->entry_text_offset &&
+               placement.owner_descriptor_file_offset == kd_file_off;
+      });
+  ASSERT_NE(body, result.text_placements.end());
+  const uint32_t branch_word = words[branch_offset / sizeof(uint32_t)];
+  const std::unique_ptr<rocjitsu::Instruction> branch(
+      decode_valid(*decoder, &words[branch_offset / sizeof(uint32_t)]));
+  ASSERT_NE(branch, nullptr);
+  EXPECT_EQ(std::string_view(branch->mnemonic()), "s_branch");
+  const int64_t branch_target =
+      static_cast<int64_t>(branch_offset) + sizeof(uint32_t) +
+      static_cast<int64_t>(static_cast<int16_t>(branch_word & 0xffffu)) * sizeof(uint32_t);
+  EXPECT_EQ(branch_target, static_cast<int64_t>(body->target_offset));
+  EXPECT_GT(body->target_offset, translated_info->entry_text_offset);
 
   uint64_t redirected_section_offset = translated_info->entry_text_offset;
   ASSERT_LT(redirected_section_offset, text->size());
