@@ -1319,16 +1319,40 @@ namespace RcclUnitTesting
 
     int groupId;
     int collId;
+    int numRanks;
 
     PIPE_READ(groupId);
     PIPE_READ(collId);
+    PIPE_READ(numRanks);
+
+    if (numRanks < 0 || numRanks > this->totalRanks)
+    {
+      TEST_ERROR("Child %d received invalid registration rank count %d", this->childId, numRanks);
+      return TEST_FAIL;
+    }
+
+    std::vector<int> globalRanks(numRanks);
+    for (int& globalRank : globalRanks) PIPE_READ(globalRank);
+
+    std::vector<int> localRanks;
+    localRanks.reserve(numRanks);
+    for (int globalRank : globalRanks)
+    {
+      if (globalRank < this->rankOffset ||
+          this->rankOffset + static_cast<int>(this->comms.size()) <= globalRank)
+      {
+        TEST_ERROR("Child %d does not contain registration rank %d", this->childId, globalRank);
+        return TEST_FAIL;
+      }
+      localRanks.push_back(globalRank - this->rankOffset);
+    }
 
     ErrCode errCode = TEST_SUCCESS;
 
-    // Grouped window registration across ALL local ranks managed by this child process
+    // Group registration across the selected local ranks managed by this child.
     CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart RegisterMem");
 
-    for (size_t localRank = 0; localRank < this->comms.size(); ++localRank)
+    for (int localRank : localRanks)
     {
       CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
 
@@ -1428,11 +1452,11 @@ namespace RcclUnitTesting
       }
     }
 
-    // Completes handle exchange for all local ranks simultaneously
+    // Completes handle exchange for all selected local ranks simultaneously.
     CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd RegisterMem");
-    // Ensure GPU memory mapping / TLB invalidations complete across all local ranks
-    for (size_t localRank = 0; localRank < this->comms.size(); ++localRank)
-     {
+    // Ensure GPU memory mapping / TLB invalidations complete on selected ranks.
+    for (int localRank : localRanks)
+    {
       CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
       CHECK_HIP(hipDeviceSynchronize());
     }

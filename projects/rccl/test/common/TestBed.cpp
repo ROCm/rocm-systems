@@ -466,6 +466,7 @@ namespace RcclUnitTesting
 
     // Loop over all ranks and send allocation command to appropriate child process
     int const cmd = TestBedChild::CHILD_ALLOCATE_MEM;
+    std::vector<int> ackChildIds;
     for (auto currGroup : groupList) {
       for (auto currRank : rankList)
       {
@@ -477,12 +478,12 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, useManagedMem);
         PIPE_WRITE(childId, userRegistered);
         PIPE_WRITE(childId, currGroup);
+        ackChildIds.push_back(childId);
       }
     }
-    // Wait for all children to complete allocation before registering
-    for (int childId = 0; childId < this->numActiveChildren; ++childId) {
-      PIPE_CHECK(childId);
-    }
+    // Each CHILD_ALLOCATE_MEM command produces one acknowledgement. Read one
+    // acknowledgement from the child that received that command.
+    for (int childId : ackChildIds) PIPE_CHECK(childId);
     InteractiveWait("Finishing AllocateMemInternal");
   }
 
@@ -501,18 +502,29 @@ namespace RcclUnitTesting
     for (int i = 0; i < this->numGroupCalls; ++i)
       if (groupId == -1 || groupId == i) groupList.push_back(i);
 
-    // Grouped RCCL Window Registration across all active children
+    // Group selected ranks by child so each child can register all of its
+    // selected local ranks in one grouped RCCL call.
+    std::vector<std::vector<int>> ranksPerChild(this->numActiveChildren);
+    for (int currRank : rankList)
+      ranksPerChild[rankToChildMap[currRank]].push_back(currRank);
+
     int const regCmd = TestBedChild::CHILD_REGISTER_MEM;
     for (auto currGroup : groupList) {
-      // 1. Send CHILD_REGISTER_MEM command to ALL active children FIRST
+      // Send to all participating children before waiting so collective
+      // symmetric-window registration can make progress across processes.
       for (int childId = 0; childId < this->numActiveChildren; ++childId) {
+        if (ranksPerChild[childId].empty()) continue;
         PIPE_WRITE(childId, regCmd);
         PIPE_WRITE(childId, currGroup);
         PIPE_WRITE(childId, collId);
+        int const numRanks = static_cast<int>(ranksPerChild[childId].size());
+        PIPE_WRITE(childId, numRanks);
+        for (int currRank : ranksPerChild[childId])
+          PIPE_WRITE(childId, currRank);
       }
-      // 2. THEN wait for all child ACKs after all children have entered registration
+
       for (int childId = 0; childId < this->numActiveChildren; ++childId) {
-         PIPE_CHECK(childId);
+        if (!ranksPerChild[childId].empty()) PIPE_CHECK(childId);
       }
     }
     InteractiveWait("Finishing RegisterMemInternal");
@@ -690,6 +702,7 @@ namespace RcclUnitTesting
       if (groupId == -1 || groupId == i) groupList.push_back(i);
 
     int const deallocCmd = TestBedChild::CHILD_DEALLOCATE_MEM;
+    std::vector<int> ackChildIds;
     for (auto currGroup : groupList) {
       for (auto currRank : rankList)
       {
@@ -698,13 +711,12 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, currRank);
         PIPE_WRITE(childId, currGroup);
         PIPE_WRITE(childId, collId);
+        ackChildIds.push_back(childId);
       }
     }
 
-    // Wait for all physical deallocations to complete
-    for (int childId = 0; childId < this->numActiveChildren; ++childId) {
-      PIPE_CHECK(childId);
-    }
+    // Each CHILD_DEALLOCATE_MEM command produces one acknowledgement.
+    for (int childId : ackChildIds) PIPE_CHECK(childId);
 
     InteractiveWait("Finishing DeallocateMem");
   }
