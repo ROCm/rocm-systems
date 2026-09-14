@@ -1041,7 +1041,7 @@
         },
         {
           "name": "NetIB_MultiThread_MixedSizeBarrage",
-          "description": "Concurrent workers walk the ladder steps that fit their share of the sweep registration budget (16 MB and below at these worker counts), exercising alignment and chunking under bandwidth pressure",
+          "description": "Concurrent workers walk the ladder steps that fit their share of the sweep registration budget, so the top step falls as the worker count rises (16 MB at 2 and 4 workers, 4 MB at 16); the serial arm covers the whole ladder to 64 MB",
           "test_filter": "NetIbMPITest.MixedSizeBarrage"
         },
         {
