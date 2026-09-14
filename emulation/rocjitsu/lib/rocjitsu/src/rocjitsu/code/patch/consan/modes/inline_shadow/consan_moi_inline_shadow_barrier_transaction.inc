@@ -404,8 +404,11 @@ void try_apply_inline_shadow_barrier_transaction(
     uint32_t required_private_bytes = 0u;
     const uint16_t scratch_count = mode.barrier_scratch_vgpr_count(
         project_moi_barrier_scratch_facts(options, candidate_point, semantics));
+    // Scalar epoch updates borrow the SCC snapshot register even when no
+    // visible-evidence VGPR tuple is needed. Preserve its guest value too.
     const bool needs_scalar_spill =
-        scratch_count > 1u && candidate_point.has_inline_moi_scalar_spill();
+        (scratch_count > 1u || candidate_point.moi_persistent_sgprs.epoch().has_value()) &&
+        candidate_point.has_inline_moi_scalar_spill();
     if (scratch_count > 1u || needs_scalar_spill) {
       if (plan == nullptr) {
         result.warnings.emplace_back(

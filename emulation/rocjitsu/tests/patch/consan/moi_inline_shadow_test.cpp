@@ -931,6 +931,58 @@ TEST(ConSanMoi, Cdna4InlineShadowAvoidsOriginalPhysicalVccPair) {
   EXPECT_EQ(*test_moi_exec_save_sgpr(result), 2u);
 }
 
+TEST(ConSanMoi, Cdna4InlineScalarBarrierPreservesBorrowedSccRegister) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA4;
+  std::vector<uint32_t> words(1200u, build_s_nop(0, arch));
+  words[0] = 0xd81a0004u;
+  words[1] = 0x00000302u; // ds_write_b32 v2, v3 offset:4
+  words[2] = *build_cdna4_s_barrier(arch);
+  // Keep the guest scalar bank live across the access and barrier. The
+  // temporary used to save SCC must itself be saved before it is borrowed.
+  for (uint16_t sgpr = 0; sgpr < 72u; ++sgpr)
+    words[3u + sgpr] = build_s_mov_b32(0, sgpr, arch);
+  words.back() = build_s_endpgm(arch);
+  for (uint16_t vgpr = 0; vgpr < 64u; ++vgpr)
+    words[75u + vgpr] = build_v_mov_b32_e32(0u, vector_source_vgpr(vgpr), arch);
+  auto bytes = make_cdna4_lds_code_object(words, "scalar_barrier_preservation", 7u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 15u);
+  });
+  append_kernel_metadata_note(bytes, "scalar_barrier_preservation",
+                              /*uses_dynamic_stack=*/false, /*sgpr_count=*/78u,
+                              /*private_segment_fixed_size=*/std::nullopt,
+                              /*required_workgroup_size=*/std::nullopt,
+                              /*has_dynamic_lds=*/false, {}, /*agpr_count=*/0u,
+                              /*vgpr_count=*/64u);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  const auto result = test_lower_consan(bytes, options);
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(test_moi_persistent_sgpr_state(result).epoch());
+  ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u);
+  const auto assignment = test_moi_transient_sgpr_assignments(result).front();
+  ASSERT_TRUE(assignment.spill_backed);
+  const auto barrier = std::ranges::find(result.patches,
+      ConSanPatchKind::TrampolineMoiInlineEpochBarrier, &ConSanPatchInfo::kind);
+  ASSERT_NE(barrier, result.patches.end());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  const auto body = text_words_at_offset(patched, barrier->trampoline_offset,
+                                         barrier->trampoline_size);
+  const uint16_t scc = assignment.exec_save_sgpr + 10u;
+  bool preserved = false;
+  for (uint16_t vgpr = 0u; vgpr < 256u; ++vgpr) {
+    const auto save = ib::build_v_writelane_b32(vgpr, scc, 10u, arch);
+    const auto restore = ib::build_v_readlane_b32(scc, vgpr, 10u, arch);
+    if (save && restore && contains_subsequence(body, *save) &&
+        contains_subsequence(body, *restore))
+      preserved = true;
+  }
+  EXPECT_TRUE(preserved) << "scalar epoch barriers must preserve the borrowed SCC temporary";
+}
+
 TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
   std::vector<uint32_t> text_words(1200, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
   text_words[0] = 0xd81a0004u;
