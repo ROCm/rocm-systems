@@ -323,6 +323,76 @@ TEST_F(RmaCeFinalizeTest, Finalize_DeregisterFails_PropagatesAndLeavesStateMarke
 // ncclRmaCePutLaunch / ncclRmaCeWaitLaunch (rma_ce.cc:376, :388)
 // ---------------------------------------------------------------------------
 
+// The dispatcher's own contract is the guard and the persistent split; what each
+// path then does is that helper's contract, covered separately. The two are told
+// apart by the capacity they size their batch-ops params to -- the persistent
+// path builds one op at a time, the non-persistent path one per rank.
+class RmaCePutLaunchTest : public RmaCeInitTest {
+protected:
+  std::unique_ptr<ncclKernelPlan> plan_;
+  ncclRmaArgs args_{};
+  std::vector<int> initCapacities_;
+
+  void SetUp() override {
+    RmaCeInitTest::SetUp();
+    ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
+
+    plan_ = std::make_unique<ncclKernelPlan>();
+    plan_->rmaArgs = &args_;
+    args_.ctx = 0;
+    args_.nRmaTasksCe = 0;  // no tasks: the split is the only thing under test
+
+    g_ceInitBatchOpsParams = [this](ncclCeBatchOpsParams*, int capacity) {
+      initCapacities_.push_back(capacity);
+      return ncclSuccess;
+    };
+  }
+};
+
+// A graph-captured plan takes the persistent path, which sizes its batches for a
+// single op because it emits them per task rather than per round.
+TEST_F(RmaCePutLaunchTest, PutLaunch_PersistentPlan_TakesPersistentPath) {
+  plan_->persistent = true;
+
+  EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  EXPECT_EQ(initCapacities_, (std::vector<int>{1, 1}));
+}
+
+// A non-captured plan takes the other path, which batches across peers and so
+// sizes for the rank count. With no tasks it returns before doing even that.
+TEST_F(RmaCePutLaunchTest, PutLaunch_NonPersistentPlanWithNoTasks_TakesNonPersistentPath) {
+  plan_->persistent = false;
+
+  EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  EXPECT_TRUE(initCapacities_.empty());
+}
+
+// Same path, now with work, so the sizing it uses is visible.
+TEST_F(RmaCePutLaunchTest, PutLaunch_NonPersistentPlanWithTasks_SizesBatchesPerRank) {
+  plan_->persistent = false;
+  args_.nRmaTasksCe = 1;
+  auto task = std::make_unique<ncclTaskRma>();
+  task->peer = 0;
+  ncclIntruQueueEnqueue(&plan_->rmaTaskQueueCe, task.get());
+
+  ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr);
+
+  ASSERT_GE(initCapacities_.size(), 2u);
+  EXPECT_EQ(initCapacities_[0], kNRanks);
+  EXPECT_EQ(initCapacities_[1], kNRanks);
+}
+
+// A failure inside the chosen path is the dispatcher's result; it does not
+// swallow it or substitute one of its own.
+TEST_F(RmaCePutLaunchTest, PutLaunch_ChosenPathFails_PropagatesUnchanged) {
+  plan_->persistent = true;
+  g_ceInitBatchOpsParams = [](ncclCeBatchOpsParams*, int) { return ncclSystemError; };
+
+  EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSystemError);
+}
+
 // Both entry points refuse to touch a communicator whose CE state was never
 // brought up, rather than dereferencing it.
 TEST_F(RmaCeLaunchTest, PutLaunch_CeNotInitialised_ReturnsInternalError) {
