@@ -165,9 +165,12 @@ class RocProfCompute:
             filter_list = self.__args.filter_metrics
 
         for block_input in filter_list:
-            # Check if this is block 30 (starts with "30" or "30.")
-            if block_input.startswith("30") and (
-                len(block_input) == 2 or block_input[2] == "."
+            # Block 21 and block 30 are profile-only gates; analyze
+            # auto-detects from profiling_config.yaml.
+            if (
+                self.__mode == "profile"
+                and block_input.startswith("30")
+                and (len(block_input) == 2 or block_input[2] == ".")
             ):
                 if not self.__args.membw_analysis or not self.__args.experimental:
                     console_error(
@@ -176,8 +179,6 @@ class RocProfCompute:
                         f'To use "-b {block_input}", you must also specify: '
                         "--experimental --membw-analysis"
                     )
-            # Block 21 (PC sampling) is profile-only; analyze auto-detects it
-            # from the profiling config yaml.
             if self.__mode == "profile" and block_input in ("21", "pc_sampling"):
                 if not self.__args.pc_sampling or not self.__args.experimental:
                     console_error(
