@@ -1371,6 +1371,11 @@ hsa_status_t HSA_API hsa_amd_vmem_get_alloc_properties_from_handle(
   return amdExtTable->hsa_amd_vmem_get_alloc_properties_from_handle_fn(alloc_handle, pool, type);
 }
 
+hsa_status_t HSA_API hsa_amd_vmem_get_alloc_size_from_handle(
+    hsa_amd_vmem_alloc_handle_t alloc_handle, size_t* size) {
+  return amdExtTable->hsa_amd_vmem_get_alloc_size_from_handle_fn(alloc_handle, size);
+}
+
 hsa_status_t HSA_API hsa_amd_agent_set_async_scratch_limit(hsa_agent_t agent, size_t threshold) {
   return amdExtTable->hsa_amd_agent_set_async_scratch_limit_fn(agent, threshold);
 }
