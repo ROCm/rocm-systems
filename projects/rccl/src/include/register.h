@@ -44,6 +44,7 @@ struct ncclReg {
   uint32_t state;
   // net reg
   struct ncclRegNetHandles* netHandleHead;
+  int netNSegments; // 0 = not yet counted; cached over the full [begAddr, endAddr) range
   // nvls reg
   CUdeviceptr regAddr;
   size_t regUCSize, regMCSize;
