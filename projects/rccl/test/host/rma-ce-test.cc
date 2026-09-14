@@ -597,6 +597,30 @@ TEST_F(RmaCeNonPersistTest, NonPersist_ZeroByteTask_EnqueuesNoDataCopy) {
   EXPECT_EQ(batches[1].size(), 1u);       // signal still sent
 }
 
+// Bailing out mid-round leaves other peers' tasks still queued. They are
+// pool-allocated, so the cleanup path returns them rather than leaking them.
+TEST_F(RmaCeNonPersistTest, NonPersist_FailsMidRound_ReturnsQueuedTasksToThePool) {
+  PushTask(/*peer=*/1, 32, false);
+  PushTask(/*peer=*/1, 32, false);
+  PushTask(/*peer=*/2, 32, false);
+  PushTask(/*peer=*/2, 32, false);
+  // Fail while resolving the second peer of the first round, so both peers still
+  // hold their second task.
+  int lookups = 0;
+  g_devrGetLsaRankPtr = [&lookups](ncclComm*, ncclDevrWindow*, size_t, int, void** outPtr) {
+    if (++lookups == 2) return ncclInternalError;
+    static uint64_t slot;
+    *outPtr = &slot;
+    return ncclSuccess;
+  };
+
+  EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclInternalError);
+
+  // The leftover tasks are returned to the pool rather than dropped, so its free
+  // list is non-empty afterwards.
+  EXPECT_NE(comm_->memPool_ncclTaskRma.head, nullptr);
+}
+
 // An unresolvable peer address is rejected rather than copied into.
 TEST_F(RmaCeNonPersistTest, NonPersist_PeerAddressUnresolved_ReturnsInvalidArgument) {
   g_devrGetLsaRankPtr = [](ncclComm*, ncclDevrWindow*, size_t, int, void** outPtr) {
@@ -728,6 +752,147 @@ TEST_F(RmaCePersistTest, Persist_PeerAddressUnresolved_ReturnsInvalidArgument) {
   PushTask(/*peer=*/1, 32, false);
 
   EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclInvalidArgument);
+}
+
+// ---------------------------------------------------------------------------
+// ncclRmaCeWaitLaunch (rma_ce.cc:388)
+// ---------------------------------------------------------------------------
+
+// Consumes the plan's single WaitSignal task and makes the stream wait until each
+// named peer has signalled. The two plan kinds wait very differently, so the
+// recording fixture is reused and the submissions are the assertions.
+class RmaCeWaitLaunchTest : public RmaCeNonPersistTest {
+protected:
+  std::vector<int> peers_;
+  std::vector<int> nsignals_;
+
+  // The plan carries exactly one WaitSignal task naming the peers to wait on and
+  // how many signals to expect from each.
+  void PushWaitTask(std::vector<int> peers, std::vector<int> nsignals) {
+    peers_ = std::move(peers);
+    nsignals_ = std::move(nsignals);
+    auto* t = ncclMemoryPoolAlloc<ncclTaskRma>(&comm_->memPool_ncclTaskRma, &comm_->memPermanent);
+    t->func = ncclFuncWaitSignal;
+    t->ctx = args_.ctx;
+    t->signalMode = NCCL_SIGNAL;
+    t->npeers = static_cast<int>(peers_.size());
+    t->peers = peers_.data();
+    t->nsignals = nsignals_.data();
+    ncclIntruQueueEnqueue(&plan_->rmaTaskQueueCe, t);
+    args_.nRmaTasksCe = 1;
+  }
+
+  // Every stream memory operation submitted, flattened across submissions.
+  std::vector<MemOp> AllMemOps() const {
+    std::vector<MemOp> out;
+    for (const auto& s : log_) out.insert(out.end(), s.memOps.begin(), s.memOps.end());
+    return out;
+  }
+};
+
+// Outside graph capture the wait is a single batch with one threshold per peer,
+// so the stream blocks once rather than per signal.
+TEST_F(RmaCeWaitLaunchTest, WaitLaunch_NonPersistent_WaitsOncePerPeerInOneBatch) {
+  PushWaitTask({1, 3}, {2, 5});
+  ncclRmaCeCtx* ceCtx = Ctx(0);
+
+  ASSERT_EQ(ncclRmaCeWaitLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  ASSERT_EQ(log_.size(), 1u);
+  ASSERT_EQ(log_[0].memOps.size(), 2u);
+  EXPECT_EQ(log_[0].memOps[0].operation, hipStreamMemOpWaitValue64);
+  EXPECT_EQ(log_[0].memOps[0].address, &ceCtx->signalsDev[1]);
+  EXPECT_EQ(log_[0].memOps[0].value, 2u);
+  EXPECT_EQ(log_[0].memOps[1].address, &ceCtx->signalsDev[3]);
+  EXPECT_EQ(log_[0].memOps[1].value, 5u);
+}
+
+// The peer's signal counter only ever rises, so each wait threshold is the running
+// total. Waiting for the same absolute value twice would pass immediately the
+// second time and drop the wait.
+TEST_F(RmaCeWaitLaunchTest, WaitLaunch_NonPersistentRepeated_ThresholdsAccumulate) {
+  PushWaitTask({1}, {2});
+  ASSERT_EQ(ncclRmaCeWaitLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+  PushWaitTask({1}, {3});
+  ASSERT_EQ(ncclRmaCeWaitLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  auto ops = AllMemOps();
+  ASSERT_EQ(ops.size(), 2u);
+  EXPECT_EQ(ops[0].value, 2u);
+  EXPECT_EQ(ops[1].value, 5u);   // 2 + 3, not 3
+}
+
+// Under capture the graph replays unchanged, so a running total cannot be baked
+// in. Each expected signal becomes its own wait-reset-ack cycle on a slot the
+// sender re-raises every replay.
+TEST_F(RmaCeWaitLaunchTest, WaitLaunch_Persistent_RunsOneWaitResetAckCyclePerSignal) {
+  plan_->persistent = true;
+  PushWaitTask({2}, {2});
+  ncclRmaCeCtx* ceCtx = Ctx(0);
+
+  ASSERT_EQ(ncclRmaCeWaitLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  // Two cycles, each a (wait, reset) memop pair followed by the ack copy.
+  ASSERT_EQ(log_.size(), 4u);
+  for (int cycle = 0; cycle < 2; cycle++) {
+    const Submission& memops = log_[cycle * 2];
+    ASSERT_EQ(memops.kind, Submission::kMemOps) << "cycle " << cycle;
+    ASSERT_EQ(memops.memOps.size(), 2u) << "cycle " << cycle;
+    EXPECT_EQ(memops.memOps[0].operation, hipStreamMemOpWaitValue64);
+    EXPECT_EQ(memops.memOps[0].address, &ceCtx->graphSignalsDev[2]);
+    EXPECT_EQ(memops.memOps[0].value, 1u);
+    EXPECT_EQ(memops.memOps[1].operation, hipStreamMemOpWriteValue64);
+    EXPECT_EQ(memops.memOps[1].value, 0u);   // reset, so the next replay waits again
+    EXPECT_EQ(log_[cycle * 2 + 1].kind, Submission::kBatch);
+  }
+}
+
+// The ack tells the sender it may proceed, and is written into the sender's slot
+// of the peer's ack region.
+TEST_F(RmaCeWaitLaunchTest, WaitLaunch_Persistent_AcksSenderSlotWithDeviceConstant) {
+  plan_->persistent = true;
+  PushWaitTask({1}, {1});
+  ncclRmaCeCtx* ceCtx = Ctx(0);
+  const char* expectedAck = reinterpret_cast<char*>(&peerSignal_[1])
+                          + ceCtx->graphAckOffset + comm_->rank * sizeof(uint64_t);
+
+  ASSERT_EQ(ncclRmaCeWaitLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  auto batches = Batches();
+  ASSERT_EQ(batches.size(), 1u);
+  ASSERT_EQ(batches[0].size(), 1u);
+  EXPECT_EQ(batches[0][0].src, ceCtx->signalConstOneDev);
+  EXPECT_EQ(batches[0][0].dst, expectedAck);
+  EXPECT_EQ(batches[0][0].size, sizeof(uint64_t));
+}
+
+// A task that is not in signalling mode has nothing to wait for.
+TEST_F(RmaCeWaitLaunchTest, WaitLaunch_SignalModeNone_SubmitsNothing) {
+  PushWaitTask({1}, {2});
+  ncclIntruQueueHead(&plan_->rmaTaskQueueCe)->signalMode = NCCL_SIGNAL_NONE;
+
+  ASSERT_EQ(ncclRmaCeWaitLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  EXPECT_TRUE(log_.empty());
+}
+
+// DEFECT PINNED, not endorsed: the graph arm submits each cycle's wait before
+// resolving the ack address, so a failure there returns with waits already on the
+// stream. The caller gets an error for an operation that is partly in flight,
+// which is the same hazard rma.cc hits when it skips its closing join.
+TEST_F(RmaCeWaitLaunchTest, WaitLaunch_PersistentAckResolutionFails_LeavesWaitsOnTheStream) {
+  plan_->persistent = true;
+  PushWaitTask({1}, {1});
+  g_devrGetLsaRankPtr = [](ncclComm*, ncclDevrWindow*, size_t, int, void**) {
+    return ncclInternalError;
+  };
+
+  EXPECT_EQ(ncclRmaCeWaitLaunchUut(comm_.get(), plan_.get(), nullptr), ncclInternalError);
+
+  // The wait-reset pair was already submitted when the failure surfaced.
+  ASSERT_EQ(log_.size(), 1u);
+  EXPECT_EQ(log_[0].kind, Submission::kMemOps);
+  EXPECT_EQ(log_[0].memOps.size(), 2u);
 }
 
 // Both entry points refuse to touch a communicator whose CE state was never
