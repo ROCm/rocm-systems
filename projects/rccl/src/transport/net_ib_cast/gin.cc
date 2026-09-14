@@ -596,7 +596,9 @@ ncclResult_t IbCastRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t s
   struct CastIbGinCollComm* cComm = (struct CastIbGinCollComm*)collComm;
   struct IbCastRmaProxyMrHandle* ginMrHandle = NULL;
   struct IbCastRmaProxyRegistration localRegistration = {};
+  struct IbCastRmaProxyRegistration registrationsStack[64];
   struct IbCastRmaProxyRegistration* registrations = NULL;
+  int registrationsHeap = 0;
   uintptr_t localVas[NCCL_RMA_MAX_SEGMENTS] = {};
   uint32_t localRkeys[NCCL_RMA_MAX_SEGMENTS * NCCL_IB_MAX_DEVS_PER_NIC] = {};
   ncclResult_t ret = ncclSuccess;
@@ -604,7 +606,13 @@ ncclResult_t IbCastRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t s
   int registered = 0;
 
   *mhandle = NULL;
-  NCCLCHECKGOTO(ncclCalloc(&registrations, cComm->nranks), ret, fail);
+  if (cComm->nranks <= (int)(sizeof(registrationsStack) / sizeof(registrationsStack[0]))) {
+    registrations = registrationsStack;
+    memset(registrations, 0, sizeof(*registrations) * (size_t)cComm->nranks);
+  } else {
+    NCCLCHECKGOTO(ncclCalloc(&registrations, cComm->nranks), ret, fail);
+    registrationsHeap = 1;
+  }
   ret = ncclCalloc(&ginMrHandle, 1);
   if (ret != ncclSuccess) goto reconcile;
   // calloc zeroes nSegments; fail paths below only dereg `registered` complete
@@ -645,7 +653,8 @@ ncclResult_t IbCastRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t s
       CUdeviceptr segBase = 0;
       size_t segSize = 0;
       CUCHECKGOTO(cuMemGetAddressRange(&segBase, &segSize, (CUdeviceptr)segPtr), ret, reconcile);
-      size_t inSeg = segSize - (segPtr - (uintptr_t)segBase);
+      // Host VMM can report segBase==0; subtracting then wraps the length.
+      size_t inSeg = (segBase == 0) ? segSize : segSize - (segPtr - (uintptr_t)segBase);
       size_t thisLen = remaining < inSeg ? remaining : inSeg;
       int segFd = -1;
       CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&segFd, (CUdeviceptr)segPtr, thisLen,
@@ -750,7 +759,7 @@ reconcile:
                                  sizeof(uint32_t) * nSeg * NCCL_IB_MAX_DEVS_PER_NIC),
                 ret, fail);
 
-  free(registrations);
+  if (registrationsHeap) free(registrations);
   *mhandle = ginMrHandle;
   return ncclSuccess;
 
@@ -763,7 +772,7 @@ fail:
     free(ginMrHandle->rkeys);
     free(ginMrHandle);
   }
-  free(registrations);
+  if (registrationsHeap) free(registrations);
   return ret;
 }
 
@@ -933,9 +942,8 @@ ncclResult_t IbCastRmaIbProxyIPut(void* ginCtx, int context, uint64_t srcOff, vo
   if (nWr > 0) IbCastAddEvent(req, qp->devIndex);
 
   ret = IbCastRmaPostWrs(qp, req, &wr[0], nWr);
-  if (ret != ncclSuccess) {
-    if (req->rmaNwrs == 0) (void)IbCastFreeRequest(req);
-    else *request = req;
+  if (ret != ncclSuccess && req->rmaNwrs == 0) {
+    (void)IbCastFreeRequest(req);
     return ret;
   }
   *request = req;
@@ -989,9 +997,8 @@ ncclResult_t IbCastRmaIbProxyIGet(void* ginCtx, int context, uint64_t remoteOffs
   if (nWr > 0) IbCastAddEvent(req, qp->devIndex);
 
   ret = IbCastRmaPostWrs(qp, req, &wr[0], nWr);
-  if (ret != ncclSuccess) {
-    if (req->rmaNwrs == 0) (void)IbCastFreeRequest(req);
-    else *request = req;
+  if (ret != ncclSuccess && req->rmaNwrs == 0) {
+    (void)IbCastFreeRequest(req);
     return ret;
   }
   *request = req;
@@ -1087,9 +1094,8 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
   }
   IbCastAddEvent(req, devIndex);
   ret = IbCastRmaPostWrs(qp, req, nPut > 0 ? &wr[0] : sigWr, nPut + 1);
-  if (ret != ncclSuccess) {
-    if (req->rmaNwrs == 0) (void)IbCastFreeRequest(req);
-    else *request = req;
+  if (ret != ncclSuccess && req->rmaNwrs == 0) {
+    (void)IbCastFreeRequest(req);
     return ret;
   }
   *request = req;
@@ -1164,9 +1170,8 @@ ncclResult_t IbCastRmaIbProxyIFlush(void* ginCtx, int context, void* mhandle, ui
   TIME_START(4);
   ret = IbCastRmaPostWrs(qp, req, &wr[0], nWr);
   TIME_STOP(4);
-  if (ret != ncclSuccess) {
-    if (req->rmaNwrs == 0) (void)IbCastFreeRequest(req);
-    else *request = req;
+  if (ret != ncclSuccess && req->rmaNwrs == 0) {
+    (void)IbCastFreeRequest(req);
     return ret;
   }
   *request = req;

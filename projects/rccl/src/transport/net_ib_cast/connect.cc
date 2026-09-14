@@ -1825,6 +1825,9 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       NCCLCHECK(IbCastQpCreate(&rCommDev->gpuFlush.qp, &qpCreateAttrs));
       rCommDev->gpuFlush.qp.channelId = channelId;
       rCommDev->gpuFlush.qp.isDataQp = qpCreateAttrs.isDataQp;
+      // Loopback flush QP: local and remote device indices are this recv device.
+      rCommDev->gpuFlush.qp.devIndex = i;
+      rCommDev->gpuFlush.qp.remDevIdx = i;
 
       INFO(NCCL_NET,
            "NET/IB: %s: Flush QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p",
