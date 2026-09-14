@@ -177,6 +177,10 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
 rccl_static int rcclKernelPackedChannels(struct ncclComm* comm, ncclFunc_t func, size_t count, ncclDataType_t datatype,
                                          int protocol, int nMaxChannels) {
   if (nMaxChannels <= 0 || count == 0) return nMaxChannels;
+  // scheduleCollTasksToPlan caps tuner/CSV nMaxChannels against comm->nChannels
+  // (p2pnChannels). Without this, CsvTuner can report 32/56 while the kernel
+  // launches on channel{Lo..Hi}={0..3}. Host microtests leave nChannels=0.
+  if (comm != nullptr && comm->nChannels > 0) nMaxChannels = std::min(nMaxChannels, comm->nChannels);
   constexpr size_t MinTrafficPerChannel = 16 << 10;
   size_t elementSize = ncclTypeSize(datatype);
   int trafficPerByte = ncclFuncTrafficPerByte(func, comm->nRanks);
