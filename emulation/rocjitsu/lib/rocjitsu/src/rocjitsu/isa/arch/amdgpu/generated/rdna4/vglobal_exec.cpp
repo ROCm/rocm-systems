@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vglobal.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -422,7 +423,6 @@ void GlobalLoadAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     d->wf_size = wf.wf_size();
     d->wg_id = wf.wg_id();
     d->wf_id = wf.wf_id();
-    d->cu_path = wf.cu().full_path();
     uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);
     int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -450,7 +450,6 @@ void GlobalStoreAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     d->wf_size = wf.wf_size();
     d->wg_id = wf.wg_id();
     d->wf_id = wf.wf_id();
-    d->cu_path = wf.cu().full_path();
     uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);
     int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -585,7 +584,7 @@ void GlobalAtomicSubClampU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->atomic_op = amdgpu::AtomicOp::SUB_CLAMP;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1169,7 +1168,7 @@ void GlobalAtomicCondSubU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->atomic_op = amdgpu::AtomicOp::COND_SUB;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1194,6 +1193,9 @@ void GlobalAtomicMinNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FMIN;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = 3;
+  d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1218,6 +1220,9 @@ void GlobalAtomicMaxNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FMAX;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = 3;
+  d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1339,6 +1344,9 @@ void GlobalAtomicAddF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = 3;
+  d->atomic_legacy_minmax = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1390,7 +1398,7 @@ void GlobalAtomicPkAddF16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_op = amdgpu::AtomicOp::PK_ADD_F16;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
@@ -1414,7 +1422,7 @@ void GlobalAtomicPkAddBf16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_op = amdgpu::AtomicOp::PK_ADD_BF16;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;

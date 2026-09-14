@@ -1261,12 +1261,6 @@ enum class InstructionExecutionId : size_t {
   BufferStoreD16HiFormatXMubuf,
   BufferGl0InvMubuf,
   BufferGl1InvMubuf,
-  BufferLoadLdsU8Mubuf,
-  BufferLoadLdsI8Mubuf,
-  BufferLoadLdsU16Mubuf,
-  BufferLoadLdsI16Mubuf,
-  BufferLoadLdsB32Mubuf,
-  BufferLoadLdsFormatXMubuf,
   BufferAtomicSwapB32Mubuf,
   BufferAtomicCmpswapB32Mubuf,
   BufferAtomicAddU32Mubuf,
@@ -1451,6 +1445,9 @@ enum class InstructionExecutionId : size_t {
   FlatAtomicMinF32Flat,
   FlatAtomicMaxF32Flat,
   FlatAtomicAddF32Flat,
+  GlobalLoadAddtidB32Flat,
+  GlobalStoreAddtidB32Flat,
+  GlobalAtomicCsubU32Flat,
   Count,
 };
 

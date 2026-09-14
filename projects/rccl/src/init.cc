@@ -61,6 +61,7 @@
 #include "git_version.h"
 #include "rccl_vars.h"
 #include "hip_rocm_version_info.h"
+#include "rccl_graph_gen.h"
 // #include <hsa/hsa_ext_amd.h>
 #ifdef USE_AMDSMI
 #include "amdsmi_wrap.h"
@@ -77,10 +78,12 @@
 
 #include "latency_profiler/CollTrace.h"
 #include "latency_profiler/CollTraceFunc.h"
-#include "dda_all_reduce.h"
-#include "ipc_init.h"
-#include "fabric_init.h"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/ipc/ipc_init.h"
+#include "algorithms/dda/fabric/fabric_init.h"
+#if defined(__x86_64__) || defined(_M_X64)
 #include <cpuid.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include "kernel_config.h"
@@ -103,8 +106,8 @@
 
 using namespace rccl;
 
-const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"AllGather",    "AllReduce", "AlltoAllPivot", "AlltoAllGda",
-                                                   "AlltoAllvGda", "Broadcast", "Reduce",        "ReduceScatter",
+const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce",
+                                                   "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda",
                                                    "SendRecv"}; // Increased numFunc by 1 for AlltollvGda
 const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS] = {"Tree",     "Ring", "CollNetDirect", "CollNetChain", "NVLS",
                                                 "NVLSTree", "PAT"};
@@ -119,6 +122,10 @@ NCCL_PARAM(CommBlocking, "COMM_BLOCKING", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(RuntimeConnect, "RUNTIME_CONNECT", 0);
 // When enabled (default), defer PAT QP creation until PAT is first selected by an AG/RS; NCCL_PAT_LAZY_INIT=0 restores eager connect at init.
 NCCL_PARAM(PatLazyInit, "PAT_LAZY_INIT", 1);
+// When enabled (default), PAT ReduceScatter and AllGather share one connection set.
+// RCCL_PAT_SHARED_QPS=0 restores a separate set per collective. The value must be identical on
+// every rank, otherwise peers disagree on direction and the first PAT collective hangs.
+RCCL_PARAM(PatSharedQps, "PAT_SHARED_QPS", 1);
 NCCL_PARAM(WinEnable, "WIN_ENABLE", 1);
 NCCL_PARAM(CollnetEnable, "COLLNET_ENABLE", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(CtaPolicy, "CTA_POLICY", NCCL_CONFIG_UNDEF_INT);
@@ -127,6 +134,7 @@ NCCL_PARAM(NumRmaCtx, "NUM_RMA_CTX", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(MaxP2pPeers, "P2P_MAX_PEERS", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(SetCpuStackSize, "SET_CPU_STACK_SIZE", 1);
 NCCL_PARAM(MultiRankGpuEnable, "MULTI_RANK_GPU_ENABLE", 0);
+NCCL_PARAM(P2pDisable, "P2P_DISABLE", 0);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
 extern int64_t ncclParamPatEnable();
@@ -199,6 +207,11 @@ std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 //   1 = force cheap fence off (__threadfence_system), 2 = force cheap fence on (override auto, e.g. re-enable on gfx950)
 RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
 
+#if ENABLE_TDM_SIMPLE
+// Off by default; the mover path is still under evaluation.
+RCCL_PARAM(TdmSimpleEnable, "TDM_SIMPLE_ENABLE", 0);
+#endif
+
 /**
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
  */
@@ -261,9 +274,8 @@ ncclResult_t checkHostUncacheMemSetting(struct ncclComm* comm) {
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
     ERROR("Build flag HIP_HOST_UNCACHED_MEMORY must be set to avoid memory corruption on mi350x");
     return ncclSystemError;
-  } else {
-    return ncclSuccess;
   }
+  return ncclSuccess;
 #endif
 }
 
@@ -300,8 +312,12 @@ static ncclResult_t ncclInit() {
   }
   INFO(NCCL_INIT, "Kernel version: %s", verStr);
   if (strstr(verStr, "cray") == NULL) {
+#if defined(__x86_64__) || defined(_M_X64)
     unsigned int eax, ebx, ecx, edx;
     if (!__get_cpuid(1, &eax, &ebx, &ecx, &edx)) ecx = 0; // cpuid not supported
+#else
+    unsigned int ecx = 0;
+#endif
     NCCLCHECK(ncclOsTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue, sizeof(strValue)));
     // Check BIOS string and hypervisor presence on ecx bit 31
     if (strncmp("Hyper-V UEFI Release", strValue, 20) != 0 && (ecx & (1u << 31)) == 0) {
@@ -481,6 +497,10 @@ static ncclResult_t commFree(ncclComm_t comm) {
   if (comm->symmetricSupport) {
     NCCLCHECK(ncclSymkFinalize(comm));
   }
+  // Self-guarded no-op if the GIN-SDMA path was never used. Must precede ncclDevrFinalize.
+  NCCLCHECK(ncclGinA2AFinalize(comm));
+  NCCLCHECK(ncclGinAllReduceFinalize(comm));
+
   // RCCL: !symmetricSupport comms still init devrState via the non-sym window-register path (dev_runtime.cc), so finalize unconditionally to free lsaRankList.
   NCCLCHECK(ncclDevrFinalize(comm));
   NCCLCHECK(ncclRasCommFini(comm));
@@ -710,6 +730,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->hierarchicalTempBuffer = nullptr;
   // Enable PAT for interComm hierarchical collectives
   comm->forcePatEnable = (parent != nullptr) ? parent->forcePatEnable : false;
+  comm->patSharedQps = rcclParamPatSharedQps() != 0;
 
   // Try to create a CUDA object right away. If there is something wrong with
   // the device we're on (failure cause #1) , better know it early.
@@ -754,8 +775,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   CUDACHECK(hipEventCreateWithFlags(&doneEvent, hipEventDisableTiming));
 
   comm->doneEvent = doneEvent;
-  comm->lastStream = nullptr;
-  comm->lastStreamValid = false;
+  comm->lastStreamTag = 0;
 
   // RCCL: acquire a scoped side stream for init-time allocations. It is
   // released once init completes (see ncclCommInitRankFunc) so it does not hold
@@ -783,7 +803,6 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   TRACE(NCCL_INIT, "comm %p rank %d nranks %d cudaDev %d busId %lx compCap %d", comm, rank, ndev, comm->cudaDev,
         comm->busId, comm->compCap);
 
-  comm->checkMode = ncclParamCheckPointers() == 1 ? ncclCheckModeDebugLocal : ncclCheckModeDefault;
   comm->dmaBufSupport = (dmaBufSupported(comm) == ncclSuccess) ? true : false;
 
   // Initialize memory manager
@@ -891,6 +910,10 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   tmpCommAndChans.comm.isAllNvlink = comm->isAllNvlink;
   tmpCommAndChans.comm.p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
   tmpCommAndChans.comm.cheapPostSendFenceOff = comm->cheapPostSendFenceOff;
+#if ENABLE_TDM_SIMPLE
+  tmpCommAndChans.comm.tdmSimpleEnable = comm->tdmSimpleEnable;
+#endif
+  tmpCommAndChans.comm.patSharedQps = comm->patSharedQps ? 1 : 0;
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     tmpCommAndChans.comm.buffSizes[p] = comm->buffSizes[p];
   }
@@ -1078,6 +1101,52 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
   info->shmDev = statbuf.st_dev;
 #endif
   info->busId = comm->busId;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // HIP names do not contain "MLOPart". DPX/XCP/CPX logical GPUs are exposed as PCI function .N of
+  // one physical device. Use that function as the partition index so ranks share the physical
+  // function-0 PCI node (see ncclTopoFillGpu) with distinct overlay DEV ids. Whether the device is
+  // partitioned at all is a property of the hardware, not of this BDF: an unpartitioned GPU and CPX
+  // partition 0 are both function 0 with an accelerator class, so read the mode from sysfs and
+  // leave mloPart undefined on an unpartitioned GPU, which must not get the DEV overlay (it breaks
+  // Rome gpuId matching and disables GIN/GDR).
+  if (info->mloPart == NCCL_TOPO_UNDEF) {
+    int fn = (int)(info->busId & 0xf);
+    if (fn < NCCL_TOPO_MLOPART_DEV_MAX) {
+      char busIdStr[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+      // The partition mode lives on the physical device. A CPX alias at .1-.7 is usually absent
+      // from sysfs entirely, so ask function 0 rather than our own BDF.
+      char physBusIdStr[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+      char partition[MAX_STR_LEN];
+      partition[0] = '\0';
+      if (int64ToBusId(info->busId & ~0xfLL, physBusIdStr) == ncclSuccess) {
+        (void)ncclOsGetPciDeviceComputePartitionByBusId(physBusIdStr, partition, sizeof(partition));
+      }
+      // A partitioned device makes every function a partition, function 0 included: partition 0 is
+      // a partition, not an unpartitioned GPU, and must carry index 0 so all of a device's
+      // partitions share one DEV overlay group. An empty string means the platform does not report
+      // a mode, which is not the same as SPX, so it falls through to the class probe below.
+      int partitioned = partition[0] != '\0' && strcmp(partition, "SPX") != 0;
+      if (partitioned) {
+        info->mloPart = fn;
+        INFO(NCCL_INIT, "MLOPart: physical device %s is in %s mode, this rank is partition %d", physBusIdStr, partition,
+             fn);
+      } else if (fn > 0) {
+        // No usable partition mode. Fall back to the shape a HIP alias has: a function that is not
+        // a GPU in sysfs. This cannot see partition 0, which is why it is only the fallback.
+        char deviceClass[MAX_STR_LEN];
+        deviceClass[0] = '\0';
+        if (int64ToBusId(info->busId, busIdStr) == ncclSuccess) {
+          (void)ncclOsGetPciDeviceClassByBusId(busIdStr, deviceClass, sizeof(deviceClass));
+          int isGpu = strncmp(deviceClass, PCI_ACCELERATOR_CLASS, strlen(PCI_ACCELERATOR_CLASS)) == 0 ||
+                      strncmp(deviceClass, "0x03", 4) == 0;
+          if (!isGpu) {
+            info->mloPart = fn;
+          }
+        }
+      }
+    }
+  }
+#endif
   CUCHECK(cuDeviceGetUuid((CUuuid*)&info->gpuUuid, (CUdevice)comm->cudaDev));
 
   // detect if fine grained memory is available on this GPU
@@ -1225,6 +1294,19 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
     comm->buffSizes[p] = envs[p] != -2 ? envs[p] : defaults[p];
   }
 
+#if ENABLE_TDM_SIMPLE
+  // FIFO slot k sits at k*(buffSizes/NCCL_STEPS), so the step must be a RCCL_TDM_ALIGN
+  // multiple for every slot to hit TDM's direct path. No-op at the 4MiB default.
+  if (comm->tdmSimpleEnable) {
+    int64_t simple = comm->buffSizes[NCCL_PROTO_SIMPLE];
+    int64_t aligned = ROUNDUP(simple, (int64_t)(NCCL_STEPS * RCCL_TDM_ALIGN));
+    if (simple > 0 && aligned != simple && aligned <= INT_MAX) {
+      INFO(NCCL_INIT, "Rounded SIMPLE buffer %ld -> %ld so every FIFO slot is %d-byte aligned", simple, aligned,
+           RCCL_TDM_ALIGN);
+      comm->buffSizes[NCCL_PROTO_SIMPLE] = (int)aligned;
+    }
+  }
+#endif
   if (comm->nNodes > 1) {
     rcclSetP2pNetChunkSize(comm, comm->p2pChunkSize);
     comm->p2pChunkSize = (comm->p2pChunkSize > RCCL_VALUE_INVALID) ? comm->p2pChunkSize : ncclParamP2pNetChunkSize();
@@ -1636,7 +1718,14 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 
-  comm->topo->skipPresetTopoMatching = !uniformRanksPerHost(comm, nranks);
+  {
+    bool nonUniformRanks = !uniformRanksPerHost(comm, nranks);
+    bool isGfx1250 = comm->topo->nodes[GPU].count > 0 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
+    comm->topo->skipPresetTopoMatching = nonUniformRanks || isGfx1250;
+    if (comm->topo->skipPresetTopoMatching) {
+      INFO(NCCL_INIT, "Rome model matching disabled %s", isGfx1250 ? "on gfx1250" : "due to non-uniform ranks per host");
+    }
+  }
 
   timers[TIMER_INIT_GRAPHS] = clockNano();
   // Get rings and trees
@@ -1648,20 +1737,44 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(ncclTopoCompute(comm->topo, ringGraph), ret, fail);
   NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, ringGraph), ret, fail);
 
-  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151")) {
+  {
+    const bool isGfx1151 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151");
+    const bool isGfx_110x_120x = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110") ||
+                                 IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120");
+    const bool p2pDisabled = ncclParamP2pDisable();
     /**
-     * GFX1151 (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
-     * edge-disjoint Hamiltonian rings. For N nodes, N/2 perfect rings are guaranteed;
-     * additional channels are balanced via greedy heuristics to saturate Fat-Tree/Clos fabrics.
-     * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels
-     * is required during Preset. Therefore, nChannels cannot be auto-calculated
-     * based on nNodes at this stage.
-     * Recommended: Set nChannels via environment variable (e.g., 6 channels for
-     * optimal 4-node load balancing). Missing channel data is backfilled
-     * by repairMissingChannels() during Postset.
-     * */
-    int numChannels = rcclParamInitChannels() > 0 ? rcclParamInitChannels() : 6 /* 2 X (comm->nNodes - 1)  */;
-    ringGraph->nChannels = std::max(ringGraph->minChannels, std::min(ringGraph->maxChannels, (int32_t)numChannels));
+     * Identical with ncclTopoPreset() in connect.cc
+     * We prefer intraGraphGen = true in case of p2pDisabled && isGfx_110x_120x for better performance
+     */
+    const bool intraGraphGen = rcclParamIntraGraphGen() || (p2pDisabled && isGfx_110x_120x);
+    
+    if (isGfx1151 || intraGraphGen) {
+      /**
+      * GFX1151 (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
+      * edge-balanced Hamiltonian rings. For N nodes, N/2 perfect rings are guaranteed;
+      * additional channels are balanced via greedy heuristics to saturate Fat-Tree/Clos fabrics.
+      * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels
+      * is required during Preset. Therefore, nChannels cannot be auto-calculated
+      * based on nNodes at this stage.
+      * Recommended: Set nChannels via environment variable (e.g., 6 channels for
+      * optimal 4-node load balancing). Missing channel data is backfilled
+      * by repairMissingChannels() during Postset.
+      * 
+      * In isGfx_110x_120x ,defaultNumChannels = 56 is due to Minimum edge-balanced Hamiltonian 
+      * cycles in graph K8 (8 GPU case) = 14 , and 56 is 14*4.
+      * */
+      int initChannels = (int)rcclParamInitChannels();
+      int defaultNumChannels =
+        isGfx1151 ? 6 /* 2 X (comm->nNodes - 1)  */ : ((isGfx_110x_120x && p2pDisabled) ? 56 : ringGraph->nChannels);
+      int numChannels = initChannels > 0 ? initChannels : defaultNumChannels;
+      ringGraph->minChannels = 1;
+      ringGraph->maxChannels = std::min(MAXCHANNELS / 2, numChannels);
+      ringGraph->nChannels = std::max(ringGraph->minChannels, std::min(ringGraph->maxChannels, (int32_t)numChannels));
+      INFO(NCCL_INIT,
+           "intraGraphGen : %d rcclParamInitChannels:%d numChannels : %d ringGraph->minChannels: %d "
+           "ringGraph->maxChannels: %d",
+           (int)intraGraphGen, initChannels, numChannels, ringGraph->minChannels, ringGraph->maxChannels);
+    }
   }
   INFO(NCCL_INIT, "ringGraph->nChannels = %d ", ringGraph->nChannels);
 
@@ -1785,7 +1898,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // AllGather3 - begin
   NCCLCHECKGOTO(ncclCalloc(&allGather3Data, nranks), ret, fail);
   int idx;
-  NCCLCHECK(ncclTopoIdToIndex(comm->topo, GPU, NCCL_TOPO_ID(comm->topo->systemId, comm->busId), &idx));
+  // GPU node ids include the MLOPart overlay (and a local-rank-on-DEV field), so they
+  // no longer match the raw PCI busId. Look up this rank's GPU node instead.
+  NCCLCHECK(ncclTopoRankToIndex(comm->topo, rank, &idx, /*showWarn=*/true));
   allGather3Data[rank].nc = 2;
   if (comm->topo->nodes[GPU].count == comm->topo->nRanks &&
       IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx906") && allXgmi)
@@ -1808,6 +1923,12 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
                                                                  false);
 #endif
   INFO(NCCL_INIT, "Cheap post-send fence is %s", comm->cheapPostSendFenceOff ? "OFF" : "ON");
+#if ENABLE_TDM_SIMPLE
+  // gfx1250 only; the mover entry points are deleted elsewhere.
+  comm->tdmSimpleEnable =
+    rcclParamTdmSimpleEnable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
+  if (comm->tdmSimpleEnable) INFO(NCCL_INIT, "TDM SIMPLE path enabled");
+#endif
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||
       IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950")) {

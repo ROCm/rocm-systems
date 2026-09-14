@@ -1,7 +1,7 @@
 #
 # rocprofv3 tool tests for kernel duration
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-rocprofv3-kernel-trace-duration

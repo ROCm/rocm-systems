@@ -14,6 +14,7 @@ enum class OperandType {
   OPR_ACCVGPR,
   OPR_DSMEM,
   OPR_FLAT_SCRATCH,
+  OPR_GPUMEM,
   OPR_HWREG,
   OPR_LABEL,
   OPR_PC,
@@ -58,6 +59,10 @@ enum OpSelDsmem {
 
 enum OpSelFlatScratch {
   OPR_FLAT_SCRATCH_FLAT_SCRATCH_ALL = 0,
+};
+
+enum OpSelGpumem {
+  OPR_GPUMEM_GPUMEM = 0,
 };
 
 enum OpSelPc {

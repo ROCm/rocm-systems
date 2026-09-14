@@ -811,6 +811,7 @@ class VSatPkU8I16Vop1 : public Vop1 {
 public:
   VSatPkU8I16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand src0;
 

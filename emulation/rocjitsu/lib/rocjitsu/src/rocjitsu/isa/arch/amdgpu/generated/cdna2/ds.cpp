@@ -739,7 +739,7 @@ DsWriteB8Ds::DsWriteB8Ds(const MachineInst *inst)
     : Ds("ds_write_b8", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWriteB8Ds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+      data0(8, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->data0 +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
                   ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
@@ -768,7 +768,7 @@ DsWriteB16Ds::DsWriteB16Ds(const MachineInst *inst)
     : Ds("ds_write_b16", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWriteB16Ds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+      data0(16, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->data0 +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
                   ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN

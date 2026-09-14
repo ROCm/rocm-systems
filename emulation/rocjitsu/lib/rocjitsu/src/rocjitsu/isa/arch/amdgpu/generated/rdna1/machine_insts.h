@@ -364,38 +364,12 @@ struct Vop3InstLiteralMachineInst {
   uint32_t simm32 : 32;
 };
 
-struct Vop1VopDpp16MachineInst {
+struct Vop1InstLiteralMachineInst {
   uint32_t src0 : 9;
   uint32_t op : 8;
   uint32_t vdst : 8;
   uint32_t encoding : 7;
-  uint32_t vsrc0 : 8;
-  uint32_t dpp_ctrl : 9;
-  uint32_t pad_49 : 1;
-  uint32_t fi : 1;
-  uint32_t bound_ctrl : 1;
-  uint32_t src0_neg : 1;
-  uint32_t src0_abs : 1;
-  uint32_t src1_neg : 1;
-  uint32_t src1_abs : 1;
-  uint32_t bank_mask : 4;
-  uint32_t row_mask : 4;
-};
-
-struct Vop1VopDpp8MachineInst {
-  uint32_t src0 : 9;
-  uint32_t op : 8;
-  uint32_t vdst : 8;
-  uint32_t encoding : 7;
-  uint32_t vsrc0 : 8;
-  uint32_t lane_sel_0 : 3;
-  uint32_t lane_sel_1 : 3;
-  uint32_t lane_sel_2 : 3;
-  uint32_t lane_sel_3 : 3;
-  uint32_t lane_sel_4 : 3;
-  uint32_t lane_sel_5 : 3;
-  uint32_t lane_sel_6 : 3;
-  uint32_t lane_sel_7 : 3;
+  uint32_t simm32 : 32;
 };
 
 struct Vop1VopSdwaMachineInst {
@@ -422,20 +396,27 @@ struct Vop1VopSdwaMachineInst {
   uint32_t s1 : 1;
 };
 
-struct Vop1InstLiteralMachineInst {
+struct Vop1VopDpp8MachineInst {
   uint32_t src0 : 9;
   uint32_t op : 8;
   uint32_t vdst : 8;
   uint32_t encoding : 7;
-  uint32_t simm32 : 32;
+  uint32_t vsrc0 : 8;
+  uint32_t lane_sel_0 : 3;
+  uint32_t lane_sel_1 : 3;
+  uint32_t lane_sel_2 : 3;
+  uint32_t lane_sel_3 : 3;
+  uint32_t lane_sel_4 : 3;
+  uint32_t lane_sel_5 : 3;
+  uint32_t lane_sel_6 : 3;
+  uint32_t lane_sel_7 : 3;
 };
 
-struct Vop2VopDpp16MachineInst {
+struct Vop1VopDpp16MachineInst {
   uint32_t src0 : 9;
-  uint32_t vsrc1 : 8;
+  uint32_t op : 8;
   uint32_t vdst : 8;
-  uint32_t op : 6;
-  uint32_t encoding : 1;
+  uint32_t encoding : 7;
   uint32_t vsrc0 : 8;
   uint32_t dpp_ctrl : 9;
   uint32_t pad_49 : 1;
@@ -449,21 +430,13 @@ struct Vop2VopDpp16MachineInst {
   uint32_t row_mask : 4;
 };
 
-struct Vop2VopDpp8MachineInst {
+struct Vop2InstLiteralMachineInst {
   uint32_t src0 : 9;
   uint32_t vsrc1 : 8;
   uint32_t vdst : 8;
   uint32_t op : 6;
   uint32_t encoding : 1;
-  uint32_t vsrc0 : 8;
-  uint32_t lane_sel_0 : 3;
-  uint32_t lane_sel_1 : 3;
-  uint32_t lane_sel_2 : 3;
-  uint32_t lane_sel_3 : 3;
-  uint32_t lane_sel_4 : 3;
-  uint32_t lane_sel_5 : 3;
-  uint32_t lane_sel_6 : 3;
-  uint32_t lane_sel_7 : 3;
+  uint32_t simm32 : 32;
 };
 
 struct Vop2VopSdwaMachineInst {
@@ -491,13 +464,40 @@ struct Vop2VopSdwaMachineInst {
   uint32_t s1 : 1;
 };
 
-struct Vop2InstLiteralMachineInst {
+struct Vop2VopDpp8MachineInst {
   uint32_t src0 : 9;
   uint32_t vsrc1 : 8;
   uint32_t vdst : 8;
   uint32_t op : 6;
   uint32_t encoding : 1;
-  uint32_t simm32 : 32;
+  uint32_t vsrc0 : 8;
+  uint32_t lane_sel_0 : 3;
+  uint32_t lane_sel_1 : 3;
+  uint32_t lane_sel_2 : 3;
+  uint32_t lane_sel_3 : 3;
+  uint32_t lane_sel_4 : 3;
+  uint32_t lane_sel_5 : 3;
+  uint32_t lane_sel_6 : 3;
+  uint32_t lane_sel_7 : 3;
+};
+
+struct Vop2VopDpp16MachineInst {
+  uint32_t src0 : 9;
+  uint32_t vsrc1 : 8;
+  uint32_t vdst : 8;
+  uint32_t op : 6;
+  uint32_t encoding : 1;
+  uint32_t vsrc0 : 8;
+  uint32_t dpp_ctrl : 9;
+  uint32_t pad_49 : 1;
+  uint32_t fi : 1;
+  uint32_t bound_ctrl : 1;
+  uint32_t src0_neg : 1;
+  uint32_t src0_abs : 1;
+  uint32_t src1_neg : 1;
+  uint32_t src1_abs : 1;
+  uint32_t bank_mask : 4;
+  uint32_t row_mask : 4;
 };
 
 struct Vop2VopSdwaSdstEncMachineInst {
@@ -567,6 +567,14 @@ struct Vop3pInstLiteralMachineInst {
   uint32_t simm32 : 32;
 };
 
+struct VopcInstLiteralMachineInst {
+  uint32_t src0 : 9;
+  uint32_t vsrc1 : 8;
+  uint32_t op : 8;
+  uint32_t encoding : 7;
+  uint32_t simm32 : 32;
+};
+
 struct VopcVopSdwaSdstEncMachineInst {
   uint32_t src0 : 9;
   uint32_t vsrc1 : 8;
@@ -587,14 +595,6 @@ struct VopcVopSdwaSdstEncMachineInst {
   uint32_t src1_abs : 1;
   uint32_t pad_62 : 1;
   uint32_t s1 : 1;
-};
-
-struct VopcInstLiteralMachineInst {
-  uint32_t src0 : 9;
-  uint32_t vsrc1 : 8;
-  uint32_t op : 8;
-  uint32_t encoding : 7;
-  uint32_t simm32 : 32;
 };
 
 } // namespace rdna1

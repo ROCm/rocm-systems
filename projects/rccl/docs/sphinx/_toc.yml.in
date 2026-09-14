@@ -29,6 +29,8 @@ subtrees:
   - file: how-to/troubleshooting-rccl
     title: Troubleshoot RCCL
   - file: how-to/rccl-usage-tips
+  - file: how-to/network-telemetry
+    title: RCCL network telemetry
 
 - caption: Examples
   entries:

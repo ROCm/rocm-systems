@@ -16,10 +16,13 @@
 #include <cstring>
 #include <functional>
 
+#include <hip/hip_ext.h>  // hipExtModuleLaunchKernel, for the profile-interceptor stubs
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_runtime.h>
 
+#include "fail_loud.h"   // FailLoud: the one abort-on-unreachable spelling
 #include "hip_fakes.h"   // g_hip* hook declarations + ResetHipFakes()
+#include "hip_profile_interceptor_fakes.h"  // X-list of the profile-runtime HIP entry points
 
 // ===========================================================================
 // Section 1: controllable HIP seams (defaults return hipErrorInvalidValue)
@@ -120,12 +123,30 @@ static hipError_t DefaultHipExtMallocWithFlags(void** ptr, std::size_t size, uns
 std::function<hipError_t(void**, std::size_t, unsigned)>
     g_hipExtMallocWithFlags = DefaultHipExtMallocWithFlags;
 
+static hipError_t DefaultHipHostMalloc(void** ptr, std::size_t size, unsigned)
+{
+    if (ptr) {
+        *ptr = std::malloc(size);
+        return *ptr ? hipSuccess : hipErrorOutOfMemory;
+    }
+    return hipErrorInvalidValue;
+}
+std::function<hipError_t(void**, std::size_t, unsigned)>
+    g_hipHostMalloc = DefaultHipHostMalloc;
+
 static hipError_t DefaultHipFree(void* ptr)
 {
     std::free(ptr);
     return hipSuccess;
 }
 std::function<hipError_t(void*)> g_hipFree = DefaultHipFree;
+
+static hipError_t DefaultHipHostFree(void* ptr)
+{
+    std::free(ptr);
+    return hipSuccess;
+}
+std::function<hipError_t(void*)> g_hipHostFree = DefaultHipHostFree;
 
 // --- device inventory + current-device state ----------------------------
 int g_deviceCount = 8;
@@ -156,6 +177,17 @@ static hipError_t DefaultHipGetDeviceCount(int* count)
 }
 std::function<hipError_t(int*)> g_hipGetDeviceCount = DefaultHipGetDeviceCount;
 
+// Defined with the plain HIP stubs below, where the attribute switch lives.
+static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device);
+static hipError_t DefaultHipDeviceSetLimit(hipLimit_t limit, size_t value);
+
+static hipError_t DefaultHipDeviceCanAccessPeer(int* canAccessPeer, int, int)
+{
+    if (canAccessPeer) *canAccessPeer = 0;
+    return hipErrorInvalidValue;
+}
+std::function<hipError_t(int*, int, int)> g_hipDeviceCanAccessPeer = DefaultHipDeviceCanAccessPeer;
+
 // --- deep-path result seams (commAlloc/devCommSetup) --------------------
 // Default to failure so any call a test hasn't opted into surfaces as an
 // unexpected call; a test sets the relevant seam to hipSuccess to enable the
@@ -167,6 +199,9 @@ hipError_t g_hipMemPoolResult            = hipErrorInvalidValue;
 hipError_t g_hipStreamCreateResult       = hipErrorInvalidValue;
 hipError_t g_hipAsyncOpsResult           = hipErrorInvalidValue;
 int        g_hipWarpSize                 = 64;
+int        g_hipDirectManagedMemAccess   = 1;
+int        g_hipMemcpyAsyncCalls         = 0;
+std::vector<HipMemcpyAsyncRecord> g_hipMemcpyAsyncArgs;
 
 // Restore every HIP hook to its default.
 void ResetHipFakes()
@@ -181,12 +216,17 @@ void ResetHipFakes()
     g_hipRuntimeGetVersion          = DefaultHipRuntimeGetVersion;
     g_hipGetDeviceProperties        = DefaultHipGetDeviceProperties;
     g_hipExtMallocWithFlags         = DefaultHipExtMallocWithFlags;
+    g_hipHostMalloc                 = DefaultHipHostMalloc;
     g_hipFree                       = DefaultHipFree;
+    g_hipHostFree                   = DefaultHipHostFree;
     g_hipGetDevice                  = DefaultHipGetDevice;
     g_hipSetDevice                  = DefaultHipSetDevice;
     g_hipGetDeviceCount             = DefaultHipGetDeviceCount;
+    g_hipDeviceCanAccessPeer        = DefaultHipDeviceCanAccessPeer;
     g_deviceCount                   = 8;
     g_currentDevice                 = 0;
+    g_hipDeviceGetAttribute         = DefaultHipDeviceGetAttribute;
+    g_hipDeviceSetLimit             = DefaultHipDeviceSetLimit;
     g_hipDeviceGetAttributeResult   = hipErrorInvalidValue;
     g_hipDeviceGetPCIBusIdResult    = hipErrorInvalidValue;
     g_hipEventCreateResult          = hipErrorInvalidValue;
@@ -194,6 +234,9 @@ void ResetHipFakes()
     g_hipStreamCreateResult         = hipErrorInvalidValue;
     g_hipAsyncOpsResult             = hipErrorInvalidValue;
     g_hipWarpSize                   = 64;
+    g_hipDirectManagedMemAccess     = 1;
+    g_hipMemcpyAsyncCalls           = 0;
+    g_hipMemcpyAsyncArgs.clear();
 }
 
 // ===========================================================================
@@ -221,10 +264,9 @@ hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle)
 }
 
 // --- plain link-satisfying stubs (unexercised paths) --------------------
-hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int, int)
+hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int dev1, int dev2)
 {
-    if (canAccessPeer) *canAccessPeer = 0;
-    return hipErrorInvalidValue;
+    return g_hipDeviceCanAccessPeer(canAccessPeer, dev1, dev2);
 }
 
 hipError_t hipDeviceEnablePeerAccess(int, unsigned int)
@@ -246,18 +288,25 @@ hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t)
     return hipSuccess;
 }
 
-hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int)
+static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int)
 {
     if (!pi) return g_hipDeviceGetAttributeResult;
     switch (attr) {
         case hipDeviceAttributeWarpSize:
             *pi = g_hipWarpSize; break;
         case hipDeviceAttributeDirectManagedMemAccessFromHost:
-            *pi = 1; break;   // report managed -> ncclCudaHostCalloc takes the extMalloc arm
+            *pi = g_hipDirectManagedMemAccess; break;   // 1 -> ncclCudaHostCalloc takes the extMalloc arm
         default:
             *pi = 0; break;
     }
     return g_hipDeviceGetAttributeResult;
+}
+std::function<hipError_t(int*, hipDeviceAttribute_t, int)>
+    g_hipDeviceGetAttribute = DefaultHipDeviceGetAttribute;
+
+hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
+{
+    return g_hipDeviceGetAttribute(pi, attr, device);
 }
 
 hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int)
@@ -296,12 +345,11 @@ const char* hipGetErrorString(hipError_t) { return "[hip_fake] stub error"; }
 
 hipError_t hipGetLastError(void) { return hipErrorInvalidValue; }
 
-hipError_t hipHostFree(void*) { return hipErrorInvalidValue; }
+hipError_t hipHostFree(void* ptr) { return g_hipHostFree(ptr); }
 
-hipError_t hipHostMalloc(void** ptr, size_t, unsigned int)
+hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int flags)
 {
-    if (ptr) *ptr = nullptr;
-    return hipErrorInvalidValue;
+    return g_hipHostMalloc(ptr, size, flags);
 }
 
 hipError_t hipIpcCloseMemHandle(void*) { return hipErrorInvalidValue; }
@@ -362,9 +410,11 @@ hipError_t hipMemSetAccess(void*, size_t, const hipMemAccessDesc*, size_t)
 
 hipError_t hipMemUnmap(void*, size_t) { return hipErrorInvalidValue; }
 
-hipError_t hipMemcpyAsync(void*, const void*, size_t, hipMemcpyKind,
+hipError_t hipMemcpyAsync(void* dst, const void* src, size_t bytes, hipMemcpyKind,
                           hipStream_t)
 {
+    g_hipMemcpyAsyncCalls++;
+    g_hipMemcpyAsyncArgs.push_back({dst, src, bytes});
     return g_hipAsyncOpsResult;
 }
 
@@ -419,9 +469,13 @@ hipError_t hipMalloc(void** p, size_t) { if (p) *p = nullptr; return hipErrorInv
 hipError_t hipMemcpy(void*, const void*, size_t, hipMemcpyKind) { return hipErrorInvalidValue; }
 hipError_t hipMemset(void*, int, size_t) { return hipErrorInvalidValue; }
 hipError_t hipDeviceSynchronize(void) { return hipErrorInvalidValue; }
-// init.cc's hipGetDeviceProperties call binds to hipGetDevicePropertiesR0600
-// after hipify; the ROCm header remaps the unversioned name to this symbol.
-hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device)
+// We define hipGetDevicePropertiesR0600, the versioned public HIP ABI symbol,
+// rather than the unversioned hipGetDeviceProperties. Callers write
+// hipGetDeviceProperties in source, but the HIP header (post rocm-systems
+// #10358) provides a `static inline hipGetDeviceProperties` wrapper that
+// delegates to hipGetDevicePropertiesR0600, so every call site inlines down to
+// a reference to that R0600 symbol -- which is what our fake must supply.
+hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_t* prop, int device)
 {
     return g_hipGetDeviceProperties(prop, device);
 }
@@ -437,7 +491,9 @@ hipError_t hipEventSynchronize(hipEvent_t) { return hipErrorInvalidValue; }
 
 // --- init.cc deep-path HIP stubs (commAlloc/devCommSetup) ---------------
 hipError_t hipRuntimeGetVersion(int* version) { return g_hipRuntimeGetVersion(version); }
-hipError_t hipDeviceSetLimit(hipLimit_t, size_t) { return hipErrorInvalidValue; }
+static hipError_t DefaultHipDeviceSetLimit(hipLimit_t, size_t) { return hipErrorInvalidValue; }
+std::function<hipError_t(hipLimit_t, size_t)> g_hipDeviceSetLimit = DefaultHipDeviceSetLimit;
+hipError_t hipDeviceSetLimit(hipLimit_t limit, size_t value) { return g_hipDeviceSetLimit(limit, value); }
 hipError_t hipEventCreateWithFlags(hipEvent_t* e, unsigned int) {
     if (e) *e = (g_hipEventCreateResult == hipSuccess) ? reinterpret_cast<hipEvent_t>(0x1) : nullptr;
     return g_hipEventCreateResult;
@@ -448,3 +504,22 @@ hipError_t hipMemPoolCreate(hipMemPool_t* p, const hipMemPoolProps*) {
 }
 hipError_t hipMemPoolDestroy(hipMemPool_t) { return hipSuccess; }  // benign teardown (commFree)
 hipError_t hipMemPoolSetAttribute(hipMemPool_t, hipMemPoolAttr, void*) { return g_hipMemPoolResult; }
+
+// ---- HIP entry points ROCm's profile runtime also defines -------------------
+// These MUST stay defined even though no microtest calls them. Left undefined,
+// -fprofile-instr-generate lets the linker satisfy them from the INTERCEPTOR in
+// libclang_rt.profile, which drags in __interception/__sanitizer deps that ship
+// in no archive. See hip_profile_interceptor_fakes.h for the full chain.
+//
+// Aborting rather than returning hipErrorInvalidValue: a host-only microtest
+// that reaches a kernel launch or module load is broken, not merely unexercised.
+
+// extern "C" is stated rather than inherited from the HIP declaration: if a
+// future SDK drops one of these, the definition still emits the C symbol the
+// linker needs instead of silently emitting a mangled one.
+extern "C" {
+#define RCCL_DEFINE_HIP_STUB(name, params) \
+  hipError_t name params { FailLoudUnfaked("hip_fakes", #name); }
+RCCL_HIP_PROFILE_INTERCEPTORS(RCCL_DEFINE_HIP_STUB)
+#undef RCCL_DEFINE_HIP_STUB
+}  // extern "C"

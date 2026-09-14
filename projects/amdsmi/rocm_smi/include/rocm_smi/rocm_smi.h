@@ -1,40 +1,24 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef ROCM_SMI_ROCM_SMI_H_
 #define ROCM_SMI_ROCM_SMI_H_
 
 #ifdef __cplusplus
-extern "C" {
-#include <stddef.h>
-#include <stdint.h>
-#else
 #include <cstddef>
 #include <cstdint>
+#else
+#include <stddef.h>
+#include <stdint.h>
 #endif  // __cplusplus
 
 #include <stdbool.h>
 
 #include "rocm_smi/kfd_ioctl.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
 
 /** \file rocm_smi.h
  *  Main header file for the ROCm SMI library.
@@ -3534,7 +3518,7 @@ rsmi_status_t rsmi_dev_mem_overdrive_level_get(uint32_t dv_ind, uint32_t* od);
  *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
  *  provided arguments.
  *  If multiple current frequencies are found, a warning is shown. If no
- *  current frequency is found, it is reflected as -1. If frequencies are not
+ *  current frequency is found, it is reflected as UINT32_MAX. If frequencies are not
  *  read from low to high a warning is shown as well.
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful

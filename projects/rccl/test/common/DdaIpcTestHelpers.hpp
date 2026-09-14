@@ -9,7 +9,7 @@
 #include <cstring>
 
 #include "comm.h"
-#include "dda_init_detail.h"
+#include "algorithms/dda/dda_init_detail.h"
 
 namespace RcclUnitTesting
 {

@@ -2,1825 +2,1825 @@
 contract:
   Contract_Memory_HipMalloc_Basic_ReturnsAlignedPointer:
     <<: *level_0
-    tags: [memory]
+    tags: [memory, P0]
   Contract_Memory_HipMalloc_ZeroSize_ReturnsNull:
     <<: *level_0
-    tags: [memory]
+    tags: [memory, P0]
   Contract_Memory_HipMalloc_NullOutPointer_ReturnsInvalidValue:
     <<: *level_0
-    tags: [memory]
+    tags: [memory, P0]
   Contract_Memory_HipFree_Null_Succeeds:
     <<: *level_0
-    tags: [memory]
+    tags: [memory, P0]
   Contract_Memory_HipFree_AllocatedPointer_Succeeds:
     <<: *level_0
-    tags: [memory]
+    tags: [memory, P0]
   Contract_Transfer_HipMemcpy_HostToDeviceToHost_RoundTripsBytes:
     <<: *level_0
-    tags: [transfer]
+    tags: [transfer, P0]
   Contract_Transfer_HipMemcpy_DeviceToDevice_CopiesBytes:
     <<: *level_0
-    tags: [transfer]
+    tags: [transfer, P0]
   Contract_Transfer_HipMemcpy_ZeroBytes_Succeeds:
     <<: *level_0
-    tags: [transfer]
+    tags: [transfer, P0]
   Contract_Transfer_HipMemcpy_InvalidDirection_ReturnsInvalidMemcpyDirection:
     <<: *level_0
-    tags: [transfer]
+    tags: [transfer, P0]
   Contract_DriverMemcpy_HipMemcpyHtoD_HtoDtoH_RoundTripsBytes:
     <<: *level_0
-    tags: [driver_memcpy]
+    tags: [driver_memcpy, P0]
   Contract_DriverMemcpy_HipMemcpyDtoD_DtoDSingleDevice_CopiesBytes:
     <<: *level_0
-    tags: [driver_memcpy]
+    tags: [driver_memcpy, P0]
   Contract_DriverMemcpy_HipMemcpyHtoD_ZeroBytes_Succeeds:
     <<: *level_0
-    tags: [driver_memcpy]
+    tags: [driver_memcpy, P0]
   Contract_DriverMemcpy_HipMemcpyHtoDAsync_AsyncOnStream_RoundTripsBytes:
     <<: *level_0
-    tags: [driver_memcpy]
+    tags: [driver_memcpy, P0]
   Contract_DriverMemcpy_HipMemcpyHtoD_NullPointers_AreRejected:
     <<: *level_0
-    tags: [driver_memcpy]
+    tags: [driver_memcpy, P0]
   Contract_DriverMemcpy_HipMemcpyHtoDAsync_AsyncNullPointers_AreRejected:
     <<: *level_0
-    tags: [driver_memcpy]
+    tags: [driver_memcpy, P0]
   Contract_DriverMemcpy2D_HipMemcpyParam2D_HtoDtoH_RoundTripsRows:
     <<: *level_0
-    tags: [driver_memcpy_2d]
+    tags: [driver_memcpy_2d, P0]
   Contract_DriverMemcpy2D_HipMemcpyParam2D_DtoDSingleDevice_CopiesRows:
     <<: *level_0
-    tags: [driver_memcpy_2d]
+    tags: [driver_memcpy_2d, P0]
   Contract_DriverMemcpy2D_HipMemcpyParam2D_ZeroExtent_Succeeds:
     <<: *level_0
-    tags: [driver_memcpy_2d]
+    tags: [driver_memcpy_2d, P0]
   Contract_DriverMemcpy2D_HipMemcpyParam2DAsync_AsyncOnStream_HostToDeviceVisibleAfterSync:
     <<: *level_0
-    tags: [driver_memcpy_2d]
+    tags: [driver_memcpy_2d, P0]
   Contract_DriverMemcpy2D_HipMemcpyParam2D_NullPointersInStruct_AreRejected:
     <<: *level_0
-    tags: [driver_memcpy_2d]
+    tags: [driver_memcpy_2d, P0]
   Contract_Runtime_HipInit_ZeroFlags_Succeeds:
     <<: *level_0
-    tags: [runtime]
+    tags: [runtime, P0]
   Contract_Runtime_HipGetDeviceCount_Default_ReturnsPositiveCount:
     <<: *level_0
-    tags: [runtime]
+    tags: [runtime, P0]
   Contract_Runtime_HipGetDevice_Default_ReturnsValidOrdinal:
     <<: *level_0
-    tags: [runtime]
+    tags: [runtime, P0]
   Contract_Runtime_HipSetDevice_SetCurrentDevice_RoundTripsThroughGetDevice:
     <<: *level_0
-    tags: [runtime]
+    tags: [runtime, P0]
   Contract_Runtime_HipRuntimeGetVersion_RuntimeVersion_ReturnsPositiveVersion:
     <<: *level_0
-    tags: [runtime]
+    tags: [runtime, P0]
   Contract_Runtime_HipDriverGetVersion_DriverVersion_ReturnsNonNegativeVersion:
     <<: *level_0
-    tags: [runtime]
+    tags: [runtime, P0]
   Contract_Runtime_HipGetErrorName_Success_ReturnsSuccessString:
     <<: *level_0
-    tags: [runtime]
+    tags: [runtime, P0]
   Contract_Runtime_HipGetErrorString_Success_ReturnsSuccessString:
     <<: *level_0
-    tags: [runtime]
+    tags: [runtime, P0]
   Contract_Runtime_HipGetLastError_Default_ClearsPreviousError:
     <<: *level_0
-    tags: [runtime]
+    tags: [runtime, P0]
   Contract_Runtime_HipPeekAtLastError_Default_DoesNotClearPreviousError:
     <<: *level_0
-    tags: [runtime]
+    tags: [runtime, P0]
   Contract_Device_HipGetDeviceProperties_GetProperties_SucceedsForCurrentDevice:
     <<: *level_0
-    tags: [device]
+    tags: [device, P0]
   Contract_Device_HipGetDeviceProperties_Name_IsNonEmpty:
     <<: *level_0
-    tags: [device]
+    tags: [device, P0]
   Contract_Device_HipGetDeviceProperties_TotalGlobalMem_IsPositive:
     <<: *level_0
-    tags: [device]
+    tags: [device, P0]
   Contract_Device_HipGetDeviceProperties_MultiProcessorCount_IsPositive:
     <<: *level_0
-    tags: [device]
+    tags: [device, P0]
   Contract_Device_HipGetDeviceProperties_WarpSize_IsPositive:
     <<: *level_0
-    tags: [device]
+    tags: [device, P0]
   Contract_Device_HipDeviceGetAttribute_WarpSize_MatchesProperties:
     <<: *level_0
-    tags: [device]
+    tags: [device, P0]
   Contract_Device_HipGetDevice_CurrentOrdinal_IsWithinDeviceCount:
     <<: *level_0
-    tags: [device]
+    tags: [device, P0]
   Contract_DeviceIdentity_HipDeviceGetByPCIBusId_Default_RoundTripsWithGetPCIBusId:
     <<: *level_0
-    tags: [device_identity]
+    tags: [device_identity, P0]
   Contract_DeviceIdentity_HipDeviceGetByPCIBusId_InvalidString_IsRejected:
     <<: *level_0
-    tags: [device_identity]
+    tags: [device_identity, P0]
   Contract_DeviceIdentity_HipDeviceGetByPCIBusId_NullArgs_AreRejected:
     <<: *level_0
-    tags: [device_identity]
+    tags: [device_identity, P0]
   Contract_DeviceIdentity_HipChooseDevice_Default_ReturnsInRangeOrdinal:
     <<: *level_0
-    tags: [device_identity]
+    tags: [device_identity, P0]
   Contract_DeviceIdentity_HipChooseDevice_NullArgs_AreRejected:
     <<: *level_0
-    tags: [device_identity]
+    tags: [device_identity, P0]
   Contract_DeviceIdentity_HipDeviceGetLuid_Default_AcceptedOrUnsupported:
     <<: *level_0
-    tags: [device_identity]
+    tags: [device_identity, P0]
   Contract_DeviceIdentity_HipDeviceGetLuid_NullArgs_AreRejected:
     <<: *level_0
-    tags: [device_identity]
+    tags: [device_identity, P0]
   Contract_DeviceIdentity_HipDeviceCanAccessPeer_Default_SelfQueryReturnsBoolean:
     <<: *level_0
-    tags: [device_identity]
+    tags: [device_identity, P0]
   Contract_DeviceIdentity_HipDeviceCanAccessPeer_InvalidArgs_AreRejected:
     <<: *level_0
-    tags: [device_identity]
+    tags: [device_identity, P0]
   Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_ReturnsPositiveWidth_ForFloatChannel:
     <<: *level_0
-    tags: [device_texture_query]
+    tags: [device_texture_query, image, P0]
   Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_ReturnsPositiveWidth_ForByteChannel:
     <<: *level_0
-    tags: [device_texture_query]
+    tags: [device_texture_query, image, P0]
   Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_NullMaxWidth_IsRejected:
     <<: *level_0
-    tags: [device_texture_query]
+    tags: [device_texture_query, image, P0]
   Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_NullDescriptor_IsRejected:
     <<: *level_0
-    tags: [device_texture_query]
+    tags: [device_texture_query, image, P0]
   Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_ZeroSizedDescriptor_IsRejected:
     <<: *level_0
-    tags: [device_texture_query]
+    tags: [device_texture_query, image, P0]
   Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_InvalidDevice_IsRejected:
     <<: *level_0
-    tags: [device_texture_query]
+    tags: [device_texture_query, image, P0]
   Contract_PeerQuery_HipDeviceGetP2PAttribute_SelfDevice_IsRejected:
     <<: *level_0
-    tags: [peer_query]
+    tags: [peer_query, P0]
   Contract_PeerQuery_HipDeviceGetP2PAttribute_InvalidArgs_AreRejected:
     <<: *level_0
-    tags: [peer_query]
+    tags: [peer_query, P0]
   Contract_PeerQuery_HipExtGetLinkTypeAndHopCount_SameDevice_IsRejected:
     <<: *level_0
-    tags: [peer_query]
+    tags: [peer_query, P0]
   Contract_PeerQuery_HipExtGetLinkTypeAndHopCount_InvalidDevice_IsRejected:
     <<: *level_0
-    tags: [peer_query]
+    tags: [peer_query, P0]
   Contract_PeerQuery_HipExtGetLinkTypeAndHopCount_NullOutputs_AreRejected:
     <<: *level_0
-    tags: [peer_query]
+    tags: [peer_query, P0]
   Contract_PeerAccess_HipDeviceEnablePeerAccess_EnableInvalidPeerId_IsRejected:
     <<: *level_0
-    tags: [peer_access]
+    tags: [peer_access, P0]
   Contract_PeerAccess_HipDeviceEnablePeerAccess_EnableInvalidFlag_IsRejected:
     <<: *level_0
-    tags: [peer_access]
+    tags: [peer_access, P0]
   Contract_PeerAccess_HipDeviceDisablePeerAccess_DisableInvalidPeerId_IsRejected:
     <<: *level_0
-    tags: [peer_access]
+    tags: [peer_access, P0]
   Contract_PeerAccess_HipDeviceDisablePeerAccess_DisableNotEnabled_IsRejected:
     <<: *level_0
-    tags: [peer_access]
+    tags: [peer_access, P0]
   Contract_PeerAccess_HipDeviceEnablePeerAccess_EnableSelf_IsRejected:
     <<: *level_0
-    tags: [peer_access]
+    tags: [peer_access, P0]
   Contract_PeerAccess_HipDeviceEnablePeerAccess_EnableTwiceThenDisable_RoundTripsWhenAvailable:
     <<: *level_0
-    tags: [peer_access]
+    tags: [peer_access, multigpu, P0]
   Contract_PeerCopy_HipMemcpyPeer_SelfDevice1D_CopiesBytes:
     <<: *level_0
-    tags: [peer_copy]
+    tags: [peer_copy, P0]
   Contract_PeerCopy_HipMemcpyPeerAsync_SelfDevice1DAsync_CopiesBytesAfterSync:
     <<: *level_0
-    tags: [peer_copy]
+    tags: [peer_copy, P0]
   Contract_PeerCopy_HipMemcpy3DPeer_SelfDevice3D_CopiesExtent:
     <<: *level_0
-    tags: [peer_copy]
+    tags: [peer_copy, P0]
   Contract_PeerCopy_HipMemcpy3DPeerAsync_SelfDevice3DAsync_CopiesExtentAfterSync:
     <<: *level_0
-    tags: [peer_copy]
+    tags: [peer_copy, P0]
   Contract_PeerCopy_HipMemcpyPeer_InvalidDevice_IsRejected:
     <<: *level_0
-    tags: [peer_copy]
+    tags: [peer_copy, P0]
   Contract_Stream_HipStreamCreate_Destroy_Succeeds:
     <<: *level_0
-    tags: [stream_event]
+    tags: [stream_event, P0]
   Contract_Stream_HipStreamSynchronize_EmptyStream_Succeeds:
     <<: *level_0
-    tags: [stream_event]
+    tags: [stream_event, P0]
   Contract_Stream_HipStreamQuery_QueryEmptyStream_ReturnsSuccess:
     <<: *level_0
-    tags: [stream_event]
+    tags: [stream_event, P0]
   Contract_Event_HipEventCreate_Destroy_Succeeds:
     <<: *level_0
-    tags: [stream_event]
+    tags: [stream_event, P0]
   Contract_Event_HipEventRecord_ThenSynchronize_Succeeds:
     <<: *level_0
-    tags: [stream_event]
+    tags: [stream_event, P0]
   Contract_Event_HipEventQuery_QueryBeforeCompletion_ReturnsNotReadyOrSuccess:
     <<: *level_0
-    tags: [stream_event]
+    tags: [stream_event, P0]
   Contract_Stream_HipStreamWaitEvent_Default_OrdersDependentWork:
     <<: *level_0
-    tags: [stream_event]
+    tags: [stream_event, P0]
   Contract_StreamProps_HipStreamGetFlags_CreateWithDefaultFlags_ReportsDefaultFlags:
     <<: *level_0
-    tags: [stream_props]
+    tags: [stream_props, P0]
   Contract_StreamProps_HipStreamGetFlags_CreateWithNonBlockingFlags_RoundTripsFlags:
     <<: *level_0
-    tags: [stream_props]
+    tags: [stream_props, P0]
   Contract_StreamProps_HipStreamGetPriority_CreateWithPriority_ClampsWithinRange:
     <<: *level_0
-    tags: [stream_props]
+    tags: [stream_props, P0]
   Contract_StreamProps_HipStreamGetDevice_Default_MatchesCurrentDevice:
     <<: *level_0
-    tags: [stream_props]
+    tags: [stream_props, P0]
   Contract_StreamProps_HipStreamGetId_GetId_DistinctStreamsDifferAndNullStreamQueryable:
     <<: *level_0
-    tags: [stream_props]
+    tags: [stream_props, P0]
   Contract_StreamProps_HipEventElapsedTime_Default_NonNegativeForOrderedEvents:
     <<: *level_0
-    tags: [stream_props]
+    tags: [stream_props, P0]
   Contract_StreamProps_HipEventRecordWithFlags_Default_RecordsAndTimes:
     <<: *level_0
-    tags: [stream_props]
+    tags: [stream_props, P0]
   Contract_StreamCallbacks_HipStreamAddCallback_Default_InvokesExactlyOnce:
     <<: *level_0
-    tags: [stream_callbacks]
+    tags: [stream_callbacks, P0]
   Contract_StreamCallbacks_HipStreamAddCallback_Default_RunsAfterPriorWork:
     <<: *level_0
-    tags: [stream_callbacks]
+    tags: [stream_callbacks, P0]
   Contract_StreamCallbacks_HipStreamAddCallback_Default_ReceivesSuccessStatus:
     <<: *level_0
-    tags: [stream_callbacks]
+    tags: [stream_callbacks, P0]
   Contract_StreamCallbacks_HipLaunchHostFunc_Default_InvokesExactlyOnce:
     <<: *level_0
-    tags: [stream_callbacks]
+    tags: [stream_callbacks, P0]
   Contract_StreamCallbacks_HipLaunchHostFunc_Default_OrdersBeforeLaterWork:
     <<: *level_0
-    tags: [stream_callbacks]
+    tags: [stream_callbacks, P0]
   Contract_StreamAttributes_HipStreamGetAttribute_Priority_RoundTrips:
     <<: *level_0
-    tags: [stream_attributes]
+    tags: [stream_attributes, P0]
   Contract_StreamAttributes_HipStreamSetAttribute_SyncPolicy_RoundTrips:
     <<: *level_0
-    tags: [stream_attributes]
+    tags: [stream_attributes, P0]
   Contract_StreamAttributes_HipStreamSetAttribute_AccessPolicyWindow_RoundTrips:
     <<: *level_0
-    tags: [stream_attributes]
+    tags: [stream_attributes, P0]
   Contract_StreamAttributes_HipStreamCopyAttributes_Default_PropagatesToDestination:
     <<: *level_0
-    tags: [stream_attributes]
+    tags: [stream_attributes, P0]
   Contract_StreamAttributes_HipStreamGetAttribute_Default_RejectsInvalidInputs:
     <<: *level_0
-    tags: [stream_attributes]
+    tags: [stream_attributes, P0]
   Contract_StreamMemoryOps_HipStreamWriteValue32_Default_BecomesVisibleInStreamOrder:
     <<: *level_0
-    tags: [stream_memory_ops]
+    tags: [stream_memory_ops, P0]
   Contract_StreamMemoryOps_HipStreamWriteValue64_Default_BecomesVisibleInStreamOrder:
     <<: *level_0
-    tags: [stream_memory_ops]
+    tags: [stream_memory_ops, P0]
   Contract_StreamMemoryOps_HipStreamWaitValue32_WaitValueGte_GatesLaterStreamWork:
     <<: *level_0
-    tags: [stream_memory_ops]
+    tags: [stream_memory_ops, P0]
   Contract_StreamMemoryOps_HipStreamWaitValue64_Gte_GatesLaterStreamWork:
     <<: *level_0
-    tags: [stream_memory_ops]
+    tags: [stream_memory_ops, P0]
   Contract_StreamMemoryOps_HipStreamBatchMemOp_Default_AppliesWritesInStreamOrder:
     <<: *level_0
-    tags: [stream_memory_ops]
+    tags: [stream_memory_ops, P0]
   Contract_StreamMemoryOps_HipStreamWriteValue32_Default_RejectsInvalidInputs:
     <<: *level_0
-    tags: [stream_memory_ops]
+    tags: [stream_memory_ops, P0]
   Contract_StreamCuMask_HipExtStreamCreateWithCUMask_NvidiaUnsupported_IsSkipped:
     <<: *level_0
-    tags: [stream_cu_mask]
+    tags: [stream_cu_mask, P0]
   Contract_StreamCuMask_HipExtStreamGetCUMask_MaskRoundTrips_AllCUsActive:
     <<: *level_0
-    tags: [stream_cu_mask]
+    tags: [stream_cu_mask, P0]
   Contract_StreamCuMask_HipExtStreamCreateWithCUMask_CreateWithDefaultMask_Succeeds:
     <<: *level_0
-    tags: [stream_cu_mask]
+    tags: [stream_cu_mask, P0]
   Contract_StreamCuMask_HipExtStreamCreateWithCUMask_Default_CreateRejectsInvalidArgs:
     <<: *level_0
-    tags: [stream_cu_mask]
+    tags: [stream_cu_mask, P0]
   Contract_StreamCuMask_HipExtStreamGetCUMask_Default_GetRejectsInvalidArgs:
     <<: *level_0
-    tags: [stream_cu_mask]
+    tags: [stream_cu_mask, P0]
   Contract_StreamAttach_HipStreamAttachMemAsync_ManagedOnCreatedStream_Succeeds:
     <<: *level_0
-    tags: [stream_attach]
+    tags: [stream_attach, P0]
   Contract_StreamAttach_HipStreamAttachMemAsync_NullStreamAttachGlobal_Succeeds:
     <<: *level_0
-    tags: [stream_attach]
+    tags: [stream_attach, P0]
   Contract_StreamAttach_HipStreamAttachMemAsync_NonZeroLengthAttachSingle_Succeeds:
     <<: *level_0
-    tags: [stream_attach]
+    tags: [stream_attach, P0]
   Contract_StreamAttach_HipStreamAttachMemAsync_NullDevPtr_IsRejected:
     <<: *level_0
-    tags: [stream_attach]
+    tags: [stream_attach, P0]
   Contract_StreamAttach_HipStreamAttachMemAsync_NullStreamAttachSingle_IsRejected:
     <<: *level_0
-    tags: [stream_attach]
+    tags: [stream_attach, P0]
   Contract_AsyncTransfer_HipMemcpyAsync_HostToDeviceToHost_RoundTripsAfterStreamSynchronize:
     <<: *level_0
-    tags: [async_transfer]
+    tags: [async_transfer, P0]
   Contract_AsyncTransfer_HipMemcpyAsync_DeviceToDevice_CopiesAfterStreamSynchronize:
     <<: *level_0
-    tags: [async_transfer]
+    tags: [async_transfer, P0]
   Contract_AsyncTransfer_HipMemcpyAsync_ZeroBytes_Succeeds:
     <<: *level_0
-    tags: [async_transfer]
+    tags: [async_transfer, P0]
   Contract_AsyncTransfer_HipMemcpyAsync_InvalidDirection_ReturnsConsistentError:
     <<: *level_0
-    tags: [async_transfer]
+    tags: [async_transfer, P0]
   Contract_MemBatchCopy_HipMemcpyBatchAsync_TwoOps_RoundTripBytes:
     <<: *level_0
-    tags: [mem_batch_copy]
+    tags: [mem_batch_copy, P0]
   Contract_MemBatchCopy_HipMemcpyBatchAsync_WithAttributes_RoundTripBytes:
     <<: *level_0
-    tags: [mem_batch_copy]
+    tags: [mem_batch_copy, P0]
   Contract_MemBatchCopy_HipMemcpyBatchAsync_NullDestination_IsRejected:
     <<: *level_0
-    tags: [mem_batch_copy]
+    tags: [mem_batch_copy, P0]
   Contract_MemBatchCopy3D_HipMemcpy3DBatchAsync_HostDeviceHostRoundTrip_IsVisibleAfterSync:
     <<: *level_0
-    tags: [mem_batch_copy_3d]
+    tags: [mem_batch_copy_3d, P0]
   Contract_MemBatchCopy3D_HipMemcpy3DBatchAsync_ZeroOps_IsRejected:
     <<: *level_0
-    tags: [mem_batch_copy_3d]
+    tags: [mem_batch_copy_3d, P0]
   Contract_MemBatchCopy3D_HipMemcpy3DBatchAsync_NullOpList_IsRejected:
     <<: *level_0
-    tags: [mem_batch_copy_3d]
+    tags: [mem_batch_copy_3d, P0]
   Contract_MemBatchCopy3D_HipMemcpy3DBatchAsync_NonZeroFlags_IsRejected:
     <<: *level_0
-    tags: [mem_batch_copy_3d]
+    tags: [mem_batch_copy_3d, P0]
   Contract_MemBatchDiscard_HipMemDiscardBatchAsync_DiscardBatch_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [mem_batch_discard]
+    tags: [mem_batch_discard, P0]
   Contract_MemBatchDiscard_HipMemDiscardAndPrefetchBatchAsync_DiscardAndPrefetchBatch_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [mem_batch_discard]
+    tags: [mem_batch_discard, P0]
   Contract_MemBatchDiscard_HipDrvMemDiscardBatchAsync_DrvDiscardBatch_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [mem_batch_discard]
+    tags: [mem_batch_discard, P0]
   Contract_MemBatchDiscard_HipDrvMemDiscardAndPrefetchBatchAsync_DrvDiscardAndPrefetchBatch_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [mem_batch_discard]
+    tags: [mem_batch_discard, P0]
   Contract_MemBatchDiscard_HipMemDiscardBatchAsync_NullPointer_IsRejectedOrUnsupported:
     <<: *level_0
-    tags: [mem_batch_discard]
+    tags: [mem_batch_discard, P0]
   Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_NvidiaPrefetchBatchUnsupported_IsSkipped:
     <<: *level_0
-    tags: [mem_batch_discard]
+    tags: [mem_batch_discard, P0]
   Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_PrefetchBatch_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [mem_batch_discard]
+    tags: [mem_batch_discard, P0]
   Contract_Memset_HipMemset_DeviceBuffer_IsFilledWithBytePattern:
     <<: *level_0
-    tags: [memset]
+    tags: [memset, P0]
   Contract_Memset_HipMemset_ZeroBytes_Succeeds:
     <<: *level_0
-    tags: [memset]
+    tags: [memset, P0]
   Contract_MemsetAsync_HipMemsetAsync_DeviceBuffer_IsFilledAfterStreamSynchronize:
     <<: *level_0
-    tags: [memset]
+    tags: [memset, P0]
   Contract_MemsetD8_HipMemsetD8_DeviceBuffer_IsFilledWithBytePattern:
     <<: *level_0
-    tags: [memset]
+    tags: [memset, P0]
   Contract_MemsetD16_HipMemsetD16_DeviceBuffer_IsFilledWithWordPattern:
     <<: *level_0
-    tags: [memset]
+    tags: [memset, P0]
   Contract_MemsetD32_HipMemsetD32_DeviceBuffer_IsFilledWithDwordPattern:
     <<: *level_0
-    tags: [memset]
+    tags: [memset, P0]
   Contract_DriverMemsetAsync_HipMemsetD8Async_D8FillsByte_VisibleAfterSync:
     <<: *level_0
-    tags: [driver_memset_async]
+    tags: [driver_memset_async, P0]
   Contract_DriverMemsetAsync_HipMemsetD16Async_D16FillsWord_VisibleAfterSync:
     <<: *level_0
-    tags: [driver_memset_async]
+    tags: [driver_memset_async, P0]
   Contract_DriverMemsetAsync_HipMemsetD32Async_D32FillsDword_VisibleAfterSync:
     <<: *level_0
-    tags: [driver_memset_async]
+    tags: [driver_memset_async, P0]
   Contract_DriverMemsetAsync_HipMemsetD32Async_NullStream_UsesDefaultStream:
     <<: *level_0
-    tags: [driver_memset_async]
+    tags: [driver_memset_async, P0]
   Contract_DriverMemsetAsync_HipMemsetD8Async_ZeroCount_Succeeds:
     <<: *level_0
-    tags: [driver_memset_async]
+    tags: [driver_memset_async, P0]
   Contract_DriverMemsetAsync_HipMemsetD8Async_NullDestination_IsRejected:
     <<: *level_0
-    tags: [driver_memset_async]
+    tags: [driver_memset_async, P0]
   Contract_DriverMemset2D_HipMemsetD2D8_D2D8FillsRows_VisibleAfterCopy:
     <<: *level_0
-    tags: [driver_memset_2d]
+    tags: [driver_memset_2d, P0]
   Contract_DriverMemset2D_HipMemsetD2D16_D2D16FillsWordRows_VisibleAfterCopy:
     <<: *level_0
-    tags: [driver_memset_2d]
+    tags: [driver_memset_2d, P0]
   Contract_DriverMemset2D_HipMemsetD2D32_D2D32FillsDwordRows_VisibleAfterCopy:
     <<: *level_0
-    tags: [driver_memset_2d]
+    tags: [driver_memset_2d, P0]
   Contract_DriverMemset2D_HipMemsetD2D8Async_AsyncD2D8_VisibleAfterSync:
     <<: *level_0
-    tags: [driver_memset_2d]
+    tags: [driver_memset_2d, P0]
   Contract_DriverMemset2D_HipMemset2D_RuntimeMemset2D_FillsRegion:
     <<: *level_0
-    tags: [driver_memset_2d]
+    tags: [driver_memset_2d, P0]
   Contract_DriverMemset2D_HipMemsetD2D8_NullDestination_IsRejected:
     <<: *level_0
-    tags: [driver_memset_2d]
+    tags: [driver_memset_2d, P0]
   Contract_DriverMemsetAsync2D3D_HipMemsetD2D16Async_FillsWordRows_VisibleAfterSync:
     <<: *level_0
-    tags: [driver_memset_async_2d3d]
+    tags: [driver_memset_async_2d3d, P0]
   Contract_DriverMemsetAsync2D3D_HipMemsetD2D32Async_FillsDwordRows_VisibleAfterSync:
     <<: *level_0
-    tags: [driver_memset_async_2d3d]
+    tags: [driver_memset_async_2d3d, P0]
   Contract_DriverMemsetAsync2D3D_HipMemset2DAsync_FillsRegion_VisibleAfterSync:
     <<: *level_0
-    tags: [driver_memset_async_2d3d]
+    tags: [driver_memset_async_2d3d, P0]
   Contract_DriverMemsetAsync2D3D_HipMemset3DAsync_FillsExtent_VisibleAfterSync:
     <<: *level_0
-    tags: [driver_memset_async_2d3d]
+    tags: [driver_memset_async_2d3d, P0]
   Contract_DriverMemsetAsync2D3D_HipMemsetD2D16Async_NullDestination_IsRejected:
     <<: *level_0
-    tags: [driver_memset_async_2d3d]
+    tags: [driver_memset_async_2d3d, P0]
   Contract_ErrorApi_HipGetErrorName_Success_ReturnsNonEmptyString:
     <<: *level_0
-    tags: [error_api]
+    tags: [error_api, P0]
   Contract_ErrorApi_HipGetErrorString_Success_ReturnsNonEmptyString:
     <<: *level_0
-    tags: [error_api]
+    tags: [error_api, P0]
   Contract_ErrorApi_HipGetErrorName_InvalidValue_ReturnsNonEmptyString:
     <<: *level_0
-    tags: [error_api]
+    tags: [error_api, P0]
   Contract_ErrorApi_HipGetErrorString_InvalidValue_ReturnsNonEmptyString:
     <<: *level_0
-    tags: [error_api]
+    tags: [error_api, P0]
   Contract_ErrorApi_HipGetErrorName_UnknownError_ReturnsNonNullString:
     <<: *level_0
-    tags: [error_api]
+    tags: [error_api, P0]
   Contract_ErrorApi_HipGetErrorString_UnknownError_ReturnsNonNullString:
     <<: *level_0
-    tags: [error_api]
+    tags: [error_api, P0]
   Contract_DriverError_HipDrvGetErrorName_KnownCode_ReturnsNonEmptyString:
     <<: *level_0
-    tags: [driver_error]
+    tags: [driver_error, P0]
   Contract_DriverError_HipDrvGetErrorString_KnownCode_ReturnsNonEmptyString:
     <<: *level_0
-    tags: [driver_error]
+    tags: [driver_error, P0]
   Contract_DriverError_HipDrvGetErrorName_Default_RepeatedQueryIsStable:
     <<: *level_0
-    tags: [driver_error]
+    tags: [driver_error, P0]
   Contract_DriverError_HipDrvGetErrorString_Default_RepeatedQueryIsStable:
     <<: *level_0
-    tags: [driver_error]
+    tags: [driver_error, P0]
   Contract_DriverError_HipDrvGetErrorName_InvalidCode_IsRejected:
     <<: *level_0
-    tags: [driver_error]
+    tags: [driver_error, P0]
   Contract_DriverError_HipDrvGetErrorString_InvalidCode_IsRejected:
     <<: *level_0
-    tags: [driver_error]
+    tags: [driver_error, P0]
   Contract_Kernel_HipLaunchKernelGGL_LaunchGGL_WritesExpectedValue:
     <<: *level_0
-    tags: [kernel]
+    tags: [kernel, P0]
   Contract_Kernel_HipLaunchKernel_Default_WritesExpectedValue:
     <<: *level_0
-    tags: [kernel]
+    tags: [kernel, P0]
   Contract_Kernel_HipGetLastError_AfterValidLaunch_ReturnsSuccess:
     <<: *level_0
-    tags: [kernel]
+    tags: [kernel, P0]
   Contract_Kernel_HipGetLastError_InvalidConfiguration_RecordsReturnedError:
     <<: *level_0
-    tags: [kernel]
+    tags: [kernel, P0]
   Contract_CallConfig_HipConfigureCall_NvidiaUnsupported_IsSkipped:
     <<: *level_0
-    tags: [call_config]
+    tags: [call_config, P0]
   Contract_CallConfig_HipLaunchByPtr_ConfigureSetupLaunch_WritesExpectedValue:
     <<: *level_0
-    tags: [call_config]
+    tags: [call_config, P0]
   Contract_CallConfig_HipLaunchByPtr_ConfigureSetupLaunch_RepeatedStagingIsIndependent:
     <<: *level_0
-    tags: [call_config]
+    tags: [call_config, P0]
   Contract_FuncAttributes_HipFuncGetAttributes_Default_ReturnsSaneStruct:
     <<: *level_0
-    tags: [func_attributes]
+    tags: [func_attributes, P0]
   Contract_FuncAttributes_HipFuncGetAttributes_NullAttr_IsRejected:
     <<: *level_0
-    tags: [func_attributes]
-  Contract_FuncAttributes_HipFuncGetAttribute_s_MatchesScalarGetAttribute:
+    tags: [func_attributes, P0]
+  Contract_FuncAttributes_HipFuncGetAttribute_Scalar_MatchesScalarGetAttribute:
     <<: *level_0
-    tags: [func_attributes]
+    tags: [func_attributes, P0]
   Contract_FuncAttributes_HipGetFuncBySymbol_Default_ResolvesInSourceKernel:
     <<: *level_0
-    tags: [func_attributes]
+    tags: [func_attributes, P0]
   Contract_FuncAttributes_HipFuncSetAttribute_MaxDynamicSharedMemory_IsAccepted:
     <<: *level_0
-    tags: [func_attributes]
+    tags: [func_attributes, P0]
   Contract_FuncAttributes_HipFuncSetAttribute_PreferredCarveout_IsAccepted:
     <<: *level_0
-    tags: [func_attributes]
+    tags: [func_attributes, P0]
   Contract_FuncAttributes_HipFuncSetCacheConfig_PreferNone_Succeeds:
     <<: *level_0
-    tags: [func_attributes]
+    tags: [func_attributes, P0]
   Contract_FuncAttributes_HipFuncSetSharedMemConfig_Default_Succeeds:
     <<: *level_0
-    tags: [func_attributes]
+    tags: [func_attributes, P0]
   Contract_KernelLaunch_HipLaunchCooperativeKernel_Default_WritesExpectedValue:
     <<: *level_0
-    tags: [kernel_launch]
+    tags: [kernel_launch, P0]
   Contract_KernelLaunch_HipLaunchCooperativeKernel_NullFunction_IsRejected:
     <<: *level_0
-    tags: [kernel_launch]
+    tags: [kernel_launch, P0]
   Contract_KernelLaunch_HipGetSymbolAddress_Default_ReturnsUsableDevicePointer:
     <<: *level_0
-    tags: [kernel_launch]
+    tags: [kernel_launch, P0]
   Contract_KernelLaunch_HipGetSymbolSize_Default_MatchesDeclaredSize:
     <<: *level_0
-    tags: [kernel_launch]
+    tags: [kernel_launch, P0]
   Contract_KernelLaunch_HipGetSymbolAddress_NullSymbol_IsRejected:
     <<: *level_0
-    tags: [kernel_launch]
+    tags: [kernel_launch, P0]
   Contract_KernelLaunch_HipLaunchKernelEx_Default_WritesExpectedValue:
     <<: *level_0
-    tags: [kernel_launch]
+    tags: [kernel_launch, P0]
   Contract_KernelLaunch_HipExtLaunchKernel_Default_WritesExpectedValue:
     <<: *level_0
-    tags: [kernel_launch]
+    tags: [kernel_launch, P0]
   Contract_SymbolCopy_HipMemcpyToSymbol_ThenFromSymbol_RoundTripsScalar:
     <<: *level_0
-    tags: [symbol_copy]
+    tags: [symbol_copy, P0]
   Contract_SymbolCopy_HipMemcpyToSymbol_WithOffset_WritesAtElementOffset:
     <<: *level_0
-    tags: [symbol_copy]
+    tags: [symbol_copy, P0]
   Contract_SymbolCopy_HipMemcpyFromSymbol_DefaultDirection_ReadsBytes:
     <<: *level_0
-    tags: [symbol_copy]
+    tags: [symbol_copy, P0]
   Contract_SymbolCopy_HipMemcpyToSymbolAsync_FromSymbolAsync_RoundTripsInStreamOrder:
     <<: *level_0
-    tags: [symbol_copy]
+    tags: [symbol_copy, P0]
   Contract_SymbolCopy_HipMemcpyToSymbol_NullSymbol_IsRejected:
     <<: *level_0
-    tags: [symbol_copy]
+    tags: [symbol_copy, P0]
   Contract_SymbolCopy_HipMemcpyToSymbol_OutOfBoundsSizePlusOffset_IsRejected:
     <<: *level_0
-    tags: [symbol_copy]
+    tags: [symbol_copy, P0]
   Contract_Graph_HipGraphCreate_Destroy_Succeeds:
     <<: *level_0
-    tags: [graph]
+    tags: [graph, P0]
   Contract_Graph_HipGraphAddEmptyNode_Default_Succeeds:
     <<: *level_0
-    tags: [graph]
+    tags: [graph, P0]
   Contract_Graph_HipGraphAddMemcpyNode1D_Default_RoundTripsBytes:
     <<: *level_0
-    tags: [graph]
+    tags: [graph, P0]
   Contract_Graph_HipGraphAddMemsetNode_Default_FillsDeviceBuffer:
     <<: *level_0
-    tags: [graph]
+    tags: [graph, P0]
   Contract_Graph_HipGraphInstantiate_LaunchSynchronize_Succeeds:
     <<: *level_0
-    tags: [graph]
+    tags: [graph, P0]
   Contract_Occupancy_HipOccupancyMaxActiveBlocksPerMultiprocessor_Default_ReturnsNonNegativeValue:
     <<: *level_0
-    tags: [occupancy]
+    tags: [occupancy, P0]
   Contract_Occupancy_HipOccupancyMaxPotentialBlockSize_Default_ReturnsUsableValues:
     <<: *level_0
-    tags: [occupancy]
+    tags: [occupancy, P0]
   Contract_Occupancy_HipOccupancyAvailableDynamicSMemPerBlock_AvailableDynamicSmem_IsWithinDeviceLimit:
     <<: *level_0
-    tags: [occupancy]
+    tags: [occupancy, P0]
   Contract_OccupancyExt_HipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Default_DefaultMatchesPlain:
     <<: *level_0
-    tags: [occupancy_ext]
+    tags: [occupancy_ext, P0]
   Contract_OccupancyExt_HipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Default_DisableCachingOverrideSucceeds:
     <<: *level_0
-    tags: [occupancy_ext]
+    tags: [occupancy_ext, P0]
   Contract_OccupancyExt_HipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Default_RejectsInvalidInputs:
     <<: *level_0
-    tags: [occupancy_ext]
+    tags: [occupancy_ext, P0]
   Contract_OccupancyExt_HipOccupancyMaxPotentialClusterSize_ClusterQueries_CapabilityGatedRange:
     <<: *level_0
-    tags: [occupancy_ext]
+    tags: [occupancy_ext, P0]
   Contract_OccupancyVariable_HipOccupancyMaxPotentialBlockSizeWithFlags_NvidiaUnsupported_IsSkipped:
     <<: *level_0
-    tags: [occupancy_variable]
+    tags: [occupancy_variable, P0]
   Contract_OccupancyVariable_HipOccupancyMaxPotentialBlockSizeWithFlags_Default_ReturnsUsableValues:
     <<: *level_0
-    tags: [occupancy_variable]
+    tags: [occupancy_variable, P0]
   Contract_OccupancyVariable_HipOccupancyMaxPotentialBlockSizeWithFlags_Default_MatchesPlainVariant:
     <<: *level_0
-    tags: [occupancy_variable]
+    tags: [occupancy_variable, P0]
   Contract_OccupancyVariable_HipOccupancyMaxPotentialBlockSizeVariableSMem_Default_ReturnsUsableValues:
     <<: *level_0
-    tags: [occupancy_variable]
+    tags: [occupancy_variable, P0]
   Contract_OccupancyVariable_HipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags_Default_ReturnsUsableValues:
     <<: *level_0
-    tags: [occupancy_variable]
+    tags: [occupancy_variable, P0]
   Contract_OccupancyVariable_HipOccupancyMaxPotentialBlockSizeWithFlags_WindowsUnsupported_IsSkipped:
     <<: *level_0
-    tags: [occupancy_variable]
+    tags: [occupancy_variable, P0]
   Contract_GraphCapture_HipStreamEndCapture_BeginEndEmptyStream_ProducesGraph:
     <<: *level_0
-    tags: [graph_capture]
-  Contract_GraphCapture_HipStreamBeginCapture_dMemcpy_RoundTripsBytes:
+    tags: [graph_capture, P0]
+  Contract_GraphCapture_HipStreamBeginCapture_Memcpy_RoundTripsBytes:
     <<: *level_0
-    tags: [graph_capture]
+    tags: [graph_capture, P0]
   Contract_GraphCapture_HipStreamIsCapturing_Default_ReportsActiveDuringCapture:
     <<: *level_0
-    tags: [graph_capture]
+    tags: [graph_capture, P0]
   Contract_GraphCapture_HipStreamGetCaptureInfo_Default_ReturnsActiveState:
     <<: *level_0
-    tags: [graph_capture]
+    tags: [graph_capture, P0]
   Contract_StreamCaptureMode_HipThreadExchangeStreamCaptureMode_Exchange_RoundTripsPreviousMode:
     <<: *level_0
-    tags: [stream_capture_mode]
+    tags: [stream_capture_mode, P0]
   Contract_StreamCaptureMode_HipThreadExchangeStreamCaptureMode_ExchangeNullMode_IsRejected:
     <<: *level_0
-    tags: [stream_capture_mode]
+    tags: [stream_capture_mode, P0]
   Contract_StreamCaptureMode_HipStreamGetCaptureInfoV2_Default_ReportsActiveDuringCapture:
     <<: *level_0
-    tags: [stream_capture_mode]
+    tags: [stream_capture_mode, P0]
   Contract_StreamCaptureMode_HipStreamGetCaptureInfoV2_Default_ReportsNoneOutsideCapture:
     <<: *level_0
-    tags: [stream_capture_mode]
+    tags: [stream_capture_mode, P0]
   Contract_StreamCaptureMode_HipStreamGetCaptureInfoV2_Default_ReturnsDependencyNode:
     <<: *level_0
-    tags: [stream_capture_mode]
+    tags: [stream_capture_mode, P0]
   Contract_StreamCaptureMode_HipStreamGetCaptureInfoV2_NullStatus_IsRejected:
     <<: *level_0
-    tags: [stream_capture_mode]
+    tags: [stream_capture_mode, P0]
   Contract_CaptureToGraph_HipStreamBeginCaptureToGraph_BeginCaptureIntoGraph_ProducesSameGraph:
     <<: *level_0
-    tags: [capture_to_graph]
+    tags: [capture_to_graph, P0]
   Contract_CaptureToGraph_HipStreamBeginCaptureToGraph_BeginCaptureIntoGraph_LaunchWritesExpectedValue:
     <<: *level_0
-    tags: [capture_to_graph]
+    tags: [capture_to_graph, P0]
   Contract_CaptureToGraph_HipStreamUpdateCaptureDependencies_Default_AddsToDependencySet:
     <<: *level_0
-    tags: [capture_to_graph]
+    tags: [capture_to_graph, P0]
   Contract_GraphKernel_HipGraphAddKernelNode_Default_WritesExpectedValue:
     <<: *level_0
-    tags: [graph_kernel]
+    tags: [graph_kernel, P0]
   Contract_GraphKernel_HipGraphKernelNodeGetParams_Default_ReturnsConfiguredParams:
     <<: *level_0
-    tags: [graph_kernel]
+    tags: [graph_kernel, P0]
   Contract_GraphKernel_HipGraphExecKernelNodeSetParams_Default_UpdatesLaunchValue:
     <<: *level_0
-    tags: [graph_kernel]
+    tags: [graph_kernel, P0]
   Contract_GraphEvent_HipGraphAddEventRecordNode_Default_RecordsEvent:
     <<: *level_0
-    tags: [graph_event]
+    tags: [graph_event, P0]
   Contract_GraphEvent_HipGraphAddEventWaitNode_Default_WaitsForRecordedEvent:
     <<: *level_0
-    tags: [graph_event]
+    tags: [graph_event, P0]
   Contract_GraphEvent_HipGraphAddEventRecordNode_RecordThenWait_OrdersMemcpy:
     <<: *level_0
-    tags: [graph_event]
+    tags: [graph_event, P0]
   Contract_GraphTopology_HipGraphGetNodes_Default_ReturnsAddedNodes:
     <<: *level_0
-    tags: [graph_topology]
+    tags: [graph_topology, P0]
   Contract_GraphTopology_HipGraphGetRootNodes_Default_ReturnsDependencyFreeNode:
     <<: *level_0
-    tags: [graph_topology]
+    tags: [graph_topology, P0]
   Contract_GraphTopology_HipGraphGetEdges_Default_ReturnsDependencyEdge:
     <<: *level_0
-    tags: [graph_topology]
+    tags: [graph_topology, P0]
   Contract_GraphTopology_HipGraphNodeGetDependencies_NodeDependencies_ReturnsConfiguredDependency:
     <<: *level_0
-    tags: [graph_topology]
+    tags: [graph_topology, P0]
   Contract_GraphTopology_HipGraphNodeGetDependentNodes_NodeDependents_ReturnsConfiguredDependent:
     <<: *level_0
-    tags: [graph_topology]
+    tags: [graph_topology, P0]
   Contract_GraphClone_HipGraphClone_ClonedEmptyGraph_InstantiatesAndLaunches:
     <<: *level_0
-    tags: [graph_clone]
+    tags: [graph_clone, P0]
   Contract_GraphClone_HipGraphClone_ClonedMemcpyGraph_RoundTripsBytes:
     <<: *level_0
-    tags: [graph_clone]
+    tags: [graph_clone, P0]
   Contract_GraphClone_HipGraphClone_OriginalAndClone_AreDistinctHandles:
     <<: *level_0
-    tags: [graph_clone]
+    tags: [graph_clone, P0]
   Contract_GraphUpdate_HipGraphExecMemcpyNodeSetParams1D_Default_UpdatesCopySource:
     <<: *level_0
-    tags: [graph_update]
+    tags: [graph_update, P0]
   Contract_GraphUpdate_HipGraphExecMemsetNodeSetParams_Default_UpdatesFillValue:
     <<: *level_0
-    tags: [graph_update]
+    tags: [graph_update, P0]
   Contract_GraphUpdate_HipGraphExecMemcpyNodeSetParams1D_Default_UpdatesCopyDestination:
     <<: *level_0
-    tags: [graph_update]
+    tags: [graph_update, P0]
   Contract_GraphUpdate_HipGraphExecUpdate_Default_AppliesChangedMemsetValue:
     <<: *level_0
-    tags: [graph_update]
+    tags: [graph_update, P0]
   Contract_GraphUpdate_HipGraphExecUpdate_Default_ReportsTopologyChanged:
     <<: *level_0
-    tags: [graph_update]
+    tags: [graph_update, P0]
   Contract_GraphUpdate_HipGraphExecHostNodeSetParams_Default_UpdatesCallbackUserData:
     <<: *level_0
-    tags: [graph_update]
+    tags: [graph_update, P0]
   Contract_GraphUpdate_HipGraphExecChildGraphNodeSetParams_Default_UpdatesEmbeddedMemset:
     <<: *level_0
-    tags: [graph_update]
+    tags: [graph_update, P0]
   Contract_GraphUpdate_HipGraphExecEventRecordNodeSetEvent_Default_UpdatesRecordedEvent:
     <<: *level_0
-    tags: [graph_update]
+    tags: [graph_update, P0]
   Contract_GraphUpdate_HipGraphExecEventWaitNodeSetEvent_Default_AcceptsSwappedEvent:
     <<: *level_0
-    tags: [graph_update]
+    tags: [graph_update, P0]
   Contract_GraphExecLifecycle_HipGraphInstantiateWithFlags_ZeroFlag_LaunchSucceeds:
     <<: *level_0
-    tags: [graph_exec_lifecycle]
+    tags: [graph_exec_lifecycle, P0]
   Contract_GraphExecLifecycle_HipGraphExecGetFlags_Default_ReflectsZero:
     <<: *level_0
-    tags: [graph_exec_lifecycle]
+    tags: [graph_exec_lifecycle, P0]
   Contract_GraphExecLifecycle_HipGraphExecGetFlags_Default_ReflectsAutoFreeOnLaunch:
     <<: *level_0
-    tags: [graph_exec_lifecycle]
+    tags: [graph_exec_lifecycle, P0]
   Contract_GraphExecLifecycle_HipGraphUpload_Default_ThenLaunchSucceeds:
     <<: *level_0
-    tags: [graph_exec_lifecycle]
+    tags: [graph_exec_lifecycle, P0]
   Contract_GraphExecLifecycle_HipGraphInstantiateWithFlags_InvalidArgs_AreRejected:
     <<: *level_0
-    tags: [graph_exec_lifecycle]
+    tags: [graph_exec_lifecycle, P0]
   Contract_GraphNodeTypes_HipGraphNodeGetType_Default_EmptyNodeReportsEmpty:
     <<: *level_0
-    tags: [graph_node_types]
+    tags: [graph_node_types, P0]
   Contract_GraphNodeTypes_HipGraphNodeGetType_Default_MemcpyNodeReportsMemcpy:
     <<: *level_0
-    tags: [graph_node_types]
+    tags: [graph_node_types, P0]
   Contract_GraphNodeTypes_HipGraphNodeGetType_Default_MemsetNodeReportsMemset:
     <<: *level_0
-    tags: [graph_node_types]
+    tags: [graph_node_types, P0]
   Contract_GraphNodeTypes_HipGraphAddDependencies_Default_CreatesEdge:
     <<: *level_0
-    tags: [graph_node_types]
+    tags: [graph_node_types, P0]
   Contract_GraphNodeTypes_HipGraphRemoveDependencies_Default_ClearsEdge:
     <<: *level_0
-    tags: [graph_node_types]
+    tags: [graph_node_types, P0]
   Contract_GraphChild_HipGraphAddChildGraphNode_Default_ExecutesEmbeddedMemcpy:
     <<: *level_0
-    tags: [graph_child]
+    tags: [graph_child, P0]
   Contract_GraphChild_HipGraphChildGraphNodeGetGraph_Default_ReturnsHandle:
     <<: *level_0
-    tags: [graph_child]
+    tags: [graph_child, P0]
   Contract_GraphChild_HipGraphNodeGetType_NodeType_ReportsGraph:
     <<: *level_0
-    tags: [graph_child]
+    tags: [graph_child, P0]
   Contract_GraphHost_HipGraphAddHostNode_Default_InvokesCallbackOnLaunch:
     <<: *level_0
-    tags: [graph_host]
+    tags: [graph_host, P0]
   Contract_GraphHost_HipGraphHostNodeGetParams_Default_RoundTripsFnAndUserData:
     <<: *level_0
-    tags: [graph_host]
+    tags: [graph_host, P0]
   Contract_GraphHost_HipGraphNodeGetType_NodeType_ReportsHost:
     <<: *level_0
-    tags: [graph_host]
+    tags: [graph_host, P0]
   Contract_GraphMemNodes_HipGraphAddMemAllocNode_Default_ReturnsDevicePtr:
     <<: *level_0
-    tags: [graph_mem_nodes]
+    tags: [graph_mem_nodes, P0]
   Contract_GraphMemNodes_HipGraphMemAllocNodeGetParams_Default_RoundTripsBytesize:
     <<: *level_0
-    tags: [graph_mem_nodes]
+    tags: [graph_mem_nodes, P0]
   Contract_GraphMemNodes_HipGraphMemFreeNodeGetParams_Default_RoundTripsPointer:
     <<: *level_0
-    tags: [graph_mem_nodes]
+    tags: [graph_mem_nodes, P0]
   Contract_GraphMemNodes_HipDeviceGraphMemTrim_GraphMemAttribute_TrimIsNonIncreasing:
     <<: *level_0
-    tags: [graph_mem_nodes]
+    tags: [graph_mem_nodes, P0]
   Contract_GraphMemNodes_HipDeviceSetGraphMemAttribute_Default_ResetsHighWatermark:
     <<: *level_0
-    tags: [graph_mem_nodes]
+    tags: [graph_mem_nodes, P0]
   Contract_GraphMemNodes_HipDeviceSetGraphMemAttribute_CurrentAttribute_IsRejected:
     <<: *level_0
-    tags: [graph_mem_nodes]
+    tags: [graph_mem_nodes, P0]
   Contract_GraphMemNodes_HipDrvGraphAddMemFreeNode_DrvFreeNode_AddsToGraph:
     <<: *level_0
-    tags: [graph_mem_nodes]
+    tags: [graph_mem_nodes, P0]
   Contract_GraphGenericNode_HipGraphAddNode_AddMemsetNode_LaunchesExpectedValue:
     <<: *level_0
-    tags: [graph_generic_node]
+    tags: [graph_generic_node, P0]
   Contract_GraphGenericNode_HipGraphNodeSetParams_Default_UpdatesValueBeforeInstantiate:
     <<: *level_0
-    tags: [graph_generic_node]
+    tags: [graph_generic_node, P0]
   Contract_GraphGenericNode_HipGraphExecNodeSetParams_Default_UpdatesValueAfterInstantiate:
     <<: *level_0
-    tags: [graph_generic_node]
+    tags: [graph_generic_node, P0]
   Contract_GraphMemcpy3DNode_HipGraphAddMemcpyNode_AddNode_LaunchesCopyThroughGraph:
     <<: *level_0
-    tags: [graph_memcpy3d_node]
+    tags: [graph_memcpy3d_node, P0]
   Contract_GraphMemcpy3DNode_HipGraphMemcpyNodeGetParams_Default_ReflectsAddedNode:
     <<: *level_0
-    tags: [graph_memcpy3d_node]
+    tags: [graph_memcpy3d_node, P0]
   Contract_GraphMemcpy3DNode_HipGraphMemcpyNodeSetParams_Default_RetargetsSourceBeforeInstantiate:
     <<: *level_0
-    tags: [graph_memcpy3d_node]
+    tags: [graph_memcpy3d_node, P0]
   Contract_GraphMemcpy3DNode_HipGraphExecMemcpyNodeSetParams_ExecSetParams_RetargetsSourceAfterInstantiate:
     <<: *level_0
-    tags: [graph_memcpy3d_node]
+    tags: [graph_memcpy3d_node, P0]
   Contract_MultiDeviceLaunch_HipLaunchCooperativeKernelMultiDevice_NvidiaUnsupported_IsSkipped:
     <<: *level_0
-    tags: [multi_device_launch]
+    tags: [multi_device_launch, P0]
   Contract_MultiDeviceLaunch_HipLaunchCooperativeKernelMultiDevice_CooperativeKernel_WritesPerDeviceValue:
     <<: *level_0
-    tags: [multi_device_launch]
+    tags: [multi_device_launch, multigpu, P0]
   Contract_MultiDeviceLaunch_HipExtLaunchMultiKernelMultiDevice_ExtMultiKernel_WritesPerDeviceValue:
     <<: *level_0
-    tags: [multi_device_launch]
+    tags: [multi_device_launch, multigpu, P0]
   Contract_MultiDeviceLaunch_HipModuleLaunchCooperativeKernelMultiDevice_ModuleCooperativeKernel_WritesPerDeviceValue:
     <<: *level_0
-    tags: [multi_device_launch]
+    tags: [multi_device_launch, multigpu, P0]
   Contract_DriverLaunchEx_HipLaunchKernelExC_Default_WritesExpectedValue:
     <<: *level_0
-    tags: [driver_launch_ex]
+    tags: [driver_launch_ex, P0]
   Contract_DriverLaunchEx_HipDevSmResourceSplit_Default_ProducesBoundedGroup:
     <<: *level_0
-    tags: [driver_launch_ex]
+    tags: [driver_launch_ex, P0]
   Contract_DriverLaunchEx_HipDrvLaunchKernelEx_Default_WritesExpectedValue:
     <<: *level_0
-    tags: [driver_launch_ex]
+    tags: [driver_launch_ex, P0]
   Contract_KernelNameRef_HipKernelNameRef_NvidiaUnsupported_IsSkipped:
     <<: *level_0
-    tags: [kernel_name_ref]
+    tags: [kernel_name_ref, P0]
   Contract_KernelNameRef_HipKernelNameRefByPtr_ByPtr_NamesHostKernel:
     <<: *level_0
-    tags: [kernel_name_ref]
+    tags: [kernel_name_ref, P0]
   Contract_KernelNameRef_HipKernelNameRef_ByFunction_NamesResolvedKernel:
     <<: *level_0
-    tags: [kernel_name_ref]
+    tags: [kernel_name_ref, P0]
   Contract_GraphicsInterop_HipGraphicsMapResources_NullResources_IsRejected:
     <<: *level_0
-    tags: [graphics_interop]
+    tags: [graphics_interop, P0]
   Contract_GraphicsInterop_HipGraphicsUnmapResources_NullResources_IsRejected:
     <<: *level_0
-    tags: [graphics_interop]
+    tags: [graphics_interop, P0]
   Contract_GraphicsInterop_HipGraphicsUnregisterResource_NullHandle_IsRejected:
     <<: *level_0
-    tags: [graphics_interop]
+    tags: [graphics_interop, P0]
   Contract_GraphicsInterop_HipGraphicsResourceGetMappedPointer_NullHandle_IsRejected:
     <<: *level_0
-    tags: [graphics_interop]
+    tags: [graphics_interop, P0]
   Contract_GraphicsInterop_HipGraphicsSubResourceGetMappedArray_NullHandle_IsRejected:
     <<: *level_0
-    tags: [graphics_interop]
+    tags: [graphics_interop, P0]
   Contract_GraphicsInterop_HipGLGetDevices_NoGLContext_IsRejected:
     <<: *level_0
-    tags: [graphics_interop]
+    tags: [graphics_interop, P0]
   Contract_GraphicsInterop_HipGraphicsGLRegisterBuffer_NoGLContext_IsRejected:
     <<: *level_0
-    tags: [graphics_interop]
+    tags: [graphics_interop, P0]
   Contract_GraphicsInterop_HipGraphicsGLRegisterImage_NoGLContext_IsRejected:
     <<: *level_0
-    tags: [graphics_interop]
+    tags: [graphics_interop, P0]
   Contract_GraphBatchMemOp_HipGraphAddBatchMemOpNode_AddNode_LaunchesWriteValue:
     <<: *level_0
-    tags: [graph_batch_mem_op]
+    tags: [graph_batch_mem_op, P0]
   Contract_GraphBatchMemOp_HipGraphBatchMemOpNodeGetParams_Default_RoundTripsCount:
     <<: *level_0
-    tags: [graph_batch_mem_op]
+    tags: [graph_batch_mem_op, P0]
   Contract_GraphBatchMemOp_HipGraphBatchMemOpNodeSetParams_Default_UpdatesWriteValueBeforeInstantiate:
     <<: *level_0
-    tags: [graph_batch_mem_op]
+    tags: [graph_batch_mem_op, P0]
   Contract_GraphBatchMemOp_HipGraphExecBatchMemOpNodeSetParams_ExecSetParams_UpdatesWriteValueAfterInstantiate:
     <<: *level_0
-    tags: [graph_batch_mem_op]
+    tags: [graph_batch_mem_op, P0]
   Contract_DriverGraphNode_HipDrvGraphAddMemcpyNode_Default_LaunchesCopyThroughGraph:
     <<: *level_0
-    tags: [driver_graph_node]
+    tags: [driver_graph_node, P0]
   Contract_DriverGraphNode_HipDrvGraphMemcpyNodeGetParams_Default_RoundTripsExtent:
     <<: *level_0
-    tags: [driver_graph_node]
+    tags: [driver_graph_node, P0]
   Contract_DriverGraphNode_HipDrvGraphExecMemcpyNodeSetParams_Default_RetargetsSourceAfterInstantiate:
     <<: *level_0
-    tags: [driver_graph_node]
+    tags: [driver_graph_node, P0]
   Contract_DriverGraphNode_HipDrvGraphAddMemsetNode_Default_LaunchesExpectedValue:
     <<: *level_0
-    tags: [driver_graph_node]
+    tags: [driver_graph_node, P0]
   Contract_DriverGraphNode_HipDrvGraphExecMemsetNodeSetParams_Default_UpdatesValueAfterInstantiate:
     <<: *level_0
-    tags: [driver_graph_node]
+    tags: [driver_graph_node, P0]
   Contract_GraphInstantiateParams_HipGraphInstantiateWithParams_Default_ReportsSuccessAndLaunches:
     <<: *level_0
-    tags: [graph_instantiate_params]
+    tags: [graph_instantiate_params, P0]
   Contract_GraphInstantiateParams_HipGraphInstantiateWithParams_UploadStream_LaunchesUploadedGraph:
     <<: *level_0
-    tags: [graph_instantiate_params]
+    tags: [graph_instantiate_params, P0]
   Contract_GraphDebug_HipGraphDebugDotPrint_Default_WritesNonEmptyFile:
     <<: *level_0
-    tags: [graph_debug]
+    tags: [graph_debug, P0]
   Contract_GraphDebug_HipGraphDebugDotPrint_Default_VerboseFlagIsAccepted:
     <<: *level_0
-    tags: [graph_debug]
+    tags: [graph_debug, P0]
   Contract_GraphNodeFind_HipGraphNodeFindInClone_ClonedNode_IsFoundAndDistinct:
     <<: *level_0
-    tags: [graph_node_find]
+    tags: [graph_node_find, P0]
   Contract_GraphNodeFind_HipGraphNodeFindInClone_Default_FoundNodeMatchesType:
     <<: *level_0
-    tags: [graph_node_find]
+    tags: [graph_node_find, P0]
   Contract_GraphNodeFind_HipGraphNodeFindInClone_NodeOnlyInOriginal_ReturnsInvalidValue:
     <<: *level_0
-    tags: [graph_node_find]
+    tags: [graph_node_find, P0]
   Contract_GraphUserObjects_HipUserObjectRelease_CreateRelease_InvokesDestructorOnce:
     <<: *level_0
-    tags: [graph_user_objects]
+    tags: [graph_user_objects, P0]
   Contract_GraphUserObjects_HipUserObjectRetain_Release_BalancesRefcount:
     <<: *level_0
-    tags: [graph_user_objects]
+    tags: [graph_user_objects, P0]
   Contract_GraphUserObjects_HipGraphRetainUserObject_GraphRetainRelease_TiedToGraphLifetime:
     <<: *level_0
-    tags: [graph_user_objects]
+    tags: [graph_user_objects, P0]
   Contract_GraphUserObjects_HipUserObjectCreate_NullObject_ReturnsInvalidValue:
     <<: *level_0
-    tags: [graph_user_objects]
+    tags: [graph_user_objects, P0]
   Contract_GraphNodeEnabled_HipGraphNodeGetEnabled_Default_ReportsOne:
     <<: *level_0
-    tags: [graph_node_enabled]
+    tags: [graph_node_enabled, P0]
   Contract_GraphNodeEnabled_HipGraphNodeSetEnabled_DisableThenQuery_ReportsZero:
     <<: *level_0
-    tags: [graph_node_enabled]
+    tags: [graph_node_enabled, P0]
   Contract_GraphNodeEnabled_HipGraphNodeSetEnabled_DisabledNode_ActsAsEmpty:
     <<: *level_0
-    tags: [graph_node_enabled]
+    tags: [graph_node_enabled, P0]
   Contract_GraphNodeAttributes_HipGraphKernelNodeSetAttribute_Cooperative_RoundTrips:
     <<: *level_0
-    tags: [graph_node_attributes]
+    tags: [graph_node_attributes, P0]
   Contract_GraphNodeAttributes_HipGraphKernelNodeSetAttribute_AccessPolicyWindow_RoundTrips:
     <<: *level_0
-    tags: [graph_node_attributes]
+    tags: [graph_node_attributes, P0]
   Contract_GraphNodeAttributes_HipGraphKernelNodeSetAttribute_Default_RejectsInvalidInputs:
     <<: *level_0
-    tags: [graph_node_attributes]
+    tags: [graph_node_attributes, P0]
   Contract_GraphNodeParams_HipGraphMemsetNodeSetParams_MemsetNodeSetThenGet_RoundTripsParams:
     <<: *level_0
-    tags: [graph_node_params]
+    tags: [graph_node_params, P0]
   Contract_GraphNodeParams_HipGraphMemcpyNodeGetParams_Default_ReflectsAddedNode:
     <<: *level_0
-    tags: [graph_node_params]
+    tags: [graph_node_params, P0]
   Contract_GraphNodeParams_HipGraphMemcpyNodeSetParams_MemcpyNodeSetThenGet_RoundTripsParams:
     <<: *level_0
-    tags: [graph_node_params]
+    tags: [graph_node_params, P0]
   Contract_GraphNodeParams_HipGraphMemsetNodeGetParams_NullArgs_AreRejected:
     <<: *level_0
-    tags: [graph_node_params]
+    tags: [graph_node_params, P0]
   Contract_GraphNodeParams_HipGraphMemcpyNodeGetParams_NullArgs_AreRejected:
     <<: *level_0
-    tags: [graph_node_params]
+    tags: [graph_node_params, P0]
   Contract_GraphNodeParams_HipGraphEventRecordNodeGetEvent_EventRecordAndWaitNodeGetEvent_ReturnsBoundEvent:
     <<: *level_0
-    tags: [graph_node_params]
+    tags: [graph_node_params, P0]
   Contract_GraphNodeParams_HipGraphDestroyNode_Default_RemovesNodeFromGraph:
     <<: *level_0
-    tags: [graph_node_params]
+    tags: [graph_node_params, P0]
   Contract_GraphNodeSetters_HipGraphKernelNodeSetParams_Default_UpdatesLaunchValue:
     <<: *level_0
-    tags: [graph_node_setters]
+    tags: [graph_node_setters, P0]
   Contract_GraphNodeSetters_HipGraphMemcpyNodeSetParams1D_Default_UpdatesCopySource:
     <<: *level_0
-    tags: [graph_node_setters]
+    tags: [graph_node_setters, P0]
   Contract_GraphNodeSetters_HipGraphHostNodeSetParams_Default_RoundTripsFnAndUserData:
     <<: *level_0
-    tags: [graph_node_setters]
+    tags: [graph_node_setters, P0]
   Contract_GraphNodeSetters_HipGraphEventRecordNodeSetEvent_EventNodesSetEvent_RoundTripSwappedEvents:
     <<: *level_0
-    tags: [graph_node_setters]
+    tags: [graph_node_setters, P0]
   Contract_GraphNodeSetters_HipGraphKernelNodeCopyAttributes_Default_PropagatesToDestination:
     <<: *level_0
-    tags: [graph_node_setters]
+    tags: [graph_node_setters, P0]
   Contract_GraphSymbolCopyNodes_HipGraphAddMemcpyNodeToSymbol_AddToFromSymbol_RoundTripsValue:
     <<: *level_0
-    tags: [graph_symbol_copy_nodes]
+    tags: [graph_symbol_copy_nodes, P0]
   Contract_GraphSymbolCopyNodes_HipGraphMemcpyNodeSetParamsToSymbol_SetParamsToFromSymbol_UpdatesGraphNodes:
     <<: *level_0
-    tags: [graph_symbol_copy_nodes]
+    tags: [graph_symbol_copy_nodes, P0]
   Contract_GraphSymbolCopyNodes_HipGraphExecMemcpyNodeSetParamsToSymbol_ExecSetParamsToFromSymbol_UpdatesExecutable:
     <<: *level_0
-    tags: [graph_symbol_copy_nodes]
+    tags: [graph_symbol_copy_nodes, P0]
   Contract_HostMemory_HipHostMalloc_Default_ReturnsUsablePointer:
     <<: *level_0
-    tags: [host_memory]
+    tags: [host_memory, P0]
   Contract_HostMemory_HipHostFree_Default_Succeeds:
     <<: *level_0
-    tags: [host_memory]
+    tags: [host_memory, P0]
   Contract_HostMemory_HipHostRegister_Unregister_Succeeds:
     <<: *level_0
-    tags: [host_memory]
+    tags: [host_memory, P0]
   Contract_HostMemory_HipHostGetDevicePointer_Default_RoundTripsBytes:
     <<: *level_0
-    tags: [host_memory]
+    tags: [host_memory, P0]
   Contract_HostMemory_HipHostGetFlags_Default_IncludesRequestedFlags:
     <<: *level_0
-    tags: [host_memory]
+    tags: [host_memory, P0]
   Contract_HostAllocAliases_HipHostAlloc_Default_ReturnsUsablePinnedPointer:
     <<: *level_0
-    tags: [host_alloc_aliases]
+    tags: [host_alloc_aliases, P0]
   Contract_HostAllocAliases_HipMallocHost_Default_ReturnsUsablePointer:
     <<: *level_0
-    tags: [host_alloc_aliases]
+    tags: [host_alloc_aliases, P0]
   Contract_HostAllocAliases_HipMemAllocHost_Default_ReturnsUsablePointer:
     <<: *level_0
-    tags: [host_alloc_aliases]
+    tags: [host_alloc_aliases, P0]
   Contract_HostAllocAliases_HipFreeHost_NullSucceeds_InvalidPointerRejected:
     <<: *level_0
-    tags: [host_alloc_aliases]
+    tags: [host_alloc_aliases, P0]
   Contract_HostAllocAliases_HipHostAlloc_InvalidArgs_AreRejected:
     <<: *level_0
-    tags: [host_alloc_aliases]
+    tags: [host_alloc_aliases, P0]
   Contract_HostAllocAliases_HipExtMallocWithFlags_Default_DefaultAllocatesAndZeroSizeIsNull:
     <<: *level_0
-    tags: [host_alloc_aliases]
+    tags: [host_alloc_aliases, P0]
   Contract_HostAllocAliases_HipExtMallocWithFlags_InvalidArgs_AreRejected:
     <<: *level_0
-    tags: [host_alloc_aliases]
+    tags: [host_alloc_aliases, P0]
   Contract_PitchedMemory_HipMallocPitch_Default_ReturnsPitchAtLeastWidth:
     <<: *level_0
-    tags: [pitched_memory]
+    tags: [pitched_memory, P0]
   Contract_PitchedMemory_HipMemcpy2D_Default_HostDeviceRoundTripsRows:
     <<: *level_0
-    tags: [pitched_memory]
+    tags: [pitched_memory, P0]
   Contract_PitchedMemory_HipMemcpy2D_Default_SingleRowRoundTripsBytes:
     <<: *level_0
-    tags: [pitched_memory]
+    tags: [pitched_memory, P0]
   Contract_PitchedMemory_HipFree_PitchedAllocation_Succeeds:
     <<: *level_0
-    tags: [pitched_memory]
+    tags: [pitched_memory, P0]
   Contract_DriverPitchedMemory_HipMemAllocPitch_Default_ReturnsPitchAtLeastWidth:
     <<: *level_0
-    tags: [driver_pitched_memory]
+    tags: [driver_pitched_memory, P0]
   Contract_DriverPitchedMemory_HipMemcpy2D_Default_HostDeviceRoundTripsRows:
     <<: *level_0
-    tags: [driver_pitched_memory]
+    tags: [driver_pitched_memory, P0]
   Contract_DriverPitchedMemory_HipMemsetD2D32_Default_RoundTripsWords:
     <<: *level_0
-    tags: [driver_pitched_memory]
+    tags: [driver_pitched_memory, P0]
   Contract_DriverPitchedMemory_HipFree_PitchedAllocation_Succeeds:
     <<: *level_0
-    tags: [driver_pitched_memory]
+    tags: [driver_pitched_memory, P0]
   Contract_DriverPitchedMemory_HipMemAllocPitch_Default_RejectsInvalidArgs:
     <<: *level_0
-    tags: [driver_pitched_memory]
+    tags: [driver_pitched_memory, P0]
   Contract_DriverPitchedMemory_HipDrvMemcpy2DUnaligned_HostToDevice_RoundTripsBytes:
     <<: *level_0
-    tags: [driver_pitched_memory]
+    tags: [driver_pitched_memory, P0]
   Contract_DriverPitchedMemory_HipDrvMemcpy2DUnaligned_NullInner_IsRejected:
     <<: *level_0
-    tags: [driver_pitched_memory]
+    tags: [driver_pitched_memory, P0]
   Contract_ArrayMemory_HipMallocArray_Default_ReturnsUsableArray:
     <<: *level_0
-    tags: [array_memory]
+    tags: [array_memory, image, P0]
   Contract_ArrayMemory_HipMemcpy2DToArray_AndBack_RoundTripsBytes:
     <<: *level_0
-    tags: [array_memory]
+    tags: [array_memory, image, P0]
   Contract_ArrayMemory_HipFreeArray_Default_Succeeds:
     <<: *level_0
-    tags: [array_memory]
+    tags: [array_memory, image, P0]
   Contract_ArrayMemory_HipArrayGetInfo_Default_ReturnsDescriptorIfAvailable:
     <<: *level_0
-    tags: [array_memory]
+    tags: [array_memory, image, P0]
   Contract_ArrayCopy_HipMemcpyToArray_AndFromArray_RoundTripsBytes:
     <<: *level_0
-    tags: [array_copy]
+    tags: [array_copy, image, P0]
   Contract_ArrayCopy_HipMemcpyHtoA_AndAtoH_RoundTripsBytes:
     <<: *level_0
-    tags: [array_copy]
+    tags: [array_copy, image, P0]
   Contract_ArrayCopy_HipMemcpy2DToArrayAsync_Memcpy2DToFromArrayAsync_VisibleAfterSync:
     <<: *level_0
-    tags: [array_copy]
+    tags: [array_copy, image, P0]
   Contract_ArrayCopy_HipMemcpyToArray_NullArray_IsRejected:
     <<: *level_0
-    tags: [array_copy]
+    tags: [array_copy, image, P0]
   Contract_ArrayCopy_HipMemcpy2DFromArrayAsync_InvalidKind_IsRejected:
     <<: *level_0
-    tags: [array_copy]
+    tags: [array_copy, image, P0]
   Contract_ArrayCopyExt_HipMemcpyDtoA_ThenAtoH_RoundTripsBytes:
     <<: *level_0
-    tags: [array_copy_ext]
+    tags: [array_copy_ext, image, P0]
   Contract_ArrayCopyExt_HipMemcpyAtoA_Default_RoundTripsBytes:
     <<: *level_0
-    tags: [array_copy_ext]
+    tags: [array_copy_ext, image, P0]
   Contract_ArrayCopyExt_HipMemcpy2DArrayToArray_Default_RoundTripsBytes:
     <<: *level_0
-    tags: [array_copy_ext]
+    tags: [array_copy_ext, image, P0]
   Contract_ArrayCopyExt_HipMemcpyHtoAAsync_NullSource_IsRejected:
     <<: *level_0
-    tags: [array_copy_ext]
+    tags: [array_copy_ext, image, P0]
   Contract_ArrayCopyExt_HipMemcpyDtoA_NullArray_IsRejected:
     <<: *level_0
-    tags: [array_copy_ext]
+    tags: [array_copy_ext, image, P0]
   Contract_ArrayCopyExt_HipMemcpyAtoD_NullArray_IsRejected:
     <<: *level_0
-    tags: [array_copy_ext]
+    tags: [array_copy_ext, image, P0]
   Contract_ArrayCopyExt_HipMemcpy2DArrayToArray_InvalidKind_IsRejected:
     <<: *level_0
-    tags: [array_copy_ext]
+    tags: [array_copy_ext, image, P0]
   Contract_ArrayCopyExt_HipMemcpyHtoAAsync_ThenAtoHAsync_VisibleAfterSync:
     <<: *level_0
-    tags: [array_copy_ext]
+    tags: [array_copy_ext, image, P0]
   Contract_DriverArray_HipArrayCreate_2D_ReturnsUsableArray:
     <<: *level_0
-    tags: [driver_array]
+    tags: [driver_array, image, P0]
   Contract_DriverArray_HipArrayGetDescriptor_Default_RoundTripsDimsAndFormat:
     <<: *level_0
-    tags: [driver_array]
+    tags: [driver_array, image, P0]
   Contract_DriverArray_HipArrayCreate_InvalidArgs_AreRejected:
     <<: *level_0
-    tags: [driver_array]
+    tags: [driver_array, image, P0]
   Contract_DriverArray_HipArrayGetDescriptor_InvalidArgs_AreRejected:
     <<: *level_0
-    tags: [driver_array]
+    tags: [driver_array, image, P0]
   Contract_DriverArray_HipArray3DCreate_Default_ReturnsUsableArray:
     <<: *level_0
-    tags: [driver_array]
+    tags: [driver_array, image, P0]
   Contract_DriverArray_HipArray3DGetDescriptor_Default_RoundTripsDepthAndFlags:
     <<: *level_0
-    tags: [driver_array]
+    tags: [driver_array, image, P0]
   Contract_MipmappedArray_HipMallocMipmappedArray_MallocAndGetLevel_ReturnsLevelArray:
     <<: *level_0
-    tags: [mipmapped_array]
+    tags: [mipmapped_array, image, P0]
   Contract_MipmappedArray_HipMipmappedArrayCreate_Default_DriverCreateGetLevelDestroy:
     <<: *level_0
-    tags: [mipmapped_array]
+    tags: [mipmapped_array, image, P0]
   Contract_MipmappedArray_HipGetMipmappedArrayLevel_GetLevelOutOfRange_IsRejected:
     <<: *level_0
-    tags: [mipmapped_array]
+    tags: [mipmapped_array, image, P0]
   Contract_MipmappedArray_HipMipmappedArrayGetMemoryRequirements_Default_IsQueryable:
     <<: *level_0
-    tags: [mipmapped_array]
+    tags: [mipmapped_array, image, P0]
   Contract_ManagedMemory_HipMallocManaged_Default_ReturnsUsablePointer:
     <<: *level_0
-    tags: [managed_memory]
+    tags: [managed_memory, P0]
   Contract_ManagedMemory_HipMallocManaged_HostWriteDeviceRead_RoundTripsAfterSynchronize:
     <<: *level_0
-    tags: [managed_memory]
+    tags: [managed_memory, P0]
   Contract_ManagedMemory_HipMallocManaged_DeviceWriteHostRead_RoundTripsAfterSynchronize:
     <<: *level_0
-    tags: [managed_memory]
+    tags: [managed_memory, P0]
   Contract_ManagedMemory_HipFree_ManagedPointer_Succeeds:
     <<: *level_0
-    tags: [managed_memory]
+    tags: [managed_memory, P0]
   Contract_ManagedMemory_HipMemPrefetchAsync_Default_SucceedsWhenSupported:
     <<: *level_0
-    tags: [managed_memory]
+    tags: [managed_memory, P0]
   Contract_MemAdvise_HipMemAdvise_SetReadMostly_RangeAttributeReflectsAdvice:
     <<: *level_0
-    tags: [mem_advise]
+    tags: [mem_advise, P0]
   Contract_MemAdvise_HipMemAdvise_SetPreferredLocation_RangeAttributeReturnsDevice:
     <<: *level_0
-    tags: [mem_advise]
+    tags: [mem_advise, P0]
   Contract_MemAdvise_HipMemAdvise_SetAccessedBy_RangeAttributeReflectsDevice:
     <<: *level_0
-    tags: [mem_advise]
+    tags: [mem_advise, P0]
   Contract_MemAdvise_HipMemRangeGetAttributes_MultipleAttributes_Succeed:
     <<: *level_0
-    tags: [mem_advise]
+    tags: [mem_advise, P0]
   Contract_MemAdvise_HipMemAdvise_NullPointer_IsRejected:
     <<: *level_0
-    tags: [mem_advise]
+    tags: [mem_advise, P0]
   Contract_MemAdvise_HipMemRangeGetAttribute_NullData_IsRejected:
     <<: *level_0
-    tags: [mem_advise]
+    tags: [mem_advise, P0]
   Contract_MemAdviseV2_HipMemAdviseV2_SetReadMostly_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [mem_advise_v2]
+    tags: [mem_advise_v2, P0]
   Contract_MemAdviseV2_HipMemAdviseV2_SetAndUnsetPreferredLocation_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [mem_advise_v2]
+    tags: [mem_advise_v2, P0]
   Contract_MemAdviseV2_HipMemPrefetchAsyncV2_PrefetchAsync_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [mem_advise_v2]
+    tags: [mem_advise_v2, P0]
   Contract_MemAdviseV2_HipMemAdviseV2_NullPointer_IsRejected:
     <<: *level_0
-    tags: [mem_advise_v2]
+    tags: [mem_advise_v2, P0]
   Contract_PointerInfo_HipPointerGetAttributes_DeviceAllocation_ReportsDeviceType:
     <<: *level_0
-    tags: [pointer_info]
+    tags: [pointer_info, P0]
   Contract_PointerInfo_HipPointerGetAttributes_HostAllocation_ReportsHostType:
     <<: *level_0
-    tags: [pointer_info]
+    tags: [pointer_info, P0]
   Contract_PointerInfo_HipPointerGetAttributes_ManagedAllocation_ReportsManagedOrUnified:
     <<: *level_0
-    tags: [pointer_info]
+    tags: [pointer_info, P0]
   Contract_PointerInfo_HipPointerGetAttribute_MemoryType_MatchesGetAttributes:
     <<: *level_0
-    tags: [pointer_info]
+    tags: [pointer_info, P0]
   Contract_PointerInfo_HipMemGetAddressRange_Default_ReturnsBaseAndSize:
     <<: *level_0
-    tags: [pointer_info]
+    tags: [pointer_info, P0]
   Contract_PointerInfo_HipMemGetInfo_Default_FreeNotGreaterThanTotal:
     <<: *level_0
-    tags: [pointer_info]
+    tags: [pointer_info, P0]
   Contract_PointerInfo_HipPointerGetAttributes_NullOutput_IsRejected:
     <<: *level_0
-    tags: [pointer_info]
+    tags: [pointer_info, P0]
   Contract_PointerQuery_HipDrvPointerGetAttributes_DrvGetAttributesDeviceAllocation_ReportsTypeAndOrdinal:
     <<: *level_0
-    tags: [pointer_query]
+    tags: [pointer_query, P0]
   Contract_PointerQuery_HipDrvPointerGetAttributes_DrvGetAttributes_MatchesSingleAttributeQuery:
     <<: *level_0
-    tags: [pointer_query]
+    tags: [pointer_query, P0]
   Contract_PointerQuery_HipDrvPointerGetAttributes_DrvGetAttributesInvalidArgs_AreRejected:
     <<: *level_0
-    tags: [pointer_query]
+    tags: [pointer_query, P0]
   Contract_PointerQuery_HipMemPtrGetInfo_Default_ReturnsAllocationSize:
     <<: *level_0
-    tags: [pointer_query]
+    tags: [pointer_query, P0]
   Contract_PointerQuery_HipPointerSetAttribute_SyncMemops_SucceedsWhenSupported:
     <<: *level_0
-    tags: [pointer_query]
+    tags: [pointer_query, P0]
   Contract_PointerQuery_HipPointerSetAttribute_InvalidArgs_AreRejected:
     <<: *level_0
-    tags: [pointer_query]
+    tags: [pointer_query, P0]
   Contract_MemoryPool_HipDeviceGetDefaultMemPool_Default_ReturnsPool:
     <<: *level_0
-    tags: [memory_pool]
+    tags: [memory_pool, P0]
   Contract_MemoryPool_HipDeviceGetMemPool_Default_ReturnsCurrentPool:
     <<: *level_0
-    tags: [memory_pool]
+    tags: [memory_pool, P0]
   Contract_MemoryPool_HipDeviceSetMemPool_SetCurrentMemPool_RoundTripsThroughGetMemPool:
     <<: *level_0
-    tags: [memory_pool]
+    tags: [memory_pool, P0]
   Contract_MemoryPool_HipMemPoolSetAttribute_GetSetReleaseThreshold_RoundTripsValue:
     <<: *level_0
-    tags: [memory_pool]
+    tags: [memory_pool, P0]
   Contract_MemoryPool_HipMallocAsync_FreeAsync_SucceedsWhenSupported:
     <<: *level_0
-    tags: [memory_pool]
+    tags: [memory_pool, P0]
   Contract_MemoryPool_HipMallocAsync_Default_MemoryUsableAfterStreamSynchronize:
     <<: *level_0
-    tags: [memory_pool]
+    tags: [memory_pool, P0]
   Contract_Vmm_HipMemGetAllocationGranularity_Default_ReturnsPositiveValue:
     <<: *level_0
-    tags: [vmm]
+    tags: [vmm, P0]
   Contract_Vmm_HipMemAddressReserve_Free_Succeeds:
     <<: *level_0
-    tags: [vmm]
+    tags: [vmm, P0]
   Contract_Vmm_HipMemCreate_ReleaseAllocationHandle_SucceedsWhenSupported:
     <<: *level_0
-    tags: [vmm]
+    tags: [vmm, P0]
   Contract_Vmm_HipMemMap_MapUnmap_SucceedsWhenSupported:
     <<: *level_0
-    tags: [vmm]
+    tags: [vmm, P0]
   Contract_Vmm_HipMemSetAccess_Default_AllowsRoundTripWhenSupported:
     <<: *level_0
-    tags: [vmm]
+    tags: [vmm, P0]
   Contract_VmmHandle_HipMemRetainAllocationHandle_ByAddress_Succeeds:
     <<: *level_0
-    tags: [vmm_handle]
+    tags: [vmm_handle, P0]
   Contract_VmmHandle_HipMemGetAllocationPropertiesFromHandle_GetAllocationProperties_RoundTripsFromHandle:
     <<: *level_0
-    tags: [vmm_handle]
+    tags: [vmm_handle, P0]
   Contract_VmmHandle_HipMemGetHandleForAddressRange_DmaBufFd_IsQueryableWhenSupported:
     <<: *level_0
-    tags: [vmm_handle]
+    tags: [vmm_handle, P0]
   Contract_VmmHandle_HipMemExportToShareableHandle_ExportImportShareableHandle_RoundTrips:
     <<: *level_0
-    tags: [vmm_handle]
+    tags: [vmm_handle, P0]
   Contract_MemMapArray_HipMemMapArrayAsync_NullMapList_IsRejected:
     <<: *level_0
-    tags: [mem_map_array]
+    tags: [mem_map_array, P0]
   Contract_MemMapArray_HipMemMapArrayAsync_ZeroCount_IsRejected:
     <<: *level_0
-    tags: [mem_map_array]
+    tags: [mem_map_array, P0]
   Contract_Copy3D_HipMalloc3D_Default_ReturnsPitchedPtr:
     <<: *level_0
-    tags: [copy3d]
+    tags: [copy3d, P0]
   Contract_Copy3D_HipMemcpy3D_Default_HostDeviceRoundTripsExtent:
     <<: *level_0
-    tags: [copy3d]
+    tags: [copy3d, P0]
   Contract_Copy3D_HipMemcpy3D_Default_SingleSliceRoundTripsBytes:
     <<: *level_0
-    tags: [copy3d]
+    tags: [copy3d, P0]
   Contract_Copy3D_HipFree_3DAllocation_Succeeds:
     <<: *level_0
-    tags: [copy3d]
+    tags: [copy3d, P0]
   Contract_AsyncCopy3D_HipMemcpy3DAsync_HostDeviceRoundTripsExtent_VisibleAfterSync:
     <<: *level_0
-    tags: [async_copy3d]
+    tags: [async_copy3d, P0]
   Contract_AsyncCopy3D_HipMemset3D_FillsExtent_VisibleAfterCopyBack:
     <<: *level_0
-    tags: [async_copy3d]
+    tags: [async_copy3d, P0]
   Contract_AsyncCopy3D_HipMemcpy3DAsync_NullParams_IsRejected:
     <<: *level_0
-    tags: [async_copy3d]
+    tags: [async_copy3d, P0]
   Contract_AsyncCopy3D_HipMemcpyWithStream_RoundTripsBytes_VisibleAfterSync:
     <<: *level_0
-    tags: [async_copy3d]
+    tags: [async_copy3d, P0]
   Contract_AsyncCopy3D_HipMemcpyWithStream_InvalidKind_IsRejected:
     <<: *level_0
-    tags: [async_copy3d]
+    tags: [async_copy3d, P0]
   Contract_AsyncCopy3D_HipMemset3D_NullPitchedPtr_IsRejected:
     <<: *level_0
-    tags: [async_copy3d]
+    tags: [async_copy3d, P0]
   Contract_DriverCopy3D_HipDrvMemcpy3D_HostToDevice_RoundTripsExtent:
     <<: *level_0
-    tags: [driver_copy3d]
+    tags: [driver_copy3d, P0]
   Contract_DriverCopy3D_HipDrvMemcpy3D_DeviceToDevice_PreservesBytes:
     <<: *level_0
-    tags: [driver_copy3d]
+    tags: [driver_copy3d, P0]
   Contract_DriverCopy3D_HipDrvMemcpy3D_ZeroExtent_IsNoOp:
     <<: *level_0
-    tags: [driver_copy3d]
+    tags: [driver_copy3d, P0]
   Contract_DriverCopy3DAsync_HipDrvMemcpy3DAsync_HostToDevice_VisibleAfterSync:
     <<: *level_0
-    tags: [driver_copy3d]
+    tags: [driver_copy3d, P0]
   Contract_DriverCopy3D_HipDrvMemcpy3D_NullInnerPointer_IsRejected:
     <<: *level_0
-    tags: [driver_copy3d]
+    tags: [driver_copy3d, P0]
   Contract_Array3D_HipMalloc3DArray_Default_ReturnsUsableArray:
     <<: *level_0
-    tags: [array3d]
+    tags: [array3d, image, P0]
   Contract_Array3D_HipMemcpy3D_ToArrayAndBack_RoundTripsBytes:
     <<: *level_0
-    tags: [array3d]
+    tags: [array3d, image, P0]
   Contract_Array3D_HipFreeArray_Default_Succeeds:
     <<: *level_0
-    tags: [array3d]
+    tags: [array3d, image, P0]
   Contract_Texture_HipCreateTextureObject_CreateAndDestroyLinearResource_Succeeds:
     <<: *level_0
-    tags: [texture]
+    tags: [texture, image, P0]
   Contract_Texture_HipGetTextureObjectResourceDesc_GetResourceDesc_RoundTripsLinearResource:
     <<: *level_0
-    tags: [texture]
+    tags: [texture, image, P0]
   Contract_Texture_HipGetTextureObjectTextureDesc_GetTextureDesc_RoundTripsReadMode:
     <<: *level_0
-    tags: [texture]
+    tags: [texture, image, P0]
   Contract_Texture_HipCreateTextureObject_CreateAndDestroyArrayResource_Succeeds:
     <<: *level_0
-    tags: [texture]
+    tags: [texture, image, P0]
   Contract_Texture_HipGetChannelDesc_Default_MatchesArrayFormat:
     <<: *level_0
-    tags: [texture]
+    tags: [texture, image, P0]
   Contract_Surface_HipCreateSurfaceObject_CreateAndDestroyArrayResource_Succeeds:
     <<: *level_0
-    tags: [texture]
+    tags: [texture, image, P0]
   Contract_Surface_HipGetChannelDesc_Default_RoundTripsArrayResource:
     <<: *level_0
-    tags: [texture]
+    tags: [texture, image, P0]
   Contract_Texture_HipGetTextureObjectResourceViewDesc_GetResourceViewDesc_RoundTripsArrayResource:
     <<: *level_0
-    tags: [texture]
+    tags: [texture, image, P0]
   Contract_DriverTexture_HipTexObjectCreate_AndDestroyLinearResource_Succeeds:
     <<: *level_0
-    tags: [driver_texture_object]
+    tags: [driver_texture_object, image, P0]
   Contract_DriverTexture_HipTexObjectGetResourceDesc_Default_RoundTripsLinearResource:
     <<: *level_0
-    tags: [driver_texture_object]
+    tags: [driver_texture_object, image, P0]
   Contract_DriverTexture_HipTexObjectGetTextureDesc_Default_RoundTripsFlags:
     <<: *level_0
-    tags: [driver_texture_object]
+    tags: [driver_texture_object, image, P0]
   Contract_DriverTexture_HipTexObjectGetResourceDesc_CreateAndGetResourceDesc_ArrayResource:
     <<: *level_0
-    tags: [driver_texture_object]
+    tags: [driver_texture_object, image, P0]
   Contract_DriverTexture_HipTexObjectGetResourceViewDesc_Default_IsQueryableWhenSupported:
     <<: *level_0
-    tags: [driver_texture_object]
+    tags: [driver_texture_object, image, P0]
   Contract_DriverTexture_HipTexObjectCreate_InvalidArgs_AreRejected:
     <<: *level_0
-    tags: [driver_texture_object]
+    tags: [driver_texture_object, image, P0]
   Contract_TextureReference_HipTexRefSetAddressMode_NvidiaUnsupported_IsSkipped:
     <<: *level_0
-    tags: [texture_reference]
+    tags: [texture_reference, P0]
   Contract_TextureReference_HipTexRefSetAddressMode_SetGetAddressMode_RoundTrips:
     <<: *level_0
-    tags: [texture_reference]
+    tags: [texture_reference, image, P0]
   Contract_TextureReference_HipTexRefSetFilterMode_SetGetFilterMode_RoundTrips:
     <<: *level_0
-    tags: [texture_reference]
+    tags: [texture_reference, image, P0]
   Contract_TextureReference_HipTexRefSetFlags_SetGetFlags_RoundTrips:
     <<: *level_0
-    tags: [texture_reference]
+    tags: [texture_reference, image, P0]
   Contract_TextureReference_HipTexRefSetFormat_SetGetFormat_RoundTrips:
     <<: *level_0
-    tags: [texture_reference]
+    tags: [texture_reference, image, P0]
   Contract_TextureReference_HipTexRefSetMaxAnisotropy_SetGetMaxAnisotropy_RoundTrips:
     <<: *level_0
-    tags: [texture_reference]
+    tags: [texture_reference, image, P0]
   Contract_TextureReferenceSymbol_HipGetTextureReference_NvidiaUnsupported_IsSkipped:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, P0]
   Contract_TextureReferenceSymbol_HipGetTextureReference_Default_ResolvesSymbol:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image, P0]
   Contract_TextureReferenceSymbol_HipBindTexture_BindUnbindLinearMemory_Succeeds:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image, P0]
   Contract_TextureReferenceSymbol_HipBindTexture2D_Default_Succeeds:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image, P0]
   Contract_TextureReferenceSymbol_HipBindTextureToArray_Default_Succeeds:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image, P0]
   Contract_TextureReferenceSymbol_HipTexRefSetAddress_ModuleTexRef_AddressAndArrayRoundTrip:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image, P0]
   Contract_TextureReferenceSymbol_HipTexRefGetMipmapFilterMode_MipmapParameterGetters_ReturnInvalidValue:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image, P0]
   Contract_TextureReferenceSymbol_HipTexRefSetMipmapFilterMode_MipmapParameterSetters_WriteAndReject:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image, P0]
   Contract_TextureReferenceSymbol_HipTexRefSetMipmappedArray_ModuleTexRef_MipmappedArrayRoundTrip:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image, P0]
   Contract_TextureReferenceSymbol_HipTexRefSetAddress2D_ModuleTexRefSetAddress2D_IsAccepted:
     <<: *level_0
-    tags: [texture_reference_symbol]
+    tags: [texture_reference_symbol, image, P0]
   Contract_Context_HipDeviceGet_Default_ReturnsHandleForOrdinalZero:
     <<: *level_0
-    tags: [context]
+    tags: [context, P0]
   Contract_Context_HipDeviceComputeCapability_Default_IsPositive:
     <<: *level_0
-    tags: [context]
+    tags: [context, P0]
   Contract_Context_HipDeviceTotalMem_Default_MatchesProperties:
     <<: *level_0
-    tags: [context]
+    tags: [context, P0]
   Contract_Context_HipDeviceGetUuid_AndPciBusId_Succeed:
     <<: *level_0
-    tags: [context]
+    tags: [context, P0]
   Contract_Context_HipDevicePrimaryCtxRetain_Release_RoundTrips:
     <<: *level_0
-    tags: [context]
+    tags: [context, P0]
   Contract_Context_HipCtxGetCurrent_AndDevice_AreConsistent:
     <<: *level_0
-    tags: [context]
+    tags: [context, P0]
   Contract_ContextMutation_HipCtxCreate_Destroy_Succeeds:
     <<: *level_0
-    tags: [context_mutation]
+    tags: [context_mutation, P0]
   Contract_ContextMutation_HipCtxSetCurrent_Default_RoundTripsThroughGetCurrent:
     <<: *level_0
-    tags: [context_mutation]
+    tags: [context_mutation, P0]
   Contract_ContextMutation_HipCtxPushCurrent_PushPop_RestoresPreviousCurrent:
     <<: *level_0
-    tags: [context_mutation]
+    tags: [context_mutation, P0]
   Contract_ContextMutation_HipCtxSynchronize_Default_ReportsSupportedOrNotSupported:
     <<: *level_0
-    tags: [context_mutation]
+    tags: [context_mutation, P0]
   Contract_ContextMutation_HipCtxGetApiVersion_Default_ReportsVersionOrNotSupported:
     <<: *level_0
-    tags: [context_mutation]
+    tags: [context_mutation, P0]
   Contract_ContextConfig_HipCtxGetCacheConfig_Default_ReturnsEnumOrNotSupported:
     <<: *level_0
-    tags: [context_config]
+    tags: [context_config, P0]
   Contract_ContextConfig_HipCtxSetCacheConfig_IsAcceptedOrUnsupported_RejectsInvalid:
     <<: *level_0
-    tags: [context_config]
+    tags: [context_config, P0]
   Contract_ContextConfig_HipCtxGetSharedMemConfig_Default_ReturnsEnumOrNotSupported:
     <<: *level_0
-    tags: [context_config]
+    tags: [context_config, P0]
   Contract_ContextConfig_HipCtxSetSharedMemConfig_Default_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [context_config]
+    tags: [context_config, P0]
   Contract_ContextConfig_HipCtxGetFlags_Default_ReturnsScheduleOrNotSupported:
     <<: *level_0
-    tags: [context_config]
+    tags: [context_config, P0]
   Contract_ContextConfig_HipCtxEnablePeerAccess_Self_IsRejectedOrUnsupportedOrNoOp:
     <<: *level_0
-    tags: [context_config]
+    tags: [context_config, P0]
   Contract_DeviceConfig_HipDeviceGetCacheConfig_Default_ReturnsEnumValue:
     <<: *level_0
-    tags: [device_config]
+    tags: [device_config, P0]
   Contract_DeviceConfig_HipDeviceSetCacheConfig_Default_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [device_config]
+    tags: [device_config, P0]
   Contract_DeviceConfig_HipDeviceGetSharedMemConfig_Default_ReturnsEnumValue:
     <<: *level_0
-    tags: [device_config]
+    tags: [device_config, P0]
   Contract_DeviceConfig_HipDeviceGetLimit_Default_ReportsStackAndHeapAndRejectsInvalid:
     <<: *level_0
-    tags: [device_config]
+    tags: [device_config, P0]
   Contract_DeviceConfig_HipDeviceSetLimit_Default_RoundTripsOrIsUnsupported:
     <<: *level_0
-    tags: [device_config]
+    tags: [device_config, P0]
   Contract_DeviceConfig_HipGetDeviceFlags_AndStreamPriorityRange_AreConsistent:
     <<: *level_0
-    tags: [device_config]
+    tags: [device_config, P0]
   Contract_DeviceLifecycle_HipSetDeviceFlags_Default_AcceptsCurrentFlags:
     <<: *level_0
-    tags: [device_lifecycle]
+    tags: [device_lifecycle, P0]
   Contract_DeviceLifecycle_HipDeviceSetSharedMemConfig_Default_RoundTripsCurrentConfig:
     <<: *level_0
-    tags: [device_lifecycle]
+    tags: [device_lifecycle, P0]
   Contract_DeviceLifecycle_HipSetValidDevices_Default_AcceptsFullDeviceList:
     <<: *level_0
-    tags: [device_lifecycle]
+    tags: [device_lifecycle, P0]
   Contract_DeviceLifecycle_HipDevicePrimaryCtxSetFlags_Default_IsAcceptedOrInUse:
     <<: *level_0
-    tags: [device_lifecycle]
+    tags: [device_lifecycle, P0]
   Contract_DeviceLifecycle_HipDevicePrimaryCtxReset_Default_LeavesDeviceUsable:
     <<: *level_0
-    tags: [device_lifecycle]
+    tags: [device_lifecycle, P0]
   Contract_DeviceLifecycle_HipInitDevice_Default_AcceptsVisibleDevice:
     <<: *level_0
-    tags: [device_lifecycle]
+    tags: [device_lifecycle, P0]
   Contract_DeviceLifecycle_HipInitDevice_InvalidDevice_IsRejected:
     <<: *level_0
-    tags: [device_lifecycle]
+    tags: [device_lifecycle, P0]
   Contract_DeviceReset_HipDeviceReset_Default_DiscardsStateAndLeavesDeviceUsable:
     <<: *level_0
-    tags: [device_reset]
+    tags: [device_reset, P0]
   Contract_GreenContext_HipDeviceGetDevResource_NvidiaCuda12Unsupported_IsSkipped:
     <<: *level_0
-    tags: [green_context]
+    tags: [green_context, P0]
   Contract_GreenContext_HipDeviceGetDevResource_Default_ReportsSmCount:
     <<: *level_0
-    tags: [green_context]
+    tags: [green_context, P0]
   Contract_GreenContext_HipDevSmResourceSplitByCount_Default_ProducesBoundedSubset:
     <<: *level_0
-    tags: [green_context]
+    tags: [green_context, P0]
   Contract_GreenContext_HipGreenCtxCreate_Default_QueriesDeviceAndResource:
     <<: *level_0
-    tags: [green_context]
+    tags: [green_context, P0]
   Contract_GreenContext_HipExecutionCtxStreamCreate_Stream_LaunchesObservableWork:
     <<: *level_0
-    tags: [green_context]
+    tags: [green_context, P0]
   Contract_GreenContext_HipExecutionCtxRecordEvent_Event_RecordAndWaitRoundTrips:
     <<: *level_0
-    tags: [green_context]
+    tags: [green_context, P0]
   Contract_MemoryPoolLifecycle_HipMemPoolCreate_Destroy_SucceedsWhenSupported:
     <<: *level_0
-    tags: [memory_pool_lifecycle]
+    tags: [memory_pool_lifecycle, P0]
   Contract_MemoryPoolLifecycle_HipMemPoolSetAttribute_GetSetReleaseThreshold_RoundTripsValue:
     <<: *level_0
-    tags: [memory_pool_lifecycle]
+    tags: [memory_pool_lifecycle, P0]
   Contract_MemoryPoolLifecycle_HipMemPoolTrimTo_Default_SucceedsOnEmptyPool:
     <<: *level_0
-    tags: [memory_pool_lifecycle]
+    tags: [memory_pool_lifecycle, P0]
   Contract_MemoryPoolLifecycle_HipMallocFromPoolAsync_MallocFromCreatedPoolAsync_SucceedsWhenSupported:
     <<: *level_0
-    tags: [memory_pool_lifecycle]
+    tags: [memory_pool_lifecycle, P0]
   Contract_MemoryPoolAccess_HipMemPoolSetAccess_CurrentDevice_SucceedsWhenSupported:
     <<: *level_0
-    tags: [memory_pool_access]
+    tags: [memory_pool_access, P0]
   Contract_MemoryPoolAccess_HipMemPoolGetAccess_CurrentDevice_ReturnsGrantedFlags:
     <<: *level_0
-    tags: [memory_pool_access]
+    tags: [memory_pool_access, P0]
   Contract_MemoryPoolAccess_HipMemPoolSetAccess_NoneCurrentDevice_IsRejected:
     <<: *level_0
-    tags: [memory_pool_access]
+    tags: [memory_pool_access, P0]
   Contract_MemLocationPool_HipMemGetMemPool_Default_ReturnsPoolForDeviceLocation:
     <<: *level_0
-    tags: [mem_location_pool]
+    tags: [mem_location_pool, P0]
   Contract_MemLocationPool_HipMemGetDefaultMemPool_CurrentDevice_ReturnsNonNullPool:
     <<: *level_0
-    tags: [mem_location_pool]
+    tags: [mem_location_pool, P0]
   Contract_MemLocationPool_HipMemSetMemPool_Default_RoundTripsThroughGetMemPool:
     <<: *level_0
-    tags: [mem_location_pool]
+    tags: [mem_location_pool, P0]
   Contract_MemLocationPool_HipMemGetAccess_Default_ReturnsFlagsForPooledAllocation:
     <<: *level_0
-    tags: [mem_location_pool]
+    tags: [mem_location_pool, P0]
   Contract_MemPoolShareableHandle_HipMemPoolExportToShareableHandle_ExportImportHandle_RoundTrips:
     <<: *level_0
-    tags: [mempool_shareable_handle]
+    tags: [mempool_shareable_handle, P0]
   Contract_MemPoolShareableHandle_HipMemPoolExportPointer_ExportImportPointer_RoundTrips:
     <<: *level_0
-    tags: [mempool_shareable_handle]
+    tags: [mempool_shareable_handle, P0]
   Contract_MemPoolShareableHandle_HipMemPoolExportToShareableHandle_NullArgs_IsRejected:
     <<: *level_0
-    tags: [mempool_shareable_handle]
+    tags: [mempool_shareable_handle, P0]
   Contract_Extension_HipGetProcAddress_Default_ResolvesKnownSymbol:
     <<: *level_0
-    tags: [extension]
+    tags: [extension, P0]
   Contract_Extension_HipGetProcAddress_UnknownSymbol_ReportsNotFound:
     <<: *level_0
-    tags: [extension]
+    tags: [extension, P0]
   Contract_Extension_HipGetProcAddress_NullArgs_AreRejected:
     <<: *level_0
-    tags: [extension]
+    tags: [extension, P0]
   Contract_Extension_HipApiName_Default_ReturnsNonEmptyString:
     <<: *level_0
-    tags: [extension]
+    tags: [extension, P0]
   Contract_Extension_HipGetStreamDeviceId_Default_MatchesCurrentDevice:
     <<: *level_0
-    tags: [extension]
+    tags: [extension, P0]
   Contract_Extension_HipExtGetLastError_Default_TracksErrorState:
     <<: *level_0
-    tags: [extension]
+    tags: [extension, P0]
   Contract_Logging_HipExtEnableLogging_NvidiaUnsupported_IsSkipped:
     <<: *level_0
-    tags: [logging]
+    tags: [logging, P0]
   Contract_Logging_HipExtEnableLogging_EnableThenDisable_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [logging]
+    tags: [logging, P0]
   Contract_Logging_HipExtSetLoggingParams_Default_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [logging]
+    tags: [logging, P0]
   Contract_Profiler_HipProfilerStart_Start_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [profiler]
+    tags: [profiler, P0]
   Contract_Profiler_HipProfilerStop_Stop_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [profiler]
+    tags: [profiler, P0]
   Contract_Profiler_HipProfilerStart_StartStop_PairIsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [profiler]
+    tags: [profiler, P0]
   Contract_DriverEntryPoint_HipGetDriverEntryPoint_ResolvesKnownSymbol_IsCallable:
     <<: *level_0
-    tags: [driver_entry_point]
+    tags: [driver_entry_point, P0]
   Contract_DriverEntryPoint_HipGetDriverEntryPoint_UnknownSymbol_ReportsNotFound:
     <<: *level_0
-    tags: [driver_entry_point]
+    tags: [driver_entry_point, P0]
   Contract_DriverEntryPoint_HipGetDriverEntryPoint_EmptySymbol_IsRejected:
     <<: *level_0
-    tags: [driver_entry_point]
+    tags: [driver_entry_point, P0]
   Contract_DriverEntryPoint_HipGetDriverEntryPoint_NullFuncPtr_IsRejected:
     <<: *level_0
-    tags: [driver_entry_point]
+    tags: [driver_entry_point, P0]
   Contract_DriverEntryPoint_HipGetDriverEntryPoint_InvalidFlag_IsRejected:
     <<: *level_0
-    tags: [driver_entry_point]
+    tags: [driver_entry_point, P0]
   Contract_Ipc_HipIpcGetMemHandle_Default_SucceedsForDeviceAllocation:
     <<: *level_0
-    tags: [ipc]
+    tags: [ipc, P0]
   Contract_Ipc_HipIpcOpenMemHandle_Default_SameProcessRoundTrip:
     <<: *level_0
-    tags: [ipc]
+    tags: [ipc, P0]
   Contract_Ipc_HipIpcGetMemHandle_NullArgs_AreRejected:
     <<: *level_0
-    tags: [ipc]
+    tags: [ipc, P0]
   Contract_Ipc_HipIpcGetEventHandle_Default_RequiresInterprocessFlag:
     <<: *level_0
-    tags: [ipc]
+    tags: [ipc, P0]
   Contract_Ipc_HipIpcOpenEventHandle_Default_SameProcessRoundTrip:
     <<: *level_0
-    tags: [ipc]
+    tags: [ipc, P0]
   Contract_ExternalResource_HipImportExternalMemory_ImportMemoryInvalidFd_IsRejected:
     <<: *level_0
-    tags: [external_resource]
+    tags: [external_resource, P0]
   Contract_ExternalResource_HipImportExternalSemaphore_ImportSemaphoreInvalidFd_IsRejected:
     <<: *level_0
-    tags: [external_resource]
+    tags: [external_resource, P0]
   Contract_ExternalResource_HipExternalMemoryGetMappedBuffer_NullHandle_IsRejected:
     <<: *level_0
-    tags: [external_resource]
+    tags: [external_resource, P0]
   Contract_ExternalResource_HipDestroyExternalMemory_DestroyMemoryNullHandle_IsRejected:
     <<: *level_0
-    tags: [external_resource]
+    tags: [external_resource, P0]
   Contract_ExternalResource_HipDestroyExternalSemaphore_DestroySemaphoreNullHandle_IsRejected:
     <<: *level_0
-    tags: [external_resource]
+    tags: [external_resource, P0]
   Contract_ExternalResource_HipSignalExternalSemaphoresAsync_SignalSemaphoreNullHandle_IsRejected:
     <<: *level_0
-    tags: [external_resource]
+    tags: [external_resource, P0]
   Contract_ExternalResource_HipWaitExternalSemaphoresAsync_WaitSemaphoreNullHandle_IsRejected:
     <<: *level_0
-    tags: [external_resource]
+    tags: [external_resource, P0]
   Contract_ExternalResource_HipExternalMemoryGetMappedMipmappedArray_NullHandle_IsRejected:
     <<: *level_0
-    tags: [external_resource]
+    tags: [external_resource, P0]
   Contract_Module_HipModuleLoadData_FromRtc_Succeeds:
     <<: *level_0
-    tags: [module]
+    tags: [module, P0]
   Contract_Module_HipModuleLoadData_NullImage_IsRejected:
     <<: *level_0
-    tags: [module]
+    tags: [module, P0]
   Contract_Module_HipModuleGetFunction_Default_ResolvesKnownSymbol:
     <<: *level_0
-    tags: [module]
+    tags: [module, P0]
   Contract_Module_HipModuleGetFunction_UnknownSymbol_IsRejected:
     <<: *level_0
-    tags: [module]
+    tags: [module, P0]
   Contract_Module_HipModuleLaunchKernel_Default_WritesExpectedValue:
     <<: *level_0
-    tags: [module]
+    tags: [module, P0]
   Contract_Module_HipModuleGetGlobal_Default_ReturnsAddressAndSize:
     <<: *level_0
-    tags: [module]
+    tags: [module, P0]
   Contract_Module_HipFuncGetAttribute_Default_ReturnsSaneValues:
     <<: *level_0
-    tags: [module]
+    tags: [module, P0]
   Contract_ModuleLoadEx_HipModuleLoadDataEx_ZeroOptions_LoadsAndUnloads:
     <<: *level_0
-    tags: [module_load_ex]
+    tags: [module_load_ex, P0]
   Contract_ModuleLoadEx_HipModuleLoadDataEx_WithJitOptions_ResolvesSymbol:
     <<: *level_0
-    tags: [module_load_ex]
+    tags: [module_load_ex, P0]
   Contract_ModuleLoadEx_HipModuleLoadDataEx_NullImage_IsRejected:
     <<: *level_0
-    tags: [module_load_ex]
+    tags: [module_load_ex, P0]
   Contract_ModuleLoadEx_HipModuleLaunchKernel_Default_LaunchWritesExpectedValue:
     <<: *level_0
-    tags: [module_load_ex]
+    tags: [module_load_ex, P0]
   Contract_ModuleLoadFile_HipModuleLoad_LoadNullModule_IsRejected:
     <<: *level_0
-    tags: [module_load_file]
+    tags: [module_load_file, P0]
   Contract_ModuleLoadFile_HipModuleLoad_LoadNullFilename_IsRejected:
     <<: *level_0
-    tags: [module_load_file]
+    tags: [module_load_file, P0]
   Contract_ModuleLoadFile_HipModuleLoad_LoadEmptyFilename_IsRejected:
     <<: *level_0
-    tags: [module_load_file]
+    tags: [module_load_file, P0]
   Contract_ModuleLoadFile_HipModuleLoad_LoadMissingFile_IsRejected:
     <<: *level_0
-    tags: [module_load_file]
+    tags: [module_load_file, P0]
   Contract_ModuleLoadFile_HipModuleLoadFatBinary_NullFatbin_IsRejected:
     <<: *level_0
-    tags: [module_load_file]
+    tags: [module_load_file, P0]
   Contract_ModuleLoadFile_HipModuleLoadFatBinary_NullModule_IsRejected:
     <<: *level_0
-    tags: [module_load_file]
+    tags: [module_load_file, P0]
   Contract_ModuleExec_HipModuleGetFunctionCount_Default_ReturnsPositiveCount:
     <<: *level_0
-    tags: [module_exec]
+    tags: [module_exec, P0]
   Contract_ModuleExec_HipModuleGetFunctionCount_NullCount_IsRejected:
     <<: *level_0
-    tags: [module_exec]
+    tags: [module_exec, P0]
   Contract_ModuleExec_HipModuleOccupancyMaxPotentialBlockSize_Default_ReturnsUsableValues:
     <<: *level_0
-    tags: [module_exec]
+    tags: [module_exec, P0]
   Contract_ModuleExec_HipModuleOccupancyMaxActiveBlocksPerMultiprocessor_OccupancyMaxActiveBlocks_ReturnsNonNegativeValue:
     <<: *level_0
-    tags: [module_exec]
+    tags: [module_exec, P0]
   Contract_ModuleExec_HipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_OccupancyWithFlags_MatchesDefault:
     <<: *level_0
-    tags: [module_exec]
+    tags: [module_exec, P0]
   Contract_ModuleExec_HipModuleOccupancyMaxPotentialBlockSizeWithFlags_OccupancyPotentialBlockSizeWithFlags_MatchesDefault:
     <<: *level_0
-    tags: [module_exec]
+    tags: [module_exec, P0]
   Contract_ModuleExec_HipModuleLaunchCooperativeKernel_Default_WritesExpectedValue:
     <<: *level_0
-    tags: [module_exec]
+    tags: [module_exec, P0]
   Contract_ModuleExec_HipModuleLaunchCooperativeKernel_NullFunction_IsRejected:
     <<: *level_0
-    tags: [module_exec]
+    tags: [module_exec, P0]
   Contract_JitLink_HipLinkCreate_NvidiaUnsupported_IsSkipped:
     <<: *level_0
-    tags: [jit_link]
+    tags: [jit_link, P0]
   Contract_JitLink_HipLinkCreate_NullState_IsRejected:
     <<: *level_0
-    tags: [jit_link]
+    tags: [jit_link, P0]
   Contract_JitLink_HipLinkCreate_Destroy_RoundTrips:
     <<: *level_0
-    tags: [jit_link]
+    tags: [jit_link, P0]
   Contract_JitLink_HipLinkDestroy_InvalidHandle_IsRejected:
     <<: *level_0
-    tags: [jit_link]
+    tags: [jit_link, P0]
   Contract_JitLink_HipLinkComplete_NullOutputs_AreRejected:
     <<: *level_0
-    tags: [jit_link]
+    tags: [jit_link, P0]
   Contract_JitLink_HipLinkAddData_InvalidImage_IsRejected:
     <<: *level_0
-    tags: [jit_link]
+    tags: [jit_link, P0]
   Contract_JitLink_HipLinkAddFile_InvalidInputType_IsRejected:
     <<: *level_0
-    tags: [jit_link]
+    tags: [jit_link, P0]
   Contract_Library_HipLibraryLoadData_FromRtc_Succeeds:
     <<: *level_0
-    tags: [library]
+    tags: [library, P0]
   Contract_Library_HipLibraryLoadData_NullImage_IsRejected:
     <<: *level_0
-    tags: [library]
+    tags: [library, P0]
   Contract_Library_HipLibraryGetKernel_LoadDataValidImage_CanResolveKernel:
     <<: *level_0
-    tags: [library]
+    tags: [library, P0]
   Contract_Library_HipLibraryGetKernel_Default_ResolvesKnownSymbol:
     <<: *level_0
-    tags: [library]
+    tags: [library, P0]
   Contract_Library_HipLibraryGetKernel_UnknownSymbol_IsRejected:
     <<: *level_0
-    tags: [library]
+    tags: [library, P0]
   Contract_Library_HipLibraryGetKernelCount_Default_MatchesLowerBound:
     <<: *level_0
-    tags: [library]
+    tags: [library, P0]
   Contract_Library_HipLibraryEnumerateKernels_ZeroMax_LeavesBufferUntouched:
     <<: *level_0
-    tags: [library]
+    tags: [library, P0]
   Contract_Library_HipLibraryEnumerateKernels_Default_HandlesResolveToFunctions:
     <<: *level_0
-    tags: [library]
+    tags: [library, P0]
   Contract_Library_HipLibraryGetKernel_Default_RepeatedLookupIsStable:
     <<: *level_0
-    tags: [library]
+    tags: [library, P0]
   Contract_Library_HipKernelGetName_Default_ReturnsRequestedSymbol:
     <<: *level_0
-    tags: [library]
+    tags: [library, P0]
   Contract_Library_HipKernelGetFunction_Default_LaunchesAndWrites:
     <<: *level_0
-    tags: [library]
+    tags: [library, P0]
   Contract_Library_HipLibraryGetGlobal_Default_ReturnsAddressAndSize:
     <<: *level_0
-    tags: [library]
+    tags: [library, P0]
   Contract_Library_HipLibraryGetGlobal_Default_MatchesModuleGetGlobal:
     <<: *level_0
-    tags: [library]
+    tags: [library, P0]
   Contract_Library_HipKernelGetLibrary_Default_RoundTrips:
     <<: *level_0
-    tags: [library]
+    tags: [library, P0]
   Contract_KernelObjectAttributes_HipKernelGetAttribute_Default_ReturnsSaneValues:
     <<: *level_0
-    tags: [kernel_object_attributes]
+    tags: [kernel_object_attributes, P0]
   Contract_KernelObjectAttributes_HipKernelSetAttribute_SetMaxDynamicSharedMemory_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [kernel_object_attributes]
+    tags: [kernel_object_attributes, P0]
   Contract_KernelObjectAttributes_HipKernelGetParamInfo_Default_ReturnsFirstParamLayout:
     <<: *level_0
-    tags: [kernel_object_attributes]
+    tags: [kernel_object_attributes, P0]
   Contract_LibraryFile_HipLibraryLoadFromFile_Default_ResolvesKnownKernel:
     <<: *level_0
-    tags: [library_file]
+    tags: [library_file, P0]
   Contract_LibraryFile_HipLibraryLoadFromFile_MissingFile_IsRejected:
     <<: *level_0
-    tags: [library_file]
+    tags: [library_file, P0]
   Contract_LibraryFile_HipLibraryGetManaged_UnknownSymbol_IsRejected:
     <<: *level_0
-    tags: [library_file]
+    tags: [library_file, P0]

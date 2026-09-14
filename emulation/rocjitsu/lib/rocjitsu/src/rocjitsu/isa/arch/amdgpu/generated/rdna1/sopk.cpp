@@ -470,7 +470,6 @@ SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   simm32 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(literal_));
-  simm32.apply_fieldless_caps(true, false, false);
 }
 
 namespace detail {
@@ -621,12 +620,11 @@ SSubvectorLoopBeginSopk::SSubvectorLoopBeginSopk(const MachineInst *inst)
       simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
       sdst_exec_in(64, OperandType::OPR_SDST_EXEC, 126) {
-  src_operands_[0] = &sdst;
   dst_operands_[0] = &sdst;
-  src_operands_[1] = &simm16;
+  src_operands_[0] = &simm16;
   dst_operands_[1] = &sdst_exec;
-  src_operands_[2] = &sdst_exec_in;
-  num_src_ = 3;
+  src_operands_[1] = &sdst_exec_in;
+  num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);
@@ -650,12 +648,11 @@ SSubvectorLoopEndSopk::SSubvectorLoopEndSopk(const MachineInst *inst)
       simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
       sdst_exec_in(64, OperandType::OPR_SDST_EXEC, 126) {
-  src_operands_[0] = &sdst;
   dst_operands_[0] = &sdst;
-  src_operands_[1] = &simm16;
+  src_operands_[0] = &simm16;
   dst_operands_[1] = &sdst_exec;
-  src_operands_[2] = &sdst_exec_in;
-  num_src_ = 3;
+  src_operands_[1] = &sdst_exec_in;
+  num_src_ = 2;
   num_dst_ = 2;
   sdst_exec.apply_fieldless_caps(false, false, false);
   sdst_exec_in.apply_fieldless_caps(false, false, false);

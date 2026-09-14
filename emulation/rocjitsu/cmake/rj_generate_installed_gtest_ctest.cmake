@@ -12,8 +12,18 @@
 #   TEST_EXECUTABLE      Build-tree executable used for --gtest_list_tests.
 #   INSTALLED_EXECUTABLE Path CTest should run from the installed test dir.
 #   OUTPUT_FILE          Generated CTest fragment path.
+#
+# Optional variables:
+#   TEST_FILTER          --gtest_filter for discovery. Must be the SAME filter the
+#                        build tree uses, or a case excluded there is discovered here
+#                        and collides with its own manual registration.
 function(rj_generate_installed_gtest_ctest)
-    set(oneValueArgs TEST_EXECUTABLE INSTALLED_EXECUTABLE OUTPUT_FILE)
+    set(oneValueArgs
+        TEST_EXECUTABLE
+        INSTALLED_EXECUTABLE
+        OUTPUT_FILE
+        TEST_FILTER
+    )
     cmake_parse_arguments(ARG "" "${oneValueArgs}" "" ${ARGN})
 
     if(NOT ARG_TEST_EXECUTABLE)
@@ -26,12 +36,17 @@ function(rj_generate_installed_gtest_ctest)
         message(FATAL_ERROR "OUTPUT_FILE is required")
     endif()
 
-    # RequestExitWakesAllPartitions is registered manually with a short
-    # timeout because its expected regression mode is a deadlocked process.
+    # Tests whose expected regression mode is a deadlocked process are registered
+    # manually with a short timeout, so discovery must exclude them here exactly as
+    # it does in the build tree. The caller passes that one filter through; only a
+    # target that registers nothing manually falls back to dropping benchmarks.
+    if(NOT ARG_TEST_FILTER)
+        set(ARG_TEST_FILTER "-*Benchmark*")
+    endif()
     execute_process(
         COMMAND
             "${ARG_TEST_EXECUTABLE}" --gtest_list_tests
-            "--gtest_filter=-*Benchmark*:*RequestExitWakesAllPartitions*"
+            "--gtest_filter=${ARG_TEST_FILTER}"
         RESULT_VARIABLE _result
         OUTPUT_VARIABLE _tests
         ERROR_VARIABLE _errors
@@ -96,4 +111,5 @@ rj_generate_installed_gtest_ctest(
     TEST_EXECUTABLE "${TEST_EXECUTABLE}"
     INSTALLED_EXECUTABLE "${INSTALLED_EXECUTABLE}"
     OUTPUT_FILE "${OUTPUT_FILE}"
+    TEST_FILTER "${TEST_FILTER}"
 )

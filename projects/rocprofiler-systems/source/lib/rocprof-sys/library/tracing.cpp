@@ -49,8 +49,6 @@ get_timemory_hash_aliases(std::int64_t _tid)
 bool debug_push = rocprofsys::get_env(env_vars::DEBUG_PUSH, false) || get_debug_env();
 bool debug_pop  = rocprofsys::get_env(env_vars::DEBUG_POP, false) || get_debug_env();
 bool debug_mark = rocprofsys::get_env(env_vars::DEBUG_MARK, false) || get_debug_env();
-bool debug_user =
-    rocprofsys::get_env(env_vars::DEBUG_USER_REGIONS, false) || get_debug_env();
 
 void
 copy_timemory_hash_ids()
@@ -153,7 +151,7 @@ record_thread_start_time()
     static thread_local std::once_flag _once{};
     std::call_once(_once, []() {
         thread_info::set_start(comp::wall_clock::record(),
-                               get_mode() != state::process::Mode::Sampling);
+                               get_mode() != state::process::Mode::sampling);
     });
 }
 

@@ -714,11 +714,16 @@ DsPkAddF16Ds::DsPkAddF16Ds(const MachineInst *inst)
             (reinterpret_cast<const OpEncoding *>(inst)->data0 +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
                   ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))) {
+                  : 0))),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -740,11 +745,16 @@ DsPkAddBf16Ds::DsPkAddBf16Ds(const MachineInst *inst)
             (reinterpret_cast<const OpEncoding *>(inst)->data0 +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
                   ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))) {
+                  : 0))),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 0;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 1;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -792,7 +802,7 @@ DsWriteB8Ds::DsWriteB8Ds(const MachineInst *inst)
     : Ds("ds_write_b8", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWriteB8Ds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+      data0(8, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->data0 +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
                   ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
@@ -821,7 +831,7 @@ DsWriteB16Ds::DsWriteB16Ds(const MachineInst *inst)
     : Ds("ds_write_b16", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWriteB16Ds)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+      data0(16, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->data0 +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
                   ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
@@ -3997,12 +4007,17 @@ DsPkAddRtnF16Ds::DsPkAddRtnF16Ds(const MachineInst *inst)
             (reinterpret_cast<const OpEncoding *>(inst)->data0 +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
                   ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))) {
+                  : 0))),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
@@ -4030,12 +4045,17 @@ DsPkAddRtnBf16Ds::DsPkAddRtnBf16Ds(const MachineInst *inst)
             (reinterpret_cast<const OpEncoding *>(inst)->data0 +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
                   ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                  : 0))) {
+                  : 0))),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 

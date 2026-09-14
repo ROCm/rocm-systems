@@ -1538,22 +1538,6 @@ DecodeResult decodeVDivScaleF32Vop3SdstEnc(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVDivScaleF64Vop3SdstEnc(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVDot2F32F16Vop3p(const MachineInst *opcode,
-                                    const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVDot2I32I16Vop3p(const MachineInst *opcode,
-                                    const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVDot2U32U16Vop3p(const MachineInst *opcode,
-                                    const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVDot2cF32F16Vop2(const MachineInst *opcode,
-                                    const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVDot2cF32F16Vop3(const MachineInst *opcode,
-                                    const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVDot4I32I8Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVDot4U32U8Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVDot4cI32I8Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVDot4cI32I8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVDot8I32I4Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVDot8U32U4Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVExpF16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVExpF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVExpF32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
@@ -1723,14 +1707,9 @@ DecodeResult decodeVMovB32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 DecodeResult decodeVMovreldB32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVMovreldB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVMovrelsB32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVMovrelsB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVMovrelsd2B32Vop1(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVMovrelsd2B32Vop3(const MachineInst *opcode,
-                                     const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVMovrelsdB32Vop1(const MachineInst *opcode,
-                                    const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVMovrelsdB32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVMqsadPkU16U8Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error);
@@ -2055,10 +2034,10 @@ const std::array<DecoderImpl::DecodeFunc, 512> DecoderImpl::primary_decode_table
     &detail::decodeVCndmaskB32Vop2,
     &detail::decodeVCndmaskB32Vop2,
     &detail::decodeVCndmaskB32Vop2,
-    &detail::decodeVDot2cF32F16Vop2,
-    &detail::decodeVDot2cF32F16Vop2,
-    &detail::decodeVDot2cF32F16Vop2,
-    &detail::decodeVDot2cF32F16Vop2,
+    &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,
     &detail::decodeVAddF32Vop2,
     &detail::decodeVAddF32Vop2,
     &detail::decodeVAddF32Vop2,
@@ -2099,10 +2078,10 @@ const std::array<DecoderImpl::DecodeFunc, 512> DecoderImpl::primary_decode_table
     &detail::decodeVMulHiU32U24Vop2,
     &detail::decodeVMulHiU32U24Vop2,
     &detail::decodeVMulHiU32U24Vop2,
-    &detail::decodeVDot4cI32I8Vop2,
-    &detail::decodeVDot4cI32I8Vop2,
-    &detail::decodeVDot4cI32I8Vop2,
-    &detail::decodeVDot4cI32I8Vop2,
+    &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
@@ -3290,10 +3269,10 @@ const std::array<DecoderImpl::DecodeFunc, 128> DecoderImpl::sub_decode_vop3p = {
     &detail::decodeVPkMaxU16Vop3p,     &detail::decodeVPkMinU16Vop3p,
     &detail::decodeVPkFmaF16Vop3p,     &detail::decodeVPkAddF16Vop3p,
     &detail::decodeVPkMulF16Vop3p,     &detail::decodeVPkMinF16Vop3p,
-    &detail::decodeVPkMaxF16Vop3p,     &detail::decodeVDot2F32F16Vop3p,
-    &detail::decodeVDot2I32I16Vop3p,   &detail::decodeVDot2U32U16Vop3p,
-    &detail::decodeVDot4I32I8Vop3p,    &detail::decodeVDot4U32U8Vop3p,
-    &detail::decodeVDot8I32I4Vop3p,    &detail::decodeVDot8U32U4Vop3p,
+    &detail::decodeVPkMaxF16Vop3p,     &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,       &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,       &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,       &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,       &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,       &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,       &DecoderImpl::decodeInvalid,
@@ -3608,7 +3587,7 @@ const std::array<DecoderImpl::DecodeFunc, 1024> DecoderImpl::sub_decode_vop3 = {
     &detail::decodeVCmpxTruF16Vop3,
     &DecoderImpl::decodeInvalid,
     &detail::decodeVCndmaskB32Vop3,
-    &detail::decodeVDot2cF32F16Vop3,
+    &DecoderImpl::decodeInvalid,
     &detail::decodeVAddF32Vop3,
     &detail::decodeVSubF32Vop3,
     &detail::decodeVSubrevF32Vop3,
@@ -3619,7 +3598,7 @@ const std::array<DecoderImpl::DecodeFunc, 1024> DecoderImpl::sub_decode_vop3 = {
     &detail::decodeVMulHiI32I24Vop3,
     &detail::decodeVMulU32U24Vop3,
     &detail::decodeVMulHiU32U24Vop3,
-    &detail::decodeVDot4cI32I8Vop3,
+    &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &detail::decodeVMinF32Vop3,
     &detail::decodeVMaxF32Vop3,
@@ -3801,12 +3780,12 @@ const std::array<DecoderImpl::DecodeFunc, 1024> DecoderImpl::sub_decode_vop3 = {
     &detail::decodeVFrexpMantF32Vop3,
     &detail::decodeVClrexcpVop3,
     &detail::decodeVMovreldB32Vop3,
-    &detail::decodeVMovrelsB32Vop3,
-    &detail::decodeVMovrelsdB32Vop3,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
-    &detail::decodeVMovrelsd2B32Vop3,
+    &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,

@@ -15,6 +15,22 @@ For more information about the AMD ROCm ecosystem, see:
 
 - https://rocm.docs.amd.com/
 
+Code Formatting
+---------------
+
+This project uses [clang-format](https://clang.llvm.org/docs/ClangFormat.html)
+to enforce consistent code style.  The style is based on the GNU style with
+minor adjustments documented in `.clang-format`.  Vendored headers under
+`src/hsa/`, `src/linux/`, `src/windows/`, and `third_party/` are excluded.
+
+Only modified lines are reformatted, using
+[clang-format-diff](https://clang.llvm.org/docs/ClangFormat.html#script-for-patch-reformatting).
+To reformat the changes in your working tree against the upstream branch:
+
+````shell
+git diff origin/develop | clang-format-diff -p1 -i
+````
+
 Build the AMD Debugger API Library
 ----------------------------------
 

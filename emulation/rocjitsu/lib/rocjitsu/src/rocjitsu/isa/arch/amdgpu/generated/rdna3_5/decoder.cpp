@@ -123,18 +123,6 @@ DecodeResult decodeBufferLoadI16Mubuf(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error);
 DecodeResult decodeBufferLoadI8Mubuf(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error);
-DecodeResult decodeBufferLoadLdsB32Mubuf(const MachineInst *opcode,
-                                         const DecodeErrorEmitter &emit_error);
-DecodeResult decodeBufferLoadLdsFormatXMubuf(const MachineInst *opcode,
-                                             const DecodeErrorEmitter &emit_error);
-DecodeResult decodeBufferLoadLdsI16Mubuf(const MachineInst *opcode,
-                                         const DecodeErrorEmitter &emit_error);
-DecodeResult decodeBufferLoadLdsI8Mubuf(const MachineInst *opcode,
-                                        const DecodeErrorEmitter &emit_error);
-DecodeResult decodeBufferLoadLdsU16Mubuf(const MachineInst *opcode,
-                                         const DecodeErrorEmitter &emit_error);
-DecodeResult decodeBufferLoadLdsU8Mubuf(const MachineInst *opcode,
-                                        const DecodeErrorEmitter &emit_error);
 DecodeResult decodeBufferLoadU16Mubuf(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error);
 DecodeResult decodeBufferLoadU8Mubuf(const MachineInst *opcode,
@@ -423,6 +411,12 @@ DecodeResult decodeFlatStoreD16HiB16Flat(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error);
 DecodeResult decodeFlatStoreD16HiB8Flat(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeGlobalAtomicCsubU32Flat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeGlobalLoadAddtidB32Flat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeGlobalStoreAddtidB32Flat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error);
 DecodeResult decodeImageAtomicAddMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error);
 DecodeResult decodeImageAtomicAndMimg(const MachineInst *opcode,
@@ -5019,8 +5013,8 @@ const std::array<DecoderImpl::DecodeFunc, 128> DecoderImpl::sub_decode_flat = {
     &detail::decodeFlatStoreD16HiB16Flat,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeGlobalLoadAddtidB32Flat,
+    &detail::decodeGlobalStoreAddtidB32Flat,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
@@ -5034,7 +5028,7 @@ const std::array<DecoderImpl::DecodeFunc, 128> DecoderImpl::sub_decode_flat = {
     &detail::decodeFlatAtomicCmpswapB32Flat,
     &detail::decodeFlatAtomicAddU32Flat,
     &detail::decodeFlatAtomicSubU32Flat,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeGlobalAtomicCsubU32Flat,
     &detail::decodeFlatAtomicMinI32Flat,
     &detail::decodeFlatAtomicMinU32Flat,
     &detail::decodeFlatAtomicMaxI32Flat,
@@ -5157,12 +5151,12 @@ const std::array<DecoderImpl::DecodeFunc, 256> DecoderImpl::sub_decode_mubuf = {
     &DecoderImpl::decodeInvalid,
     &detail::decodeBufferGl0InvMubuf,
     &detail::decodeBufferGl1InvMubuf,
-    &detail::decodeBufferLoadLdsU8Mubuf,
-    &detail::decodeBufferLoadLdsI8Mubuf,
-    &detail::decodeBufferLoadLdsU16Mubuf,
-    &detail::decodeBufferLoadLdsI16Mubuf,
-    &detail::decodeBufferLoadLdsB32Mubuf,
-    &detail::decodeBufferLoadLdsFormatXMubuf,
+    &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,
     &detail::decodeBufferAtomicSwapB32Mubuf,
     &detail::decodeBufferAtomicCmpswapB32Mubuf,
     &detail::decodeBufferAtomicAddU32Mubuf,

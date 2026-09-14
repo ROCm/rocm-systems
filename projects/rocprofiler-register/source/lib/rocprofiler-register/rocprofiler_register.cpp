@@ -26,12 +26,15 @@
 #include "details/dl.hpp"
 #include "details/environment.hpp"
 #include "details/filesystem.hpp"
+#include "details/library_config.hpp"
 #include "details/logging.hpp"
 #include "details/scope_destructor.hpp"
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <glog/logging.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <bitset>
@@ -39,8 +42,11 @@
 #include <mutex>
 #include <regex>
 #include <stdexcept>
+#include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
+#include <vector>
 
 #include <dlfcn.h>
 #include <unistd.h>
@@ -150,16 +156,112 @@ static_assert(sizeof(bitset_t) ==
                   sizeof(rocprofiler_register_library_indentifier_t::handle),
               "bitset should be same at uint64_t");
 
-constexpr auto rocprofiler_lib_name                = "librocprofiler-sdk.so";
-constexpr auto rocprofiler_lib_register_entrypoint = "rocprofiler_set_api_table";
-constexpr auto rocprofiler_attach_lib_name         = "librocprofiler-sdk-attach.so";
+constexpr auto shared_library_prefix =
+    std::string_view{ ROCPROFILER_REGISTER_SHARED_LIBRARY_PREFIX };
+constexpr auto shared_library_suffix =
+    std::string_view{ ROCPROFILER_REGISTER_SHARED_LIBRARY_SUFFIX };
+
+std::string
+get_unversioned_library_name(std::string_view base_name)
+{
+    return fmt::format("{}{}{}", shared_library_prefix, base_name, shared_library_suffix);
+}
+
+std::string
+get_versioned_library_name(std::string_view base_name, std::string_view soversion)
+{
+#if defined(_WIN32)
+    static_cast<void>(soversion);
+    return get_unversioned_library_name(base_name);
+#elif defined(__APPLE__)
+    return fmt::format(
+        "{}{}.{}{}", shared_library_prefix, base_name, soversion, shared_library_suffix);
+#else
+    return fmt::format(
+        "{}{}{}.{}", shared_library_prefix, base_name, shared_library_suffix, soversion);
+#endif
+}
+
+std::string
+get_versioned_library_name(std::string_view base_name, uint32_t soversion)
+{
+    return get_versioned_library_name(base_name, std::to_string(soversion));
+}
+
+enum class load_library_kind : uint8_t
+{
+    sdk,
+    attach,
+};
+
+template <load_library_kind>
+struct load_library_trait;
+
+#define ROCPROFILER_REGISTER_DEFINE_LOAD_LIBRARY_TRAIT(                                   \
+    KIND, BASE_NAME, MIN_SOVERSION, MAX_SOVERSION, ENTRYPOINT)                            \
+    template <>                                                                           \
+    struct load_library_trait<load_library_kind::KIND>                                    \
+    {                                                                                     \
+        static constexpr auto        base_name           = std::string_view{ BASE_NAME }; \
+        static constexpr uint32_t    min_soversion       = MIN_SOVERSION;                 \
+        static constexpr uint32_t    max_soversion       = MAX_SOVERSION;                 \
+        static constexpr const char* required_entrypoint = ENTRYPOINT;                    \
+                                                                                          \
+        static_assert(min_soversion <= max_soversion);                                    \
+    }
+
+// These ranges enumerate known-compatible SONAME fallbacks. Libraries found through
+// weak symbols, RTLD_DEFAULT, or the unversioned name retain the existing symbol-based
+// compatibility behavior.
+// rocprofiler_set_api_table has the same signature in SDK SOVERSIONs 0 and 1.
+ROCPROFILER_REGISTER_DEFINE_LOAD_LIBRARY_TRAIT(sdk,
+                                               "rocprofiler-sdk",
+                                               0,
+                                               1,
+                                               "rocprofiler_set_api_table");
+// The attachment helper and its registration entry point were introduced in ABI 1.
+ROCPROFILER_REGISTER_DEFINE_LOAD_LIBRARY_TRAIT(attach,
+                                               "rocprofiler-sdk-attach",
+                                               1,
+                                               1,
+                                               "rocprofiler_attach_set_api_table");
+
+#undef ROCPROFILER_REGISTER_DEFINE_LOAD_LIBRARY_TRAIT
+
+using rocprofiler_sdk_load_trait    = load_library_trait<load_library_kind::sdk>;
+using rocprofiler_attach_load_trait = load_library_trait<load_library_kind::attach>;
+
+template <typename TraitT>
+std::vector<std::string>
+get_default_library_candidates()
+{
+    auto candidates    = std::vector<std::string>{};
+    auto append_unique = [&candidates](std::string name) {
+        if(std::find(candidates.begin(), candidates.end(), name) == candidates.end())
+            candidates.emplace_back(std::move(name));
+    };
+
+    // Preserve the existing unversioned lookup, then support runtime-only installations
+    // which provide only known-compatible SONAMEs.
+    append_unique(get_unversioned_library_name(TraitT::base_name));
+    for(auto soversion = TraitT::max_soversion;; --soversion)
+    {
+        append_unique(get_versioned_library_name(TraitT::base_name, soversion));
+        if(soversion == TraitT::min_soversion) break;
+    }
+
+    return candidates;
+}
+
+constexpr auto rocprofiler_lib_register_entrypoint =
+    rocprofiler_sdk_load_trait::required_entrypoint;
 constexpr auto rocprofiler_attach_lib_register_entrypoint =
-    "rocprofiler_attach_set_api_table";
+    rocprofiler_attach_load_trait::required_entrypoint;
 constexpr auto rocprofiler_lib_attach_entrypoint = "rocprofiler_attach";
 constexpr auto rocprofiler_lib_detach_entrypoint = "rocprofiler_detach";
 
-constexpr auto rocprofiler_register_lib_name =
-    "librocprofiler-register.so." ROCPROFILER_REGISTER_SOVERSION;
+const auto rocprofiler_register_lib_name =
+    get_versioned_library_name("rocprofiler-register", ROCPROFILER_REGISTER_SOVERSION);
 
 enum rocp_reg_supported_library  // NOLINT(performance-enum-size)
 {
@@ -329,8 +431,25 @@ auto rocp_reg_get_imports(std::index_sequence<Idx...>)
     return _data;
 }
 
+struct loaded_library
+{
+    void* handle     = nullptr;
+    void* entrypoint = nullptr;
+};
+
+struct opened_library
+{
+    void*       handle = nullptr;
+    std::string path   = {};
+};
+
+opened_library open_library_local(std::string_view);
+
+loaded_library
+load_library(const std::vector<std::string>&, const char*, bool = false);
+
 rocp_set_api_table_data_t
-rocp_load_rocprofiler_lib(std::string _rocp_reg_lib);
+rocp_load_rocprofiler_lib(const std::string& _rocp_reg_lib);
 
 struct rocp_scan_data
 {
@@ -368,16 +487,15 @@ rocp_reg_scan_for_tools()
                                    rocprofiler_lib_attach_fn,
                                    rocprofiler_lib_detach_fn };
 
-        if(_rocp_reg_lib.empty()) _rocp_reg_lib = rocprofiler_lib_name;
-
         std::tie(rocprofiler_lib_handle,
                  rocprofiler_lib_config_fn,
                  rocprofiler_lib_attach_fn,
                  rocprofiler_lib_detach_fn) = rocp_load_rocprofiler_lib(_rocp_reg_lib);
 
         LOG_IF(FATAL, !rocprofiler_lib_config_fn)
-            << rocprofiler_lib_register_entrypoint << " not found. Tried to dlopen "
-            << _rocp_reg_lib;
+            << rocprofiler_lib_register_entrypoint << " not found after trying "
+            << ((_rocp_reg_lib.empty()) ? "the default rocprofiler-sdk library candidates"
+                                        : _rocp_reg_lib);
     }
     else if(_found_tool && rocprofiler_set_api_table)
     {
@@ -392,73 +510,141 @@ rocp_reg_scan_for_tools()
                            rocprofiler_lib_detach_fn };
 }
 
-void*
-get_library_handle(std::string_view _rocp_reg_lib)
+opened_library
+open_library_local(std::string_view _rocp_reg_lib)
 {
     void* rocprofiler_lib_handle = nullptr;
 
-    if(_rocp_reg_lib.empty()) return nullptr;
+    if(_rocp_reg_lib.empty()) return {};
 
-    auto _rocp_reg_lib_path       = fs::path{ _rocp_reg_lib };
-    auto _rocp_reg_lib_path_fname = _rocp_reg_lib_path.filename();
-    auto _rocp_reg_lib_path_abs =
-        (_rocp_reg_lib_path.is_absolute())
-            ? _rocp_reg_lib_path
-            : (fs::path{ get_this_library_path() } / _rocp_reg_lib_path);
+    auto _rocp_reg_lib_path        = fs::path{ _rocp_reg_lib };
+    auto _rocp_reg_lib_is_absolute = _rocp_reg_lib_path.is_absolute();
 
     // check to see if the rocprofiler library is already loaded
-    rocprofiler_lib_handle = dlopen(_rocp_reg_lib_path.c_str(), RTLD_NOLOAD | RTLD_LAZY);
+    rocprofiler_lib_handle =
+        dlopen(_rocp_reg_lib_path.c_str(), RTLD_NOLOAD | RTLD_LOCAL | RTLD_LAZY);
 
     if(rocprofiler_lib_handle)
     {
-        LOG(INFO) << "loaded " << _rocp_reg_lib << " library at "
+        LOG(INFO) << "found loaded " << _rocp_reg_lib << " library at "
                   << _rocp_reg_lib_path.string() << " (handle=" << rocprofiler_lib_handle
-                  << ") via RTLD_NOLOAD | RTLD_LAZY";
+                  << ") via RTLD_NOLOAD | RTLD_LOCAL | RTLD_LAZY";
     }
 
-    // try to load with the given path
+    // Probe with local visibility so a candidate is not globally exposed before its
+    // required entry point is validated.
     if(!rocprofiler_lib_handle)
     {
         rocprofiler_lib_handle =
-            dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+            dlopen(_rocp_reg_lib_path.c_str(), RTLD_LOCAL | RTLD_LAZY);
 
         if(rocprofiler_lib_handle)
         {
-            LOG(INFO) << "loaded " << _rocp_reg_lib << " library at "
+            LOG(INFO) << "opened " << _rocp_reg_lib << " library at "
                       << _rocp_reg_lib_path.string()
                       << " (handle=" << rocprofiler_lib_handle
-                      << ") via RTLD_GLOBAL | RTLD_LAZY";
+                      << ") via RTLD_LOCAL | RTLD_LAZY";
         }
     }
 
-    // try to load with the absolute path
-    if(!rocprofiler_lib_handle)
+    // Try the same relative path from the rocprofiler-register installation.
+    if(!rocprofiler_lib_handle && !_rocp_reg_lib_is_absolute)
     {
-        _rocp_reg_lib_path = _rocp_reg_lib_path_abs;
+        _rocp_reg_lib_path = fs::path{ get_this_library_path() } / _rocp_reg_lib_path;
         rocprofiler_lib_handle =
-            dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+            dlopen(_rocp_reg_lib_path.c_str(), RTLD_LOCAL | RTLD_LAZY);
     }
 
-    // try to load with the basename path
-    if(!rocprofiler_lib_handle)
+    LOG_IF(INFO, rocprofiler_lib_handle != nullptr)
+        << "locally opened " << _rocp_reg_lib << " library at "
+        << _rocp_reg_lib_path.string() << " (handle=" << rocprofiler_lib_handle << ")";
+
+    return opened_library{ rocprofiler_lib_handle, _rocp_reg_lib_path.string() };
+}
+
+std::string
+format_library_candidates(const std::vector<std::string>& candidates)
+{
+    return fmt::format("{}", fmt::join(candidates.begin(), candidates.end(), ", "));
+}
+
+loaded_library
+load_library(const std::vector<std::string>& candidates,
+             const char*                     required_entrypoint,
+             bool                            prefer_colocated)
+{
+    auto search_candidates = std::vector<std::string>{};
+    auto append_unique     = [&search_candidates](std::string candidate) {
+        if(std::find(search_candidates.begin(), search_candidates.end(), candidate) ==
+           search_candidates.end())
+            search_candidates.emplace_back(std::move(candidate));
+    };
+
+    if(prefer_colocated)
     {
-        _rocp_reg_lib_path = _rocp_reg_lib_path_fname;
-        rocprofiler_lib_handle =
-            dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+        // Try every candidate from this installation before searching globally. Otherwise
+        // a missing local unversioned name could select an unrelated system installation
+        // before reaching a co-located SONAME.
+        auto library_directory = fs::path{ get_this_library_path() };
+        for(const auto& candidate : candidates)
+        {
+            auto path = fs::path{ candidate };
+            if(path.is_absolute()) continue;
+
+            auto colocated = library_directory / path;
+            auto ec        = std::error_code{};
+            if(fs::exists(colocated, ec) && !ec) append_unique(colocated.string());
+        }
     }
 
-    LOG(INFO) << "loaded " << _rocp_reg_lib << " library at "
-              << _rocp_reg_lib_path.string() << " (handle=" << rocprofiler_lib_handle
-              << ")";
+    for(const auto& candidate : candidates)
+        append_unique(candidate);
 
-    LOG_IF(WARNING, rocprofiler_lib_handle == nullptr)
-        << _rocp_reg_lib << " failed to load\n";
+    for(const auto& candidate : search_candidates)
+    {
+        auto opened = open_library_local(candidate);
+        if(!opened.handle) continue;
 
-    return rocprofiler_lib_handle;
+        dlerror();
+        auto* entrypoint = dlsym(opened.handle, required_entrypoint);
+        auto* error      = dlerror();
+        if(error == nullptr && entrypoint != nullptr)
+        {
+            auto* handle =
+                dlopen(opened.path.c_str(), RTLD_NOLOAD | RTLD_GLOBAL | RTLD_LAZY);
+            if(!handle) handle = dlopen(opened.path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+
+            void*       promoted_entrypoint = nullptr;
+            const char* promotion_error     = nullptr;
+            if(handle)
+            {
+                dlerror();
+                promoted_entrypoint = dlsym(handle, required_entrypoint);
+                promotion_error     = dlerror();
+            }
+
+            dlclose(opened.handle);
+            if(!handle || promotion_error != nullptr || promoted_entrypoint == nullptr)
+            {
+                if(handle) dlclose(handle);
+                continue;
+            }
+
+            LOG(INFO) << "selected " << candidate << " for entry point "
+                      << required_entrypoint;
+            return loaded_library{ handle, promoted_entrypoint };
+        }
+
+        dlclose(opened.handle);
+    }
+
+    LOG(WARNING) << "failed to load a library containing '" << required_entrypoint
+                 << "'. Tried: " << format_library_candidates(search_candidates);
+    return {};
 }
 
 rocp_set_api_table_data_t
-rocp_load_rocprofiler_lib(std::string _rocp_reg_lib)
+rocp_load_rocprofiler_lib(const std::string& _rocp_reg_lib)
 {
     void*                       rocprofiler_lib_handle    = nullptr;
     rocprofiler_set_api_table_t rocprofiler_lib_config_fn = nullptr;
@@ -496,22 +682,26 @@ rocp_load_rocprofiler_lib(std::string _rocp_reg_lib)
                                rocprofiler_lib_detach_fn);
     }
 
-    if(_rocp_reg_lib.empty()) _rocp_reg_lib = rocprofiler_lib_name;
+    auto use_default_candidates = _rocp_reg_lib.empty();
+    auto candidates             = (use_default_candidates)
+                                      ? get_default_library_candidates<rocprofiler_sdk_load_trait>()
+                                      : std::vector<std::string>{ _rocp_reg_lib };
+    auto loaded                 = load_library(
+        candidates, rocprofiler_lib_register_entrypoint, use_default_candidates);
+    rocprofiler_lib_handle                 = loaded.handle;
+    *(void**) (&rocprofiler_lib_config_fn) = loaded.entrypoint;
 
-    rocprofiler_lib_handle = get_library_handle(_rocp_reg_lib);
-
-    *(void**) (&rocprofiler_lib_config_fn) =
-        dlsym(rocprofiler_lib_handle, rocprofiler_lib_register_entrypoint);
+    if(!rocprofiler_lib_handle)
+        return std::make_tuple(rocprofiler_lib_handle,
+                               rocprofiler_lib_config_fn,
+                               rocprofiler_lib_attach_fn,
+                               rocprofiler_lib_detach_fn);
 
     *(void**) (&rocprofiler_lib_attach_fn) =
         dlsym(rocprofiler_lib_handle, rocprofiler_lib_attach_entrypoint);
 
     *(void**) (&rocprofiler_lib_detach_fn) =
         dlsym(rocprofiler_lib_handle, rocprofiler_lib_detach_entrypoint);
-
-    LOG_IF(WARNING, rocprofiler_lib_config_fn == nullptr)
-        << _rocp_reg_lib << " (handle=" << rocprofiler_lib_handle << ") did not contain '"
-        << rocprofiler_lib_register_entrypoint << "' symbol";
 
     LOG_IF(INFO, rocprofiler_lib_config_fn != nullptr)
         << "Found " << rocprofiler_lib_register_entrypoint << " symbol";
@@ -828,8 +1018,11 @@ rocprofiler_register_library_api_table(
     if(!_activate_rocprofiler && _attachment_enabled &&
        _import_match->library_idx == ROCP_REG_HSA)
     {
-        void* attachlibrary = get_library_handle(rocprofiler_attach_lib_name);
-        if(!attachlibrary)
+        auto loaded_attach_library =
+            load_library(get_default_library_candidates<rocprofiler_attach_load_trait>(),
+                         rocprofiler_attach_lib_register_entrypoint,
+                         true);
+        if(!loaded_attach_library.handle)
         {
             LOG(ERROR)
                 << "Proxy queues for attachment are enabled, but the attach library "
@@ -837,9 +1030,9 @@ rocprofiler_register_library_api_table(
                    "be able to profile anything that requires proxy queues.";
             return ROCP_REG_NO_TOOLS;
         }
-        rocprofiler_attach_set_api_table_t rocprofiler_attach_set_api_table_fn;
+        rocprofiler_attach_set_api_table_t rocprofiler_attach_set_api_table_fn = nullptr;
         *(void**) (&rocprofiler_attach_set_api_table_fn) =
-            dlsym(attachlibrary, rocprofiler_attach_lib_register_entrypoint);
+            loaded_attach_library.entrypoint;
 
         if(!rocprofiler_attach_set_api_table_fn)
         {

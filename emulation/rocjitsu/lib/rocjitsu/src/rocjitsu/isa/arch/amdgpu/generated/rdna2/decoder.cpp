@@ -414,6 +414,12 @@ DecodeResult decodeFlatStoreShortD16HiFlat(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error);
 DecodeResult decodeFlatStoreShortFlat(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeGlobalAtomicCsubFlat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeGlobalLoadDwordAddtidFlat(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error);
+DecodeResult decodeGlobalStoreDwordAddtidFlat(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error);
 DecodeResult decodeImageAtomicAddMimg(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error);
 DecodeResult decodeImageAtomicAndMimg(const MachineInst *opcode,
@@ -1709,14 +1715,9 @@ DecodeResult decodeVMovB32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 DecodeResult decodeVMovreldB32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVMovreldB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVMovrelsB32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVMovrelsB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVMovrelsd2B32Vop1(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVMovrelsd2B32Vop3(const MachineInst *opcode,
-                                     const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVMovrelsdB32Vop1(const MachineInst *opcode,
-                                    const DecodeErrorEmitter &emit_error);
-DecodeResult decodeVMovrelsdB32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVMqsadPkU16U8Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error);
@@ -3787,12 +3788,12 @@ const std::array<DecoderImpl::DecodeFunc, 1024> DecoderImpl::sub_decode_vop3 = {
     &detail::decodeVFrexpMantF32Vop3,
     &detail::decodeVClrexcpVop3,
     &detail::decodeVMovreldB32Vop3,
-    &detail::decodeVMovrelsB32Vop3,
-    &detail::decodeVMovrelsdB32Vop3,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
-    &detail::decodeVMovrelsd2B32Vop3,
+    &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,
+    &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
@@ -4648,8 +4649,8 @@ const std::array<DecoderImpl::DecodeFunc, 128> DecoderImpl::sub_decode_flat = {
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeGlobalLoadDwordAddtidFlat,
+    &detail::decodeGlobalStoreDwordAddtidFlat,
     &detail::decodeFlatStoreByteFlat,
     &detail::decodeFlatStoreByteD16HiFlat,
     &detail::decodeFlatStoreShortFlat,
@@ -4678,7 +4679,7 @@ const std::array<DecoderImpl::DecodeFunc, 128> DecoderImpl::sub_decode_flat = {
     &detail::decodeFlatAtomicCmpswapFlat,
     &detail::decodeFlatAtomicAddFlat,
     &detail::decodeFlatAtomicSubFlat,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeGlobalAtomicCsubFlat,
     &detail::decodeFlatAtomicSminFlat,
     &detail::decodeFlatAtomicUminFlat,
     &detail::decodeFlatAtomicSmaxFlat,
