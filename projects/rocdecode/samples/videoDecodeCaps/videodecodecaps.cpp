@@ -23,6 +23,8 @@ THE SOFTWARE.
 #include <iostream>
 #include <iomanip>
 #include <cstring>
+#include <cstdlib>
+#include <climits>
 #include <vector>
 #include "hip/hip_runtime.h"
 #include "rocdecode/rocdecode.h"
@@ -79,7 +81,7 @@ void ShowHelpAndExit(const char *option = nullptr) {
     }
     std::cout << "Options:" << std::endl
     << "-d GPU device ID (0 for the first device, 1 for the second, etc.); optional; default: 0" << std::endl;
-    exit(0);
+    exit(option ? 1 : 0);
 }
 
 struct CapRow {
@@ -131,7 +133,13 @@ int main(int argc, char **argv) {
             if (++i == argc) {
                 ShowHelpAndExit("-d");
             }
-            device_id = atoi(argv[i]);
+            char *end = nullptr;
+            long parsed = strtol(argv[i], &end, 10);
+            if (*end != '\0' || end == argv[i] || parsed < 0 || parsed > INT_MAX) {
+                std::cerr << "Error: invalid device ID '" << argv[i] << "'; expected a non-negative integer." << std::endl;
+                return 1;
+            }
+            device_id = static_cast<int>(parsed);
             continue;
         }
         ShowHelpAndExit(argv[i]);
@@ -186,7 +194,13 @@ int main(int argc, char **argv) {
                 decode_caps.chroma_format = chroma.chroma;
                 decode_caps.bit_depth_minus_8 = bit_depth - 8;
 
-                if (rocDecGetDecoderCaps(&decode_caps) != ROCDEC_SUCCESS || !decode_caps.is_supported) {
+                rocDecStatus status = rocDecGetDecoderCaps(&decode_caps);
+                if (status != ROCDEC_SUCCESS) {
+                    std::cerr << "Error: rocDecGetDecoderCaps failed: "
+                              << rocDecGetErrorName(status) << std::endl;
+                    return 1;
+                }
+                if (!decode_caps.is_supported) {
                     continue;
                 }
                 num_supported++;
