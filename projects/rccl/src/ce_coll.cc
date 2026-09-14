@@ -1973,6 +1973,8 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     agArgs.recvBuff = tmpBuf;
     agArgs.sendWin = comm->ceColl.ceARTmpWin;
     agArgs.recvWin = comm->ceColl.ceARTmpWin;
+    agArgs.collApiEventHandle = collArgs.collApiEventHandle;
+    agArgs.ceCollProfHandle = collArgs.ceCollProfHandle;
     NCCLCHECKGOTO(ncclCeAllGather(comm, &agArgs, ceStream), ret, fail);
 
     // Phase 5 (slow path only): Local Copy — move assembled result from

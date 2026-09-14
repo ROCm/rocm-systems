@@ -78,6 +78,6 @@ if(NOT PROFILER_EXAMPLE_STANDALONE)
 endif()
 
 add_custom_target(clean-profiler-lib
-    COMMAND ${CMAKE_COMMAND} -E remove -f ${CMAKE_BINARY_DIR}/test/unit/plugins/librccl-profiler-example.so
+    COMMAND ${CMAKE_COMMAND} -E remove -f $<TARGET_FILE:rccl-profiler-example>
     COMMENT "Cleaning librccl-profiler-example.so"
 )

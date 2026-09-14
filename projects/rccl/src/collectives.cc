@@ -670,6 +670,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
     ceArgs.eltSize = ncclTypeSize(datatype);
     ceArgs.sendBuff = (uint8_t*)sendbuff;
     ceArgs.recvBuff = (uint8_t*)recvbuff;
+    ceArgs.collApiEventHandle = ncclProfilerApiState.collApiEventHandle;
     NCCLCHECK(ncclProfilerStartCeCollEvent(comm, &ceArgs, stream));
     ncclResult_t ceRet = ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream, nullptr, &ceArgs);
     ncclProfilerStopCeCollEvent(comm, &ceArgs, stream);

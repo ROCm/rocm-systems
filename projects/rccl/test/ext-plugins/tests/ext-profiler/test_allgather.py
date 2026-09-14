@@ -234,8 +234,8 @@ def test_single_node_detailed_profiling(paths):
         assert group_events > 0, \
             f"Should have Group API events in {trace_file}, found {group_events}"
         
-        # P2P/Send/Recv are proxy events; AllGather runs as a collective, so this category is
-        # only populated when the app issues explicit Send/Recv. Check it only when present.
+        # P2P/Send/Recv are proxy events. Intra-node AllGather can still emit them
+        # under a full event mask; only require Send/Recv when the category is present.
         p2p_events = paths.count_events_in_trace(trace_file, category="P2P")
         if p2p_events > 0:
             send_events = paths.count_events_in_trace(trace_file, event_name="Send")

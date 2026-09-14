@@ -42,11 +42,9 @@ typedef enum {
 typedef void (*ncclDebugLogger_t)(ncclDebugLogLevel level, unsigned long flags, const char* file, int line,
                                   const char* fmt, ...);
 
-// In-tree builds get ncclResult_t from the generated nccl.h; standalone builds
-// have no nccl.h and need this fallback.
-#if __has_include("nccl.h")
-#include "nccl.h"
-#else
+// Local ncclResult_t only. Do not pull in a machine's installed nccl.h:
+// ${ROCM_PATH}/include is on the plugin include path and a source-installed
+// RCCL drops nccl.h there, which then pulls hip_runtime.h into this shim.
 typedef enum {
   ncclSuccess = 0,
   ncclUnhandledCudaError = 1,
@@ -56,6 +54,5 @@ typedef enum {
   ncclInvalidUsage = 5,
   ncclRemoteError = 6
 } ncclResult_t;
-#endif
 
 #endif

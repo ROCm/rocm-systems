@@ -30,7 +30,7 @@ $(HIPIFY_STAMP): $(SRC_FILES) $(wildcard *.h) $(wildcard nccl/*.h)
 	@cp -f *.cc *.h $(HIPIFY_DIR)/
 	@cp -f nccl/*.h $(HIPIFY_DIR)/nccl/
 	@rm -f $(HIPIFY_DIR)/*.prehip $(HIPIFY_DIR)/nccl/*.prehip
-	@$(HIPIFY_PL_EXE) -inplace -quiet-warnings $(HIPIFY_DIR)/*.cc $(HIPIFY_DIR)/*.h
+	@$(HIPIFY_PL_EXE) -inplace -quiet-warnings $(HIPIFY_DIR)/*.cc $(HIPIFY_DIR)/*.h $(HIPIFY_DIR)/nccl/*.h
 	@touch $@
 
 $(HIPIFY_DIR)/%.cc: $(HIPIFY_STAMP)

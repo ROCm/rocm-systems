@@ -34,6 +34,6 @@ endif()
 
 # Add custom target for clean (equivalent to Makefile clean target)
 add_custom_target(clean-tuner-lib
-    COMMAND ${CMAKE_COMMAND} -E remove -f ${CMAKE_CURRENT_BINARY_DIR}/librccl-tuner-example.so
+    COMMAND ${CMAKE_COMMAND} -E remove -f $<TARGET_FILE:rccl-tuner-example>
     COMMENT "Cleaning librccl-tuner-example.so"
 )
