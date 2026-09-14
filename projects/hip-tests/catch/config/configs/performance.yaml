@@ -21,6 +21,8 @@ performance:
   Performance_hipMemcpy_HostToHost: *level_stress
   Performance_hipMemcpy_DeviceToDevice_EnablePeerAccess: *level_stress
   Performance_hipMemcpy_DeviceToDevice_DisablePeerAccess: *level_stress
+  Performance_hipMemcpy_SdmaCopyPath: *level_stress
+  Performance_hipMemcpy_SdmaRingWrap: *level_stress
   Performance_hipMemcpyAsync_DeviceToHost: *level_stress
   Performance_hipMemcpyAsync_HostToDevice: *level_stress
   Performance_hipMemcpyAsync_HostToHost: *level_stress
