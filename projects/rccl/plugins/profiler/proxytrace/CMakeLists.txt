@@ -4,8 +4,9 @@
 #   1. Standalone:   cmake -S . -B build && cmake --build build
 #   2. As part of the main RCCL build via add_subdirectory(plugins/profiler/proxytrace)
 #
-# Both builds use the local proxy_trace.{h,cc} copies; no dependency on the
-# RCCL CMake build directory or external fmt.
+# Either way the plugin compiles the core src/misc/proxy_trace/proxy_trace.cc, so
+# the plugin and librccl cannot disagree on the trace format. No libfmt, no
+# configured RCCL build directory.
 
 # Detect standalone vs. in-tree configuration.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
@@ -21,13 +22,16 @@ get_filename_component(RCCL_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE
 
 add_library(rccl-profiler-proxytrace SHARED
     ${CMAKE_CURRENT_SOURCE_DIR}/proxytrace_plugin.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/proxy_trace.cc
+    ${RCCL_ROOT}/src/misc/proxy_trace/proxy_trace.cc
 )
 
+# nccl/ must stay ahead of src/include: it supplies the minimal os.h that keeps
+# RCCL's internal os.h (and nccl.h) out of the build.
 target_include_directories(rccl-profiler-proxytrace PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/nccl
     ${RCCL_ROOT}/src/include/plugin
+    ${RCCL_ROOT}/src/include
     ${ROCM_PATH}/include
 )
 

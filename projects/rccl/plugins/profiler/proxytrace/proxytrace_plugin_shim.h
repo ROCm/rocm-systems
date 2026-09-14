@@ -1,6 +1,5 @@
 /*************************************************************************
  * Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  *
@@ -42,9 +41,6 @@ typedef enum {
 typedef void (*ncclDebugLogger_t)(ncclDebugLogLevel level, unsigned long flags, const char* file, int line,
                                   const char* fmt, ...);
 
-// Local ncclResult_t only. Do not pull in a machine's installed nccl.h:
-// ${ROCM_PATH}/include is on the plugin include path and a source-installed
-// RCCL drops nccl.h there, which then pulls hip_runtime.h into this shim.
 typedef enum {
   ncclSuccess = 0,
   ncclUnhandledCudaError = 1,
