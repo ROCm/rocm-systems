@@ -1947,7 +1947,7 @@ TEST_F(UBR_MultiSegment, DeepEP_ElasticWindowRegistration)
 /**
  * @brief DeepEP HybridElasticSymmetricMemory positive registration path.
  *
- * Reproduces [GPU][CPU local-rank 0][CPU local-rank 1] on each rank. Every
+ * Reproduces [GPU][CPU local-rank 0]...[CPU local-rank 3] on each rank. Every
  * local process imports the same ordered CPU handles before registering the
  * complete range with NCCL_WIN_STRICT_ORDERING. Requires
  * NCCL_ELASTIC_BUFFER_REGISTER=1 and NCCL_SYM_REUSE_SYSMEM_HANDLES=1 so LSA
@@ -1956,10 +1956,10 @@ TEST_F(UBR_MultiSegment, DeepEP_ElasticWindowRegistration)
 TEST_F(UBR_MultiSegment, DeepEP_HybridWindowRegistrationAndHandleReuse)
 {
     if (!validateTestPrerequisites(
-            /*min_processes=*/4, /*max_processes=*/4,
+            /*min_processes=*/8, /*max_processes=*/8,
             /*require_power_of_two=*/kNoPowerOfTwoRequired,
             /*min_nodes=*/2, /*max_nodes=*/2)) {
-        GTEST_SKIP() << "Requires 4 ranks across exactly 2 nodes";
+        GTEST_SKIP() << "Requires 8 ranks across exactly 2 nodes";
     }
     if (!isSymSysmemHandleReuseEnabled()) {
         GTEST_SKIP() << "Requires NCCL_SYM_REUSE_SYSMEM_HANDLES=1";
@@ -1981,8 +1981,8 @@ TEST_F(UBR_MultiSegment, DeepEP_HybridWindowRegistrationAndHandleReuse)
     auto hybridCleanup = makeScopeGuard([&]() {
         RCCLHybridVmmTests::FreeHybridVmm(hybrid);
     });
-    ASSERT_EQ(hybrid.localSize, 2)
-        << "The hybrid test requires exactly two local ranks per node";
+    ASSERT_EQ(hybrid.localSize, 4)
+        << "The hybrid test requires exactly four local ranks per node";
 
     ncclWindow_t win = nullptr;
     ncclResult_t result = ncclCommWindowRegister(
@@ -2022,10 +2022,10 @@ TEST_F(UBR_MultiSegment, DeepEP_HybridWindowRegistrationAndHandleReuse)
 TEST_F(UBR_MultiSegment, DeepEP_HybridElasticRegistrationDisabled)
 {
     if (!validateTestPrerequisites(
-            /*min_processes=*/4, /*max_processes=*/4,
+            /*min_processes=*/8, /*max_processes=*/8,
             /*require_power_of_two=*/kNoPowerOfTwoRequired,
             /*min_nodes=*/2, /*max_nodes=*/2)) {
-        GTEST_SKIP() << "Requires 4 ranks across exactly 2 nodes";
+        GTEST_SKIP() << "Requires 8 ranks across exactly 2 nodes";
     }
     if (isElasticBufferRegisterEnabled()) {
         GTEST_SKIP() << "Requires NCCL_ELASTIC_BUFFER_REGISTER=0";
