@@ -38,9 +38,19 @@ types = [
     ("unsigned int", "uint"),
     ("unsigned long", "ulong"),
     ("unsigned long long", "ulonglong"),
+    ("__half", "half"),
+    ("__hip_bfloat16", "bfloat16"),
+    ("int8_t", "int8"),
+    ("int16_t", "int16"),
+    ("int32_t", "int32"),
+    ("int64_t", "int64"),
+    ("uint8_t", "uint8"),
+    ("uint16_t", "uint16"),
+    ("uint32_t", "uint32"),
     ("uint64_t", "uint64"),
+    ("size_t", "size"),
+    ("ptrdiff_t", "ptrdiff"),
 ]
-
 
 def wait_until_api(T, TNAME):
     return (
