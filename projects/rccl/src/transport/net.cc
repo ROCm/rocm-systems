@@ -2301,8 +2301,8 @@ static ncclResult_t netRegisterBuffer(ncclComm* comm, const void* userbuff, size
             regRecord->netHandleHead = netHandle;
             outHandle[p] = handle;
             *outRegBufFlag = 1;
-            INFO(NCCL_REG, "rank %d - NET register userbuff %p (handle %p), buffSize %ld", comm->rank, userbuff, handle,
-                 buffSize);
+            INFO(NCCL_REG, "rank %d - NET register userbuff %p (handle %p), buffSize %ld numSegments %d", comm->rank,
+                 userbuff, handle, buffSize, numSegments);
           } else {
             goto fail;
           }
@@ -2338,7 +2338,11 @@ ncclResult_t ncclNetLocalRegisterBuffer(ncclComm* comm, const void* userbuff, si
     NCCLCHECKGOTO(ncclRegLocalIsValid(regRecord, &isValid), ret, fail);
     if (isValid) {
       int numSegments = 0;
-      NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)userbuff, buffSize, (CUdeviceptr*)&base, &baseSize,
+      // The proxy registers the complete user registration, not just the
+      // collective's current send/receive subrange. Count segments over that
+      // same range so multi-segment registration cannot stop after a partial prefix.
+      size_t regSize = regRecord->endAddr - regRecord->begAddr;
+      NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)regRecord->begAddr, regSize, (CUdeviceptr*)&base, &baseSize,
                                          &numSegments));
       if (numSegments > 1 && !ncclParamMultiSegmentRegister()) goto exit;
       NCCLCHECKGOTO(netRegisterBuffer(comm, userbuff, buffSize, peerConns, nPeers, regRecord, outRegBufFlag, outHandle,

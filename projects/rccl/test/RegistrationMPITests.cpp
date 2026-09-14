@@ -29,6 +29,7 @@
 #include "MPIHelpers.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
+#include "register_inline.h"
 #ifdef ENABLE_FAULT_INJECTION
 #include "ce_fault_inject.h"
 #endif
@@ -855,22 +856,6 @@ class UBR_MultiSegment : public RegistrationTestBase
 protected:
     using T = RegTestConfig::DefaultType;
 
-    // Multi-segment registration currently relies on dmabuf support from the
-    // runtime/HSA layer for the inter-node (NET/GIN) path. Until that lands,
-    // restrict every UBR_MultiSegment test to a single node so the multi-node
-    // tests are not exercised.
-    void SetUp() override
-    {
-        RegistrationTestBase::SetUp();
-        if (::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure()) {
-            return;
-        }
-        if (MPITestConstants::detectNodeCount() != 1) {
-            GTEST_SKIP() << "UBR_MultiSegment is limited to single node until "
-                            "dmabuf support is available from the HIP/HSA layer";
-        }
-    }
-
     // Rank-local GTEST_SKIP after alloc failure hangs peers in WindowRegister.
     void skipUnlessAllRanksAllocated(bool allocated, const char* msg)
     {
@@ -1063,20 +1048,25 @@ protected:
  *   sendbuff = [0,                  N * kSegmentSize)  covers first N segments
  *   recvbuff = [N * kSegmentSize,  2N * kSegmentSize)  covers last  N segments
  *
- * Confirmation in the logs (NCCL_DEBUG=TRACE NCCL_DEBUG_SUBSYS=REG):
- *   "... numSegments 4"
+ * The collective operates on four segments per half, while ncclCommRegister
+ * covers the complete eight-segment allocation. After AllReduce the cache entry
+ * must cover that full VA and carry NET_REG_COMPLETE; a correct result alone is
+ * not enough, because host staging would still produce one. This regression
+ * requires multiple nodes so an IPC-only registration cannot satisfy the flag.
  */
 TEST_F(UBR_MultiSegment, Generic)
 {
-    if (!validateTestPrerequisites(/*min_processes=*/2)) {
-        GTEST_SKIP() << "Requires 2+ ranks";
+    if (!validateTestPrerequisites(
+            /*min_processes=*/2, /*max_processes=*/kNoProcessLimit,
+            /*require_power_of_two=*/kNoPowerOfTwoRequired,
+            /*min_nodes=*/2, /*max_nodes=*/kNoNodeLimit)) {
+        GTEST_SKIP() << "Requires 2+ ranks across at least 2 nodes";
     }
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
     ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
     ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
     ASSERT_TRUE(isMultiSegmentRegisterEnabled()) << "NCCL_MULTI_SEGMENT_REGISTER must be set to 1";
-    ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
 
     int dev = 0;
     ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
@@ -1121,12 +1111,16 @@ TEST_F(UBR_MultiSegment, Generic)
 
     ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
 
-    REGLogChecker checker = getLogChecker();
-    TEST_INFO("SpansMultipleSegments: %s (log size: %zu bytes)",
-              checker.getSummary().c_str(), checker.getContentLength());
-    ASSERT_TRUE(checker.hasNumSegments(kNumSegments / 2))
-        << "Expected 'numSegments " << (kNumSegments / 2)
-        << "' in log - the multi-segment registration branch did not fire";
+    struct ncclReg* reg = nullptr;
+    ASSERT_EQ(ncclSuccess,
+              ncclRegFind(reinterpret_cast<struct ncclComm*>(getActiveCommunicator()), buf.vaBase, buf.totalSize,
+                          &reg));
+    ASSERT_NE(reg, nullptr) << "ncclCommRegister did not publish a cache entry for the multi-segment buffer";
+    ASSERT_LE(reg->begAddr, reinterpret_cast<uintptr_t>(buf.vaBase));
+    ASSERT_GE(reg->endAddr, reinterpret_cast<uintptr_t>(buf.vaBase) + buf.totalSize);
+    ASSERT_TRUE(reg->state & NET_REG_COMPLETE)
+        << "AllReduce completed without a NET MR; host staging would still produce a correct result";
+    ASSERT_NE(reg->netHandleHead, nullptr);
 }
 
 /**
