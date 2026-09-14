@@ -5,6 +5,7 @@
  ************************************************************************/
 
 #include "TestBedChild.hpp"
+#include "PipeUtils.hpp"
 
 #include <thread>
 #include <execinfo.h>
@@ -52,57 +53,12 @@ static int getThreadId()
   } while (false)
 #define CHILD_NCCL_CALL_NON_BLOCKING(msg, localRank) CHILD_NCCL_CALL_NON_BLOCKING_BASE(msg, localRank, RETURN_RESULT)
 
-/**
- * @brief Reads exactly 'count' bytes from a file descriptor, handling partial 
- * reads and signal interruptions (EINTR).
- * @return 'count' on success, or -1 on error / premature EOF.
- */
-inline ssize_t safe_pipe_read(int fd, void* buf, size_t count) {
-  char* ptr = static_cast<char*>(buf);
-  size_t bytesLeft = count;
-
-  while (bytesLeft > 0) {
-    ssize_t const bytesRead = read(fd, ptr, bytesLeft);
-    if (bytesRead < 0) {
-      if (errno == EINTR) continue; // Interrupted by OS signal, retry
-      return -1;                    // Read error
-    }
-    if (bytesRead == 0) {
-      return -1;                    // EOF: Pipe closed prematurely
-    }
-    ptr += bytesRead;
-    bytesLeft -= bytesRead;
-  }
-  return static_cast<ssize_t>(count); // Successfully read all requested bytes
-}
-
-/**
- * @brief Writes exactly 'count' bytes to a file descriptor, handling partial 
- * writes and signal interruptions (EINTR).
- * @return 'count' on success, or -1 on error.
- */
-inline ssize_t safe_pipe_write(int fd, const void* buf, size_t count) {
-  const char* ptr = static_cast<const char*>(buf);
-  size_t bytesLeft = count;
-
-  while (bytesLeft > 0) {
-    ssize_t const bytesWritten = write(fd, ptr, bytesLeft);
-    if (bytesWritten < 0) {
-      if (errno == EINTR) continue; // Interrupted by OS signal, retry
-      return -1;                    // Write error
-    }
-    ptr += bytesWritten;
-    bytesLeft -= bytesWritten;
-  }
-  return static_cast<ssize_t>(count); // Successfully wrote all requested bytes
-}
-
 // #define PIPE_READ(val) \
 //   if (read(childReadFd, &val, sizeof(val)) != sizeof(val)) return TEST_FAIL;
 
 #undef PIPE_READ // Just in case it's defined elsewhere
 #define PIPE_READ(val) \
-    if (safe_pipe_read(childReadFd, &val, sizeof(val)) != sizeof(val)) return TEST_FAIL;
+    if (RcclUnitTesting::detail::safe_pipe_read(childReadFd, &val, sizeof(val)) != sizeof(val)) return TEST_FAIL;
 
 #ifdef ENABLE_OPENMP
 #define CHILD_NCCL_CALL_RANK(errCode, cmd, msg) CHILD_NCCL_CALL_BASE(cmd, msg, OMP_CANCEL_FOR, errCode)
@@ -164,7 +120,7 @@ namespace RcclUnitTesting
     int command;
     while (true)
     {
-      if (safe_pipe_read(childReadFd, &command, sizeof(command)) <= 0) {
+      if (RcclUnitTesting::detail::safe_pipe_read(childReadFd, &command, sizeof(command)) <= 0) {
         break;
       }
       ErrCode status = TEST_SUCCESS;
@@ -200,11 +156,12 @@ namespace RcclUnitTesting
       // Send back acknowledgement to parent
       if (status == TEST_FAIL)
         TEST_ERROR("Child %d failed on command [%s]:", this->childId, ChildCommandNames[command]);
-      if (safe_pipe_write(childWriteFd, &status, sizeof(status)) < 0) {
+      if (RcclUnitTesting::detail::safe_pipe_write(childWriteFd, &status, sizeof(status)) < 0) {
         TEST_ERROR("Child %d write to parent failed: %s", this->childId, strerror(errno));
         break;
       }
-      if (retValBuf.size() > 0 && safe_pipe_write(childWriteFd, retValBuf.data(), retValBuf.size()) < 0) {
+      if (retValBuf.size() > 0 &&
+          RcclUnitTesting::detail::safe_pipe_write(childWriteFd, retValBuf.data(), retValBuf.size()) < 0) {
         TEST_ERROR("Child %d write return value to parent failed: %s", this->childId, strerror(errno));
         break;
       }
@@ -254,9 +211,9 @@ namespace RcclUnitTesting
     this->numCollectivesInGroup.resize(numCollSize);
     if (numCollSize > 0)
     {
-      if (safe_pipe_read(this->childReadFd,
-                         this->numCollectivesInGroup.data(),
-                         numCollSize * sizeof(int)) !=
+      if (RcclUnitTesting::detail::safe_pipe_read(this->childReadFd,
+                                                  this->numCollectivesInGroup.data(),
+                                                  numCollSize * sizeof(int)) !=
           static_cast<ssize_t>(numCollSize * sizeof(int)))
         return TEST_FAIL;
     }
@@ -273,9 +230,9 @@ namespace RcclUnitTesting
     this->numStreamsPerGroup.resize(numStreamsSize);
     if (numStreamsSize > 0)
     {
-      if (safe_pipe_read(this->childReadFd,
-                         this->numStreamsPerGroup.data(),
-                         numStreamsSize * sizeof(int)) !=
+      if (RcclUnitTesting::detail::safe_pipe_read(this->childReadFd,
+                                                  this->numStreamsPerGroup.data(),
+                                                  numStreamsSize * sizeof(int)) !=
           static_cast<ssize_t>(numStreamsSize * sizeof(int)))
         return TEST_FAIL;
     }

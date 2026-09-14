@@ -7,62 +7,17 @@
 #include <csignal>
 #include <unistd.h>
 #include "TestBed.hpp"
+#include "PipeUtils.hpp"
 #include <rccl/rccl.h>
 
-
-/**
- * @brief Reads exactly 'count' bytes from a file descriptor, handling partial 
- * reads and signal interruptions (EINTR).
- * @return 'count' on success, or -1 on error / premature EOF.
- */
-inline ssize_t safe_pipe_read(int fd, void* buf, size_t count) {
-  char* ptr = static_cast<char*>(buf);
-  size_t bytesLeft = count;
-
-  while (bytesLeft > 0) {
-    ssize_t const bytesRead = read(fd, ptr, bytesLeft);
-    if (bytesRead < 0) {
-      if (errno == EINTR) continue; // Interrupted by OS signal, retry
-      return -1;                    // Read error
-    }
-    if (bytesRead == 0) {
-      return -1;                    // EOF: Pipe closed prematurely
-    }
-    ptr += bytesRead;
-    bytesLeft -= bytesRead;
-  }
-  return static_cast<ssize_t>(count); // Successfully read all requested bytes
-}
-
-/**
- * @brief Writes exactly 'count' bytes to a file descriptor, handling partial 
- * writes and signal interruptions (EINTR).
- * @return 'count' on success, or -1 on error.
- */
-inline ssize_t safe_pipe_write(int fd, const void* buf, size_t count) {
-  const char* ptr = static_cast<const char*>(buf);
-  size_t bytesLeft = count;
-
-  while (bytesLeft > 0) {
-    ssize_t const bytesWritten = write(fd, ptr, bytesLeft);
-    if (bytesWritten < 0) {
-      if (errno == EINTR) continue; // Interrupted by OS signal, retry
-      return -1;                    // Write error
-    }
-    ptr += bytesWritten;
-    bytesLeft -= bytesWritten;
-  }
-  return static_cast<ssize_t>(count); // Successfully wrote all requested bytes
-}
-
 #define PIPE_WRITE(childId, val)                                        \
-  ASSERT_EQ(safe_pipe_write(childList[childId]->parentWriteFd, &val, sizeof(val)), sizeof(val))
+  ASSERT_EQ(RcclUnitTesting::detail::safe_pipe_write(childList[childId]->parentWriteFd, &val, sizeof(val)), sizeof(val))
 
 
 #define PIPE_READ(childId, val)                                                         \
   {                                                                                     \
     if (ev.verbose) TEST_INFO("Calling PIPE_READ to Child %d", childId); \
-    ssize_t retval = safe_pipe_read(childList[childId]->parentReadFd, &val, sizeof(val)); \
+    ssize_t retval = RcclUnitTesting::detail::safe_pipe_read(childList[childId]->parentReadFd, &val, sizeof(val)); \
     if (ev.verbose) TEST_INFO("Got PIPE_READ %ld from Child %d", retval, childId); \
     if (retval == -1)                                                                   \
     {                                                                                   \
@@ -128,12 +83,15 @@ namespace RcclUnitTesting
     if (this->numActiveChildren > 0)
     {
       this->DestroyComms();
-      for (int i = 0; i < this->numActiveChildren; ++i)
-      {
-        this->StopChild(i); // Gracefully stops and waits for child
-      }
-      this->numActiveChildren = 0;
     }
+
+    // DestroyComms() owns teardown for both pool and fork-fresh paths. A
+    // non-empty childList here means teardown failed to restore the invariant.
+    if (!childList.empty())
+    {
+      FAIL() << "DestroyComms failed to clear childList before InitComms";
+    }
+
     // Count up the total number of GPUs to use and track child/deviceId per rank
     this->numActiveChildren = deviceIdsPerProcess.size();
     this->numActiveRanks = 0;
@@ -153,13 +111,6 @@ namespace RcclUnitTesting
         this->rankToDeviceMap.push_back(deviceIdsPerProcess[childId][i]);
         ++this->numActiveRanks;
       }
-    }
-
-    // Guards both paths: the pool-reuse branch below would silently overwrite
-    // a non-empty childList.
-    if (childList.size() > 0)
-    {
-      FAIL() << "DestroyComms must be called prior to subsequent call to InitComms";
     }
 
     // Comm pool (UT_COMM_POOL): worker d is pinned to device d and keeps its
@@ -238,7 +189,7 @@ namespace RcclUnitTesting
     if (!this->configUsedPool)
     {
       // ---- Classic fork-fresh path (pool disabled, or an unmappable config) ----
-      // (The "DestroyComms must precede InitComms" guard is hoisted above, covering both paths.)
+      // The childList invariant was checked above after any prior teardown.
       childList.resize(this->numActiveChildren);
       for (int childId = 0; childId < this->numActiveChildren; ++childId)
       {
@@ -361,9 +312,9 @@ namespace RcclUnitTesting
       int const numCollSize = this->numCollectivesInGroup.size();
       PIPE_WRITE(childId, numCollSize);
       if (numCollSize > 0) {
-        ASSERT_EQ(safe_pipe_write(childList[childId]->parentWriteFd,
-                                  this->numCollectivesInGroup.data(),
-                                  numCollSize * sizeof(int)),
+        ASSERT_EQ(RcclUnitTesting::detail::safe_pipe_write(childList[childId]->parentWriteFd,
+                                                           this->numCollectivesInGroup.data(),
+                                                           numCollSize * sizeof(int)),
                   numCollSize * sizeof(int));
       }
 
@@ -381,9 +332,9 @@ namespace RcclUnitTesting
       int const numStreamsSize = this->numStreamsPerGroup.size();
       PIPE_WRITE(childId, numStreamsSize);
       if (numStreamsSize > 0) {
-        ASSERT_EQ(safe_pipe_write(childList[childId]->parentWriteFd,
-                                  this->numStreamsPerGroup.data(),
-                                  numStreamsSize * sizeof(int)),
+        ASSERT_EQ(RcclUnitTesting::detail::safe_pipe_write(childList[childId]->parentWriteFd,
+                                                           this->numStreamsPerGroup.data(),
+                                                           numStreamsSize * sizeof(int)),
                   numStreamsSize * sizeof(int));
       }
 
