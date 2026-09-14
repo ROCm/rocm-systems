@@ -72,6 +72,11 @@ build_playback() {
 export_playback_env() {
   local play="$1" ld_parts=()
   export HRR_PLAYBACK="$play"
+  # An in-tree ROCR lib dir, when the caller points at one, must precede the
+  # packaged runtime. check_replay_compat.py, replay_docker.sh and
+  # triage_archive.sh read the same variable; resolving it from a CLR build
+  # tree is gone with the standalone layout, so it is taken from the caller.
+  [[ -n "${ROCR_LIB:-}" && -d "${ROCR_LIB}" ]] && ld_parts+=("$ROCR_LIB")
   [[ -d "$ROCM_PATH/lib" ]] && ld_parts+=("$ROCM_PATH/lib")
   if [[ ${#ld_parts[@]} -gt 0 ]]; then
     export LD_LIBRARY_PATH="$(IFS=:; echo "${ld_parts[*]}")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
