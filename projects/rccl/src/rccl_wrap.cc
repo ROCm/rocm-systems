@@ -899,10 +899,14 @@ size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
 // RCCL_DDA_LL128 = 0 drop their tier so disabling one cannot widen the gate.
 // Each tier still applies its own cap at the call site, including the VMM/IPC
 // branch, which checks rcclDdaVmmThreshold() there.
+// ddaVmmMaxGraph is also folded in: it is 0 for all collectives except AR
+// (256 MiB on gfx1250), so it only widens the gate for graph-mode AR calls
+// and is a no-op for all other collectives.
 inline size_t rcclDdaEntryThresholdTab(const rcclArchThresholds* table, ncclFunc_t func) {
   size_t cap = rcclDdaVmmThresholdTab(table, func);
   if (rcclParamDdaLL())    cap = std::max(cap, rcclDdaLLThresholdTab(table, func));
   if (rcclParamDdaLL128()) cap = std::max(cap, rcclDdaLL128ThresholdTab(table, func));
+  if (table != nullptr)    cap = std::max(cap, funcThresholdFromTable(table->ddaVmmMaxGraph, func));
   return cap;
 }
 size_t rcclDdaEntryThreshold(const ncclComm* comm, ncclFunc_t func) {
