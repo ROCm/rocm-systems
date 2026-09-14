@@ -103,115 +103,6 @@ auto s_intercept_dynamic   = std::atomic<bool>{false};  // dynamically add queue
 auto s_consumer_transition_in_progress = std::atomic<bool>{false};
 
 bool
-queue_interposition_debug_enabled()
-{
-    static const bool enabled =
-        common::get_env("ROCPROFILER_QUEUE_INTERPOSITION_DEBUG", false);
-    return enabled;
-}
-
-bool
-stop_drain_syncs_async_handlers()
-{
-    // Default false: joining stuck async handlers on 1->0 stop deadlocks when a
-    // completion signal never drops (ROCM-29631).  Fence doorbell workers only;
-    // handlers abandon the wait once the consumer count hits zero.
-    static const bool enabled =
-        common::get_env("ROCPROFILER_QUEUE_INTERPOSITION_STOP_DRAIN_SYNC", false);
-    return enabled;
-}
-
-void
-log_queue_shadow_state(const char* tag, QueueState* state)
-{
-    if(!queue_interposition_debug_enabled() || !state) return;
-
-    const uint64_t real_rdid =
-        state->real_wdid ? __atomic_load_n(state->real_wdid, __ATOMIC_RELAXED) : 0;
-
-    ROCP_WARNING << fmt::format(
-        "[ROCM-29631] {} queue={} real_rdid={} virtual_wptr={} scan_pos={} submit_pos={}",
-        tag,
-        fmt::ptr(state->hsa_queue),
-        real_rdid,
-        state->virtual_wptr.load(std::memory_order_relaxed),
-        state->next_scan_pos,
-        state->next_submit_pos);
-}
-
-void
-log_all_queue_shadow_states(const char* tag)
-{
-    if(!queue_interposition_debug_enabled()) return;
-
-    get_queue_registry().rlock([&tag](const auto& registry) {
-        ROCP_WARNING << fmt::format("[ROCM-29631] {} queue_count={}", tag, registry.size());
-        for(const auto& entry : registry)
-            log_queue_shadow_state(tag, entry.second.get());
-    });
-}
-
-void
-log_stale_shadow_queues(const char* tag)
-{
-    if(!queue_interposition_debug_enabled()) return;
-
-    get_queue_registry().rlock([&tag](const auto& registry) {
-        for(const auto& entry : registry)
-        {
-            auto* state = entry.second.get();
-            if(!state || !state->real_wdid) continue;
-
-            const uint64_t hw_rdid =
-                __atomic_load_n(state->real_wdid, __ATOMIC_RELAXED);
-            const uint64_t virtual_wptr =
-                state->virtual_wptr.load(std::memory_order_relaxed);
-
-            if(hw_rdid == virtual_wptr && hw_rdid == state->next_submit_pos &&
-               hw_rdid == state->next_scan_pos)
-                continue;
-
-            ROCP_WARNING << fmt::format(
-                "[ROCM-29631-DIAG] {} stale_shadow queue={} hw_rdid={} virtual_wptr={} "
-                "scan_pos={} submit_pos={} consumers={} transition={}",
-                tag,
-                fmt::ptr(state->hsa_queue),
-                hw_rdid,
-                virtual_wptr,
-                state->next_scan_pos,
-                state->next_submit_pos,
-                s_active_queue_interposition_consumers.load(std::memory_order_acquire),
-                s_consumer_transition_in_progress.load(std::memory_order_acquire));
-        }
-    });
-}
-
-void
-maybe_log_bypass_doorbell_during_transition(const hsa_queue_t* queue)
-{
-    if(!queue_interposition_debug_enabled()) return;
-    if(!s_consumer_transition_in_progress.load(std::memory_order_acquire)) return;
-
-    if(auto state = lookup_queue_state(queue, false))
-    {
-        const uint64_t hw_rdid = state->real_wdid
-                                     ? __atomic_load_n(state->real_wdid, __ATOMIC_RELAXED)
-                                     : 0;
-        if(hw_rdid == 0) return;
-
-        ROCP_WARNING << fmt::format(
-            "[ROCM-29631-DIAG] bypass_doorbell_during_transition queue={} hw_rdid={} "
-            "virtual_wptr={} submit_pos={} scan_pos={} consumers={}",
-            fmt::ptr(queue),
-            hw_rdid,
-            state->virtual_wptr.load(std::memory_order_relaxed),
-            state->next_submit_pos,
-            state->next_scan_pos,
-            s_active_queue_interposition_consumers.load(std::memory_order_acquire));
-    }
-}
-
-bool
 has_active_queue_interposition_consumers()
 {
     return s_active_queue_interposition_consumers.load(std::memory_order_relaxed) > 0;
@@ -564,16 +455,6 @@ async_signal_handler(hsa_signal_t                            completion_signal,
     auto signal_value = starting_value;
     auto niterations  = uint64_t{0};
 
-    if(queue_interposition_debug_enabled())
-    {
-        ROCP_WARNING << fmt::format(
-            "[ROCM-29631] async_signal_handler start signal={{.handle={}}} "
-            "starting_value={} consumers={}",
-            completion_signal.handle,
-            starting_value,
-            s_active_queue_interposition_consumers.load(std::memory_order_acquire));
-    }
-
     // Stop only on completion or finalization; never run cleanup while the kernel is live.
     while(true)
     {
@@ -593,19 +474,6 @@ async_signal_handler(hsa_signal_t                            completion_signal,
         // Surface long-running waits for diagnostics without giving up the wait.
         constexpr auto warn_interval = (1UL << 20);
         if(niterations % warn_interval == 0)
-        {
-            if(queue_interposition_debug_enabled())
-            {
-                ROCP_WARNING << fmt::format(
-                    "[ROCM-29631] async_signal_handler spin signal={{.handle={}}} "
-                    "iterations={} value={} starting_value={} consumers={} fini={}",
-                    completion_signal.handle,
-                    niterations,
-                    signal_value,
-                    starting_value,
-                    s_active_queue_interposition_consumers.load(std::memory_order_acquire),
-                    registration::get_fini_status());
-            }
             ROCP_WARNING << fmt::format(
                 "Async signal handler still waiting on signal {{.handle={}}} after {} iterations "
                 "(value={}, starting_value={})",
@@ -613,7 +481,6 @@ async_signal_handler(hsa_signal_t                            completion_signal,
                 niterations,
                 signal_value,
                 starting_value);
-        }
     }
 
     // Consumer stop may race kernel completion; re-read once before deciding abandon.
@@ -621,24 +488,6 @@ async_signal_handler(hsa_signal_t                            completion_signal,
        registration::get_fini_status() == 0)
     {
         signal_value = get_core_table()->hsa_signal_load_scacquire_fn(completion_signal);
-    }
-
-    if(queue_interposition_debug_enabled())
-    {
-        const char* reason = (signal_value < starting_value) ? "completed"
-                             : (registration::get_fini_status() != 0) ? "fini"
-                             : (!has_active_queue_interposition_consumers())
-                                 ? "consumers_stopped"
-                                 : "loop_exit";
-        ROCP_WARNING << fmt::format(
-            "[ROCM-29631] async_signal_handler exit reason={} signal={{.handle={}}} "
-            "value={} starting_value={} iterations={} consumers={}",
-            reason,
-            completion_signal.handle,
-            signal_value,
-            starting_value,
-            niterations,
-            s_active_queue_interposition_consumers.load(std::memory_order_acquire));
     }
 
     ROCP_INFO << fmt::format("Async signal handler invoked for signal {{.handle={}}} with "
@@ -659,18 +508,6 @@ async_signal_handler(hsa_signal_t                            completion_signal,
     const bool abandoned =
         !completed && !has_active_queue_interposition_consumers() &&
         registration::get_fini_status() == 0;
-
-    if(abandoned && queue_interposition_debug_enabled())
-    {
-        ROCP_WARNING << fmt::format(
-            "[ROCM-29631-DIAG] abandon_dispatch packets={} signal={{.handle={}}} "
-            "value={} starting_value={} consumers={}",
-            session->packet_data.size(),
-            completion_signal.handle,
-            signal_value,
-            starting_value,
-            s_active_queue_interposition_consumers.load(std::memory_order_acquire));
-    }
 
     for(auto& packet : session->packet_data)
     {
@@ -1327,17 +1164,6 @@ write_interceptor(Queue*                                queue,
             current_signal_value =
                 get_core_table()->hsa_signal_load_scacquire_fn(last_completion_signal);
 
-            if(queue_interposition_debug_enabled())
-            {
-                ROCP_WARNING << fmt::format(
-                    "[ROCM-29631] enqueue batch completion_signal={{.handle={}}} value={} "
-                    "consumers={} pkt_count={}",
-                    last_completion_signal.handle,
-                    current_signal_value,
-                    s_active_queue_interposition_consumers.load(std::memory_order_acquire),
-                    _info_session.packet_data.size());
-            }
-
             ROCP_INFO << fmt::format(
                 "  Enqueued batch with completion signal {{.handle={}}} with value {}",
                 last_completion_signal.handle,
@@ -1457,25 +1283,6 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     // gate_lock serializes doorbell processing; producers never take it, so no deadlock.
     std::unique_lock<std::mutex> lock{state_ptr->gate_lock};
 
-    if(queue_interposition_debug_enabled() && state_ptr->real_wdid)
-    {
-        const uint64_t hw_rdid =
-            __atomic_load_n(state_ptr->real_wdid, __ATOMIC_ACQUIRE);
-        if(state_ptr->next_submit_pos < hw_rdid)
-        {
-            ROCP_WARNING << fmt::format(
-                "[ROCM-29631-DIAG] doorbell_stale_shadow queue={} hw_rdid={} "
-                "virtual_wptr={} scan_pos={} submit_pos={} consumers={} transition={}",
-                fmt::ptr(state_ptr->hsa_queue),
-                hw_rdid,
-                state_ptr->virtual_wptr.load(std::memory_order_acquire),
-                state_ptr->next_scan_pos,
-                state_ptr->next_submit_pos,
-                s_active_queue_interposition_consumers.load(std::memory_order_acquire),
-                s_consumer_transition_in_progress.load(std::memory_order_acquire));
-        }
-    }
-
     const uint64_t scan_pos = state_ptr->next_scan_pos;
 
     const uint64_t wptr_end = state_ptr->virtual_wptr.load(std::memory_order_acquire);
@@ -1591,19 +1398,11 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     auto ring_used = (state_ptr->next_submit_pos - real_rdid);
     if(ring_used > state_ptr->ring_size)
     {
-        ROCP_WARNING << fmt::format(
-            "[ROCM-29631-DIAG] ring_underflow queue={} ring_used={} ring_size={} hw_rdid={} "
-            "virtual_wptr={} scan_pos={} scan_end={} submit_pos={} consumers={} transition={}",
-            fmt::ptr(state_ptr->hsa_queue),
-            ring_used,
-            state_ptr->ring_size,
-            real_rdid,
-            state_ptr->virtual_wptr.load(std::memory_order_relaxed),
-            scan_pos,
-            scan_end,
-            state_ptr->next_submit_pos,
-            s_active_queue_interposition_consumers.load(std::memory_order_acquire),
-            s_consumer_transition_in_progress.load(std::memory_order_acquire));
+        ROCP_WARNING << "Queue-intercept observed ring usage beyond ring size. queue="
+                     << state_ptr->hsa_queue << ", ring_used=" << ring_used
+                     << ", ring_size=" << state_ptr->ring_size << ", scan_pos=" << scan_pos
+                     << ", scan_end=" << scan_end
+                     << ", next_submit_pos=" << state_ptr->next_submit_pos;
     }
 
     publish_submitted_packets(state_ptr, state_ptr->next_submit_pos);
@@ -1714,7 +1513,6 @@ ROCP_QUEUE_ADD_WRITE_INDEX(screlease, std::memory_order_release)
     {                                                                                              \
         if(should_bypass_inline_intercept())                                                       \
         {                                                                                          \
-            maybe_log_bypass_doorbell_during_transition(q);                                        \
             get_next_table()->hsa_queue_store_write_index_##SUFFIX##_fn(q, v);                     \
             return;                                                                                \
         }                                                                                          \
@@ -1810,36 +1608,12 @@ std::mutex s_consumer_transition_mutex;
 void
 drain_intercept_work(bool sync_async_handlers)
 {
-    const auto t0 = std::chrono::steady_clock::now();
-
-    if(queue_interposition_debug_enabled())
-    {
-        ROCP_WARNING << fmt::format(
-            "[ROCM-29631] drain_intercept_work begin sync_async={} consumers={} "
-            "async_handler_exists={}",
-            sync_async_handlers,
-            s_active_queue_interposition_consumers.load(std::memory_order_acquire),
-            async_signal_handler_exists());
-    }
-
     // Match signal-less teardown order: wait for in-flight doorbell workers
     // first, then join async completion handlers they may have queued.
     fence_all_queue_gates();
 
     if(sync_async_handlers)
         interposition_sync();
-
-    if(queue_interposition_debug_enabled())
-    {
-        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            std::chrono::steady_clock::now() - t0)
-                            .count();
-        ROCP_WARNING << fmt::format(
-            "[ROCM-29631] drain_intercept_work end sync_async={} elapsed_ms={} consumers={}",
-            sync_async_handlers,
-            ms,
-            s_active_queue_interposition_consumers.load(std::memory_order_acquire));
-    }
 }
 
 void
@@ -1854,7 +1628,6 @@ resync_queue_shadow_state(QueueState* state)
     state->virtual_wptr.store(wdid, std::memory_order_release);
     state->next_scan_pos   = wdid;
     state->next_submit_pos = wdid;
-    log_queue_shadow_state("resync_queue_shadow_state", state);
 }
 
 void
@@ -1883,18 +1656,10 @@ notify_queue_interposition_consumer_context_started(const context::context* ctx)
         auto lk = std::lock_guard<std::mutex>{s_consumer_transition_mutex};
         if(s_active_queue_interposition_consumers.load(std::memory_order_acquire) == 0)
         {
-            if(queue_interposition_debug_enabled())
-            {
-                ROCP_WARNING << fmt::format(
-                    "[ROCM-29631] consumer_context_started 0->1 ctx={} (pre-drain/resync)",
-                    fmt::ptr(ctx));
-                log_all_queue_shadow_states("before 0->1 drain");
-            }
             s_consumer_transition_in_progress.store(true, std::memory_order_release);
             drain_intercept_work(true);
             resync_all_queue_shadow_states();
-            const auto next =
-                s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_acq_rel) + 1;
+            s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_acq_rel);
             // Second resync while transition_in_progress still forces bypass, so no
             // intercept doorbell can interleave with shadow updates.  Re-enable
             // intercept only after shadow matches hardware.
@@ -1903,30 +1668,11 @@ notify_queue_interposition_consumer_context_started(const context::context* ctx)
             // Third resync after intercept re-enables: catches any bypass doorbell
             // that slipped between the pre-unlock resync and transition unlock.
             resync_all_queue_shadow_states();
-            if(queue_interposition_debug_enabled())
-            {
-                log_all_queue_shadow_states("after 0->1 pre+post unlock resync");
-                log_stale_shadow_queues("after 0->1 pre+post unlock resync");
-                ROCP_WARNING << fmt::format(
-                    "[ROCM-29631] consumer_context_started ctx={} prev={} next={}",
-                    fmt::ptr(ctx),
-                    prev,
-                    next);
-            }
             return;
         }
     }
 
-    const auto next = s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_acq_rel) + 1;
-
-    if(queue_interposition_debug_enabled())
-    {
-        ROCP_WARNING << fmt::format(
-            "[ROCM-29631] consumer_context_started ctx={} prev={} next={}",
-            fmt::ptr(ctx),
-            prev,
-            next);
-    }
+    s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_acq_rel);
 }
 
 void
@@ -1945,13 +1691,6 @@ notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
             if(cur == 0) return;
             if(cur == 1)
             {
-                if(queue_interposition_debug_enabled())
-                {
-                    ROCP_WARNING << fmt::format(
-                        "[ROCM-29631] consumer_context_stopped 1->0 ctx={} (pre-drain)",
-                        fmt::ptr(ctx));
-                    log_all_queue_shadow_states("before 1->0 drain");
-                }
                 s_consumer_transition_in_progress.store(true, std::memory_order_release);
                 drain_intercept_work(false);
                 if(s_active_queue_interposition_consumers.compare_exchange_weak(
@@ -1959,15 +1698,6 @@ notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
                 {
                     interposition_sync();
                     s_consumer_transition_in_progress.store(false, std::memory_order_release);
-                    if(queue_interposition_debug_enabled())
-                    {
-                        log_all_queue_shadow_states("after 1->0 drain");
-                        log_stale_shadow_queues("after 1->0 drain");
-                        ROCP_WARNING << fmt::format(
-                            "[ROCM-29631] consumer_context_stopped ctx={} now={}",
-                            fmt::ptr(ctx),
-                            cur - 1);
-                    }
                     return;
                 }
                 s_consumer_transition_in_progress.store(false, std::memory_order_release);
@@ -1978,16 +1708,7 @@ notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
 
         if(s_active_queue_interposition_consumers.compare_exchange_weak(
                cur, cur - 1, std::memory_order_acq_rel, std::memory_order_acquire))
-        {
-            if(queue_interposition_debug_enabled())
-            {
-                ROCP_WARNING << fmt::format(
-                    "[ROCM-29631] consumer_context_stopped ctx={} now={}",
-                    fmt::ptr(ctx),
-                    cur - 1);
-            }
             return;
-        }
     }
 }
 
@@ -2011,36 +1732,10 @@ interposition_sync()
         auto _g      = std::unique_lock<std::shared_mutex>{g_handler_gate};
         _constructed = async_signal_handler_exists();
     }
-    if(!_constructed)
-    {
-        if(queue_interposition_debug_enabled())
-        {
-            ROCP_WARNING << "[ROCM-29631] interposition_sync skipped (no async handler)";
-        }
-        return;
-    }
+    if(!_constructed) return;
 
     constexpr auto async_only = true;
-    if(auto* tg = get_async_signal_handler(); tg)
-    {
-        if(queue_interposition_debug_enabled())
-        {
-            ROCP_WARNING << fmt::format(
-                "[ROCM-29631] interposition_sync join begin consumers={}",
-                s_active_queue_interposition_consumers.load(std::memory_order_acquire));
-        }
-        const auto t0 = std::chrono::steady_clock::now();
-        tg->join(async_only);
-        if(queue_interposition_debug_enabled())
-        {
-            const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                std::chrono::steady_clock::now() - t0)
-                                .count();
-            ROCP_WARNING << fmt::format(
-                "[ROCM-29631] interposition_sync join end elapsed_ms={}",
-                ms);
-        }
-    }
+    if(auto* tg = get_async_signal_handler(); tg) tg->join(async_only);
 }
 
 void
