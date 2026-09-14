@@ -2070,6 +2070,16 @@ hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(hsa_amd_vmem_alloc_ha
   CATCH;
 }
 
+hsa_status_t hsa_amd_vmem_get_alloc_size_from_handle(hsa_amd_vmem_alloc_handle_t allocHandle,
+                                                     size_t* size) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(size);
+
+  return core::Runtime::runtime_singleton_->VMemoryGetAllocSizeFromHandle(allocHandle, size);
+  CATCH;
+}
+
 hsa_status_t HSA_API hsa_amd_agent_set_async_scratch_limit(hsa_agent_t _agent, size_t threshold) {
   TRY;
   IS_OPEN();

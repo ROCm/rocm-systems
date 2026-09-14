@@ -2188,6 +2188,19 @@ class Device : public RuntimeObject {
   }
 
   /**
+   * Recovers the location and size of a VMM allocation from its backend handle.
+   *
+   * @param handle backend allocation handle
+   * @param location_type [out] where the allocation resides
+   * @param size [out] allocation size in bytes
+   * @return True when the backend reported both; false leaves the caller on its default.
+   */
+  virtual bool getVmmAllocInfo(uint64_t handle, VmmLocationType* location_type,
+                               size_t* size) const {
+    return false;
+  }
+
+  /**
    * @return True if the device successfully applied the SVM attributes in HMM for device memory
    */
   virtual bool SetSvmAttributes(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
