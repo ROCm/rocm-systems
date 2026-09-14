@@ -293,8 +293,8 @@ static ncclResult_t IbCastMultiSendSegmented(struct ncclIbSendComm* comm, int sl
       lastWr->imm_data = htobe32(immData);
     }
 
+    struct ncclIbRemapWrId* remapWrId = nullptr;
     if ((comm->base.recvMatchingScheme == BY_INDEX)) {
-      struct ncclIbRemapWrId* remapWrId;
       NCCLCHECK(IbCastQpSchedGetRemap(&comm->base, wr_id, qpIndex, &remapWrId));
       lastWr->wr_id = (uint64_t)remapWrId;
       remapWrId->parms = reqs[nreqs - 1]->desc.parms;
@@ -332,13 +332,18 @@ static ncclResult_t IbCastMultiSendSegmented(struct ncclIbSendComm* comm, int sl
       const uint32_t faultDelay = comm->base.faultQpDelayUs[qpIndex];
       if (faultDelay) usleep(faultDelay);
       if (comm->base.faultQpError[qpIndex]) {
+        if (remapWrId) IbCastQpSchedFreeRemap(remapWrId);
         IbCastStatsFatalError(&comm->base.stats);
         return ncclSystemError;
       }
     }
 #endif
     struct ibv_send_wr* bad_wr;
-    NCCLCHECK(wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr));
+    ncclResult_t postRet = wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr);
+    if (postRet != ncclSuccess) {
+      if (remapWrId) IbCastQpSchedFreeRemap(remapWrId);
+      return postRet;
+    }
 
     for (int r = 0; r < nreqs; r++) {
       sendOffsets[r] = std::min<uint32_t>(sendOffsets[r] + chunkLen[r], reqs[r]->send.size);
@@ -480,6 +485,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     // Hoisted out of the loop below: the WQE-size histogram is per device, so
     // this index is the same for every sub-request posted on this QP.
     const int telDevIdx = comm->base.vProps.devs[devIndex];
+    struct ncclIbRemapWrId* remapWrId = nullptr;
     for (int r = 0; r < nreqs; r++) {
       // Track this event for completion
       // IbCastAddEvent(reqs[r], devIndex);
@@ -516,7 +522,6 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       // wr_id remapping is only used for CAST scheduler RTT timing (BY_INDEX).
       // BY_ID (used by PORT_FAILOVER/RECOVERY) and BY_ORDER skip remapping.
       if ((r == (nreqs - 1)) && (comm->base.recvMatchingScheme == BY_INDEX)) {
-        struct ncclIbRemapWrId* remapWrId;
         NCCLCHECK(IbCastQpSchedGetRemap(&comm->base, wr_id, qpIndex, &remapWrId));
         lastWr->wr_id = (uint64_t)remapWrId;
         /* save tx data for measuring QP performance */
@@ -585,6 +590,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       const uint32_t faultDelay = comm->base.faultQpDelayUs[qpIndex];
       if (faultDelay) usleep(faultDelay);
       if (comm->base.faultQpError[qpIndex]) {
+        if (remapWrId) IbCastQpSchedFreeRemap(remapWrId);
         IbCastStatsFatalError(&comm->base.stats);
         return ncclSystemError;
       }
@@ -596,7 +602,11 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       for (int r=0; r<nreqs; r++) reqs[r]->tel_post_ts = _tel_ns;
     }
 
-    NCCLCHECK(wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr));
+    ncclResult_t postRet = wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr);
+    if (postRet != ncclSuccess) {
+      if (remapWrId) IbCastQpSchedFreeRemap(remapWrId);
+      return postRet;
+    }
 
     rcclTelemetryQpSendPosted(qp->telQpStats, useWriteOp ? 0 : 1);
 
