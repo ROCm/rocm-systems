@@ -531,10 +531,15 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
     if (waitStream == nullptr) {
       return hipErrorInvalidHandle;
     }
-    // Don't set when a stream waits on its own event, or when a forked stream joins back to
-    // the parent.
-    if (waitStream != eventStream && !waitStream->IsOriginStream() &&
-        waitStream != reinterpret_cast<hip::Stream*>(eventStream->GetCaptureOwner())) {
+    // A stream is enrolled in a capture the first time it is pulled in, and is never
+    // re-enrolled afterwards. That single condition subsumes the three it replaces, each of
+    // which was an indirect way of asking the same thing: the origin is already capturing, a
+    // stream joining back to its parent is already capturing, and a stream waiting on its own
+    // event is already capturing.
+    //
+    // Test for None rather than != Active: an invalidated stream must not be resurrected to
+    // Active by the SetCaptureGraph below.
+    if (waitStream->GetCaptureStatus() == hipStreamCaptureStatusNone) {
       waitStream->SetCaptureGraph(eventStream->GetCaptureGraph());
       waitStream->SetCaptureID(eventStream->GetCaptureID());
       waitStream->SetCaptureMode(eventStream->GetCaptureMode());
