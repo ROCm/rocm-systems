@@ -21,8 +21,8 @@
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
 #define STORE(DST, SRC) \
   { \
-    __hip_atomic_store((__attribute__((address_space(1))) __typeof__(*(DST))*)(DST), (SRC), __ATOMIC_RELAXED, \
-                       __HIP_MEMORY_SCOPE_SYSTEM); \
+    __scoped_atomic_store_n((__attribute__((address_space(1))) __typeof__(*(DST))*)(DST), (SRC), __ATOMIC_RELAXED, \
+                            __MEMORY_SCOPE_SYSTEM); \
   }
 #elif defined(__GFX9__)
 #define STORE(DST, SRC) \
