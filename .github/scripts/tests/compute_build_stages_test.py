@@ -84,7 +84,7 @@ class ComputeBuildStagesTest(unittest.TestCase):
         """Install a fake _therock_utils.build_topology module on sys.path.
 
         known: set of resolvable project names. Any project not in `known`
-        resolves to None (mirrors BuildTopology.resolve_project_to_artifact).
+        resolves to None (mirrors BuildTopology.resolve_alias_to_artifact).
         """
         known = set(known) if known is not None else None
         mod = types.ModuleType("_therock_utils.build_topology")
@@ -93,10 +93,10 @@ class ComputeBuildStagesTest(unittest.TestCase):
             def get_all_stage_names(self):
                 return set(all_stages)
 
-            def get_stages_for_projects(self, projects):
+            def get_stages_for_artifacts(self, artifacts):
                 return set(required)
 
-            def resolve_project_to_artifact(self, project):
+            def resolve_alias_to_artifact(self, project):
                 if known is None:
                     return project  # everything resolves
                 return project if project in known else None
@@ -123,7 +123,7 @@ class ComputeBuildStagesTest(unittest.TestCase):
 
     def test_mixed_known_and_unknown_builds_everything(self):
         # rdc is known, but the unknown project is silently dropped by
-        # get_stages_for_projects; we must NOT narrow in that case.
+        # get_stages_for_artifacts; we must NOT narrow in that case.
         self._install_fake_topology(
             all_stages=["compiler-runtime", "dctools-core", "math-libs"],
             required=["compiler-runtime", "dctools-core"],

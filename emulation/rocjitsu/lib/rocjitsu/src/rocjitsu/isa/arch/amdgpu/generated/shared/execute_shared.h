@@ -17107,28 +17107,27 @@ inline void execute_v_pk_add_f16_vop3p([[maybe_unused]] Inst &inst,
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
     bool sel1_hi = (inst.inst_.op_sel_hi >> 1) & 1;
-    float a_lo = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
-    float b_lo = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
-    float a_hi = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
-    float b_hi = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
-    if (inst.inst_.neg & 1) {
-      a_lo = -a_lo;
-    }
-    if (inst.inst_.neg & 2) {
-      b_lo = -b_lo;
-    }
-    if (inst.inst_.neg_hi & 1) {
-      a_hi = -a_hi;
-    }
-    if (inst.inst_.neg_hi & 2) {
-      b_hi = -b_hi;
-    }
-    float rlo = a_lo + b_lo;
-    float rhi = a_hi + b_hi;
-    sdwa::write_lane<true>(
-        inst, wf, inst.vdst, lane,
-        util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) |
-            (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));
+    uint16_t a_lo = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+    if (inst.inst_.neg & 1u)
+      a_lo ^= 0x8000u;
+    uint16_t b_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+    if (inst.inst_.neg & 2u)
+      b_lo ^= 0x8000u;
+    const uint16_t rlo = amdgpu::fp_mode::packed_binary_f16(
+        amdgpu::fp_mode::PackedBinaryOp::ADD, a_lo, b_lo, wf.fp_round_mode_f16_f64(),
+        wf.fp_denorm_mode_f16_f64(), inst.inst_.clamp, wf.fp16_ovfl(),
+        amdgpu::floating_clamp_nan_to_zero(wf));
+    uint16_t a_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+    if (inst.inst_.neg_hi & 1u)
+      a_hi ^= 0x8000u;
+    uint16_t b_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+    if (inst.inst_.neg_hi & 2u)
+      b_hi ^= 0x8000u;
+    const uint16_t rhi = amdgpu::fp_mode::packed_binary_f16(
+        amdgpu::fp_mode::PackedBinaryOp::ADD, a_hi, b_hi, wf.fp_round_mode_f16_f64(),
+        wf.fp_denorm_mode_f16_f64(), inst.inst_.clamp, wf.fp16_ovfl(),
+        amdgpu::floating_clamp_nan_to_zero(wf));
+    sdwa::write_lane<true>(inst, wf, inst.vdst, lane, rlo | (static_cast<uint32_t>(rhi) << 16));
   }
 }
 
@@ -17162,8 +17161,12 @@ inline void execute_v_pk_add_f32_vop3p([[maybe_unused]] Inst &inst,
       a_hi = -a_hi;
     if (inst.inst_.neg_hi & 2)
       b_hi = -b_hi;
-    uint32_t rlo = std::bit_cast<uint32_t>(a_lo + b_lo);
-    uint32_t rhi = std::bit_cast<uint32_t>(a_hi + b_hi);
+    uint32_t rlo = amdgpu::fp_mode::packed_f32(
+        a_lo, b_lo, 0.0f, amdgpu::fp_mode::PackedF32Op::ADD, wf.fp_round_mode_f32(),
+        wf.fp_denorm_mode_f32(), inst.inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
+    uint32_t rhi = amdgpu::fp_mode::packed_f32(
+        a_hi, b_hi, 0.0f, amdgpu::fp_mode::PackedF32Op::ADD, wf.fp_round_mode_f32(),
+        wf.fp_denorm_mode_f32(), inst.inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
     sdwa::write_lane64<true>(inst, wf, inst.vdst, lane,
                              static_cast<uint64_t>(rlo) | (static_cast<uint64_t>(rhi) << 32));
   }
@@ -17348,8 +17351,12 @@ inline void execute_v_pk_fma_f32_vop3p([[maybe_unused]] Inst &inst,
       b_hi = -b_hi;
     if (inst.inst_.neg_hi & 4)
       c_hi = -c_hi;
-    uint32_t rlo = std::bit_cast<uint32_t>(std::fma(a_lo, b_lo, c_lo));
-    uint32_t rhi = std::bit_cast<uint32_t>(std::fma(a_hi, b_hi, c_hi));
+    uint32_t rlo = amdgpu::fp_mode::packed_f32(
+        a_lo, b_lo, c_lo, amdgpu::fp_mode::PackedF32Op::FMA, wf.fp_round_mode_f32(),
+        wf.fp_denorm_mode_f32(), inst.inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
+    uint32_t rhi = amdgpu::fp_mode::packed_f32(
+        a_hi, b_hi, c_hi, amdgpu::fp_mode::PackedF32Op::FMA, wf.fp_round_mode_f32(),
+        wf.fp_denorm_mode_f32(), inst.inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
     sdwa::write_lane64<true>(inst, wf, inst.vdst, lane,
                              static_cast<uint64_t>(rlo) | (static_cast<uint64_t>(rhi) << 32));
   }
@@ -17552,7 +17559,6 @@ inline void execute_v_pk_mad_u16_vop3p([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_pk_max_f16_vop3p([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_FP16([](auto a, auto b) { return util::stdx::fmax(a, b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -17567,28 +17573,27 @@ inline void execute_v_pk_max_f16_vop3p([[maybe_unused]] Inst &inst,
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
     bool sel1_hi = (inst.inst_.op_sel_hi >> 1) & 1;
-    float a_lo = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
-    float b_lo = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
-    float a_hi = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
-    float b_hi = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
-    if (inst.inst_.neg & 1) {
-      a_lo = -a_lo;
-    }
-    if (inst.inst_.neg & 2) {
-      b_lo = -b_lo;
-    }
-    if (inst.inst_.neg_hi & 1) {
-      a_hi = -a_hi;
-    }
-    if (inst.inst_.neg_hi & 2) {
-      b_hi = -b_hi;
-    }
-    float rlo = std::fmax(a_lo, b_lo);
-    float rhi = std::fmax(a_hi, b_hi);
-    sdwa::write_lane<true>(
-        inst, wf, inst.vdst, lane,
-        util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) |
-            (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));
+    uint16_t a_lo = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+    if (inst.inst_.neg & 1u)
+      a_lo ^= 0x8000u;
+    uint16_t b_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+    if (inst.inst_.neg & 2u)
+      b_lo ^= 0x8000u;
+    const uint16_t rlo = amdgpu::fp_mode::packed_binary_f16(
+        amdgpu::fp_mode::PackedBinaryOp::MAX, a_lo, b_lo, wf.fp_round_mode_f16_f64(),
+        wf.fp_denorm_mode_f16_f64(), inst.inst_.clamp, wf.fp16_ovfl(),
+        amdgpu::floating_clamp_nan_to_zero(wf));
+    uint16_t a_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+    if (inst.inst_.neg_hi & 1u)
+      a_hi ^= 0x8000u;
+    uint16_t b_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+    if (inst.inst_.neg_hi & 2u)
+      b_hi ^= 0x8000u;
+    const uint16_t rhi = amdgpu::fp_mode::packed_binary_f16(
+        amdgpu::fp_mode::PackedBinaryOp::MAX, a_hi, b_hi, wf.fp_round_mode_f16_f64(),
+        wf.fp_denorm_mode_f16_f64(), inst.inst_.clamp, wf.fp16_ovfl(),
+        amdgpu::floating_clamp_nan_to_zero(wf));
+    sdwa::write_lane<true>(inst, wf, inst.vdst, lane, rlo | (static_cast<uint32_t>(rhi) << 16));
   }
 }
 
@@ -17660,7 +17665,6 @@ inline void execute_v_pk_max_u16_vop3p([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_pk_min_f16_vop3p([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_FP16([](auto a, auto b) { return util::stdx::fmin(a, b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -17675,28 +17679,27 @@ inline void execute_v_pk_min_f16_vop3p([[maybe_unused]] Inst &inst,
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
     bool sel1_hi = (inst.inst_.op_sel_hi >> 1) & 1;
-    float a_lo = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
-    float b_lo = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
-    float a_hi = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
-    float b_hi = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
-    if (inst.inst_.neg & 1) {
-      a_lo = -a_lo;
-    }
-    if (inst.inst_.neg & 2) {
-      b_lo = -b_lo;
-    }
-    if (inst.inst_.neg_hi & 1) {
-      a_hi = -a_hi;
-    }
-    if (inst.inst_.neg_hi & 2) {
-      b_hi = -b_hi;
-    }
-    float rlo = std::fmin(a_lo, b_lo);
-    float rhi = std::fmin(a_hi, b_hi);
-    sdwa::write_lane<true>(
-        inst, wf, inst.vdst, lane,
-        util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) |
-            (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));
+    uint16_t a_lo = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+    if (inst.inst_.neg & 1u)
+      a_lo ^= 0x8000u;
+    uint16_t b_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+    if (inst.inst_.neg & 2u)
+      b_lo ^= 0x8000u;
+    const uint16_t rlo = amdgpu::fp_mode::packed_binary_f16(
+        amdgpu::fp_mode::PackedBinaryOp::MIN, a_lo, b_lo, wf.fp_round_mode_f16_f64(),
+        wf.fp_denorm_mode_f16_f64(), inst.inst_.clamp, wf.fp16_ovfl(),
+        amdgpu::floating_clamp_nan_to_zero(wf));
+    uint16_t a_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+    if (inst.inst_.neg_hi & 1u)
+      a_hi ^= 0x8000u;
+    uint16_t b_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+    if (inst.inst_.neg_hi & 2u)
+      b_hi ^= 0x8000u;
+    const uint16_t rhi = amdgpu::fp_mode::packed_binary_f16(
+        amdgpu::fp_mode::PackedBinaryOp::MIN, a_hi, b_hi, wf.fp_round_mode_f16_f64(),
+        wf.fp_denorm_mode_f16_f64(), inst.inst_.clamp, wf.fp16_ovfl(),
+        amdgpu::floating_clamp_nan_to_zero(wf));
+    sdwa::write_lane<true>(inst, wf, inst.vdst, lane, rlo | (static_cast<uint32_t>(rhi) << 16));
   }
 }
 
@@ -17804,28 +17807,27 @@ inline void execute_v_pk_mul_f16_vop3p([[maybe_unused]] Inst &inst,
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
     bool sel1_hi = (inst.inst_.op_sel_hi >> 1) & 1;
-    float a_lo = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
-    float b_lo = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
-    float a_hi = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
-    float b_hi = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
-    if (inst.inst_.neg & 1) {
-      a_lo = -a_lo;
-    }
-    if (inst.inst_.neg & 2) {
-      b_lo = -b_lo;
-    }
-    if (inst.inst_.neg_hi & 1) {
-      a_hi = -a_hi;
-    }
-    if (inst.inst_.neg_hi & 2) {
-      b_hi = -b_hi;
-    }
-    float rlo = a_lo * b_lo;
-    float rhi = a_hi * b_hi;
-    sdwa::write_lane<true>(
-        inst, wf, inst.vdst, lane,
-        util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) |
-            (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));
+    uint16_t a_lo = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);
+    if (inst.inst_.neg & 1u)
+      a_lo ^= 0x8000u;
+    uint16_t b_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
+    if (inst.inst_.neg & 2u)
+      b_lo ^= 0x8000u;
+    const uint16_t rlo = amdgpu::fp_mode::packed_binary_f16(
+        amdgpu::fp_mode::PackedBinaryOp::MUL, a_lo, b_lo, wf.fp_round_mode_f16_f64(),
+        wf.fp_denorm_mode_f16_f64(), inst.inst_.clamp, wf.fp16_ovfl(),
+        amdgpu::floating_clamp_nan_to_zero(wf));
+    uint16_t a_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
+    if (inst.inst_.neg_hi & 1u)
+      a_hi ^= 0x8000u;
+    uint16_t b_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
+    if (inst.inst_.neg_hi & 2u)
+      b_hi ^= 0x8000u;
+    const uint16_t rhi = amdgpu::fp_mode::packed_binary_f16(
+        amdgpu::fp_mode::PackedBinaryOp::MUL, a_hi, b_hi, wf.fp_round_mode_f16_f64(),
+        wf.fp_denorm_mode_f16_f64(), inst.inst_.clamp, wf.fp16_ovfl(),
+        amdgpu::floating_clamp_nan_to_zero(wf));
+    sdwa::write_lane<true>(inst, wf, inst.vdst, lane, rlo | (static_cast<uint32_t>(rhi) << 16));
   }
 }
 
@@ -17859,8 +17861,12 @@ inline void execute_v_pk_mul_f32_vop3p([[maybe_unused]] Inst &inst,
       a_hi = -a_hi;
     if (inst.inst_.neg_hi & 2)
       b_hi = -b_hi;
-    uint32_t rlo = std::bit_cast<uint32_t>(a_lo * b_lo);
-    uint32_t rhi = std::bit_cast<uint32_t>(a_hi * b_hi);
+    uint32_t rlo = amdgpu::fp_mode::packed_f32(
+        a_lo, b_lo, 0.0f, amdgpu::fp_mode::PackedF32Op::MUL, wf.fp_round_mode_f32(),
+        wf.fp_denorm_mode_f32(), inst.inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
+    uint32_t rhi = amdgpu::fp_mode::packed_f32(
+        a_hi, b_hi, 0.0f, amdgpu::fp_mode::PackedF32Op::MUL, wf.fp_round_mode_f32(),
+        wf.fp_denorm_mode_f32(), inst.inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
     sdwa::write_lane64<true>(inst, wf, inst.vdst, lane,
                              static_cast<uint64_t>(rlo) | (static_cast<uint64_t>(rhi) << 32));
   }
