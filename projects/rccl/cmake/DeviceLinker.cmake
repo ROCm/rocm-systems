@@ -37,10 +37,6 @@ string(REGEX MATCHALL "--hip-path=[^ ]+" _hip_path_flags "${CMAKE_CXX_FLAGS}")
 list(APPEND DL_HIP_COMPILER_FLAGS ${_hip_path_flags})
 string(REGEX MATCHALL "--hip-device-lib-path=[^ ]+" _hip_devlib_flags "${CMAKE_CXX_FLAGS}")
 list(APPEND DL_HIP_COMPILER_FLAGS ${_hip_devlib_flags})
-# amdclang++ 23 on this host prefers GCC 16, whose libstdc++ is not usable.
-# Forward --gcc-install-dir from CMAKE_CXX_FLAGS onto device compiles too.
-string(REGEX MATCHALL "--gcc-install-dir=[^ ]+" _gcc_install_flags "${CMAKE_CXX_FLAGS}")
-list(APPEND DL_HIP_COMPILER_FLAGS ${_gcc_install_flags})
 if(DL_HIP_COMPILER_FLAGS)
   message(STATUS "Device Linker: forwarding HIP flags from toolchain: ${DL_HIP_COMPILER_FLAGS}")
 else()
