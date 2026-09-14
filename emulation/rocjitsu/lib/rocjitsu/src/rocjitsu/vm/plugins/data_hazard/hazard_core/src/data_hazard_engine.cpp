@@ -591,6 +591,12 @@ void DataHazardEngine::on_barrier(const BarrierEvent &barrier) {
   } else if (barrier.kind == BarrierKind::Cluster) {
     for (const auto &key : workgroup_keys_for_barrier(barrier))
       flush_workgroup_epoch(key);
+  } else if (barrier.kind == BarrierKind::Named) {
+    // TODO: Add full support for named barriers
+    //
+    // A named barrier synchronizes only the subset of waves that joined
+    // it, not the whole workgroup, so it must not flush the shared LDS epoch.
+    // No-op for now.
   }
 }
 
