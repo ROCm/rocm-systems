@@ -2089,7 +2089,7 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_Lsa)
      MultiSegmentBuffer buf;
      ASSERT_NO_FATAL_FAILURE(
          createMixedMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, kNumHostSegments, buf));
-     if (buf.totalSize == 0) {
+     if (!MPIHelpers::allRanksTrue(buf.totalSize != 0)) {
          GTEST_SKIP() << "Host VMM (hipMemCreate with hipMemLocationTypeHost) not supported on this runtime";
      }
      auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
@@ -2164,7 +2164,7 @@ TEST_F(UBR_MultiSegment, DeepEP_ElasticWindowRegistration)
 
     MultiSegmentBuffer buf;
     ASSERT_NO_FATAL_FAILURE(createDeepEpElasticBuffer(dev, kGpuBytes, kCpuBytes, buf));
-    if (buf.totalSize == 0) {
+    if (!MPIHelpers::allRanksTrue(buf.totalSize != 0)) {
         GTEST_SKIP() << "DeepEP-style GPU+CPU VMM allocation unavailable on this runtime";
     }
     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
@@ -2346,7 +2346,7 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_Gating)
      MultiSegmentBuffer buf;
      ASSERT_NO_FATAL_FAILURE(
          createMixedMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, kNumHostSegments, buf));
-     if (buf.totalSize == 0) {
+     if (!MPIHelpers::allRanksTrue(buf.totalSize != 0)) {
          GTEST_SKIP() << "Host VMM (hipMemCreate with hipMemLocationTypeHost) not supported on this runtime";
      }
      auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });

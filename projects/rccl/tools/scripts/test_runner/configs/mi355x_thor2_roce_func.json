@@ -2934,7 +2934,8 @@
           "name": "UBR_MultiSegment_Symmetric_Lsa_AFTER",
           "test_filter": "UBR_MultiSegment.Symmetric_Lsa",
           "env_variables": {
-            "RCCL_CE_ALLREDUCE": "1"
+            "RCCL_CE_ALLREDUCE": "1",
+            "NCCL_CTA_POLICY": "2"
           }
         },
         {
