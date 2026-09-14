@@ -75,7 +75,6 @@ ncclResult_t IbCastPortRecoveryQpsRestoreAinic(struct ncclIbPortRecoveryContext*
         struct ncclIbQpCreateAttr flushCreateAttr;
         IbCastBuildDataQpCreateAttr(recoveryContext->resCtx->baseComm, recoveryContext->devIndex, &flushCreateAttr);
         flushCreateAttr.maxRecvWorkRequest = 0;
-        flushCreateAttr.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
         flushCreateAttr.channelId = flushQp->channelId;
         flushCreateAttr.isDataQp = flushQp->isDataQp;
         NCCLCHECK(IbCastQpCreate(flushQp, &flushCreateAttr));
