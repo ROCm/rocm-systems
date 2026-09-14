@@ -54,6 +54,9 @@ public:
     const std::unique_ptr<const DL> dl{nullptr};
 
     LockedTable table{};
+
+    /// Bitmask of rocprofiler_thread_trace_decoder_analysis_flags_t requested for decoding.
+    std::atomic<uint64_t> analysis_flags{0};
 };
 
 using DecoderMap =
@@ -121,6 +124,23 @@ rocprofiler_thread_trace_decoder_codeobj_load(rocprofiler_thread_trace_decoder_i
     {
         return ROCPROFILER_STATUS_ERROR;
     }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+rocprofiler_thread_trace_decoder_set_analysis(rocprofiler_thread_trace_decoder_id_t handle,
+                                              uint64_t                              flags)
+{
+    auto decoder = get_dl(handle);
+    if(decoder == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    constexpr uint64_t known_flags = ROCPROFILER_THREAD_TRACE_DECODER_ANALYSIS_HIDDEN_LATENCY;
+    if((flags & ~known_flags) != 0) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if(flags != 0 && !decoder->dl->supports_analysis())
+        return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
+
+    decoder->analysis_flags.store(flags);
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
@@ -217,6 +237,31 @@ trace_callback(rocprofiler_thread_trace_decoder_record_type_t record_type_id,
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
 
+/// Runs one decode. Analyses are only reachable through the handle-based API, so take that
+/// route when any were requested and fall back to parse_data otherwise, which keeps decoding
+/// working against decoders too old to offer the handle API at all.
+rocprofiler_thread_trace_decoder_status_t
+decode_with(const DL& dl, uint64_t analysis_flags, trace_data_t* cbdata)
+{
+    if(analysis_flags == 0)
+        return dl.att_parse_data_fn(copy_trace_data, trace_callback, isa_callback, cbdata);
+
+    rocprof_trace_decoder_handle_t handle{};
+    auto                           status = dl.att_create_handle_fn(&handle);
+    if(status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return status;
+
+    status = dl.att_set_isa_callback_fn(handle, isa_callback, cbdata);
+    if(status == ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
+        status = dl.att_set_se_data_callback_fn(handle, copy_trace_data, cbdata);
+    if(status == ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
+        status = dl.att_set_analysis_fn(handle, analysis_flags);
+    if(status == ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
+        status = dl.att_handle_parse_fn(handle, nullptr, 0, trace_callback, cbdata);
+
+    dl.att_destroy_handle_fn(handle);
+    return status;
+}
+
 }  // namespace
 
 extern "C" {
@@ -236,8 +281,7 @@ rocprofiler_trace_decode(rocprofiler_thread_trace_decoder_id_t       handle,
                         .cb       = user_callback,
                         .userdata = userdata};
 
-    auto status =
-        decoder->dl->att_parse_data_fn(copy_trace_data, trace_callback, isa_callback, &cbdata);
+    auto status = decode_with(*decoder->dl, decoder->analysis_flags.load(), &cbdata);
     if(status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
     {
         const char* statustr = decoder->dl->att_status_fn(status);
