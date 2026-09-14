@@ -203,6 +203,16 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
                           .c_str());
     return false;
   }
+  for (size_t i = 0; i < plan.probe_args.size(); ++i) {
+    if (!is_declared_probe_arg_source(plan.probe_args[i].source)) {
+      report(error_out,
+             ("probe-call resource planning: argument " + std::to_string(i) + " names source " +
+              std::to_string(static_cast<int>(plan.probe_args[i].source)) +
+              ", which is not a declared ProbeArgSource")
+                 .c_str());
+      return false;
+    }
+  }
   const RegisterSet arg_regs = arg_registers(abi);
 
   // Reject if either lane of the link pair is live at the anchor; saving a live
@@ -321,8 +331,17 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   before_words += 1;     // s_swappc_b64
   // Each argument is one v_mov_b32; an immediate adds the literal word its src0
   // field names, a register source does not.
-  for (const ProbeArgValue &arg : plan.probe_args)
-    before_words += arg.source == ProbeArgSource::Immediate ? 2 : 1;
+  for (const ProbeArgValue &arg : plan.probe_args) {
+    switch (arg.source) {
+    case ProbeArgSource::Immediate:
+      before_words += 2;
+      break;
+    case ProbeArgSource::AnchorExecLo:
+    case ProbeArgSource::AnchorExecHi:
+      before_words += 1;
+      break;
+    }
+  }
   if (plan.preserve_scc)
     before_words += 2; // s_cselect_b32 (save) + s_cmp_lg_u32 (restore)
   // Each special-state register adds one s_mov save + one s_mov restore.
@@ -441,10 +460,14 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   for (size_t i = 0; i < plan.probe_args.size(); ++i) {
     const ProbeArgValue &arg = plan.probe_args[i];
     const uint16_t vdst = static_cast<uint16_t>(plan.arg_vgpr_base + i);
-    if (arg.source == ProbeArgSource::Immediate) {
-      const auto words = build_v_mov_b32_imm(vdst, arg.immediate, plan.arch);
-      env.insert(env.end(), words.begin(), words.end());
-      continue;
+    // Screened again here rather than inherited from planning: emit_probe_call is
+    // callable on a plan this builder did not produce.
+    if (!is_declared_probe_arg_source(arg.source)) {
+      report(error_out, ("probe-call emission: argument " + std::to_string(i) + " names source " +
+                         std::to_string(static_cast<int>(arg.source)) +
+                         ", which is not a declared ProbeArgSource")
+                            .c_str());
+      return std::nullopt;
     }
     // The anchor mask comes from the saved pair, not from `exec`: the widen above
     // already overwrote the register. exec_temp is the pair base, so the high
@@ -453,10 +476,19 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     // So an EXEC-sourced argument needs a site that saved EXEC. Nothing asks for
     // that on its own: any argument at all opens the full-mask window, which
     // reserves the temp, and the guard above fails closed if it is somehow absent.
-    const uint16_t src = arg.source == ProbeArgSource::AnchorExecLo
-                             ? exec_temp
-                             : static_cast<uint16_t>(exec_temp + 1);
-    env.push_back(build_v_mov_b32_src(vdst, src, plan.arch));
+    switch (arg.source) {
+    case ProbeArgSource::Immediate: {
+      const auto words = build_v_mov_b32_imm(vdst, arg.immediate, plan.arch);
+      env.insert(env.end(), words.begin(), words.end());
+      break;
+    }
+    case ProbeArgSource::AnchorExecLo:
+      env.push_back(build_v_mov_b32_src(vdst, exec_temp, plan.arch));
+      break;
+    case ProbeArgSource::AnchorExecHi:
+      env.push_back(build_v_mov_b32_src(vdst, static_cast<uint16_t>(exec_temp + 1), plan.arch));
+      break;
+    }
   }
 
   // Restore the anchor EXEC before the call so the probe runs under the anchor mask,

@@ -1914,10 +1914,10 @@ TEST(InstrumentorProbePatch, CopiesProbeBodyOnceAndCallTargetsIt) {
   EXPECT_EQ(va_after_getpc + delta, p.probe_target_offset); // wraps mod 2^64.
 }
 
-// Two sites naming one symbol with different counts were verified against
-// different conventions, so they must not share a ProbeCallable. Checks the
-// registry split; the values themselves are not materialized yet.
-TEST(InstrumentorProbePatch, SitesDifferingOnlyInArgumentCountDoNotShareABody) {
+// Two points naming one symbol with different counts are describing one probe
+// two ways. The framework cannot tell which count the body wants, so it refuses
+// the second declaration instead of resolving a second probe.
+TEST(InstrumentorProbePatch, PointsDisagreeingOnArgumentCountAreRejected) {
   auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
@@ -1935,24 +1935,16 @@ TEST(InstrumentorProbePatch, SitesDifferingOnlyInArgumentCountDoNotShareABody) {
   }
 
   auto result = instr.patch_with_debug_summaries();
-  ASSERT_TRUE(result.errors.empty())
-      << (result.errors.empty() ? std::string{} : result.errors.front());
-  ASSERT_EQ(result.patches.size(), 2u);
-  EXPECT_NE(result.patches[0].probe_target_offset, result.patches[1].probe_target_offset);
-
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
-  ASSERT_TRUE(patched.is_valid());
-  const std::vector<uint32_t> text = section_words(patched, ".text");
-  constexpr size_t kOriginalTextWords = 2;
-  ASSERT_GT(text.size(), kOriginalTextWords);
-  const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 2);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("already declared with 0 argument dwords"),
+            std::string::npos)
+      << result.errors.front();
 }
 
-// Arity is not the only shape fact. Two sites passing one argument each, one a
-// constant and one the anchor mask, are asking for different calls: what the
-// body may assume it received differs, so they must not share a ProbeCallable.
-TEST(InstrumentorProbePatch, SitesDifferingOnlyInArgumentSourceDoNotShareABody) {
+// Arity is not the only fact the probe owns. One point asking for a constant and
+// another for the anchor mask disagree about what the body receives, and the
+// body cannot arbitrate.
+TEST(InstrumentorProbePatch, PointsDisagreeingOnArgumentSourceAreRejected) {
   auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
@@ -1970,16 +1962,15 @@ TEST(InstrumentorProbePatch, SitesDifferingOnlyInArgumentSourceDoNotShareABody) 
   }
 
   auto result = instr.patch_with_debug_summaries();
-  ASSERT_TRUE(result.errors.empty())
-      << (result.errors.empty() ? std::string{} : result.errors.front());
-  ASSERT_EQ(result.patches.size(), 2u);
-  EXPECT_NE(result.patches[0].probe_target_offset, result.patches[1].probe_target_offset);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("different argument sources"), std::string::npos)
+      << result.errors.front();
 }
 
-// Mask policy is part of the shape too: one site running the probe masked and
-// another running it with every lane enabled are different calls, so they get
-// separate ProbeCallables even though the argument list matches.
-TEST(InstrumentorProbePatch, SitesDifferingOnlyInMaskPolicyDoNotShareABody) {
+// Mask policy is the same class of fact: which lanes the body runs on follows
+// from what the body computes, so one probe cannot be masked at one point and
+// full-exec at another.
+TEST(InstrumentorProbePatch, PointsDisagreeingOnMaskPolicyAreRejected) {
   auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
@@ -1996,10 +1987,41 @@ TEST(InstrumentorProbePatch, SitesDifferingOnlyInMaskPolicyDoNotShareABody) {
   }
 
   auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("already declared with the anchor mask"), std::string::npos)
+      << result.errors.front();
+}
+
+TEST(InstrumentorProbePatch, PointsAgreeingOnPolicyAndSourcesShareOneBody) {
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  for (uint64_t anchor : {uint64_t{0}, uint64_t{4}}) {
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    pt.probe_args = {{ProbeArgSource::AnchorExecLo, 0}, {ProbeArgSource::AnchorExecHi, 0}};
+    pt.force_full_exec = true;
+    instr.add_point(pt);
+  }
+
+  auto result = instr.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
   ASSERT_EQ(result.patches.size(), 2u);
-  EXPECT_NE(result.patches[0].probe_target_offset, result.patches[1].probe_target_offset);
+  EXPECT_EQ(result.patches[0].probe_target_offset, result.patches[1].probe_target_offset);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  constexpr size_t kOriginalTextWords = 2;
+  ASSERT_GT(text.size(), kOriginalTextWords);
+  const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
+  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 1);
 }
 
 // A Wave32 kernel's EXEC is one dword. Passing the high half would hand the
