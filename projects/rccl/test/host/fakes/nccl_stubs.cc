@@ -69,6 +69,9 @@ ncclResult_t ncclDdaFabricCommFini(struct ncclComm* comm) { return ncclSuccess; 
 ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm) { ::abort(); }
+bool ncclDdaNranksRelaxEnabled() { return false; }
+// Mirrors the real gate with relax off: only the full kDdaNranks clique is supported.
+bool ncclDdaIpcNranksSupported(int nRanks) { return nRanks == 8; }
 bool ncclDdaUseFabricPath(struct ncclComm* comm) { return false; }
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, struct ncclDevrWindow** outWin) { ::abort(); }

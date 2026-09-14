@@ -52,6 +52,7 @@ set(SRC_FILES
   algorithms/dda/fabric/fabric_init.cu
   algorithms/dda/fabric/fabric_mem_handler.cc
   group.cc
+  algorithms/dda/ipc/dda_nranks_relax_consensus.cc
   algorithms/dda/ipc/ipc_gpu_barrier.cu
   algorithms/dda/ipc/ipc_init.cu
   algorithms/dda/ipc/ipc_mem_handler.cc
@@ -166,6 +167,7 @@ set(SRC_FILES
   include/core.h
   include/cpuset.h
 # include/cudawrap.h
+  algorithms/dda/ipc/dda_nranks_relax_consensus.h
   algorithms/dda/all_reduce/dda_all_reduce.h
   algorithms/dda/reduce_scatter/dda_reduce_scatter.h
   algorithms/dda/all_gather/dda_all_gather.h

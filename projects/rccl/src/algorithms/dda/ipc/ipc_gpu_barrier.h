@@ -72,8 +72,13 @@ public:
   }
 
 private:
-  int nBlocks_;
-  FlagType* flags_;
+  // Initialized in-class so a default-constructed mailbox is deterministic.
+  // IpcGpuBarrier holds a std::array<DeviceMailbox, NRANKS> but fills only the
+  // first nRanks entries when RCCL_DDA_NRANKS_RELAX admits a smaller clique;
+  // without these the unused tail would carry indeterminate values into the
+  // kernel argument.
+  int nBlocks_{0};
+  FlagType* flags_{nullptr};
 
   __device__ inline int getFlagIdx(int rank, int block) {
     return block * NRANKS + rank;
@@ -113,7 +118,7 @@ public:
     if constexpr (hasPreviousMemAccess) {
       __syncthreads();
     }
-    if (threadIdx.x < NRANKS) {
+    if (threadIdx.x < nRanks_) {  // active peers only; NRANKS would deadlock for <8
       auto peerRank = threadIdx.x;
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
         allMailboxes_[peerRank].setFlagNoMemFence(selfRank_, blockIdx.x);
@@ -135,6 +140,7 @@ public:
 private:
   int nBlocks_{-1};
   int selfRank_{-1};
+  int nRanks_{NRANKS};
   std::array<DeviceMailbox, NRANKS> allMailboxes_;
 
   __host__ IpcGpuBarrier(int nRanks, int nBlocks, int selfRank, const std::array<DeviceMailbox, NRANKS>& allMailboxes);

@@ -680,7 +680,7 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
 }
 
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default,
-                    size_t gfx1250Default) {
+                    size_t gfx1250Default, int minRanks) {
   if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) {
     return false;
   }
@@ -688,7 +688,9 @@ bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Defaul
   if (IsArchMatch(comm->archName, "gfx1250")) {
     threshold = gfx1250Default ? gfx1250Default : static_cast<size_t>(rcclParamDdaThreshold());
   } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
-    if (comm->nRanks < 8) return false;
+    // Participant-count floor supplied by the caller; see the declaration in
+    // rccl_common.h for which collectives relax it.
+    if (comm->nRanks < minRanks) return false;
     if (IsArchMatch(comm->archName, "gfx942")) {
       threshold = gfx942Default;
     } else {
