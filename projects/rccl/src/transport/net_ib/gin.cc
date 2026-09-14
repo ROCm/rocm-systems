@@ -594,8 +594,9 @@ ncclResult_t ncclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
   int registered = 0;
 
   *mhandle = NULL;
-  NCCLCHECK(ncclCalloc(&rmaMrHandle, 1));
   NCCLCHECKGOTO(ncclCalloc(&registrations, cComm->nranks), ret, fail);
+  ret = ncclCalloc(&rmaMrHandle, 1);
+  if (ret != ncclSuccess) goto reconcile;
   // calloc zeroes nSegments; fail paths below only dereg `registered` complete
   // handles, so a half-built ncclIbMrHandle is never passed to deregMr.
 
@@ -690,7 +691,8 @@ reconcile:
   // complete status and layout in one fixed-size record.
   localRegistration.status = ret;
   localRegistration.nSegments = nSeg;
-  if (nSeg <= NCCL_RMA_MAX_SEGMENTS) memcpy(localRegistration.segOff, rmaMrHandle->segOff, sizeof(size_t) * (nSeg + 1));
+  if (rmaMrHandle && nSeg >= 1 && nSeg <= NCCL_RMA_MAX_SEGMENTS)
+    memcpy(localRegistration.segOff, rmaMrHandle->segOff, sizeof(size_t) * (nSeg + 1));
   NCCLCHECKGOTO(cComm->allGather(cComm, &localRegistration, registrations, sizeof(struct ncclRmaIbProxyRegistration)),
                 ret, fail);
 
