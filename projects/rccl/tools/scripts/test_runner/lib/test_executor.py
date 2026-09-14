@@ -110,6 +110,27 @@ def suite_disposition(suite, smoke_only, suite_name_filter=None):
     return "run"
 
 
+def collect_mpi_export_vars(env, merged_env):
+    """Yield (key, value) pairs that mpirun must -x so every rank sees them.
+
+    OpenMPI forwards only explicitly exported variables to remote ranks.
+    Local ranks inherit the launcher environment. A leftover NCCL_* from the
+    parent shell (for example NCCL_IB_QPS_PER_CONNECTION=2 from a CAST run)
+    would otherwise apply to rank 0 only; mismatched QP counts then fail
+    ibv_modify_qp INIT→RTR with EIO.
+    """
+    seen = set()
+    for key, value in merged_env.items():
+        if key == "LD_LIBRARY_PATH":
+            continue
+        seen.add(key)
+        yield key, value
+    for key, value in env.items():
+        if key.startswith(("NCCL_", "RCCL_")) and key not in seen:
+            seen.add(key)
+            yield key, value
+
+
 def configure_coverage_build(install_flags, cmake_options, coverage_report):
     """Return build options for the requested coverage mode."""
     install_flags = list(install_flags)
@@ -2283,8 +2304,11 @@ class TestExecutor:
             )
 
             # Add environment variables for MPI (quote values to handle shell metacharacters like ;)
+            # Export JSON/suite vars plus any leftover NCCL_*/RCCL_* in the
+            # launcher env so remote ranks match rank 0 (OpenMPI does not
+            # forward the rest of the environment).
             env_fmt = self.mpi_config["env_format"]
-            for key, value in merged_env.items():
+            for key, value in collect_mpi_export_vars(env, merged_env):
                 mpi_args += " " + env_fmt.format(key=key, value=value)
 
             mpi_args += " " + env_fmt.format(key="LD_LIBRARY_PATH", value=env['LD_LIBRARY_PATH'])
