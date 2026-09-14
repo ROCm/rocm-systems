@@ -126,10 +126,14 @@ else()
   )
   mark_as_advanced(AVUTIL_LIBRARY)
 
-  # All three are required: FFMPEG_LIBRARIES below links avutil as well, so
-  # accepting a prefix without it would configure cleanly and then fail at link
-  # time on a literal AVUTIL_LIBRARY-NOTFOUND.
-  if(AVCODEC_LIBRARY AND AVFORMAT_LIBRARY AND AVUTIL_LIBRARY)
+  # All six are required. FFMPEG_LIBRARIES below links all three libraries and
+  # consumers include all three header directories, so accepting a partial
+  # prefix would configure cleanly and then fail later on a literal
+  # AVUTIL_LIBRARY-NOTFOUND at link time or AVCODEC_INCLUDE_DIR-NOTFOUND at
+  # compile time. find_package_handle_standard_args is called at the top of this
+  # file, before discovery runs, so it cannot catch this.
+  if(AVCODEC_LIBRARY AND AVFORMAT_LIBRARY AND AVUTIL_LIBRARY
+     AND AVCODEC_INCLUDE_DIR AND AVFORMAT_INCLUDE_DIR AND AVUTIL_INCLUDE_DIR)
     set(FFMPEG_FOUND TRUE)
   endif()
   

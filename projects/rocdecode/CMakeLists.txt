@@ -127,10 +127,17 @@ if(NOT WIN32)
       HINTS $ENV{rocprofiler_register_ROOT} $ENV{ROCPROFILER_REGISTER_ROOT} ${CMAKE_INSTALL_PREFIX}
       PATHS ${ROCM_PATH})
   endif()
-elseif(ROCDECODE_ENABLE_ROCPROFILER_REGISTER)
-  # The option defaults to ON, so say plainly that it has no effect here
-  # rather than silently producing a build without profiling support.
-  message("-- ${Yellow}NOTE: rocprofiler-register is not available on Windows -- ROCDECODE_ENABLE_ROCPROFILER_REGISTER ignored${ColourReset}")
+else()
+  # Not available on Windows. Clear any value inherited from an enclosing scope
+  # -- a superbuild parent that found the package would otherwise leave
+  # rocprofiler-register_FOUND true here, and the link and compile-definition
+  # blocks below would act on a package this branch never searched for.
+  set(rocprofiler-register_FOUND FALSE)
+  if(ROCDECODE_ENABLE_ROCPROFILER_REGISTER)
+    # The option defaults to ON, so say plainly that it has no effect here
+    # rather than silently producing a build without profiling support.
+    message("-- ${Yellow}NOTE: rocprofiler-register is not available on Windows -- ROCDECODE_ENABLE_ROCPROFILER_REGISTER ignored${ColourReset}")
+  endif()
 endif()
 if(ROCDECODE_ENABLE_HOST_DECODER)
   find_package(FFmpeg QUIET)
