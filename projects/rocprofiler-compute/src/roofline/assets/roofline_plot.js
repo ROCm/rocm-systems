@@ -19,14 +19,18 @@
   var ALL_PEAKS_VALUE = model.allPeaksValue;
   var ROOF_EXTREME_MAX_AI = model.roofExtremeMaxAi;
   var KERNEL_NAME_FONT_FAMILY = model.kernelNameFontFamily;
-  var FRAME_PAD = model.framePad;
-  var FRAME_MIN_DECADES = model.frameMinDecades;
-  var FRAME_SLOPE_SKEW = model.frameSlopeSkew;
 
   // ---- Own presentation ---------------------------------------------------
   var ALL_PEAKS_LABEL = "All peaks";
   var FALLBACK_COLOR = "#888888";
   var PLOT_DIM_OPACITY = 0.15;
+  // How far a roof drawn at 45 degrees in data space may lean on screen.
+  // Viewport shaping may widen the canonical frame to correct this presentation,
+  // but it must never narrow the server-owned bounds.
+  var PLOT_SLOPE_SKEW = 2.0;
+  var OFF_PLOT_LABEL = "off plot";
+  var ZOOM_PAD_DECADES = 0.5;
+  var ZOOM_MIN_DECADES = 1.0;
   var RUNTIME_EPSILON = 1e-6;
   var EXPORT_MIN_WIDTH = 960;
   var EXPORT_MIN_HEIGHT = 560;
@@ -67,6 +71,8 @@
   var roofCountEl = document.getElementById("roofline-roof-count");
   var showAllRoofsBtn = document.getElementById("roofline-show-all-roofs");
   var resetViewBtn = document.getElementById("roofline-reset-view");
+  var fitDataBtn = document.getElementById("roofline-fit-data");
+  var offPlotCountEl = document.getElementById("roofline-kernel-offplot-count");
   var exportPngBtn = document.getElementById("roofline-export-png");
   var themeToggleBtn = document.getElementById("roofline-theme-toggle");
   var plotColumn = gd ? gd.closest(".roofline-plot-col") : null;
@@ -75,6 +81,8 @@
   var exportTextMeasureContext = null;
   var autoFramed = false;
   var applyingFrame = false;
+  var rangeOperationCounter = 0;
+  var activeRangeOperation = 0;
   var themeIsReaderChoice = false;
 
   // ---- Data initialized from the model -------------------------------------
@@ -89,7 +97,6 @@
   var computeOverlayTraces = model.computeOverlayTraces;
   var precisions = model.precisions || [];
   var peakColors = model.peakColors;
-  var initialRange = null;
 
   function kernelHasRuntime(kernel) {
     return kernel.pctRuntime != null && isFinite(kernel.pctRuntime);
@@ -106,9 +113,44 @@
   var computeCeilingIndices = computeTraces.map(function (ceiling) {
     return ceiling.traceIndex;
   });
+  var bandwidthRoofSources = {};
+
+  function bandwidthRoofSource(roof) {
+    if (bandwidthRoofSources[roof.traceIndex]) {
+      return bandwidthRoofSources[roof.traceIndex];
+    }
+    // The drawn trace arrives clipped to the opening precisions, so re-clipping
+    // reads the server's full sample grid where one was shipped.
+    var xs = roof.sampleAi;
+    var ys = xs
+      ? xs.map(function (ai) {
+          return roof.bandwidth * ai;
+        })
+      : null;
+    if (!xs) {
+      var traceData = gd && gd.data ? gd.data[roof.traceIndex] : null;
+      if (!traceData || !traceData.x || !traceData.y) {
+        return null;
+      }
+      xs = traceData.x;
+      ys = traceData.y;
+    }
+    bandwidthRoofSources[roof.traceIndex] = Object.freeze({
+      x: Object.freeze(Array.prototype.slice.call(xs)),
+      y: Object.freeze(Array.prototype.slice.call(ys)),
+    });
+    return bandwidthRoofSources[roof.traceIndex];
+  }
+
+  // The server paints the figure with exactly these precisions shown, so the
+  // opening state must agree with it or the first restyle would flash.
+  var defaultPrecisions =
+    model.defaultPrecisions && model.defaultPrecisions.length
+      ? model.defaultPrecisions
+      : [precisions.indexOf("FP32") !== -1 ? "FP32" : precisions[0] || ""];
 
   var state = {
-    precisions: new Set([precisions.indexOf("FP32") !== -1 ? "FP32" : (precisions[0] || "")]),
+    precisions: new Set(defaultPrecisions),
     peak: model.defaultPeak || ALL_PEAKS_VALUE,
     selected: new Set(),
     isolatedRoofs: new Set(),
@@ -227,16 +269,33 @@
     return kernelIsVisible(kernel) && pointsForCurrentPeak(kernel).length > 0;
   }
 
+  function pointIsPlottable(point) {
+    return (
+      point &&
+      typeof point.ai === "number" &&
+      point.ai > 0 &&
+      isFinite(point.ai) &&
+      typeof point.perf === "number" &&
+      point.perf > 0 &&
+      isFinite(point.perf)
+    );
+  }
+
+  function plottablePoints(kernel) {
+    return (kernel.points || []).filter(pointIsPlottable);
+  }
+
   function isSoleSelected(kernel) {
     return isSingleKernelIsolated() && state.selected.has(kernel.index);
   }
 
   function pointsForCurrentPeak(kernel) {
+    var points = plottablePoints(kernel);
     var peak = effectivePeak();
     if (peak === ALL_PEAKS_VALUE) {
-      return kernel.points;
+      return points;
     }
-    return kernel.points.filter(function (point) {
+    return points.filter(function (point) {
       return point.peak === peak;
     });
   }
@@ -327,6 +386,46 @@
     return max;
   }
 
+  function bandwidthRoofCoordinates(roof, topPeak) {
+    var source = bandwidthRoofSource(roof);
+    if (!source || !(roof.bandwidth > 0)) {
+      return null;
+    }
+    var kneeAi = topPeak / roof.bandwidth;
+    var points = [];
+    var sourceLength = Math.min(source.x.length, source.y.length);
+    for (var i = 0; i < sourceLength; i += 1) {
+      var x = source.x[i];
+      var y = source.y[i];
+      if (
+        typeof x === "number" &&
+        x > 0 &&
+        isFinite(x) &&
+        typeof y === "number" &&
+        y > 0 &&
+        isFinite(y) &&
+        x < kneeAi &&
+        y < topPeak
+      ) {
+        points.push({ x: x, y: y });
+      }
+    }
+    points.sort(function (left, right) {
+      return left.x - right.x;
+    });
+    var xs = [];
+    var ys = [];
+    points.forEach(function (point) {
+      if (!xs.length || point.x > xs[xs.length - 1]) {
+        xs.push(point.x);
+        ys.push(point.y);
+      }
+    });
+    xs.push(kneeAi);
+    ys.push(topPeak);
+    return { x: xs, y: ys };
+  }
+
   function updateBandwidthRooflines() {
     if (!plotlyReady() || !rooflineTraces.length) {
       return;
@@ -339,20 +438,13 @@
     var xs = [];
     var ys = [];
     rooflineTraces.forEach(function (roof) {
-      if (!(roof.bandwidth > 0)) {
+      var coordinates = bandwidthRoofCoordinates(roof, topPeak);
+      if (!coordinates) {
         return;
       }
-      var traceData = gd.data[roof.traceIndex];
-      if (!traceData || !traceData.x || !traceData.y) {
-        return;
-      }
-      var newX = traceData.x.slice();
-      var newY = traceData.y.slice();
-      newX[newX.length - 1] = topPeak / roof.bandwidth;
-      newY[newY.length - 1] = topPeak;
       indices.push(roof.traceIndex);
-      xs.push(newX);
-      ys.push(newY);
+      xs.push(coordinates.x);
+      ys.push(coordinates.y);
     });
     if (indices.length) {
       Plotly.restyle(gd, { x: xs, y: ys }, indices);
@@ -484,50 +576,6 @@
     }
   }
 
-  function frameAnchors() {
-    var xs = [];
-    var ys = [];
-    kernels.forEach(function (kernel) {
-      if (!kernelIsDrawn(kernel)) {
-        return;
-      }
-      pointsForCurrentPeak(kernel).forEach(function (point) {
-        if (point.ai > 0 && point.perf > 0) {
-          xs.push(point.ai);
-          ys.push(point.perf);
-        }
-      });
-    });
-    if (!xs.length) {
-      return null;
-    }
-    rooflineTraces.forEach(function (roof) {
-      if (roof.kneeAi > 0 && roof.kneePerf > 0) {
-        xs.push(roof.kneeAi);
-        ys.push(roof.kneePerf);
-      }
-    });
-    computeTraces.forEach(function (ceiling) {
-      if (ceiling.peakPerf > 0) {
-        ys.push(ceiling.peakPerf);
-      }
-    });
-    var perfLo = Math.min.apply(null, ys);
-    rooflineTraces.forEach(function (roof) {
-      if (roof.bandwidth > 0) {
-        xs.push(perfLo / roof.bandwidth);
-      }
-    });
-    return { xs: xs, ys: ys };
-  }
-
-  function paddedLogSpan(lo, hi) {
-    return [
-      Math.log10(lo) - Math.log10(FRAME_PAD),
-      Math.log10(hi) + Math.log10(FRAME_PAD),
-    ];
-  }
-
   function widenTo(range, decades) {
     var span = range[1] - range[0];
     if (!(decades > span)) {
@@ -547,6 +595,7 @@
     return { width: width, height: height };
   }
 
+  // widenTo is the only axis adjustment here, so shaping is pad-only.
   function shapeToPlotArea(frame) {
     var area = plotAreaPixels();
     if (!area) {
@@ -558,20 +607,20 @@
       return frame;
     }
     var screenSlope = (area.height * xSpan) / (area.width * ySpan);
-    if (screenSlope > FRAME_SLOPE_SKEW) {
+    if (screenSlope > PLOT_SLOPE_SKEW) {
       return {
         x: frame.x.slice(),
         y: widenTo(
           frame.y,
-          (area.height * xSpan) / (area.width * FRAME_SLOPE_SKEW)
+          (area.height * xSpan) / (area.width * PLOT_SLOPE_SKEW)
         ),
       };
     }
-    if (screenSlope < 1 / FRAME_SLOPE_SKEW) {
+    if (screenSlope < 1 / PLOT_SLOPE_SKEW) {
       return {
         x: widenTo(
           frame.x,
-          (area.width * ySpan) / (FRAME_SLOPE_SKEW * area.height)
+          (area.width * ySpan) / (PLOT_SLOPE_SKEW * area.height)
         ),
         y: frame.y.slice(),
       };
@@ -579,57 +628,58 @@
     return frame;
   }
 
-  function pinToSlopes(frame) {
-    var slopes = rooflineTraces
-      .map(function (roof) {
-        return Math.log10(roof.bandwidth);
-      })
-      .filter(function (slope) {
-        return isFinite(slope);
-      });
-    if (!slopes.length) {
-      return frame;
+  function canonicalFrame() {
+    var frame = model.frame;
+    if (
+      !frame ||
+      !Array.isArray(frame.x) ||
+      !Array.isArray(frame.y) ||
+      frame.x.length !== 2 ||
+      frame.y.length !== 2
+    ) {
+      return null;
     }
-    var xLo = Math.min(frame.x[0], frame.y[0] - Math.max.apply(null, slopes));
-    var area = plotAreaPixels();
-    var y = frame.y.slice();
-    if (area) {
-      var roomForSlope =
-        (area.height * (frame.x[1] - xLo)) / (area.width * FRAME_SLOPE_SKEW);
-      if (roomForSlope > y[1] - y[0]) {
-        y = [y[0], y[0] + roomForSlope];
-      }
-    }
-    return { x: [xLo, frame.x[1]], y: y };
+    var x = frame.x.map(function (value) {
+      return Math.log10(value);
+    });
+    var y = frame.y.map(function (value) {
+      return Math.log10(value);
+    });
+    var valid =
+      frame.x.every(function (value) {
+        return value > 0 && isFinite(value);
+      }) &&
+      frame.y.every(function (value) {
+        return value > 0 && isFinite(value);
+      }) &&
+      x.every(isFinite) &&
+      y.every(isFinite) &&
+      x[0] < x[1] &&
+      y[0] < y[1];
+    return valid ? { x: x, y: y } : null;
   }
 
   function currentFrame() {
-    var anchors = frameAnchors();
-    if (!anchors) {
-      return null;
-    }
-    var frame = {
-      x: paddedLogSpan(
-        Math.min.apply(null, anchors.xs),
-        Math.max.apply(null, anchors.xs)
-      ),
-      y: paddedLogSpan(
-        Math.min.apply(null, anchors.ys),
-        Math.max.apply(null, anchors.ys)
-      ),
-    };
-    frame.x = widenTo(frame.x, FRAME_MIN_DECADES);
-    return pinToSlopes(shapeToPlotArea(frame));
+    var frame = canonicalFrame();
+    return frame ? shapeToPlotArea(frame) : null;
   }
 
-  function applyFrame(frame) {
+  // framed means resize may reshape this canonical view. One-shot zooms and
+  // manual views remain untouched by resize.
+  function applyRange(range, framed) {
+    var operationId = ++rangeOperationCounter;
+    activeRangeOperation = operationId;
     applyingFrame = true;
-    autoFramed = true;
+    autoFramed = framed;
     var settled = Plotly.relayout(gd, {
-      "xaxis.range": frame.x,
-      "yaxis.range": frame.y,
+      "xaxis.range": range.x,
+      "yaxis.range": range.y,
     });
     var release = function () {
+      if (activeRangeOperation !== operationId) {
+        return;
+      }
+      activeRangeOperation = 0;
       applyingFrame = false;
     };
     if (settled && typeof settled.then === "function") {
@@ -643,11 +693,131 @@
     if (!plotlyReady()) {
       return;
     }
-    var frame = currentFrame() || initialRange;
+    var frame = currentFrame();
     if (!frame) {
       return;
     }
-    applyFrame(frame);
+    applyRange(frame, true);
+  }
+
+  function loggedExtent(values) {
+    var logged = values
+      .filter(function (value) {
+        return value > 0 && isFinite(value);
+      })
+      .map(function (value) {
+        return Math.log10(value);
+      })
+      .filter(function (value) {
+        return isFinite(value);
+      });
+    if (!logged.length) {
+      return null;
+    }
+    var range = [
+      Math.min.apply(null, logged) - ZOOM_PAD_DECADES,
+      Math.max.apply(null, logged) + ZOOM_PAD_DECADES,
+    ];
+    return widenTo(range, ZOOM_MIN_DECADES);
+  }
+
+  // A roof reads as a slope on screen, so the angle where a bandwidth roof
+  // meets a compute ceiling depends on the decades each axis spends. Zooming
+  // keeps the frame's decade ratio, and only ever widens, so the knee looks
+  // the way it does on the full plot and the zoomed points stay in view.
+  function matchFrameAspect(range) {
+    var frame = currentFrame();
+    if (!frame) {
+      return range;
+    }
+    var frameX = frame.x[1] - frame.x[0];
+    var frameY = frame.y[1] - frame.y[0];
+    var xSpan = range.x[1] - range.x[0];
+    var ySpan = range.y[1] - range.y[0];
+    if (!(frameX > 0) || !(frameY > 0) || !(xSpan > 0) || !(ySpan > 0)) {
+      return range;
+    }
+    return {
+      x: widenTo(range.x, (ySpan * frameX) / frameY),
+      y: widenTo(range.y, (xSpan * frameY) / frameX),
+    };
+  }
+
+  function zoomToPoints(points) {
+    var validPoints = (points || []).filter(pointIsPlottable);
+    if (!plotlyReady() || !validPoints.length) {
+      return;
+    }
+    var x = loggedExtent(
+      validPoints.map(function (point) {
+        return point.ai;
+      })
+    );
+    var y = loggedExtent(
+      validPoints.map(function (point) {
+        return point.perf;
+      })
+    );
+    if (x && y) {
+      applyRange(matchFrameAspect({ x: x, y: y }), false);
+    }
+  }
+
+  function zoomToKernel(kernel) {
+    zoomToPoints(plottablePoints(kernel));
+  }
+
+  function drawnPoints() {
+    var points = [];
+    kernels.forEach(function (kernel) {
+      if (kernelIsDrawn(kernel)) {
+        points = points.concat(pointsForCurrentPeak(kernel));
+      }
+    });
+    return points;
+  }
+
+  function fitToData() {
+    zoomToPoints(drawnPoints());
+  }
+
+  function pointIsOffPlot(point) {
+    var frame = model.frame;
+    if (
+      !point ||
+      !frame ||
+      !Array.isArray(frame.x) ||
+      !Array.isArray(frame.y) ||
+      frame.x.length !== 2 ||
+      frame.y.length !== 2 ||
+      !frame.x.every(function (value) {
+        return value > 0 && isFinite(value);
+      }) ||
+      !frame.y.every(function (value) {
+        return value > 0 && isFinite(value);
+      }) ||
+      !(frame.x[0] < frame.x[1]) ||
+      !(frame.y[0] < frame.y[1])
+    ) {
+      return false;
+    }
+    return (
+      point.ai < frame.x[0] ||
+      point.ai > frame.x[1] ||
+      point.perf < frame.y[0] ||
+      point.perf > frame.y[1]
+    );
+  }
+
+  function offPlotPoints(kernel) {
+    if (!kernelIsDrawn(kernel)) {
+      return [];
+    }
+    return pointsForCurrentPeak(kernel).filter(pointIsOffPlot);
+  }
+
+  function kernelIsOffPlot(kernel) {
+    return offPlotPoints(kernel).length > 0;
   }
 
   function exportTextWidth(text) {
@@ -1227,6 +1397,10 @@
       item.dataset[key] = opts.dataset[key];
     });
 
+    var action = document.createElement("button");
+    action.type = "button";
+    action.className = "roofline-panel-action";
+
     var swatch = document.createElement("span");
     swatch.className = opts.swatchClass || "roofline-swatch";
     swatch.style.backgroundColor = opts.color || FALLBACK_COLOR;
@@ -1235,19 +1409,15 @@
     label.className = opts.labelClass || "roofline-panel-name";
     label.textContent = opts.label;
 
-    item.appendChild(swatch);
-    item.appendChild(label);
-    opts.extras.forEach(function (node) {
-      item.appendChild(node);
+    action.appendChild(swatch);
+    action.appendChild(label);
+    opts.actionExtras.forEach(function (node) {
+      action.appendChild(node);
     });
-    item.tabIndex = 0;
-    item.setAttribute("role", "button");
-    item.addEventListener("click", opts.onClick);
-    item.addEventListener("keydown", function (event) {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        opts.onClick(event);
-      }
+    action.addEventListener("click", opts.onClick);
+    item.appendChild(action);
+    opts.siblingControls.forEach(function (node) {
+      item.appendChild(node);
     });
     return item;
   }
@@ -1300,19 +1470,40 @@
     updatePrecisionLabel();
   }
 
+  function buildOffPlotBadge(kernel) {
+    var badge = document.createElement("button");
+    badge.type = "button";
+    badge.className = "roofline-kernel-offplot";
+    badge.textContent = OFF_PLOT_LABEL;
+    badge.setAttribute(
+      "aria-label",
+      "Zoom to off-plot kernel " + kernel.name
+    );
+    badge.title =
+      "This kernel is outside the fixed opening axes; click to zoom to all " +
+      "of its memory-level points. Reset zoom or double-click to return to " +
+      "the opening axes.";
+    badge.hidden = true;
+    badge.addEventListener("click", function (event) {
+      event.stopPropagation();
+      zoomToKernel(kernel);
+    });
+    return badge;
+  }
+
   function buildKernelPanel() {
     if (!kernelList) {
       return;
     }
     kernelIndicesByRuntime().forEach(function (index) {
       var kernel = kernels[index];
-      var extras = [];
+      var actionExtras = [];
       if (kernelHasRuntime(kernel)) {
         var pct = document.createElement("span");
         pct.className = "roofline-kernel-pct";
         pct.textContent = kernel.pctRuntime.toFixed(1) + "%";
         pct.title = "Percent of GPU resident time";
-        extras.push(pct);
+        actionExtras.push(pct);
       }
       kernelList.appendChild(
         createPanelRow({
@@ -1320,7 +1511,8 @@
           label: kernel.name,
           labelClass: "roofline-panel-name roofline-kernel-name",
           dataset: { index: String(index) },
-          extras: extras,
+          actionExtras: actionExtras,
+          siblingControls: [buildOffPlotBadge(kernel)],
           onClick: function (event) {
             toggleKernel(kernel.index, event);
           },
@@ -1342,7 +1534,8 @@
           label: roof.level,
           swatchClass: "roofline-swatch roofline-roof-swatch",
           dataset: { trace: String(roof.traceIndex), level: roof.level },
-          extras: [aiaxis],
+          actionExtras: [aiaxis],
+          siblingControls: [],
           onClick: function (event) {
             isolateRoof(roof.traceIndex, isMultiSelectEvent(event));
           },
@@ -1388,6 +1581,7 @@
 
   function updatePanel() {
     var filtering = state.selected.size > 0;
+    var offPlotKernelCount = 0;
     eachKernelRow(function (item, kernel) {
       var selected = state.selected.has(kernel.index);
       setRowState(item, selected, filtering && !selected);
@@ -1402,12 +1596,34 @@
           ? swatchGradient(colors)
           : colors[0] || FALLBACK_COLOR;
       }
+      var badge = item.querySelector(".roofline-kernel-offplot");
+      var offPlot = kernelIsOffPlot(kernel);
+      if (badge) {
+        badge.hidden = !offPlot;
+      }
+      if (offPlot) {
+        offPlotKernelCount += 1;
+      }
     });
+    var drawnKernelCount = kernels.filter(kernelIsDrawn).length;
     if (kernelCountEl) {
       kernelCountEl.textContent = formatCount(
-        kernels.filter(kernelIsDrawn).length,
+        drawnKernelCount,
         kernels.length
       );
+    }
+    if (offPlotCountEl) {
+      offPlotCountEl.hidden = offPlotKernelCount === 0;
+      offPlotCountEl.textContent =
+        "(" + offPlotKernelCount + " " + OFF_PLOT_LABEL + ")";
+      offPlotCountEl.title =
+        offPlotKernelCount +
+        " currently drawn kernel" +
+        (offPlotKernelCount === 1 ? " is" : "s are") +
+        " outside the fixed opening axes";
+    }
+    if (fitDataBtn) {
+      fitDataBtn.disabled = drawnKernelCount === 0;
     }
     if (showAllBtn) {
       showAllBtn.disabled = !filtering;
@@ -1475,6 +1691,9 @@
     if (resetViewBtn) {
       resetViewBtn.addEventListener("click", resetView);
     }
+    if (fitDataBtn) {
+      fitDataBtn.addEventListener("click", fitToData);
+    }
     if (exportPngBtn) {
       exportPngBtn.addEventListener("click", exportPng);
     }
@@ -1535,33 +1754,26 @@
     }
   }
 
+  function resizeView() {
+    resizePlot();
+    if (autoFramed) {
+      resetView();
+    }
+  }
+
   function schedulePlotResize() {
     if (plotResizeFrame != null) {
       return;
     }
     plotResizeFrame = window.requestAnimationFrame(function () {
       plotResizeFrame = null;
-      resizePlot();
-      if (autoFramed) {
-        resetView();
-      }
+      resizeView();
     });
   }
 
   function observePlotContainer() {
     if (plotColumn && typeof window.ResizeObserver === "function") {
       new window.ResizeObserver(schedulePlotResize).observe(plotColumn);
-    }
-  }
-
-  function captureInitialRange() {
-    if (!gd || !gd.layout || !gd.layout.xaxis || !gd.layout.yaxis) {
-      return;
-    }
-    var xr = gd.layout.xaxis.range;
-    var yr = gd.layout.yaxis.range;
-    if (xr && yr) {
-      initialRange = { x: xr.slice(), y: yr.slice() };
     }
   }
 
@@ -1601,7 +1813,6 @@
     syncThemeToggle();
     watchSystemTheme();
     whenPlotReady(function () {
-      captureInitialRange();
       wireEvents();
       observePlotContainer();
       resizePlot();
@@ -1612,6 +1823,35 @@
     }, PLOT_READY_MAX_ATTEMPTS);
   }
 
+  function installTestHooks() {
+    var hooks = window.__rooflineTestHooks;
+    if (!hooks) {
+      return;
+    }
+    hooks.applyPrecision = applyPrecision;
+    hooks.applyRange = applyRange;
+    hooks.buildKernelRestylePayload = buildKernelRestylePayload;
+    hooks.buildKernelPanel = buildKernelPanel;
+    hooks.drawnPoints = drawnPoints;
+    hooks.fitToData = fitToData;
+    hooks.isApplyingRange = function () {
+      return applyingFrame;
+    };
+    hooks.isAutoFramed = function () {
+      return autoFramed;
+    };
+    hooks.kernelIsDrawn = kernelIsDrawn;
+    hooks.kernels = function () {
+      return kernels;
+    };
+    hooks.resetView = resetView;
+    hooks.resizeView = resizeView;
+    hooks.updatePanel = updatePanel;
+    hooks.wireEvents = wireEvents;
+    hooks.zoomToPoints = zoomToPoints;
+  }
+
+  installTestHooks();
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
   } else {
