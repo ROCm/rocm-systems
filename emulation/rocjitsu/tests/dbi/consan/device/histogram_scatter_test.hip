@@ -24,6 +24,7 @@ struct DeviceState {
   uint32_t packed_bf16_scatter[kPackedBf16BinCount];
   uint32_t packed_bf16_executed;
   uint32_t control[128];
+  __hip_bfloat16 bf16_increment;
 };
 
 __device__ __forceinline__ void relaxed_native_packed_bf16_add(uint32_t *address,
@@ -76,7 +77,7 @@ __global__ __launch_bounds__(128) void histogram_scatter_for_consan(DeviceState 
   // scalar BF16 atomicAdd wrapper requests acquire-release ordering, whereas
   // the workload idiom only requires a relaxed device-scope RMW.
   (void)__scoped_atomic_fetch_add(reinterpret_cast<__bf16 *>(&state->bf16_scatter[bin]),
-                                  static_cast<__bf16>(1.0f), __ATOMIC_RELAXED,
+                                  static_cast<__bf16>(state->bf16_increment), __ATOMIC_RELAXED,
                                   __MEMORY_SCOPE_DEVICE);
 #if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1201__) || defined(__gfx1250__)
   relaxed_native_packed_bf16_add(&state->packed_bf16_scatter[tid % kPackedBf16BinCount],
@@ -119,6 +120,11 @@ void run_histogram_scatter(bool synchronize) {
   DeviceState state{};
   state.synchronize = synchronize;
   state.wave_size = wave_size;
+  // Keep the addend as runtime input: this TheRock compiler emits a BF16 CAS
+  // loop with inline 1.0 but OPSEL=0 on gfx1250, selecting the zero low half
+  // of the FP32 inline encoding. A loaded BF16 operand has the intended bits
+  // in its low half on every target. The numerical operation stays +1.
+  state.bf16_increment = __float2bfloat16(1.0f);
   DeviceState *device_state = nullptr;
   HIP_ASSERT(hipMalloc(&device_state, sizeof(state)));
   HIP_ASSERT(hipMemcpy(device_state, &state, sizeof(state), hipMemcpyHostToDevice));
