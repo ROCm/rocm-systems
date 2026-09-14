@@ -4,11 +4,14 @@ set(RCCL_MICRO_TEST_SOURCES
   p2p-test.cc
   rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
   rma-test.cc                         # RMA plan scheduling + launch dispatch coverage
+  rma-ce-test.cc                      # RMA copy-engine launch coverage
   group-test.cc
   devcomm-test.cc
   fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
   fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
   fakes/rma_fakes.cc                   # rma proxy/CE externals (circular-buf, destroy, launchers)
+  fakes/ce_fakes.cc                    # src/ce_coll.cc (availability predicates + batch ops)
+  fakes/dev_runtime_fakes.cc           # src/dev_runtime.cc (window predicates + lsa rank/ptr)
   fakes/comm_fakes.cc                  # comm-lifecycle seams (real in init.cc; faked here)
   fakes/recorder_fakes.cc              # src/recorder.cc
   fakes/utils_fakes.cc                 # src/misc/utils.cc (targets without the real utils.cc)
@@ -80,6 +83,7 @@ if(BUILD_TESTS)
     P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p_tmp.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rma/rma_proxy_progress.cc"
     RMA_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rma/rma.cc"
+    RMA_CE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rma/rma_ce.cc"
     GROUP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/group.cc"
     DEVCOMM_V22902_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/devcomm/devcomm_v22902.cc"
     DEVCOMM_V22907_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/devcomm/devcomm_v22907.cc"
@@ -730,6 +734,7 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
   RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
   RMA_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma.cc"
+  RMA_CE_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_ce.cc"
   GROUP_CC_PATH="${RCCL_HIPIFY_DIR}/src/group.cc"
   DEVCOMM_V22902_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
   DEVCOMM_V22907_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"

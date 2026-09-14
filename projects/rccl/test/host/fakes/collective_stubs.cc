@@ -13,6 +13,12 @@
 // NVLS/P2P-level stubs now route through test-driven seam globals defined in
 // the init test's own TUs), this floor has no external seam globals, so it
 // links into any micro-test binary on its own.
+//
+// It also carries the local floor for a few symbols whose owning stubs file this
+// target cannot link: nccl_stubs.cc and sched_stubs.cc own ncclMemAlloc /
+// ncclMemFree / ncclShadowPoolToHost, but both also define symbols the real
+// group.cc already supplies here (ncclGroupDepth, ncclGroupError,
+// ncclAsyncLaunch). Deduplicating that properly is AICOMRCCL-1688.
 
 #include <cstdlib>
 
@@ -27,6 +33,7 @@
 #include "dev_runtime.h"
 #include "transport.h"
 #include "os.h"
+#include "allocator.h"
 
 // enqueue.h
 ncclResult_t ncclPrepareTasks(struct ncclComm*, bool*, bool*, ncclSimInfo_t*) { ::abort(); }
@@ -42,9 +49,9 @@ ncclResult_t ncclCeInit(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclLaunchCeColl(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
 
 // rma/rma.h, rma/rma_ce.h
-// ncclLaunchRma is absent on purpose: rma-test.cc compiles the real rma.cc in,
-// so a stub here would be a duplicate symbol.
-ncclResult_t ncclRmaCeInit(struct ncclComm*) { ::abort(); }
+// ncclLaunchRma and ncclRmaCeInit are absent on purpose: rma-test.cc and
+// rma-ce-test.cc compile the real rma.cc / rma_ce.cc into this binary, so a
+// stub for either would be a duplicate symbol.
 
 // dev_runtime.h
 ncclResult_t ncclDevrCommCreateInternal(struct ncclComm*, struct ncclDevCommRequirements*,
@@ -73,3 +80,27 @@ ncclResult_t ncclNvlsBufferSetup(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclNvlsTreeConnect(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclCollNetChainBufferSetup(ncclComm_t) { ::abort(); }
 ncclResult_t ncclCollNetDirectBufferSetup(ncclComm_t) { ::abort(); }
+
+// allocator.h / nccl.h -- see the note at the top of this file for why these are
+// here rather than in nccl_stubs.cc / sched_stubs.cc. Host memory is enough; the
+// RMA copy-engine path only needs its signal window to be addressable.
+ncclResult_t ncclMemAlloc(void** ptr, size_t size) {
+  if (ptr == nullptr) return ncclInvalidArgument;
+  *ptr = ::calloc(1, size);
+  return *ptr ? ncclSuccess : ncclSystemError;
+}
+
+ncclResult_t ncclMemFree(void* ptr) {
+  ::free(ptr);
+  return ncclSuccess;
+}
+
+// No device object in a host-only build, so the identity mapping is the honest
+// answer: the pointer handed in is the one that comes back.
+ncclResult_t ncclShadowPoolToHost(struct ncclShadowPool*, void* devObj, void** outHostObj) {
+  if (outHostObj) *outHostObj = devObj;
+  return ncclSuccess;
+}
+
+// api_trace.h
+ncclResult_t ncclCommWindowDeregister(ncclComm_t, ncclWindow_t) { return ncclSuccess; }
