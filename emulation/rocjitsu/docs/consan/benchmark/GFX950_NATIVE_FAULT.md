@@ -28,6 +28,10 @@ With explicit user approval, PIDs 2509904, 2510869, and 2512712 were stopped.
 AMD SMI confirmed no remaining GPU processes. Native HIP still failed.
 The authorized `amd-smi reset --gpureset --gpu 0` then succeeded, and the
 unchanged native HIP binary passed all 65536 CPU-oracle comparisons.
-After recovery, require a passing native HIP smoke and attention control,
-then resume remaining benchmark cells with `--timeout 600 --resume`.
+The unchanged native attention control also passed after reset. Remaining
+benchmark cells resumed with `--timeout 600 --resume`.
 Do not discard completed cells or retry the capped large-M InlineShadow cell.
+
+The first post-reset full RecordReplay attempt still faults, while an immediate
+standalone native HIP check passes. Thus GPU recovery did not resolve the
+RecordReplay issue; instrumentation isolation continues on the recovered GPU.

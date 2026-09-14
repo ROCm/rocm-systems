@@ -20,7 +20,3 @@ by its ratio to the matching uninstrumented second run.
 | TokenSpeed Qwen3-0.6B real cached decode | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | not started: pending |
 | TokenSpeed Triton FP8 block-scaled GEMM | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | not started: pending |
 | TokenSpeed Gluon BF16 MoE | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | not started: pending |
-
-GPU health update: an authorized GPU reset restored the native HIP smoke test.
-See [diagnostic evidence and recovery state](GFX950_NATIVE_FAULT.md).
-Completed measurements above are retained; native attention is being rechecked.
