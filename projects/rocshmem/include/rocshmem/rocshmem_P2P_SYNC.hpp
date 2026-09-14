@@ -576,6 +576,375 @@ __host__ size_t rocshmem_ulonglong_wait_until_some_vector(
     unsigned long long *ivars, size_t nelems, size_t* indices, const int* status,
     int cmp, unsigned long long* vals);
 
+__device__ void rocshmem_half_wait_until(
+    __half *ivars, int cmp, __half val);
+__device__ size_t rocshmem_half_wait_until_any(
+    __half *ivars, size_t nelems, const int* status,
+    int cmp, __half val);
+__device__ void rocshmem_half_wait_until_all(
+    __half *ivars, size_t nelems, const int* status,
+    int cmp, __half val);
+__device__ size_t rocshmem_half_wait_until_some(
+    __half *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, __half val);
+__device__ size_t rocshmem_half_wait_until_any_vector(
+    __half *ivars, size_t nelems, const int* status,
+    int cmp, __half* vals);
+__device__ void rocshmem_half_wait_until_all_vector(
+    __half *ivars, size_t nelems, const int* status,
+    int cmp, __half* vals);
+__device__ size_t rocshmem_half_wait_until_some_vector(
+    __half *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, __half* vals);
+__host__ void rocshmem_half_wait_until(
+    __half *ivars, int cmp, __half val);
+__host__ size_t rocshmem_half_wait_until_any(
+    __half *ivars, size_t nelems, const int* status,
+    int cmp, __half val);
+__host__ void rocshmem_half_wait_until_all(
+    __half *ivars, size_t nelems, const int* status,
+    int cmp, __half val);
+__host__ size_t rocshmem_half_wait_until_some(
+    __half *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, __half val);
+__host__ size_t rocshmem_half_wait_until_any_vector(
+    __half *ivars, size_t nelems, const int* status,
+    int cmp, __half* vals);
+__host__ void rocshmem_half_wait_until_all_vector(
+    __half *ivars, size_t nelems, const int* status,
+    int cmp, __half* vals);
+__host__ size_t rocshmem_half_wait_until_some_vector(
+    __half *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, __half* vals);
+
+__device__ void rocshmem_bfloat16_wait_until(
+    __hip_bfloat16 *ivars, int cmp, __hip_bfloat16 val);
+__device__ size_t rocshmem_bfloat16_wait_until_any(
+    __hip_bfloat16 *ivars, size_t nelems, const int* status,
+    int cmp, __hip_bfloat16 val);
+__device__ void rocshmem_bfloat16_wait_until_all(
+    __hip_bfloat16 *ivars, size_t nelems, const int* status,
+    int cmp, __hip_bfloat16 val);
+__device__ size_t rocshmem_bfloat16_wait_until_some(
+    __hip_bfloat16 *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, __hip_bfloat16 val);
+__device__ size_t rocshmem_bfloat16_wait_until_any_vector(
+    __hip_bfloat16 *ivars, size_t nelems, const int* status,
+    int cmp, __hip_bfloat16* vals);
+__device__ void rocshmem_bfloat16_wait_until_all_vector(
+    __hip_bfloat16 *ivars, size_t nelems, const int* status,
+    int cmp, __hip_bfloat16* vals);
+__device__ size_t rocshmem_bfloat16_wait_until_some_vector(
+    __hip_bfloat16 *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, __hip_bfloat16* vals);
+__host__ void rocshmem_bfloat16_wait_until(
+    __hip_bfloat16 *ivars, int cmp, __hip_bfloat16 val);
+__host__ size_t rocshmem_bfloat16_wait_until_any(
+    __hip_bfloat16 *ivars, size_t nelems, const int* status,
+    int cmp, __hip_bfloat16 val);
+__host__ void rocshmem_bfloat16_wait_until_all(
+    __hip_bfloat16 *ivars, size_t nelems, const int* status,
+    int cmp, __hip_bfloat16 val);
+__host__ size_t rocshmem_bfloat16_wait_until_some(
+    __hip_bfloat16 *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, __hip_bfloat16 val);
+__host__ size_t rocshmem_bfloat16_wait_until_any_vector(
+    __hip_bfloat16 *ivars, size_t nelems, const int* status,
+    int cmp, __hip_bfloat16* vals);
+__host__ void rocshmem_bfloat16_wait_until_all_vector(
+    __hip_bfloat16 *ivars, size_t nelems, const int* status,
+    int cmp, __hip_bfloat16* vals);
+__host__ size_t rocshmem_bfloat16_wait_until_some_vector(
+    __hip_bfloat16 *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, __hip_bfloat16* vals);
+
+__device__ void rocshmem_int8_wait_until(
+    int8_t *ivars, int cmp, int8_t val);
+__device__ size_t rocshmem_int8_wait_until_any(
+    int8_t *ivars, size_t nelems, const int* status,
+    int cmp, int8_t val);
+__device__ void rocshmem_int8_wait_until_all(
+    int8_t *ivars, size_t nelems, const int* status,
+    int cmp, int8_t val);
+__device__ size_t rocshmem_int8_wait_until_some(
+    int8_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, int8_t val);
+__device__ size_t rocshmem_int8_wait_until_any_vector(
+    int8_t *ivars, size_t nelems, const int* status,
+    int cmp, int8_t* vals);
+__device__ void rocshmem_int8_wait_until_all_vector(
+    int8_t *ivars, size_t nelems, const int* status,
+    int cmp, int8_t* vals);
+__device__ size_t rocshmem_int8_wait_until_some_vector(
+    int8_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, int8_t* vals);
+__host__ void rocshmem_int8_wait_until(
+    int8_t *ivars, int cmp, int8_t val);
+__host__ size_t rocshmem_int8_wait_until_any(
+    int8_t *ivars, size_t nelems, const int* status,
+    int cmp, int8_t val);
+__host__ void rocshmem_int8_wait_until_all(
+    int8_t *ivars, size_t nelems, const int* status,
+    int cmp, int8_t val);
+__host__ size_t rocshmem_int8_wait_until_some(
+    int8_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, int8_t val);
+__host__ size_t rocshmem_int8_wait_until_any_vector(
+    int8_t *ivars, size_t nelems, const int* status,
+    int cmp, int8_t* vals);
+__host__ void rocshmem_int8_wait_until_all_vector(
+    int8_t *ivars, size_t nelems, const int* status,
+    int cmp, int8_t* vals);
+__host__ size_t rocshmem_int8_wait_until_some_vector(
+    int8_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, int8_t* vals);
+
+__device__ void rocshmem_int16_wait_until(
+    int16_t *ivars, int cmp, int16_t val);
+__device__ size_t rocshmem_int16_wait_until_any(
+    int16_t *ivars, size_t nelems, const int* status,
+    int cmp, int16_t val);
+__device__ void rocshmem_int16_wait_until_all(
+    int16_t *ivars, size_t nelems, const int* status,
+    int cmp, int16_t val);
+__device__ size_t rocshmem_int16_wait_until_some(
+    int16_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, int16_t val);
+__device__ size_t rocshmem_int16_wait_until_any_vector(
+    int16_t *ivars, size_t nelems, const int* status,
+    int cmp, int16_t* vals);
+__device__ void rocshmem_int16_wait_until_all_vector(
+    int16_t *ivars, size_t nelems, const int* status,
+    int cmp, int16_t* vals);
+__device__ size_t rocshmem_int16_wait_until_some_vector(
+    int16_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, int16_t* vals);
+__host__ void rocshmem_int16_wait_until(
+    int16_t *ivars, int cmp, int16_t val);
+__host__ size_t rocshmem_int16_wait_until_any(
+    int16_t *ivars, size_t nelems, const int* status,
+    int cmp, int16_t val);
+__host__ void rocshmem_int16_wait_until_all(
+    int16_t *ivars, size_t nelems, const int* status,
+    int cmp, int16_t val);
+__host__ size_t rocshmem_int16_wait_until_some(
+    int16_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, int16_t val);
+__host__ size_t rocshmem_int16_wait_until_any_vector(
+    int16_t *ivars, size_t nelems, const int* status,
+    int cmp, int16_t* vals);
+__host__ void rocshmem_int16_wait_until_all_vector(
+    int16_t *ivars, size_t nelems, const int* status,
+    int cmp, int16_t* vals);
+__host__ size_t rocshmem_int16_wait_until_some_vector(
+    int16_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, int16_t* vals);
+
+__device__ void rocshmem_int32_wait_until(
+    int32_t *ivars, int cmp, int32_t val);
+__device__ size_t rocshmem_int32_wait_until_any(
+    int32_t *ivars, size_t nelems, const int* status,
+    int cmp, int32_t val);
+__device__ void rocshmem_int32_wait_until_all(
+    int32_t *ivars, size_t nelems, const int* status,
+    int cmp, int32_t val);
+__device__ size_t rocshmem_int32_wait_until_some(
+    int32_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, int32_t val);
+__device__ size_t rocshmem_int32_wait_until_any_vector(
+    int32_t *ivars, size_t nelems, const int* status,
+    int cmp, int32_t* vals);
+__device__ void rocshmem_int32_wait_until_all_vector(
+    int32_t *ivars, size_t nelems, const int* status,
+    int cmp, int32_t* vals);
+__device__ size_t rocshmem_int32_wait_until_some_vector(
+    int32_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, int32_t* vals);
+__host__ void rocshmem_int32_wait_until(
+    int32_t *ivars, int cmp, int32_t val);
+__host__ size_t rocshmem_int32_wait_until_any(
+    int32_t *ivars, size_t nelems, const int* status,
+    int cmp, int32_t val);
+__host__ void rocshmem_int32_wait_until_all(
+    int32_t *ivars, size_t nelems, const int* status,
+    int cmp, int32_t val);
+__host__ size_t rocshmem_int32_wait_until_some(
+    int32_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, int32_t val);
+__host__ size_t rocshmem_int32_wait_until_any_vector(
+    int32_t *ivars, size_t nelems, const int* status,
+    int cmp, int32_t* vals);
+__host__ void rocshmem_int32_wait_until_all_vector(
+    int32_t *ivars, size_t nelems, const int* status,
+    int cmp, int32_t* vals);
+__host__ size_t rocshmem_int32_wait_until_some_vector(
+    int32_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, int32_t* vals);
+
+__device__ void rocshmem_int64_wait_until(
+    int64_t *ivars, int cmp, int64_t val);
+__device__ size_t rocshmem_int64_wait_until_any(
+    int64_t *ivars, size_t nelems, const int* status,
+    int cmp, int64_t val);
+__device__ void rocshmem_int64_wait_until_all(
+    int64_t *ivars, size_t nelems, const int* status,
+    int cmp, int64_t val);
+__device__ size_t rocshmem_int64_wait_until_some(
+    int64_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, int64_t val);
+__device__ size_t rocshmem_int64_wait_until_any_vector(
+    int64_t *ivars, size_t nelems, const int* status,
+    int cmp, int64_t* vals);
+__device__ void rocshmem_int64_wait_until_all_vector(
+    int64_t *ivars, size_t nelems, const int* status,
+    int cmp, int64_t* vals);
+__device__ size_t rocshmem_int64_wait_until_some_vector(
+    int64_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, int64_t* vals);
+__host__ void rocshmem_int64_wait_until(
+    int64_t *ivars, int cmp, int64_t val);
+__host__ size_t rocshmem_int64_wait_until_any(
+    int64_t *ivars, size_t nelems, const int* status,
+    int cmp, int64_t val);
+__host__ void rocshmem_int64_wait_until_all(
+    int64_t *ivars, size_t nelems, const int* status,
+    int cmp, int64_t val);
+__host__ size_t rocshmem_int64_wait_until_some(
+    int64_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, int64_t val);
+__host__ size_t rocshmem_int64_wait_until_any_vector(
+    int64_t *ivars, size_t nelems, const int* status,
+    int cmp, int64_t* vals);
+__host__ void rocshmem_int64_wait_until_all_vector(
+    int64_t *ivars, size_t nelems, const int* status,
+    int cmp, int64_t* vals);
+__host__ size_t rocshmem_int64_wait_until_some_vector(
+    int64_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, int64_t* vals);
+
+__device__ void rocshmem_uint8_wait_until(
+    uint8_t *ivars, int cmp, uint8_t val);
+__device__ size_t rocshmem_uint8_wait_until_any(
+    uint8_t *ivars, size_t nelems, const int* status,
+    int cmp, uint8_t val);
+__device__ void rocshmem_uint8_wait_until_all(
+    uint8_t *ivars, size_t nelems, const int* status,
+    int cmp, uint8_t val);
+__device__ size_t rocshmem_uint8_wait_until_some(
+    uint8_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, uint8_t val);
+__device__ size_t rocshmem_uint8_wait_until_any_vector(
+    uint8_t *ivars, size_t nelems, const int* status,
+    int cmp, uint8_t* vals);
+__device__ void rocshmem_uint8_wait_until_all_vector(
+    uint8_t *ivars, size_t nelems, const int* status,
+    int cmp, uint8_t* vals);
+__device__ size_t rocshmem_uint8_wait_until_some_vector(
+    uint8_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, uint8_t* vals);
+__host__ void rocshmem_uint8_wait_until(
+    uint8_t *ivars, int cmp, uint8_t val);
+__host__ size_t rocshmem_uint8_wait_until_any(
+    uint8_t *ivars, size_t nelems, const int* status,
+    int cmp, uint8_t val);
+__host__ void rocshmem_uint8_wait_until_all(
+    uint8_t *ivars, size_t nelems, const int* status,
+    int cmp, uint8_t val);
+__host__ size_t rocshmem_uint8_wait_until_some(
+    uint8_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, uint8_t val);
+__host__ size_t rocshmem_uint8_wait_until_any_vector(
+    uint8_t *ivars, size_t nelems, const int* status,
+    int cmp, uint8_t* vals);
+__host__ void rocshmem_uint8_wait_until_all_vector(
+    uint8_t *ivars, size_t nelems, const int* status,
+    int cmp, uint8_t* vals);
+__host__ size_t rocshmem_uint8_wait_until_some_vector(
+    uint8_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, uint8_t* vals);
+
+__device__ void rocshmem_uint16_wait_until(
+    uint16_t *ivars, int cmp, uint16_t val);
+__device__ size_t rocshmem_uint16_wait_until_any(
+    uint16_t *ivars, size_t nelems, const int* status,
+    int cmp, uint16_t val);
+__device__ void rocshmem_uint16_wait_until_all(
+    uint16_t *ivars, size_t nelems, const int* status,
+    int cmp, uint16_t val);
+__device__ size_t rocshmem_uint16_wait_until_some(
+    uint16_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, uint16_t val);
+__device__ size_t rocshmem_uint16_wait_until_any_vector(
+    uint16_t *ivars, size_t nelems, const int* status,
+    int cmp, uint16_t* vals);
+__device__ void rocshmem_uint16_wait_until_all_vector(
+    uint16_t *ivars, size_t nelems, const int* status,
+    int cmp, uint16_t* vals);
+__device__ size_t rocshmem_uint16_wait_until_some_vector(
+    uint16_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, uint16_t* vals);
+__host__ void rocshmem_uint16_wait_until(
+    uint16_t *ivars, int cmp, uint16_t val);
+__host__ size_t rocshmem_uint16_wait_until_any(
+    uint16_t *ivars, size_t nelems, const int* status,
+    int cmp, uint16_t val);
+__host__ void rocshmem_uint16_wait_until_all(
+    uint16_t *ivars, size_t nelems, const int* status,
+    int cmp, uint16_t val);
+__host__ size_t rocshmem_uint16_wait_until_some(
+    uint16_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, uint16_t val);
+__host__ size_t rocshmem_uint16_wait_until_any_vector(
+    uint16_t *ivars, size_t nelems, const int* status,
+    int cmp, uint16_t* vals);
+__host__ void rocshmem_uint16_wait_until_all_vector(
+    uint16_t *ivars, size_t nelems, const int* status,
+    int cmp, uint16_t* vals);
+__host__ size_t rocshmem_uint16_wait_until_some_vector(
+    uint16_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, uint16_t* vals);
+
+__device__ void rocshmem_uint32_wait_until(
+    uint32_t *ivars, int cmp, uint32_t val);
+__device__ size_t rocshmem_uint32_wait_until_any(
+    uint32_t *ivars, size_t nelems, const int* status,
+    int cmp, uint32_t val);
+__device__ void rocshmem_uint32_wait_until_all(
+    uint32_t *ivars, size_t nelems, const int* status,
+    int cmp, uint32_t val);
+__device__ size_t rocshmem_uint32_wait_until_some(
+    uint32_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, uint32_t val);
+__device__ size_t rocshmem_uint32_wait_until_any_vector(
+    uint32_t *ivars, size_t nelems, const int* status,
+    int cmp, uint32_t* vals);
+__device__ void rocshmem_uint32_wait_until_all_vector(
+    uint32_t *ivars, size_t nelems, const int* status,
+    int cmp, uint32_t* vals);
+__device__ size_t rocshmem_uint32_wait_until_some_vector(
+    uint32_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, uint32_t* vals);
+__host__ void rocshmem_uint32_wait_until(
+    uint32_t *ivars, int cmp, uint32_t val);
+__host__ size_t rocshmem_uint32_wait_until_any(
+    uint32_t *ivars, size_t nelems, const int* status,
+    int cmp, uint32_t val);
+__host__ void rocshmem_uint32_wait_until_all(
+    uint32_t *ivars, size_t nelems, const int* status,
+    int cmp, uint32_t val);
+__host__ size_t rocshmem_uint32_wait_until_some(
+    uint32_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, uint32_t val);
+__host__ size_t rocshmem_uint32_wait_until_any_vector(
+    uint32_t *ivars, size_t nelems, const int* status,
+    int cmp, uint32_t* vals);
+__host__ void rocshmem_uint32_wait_until_all_vector(
+    uint32_t *ivars, size_t nelems, const int* status,
+    int cmp, uint32_t* vals);
+__host__ size_t rocshmem_uint32_wait_until_some_vector(
+    uint32_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, uint32_t* vals);
+
 __device__ void rocshmem_uint64_wait_until(
     uint64_t *ivars, int cmp, uint64_t val);
 __device__ size_t rocshmem_uint64_wait_until_any(
@@ -616,6 +985,88 @@ __host__ void rocshmem_uint64_wait_until_all_vector(
 __host__ size_t rocshmem_uint64_wait_until_some_vector(
     uint64_t *ivars, size_t nelems, size_t* indices, const int* status,
     int cmp, uint64_t* vals);
+
+__device__ void rocshmem_size_wait_until(
+    size_t *ivars, int cmp, size_t val);
+__device__ size_t rocshmem_size_wait_until_any(
+    size_t *ivars, size_t nelems, const int* status,
+    int cmp, size_t val);
+__device__ void rocshmem_size_wait_until_all(
+    size_t *ivars, size_t nelems, const int* status,
+    int cmp, size_t val);
+__device__ size_t rocshmem_size_wait_until_some(
+    size_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, size_t val);
+__device__ size_t rocshmem_size_wait_until_any_vector(
+    size_t *ivars, size_t nelems, const int* status,
+    int cmp, size_t* vals);
+__device__ void rocshmem_size_wait_until_all_vector(
+    size_t *ivars, size_t nelems, const int* status,
+    int cmp, size_t* vals);
+__device__ size_t rocshmem_size_wait_until_some_vector(
+    size_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, size_t* vals);
+__host__ void rocshmem_size_wait_until(
+    size_t *ivars, int cmp, size_t val);
+__host__ size_t rocshmem_size_wait_until_any(
+    size_t *ivars, size_t nelems, const int* status,
+    int cmp, size_t val);
+__host__ void rocshmem_size_wait_until_all(
+    size_t *ivars, size_t nelems, const int* status,
+    int cmp, size_t val);
+__host__ size_t rocshmem_size_wait_until_some(
+    size_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, size_t val);
+__host__ size_t rocshmem_size_wait_until_any_vector(
+    size_t *ivars, size_t nelems, const int* status,
+    int cmp, size_t* vals);
+__host__ void rocshmem_size_wait_until_all_vector(
+    size_t *ivars, size_t nelems, const int* status,
+    int cmp, size_t* vals);
+__host__ size_t rocshmem_size_wait_until_some_vector(
+    size_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, size_t* vals);
+
+__device__ void rocshmem_ptrdiff_wait_until(
+    ptrdiff_t *ivars, int cmp, ptrdiff_t val);
+__device__ size_t rocshmem_ptrdiff_wait_until_any(
+    ptrdiff_t *ivars, size_t nelems, const int* status,
+    int cmp, ptrdiff_t val);
+__device__ void rocshmem_ptrdiff_wait_until_all(
+    ptrdiff_t *ivars, size_t nelems, const int* status,
+    int cmp, ptrdiff_t val);
+__device__ size_t rocshmem_ptrdiff_wait_until_some(
+    ptrdiff_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, ptrdiff_t val);
+__device__ size_t rocshmem_ptrdiff_wait_until_any_vector(
+    ptrdiff_t *ivars, size_t nelems, const int* status,
+    int cmp, ptrdiff_t* vals);
+__device__ void rocshmem_ptrdiff_wait_until_all_vector(
+    ptrdiff_t *ivars, size_t nelems, const int* status,
+    int cmp, ptrdiff_t* vals);
+__device__ size_t rocshmem_ptrdiff_wait_until_some_vector(
+    ptrdiff_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, ptrdiff_t* vals);
+__host__ void rocshmem_ptrdiff_wait_until(
+    ptrdiff_t *ivars, int cmp, ptrdiff_t val);
+__host__ size_t rocshmem_ptrdiff_wait_until_any(
+    ptrdiff_t *ivars, size_t nelems, const int* status,
+    int cmp, ptrdiff_t val);
+__host__ void rocshmem_ptrdiff_wait_until_all(
+    ptrdiff_t *ivars, size_t nelems, const int* status,
+    int cmp, ptrdiff_t val);
+__host__ size_t rocshmem_ptrdiff_wait_until_some(
+    ptrdiff_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, ptrdiff_t val);
+__host__ size_t rocshmem_ptrdiff_wait_until_any_vector(
+    ptrdiff_t *ivars, size_t nelems, const int* status,
+    int cmp, ptrdiff_t* vals);
+__host__ void rocshmem_ptrdiff_wait_until_all_vector(
+    ptrdiff_t *ivars, size_t nelems, const int* status,
+    int cmp, ptrdiff_t* vals);
+__host__ size_t rocshmem_ptrdiff_wait_until_some_vector(
+    ptrdiff_t *ivars, size_t nelems, size_t* indices, const int* status,
+    int cmp, ptrdiff_t* vals);
 
 
 /**
@@ -699,10 +1150,65 @@ __device__ int rocshmem_ulonglong_test(
 __host__ int rocshmem_ulonglong_test(
     unsigned long long *ivars, int cmp, unsigned long long val);
 
+__device__ int rocshmem_half_test(
+    __half *ivars, int cmp, __half val);
+__host__ int rocshmem_half_test(
+    __half *ivars, int cmp, __half val);
+
+__device__ int rocshmem_bfloat16_test(
+    __hip_bfloat16 *ivars, int cmp, __hip_bfloat16 val);
+__host__ int rocshmem_bfloat16_test(
+    __hip_bfloat16 *ivars, int cmp, __hip_bfloat16 val);
+
+__device__ int rocshmem_int8_test(
+    int8_t *ivars, int cmp, int8_t val);
+__host__ int rocshmem_int8_test(
+    int8_t *ivars, int cmp, int8_t val);
+
+__device__ int rocshmem_int16_test(
+    int16_t *ivars, int cmp, int16_t val);
+__host__ int rocshmem_int16_test(
+    int16_t *ivars, int cmp, int16_t val);
+
+__device__ int rocshmem_int32_test(
+    int32_t *ivars, int cmp, int32_t val);
+__host__ int rocshmem_int32_test(
+    int32_t *ivars, int cmp, int32_t val);
+
+__device__ int rocshmem_int64_test(
+    int64_t *ivars, int cmp, int64_t val);
+__host__ int rocshmem_int64_test(
+    int64_t *ivars, int cmp, int64_t val);
+
+__device__ int rocshmem_uint8_test(
+    uint8_t *ivars, int cmp, uint8_t val);
+__host__ int rocshmem_uint8_test(
+    uint8_t *ivars, int cmp, uint8_t val);
+
+__device__ int rocshmem_uint16_test(
+    uint16_t *ivars, int cmp, uint16_t val);
+__host__ int rocshmem_uint16_test(
+    uint16_t *ivars, int cmp, uint16_t val);
+
+__device__ int rocshmem_uint32_test(
+    uint32_t *ivars, int cmp, uint32_t val);
+__host__ int rocshmem_uint32_test(
+    uint32_t *ivars, int cmp, uint32_t val);
+
 __device__ int rocshmem_uint64_test(
     uint64_t *ivars, int cmp, uint64_t val);
 __host__ int rocshmem_uint64_test(
     uint64_t *ivars, int cmp, uint64_t val);
+
+__device__ int rocshmem_size_test(
+    size_t *ivars, int cmp, size_t val);
+__host__ int rocshmem_size_test(
+    size_t *ivars, int cmp, size_t val);
+
+__device__ int rocshmem_ptrdiff_test(
+    ptrdiff_t *ivars, int cmp, ptrdiff_t val);
+__host__ int rocshmem_ptrdiff_test(
+    ptrdiff_t *ivars, int cmp, ptrdiff_t val);
 
 
 }  // namespace rocshmem

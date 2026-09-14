@@ -235,6 +235,28 @@ __host__ void rocshmem_ctx_int16_put(
 __host__ void rocshmem_int16_put(int16_t *dest,
     const int16_t *source, size_t nelems, int pe);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int32_put(
+    rocshmem_ctx_t ctx, int32_t *dest, const int32_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int32_put(
+    int32_t *dest, const int32_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_int32_put(
+    rocshmem_ctx_t ctx, int32_t *dest, const int32_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_int32_put(int32_t *dest,
+    const int32_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int64_put(
+    rocshmem_ctx_t ctx, int64_t *dest, const int64_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int64_put(
+    int64_t *dest, const int64_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_int64_put(
+    rocshmem_ctx_t ctx, int64_t *dest, const int64_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_int64_put(int64_t *dest,
+    const int64_t *source, size_t nelems, int pe);
+
 __device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_put(
     rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
     size_t nelems, int pe);
@@ -256,6 +278,50 @@ __host__ void rocshmem_ctx_uint16_put(
     size_t nelems, int pe);
 __host__ void rocshmem_uint16_put(uint16_t *dest,
     const uint16_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint32_put(
+    rocshmem_ctx_t ctx, uint32_t *dest, const uint32_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint32_put(
+    uint32_t *dest, const uint32_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint32_put(
+    rocshmem_ctx_t ctx, uint32_t *dest, const uint32_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_uint32_put(uint32_t *dest,
+    const uint32_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint64_put(
+    rocshmem_ctx_t ctx, uint64_t *dest, const uint64_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint64_put(
+    uint64_t *dest, const uint64_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint64_put(
+    rocshmem_ctx_t ctx, uint64_t *dest, const uint64_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_uint64_put(uint64_t *dest,
+    const uint64_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_size_put(
+    rocshmem_ctx_t ctx, size_t *dest, const size_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_size_put(
+    size_t *dest, const size_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_size_put(
+    rocshmem_ctx_t ctx, size_t *dest, const size_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_size_put(size_t *dest,
+    const size_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ptrdiff_put(
+    rocshmem_ctx_t ctx, ptrdiff_t *dest, const ptrdiff_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ptrdiff_put(
+    ptrdiff_t *dest, const ptrdiff_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_ptrdiff_put(
+    rocshmem_ctx_t ctx, ptrdiff_t *dest, const ptrdiff_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_ptrdiff_put(ptrdiff_t *dest,
+    const ptrdiff_t *source, size_t nelems, int pe);
 
 
 /**
@@ -515,6 +581,28 @@ __host__ void rocshmem_ctx_int16_p(
 __host__ void rocshmem_int16_p(
     int16_t *dest, int16_t value, int pe);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int32_p(
+    rocshmem_ctx_t ctx, int32_t *dest, int32_t value,
+    int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int32_p(
+    int32_t *dest, int32_t value, int pe);
+__host__ void rocshmem_ctx_int32_p(
+    rocshmem_ctx_t ctx, int32_t *dest, int32_t value,
+    int pe);
+__host__ void rocshmem_int32_p(
+    int32_t *dest, int32_t value, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int64_p(
+    rocshmem_ctx_t ctx, int64_t *dest, int64_t value,
+    int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int64_p(
+    int64_t *dest, int64_t value, int pe);
+__host__ void rocshmem_ctx_int64_p(
+    rocshmem_ctx_t ctx, int64_t *dest, int64_t value,
+    int pe);
+__host__ void rocshmem_int64_p(
+    int64_t *dest, int64_t value, int pe);
+
 __device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_p(
     rocshmem_ctx_t ctx, uint8_t *dest, uint8_t value,
     int pe);
@@ -536,6 +624,50 @@ __host__ void rocshmem_ctx_uint16_p(
     int pe);
 __host__ void rocshmem_uint16_p(
     uint16_t *dest, uint16_t value, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint32_p(
+    rocshmem_ctx_t ctx, uint32_t *dest, uint32_t value,
+    int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint32_p(
+    uint32_t *dest, uint32_t value, int pe);
+__host__ void rocshmem_ctx_uint32_p(
+    rocshmem_ctx_t ctx, uint32_t *dest, uint32_t value,
+    int pe);
+__host__ void rocshmem_uint32_p(
+    uint32_t *dest, uint32_t value, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint64_p(
+    rocshmem_ctx_t ctx, uint64_t *dest, uint64_t value,
+    int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint64_p(
+    uint64_t *dest, uint64_t value, int pe);
+__host__ void rocshmem_ctx_uint64_p(
+    rocshmem_ctx_t ctx, uint64_t *dest, uint64_t value,
+    int pe);
+__host__ void rocshmem_uint64_p(
+    uint64_t *dest, uint64_t value, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_size_p(
+    rocshmem_ctx_t ctx, size_t *dest, size_t value,
+    int pe);
+__device__ ATTR_NO_INLINE void rocshmem_size_p(
+    size_t *dest, size_t value, int pe);
+__host__ void rocshmem_ctx_size_p(
+    rocshmem_ctx_t ctx, size_t *dest, size_t value,
+    int pe);
+__host__ void rocshmem_size_p(
+    size_t *dest, size_t value, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ptrdiff_p(
+    rocshmem_ctx_t ctx, ptrdiff_t *dest, ptrdiff_t value,
+    int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ptrdiff_p(
+    ptrdiff_t *dest, ptrdiff_t value, int pe);
+__host__ void rocshmem_ctx_ptrdiff_p(
+    rocshmem_ctx_t ctx, ptrdiff_t *dest, ptrdiff_t value,
+    int pe);
+__host__ void rocshmem_ptrdiff_p(
+    ptrdiff_t *dest, ptrdiff_t value, int pe);
 
 __device__ ATTR_NO_INLINE void rocshmem_ctx_int64_p(
     rocshmem_ctx_t ctx, int64_t *dest, int64_t value,
@@ -750,6 +882,28 @@ __host__ void rocshmem_ctx_int16_get(
 __host__ void rocshmem_int16_get(int16_t *dest,
     const int16_t *source, size_t nelems, int pe);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int32_get(
+    rocshmem_ctx_t ctx, int32_t *dest, const int32_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int32_get(
+    int32_t *dest, const int32_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_int32_get(
+    rocshmem_ctx_t ctx, int32_t *dest, const int32_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_int32_get(int32_t *dest,
+    const int32_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int64_get(
+    rocshmem_ctx_t ctx, int64_t *dest, const int64_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int64_get(
+    int64_t *dest, const int64_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_int64_get(
+    rocshmem_ctx_t ctx, int64_t *dest, const int64_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_int64_get(int64_t *dest,
+    const int64_t *source, size_t nelems, int pe);
+
 __device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_get(
     rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
     size_t nelems, int pe);
@@ -771,6 +925,50 @@ __host__ void rocshmem_ctx_uint16_get(
     size_t nelems, int pe);
 __host__ void rocshmem_uint16_get(uint16_t *dest,
     const uint16_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint32_get(
+    rocshmem_ctx_t ctx, uint32_t *dest, const uint32_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint32_get(
+    uint32_t *dest, const uint32_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint32_get(
+    rocshmem_ctx_t ctx, uint32_t *dest, const uint32_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_uint32_get(uint32_t *dest,
+    const uint32_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint64_get(
+    rocshmem_ctx_t ctx, uint64_t *dest, const uint64_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint64_get(
+    uint64_t *dest, const uint64_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint64_get(
+    rocshmem_ctx_t ctx, uint64_t *dest, const uint64_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_uint64_get(uint64_t *dest,
+    const uint64_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_size_get(
+    rocshmem_ctx_t ctx, size_t *dest, const size_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_size_get(
+    size_t *dest, const size_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_size_get(
+    rocshmem_ctx_t ctx, size_t *dest, const size_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_size_get(size_t *dest,
+    const size_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ptrdiff_get(
+    rocshmem_ctx_t ctx, ptrdiff_t *dest, const ptrdiff_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ptrdiff_get(
+    ptrdiff_t *dest, const ptrdiff_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_ptrdiff_get(
+    rocshmem_ctx_t ctx, ptrdiff_t *dest, const ptrdiff_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_ptrdiff_get(ptrdiff_t *dest,
+    const ptrdiff_t *source, size_t nelems, int pe);
 
 
 /**
@@ -997,6 +1195,24 @@ __host__ int16_t rocshmem_ctx_int16_g(
 __host__ int16_t rocshmem_int16_g(
     const int16_t *source, int pe);
 
+__device__ ATTR_NO_INLINE int32_t rocshmem_ctx_int32_g(
+    rocshmem_ctx_t ctx, const int32_t *source, int pe);
+__device__ ATTR_NO_INLINE int32_t rocshmem_int32_g(
+    const int32_t *source, int pe);
+__host__ int32_t rocshmem_ctx_int32_g(
+    rocshmem_ctx_t ctx, const int32_t *source, int pe);
+__host__ int32_t rocshmem_int32_g(
+    const int32_t *source, int pe);
+
+__device__ ATTR_NO_INLINE int64_t rocshmem_ctx_int64_g(
+    rocshmem_ctx_t ctx, const int64_t *source, int pe);
+__device__ ATTR_NO_INLINE int64_t rocshmem_int64_g(
+    const int64_t *source, int pe);
+__host__ int64_t rocshmem_ctx_int64_g(
+    rocshmem_ctx_t ctx, const int64_t *source, int pe);
+__host__ int64_t rocshmem_int64_g(
+    const int64_t *source, int pe);
+
 __device__ ATTR_NO_INLINE uint8_t rocshmem_ctx_uint8_g(
     rocshmem_ctx_t ctx, const uint8_t *source, int pe);
 __device__ ATTR_NO_INLINE uint8_t rocshmem_uint8_g(
@@ -1014,6 +1230,42 @@ __host__ uint16_t rocshmem_ctx_uint16_g(
     rocshmem_ctx_t ctx, const uint16_t *source, int pe);
 __host__ uint16_t rocshmem_uint16_g(
     const uint16_t *source, int pe);
+
+__device__ ATTR_NO_INLINE uint32_t rocshmem_ctx_uint32_g(
+    rocshmem_ctx_t ctx, const uint32_t *source, int pe);
+__device__ ATTR_NO_INLINE uint32_t rocshmem_uint32_g(
+    const uint32_t *source, int pe);
+__host__ uint32_t rocshmem_ctx_uint32_g(
+    rocshmem_ctx_t ctx, const uint32_t *source, int pe);
+__host__ uint32_t rocshmem_uint32_g(
+    const uint32_t *source, int pe);
+
+__device__ ATTR_NO_INLINE uint64_t rocshmem_ctx_uint64_g(
+    rocshmem_ctx_t ctx, const uint64_t *source, int pe);
+__device__ ATTR_NO_INLINE uint64_t rocshmem_uint64_g(
+    const uint64_t *source, int pe);
+__host__ uint64_t rocshmem_ctx_uint64_g(
+    rocshmem_ctx_t ctx, const uint64_t *source, int pe);
+__host__ uint64_t rocshmem_uint64_g(
+    const uint64_t *source, int pe);
+
+__device__ ATTR_NO_INLINE size_t rocshmem_ctx_size_g(
+    rocshmem_ctx_t ctx, const size_t *source, int pe);
+__device__ ATTR_NO_INLINE size_t rocshmem_size_g(
+    const size_t *source, int pe);
+__host__ size_t rocshmem_ctx_size_g(
+    rocshmem_ctx_t ctx, const size_t *source, int pe);
+__host__ size_t rocshmem_size_g(
+    const size_t *source, int pe);
+
+__device__ ATTR_NO_INLINE ptrdiff_t rocshmem_ctx_ptrdiff_g(
+    rocshmem_ctx_t ctx, const ptrdiff_t *source, int pe);
+__device__ ATTR_NO_INLINE ptrdiff_t rocshmem_ptrdiff_g(
+    const ptrdiff_t *source, int pe);
+__host__ ptrdiff_t rocshmem_ctx_ptrdiff_g(
+    rocshmem_ctx_t ctx, const ptrdiff_t *source, int pe);
+__host__ ptrdiff_t rocshmem_ptrdiff_g(
+    const ptrdiff_t *source, int pe);
 
 
 /**
@@ -1225,6 +1477,28 @@ __host__ void rocshmem_ctx_int16_put_nbi(
 __host__ void rocshmem_int16_put_nbi(
     int16_t *dest, const int16_t *source, size_t nelems, int pe);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int32_put_nbi(
+    rocshmem_ctx_t ctx, int32_t *dest, const int32_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int32_put_nbi(
+    int32_t *dest, const int32_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_int32_put_nbi(
+    rocshmem_ctx_t ctx, int32_t *dest, const int32_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_int32_put_nbi(
+    int32_t *dest, const int32_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int64_put_nbi(
+    rocshmem_ctx_t ctx, int64_t *dest, const int64_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int64_put_nbi(
+    int64_t *dest, const int64_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_int64_put_nbi(
+    rocshmem_ctx_t ctx, int64_t *dest, const int64_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_int64_put_nbi(
+    int64_t *dest, const int64_t *source, size_t nelems, int pe);
+
 __device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_put_nbi(
     rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
     size_t nelems, int pe);
@@ -1246,6 +1520,50 @@ __host__ void rocshmem_ctx_uint16_put_nbi(
     size_t nelems, int pe);
 __host__ void rocshmem_uint16_put_nbi(
     uint16_t *dest, const uint16_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint32_put_nbi(
+    rocshmem_ctx_t ctx, uint32_t *dest, const uint32_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint32_put_nbi(
+    uint32_t *dest, const uint32_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint32_put_nbi(
+    rocshmem_ctx_t ctx, uint32_t *dest, const uint32_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_uint32_put_nbi(
+    uint32_t *dest, const uint32_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint64_put_nbi(
+    rocshmem_ctx_t ctx, uint64_t *dest, const uint64_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint64_put_nbi(
+    uint64_t *dest, const uint64_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint64_put_nbi(
+    rocshmem_ctx_t ctx, uint64_t *dest, const uint64_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_uint64_put_nbi(
+    uint64_t *dest, const uint64_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_size_put_nbi(
+    rocshmem_ctx_t ctx, size_t *dest, const size_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_size_put_nbi(
+    size_t *dest, const size_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_size_put_nbi(
+    rocshmem_ctx_t ctx, size_t *dest, const size_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_size_put_nbi(
+    size_t *dest, const size_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ptrdiff_put_nbi(
+    rocshmem_ctx_t ctx, ptrdiff_t *dest, const ptrdiff_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ptrdiff_put_nbi(
+    ptrdiff_t *dest, const ptrdiff_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_ptrdiff_put_nbi(
+    rocshmem_ctx_t ctx, ptrdiff_t *dest, const ptrdiff_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_ptrdiff_put_nbi(
+    ptrdiff_t *dest, const ptrdiff_t *source, size_t nelems, int pe);
 
 
 /**
@@ -1511,6 +1829,28 @@ __host__ void rocshmem_ctx_int16_get_nbi(
 __host__ void rocshmem_int16_get_nbi(int16_t *dest,
     const int16_t *source, size_t nelems, int pe);
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int32_get_nbi(
+    rocshmem_ctx_t ctx, int32_t *dest, const int32_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int32_get_nbi(
+    int32_t *dest, const int32_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_int32_get_nbi(
+    rocshmem_ctx_t ctx, int32_t *dest, const int32_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_int32_get_nbi(int32_t *dest,
+    const int32_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int64_get_nbi(
+    rocshmem_ctx_t ctx, int64_t *dest, const int64_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int64_get_nbi(
+    int64_t *dest, const int64_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_int64_get_nbi(
+    rocshmem_ctx_t ctx, int64_t *dest, const int64_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_int64_get_nbi(int64_t *dest,
+    const int64_t *source, size_t nelems, int pe);
+
 __device__ ATTR_NO_INLINE void rocshmem_ctx_uint8_get_nbi(
     rocshmem_ctx_t ctx, uint8_t *dest, const uint8_t *source,
     size_t nelems, int pe);
@@ -1532,6 +1872,50 @@ __host__ void rocshmem_ctx_uint16_get_nbi(
     size_t nelems, int pe);
 __host__ void rocshmem_uint16_get_nbi(uint16_t *dest,
     const uint16_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint32_get_nbi(
+    rocshmem_ctx_t ctx, uint32_t *dest, const uint32_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint32_get_nbi(
+    uint32_t *dest, const uint32_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint32_get_nbi(
+    rocshmem_ctx_t ctx, uint32_t *dest, const uint32_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_uint32_get_nbi(uint32_t *dest,
+    const uint32_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint64_get_nbi(
+    rocshmem_ctx_t ctx, uint64_t *dest, const uint64_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint64_get_nbi(
+    uint64_t *dest, const uint64_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint64_get_nbi(
+    rocshmem_ctx_t ctx, uint64_t *dest, const uint64_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_uint64_get_nbi(uint64_t *dest,
+    const uint64_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_size_get_nbi(
+    rocshmem_ctx_t ctx, size_t *dest, const size_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_size_get_nbi(
+    size_t *dest, const size_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_size_get_nbi(
+    rocshmem_ctx_t ctx, size_t *dest, const size_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_size_get_nbi(size_t *dest,
+    const size_t *source, size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ptrdiff_get_nbi(
+    rocshmem_ctx_t ctx, ptrdiff_t *dest, const ptrdiff_t *source,
+    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ptrdiff_get_nbi(
+    ptrdiff_t *dest, const ptrdiff_t *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_ptrdiff_get_nbi(
+    rocshmem_ctx_t ctx, ptrdiff_t *dest, const ptrdiff_t *source,
+    size_t nelems, int pe);
+__host__ void rocshmem_ptrdiff_get_nbi(ptrdiff_t *dest,
+    const ptrdiff_t *source, size_t nelems, int pe);
 
 
 /**
