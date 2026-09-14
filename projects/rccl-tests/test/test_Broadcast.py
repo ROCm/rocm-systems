@@ -36,12 +36,17 @@ from .gin_sdma_harness import (
     bcast_tiers,
     detect_ngpus,
     env_int,
+    gin_perf_argv,
     launch_bcast_gin_sdma,
     run_bcast_with_conn_gate_retry,
     run_with_conn_gate_retry,
 )
 
-ngpus = max(1, detect_ngpus())
+try:
+    _detected_ngpus = detect_ngpus()
+except RuntimeError:
+    _detected_ngpus = 0
+ngpus = max(1, _detected_ngpus)
 log_ngpus = int(math.log2(ngpus))
 
 nthreads = ["1"]
@@ -137,7 +142,9 @@ _bcast_enabled = os.environ.get("RCCL_TESTS_GIN_SDMA_BCAST", "") not in (
     "False",
 )
 
-BCAST_NP = env_int("RCCL_TESTS_BCAST_NP", 0) or ngpus
+BCAST_NP = env_int("RCCL_TESTS_BCAST_NP", 0) or (
+    detect_ngpus() if _bcast_enabled else _detected_ngpus
+)
 BCAST_LAUNCHER = os.environ.get("RCCL_TESTS_MPI_LAUNCHER", "mpirun")
 BCAST_CTAS = os.environ.get("RCCL_TESTS_BCAST_CTAS", "8")
 BCAST_GIN_TYPE = os.environ.get("RCCL_TESTS_BCAST_GIN_TYPE", "6")
@@ -320,6 +327,37 @@ def test_BroadcastGinSdmaConnRetryNeverRetriesDataFailure():
 
     assert run_with_conn_gate_retry(launch, 5, settle_s=0) == (1, "#wrong = 1")
     assert len(calls) == 1
+
+
+def test_BroadcastGinSdmaConnRetryDoesNotRetryNonGateError():
+    calls = []
+
+    def launch():
+        calls.append(None)
+        return 1, "some other error"
+
+    assert run_with_conn_gate_retry(launch, 5, settle_s=0) == (
+        1,
+        "some other error",
+    )
+    assert len(calls) == 1
+
+
+def test_BroadcastGinSdmaDetectNgpusRequiresRocminfo(monkeypatch):
+    monkeypatch.delenv("ROCR_VISIBLE_DEVICES", raising=False)
+    monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
+    from . import gin_sdma_harness as harness
+
+    monkeypatch.setattr(harness.shutil, "which", lambda _cmd: None)
+    with pytest.raises(RuntimeError, match="rocminfo"):
+        harness.detect_ngpus()
+
+
+def test_BroadcastGinSdmaPerfArgvMakesAverageCountGapExplicit():
+    ag = gin_perf_argv("all_gather_perf", 8, "int32", "8", extra=["-A", "1"])
+    a2a = gin_perf_argv("alltoall_perf", 8, "int32", "16")
+    assert ag[ag.index("-D") + 2 : ag.index("-V")] == ["-A", "1"]
+    assert a2a[a2a.index("-D") + 2 : a2a.index("-V")] == []
 
 
 def _clean_bcast_output(tier):

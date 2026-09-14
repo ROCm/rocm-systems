@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Run the RCCL device-API benchmark suite (symmetric memory / LSA device kernels
-# / GIN proxy) against the freshly built rccl-tests tree. Mirrors the legacy
-# rocJenkins "device-api" testCommand.
+# Run the RCCL device-API benchmark suite (symmetric memory / GIN proxy)
+# against the freshly built rccl-tests tree. Mirrors the legacy rocJenkins
+# "device-api" testCommand. LSA all_reduce_perf (-D 1/-D 2) is not launched:
+# that binary still does not build under ENABLE_ROCSHMEM_GIN.
 #
 # Consumes ROCM_PATH (rocm.env), MPI_HOME (ompi.env), the in-tree RCCL build at
 # projects/rccl/build/release, and rccl-tests/build. Build paths come from the
@@ -86,7 +87,9 @@ if [[ -n "${RCCL_TESTS_BIN_DIR:-}" ]]; then
 else
   PERF_DIR="${RCCL_TESTS_DIR}/build"
 fi
-if [[ ! -d "${PERF_DIR}" || ! -f "${PERF_DIR}/all_reduce_perf" ]]; then
+# all_reduce_perf is not a valid sentinel here: it still fails to build under
+# ENABLE_ROCSHMEM_GIN. alltoall_perf is the binary this GIN job always needs.
+if [[ ! -d "${PERF_DIR}" || ! -x "${PERF_DIR}/alltoall_perf" ]]; then
   echo "rccl-tests perf binaries not found under ${PERF_DIR}"
   ls -la "${PERF_DIR}" 2>/dev/null || ls -la "${RCCL_TESTS_DIR}"
   exit 1

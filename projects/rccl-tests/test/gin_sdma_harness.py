@@ -49,17 +49,29 @@ DATA_FAIL_RE = re.compile(
 
 
 def detect_ngpus():
+    """Return the visible GPU count.
+
+    Prefer ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES. Otherwise require
+    rocminfo on PATH: a missing binary used to look like zero GPUs because
+    `rocminfo | grep | wc -l` still exits 0, and callers that clamp with
+    max(1, ...) then silently collect a one-GPU matrix.
+    """
     if os.environ.get("ROCR_VISIBLE_DEVICES") is not None:
         return len(os.environ["ROCR_VISIBLE_DEVICES"].split(","))
     if os.environ.get("HIP_VISIBLE_DEVICES") is not None:
         return len(os.environ["HIP_VISIBLE_DEVICES"].split(","))
-    try:
-        out = subprocess.check_output(
-            'rocminfo | grep "Device Type:.\\s*.GPU" | wc -l', shell=True
+    rocminfo = shutil.which("rocminfo")
+    if rocminfo is None:
+        raise RuntimeError(
+            "rocminfo not on PATH; cannot detect GPU count. Set "
+            "ROCR_VISIBLE_DEVICES, HIP_VISIBLE_DEVICES, or RCCL_TESTS_*_NP."
         )
-        return int(out)
-    except Exception:
-        return 0
+    out = subprocess.check_output(
+        [rocminfo], universal_newlines=True, stderr=subprocess.DEVNULL
+    )
+    return sum(
+        1 for line in out.splitlines() if re.search(r"Device Type:\s*GPU", line)
+    )
 
 
 def env_int(name, default):
@@ -88,6 +100,54 @@ def gin_env_xflags(kv_list):
     for kv in kv_list:
         flags += ["-x", kv]
     return flags
+
+
+def gin_perf_argv(exe, size, dtype, ctas, extra=None):
+    """Fixed-size GIN -D 3 perf argv.
+
+    `extra` is inserted after `-D 3` and before `-V`, so the AllToAll vs
+    AllGather/Broadcast `-A 1` gap is an explicit extra rather than a
+    copy-paste drift. AllToAll omits `-A 1`; the others pass extra=["-A", "1"].
+    """
+    args = [
+        exe,
+        "-b",
+        str(size),
+        "-e",
+        str(size),
+        "-f",
+        "2",
+        "-g",
+        "1",
+        "-R",
+        "2",
+        "-D",
+        "3",
+    ]
+    args += list(extra or [])
+    args += [
+        "-V",
+        str(ctas),
+        "-d",
+        dtype,
+        "-c",
+        "1",
+        "-w",
+        "1",
+        "-n",
+        "3",
+    ]
+    return args
+
+
+def gin_hang_msg(collective, timeout_s, size, dtype, size_desc):
+    """Timeout diagnostic; size_desc is e.g. '256 MiB/rank' or '256 MiB'."""
+    return (
+        "{} GIN-SDMA HANG: no completion within {}s at {} bytes "
+        "({}), dtype={}. Output tail:\n{{}}".format(
+            collective, timeout_s, size, size_desc, dtype
+        )
+    )
 
 
 def launch_mpi_shell(cmd, timeout_s, hang_msg):
@@ -159,13 +219,13 @@ PLUGIN_RE = re.compile(r"gin-anvil-sdma", re.I)
 
 _NUM = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
 _WRONG = r"(?:{}|N/A)".format(_NUM)
+# Deliberately not end-anchored: rccl-tests may append an algo/proto/nchannels
+# group and a timestamp, and concurrent rank output can splice onto the line.
 BCAST_ROW_RE = re.compile(
     r"^\s*(\d+)\s+(\d+)\s+\S+\s+\S+\s+(\d+)"
     r"\s+{n}\s+{n}\s+{n}\s+({w})"
     r"\s+{n}\s+{n}\s+{n}\s+({w})".format(n=_NUM, w=_WRONG)
 )
-# Deliberately not end-anchored: rccl-tests may append an algo/proto/nchannels
-# group and a timestamp, and concurrent rank output can splice onto the line.
 BCAST_OOB_RE = re.compile(r"Out of bounds values\s*:\s*(\d+)")
 # Matches the tier emitted by bcastReportTier() in src/broadcast.cu.
 BCAST_TIER_RE = re.compile(r"^#\[bcast-tier\]\s+(\S+)", re.M)
@@ -301,40 +361,11 @@ def launch_bcast_gin_sdma(
     args = (
         mpi_launch_prefix(request, launcher, np, mpi_opts)
         + gin_env_xflags(gin_env)
-        + [
-            exe,
-            "-b",
-            size,
-            "-e",
-            size,
-            "-f",
-            "2",
-            "-g",
-            "1",
-            "-R",
-            "2",
-            "-D",
-            "3",
-            "-A",
-            "1",
-            "-V",
-            ctas,
-            "-d",
-            dtype,
-            "-c",
-            "1",
-            "-w",
-            "1",
-            "-n",
-            "3",
-        ]
+        + gin_perf_argv(exe, size, dtype, ctas, extra=["-A", "1"])
     )
     cmd = " ".join(shlex.quote(a) for a in args)
-    hang_msg = (
-        "Broadcast GIN-SDMA HANG: no completion within {}s at msg={} bytes "
-        "({} MiB), dtype={}. Output tail:\n{{}}".format(
-            timeout_s, size, msg_bytes // MiB, dtype
-        )
+    hang_msg = gin_hang_msg(
+        "Broadcast", timeout_s, size, dtype, "{} MiB".format(msg_bytes // MiB)
     )
     try:
         rc, out = launch_mpi_shell(cmd, timeout_s, hang_msg)

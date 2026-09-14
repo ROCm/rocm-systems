@@ -34,12 +34,18 @@ from .gin_sdma_harness import (
     detect_ngpus,
     env_int,
     gin_env_xflags,
+    gin_hang_msg,
+    gin_perf_argv,
     launch_mpi_shell,
     mpi_launch_prefix,
     run_with_conn_gate_retry,
 )
 
-ngpus = max(1, detect_ngpus())
+try:
+    _detected_ngpus = detect_ngpus()
+except RuntimeError:
+    _detected_ngpus = 0
+ngpus = max(1, _detected_ngpus)
 log_ngpus = int(math.log2(ngpus))
 
 nthreads = ["1"]
@@ -131,7 +137,9 @@ def test_AllGatherSingleProcess(nthreads, ngpus_single, byte_range, op, step_fac
 
 _ag_enabled = os.environ.get("RCCL_TESTS_GIN_SDMA_AG", "") not in ("", "0", "false", "False")
 
-AG_NP = env_int("RCCL_TESTS_AG_NP", 0) or ngpus
+AG_NP = env_int("RCCL_TESTS_AG_NP", 0) or (
+    detect_ngpus() if _ag_enabled else _detected_ngpus
+)
 AG_LAUNCHER = os.environ.get("RCCL_TESTS_MPI_LAUNCHER", "mpirun")
 AG_CTAS = os.environ.get("RCCL_TESTS_AG_CTAS", "8")
 AG_TIMEOUT_S = env_int("RCCL_TESTS_AG_TIMEOUT_S", 900)
@@ -147,7 +155,6 @@ _ag_skip = pytest.mark.skipif(
            "a GIN-SDMA-capable (e.g. 8x MI355X) node to enable.")
 
 
-# Intermittent gfx950 cuMem-VMM connectivity-gate abort: see gin_sdma_harness.py.
 _AG_DEVTIME_TIER_RE = re.compile(r"#\[ag-devtime\].*tier\s+(LSA|SDMA)", re.I)
 
 
@@ -161,45 +168,21 @@ def _launch_ag_gin_sdma(request, total_bytes, dtype, force_sdma_tier=True, devic
             "NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER=0",
         ]
 
+    extra = ["-A", "1"]
     args = (
         mpi_launch_prefix(request, AG_LAUNCHER, AG_NP, AG_MPI_OPTS)
         + gin_env_xflags(gin_kv)
-        + [
-            AG_EXE,
-            "-b",
-            size,
-            "-e",
-            size,
-            "-f",
-            "2",
-            "-g",
-            "1",
-            "-R",
-            "2",
-            "-D",
-            "3",
-            "-A",
-            "1",
-            "-V",
-            AG_CTAS,
-            "-d",
-            dtype,
-            "-c",
-            "1",
-            "-w",
-            "1",
-            "-n",
-            "3",
-        ]
+        + gin_perf_argv(AG_EXE, size, dtype, AG_CTAS, extra=extra)
     )
     if device_timing:
         args += ["-B", "1"]
     cmd = " ".join(shlex.quote(a) for a in args)
-    hang_msg = (
-        "AllGather GIN-SDMA HANG: no completion within {}s at total={} bytes "
-        "({} MiB/rank), dtype={}. Output tail:\n{{}}".format(
-            AG_TIMEOUT_S, size, total_bytes // AG_NP // MiB, dtype
-        )
+    hang_msg = gin_hang_msg(
+        "AllGather",
+        AG_TIMEOUT_S,
+        size,
+        dtype,
+        "{} MiB/rank".format(total_bytes // AG_NP // MiB),
     )
     return launch_mpi_shell(cmd, AG_TIMEOUT_S, hang_msg)
 

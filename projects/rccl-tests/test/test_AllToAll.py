@@ -66,6 +66,8 @@ from .gin_sdma_harness import (
     detect_ngpus,
     env_int,
     gin_env_xflags,
+    gin_hang_msg,
+    gin_perf_argv,
     launch_mpi_shell,
     mpi_launch_prefix,
     run_with_conn_gate_retry,
@@ -83,7 +85,7 @@ _enabled = os.environ.get("RCCL_TESTS_GIN_SDMA_A2A", "") not in (
     "False",
 )
 
-NP = env_int("RCCL_TESTS_A2A_NP", 0) or detect_ngpus()
+NP = env_int("RCCL_TESTS_A2A_NP", 0) or (detect_ngpus() if _enabled else 0)
 LAUNCHER = os.environ.get("RCCL_TESTS_MPI_LAUNCHER", "mpirun")
 CTAS = os.environ.get("RCCL_TESTS_A2A_CTAS", "16")
 TIMEOUT_S = env_int("RCCL_TESTS_A2A_TIMEOUT_S", 900)
@@ -114,38 +116,15 @@ def _launch_a2a(request, total_bytes, dtype):
     args = (
         mpi_launch_prefix(request, LAUNCHER, NP, MPI_OPTS)
         + gin_env
-        + [
-            executable,
-            "-b",
-            size,
-            "-e",
-            size,
-            "-f",
-            "2",
-            "-g",
-            "1",
-            "-R",
-            "2",
-            "-D",
-            "3",
-            "-V",
-            CTAS,
-            "-d",
-            dtype,
-            "-c",
-            "1",
-            "-w",
-            "1",
-            "-n",
-            "3",
-        ]
+        + gin_perf_argv(executable, size, dtype, CTAS)
     )
     cmd = " ".join(shlex.quote(a) for a in args)
-    hang_msg = (
-        "AllToAll GIN-SDMA HANG: no completion within {}s at total={} bytes "
-        "({} MiB/peer), dtype={}. Output tail:\n{{}}".format(
-            TIMEOUT_S, size, total_bytes // NP // MiB, dtype
-        )
+    hang_msg = gin_hang_msg(
+        "AllToAll",
+        TIMEOUT_S,
+        size,
+        dtype,
+        "{} MiB/peer".format(total_bytes // NP // MiB),
     )
     return launch_mpi_shell(cmd, TIMEOUT_S, hang_msg)
 
