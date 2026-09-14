@@ -1194,8 +1194,10 @@ hipError_t hipStreamBeginCapture_common(hipStream_t stream, hipStreamCaptureMode
     return hipErrorInvalidValue;
   }
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
-  // It can be initiated if the stream is not already in capture mode
-  if (s->GetCaptureStatus() == hipStreamCaptureStatusActive) {
+  // A capture can only be started on a stream that is not already part of one. An
+  // invalidated capture still has to be ended on its origin before any of its streams can be
+  // reused, so an invalidated stream is not eligible either.
+  if (s->GetCaptureStatus() != hipStreamCaptureStatusNone) {
     return hipErrorIllegalState;
   }
   if (graph == nullptr) {
