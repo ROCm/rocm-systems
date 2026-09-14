@@ -27,7 +27,7 @@
 /// failure aborts the whole patch.
 /// Future work: predicate-based anchor selection (Instrumentor walks blocks
 /// itself), per-site failure tolerance, probe-call bodies,
-/// AfterInst / BlockEntry / BlockExit kinds, EXEC policy management.
+/// AfterInst / BlockEntry / BlockExit kinds.
 /// As that lands the per-stage types will thicken
 /// (e.g. ResolvedInstrumentationSite probably gains an ordered list of bodies)
 /// and a layout/negotiation stage will appear between planning and splicing.
@@ -98,18 +98,20 @@ struct InstrumentationPoint {
   std::string probe_symbol;
   // Argument dwords to hand the probe, one per VGPR from the ABI's
   // arg_vgpr_base. Each names where the trampoline gets the value; use
-  // probe_arg_imm() for a constant. The list's *shape* describes the probe: its
-  // size is the declared argument count the probe body is verified against, and
-  // each slot's source decides what the body may assume it received. So two
-  // sites calling one probe with different shapes do not share a ProbeCallable.
-  // Empty means a probe called with no arguments. Only meaningful alongside
-  // probe_obj / probe_symbol.
+  // probe_arg_imm() for a constant. Empty means a probe called with no
+  // arguments. Only meaningful alongside probe_obj / probe_symbol.
+  //
+  // The list's *shape* (its size and each slot's source) belongs to the probe,
+  // not to this point, which is only the channel the declaration arrives
+  // through until a probe descriptor carries it. Two points
+  // naming one probe and describing it differently is an error, not two probes.
+  // Only the immediate values are per-site.
   std::vector<ProbeArgValue> probe_args;
   // Run the probe body with every lane enabled rather than under the mask the
   // guest had at the anchor. For a uniform probe whose work does not depend on
   // which lanes were active; a probe that reads per-lane guest state wants the
-  // anchor mask instead, which is the default. Like the argument shape, this
-  // describes the probe rather than the site, so it keys the ProbeCallable.
+  // anchor mask instead, which is the default. Declared per probe, like the
+  // argument shape, and relayed through this point for the same reason.
   //
   // The envelope already widens EXEC around the spill and argument writes; this
   // holds that window open across the call instead of closing it first.
@@ -132,13 +134,9 @@ struct ResolvedInstrumentationSite {
 
   // Argument values for this site, copied from the request. Only the immediates
   // are genuinely per-site: two sites can call one probe body with different
-  // constants, but the shape is shared, since it keys the ProbeCallable that
-  // probe_index names.
+  // constants. The shape they must conform to, and the mask policy, live on the
+  // ProbeCallable that probe_index names.
   std::vector<ProbeArgValue> probe_args;
-
-  // Mask policy for this site, copied from the request. Shared with every other
-  // site that resolved to the same probe_index, since it keys the registry.
-  bool force_full_exec = false;
 
   [[nodiscard]] bool is_probe_call() const { return probe_index.has_value(); }
 };
@@ -215,14 +213,15 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 /// (the free-function form lets test fixtures use synthetic TestInstruction
 /// objects without standing up an AmdGpuCodeObject). The anchor identity is
 /// already resolved by the caller; @p pt is read for `filter_flags`, `kind`,
-/// and reserved fields. See is_relocatable_anchor for rules.
+/// and the probe fields. See is_relocatable_anchor for rules.
 ///
 /// Temporary rules enforced here:
 ///   - @p pt.filter_flags is zero.
 ///   - @p pt.kind is BeforeInst (other kinds are unsupported in this milestone).
 ///   - @p pt.probe_obj and @p pt.probe_symbol are consistent: both set (a probe
 ///     call) or both empty (the inline nop). Setting only one is rejected.
-///   - @p pt.force_full_exec is false.
+///   - @p pt.force_full_exec is not set without a probe: an inline-nop site
+///     has no call envelope whose mask could be widened.
 [[nodiscard]] std::optional<ResolvedInstrumentationSite>
 validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                 std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,

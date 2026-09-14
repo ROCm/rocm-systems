@@ -59,6 +59,9 @@ constexpr uint32_t kProbeSentinel = 42;
 constexpr uint32_t kUntouched = 0;
 // The guest's own value in v0, live across the anchor in the argument shapes.
 constexpr uint32_t kGuestValue = 7;
+// The argument value written over a live v0. Distinct from kGuestValue so a lane
+// whose spill reload never arrived is readable as such rather than ambiguous.
+constexpr uint32_t kArgValue = 55;
 // Pre-set in v2 so a probe writing exec_hi (which is 0 on a wave64 mask of 3)
 // is distinguishable from a probe that never ran.
 constexpr uint32_t kV2Preset = 9;
@@ -174,6 +177,16 @@ protected:
   // Republishes its first argument in v3.
   [[nodiscard]] std::vector<uint32_t> echo_probe() const {
     return {kMovV3V0, build_s_setpc_b64(/*s[30:31]=*/30, a_.arch)};
+  }
+
+  // Publishes the sentinel, then narrows EXEC and returns without putting it
+  // back. A probe is entitled to do this: EXEC is caller-saved across the call,
+  // and the envelope is what has to cope.
+  [[nodiscard]] std::vector<uint32_t> narrowing_sentinel_probe() const {
+    return {test::make_mov_vgpr_inline(3, kProbeSentinel),
+            build_s_mov_b64(scalar_operand_exec_lo(a_.arch),
+                            scalar_positive_inline_u32(kAnchorMask), a_.arch),
+            build_s_setpc_b64(/*s[30:31]=*/30, a_.arch)};
   }
 
   // Widened before the shift: the wave64 fixtures run lanes up to 63, and
@@ -312,8 +325,64 @@ protected:
   }
 
   //============================================================================
-  // Negative control.
+  // A probe that narrows EXEC and returns.
+  //
+  // The spill store ran under the full mask, so the reload must too, or the
+  // lanes the probe switched off keep the argument the envelope wrote over the
+  // guest's value. The re-widen guarding this is the only EXEC write between the
+  // call and the special-state restore, and it is emitted on a full-exec site
+  // precisely for this case: the site entered the call at -1, so nothing else
+  // would put it back.
   //============================================================================
+
+  void expect_probe_narrowing_exec_does_not_strand_the_spill_reload() {
+    const auto regs = run_patched(live_argument_target(), narrowing_sentinel_probe(),
+                                  {probe_arg_imm(kArgValue)}, /*full_exec=*/true, {3, 0});
+    ASSERT_EQ(regs[0].size(), a_.wave_size) << "kernel did not run to completion";
+    EXPECT_EQ(patched_scratch_, 68u) << "descriptor scratch must grow to spill the live v0";
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
+      EXPECT_EQ(regs[0][lane], kProbeSentinel)
+          << "lane " << lane << ": the probe published before narrowing, so every lane saw it";
+      EXPECT_EQ(regs[1][lane], kGuestValue)
+          << "lane " << lane << ": the guest's v0 must come back in every lane the store covered";
+    }
+  }
+
+  //============================================================================
+  // Negative controls.
+  //============================================================================
+
+  // Nop the post-call re-widen and the reload runs under the mask the probe left
+  // behind, so only those lanes get the guest's v0 back. Without this the
+  // re-widen is unobservable: the other probes here leave EXEC at -1, where
+  // writing -1 over it changes nothing.
+  void expect_without_the_post_call_rewiden_the_reload_strands_switched_off_lanes() {
+    ASSERT_NO_FATAL_FAILURE((void)run_patched(live_argument_target(), narrowing_sentinel_probe(),
+                                              {probe_arg_imm(kArgValue)}, /*full_exec=*/true,
+                                              {3, 0}));
+    ASSERT_FALSE(patched_text_.empty());
+
+    const uint32_t widen =
+        build_s_mov_b64(scalar_operand_exec_lo(a_.arch), scalar_inline_neg_one(a_.arch), a_.arch);
+    std::vector<uint32_t> sabotaged = patched_text_;
+    // A full-exec site widens exactly twice: once opening the window, once
+    // reopening it for the spill loads. The anchor-mask restore that would sit
+    // between them is what the policy omits, so the second match is the one under
+    // test with no ambiguity about which is which.
+    ASSERT_EQ(std::count(sabotaged.begin(), sabotaged.end(), widen), 2);
+    auto it = std::find(sabotaged.begin(), sabotaged.end(), widen);
+    it = std::find(it + 1, sabotaged.end(), widen);
+    ASSERT_NE(it, sabotaged.end());
+    *it = build_s_nop(0, a_.arch);
+
+    test::DbiSim broken(a_.sim_arch, a_.wave_size);
+    const std::vector<uint32_t> v0 = broken.run_and_read_vgpr(sabotaged, patched_scratch_,
+                                                              /*reg=*/0);
+    ASSERT_EQ(v0.size(), a_.wave_size);
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+      EXPECT_EQ(v0[lane], lane_active(lane) ? kGuestValue : kArgValue)
+          << "lane " << lane << ": without the re-widen the reload cannot reach this lane";
+  }
 
   // Nop the widen that opens the full-mask window and the full-exec probe stops
   // reaching the inactive lanes, which is the answer the masked case gives.
@@ -377,6 +446,12 @@ TEST_F(DbiCdna3MaskSimFixture, ProbeReceivesTheAnchorMask) {
 TEST_F(DbiCdna3MaskSimFixture, WithoutTheWidenFullExecReachesOnlyActiveLanes) {
   expect_without_the_widen_full_exec_reaches_only_active_lanes();
 }
+TEST_F(DbiCdna3MaskSimFixture, ProbeNarrowingExecDoesNotStrandTheSpillReload) {
+  expect_probe_narrowing_exec_does_not_strand_the_spill_reload();
+}
+TEST_F(DbiCdna3MaskSimFixture, WithoutThePostCallRewidenTheReloadStrandsSwitchedOffLanes) {
+  expect_without_the_post_call_rewiden_the_reload_strands_switched_off_lanes();
+}
 
 TEST_F(DbiCdna4MaskSimFixture, MaskedProbeReachesOnlyActiveLanes) {
   expect_masked_probe_reaches_only_active_lanes();
@@ -396,6 +471,12 @@ TEST_F(DbiCdna4MaskSimFixture, ProbeReceivesTheAnchorMask) {
 TEST_F(DbiCdna4MaskSimFixture, WithoutTheWidenFullExecReachesOnlyActiveLanes) {
   expect_without_the_widen_full_exec_reaches_only_active_lanes();
 }
+TEST_F(DbiCdna4MaskSimFixture, ProbeNarrowingExecDoesNotStrandTheSpillReload) {
+  expect_probe_narrowing_exec_does_not_strand_the_spill_reload();
+}
+TEST_F(DbiCdna4MaskSimFixture, WithoutThePostCallRewidenTheReloadStrandsSwitchedOffLanes) {
+  expect_without_the_post_call_rewiden_the_reload_strands_switched_off_lanes();
+}
 
 TEST_F(DbiRdna4MaskSimFixture, MaskedProbeReachesOnlyActiveLanes) {
   expect_masked_probe_reaches_only_active_lanes();
@@ -414,6 +495,12 @@ TEST_F(DbiRdna4MaskSimFixture, ProbeReceivesTheAnchorMask) {
 }
 TEST_F(DbiRdna4MaskSimFixture, WithoutTheWidenFullExecReachesOnlyActiveLanes) {
   expect_without_the_widen_full_exec_reaches_only_active_lanes();
+}
+TEST_F(DbiRdna4MaskSimFixture, ProbeNarrowingExecDoesNotStrandTheSpillReload) {
+  expect_probe_narrowing_exec_does_not_strand_the_spill_reload();
+}
+TEST_F(DbiRdna4MaskSimFixture, WithoutThePostCallRewidenTheReloadStrandsSwitchedOffLanes) {
+  expect_without_the_post_call_rewiden_the_reload_strands_switched_off_lanes();
 }
 
 // Wave64 only. A Wave32 kernel has no high EXEC dword, and the orchestrator

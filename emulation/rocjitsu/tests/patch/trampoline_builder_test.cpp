@@ -556,9 +556,6 @@ RegisterSet make_vgpr_set(std::initializer_list<uint16_t> indices) {
   return set;
 }
 
-// Each argument costs a v_mov_b32 plus its literal word. The count is what the
-// orchestrator sizes the trampoline from, and what the emit-time drift guard
-// checks the synthesized envelope against.
 // Each argument costs a v_mov_b32 plus its literal word, and passing any
 // argument at all opens the full-mask window (three EXEC toggles) so the writes
 // define every lane. Both components are in the count the orchestrator sizes the
@@ -729,6 +726,20 @@ TEST(TrampolineBuilderPlan, ArgumentCountDisagreeingWithTheAbiFails) {
   EXPECT_FALSE(fewer.is_probe_call);
 }
 
+// A source outside the declared set would be counted as one word here and
+// emitted as the EXEC high dword there, so the plan and the envelope would agree
+// on a call neither was asked for. Rejected instead of decoded by fallthrough.
+TEST(TrampolineBuilderPlan, UndeclaredArgumentSourceFails) {
+  TrampolinePlan plan;
+  plan.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  plan.probe_args = {{static_cast<ProbeArgSource>(99), 0}};
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}),
+                                                  /*probe_body_clobbers=*/{}, &err));
+  EXPECT_NE(err.find("not a declared ProbeArgSource"), std::string::npos) << err;
+  EXPECT_FALSE(plan.is_probe_call);
+}
+
 //==============================================================================
 // Probe-call emission (emit_probe_call)
 //
@@ -758,6 +769,22 @@ TrampolinePlan make_probe_plan(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA2) {
                                                  /*probe_body_clobbers=*/{}, &err))
       << err;
   return plan;
+}
+
+// Emission screens the sources too rather than trusting that planning did: the
+// two entry points are separately callable, so a plan can reach the emitter
+// without this builder having produced it.
+TEST(TrampolineBuilderEmit, UndeclaredArgumentSourceFails) {
+  TrampolinePlan plan = make_probe_plan();
+  plan.probe_args = {{ProbeArgSource::AnchorExecLo, 0}};
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+
+  plan.probe_args[0].source = static_cast<ProbeArgSource>(99);
+  EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan, &err).has_value());
+  EXPECT_NE(err.find("not a declared ProbeArgSource"), std::string::npos) << err;
 }
 
 // The envelope materializes the target address with getpc + add + addc.

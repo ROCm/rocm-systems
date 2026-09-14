@@ -90,6 +90,23 @@ struct ProbeArgValue {
   return source == ProbeArgSource::AnchorExecLo || source == ProbeArgSource::AnchorExecHi;
 }
 
+/// @brief Is @p source one of the values ProbeArgSource declares?
+///
+/// @details A scoped enum still holds whatever a cast puts in it. The planner
+/// counts the words an argument costs and the emitter produces them, so a value
+/// neither of them has a case for would be counted one way and emitted another,
+/// and the plan/emit drift guard is the only thing that would notice. Both paths
+/// screen the source instead of assuming the type did.
+[[nodiscard]] inline constexpr bool is_declared_probe_arg_source(ProbeArgSource source) {
+  switch (source) {
+  case ProbeArgSource::Immediate:
+  case ProbeArgSource::AnchorExecLo:
+  case ProbeArgSource::AnchorExecHi:
+    return true;
+  }
+  return false;
+}
+
 /// @brief Where a verified convention places the values the framework, rather
 ///        than the probe body, is responsible for producing.
 ///
@@ -178,6 +195,23 @@ struct ProbeCallable {
   rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID; ///< Concrete ISA target, if known.
   std::vector<uint32_t> body_words; ///< The body's instruction words, in order.
   ProbeAbi abi;                     ///< Verified convention and the registers it implies.
+
+  /// Where the framework sources each argument dword, one entry per
+  /// abi.num_arg_vgprs. Declared by the caller, like the count the ABI came
+  /// from: a body that reads v0 cannot say whether it wants a constant or the
+  /// anchor EXEC mask. Only the *values* behind an Immediate slot vary per
+  /// site.
+  std::vector<ProbeArgSource> arg_sources;
+
+  /// Run the body with every lane enabled rather than under the mask the guest
+  /// had at the anchor. A property of what the probe computes, so it is fixed
+  /// here for every site that calls this probe.
+  ///
+  /// Declared rather than derived, and nothing in the body can be checked
+  /// against it. build_probe_callable() therefore does not take it; the caller
+  /// that owns the declaration fills it in. A descriptor carried by the probe
+  /// object would own it instead; there is none today.
+  bool force_full_exec = false;
 
   /// Byte offset of the body once it has been laid out in the instrumented
   /// code object's text.
