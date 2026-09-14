@@ -527,8 +527,9 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
     if (waitStream == nullptr) {
       return hipErrorInvalidHandle;
     }
-    // Don't set when forked stream joins back to the parent.
-    if (!waitStream->IsOriginStream() &&
+    // Don't set when a stream waits on its own event, or when a forked stream joins back to
+    // the parent.
+    if (waitStream != eventStream && !waitStream->IsOriginStream() &&
         waitStream != reinterpret_cast<hip::Stream*>(eventStream->GetParentStream())) {
       waitStream->SetCaptureGraph(eventStream->GetCaptureGraph());
       waitStream->SetCaptureID(eventStream->GetCaptureID());
