@@ -67,7 +67,11 @@ TEST(DdaFabricMaxBlocksTest, OverrideCannotExceedCuCap)
 
 TEST(DdaFabricMaxBlocksTest, ZeroOverrideUsesOneBlock)
 {
-    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "0"), 1);
+    nccl_dda_detail::DdaFabricMaxBlocksOverride parsed;
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "0", &parsed), 1);
+    EXPECT_TRUE(parsed.specified);
+    EXPECT_TRUE(parsed.valid);
+    EXPECT_EQ(parsed.requested, 0);
 }
 
 TEST(DdaFabricMaxBlocksTest, MinimumValidCuCount)
@@ -100,7 +104,11 @@ TEST(DdaFabricMaxBlocksTest, InvalidOverrideIgnored)
 
 TEST(DdaFabricMaxBlocksTest, NegativeOverrideUsesOneBlock)
 {
-    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "-5"), 1);
+    nccl_dda_detail::DdaFabricMaxBlocksOverride parsed;
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "-5", &parsed), 1);
+    EXPECT_TRUE(parsed.specified);
+    EXPECT_TRUE(parsed.valid);
+    EXPECT_EQ(parsed.requested, -5);
 }
 
 TEST(DdaFabricMaxBlocksTest, LargeOverrideDoesNotOverflow)
