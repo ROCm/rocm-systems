@@ -813,7 +813,7 @@ inline size_t rcclSymMinR2Cap(const ncclComm* comm, ncclFunc_t func) {
 inline size_t rcclCeRegMaxTab(const rcclArchThresholds* table, ncclFunc_t func) {
   const int64_t param = (func == ncclFuncAllReduce) ? rcclParamCeArRegMaxMsgBytes() : -1;
   if (param >= 0) return (size_t)param;
-  if (table == nullptr) return 0;
+  if (table == nullptr) return kThreshUnlimited;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceRegMax[(size_t)func] : 0;
 }
 inline size_t rcclCeRegMax(const ncclComm* comm, ncclFunc_t func) {
@@ -821,7 +821,8 @@ inline size_t rcclCeRegMax(const ncclComm* comm, ncclFunc_t func) {
 }
 
 inline size_t rcclCeNonRegMaxTab(const rcclArchThresholds* table, ncclFunc_t func) {
-  if (table == nullptr) return 0;
+  if (table == nullptr)
+    return func == ncclFuncAllReduce ? NCCL_CE_AR_TMPBUF_DEFAULT_BYTES : 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMax[(size_t)func] : 0;
 }
 inline size_t rcclCeNonRegMax(const ncclComm* comm, ncclFunc_t func) {
@@ -879,7 +880,7 @@ inline bool rcclAllGatherCeRegisteredWindowTab(const rcclArchThresholds* table, 
   const size_t symMax = rcclSymMaxR2CapTab(table, ncclFuncAllGather, graphMode);
   if (symMax == 0 || totalBytes <= symMax) return false;
   const size_t regMax = rcclCeRegMaxTab(table, ncclFuncAllGather);
-  return regMax == 0 || totalBytes <= regMax;
+  return regMax == kThreshUnlimited || totalBytes <= regMax;
 }
 bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes,
                                             ncclSymRegType_t winRegType, bool graphMode) {
@@ -1461,7 +1462,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // 2-shot selector (table/env cap, 0 = off). Independent of the allocated
   // ceARTmpBuf size used by registered CE.
   const size_t ceArRegMax = rcclCeRegMaxTab(archTable, ncclFuncAllReduce);
-  const bool ceRegInWindow = ceArRegMax == 0 || msgBytes <= ceArRegMax;
+  const bool ceRegInWindow = ceArRegMax == kThreshUnlimited || msgBytes <= ceArRegMax;
   if (!symEligible && ceRegInWindow && ceAvailable && !hasSysmemSegment &&
       ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
     decision->algo = RCCL_CE_REGISTERED;
