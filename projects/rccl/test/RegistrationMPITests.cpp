@@ -29,6 +29,7 @@
 #include "MPIHelpers.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
+#include "register_inline.h"
 #ifdef ENABLE_FAULT_INJECTION
 #include "ce_fault_inject.h"
 #endif
@@ -111,12 +112,6 @@ public:
     bool hasNETRegistration() const
     {
         return hasPattern("NET register userbuff");
-    }
-
-    bool hasNETRegistrationWithSegments(int n) const
-    {
-        const std::regex re("NET register userbuff[^\\n]*numSegments " + std::to_string(n) + "\\b");
-        return std::regex_search(m_content, re);
     }
 
     bool hasAnyRegistrationSuccess() const
@@ -1054,12 +1049,10 @@ protected:
  *   recvbuff = [N * kSegmentSize,  2N * kSegmentSize)  covers last  N segments
  *
  * The collective operates on four segments per half, while ncclCommRegister
- * covers the complete eight-segment allocation. NET registration must count
- * that full range (numSegments 8). This regression requires multiple nodes so
- * an IPC-only registration cannot satisfy the assertion.
- *
- * Confirmation in the logs (NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=REG):
- *   NET: "... numSegments 8"
+ * covers the complete eight-segment allocation. After AllReduce the cache entry
+ * must cover that full VA and carry NET_REG_COMPLETE; a correct result alone is
+ * not enough, because host staging would still produce one. This regression
+ * requires multiple nodes so an IPC-only registration cannot satisfy the flag.
  */
 TEST_F(UBR_MultiSegment, Generic)
 {
@@ -1074,7 +1067,6 @@ TEST_F(UBR_MultiSegment, Generic)
     ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
     ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
     ASSERT_TRUE(isMultiSegmentRegisterEnabled()) << "NCCL_MULTI_SEGMENT_REGISTER must be set to 1";
-    ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
 
     int dev = 0;
     ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
@@ -1119,11 +1111,16 @@ TEST_F(UBR_MultiSegment, Generic)
 
     ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
 
-    REGLogChecker checker = getLogChecker();
-    TEST_INFO("SpansMultipleSegments: %s (log size: %zu bytes)",
-              checker.getSummary().c_str(), checker.getContentLength());
-    ASSERT_TRUE(checker.hasNETRegistrationWithSegments(kNumSegments))
-        << "Expected NET register userbuff with numSegments " << kNumSegments;
+    struct ncclReg* reg = nullptr;
+    ASSERT_EQ(ncclSuccess,
+              ncclRegFind(reinterpret_cast<struct ncclComm*>(getActiveCommunicator()), buf.vaBase, buf.totalSize,
+                          &reg));
+    ASSERT_NE(reg, nullptr) << "ncclCommRegister did not publish a cache entry for the multi-segment buffer";
+    ASSERT_LE(reg->begAddr, reinterpret_cast<uintptr_t>(buf.vaBase));
+    ASSERT_GE(reg->endAddr, reinterpret_cast<uintptr_t>(buf.vaBase) + buf.totalSize);
+    ASSERT_TRUE(reg->state & NET_REG_COMPLETE)
+        << "AllReduce completed without a NET MR; host staging would still produce a correct result";
+    ASSERT_NE(reg->netHandleHead, nullptr);
 }
 
 /**
