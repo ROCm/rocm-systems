@@ -1285,9 +1285,9 @@ protected:
         std::vector<void*> requests(slots, nullptr);
 
         // One deadline for the whole batch rather than kStressTimeoutMs per slot. Each
-        // slot taking its own 60 s is 32 minutes across a full batch, and the suite's
-        // own 300 s timeout kills the process long before the loop returns, so the
-        // readable failure below never gets printed. Every slot is still waited on,
+        // slot taking its own 60 s is 32 minutes across a full batch, and the suite's own
+        // timeout -- 600 s for the threaded suites -- kills the process long before the
+        // loop returns, so the readable failure below never gets printed. Every slot is still waited on,
         // with what is left of the budget and a floor so a drain that starts past the
         // deadline still gets a chance to retire its work.
         const auto deadline = std::chrono::steady_clock::now()

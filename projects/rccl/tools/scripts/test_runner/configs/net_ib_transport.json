@@ -995,7 +995,6 @@
     "net_ib_multithread_base": {
       "extends": "net_ib_base",
       "timeout": 600,
-      "timeout": 300,
       "description": "Shared environment for the threaded suites. Deliberately carries no tests: extends merges test lists rather than replacing them, so a threaded suite that extended a suite with tests would also run those tests, at whatever worker count it sets.",
       "env_variables": {
         "NCCL_DEBUG": "INFO",
