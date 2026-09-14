@@ -390,6 +390,35 @@ TEST(ConSanMoi, Gfx1201InlineShadowBarrierSuspendsDistantGuestExpertScheduling) 
   EXPECT_TRUE(std::equal(expert->begin(), expert->end(), trampoline.end() - expert->size()));
 }
 
+TEST(ConSanMoi, Cdna4DirectLdsSentinelCannotIndexOutsideShadow) {
+  std::vector<uint32_t> words(2400, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  words[0] = 0xe05d1000u;
+  words[1] = 0x80020005u; // buffer_load_dwordx4 v5, s[8:11], 0 offen lds
+  words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.scratch_vgpr = 8;
+  options.set_moi_owner_epoch_vgprs(40, 41);
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  const auto result = test_lower_consan(make_cdna4_lds_code_object(words), options);
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.patches.size(), 1u);
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  const auto body = text_words_at_offset(patched, result.patches[0].trampoline_offset,
+                                        result.patches[0].trampoline_size);
+  // Direct addresses are captured in the final scratch register. The bounds
+  // comparison must precede shadow transactions; M0=0x7fffffff masks to
+  // 0x3ffff and must produce no shadow access, while ordinary LDS offsets pass.
+  const auto compare = ib::build_v_cmp_gt_u32_vcc(vector_source_vgpr(12u), 26u,
+                                                  ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(compare);
+  auto guard = std::ranges::find(body, *compare);
+  ASSERT_NE(guard, body.end()) << "Direct-to-LDS shadow index has no aperture guard";
+  ASSERT_NE(guard + 1, body.end());
+  EXPECT_EQ((*(guard + 1) >> 8u) & 0xffu, 0x20u) << "guard must narrow EXEC";
+}
+
 TEST(ConSanMoi, Cdna4InlineShadowProbeEmitsNativeTransactions) {
   // Leave enough dense padding for the complete exact-byte transaction so
   // this fixture continues to exercise the native inline placement.

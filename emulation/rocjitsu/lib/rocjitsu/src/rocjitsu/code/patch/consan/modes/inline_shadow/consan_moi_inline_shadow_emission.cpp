@@ -1850,6 +1850,29 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
     words.push_back(*in_shared_aperture);
     words.push_back(*retain_shared_lanes);
   }
+  if (candidate.site().lowering.form &&
+      candidate.site().lowering.form->kind ==
+          ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed &&
+      !workgroup_shadow) {
+    // Direct LDS loads can deliberately target an out-of-range M0 to suppress
+    // writes (CDNA4 ISA 9.1.9.1). Such lanes must not index the external shadow.
+    // The report provisions one slot per LDS byte in each dispatch bank;
+    // its aperture covers every owning kernel, including dynamic LDS.
+    if (layout.inline_exact_dispatch_bank_count == 0u)
+      return std::nullopt;
+    const uint32_t lds_extent =
+        layout.exact_shadow_entry_capacity / layout.inline_exact_dispatch_bank_count;
+    const auto extent = instrumentation::build_v_mov_b32_literal(tmp_vgpr, lds_extent, arch);
+    const auto in_lds = instrumentation::build_v_cmp_gt_u32_vcc(
+        vector_source_vgpr(tmp_vgpr), *lds_byte_offset_vgpr, arch);
+    const auto retain_lds_lanes = instrumentation::build_s_and_saveexec_b64(
+        static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u), kAmdGpuVccLo, arch);
+    if (!extent || !in_lds || !retain_lds_lanes)
+      return std::nullopt;
+    words.insert(words.end(), extent->begin(), extent->end());
+    words.push_back(*in_lds);
+    words.push_back(*retain_lds_lanes);
+  }
   if (workgroup_shadow) {
     const auto retain_valid_workgroup = instrumentation::build_s_mov_b64(
         static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 22u), kAmdGpuExecLo, arch);

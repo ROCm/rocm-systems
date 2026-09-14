@@ -454,6 +454,8 @@ TEST(ConSan, InventoriesCdnaDirectGlobalToLdsAsAnLdsWrite) {
   EXPECT_EQ(result.program_inventory.access_sites()[1].decoded_width_bits, 128u);
   EXPECT_FALSE(result.program_inventory.access_sites()[1].operands.address_vgpr.has_value());
   EXPECT_EQ(result.program_inventory.access_sites()[1].operands.direct_memory_address_vgpr, 4u);
+  for (const auto &site : result.program_inventory.access_sites())
+    EXPECT_EQ(site.operands.direct_m0_address_mask, 0x3ffffu);
   for (const ConSanProgramSite &candidate : test_admitted_accesses(result)) {
     EXPECT_EQ(candidate.origin, ConSanAccessOrigin::DirectToLds);
     EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Write);
