@@ -7,7 +7,7 @@ by its ratio to the matching uninstrumented second run.
 
 | Workload | Uninstrumented Startup | Uninstrumented Run | SuperCollider Startup | SuperCollider Run | RecordReplay Startup | RecordReplay Run | Sampled Startup | Sampled Run | InlineShadow Startup | InlineShadow Run | Progress |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| PyTorch synthetic dense prefill (32-token prompt) | 4.36 s | 0.00276 s (1×) | interrupted | interrupted | pending | pending | pending | pending | pending | pending | [supercollider--audit-on: interrupted](</home/benjacob/consan-gfx950-benchmark-full/pytorch-dense-prefill--supercollider--audit-on.log>) |
+| PyTorch synthetic dense prefill (32-token prompt) | 4.32 s | 0.00351 s (1×) | interrupted | interrupted | pending | pending | pending | pending | pending | pending | [supercollider--audit-on: interrupted](</home/benjacob/consan-gfx950-benchmark-full/pytorch-dense-prefill--supercollider--audit-on.log>) |
 | PyTorch synthetic dense decode (one continuous-batch tick) | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | not started: pending |
 | PyTorch synthetic four-expert top-1 MoE prefill (16-token prompt) | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | not started: pending |
 | Gluon verified shared-memory round trip (1024 elements) | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | not started: pending |
