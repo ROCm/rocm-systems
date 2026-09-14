@@ -24,6 +24,10 @@
 
 namespace rocjitsu {
 
+/// Separate a VALU scalar restore from any following guest SGPR consumer,
+/// including VMEM buffer descriptors (five wait states on CDNA4).
+[[nodiscard]] std::optional<uint32_t> build_sgpr_restore_dependency_wait(rj_code_arch_t arch);
+
 /// @brief Monotonic byte-range allocator for one kernel's private segment.
 ///
 /// @details This deliberately knows nothing about register identity or spill

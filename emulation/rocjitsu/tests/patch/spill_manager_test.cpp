@@ -737,6 +737,29 @@ TEST(ConSanSpill, Cdna4MatrixAccumulatorIsReadyBeforeScratchSave) {
       << "Scratch save can observe a pending MFMA result (CDNA4 ISA Table 38)";
 }
 
+TEST(ConSanSpill, Cdna4RestoredBufferDescriptorIsReadyForVmem) {
+  // Attention prefill immediately consumes restored s[12:15] in a MUBUF
+  // load. CDNA4 ISA section 4.5 requires five wait states from a VALU SGPR
+  // write to VMEM; the shorter VALU-to-SALU wait is insufficient.
+  SpillManager manager(0u, kMaxCdnaAddressFreeScratchPrivateBytes);
+  const auto memory = build_sgpr_spill_sequence(manager, 12u, 4u, 4u,
+                                                ROCJITSU_CODE_ARCH_CDNA4);
+  const auto lanes = build_lane_sgpr_spill_sequence(12u, 4u, 4u, 0u,
+                                                  ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(memory && lanes);
+  for (const auto *sequence : {&*memory, &*lanes}) {
+    SCOPED_TRACE(sequence->lane_reservoir_vgpr ? "lane-backed" : "memory-backed");
+    unsigned wait_states = 0u;
+    for (auto it = sequence->restore_words.rbegin(); it != sequence->restore_words.rend(); ++it) {
+      if ((*it & 0xffff0000u) != 0xbf800000u)
+        break;
+      wait_states += (*it & 0xfu) + 1u;
+    }
+    EXPECT_GE(wait_states, 5u)
+        << "A following buffer load can consume a stale restored SGPR descriptor";
+  }
+}
+
 TEST(SpillManager, BuildsGfx950VgprSaveRestoreSequence) {
   SpillManager manager(/*original_private_bytes=*/0, kMaxCdnaAddressFreeScratchPrivateBytes);
   const auto sequence = build_vgpr_spill_sequence(manager, /*vgpr_base=*/10,
@@ -772,7 +795,7 @@ TEST(SpillManager, ComposesGfx950EntrySgprSpillAfterTemporaryVgprs) {
   EXPECT_EQ(sgprs->total_private_bytes, 48u);
   EXPECT_EQ(manager.total_private_bytes(), 48u);
   const auto restore_dependency_wait =
-      instrumentation::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_CDNA4);
+      std::optional<uint32_t>{build_s_nop(4, ROCJITSU_CODE_ARCH_CDNA4)};
   ASSERT_TRUE(restore_dependency_wait);
   EXPECT_EQ(sgprs->restore_words.back(), *restore_dependency_wait)
       << "memory-backed scalar restore must separate v_readfirstlane from scalar consumers";
@@ -843,7 +866,9 @@ TEST(SpillManager, BuildsLaneBackedScalarSpillAcrossEveryConSanArchitecture) {
       expected_save.insert(expected_save.end(), save->begin(), save->end());
       expected_restore.insert(expected_restore.end(), restore->begin(), restore->end());
     }
-    const auto dependency_wait = instrumentation::build_valu_to_salu_dependency_wait(target.arch);
+    const auto dependency_wait = target.arch == ROCJITSU_CODE_ARCH_CDNA4
+            ? std::optional<uint32_t>{build_s_nop(4, target.arch)}
+            : instrumentation::build_valu_to_salu_dependency_wait(target.arch);
     ASSERT_TRUE(dependency_wait);
     expected_restore.push_back(*dependency_wait);
     EXPECT_EQ(sequence->save_words, expected_save);
@@ -1176,7 +1201,9 @@ TEST(SpillManager, ComposesDynamicStackVgprAndSgprFramesAcrossArchitectures) {
     ASSERT_TRUE(wait);
     expected_save.push_back(*wait);
     const auto restore_dependency_wait =
-        instrumentation::build_valu_to_salu_dependency_wait(target.arch);
+        target.arch == ROCJITSU_CODE_ARCH_CDNA4
+            ? std::optional<uint32_t>{build_s_nop(4, target.arch)}
+            : instrumentation::build_valu_to_salu_dependency_wait(target.arch);
     ASSERT_TRUE(restore_dependency_wait);
     expected_restore.push_back(*restore_dependency_wait);
     EXPECT_EQ(sgpr_sequence->save_words, expected_save);

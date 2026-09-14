@@ -1446,7 +1446,7 @@ void validate_entry_scalar_backup_semantics(const FinalValidationEnvironment &en
       expected_save.insert(expected_save.end(), save->begin(), save->end());
       expected_restore.insert(expected_restore.end(), restore->begin(), restore->end());
     }
-    const auto restore_wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
+    const auto restore_wait = build_sgpr_restore_dependency_wait(arch);
     if (restore_wait)
       expected_restore.push_back(*restore_wait);
     else

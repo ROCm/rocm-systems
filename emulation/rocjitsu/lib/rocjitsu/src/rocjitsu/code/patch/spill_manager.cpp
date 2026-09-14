@@ -80,6 +80,15 @@ normalize_instruction_words(std::optional<Sequence> encoded) {
 
 } // namespace
 
+// Restored SGPRs can feed a VMEM descriptor immediately after the spill.
+// CDNA4 ISA section 4.5 requires five wait states from a VALU SGPR write
+// to VMEM; the VALU-to-SALU dependency wait alone does not cover that use.
+[[nodiscard]] std::optional<uint32_t> build_sgpr_restore_dependency_wait(rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return build_s_nop(4, arch);
+  return instrumentation::build_valu_to_salu_dependency_wait(arch);
+}
+
 SpillManager::SpillManager(uint32_t original_private_bytes, uint32_t per_lane_scratch_limit)
     : limit_(per_lane_scratch_limit),
       slots_(util::align_up(original_private_bytes, kDbiZoneAlignment)) {}
@@ -290,8 +299,7 @@ std::optional<SgprSpillSequence> build_sgpr_spill_sequence(SpillManager &manager
                          : arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
                                                             : build_s_wait_loadcnt0(arch);
   const auto wait_scalar_load = instrumentation::build_s_wait_scalar_load0(arch);
-  const auto restore_dependency_wait =
-      instrumentation::build_valu_to_salu_dependency_wait(arch);
+  const auto restore_dependency_wait = build_sgpr_restore_dependency_wait(arch);
   if (!required_private_bytes || !wait_store || !wait_load || !wait_scalar_load ||
       !restore_dependency_wait)
     return std::nullopt;
@@ -369,7 +377,7 @@ build_lane_sgpr_spill_sequence(uint16_t sgpr_base, uint16_t sgpr_count, uint16_t
       reservoir_vgpr >= REGISTER_SET_MAX_VGPRS) {
     return std::nullopt;
   }
-  const auto restore_wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
+  const auto restore_wait = build_sgpr_restore_dependency_wait(arch);
   const auto wait_scalar_load = instrumentation::build_s_wait_scalar_load0(arch);
   if (!restore_wait || !wait_scalar_load)
     return std::nullopt;
@@ -736,8 +744,7 @@ build_dynamic_stack_sgpr_spill_sequence(uint16_t sgpr_base, uint16_t sgpr_count,
                          : arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
                                                             : build_s_wait_loadcnt0(arch);
   const auto wait_scalar_load = instrumentation::build_s_wait_scalar_load0(arch);
-  const auto restore_dependency_wait =
-      instrumentation::build_valu_to_salu_dependency_wait(arch);
+  const auto restore_dependency_wait = build_sgpr_restore_dependency_wait(arch);
   if (!wait_store || !wait_load || !wait_scalar_load || !restore_dependency_wait)
     return std::nullopt;
 

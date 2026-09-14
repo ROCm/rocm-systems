@@ -83,7 +83,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   if (restore)
     require_emission.append(
         "ConSan MOI entry scalar backup could not encode its restore dependency wait",
-        instrumentation::build_valu_to_salu_dependency_wait(arch));
+        build_sgpr_restore_dependency_wait(arch));
   return sequence.finish();
 }
 
