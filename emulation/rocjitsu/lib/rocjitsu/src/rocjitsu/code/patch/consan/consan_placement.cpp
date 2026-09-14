@@ -238,7 +238,8 @@ bool is_relocatable_consan_barrier_destination(const Instruction &instruction, u
       vgpr_ranges_overlap(candidate, required_vgprs, *form.address_vgpr, form.address_vgpr_count))
     return true;
   if (form.direct_memory_address_vgpr &&
-      vgpr_ranges_overlap(candidate, required_vgprs, *form.direct_memory_address_vgpr, 1u))
+      vgpr_ranges_overlap(candidate, required_vgprs, *form.direct_memory_address_vgpr,
+                          form.direct_memory_address_vgpr_count))
     return true;
 
   if (form.destination_vgpr &&
@@ -269,7 +270,7 @@ bool is_relocatable_consan_barrier_destination(const Instruction &instruction, u
   };
 
   note_range(form.address_vgpr, form.address_vgpr_count);
-  note_range(form.direct_memory_address_vgpr, 1u);
+  note_range(form.direct_memory_address_vgpr, form.direct_memory_address_vgpr_count);
   note_range(form.destination_vgpr, form.destination_register_count);
   const uint16_t data_vgprs =
       form.second_data_vgpr ? form.element_register_count : form.data_register_count;

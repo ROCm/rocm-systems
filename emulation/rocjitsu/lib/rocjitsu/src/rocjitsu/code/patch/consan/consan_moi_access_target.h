@@ -35,11 +35,9 @@ resolve_moi_access_resource_facts(const ConSanMoiOperatingPoint &point,
 candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
                                std::vector<std::string> &errors);
 
-[[nodiscard]] bool append_materialize_direct_to_lds_address(std::vector<uint32_t> &words,
-                                                            const ConSanProgramSite &site,
-                                                            uint16_t result_vgpr,
-                                                            uint16_t exec_save_sgpr,
-                                                            rj_code_arch_t arch);
+[[nodiscard]] bool append_materialize_direct_to_lds_address(
+    std::vector<uint32_t> &words, const ConSanProgramSite &site, uint16_t result_vgpr,
+    uint16_t temporary_vgpr, uint16_t exec_save_sgpr, rj_code_arch_t arch);
 
 [[nodiscard]] bool candidate_uses_scalar_vector_flat_address(const ConSanMoiCandidate &candidate);
 [[nodiscard]] bool

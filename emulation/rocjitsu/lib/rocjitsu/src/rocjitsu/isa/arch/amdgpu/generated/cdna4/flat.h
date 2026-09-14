@@ -726,6 +726,24 @@ public:
   Operand saddr;
 };
 
+class GlobalLoadLdsDwordx4Flat : public Flat {
+public:
+  GlobalLoadLdsDwordx4Flat(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand m0;
+  Operand saddr;
+};
+
+class GlobalLoadLdsDwordx3Flat : public Flat {
+public:
+  GlobalLoadLdsDwordx3Flat(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand addr;
+  Operand m0;
+  Operand saddr;
+};
+
 } // namespace cdna4
 } // namespace rocjitsu
 

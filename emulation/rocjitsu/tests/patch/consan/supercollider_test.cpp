@@ -19,15 +19,13 @@ struct GrowthPolicyFixture {
 };
 
 [[nodiscard]] std::optional<uint16_t> test_sc_vcc_save_sgpr(const ConSanPatchInfo &patch) {
-  return patch.scalar_vcc_spill
-             ? std::optional<uint16_t>{patch.scalar_vcc_spill->vcc_save_sgpr}
-             : std::nullopt;
+  return patch.scalar_vcc_spill ? std::optional<uint16_t>{patch.scalar_vcc_spill->vcc_save_sgpr}
+                                : std::nullopt;
 }
 
 [[nodiscard]] std::optional<uint16_t> test_sc_vcc_reservoir_vgpr(const ConSanPatchInfo &patch) {
-  return patch.scalar_vcc_spill
-             ? std::optional<uint16_t>{patch.scalar_vcc_spill->reservoir_vgpr}
-             : std::nullopt;
+  return patch.scalar_vcc_spill ? std::optional<uint16_t>{patch.scalar_vcc_spill->reservoir_vgpr}
+                                : std::nullopt;
 }
 
 [[nodiscard]] uint16_t test_sc_vcc_reservoir_count(const ConSanPatchInfo &patch) {
@@ -3269,6 +3267,44 @@ TEST(ConSan, ProbeLdsCheckTrapModeExpandsCdna4DirectToLdsAndRetainsPayload) {
   EXPECT_EQ(count_subsequence(body, direct), 0u);
 }
 
+TEST(ConSan, Gfx950GlobalDirectToLdsRetainsPayloadAndGlobalAddressPair) {
+  for (const uint32_t width : {96u, 128u}) {
+    SCOPED_TRACE(width);
+    // Nonzero signed OFFSET must survive the replacement global load, and
+    // must also be represented in the LDS destination address.
+    const uint32_t op = width == 96u ? 126u : 125u;
+    const std::array<uint32_t, 2> direct = {0xdc008000u | (op << 18u) | 0x1ff0u, 0x007f0002u};
+    std::vector<uint32_t> words(direct.begin(), direct.end());
+    words.insert(words.end(), 32u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+    words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+    ConSanOptions options;
+    options.flavor = ConSanFlavor::SuperCollider;
+    options.probe_lds_check_trap = true;
+    options.delay_nops = 2u;
+    const auto result =
+        test_lower_consan(make_cdna4_lds_code_object(words, "gfx950_global_direct_lds"), options);
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+    ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+    const auto &site = result.program_inventory.access_sites().front();
+    ASSERT_TRUE(site.lowering.form);
+    EXPECT_EQ(site.lowering.form->immediate_byte_offset, -16);
+    EXPECT_EQ(site.lowering.form->direct_memory_address_vgpr_count, 2u);
+    EXPECT_EQ(site.lowering.form->direct_m0_address_mask, 0x3fffcu);
+    EXPECT_EQ(site.decoded_width_bits, width);
+    ASSERT_EQ(result.patches.size(), 1u);
+    const auto &patch = result.patches.front();
+    ASSERT_TRUE(patch.scratch_vgpr);
+    EXPECT_GT(*patch.scratch_vgpr, 3u);
+    const auto body = emitted_patch_words(result, patch);
+    const std::array<uint32_t, 2> retained = {
+        (direct[0] & ~(0x7fu << 18u)) | ((width == 96u ? 22u : 23u) << 18u),
+        direct[1] | (static_cast<uint32_t>(*patch.scratch_vgpr) << 24u)};
+    EXPECT_TRUE(contains_subsequence(body, retained));
+    EXPECT_EQ(count_subsequence(body, direct), 0u);
+  }
+}
+
 TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B8VdsStoreBeforeComparingReadback) {
   constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB8Vds, {.addr = 2, .data0 = 1});
   std::vector<uint32_t> text_words = {store[0], store[1]};
@@ -5879,12 +5915,10 @@ TEST(ConSan, FinalValidationAcceptsProvenNonTargetDescriptorSgprGrowth) {
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_TRUE(result.text_relocation);
   KD original_descriptor{};
-  std::memcpy(&original_descriptor,
-              bytes.data() + original_helper->descriptor_file_offset,
+  std::memcpy(&original_descriptor, bytes.data() + original_helper->descriptor_file_offset,
               sizeof(original_descriptor));
   const uint32_t original_sgpr_granule = AMDHSA_BITS_GET(
-      original_descriptor.compute_pgm_rsrc1,
-      kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
+      original_descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
   mutate_kernel_descriptor(result.replacement, "lds_helper", [&](KD &descriptor) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
@@ -5996,8 +6030,7 @@ TEST(ConSan, Gfx1250CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
   EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
   ConSanTransformArtifacts corrupted = result;
   ASSERT_TRUE(corrupted.patches.front().scalar_vcc_spill);
-  corrupted.patches.front().scalar_vcc_spill->reservoir =
-      static_cast<ConSanScalarVccReservoir>(3u);
+  corrupted.patches.front().scalar_vcc_spill->reservoir = static_cast<ConSanScalarVccReservoir>(3u);
   const std::vector<std::string> validation_errors = validate_consan_modified_elf(bytes, corrupted);
   EXPECT_TRUE(std::ranges::any_of(validation_errors, [](const std::string &error) {
     return error.find("invalid SuperCollider scalar-VCC spill effect") != std::string::npos;

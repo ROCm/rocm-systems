@@ -113,6 +113,8 @@ struct ConSanAccessLoweringForm {
   bool destination_preserves_unwritten_bits = false;
   std::optional<uint16_t> address_vgpr;
   std::optional<uint16_t> direct_memory_address_vgpr;
+  uint16_t direct_memory_address_vgpr_count = 1;
+  uint32_t direct_m0_address_mask = 0xffffffffu;
   std::optional<uint16_t> destination_vgpr;
   std::optional<uint16_t> destination_accvgpr;
   std::optional<uint16_t> data_vgpr;

@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
+#include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -455,6 +458,111 @@ TEST(ConSan, InventoriesCdnaDirectGlobalToLdsAsAnLdsWrite) {
     EXPECT_EQ(candidate.origin, ConSanAccessOrigin::DirectToLds);
     EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Write);
   }
+}
+
+TEST(ConSan, InventoriesGfx950GlobalLoadLdsDwordx4) {
+  // Actual gfx950 instruction from TokenSpeed's Gluon attention decode kernel:
+  // global_load_lds_dwordx4 v[54:55], off. Unlike ordinary global loads,
+  // opcode 125 has no corresponding FLAT opcode in the vendor MR ISA.
+  const std::array<uint32_t, 3> words = {0xDDF48000u, 0x007F0036u,
+                                         build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)};
+  const ConSanTransformArtifacts result =
+      test_lower_consan(make_cdna4_lds_code_object(words, "gfx950_global_load_lds_dwordx4"),
+                        moi_options(ConSanMoiEngine::RecordReplay));
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+  const ConSanProgramSite &site = result.program_inventory.access_sites().front();
+  EXPECT_EQ(site.decoded_site().mnemonic, "global_load_lds_dwordx4");
+  EXPECT_EQ(site.kind, ConSanLdsAccessKind::Write);
+  EXPECT_EQ(site.origin, ConSanAccessOrigin::DirectToLds);
+  EXPECT_EQ(site.decoded_width_bits, 128u);
+  EXPECT_FALSE(site.operands.address_vgpr.has_value());
+  EXPECT_EQ(site.operands.direct_memory_address_vgpr, 54u);
+  EXPECT_EQ(site.operands.direct_memory_address_vgpr_count, 2u);
+  EXPECT_EQ(site.operands.direct_m0_address_mask, 0x3fffcu);
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+}
+
+TEST(ConSan, Gfx950GlobalDirectLdsDecodePreservesDependenciesAndRejectsReservedFields) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  for (const uint32_t op : {125u, 126u}) {
+    for (const uint32_t saddr : {32u, 127u}) {
+      std::array<uint32_t, 2> words = {0xdc008000u | (op << 18u), (saddr << 16u) | 54u};
+      auto decoded = decoder->decode(words.data());
+      ASSERT_FALSE(decoded.failed());
+      const auto &inst = *decoded.value();
+      EXPECT_TRUE(inst.is_memory_op());
+      EXPECT_EQ(inst.num_dst_operands(), 0);
+      const InstDefUse def_use(inst);
+      EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 54, 1}));
+      EXPECT_EQ(def_use.uses.contains({RegClass::VGPR, 55, 1}), saddr == 127u);
+      EXPECT_TRUE(def_use.uses.contains({RegClass::M0, 0, 1}));
+      if (saddr != 127u)
+        EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 32, 2}));
+      words[1] |= 1u << 24u;
+      EXPECT_TRUE(decoder->decode(words.data()).failed());
+      words[1] &= 0x00ffffffu;
+      words[0] &= ~(3u << 14u);
+      EXPECT_TRUE(decoder->decode(words.data()).failed());
+    }
+  }
+}
+
+TEST(ConSan, Gfx950DirectLdsAddressExecutesMaskedM0OffsetAndPhysicalLaneStride) {
+  ConSanProgramSite site;
+  site.lowering.form.emplace();
+  auto &form = *site.lowering.form;
+  form.kind = ConSanAccessLoweringFormKind::DirectToLdsLaneAddressed;
+  form.direct_m0_address_mask = 0x3fffcu;
+  amdgpu::GpuMemory memory("consan_direct_lds_address_mem");
+  amdgpu::L2Cache l2("consan_direct_lds_address_l2");
+  l2.set_backing_memory(&memory);
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("consan_direct_lds_address", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  constexpr uint64_t exec = 0x8000000180000001ull;
+  constexpr uint32_t m0 = 0xa5fc0207u;
+  for (const uint32_t width : {96u, 128u}) {
+    for (const int32_t offset : {-16, 0, 48}) {
+      SCOPED_TRACE(std::to_string(width) + ":" + std::to_string(offset));
+      form.element_width_bits = width;
+      form.immediate_byte_offset = offset;
+      std::vector<uint32_t> words;
+      ASSERT_TRUE(consan_moi_impl::append_materialize_direct_to_lds_address(words, site, 20u, 21u,
+                                                                            30u, config.arch));
+      for (size_t i = 0; i < words.size(); ++i)
+        memory.write32(i * sizeof(uint32_t), words[i]);
+      wave->pc = 0u;
+      wave->set_exec(exec);
+      wave->set_m0(m0);
+      wave->set_vcc(0x1234567887654321ull);
+      wave->write_scc(true);
+      size_t steps = 0;
+      while (wave->pc < words.size() * sizeof(uint32_t)) {
+        ASSERT_LT(steps++, words.size());
+        cu->step();
+      }
+      cu->flush_all();
+      for (uint32_t lane = 0; lane < 64u; ++lane)
+        EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 20u, lane),
+                  (m0 & 0x3fffcu) + offset + lane * 16u)
+            << "lane=" << lane;
+      EXPECT_EQ(wave->exec(), exec);
+      EXPECT_EQ(wave->m0(), m0);
+      EXPECT_EQ(wave->vcc(), 0x1234567887654321ull);
+      EXPECT_TRUE(wave->read_scc());
+    }
+  }
+  wave->halt();
 }
 
 TEST(ConSan, InventoriesGfx1250VflatRawFields) {

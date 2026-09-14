@@ -366,6 +366,8 @@ struct ConSanAccessOperandFacts : ConSanDecodedMemoryOperands {
   /// can also have an explicit LDS address, so this cannot share
   /// `address_vgpr` without conflating the two address spaces.
   std::optional<uint16_t> direct_memory_address_vgpr;
+  uint16_t direct_memory_address_vgpr_count = 1;
+  uint32_t direct_m0_address_mask = 0xffffffffu;
   /// Target-normalized scalar half of a scalar-vector FLAT address. The raw
   /// SADDR encoding remains below for exact lowering validation; absence here
   /// means that the target decoder identified its vector-only sentinel.

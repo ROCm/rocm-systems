@@ -90,11 +90,9 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
   return *form.address_vgpr;
 }
 
-[[nodiscard]] bool append_materialize_direct_to_lds_address(std::vector<uint32_t> &words,
-                                                            const ConSanProgramSite &site,
-                                                            uint16_t result_vgpr,
-                                                            uint16_t exec_save_sgpr,
-                                                            rj_code_arch_t arch) {
+[[nodiscard]] bool append_materialize_direct_to_lds_address(
+    std::vector<uint32_t> &words, const ConSanProgramSite &site, uint16_t result_vgpr,
+    uint16_t temporary_vgpr, uint16_t exec_save_sgpr, rj_code_arch_t arch) {
   if (!site.lowering.form)
     return false;
   const ConSanAccessLoweringForm &form = *site.lowering.form;
@@ -123,11 +121,19 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
       result_vgpr, kScalarInlineNegativeOneOperand, vector_source_vgpr(result_vgpr), arch);
   const auto scale = instrumentation::build_v_lshlrev_b32(
       result_vgpr, scalar_positive_inline_u32(lane_stride_shift), result_vgpr, arch);
-  const auto add =
-      instrumentation::build_v_add_u32(result_vgpr, scalar_operand_m0(arch), result_vgpr, arch);
+  if (temporary_vgpr == result_vgpr || temporary_vgpr >= 256u)
+    return false;
+  const auto mask = instrumentation::build_v_and_b32_literal(
+      temporary_vgpr, form.direct_m0_address_mask, temporary_vgpr, arch);
+  const auto add = instrumentation::build_v_add_u32(result_vgpr, vector_source_vgpr(temporary_vgpr),
+                                                    result_vgpr, arch);
+  const auto add_offset = instrumentation::build_v_add_u32(
+      result_vgpr, vector_source_vgpr(temporary_vgpr), result_vgpr, arch);
+  const auto offset = instrumentation::build_v_mov_b32_literal(
+      temporary_vgpr, static_cast<uint32_t>(form.immediate_byte_offset.value_or(0)), arch);
   const auto restore_exec = instrumentation::build_s_mov_b64(kAmdGpuExecLo, exec_save_sgpr, arch);
-  if (!save_exec || !activate_all_lanes || !lane_lo || !lane_hi || !scale || !add ||
-      !restore_exec) {
+  if (!save_exec || !activate_all_lanes || !lane_lo || !lane_hi || !scale || !mask || !add ||
+      !add_offset || !offset || !restore_exec) {
     return false;
   }
   words.push_back(*save_exec);
@@ -135,7 +141,13 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
   words.insert(words.end(), lane_lo->begin(), lane_lo->end());
   words.insert(words.end(), lane_hi->begin(), lane_hi->end());
   words.push_back(*scale);
+  words.push_back(build_v_mov_b32_e32(temporary_vgpr, scalar_operand_m0(arch), arch));
+  words.insert(words.end(), mask->begin(), mask->end());
   words.insert(words.end(), add->begin(), add->end());
+  if (form.immediate_byte_offset.value_or(0) != 0) {
+    words.insert(words.end(), offset->begin(), offset->end());
+    words.insert(words.end(), add_offset->begin(), add_offset->end());
+  }
   words.push_back(*restore_exec);
   return true;
 }

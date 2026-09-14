@@ -1214,5 +1214,41 @@ void FlatAtomicDecX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
+void GlobalLoadLdsDwordx4Flat::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 4;
+  d->is_load = true;
+  d->lds_dst = true;
+  d->lds_per_lane_addr = true;
+  d->lds_base = wf.lds_base();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
+    d->per_lane_lds_addr[lane] = wf.lds_base() + (wf.m0() & 0x3fffcu) +
+                                 (static_cast<int32_t>(inst_.offset << 19u) >> 19u) + lane * 16u;
+  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
+  d->non_temporal = inst_.nt;
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  flat_calculate_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void GlobalLoadLdsDwordx3Flat::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 3;
+  d->is_load = true;
+  d->lds_dst = true;
+  d->lds_per_lane_addr = true;
+  d->lds_base = wf.lds_base();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
+    d->per_lane_lds_addr[lane] = wf.lds_base() + (wf.m0() & 0x3fffcu) +
+                                 (static_cast<int32_t>(inst_.offset << 19u) >> 19u) + lane * 16u;
+  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
+  d->non_temporal = inst_.nt;
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  flat_calculate_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
 } // namespace cdna4
 } // namespace rocjitsu

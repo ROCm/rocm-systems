@@ -1988,6 +1988,12 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
         # FP atomics and other unrecognized patterns.
         return InstructionSemantics(name, 'flat_atomic')
 
+    if upper in ('GLOBAL_LOAD_LDS_DWORDX3', 'GLOBAL_LOAD_LDS_DWORDX4'):
+        return InstructionSemantics(
+            name, 'global_load_lds', elem_size=4,
+            num_elems=3 if upper.endswith('X3') else 4,
+        )
+
     for prefix in ('GLOBAL_LOAD_ASYNC_TO_LDS_', 'CLUSTER_LOAD_ASYNC_TO_LDS_'):
         if upper.startswith(prefix):
             info = _FLAT_DATA_MAP.get(upper[len(prefix) :])

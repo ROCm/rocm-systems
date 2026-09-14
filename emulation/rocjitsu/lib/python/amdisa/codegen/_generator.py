@@ -1036,6 +1036,7 @@ class CodeGenerator:
                 'gl1_inv',
                 'gl1_wbinv',
                 'global_load_addtid',
+                'global_load_lds',
                 'global_load_async_to_lds',
                 'image_bvh',
                 'image_load',
@@ -7255,6 +7256,8 @@ class CodeGenerator:
         if cls == 'flat_store':
             return self._gen_flat_store(dst_ops, src_ops, sem)
 
+        if cls == 'global_load_lds':
+            return self._gen_global_load_lds(dst_ops, src_ops, sem)
         if cls == 'global_load_async_to_lds':
             return self._gen_global_load_async_to_lds(dst_ops, src_ops, sem)
 
@@ -7975,6 +7978,33 @@ class CodeGenerator:
         L.append('  }')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
+
+    def _gen_global_load_lds(
+        self, dst: list[str], src: list[str], sem: InstructionSemantics
+    ) -> str:
+        # CDNA4 ISA 10.3: M0[17:2]*4 + OFFSET + lane*16. X3 leaves
+        # the fourth dword untouched. These transfers count against VM_CNT.
+        _, _, nt = self._coherency_exprs()
+        lines = [
+            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
+            f'  d->elem_size = {sem.elem_size};',
+            f'  d->num_elems = {sem.num_elems};',
+            '  d->is_load = true;',
+            '  d->lds_dst = true;',
+            '  d->lds_per_lane_addr = true;',
+            '  d->lds_base = wf.lds_base();',
+            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)',
+            '    d->per_lane_lds_addr[lane] = wf.lds_base() + (wf.m0() & 0x3fffcu) +',
+            '        (static_cast<int32_t>(inst_.offset << 19u) >> 19u) + lane * 16u;',
+            f'  d->mtype = {self._mtype_expr()};',
+            f'  d->non_temporal = {nt};',
+        ]
+        self._append_wait_counter_type(lines, 'flat_load')
+        lines.extend([
+            '  flat_calculate_addresses(inst_, wf, *d);',
+            '  set_data(std::move(d));',
+        ])
+        return '\n'.join(lines)
 
     def _gen_global_load_async_to_lds(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
@@ -9038,6 +9068,7 @@ class CodeGenerator:
             'global_store',
             'global_load_addtid',
             'global_store_addtid',
+            'global_load_lds',
             'global_load_async_to_lds',
             'global_store_async_from_lds',
             'dcache_inv',
@@ -10254,6 +10285,7 @@ class CodeGenerator:
                             'flat_load',
                             'flat_store',
                             'flat_atomic',
+                            'global_load_lds',
                             'global_load_async_to_lds',
                             'global_store_async_from_lds',
                             'global_load_addtid',
@@ -10311,6 +10343,17 @@ class CodeGenerator:
                     fieldless_caps_guards: dict[str, str] = {}
                     factory_validation_parts: list[str] = []
                     factory_op_encoding = f'{inst.fmt_true_enc_name}::OpEncoding'
+                    if inst.name in getattr(
+                        self.isa_spec.profile, 'shared_flat_global_only_instructions', ()
+                    ):
+                        factory_validation_parts.append(
+                            f'const auto *global_lds = reinterpret_cast<const {factory_op_encoding}*>(inst);'
+                        )
+                        factory_validation_parts.append(
+                            'if (global_lds->seg != 2u || global_lds->vdst != 0u) '
+                            '[[unlikely]] return emit_error.emit() << '
+                            '"global LDS load requires the global segment and reserved VDST=0";'
+                        )
                     # Guard fieldless def/use operands (pushed positionally) from
                     # silently writing past the fixed-size operand arrays. The
                     # capacities mirror instruction.h (see the class constants).

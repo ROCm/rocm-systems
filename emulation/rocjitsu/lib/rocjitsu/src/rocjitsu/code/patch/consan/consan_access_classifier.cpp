@@ -334,6 +334,8 @@ ConSanAccessLoweringClassification classify_consan_access_lowering(const ConSanP
       .range_count = static_cast<uint32_t>(access.ranges.size()),
       .address_vgpr = access.operands.address_vgpr,
       .direct_memory_address_vgpr = access.operands.direct_memory_address_vgpr,
+      .direct_memory_address_vgpr_count = access.operands.direct_memory_address_vgpr_count,
+      .direct_m0_address_mask = access.operands.direct_m0_address_mask,
       .destination_vgpr = access.operands.destination_vgpr,
       .destination_accvgpr = access.operands.destination_accvgpr,
       .data_vgpr = access.operands.data_vgpr,

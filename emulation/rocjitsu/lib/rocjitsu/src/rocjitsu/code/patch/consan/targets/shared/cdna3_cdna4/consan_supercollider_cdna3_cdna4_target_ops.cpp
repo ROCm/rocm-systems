@@ -72,18 +72,31 @@ std::optional<ConSanScDirectToLdsTransfer> build_cdna3_cdna4_direct_to_lds_trans
       payload_vgpr > 256u - dwords || readback_vgpr > 256u - dwords)
     return std::nullopt;
 
-  cdna4::MubufMachineInst load{};
-  static_assert(sizeof(load) == sizeof(original_words));
-  std::memcpy(&load, original_words.data(), sizeof(load));
-  const uint16_t expected_load_op = width_bits == 32u   ? cdna4::kBufferLoadDwordMubuf
-                                    : width_bits == 96u ? cdna4::kBufferLoadDwordx3Mubuf
-                                                        : cdna4::kBufferLoadDwordx4Mubuf;
-  if (load.lds == 0u || load.vdata != 0u || load.op != expected_load_op)
-    return std::nullopt;
-  load.lds = 0u;
-  load.vdata = payload_vgpr;
   std::array<uint32_t, 2> global_load{};
-  std::memcpy(global_load.data(), &load, sizeof(load));
+  cdna4::FlatGlblMachineInst flat{};
+  std::memcpy(&flat, original_words.data(), sizeof(flat));
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4 && flat.encoding == 0x37u && flat.seg == 2u &&
+      (flat.op == cdna4::kGlobalLoadLdsDwordx3Flat ||
+       flat.op == cdna4::kGlobalLoadLdsDwordx4Flat)) {
+    const bool x3 = flat.op == cdna4::kGlobalLoadLdsDwordx3Flat;
+    if (flat.vdst != 0u || width_bits != (x3 ? 96u : 128u))
+      return std::nullopt;
+    flat.op = x3 ? cdna4::kFlatLoadDwordx3Flat : cdna4::kFlatLoadDwordx4Flat;
+    flat.vdst = payload_vgpr;
+    std::memcpy(global_load.data(), &flat, sizeof(flat));
+  } else {
+    cdna4::MubufMachineInst load{};
+    static_assert(sizeof(load) == sizeof(original_words));
+    std::memcpy(&load, original_words.data(), sizeof(load));
+    const uint16_t expected_load_op = width_bits == 32u   ? cdna4::kBufferLoadDwordMubuf
+                                      : width_bits == 96u ? cdna4::kBufferLoadDwordx3Mubuf
+                                                          : cdna4::kBufferLoadDwordx4Mubuf;
+    if (load.lds == 0u || load.vdata != 0u || load.op != expected_load_op)
+      return std::nullopt;
+    load.lds = 0u;
+    load.vdata = payload_vgpr;
+    std::memcpy(global_load.data(), &load, sizeof(load));
+  }
 
   if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
     const uint16_t write_op = width_bits == 32u   ? cdna3::kDsWriteB32Ds

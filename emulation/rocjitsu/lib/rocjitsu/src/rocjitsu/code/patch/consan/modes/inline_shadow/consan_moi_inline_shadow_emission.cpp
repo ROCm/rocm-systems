@@ -1710,7 +1710,7 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
           return std::nullopt;
         }
         if (!append_materialize_direct_to_lds_address(words, candidate.site(),
-                                                      *saved_lds_byte_offset_vgpr,
+                                                      *saved_lds_byte_offset_vgpr, scratch_vgpr,
                                                       *plan.scalar_state.exec_save_sgpr, arch)) {
           errors.emplace_back("ConSan MOI inline-shadow probe could not materialize a "
                               "direct-to-LDS destination");

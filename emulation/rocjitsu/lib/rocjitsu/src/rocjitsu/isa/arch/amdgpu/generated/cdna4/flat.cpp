@@ -2925,5 +2925,85 @@ DecodeResult decodeFlatAtomicDecX2Flat(const MachineInst *opcode,
 }
 } // namespace detail
 
+GlobalLoadLdsDwordx4Flat::GlobalLoadLdsDwordx4Flat(const MachineInst *inst)
+    : Flat("global_load_lds_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::GlobalLoadLdsDwordx4Flat)),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 0;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
+}
+
+namespace detail {
+DecodeResult decodeGlobalLoadLdsDwordx4Flat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "global_load_lds_dwordx4", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  const auto *global_lds = reinterpret_cast<const Flat::OpEncoding *>(inst);
+  if (global_lds->seg != 2u || global_lds->vdst != 0u) [[unlikely]]
+    return emit_error.emit() << "global LDS load requires the global segment and reserved VDST=0";
+  return std::make_unique<GlobalLoadLdsDwordx4Flat>(opcode);
+}
+} // namespace detail
+
+GlobalLoadLdsDwordx3Flat::GlobalLoadLdsDwordx3Flat(const MachineInst *inst)
+    : Flat("global_load_lds_dwordx3", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::GlobalLoadLdsDwordx3Flat)),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 0;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_OP;
+  flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
+}
+
+namespace detail {
+DecodeResult decodeGlobalLoadLdsDwordx3Flat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "global_load_lds_dwordx3", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  const auto *global_lds = reinterpret_cast<const Flat::OpEncoding *>(inst);
+  if (global_lds->seg != 2u || global_lds->vdst != 0u) [[unlikely]]
+    return emit_error.emit() << "global LDS load requires the global segment and reserved VDST=0";
+  return std::make_unique<GlobalLoadLdsDwordx3Flat>(opcode);
+}
+} // namespace detail
+
 } // namespace cdna4
 } // namespace rocjitsu

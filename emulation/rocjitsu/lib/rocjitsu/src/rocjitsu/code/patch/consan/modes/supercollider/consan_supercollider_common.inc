@@ -278,7 +278,7 @@ private:
       request.forbidden.expand({RegClass::VGPR, *base, static_cast<uint8_t>(count)});
   };
   forbid(form.address_vgpr, form.address_vgpr_count);
-  forbid(form.direct_memory_address_vgpr, 1u);
+  forbid(form.direct_memory_address_vgpr, form.direct_memory_address_vgpr_count);
   forbid(form.destination_vgpr, form.destination_register_count);
   const uint16_t data_count =
       form.second_data_vgpr ? form.element_register_count : form.data_register_count;
@@ -593,8 +593,8 @@ direct_to_lds_scratch_layout(const ConSanProgramSite &site, const ConSanTargetPr
   }
 
   std::vector<uint32_t> words;
-  if (!consan_moi_impl::append_materialize_direct_to_lds_address(words, site, layout->address_vgpr,
-                                                                 vcc_save_sgpr, arch)) {
+  if (!consan_moi_impl::append_materialize_direct_to_lds_address(
+          words, site, layout->address_vgpr, layout->payload_vgpr, vcc_save_sgpr, arch)) {
     errors.emplace_back("ConSan Direct-to-LDS check/trap could not materialize LDS address");
     return std::nullopt;
   }

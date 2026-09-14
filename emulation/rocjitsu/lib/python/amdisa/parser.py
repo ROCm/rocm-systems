@@ -34,6 +34,7 @@ Known XML spec bugs handled by this parser (as of spec version 1.1.1):
 """
 
 from collections.abc import Sequence
+from copy import deepcopy
 import re
 import xml.etree.ElementTree as elem_tree
 
@@ -370,6 +371,7 @@ class Parser:
             addition.identifier: addition
             for addition in self.isa_spec.applied_additions
         }
+        self._retain_shared_flat_global_instructions()
         self.parse_encodings()
         self.parse_insts()
         self._validate_addition_decode_reachability()
@@ -378,6 +380,49 @@ class Parser:
         self._collect_fieldless_operand_types()
         validate_fieldless_taxonomy(self.isa_spec)
         return self.isa_spec
+
+    def _retain_shared_flat_global_instructions(self) -> None:
+        """Keep global-only opcodes in the legacy shared FLAT decoder.
+
+        Normalize an in-memory copy; the vendor XML file stays unchanged.
+        Ordinary segment aliases remain runtime-selected by the parent decoder.
+        """
+        names = getattr(self.profile, 'shared_flat_global_only_instructions', ())
+        if not names:
+            return
+        encodings = {xs.get_node_text(xs.get_node(node, xs.ENCODING_NAME)): node
+                     for node in self.encodings_node}
+        parent = encodings['ENC_FLAT']
+        source = encodings['ENC_FLAT_GLBL']
+        identifiers = xs.get_node(source, xs.ENCODING_IDENTIFERS)
+        parent_identifiers = xs.get_node(parent, xs.ENCODING_IDENTIFERS)
+        mask = xs.get_node_text(xs.get_node(source, xs.ENCODING_IDENTIFIER_MASK))
+        bit_cnt = int(xs.get_node_text(xs.get_node(source, xs.BIT_CNT)))
+        _, enc_bits, op_bits, _ = self.parse_ucode_bitmap(source, bit_cnt)
+        _, op_range, _ = _parse_enc_id_masks(
+            mask, self.profile.max_enc_bits, enc_bits, op_bits
+        )
+        for node in self.insts_node:
+            name = xs.get_node_text(xs.get_node(node, xs.INST_NAME))
+            if name not in names:
+                continue
+            for encoding in xs.get_node(node, xs.INST_ENCODINGS):
+                enc_name = xs.get_node(encoding, xs.ENCODING_NAME)
+                if enc_name.text != 'ENC_FLAT_GLBL':
+                    continue
+                opcode = int(xs.get_node_text(xs.get_node(encoding, xs.OPCODE)))
+                for identifier in identifiers:
+                    if int(identifier.text[op_range[0]:op_range[1]], 2) == opcode:
+                        if not any(item.text == identifier.text for item in parent_identifiers):
+                            parent_identifiers.append(deepcopy(identifier))
+                enc_name.text = 'ENC_FLAT'
+                operands = xs.get_node(encoding, xs.OPERANDS)
+                for operand in list(operands):
+                    field = operand.find(xs.FIELD_NAME)
+                    # VDST is reserved, not a register definition. SADDR is
+                    # supplied conditionally by the shared FLAT code generator.
+                    if field is not None and field.text in ('VDST', 'SADDR'):
+                        operands.remove(operand)
 
     def _validate_addition_decode_reachability(self) -> None:
         """Check the final decode pointers for every active added instruction form."""

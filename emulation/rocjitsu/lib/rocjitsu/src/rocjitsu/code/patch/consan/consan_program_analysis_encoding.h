@@ -154,6 +154,9 @@ struct ConSanDirectLdsTransferEncoding {
   bool writes_lds = false;
   std::optional<uint8_t> address_source_operand;
   std::optional<uint16_t> memory_address_vgpr;
+  uint16_t memory_address_vgpr_count = 1;
+  uint32_t m0_address_mask = 0xffffffffu;
+  int32_t immediate_byte_offset = 0;
 };
 
 } // namespace rocjitsu

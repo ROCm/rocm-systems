@@ -1108,6 +1108,9 @@ record_direct_lds_transfer_site(const Instruction &inst, std::span<const uint8_t
         vgpr_index(inst.src_operand(static_cast<int>(*encoding->address_source_operand)));
   }
   site.operands.direct_memory_address_vgpr = encoding->memory_address_vgpr;
+  site.operands.direct_memory_address_vgpr_count = encoding->memory_address_vgpr_count;
+  site.operands.direct_m0_address_mask = encoding->m0_address_mask;
+  site.operands.raw_ioffset = encoding->immediate_byte_offset;
   site.decoded_site().mnemonic = std::string(mnemonic);
   site.container = kernel.id;
   sites.add_access(std::move(site));

@@ -96,6 +96,20 @@ ConSanVectorMemoryDecode decode_cdna3_cdna4_global_memory(std::span<const uint8_
 std::optional<ConSanDirectLdsTransferEncoding>
 decode_cdna3_cdna4_direct_lds_transfer(std::string_view mnemonic,
                                        std::span<const uint8_t> instruction) {
+  if ((mnemonic == "global_load_lds_dwordx3" || mnemonic == "global_load_lds_dwordx4") &&
+      instruction.size() == sizeof(cdna4::FlatGlblMachineInst)) {
+    cdna4::FlatGlblMachineInst raw{};
+    std::memcpy(&raw, instruction.data(), sizeof(raw));
+    if (raw.seg != 2u || raw.vdst != 0u)
+      return std::nullopt;
+    return ConSanDirectLdsTransferEncoding{
+        .writes_lds = true,
+        .address_source_operand = std::nullopt,
+        .memory_address_vgpr = static_cast<uint16_t>(raw.addr),
+        .memory_address_vgpr_count = static_cast<uint16_t>(raw.saddr == 0x7fu ? 2u : 1u),
+        .m0_address_mask = 0x3fffcu,
+        .immediate_byte_offset = sign_extend_13_bit_offset(static_cast<uint32_t>(raw.offset))};
+  }
   const bool supported_load =
       mnemonic == "buffer_load_dword" || mnemonic == "buffer_load_dwordx2" ||
       mnemonic == "buffer_load_dwordx3" || mnemonic == "buffer_load_dwordx4";
