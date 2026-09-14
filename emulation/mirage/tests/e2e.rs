@@ -362,6 +362,47 @@ fn every_builtin_agent_starts_the_rocjitsu_daemon() {
     }
 }
 
+/// A machine upgraded from the previous release can still run.
+///
+/// The documents below are what that release wrote — not the current
+/// ones with a field removed, which is a shape only an install that
+/// upgraded mid-release would ever have. They differ from what mirage
+/// ships by more than the queue count (the previous `mi350x` has five
+/// SDMA engines and four CUs per shader array against today's two and
+/// nine), and none of them carries the queue count rocjitsu now demands,
+/// so before the startup pass learned to recognise them this seeded an
+/// install whose *default* profile could not start a session.
+#[test]
+fn an_install_upgraded_from_the_previous_release_still_runs() {
+    if skip_without_emulator() {
+        return;
+    }
+    for (agent, document) in [
+        ("mi300x", include_str!("../builtin/legacy/mi300x.json")),
+        ("mi350x", include_str!("../builtin/legacy/mi350x.json")),
+        ("mi450x", include_str!("../builtin/legacy/mi450x.json")),
+    ] {
+        let env = Env::new();
+        let path = env.root().join(format!("config/mirage/agent/{agent}.json"));
+        // Nothing has run yet, so this is the directory an upgrade finds
+        // already populated rather than one mirage has just made.
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, document).unwrap();
+
+        let output = env.run(&["run", "--profile", agent, "--", "/bin/true"]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{agent}: {stderr}");
+
+        // Not patched into a machine that is neither: the whole document
+        // is now the one a fresh install gets.
+        let migrated: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let shipped: serde_json::Value =
+            serde_json::from_str(&env.ok(&["agent", "show", agent])).unwrap();
+        assert_eq!(migrated, shipped, "{agent}");
+    }
+}
+
 #[test]
 fn builtin_agents_without_sdma_queue_counts_are_upgraded() {
     if skip_without_emulator() {

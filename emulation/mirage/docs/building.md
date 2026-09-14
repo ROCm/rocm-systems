@@ -45,26 +45,30 @@ delete it.
 RocJITsu refuses a device that has SDMA engines and no queues on them,
 and it refuses it while loading the config — so a session dies at daemon
 start rather than at profile validation. Mirage never wrote
-`vm.gpu.device.num_sdma_queues_per_engine` before this release, so an
-agent an older Mirage left on disk is one RocJITsu now rejects. On
-startup Mirage completes that one field, in place, but only for a stored
-agent that is otherwise byte-for-byte the one this Mirage ships: put the
-field back and the file *is* the shipped document, so filling it in is
-finishing Mirage's own work and the result is the shipped agent whole.
-The shipped MI300X and MI350X presets use 8 queues per engine, and MI450X
-uses 2.
+`vm.gpu.device.num_sdma_queues_per_engine` before this release, so every
+agent an older Mirage left on disk is one RocJITsu now rejects, `mi350x`
+included — which is what `--profile` defaults to. The shipped MI300X and
+MI350X presets use 8 queues per engine, and MI450X uses 2.
 
-Any other file is left exactly as it is, because Mirage has no value to
-offer it. An agent seeded by an older release and an agent you edited
-look alike from here, and both are yours to keep — and this GPU's queue
-count describes neither, so writing it in would produce a machine that is
-neither what was on disk nor what Mirage ships. An MI350X seeded before
-this release has five SDMA engines and four CUs per shader array; filling
-in today's eight queues per engine would leave a document belonging to no
-GPU either party has heard of. An explicit `0` is likewise an answer, and
-Mirage does not argue with it — RocJITsu will.
+So on startup Mirage replaces an agent file it can prove it wrote itself
+with the one it ships now. Proof means the stored document is either the
+shipped one with just that field missing, or byte-for-meaning one of the
+documents a previous release wrote, kept verbatim in
+`builtin/legacy/*.json` because they cannot be derived from anything —
+the code that produced them is gone. Recognition is exact, and the answer
+is always the whole shipped document rather than a patched copy of the
+old one: the previous `mi350x` has five SDMA engines and four CUs per
+shader array against today's two and nine, so pasting today's queue count
+into it would leave a machine neither Mirage nor RocJITsu ships.
 
-Such a file is not left silent, though. `mirage state builtins` names it
+Anything else is left exactly as it is. An agent you edited is yours to
+keep, and so is one from a release too old to be in that table — the
+serialized shape moved more than once before this, and a document from
+one of those is simply not recognised. Adding a release to the table is a
+matter of dumping its agents and appending the file. An explicit `0` is
+likewise an answer, and Mirage does not argue with it — RocJITsu will.
+
+An unrecognised file is not left silent. `mirage state builtins` names it
 along with every other builtin document that differs from the shipped
 one, with its path and how to take the shipped version instead
 (`mirage agent delete <name>`, then run `mirage state builtins` again).
