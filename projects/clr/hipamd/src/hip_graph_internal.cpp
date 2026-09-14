@@ -6,6 +6,8 @@
 
 #include "hip_graph_internal.hpp"
 
+#include <limits>
+
 #define CASE_STRING(X, C)                                                                          \
   case X:                                                                                          \
     case_string = #C;                                                                              \
@@ -1560,12 +1562,14 @@ bool GraphExecSegmented::ShouldCollapseToSingleStream() const {
 }
 
 // Carries the per-launch state needed by the completion callback: the graph
-// whose refcount to drop, plus the signal set (and its device) to re-arm and
-// return to the pool now that the launch's GPU work is done.
+// whose refcount to drop, the signal set to recycle, and the kernarg launch ID
+// whose completion may make retired slots reusable.
 struct GraphLaunchCleanup {
   GraphExecBase* exec;
   amd::Device* device;
   std::vector<void*> signal_set;
+  GraphKernelArgManager* kernarg_manager = nullptr;
+  uint64_t kernarg_launch_id = 0;
 };
 
 // ================================================================================================
@@ -2494,6 +2498,12 @@ hipError_t GraphExecSegmented::UpdatePacketBatchesForNodeEnableDisable(hip::Grap
 void GraphExecBase::OnLaunchComplete(cl_event event, cl_int command_exec_status, void* user_data) {
   auto* cleanup = reinterpret_cast<GraphLaunchCleanup*>(user_data);
   GraphExecBase* execBase = cleanup->exec;
+  // AQL packets already copied to a hardware queue can retain kernarg addresses
+  // after the GraphExec's current packet set has been updated. Release the launch
+  // ID before recycling slots retired by that update.
+  if (cleanup->kernarg_manager != nullptr && cleanup->kernarg_launch_id != 0) {
+    cleanup->kernarg_manager->CompleteLaunch(cleanup->kernarg_launch_id);
+  }
   // Re-arm and recycle the launch's signals while the GraphExecBase (and thus its
   // signal pool) is still alive, then drop the launch's reference.
   execBase->RecycleLaunchSignals(cleanup->device, cleanup->signal_set);
@@ -3178,6 +3188,12 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
     graph_launch_stream->vdev()->HiddenHeapInit();
   }
 
+  // Register before any captured AQL packet is queued. A successful recapture may
+  // replace the GraphExec's packet set while this asynchronous launch still has
+  // packets that reference the previous kernarg slots.
+  const uint64_t kernarg_launch_id =
+      (kernArgManager_ != nullptr) ? kernArgManager_->RegisterLaunch() : 0;
+
   amd::Command* last_cmd = nullptr;
   if (!cross_device_launch) {
     if (max_streams_dev_.size() == 1) {
@@ -3214,14 +3230,17 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
       // The launch stream queue owns this marker now. Keep last_cmd as the
       // capture-device completion command that drives graph resource cleanup.
       launch_done->release();
-    } else if (status != hipSuccess) {
-      // Error path only: EnqueueSegmentedGraph may have queued partial work
-      // before failing. Drain the capture-device streams before the common
-      // cleanup path can recycle launch signals or drop this exec reference.
-      for (auto* stream : streams_) {
-        if (stream != nullptr) {
-          stream->finish();
-        }
+    }
+  }
+
+  if (status != hipSuccess) {
+    // EnqueueSegmentedGraph may have queued partial work before failing.
+    // Wait for all partially submitted graph work to finish before releasing
+    // per-launch resources or allowing its kernarg slots to be reused.
+    // This applies to both same-device and cross-device launches.
+    for (auto* stream : streams_) {
+      if (stream != nullptr) {
+        stream->finish();
       }
     }
   }
@@ -3255,6 +3274,8 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
   cleanup->exec = this;
   cleanup->device = g_devices[captureDeviceId_]->devices()[0];
   cleanup->signal_set = std::move(launch_signal_set);
+  cleanup->kernarg_manager = kernArgManager_;
+  cleanup->kernarg_launch_id = kernarg_launch_id;
   if (!event.setCallback(CL_COMPLETE, GraphExecBase::OnLaunchComplete, cleanup, kBlocking)) {
     // setCallback essentially never fails, but if it does the launch's GPU work
     // is already queued (the accumulate is enqueued and was told not to destroy
@@ -3390,6 +3411,7 @@ bool GraphKernelArgManager::AllocGraphKernargPool(size_t pool_size, amd::Device*
 
 void GraphKernelArgManager::BeginCapture(const void* owner) {
   assert(owner != nullptr);
+  std::lock_guard<std::mutex> lock(allocation_lock_);
   assert(capture_owner_ == nullptr && "Graph kernarg captures must not overlap");
 
   capture_owner_ = owner;
@@ -3397,13 +3419,19 @@ void GraphKernelArgManager::BeginCapture(const void* owner) {
 }
 
 void GraphKernelArgManager::EndCapture(const void* owner, bool success) {
+  std::lock_guard<std::mutex> lock(allocation_lock_);
   assert(capture_owner_ == owner && "Mismatched graph kernarg capture owner");
 
   if (success) {
+    // These slots can only be referenced by launches registered after this
+    // capture becomes the node's current packet set.
+    for (auto& allocation : capture_allocations_) {
+      allocation.first_launch_id_ = next_launch_id_;
+    }
+
     auto old_allocations = owner_allocations_.find(owner);
     if (old_allocations != owner_allocations_.end()) {
-      free_allocations_.insert(free_allocations_.end(), old_allocations->second.begin(),
-                               old_allocations->second.end());
+      RetireAllocations(old_allocations->second);
       old_allocations->second = std::move(capture_allocations_);
     } else {
       owner_allocations_.emplace(owner, std::move(capture_allocations_));
@@ -3417,6 +3445,58 @@ void GraphKernelArgManager::EndCapture(const void* owner, bool success) {
 
   capture_allocations_.clear();
   capture_owner_ = nullptr;
+}
+
+uint64_t GraphKernelArgManager::RegisterLaunch() {
+  std::lock_guard<std::mutex> lock(allocation_lock_);
+  const uint64_t launch_id = next_launch_id_++;
+  active_launch_ids_.insert(launch_id);
+
+  return launch_id;
+}
+
+void GraphKernelArgManager::CompleteLaunch(uint64_t launch_id) {
+  std::lock_guard<std::mutex> lock(allocation_lock_);
+  const size_t erased = active_launch_ids_.erase(launch_id);
+  if (erased == 0) {
+    return;
+  }
+
+  ReclaimDeferredAllocations();
+}
+
+void GraphKernelArgManager::RetireAllocations(const std::vector<KernelArgAllocation>& allocations) {
+  if (allocations.empty()) {
+    return;
+  }
+
+  // Launches in [first_launch_id_, last_launch_id] may contain an AQL packet
+  // referencing this ownership generation. Older launches predate the block;
+  // newer launches use the replacement packet.
+  const uint64_t last_launch_id = next_launch_id_ - 1;
+  for (const auto& allocation : allocations) {
+    assert(allocation.first_launch_id_ != 0 && "Live kernarg slot has no launch generation");
+    auto active = active_launch_ids_.lower_bound(allocation.first_launch_id_);
+    const bool no_referencing_launch_active =
+        active == active_launch_ids_.end() || *active > last_launch_id;
+    if (no_referencing_launch_active) {
+      free_allocations_.push_back(allocation);
+    } else {
+      deferred_allocations_.emplace_back(allocation, last_launch_id);
+    }
+  }
+}
+
+void GraphKernelArgManager::ReclaimDeferredAllocations() {
+  for (auto deferred = deferred_allocations_.begin(); deferred != deferred_allocations_.end();) {
+    auto active = active_launch_ids_.lower_bound(deferred->allocation_.first_launch_id_);
+    if (active == active_launch_ids_.end() || *active > deferred->last_launch_id_) {
+      free_allocations_.push_back(deferred->allocation_);
+      deferred = deferred_allocations_.erase(deferred);
+    } else {
+      ++deferred;
+    }
+  }
 }
 
 bool GraphKernelArgManager::FreeBlockFits(const KernelArgAllocation& block, size_t size,
@@ -3487,6 +3567,28 @@ address GraphKernelArgManager::AllocKernArgFromFreeList(size_t size, size_t alig
   return nullptr;
 }
 
+address GraphKernelArgManager::AllocKernArgFromCurrentPool(size_t size, size_t alignment,
+                                                           amd::Device* device) {
+  auto& device_pools = kernarg_graph_[device];
+  if (device_pools.empty()) {
+    return nullptr;
+  }
+
+  auto& current_pool = device_pools.back();
+  address aligned_addr =
+      amd::alignUp(current_pool.kernarg_pool_addr_ + current_pool.kernarg_pool_offset_, alignment);
+  const size_t new_pool_usage = (aligned_addr + size) - current_pool.kernarg_pool_addr_;
+  if (new_pool_usage > current_pool.kernarg_pool_size_) {
+    return nullptr;
+  }
+
+  current_pool.kernarg_pool_offset_ = new_pool_usage;
+  if (capture_owner_ != nullptr) {
+    capture_allocations_.emplace_back(aligned_addr, size, device);
+  }
+  return aligned_addr;
+}
+
 address GraphKernelArgManager::AllocKernArg(size_t size, size_t alignment, int devId) {
   if (size == 0) {
     return nullptr;
@@ -3494,6 +3596,7 @@ address GraphKernelArgManager::AllocKernArg(size_t size, size_t alignment, int d
 
   amd::Device* device = g_devices[devId]->devices()[0];
   assert(alignment != 0 && "Alignment must be non-zero");
+  std::lock_guard<std::mutex> lock(allocation_lock_);
 
   // Free-list reuse is only valid while a node capture is tracking the
   // resulting block. Taking a block outside BeginCapture/EndCapture would
@@ -3511,27 +3614,23 @@ address GraphKernelArgManager::AllocKernArg(size_t size, size_t alignment, int d
     return nullptr;
   }
 
-  auto& current_pool = device_pools.back();
-  // Calculate aligned address for the allocation
-  address aligned_addr = amd::alignUp(current_pool.kernarg_pool_addr_ + current_pool.kernarg_pool_offset_, alignment);
-  const size_t new_pool_usage = (aligned_addr + size) - current_pool.kernarg_pool_addr_;
-
-  // Check if allocation fits in current pool
-  if (new_pool_usage <= current_pool.kernarg_pool_size_) {
-    current_pool.kernarg_pool_offset_ = new_pool_usage;
-    if (capture_owner_ != nullptr) {
-      capture_allocations_.emplace_back(aligned_addr, size, device);
-    }
-    return aligned_addr;
+  address allocation = AllocKernArgFromCurrentPool(size, alignment, device);
+  if (allocation != nullptr) {
+    return allocation;
   }
 
-  // Current pool is full - allocate a new pool with the same size
-  if (!AllocGraphKernargPool(current_pool.kernarg_pool_size_, device)) {
+  // Allocate one replacement pool large enough for this request, including
+  // worst-case leading alignment padding, then make one bounded retry.
+  const size_t alignment_padding = alignment - 1;
+  if (size > std::numeric_limits<size_t>::max() - alignment_padding) {
     return nullptr;
   }
-
-  // Recursively allocate from the new pool
-  return AllocKernArg(size, alignment, devId);
+  const size_t new_pool_size =
+      std::max(device_pools.back().kernarg_pool_size_, size + alignment_padding);
+  if (!AllocGraphKernargPool(new_pool_size, device)) {
+    return nullptr;
+  }
+  return AllocKernArgFromCurrentPool(size, alignment, device);
 }
 
 void GraphKernelArgManager::ReadBackOrFlush() {

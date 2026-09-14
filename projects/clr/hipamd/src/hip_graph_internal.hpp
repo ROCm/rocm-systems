@@ -7,9 +7,13 @@
 #pragma once
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
+#include <deque>
 #include <queue>
+#include <set>
 #include <stack>
 #include <iostream>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <shared_mutex>
@@ -166,6 +170,13 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
   //! Commit the new allocations and release the owner's previous slots, or roll back on failure.
   void EndCapture(const void* owner, bool success);
 
+  //! Register a graph launch before its packets are queued.
+  //! The returned sequence ID must be passed to CompleteLaunch after GPU completion.
+  uint64_t RegisterLaunch();
+
+  //! Mark a registered launch complete and reclaim slots that it could have referenced.
+  void CompleteLaunch(uint64_t launch_id);
+
   // Do HDP flush/When HDP flush register is invalid fallback to Readback
   void ReadBackOrFlush();
 
@@ -184,6 +195,16 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
     address kernarg_addr_;
     size_t size_;
     amd::Device* device_;
+    //! First launch ID that could contain a packet referencing this ownership generation.
+    uint64_t first_launch_id_ = 0;
+  };
+
+  struct DeferredAllocation {
+    DeferredAllocation(const KernelArgAllocation& allocation, uint64_t last_launch_id)
+        : allocation_(allocation), last_launch_id_(last_launch_id) {}
+    KernelArgAllocation allocation_;
+    //! Upper bound of [first_launch_id_, last_launch_id_] for launches that may reference |allocation_|.
+    uint64_t last_launch_id_;
   };
 
   //! True if |block| can satisfy |size| at |alignment| without splitting the block.
@@ -195,8 +216,21 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
   //! share one extra generation across nodes instead of pinning a spare per node.
   address AllocKernArgFromFreeList(size_t size, size_t alignment, amd::Device* device);
 
+  //! Try a bump allocation from the most recently created pool.
+  //! Caller must hold |allocation_lock_|.
+  address AllocKernArgFromCurrentPool(size_t size, size_t alignment, amd::Device* device);
+
   //! Remove |index| from the free list and assign the whole block to the in-progress capture.
   address TakeFreeBlock(size_t index, address aligned_addr);
+
+  //! Retire allocations replaced by a successful capture. The blocks become reusable only
+  //! after launches that could still reference their addresses have completed.
+  //! Caller must hold |allocation_lock_|.
+  void RetireAllocations(const std::vector<KernelArgAllocation>& allocations);
+
+  //! Move deferred allocations no active launch can reference to |free_allocations_|.
+  //! Caller must hold |allocation_lock_|.
+  void ReclaimDeferredAllocations();
 
   bool device_kernarg_pool_ = false;  //! Indicate if kernel pool in device mem
   std::unordered_map<amd::Device*, std::vector<KernelArgPoolGraph>>
@@ -207,6 +241,11 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
   const void* capture_owner_ = nullptr;                 //! Node currently being captured
   std::vector<KernelArgAllocation>
       capture_allocations_;  //! Slots allocated by the in-progress capture
+  std::deque<DeferredAllocation>
+      deferred_allocations_;  //! Retired slots still referenced by queued/running launches
+  std::set<uint64_t> active_launch_ids_;  //! Registered launches not yet GPU-complete
+  uint64_t next_launch_id_ = 1;
+  std::mutex allocation_lock_;  //! Protects capture, free/deferred, and launch-lifetime state
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };
 
