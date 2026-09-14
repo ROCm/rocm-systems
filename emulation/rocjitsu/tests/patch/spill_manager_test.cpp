@@ -712,6 +712,31 @@ TEST(SpillManager, BuildsGfx1100VgprSaveRestoreSequence) {
   EXPECT_EQ(sequence->restore_words.back(), *wait);
 }
 
+
+TEST(ConSanSpill, Cdna4MatrixAccumulatorIsReadyBeforeScratchSave) {
+  // Medium-M TokenSpeed GEMM places a DS read immediately after an MFMA
+  // writing v[0:3]. SuperCollider borrows these live registers for readback.
+  // VM/LGKM counters may both already be zero while the MFMA is pending.
+  SpillManager manager(0u, kMaxCdnaAddressFreeScratchPrivateBytes);
+  const auto sequence = build_vgpr_spill_sequence(manager, 0u, 4u,
+                                                 ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(sequence);
+  unsigned elapsed_wait_states = 0;
+  bool found_store = false;
+  for (const uint32_t word : sequence->save_words) {
+    if ((word & 0xffff0000u) == 0xbf800000u) {
+      elapsed_wait_states += (word & 0xfu) + 1u;
+    } else if ((word & 0xffff0000u) == 0xdc700000u) {
+      found_store = true;
+      break;
+    }
+    // Do not count S_WAITCNT: empty memory queues guarantee no MFMA delay.
+  }
+  ASSERT_TRUE(found_store);
+  EXPECT_GE(elapsed_wait_states, 20u)
+      << "Scratch save can observe a pending MFMA result (CDNA4 ISA Table 38)";
+}
+
 TEST(SpillManager, BuildsGfx950VgprSaveRestoreSequence) {
   SpillManager manager(/*original_private_bytes=*/0, kMaxCdnaAddressFreeScratchPrivateBytes);
   const auto sequence = build_vgpr_spill_sequence(manager, /*vgpr_base=*/10,
@@ -720,13 +745,13 @@ TEST(SpillManager, BuildsGfx950VgprSaveRestoreSequence) {
   EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0, 4, 8}));
   EXPECT_EQ(sequence->total_private_bytes, 16u);
   EXPECT_EQ(manager.total_private_bytes(), 12u);
-  ASSERT_EQ(sequence->save_words.size(), 9u);
+  ASSERT_EQ(sequence->save_words.size(), 11u);
   ASSERT_EQ(sequence->restore_words.size(), 7u);
   EXPECT_EQ(sequence->save_words[0], 0xbf8c0f70u);
   EXPECT_EQ(sequence->save_words[1], *instrumentation::build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA4));
-  EXPECT_EQ(sequence->save_words[2], 0xdc704000u);
-  EXPECT_EQ(sequence->save_words[3], 0x007f0a00u);
-  EXPECT_EQ(sequence->save_words[8], 0xbf8c0f70u);
+  EXPECT_EQ(sequence->save_words[4], 0xdc704000u);
+  EXPECT_EQ(sequence->save_words[5], 0x007f0a00u);
+  EXPECT_EQ(sequence->save_words[10], 0xbf8c0f70u);
   EXPECT_EQ(sequence->restore_words[0], 0xdc504000u);
   EXPECT_EQ(sequence->restore_words[1], 0x0a7f0000u);
   EXPECT_EQ(sequence->restore_words[6], 0xbf8c0f70u);

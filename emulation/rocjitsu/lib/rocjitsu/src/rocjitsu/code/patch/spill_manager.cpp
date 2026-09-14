@@ -214,6 +214,14 @@ std::optional<VgprSpillSequence> build_vgpr_spill_sequence(SpillManager &manager
   sequence.restore_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 1u);
   sequence.save_words.push_back(*wait_load);
   sequence.save_words.push_back(*wait_lds);
+  // CDNA4 ISA section 7.6, Table 38: matrix results read by VMEM need
+  // up to 20 software wait states. VM/LGKM wait counters do not track MFMA.
+  // A spill may borrow a just-written accumulator VGPR, so cover the maximum
+  // dependency here; this helper has no preceding-instruction context.
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    sequence.save_words.push_back(build_s_nop(15, arch));
+    sequence.save_words.push_back(build_s_nop(3, arch));
+  }
   for (uint16_t i = 0; i < vgpr_count; ++i) {
     const uint16_t vgpr = static_cast<uint16_t>(vgpr_base + i);
     const auto offset = planned_manager.offset_for(RegisterRef{RegClass::VGPR, vgpr, 1});
