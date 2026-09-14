@@ -92,10 +92,6 @@ else()
     )
   endif()
 
-  if(WIN32)
-    set(_FFMPEG_SEARCH_INCLUDE)
-    set(_FFMPEG_SEARCH_LIB)
-  else()
   if(NOT WIN32)
     # Union of all three components' pkg-config dirs: avformat/avutil may live
     # under a different prefix than avcodec.
@@ -116,10 +112,10 @@ else()
       /opt/local/lib
       /sw/lib)
   else()
-    # On Windows, allow FFMPEG_ROOT to point to a pre-built FFmpeg installation
-    # (e.g. -DFFMPEG_ROOT=C:/ffmpeg)
-    set(_FFMPEG_SEARCH_INCLUDE ${FFMPEG_ROOT}/include)
-    set(_FFMPEG_SEARCH_LIB ${FFMPEG_ROOT}/lib)
+    # Windows resolves headers/libs through _FFMPEG_ROOT_HINTS (FFMPEG_ROOT plus
+    # the PATH/common-location probing above), so no extra search PATHS are needed.
+    set(_FFMPEG_SEARCH_INCLUDE)
+    set(_FFMPEG_SEARCH_LIB)
   endif()
 
   # AVCODEC
