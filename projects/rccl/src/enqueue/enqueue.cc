@@ -2122,7 +2122,11 @@ ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream, int 
 
 restore:
   if (savedDev != -1 && savedDev != comm->cudaDev) {
-    CUDACHECK(hipSetDevice(savedDev));
+    cudaError_t restoreErr = hipSetDevice(savedDev);
+    if (restoreErr != cudaSuccess) {
+      ncclResult_t restoreRes = rcclCudaErrorHandler(restoreErr);
+      if (result == ncclSuccess) result = restoreRes;
+    }
   }
   return result;
 }
