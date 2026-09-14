@@ -28,6 +28,42 @@ THE SOFTWARE.
 #include <hip/hip_runtime.h>
 
 /**
+ * @brief Compile-time selection of the YUV-to-RGB color conversion standard.
+ *
+ * Define CC_STANDARD at build time to choose the coefficient set:
+ *   CC_STANDARD_BT601 (default) - ITU-R BT.601 full-range (JFIF/JPEG)
+ *   CC_STANDARD_BT709           - ITU-R BT.709 full-range
+ *
+ * The coefficients expand to float literals, so the compiler keeps them as
+ * immediate operands in the fmaf instructions (no memory load, no register
+ * pressure, identical codegen to hardcoded constants).
+ */
+#define CC_STANDARD_BT601 601
+#define CC_STANDARD_BT709 709
+
+#ifndef CC_STANDARD
+#define CC_STANDARD CC_STANDARD_BT601
+#endif
+
+#if CC_STANDARD == CC_STANDARD_BT601
+#define CC_CR0  0.0000f
+#define CC_CR1  1.4020f
+#define CC_CG0 -0.3441f
+#define CC_CG1 -0.7141f
+#define CC_CB0  1.7720f
+#define CC_CB1  0.0000f
+#elif CC_STANDARD == CC_STANDARD_BT709
+#define CC_CR0  0.0000f
+#define CC_CR1  1.5748f
+#define CC_CG0 -0.1873f
+#define CC_CG1 -0.4681f
+#define CC_CB0  1.8556f
+#define CC_CB1  0.0000f
+#else
+#error "Unsupported CC_STANDARD: use CC_STANDARD_BT601 or CC_STANDARD_BT709"
+#endif
+
+/**
  * @brief Converts YUV444 image to RGB image.
  *
  * This function takes a YUV444 image and converts it to an RGB image.

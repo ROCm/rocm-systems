@@ -76,7 +76,7 @@ struct env_snapshot
     template <typename Tp>
     void set(
         std::string_view key, Tp&& value,
-        rocprofsys::common::update_mode mode = rocprofsys::common::update_mode::REPLACE,
+        rocprofsys::common::update_mode mode = rocprofsys::common::update_mode::replace,
         std::string_view                join_delim = ":")
     {
         rocprofsys::common::update_env(current, key, std::forward<Tp>(value), mode,

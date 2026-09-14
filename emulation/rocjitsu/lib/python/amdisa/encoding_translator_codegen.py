@@ -727,7 +727,7 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
     return lines
 
 
-def _emit_dispatch(translations, src_name, dst_name):
+def _emit_dispatch(translations, src_name, dst_name, src_spec, dst_spec):
     val_groups: dict[int, list[EncodingTranslation]] = {}
     for t in translations:
         val_groups.setdefault(t.src_dt_index, []).append(t)
@@ -777,8 +777,41 @@ def _emit_dispatch(translations, src_name, dst_name):
                 if t.src_bit_cnt <= 32
                 else ('w0, w1' if t.src_bit_cnt == 64 else 'w0, w1, w2')
             )
-            lines.append(f'    case kEnc_{cn}:')
-            lines.append(f'        return {enc_fn}({dec_fn}({args}), dst_op);')
+            swap_compare_data = (
+                t.src_enc_name in ('ENC_DS', 'ENC_VDS')
+                and src_spec.profile.ds_compare_store_compare_first
+                != dst_spec.profile.ds_compare_store_compare_first
+            )
+            if swap_compare_data:
+                opcodes = sorted(
+                    {
+                        inst.opcode
+                        for inst in src_spec.encoding_map[t.src_enc_name].insts
+                        if inst.name.startswith(('DS_CMPST_', 'DS_CMPSTORE_'))
+                    }
+                )
+                fields_type = _fields_struct_name(t.src_enc_name)
+                lines.append(f'    case kEnc_{cn}: {{')
+                lines.append(f'        {fields_type} fields = {dec_fn}({args});')
+                lines.append('        switch (fields.op) {')
+                for opcode in opcodes:
+                    lines.append(f'        case {opcode}:')
+                if opcodes:
+                    lines.append('        {')
+                    lines.append(
+                        '            const uint32_t comparison = fields.data0;'
+                    )
+                    lines.append('            fields.data0 = fields.data1;')
+                    lines.append('            fields.data1 = comparison;')
+                    lines.append('            break;')
+                    lines.append('        }')
+                lines.append('        default: break;')
+                lines.append('        }')
+                lines.append(f'        return {enc_fn}(fields, dst_op);')
+                lines.append('    }')
+            else:
+                lines.append(f'    case kEnc_{cn}:')
+                lines.append(f'        return {enc_fn}({dec_fn}({args}), dst_op);')
         else:
             lines.append(f'    case kEnc_{cn}: {{')
             lines.append(f'        const uint8_t seg = (w0 >> 14) & 0x3;')
@@ -967,7 +1000,9 @@ def generate_encoding_translators(
         pair_lines.extend(_emit_decode_fn(t, src_ns, src_name))
     for t in translations:
         pair_lines.extend(_emit_encode_fn(t, dst_ns, dst_name))
-    pair_lines.extend(_emit_dispatch(translations, src_name, dst_name))
+    pair_lines.extend(
+        _emit_dispatch(translations, src_name, dst_name, src_spec, dst_spec)
+    )
 
     pair_lines += [
         f'}}  // namespace {src_name}_to_{dst_name}',
