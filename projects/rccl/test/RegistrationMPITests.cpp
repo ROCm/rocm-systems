@@ -34,6 +34,7 @@
 #include "ce_coll.h"
 #include "comm.h"
 #include "rccl_common.h"
+#include "register.h"
 #include "register_inline.h"
 #ifdef ENABLE_FAULT_INJECTION
 #include "ce_fault_inject.h"
@@ -1163,9 +1164,12 @@ protected:
  *
  * The collective operates on four segments per half, while ncclCommRegister
  * covers the complete eight-segment allocation. After AllReduce the cache entry
- * must cover that full VA and carry NET_REG_COMPLETE; a correct result alone is
- * not enough, because host staging would still produce one. This regression
- * requires multiple nodes so an IPC-only registration cannot satisfy the flag.
+ * must cover that full VA, carry NET_REG_COMPLETE, and record netNSegments==8.
+ * Staging can still produce a correct AllReduce, and NET_REG_COMPLETE fires for
+ * both a 4-segment (pre-fix) and 8-segment (post-fix) count, so the cached
+ * segment count is what proves the walk used the full ncclCommRegister range.
+ * This regression requires multiple nodes so an IPC-only registration cannot
+ * satisfy the NET flag.
  */
 TEST_F(UBR_MultiSegment, Generic)
 {
@@ -1236,6 +1240,8 @@ TEST_F(UBR_MultiSegment, Generic)
     ASSERT_TRUE(reg->state & NET_REG_COMPLETE)
         << "AllReduce completed without a NET MR; host staging would still produce a correct result";
     ASSERT_NE(reg->netHandleHead, nullptr);
+    ASSERT_EQ(reg->netNSegments, kNumSegments)
+        << "NET registration walked a prefix of the ncclCommRegister range, not the full 8-segment allocation";
 }
 
 /**
@@ -1727,8 +1733,11 @@ TEST_F(UBR_MultiSegment, Symmetric_LsaGin)
  */
 TEST_F(UBR_MultiSegment, Symmetric_Elastic_Lsa)
 {
-    if (!validateTestPrerequisites(/*min_processes=*/2)) {
-        GTEST_SKIP() << "Requires 2+ ranks";
+    if (!validateTestPrerequisites(
+            /*min_processes=*/2, /*max_processes=*/kNoProcessLimit,
+            /*require_power_of_two=*/kNoPowerOfTwoRequired,
+            /*min_nodes=*/1, /*max_nodes=*/1)) {
+        GTEST_SKIP() << "Requires 2+ ranks on a single node";
     }
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
