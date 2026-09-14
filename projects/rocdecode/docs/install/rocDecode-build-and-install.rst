@@ -124,7 +124,7 @@ Build on Windows
       * Set ``ROCM_PATH`` to the TheRock build output directory. The VA-API runtime and
         driver are picked up from there; no separate path needs to be supplied.
       * FFmpeg support is detected automatically from your ``PATH`` and common installation locations. Use  ``-DFFMPEG_ROOT=<path-to-ffmpeg>`` to override that search or point to a specific non-standard location.
-      * The detected FFmpeg libraries are used for linking only. At run time, the FFmpeg ``bin`` directory (containing ``avcodec``, ``avformat``, and ``avutil`` DLLs) must be on ``PATH``, otherwise the samples and host decoder fail to launch with missing DLL errors.
+The detected FFmpeg libraries are used for linking only. At run time, the FFmpeg ``bin`` directory must be on ``PATH``. The samples and host decoder will fail to launch and report missing DLL errors if the ``bin`` directory is not in the path.
 
 4. To verify the build, run a sample:
 
