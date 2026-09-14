@@ -1953,14 +1953,14 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeGfx950_IsEnabled) {
 }
 
 TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_Gfx950WithAinic_IsDisabled) {
-  // The `!rcclUseAinic()` conjunct -- the reason g_rcclUseAinic is a seam in
+  // The `!rcclUseAinic()` conjunct -- the reason g_rcclUseAinicValue is a seam in
   // fakes/transport_stubs.cc rather than the fail-loud stub it used to be.
   // Without it the flag stays false in every test and dropping the conjunct
   // survives. Differential with MultiNodeGfx950_IsEnabled, which is identical
   // but for the AINIC flag.
   BatchComm bc(/*nNodes=*/2, "gfx950");
   SetBatchParam(-1);
-  g_rcclUseAinic = true;
+  g_rcclUseAinicValue = true;
   EXPECT_EQ(0, rcclEffectiveP2pBatchEnable(bc.get()))
       << "gfx950 with AINIC must not enable p2p batching";
 }

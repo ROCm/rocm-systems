@@ -4,18 +4,25 @@ cmake_minimum_required(VERSION 3.16)
 # values exist only as RCCL_PARAM/NCCL_PARAM macro arguments. The original
 # sources are guaranteed to be available here, unlike at installed-test run
 # time, so a changed default becomes an immediate configuration error.
-function(rccl_assert_param_default_unchanged _file _needle _fake)
+function(rccl_assert_source_line _file _expected _what)
   if(NOT EXISTS "${_file}")
     message(FATAL_ERROR "wrap-test drift guard: ${_file} not found at configure time")
   endif()
-  file(READ "${_file}" _contents)
-  string(FIND "${_contents}" "${_needle}" _pos)
-  if(_pos EQUAL -1)
+  file(STRINGS "${_file}" _lines)
+  set(_found FALSE)
+  foreach(_line IN LISTS _lines)
+    string(STRIP "${_line}" _line)
+    string(FIND "${_line}" "${_expected}" _pos)
+    if(_pos EQUAL 0)
+      set(_found TRUE)
+      break()
+    endif()
+  endforeach()
+  if(NOT _found)
     message(FATAL_ERROR
       "wrap-test drift guard: ${_file} no longer contains\n"
-      "    ${_needle}\n"
-      "Update ${_fake} to match the new "
-      "default, then update this check.")
+      "    ${_expected}\n"
+      "Update ${_what}, then update this check.")
   endif()
 endfunction()
 
@@ -23,15 +30,23 @@ endfunction()
 # at configure time. Paths are relative to this file, so the same checks cover
 # the in-build and standalone contexts.
 set(_rccl_src_root "${CMAKE_CURRENT_LIST_DIR}/../../src")
-rccl_assert_param_default_unchanged("${_rccl_src_root}/graph/connect.cc"
+rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
   "NCCL_PARAM(MinNchannels, \"MIN_NCHANNELS\", -2)" "fakes/tuning_fakes.cc: ncclParamMinNchannels()")
-rccl_assert_param_default_unchanged("${_rccl_src_root}/graph/connect.cc"
+rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
   "NCCL_PARAM(MaxNchannels, \"MAX_NCHANNELS\", -2)" "fakes/tuning_fakes.cc: ncclParamMaxNchannels()")
-rccl_assert_param_default_unchanged("${_rccl_src_root}/enqueue.cc"
+rccl_assert_source_line("${_rccl_src_root}/enqueue.cc"
   "RCCL_PARAM(ForceCe, \"FORCE_CE\", 1)" "fakes/wrap_fakes.cc: rcclParamForceCe()")
-rccl_assert_param_default_unchanged("${_rccl_src_root}/enqueue.cc"
+rccl_assert_source_line("${_rccl_src_root}/enqueue.cc"
   "NCCL_PARAM(LaunchOrderImplicit, \"LAUNCH_ORDER_IMPLICIT\", 0)"
   "fakes/wrap_fakes.cc: ncclParamLaunchOrderImplicit()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
+  "int64_t g_paramMinNchannels = -2;" "the MinNchannels fake default")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
+  "int64_t g_paramMaxNchannels = -2;" "the MaxNchannels fake default")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
+  "static int64_t DefaultParamForceCe() { return 1; }" "the ForceCe fake default")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
+  "static int64_t DefaultParamLaunchOrderImplicit() { return 0; }" "the LaunchOrderImplicit fake default")
 unset(_rccl_src_root)
 
 set(RCCL_MICRO_TEST_SOURCES

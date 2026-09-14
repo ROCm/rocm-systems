@@ -2374,6 +2374,40 @@ TEST(WrapMicrotestIsolated, OptThreadBlockSize_TreeAlgorithmUsesMaxThreads) {
       });
 }
 
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_PatAlgorithmUsesMaxThreads) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_PatAlgorithmUsesMaxThreads",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_PAT;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncAllReduce;
+        int nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
+        EXPECT_EQ(RCCL_DEFAULT_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_MultiNodeLlProtocolUsesLlThreads) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_MultiNodeLlProtocolUsesLlThreads",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_LL;
+        info.func = ncclFuncAllReduce;
+        int nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
+        EXPECT_EQ(RCCL_LL_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, OptThreadBlockSize_SingleNodeUsesHalfThreads) {
   RUN_ISOLATED_TEST(
       "Wrap_OptThreadBlockSize_SingleNodeUsesHalfThreads",
@@ -2757,6 +2791,41 @@ TEST(WrapMicrotest, OverrideChannels_UndefinedMaxThresholdBreaksLoop) {
   // [0][1] (maxByteThreshold) left at its zero-init default (undefined).
   int nc = -100;
   EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/1024, nc));
+  EXPECT_EQ(-100, nc);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, OverrideChannels_LaterBucketCanApply) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 4;
+  comm->nRanks = 8;
+  comm->nChannels = 32;
+  comm->config.minCTAs = 1;
+  comm->config.maxCTAs = 64;
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][0] = 1;
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][1] = 100; // defined, but does not match 1024 bytes/rank
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][1][0] = 100;
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][1][1] = 2048;
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][1][2] = 7;
+  int nc = -100;
+  EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/8192, nc));
+  EXPECT_EQ(7, nc);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, OverrideChannels_UndefinedFirstBucketStopsBeforeLaterMatch) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 4;
+  comm->nRanks = 8;
+  comm->nChannels = 32;
+  comm->config.minCTAs = 1;
+  comm->config.maxCTAs = 64;
+  // Bucket zero remains CHAN_THRESHOLDS_UNDEFINED, so the scan must stop.
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][1][0] = 100;
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][1][1] = 2048;
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][1][2] = 7;
+  int nc = -100;
+  EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/8192, nc));
   EXPECT_EQ(-100, nc);
   DeleteCommWithArch(comm);
 }
@@ -3378,6 +3447,31 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredChosenWhenAvailableAndPo
       });
 }
 
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredForwardsBlockCalculatorArguments) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeRegisteredForwardsBlockCalculatorArguments",
+      []() {
+        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
+        ScopedHook localBlocks(g_ceLocalReduceBlocks, [](ncclDataType_t type, size_t chunkElems) {
+          EXPECT_EQ(ncclFloat32, type);
+          EXPECT_EQ(16u, chunkElems); // count(16) / nRanks(1)
+          return 29;
+        });
+        ncclComm* comm = MakeSelectComm();
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/16, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(29, decision.nMaxChannels);
+        DeleteCommWithArch(comm);
+      });
+}
+
 // g_devrWindowHasSysmemSegment had a controllable seam (wrap_fakes.cc) but
 // no test had ever driven it true anywhere in this file (llvm-cov: 0 hits
 // on the true side of ncclDevrWindowHasSysmemSegment at every call site).
@@ -3448,6 +3542,11 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenEligibleAndStagin
           if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
           return deft;
         };
+        ScopedHook localBlocks(g_ceLocalReduceBlocks, [](ncclDataType_t type, size_t chunkElems) {
+          EXPECT_EQ(ncclFloat32, type);
+          EXPECT_EQ(8u, chunkElems); // count(8) / nRanks(1)
+          return 19;
+        });
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         // force bypasses this, matching rcclUseCeAllReduce's precedent
@@ -3460,7 +3559,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenEligibleAndStagin
                                                     /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
         EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
-        EXPECT_EQ(1, decision.nMaxChannels);
+        EXPECT_EQ(19, decision.nMaxChannels);
         DeleteCommWithArch(comm);
       });
 }
@@ -3667,6 +3766,16 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_PlainKernelFallbackReportsGetAlgoInf
           task->nMaxChannels = 7;
           return ncclSuccess;
         });
+        ScopedHook packed(g_kernelPackedChannels,
+                          [](struct ncclComm*, ncclFunc_t func, size_t count, ncclDataType_t type, int protocol,
+                             int nMaxChannels) {
+          EXPECT_EQ(ncclFuncAllReduce, func);
+          EXPECT_EQ(8u, count);
+          EXPECT_EQ(ncclFloat32, type);
+          EXPECT_EQ(NCCL_PROTO_LL128, protocol);
+          EXPECT_EQ(7, nMaxChannels);
+          return 37;
+        });
         ncclComm* comm = MakeSelectComm();
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
@@ -3674,7 +3783,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_PlainKernelFallbackReportsGetAlgoInf
                                                     /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ(NCCL_ALGO_TREE, decision.algo);
         EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
-        EXPECT_EQ(7, decision.nMaxChannels);
+        EXPECT_EQ(37, decision.nMaxChannels);
         DeleteCommWithArch(comm);
       });
 }
@@ -3723,6 +3832,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_QueryModeNeverProbesCapturingGraph) 
                                                     /*graphCapturingHint=*/true, &decision));
         EXPECT_EQ(0, graphProbe.calls);
         EXPECT_TRUE(decision.ceCapturing); // came from graphCapturingHint, not a probe
+        EXPECT_FALSE(decision.ceArGraphAllowed);
         DeleteCommWithArch(comm);
       });
 }
@@ -4364,13 +4474,23 @@ TEST(WrapMicrotestIsolated, SelectAllGather_PlainKernelFallbackReportsGetAlgoInf
           task->nMaxChannels = 5;
           return ncclSuccess;
         });
+        ScopedHook packed(g_kernelPackedChannels,
+                          [](struct ncclComm*, ncclFunc_t func, size_t count, ncclDataType_t type, int protocol,
+                             int nMaxChannels) {
+          EXPECT_EQ(ncclFuncAllGather, func);
+          EXPECT_EQ(8u, count);
+          EXPECT_EQ(ncclFloat32, type);
+          EXPECT_EQ(NCCL_PROTO_LL128, protocol);
+          EXPECT_EQ(5, nMaxChannels);
+          return 38;
+        });
         ncclComm* comm = MakeSelectComm(); // not a DDA/Direct-eligible arch
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
                                                     /*query=*/true, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ(NCCL_ALGO_TREE, decision.algo);
         EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
-        EXPECT_EQ(5, decision.nMaxChannels);
+        EXPECT_EQ(38, decision.nMaxChannels);
         DeleteCommWithArch(comm);
       });
 }
@@ -4900,13 +5020,23 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_PlainKernelFallbackReportsGetAlg
           task->nMaxChannels = 3;
           return ncclSuccess;
         });
+        ScopedHook packed(g_kernelPackedChannels,
+                          [](struct ncclComm*, ncclFunc_t func, size_t count, ncclDataType_t type, int protocol,
+                             int nMaxChannels) {
+          EXPECT_EQ(ncclFuncReduceScatter, func);
+          EXPECT_EQ(8u, count);
+          EXPECT_EQ(ncclFloat32, type);
+          EXPECT_EQ(NCCL_PROTO_LL128, protocol);
+          EXPECT_EQ(3, nMaxChannels);
+          return 39;
+        });
         ncclComm* comm = MakeSelectComm();
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
                                                         ncclSum, /*query=*/true, &decision));
         EXPECT_EQ(NCCL_ALGO_TREE, decision.algo);
         EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
-        EXPECT_EQ(3, decision.nMaxChannels);
+        EXPECT_EQ(39, decision.nMaxChannels);
         DeleteCommWithArch(comm);
       });
 }

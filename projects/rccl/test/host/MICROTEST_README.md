@@ -246,7 +246,7 @@ and that default silently selects which production arm runs. Driving a seam mean
 marker. The marker travels with the declaration rather than a block comment so it cannot drift from
 what it describes. Call *counters* do not take the marker unless the counter itself is unread.
 
-Four things do NOT follow the TU-per-file rule, deliberately:
+Five things do NOT follow the TU-per-file rule, deliberately:
 
 - `fakes/collective_stubs.cc` is a fail-loud floor for the collective *launch*
   pipeline (`ncclLaunchKernel` and friends), which `enqueue.cc` itself defines.
@@ -258,6 +258,10 @@ Four things do NOT follow the TU-per-file rule, deliberately:
   `ncclOsSetAffinity` entries. It cannot link `os_fakes.cc` alongside them, so
   the `rccl-UnitTestsMicro` target keeps that pair target-shaped; every other
   target gets them from `os_fakes.cc`.
+- `transport_stubs.cc` and `collective_stubs.cc` both provide eight fail-loud
+  collective-transport setup symbols. `rccl-UnitTestsMicro` needs both floors,
+  so `RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR` omits the transport copy in
+  that target to avoid fakes-versus-fakes duplicate definitions.
 - Two `NCCL_PARAM` bodies stay in `fakes/init_fakes.cc` rather than their owner's
   fakes file. `ncclParamLaunchOrderImplicit` cannot move because that file links
   into a target whose unit under test defines the same symbol

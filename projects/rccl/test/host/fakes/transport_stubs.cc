@@ -47,8 +47,8 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm*, int* gdrSupport) {
 // the enqueue target to omit it via a macro and supply its own; a seam here
 // serves both. `false` means "no AINIC", which is what a host-only binary with
 // no device actually has, so no test is silently steered by the default.
-bool g_rcclUseAinic = false;
-static bool DefaultUseAinic() { return g_rcclUseAinic; }
+bool g_rcclUseAinicValue = false;
+static bool DefaultUseAinic() { return g_rcclUseAinicValue; }
 std::function<bool()> g_useAinic = DefaultUseAinic;
 bool rcclUseAinic() { return g_useAinic(); }
 
@@ -61,7 +61,7 @@ static ncclResult_t DefaultNcclProxyStop(struct ncclComm*) { return ncclSuccess;
 std::function<ncclResult_t(struct ncclComm*)> g_ncclProxyStop = DefaultNcclProxyStop;
 
 void ResetTransportStubs() {
-  g_rcclUseAinic = false;
+  g_rcclUseAinicValue = false;
   g_useAinic = DefaultUseAinic;
   g_pxnDisable = DefaultPxnDisable;
   g_ncclProxyStop = DefaultNcclProxyStop;
