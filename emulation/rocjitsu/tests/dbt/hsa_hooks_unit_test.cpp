@@ -2110,6 +2110,41 @@ rocjitsu::ConSanTransformArtifacts process_growth_replacement_result(size_t repl
   return result;
 }
 
+TEST(HsaHooksUnitTest, ConSanProcessExitFinalizesWithoutRuntimeUnload) {
+  EXPECT_EXIT(
+      {
+        ScopedEnvVar mode("RJ_CONSAN_MODE", "supercollider");
+        FakeApiTable api;
+        const int saved_stderr = dup(STDERR_FILENO);
+        FILE *quiet = std::fopen("/dev/null", "w");
+        dup2(fileno(quiet), STDERR_FILENO);
+        InstalledDbiHook hook(api);
+        std::fflush(stderr);
+        dup2(saved_stderr, STDERR_FILENO);
+        close(saved_stderr);
+        std::fclose(quiet);
+        if (!hook.installed())
+          std::_Exit(2);
+        // std::exit deliberately skips the fixture's automatic OnUnload.
+        std::exit(0);
+      },
+      ::testing::ExitedWithCode(0), "ConSan analysis verdict");
+}
+
+TEST(HsaHooksUnitTest, ConSanRepeatedUnloadDoesNotEmitAnotherVerdict) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "supercollider");
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+  testing::internal::CaptureStderr();
+  hook.unload();
+  hook.invoke_unload_again_for_test();
+  const std::string log = testing::internal::GetCapturedStderr();
+  const auto first = log.find("ConSan analysis verdict");
+  ASSERT_NE(first, std::string::npos) << log;
+  EXPECT_EQ(log.find("ConSan analysis verdict", first + 1), std::string::npos) << log;
+}
+
 TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiRecordReplay) {
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "3");
   ScopedEnvVar mode("RJ_CONSAN_MODE", nullptr);

@@ -2409,6 +2409,9 @@ public:
 
   void uninstall() {
     std::lock_guard lock(mutex_);
+    // Runtime unload and the process-exit fallback must finalize exactly once.
+    if (!active_)
+      return;
     const bool supercollider_active =
         config_ && config_->flavor == rocjitsu::ConSanFlavor::SuperCollider;
     const std::string process_concurrent_transform_ceiling =
@@ -5252,7 +5255,18 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
     return true;
   }
 
-  return layer().install(table, *config);
+  if (!layer().install(table, *config))
+    return false;
+  // Some applications retain an HSA reference until process exit, so ROCR
+  // never invokes OnUnload. Register after layer construction so this runs
+  // before its destruction. The DSO is retained above for process lifetime.
+  static const bool exit_handler_registered =
+      std::atexit([] { layer().uninstall(); }) == 0;
+  if (!exit_handler_registered) {
+    layer().uninstall();
+    return false;
+  }
+  return true;
 }
 
 extern "C" RJ_HOOK_EXPORT void OnUnload() {
