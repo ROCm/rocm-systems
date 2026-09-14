@@ -8,7 +8,6 @@ import os
 import subprocess
 import pytest
 import glob
-import json
 
 
 def _sendrecv_env(paths, dump_dir, extra=None):
@@ -20,6 +19,10 @@ def _sendrecv_env(paths, dump_dir, extra=None):
         "NCCL_PROFILER_PLUGIN": paths.INSPECTOR_SO,
         "NCCL_INSPECTOR_ENABLE": "1",
         "NCCL_INSPECTOR_DUMP_DIR": dump_dir,
+        "NCCL_INSPECTOR_REQUIRE_KERNEL_TIMING": "1",
+        "NCCL_INSPECTOR_ENABLE_P2P": "1",
+        "NCCL_INSPECTOR_PROM_DUMP": "0",
+        "NCCL_INSPECTOR_DUMP_MIN_SIZE_BYTES": "0",
         "NCCL_DEBUG": "INFO",
     })
     if extra:

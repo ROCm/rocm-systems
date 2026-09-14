@@ -7,6 +7,7 @@
 import os
 import shutil
 import subprocess
+import tempfile
 import pytest
 
 MODEL_DEMO_DIR = os.path.abspath(
@@ -28,8 +29,13 @@ def _build_model_demo_plugin():
     if shutil.which("make") is None or shutil.which(cc) is None:
         pytest.skip(f"make/{cc} not available to build the model_demo tuner")
 
+    if os.access(MODEL_DEMO_DIR, os.W_OK):
+        dest = MODEL_DEMO_SO
+    else:
+        dest = os.path.join(tempfile.mkdtemp(prefix="rccl-model-demo-"), "librccl-tuner.so")
+
     build = subprocess.run(
-        ["make", "default"],
+        ["make", "default", f"PLUGIN_SO={dest}"],
         cwd=MODEL_DEMO_DIR,
         capture_output=True,
         text=True,
@@ -38,8 +44,8 @@ def _build_model_demo_plugin():
     assert build.returncode == 0, (
         f"Failed to build model_demo tuner:\nstdout:\n{build.stdout}\nstderr:\n{build.stderr}"
     )
-    assert os.path.exists(MODEL_DEMO_SO), f"model_demo tuner not produced at {MODEL_DEMO_SO}"
-    _built_so = MODEL_DEMO_SO
+    assert os.path.exists(dest), f"model_demo tuner not produced at {dest}"
+    _built_so = dest
     return _built_so
 
 

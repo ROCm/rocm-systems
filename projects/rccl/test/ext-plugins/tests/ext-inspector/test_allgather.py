@@ -93,8 +93,8 @@ def test_single_node(paths, inspector_helpers):
                     continue
                 record = json.loads(line)
 
-                # Multi-node AllGather moves data with send/recv, so the dump carries p2p
-                # records alongside the collective ones; only the latter name a collective.
+                # Single-node AllGather is a collective; p2p_perf records are from
+                # explicit Send/Recv and are skipped here.
                 if "coll_perf" not in record:
                     continue
 

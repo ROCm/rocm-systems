@@ -365,18 +365,31 @@ static void printAllEvents(FILE* fh, struct context* ctx) {
     printEvent(fh, &ctx->proxyCtrlPool[i % proxyCtrlPoolSize]);
   }
 
-  // Print orphan CeColl events (those without CollApi parent)
-  start = (ctx->ceCollPoolIndex - ctx->ceCollPoolSize >= 0) ? ctx->ceCollPoolIndex - ctx->ceCollPoolSize : 0;
-  end = ctx->ceCollPoolIndex;
-  for (int i = start; i < end; i++) {
-    struct ceColl* event = &ctx->ceCollPool[i % ctx->ceCollPoolSize];
-    // Only print if no parent (orphan) AND completed
-    if (!event->parent && event->stopCompleted) {
-      printEvent(fh, event);
+  // Unlinked on retire, so dump completed CE events from the pools.
+  if (ctx->ceCollPool && ctx->ceCollPoolSize > 0) {
+    start = (ctx->ceCollPoolIndex - ctx->ceCollPoolSize >= 0) ? ctx->ceCollPoolIndex - ctx->ceCollPoolSize : 0;
+    end = ctx->ceCollPoolIndex;
+    for (int i = start; i < end; i++) {
+      struct ceColl* event = &ctx->ceCollPool[i % ctx->ceCollPoolSize];
+      if (event->stopCompleted) printEvent(fh, event);
     }
   }
-
-  // CeSync and CeBatch are printed via their CeColl parent
+  if (ctx->ceSyncPool && ctx->ceSyncPoolSize > 0) {
+    start = (ctx->ceSyncPoolIndex - ctx->ceSyncPoolSize >= 0) ? ctx->ceSyncPoolIndex - ctx->ceSyncPoolSize : 0;
+    end = ctx->ceSyncPoolIndex;
+    for (int i = start; i < end; i++) {
+      struct ceSync* event = &ctx->ceSyncPool[i % ctx->ceSyncPoolSize];
+      if (event->stopCompleted) printEvent(fh, event);
+    }
+  }
+  if (ctx->ceBatchPool && ctx->ceBatchPoolSize > 0) {
+    start = (ctx->ceBatchPoolIndex - ctx->ceBatchPoolSize >= 0) ? ctx->ceBatchPoolIndex - ctx->ceBatchPoolSize : 0;
+    end = ctx->ceBatchPoolIndex;
+    for (int i = start; i < end; i++) {
+      struct ceBatch* event = &ctx->ceBatchPool[i % ctx->ceBatchPoolSize];
+      if (event->stopCompleted) printEvent(fh, event);
+    }
+  }
 }
 
 // Free all context pools
@@ -1126,17 +1139,17 @@ __attribute__((visibility("default"))) int exampleProfilerStop(void) {
 #include "nccl/profiler_v6.h"
 
 __hidden ncclResult_t exampleProfilerStartEvent_v6(void* context, void** eHandle, ncclProfilerEventDescr_v6_t* eDescr) {
+  // Match v5: CE start skips exampleProfilerStartEvent, so null first.
+  *eHandle = NULL;
   struct context* ctx = (struct context*)context;
 
   if (ctx == NULL) {
-    *eHandle = NULL;
     return ncclSuccess;
   }
   // The CE paths below bypass exampleProfilerStartEvent, so they need the same
   // guard: an event created after finalize has begun has no poller to complete
   // it and leaks its cudaEvents past the cleanup that already ran.
   if (__atomic_load_n(&ctx->finalizing, __ATOMIC_RELAXED)) {
-    *eHandle = NULL;
     return ncclSuccess;
   }
   if (eDescr->type == ncclProfileCeColl) {

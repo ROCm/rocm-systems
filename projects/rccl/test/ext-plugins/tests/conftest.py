@@ -28,6 +28,22 @@ PROFILER_SO = f"{PROFILER_DIR}/librccl-profiler-example.so"
 INSPECTOR_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/inspector"
 INSPECTOR_SO = f"{INSPECTOR_DIR}/librccl-profiler-inspector.so"
 
+def _first_existing(*candidates):
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return candidates[0] if candidates else ""
+
+_PROXYTRACE_SRC = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "plugins", "profiler", "proxytrace")
+)
+PROXYTRACE_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/proxytrace"
+PROXYTRACE_SO = _first_existing(
+    os.path.join(PROXYTRACE_DIR, "librccl-profiler-proxytrace.so"),
+    os.path.join(RCCL_INSTALL_DIR, "librccl-profiler-proxytrace.so"),
+    os.path.join(_PROXYTRACE_SRC, "librccl-profiler-proxytrace.so"),
+)
+
 # CSV Configs 
 VALID_CONFIG_WITH_WILDCARDS = os.path.join(WORKDIR, "assets/csv_confs/valid_config_with_wildcards.conf")
 VALID_CONFIG_WITHOUT_WILDCARDS = os.path.join(WORKDIR, "assets/csv_confs/valid_config_without_wildcards.conf")
@@ -199,6 +215,8 @@ def paths():
         PROFILER_SO=PROFILER_SO,
         INSPECTOR_DIR=INSPECTOR_DIR,
         INSPECTOR_SO=INSPECTOR_SO,
+        PROXYTRACE_DIR=PROXYTRACE_DIR,
+        PROXYTRACE_SO=PROXYTRACE_SO,
         # CSV Configs
         VALID_CONFIG_WITH_WILDCARDS=VALID_CONFIG_WITH_WILDCARDS,
         VALID_CONFIG_WITHOUT_WILDCARDS=VALID_CONFIG_WITHOUT_WILDCARDS,

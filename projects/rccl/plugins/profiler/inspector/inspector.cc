@@ -1628,39 +1628,48 @@ static uint64_t calculateKernelGpuExecTimeUsecs(struct inspectorKernelChInfo *ke
 static uint64_t calculateMaxKernelExecTimeUsecs(struct inspectorCollInfo *collInfo,
                                                 inspectorTimingSource_t *timingSource) {
   uint64_t maxKernelExecTimeUsecs = 0;
-  inspectorTimingSource_t bestTimingSource = inspectorTimingSourceCollectiveCpu;
+  bool hasGpuTiming = false;
 
-  // Indexed by channelId, so scan every slot rather than assuming the channels used are
-  // packed into [0, nChannels). Pool entries are zeroed on allocation.
+  // Prefer GPU timing the same way P2P does: one channel's CPU delta must not
+  // outbid another channel's GPU duration, or requireKernelTiming (default
+  // true) drops the whole collective record.
   for (uint32_t i = 0; i < MAX_CHANNELS; i++) {
     struct inspectorKernelChInfo *kernelCh = &collInfo->kernelCh[i];
     if (kernelCh->type != ncclProfileKernelCh) continue;
     uint64_t gpuExecTimeUsecs = calculateKernelGpuExecTimeUsecs(kernelCh);
     if (gpuExecTimeUsecs > 0) {
+      hasGpuTiming = true;
       if (gpuExecTimeUsecs > maxKernelExecTimeUsecs) {
         maxKernelExecTimeUsecs = gpuExecTimeUsecs;
-        bestTimingSource = inspectorTimingSourceKernelGpu;
       }
-    } else {
-      if (kernelCh->tsCompletedUsec > kernelCh->tsStartUsec) {
-        uint64_t cpuExecTimeUsecs = kernelCh->tsCompletedUsec - kernelCh->tsStartUsec;
-        if (cpuExecTimeUsecs > maxKernelExecTimeUsecs) {
-          maxKernelExecTimeUsecs = cpuExecTimeUsecs;
-          bestTimingSource = inspectorTimingSourceKernelCpu;
-        }
+    }
+  }
+
+  if (hasGpuTiming) {
+    *timingSource = inspectorTimingSourceKernelGpu;
+    return maxKernelExecTimeUsecs;
+  }
+
+  for (uint32_t i = 0; i < MAX_CHANNELS; i++) {
+    struct inspectorKernelChInfo *kernelCh = &collInfo->kernelCh[i];
+    if (kernelCh->type != ncclProfileKernelCh) continue;
+    if (kernelCh->tsCompletedUsec > kernelCh->tsStartUsec) {
+      uint64_t cpuExecTimeUsecs = kernelCh->tsCompletedUsec - kernelCh->tsStartUsec;
+      if (cpuExecTimeUsecs > maxKernelExecTimeUsecs) {
+        maxKernelExecTimeUsecs = cpuExecTimeUsecs;
       }
     }
   }
 
   if (maxKernelExecTimeUsecs > 0) {
-    *timingSource = bestTimingSource;
+    *timingSource = inspectorTimingSourceKernelCpu;
     return maxKernelExecTimeUsecs;
-  } else {
-    *timingSource = inspectorTimingSourceCollectiveCpu;
-    // RCCL: underflow guard (clock skew / racing stop can make completed <= start).
-    if (collInfo->tsCompletedUsec <= collInfo->tsStartUsec) return 0;
-    return collInfo->tsCompletedUsec - collInfo->tsStartUsec;
   }
+
+  *timingSource = inspectorTimingSourceCollectiveCpu;
+  // RCCL: underflow guard (clock skew / racing stop can make completed <= start).
+  if (collInfo->tsCompletedUsec <= collInfo->tsStartUsec) return 0;
+  return collInfo->tsCompletedUsec - collInfo->tsStartUsec;
 }
 
 /*

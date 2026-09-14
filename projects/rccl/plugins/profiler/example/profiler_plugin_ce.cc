@@ -18,6 +18,18 @@
 
 #define __hidden __attribute__ ((visibility("hidden")))
 
+static void unlinkCeCollFromParent(struct collApi* parent, struct taskEventBase* base) {
+  if (parent == NULL) return;
+  taskEventQueueUnlink(parent, base);
+  __atomic_fetch_sub(&parent->refCount, 1, __ATOMIC_RELAXED);
+}
+
+static void unlinkCeChildFromParent(struct ceColl* parent, struct taskEventBase* base) {
+  if (parent == NULL) return;
+  taskEventQueueUnlink(parent, base);
+  __atomic_fetch_sub(&parent->base.refCount, 1, __ATOMIC_RELAXED);
+}
+
 // External reference to gettime() from plugin.cc
 extern double gettime(void);
 
@@ -78,10 +90,8 @@ static void pollCeCollEvents(struct context* ctx) {
         event->elapsedTime = (uint64_t)event->cpuDuration;
       }
 
-      // Decrement parent refCount when complete
-      if (event->parent) {
-        __atomic_fetch_sub(&event->parent->refCount, 1, __ATOMIC_RELAXED);
-      }
+      // Drop the node from the parent CollApi chain before the pool slot is reused.
+      unlinkCeCollFromParent(event->parent, &event->base);
 
       // Retiring unlinks the event, so destroy its cudaEvents here: the
       // finalize-time cleanup only walks the lists and would never see them,
@@ -132,10 +142,7 @@ static void pollCeSyncEvents(struct context* ctx) {
         event->elapsedTime = (uint64_t)event->cpuDuration;
       }
 
-      // Decrement parent refCount when complete
-      if (event->parent) {
-        __atomic_fetch_sub(&event->parent->base.refCount, 1, __ATOMIC_RELAXED);
-      }
+      unlinkCeChildFromParent(event->parent, &event->base);
 
       // Retiring unlinks the event, so destroy its cudaEvents here: the
       // finalize-time cleanup only walks the lists and would never see them,
@@ -186,10 +193,7 @@ static void pollCeBatchEvents(struct context* ctx) {
         event->elapsedTime = (uint64_t)event->cpuDuration;
       }
 
-      // Decrement parent refCount when complete
-      if (event->parent) {
-        __atomic_fetch_sub(&event->parent->base.refCount, 1, __ATOMIC_RELAXED);
-      }
+      unlinkCeChildFromParent(event->parent, &event->base);
 
       // Retiring unlinks the event, so destroy its cudaEvents here: the
       // finalize-time cleanup only walks the lists and would never see them,
@@ -423,12 +427,6 @@ ncclResult_t ceProfilerStartCeCollEvent(struct context* ctx, void** eHandle, ncc
     event->eventHead = NULL;
     event->eventTail = NULL;
 
-    // Add to parent CollApi's task event queue
-    if (event->parent) {
-      taskEventQueueEnqueue(event->parent, &event->base);
-      __atomic_fetch_add(&event->parent->refCount, 1, __ATOMIC_RELAXED);
-    }
-
     // Create CUDA events with appropriate flags
     if (ceProfilerCtxt.timingMode == CE_TIMING_GPU) {
       cudaEventCreateWithFlags(&event->startEvent, 0);
@@ -442,6 +440,10 @@ ncclResult_t ceProfilerStartCeCollEvent(struct context* ctx, void** eHandle, ncc
     cudaEventRecord(event->startEvent, event->stream);
 
     pthread_mutex_lock(&ctx->ceEvents.mutex);
+    if (event->parent) {
+      taskEventQueueEnqueue(event->parent, &event->base);
+      __atomic_fetch_add(&event->parent->refCount, 1, __ATOMIC_RELAXED);
+    }
     event->pollerNext = ctx->ceEvents.ceCollHead;
     ctx->ceEvents.ceCollHead = event;
     pthread_mutex_unlock(&ctx->ceEvents.mutex);
@@ -451,6 +453,7 @@ ncclResult_t ceProfilerStartCeCollEvent(struct context* ctx, void** eHandle, ncc
     return ncclSuccess;
   } else {
     __atomic_fetch_sub(&ctx->ceCollPoolIndex, 1, __ATOMIC_RELAXED);
+    *eHandle = NULL;
     return ncclSuccess;
   }
 }
@@ -473,9 +476,13 @@ ncclResult_t ceProfilerStartCeSyncEvent(struct context* ctx, void** eHandle, ncc
     event->ceSyncId = ceSyncId;
     event->isComplete = eDescr->ceCollSync.isComplete;
     event->nRanks = eDescr->ceCollSync.nRanks;
-    // Get seqNumber and stream from parent CeColl event
-    event->seqNumber = event->parent->seqNumber;
-    event->stream = event->parent->stream;
+    if (event->parent) {
+      event->seqNumber = event->parent->seqNumber;
+      event->stream = event->parent->stream;
+    } else {
+      event->seqNumber = 0;
+      event->stream = NULL;
+    }
     event->eventId = ceSyncId;
     event->timingMode = ceProfilerCtxt.timingMode;
     event->startCompleted = false;
@@ -491,12 +498,6 @@ ncclResult_t ceProfilerStartCeSyncEvent(struct context* ctx, void** eHandle, ncc
     event->base.startTs = -1;
     event->base.stopTs = -1;
 
-    // Add to parent CeColl's event queue if it exists
-    if (event->parent) {
-      taskEventQueueEnqueue(event->parent, &event->base);
-      __atomic_fetch_add(&event->parent->base.refCount, 1, __ATOMIC_RELAXED);
-    }
-
     // Create CUDA events with appropriate flags
     if (ceProfilerCtxt.timingMode == CE_TIMING_GPU) {
       cudaEventCreateWithFlags(&event->startEvent, 0);
@@ -506,10 +507,13 @@ ncclResult_t ceProfilerStartCeSyncEvent(struct context* ctx, void** eHandle, ncc
       cudaEventCreateWithFlags(&event->stopEvent, cudaEventDisableTiming);
     }
 
-    // Record start event to stream
-    cudaEventRecord(event->startEvent, event->stream);
+    if (event->stream) cudaEventRecord(event->startEvent, event->stream);
 
     pthread_mutex_lock(&ctx->ceEvents.mutex);
+    if (event->parent) {
+      taskEventQueueEnqueue(event->parent, &event->base);
+      __atomic_fetch_add(&event->parent->base.refCount, 1, __ATOMIC_RELAXED);
+    }
     event->pollerNext = ctx->ceEvents.ceSyncHead;
     ctx->ceEvents.ceSyncHead = event;
     pthread_mutex_unlock(&ctx->ceEvents.mutex);
@@ -519,6 +523,7 @@ ncclResult_t ceProfilerStartCeSyncEvent(struct context* ctx, void** eHandle, ncc
     return ncclSuccess;
   } else {
     __atomic_fetch_sub(&ctx->ceSyncPoolIndex, 1, __ATOMIC_RELAXED);
+    *eHandle = NULL;
     return ncclSuccess;
   }
 }
@@ -542,8 +547,11 @@ ncclResult_t ceProfilerStartCeBatchEvent(struct context* ctx, void** eHandle, nc
     event->numOps = eDescr->ceCollBatch.numOps;
     event->totalBytes = eDescr->ceCollBatch.totalBytes;
     event->useIntraSync = eDescr->ceCollBatch.useIntraSync;
-    // Get stream from parent CeColl event
-    event->stream = event->parent->stream;
+    if (event->parent) {
+      event->stream = event->parent->stream;
+    } else {
+      event->stream = NULL;
+    }
     event->eventId = ceBatchId;
     event->timingMode = ceProfilerCtxt.timingMode;
     event->startCompleted = false;
@@ -559,12 +567,6 @@ ncclResult_t ceProfilerStartCeBatchEvent(struct context* ctx, void** eHandle, nc
     event->base.startTs = -1;
     event->base.stopTs = -1;
 
-    // Add to parent CeColl's event queue if it exists
-    if (event->parent) {
-      taskEventQueueEnqueue(event->parent, &event->base);
-      __atomic_fetch_add(&event->parent->base.refCount, 1, __ATOMIC_RELAXED);
-    }
-
     // Create CUDA events with appropriate flags
     if (ceProfilerCtxt.timingMode == CE_TIMING_GPU) {
       cudaEventCreateWithFlags(&event->startEvent, 0);
@@ -574,10 +576,13 @@ ncclResult_t ceProfilerStartCeBatchEvent(struct context* ctx, void** eHandle, nc
       cudaEventCreateWithFlags(&event->stopEvent, cudaEventDisableTiming);
     }
 
-    // Record start event to stream
-    cudaEventRecord(event->startEvent, event->stream);
+    if (event->stream) cudaEventRecord(event->startEvent, event->stream);
 
     pthread_mutex_lock(&ctx->ceEvents.mutex);
+    if (event->parent) {
+      taskEventQueueEnqueue(event->parent, &event->base);
+      __atomic_fetch_add(&event->parent->base.refCount, 1, __ATOMIC_RELAXED);
+    }
     event->pollerNext = ctx->ceEvents.ceBatchHead;
     ctx->ceEvents.ceBatchHead = event;
     pthread_mutex_unlock(&ctx->ceEvents.mutex);
@@ -587,6 +592,7 @@ ncclResult_t ceProfilerStartCeBatchEvent(struct context* ctx, void** eHandle, nc
     return ncclSuccess;
   } else {
     __atomic_fetch_sub(&ctx->ceBatchPoolIndex, 1, __ATOMIC_RELAXED);
+    *eHandle = NULL;
     return ncclSuccess;
   }
 }

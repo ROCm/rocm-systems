@@ -91,9 +91,7 @@ def test_group_events_traced(paths):
     """GROUP spans reach the trace and do not duplicate the collectives they cover.
 
     A group event carries no parent, so a plugin that requires one drops it before it is
-    ever pooled and the category never appears. The span is emitted on its own because the
-    task events it covers are already written under the collective API entry; counting COLL
-    against COLL_API catches a regression that walks the group queue again.
+    ever pooled and the category never appears.
     """
 
     dump_dir = os.path.join(paths.PROFILER_DUMP_DIR, "allreduce_profiler_dumps")
@@ -153,11 +151,19 @@ def test_group_events_traced(paths):
         is_valid, message = paths.validate_json_trace(trace_file)
         assert is_valid, f"Trace file {trace_file} validation failed: {message}"
 
-        group_events = paths.count_events_in_trace(trace_file, category="GROUP")
-        assert group_events > 0, \
-            f"Should have GROUP events in {trace_file}, found {group_events}"
-        assert group_events % 2 == 0, \
-            f"Each GROUP span needs a begin and an end, found {group_events} entries in {trace_file}"
+        group_events = [e for e in json.load(open(trace_file)) if isinstance(e, dict) and e.get("cat") == "GROUP"]
+        assert group_events, f"Should have GROUP events in {trace_file}"
+        by_id = {}
+        for event in group_events:
+            by_id.setdefault(event.get("id"), {"b": None, "e": None})
+            ph = event.get("ph")
+            if ph in ("b", "e"):
+                by_id[event.get("id")][ph] = event
+        for gid, pair in by_id.items():
+            assert pair["b"] is not None and pair["e"] is not None, \
+                f"GROUP id {gid} in {trace_file} is missing a begin or end"
+            assert pair["e"].get("ts", 0) >= pair["b"].get("ts", 0), \
+                f"GROUP id {gid} in {trace_file} ends before it starts"
 
         coll_events = paths.count_events_in_trace(trace_file, category="COLL")
         coll_api_events = paths.count_events_in_trace(trace_file, category="COLL_API")

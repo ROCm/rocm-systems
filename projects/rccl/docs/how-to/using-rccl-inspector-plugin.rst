@@ -249,7 +249,8 @@ into the directory watched by the node exporter textfile collector:
 Unlike the JSON logs, ``.prom`` files are rewritten in place at each dump, so
 their size is bounded by the number of communicators sharing a device (roughly
 500 to 1000 bytes per communicator per metric). The files are removed when the
-communicator is destroyed.
+communicator is destroyed if a periodic dump thread ran (``NCCL_INSPECTOR_DUMP_THREAD_ENABLE``
+is not ``0``). If dumps only happen at communicator teardown, the ``.prom`` file is kept.
 
 The following metrics are exported:
 

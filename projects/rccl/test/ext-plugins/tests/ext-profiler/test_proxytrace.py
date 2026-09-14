@@ -21,8 +21,7 @@ def test_multinode_dump_is_complete(paths):
     only exist for inter-node traffic, hence the multi-node requirement.
     """
 
-    plugin_so = os.path.join(paths.RCCL_INSTALL_DIR, "plugins", "profiler", "proxytrace",
-                             "librccl-profiler-proxytrace.so")
+    plugin_so = paths.PROXYTRACE_SO
     if not os.path.exists(plugin_so):
         pytest.skip(f"proxytrace plugin is not built at {plugin_so}")
 

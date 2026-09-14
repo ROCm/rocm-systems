@@ -425,6 +425,26 @@ inline struct taskEventBase* taskEventQueueDequeue(T* obj) {
   return tmp;
 }
 
+// Unlink a specific child, not just the head: CE children complete out of order
+// and the poller returns the slot to the ring without going through resetTaskEvents.
+template <typename T>
+inline void taskEventQueueUnlink(T* obj, struct taskEventBase* event) {
+  if (obj == NULL || event == NULL) return;
+  struct taskEventBase* prev = NULL;
+  struct taskEventBase* cur = obj->eventHead;
+  while (cur) {
+    if (cur == event) {
+      if (prev) prev->next = cur->next;
+      else obj->eventHead = cur->next;
+      if (obj->eventTail == cur) obj->eventTail = prev;
+      cur->next = NULL;
+      return;
+    }
+    prev = cur;
+    cur = cur->next;
+  }
+}
+
 template <typename T>
 inline void resetTaskEvents(T *obj, struct context* ctx) {
   while (!taskEventQueueEmpty(obj)) {
