@@ -14,14 +14,16 @@
 /// these because they exercise the driver object directly, bypassing the fd
 /// tracking that lives in the interposer.
 
+#include "scoped_temp.h"
+
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 // Use the checked-in UAPI because older system libdrm headers do not expose the
 // GEM_VA timeline fields exercised by these tests.
-#include "linux/uapi/drm/amdgpu_drm.h"
-#include "linux/uapi/drm/drm.h"
 #include "linux/uapi/kfd_ioctl.h"
+#include <libdrm/amdgpu_drm.h>
+#include <libdrm/drm.h>
 RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
@@ -31,19 +33,25 @@ RJ_DIAGNOSTIC_POP
 #include <barrier>
 #include <cerrno>
 #include <chrono>
+#include <climits>
 #include <csignal>
+#include <cstdio>
 #include <cstring>
 #include <fcntl.h>
 #include <fstream>
+#include <spawn.h>
 #include <string>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/sysmacros.h>
 #include <sys/wait.h>
 #include <thread>
 #include <time.h>
 #include <unistd.h>
+
+extern char **environ;
 
 namespace {
 
@@ -1149,109 +1157,680 @@ TEST(InterposerSyncobjTest, TimelineWaitReturnsEintrForSignal) {
   EXPECT_EQ(close(kfd), 0);
 }
 
-TEST(InterposerSyncobjTest, ForkedChildReinitializesTimelineFutexState) {
+// rocJITsu local mode supports fork-then-exec only: its simulator state lives in
+// this address space, and a driver call holds private driver locks for its whole
+// duration -- sometimes across a blocking wait -- so no atfork prepare handler could
+// drain them without risking hanging fork() itself. Same contract as CUDA, HSA/ROCr
+// and ThreadSanitizer. Enforcement is an immutable owner PID checked at the top of
+// every interposed entry point, before any inherited lock, container or pointer.
+//
+// These cover the contract from a MULTITHREADED parent, which is the case that
+// previously deadlocked: the child must reach exec (or _exit) without ever touching
+// inherited state.
+
+// A forked child must NOT silently fall through to the host's real GPU. If this box
+// has a real /dev/kfd, passing the open through to libc would move the child off the
+// emulator and onto real hardware -- worse than any error. It must fail closed.
+TEST(InterposerForkTest, ChildRefusesGpuEndpointsBeforeExec) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
-  int drm = open_drm_render();
-  if (drm < 0)
-    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
-
-  drm_syncobj_create create{};
-  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
-  constexpr size_t kBoSize = 0x1000;
-  constexpr uint64_t kVa = 0x1000000000ULL;
-  int dmabuf = make_sized_memfd(kBoSize);
-  ASSERT_GE(dmabuf, 0);
-  uint32_t gem_handle = 0;
-  ASSERT_TRUE(prime_import(drm, dmabuf, &gem_handle));
-
-  uint32_t handles[] = {create.handle};
-  uint64_t points[] = {1};
-  drm_syncobj_timeline_wait wait{};
-  wait.handles = reinterpret_cast<uintptr_t>(handles);
-  wait.points = reinterpret_cast<uintptr_t>(points);
-  wait.count_handles = 1;
-  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
-  wait.timeout_nsec = monotonic_deadline_after(std::chrono::seconds(2));
-
-  std::barrier ready(2);
-  std::atomic<int> wait_rc{-2};
-  std::thread waiter([&] {
-    ready.arrive_and_wait();
-    wait_rc = ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
-  });
-  ready.arrive_and_wait();
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
   const pid_t child = fork();
-  if (child < 0) {
-    const int fork_errno = errno;
-    waiter.join();
-    EXPECT_EQ(gem_close(drm, gem_handle), 0);
-    EXPECT_EQ(close(dmabuf), 0);
-    EXPECT_EQ(close(drm), 0);
-    EXPECT_EQ(close(kfd), 0);
-    FAIL() << "fork failed: " << std::strerror(fork_errno);
-  }
+  ASSERT_GE(child, 0) << "fork failed: " << std::strerror(errno);
   if (child == 0) {
-    alarm(3);
-    int child_kfd = open_kfd();
-    if (child_kfd < 0 || !kfd_version_ok(child_kfd))
-      _exit(1);
-    int child_drm = open_drm_render();
-    if (child_drm < 0)
-      _exit(2);
-    drm_syncobj_create child_create{};
-    if (ioctl(child_drm, DRM_IOCTL_SYNCOBJ_CREATE, &child_create) != 0)
-      _exit(3);
-    int child_dmabuf = make_sized_memfd(kBoSize);
-    uint32_t child_gem_handle = 0;
-    if (child_dmabuf < 0 || !prime_import(child_drm, child_dmabuf, &child_gem_handle))
-      _exit(4);
-    drm_amdgpu_gem_va child_map{};
-    child_map.handle = child_gem_handle;
-    child_map.operation = AMDGPU_VA_OP_MAP;
-    child_map.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
-    child_map.va_address = kVa;
-    child_map.map_size = kBoSize;
-    child_map.vm_timeline_point = 1;
-    child_map.vm_timeline_syncobj_out = child_create.handle;
-    if (ioctl(child_drm, DRM_AMDGPU_GEM_VA_request(), &child_map) != 0)
-      _exit(5);
-    uint32_t child_handles[] = {child_create.handle};
-    uint64_t child_points[] = {1};
-    drm_syncobj_timeline_wait child_wait{};
-    child_wait.handles = reinterpret_cast<uintptr_t>(child_handles);
-    child_wait.points = reinterpret_cast<uintptr_t>(child_points);
-    child_wait.count_handles = 1;
-    child_wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL;
-    child_wait.timeout_nsec = monotonic_deadline_after(std::chrono::seconds(1));
-    _exit(ioctl(child_drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &child_wait) == 0 ? 0 : 6);
+    alarm(10);
+    // Must fail, and must not hand back a real-hardware descriptor.
+    int child_kfd = open("/dev/kfd", O_RDWR | O_CLOEXEC);
+    if (child_kfd >= 0)
+      _exit(10); // opened something -- emulator or host -- both wrong here.
+    if (errno != ENODEV)
+      _exit(11);
+    // Ordinary filesystem work still passes through normally.
+    int devnull = open("/dev/null", O_RDONLY | O_CLOEXEC);
+    if (devnull < 0)
+      _exit(12);
+    close(devnull);
+    _exit(0);
   }
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status)) << "child did not exit cleanly";
+  EXPECT_EQ(WEXITSTATUS(status), 0)
+      << "10=GPU endpoint opened in child, 11=wrong errno, 12=ordinary open broken";
+  EXPECT_EQ(close(kfd), 0);
+}
 
-  drm_amdgpu_gem_va map{};
-  map.handle = gem_handle;
-  map.operation = AMDGPU_VA_OP_MAP;
-  map.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
-  map.va_address = kVa;
-  map.map_size = kBoSize;
-  map.vm_timeline_point = 1;
-  map.vm_timeline_syncobj_out = create.handle;
-  EXPECT_EQ(ioctl(drm, DRM_AMDGPU_GEM_VA_request(), &map), 0);
-  waiter.join();
-  EXPECT_EQ(wait_rc.load(), 0);
+// A textual path check is not enough: /dev//kfd, /dev/./kfd, a cwd-relative
+// openat(dirfd, "kfd", ...) and freopen() all reach the same device node by a
+// different spelling. The child-side classifier resolves target IDENTITY instead, so
+// every spelling must be refused. A leak here silently moves the child onto real
+// hardware on any box that has a physical KFD.
+TEST(InterposerForkTest, ChildRefusesEveryGpuEndpointSpelling) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
 
+  const pid_t child = fork();
+  ASSERT_GE(child, 0) << "fork failed: " << std::strerror(errno);
+  if (child == 0) {
+    alarm(10);
+    auto refused = [](int fd) {
+      if (fd >= 0) {
+        close(fd);
+        return false;
+      }
+      return errno == ENODEV;
+    };
+    if (!refused(open("/dev/kfd", O_RDWR | O_CLOEXEC)))
+      _exit(20);
+    if (!refused(open("/dev//kfd", O_RDWR | O_CLOEXEC)))
+      _exit(21);
+    if (!refused(open("/dev/./kfd", O_RDWR | O_CLOEXEC)))
+      _exit(22);
+    int devdir = open("/dev", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (devdir < 0)
+      _exit(23);
+    if (!refused(openat(devdir, "kfd", O_RDWR | O_CLOEXEC)))
+      _exit(24);
+    close(devdir);
+    // A refused freopen must still CLOSE the caller's original stream. POSIX freopen
+    // closes it first and does so even when opening the replacement fails, so
+    // returning ENODEV while leaving it live would keep a descriptor alive past a
+    // failed freopen -- and past the exec that follows. Use a throwaway stream rather
+    // than stdin so the check is observable.
+    FILE *victim = fopen("/dev/null", "r");
+    if (!victim)
+      _exit(25);
+    const int victim_fd = fileno(victim);
+    errno = 0;
+    if (freopen("/dev/kfd", "r", victim) != nullptr)
+      _exit(26);
+    if (errno != ENODEV)
+      _exit(27);
+    if (fcntl(victim_fd, F_GETFD) >= 0)
+      _exit(28); // original descriptor outlived a failed freopen.
+    // Ordinary character devices must still work -- the classifier refuses GPU
+    // nodes, not every device.
+    int devnull = open("/dev/null", O_RDONLY | O_CLOEXEC);
+    if (devnull < 0)
+      _exit(29);
+    close(devnull);
+    _exit(0);
+  }
   int status = 0;
   ASSERT_EQ(waitpid(child, &status, 0), child);
   ASSERT_TRUE(WIFEXITED(status));
-  EXPECT_EQ(WEXITSTATUS(status), 0);
-
-  EXPECT_EQ(gem_close(drm, gem_handle), 0);
-  EXPECT_EQ(close(dmabuf), 0);
-  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(WEXITSTATUS(status), 0)
+      << "20-24=a GPU endpoint spelling was not refused, 25=setup, 26/27=freopen "
+      << "leaked, 28=refused freopen left the original stream open, 29=ordinary "
+      << "device open broken";
   EXPECT_EQ(close(kfd), 0);
 }
+
+// Both tests above only prove anything on a box that HAS the device node they name:
+// the child-side classifier resolved identity by stat()ing the target, so on a host
+// with no /dev/kfd and no render nodes -- CI, and any pure-emulation deployment --
+// it classified nothing and every spelling fell through to libc with ENOENT. The
+// parent does not work that way: it synthesizes GPU endpoints by spelling, so it
+// serves an emulated endpoint whether or not the host has a matching node, and the
+// child's contract must not quietly depend on the box having hardware.
+//
+// Pin that with an endpoint this host does NOT have, which reaches the same branch
+// on every box rather than only on bare ones.
+TEST(InterposerForkTest, ChildRefusesAnEmulatedEndpointTheHostDoesNotHave) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+
+  // First render minor with no node on this host. DRM allocates them from 128.
+  std::string absent;
+  for (unsigned minor = 128; minor < 256; ++minor) {
+    std::string candidate = "/dev/dri/renderD" + std::to_string(minor);
+    struct stat st {};
+    if (stat(candidate.c_str(), &st) != 0) {
+      absent = std::move(candidate);
+      break;
+    }
+  }
+  if (absent.empty())
+    GTEST_SKIP() << "every render minor 128-255 exists on this host";
+
+  const std::string node = absent.substr(absent.rfind('/') + 1);
+  // The same node reached by every spelling ChildRefusesEveryGpuEndpointSpelling
+  // uses, so the absent-node path is held to the same contract as the present one.
+  // With no node to resolve, the classifier has to normalize these itself, and that
+  // normalization is only reachable here.
+  const std::string doubled = "/dev/dri//" + node;
+  const std::string dotted = "/dev/dri/./" + node;
+  const std::string parented = "/dev/dri/../dri/" + node;
+
+  const pid_t child = fork();
+  ASSERT_GE(child, 0) << "fork failed: " << std::strerror(errno);
+  if (child == 0) {
+    alarm(10);
+    auto refused = [](int fd) {
+      if (fd >= 0) {
+        close(fd);
+        return false;
+      }
+      return errno == ENODEV;
+    };
+    if (!refused(open(absent.c_str(), O_RDWR | O_CLOEXEC)))
+      _exit(30);
+    if (!refused(open(doubled.c_str(), O_RDWR | O_CLOEXEC)))
+      _exit(31);
+    if (!refused(open(dotted.c_str(), O_RDWR | O_CLOEXEC)))
+      _exit(32);
+    if (!refused(open(parented.c_str(), O_RDWR | O_CLOEXEC)))
+      _exit(33);
+    int dridir = open("/dev/dri", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dridir >= 0) {
+      // Relative to a dirfd there is no absolute name to inspect at all, so this
+      // is the spelling that proves the classifier resolves rather than matches.
+      if (!refused(openat(dridir, node.c_str(), O_RDWR | O_CLOEXEC)))
+        _exit(34);
+      close(dridir);
+    }
+    // A path that merely does not exist must still report ENOENT: the fallback
+    // matches the endpoints the parent synthesizes, not everything absent.
+    if (open("/dev/dri/definitely-not-a-render-node", O_RDWR | O_CLOEXEC) >= 0)
+      _exit(35);
+    if (errno != ENOENT)
+      _exit(36);
+    _exit(0);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status)) << "child did not exit cleanly";
+  EXPECT_EQ(WEXITSTATUS(status), 0)
+      << "30-34=an absent GPU endpoint spelling was not refused with ENODEV, "
+      << "35/36=an ordinary missing path stopped reporting ENOENT";
+  EXPECT_EQ(close(kfd), 0);
+}
+
+// The classifier's stated rule is that an unclassifiable target is treated AS a GPU
+// endpoint -- a child getting ENODEV on some unrelated node costs far less than a
+// child silently acquiring real hardware. Both classifiers have a give-up path, and
+// a give-up that answered "not a GPU endpoint" would be a silent fail-OPEN.
+//
+// A path too long to resolve reaches exactly that: no node to stat, and no absolute
+// spelling to compare, so neither classifier can decide. libc alone would answer
+// ENAMETOOLONG; the contract says refuse instead.
+TEST(InterposerForkTest, ChildFailsClosedOnAnUnclassifiablePath) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+
+  // Well past PATH_MAX, so resolution cannot produce a comparable absolute path.
+  const std::string overlong = "/" + std::string(PATH_MAX + 64, 'x');
+
+  const pid_t child = fork();
+  ASSERT_GE(child, 0) << "fork failed: " << std::strerror(errno);
+  if (child == 0) {
+    alarm(10);
+    int fd = open(overlong.c_str(), O_RDWR | O_CLOEXEC);
+    if (fd >= 0) {
+      close(fd);
+      _exit(40);
+    }
+    if (errno != ENODEV)
+      _exit(41);
+    // ...and a path that IS classifiable still reports its own error, so failing
+    // closed has not swallowed ordinary errno reporting.
+    if (open("/tmp/rocjitsu-no-such-file-here", O_RDONLY | O_CLOEXEC) >= 0)
+      _exit(42);
+    if (errno != ENOENT)
+      _exit(43);
+    _exit(0);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status)) << "child did not exit cleanly";
+  EXPECT_EQ(WEXITSTATUS(status), 0)
+      << "40=an unclassifiable path was opened, 41=it was not refused with ENODEV "
+      << "(fail-open), 42/43=a classifiable missing path stopped reporting ENOENT";
+  EXPECT_EQ(close(kfd), 0);
+}
+
+// The descriptor an application receives must carry NO real-hardware authority.
+// Under fork-then-exec the interposer passes a child's ioctl/dup/dup2/fcntl straight
+// to libc, so if the app fd were a real /dev/kfd duplicate a child could drive real
+// hardware through it -- and dup2() it to a fresh number, clearing FD_CLOEXEC, to
+// carry that authority across the exec that was supposed to sanitize the process.
+// Both drivers therefore hand out synthetic descriptors and keep any real device fd
+// strictly private.
+TEST(InterposerForkTest, AppDescriptorCarriesNoRealHardwareAuthority) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+
+  auto is_real_gpu = [](int fd) {
+    struct stat st {};
+    if (::fstat(fd, &st) != 0 || !S_ISCHR(st.st_mode))
+      return false;
+    struct stat kfd_st {};
+    if (::stat("/dev/kfd", &kfd_st) == 0 && st.st_rdev == kfd_st.st_rdev)
+      return true;
+    return major(st.st_rdev) == 226u;
+  };
+
+  EXPECT_FALSE(is_real_gpu(kfd))
+      << "the application-facing KFD descriptor must be synthetic, not a real device";
+
+  const pid_t child = fork();
+  ASSERT_GE(child, 0) << "fork failed: " << std::strerror(errno);
+  if (child == 0) {
+    alarm(10);
+    // Laundering the inherited descriptor must not produce hardware authority.
+    int laundered = dup2(kfd, 200);
+    if (laundered >= 0) {
+      struct stat st {};
+      if (::fstat(200, &st) == 0 && S_ISCHR(st.st_mode)) {
+        struct stat kfd_st {};
+        if ((::stat("/dev/kfd", &kfd_st) == 0 && st.st_rdev == kfd_st.st_rdev) ||
+            major(st.st_rdev) == 226u)
+          _exit(40); // real GPU authority survived into the child.
+      }
+    }
+    _exit(0);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0)
+      << "40=a real GPU descriptor was inherited and laundered across dup2";
+  EXPECT_EQ(close(kfd), 0);
+}
+
+// Making the APPLICATION-facing descriptor synthetic is not enough on its own:
+// fork() copies the whole descriptor table, so a hardware-backed guest's PRIVATE
+// real /dev/kfd is inherited too, and a child can find it by walking /proc/self/fd.
+// Child pass-through paths therefore check descriptor IDENTITY, refusing operations
+// on any real GPU fd rather than trusting the path used to obtain it.
+//
+// This is a cooperative, API-level contract, not a security boundary -- a child
+// issuing raw syscalls is out of reach of interposition -- but it stops the
+// realistic failure: inheriting hardware by accident and laundering it across exec.
+TEST(InterposerForkTest, ChildRefusesOperationsOnInheritedRealGpuDescriptors) {
+  // card0 is a real DRM device the interposer does not synthesize, so the parent
+  // genuinely hands real GPU authority to the child -- the same shape as a hardware
+  // guest's private KFD descriptor.
+  int real_gpu = ::open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
+  if (real_gpu < 0)
+    GTEST_SKIP() << "no real DRM device available to inherit";
+
+  const pid_t child = fork();
+  ASSERT_GE(child, 0) << "fork failed: " << std::strerror(errno);
+  if (child == 0) {
+    alarm(10);
+    auto refused = [](int rc) { return rc < 0 && errno == ENODEV; };
+    if (!refused(ioctl(real_gpu, 0, 0)))
+      _exit(50); // operated real hardware through an inherited descriptor.
+    if (!refused(dup(real_gpu)))
+      _exit(51);
+    if (!refused(dup2(real_gpu, 210)))
+      _exit(52); // dup2 also strips FD_CLOEXEC, so this is the exec-laundering route.
+    if (!refused(fcntl(real_gpu, F_DUPFD_CLOEXEC, 0)))
+      _exit(53);
+    _exit(0);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0)
+      << "50=ioctl, 51=dup, 52=dup2, 53=F_DUPFD each allowed on an inherited real "
+      << "GPU descriptor";
+  EXPECT_EQ(close(real_gpu), 0);
+}
+
+// Duplication is not the only way to launder an inherited descriptor past exec:
+// clearing FD_CLOEXEC on the descriptor already held does it with no dup at all.
+// The child gate must cover both, while leaving harmless fcntl use working.
+TEST(InterposerForkTest, ChildCannotLaunderInheritedGpuFdAcrossExec) {
+  int real_gpu = ::open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
+  if (real_gpu < 0)
+    GTEST_SKIP() << "no real DRM device available to inherit";
+
+  const pid_t child = fork();
+  ASSERT_GE(child, 0) << "fork failed: " << std::strerror(errno);
+  if (child == 0) {
+    alarm(10);
+    // Clearing FD_CLOEXEC is the no-duplication laundering route.
+    if (!(fcntl(real_gpu, F_SETFD, 0) < 0 && errno == ENODEV))
+      _exit(60);
+    // Setting it is harmless and must still be permitted.
+    if (fcntl(real_gpu, F_SETFD, FD_CLOEXEC) != 0)
+      _exit(61);
+    // Ordinary queries must keep working.
+    if (fcntl(real_gpu, F_GETFD) < 0)
+      _exit(62);
+    _exit(0);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0)
+      << "60=F_SETFD cleared FD_CLOEXEC on a real GPU fd, 61=setting FD_CLOEXEC was "
+      << "wrongly refused, 62=an ordinary fcntl query was wrongly refused";
+  EXPECT_EQ(close(real_gpu), 0);
+}
+
+// dup3 is gated on the same path as dup2 but is worth its own case: it takes an
+// explicit flags argument, so the laundering shape (flags without O_CLOEXEC) is
+// expressed differently, and a future refactor could plausibly gate one and not the
+// other. Both flag forms must be refused on a real GPU fd -- a child has no business
+// operating real hardware whether or not the copy would survive exec -- while dup3
+// on an ordinary descriptor must keep working.
+TEST(InterposerForkTest, ChildRefusesDup3OnInheritedGpuFd) {
+  int real_gpu = ::open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
+  if (real_gpu < 0)
+    GTEST_SKIP() << "no real DRM device available to inherit";
+  int ordinary = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(ordinary, 0);
+
+  const pid_t child = fork();
+  ASSERT_GE(child, 0) << "fork failed: " << std::strerror(errno);
+  if (child == 0) {
+    alarm(10);
+    // Without O_CLOEXEC the copy would survive exec -- the laundering route.
+    if (!(dup3(real_gpu, 220, 0) < 0 && errno == ENODEV))
+      _exit(90);
+    // With O_CLOEXEC it would not survive exec, but the child still must not get a
+    // usable real-hardware descriptor.
+    if (!(dup3(real_gpu, 221, O_CLOEXEC) < 0 && errno == ENODEV))
+      _exit(91);
+    // Ordinary descriptors are unaffected.
+    if (dup3(ordinary, 222, O_CLOEXEC) < 0)
+      _exit(92);
+    _exit(0);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0)
+      << "90=dup3 laundered a real GPU fd, 91=dup3 with O_CLOEXEC still handed one "
+      << "over, 92=dup3 on an ordinary fd was wrongly refused";
+  EXPECT_EQ(close(ordinary), 0);
+  EXPECT_EQ(close(real_gpu), 0);
+}
+
+// mmap64 is a distinct exported symbol, and _FILE_OFFSET_BITS=64 redirects even a
+// source-level mmap() call to it. Exporting only mmap would let those calls bypass
+// the child refusal and all emulator routing, exactly as would have happened for
+// fcntl64. Call it explicitly so the test cannot be silently re-bound.
+extern "C" void *mmap64(void *, size_t, int, int, int, __off64_t);
+
+TEST(InterposerForkTest, ChildRefusesMmap64OnInheritedGpuFd) {
+  int real_gpu = ::open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
+  if (real_gpu < 0)
+    GTEST_SKIP() << "no real DRM device available to inherit";
+
+  const pid_t child = fork();
+  ASSERT_GE(child, 0) << "fork failed: " << std::strerror(errno);
+  if (child == 0) {
+    alarm(10);
+    void *p = mmap64(nullptr, 4096, PROT_READ, MAP_SHARED, real_gpu, 0);
+    if (!(p == MAP_FAILED && errno == ENODEV))
+      _exit(70);
+    _exit(0);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0) << "70=mmap64 bypassed the child GPU-fd refusal";
+  EXPECT_EQ(close(real_gpu), 0);
+}
+
+// The child's fopen must keep libc's own mode parser. An earlier version re-derived
+// open flags and used fdopen, which silently lost the 0666 creation mode for "w"/"a"
+// (files came out mode 0000) and the "x" exclusive modifier (truncating instead of
+// failing EEXIST).
+TEST(InterposerForkTest, ChildFopenPreservesLibcModeSemantics) {
+  rocjitsu::test::ScopedTempDirectory tmp("rj_fopen_");
+  const std::string target = tmp.path() + "/created";
+
+  const pid_t child = fork();
+  ASSERT_GE(child, 0) << "fork failed: " << std::strerror(errno);
+  if (child == 0) {
+    alarm(10);
+    // Pin the umask so the expected mode is exact. Without this the assertion has to
+    // weaken to "some bit is set", which would accept genuinely wrong modes -- and
+    // would wrongly fail under an ambient umask of 0777, where 0000 is correct.
+    ::umask(0);
+
+    FILE *w = fopen(target.c_str(), "w");
+    if (!w)
+      _exit(80);
+    fclose(w);
+    struct stat st {};
+    if (::stat(target.c_str(), &st) != 0)
+      _exit(81);
+    if ((st.st_mode & 07777) != 0666)
+      _exit(82); // must be exactly 0666 & ~umask(0); mode 0000 was the old bug.
+
+    // Seed content so "wx" failing is distinguishable from "wx" truncating and then
+    // failing -- a null return alone does not prove the file was left alone.
+    FILE *seed = fopen(target.c_str(), "w");
+    if (!seed)
+      _exit(83);
+    fputs("SENTINEL", seed);
+    fclose(seed);
+
+    errno = 0;
+    FILE *excl = fopen(target.c_str(), "wx");
+    const int excl_errno = errno;
+    if (excl != nullptr) {
+      fclose(excl);
+      _exit(84); // "x" must refuse an existing file.
+    }
+    if (excl_errno != EEXIST)
+      _exit(85);
+    char buf[32] = {};
+    FILE *rd = fopen(target.c_str(), "r");
+    if (!rd)
+      _exit(86);
+    const char *got = fgets(buf, sizeof(buf), rd);
+    fclose(rd);
+    if (!got || std::strcmp(buf, "SENTINEL") != 0)
+      _exit(87); // truncated despite failing: the destructive-then-fail shape.
+    _exit(0);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0)
+      << "80/81=fopen(\"w\") failed, 82=creation mode was not 0666 under umask(0), "
+      << "83=seeding failed, 84=\"wx\" opened an existing file, 85=wrong errno, "
+      << "86/87=\"wx\" truncated the file before failing";
+}
+
+// Names lie; device identity does not. A symlink can point at the real KFD under any
+// name, a chain can hide it another level down, and an unrelated node can be *named*
+// like KFD without being one. The child classifier resolves the target and compares
+// st_rdev against the host KFD recorded at init, so all three must come out right --
+// including the reverse case, which a substring check would wrongly refuse.
+TEST(InterposerForkTest, ChildClassifiesGpuEndpointsByIdentityNotName) {
+  struct stat kfd_st {};
+  if (::stat("/dev/kfd", &kfd_st) != 0 || !S_ISCHR(kfd_st.st_mode))
+    GTEST_SKIP() << "host has no real /dev/kfd to alias";
+
+  rocjitsu::test::ScopedTempDirectory tmp("rj_alias_");
+  const std::string aliased = tmp.path() + "/gpu";          // -> /dev/kfd
+  const std::string chained = tmp.path() + "/chained";      // -> gpu -> /dev/kfd
+  const std::string lookalike = tmp.path() + "/kfd_shaped"; // -> /dev/null
+  ASSERT_EQ(symlink("/dev/kfd", aliased.c_str()), 0);
+  ASSERT_EQ(symlink("gpu", chained.c_str()), 0);
+  ASSERT_EQ(symlink("/dev/null", lookalike.c_str()), 0);
+
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+
+  const pid_t child = fork();
+  ASSERT_GE(child, 0) << "fork failed: " << std::strerror(errno);
+  if (child == 0) {
+    alarm(10);
+    auto refused = [](const std::string &p) {
+      int fd = open(p.c_str(), O_RDWR | O_CLOEXEC);
+      if (fd >= 0) {
+        close(fd);
+        return false;
+      }
+      return errno == ENODEV;
+    };
+    if (!refused(aliased))
+      _exit(30); // differently named alias leaked real hardware.
+    if (!refused(chained))
+      _exit(31); // chained alias leaked real hardware.
+    int ok = open(lookalike.c_str(), O_RDONLY | O_CLOEXEC);
+    if (ok < 0)
+      _exit(32); // a node merely NAMED like KFD must not be refused.
+    close(ok);
+    _exit(0);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0)
+      << "30=named alias leaked, 31=chained alias leaked, 32=false positive on a "
+      << "non-GPU node whose name resembles KFD";
+  EXPECT_EQ(close(kfd), 0);
+}
+
+// The case that used to deadlock: fork racing threads that are inside interposed
+// calls. Under the PID gate the child touches nothing inherited, so it must always
+// reach exec. The alarm in the child is the liveness assertion.
+TEST(InterposerForkTest, MultithreadedForkExecAlwaysReachesExec) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+
+  std::atomic<bool> stop{false};
+  std::vector<std::thread> churn;
+  for (int i = 0; i < 4; ++i) {
+    churn.emplace_back([&] {
+      while (!stop.load(std::memory_order_acquire)) {
+        int d = dup(kfd);
+        if (d >= 0)
+          close(d);
+      }
+    });
+  }
+  for (int i = 0; i < 2; ++i) {
+    churn.emplace_back([&] {
+      while (!stop.load(std::memory_order_acquire)) {
+        struct stat st {};
+        stat("/sys/class/kfd/kfd/topology/nodes/0/properties", &st);
+      }
+    });
+  }
+
+  for (int round = 0; round < 24; ++round) {
+    const pid_t child = fork();
+    ASSERT_GE(child, 0) << "fork failed: " << std::strerror(errno);
+    if (child == 0) {
+      alarm(10);
+      execl("/bin/true", "true", static_cast<char *>(nullptr));
+      _exit(127); // exec failed
+    }
+    int status = 0;
+    ASSERT_EQ(waitpid(child, &status, 0), child);
+    ASSERT_TRUE(WIFEXITED(status))
+        << "round " << round << ": child never reached exec (a fork racing an "
+        << "interposed call must not be able to block on inherited state)";
+    EXPECT_EQ(WEXITSTATUS(status), 0) << "round " << round;
+  }
+
+  stop.store(true, std::memory_order_release);
+  for (auto &t : churn)
+    t.join();
+  EXPECT_EQ(close(kfd), 0);
+}
+
+// system() and popen() fork internally without going through our exported fork(),
+// so they exercise the same child path via a route we do not control.
+TEST(InterposerForkTest, SystemAndPopenWorkFromAMultithreadedParent) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+
+  std::atomic<bool> stop{false};
+  std::vector<std::thread> churn;
+  for (int i = 0; i < 4; ++i) {
+    churn.emplace_back([&] {
+      while (!stop.load(std::memory_order_acquire)) {
+        int d = dup(kfd);
+        if (d >= 0)
+          close(d);
+      }
+    });
+  }
+
+  for (int round = 0; round < 8; ++round) {
+    EXPECT_EQ(system("/bin/true"), 0) << "round " << round;
+    FILE *pipe = popen("/bin/echo rocjitsu", "r");
+    ASSERT_NE(pipe, nullptr) << "round " << round;
+    char buf[64] = {};
+    EXPECT_NE(fgets(buf, sizeof(buf), pipe), nullptr);
+    EXPECT_STREQ(buf, "rocjitsu\n");
+    EXPECT_EQ(pclose(pipe), 0) << "round " << round;
+  }
+
+  stop.store(true, std::memory_order_release);
+  for (auto &t : churn)
+    t.join();
+  EXPECT_EQ(close(kfd), 0);
+}
+
+// posix_spawn uses vfork/CLONE_VFORK internally, where the child shares the parent's
+// address space until exec. The gate must not mutate anything in that window.
+TEST(InterposerForkTest, PosixSpawnFromAMultithreadedParent) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+
+  std::atomic<bool> stop{false};
+  std::vector<std::thread> churn;
+  for (int i = 0; i < 4; ++i) {
+    churn.emplace_back([&] {
+      while (!stop.load(std::memory_order_acquire)) {
+        int d = dup(kfd);
+        if (d >= 0)
+          close(d);
+      }
+    });
+  }
+
+  for (int round = 0; round < 8; ++round) {
+    pid_t spawned = -1;
+    char prog[] = "/bin/true";
+    char *const argv[] = {prog, nullptr};
+    ASSERT_EQ(posix_spawn(&spawned, prog, nullptr, nullptr, argv, environ), 0) << "round " << round;
+    int status = 0;
+    ASSERT_EQ(waitpid(spawned, &status, 0), spawned);
+    EXPECT_TRUE(WIFEXITED(status)) << "round " << round;
+    EXPECT_EQ(WEXITSTATUS(status), 0) << "round " << round;
+  }
+
+  stop.store(true, std::memory_order_release);
+  for (auto &t : churn)
+    t.join();
+  // The parent's own KFD routing must be untouched by all that spawning.
+  EXPECT_TRUE(kfd_version_ok(kfd));
+  EXPECT_EQ(close(kfd), 0);
+}
+
+// RETIRED: this exercised fork-WITHOUT-exec in local mode -- the child re-opened
+// KFD/DRM and ran GEM + syncobj work with no intervening exec. That contradicts the
+// contract local mode can actually honour (see InterposerForkTest above): the
+// simulator lives in this address space and its driver locks cannot be drained by an
+// atfork handler. The capability is only supportable where the state is NOT in the
+// forking address space, i.e. daemon mode -- and re-homing it there needs its own
+// design first, because a daemon-mode child still inherits the client-side context,
+// RemoteDriver, fd maps and shared_ptr control blocks. Being out-of-process removes
+// the simulator from the child, not the proxy. Tracked separately; do not simply
+// move this test.
 
 TEST(InterposerSyncobjTest, ConcurrentVmUpdatesShareTimeline) {
   int kfd = open_kfd();

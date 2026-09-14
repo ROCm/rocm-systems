@@ -26,7 +26,7 @@ THE SOFTWARE.
 extern "C" {
     #include <libavcodec/avcodec.h>
     #include <libavformat/avformat.h>
-    #if USE_AVCODEC_GREATER_THAN_58_134
+    #if USE_AVCODEC_GREATER_THAN_58_134 || USE_AVCODEC_GREATER_THAN_60_31
         #include <libavcodec/bsf.h>
     #endif
 }
@@ -522,9 +522,9 @@ class VideoDemuxer {
                         || !strcmp(av_fmt_input_ctx_->iformat->long_name, "Matroska / WebM"));
 
             // Check if the input file allow seek functionality.
-#if USE_AVCODEC_GREATER_THAN_58_134
+#if USE_AVCODEC_GREATER_THAN_58_134 || USE_AVCODEC_GREATER_THAN_60_31
             is_seekable_ = true;    //for latest version of FFMPeg, read_seek and read_seek2 is not exposed in AVFormatContext
-#else            
+#else
             is_seekable_ = av_fmt_input_ctx_->iformat->read_seek || av_fmt_input_ctx_->iformat->read_seek2;
 #endif            
 

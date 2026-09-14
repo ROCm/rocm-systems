@@ -31,6 +31,12 @@ THE SOFTWARE.
 #include <ctime>
 #include <time.h>
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <process.h>
 #include <windows.h>
 #else
@@ -58,20 +64,22 @@ enum RocDecLogLevel {
     kRocDecLogLevelMax       = 4
 };
 
-#ifdef _WIN32
-#define GET_TIME_NS() ([]() -> uint64_t { \
-    static LARGE_INTEGER freq = {}; \
-    if (freq.QuadPart == 0) QueryPerformanceFrequency(&freq); \
-    LARGE_INTEGER cnt; QueryPerformanceCounter(&cnt); \
-    return static_cast<uint64_t>(cnt.QuadPart * 1000000000ULL / freq.QuadPart); }())
-#define FILENAME_ONLY (strrchr(__FILE__, '\\') ? strrchr(__FILE__, '\\') + 1 : (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__))
-#define GET_THREAD_ID() (static_cast<uint32_t>(GetCurrentThreadId()))
-#define GET_PID() (_getpid())
-#else
+#ifndef _WIN32
 #define GET_TIME_NS() ([]() -> uint64_t { struct timespec ts_; clock_gettime(CLOCK_MONOTONIC, &ts_); return static_cast<uint64_t>(ts_.tv_sec) * 1000000000LL + ts_.tv_nsec; }())
 #define FILENAME_ONLY (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define GET_THREAD_ID() (static_cast<pid_t>(syscall(SYS_gettid)))
 #define GET_PID() (getpid())
+#else
+#define GET_TIME_NS() ([]() -> uint64_t { \
+    static const LARGE_INTEGER freq = []() { LARGE_INTEGER f{}; QueryPerformanceFrequency(&f); return f; }(); \
+    LARGE_INTEGER cnt{}; QueryPerformanceCounter(&cnt); \
+    if (freq.QuadPart <= 0) return 0ULL; \
+    const uint64_t sec = static_cast<uint64_t>(cnt.QuadPart / freq.QuadPart); \
+    const uint64_t rem = static_cast<uint64_t>(cnt.QuadPart % freq.QuadPart); \
+    return sec * 1000000000ULL + (rem * 1000000000ULL) / static_cast<uint64_t>(freq.QuadPart); }())
+#define FILENAME_ONLY (strrchr(__FILE__, '\\') ? strrchr(__FILE__, '\\') + 1 : (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__))
+#define GET_THREAD_ID() (static_cast<uint32_t>(GetCurrentThreadId()))
+#define GET_PID() (_getpid())
 #endif
 #define GET_HASHED_THREAD_ID() ([]() -> std::string { std::ostringstream oss; oss << "0x" << std::hex << std::setw(5) << std::setfill('0') << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); return oss.str(); }())
 #define MakeMsg(msg) ROCDEC_STR(FILENAME_ONLY) + ":" + ROCDEC_TOSTR(__LINE__) + ": " + ROCDEC_TOSTR(GET_TIME_NS() / 1000ULL) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(GET_PID()) + ROCDEC_STR(" tid:") + ROCDEC_TOSTR(GET_THREAD_ID()) + ROCDEC_STR(" hashid:") + GET_HASHED_THREAD_ID() + ROCDEC_STR("] ") + ROCDEC_STR(__func__) + "(): " + msg

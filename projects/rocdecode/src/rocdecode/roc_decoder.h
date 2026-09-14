@@ -31,6 +31,12 @@ THE SOFTWARE.
 #include <string.h>
 #include <map>
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #endif
 #include "../api/rocdecode/rocdecode.h"
@@ -46,7 +52,7 @@ struct HipInteropDeviceMem {
     uint32_t pitch[3]; // Pitch of each plane
     uint32_t num_layers; // Number of layers making up the surface
 #ifdef _WIN32
-    HANDLE nt_handle; // NT handle from vaExportSurfaceHandle; must CloseHandle after HIP import
+    HANDLE d3d12_shared_handle; // from ID3D12Device::CreateSharedHandle; must CloseHandle when no longer needed
 #endif
 };
 

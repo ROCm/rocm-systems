@@ -26,7 +26,7 @@ extern "C" {
     #include <libavcodec/avcodec.h>
     #include <libavformat/avformat.h>
     #include <libavutil/pixdesc.h>
-    #if USE_AVCODEC_GREATER_THAN_58_134
+    #if USE_AVCODEC_GREATER_THAN_58_134 || USE_AVCODEC_GREATER_THAN_60_31
         #include <libavcodec/bsf.h>
     #endif
 }

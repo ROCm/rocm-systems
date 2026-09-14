@@ -17,13 +17,15 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
     endif()
     string(REPLACE "/GR" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     string(REPLACE "/W3" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        add_compile_options(/MTd)
-        add_compile_options(-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH)
+    if (AMD_COMPUTE_WIN)
+        # shared prebuilt libs are release, allows hip to be debug
+        add_compile_options(/MT)
+        add_compile_options("$<$<CONFIG:Debug>:-D_ITERATOR_DEBUG_LEVEL=0>")
+        add_compile_options("$<$<CONFIG:Debug>:-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH>")
     else()
-        if (AMD_COMPUTE_WIN)
-            add_compile_options(/MT)
-        endif()
+        add_compile_options("$<$<CONFIG:Debug>:/MTd>")
+        add_compile_options("$<$<NOT:$<CONFIG:Debug>>:/MT>")
+        add_compile_options("$<$<CONFIG:Debug>:-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH>")
     endif()
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         # Unlike when targeting MSFT's MSVC, when targeting clang-cl,
@@ -47,6 +49,8 @@ option(USE_NEW_HOSTCALL_IMPL
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")
 endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/CLRHardening.cmake")
 
 #############
 # Build steps

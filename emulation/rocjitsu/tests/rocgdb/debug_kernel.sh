@@ -30,6 +30,15 @@ set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 profile="${MIRAGE_PROFILE:-mi350x}"
 arch="${OFFLOAD_ARCH:-gfx950}"
+if [[ "$arch" == gfx1250 ]]; then
+  exec_regex='^exec +0x(00000000)?ffffffff'
+  expected_wave_positions=(0 1 2 3)
+  expected_wave_locals=(3 227 451 675)
+else
+  exec_regex='^exec +0xffffffffffffffff'
+  expected_wave_positions=(0 1)
+  expected_wave_locals=(3 451)
+fi
 
 # CTest matches the whole output against SKIP_REGULAR_EXPRESSION "SKIP:" (see
 # the RocgdbDebug.KernelBreakpoint registration in tests/CMakeLists.txt), and a
@@ -90,6 +99,13 @@ mirage_runtime_args=()
 if [[ -n "$runtime_library_path" ]]; then
   mirage_runtime_args+=(--env "LD_LIBRARY_PATH=$runtime_library_path")
 fi
+# The nightly gfx1250 HIP/ROCr stack enables its code-object rewrite path by
+# default. A debugger qualification must observe the code object that hipcc
+# emitted, not a replacement held in anonymous memory, so disable that path in
+# both CLR and ROCr for every scenario below. The first ROCgdb run also prints
+# the inherited value and loaded libraries; the assertions below make this
+# fail closed if the variable is lost or the rewrite library is loaded anyway.
+mirage_runtime_args+=(--env "HSA_HOTSWAP_DISABLE=1")
 
 # --- Build the demo kernel --------------------------------------------------
 workdir="$(mktemp -d)"
@@ -120,9 +136,12 @@ echo "running rocgdb under: $mirage_bin run --profile $profile"
 outfile="$workdir/rocgdb.out"
 timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
   rocgdb --batch \
+    -ex 'show environment HSA_HOTSWAP_DISABLE' \
     -ex 'set breakpoint pending on' \
     -ex 'break add_one' \
     -ex 'run' \
+    -ex 'disable 1' \
+    -ex 'info sharedlibrary' \
     -ex 'info registers pc exec' \
     -ex 'x/i $pc' \
     -ex 'print/x $pc' \
@@ -180,8 +199,15 @@ check() { # <regex> <description>
 }
 
 check 'hit Breakpoint 1, .*add_one .*at .*:[0-9]+' 'stopped at the GPU kernel breakpoint'
+check '^HSA_HOTSWAP_DISABLE = 1' 'disabled the gfx1250 code-object rewrite path'
+if grep -qaE 'libhsa_hotswap_rocjitsu|HotSwap: forwarding' <<<"$out"; then
+  echo "  FAIL: a HotSwap implementation was active during ROCgdb qualification" >&2
+  fail=1
+else
+  echo "  ok: no HotSwap implementation was loaded"
+fi
 check '^pc +0x[0-9a-f]+' 'read the wave PC register'
-check '^exec +0xffffffffffffffff' 'read the wave EXEC mask (all 64 lanes)'
+check "$exec_regex" "read the wave EXEC mask (all lanes for $arch)"
 check '=> 0x[0-9a-f]+ <.*add_one.*>:' 'disassembled the instruction at PC'
 check 'add_one done: host\[0\]=1 host\[63\]=1' 'kernel produced the correct result after continue'
 check 'Inferior 1 .*exited normally' 'inferior exited normally'
@@ -231,6 +257,7 @@ timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -
     -ex 'set breakpoint pending on' \
     -ex "break add_one.hip:${store_line}" \
     -ex 'run' \
+    -ex 'disable 1' \
     -ex 'info registers pc' \
     -ex 'continue' \
     "$app" </dev/null >"$outfile2" 2>&1
@@ -280,6 +307,7 @@ timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -
     -ex 'run' \
     -ex 'set $waddr = (unsigned long)d' \
     -ex 'continue' \
+    -ex 'disable 2' \
     -ex 'watch *(int*)$waddr' \
     -ex 'continue' \
     "$app" </dev/null >"$outfile3" 2>&1
@@ -318,6 +346,7 @@ timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -
     -ex 'set breakpoint pending on' \
     -ex 'break add_one' \
     -ex 'run' \
+    -ex 'disable 1' \
     -ex 'stepi' \
     -ex 'set {unsigned int}$pc = 0xffffffff' \
     -ex 'continue' \
@@ -358,6 +387,7 @@ if hipcc --offload-arch="$arch" -g -O0 -o "$badapp" "$here/bad_access.hip" 2>"$w
       -ex 'set breakpoint pending on' \
       -ex 'break bad_access' \
       -ex 'run' \
+      -ex 'disable 1' \
       -ex 'continue' \
       "$badapp" </dev/null >"$outfile5" 2>&1
   status5=$?
@@ -399,6 +429,7 @@ timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -
     -ex 'set breakpoint pending on' \
     -ex 'break add_one' \
     -ex 'run' \
+    -ex 'disable 1' \
     -ex 'print data' \
     -ex 'print n' \
     -ex 'print data[0]' \
@@ -438,12 +469,12 @@ if grep -qaE 'Cannot access memory at address private_lane|flat_scratch may be c
 fi
 
 # --- Seventh scenario: multi-wave workgroup correlation -----------------------
-# Launch one workgroup of 128 threads (two 64-lane wavefronts) and break inside
-# the kernel. Both waves of the workgroup trap; the emulator serializes them
+# Launch one workgroup of 128 threads (two wave64 or four wave32 wavefronts) and
+# break inside the kernel. Every wave of the workgroup traps; the emulator serializes them
 # together (atomic capture once the queue quiesces) so rocm-dbgapi decodes a
 # stable control stack and correlates each wave to workgroup (0,0,0) at its
-# position (/0 and /1). Reading the scratch-resident `local` in each wave must
-# return that wave's own value (thread 0 -> 3, thread 64 -> 451), which
+# position. Reading the scratch-resident `local` in each wave must return that
+# wave's own value, which
 # exercises the per-wave scratch scoreboard mapping. A regression shows up as a
 # dbgapi fatal ("not in the same workgroup as the group_leader" /
 # "os_queue_packet_id ... not within"), a crash, or identical/again-corrupted
@@ -461,7 +492,7 @@ if hipcc --offload-arch="$arch" -g -O0 -o "$mwapp" "$here/multi_wave.hip" 2>"$wo
       -ex "break multi_wave.hip:${mw_line}" \
       -ex 'run' \
       -ex 'info threads' \
-      -ex 'thread apply all -q print local' \
+      -ex 'thread apply all print local' \
       -ex 'delete breakpoints' \
       -ex 'continue' \
       "$mwapp" </dev/null >"$outfile7" 2>&1
@@ -482,11 +513,27 @@ if hipcc --offload-arch="$arch" -g -O0 -o "$mwapp" "$here/multi_wave.hip" 2>"$wo
       fail=1
     fi
   }
+  check7_wave_local() { # <wave-position> <local-value>
+    local wave_position="$1"
+    local local_value="$2"
+    if awk -v position="$wave_position" -v value="$local_value" '
+      /^[[:space:]]*Thread [0-9]+ .*AMDGPU Wave / {
+        current = index($0, "(0,0,0)/" position) != 0
+        next
+      }
+      current && $1 ~ /^\$[0-9]+$/ && $2 == "=" && $3 == value { found = 1 }
+      END { exit found ? 0 : 1 }
+    ' <<<"$out7"; then
+      echo "  ok: wave ${wave_position} scratch read includes local == ${local_value}"
+    else
+      echo "  MISSING: wave ${wave_position} did not report local == ${local_value}" >&2
+      fail=1
+    fi
+  }
   check7 "hit Breakpoint 1, .*multi_wave .*at .*:${mw_line}" 'both waves stop at the kernel breakpoint'
-  check7 'AMDGPU Wave .*\(0,0,0\)/0' 'wave 0 correlated to workgroup (0,0,0) position 0'
-  check7 'AMDGPU Wave .*\(0,0,0\)/1' 'wave 1 correlated to workgroup (0,0,0) position 1'
-  check7 '= 3' 'wave 0 scratch read: local == 3 (global thread 0)'
-  check7 '= 451' 'wave 1 scratch read: local == 451 (global thread 64)'
+  for index in "${!expected_wave_positions[@]}"; do
+    check7_wave_local "${expected_wave_positions[index]}" "${expected_wave_locals[index]}"
+  done
   check7 'multi_wave done: h\[0\]=3 h\[64\]=451' 'kernel produced the correct per-thread results'
   check7 'Inferior 1 .*exited normally' 'inferior exited normally after multi-wave debug'
   if grep -qaE 'not in the same workgroup as the group_leader|os_queue_packet_id .* is not within|Segmentation fault' <<<"$out7"; then

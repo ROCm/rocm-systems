@@ -68,9 +68,9 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 if(NOT WIN32)
   if(CMAKE_BUILD_TYPE MATCHES Debug)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4")
+    set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O0 -gdwarf-4)
   else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
+    set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O3 -DNDEBUG -fPIC)
   endif()
 endif()
 
@@ -185,7 +185,9 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
     endif()
 
     add_executable(${PROJECT_NAME} ${SOURCES})
-    if(WIN32)
+    if(NOT WIN32)
+        target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS})
+    elseif(WIN32)
         add_dependencies(${PROJECT_NAME} hip_kernels)
         target_link_libraries(${PROJECT_NAME} ${KERNEL_OBJS})
     # On TheRock installs libva is vendored under lib/rocm_sysdeps, but FFmpeg still

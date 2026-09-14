@@ -364,9 +364,13 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'gpr_idx', operation='off')
     if name == 'S_SET_GPR_IDX_MODE':
         return InstructionSemantics(name, 'gpr_idx', operation='mode')
-    # S_NOP, S_SLEEP, S_SETHALT, S_SETPRIO, S_SENDMSG, S_ICACHE_INV,
-    # S_INCPERFLEVEL, S_DECPERFLEVEL — all are either no-ops or system/debug
-    # instructions that don't affect compute simulation correctness.
+    # The instruction cache is not coherent with data writes, so self-modifying
+    # code is only visible to the fetcher once this instruction retires.
+    if name == 'S_ICACHE_INV':
+        return InstructionSemantics(name, 'icache_inv')
+    # S_NOP, S_SLEEP, S_SETHALT, S_SETPRIO, S_SENDMSG, S_INCPERFLEVEL,
+    # S_DECPERFLEVEL — all are either no-ops or system/debug instructions that
+    # don't affect compute simulation correctness.
     return InstructionSemantics(name, 'true_nop')
 
 
@@ -1599,6 +1603,10 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'pk_binop_f32', operation='add', data_type='f32'
         )
+    if name == 'V_PK_LSHL_ADD_U64':
+        return InstructionSemantics(
+            name, 'pk_lshl_add_u64', operation='lshl_add', data_type='u64'
+        )
     if name == 'V_PK_MOV_B32':
         return InstructionSemantics(name, 'pk_mov_b32')
 
@@ -1822,9 +1830,9 @@ _TRANSPOSE_LOAD_MAP: dict[str, tuple[str, int, int, int]] = {
     # suffix -> (semantic suffix, elem_size, num_elems, transpose kind)
     # elem_size/num_elems describe the raw VGPR result size in dwords.
     # transpose kind is amdgpu::TransposeKind: TR_B4=1, TR_B6=2,
-    # B64_TR_B8=3 (CDNA4 MFMA / CDNA5 DS layout), TR16_B128=4,
-    # B64_TR_B16=5,
-    # WMMA_TR_B8=6 (RDNA4 16x16 matrix layout). All textual aliases use the
+    # B64_TR_B8=3 (CDNA4 MFMA default), TR16_B128=4, B64_TR_B16=5,
+    # WMMA_TR_B8=6 (RDNA4 16x16 matrix layout), and
+    # CDNA5_DS_TR_B8=7 (gfx1250 DS matrix layout). All textual aliases use the
     # same default here; instruction-family and ISA-profile overrides below
     # select the architecture's routing.
     'B64_TR_B4': ('b4', 4, 2, 1),
@@ -1892,9 +1900,9 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
     'MIN_U64': ('umin', 2),
     'MAX_I64': ('smax', 2),
     'MAX_U64': ('umax', 2),
-    # Packed FP atomics (treated as 32-bit fadd for now).
-    'PK_ADD_F16': ('fadd', 1),
-    'PK_ADD_BF16': ('fadd', 1),
+    # Packed FP atomics retain the component format through execution.
+    'PK_ADD_F16': ('pk_add_f16', 1),
+    'PK_ADD_BF16': ('pk_add_bf16', 1),
 }
 
 
@@ -2456,10 +2464,10 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         '_STOREXCHG_2ADDR_STRIDE64_RTN_B32': ('swap', 4, 1),
         '_STOREXCHG_2ADDR_RTN_B64': ('swap', 8, 2),
         '_STOREXCHG_2ADDR_STRIDE64_RTN_B64': ('swap', 8, 2),
-        '_PK_ADD_F16': ('fadd', 4, 1),
-        '_PK_ADD_RTN_F16': ('fadd', 4, 1),
-        '_PK_ADD_BF16': ('fadd', 4, 1),
-        '_PK_ADD_RTN_BF16': ('fadd', 4, 1),
+        '_PK_ADD_F16': ('pk_add_f16', 4, 1),
+        '_PK_ADD_RTN_F16': ('pk_add_f16', 4, 1),
+        '_PK_ADD_BF16': ('pk_add_bf16', 4, 1),
+        '_PK_ADD_RTN_BF16': ('pk_add_bf16', 4, 1),
     }
     for suffix, (op, esz, dw) in _DS_ATOMIC_MAP.items():
         if suffix in upper:

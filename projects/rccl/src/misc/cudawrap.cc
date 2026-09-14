@@ -44,6 +44,10 @@ error:
 #endif
 }
 
+int ncclCuMemRuntimeSupported() {
+  return ncclIsCuMemSupported();
+}
+
 int ncclCuMemEnable() {
   // NCCL_CUMEM_ENABLE=-2 means auto-detect CUMEM support
   int param = ncclParamCuMemEnable();

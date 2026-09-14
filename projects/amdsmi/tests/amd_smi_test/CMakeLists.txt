@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 option(INSTALL_GTEST "Install GTest" OFF)
 
 # Help tests find libraries at runtime

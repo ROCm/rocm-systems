@@ -31,6 +31,7 @@
 #include "MPIHelpers.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
+#include "rccl_float8.h"
 #include <cstdlib>
 #include <vector>
 
@@ -43,6 +44,45 @@ using namespace RCCLTestHelpers;
 namespace {
     constexpr size_t DEFAULT_COUNT = 256 * 1024;
     constexpr int MIN_RANKS = 2;
+
+    template <typename Fp8T>
+    void FillFp8ReduceScatterInput(std::vector<Fp8T>& hostSend, int rank) {
+        for (size_t j = 0; j < hostSend.size(); j++) {
+            // Keep values in a compact signed range while varying by rank/index.
+            const int base = static_cast<int>(j % 61) - 30;
+            hostSend[j] = Fp8T(static_cast<float>(base + rank));
+        }
+    }
+
+    template <typename Fp8T>
+    float ExpectedFp8ReduceScatterSum(int rank, int nRanks, size_t count, size_t i) {
+        const size_t globalIdx = static_cast<size_t>(rank) * count + i;
+        const int base = static_cast<int>(globalIdx % 61) - 30;
+        float acc = 0.0f;
+        for (int r = 0; r < nRanks; r++) {
+            acc += static_cast<float>(Fp8T(static_cast<float>(base + r)));
+        }
+        return static_cast<float>(Fp8T(acc));
+    }
+
+    template <typename Fp8T>
+    void FillFp8AllReduceInput(std::vector<Fp8T>& hostSend, int rank) {
+        for (size_t j = 0; j < hostSend.size(); j++) {
+            // Match reduce-scatter's compact signed range to exercise the same regime.
+            const int base = static_cast<int>(j % 61) - 30;
+            hostSend[j] = Fp8T(static_cast<float>(base + rank));
+        }
+    }
+
+    template <typename Fp8T>
+    float ExpectedFp8AllReduceSum(int nRanks, size_t i) {
+        const int base = static_cast<int>(i % 61) - 30;
+        float acc = 0.0f;
+        for (int r = 0; r < nRanks; r++) {
+            acc += static_cast<float>(Fp8T(static_cast<float>(base + r)));
+        }
+        return static_cast<float>(Fp8T(acc));
+    }
 }
 
 // ============================================================================
@@ -336,6 +376,66 @@ TEST_F(SymWin_AllReduce, SingleWindow_InPlace)
     TEST_INFO("Rank %d: SingleWindow_InPlace passed (one-buffer path)", rank);
 }
 
+TEST_F(SymWin_AllReduce, BothWindows_Fp8Sum)
+{
+    if (!setupForSymmetric()) {
+        GTEST_SKIP() << "Requires symmetric support with 2+ ranks";
+    }
+
+    ncclComm_t comm = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+    int rank, nRanks;
+    ncclCommUserRank(comm, &rank);
+    ncclCommCount(comm, &nRanks);
+
+    auto runCase = [&](ncclDataType_t dtype, const char* dtypeName, auto typeTag) {
+        using Fp8T = decltype(typeTag);
+        const std::vector<size_t> counts = {1, 1024, size_t{1} << 16};
+
+        for (size_t count : counts) {
+            SCOPED_TRACE(::testing::Message() << "dtype=" << dtypeName << " count=" << count);
+
+            const size_t bufSize = count * sizeof(Fp8T);
+            void* sendBuf = allocNcclBuf(bufSize);
+            void* recvBuf = allocNcclBuf(bufSize);
+            ASSERT_MPI_NE(sendBuf, nullptr);
+            ASSERT_MPI_NE(recvBuf, nullptr);
+
+            ncclWindow_t sendWin = registerWindow(comm, sendBuf, bufSize);
+            ncclWindow_t recvWin = registerWindow(comm, recvBuf, bufSize);
+            ASSERT_MPI_NE(sendWin, nullptr);
+            ASSERT_MPI_NE(recvWin, nullptr);
+
+            std::vector<Fp8T> hostSend(count);
+            FillFp8AllReduceInput(hostSend, rank);
+            std::vector<Fp8T> hostRecv(count, Fp8T(0.0f));
+            ASSERT_MPI_EQ(hipSuccess, hipMemcpy(sendBuf, hostSend.data(), bufSize, hipMemcpyHostToDevice));
+            ASSERT_MPI_EQ(hipSuccess, hipMemcpy(recvBuf, hostRecv.data(), bufSize, hipMemcpyHostToDevice));
+
+            ASSERT_MPI_EQ(ncclSuccess,
+                ncclAllReduce(sendBuf, recvBuf, count, dtype, ncclSum, comm, stream));
+            ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+            ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hostRecv.data(), recvBuf, bufSize, hipMemcpyDeviceToHost));
+            size_t localErrors = 0;
+            for (size_t i = 0; i < count; i++) {
+                const float expected = ExpectedFp8AllReduceSum<Fp8T>(nRanks, i);
+                if (expected != static_cast<float>(hostRecv[i])) {
+                    if (localErrors == 0) {
+                        TEST_INFO("rank=%d dtype=%s first mismatch at i=%zu: expected=%f got=%f",
+                            rank, dtypeName, i, expected, static_cast<float>(hostRecv[i]));
+                    }
+                    localErrors++;
+                }
+            }
+            ASSERT_MPI_EQ(localErrors, size_t{0});
+        }
+    };
+
+    runCase(ncclFloat8e4m3, "fp8_e4m3", rccl_float8{});
+    runCase(ncclFloat8e5m2, "fp8_e5m2", rccl_bfloat8{});
+}
+
 // ============================================================================
 // ReduceScatter with symmetric windows
 // ============================================================================
@@ -448,6 +548,69 @@ TEST_F(SymWin_ReduceScatter, NoWindows)
 
     ASSERT_TRUE(checkReduceScatterResult<T>(recvBuf, countPerRank, nRanks));
     TEST_INFO("Rank %d: ReduceScatter NoWindows passed (non-symmetric fallback)", rank);
+}
+
+TEST_F(SymWin_ReduceScatter, BothWindows_Fp8Sum)
+{
+    if (!setupForSymmetric()) {
+        GTEST_SKIP() << "Requires symmetric support with 2+ ranks";
+    }
+
+    ncclComm_t comm = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+    int rank, nRanks;
+    ncclCommUserRank(comm, &rank);
+    ncclCommCount(comm, &nRanks);
+
+    auto runCase = [&](ncclDataType_t dtype, const char* dtypeName, auto typeTag) {
+        using Fp8T = decltype(typeTag);
+        const std::vector<size_t> counts = {1, 1024, size_t{1} << 16};
+
+        for (size_t countPerRank : counts) {
+            SCOPED_TRACE(::testing::Message() << "dtype=" << dtypeName << " count=" << countPerRank);
+
+            const size_t sendElems = countPerRank * nRanks;
+            const size_t sendSize = sendElems * sizeof(Fp8T);
+            const size_t recvSize = countPerRank * sizeof(Fp8T);
+
+            void* sendBuf = allocNcclBuf(sendSize);
+            void* recvBuf = allocNcclBuf(recvSize);
+            ASSERT_MPI_NE(sendBuf, nullptr);
+            ASSERT_MPI_NE(recvBuf, nullptr);
+
+            ncclWindow_t sendWin = registerWindow(comm, sendBuf, sendSize);
+            ncclWindow_t recvWin = registerWindow(comm, recvBuf, recvSize);
+            ASSERT_MPI_NE(sendWin, nullptr);
+            ASSERT_MPI_NE(recvWin, nullptr);
+
+            std::vector<Fp8T> hostSend(sendElems);
+            FillFp8ReduceScatterInput(hostSend, rank);
+            std::vector<Fp8T> hostRecv(countPerRank, Fp8T(0.0f));
+            ASSERT_MPI_EQ(hipSuccess, hipMemcpy(sendBuf, hostSend.data(), sendSize, hipMemcpyHostToDevice));
+            ASSERT_MPI_EQ(hipSuccess, hipMemcpy(recvBuf, hostRecv.data(), recvSize, hipMemcpyHostToDevice));
+
+            ASSERT_MPI_EQ(ncclSuccess,
+                ncclReduceScatter(sendBuf, recvBuf, countPerRank, dtype, ncclSum, comm, stream));
+            ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+            ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hostRecv.data(), recvBuf, recvSize, hipMemcpyDeviceToHost));
+            size_t localErrors = 0;
+            for (size_t i = 0; i < countPerRank; i++) {
+                const float expected = ExpectedFp8ReduceScatterSum<Fp8T>(rank, nRanks, countPerRank, i);
+                if (expected != static_cast<float>(hostRecv[i])) {
+                    if (localErrors == 0) {
+                        TEST_INFO("rank=%d dtype=%s first mismatch at i=%zu: expected=%f got=%f",
+                            rank, dtypeName, i, expected, static_cast<float>(hostRecv[i]));
+                    }
+                    localErrors++;
+                }
+            }
+            ASSERT_MPI_EQ(localErrors, size_t{0});
+        }
+    };
+
+    runCase(ncclFloat8e4m3, "fp8_e4m3", rccl_float8{});
+    runCase(ncclFloat8e5m2, "fp8_e5m2", rccl_bfloat8{});
 }
 
 // ============================================================================

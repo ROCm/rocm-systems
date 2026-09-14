@@ -11,8 +11,32 @@
 # The gfx950 race detector cases include CDNA-specific inline assembly
 # sequences for LDS and waitcnt coverage. Keep that binary on gfx950 even when
 # generic HIP smoke tests are overridden for local validation on another ISA.
-rj_add_hip_test(hip_race_tests_gfx950 ARCH gfx950 SOURCE hip_race_gfx950_test.hip)
-rj_add_hip_test(hip_race_tests_gfx1151 ARCH gfx1151 SOURCE hip_race_gfx1151_test.hip)
+set(RJ_RACE_TEST_SUPPORT_HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/race_log_expectation.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/race_test_support.hpp
+)
+
+function(rj_add_hip_race_test TEST_NAME)
+    rj_add_hip_test(${TEST_NAME} ${ARGN})
+    # The race plugin is loaded at runtime, so no link dependency pulls its
+    # shared object into focused builds of the HIP race-test targets.
+    if(TARGET rocjitsu_plugin_race_so)
+        add_dependencies(${TEST_NAME}_target rocjitsu_plugin_race_so)
+    endif()
+endfunction()
+
+rj_add_hip_race_test(
+    hip_race_tests_gfx950
+    ARCH gfx950
+    SOURCE hip_race_gfx950_test.hip
+    DEPENDENCIES ${RJ_RACE_TEST_SUPPORT_HEADERS}
+)
+rj_add_hip_race_test(
+    hip_race_tests_gfx1151
+    ARCH gfx1151
+    SOURCE hip_race_gfx1151_test.hip
+    DEPENDENCIES ${RJ_RACE_TEST_SUPPORT_HEADERS}
+)
 set(RJ_RACE_GFX950_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/race_test_config.json)
 if(RJ_INSTALL_TESTS)
     install(
@@ -118,6 +142,10 @@ rj_add_gfx950_race_test_case(vgpr_waitcnt)
 rj_add_gfx950_race_test_case(vgpr_waitcnt_race)
 rj_add_gfx950_race_test_case(sgpr_waitcnt)
 rj_add_gfx950_race_test_case(sgpr_waitcnt_race)
+rj_add_gfx950_race_test_case(sgpr_waw_load_then_mov)
+rj_add_gfx950_race_test_case(sgpr_waw_load_then_mov_race)
+rj_add_gfx950_race_test_case(sgpr_waw_load_then_load)
+rj_add_gfx950_race_test_case(sgpr_waw_load_then_load_race)
 rj_add_gfx950_race_test_case(lds_cross_wave)
 rj_add_gfx950_race_test_case(lds_cross_wave_race)
 rj_add_gfx950_race_test_case(lds_same_wave_order)

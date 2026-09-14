@@ -8,6 +8,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 
 * Invalid video size handling for AVC/HEVC.
 * Windows support (experimental): hardware-accelerated video decoding on Windows via the vaon12 backend (Mesa's VA-API on D3D12 translation layer). Supports H.264, HEVC, AV1, and VP9. Requires HIP from TheRock for Windows and the vaon12 package.
+* Added support for explicitly loading librocm_sysdeps_va via dlopen, ensuring complete isolation from the system libva library.
 
 ### Resolved issues
 

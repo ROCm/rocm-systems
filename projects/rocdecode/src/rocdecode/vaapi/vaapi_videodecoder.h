@@ -28,15 +28,23 @@ THE SOFTWARE.
 #include <vector>
 #include <string>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <algorithm>
 #include <unordered_map>
 
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #include <d3d12.h>
 #include <dxgi1_2.h>
 #include <va/va_win32.h>
+#include "d3d12_interop.h"
 #else
 #include <fcntl.h>
 #include <unistd.h>
@@ -49,6 +57,9 @@ THE SOFTWARE.
 
 #include <va/va.h>
 #include <va/va_drmcommon.h>
+#ifdef ROCDECODE_USE_DLOPEN_VA
+#include "vaapi_loader.h"
+#endif
 #include "../../commons.h"
 #include "../../../api/rocdecode/rocdecode.h"
 
@@ -84,10 +95,10 @@ typedef struct {
     int device_id;
     std::string gpu_uuid;
     std::string gpu_pci_bdf;
-#ifdef _WIN32
-    LUID adapter_luid;
-#else
+#ifndef _WIN32
     int drm_fd;
+#else
+    LUID adapter_luid;
 #endif
     VADisplay va_display;
     hipDeviceProp_t hip_dev_prop;
@@ -112,33 +123,13 @@ public:
     rocDecStatus InitializeDecoder();
     rocDecStatus SubmitDecode(RocdecPicParams *pPicParams);
     rocDecStatus GetDecodeStatus(int pic_idx, RocdecDecodeStatus* decode_status);
-#ifdef _WIN32
-    // Surface layout info (computed from decoder config, matches GetSurfaceStrideInternal).
-    struct SurfaceLayout {
-        uint32_t pitch;             // Row pitch in bytes (luma and chroma share this for NV12/P016)
-        uint32_t vstride;           // Aligned height
-        uint32_t num_planes;        // Total planes (luma + chroma): 1 for mono, 2 for NV12/P016, 3 for planar YUV
-        uint32_t plane_offset[3];   // Byte offset of each plane
-        uint32_t plane_pitch[3];    // Byte pitch of each plane
-        uint32_t plane_height[3];   // Row count of each plane
-        uint64_t total_size;        // Total buffer size in bytes
-    };
-    SurfaceLayout GetSurfaceLayout() const;
-
-    // Interop paths:
-    rocDecStatus ExportSurfaceNTHandle(int pic_idx, HANDLE &nt_handle);
-    uint64_t GetD3D12ResourceAllocationSize(int pic_idx);
-    rocDecStatus CopyToStagingBuffer(int pic_idx);
-    rocDecStatus ExportStagingBufferHandle(int pic_idx, HANDLE &nt_handle);
-    uint64_t GetStagingBufferSize(int pic_idx);
-    void GetD3D12ResourceLayout(int pic_idx, uint32_t pitches[3], uint32_t offsets[3], uint32_t &num_planes);
-    bool HasStagingBuffers() const { return !d3d12_staging_buffers_.empty() && d3d12_staging_buffers_[0] != nullptr; }
-    // EXPERIMENTAL CPU-staged path (functional workaround):
-    rocDecStatus MapSurfaceToCPU(int pic_idx, uint8_t** cpu_ptr, uint32_t &width, uint32_t &height,
-                                 uint32_t pitches[3], uint32_t offsets[3], uint32_t &num_planes);
-    rocDecStatus UnmapSurface(int pic_idx);
-#else
+#ifndef _WIN32
     rocDecStatus ExportSurface(int pic_idx, VADRMPRIMESurfaceDescriptor &va_drm_prime_surface_desc);
+#else
+    // Interop path (forwarders into D3D12Interop): tiled D3D12 decode texture ->
+    // linear staging buffer -> HIP import. Implementation lives in d3d12_interop.cpp.
+    rocDecStatus CopyToStagingBuffer(int pic_idx);
+    rocDecStatus ExportStagingInterop(int pic_idx, D3D12Interop::StagingInteropInfo &out);
 #endif
     rocDecStatus SyncSurface(int pic_idx);
     rocDecStatus ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconfig_params);
@@ -154,17 +145,8 @@ private:
     std::vector<VASurfaceID> va_surface_ids_;
     bool supports_modifiers_;
 #ifdef _WIN32
-    ID3D12Device* d3d12_device_;                         // D3D12 device for creating shared resources
-    std::vector<ID3D12Resource*> d3d12_shared_resources_; // Shared D3D12 textures used as VA surfaces
-    // D3D12 copy infrastructure: tiled texture → linear staging buffer
-    ID3D12CommandQueue* d3d12_copy_queue_;
-    ID3D12CommandAllocator* d3d12_cmd_allocator_;
-    ID3D12GraphicsCommandList* d3d12_cmd_list_;
-    ID3D12Fence* d3d12_fence_;
-    HANDLE d3d12_fence_event_;
-    uint64_t d3d12_fence_value_;
-    std::vector<ID3D12Resource*> d3d12_staging_buffers_;  // Linear staging buffers (shared, for HIP import)
-    VAImage va_mapped_image_;                             // Current derived image for CPU mapping
+    // All D3D12 device/resource/staging state lives in this helper (see d3d12_interop.h).
+    std::unique_ptr<D3D12Interop> d3d12_interop_;
 #endif
 
     VABufferID pic_params_buf_id_;
@@ -196,6 +178,9 @@ public:
     rocDecStatus GetVaContext(int device_id, uint32_t *va_ctx_id);
     rocDecStatus GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display);
     rocDecStatus CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap);
+#ifdef _WIN32
+    rocDecStatus GetAdapterLuid(int device_id, LUID *adapter_luid);
+#endif
 
 private:
     std::mutex mutex;
@@ -219,10 +204,15 @@ private:
     VaContext& operator = (const VaContext) = delete;
     ~VaContext();
 
+#ifdef ROCDECODE_USE_DLOPEN_VA
+    // Exclusively owns the dlopen handle and VA function pointer table.
+    // VaContext is a singleton so there is exactly one instance; unique_ptr
+    // is correct here. Outlives all VADisplay handles.
+    std::unique_ptr<VaapiLoader> va_loader_;
+#endif
+
     rocDecStatus InitHIP(int device_id, hipDeviceProp_t& hip_dev_prop);
-#ifdef _WIN32
-    rocDecStatus InitVAAPI(int va_ctx_idx, const LUID* adapter_luid);
-#else
+#ifndef _WIN32
     rocDecStatus InitVAAPI(int va_ctx_idx, std::string drm_node);
     void GetVisibleDevices(std::vector<int>& visible_devices_vetor);
     void GetDrmNodeOffset(std::string device_name, uint8_t device_id, std::vector<int>& visible_devices, ComputePartition current_compute_partition, int &offset);
@@ -233,5 +223,7 @@ private:
 
     // Returns the lowest-numbered /dev/dri/renderD* node, or "" if none.
     std::string GetFirstAvailableDrmNode();
+#else
+    rocDecStatus InitVAAPI(int va_ctx_idx, const LUID* adapter_luid);
 #endif
 };
