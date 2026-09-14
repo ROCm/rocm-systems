@@ -44,6 +44,7 @@ set(RJ_HOOKS_LINK_LIBS
     rocjitsu_analysis
     rocjitsu_code
     ${ROCJITSU_CONSAN_OBJECT_LIBS}
+    rocjitsu_code_object
     rocjitsu_dbt_config
     rocjitsu_isa
     rocjitsu_amdgpu_isa_registry

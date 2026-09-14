@@ -9,7 +9,8 @@ ROCm Systems Profiler (rocprofiler-systems)
 ROCm Systems Profiler is designed for the high-level profiling and comprehensive tracing
 of applications running on the CPU or the CPU and GPU. It supports dynamic binary
 instrumentation, call-stack sampling, and various other features for determining
-which function and line number are currently executing. To learn more, see :doc:`what-is-rocprof-sys`
+which function and line number are currently executing. To learn more, see
+:doc:`What is ROCm Systems Profiler? <what-is-rocprof-sys>`
 
 ROCm Systems Profiler is open source and hosted at `<https://github.com/ROCm/rocm-systems>`__.
 It is the successor to `<https://github.com/ROCm/omnitrace>`__.
@@ -21,6 +22,8 @@ It is the successor to `<https://github.com/ROCm/omnitrace>`__.
 
     * :doc:`Install ROCm Systems Profiler <./install/install>`
     * :doc:`Build from source <./install/build>`
+
+  .. grid-item::
 
 Use the following topics to learn more about the advantages of ROCm Systems Profiler in application
 profiling, how it supports performance analysis, and how to leverage its capabilities in practice:

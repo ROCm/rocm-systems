@@ -1220,8 +1220,8 @@ TEST(MemoryPipelineAtomicTest, PackedFloatAddsUpdateBothHalvesAcrossGlobalAndLds
     uint32_t expected;
   };
   constexpr std::array cases = {
-      Case{amdgpu::AtomicOp::PK_F16_ADD, 0x40003C00u, 0x48004400u},
-      Case{amdgpu::AtomicOp::PK_BF16_ADD, 0x40003F80u, 0x41004080u},
+      Case{amdgpu::AtomicOp::PK_ADD_F16, 0x40003C00u, 0x48004400u},
+      Case{amdgpu::AtomicOp::PK_ADD_BF16, 0x40003F80u, 0x41004080u},
   };
 
   for (const Case &test_case : cases) {

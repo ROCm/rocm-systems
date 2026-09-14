@@ -10,6 +10,9 @@
 #include <algorithm>
 #include <vector>
 
+#include <algorithm>
+#include <vector>
+
 namespace rocjitsu {
 
 std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry,
@@ -66,47 +69,37 @@ DecodeResult Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc
 DecodeResult Decoder::decode_window(std::span<const rj_code_binary_inst_t> words, uint64_t src_loc,
                                     const DecodeErrorEmitter &emit_error) {
   if (words.empty())
-    throw util::InvalidInst("empty decode window");
-
+    return emit_error.emit() << "empty decode window";
   const std::size_t maximum_words = max_instruction_words();
   if (maximum_words == 0)
-    throw util::InvalidInst("decoder reported a zero-width decode window");
-  std::vector<rj_code_binary_inst_t> window(maximum_words, 0);
-  const bool needs_padding = words.size() < window.size();
+    return emit_error.emit() << "decoder reported a zero-width decode window";
+
+  // Allocate only at the tail; full windows keep the raw-pointer decode path.
+  std::vector<rj_code_binary_inst_t> window;
+  const bool needs_padding = words.size() < maximum_words;
   const rj_code_binary_inst_t *decode_words = words.data();
   if (needs_padding) {
+    window.resize(maximum_words, 0);
     std::copy(words.begin(), words.end(), window.begin());
     decode_words = window.data();
   }
 
-  DecodeResult decode_result = decode(decode_words, src_loc, emit_error);
-  if (decode_result.failed())
+  DecodeResult result = decode(decode_words, src_loc, emit_error);
+  if (result.failed())
     return Result::failure();
-  std::unique_ptr<Instruction> decoded_owner = std::move(decode_result).value();
-  Instruction *decoded = decoded_owner.get();
+  Instruction &decoded = *result.value();
+  const int decoded_size = decoded.size();
+  if (decoded_size <= 0 || decoded_size % sizeof(rj_code_binary_inst_t) != 0 ||
+      static_cast<std::size_t>(decoded_size) / sizeof(rj_code_binary_inst_t) > maximum_words)
+    return emit_error.emit() << "decoder exceeded the maximum instruction size";
+  if (static_cast<std::size_t>(decoded_size) > words.size_bytes())
+    return emit_error.emit() << "truncated instruction encoding";
 
-  const int decoded_size = decoded->size();
-  if (decoded_size <= 0 || decoded_size % static_cast<int>(sizeof(window.front())) != 0 ||
-      static_cast<std::size_t>(decoded_size) > window.size() * sizeof(window.front())) {
-    throw util::InvalidInst("decoder exceeded the maximum instruction size");
-  }
-  if (static_cast<std::size_t>(decoded_size) > words.size_bytes()) {
-    throw util::InvalidInst("truncated instruction encoding");
-  }
-
-  // Most generated instructions own a copy of their encoding. A few combined
-  // encodings, as well as external Decoder implementations, retain the input
-  // pointer instead. Keep that established lifetime contract when a padded
-  // tail window was required.
-  if (needs_padding && decoded->raw_encoding_ == window.data())
-    decoded->raw_encoding_ = words.data();
-  return decoded_owner;
-}
-
-Instruction *Decoder::decode_window(std::span<const rj_code_binary_inst_t> words,
-                                    uint64_t src_loc) {
-  DecodeResult result = decode_window(words, src_loc, DecodeErrorEmitter{});
-  return result.failed() ? nullptr : std::move(result).value().release();
+  // Combined encodings and external decoders can retain the input pointer.
+  // Preserve that contract instead of returning a pointer into the tail buffer.
+  if (needs_padding && decoded.raw_encoding_ == window.data())
+    decoded.raw_encoding_ = words.data();
+  return result;
 }
 
 void Decoder::activate_pool(AllocFn alloc, DeallocFn dealloc, void *pool) {

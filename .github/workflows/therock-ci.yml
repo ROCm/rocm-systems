@@ -81,7 +81,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: f86222e7032f1f2a45720fa396a8cf69eac3291f # 2026-09-08
+          ref: ec26b5e6128bcef52e1d36199f16042bee19cf36 # 2026-09-09 commit
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

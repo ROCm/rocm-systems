@@ -672,8 +672,16 @@ struct Analyzer {
     while (word_index < words.size()) {
       std::unique_ptr<Instruction> inst;
       try {
-        inst.reset(
-            decoder->decode_window(words.subspan(word_index), word_index * sizeof(uint32_t)));
+        const auto emit_decode_error = [&](std::string_view message) {
+          set_analysis_error(section_name, word_index * sizeof(uint32_t),
+                             util::InvalidInst(std::string(message)));
+        };
+        DecodeResult decoded = decoder->decode_window(
+            words.subspan(word_index), word_index * sizeof(uint32_t),
+            DecodeErrorEmitter(emit_decode_error));
+        if (decoded.failed())
+          return;
+        inst = std::move(decoded).value();
       } catch (const util::Exception &ex) {
         set_analysis_error(section_name, word_index * sizeof(uint32_t), ex);
         return;

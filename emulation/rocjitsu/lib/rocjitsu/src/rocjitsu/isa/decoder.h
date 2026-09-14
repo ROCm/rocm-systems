@@ -68,22 +68,16 @@ public:
   DecodeResult decode(const rj_code_binary_inst_t *inst, uint64_t src_loc,
                       const DecodeErrorEmitter &emit_error = {});
 
-  /// @brief Safely decode from a bounded instruction stream with diagnostics.
-  DecodeResult decode_window(std::span<const rj_code_binary_inst_t> words, uint64_t src_loc,
-                             const DecodeErrorEmitter &emit_error);
-
-  /// @brief Safely decode from a bounded instruction stream.
+  /// @brief Decode from a bounded instruction stream and record its source offset.
   ///
-  /// @details Uses the original stream when it contains a complete maximum-size
-  /// decode window. At the tail, copies the remaining words into zero-padded
-  /// local storage while preserving the decoded instruction's raw-encoding
-  /// lifetime. Use this overload whenever the available stream extent is known.
-  /// @param[in] words Remaining instruction words beginning at the instruction.
-  /// @param[in] src_loc Source byte offset in the decoded text stream.
-  /// @returns Decoded Instruction pointer (pool or heap allocated).
-  /// @throws util::InvalidInst if @p words is empty, the decoded instruction is
-  /// truncated, or a decoder reports an invalid instruction size.
-  Instruction *decode_window(std::span<const rj_code_binary_inst_t> words, uint64_t src_loc = 0);
+  /// @details Uses the original stream when it contains the decoder's maximum
+  /// lookahead. At the tail, pads a temporary window with zeros and rejects any
+  /// instruction whose encoded size exceeds the remaining input or the declared
+  /// bound. Input-backed raw encodings retain the original stream's lifetime;
+  /// callers must keep that stream alive while using the decoded instruction.
+  /// @returns A decoded instruction, or failure with an optional diagnostic.
+  DecodeResult decode_window(std::span<const rj_code_binary_inst_t> words, uint64_t src_loc = 0,
+                             const DecodeErrorEmitter &emit_error = {});
 
   /// @brief Create a decoder for the given architecture.
   static std::unique_ptr<Decoder> create(rj_code_arch_t arch);

@@ -33,7 +33,7 @@ enum class [[nodiscard]] MemoryAccessCompletion {
 using MemoryAccessDeferredCompletion = std::function<void()>;
 
 /// @brief Apply one packed two-component 16-bit floating-point atomic add.
-/// @param op PK_F16_ADD or PK_BF16_ADD.
+/// @param op PK_ADD_F16 or PK_ADD_BF16.
 /// @return The independently rounded low/high component sums.
 [[nodiscard]] uint32_t apply_packed_float_atomic_add(AtomicOp op, uint32_t old_value,
                                                      uint32_t source_value);
