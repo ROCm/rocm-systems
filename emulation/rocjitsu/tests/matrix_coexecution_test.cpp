@@ -741,6 +741,26 @@ std::vector<ExtendedMmaCase> extended_mma_cases() {
           cdna4::build_vop3p_mfma(
               opcode, {.vdst = 64, .acc_cd = acc, .src0 = 256, .src1 = 288, .src2 = 320}),
           0x3c003c00, 0, 4);
+  // Ordinary FP8/BF8, including mixed inputs and both accumulator banks.
+  for (unsigned opcode = 112; opcode != 120; ++opcode)
+    for (uint8_t acc : {0, 1})
+      add(ROCJITSU_CODE_ARCH_CDNA4,
+          cdna4::build_vop3p_mfma(
+              opcode, {.vdst = 64, .acc_cd = acc, .src0 = 256, .src1 = 288, .src2 = 320}),
+          0x38383838, 0, 8);
+  // The unscaled mixed-format opcodes have the same register-only contract.
+  for (unsigned opcode : {45, 46})
+    for (uint8_t format = 0; format != 5; ++format)
+      for (uint8_t acc : {0, 1})
+        add(ROCJITSU_CODE_ARCH_CDNA4,
+            cdna4::build_vop3p_mfma(opcode, {.vdst = 64,
+                                             .cbsz = format,
+                                             .acc_cd = acc,
+                                             .src0 = 256,
+                                             .src1 = 288,
+                                             .src2 = 320,
+                                             .blgp = format}),
+            0x38383838, 0, 8);
   for (unsigned opcode : {45, 46})
     for (bool inline_scale : {false, true})
       add(ROCJITSU_CODE_ARCH_CDNA4,
@@ -752,7 +772,7 @@ std::vector<ExtendedMmaCase> extended_mma_cases() {
 }
 
 TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossRegisterHazards) {
-  // Run with MIN_K=16 and MFMA=7 to require offloads for every family. The
+  // Run with MIN_K=16 and MFMA=15 to require offloads for every family. The
   // narrower configurations also check that disabled families remain inline.
   // Eligibility is recorded with each case instead of reusing the candidate
   // predicate: dropping an opcode from that predicate must fail this test.
@@ -763,7 +783,9 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
     SCOPED_TRACE(first->mnemonic());
     SCOPED_TRACE(c.arch);
     const bool family_enabled =
-        c.mfma ? (mc::mfma_families() & c.mfma_family) != 0 : mc::min_wmma_k() <= c.wmma_k;
+        c.mfma ? (mc::mfma_families(amdgpu::async_mma_policy::default_mfma_families(c.arch)) &
+                  c.mfma_family) != 0
+               : mc::min_wmma_k() <= c.wmma_k;
     const bool expect_async = mc::mode() == 4 && mc::width() > 1 &&
                               mc::shared_helper_limit().value_or(4) > 0 && family_enabled;
     const size_t suffix = c.words.size() - 2;

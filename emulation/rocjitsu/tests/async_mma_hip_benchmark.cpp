@@ -91,6 +91,20 @@ template <> struct Matrix<201> {
 LARGE_HALF_MFMA(216, 16, F16, __builtin_amdgcn_mfma_f32_32x32x16_f16);
 LARGE_HALF_MFMA(232, 32, F4, __builtin_amdgcn_mfma_f32_16x16x32_f16);
 #undef LARGE_HALF_MFMA
+#define FP8_MFMA(SHAPE, K, RESULT, ONES, BUILTIN)                                                  \
+  template <> struct Matrix<SHAPE> {                                                               \
+    using A = I2;                                                                                  \
+    using C = RESULT;                                                                              \
+    static constexpr int k = K, ones = ONES;                                                       \
+    __device__ static C multiply(A a, A b, C c, int, int) {                                        \
+      return BUILTIN(__builtin_bit_cast(int64_t, a), __builtin_bit_cast(int64_t, b), c, 0, 0, 0);  \
+    }                                                                                              \
+  }
+FP8_MFMA(316, 32, F4, 0x38383838, __builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8);
+FP8_MFMA(332, 16, F16, 0x38383838, __builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8);
+FP8_MFMA(416, 32, F4, 0x3c3c3c3c, __builtin_amdgcn_mfma_f32_16x16x32_bf8_bf8);
+FP8_MFMA(432, 16, F16, 0x3c3c3c3c, __builtin_amdgcn_mfma_f32_32x32x16_bf8_bf8);
+#undef FP8_MFMA
 #define SCALED_MFMA(SHAPE, K, RESULT, BUILTIN)                                                     \
   template <> struct Matrix<SHAPE> {                                                               \
     using A = I8;                                                                                  \
@@ -199,6 +213,10 @@ int main(int argc, char **argv) {
     RUN(201);
     RUN(216);
     RUN(232);
+    RUN(316);
+    RUN(332);
+    RUN(416);
+    RUN(432);
     RUN(128);
     RUN(64);
 #endif

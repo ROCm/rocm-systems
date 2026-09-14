@@ -119,7 +119,7 @@ inline bool candidate(std::string_view mnemonic) {
   return async_mma_policy::large_candidate(mnemonic);
 }
 
-// The smaller shapes and MFMA families remain separate opt-in experiments.
+// Smaller WMMA shapes remain a separate opt-in experiment.
 inline unsigned min_wmma_k() {
   static const unsigned value = [] {
     const char *text = std::getenv("RJ_ASYNC_WMMA_MIN_K");
@@ -127,12 +127,16 @@ inline unsigned min_wmma_k() {
   }();
   return value;
 }
-inline unsigned mfma_families() {
-  static const unsigned value = [] {
+// The CU factory supplies target defaults once. Inside an enabled adapter the
+// default candidate set is CDNA4's; other MFMA targets require an explicit mask.
+inline unsigned mfma_families(unsigned defaults = async_mma_policy::cdna4_mfma_families) {
+  static const std::optional<unsigned> value = []() -> std::optional<unsigned> {
     const char *text = std::getenv("RJ_ASYNC_MFMA");
-    return static_cast<unsigned>(text ? std::atoi(text) : 0) & 7u;
+    if (!text)
+      return std::nullopt;
+    return static_cast<unsigned>(std::atoi(text)) & 15u;
   }();
-  return value;
+  return value.value_or(defaults);
 }
 inline bool async_candidate(std::string_view name) {
   if (async_mma_policy::large_candidate(name))

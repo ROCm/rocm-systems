@@ -26,12 +26,14 @@ namespace rocjitsu::amdgpu {
 class MmaAdmissionCache {
 public:
   using Words = std::array<uint32_t, 4>;
-  static int configured_mode() {
-    static const int value = [] {
+  static int configured_mode(int defaults = 0) {
+    static const std::optional<int> value = []() -> std::optional<int> {
       const char *text = std::getenv("RJ_MMA_ADMISSION");
-      return std::clamp(text ? std::atoi(text) : 0, 0, 3);
+      if (!text)
+        return std::nullopt;
+      return std::clamp(std::atoi(text), 0, 3);
     }();
-    return value;
+    return value.value_or(defaults);
   }
   static unsigned configured_limit() {
     static const unsigned value = [] {

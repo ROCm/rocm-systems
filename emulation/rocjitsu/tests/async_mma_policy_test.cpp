@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include "decode_test_util.h"
+#include "mma_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
@@ -45,11 +48,33 @@ TEST(AsyncMmaPolicyTest, EncodingHintDoesNotExcludeEnabledDecodedCandidates) {
         EXPECT_TRUE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA5, words[0], min_k));
     }
   }
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
     EXPECT_FALSE(policy::has_encoding_hint(arch, 32));
     EXPECT_TRUE(policy::encoding_may_be_candidate(arch, 0, 32));
   }
   EXPECT_FALSE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA5, 0, 32));
+}
+
+TEST(AsyncMmaPolicyTest, Cdna4EncodingHintCoversOrdinaryAndExtendedMfma) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  for (unsigned opcode = 0; opcode != 128; ++opcode) {
+    const auto encoding =
+        cdna4::build_vop3p_mfma(opcode, {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320});
+    // An opcode may decode as an extension prefix; provide the maximum size.
+    const std::array<uint32_t, 4> words = {encoding[0], encoding[1], 0, 0};
+    auto result = decoder->decode(words.data());
+    if (result.succeeded() && policy::candidate(result.value()->mnemonic(), 64, 15))
+      EXPECT_TRUE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA4, words[0], 64));
+  }
+  for (unsigned opcode : {45, 46}) {
+    const auto words = mma_test::make_cdna4_mfma_scale_words(opcode, 1, 448, 449);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_TRUE(policy::candidate(inst->mnemonic(), 64, 15));
+    EXPECT_TRUE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA4, words[0], 64));
+  }
+  const auto add = cdna4::build_sop2(cdna4::kSAddU32Sop2, {.ssrc0 = 1, .ssrc1 = 2, .sdst = 0});
+  EXPECT_TRUE(policy::has_encoding_hint(ROCJITSU_CODE_ARCH_CDNA4, 64));
+  EXPECT_FALSE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA4, add[0], 64));
 }
 
 TEST(AsyncMmaPolicyTest, TargetSelectionMatchesTheAcceptedInstructionShapes) {
@@ -72,6 +97,28 @@ TEST(AsyncMmaPolicyTest, TargetSelectionMatchesTheAcceptedInstructionShapes) {
     EXPECT_EQ(policy::candidate(inst->mnemonic(), 16, 0),
               opcode == rdna4::kVWmmaF3216x16x16F16Vop3p);
   }
+}
+
+TEST(AsyncMmaPolicyTest, Cdna4DefaultsRequireAdmissionAndLeaveOtherTargetsDisabled) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA3,
+                    ROCJITSU_CODE_ARCH_RDNA4}) {
+    EXPECT_EQ(policy::default_mfma_families(arch), 0u);
+    EXPECT_EQ(policy::default_admission_mode(arch), 0);
+  }
+  const unsigned families = policy::default_mfma_families(ROCJITSU_CODE_ARCH_CDNA4);
+  const int admission = policy::default_admission_mode(ROCJITSU_CODE_ARCH_CDNA4);
+  for (auto name :
+       {"v_mfma_f32_16x16x32_f16", "v_mfma_f32_32x32x16_f16", "v_mfma_f32_16x16x32_fp8_fp8",
+        "v_mfma_f32_32x32x16_bf8_fp8", "v_mfma_f32_16x16x128_f8f6f4", "v_mfma_f32_32x32x64_f8f6f4",
+        "v_mfma_scale_f32_16x16x128_f8f6f4"}) {
+    EXPECT_TRUE(policy::candidate(name, 64, families));
+    EXPECT_TRUE(policy::needs_admission(admission, name));
+  }
+  EXPECT_FALSE(policy::candidate("v_mfma_f32_32x32x4_2b_f16", 64, families));
+  EXPECT_FALSE(policy::candidate("v_mfma_i32_16x16x64_i8", 64, families));
+  EXPECT_TRUE(policy::enabled<cdna4::Isa>(4, 64, families));
+  EXPECT_FALSE(policy::enabled<cdna4::Isa>(0, 64, families));
+  EXPECT_FALSE(policy::enabled<cdna4::Isa>(4, 64, 0));
 }
 
 struct BlockedMmaState {
