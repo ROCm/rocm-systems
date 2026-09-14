@@ -273,7 +273,7 @@ private:
   void *Lock(D3DKMT_HANDLE handle);
   bool Unlock(D3DKMT_HANDLE handle);
   bool CreateContext(int engine, D3DKMT_HANDLE *handle, uint64_t debugger_data = 0,
-                     bool rocr_client = false);
+                     bool sdma_native = false);
   bool DestroyContext(D3DKMT_HANDLE handle);
 
   void SetPowerOptimization(bool restore);
