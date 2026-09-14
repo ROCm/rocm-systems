@@ -68,6 +68,40 @@ def _run(
 
 
 class ConSanBenchmarkTest(unittest.TestCase):
+    def test_target_corpus_preserves_rdna_and_preallocates_cdna_rows(self) -> None:
+        self.assertEqual(benchmark._target_workloads("gfx1201"), benchmark.WORKLOADS)
+        cdna = benchmark._target_workloads("gfx950")
+        self.assertEqual(len(cdna), 13)
+        self.assertEqual(len({workload.id for workload in cdna}), 13)
+        self.assertEqual(cdna[:5], benchmark.WORKLOADS)
+
+    def test_live_status_records_running_and_failure_without_removing_rows(self) -> None:
+        workloads = benchmark._target_workloads("gfx950")
+        with tempfile.TemporaryDirectory() as directory:
+            args = self._runner_args(directory)
+            args.status = Path(directory) / "STATUS.md"
+            args.status_projection = {
+                "target": "gfx950",
+                "workloads": [{"id": w.id, "description": w.description, "modes": {}, "progress": {}} for w in workloads],
+            }
+
+            def fail(*unused_args, **unused_kwargs):
+                text = args.status.read_text()
+                self.assertIn("native-reference-1: running", text)
+                self.assertIn(workloads[-1].description, text)
+                raise subprocess.TimeoutExpired("fixture", 7, output=b"partial evidence")
+
+            with mock.patch.object(benchmark.subprocess, "run", side_effect=fail):
+                with self.assertRaises(benchmark.BenchmarkError):
+                    benchmark._run_one(args=args, workload=workloads[0], mode=None,
+                                       audit_sites=False, label="native-reference-1")
+            text = args.status.read_text()
+            self.assertIn("native-reference-1: failed", text)
+            self.assertIn("| failed | failed |", text)
+            self.assertTrue(all(w.description in text for w in workloads))
+            progress = json.loads((Path(directory) / "progress.json").read_text())
+            self.assertIn("timed out", progress["projection"]["workloads"][0]["progress"]["error"])
+
     @staticmethod
     def _runner_args(directory: str, *, resume: bool = False) -> SimpleNamespace:
         return SimpleNamespace(

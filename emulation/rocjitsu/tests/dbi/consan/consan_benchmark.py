@@ -156,6 +156,33 @@ WORKLOADS = (
 )
 
 
+GFX950_ADDITIONS = tuple(
+    Workload(id, description, "latency_ms", config, payload="tokenspeed")
+    for id, description, config in (
+        ("tokenspeed-bf16-gemm-mediumm", "TokenSpeed Gluon BF16 GEMM medium-M (128×4096×4096)",
+         {"operation": "gemm", "variant": "mediumm", "m": 128, "n": 4096, "k": 4096}),
+        ("tokenspeed-bf16-gemm-largem", "TokenSpeed Gluon BF16 GEMM large-M (4096×4096×4096)",
+         {"operation": "gemm", "variant": "largem", "m": 4096, "n": 4096, "k": 4096}),
+        ("tokenspeed-attention-prefill", "TokenSpeed Gluon attention prefill",
+         {"operation": "attention-prefill"}),
+        ("tokenspeed-attention-decode", "TokenSpeed Gluon attention decode",
+         {"operation": "attention-decode"}),
+        ("tokenspeed-qwen-prefill", "TokenSpeed Qwen3-0.6B prefill",
+         {"operation": "qwen-prefill"}),
+        ("tokenspeed-qwen-decode", "TokenSpeed Qwen3-0.6B real cached decode",
+         {"operation": "qwen-decode"}),
+        ("tokenspeed-fp8-blockscale-gemm", "TokenSpeed Triton FP8 block-scaled GEMM",
+         {"operation": "fp8-gemm", "m": 16, "n": 256, "k": 256}),
+        ("tokenspeed-bf16-moe", "TokenSpeed Gluon BF16 MoE",
+         {"operation": "moe"}),
+    )
+)
+
+
+def _target_workloads(target: str) -> tuple[Workload, ...]:
+    return WORKLOADS + (GFX950_ADDITIONS if target == "gfx950" else ())
+
+
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", choices=SUPPORTED_TARGETS, required=True)
@@ -202,13 +229,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--audit-sites",
-        action=argparse.BooleanOptionalAction,
+        action="store_true",
         default=True,
         help=argparse.SUPPRESS,
     )
+    parser.add_argument("--no-audit-sites", dest="audit_sites", action="store_false", help=argparse.SUPPRESS)
     parser.add_argument(
         "--workload",
-        choices=tuple(workload.id for workload in WORKLOADS),
+        choices=tuple(workload.id for workload in WORKLOADS + GFX950_ADDITIONS),
         action="append",
         help="run only this workload (repeatable)",
     )
@@ -375,6 +403,7 @@ def _payload_program(workload: Workload) -> Path:
         "aorta": "consan_aorta_benchmark_workload.py",
         "gluon": "consan_gluon_benchmark_workload.py",
         "hipblaslt": "consan_hipblaslt_benchmark_workload.py",
+        "tokenspeed": "consan_tokenspeed_benchmark_workload.py",
     }
     try:
         filename = filenames[workload.payload]
@@ -410,7 +439,7 @@ def _archive_existing(path: Path) -> None:
     path.rename(archived)
 
 
-def _run_one(
+def _run_one_impl(
     *,
     args: argparse.Namespace,
     workload: Workload,
@@ -441,7 +470,7 @@ def _run_one(
         audit_sites,
         kernel_allowlist_file,
         epoch_analysis=(
-            "manual" if workload.payload in ("aorta", "gluon") else "nth:1"
+            "manual" if workload.payload in ("aorta", "gluon", "tokenspeed") else "nth:1"
         ),
     )
     log_path = args.output_dir / f"{workload.id}--{label}.log"
@@ -480,8 +509,12 @@ def _run_one(
             result = checkpoint.get("result")
             if isinstance(result, dict):
                 print(f"resume {workload.id} {label}", flush=True)
+                _cell_progress(args, workload, label, mode, "resumed", result)
                 return result
 
+    if checkpoint_path.exists():
+        _cell_progress(args, workload, label, mode, "invalidated")
+    _cell_progress(args, workload, label, mode, "running")
     if profile_directory is not None:
         _archive_existing(profile_directory)
     print(f"run {workload.id} {label}", flush=True)
@@ -532,7 +565,49 @@ def _run_one(
         json.dumps({"fingerprint": fingerprint, "result": result}, indent=2) + "\n",
     )
     print(f"pass {workload.id} {label} wall_ms={wall_ms:.1f}", flush=True)
+    _cell_progress(args, workload, label, mode, "accepted", result)
     return result
+
+
+def _run_one(**kwargs: Any) -> dict[str, Any]:
+    try:
+        return _run_one_impl(**kwargs)
+    except (BenchmarkError, OSError, subprocess.SubprocessError) as error:
+        _cell_progress(
+            kwargs["args"], kwargs["workload"], kwargs["label"],
+            kwargs["mode"], "failed", error=str(error),
+        )
+        raise
+
+
+def _write_progress(args: argparse.Namespace) -> None:
+    projection = getattr(args, "status_projection", None)
+    if projection is None:
+        return
+    _atomic_write(
+        args.output_dir / "progress.json",
+        json.dumps({"run_identity": args.run_identity, "projection": projection}, indent=2) + "\n",
+    )
+    if args.status is not None:
+        _atomic_write(args.status, _render_status(projection))
+
+
+def _cell_progress(
+    args: argparse.Namespace, workload: Workload, label: str, mode: str | None,
+    state: str, result: dict[str, Any] | None = None, *, error: str | None = None,
+) -> None:
+    projection = getattr(args, "status_projection", None)
+    if projection is None:
+        return
+    row = next(row for row in projection["workloads"] if row["id"] == workload.id)
+    log = str(args.output_dir / f"{workload.id}--{label}.log")
+    row["progress"] = {"label": label, "state": state, "log": log, "error": error}
+    row.setdefault("cell_states", {})[mode or "native"] = state
+    if mode is not None:
+        row["modes"].pop(mode, None)
+        if result is not None:
+            row["modes"][mode] = _summarize_mode(result, tuple(row["native"]["runtime_ms"]))
+    _write_progress(args)
 
 
 def _generate_kernel_allowlist(
@@ -716,6 +791,7 @@ def _format_three_significant_digits(value: float) -> str:
 
 def _render_status(summary: dict[str, Any]) -> str:
     columns = tuple(PROFILE_IDS)
+    live = any("progress" in row for row in summary["workloads"])
     lines = [
         f"# ConSan `{summary['target']}` benchmark status",
         "",
@@ -733,17 +809,20 @@ def _render_status(summary: dict[str, Any]) -> str:
                 f"{MODE_LABELS[mode]} Run",
             )
         )
-        + " |",
+        + (" | Progress |" if live else " |"),
         "| --- | "
         + " | ".join("---:" for _ in range(2 + 2 * len(columns)))
-        + " |",
+        + (" | --- |" if live else " |"),
     ]
     for workload in summary["workloads"]:
         native_runtime = workload.get("native_runtime_ms")
         if native_runtime is None:
             native_runtime = workload.get("native", {}).get("runtime_ms")
         if not isinstance(native_runtime, (list, tuple)) or len(native_runtime) != 2:
-            native_cells = ["pending", "pending"]
+            state = workload.get("cell_states", {}).get("native", "pending")
+            # A single accepted native sample is not yet a baseline median.
+            state = state if state in ("running", "failed", "invalidated", "blocked") else "pending"
+            native_cells = [state, state]
         else:
             native_cells = [
                 f"{_format_three_significant_digits(native_runtime[0] / 1000.0)} s",
@@ -753,7 +832,8 @@ def _render_status(summary: dict[str, Any]) -> str:
         for mode in columns:
             result = workload["modes"].get(mode)
             if result is None:
-                cells.extend(("pending", "pending"))
+                state = workload.get("cell_states", {}).get(mode, "pending")
+                cells.extend((state, state))
             else:
                 cells.extend(
                     (
@@ -762,6 +842,12 @@ def _render_status(summary: dict[str, Any]) -> str:
                         f"({_format_three_significant_digits(result['run_ratio'])}×)",
                     )
                 )
+        if live:
+            progress = workload.get("progress", {})
+            detail = f"{progress.get('label', 'not started')}: {progress.get('state', 'pending')}"
+            if progress.get("log"):
+                detail = f"[{detail}](<{progress['log']}>)"
+            cells.append(detail)
         lines.append(f"| {workload['description']} | " + " | ".join(cells) + " |")
     lines.append("")
     return "\n".join(lines)
@@ -787,11 +873,13 @@ def _main(argv: list[str]) -> int:
     args.rocprofv3 = args.rocprofv3.resolve()
     selected = [
         workload
-        for workload in WORKLOADS
+        for workload in _target_workloads(args.target)
         if args.workload is None or workload.id in args.workload
     ]
     if not selected:
         raise BenchmarkError("no workloads selected")
+    if args.workload and set(args.workload) - {workload.id for workload in selected}:
+        raise BenchmarkError("selected workload is not supported on this target")
     if args.hipblaslt_bench is not None:
         args.hipblaslt_bench = args.hipblaslt_bench.resolve()
     for path, description in (
@@ -841,10 +929,17 @@ def _main(argv: list[str]) -> int:
     status_projection = {
         "target": args.target,
         "workloads": [
-            {"id": workload.id, "description": workload.description, "modes": {}}
-            for workload in selected
+            {"id": workload.id, "description": workload.description, "modes": {}, "progress": {}}
+            for workload in _target_workloads(args.target)
         ],
     }
+    progress_path = args.output_dir / "progress.json"
+    if args.resume and progress_path.is_file():
+        previous = json.loads(progress_path.read_text(encoding="utf-8"))
+        if previous.get("run_identity") == args.run_identity:
+            status_projection = previous["projection"]
+    args.status_projection = status_projection
+    _write_progress(args)
     status_rows = {
         workload["id"]: workload for workload in status_projection["workloads"]
     }
@@ -879,6 +974,7 @@ def _main(argv: list[str]) -> int:
             for run_index in range(2)
         )
         status_rows[workload.id]["native"] = {"runtime_ms": list(native_runtime)}
+        _write_progress(args)
         modes: dict[str, dict[str, Any]] = {}
         for mode in PROFILE_IDS:
             modes[mode] = _run_one(
@@ -935,8 +1031,7 @@ def _main(argv: list[str]) -> int:
     _atomic_write(
         args.output_dir / "summary.json", json.dumps(summary, indent=2) + "\n"
     )
-    if args.status is not None:
-        _atomic_write(args.status, _render_status(summary))
+    _write_progress(args)
     print(json.dumps(summary, indent=2))
     return 0
 
