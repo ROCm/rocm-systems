@@ -1301,12 +1301,20 @@ resolve_moi_scalar_owner_contexts(const MoiResourcePlanningState &state,
 
 bool moi_resource_owner_sgpr_window_admitted(const MoiResourcePlanningState &state,
                                              std::span<const ConSanProgramContainerId> owners,
-                                             uint16_t base, uint16_t count) {
+                                             uint16_t base, uint16_t count,
+                                             uint32_t required_sgpr_count_floor) {
   const auto contexts = resolve_moi_scalar_owner_contexts(state, owners);
-  return contexts && consan_detail::scalar_owner_contexts_admit_reserved_window(
-                         contexts->summaries, base, count,
-                         moi_scalar_placement_model(state.arch) ==
-                             ConSanScalarPlacementModel::DescriptorPartitioned);
+  if (!contexts || !std::ranges::all_of(contexts->summaries, [&](const auto &context) {
+        return consan_detail::scalar_owner_tail_floor(context) <= base;
+      })) {
+    return false;
+  }
+  if (moi_scalar_placement_model(state.arch) != ConSanScalarPlacementModel::DescriptorPartitioned) {
+    return true;
+  }
+  const std::array ranges{consan_detail::ScalarOwnerSgprRange{base, count}};
+  return !consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(
+      contexts->summaries, ranges, required_sgpr_count_floor);
 }
 
 struct MoiScalarOwnerContextGroup {
@@ -1518,6 +1526,36 @@ void occupy_moi_transient_scalar_state(MoiScalarPlacementDomain &domain,
     if (assignment.branch_only_spill)
       domain.occupy(assignment.branch_only_spill->dynamic_stack_borrowed_sgpr, 2u);
   }
+}
+
+[[nodiscard]] uint32_t moi_required_sgpr_count_floor(const ConSanRequest &request,
+                                                     const BoundRuntimeResources &resources,
+                                                     const ConSanMoiOperatingPoint &point,
+                                                     const MoiObjectModeSemantics &mode_semantics,
+                                                     rj_code_arch_t arch) {
+  uint32_t floor = 0u;
+  const auto include = [&](std::optional<uint16_t> base, uint16_t width) {
+    if (base)
+      floor = std::max<uint32_t>(floor, static_cast<uint32_t>(*base) + width);
+  };
+  const uint16_t exec_width = moi_exec_save_sgpr_count(
+      resolve_moi_exec_save_requirement(request, resources, point, mode_semantics), arch);
+  include(point.moi_exec_save_sgpr, exec_width);
+  include(point.moi_owner_sgpr.base(), 1u);
+  include(point.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount);
+  point.for_each_auxiliary_sgpr_range(include);
+  for (const ConSanMoiTransientSgprAssignment &assignment : point.owner_transient_sgprs) {
+    include(assignment.exec_save_sgpr, exec_width);
+    include(assignment.owner_sgpr, 1u);
+    include(assignment.dispatch_id_sgpr, kMoiDispatchStateSgprCount);
+    if (assignment.scalar_spill_setup) {
+      assignment.scalar_spill_setup->for_each_sgpr_range(
+          true, [&](uint16_t base, uint16_t width) { include(base, width); });
+    }
+    if (assignment.branch_only_spill)
+      include(assignment.branch_only_spill->dynamic_stack_borrowed_sgpr, 2u);
+  }
+  return floor;
 }
 
 struct MoiScalarSiteAvailability {
@@ -2907,12 +2945,8 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
   const uint16_t dispatch_state_count = kMoiDispatchStateSgprCount;
   const uint16_t ordinary_sgpr_limit = moi_ordinary_sgpr_limit(arch);
   MoiScalarPlacementDomain dispatch_domain(arch, ordinary_sgpr_limit, scalar_contexts.summaries);
-  dispatch_domain.occupy(options.moi_owner_sgpr.base(), 1u);
-  dispatch_domain.occupy(
-      options.moi_exec_save_sgpr,
-      moi_exec_save_sgpr_count(
-          resolve_moi_exec_save_requirement(request, resources, options, problem.mode_semantics()),
-          arch));
+  occupy_moi_transient_scalar_state(dispatch_domain, request, resources, options, options,
+                                    problem.mode_semantics(), arch);
   const auto dispatch_base = dispatch_domain.select_first(first, dispatch_state_count, 2u);
   if (dispatch_base) {
     options.moi_dispatch_identity.set_sgpr(*dispatch_base, true);

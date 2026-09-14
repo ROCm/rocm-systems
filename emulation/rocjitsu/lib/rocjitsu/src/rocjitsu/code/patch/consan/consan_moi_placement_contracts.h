@@ -222,10 +222,15 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanRequ
                                std::span<const ConSanMoiCandidate> candidates,
                                std::vector<ConSanCandidateResourcePlan> &plans);
 
-[[nodiscard]] bool
-moi_resource_owner_sgpr_window_admitted(const MoiResourcePlanningState &state,
-                                        std::span<const ConSanProgramContainerId> owners,
-                                        uint16_t base, uint16_t count);
+[[nodiscard]] bool moi_resource_owner_sgpr_window_admitted(
+    const MoiResourcePlanningState &state, std::span<const ConSanProgramContainerId> owners,
+    uint16_t base, uint16_t count, uint32_t required_sgpr_count_floor);
+
+[[nodiscard]] uint32_t moi_required_sgpr_count_floor(const ConSanRequest &request,
+                                                     const BoundRuntimeResources &resources,
+                                                     const ConSanMoiOperatingPoint &point,
+                                                     const MoiObjectModeSemantics &mode_semantics,
+                                                     rj_code_arch_t arch);
 
 [[nodiscard]] bool configure_automatic_moi_exec_save_sgprs(
     ConSanMoiOperatingPoint &options, const MoiResourceProblem &problem,

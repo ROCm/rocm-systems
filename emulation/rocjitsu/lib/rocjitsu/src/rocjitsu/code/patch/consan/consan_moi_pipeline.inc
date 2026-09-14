@@ -117,6 +117,8 @@ plan_moi_resources(MoiResourcePlanningState &state, const ConSanDebugOverrides &
   const rj_code_arch_t arch = moi_resource_arch(state);
   const ConSanRequest &request = problem.request();
   const BoundRuntimeResources &bound_resources = problem.resources();
+  const uint32_t required_sgpr_count_floor = moi_required_sgpr_count_floor(
+      request, bound_resources, point, problem.mode_semantics(), arch);
   planning.attempted_operating_point = attempted_point;
   append_moi_resource_plans(state, request, bound_resources, debug, point, problem.candidates(),
                             planning.plans);
@@ -158,9 +160,10 @@ plan_moi_resources(MoiResourcePlanningState &state, const ConSanDebugOverrides &
       }
       const bool missing_dispatch = !owner_point.moi_dispatch_identity.sgpr();
       const uint16_t dispatch_base = owner_point.moi_dispatch_identity.sgpr().value_or(0u);
-      const bool admitted = !missing_dispatch && moi_resource_owner_sgpr_window_admitted(
-                                                     state, plan.owner_kernel_ids, dispatch_base,
-                                                     kMoiDispatchStateSgprCount);
+      const bool admitted =
+          !missing_dispatch && moi_resource_owner_sgpr_window_admitted(
+                                   state, plan.owner_kernel_ids, dispatch_base,
+                                   kMoiDispatchStateSgprCount, required_sgpr_count_floor);
       if (!admitted) {
         plan.source = ConSanRegisterAllocationSource::Unsupported;
         plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
@@ -196,7 +199,7 @@ plan_moi_resources(MoiResourcePlanningState &state, const ConSanDebugOverrides &
       }
       if (!plan.owner_kernel_ids.empty() &&
           !moi_resource_owner_sgpr_window_admitted(state, plan.owner_kernel_ids, exec_base,
-                                                   exec_count)) {
+                                                   exec_count, required_sgpr_count_floor)) {
         plan.source = ConSanRegisterAllocationSource::Unsupported;
         plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
         plan.scratch_vgpr.reset();

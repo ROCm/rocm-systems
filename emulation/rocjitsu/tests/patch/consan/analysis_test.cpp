@@ -2556,8 +2556,8 @@ TEST(ConSanMoi, EveryEngineSupportsEveryD16GroupFlatLoadOnEveryTarget) {
         EXPECT_EQ(candidate.decoded_width_bits, form.memory_width_bits);
         EXPECT_TRUE(candidate.lowering.replay_guest_access.available());
         ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
-        ASSERT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
-                  1u);
+        ASSERT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u)
+            << testing::PrintToString(result.warnings);
         ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
         EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       }

@@ -6722,11 +6722,12 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessDoesNotIntroduceSccMutatingRelay) {
   };
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
+  options.moi_dispatch_identity.set_sgpr(34u);
   const ConSanMoiTransientSgprAssignment seed_assignment{
       .descriptor_file_offset = original.kernels().front().descriptor_file_offset,
       .exec_save_sgpr = 4u,
       .owner_sgpr = std::nullopt,
-      .dispatch_id_sgpr = std::nullopt,
+      .dispatch_id_sgpr = 34u,
       .spill_backed = true,
       .scalar_spill_setup =
           ConSanMoiScalarSpillSetup{
@@ -6748,7 +6749,8 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessDoesNotIntroduceSccMutatingRelay) {
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
-            kAccessCount);
+            kAccessCount)
+      << testing::PrintToString(result.warnings);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
                                &ConSanPatchInfo::kind),
             1u);
@@ -7921,7 +7923,10 @@ TEST(ConSanMoi, Cdna4InlineExcludesOnlyOwnerWithoutSpillRouter) {
 
   const std::array<uint16_t, 2> low_live = {8u, 9u};
   std::vector<uint16_t> high_live;
-  for (uint16_t sgpr = 8u; sgpr <= 88u; ++sgpr)
+  // Keep every ordinary SGPR live so the high-pressure owner has neither an
+  // owner-wide window nor the three dead setup scalars needed to route a
+  // spill-backed window through private memory.
+  for (uint16_t sgpr = 8u; sgpr <= 105u; ++sgpr)
     high_live.push_back(sgpr);
   std::vector<uint8_t> bytes = make_rdna4_code_object_with_local_function(
       make_owner(low_live), make_owner(high_live), {}, kRdna4Wave64AllVgprsGranulated,
@@ -7930,7 +7935,7 @@ TEST(ConSanMoi, Cdna4InlineExcludesOnlyOwnerWithoutSpillRouter) {
                     [](Elf64_Ehdr &header) { header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950; });
   const auto configure_descriptor = [](KD &descriptor) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
-                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 11u);
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 8u);
     AMDHSA_BITS_SET(descriptor.kernel_code_properties,
                     kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
@@ -7950,7 +7955,8 @@ TEST(ConSanMoi, Cdna4InlineExcludesOnlyOwnerWithoutSpillRouter) {
 
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
-  ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u);
+  ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u)
+      << testing::PrintToString(result.warnings);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("admitted full-pressure owners with component-local scalar state") !=
            std::string::npos;

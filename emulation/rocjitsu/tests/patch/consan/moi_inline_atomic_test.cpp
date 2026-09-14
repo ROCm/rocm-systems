@@ -3045,11 +3045,11 @@ TEST(ConSanMoi, Gfx1250ScaledVglobalAddressPlanMatchesIsaEffectiveAddress) {
   ASSERT_TRUE(save_scc && save_vcc && scale && add_vaddr && add_displacement && restore_vcc &&
               restore_scc);
   std::vector<uint32_t> expected = {
+      build_v_mov_b32_e32(plan.result_address_vgpr, 0u, ROCJITSU_CODE_ARCH_CDNA5),
+      build_v_mov_b32_e32(plan.result_address_vgpr + 1u, 1u, ROCJITSU_CODE_ARCH_CDNA5),
       *save_scc,
       *save_vcc,
       *scale,
-      build_v_mov_b32_e32(plan.result_address_vgpr, 0u, ROCJITSU_CODE_ARCH_CDNA5),
-      build_v_mov_b32_e32(plan.result_address_vgpr + 1u, 1u, ROCJITSU_CODE_ARCH_CDNA5),
   };
   expected.insert(expected.end(), add_vaddr->begin(), add_vaddr->end());
   expected.insert(expected.end(), add_displacement->begin(), add_displacement->end());
@@ -3224,10 +3224,10 @@ TEST(ConSanMoi, VglobalAddressMaterializationPreservesSpecialStateAndSignedOffse
     ASSERT_TRUE(restore_scc);
 
     std::vector<uint32_t> expected = {
-        *save_scc,
-        *save_vcc,
         build_v_mov_b32_e32(plan.result_address_vgpr, 4u, target.arch),
         build_v_mov_b32_e32(plan.result_address_vgpr + 1u, 5u, target.arch),
+        *save_scc,
+        *save_vcc,
     };
     expected.insert(expected.end(), add_vaddr->begin(), add_vaddr->end());
     expected.insert(expected.end(), add_negative->begin(), add_negative->end());

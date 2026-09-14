@@ -1545,8 +1545,8 @@ TEST(ConSanMoi, ScalarOwnerWindowQualificationUsesEveryTailAndPhysicalVcc) {
       direct_owners, dispatch_hits_second_vcc));
   EXPECT_TRUE(consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(direct_owners,
                                                                               hits_second_vcc));
-  const std::array streamk_transient_state = {
-      Range{4u, 30u}, Range{34u, 2u}, Range{36u, 1u}, Range{76u, 1u}};
+  const std::array streamk_transient_state = {Range{4u, 30u}, Range{34u, 2u}, Range{36u, 1u},
+                                              Range{76u, 1u}};
   const std::array streamk_owner = {
       Summary{.descriptor_file_offset = 0x30u,
               .current_sgpr_count = 80u,
@@ -2303,17 +2303,9 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
         EXPECT_GE(*assignment.dispatch_id_sgpr, 80u);
       }
     }
-    if (engine == ConSanMoiEngine::Sampled) {
-      // Above the 80-SGPR scalar-relative tail, CDNA4 has too few physical-VCC
-      // safe holes for dispatch state, the nine-register transient window, and
-      // persistent owner/epoch state. Failing closed is the only safe result.
-      EXPECT_FALSE(result.modified());
-      EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
-      EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-        return warning.find("cannot place persistent scalar state") != std::string::npos;
-      })) << testing::PrintToString(result.warnings);
-      continue;
-    }
+    // The automatic layout exactly packs dispatch state, persistent identity,
+    // and the transient window into s80:s96 while moving physical VCC above
+    // them. Both engines must retain that legal boundary solution.
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     ASSERT_TRUE(test_moi_persistent_sgpr_state(result).owner())
         << testing::PrintToString(result.warnings);
@@ -2890,8 +2882,7 @@ TEST(ConSanMoi, DispatchPreloadDescriptorPermutationsUseExactAmdhsaPrefix) {
     ASSERT_TRUE(prologue->dispatch_id_prologue);
     ASSERT_TRUE(prologue->dispatch_id_prologue->capture.sgpr());
     const uint16_t queue_insertion = (mask & 4u) != 0u ? 0u : 2u;
-    EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr,
-              prefix + queue_insertion);
+    EXPECT_EQ(prologue->dispatch_id_prologue->preload.dispatch_id_sgpr, prefix + queue_insertion);
     EXPECT_EQ(prologue->dispatch_id_prologue->preload.original_user_sgpr_count, prefix + 2u);
     EXPECT_EQ(prologue->dispatch_id_prologue->preload.expanded_user_sgpr_count,
               prefix + 4u + queue_insertion);
@@ -3004,8 +2995,7 @@ TEST(ConSanMoi, DispatchPrologueCapturesBeforeAscendingRestoreAtBothKernargEntri
     expect_write(build_s_mov_b32(static_cast<uint16_t>(persistent + 1u), 11u, kArch));
     ASSERT_TRUE(prologue.dispatch_id_prologue->preload.identity_salt_sgpr);
     const auto mix = instrumentation::build_s_xor_b64(
-        persistent, persistent, *prologue.dispatch_id_prologue->preload.identity_salt_sgpr,
-        kArch);
+        persistent, persistent, *prologue.dispatch_id_prologue->preload.identity_salt_sgpr, kArch);
     ASSERT_TRUE(mix);
     expect_write(*mix);
     expect_write(build_s_add_u32(persistent, persistent, scalar_positive_inline_u32(1), kArch));
@@ -3090,8 +3080,8 @@ TEST(ConSanMoi, AlreadyEnabledQueueAndDispatchPreloadsReuseExactAbiPositions) {
     AMDHSA_BITS_SET(descriptor.kernel_code_properties,
                     kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID, 1u);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 6u);
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2,
-                    kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                    1u);
   });
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_report_buffer_address = 0x100000000ull;
@@ -3287,8 +3277,8 @@ TEST(ConSanMoi, FinalValidationPinsDispatchDescriptorAndCaptureSequence) {
   ConSanTransformArtifacts queue_descriptor_corruption = valid;
   std::memcpy(&descriptor, queue_descriptor_corruption.replacement.data() + descriptor_offset,
               sizeof(descriptor));
-  AMDHSA_BITS_SET(descriptor.kernel_code_properties,
-                  kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR, 0u);
+  AMDHSA_BITS_SET(descriptor.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR,
+                  0u);
   std::memcpy(queue_descriptor_corruption.replacement.data() + descriptor_offset, &descriptor,
               sizeof(descriptor));
   EXPECT_FALSE(validate_consan_modified_elf(bytes, queue_descriptor_corruption).empty());
@@ -3324,25 +3314,24 @@ TEST(ConSanMoi, FinalValidationPinsDispatchDescriptorAndCaptureSequence) {
   const auto mix = std::ranges::find(mix_words, *expected_mix);
   ASSERT_NE(mix, mix_words.end());
   const size_t mix_word_index = static_cast<size_t>(mix - mix_words.begin());
-  const size_t mix_file_offset =
-      mix_object.text_sections().front()->sectionOffset() + prologue->trampoline_offset +
-      mix_word_index * sizeof(uint32_t);
+  const size_t mix_file_offset = mix_object.text_sections().front()->sectionOffset() +
+                                 prologue->trampoline_offset + mix_word_index * sizeof(uint32_t);
   const uint32_t missing_mix = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
   std::memcpy(mix_corruption.replacement.data() + mix_file_offset, &missing_mix,
               sizeof(missing_mix));
   EXPECT_FALSE(validate_consan_modified_elf(bytes, mix_corruption).empty());
 
   ConSanTransformArtifacts restore_metadata_corruption = valid;
-  auto corrupted_prologue = std::ranges::find_if(
-      restore_metadata_corruption.patches,
-      [](const ConSanPatchInfo &patch) { return patch.dispatch_id_prologue.has_value(); });
+  auto corrupted_prologue =
+      std::ranges::find_if(restore_metadata_corruption.patches, [](const ConSanPatchInfo &patch) {
+        return patch.dispatch_id_prologue.has_value();
+      });
   ASSERT_NE(corrupted_prologue, restore_metadata_corruption.patches.end());
   auto &corrupted_preload = corrupted_prologue->dispatch_id_prologue->preload;
   ASSERT_GT(corrupted_preload.guest_restore_count, 0u);
   // The explicit source map is exclusively a user-preload repair. The old
   // combined user+system bound incorrectly admitted this first system SGPR.
-  corrupted_preload.guest_restore_destinations[0] =
-      corrupted_preload.original_user_sgpr_count;
+  corrupted_preload.guest_restore_destinations[0] = corrupted_preload.original_user_sgpr_count;
   const std::vector<std::string> restore_errors =
       validate_consan_modified_elf(bytes, restore_metadata_corruption);
   EXPECT_TRUE(std::ranges::any_of(restore_errors, [](const std::string &error) {

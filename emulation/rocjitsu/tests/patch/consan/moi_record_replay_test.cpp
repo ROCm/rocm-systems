@@ -5053,7 +5053,7 @@ TEST(ConSanMoi, AutoReportInventoryAdaptsRecordReplayGridAndEventHeadroomForFatO
 TEST(ConSanMoi, AutoReportInventoryAdaptsAddressGroupHeadroomForVeryLargeObjects) {
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = ConSanMoiEngine::RecordReplay;
-  inventory.access_range_count = 50000u;
+  inventory.access_range_count = 500000u;
   inventory.diagnostic_count = inventory.access_range_count;
   inventory.barrier_event_count = 65000u;
   inventory.record_replay_bank_count_adaptive = true;
@@ -11157,7 +11157,6 @@ TEST(ConSanMoi, Cdna4DenseRecordReplayRestoresGuestSccBeforeRelocatedAccess) {
   constexpr size_t kLargeTextWords = 33'000u;
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr uint16_t kExecSaveSgpr = 80u;
-  constexpr uint16_t kSccSaveSgpr = kExecSaveSgpr + 4u;
   const uint32_t filler = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, kArch);
   std::vector<uint32_t> text_words(kLargeTextWords, filler);
   size_t cursor = 8u;
@@ -11203,10 +11202,6 @@ TEST(ConSanMoi, Cdna4DenseRecordReplayRestoresGuestSccBeforeRelocatedAccess) {
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
-  const auto restore_guest_scc =
-      instrumentation::build_s_cmp_lg_u32(kSccSaveSgpr, scalar_positive_inline_u32(0u), kArch);
-  ASSERT_TRUE(restore_guest_scc);
-
   const auto last_access =
       std::ranges::max_element(result.patches, {}, [](const ConSanPatchInfo &patch) {
         return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ? patch.anchor_offset
@@ -11214,10 +11209,21 @@ TEST(ConSanMoi, Cdna4DenseRecordReplayRestoresGuestSccBeforeRelocatedAccess) {
       });
   ASSERT_NE(last_access, result.patches.end());
   ASSERT_TRUE(last_access->relocated_guest_instruction_offset);
+  ASSERT_EQ(last_access->owner_descriptor_file_offsets.size(), 1u);
+  const auto assignment = test_moi_transient_sgpr_assignment(
+      result, last_access->owner_descriptor_file_offsets.front());
+  ASSERT_TRUE(assignment) << testing::PrintToString(result.warnings);
+  const uint16_t site_scc_save_sgpr =
+      assignment->scalar_spill_setup ? assignment->scalar_spill_setup->temporaries.scc_save_sgpr
+                                     : static_cast<uint16_t>(assignment->exec_save_sgpr + 4u);
+  const auto restore_guest_scc = instrumentation::build_s_cmp_lg_u32(
+      site_scc_save_sgpr, scalar_positive_inline_u32(0u), kArch);
+  ASSERT_TRUE(restore_guest_scc);
+
   const std::vector<uint32_t> relocated_words =
       text_words_at_offset(patched, last_access->trampoline_offset, last_access->trampoline_size);
   const auto restore = std::ranges::find(relocated_words, *restore_guest_scc);
-  ASSERT_NE(restore, relocated_words.end());
+  ASSERT_NE(restore, relocated_words.end()) << testing::PrintToString(relocated_words);
   const size_t guest_word =
       (*last_access->relocated_guest_instruction_offset - last_access->trampoline_offset) /
       sizeof(uint32_t);
