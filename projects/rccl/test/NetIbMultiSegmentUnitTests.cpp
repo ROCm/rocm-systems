@@ -9,11 +9,11 @@
 // src/transport/net_ib/multiseg.h and run in rccl-UnitTestsFixtures without
 // IB hardware, a GPU, or MPI.
 
-#include <gtest/gtest.h>
-
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+
+#include <gtest/gtest.h>
 
 // Pure helpers under test (no ibverbs / RCCL deps).
 #include "../src/transport/net_ib/multiseg.h"
@@ -129,6 +129,11 @@ TEST(NetIbMultiSeg, OverlappingRangeZeroLengthIsEmpty) {
 
 TEST(NetIbMultiSeg, UniformLayoutAccepted) {
     std::vector<size_t> len(4, kSeg);
+    EXPECT_TRUE(ncclIbSegmentsUniform(4, len.data()));
+}
+
+TEST(NetIbMultiSeg, TrailingSegmentMayBeSmaller) {
+    std::vector<size_t> len = {kSeg, kSeg, kSeg, kSeg / 2};
     EXPECT_TRUE(ncclIbSegmentsUniform(4, len.data()));
 }
 
@@ -341,4 +346,48 @@ TEST(NetIbSplit, SlicesTileRangeContiguously) {
             EXPECT_EQ(sum, len) << "off=" << off << " len=" << len;
         }
     }
+}
+
+TEST(NetIbCtsLayout, AcceptsMonotonicNonzeroRkeys) {
+    const uint64_t start[] = {kBase, kBase + kSeg, kBase + 2 * kSeg};
+    const uint32_t rkeys[] = {1u, 2u, 3u};
+    EXPECT_TRUE(ncclIbCtsRemoteLayoutValid(3, /*remDevIdx=*/0, /*maxDevs=*/2, NCCL_IB_MAX_SEGMENTS, start, rkeys));
+}
+
+TEST(NetIbCtsLayout, RejectsZeroSegmentCount) {
+    const uint64_t start[] = {kBase};
+    const uint32_t rkeys[] = {1u};
+    EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(0, 0, 2, NCCL_IB_MAX_SEGMENTS, start, rkeys));
+}
+
+TEST(NetIbCtsLayout, RejectsSegmentCountAboveCap) {
+    const uint64_t start[] = {kBase};
+    const uint32_t rkeys[] = {1u};
+    EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(NCCL_IB_MAX_SEGMENTS + 1, 0, 2, NCCL_IB_MAX_SEGMENTS, start, rkeys));
+}
+
+TEST(NetIbCtsLayout, RejectsOutOfRangeDeviceIndex) {
+    const uint64_t start[] = {kBase, kBase + kSeg};
+    const uint32_t rkeys[] = {1u, 2u};
+    EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(2, /*remDevIdx=*/-1, 2, NCCL_IB_MAX_SEGMENTS, start, rkeys));
+    EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(2, /*remDevIdx=*/2, 2, NCCL_IB_MAX_SEGMENTS, start, rkeys));
+}
+
+TEST(NetIbCtsLayout, RejectsNonMonotonicSegStart) {
+    const uint64_t start[] = {kBase, kBase, kBase + 2 * kSeg};
+    const uint32_t rkeys[] = {1u, 2u, 3u};
+    EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(3, 0, 2, NCCL_IB_MAX_SEGMENTS, start, rkeys));
+}
+
+TEST(NetIbCtsLayout, RejectsZeroRkey) {
+    const uint64_t start[] = {kBase, kBase + kSeg};
+    const uint32_t rkeys[] = {1u, 0u};
+    EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(2, 0, 2, NCCL_IB_MAX_SEGMENTS, start, rkeys));
+}
+
+TEST(NetIbCtsLayout, RejectsNullTables) {
+    const uint64_t start[] = {kBase, kBase + kSeg};
+    const uint32_t rkeys[] = {1u, 2u};
+    EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(2, 0, 2, NCCL_IB_MAX_SEGMENTS, nullptr, rkeys));
+    EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(2, 0, 2, NCCL_IB_MAX_SEGMENTS, start, nullptr));
 }
