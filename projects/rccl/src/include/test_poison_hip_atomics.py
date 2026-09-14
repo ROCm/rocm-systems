@@ -233,6 +233,19 @@ class PoisonHipAtomicsTest(unittest.TestCase):
         rc, out = self._compile_with_external_anvil_stub(src)
         self.assertEqual(rc, 0, msg=out)
 
+    def test_poison_still_rejects_rccl_code_after_external_anvil_header(self):
+        src = textwrap.dedent("""\
+            #include "sdma/anvil_device.hpp"
+            __global__ void k(unsigned int *p, unsigned int *out) {
+              *out = __hip_atomic_load(
+                  p, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+            }
+            """)
+        rc, out = self._compile_with_external_anvil_stub(src)
+        self.assertNotEqual(rc, 0, msg=out)
+        self.assertIn("poisoned identifier", out, msg=out)
+        self.assertIn("__hip_atomic_load", out, msg=out)
+
     def test_hip_atomic_load_rejected_on_device(self):
         rc, out = _compile(
             _probe_src(_call_expr("__hip_atomic_load")),
