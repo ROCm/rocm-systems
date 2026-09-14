@@ -9,11 +9,13 @@ from typing import Callable, Iterable, Protocol, Union
 
 from ._version import __version__ as _PACKAGE_VERSION
 from .records import (
+    AnalysisFlags,
     DecoderStatus,
     Dispatch,
     Event,
     EventPayload,
     Instruction,
+    HiddenLatency,
     Occupancy,
     OtherSimdInstruction,
     Pc,
@@ -133,6 +135,18 @@ class _OtherSimdInstruction(ctypes.Structure):
         ("cycles", ctypes.c_uint16),
         ("wgp", ctypes.c_uint8),
         ("category", ctypes.c_uint8),
+    ]
+
+
+class _HiddenLatency(ctypes.Structure):
+    _fields_ = [
+        ("size", ctypes.c_uint64),
+        ("pc", _PcInfo),
+        ("idle", ctypes.c_int64),
+        ("stall", ctypes.c_int64),
+        ("issue", ctypes.c_int64),
+        ("simd", ctypes.c_uint8),
+        ("reserved", ctypes.c_uint8 * 7),
     ]
 
 
@@ -384,6 +398,11 @@ class Decoder:
         ]
         lib.rocprof_trace_decoder_set_se_data_callback.restype = ctypes.c_int
 
+        # Added in decoder 0.2.3; absent when running against an older library.
+        if hasattr(lib, "rocprof_trace_decoder_set_analysis"):
+            lib.rocprof_trace_decoder_set_analysis.argtypes = [_Handle, ctypes.c_uint64]
+            lib.rocprof_trace_decoder_set_analysis.restype = ctypes.c_int
+
         lib.rocprof_trace_decoder_parse.argtypes = [
             _Handle,
             ctypes.c_void_p,
@@ -505,6 +524,23 @@ class Decoder:
         self._ensure_open()
         status = self._lib.rocprof_trace_decoder_codeobj_unload(self._handle, load_id)
         self._check(status)
+
+    def set_analysis(self, flags: int | AnalysisFlags) -> None:
+        """Request optional in-decoder analyses for subsequent parses.
+
+        Off by default, because the decoder has to retain instruction-pipe activity
+        across wave callbacks. Results arrive as ``RecordType.HIDDEN_LATENCY`` batches
+        after the rest of the records, and land in ``TraceRecords.hidden_latency``.
+        Each parse is one analysis scope: the decoder is not told which shader engine
+        it is decoding.
+        """
+        self._ensure_open()
+        if not hasattr(self._lib, "rocprof_trace_decoder_set_analysis"):
+            raise DecoderError(
+                int(DecoderStatus.ERROR_NOT_IMPLEMENTED),
+                "decoder library predates rocprof_trace_decoder_set_analysis (0.2.3)",
+            )
+        self._check(self._lib.rocprof_trace_decoder_set_analysis(self._handle, int(flags)))
 
     def parse_file(
         self,
@@ -650,6 +686,9 @@ class Decoder:
         if record_type == RecordType.DISPATCH:
             ptr = ctypes.cast(events, ctypes.POINTER(_Dispatch))
             return [_convert_dispatch(ptr[i]) for i in range(size)]
+        if record_type == RecordType.HIDDEN_LATENCY:
+            ptr = ctypes.cast(events, ctypes.POINTER(_HiddenLatency))
+            return [_convert_hidden_latency(ptr[i]) for i in range(size)]
         return []
 
 
@@ -797,6 +836,17 @@ def _convert_dispatch(c: _Dispatch) -> Dispatch:
     )
 
 
+def _convert_hidden_latency(c: _HiddenLatency) -> HiddenLatency:
+    return HiddenLatency(
+        size=int(c.size),
+        pc=_pc(c.pc),
+        idle=int(c.idle),
+        stall=int(c.stall),
+        issue=int(c.issue),
+        simd=int(c.simd),
+    )
+
+
 def _append_batch(
     records: TraceRecords,
     record_type: RecordType,
@@ -825,6 +875,8 @@ def _append_batch(
         records.other_simd.extend(batch)  # type: ignore[arg-type]
     elif record_type == RecordType.DISPATCH:
         records.dispatches.extend(batch)  # type: ignore[arg-type]
+    elif record_type == RecordType.HIDDEN_LATENCY:
+        records.hidden_latency.extend(batch)  # type: ignore[arg-type]
 
 
 def merge_records(dst: TraceRecords, src: TraceRecords) -> TraceRecords:
@@ -841,6 +893,7 @@ def merge_records(dst: TraceRecords, src: TraceRecords) -> TraceRecords:
     dst.realtime.extend(src.realtime)
     dst.other_simd.extend(src.other_simd)
     dst.dispatches.extend(src.dispatches)
+    dst.hidden_latency.extend(src.hidden_latency)
     dst.batches.extend(src.batches)
     return dst
 

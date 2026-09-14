@@ -87,9 +87,12 @@ def decode_traces(
     att_paths: list[Path],
     *,
     code_index,
+    analysis: int = 0,
 ) -> list[DecodedTrace]:
     decoded: list[DecodedTrace] = []
     with Decoder() as decoder:
+        if analysis:
+            decoder.set_analysis(analysis)
         for path in att_paths:
             records = decoder.parse(path.read_bytes(), isa=code_index)
             for info in records.info:
