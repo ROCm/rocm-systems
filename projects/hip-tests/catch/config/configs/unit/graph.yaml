@@ -711,6 +711,9 @@ graph:
   Unit_hipStreamBeginCapture_Positive_DestroyNestedForkDuringCapture:
     <<: *level_2
     tags: [capture]
+  Unit_hipStreamBeginCapture_Positive_ConcurrentForkIntoOneCapture:
+    <<: *level_2
+    tags: [capture]
   Unit_hipGraphAddMemcpyNode1D_Functional:
     <<: *level_2
     tags: [node]

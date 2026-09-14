@@ -481,9 +481,15 @@ namespace hip {
       captureEvents_.erase(e);
     }
     /// Enroll a stream in this capture. Only meaningful on the origin stream.
-    void AddCaptureStream(hipStream_t s) { captureStreams_.insert(s); }
+    void AddCaptureStream(hipStream_t s) {
+      std::scoped_lock lock(lock_);
+      captureStreams_.insert(s);
+    }
     /// Remove a stream from this capture. Only meaningful on the origin stream.
-    void EraseCaptureStream(hipStream_t s) { captureStreams_.erase(s); }
+    void EraseCaptureStream(hipStream_t s) {
+      std::scoped_lock lock(lock_);
+      captureStreams_.erase(s);
+    }
     /// Mark the whole capture this stream belongs to as invalidated: the origin and every
     /// stream enrolled in it. Callable from the origin or from any participant.
     void InvalidateCapture();
@@ -510,7 +516,7 @@ namespace hip {
     /// that capture teardown keeps a single entry point.
     void ResetCaptureState(bool preserveInvalidated);
 
-    mutable std::recursive_mutex lock_;      //!< Guards captureEvents_ bookkeeping
+    mutable std::recursive_mutex lock_;      //!< Guards captureEvents_ and captureStreams_
     Device* device_;                         //!< Device that owns this stream
     Priority priority_;                      //!< Scheduling priority (High / Normal / Low)
     unsigned int flags_;                     //!< Creation flags (e.g. hipStreamNonBlocking)

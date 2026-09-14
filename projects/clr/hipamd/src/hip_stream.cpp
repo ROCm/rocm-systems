@@ -61,6 +61,7 @@ void Stream::ResetCaptureState(bool preserveInvalidated) {
       reinterpret_cast<hip::Event*>(event)->SetCaptureStream(nullptr);
     }
     captureEvents_.clear();
+    captureStreams_.clear();
   }
 
   captureStatus_ = preserveInvalidated ? hipStreamCaptureStatusInvalidated
@@ -69,7 +70,6 @@ void Stream::ResetCaptureState(bool preserveInvalidated) {
   originStream_ = false;
   captureOwner_ = nullptr;
   lastCapturedNodes_.clear();
-  captureStreams_.clear();
 }
 
 // ================================================================================================
@@ -79,9 +79,13 @@ void Stream::InvalidateCapture() {
     return;
   }
   owner->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
-  for (auto stream : owner->captureStreams_) {
-    reinterpret_cast<hip::Stream*>(stream)->SetCaptureStatus(
-        hipStreamCaptureStatusInvalidated);
+  std::unordered_set<hipStream_t> participants;
+  {
+    std::scoped_lock lock(owner->lock_);
+    participants = owner->captureStreams_;
+  }
+  for (auto stream : participants) {
+    reinterpret_cast<hip::Stream*>(stream)->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
   }
 }
 
@@ -90,9 +94,22 @@ void Stream::EndCapture(bool preserveInvalidated) {
   if (originStream_) {
     // Swap the participant set out before walking it, so each participant is free to erase
     // itself from the owner on the way through. Iterating a local copy also means the walk
-    // terminates whatever shape the set is in.
+    // terminates whatever shape the set is in, which is what makes a cycle among forked
+    // streams safe to tear down.
+    //
+    // The lock is released before the walk begins, which is what keeps the ordering rule
+    // below satisfiable: each participant takes this origin's lock to erase itself.
+    //
+    // Holding the lock across the walk is not a way to make teardown concurrency-safe, only
+    // a way to deadlock on anything but a recursive mutex. Racing teardown against
+    // hipStreamDestroy on a participant, or against a wait that enrols a new one, is still
+    // caller error: the pointers in this copy can be freed under us, and a stream enrolled
+    // after the swap keeps an owner pointer this call is about to invalidate.
     std::unordered_set<hipStream_t> participants;
-    participants.swap(captureStreams_);
+    {
+      std::scoped_lock lock(lock_);
+      participants.swap(captureStreams_);
+    }
     for (auto stream : participants) {
       reinterpret_cast<hip::Stream*>(stream)->EndCapture(preserveInvalidated);
     }

@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <atomic>
+#include <thread>
+#include <vector>
+
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 
@@ -2103,6 +2107,108 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_DestroyNestedForkDuringCapture
 
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify that several threads can fork their own stream into one capture at the
+ *      same time. Enrolling a stream mutates a container on the origin, so concurrent
+ *      hipStreamWaitEvent calls against one capture all write to it together. The threads are
+ *      released from a spin barrier to land those calls as close together as possible, and
+ *      the sequence repeats because the window is narrow.
+ *    - Detection is indirect but precise: ending the capture resets every enrolled stream, so
+ *      a forked stream still reporting a capture status afterwards was dropped. Before the
+ *      origin's participant set was synchronised this lost roughly one enrollment in seventy
+ *      and went on to fault outright.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_ConcurrentForkIntoOneCapture) {
+  constexpr int kThreads = 8;
+  // Measured against a build with the origin's participant set left unsynchronised: 5
+  // iterations catch the loss in 8 runs out of 20 and 25 in 77 out of 80, while 50 and 100
+  // both catch it in 80 out of 80. The count sits a stride past the point where detection
+  // first saturates rather than on it, because the window tracks how many of the threads
+  // genuinely run at once and the figures above come from a 256-core host.
+  constexpr int kIterations = 100;
+
+  (void)hipGetLastError();
+
+  LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
+  int* devMem = devMem_g.ptr();
+  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  int lostEnrollments = 0;
+  int waitFailures = 0;
+
+  for (int iter = 0; iter < kIterations; ++iter) {
+    StreamsGuard streams(kThreads + 1);
+    EventsGuard events(kThreads + 1);
+
+    hipStream_t origin = streams[0];
+    hipEvent_t forkEvent = events[0];
+
+    // Relaxed, so the forking threads are not restricted by the capturing thread.
+    HIP_CHECK(hipStreamBeginCapture(origin, hipStreamCaptureModeRelaxed));
+    incrementKernel<<<1, 1, 0, origin>>>(devMem);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipEventRecord(forkEvent, origin));
+
+    std::atomic<bool> go{false};
+    std::atomic<int> ready{0};
+    std::atomic<int> failures{0};
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+    for (int t = 0; t < kThreads; ++t) {
+      threads.emplace_back([&, t]() {
+        ready.fetch_add(1, std::memory_order_release);
+        while (!go.load(std::memory_order_acquire)) {
+        }
+        if (hipStreamWaitEvent(streams[t + 1], forkEvent, 0) != hipSuccess) {
+          failures.fetch_add(1, std::memory_order_relaxed);
+        }
+      });
+    }
+    while (ready.load(std::memory_order_acquire) < kThreads) {
+    }
+    go.store(true, std::memory_order_release);
+    for (auto& thread : threads) {
+      thread.join();
+    }
+    waitFailures += failures.load(std::memory_order_relaxed);
+
+    // Join every fork back so the capture is closeable.
+    for (int t = 0; t < kThreads; ++t) {
+      incrementKernel<<<1, 1, 0, streams[t + 1]>>>(devMem);
+      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipEventRecord(events[t + 1], streams[t + 1]));
+      HIP_CHECK(hipStreamWaitEvent(origin, events[t + 1], 0));
+    }
+
+    hipGraph_t graph = nullptr;
+    HIP_CHECK(hipStreamEndCapture(origin, &graph));
+    REQUIRE(graph != nullptr);
+    HIP_CHECK(hipGraphDestroy(graph));
+
+    // Ending the capture resets every enrolled stream, so anything still carrying a capture
+    // status was never enrolled.
+    for (int t = 0; t < kThreads; ++t) {
+      hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone;
+      HIP_CHECK(hipStreamIsCapturing(streams[t + 1], &captureStatus));
+      if (captureStatus != hipStreamCaptureStatusNone) {
+        ++lostEnrollments;
+      }
+    }
+  }
+
+  REQUIRE(waitFailures == 0);
+  REQUIRE(lostEnrollments == 0);
 }
 
 /**
