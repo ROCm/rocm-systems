@@ -105,9 +105,6 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   // Fabric cliques are normally homogeneous, but harvested or disabled CUs
   // can produce different local caps. Every rank must launch the same number
   // of blocks because the barrier pairs participants by blockIdx.
-  // Do not locally degrade on a bootstrap collective error: failures need not
-  // be observed identically by every rank, and rank-divergent fallback could
-  // deadlock the later fabric pointer exchanges.
   NCCLCHECK(bootstrapAllGather(comm->bootstrap, blockCaps.data(), sizeof(int)));
 
   int nBlocksMax = localBlocksMax;

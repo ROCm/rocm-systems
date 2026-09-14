@@ -680,7 +680,7 @@
         {
           "name": "DdaFabricEligibilityTest",
           "description": "Dda Fabric eligibility and block-cap tests",
-          "test_filter": "DdaFabricEligibilityTest.*:DdaFabricMaxBlocksTest.*"
+          "test_filter": "DdaFabricEligibilityTest.*:DdaFabricMaxBlocksTest.*:DdaFabricScratchSizingTest.*"
         },
         {
           "name": "TimeoutTests",
