@@ -5,7 +5,8 @@
 
 #include "library/rocprofiler-sdk/types.hpp"
 #include "logger/debug.hpp"
-#include "policies/rocprofiler-sdk/domain_service.hpp"
+#include "policies/rocprofiler-sdk/domain_service/backend.hpp"
+#include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
 #include <fmt/format.h>
 
@@ -17,7 +18,7 @@
 namespace rocprofsys::domains::buffered
 {
 
-template <policies::rocprofiler_sdk::domain_service_externals Externals>
+template <policies::domain_service::externals Externals>
 inline void
 on_kfd_queue_configure()
 {
@@ -61,8 +62,8 @@ on_kfd_queue_configure()
     }
 }
 
-template <policies::rocprofiler_sdk::domain_service_backend   SdkBackend,
-          policies::rocprofiler_sdk::domain_service_externals Externals>
+template <policies::domain_service::backend   SdkBackend,
+          policies::domain_service::externals Externals>
 inline void
 on_kfd_queue(typename SdkBackend::kfd_queue_record* record, void* data)
 {
@@ -105,8 +106,8 @@ on_kfd_queue(typename SdkBackend::kfd_queue_record* record, void* data)
         std::optional<std::int64_t>(record->pid) });
 }
 
-template <policies::rocprofiler_sdk::domain_service_backend   SdkBackend,
-          policies::rocprofiler_sdk::domain_service_externals Externals>
+template <policies::domain_service::backend   SdkBackend,
+          policies::domain_service::externals Externals>
 inline constexpr auto k_kfd_queue = buffered_domain_definition<SdkBackend>{
     .meta =
         domain_descriptor{

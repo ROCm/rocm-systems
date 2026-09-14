@@ -9,7 +9,7 @@
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
-#include "policies/rocprofiler-sdk/domain_service.hpp"
+#include "policies/rocprofiler-sdk/gpu_perf_counters/backend.hpp"
 
 #include <concepts>
 #include <cstddef>
@@ -25,16 +25,14 @@ namespace rocprofsys::pmc::device_providers::rocprofiler_sdk
 {
 
 // Contract required of the factory type passed to provider<BackendFactory>: it must
-// produce a backend satisfying policies::rocprofiler_sdk::domain_service_backend.
+// produce a backend satisfying policies::gpu_perf_counters::backend.
 template <typename BackendFactory>
-concept backend_factory_contract =
-    requires {
-        typename BackendFactory::backend_t;
-        {
-            BackendFactory::create_backend()
-        } -> std::same_as<std::shared_ptr<typename BackendFactory::backend_t>>;
-    } &&
-    policies::rocprofiler_sdk::domain_service_backend<typename BackendFactory::backend_t>;
+concept backend_factory_contract = requires {
+    typename BackendFactory::backend_t;
+    {
+        BackendFactory::create_backend()
+    } -> std::same_as<std::shared_ptr<typename BackendFactory::backend_t>>;
+} && policies::gpu_perf_counters::backend<typename BackendFactory::backend_t>;
 
 template <backend_factory_contract BackendFactory>
 class provider

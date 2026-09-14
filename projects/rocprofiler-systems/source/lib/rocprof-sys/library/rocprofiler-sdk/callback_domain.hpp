@@ -4,7 +4,7 @@
 #pragma once
 
 #include "library/rocprofiler-sdk/types.hpp"
-#include "policies/rocprofiler-sdk/domain_service.hpp"
+#include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 
 #include <string_view>
 #include <vector>
@@ -12,7 +12,7 @@
 namespace rocprofsys::domains
 {
 
-template <policies::rocprofiler_sdk::domain_service_backend SdkBackend>
+template <policies::domain_service::backend SdkBackend>
 class callback_domain
 {
 public:

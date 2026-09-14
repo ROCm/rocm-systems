@@ -16,12 +16,12 @@
 namespace rocprofsys::domains::test_support
 {
 
-// Shared stand-in for SdkBackend, satisfying domain_service_backend for every test
-// that instantiates callback_domain<>, buffered_domain<>, registry<>, domain_service<>,
-// or a single kfd_* on_record(s)/on_configure() pair. Carries every kfd_* domain's
-// record type and BUFFER_TRACING_*/CALLBACK_TRACING_* id, since registry<>/
-// domain_service<> pull in the full domains::registry<> regardless of which single
-// domain a given test exercises.
+// Shared stand-in for SdkBackend, satisfying policies::domain_service::backend for
+// every test that instantiates callback_domain<>, buffered_domain<>, registry<>,
+// domain_service<>, or a single kfd_* on_record(s)/on_configure() pair. Carries every
+// kfd_* domain's record type and BUFFER_TRACING_*/CALLBACK_TRACING_* id, since
+// registry<>/domain_service<> pull in the full domains::registry<> regardless of which
+// single domain a given test exercises.
 struct context_id_t
 {
     std::uint64_t handle                                 = 0;
@@ -67,28 +67,6 @@ struct agent_id_t
 {
     std::uint64_t handle = 0;
 };
-
-// domain_service_backend's device-counting (GPU perf-counter) surface. buffered_domain/
-// callback_domain/registry/domain_service tests never exercise it, so these are
-// trivial stand-ins kept only to satisfy the concept.
-using status_t       = int;
-using counter_flag_t = int;
-struct counter_record_t
-{
-    std::uint64_t id = 0;
-};
-struct counter_id_t
-{
-    std::uint64_t handle = 0;
-};
-struct counter_config_id_t
-{
-    std::uint64_t handle = 0;
-};
-struct counter_metadata_t
-{};
-using available_counters_cb_t      = void (*)();
-using device_counting_service_cb_t = void (*)();
 
 struct address_t
 {
@@ -168,8 +146,8 @@ struct kfd_queue_record
     std::uint64_t end_timestamp   = 0;
 };
 
-// Satisfies domain_service_backend's requirement that get_{buffer,callback}_
-// tracing_names() return a std::ranges::range of entries exposing
+// Satisfies policies::domain_service::backend's requirement that
+// get_{buffer,callback}_tracing_names() return a std::ranges::range of entries exposing
 // name/operations/value. Kept as a plain (non-gmock) value: on_kfd_*<...> calls
 // get_buffer_tracing_names().at(...) unconditionally, so it must work without a test
 // having to set up an expectation for it.
@@ -194,10 +172,11 @@ struct tracing_names_t
     }
 };
 
-// Every domain_service_backend member that tests actually verify calls into, as a
-// GMock method -- a test EXPECT_CALLs only the handful its scenario exercises;
-// StrictMock fails it if anything else is touched. get_{buffer,callback}_tracing_names
-// are deliberately NOT here; see tracing_names_t above.
+// Every policies::domain_service::backend member that tests actually verify calls
+// into, as a GMock method -- a test EXPECT_CALLs only the handful its scenario
+// exercises; StrictMock fails it if anything else is touched.
+// get_{buffer,callback}_tracing_names are deliberately NOT here; see tracing_names_t
+// above.
 struct gmock_sdk_backend
 {
     MOCK_METHOD(void, create_context, (context_id_t * context));
@@ -255,22 +234,9 @@ struct mock_sdk
     using tracing_names_t           = test_support::tracing_names_t;
     using agent_id_t                = test_support::agent_id_t;
 
-    // domain_service_backend's device-counting surface; see test_support definitions.
-    using status_t                     = test_support::status_t;
-    using counter_flag_t               = test_support::counter_flag_t;
-    using counter_record_t             = test_support::counter_record_t;
-    using counter_id_t                 = test_support::counter_id_t;
-    using counter_config_id_t          = test_support::counter_config_id_t;
-    using counter_metadata_t           = test_support::counter_metadata_t;
-    using available_counters_cb_t      = test_support::available_counters_cb_t;
-    using device_counting_service_cb_t = test_support::device_counting_service_cb_t;
-
     // NOLINTBEGIN(readability-identifier-naming)
     static constexpr std::size_t     compile_time_version                    = 90909;
     static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS                  = 1;
-    static constexpr counter_flag_t  flag_none                               = 0;
-    static constexpr status_t        status_success                          = 0;
-    static constexpr status_t        status_hsa_not_loaded                   = 1;
     static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS = 20;
     static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_PAGE_FAULT     = 21;
     static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE   = 22;
@@ -293,49 +259,6 @@ struct mock_sdk
 
     static void create_context(context_id_t* context) { g_mock->create_context(context); }
     static void start_context(context_id_t context) { g_mock->start_context(context); }
-
-    // domain_service_backend's device-counting surface: never exercised by
-    // buffered_domain/callback_domain/registry/domain_service tests, so these are
-    // trivial no-op stubs rather than g_mock forwards.
-    static void       stop_context(context_id_t /*context*/) {}
-    static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
-
-    // NOLINTBEGIN(readability-function-size)
-    static status_t sample_device_counting_service(context_id_t, user_data_t,
-                                                   counter_flag_t, counter_record_t*,
-                                                   std::size_t*)
-    {
-        return status_success;
-    }
-    // NOLINTEND(readability-function-size)
-
-    static status_t query_record_counter_id(counter_record_t, counter_id_t*)
-    {
-        return status_success;
-    }
-    static std::vector<counter_metadata_t> query_counter_details(counter_id_t)
-    {
-        return {};
-    }
-    static status_t iterate_agent_supported_counters(agent_id_t, available_counters_cb_t,
-                                                     void*)
-    {
-        return status_success;
-    }
-    static status_t create_counter_config(agent_id_t, counter_id_t*, std::size_t,
-                                          counter_config_id_t*)
-    {
-        return status_success;
-    }
-
-    // NOLINTBEGIN(readability-function-size)
-    static status_t configure_device_counting_service(context_id_t, buffer_id_t,
-                                                      agent_id_t,
-                                                      device_counting_service_cb_t, void*)
-    {
-        return status_success;
-    }
-    // NOLINTEND(readability-function-size)
 
     // NOLINTNEXTLINE(readability-function-size)
     static void create_buffer(context_id_t context, std::size_t buffer_size,
@@ -394,7 +317,8 @@ struct mock_sdk
 // Stand-in for the agent/trace_cache::info shapes every on_kfd_*<...> touches through
 // Externals. Every field beyond type/device_type_index exists solely so agent_t
 // satisfies policies::agent_policy (required transitively by
-// domain_service_externals's agent_manager_policy check); tests never read them.
+// policies::domain_service::externals's agent_manager_policy check); tests never read
+// them.
 struct agent_t
 {
     int           type                 = 0;
@@ -452,8 +376,8 @@ inline std::unique_ptr<::testing::StrictMock<gmock_externals>> g_externals_mock;
 // (add_thread_info/add_track/buffer_storage_store) stay plain no-ops -- only
 // add_string/get_agents_by_type/add_pmc_info, which on_configure() exercises, are
 // mocked. Category name/description constants for every kfd_* domain are carried
-// here since domain_service_externals requires the full set regardless of which
-// single domain a given test exercises.
+// here since policies::domain_service::externals requires the full set regardless of
+// which single domain a given test exercises.
 struct externals
 {
     using agent_t      = test_support::agent_t;
@@ -495,9 +419,9 @@ struct externals
     };
 
     // Satisfies policies::agent_manager_policy (required transitively by
-    // domain_service_externals); only get_agents_by_type and the single-argument
-    // get_agent_by_handle are ever exercised by these tests, so the rest are
-    // unreachable stubs.
+    // policies::domain_service::externals); only get_agents_by_type and the
+    // single-argument get_agent_by_handle are ever exercised by these tests, so the
+    // rest are unreachable stubs.
     struct agent_manager_t
     {
         agent_manager_t() = default;

@@ -4,20 +4,21 @@
 #pragma once
 
 #include "library/rocprofiler-sdk/types.hpp"
-#include "policies/rocprofiler-sdk/domain_service.hpp"
+#include "policies/rocprofiler-sdk/domain_service/backend.hpp"
+#include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
 #include <optional>
 
 namespace rocprofsys::domains::callback
 {
 
-template <policies::rocprofiler_sdk::domain_service_externals Externals>
+template <policies::domain_service::externals Externals>
 inline void
 on_code_object_configure()
 {}
 
-template <policies::rocprofiler_sdk::domain_service_backend   SdkBackend,
-          policies::rocprofiler_sdk::domain_service_externals Externals>
+template <policies::domain_service::backend   SdkBackend,
+          policies::domain_service::externals Externals>
 inline void
 on_code_object(typename SdkBackend::callback_tracing_record_t record,
                typename SdkBackend::user_data_t* user_data, void* callback_data)
@@ -27,8 +28,8 @@ on_code_object(typename SdkBackend::callback_tracing_record_t record,
     (void) callback_data;
 }
 
-template <policies::rocprofiler_sdk::domain_service_backend   SdkBackend,
-          policies::rocprofiler_sdk::domain_service_externals Externals>
+template <policies::domain_service::backend   SdkBackend,
+          policies::domain_service::externals Externals>
 inline constexpr auto k_code_object = callback_domain_definition<SdkBackend>{
     .meta =
         domain_descriptor{

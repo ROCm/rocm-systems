@@ -11,7 +11,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -60,49 +59,6 @@ struct mock_counter_record
 struct mock_user_data
 {};
 
-// Types that exist purely to satisfy
-// policies::rocprofiler_sdk::domain_service_backend's static interface. The GPU
-// perf-counter device<Backend> never exercises this surface (it uses the
-// device-counting-service API below), so these are trivial stand-ins.
-struct mock_record_header
-{
-    std::uint32_t category{};
-    std::uint32_t kind{};
-};
-struct mock_callback_thread_id
-{
-    std::uint64_t handle{};
-};
-struct mock_callback_tracing_record
-{
-    std::uint32_t kind{};
-    std::uint32_t operation{};
-};
-using mock_tracing_operation_t     = std::uint32_t;
-using mock_buffer_tracing_kind_t   = std::uint32_t;
-using mock_callback_tracing_kind_t = std::uint32_t;
-using mock_buffer_policy_t         = std::uint32_t;
-using mock_on_records_cb_t         = void (*)();
-using mock_on_record_cb_t          = void (*)();
-
-struct mock_tracing_name_entry
-{
-    std::string_view              name;
-    std::vector<std::string_view> operations;
-    std::size_t                   value{};
-};
-
-// Satisfies both std::ranges::range (via begin()/end()) and the `.at(kind, op)`
-// lookup that domain_service_backend requires of the tracing-name tables.
-struct mock_tracing_name_table
-{
-    std::vector<mock_tracing_name_entry> entries;
-
-    [[nodiscard]] auto             begin() const { return entries.begin(); }
-    [[nodiscard]] auto             end() const { return entries.end(); }
-    [[nodiscard]] std::string_view at(std::uint32_t, std::uint32_t) const { return {}; }
-};
-
 // Stateless lambdas used as callbacks are convertible to these function-pointer types.
 using mock_available_counters_cb_t      = mock_status (*)(mock_agent_id, mock_counter_id*,
                                                      std::size_t, void*);
@@ -113,9 +69,10 @@ using mock_device_counting_service_cb_t = void (*)(mock_context_id, mock_agent_i
 
 // The GMock-verifiable object. Tests set EXPECT_CALL expectations directly on an
 // instance of this class. It is never used as the `Backend` template parameter
-// itself (see `mock_backend` below) because domain_service_backend requires several
-// methods to be callable as unqualified static calls (`Backend::start_context(...)`),
-// which is incompatible with GMock's instance-based MOCK_METHOD dispatch.
+// itself (see `mock_backend` below) because policies::gpu_perf_counters::backend
+// requires several methods to be callable as unqualified static calls
+// (`Backend::start_context(...)`), which is incompatible with GMock's instance-based
+// MOCK_METHOD dispatch.
 class mock_backend_impl
 {
 public:
@@ -173,7 +130,7 @@ public:
 // The type actually used as the `Backend` / `backend_t` template parameter. It holds
 // no per-instance state: every call is forwarded to whichever `mock_backend_impl`
 // instance is currently bound (via `bind()`), so it can satisfy
-// policies::rocprofiler_sdk::domain_service_backend's requirement that members like
+// policies::gpu_perf_counters::backend's requirement that members like
 // `create_context`/`start_context` be reachable via an unqualified static call
 // (`Backend::start_context(ctx)`), while still routing through a GMock object that
 // tests can set EXPECT_CALL expectations on.
@@ -194,17 +151,6 @@ public:
     using device_counting_agent_cb_t   = mock_backend_impl::device_counting_agent_cb_t;
     using device_counting_service_cb_t = mock_backend_impl::device_counting_service_cb_t;
 
-    // domain_service_backend-only surface (unused by device<Backend>'s logic).
-    using record_header_t           = mock_record_header;
-    using callback_thread_id_t      = mock_callback_thread_id;
-    using callback_tracing_record_t = mock_callback_tracing_record;
-    using tracing_operation_t       = mock_tracing_operation_t;
-    using buffer_tracing_kind_t     = mock_buffer_tracing_kind_t;
-    using callback_tracing_kind_t   = mock_callback_tracing_kind_t;
-    using buffer_policy_t           = mock_buffer_policy_t;
-    using on_records_cb_t           = mock_on_records_cb_t;
-    using on_record_cb_t            = mock_on_record_cb_t;
-
     // Names mirror the `Backend` static interface required by device.hpp/provider.hpp
     // (e.g. `Backend::status_success`), so they can't take the usual k_ prefix.
     // NOLINTBEGIN(readability-identifier-naming)
@@ -213,8 +159,6 @@ public:
     static constexpr status_t       status_error   = mock_backend_impl::status_error;
     static constexpr status_t       status_hsa_not_loaded =
         mock_backend_impl::status_hsa_not_loaded;
-    static constexpr std::uint32_t   compile_time_version   = 0;
-    static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS = 0;
     // NOLINTEND(readability-identifier-naming)
 
     static agent_id_t make_agent_id(std::uint64_t handle)
@@ -231,7 +175,8 @@ public:
     }
     static void unbind() { s_active.reset(); }
 
-    // --- backend_contract surface (forwarded to the bound impl for verification) ---
+    // --- gpu_perf_counters::backend surface (forwarded to the bound impl for
+    // verification) ---
     static void create_context(context_id_t* ctx) { active().create_context(ctx); }
     static void start_context(context_id_t ctx) { active().start_context(ctx); }
     static void stop_context(context_id_t ctx) { active().stop_context(ctx); }
@@ -281,33 +226,6 @@ public:
                                                           user_data);
     }
     // NOLINTEND(readability-function-size)
-
-    // --- domain_service_backend-only surface: never exercised, trivial no-ops ---
-    static void create_buffer(context_id_t, std::size_t, std::size_t, buffer_policy_t,
-                              on_records_cb_t, void*, buffer_id_t*)
-    {}
-    static void configure_buffer_tracing_service(context_id_t, buffer_tracing_kind_t,
-                                                 tracing_operation_t*, std::size_t,
-                                                 buffer_id_t)
-    {}
-    static void create_callback_thread(callback_thread_id_t*) {}
-    static void assign_callback_thread(buffer_id_t, callback_thread_id_t) {}
-    static void flush_buffer(buffer_id_t) {}
-    static void destroy_buffer(buffer_id_t) {}
-    static void configure_callback_tracing_service(context_id_t, callback_tracing_kind_t,
-                                                   tracing_operation_t*, std::size_t,
-                                                   on_record_cb_t, void*)
-    {}
-    static const mock_tracing_name_table& get_buffer_tracing_names()
-    {
-        static const mock_tracing_name_table k_table{};
-        return k_table;
-    }
-    static const mock_tracing_name_table& get_callback_tracing_names()
-    {
-        static const mock_tracing_name_table k_table{};
-        return k_table;
-    }
 
 private:
     static mock_backend_impl& active()

@@ -10,7 +10,8 @@
 #include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 #include "logger/debug.hpp"
-#include "policies/rocprofiler-sdk/domain_service.hpp"
+#include "policies/rocprofiler-sdk/domain_service/backend.hpp"
+#include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
 #include <fmt/format.h>
 
@@ -27,8 +28,8 @@
 namespace rocprofsys
 {
 
-template <policies::rocprofiler_sdk::domain_service_backend   SdkBackend,
-          policies::rocprofiler_sdk::domain_service_externals Externals>
+template <policies::domain_service::backend   SdkBackend,
+          policies::domain_service::externals Externals>
 class domain_service
 {
 public:

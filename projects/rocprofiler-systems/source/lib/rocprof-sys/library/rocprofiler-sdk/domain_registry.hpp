@@ -18,7 +18,8 @@
 #include "library/rocprofiler-sdk/callback/code_object.hpp"
 
 #include "library/rocprofiler-sdk/types.hpp"
-#include "policies/rocprofiler-sdk/domain_service.hpp"
+#include "policies/rocprofiler-sdk/domain_service/backend.hpp"
+#include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
 #include <fmt/format.h>
 
@@ -50,8 +51,8 @@ struct simple_static_vector
     }
 };
 
-template <policies::rocprofiler_sdk::domain_service_backend   SdkBackend,
-          policies::rocprofiler_sdk::domain_service_externals Externals>
+template <policies::domain_service::backend   SdkBackend,
+          policies::domain_service::externals Externals>
 struct registry
 {
     [[nodiscard]] static const domain_descriptor* find_descriptor(

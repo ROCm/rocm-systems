@@ -8,7 +8,7 @@
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "logger/debug.hpp"
 
-#include "policies/rocprofiler-sdk/domain_service.hpp"
+#include "policies/rocprofiler-sdk/gpu_perf_counters/backend.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -25,7 +25,7 @@
 namespace rocprofsys::pmc::collectors::gpu_perf_counter
 {
 
-template <policies::rocprofiler_sdk::domain_service_backend Backend>
+template <policies::gpu_perf_counters::backend Backend>
 class device
 {
 public:
