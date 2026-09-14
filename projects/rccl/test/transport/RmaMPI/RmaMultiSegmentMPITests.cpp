@@ -584,14 +584,14 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_MultiNodeEngramMixedWindowIGetStress)
 }
 
 // DeepEP HybridElasticSymmetricMemory:
-// [GPU][CPU local-rank 0][CPU local-rank 1]. Each process imports the same
+// [GPU][CPU local-rank 0]...[CPU local-rank 3]. Each process imports the same
 // local CPU handles before registration. Fetch from the matching CPU segment
 // on the other node into a non-zero local GPU offset.
 TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
 {
-    if (!SetUpFixture(/*minProcesses=*/4, /*maxProcesses=*/4,
+    if (!SetUpFixture(/*minProcesses=*/8, /*maxProcesses=*/8,
                       /*minNodes=*/2, /*maxNodes=*/2))
-        GTEST_SKIP() << "requires exactly 4 ranks across 2 nodes";
+        GTEST_SKIP() << "requires exactly 8 ranks across 2 nodes";
 
     constexpr size_t kGpuBytes = 8 * kMiB;
     constexpr size_t kCpuBytes = 2 * kMiB;
@@ -602,7 +602,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
     std::string reason;
     RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
     if (!AllocHybridForLocalRanks(
-            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/2, &window, &reason))
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason))
         GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
 
     const size_t remoteOff = kGpuBytes + static_cast<size_t>(window->localRank) * kCpuBytes + 4096;
@@ -636,9 +636,9 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
 // local/remote cursors with sentinel protection.
 TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
 {
-    if (!SetUpFixture(/*minProcesses=*/4, /*maxProcesses=*/4,
+    if (!SetUpFixture(/*minProcesses=*/8, /*maxProcesses=*/8,
                       /*minNodes=*/2, /*maxNodes=*/2))
-        GTEST_SKIP() << "requires exactly 4 ranks across 2 nodes";
+        GTEST_SKIP() << "requires exactly 8 ranks across 2 nodes";
 
     constexpr size_t kGpuBytes = 8 * kMiB;
     constexpr size_t kCpuBytes = 2 * kMiB;
@@ -652,7 +652,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
     std::string reason;
     RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
     if (!AllocHybridForLocalRanks(
-            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/2, &window, &reason))
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason))
         GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
 
     void *mh = nullptr, *gh = nullptr;
@@ -700,9 +700,9 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
 // segment must be rejected before posting and leave the GPU destination intact.
 TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridOutOfRangeIGetRejected)
 {
-    if (!SetUpFixture(/*minProcesses=*/4, /*maxProcesses=*/4,
+    if (!SetUpFixture(/*minProcesses=*/8, /*maxProcesses=*/8,
                       /*minNodes=*/2, /*maxNodes=*/2))
-        GTEST_SKIP() << "requires exactly 4 ranks across 2 nodes";
+        GTEST_SKIP() << "requires exactly 8 ranks across 2 nodes";
 
     constexpr size_t kGpuBytes = 8 * kMiB;
     constexpr size_t kCpuBytes = 2 * kMiB;
@@ -711,7 +711,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridOutOfRangeIGetRejected)
     std::string reason;
     RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
     if (!AllocHybridForLocalRanks(
-            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/2, &window, &reason))
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason))
         GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
 
     void *mh = nullptr, *gh = nullptr;
