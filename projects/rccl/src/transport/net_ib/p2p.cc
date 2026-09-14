@@ -125,6 +125,9 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
 
   int64_t splitDataThreshold = rcclParamIbSplitDataThreshold();
   uint32_t sendOffsets[NCCL_NET_IB_MAX_RECVS] = {0};
+#ifdef NCCL_ENABLE_NET_PROFILING
+  for (int r = 0; r < nreqs; r++) reqs[r]->pInfo[0].nEventHandles = 0;
+#endif
 
   int qpIndex = -1;
   ncclIbQp* qp = NULL;
