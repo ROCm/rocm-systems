@@ -290,6 +290,24 @@ void try_stage_first_light_access_fragments(std::span<const uint8_t> bytes,
                                               "MOI first-light probe"))
         return;
     }
+    if (entry.scalar_spill) {
+      // Per-lane stores cannot save borrowed SGPRs when EXEC is empty, but
+      // v_readfirstlane would still overwrite them during restoration. The
+      // guest vector access is inert too, so skip the complete transaction.
+      // End keeps this distinct from workgroup-selection Bypass guards used
+      // by barrier planning to decide whether synchronization is gated.
+      const auto guard = instrumentation::build_s_cbranch_execz(0, target.arch);
+      if (!guard) {
+        result.errors.emplace_back(
+            "ConSan MOI first-light probe could not encode its empty-wave guard");
+        return;
+      }
+      for (auto &fixup : fragment->branch_fixups)
+        ++fixup.word_index;
+      fragment->before_words.insert(fragment->before_words.begin(), *guard);
+      fragment->branch_fixups.push_back(
+          {.word_index = 0u, .target = ConSanTextFragmentBranchTarget::End});
+    }
     fragments.push_back(std::move(*fragment));
   }
   const MoiDescriptorLdsRequirements no_lds;
