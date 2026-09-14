@@ -2054,6 +2054,30 @@ class SetValueCommands:
                 self.logger.print_output()
                 return
 
+        # Special node power limit handling (node-wide, not per-GPU) — handle before device dispatch
+        if hasattr(args, "node_power_limit") and args.node_power_limit is not None:
+            if hasattr(args, "gpu") and args.gpu is not None:
+                print(
+                    "amd-smi set: error: argument --node-power-limit/-n: not allowed with "
+                    "argument --gpu/-g (--node-power-limit is a node-wide setting, not per-GPU)",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+            requested_limit = args.node_power_limit
+            if self.node_handle is None:
+                self.logger.output["set_node_power_limit"] = (
+                    "[AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported] "
+                    "Unable to set node power limit: no NPM-capable node found"
+                )
+                self.logger.print_output()
+                return
+            result = self.helpers.validate_and_set_node_power_limit(
+                self.node_handle, requested_limit, self.logger
+            )
+            self.logger.output["set_node_power_limit"] = result
+            self.logger.print_output()
+            return
+
         # Check if a GPU argument has been set
         gpu_args_enabled = False
         gpu_attributes = [

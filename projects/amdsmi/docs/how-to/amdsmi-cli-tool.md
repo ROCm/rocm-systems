@@ -618,7 +618,7 @@ Set options for specified devices.
 ~$ amd-smi set --help
 usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]) [-f %]
                    [-l LEVEL] [-P SETPROFILE] [-d SCLKMAX] [-C PARTITION] [-M PARTITION]
-                   [-a MODE] [-o WATTS] [-p POLICY_ID] [-x POLICY_ID] [-R STATUS]
+                   [-a MODE] [-o WATTS] [-p POLICY_ID] [-x POLICY_ID] [-R STATUS] [-n WATTS]
                    [--cpu-pwr-limit PWR_LIMIT] [--cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH]
                    [--cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM] [--cpu-pwr-eff-mode MODE [UTIL PPT_LIMIT]]
                    [--cpu-gmi3-link-width MIN_LW MAX_LW] [--cpu-pcie-link-rate LINK_RATE]
@@ -668,6 +668,9 @@ Set Arguments:
   -R, --process-isolation STATUS              Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.
   --ptl-status STATUS                         Enable or disable the PTL on a GPU processor: 0 for disable and 1 for enable
   --ptl-format FRMT1,FRMT2                    Set the PTL format on a GPU processor. For example, --ptl-format I8,F32
+  -n, --node-power-limit WATTS                Set the node-level (NPM) power limit in watts.
+                                                This is a node-wide setting, not per-GPU.
+                                                Max node power limit: 6000 W
 
 CPU Arguments:
   --cpu-pwr-limit PWR_LIMIT                                      Set power limit for the given socket. Input parameter is power limit value.
@@ -1660,6 +1663,23 @@ for API examples.
 users inspect and tune the BIOS VRAM carveout and the TTM `pages_limit`
 (shared GTT) respectively. Both features talk directly to kernel UAPI
 interfaces (sysfs / modprobe.d) and do **not** require libdrm.
+
+`amd-smi node -p` / `amd-smi node --power-management` also reports a
+`CURRENT_NODE_POWER` line alongside the existing `LIMIT`/`STATUS`/`THRESHOLD`
+fields: the current (instantaneous) node power draw in watts, read once per
+node rather than once per GPU. Use `amd-smi set -n WATTS` /
+`amd-smi set --node-power-limit WATTS` to change the node-level power limit
+(also a node-wide, not per-GPU, setting):
+
+```shell-session
+~$ amd-smi node -p
+NODE:
+    POWER_MANAGEMENT:
+        LIMIT: 6000 W
+        STATUS: ENABLED
+        THRESHOLD: N/A W
+        CURRENT_NODE_POWER: 5800 W
+```
 
 ### Supported ASICs
 

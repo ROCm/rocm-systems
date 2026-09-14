@@ -19,6 +19,7 @@ from .amdsmi_interface import amdsmi_get_processor_info
 from .amdsmi_interface import amdsmi_get_node_handle
 from .amdsmi_interface import amdsmi_get_npm_info
 from .amdsmi_interface import amdsmi_get_tray_info
+from .amdsmi_interface import amdsmi_set_npm_limit
 
 # ESMI Dependent Functions
 try:
