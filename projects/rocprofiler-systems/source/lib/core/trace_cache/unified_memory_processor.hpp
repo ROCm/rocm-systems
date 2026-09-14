@@ -178,10 +178,10 @@ private:
 
     enum class migration_direction
     {
-        HOST_TO_DEVICE,
-        DEVICE_TO_HOST,
-        DEVICE_TO_DEVICE,
-        UNKNOWN
+        host_to_device,
+        device_to_host,
+        device_to_device,
+        unknown
     };
 
     [[nodiscard]] migration_direction classify_direction(

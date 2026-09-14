@@ -30,7 +30,7 @@
 
 ### C/C++
 
-* C++17 and C11 are supported
+* C++20 and C11 are supported
 * Use modern C++ idioms
 * Do not use GNU extensions
 * Code should be platform-independent

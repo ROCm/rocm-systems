@@ -23,7 +23,11 @@
 #endif
 
 #define MAX_IFS 16
+#if NCCL_OS_LINUX
 #define MAX_IF_NAME_SIZE 16
+#elif NCCL_OS_WINDOWS
+#define MAX_IF_NAME_SIZE 64
+#endif
 #if defined(__CUDA_ARCH__) || (!defined(NCCL_OS_WINDOWS) && !defined(NCCL_OS_LINUX))
 /* Device compilation or stub build (no OS): no system socket headers; use placeholder for union size. */
 #ifndef NI_MAXHOST
@@ -63,7 +67,7 @@ enum ncclSocketState {
   ncclSocketStateTerminating = 8,
   ncclSocketStateClosed = 9,
   ncclSocketStateError = 10,
-  ncclSocketStateBadMagic = 11,
+  ncclSocketStateBadHandshake = 11,
   ncclSocketStateNum = 12
 };
 
@@ -118,9 +122,12 @@ ncclResult_t ncclFindInterfaceMatchSubnet(char* ifName, union ncclSocketAddress*
 ncclResult_t ncclFindInterfaces(char* ifNames, union ncclSocketAddress* ifAddrs, int ifNameMaxSize, int maxIfs,
                                 int* nIfs);
 
+// Magic used for NCCL-internal TCP handshakes (bootstrap uses comm magic separately). Honors NCCL_SOCKET_MAGIC env.
+uint64_t ncclSocketDefaultMagic(void);
+
 // Initialize a socket
 ncclResult_t ncclSocketInit(struct ncclSocket* sock, const union ncclSocketAddress* addr = NULL,
-                            uint64_t magic = NCCL_SOCKET_MAGIC, enum ncclSocketType type = ncclSocketTypeUnknown,
+                            uint64_t magic = ncclSocketDefaultMagic(), enum ncclSocketType type = ncclSocketTypeUnknown,
                             volatile uint32_t* abortFlag = NULL, int asyncFlag = 0, int customRetry = 0);
 // Create a listening socket. sock->addr can be pre-filled with IP & port info. sock->fd is set after a successful call
 ncclResult_t ncclSocketListen(struct ncclSocket* sock);
@@ -129,10 +136,11 @@ ncclResult_t ncclSocketGetAddr(struct ncclSocket* sock, union ncclSocketAddress*
 ncclResult_t ncclSocketConnect(struct ncclSocket* sock);
 // Return socket connection state.
 ncclResult_t ncclSocketReady(struct ncclSocket* sock, int* running);
-// Accept an incoming connection from listenSock->fd and keep the file descriptor in sock->fd, with the remote side IP/port in sock->addr.
-ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* ulistenSock, bool retryOnBadMagic = true);
-ncclResult_t ncclSocketGetFd(struct ncclSocket* sock, int* fd);
-ncclResult_t ncclSocketSetFd(int fd, struct ncclSocket* sock);
+// Accept an incoming connection from listenSock->socketDescriptor and keep the file descriptor in
+// sock->socketDescriptor, with the remote side IP/port in sock->addr.
+ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* ulistenSock, bool retry = true);
+ncclResult_t ncclSocketGetFd(struct ncclSocket* sock, ncclSocketDescriptor* socketDescriptor);
+ncclResult_t ncclSocketSetFd(ncclSocketDescriptor socketDescriptor, struct ncclSocket* sock);
 
 #define NCCL_SOCKET_SEND 0
 #define NCCL_SOCKET_RECV 1

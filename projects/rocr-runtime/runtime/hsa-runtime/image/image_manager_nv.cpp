@@ -51,6 +51,7 @@
 #include "core/inc/runtime.h"
 #include "inc/hsa_ext_amd.h"
 #include "core/inc/hsa_internal.h"
+#include "hsakmt/hsakmt.h"
 #include "addrlib/src/core/addrlib.h"
 #include "image_runtime.h"
 #include "resource.h"
@@ -465,8 +466,8 @@ hsa_status_t ImageManagerNv::PopulateImageSrd(Image& image) const {
     SQ_IMG_RSRC_WORD3 word3;
     SQ_IMG_RSRC_WORD4 word4;
     SQ_IMG_RSRC_WORD5 word5;
-    SQ_IMG_RSRC_WORD5 word6;
-    SQ_IMG_RSRC_WORD5 word7;
+    SQ_IMG_RSRC_WORD6 word6;
+    SQ_IMG_RSRC_WORD7 word7;
 
     ADDR2_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
 
@@ -645,7 +646,8 @@ uint32_t ImageManagerNv::GetAddrlibSurfaceInfoNv(
     Image::TileMode tileMode,
     size_t image_data_row_pitch,
     size_t image_data_slice_pitch,
-    ADDR2_COMPUTE_SURFACE_INFO_OUTPUT& out) const {
+    ADDR2_COMPUTE_SURFACE_INFO_OUTPUT& out,
+    std::optional<uint32_t> forced_sw_mode) const {
   const ImageProperty image_prop =
       GetImageProperty(component, desc.format, desc.geometry);
 
@@ -715,43 +717,46 @@ uint32_t ImageManagerNv::GetAddrlibSurfaceInfoNv(
   }
   in.flags.texture = 1;
 
-  ADDR2_GET_PREFERRED_SURF_SETTING_INPUT  prefSettingsInput = { 0 };
-  ADDR2_GET_PREFERRED_SURF_SETTING_OUTPUT prefSettingsOutput = { 0 };
+  if (forced_sw_mode.has_value()) {
+    // Imported surface (e.g. Vulkan image interop): use the driver-supplied swizzle mode instead
+    // of addrlib's preferred one. addrlib's preferred depends on per-caller flags and would not
+    // match the exact tiling the allocating driver chose, so the layout (pitch / mip offsets) must
+    // be computed for the imported swizzle.
+    in.swizzleMode = static_cast<AddrSwizzleMode>(*forced_sw_mode);
+  } else {
+    ADDR2_GET_PREFERRED_SURF_SETTING_INPUT  prefSettingsInput = { 0 };
+    ADDR2_GET_PREFERRED_SURF_SETTING_OUTPUT prefSettingsOutput = { 0 };
 
-  prefSettingsInput.size            = sizeof(prefSettingsInput);
-  prefSettingsInput.flags           = in.flags;
-  prefSettingsInput.bpp             = in.bpp;
-  prefSettingsInput.format          = in.format;
-  prefSettingsInput.width           = in.width;
-  prefSettingsInput.height          = in.height;
-  prefSettingsInput.numFrags        = in.numFrags;
-  prefSettingsInput.numSamples      = in.numSamples;
-  prefSettingsInput.numMipLevels    = in.numMipLevels;
-  prefSettingsInput.numSlices       = in.numSlices;
-  prefSettingsInput.resourceLoction = ADDR_RSRC_LOC_UNDEF;
-  prefSettingsInput.resourceType    = in.resourceType;
+    prefSettingsInput.size            = sizeof(prefSettingsInput);
+    prefSettingsInput.flags           = in.flags;
+    prefSettingsInput.bpp             = in.bpp;
+    prefSettingsInput.format          = in.format;
+    prefSettingsInput.width           = in.width;
+    prefSettingsInput.height          = in.height;
+    prefSettingsInput.numFrags        = in.numFrags;
+    prefSettingsInput.numSamples      = in.numSamples;
+    prefSettingsInput.numMipLevels    = in.numMipLevels;
+    prefSettingsInput.numSlices       = in.numSlices;
+    prefSettingsInput.resourceLoction = ADDR_RSRC_LOC_UNDEF;
+    prefSettingsInput.resourceType    = in.resourceType;
 
-  // Disallow all swizzles but linear.
-  if (tileMode == Image::TileMode::LINEAR) {
-      prefSettingsInput.forbiddenBlock.macroThin4KB = 1;
-      prefSettingsInput.forbiddenBlock.macroThick4KB = 1;
-      prefSettingsInput.forbiddenBlock.macroThin64KB = 1;
-      prefSettingsInput.forbiddenBlock.macroThick64KB = 1;
-      prefSettingsInput.forbiddenBlock.micro = 1;
-      prefSettingsInput.forbiddenBlock.var = 1;
+    // Disallow all swizzles but linear.
+    if (tileMode == Image::TileMode::LINEAR) {
+        prefSettingsInput.forbiddenBlock.macroThin4KB = 1;
+        prefSettingsInput.forbiddenBlock.macroThick4KB = 1;
+        prefSettingsInput.forbiddenBlock.macroThin64KB = 1;
+        prefSettingsInput.forbiddenBlock.macroThick64KB = 1;
+        prefSettingsInput.forbiddenBlock.micro = 1;
+        prefSettingsInput.forbiddenBlock.var = 1;
+    }
+
+    if (ADDR_OK != Addr2GetPreferredSurfaceSetting(addr_lib_,
+                                     &prefSettingsInput, &prefSettingsOutput)) {
+      return (uint32_t)(-1);
+    }
+
+    in.swizzleMode = prefSettingsOutput.swizzleMode;
   }
-
-  // but don't ever allow the 256b swizzle modes
-  //prefSettingsInput.forbiddenBlock.micro = 1;
-  // and don't allow variable-size block modes
-  //prefSettingsInput.forbiddenBlock.var = 1;
-
-  if (ADDR_OK != Addr2GetPreferredSurfaceSetting(addr_lib_,
-                                   &prefSettingsInput, &prefSettingsOutput)) {
-    return (uint32_t)(-1);
-  }
-
-  in.swizzleMode = prefSettingsOutput.swizzleMode;
 
   out.size = sizeof(ADDR2_COMPUTE_SURFACE_INFO_OUTPUT);
   if (ADDR_OK != Addr2ComputeSurfaceInfo(addr_lib_, &in, &out)) {
@@ -837,6 +842,19 @@ hsa_status_t ImageManagerNv::FillImage(const Image& image, const void* pattern,
 }
 
 hsa_status_t ImageManagerNv::PopulateMipmapSrd(MipmappedArray& mipmap) const {
+  return BuildMipmapSrd(mipmap, nullptr);
+}
+
+hsa_status_t ImageManagerNv::BuildMipmapSrd(MipmappedArray& mipmap,
+                                            const HsaWddmSurfaceMetadata* meta) const {
+  // Imported surface (Vulkan image interop): force the driver-supplied swizzle and inject its
+  // pipe-bank-XOR, instead of letting addrlib pick its preferred tiling. meta==nullptr is the
+  // original (non-interop) path.
+  const std::optional<uint32_t> forced_sw_mode =
+      meta ? std::optional<uint32_t>(meta->swizzle_mode) : std::nullopt;
+  const uint32_t tile_swizzle = meta ? meta->tile_swizzle : 0u;
+  const bool imported = forced_sw_mode.has_value();
+
   ImageProperty mipmap_prop = ImageLut().MapFormat(mipmap.desc.format, mipmap.desc.geometry);
   assert(mipmap_prop.cap != HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED);
   assert(mipmap_prop.element_size != 0);
@@ -891,17 +909,20 @@ hsa_status_t ImageManagerNv::PopulateMipmapSrd(MipmappedArray& mipmap) const {
     SQ_IMG_RSRC_WORD3 word3;
     SQ_IMG_RSRC_WORD4 word4;
     SQ_IMG_RSRC_WORD5 word5;
-    SQ_IMG_RSRC_WORD5 word6;
-    SQ_IMG_RSRC_WORD5 word7;
+    SQ_IMG_RSRC_WORD6 word6;
+    SQ_IMG_RSRC_WORD7 word7;
 
     ADDR2_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
 
-    // pMipInfo not needed - set to nullptr and AddrLib will ignore it
+    // pMipInfo not needed - set to nullptr and AddrLib will ignore it. PopulateMipLevelSrd derives
+    // per-level views from BASE_LEVEL/LAST_LEVEL, so per-level offsets are never read back.
     out.pMipInfo = nullptr;
 
+    // Imported surfaces must be tiled with the forced swizzle; native surfaces keep tile_mode.
+    const Image::TileMode tileMode = imported ? Image::TileMode::TILED : mipmap.tile_mode;
     uint32_t swizzleMode = GetAddrlibSurfaceInfoNv(
                         mipmap.component, mipmap.desc, mipmap.num_levels,
-                        mipmap.tile_mode, mipmap.row_pitch, mipmap.slice_pitch, out);
+                        tileMode, mipmap.row_pitch, mipmap.slice_pitch, out, forced_sw_mode);
     if (swizzleMode == (uint32_t)(-1)) {
       return HSA_STATUS_ERROR;
     }
@@ -914,6 +935,13 @@ hsa_status_t ImageManagerNv::PopulateMipmapSrd(MipmappedArray& mipmap) const {
 
     word0.val = 0;
     word0.f.BASE_ADDRESS = PtrLow40Shift8(mipmap_data_addr);
+    if (imported) {
+      // Inject the pipe-bank-XOR into the low bits of the (>>8) tile-aligned base, matching PAL's
+      // addr | (pipeBankXor << 8). kGfx10PbxExtraShift is confirmed empirically (0 vs 2) by whether
+      // reconstructed pixels line up on gfx10 hardware.
+      static constexpr uint32_t kGfx10PbxExtraShift = 0;
+      word0.f.BASE_ADDRESS |= (tile_swizzle << kGfx10PbxExtraShift);
+    }
 
     word1.val = 0;
     word1.f.BASE_ADDRESS_HI = PtrHigh64Shift40(mipmap_data_addr);
@@ -1172,6 +1200,23 @@ hsa_status_t ImageManagerNv::PopulateMipLevelSrd(
 
 hsa_status_t ImageManagerNv::PopulateMipmapSrd(MipmappedArray& mipmap_array, const metadata_amd_t* desc) const {
   const metadata_amd_nv_t* desc_nv = reinterpret_cast<const metadata_amd_nv_t*>(desc);
+
+  // Vulkan image interop (Windows): the AMD Vulkan driver exposes no extension to query an
+  // imported image's SRD, so clr delivers only the surface's swizzle mode + pipe-bank-XOR in the
+  // descriptor's fallback slots (see HSA_WDDM_*_DATA_OFFSET in hsakmt/hsakmttypes.h). The +2
+  // skips the {version, deviceID} header preceding the data[] region. When present, reconstruct
+  // the SRD from that metadata instead of copying the (empty) SRD words below.
+  //
+  // GUARD: reconstruct only when the descriptor's version marks a WDDM surface-metadata blob. GL/D3D
+  // interop fill a real SRD via wglResourceAttachAMD/CLQueryResource (small version) and keep their
+  // exact driver-supplied SRD; they are never reconstructed here.
+  if (ClassifyInteropDescriptor(desc) == InteropDescriptorContent::kReconstructFromMetadata) {
+    // clr wrote the surface-metadata blob at the start of the data[] region (metadata_amd_t::words);
+    // reconstruct the SRD from it.
+    const auto* meta = reinterpret_cast<const HsaWddmSurfaceMetadata*>(desc->words);
+    return BuildMipmapSrd(mipmap_array, meta);
+  }
+
   const void* mipmap_data_addr = mipmap_array.data;
   
   ImageProperty mipmap_prop = ImageLut().MapFormat(mipmap_array.desc.format, mipmap_array.desc.geometry);
@@ -1252,7 +1297,7 @@ hsa_status_t ImageManagerNv::PopulateMipmapSrd(MipmappedArray& mipmap_array, con
                              mip_info_storage[last_level].depth * 
                              mipmap_prop.element_size;
   mipmap_array.size = mip_info_storage[last_level].offset + last_level_size;
-  
+
   return HSA_STATUS_SUCCESS;
 }
 

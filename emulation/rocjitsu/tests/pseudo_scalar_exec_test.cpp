@@ -4,9 +4,10 @@
 /// @file pseudo_scalar_exec_test.cpp
 /// @brief Cross-architecture pseudo-scalar transcendental execution tests.
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
@@ -55,7 +56,7 @@ std::optional<BaseEncodingWords> rdna4_encoding(std::string_view mnemonic) {
 }
 
 std::optional<BaseEncodingWords> gfx1250_encoding(std::string_view mnemonic) {
-  return find_test_encoding(gfx1250::test_data::ENCODINGS, mnemonic);
+  return find_test_encoding(cdna5::test_data::ENCODINGS, mnemonic);
 }
 
 struct PseudoScalarProfile {
@@ -69,8 +70,8 @@ struct PseudoScalarProfile {
 constexpr std::array<PseudoScalarProfile, 2> kProfiles{{
     {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4_encoding, rdna4::kSSetregB32Sopk,
      rdna4::kSSetregImm32B32Sopk},
-    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", gfx1250_encoding, gfx1250::kSSetregB32Sopk,
-     gfx1250::kSSetregImm32B32Sopk},
+    {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", gfx1250_encoding, cdna5::kSSetregB32Sopk,
+     cdna5::kSSetregImm32B32Sopk},
 }};
 
 struct PseudoScalarCase {
@@ -701,7 +702,7 @@ TEST_P(PseudoScalarExecTest, ExecutesAtExecZeroWithDestinationOpselZeroAndUsesLo
       encode_vop3(profile, test_case.mnemonic, kDestinationSgpr, kSourceSgpr,
                   {.source_opsel = test_case.set_source_opsel});
   ASSERT_EQ(words[0] & kDestinationOpselBit, 0u) << "OPSEL[3] must select the low destination half";
-  std::unique_ptr<Instruction> instruction(fixture.decoder->decode(words.data()));
+  std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words.data()));
   ASSERT_NE(instruction, nullptr) << profile.name << " " << test_case.mnemonic;
   ASSERT_EQ(std::string_view(instruction->mnemonic()), test_case.mnemonic) << profile.name;
   EXPECT_EQ(instruction->size(), 8u);
@@ -730,7 +731,7 @@ TEST_P(PseudoScalarExecTest, ExecutesWithVccAsSourceAndDestination) {
 
     const InstructionWords words = encode_vop3(profile, test_case.mnemonic, selector, selector,
                                                {.source_opsel = test_case.set_source_opsel});
-    std::unique_ptr<Instruction> instruction(fixture.decoder->decode(words.data()));
+    std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words.data()));
     ASSERT_NE(instruction, nullptr);
 
     const uint64_t source = selector == kVccSelectors[0]
@@ -739,7 +740,7 @@ TEST_P(PseudoScalarExecTest, ExecutesWithVccAsSourceAndDestination) {
     const uint64_t expected = selector == kVccSelectors[0]
                                   ? (uint64_t{kOtherHalfSentinel} << 32) | test_case.expected
                                   : (uint64_t{test_case.expected} << 32) | kOtherHalfSentinel;
-    fixture.wavefront->set_vcc(source);
+    fixture.wavefront->set_vcc_raw(source);
     fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront);
     EXPECT_EQ(fixture.wavefront->vcc(), expected);
   }
@@ -759,7 +760,7 @@ TEST(PseudoScalarDecodeTest, RejectsOutOfClassDestinations) {
         SCOPED_TRACE(selector);
         const InstructionWords words =
             encode_vop3(profile, test_case.mnemonic, selector, kSourceSgpr);
-        EXPECT_THROW((void)decoder->decode(words.data()), util::InvalidInst);
+        EXPECT_TRUE(decode_fails(*decoder, words.data()));
       }
     }
   }
@@ -774,10 +775,7 @@ TEST(PseudoScalarDecodeTest, RejectsDppAndDpp8Sources) {
     ASSERT_NE(decoder, nullptr) << profile.name;
     for (const uint32_t source : kUnsupportedSources) {
       const InstructionWords words = encode_vop3(profile, "v_s_sqrt_f32", kDestinationSgpr, source);
-      EXPECT_THROW(
-          { std::unique_ptr<Instruction> instruction(decoder->decode(words.data())); },
-          util::InvalidInst)
-          << profile.name << " source=" << source;
+      EXPECT_TRUE(decode_fails(*decoder, words.data())) << profile.name << " source=" << source;
     }
   }
 }
@@ -890,7 +888,7 @@ TEST_P(PseudoScalarSpecialExecTest, CoversLiteralModifierAndModeBehavior) {
 
   const InstructionWords words =
       encode_vop3(profile, test_case.mnemonic, kDestinationSgpr, kSourceSgpr, test_case.encoding);
-  std::unique_ptr<Instruction> instruction(fixture.decoder->decode(words.data()));
+  std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words.data()));
   ASSERT_NE(instruction, nullptr) << profile.name << " " << test_case.mnemonic;
   ASSERT_EQ(std::string_view(instruction->mnemonic()), test_case.mnemonic) << profile.name;
   EXPECT_EQ(instruction->size(), test_case.encoding.use_literal ? 12u : 8u);
@@ -930,13 +928,13 @@ TEST(PseudoScalarModeIntegrationTest, SetregInstructionsUpdateModesConsumedByPse
 
     const BaseEncodingWords set_round_words =
         encode_sopk(profile.setreg_op, kModeSgpr, encode_hwreg(kModeHwreg));
-    std::unique_ptr<Instruction> set_round(fixture.decoder->decode(set_round_words.data()));
+    std::unique_ptr<Instruction> set_round(decode_valid(*fixture.decoder, set_round_words.data()));
     ASSERT_NE(set_round, nullptr);
     ASSERT_EQ(std::string_view(set_round->mnemonic()), "s_setreg_b32");
 
     const InstructionWords exp_words =
         encode_vop3(profile, "v_s_exp_f32", kDestinationSgpr, kSourceSgpr);
-    std::unique_ptr<Instruction> exp(fixture.decoder->decode(exp_words.data()));
+    std::unique_ptr<Instruction> exp(decode_valid(*fixture.decoder, exp_words.data()));
     ASSERT_NE(exp, nullptr);
 
     fixture.wavefront->set_mode_raw(0);
@@ -949,13 +947,14 @@ TEST(PseudoScalarModeIntegrationTest, SetregInstructionsUpdateModesConsumedByPse
 
     const BaseEncodingWords set_denorm_words =
         encode_sopk(profile.setreg_imm_op, 0, encode_hwreg(kModeHwreg, 6, 2), 1u);
-    std::unique_ptr<Instruction> set_denorm(fixture.decoder->decode(set_denorm_words.data()));
+    std::unique_ptr<Instruction> set_denorm(
+        decode_valid(*fixture.decoder, set_denorm_words.data()));
     ASSERT_NE(set_denorm, nullptr);
     ASSERT_EQ(std::string_view(set_denorm->mnemonic()), "s_setreg_imm32_b32");
 
     const InstructionWords log_words =
         encode_vop3(profile, "v_s_log_f16", kDestinationSgpr, kSourceSgpr, {.source_opsel = true});
-    std::unique_ptr<Instruction> log(fixture.decoder->decode(log_words.data()));
+    std::unique_ptr<Instruction> log(decode_valid(*fixture.decoder, log_words.data()));
     ASSERT_NE(log, nullptr);
 
     fixture.wavefront->set_mode_raw(0);

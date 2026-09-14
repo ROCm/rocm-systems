@@ -37,9 +37,9 @@ struct InstructionLegalization;
 /// confirmation of the exact translated set.
 ///
 /// @details The barrier-state query and s_monitor_sleep may need
-/// target-specific translation that is not yet implemented -- the latter
-/// because of DEGFXMI400-12268, where s_monitor_sleep('forever') with MWAIT=0
-/// can hang the wave. Rather than fail closed, they are passed through
+/// target-specific translation that is not yet implemented. For
+/// s_monitor_sleep, the affected case is the 'forever' form with MWAIT=0,
+/// which can hang the wave. Rather than fail closed, they are passed through
 /// unchanged and the caller reports the omission so it is visible rather than
 /// silent. Revisit once the precise set is confirmed; if translation is
 /// required, move the relevant members into the fail-closed classification.

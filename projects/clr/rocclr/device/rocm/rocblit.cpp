@@ -1017,7 +1017,9 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
         wait_events.size(), wait_events.data());
 
     if (status != HSA_STATUS_SUCCESS) {
-      gpu().Barriers().ResetCurrentSignal();
+      for (size_t s = 0; s < finalOps.size(); ++s) {
+        gpu().Barriers().ResetCurrentSignal();
+      }
       LogPrintfError("HSA batch copy failed with code %d for engine %d", status, engine);
       return false;
     }
@@ -2831,84 +2833,98 @@ bool KernelBlitManager::ShaderCopyBufferBatchRaw(
 
   constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
   constexpr uint32_t kLocalWorkSize = 512;
-  const uint32_t max_workgroups_per_copy = std::max<uint32_t>(
-      dev().settings().limit_blit_wg_ / copy_operations.size(), 1);
-  const size_t descriptor_bytes =
-      copy_operations.size() * sizeof(CopyBufferBatchDescriptor);
-  void *descriptor_buffer = gpu().allocKernArg(descriptor_bytes, kCBAlignment);
-  CopyBufferBatchDescriptor *descriptors =
-      static_cast<CopyBufferBatchDescriptor *>(descriptor_buffer);
-  size_t descriptor_index = 0;
-  uint64_t max_aligned_element_count = 0;
-  bool needs_system_scope = false;
+  amd::Kernel* const kernel = kernels_[BlitCopyBufferBatch];
+  const Kernel& gpu_kernel = static_cast<const Kernel&>(*kernel->getDeviceKernel(dev()));
+  const size_t kernarg_reservation = (kCBAlignment - 1) +
+                                     (gpu_kernel.KernargSegmentAlignment() - 1) +
+                                     gpu_kernel.KernargSegmentByteSize();
+  const size_t kernarg_pool_chunk_size = gpu().KernArgPoolChunkSize();
+  if (kernarg_reservation > kernarg_pool_chunk_size ||
+      kernarg_pool_chunk_size - kernarg_reservation < sizeof(CopyBufferBatchDescriptor)) {
+    LogError("Kernarg pool chunk is too small for a batch copy dispatch");
+    return false;
+  }
+  const size_t max_operations_per_dispatch =
+      (kernarg_pool_chunk_size - kernarg_reservation) / sizeof(CopyBufferBatchDescriptor);
+  const size_t descriptor_buffer_bytes =
+      max_operations_per_dispatch * sizeof(CopyBufferBatchDescriptor);
   bool attach_signal = false;
 
-  for (const auto &copy_operation : copy_operations) {
-    const uint64_t source_address = reinterpret_cast<uint64_t>(copy_operation.src);
-    const uint64_t destination_address = reinterpret_cast<uint64_t>(copy_operation.dst);
-    needs_system_scope |= copy_operation.needs_system_scope || !copy_operation.metadata.isAsync_;
-    attach_signal |= copy_operation.attach_signal || !copy_operation.metadata.isAsync_;
-    const bool addresses_aligned = ((source_address % kMaxAlignment) == 0) &&
-                                   ((destination_address % kMaxAlignment) == 0);
-    const uint32_t aligned_element_size =
-        (addresses_aligned) ? kMaxAlignment : sizeof(uint32_t);
-    const uint64_t aligned_element_count =
-        copy_operation.size / aligned_element_size;
-    const uint32_t trailing_byte_count =
-        copy_operation.size % aligned_element_size;
-    max_aligned_element_count =
-        std::max(max_aligned_element_count, aligned_element_count);
+  for (size_t operation_offset = 0; operation_offset < copy_operations.size();
+       operation_offset += max_operations_per_dispatch) {
+    const size_t operation_count =
+        std::min(max_operations_per_dispatch, copy_operations.size() - operation_offset);
+    void* descriptor_buffer = gpu().allocKernArg(descriptor_buffer_bytes, kCBAlignment);
+    CopyBufferBatchDescriptor* descriptors =
+        static_cast<CopyBufferBatchDescriptor*>(descriptor_buffer);
+    uint64_t max_aligned_element_count = 0;
+    bool needs_system_scope = false;
 
-    descriptors[descriptor_index++] = {
-        source_address, destination_address, aligned_element_count,
-        aligned_element_size, trailing_byte_count};
+    for (size_t descriptor_index = 0; descriptor_index < operation_count; ++descriptor_index) {
+      const BatchRawCopyOp& copy_operation = copy_operations[operation_offset + descriptor_index];
+      const uint64_t source_address = reinterpret_cast<uint64_t>(copy_operation.src);
+      const uint64_t destination_address = reinterpret_cast<uint64_t>(copy_operation.dst);
+      needs_system_scope |= copy_operation.needs_system_scope || !copy_operation.metadata.isAsync_;
+      attach_signal |= copy_operation.attach_signal || !copy_operation.metadata.isAsync_;
+      const bool addresses_aligned =
+          ((source_address % kMaxAlignment) == 0) && ((destination_address % kMaxAlignment) == 0);
+      const uint32_t aligned_element_size = (addresses_aligned) ? kMaxAlignment : sizeof(uint32_t);
+      const uint64_t aligned_element_count = copy_operation.size / aligned_element_size;
+      const uint32_t trailing_byte_count = copy_operation.size % aligned_element_size;
+      max_aligned_element_count = std::max(max_aligned_element_count, aligned_element_count);
+
+      descriptors[descriptor_index] = {source_address, destination_address, aligned_element_count,
+                                       aligned_element_size, trailing_byte_count};
+    }
+
+    const uint32_t max_workgroups_per_copy = std::max<uint32_t>(
+        dev().settings().limit_blit_wg_ / static_cast<uint32_t>(operation_count), 1);
+    uint32_t workgroup_count = static_cast<uint32_t>(std::min<uint64_t>(
+        max_workgroups_per_copy,
+        amd::alignUp(max_aligned_element_count, static_cast<uint64_t>(kLocalWorkSize)) /
+            kLocalWorkSize));
+    workgroup_count = std::max<uint32_t>(workgroup_count, 1);
+    const uint32_t copy_stride = workgroup_count * kLocalWorkSize;
+
+    constexpr bool kDirectVa = true;
+    setArgument(kernel, 0, sizeof(cl_mem), descriptor_buffer, 0, nullptr, kDirectVa);
+    setArgument(kernel, 1, sizeof(kLocalWorkSize), &kLocalWorkSize);
+    setArgument(kernel, 2, sizeof(copy_stride), &copy_stride);
+
+    size_t global_work_size[2] = {copy_stride, operation_count};
+    size_t local_work_size[2] = {kLocalWorkSize, 1};
+    amd::NDRangeContainer nd_range(2, nullptr, global_work_size, local_work_size);
+
+    address parameters = captureArguments(kernel);
+    if (needs_system_scope) {
+      gpu().addSystemScope();
+    }
+    const bool is_last_dispatch = (operation_offset + operation_count) == copy_operations.size();
+    const bool submit_result =
+        gpu().submitKernelInternal(nd_range, *kernel, parameters, nullptr, 0, nullptr, nullptr,
+                                   is_last_dispatch && attach_signal);
+    releaseArguments(parameters);
+    if (!submit_result) {
+      return false;
+    }
   }
 
-  uint32_t workgroup_count = static_cast<uint32_t>(
-      std::min<uint64_t>(max_workgroups_per_copy,
-                         amd::alignUp(max_aligned_element_count,
-                                      static_cast<uint64_t>(kLocalWorkSize)) /
-                             kLocalWorkSize));
-  workgroup_count = std::max<uint32_t>(workgroup_count, 1);
-  const uint32_t copy_stride = workgroup_count * kLocalWorkSize;
-
-  amd::Kernel *const kernel = kernels_[BlitCopyBufferBatch];
-  constexpr bool kDirectVa = true;
-  setArgument(kernel, 0, sizeof(cl_mem), descriptor_buffer, 0, nullptr,
-              kDirectVa);
-
-  setArgument(kernel, 1, sizeof(kLocalWorkSize), &kLocalWorkSize);
-  setArgument(kernel, 2, sizeof(copy_stride), &copy_stride);
-
-  size_t global_work_size[2] = {copy_stride, copy_operations.size()};
-  size_t local_work_size[2] = {kLocalWorkSize, 1};
-  amd::NDRangeContainer nd_range(2, nullptr, global_work_size, local_work_size);
-
-  address parameters = captureArguments(kernel);
-  if (needs_system_scope) {
-    gpu().addSystemScope();
-  }
-  bool submit_result =
-      gpu().submitKernelInternal(nd_range, *kernel, parameters, nullptr, 0,
-                                 nullptr, nullptr, attach_signal);
-  releaseArguments(parameters);
-
-  return submit_result;
+  return true;
 }
 
 // ================================================================================================
 bool KernelBlitManager::WriteBufferBatch(
     const std::vector<amd::BatchWriteMemoryOp>& write_ops) const {
-  for (const amd::BatchWriteMemoryOp& op : write_ops) {
-    if (op.metadata.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderStream) {
-      gpu().releaseGpuMemoryFence();
-      break;
-    }
-  }
-
   std::vector<amd::BatchCopyOp> pinned_copy_ops;
+  std::vector<BufferState> pinned_buffers;
   std::vector<BatchRawCopyOp> staging_copy_ops;
   size_t staging_batch_size = 0;
+  auto release_pinned_buffers = [this, &pinned_buffers]() {
+    for (BufferState& buffer : pinned_buffers) {
+      releaseBuffer(buffer);
+    }
+    pinned_buffers.clear();
+  };
 
   for (const amd::BatchWriteMemoryOp& op : write_ops) {
     Memory* dst_memory = dev().getRocMemory(op.dst_memory);
@@ -2935,6 +2951,7 @@ bool KernelBlitManager::WriteBufferBatch(
         staging_copy_ops.clear();
         staging_batch_size = 0;
         if (!result) {
+          release_pinned_buffers();
           gpu().releaseGpuMemoryFence();
           gpu().command()->ReleasePinnedMemory();
           return false;
@@ -2947,6 +2964,7 @@ bool KernelBlitManager::WriteBufferBatch(
       const size_t copy_size = buffer_state.copySize_;
       if (buffer_state.buffer_ == 0 || copy_size == 0) {
         LogWarning("KernelBlitManager::WriteBufferBatch: Buffer creation failed!");
+        release_pinned_buffers();
         gpu().releaseGpuMemoryFence();
         gpu().command()->ReleasePinnedMemory();
         return false;
@@ -2957,7 +2975,7 @@ bool KernelBlitManager::WriteBufferBatch(
         const size_t pinned_offset = buffer_state.buffer_ - pinned_memory->getDeviceMemory();
         pinned_copy_ops.emplace_back(buffer_state.pinnedMem_, op.dst_memory, pinned_offset,
                                      op.dst_offset + copy_offset, copy_size, op.metadata);
-        releaseBuffer(buffer_state);
+        pinned_buffers.push_back(buffer_state);
       } else {
         memcpy(buffer_state.buffer_, src_addr + copy_offset, copy_size);
         staging_copy_ops.push_back({buffer_state.buffer_,
@@ -2996,12 +3014,14 @@ bool KernelBlitManager::WriteBufferBatch(
 
   if (!staging_copy_ops.empty()) {
     if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
+      release_pinned_buffers();
       gpu().releaseGpuMemoryFence();
       gpu().command()->ReleasePinnedMemory();
       return false;
     }
   }
 
+  release_pinned_buffers();
   return true;
 }
 
@@ -3014,14 +3034,22 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
   };
 
   std::vector<amd::BatchCopyOp> pinned_copy_ops;
+  std::vector<BufferState> pinned_buffers;
   std::vector<BatchRawCopyOp> staging_copy_ops;
   std::vector<StagingReadBack> staging_read_backs;
   size_t staging_batch_size = 0;
+  auto release_pinned_buffers = [this, &pinned_buffers]() {
+    for (BufferState& buffer : pinned_buffers) {
+      releaseBuffer(buffer);
+    }
+    pinned_buffers.clear();
+  };
 
   for (const amd::BatchReadMemoryOp& op : read_ops) {
     Memory* src_memory = dev().getRocMemory(op.src_memory);
     if (src_memory == nullptr) {
       LogError("KernelBlitManager::ReadBufferBatch: Invalid source memory!");
+      release_pinned_buffers();
       gpu().releaseGpuMemoryFence();
       gpu().command()->ReleasePinnedMemory();
       return false;
@@ -3036,6 +3064,7 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
       const size_t max_staging_size = std::min(remaining_size, StagingXferSize);
       if ((staging_batch_size + max_staging_size) > StagingXferSize) {
         if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
+          release_pinned_buffers();
           gpu().releaseGpuMemoryFence();
           gpu().command()->ReleasePinnedMemory();
           return false;
@@ -3055,6 +3084,7 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
       const size_t copy_size = buffer_state.copySize_;
       if (buffer_state.buffer_ == 0 || copy_size == 0) {
         LogWarning("KernelBlitManager::ReadBufferBatch: Buffer creation failed!");
+        release_pinned_buffers();
         gpu().releaseGpuMemoryFence();
         gpu().command()->ReleasePinnedMemory();
         return false;
@@ -3066,7 +3096,7 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
         pinned_copy_ops.emplace_back(op.src_memory, buffer_state.pinnedMem_,
                                      op.src_offset + copy_offset, pinned_offset, copy_size,
                                      op.metadata);
-        releaseBuffer(buffer_state);
+        pinned_buffers.push_back(buffer_state);
       } else {
         staging_copy_ops.push_back({src_memory->getDeviceMemory() + op.src_offset + copy_offset,
                                     buffer_state.buffer_, copy_size, op.metadata, true, true});
@@ -3104,6 +3134,7 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
 
   if (!staging_copy_ops.empty()) {
     if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
+      release_pinned_buffers();
       gpu().releaseGpuMemoryFence();
       gpu().command()->ReleasePinnedMemory();
       return false;
@@ -3119,6 +3150,7 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
     }
   }
 
+  release_pinned_buffers();
   return true;
 }
 

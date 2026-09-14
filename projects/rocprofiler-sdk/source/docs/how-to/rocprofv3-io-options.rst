@@ -11,6 +11,12 @@ rocprofv3 I/O control options
 
 ``rocprofv3`` provides the following options to control the output.
 
+.. warning::
+
+   Direct CSV, PFTrace, and OTF2 output from ``rocprofv3`` is deprecated and might omit data for some tracing features, including hipFILE and rocSHMEM tracing.
+   The examples below use direct CSV to illustrate output naming.
+   For data collection, use the default rocpd format and run ``rocpd convert -i <output-file>_results.db --output-format csv`` when CSV is needed.
+
 .. _output-prefix-keys:
 
 Output prefix keys

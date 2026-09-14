@@ -15,7 +15,7 @@ import pandas as pd
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import file_io, parser, schema
+from utils import csv_compression, file_io, parser, schema
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
@@ -27,7 +27,7 @@ from utils.logger import (
 from utils.metrics.expression import build_metric_value_string
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
-    is_workload_empty,
+    validate_workload,
 )
 from utils.utils_common import (
     PC_SAMPLING_BLOCK_IDS,
@@ -63,16 +63,6 @@ TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
 ])
 
 
-# ------------------------------------
-# Helper functions for join_prof()
-# ------------------------------------
-
-
-def test_df_column_equality(df: pd.DataFrame) -> bool:
-    """Test if all columns in dataframe are equal."""
-    return df.eq(df.iloc[:, 0], axis=0).all(1).all()
-
-
 class OmniAnalyze_Base:
     def __init__(
         self, args: argparse.Namespace, supported_archs: dict[str, str]
@@ -102,12 +92,10 @@ class OmniAnalyze_Base:
         config = getattr(self, "_profiling_config", {})
         return is_only_pc_sampling(config.get("filter_blocks", []))
 
-    def load_pc_sampling_tool_data(
-        self, workload_path: str
-    ) -> Optional[dict[str, Any]]:
-        """Return parsed PC sampling tool data, or None when not collected."""
+    def load_pc_sampling_tool_data(self, workload_path: str) -> list[dict[str, Any]]:
+        """Return parsed PC sampling tool records, or an empty list."""
         if not self.pc_sampling_collected():
-            return None
+            return []
         return file_io.load_pc_sampling_results(str(workload_path))
 
     def build_pc_sampling_only_workload(
@@ -115,10 +103,10 @@ class OmniAnalyze_Base:
         workload: schema.Workload,
         dir_path: str,
         args: argparse.Namespace,
-        tool_data: Optional[dict[str, Any]],
+        tool_data: list[dict[str, Any]],
     ) -> None:
         """Build dispatch scaffolding and tables for a run without counters."""
-        workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(tool_data)
+        workload.raw_pmc = file_io.process_pc_sampling_kernel_traces(tool_data)
         workload.raw_pmc = workload.raw_pmc.rename(
             columns={"Dispatch_Id": "Dispatch_ID"}
         )
@@ -303,6 +291,7 @@ class OmniAnalyze_Base:
 
         # ensure absolute path
         seen_paths: set[str] = set()
+        seen_workload_names: set[tuple[str, ...]] = set()
         for dir_info in args.path:
             full_path = Path(dir_info[0]).absolute().resolve()
             dir_info[0] = str(full_path)
@@ -316,6 +305,17 @@ class OmniAnalyze_Base:
             if dir_info[0] in seen_paths:
                 console_error("analysis", "You cannot provide the same path twice.")
             seen_paths.add(dir_info[0])
+
+            # The pair names the workload's row and its source export folder.
+            workload_name = full_path.parts[-2:]
+            if workload_name in seen_workload_names:
+                console_error(
+                    "analysis",
+                    f"{full_path} reuses the workload name "
+                    f"{'/'.join(workload_name)}. Paths must differ in their "
+                    "last two components.",
+                )
+            seen_workload_names.add(workload_name)
 
         self._profiling_config: dict[str, Any] = file_io.load_profiling_config(
             args.path[0][0]
@@ -344,7 +344,7 @@ class OmniAnalyze_Base:
                 profiling_config.get("iteration_multiplexing"),
                 self.pc_sampling_only(),
             ]):
-                is_workload_empty(dir_info[0])
+                validate_workload(dir_info[0])
 
         # Ensure analysis output does not overwrite existing files
         if args.output_name:
@@ -376,257 +376,80 @@ class OmniAnalyze_Base:
             )
 
     @demarcate
-    def join_prof(
-        self, workload_dir: Path, out: Optional[str] = None
-    ) -> Optional[pd.DataFrame]:
-        """Join separated rocprof runs into single pmc_perf.csv.
+    def concat_result_csvs(self, result_files: list[Path], output_file: Path) -> None:
+        """Vertically concatenate rocpd ``results_*.csv`` files into one CSV.
+
+        Every file shares the long-form header rocpd writes, so the header is
+        taken from the first non-empty file and the remaining rows are appended.
 
         Args:
-            workload_dir: Path to workload directory containing CSV files
-            out: Optional output file path (defaults to workload_dir/pmc_perf.csv)
-
-        Returns:
-            DataFrame if called programmatically, None if saving to file
+            result_files: The results_*.csv files to concatenate
+            output_file: Destination CSV
         """
-        output_file = out or str(workload_dir / "pmc_perf.csv")
+        console_warning(
+            "Reading intermediate results_*.csv files is deprecated and "
+            "will be removed in a future release."
+        )
 
-        # Load profiling config from THIS workload directory (not args)
-        profiling_config = file_io.load_profiling_config(str(workload_dir))
-        format_rocprof = profiling_config.get("format_rocprof_output", "rocpd")
-        join_type = profiling_config.get("join_type", "grid")
-        kokkos_trace = profiling_config.get("kokkos_trace", False)
-
-        # handle rocpd format
-        if format_rocprof == "rocpd":
-            # Vertically concat (by rows) results_*.csv into pmc_perf.csv
-            result_files = list(workload_dir.glob("results_*.csv"))
-
-            console_warning(
-                "Reading intermediate results_*.csv files is deprecated and "
-                "will be removed in a future release."
-            )
-
-            with open(output_file, "w", newline="", encoding="utf-8") as outfile:
-                writer = None
-                for file in result_files:
-                    with open(file, newline="", encoding="utf-8") as infile:
+        rows_written = 0
+        with csv_compression.open_csv_write(output_file) as outfile:
+            writer = None
+            for file in result_files:
+                # Only the read can fail on compression; output_file is plain.
+                try:
+                    with csv_compression.open_csv_read(file) as infile:
                         reader = csv.reader(infile)
-                        header = next(reader)
-                        # Write header only once
+                        header = next(reader, None)
+                        if header is None:
+                            console_warning(f"Skipping empty {file}")
+                            continue
+                        if "Counter_Name" not in header:
+                            output_file.unlink(missing_ok=True)
+                            console_error(
+                                f"{file} is not in the supported rocpd format. "
+                                "Please re-profile this workload with a current "
+                                "release."
+                            )
                         if writer is None:
                             writer = csv.writer(outfile)
                             writer.writerow(header)
                         for row in reader:
                             writer.writerow(row)
+                            rows_written += 1
+                except csv_compression.CORRUPT_CSV_ERRORS as e:
+                    # Drop the partial pmc_perf.csv built from earlier files.
+                    output_file.unlink(missing_ok=True)
+                    console_error(
+                        f"{file} is truncated or corrupt: {e}\n"
+                        "A profile run killed mid-write leaves this behind; "
+                        "re-run 'rocprof-compute profile' to regenerate the "
+                        "workload."
+                    )
 
-            console_debug(f"Created file: {output_file}")
+        # A header-only pmc_perf.csv would be reused by later analyze runs.
+        if rows_written == 0:
+            output_file.unlink(missing_ok=True)
+            console_error(
+                f"No counter data in results_*.csv under {output_file.parent}.\n"
+                f"Please re-run 'rocprof-compute profile'."
+            )
 
-            return None
-
-        # Collect files to process - normalize to Path objects
-        files: list[Path] = []
-
-        csv_patterns = ["results_pmc_perf_*.csv", "SQ_*.csv", "SQC_*.csv"]
-        files = [
-            file for pattern in csv_patterns for file in workload_dir.glob(pattern)
-        ]
-
-        if kokkos_trace:
-            # remove marker api trace outputs from this list
-            files = [f for f in files if not f.name.endswith("_marker_api_trace.csv")]
-
-        # Process files and create joined dataframe
-        df = None
-        for i, file in enumerate(files):
-            current_df = pd.read_csv(file)
-
-            if current_df.empty:
-                console_warning("join_prof", f"Empty dataframe from {file}")
-                continue
-
-            # rocprof writes the accumulator column as SQ_ACCUM_PREV_HIRES
-            # regardless of which *_ACCUM counter was requested. Recover the
-            # requested name from the file stem so downstream YAML formulas
-            # can reference it directly. Done before the merge so per-bucket
-            # values do not collide and get pandas-suffixed.
-            if (
-                file.name.startswith("results_pmc_perf_")
-                and file.stem.endswith("_ACCUM")
-                and "SQ_ACCUM_PREV_HIRES" in current_df.columns
-            ):
-                target = file.stem[len("results_pmc_perf_") :]
-                current_df = current_df.rename(columns={"SQ_ACCUM_PREV_HIRES": target})
-
-            if join_type == "kernel":
-                key = current_df.groupby("Kernel_Name").cumcount()
-                current_df["key"] = current_df.Kernel_Name + " - " + key.astype(str)
-            elif join_type == "grid":
-                key = current_df.groupby(["Kernel_Name", "Grid_Size"]).cumcount()
-                current_df["key"] = (
-                    current_df["Kernel_Name"].astype(str)
-                    + " - "
-                    + current_df["Grid_Size"].astype(str)
-                    + " - "
-                    + key.astype(str)
-                )
-            else:
-                console_error(
-                    "join_prof",
-                    f"{join_type} is an unrecognized option for --join-type",
-                )
-
-            if df is None:
-                df = current_df
-            else:
-                # join by unique index of kernel
-                df = pd.merge(
-                    df, current_df, how="inner", on="key", suffixes=("", f"_{i}")
-                )
-
-        if df is None or df.empty:
-            console_warning("join_prof", "No data available after processing all files")
-            return None
-
-        # TODO: check for any mismatch in joins
-        duplicate_cols = {
-            "GPU_ID": [col for col in df.columns if col.startswith("GPU_ID")],
-            "Grid_Size": [col for col in df.columns if col.startswith("Grid_Size")],
-            "Workgroup_Size": [
-                col for col in df.columns if col.startswith("Workgroup_Size")
-            ],
-            "LDS_Per_Workgroup": [
-                col for col in df.columns if col.startswith("LDS_Per_Workgroup")
-            ],
-            "Scratch_Per_Workitem": [
-                col for col in df.columns if col.startswith("Scratch_Per_Workitem")
-            ],
-            "SGPR": [col for col in df.columns if col.startswith("SGPR")],
-        }
-
-        # Check for vgpr counter in ROCm < 5.3
-        if "vgpr" in df.columns:
-            duplicate_cols["vgpr"] = [
-                col for col in df.columns if col.startswith("vgpr")
-            ]
-        # Check for vgpr counter in ROCm >= 5.3
-        else:
-            duplicate_cols["Arch_VGPR"] = [
-                col for col in df.columns if col.startswith("Arch_VGPR")
-            ]
-            duplicate_cols["Accum_VGPR"] = [
-                col for col in df.columns if col.startswith("Accum_VGPR")
-            ]
-
-        for key, cols in duplicate_cols.items():
-            current_df = df[cols]
-            if not test_df_column_equality(current_df):
-                console_warning(
-                    "join_prof",
-                    f"Detected differing {key} values while joining pmc_perf.csv",
-                )
-            else:
-                console_debug("join_prof", f"Successfully joined {key} in pmc_perf.csv")
-
-        # now, we can:
-        #   A) throw away any of the "boring" duplicates
-        columns_to_remove = [
-            # rocprofv2 headers
-            "GPU_ID_",
-            "Grid_Size_",
-            "Workgroup_Size_",
-            "LDS_Per_Workgroup_",
-            "Scratch_Per_Workitem_",
-            "vgpr_",
-            "Arch_VGPR_",
-            "Accum_VGPR_",
-            "SGPR_",
-            "Dispatch_ID_",
-            "Kernel_ID_",
-            "Queue_ID",
-            "Queue_Index",
-            "PID",
-            "TID",
-            "SIG",
-            "OBJ",
-            "Correlation_ID_",
-            "Wave_Size_",
-            # rocscope specific merged counters, keep original
-            "dispatch_",
-            # extras
-            "sig",
-            "queue-id",
-            "queue-index",
-            "pid",
-            "tid",
-            "fbar",
-        ]
-
-        df = df[
-            [
-                col
-                for col in df.columns
-                if not any(col.startswith(prefix) for prefix in columns_to_remove)
-            ]
-        ]
-
-        #   B) any timestamps that are _not_ the duration,
-        #      which is the one we care about
-        timestamp_patterns = ["DispatchNs", "CompleteNs", "HostDuration"]
-
-        df = df[
-            [
-                col
-                for col in df.columns
-                if not any(pattern in col for pattern in timestamp_patterns)
-            ]
-        ]
-
-        #   C) sanity check the name and key
-        name_cols = [col for col in df.columns if "Kernel_Name" in col]
-        if not name_cols:
-            return df
-
-        for col in name_cols[1:]:
-            assert (df[name_cols[0]] == df[col]).all()
-
-        df = df.drop(columns=name_cols[1:])
-
-        # now take the median of the durations
-        start_cols = [col for col in df.columns if "Start_Timestamp" in col]
-        end_cols = [col for col in df.columns if "End_Timestamp" in col]
-
-        # compute mean mean timestamps
-        if start_cols and end_cols:
-            mean_start = df[start_cols].mean(axis=1)
-            mean_end = df[end_cols].mean(axis=1)
-
-            # Replace with consolidated timestamps
-            df = df.drop(columns=start_cols + end_cols)
-            df["Start_Timestamp"] = mean_start
-            df["End_Timestamp"] = mean_end
-
-        # finally, join the drop key
-        if "key" in df.columns:
-            df = df.drop(columns=["key"])
-
-        # save to file
-        df.to_csv(output_file, index=False)
-        return None
+        console_debug(f"Created file: {output_file} ({rows_written} counter rows)")
 
     def join_workload_csvs(self, workload_dir: Path) -> None:
-        """Join results_*.csv source files into pmc_perf.csv if needed.
+        """Concatenate results_*.csv source files into pmc_perf.csv if needed.
 
         Args:
             workload_dir: Path to the workload directory
         """
         pmc_perf = workload_dir / "pmc_perf.csv"
-        results_files = list(workload_dir.glob("results_*.csv"))
+        result_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
 
-        if pmc_perf.exists():
+        if pmc_perf.exists() and pmc_perf.stat().st_size > 0:
             console_debug(f"Using existing {pmc_perf}")
-        elif results_files:
+        elif result_files:
             console_log(f"Joining results_*.csv for {workload_dir}...")
-            self.join_prof(workload_dir, out=str(pmc_perf))
+            self.concat_result_csvs(result_files, pmc_perf)
             console_log(f"Created {pmc_perf}")
         else:
             console_error(

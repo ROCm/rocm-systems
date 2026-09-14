@@ -23,7 +23,7 @@
 #
 # rocprofv3 tool test
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 include(FindPackageHandleStandardArgs)
 
@@ -197,11 +197,26 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-hsa-multiqueue-plus-pmc
     COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input --pmc
-            SQ_WAVES -o out -- $<TARGET_FILE:vector-ops>
+            SQ_WAVES -o pmc -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
     LABELS "integration-tests"
-    DISABLED ${IS_DISABLED})
+    DISABLED ${IS_DISABLED}
+    FIXTURES_SETUP rocprofv3-test-att-hsa-multiqueue-plus-pmc)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-hsa-multiqueue-plus-pmc
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-hsa-multiqueue-plus-pmc
+    DISCOVERY_ARGS -k test_counter_collection_with_att
+    ARGS --att-pmc-input
+         ${CMAKE_CURRENT_BINARY_DIR}/vector-ops-trace/cmd_input/pmc_results.json
+    FAIL_REGULAR_EXPRESSION "AssertionError")
 
 # Check for conflict PMC + activity
 rocprofiler_add_integration_execute_test(
@@ -349,6 +364,35 @@ if(attdecoder_FOUND
         FAIL_REGULAR_EXPRESSION "AssertionError")
 endif()
 
+set(ATT_NO_DETAIL_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-no-detail")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-no-detail
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_NO_DETAIL_OUT_DIR} --att
+        --att-no-detail --output-format json --kernel-include-regex matrixTranspose --
+        $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-no-detail)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-no-detail
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_att_no_detail
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-no-detail
+    ARGS --att-no-detail-out-dir ${ATT_NO_DETAIL_OUT_DIR}
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
 # Other SIMD file tests
 set(IS_DISABLED_OTHER_SIMD ON)
 list(GET rocprofiler-sdk-tests-gfx-info 0 att-gpu-0-gfx-info)
@@ -441,6 +485,7 @@ rocprofiler_add_integration_execute_test(
     DISABLED ${IS_DISABLED}
     ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    SKIP_REGULAR_EXPRESSION "HW Exception by GPU"
     FIXTURES_SETUP rocprofv3-test-att-no-intercept)
 
 rocprofiler_add_integration_validate_test(

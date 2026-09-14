@@ -4,7 +4,7 @@
 #include "log.hpp"
 #include "fwd.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <cmath>
 #include <cstdint>
@@ -58,7 +58,7 @@ log_entry::as_string(const char* _color, const char* _src, const char* _end) con
             << _src << m_location.function << _end << "]";
     }
 
-    bool _remove_color = (strlen(_color) + strlen(_src) + strlen(_end) == 0);
+    const bool _remove_color = (strlen(_color) + strlen(_src) + strlen(_end) == 0);
 
     _ss << " " << _color << std::regex_replace(m_message, std::regex{ "\n" }, " ... ")
         << _end;
@@ -78,8 +78,9 @@ print_log_entries(std::ostream& _os, std::int64_t _count,
                   const std::function<void()>& _prelude, const char* _color,
                   bool _color_entries)
 {
-    size_t i0 = (_count < 0) ? 0 : std::max<std::int64_t>(log_entries.size() - _count, 0);
-    size_t _w = std::log10(log_entries.size()) + 1;
+    const size_t i0 =
+        (_count < 0) ? 0 : std::max<std::int64_t>(log_entries.size() - _count, 0);
+    const size_t _w = std::log10(log_entries.size()) + 1;
 
     if(dynamic_cast<std::ofstream*>(&_os) ||
        (&_os != &std::cout && &_os != &std::cerr && &_os != &std::clog))

@@ -33,6 +33,7 @@ static const char* events = nullptr;
 static int sock = -1;
 
 static void printUsage(const char* argv0) {
+  // clang-format off
   fprintf(stderr,
           "Usage: %s [OPTION]...\n"
           "Query the state of a running NCCL job.\n"
@@ -348,8 +349,10 @@ static int getNCCLStatus() {
       else perror("read socket");
       return 1;
     }
-    if (bytes == 0) // EOF
+    if (bytes == 0) {
+      // EOF
       break;
+    }
     if (fwrite(msgBuf, 1, bytes, stdout) != bytes) {
       fprintf(stderr, "fwrite to stdout failed!\n");
       return 1;

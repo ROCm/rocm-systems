@@ -13,7 +13,9 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
 RJ_DIAGNOSTIC_POP
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -35,7 +37,8 @@ struct KernelDescriptorInfo {
 /// The single discovery routine shared by DBT translation and DBI; operates on the
 /// raw, pre-growth image.
 [[nodiscard]] std::vector<KernelDescriptorInfo>
-scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size);
+scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
+                        std::optional<size_t> text_section_index = std::nullopt);
 
 /// @brief Wavefront size (32 or 64) the launch hardware interprets for @p desc.
 ///
@@ -53,5 +56,15 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
 /// for Wave64. Shared by DBT resource accounting and DBI descriptor decoding.
 [[nodiscard]] uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch,
                                                                  uint32_t wavefront_size);
+
+/// @brief Decode COMPUTE_PGM_RSRC2.USER_SGPR_COUNT using the layout for @p arch.
+[[nodiscard]] uint32_t
+kernel_descriptor_user_sgpr_count(rj_code_arch_t arch,
+                                  const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
+
+/// @brief Encode COMPUTE_PGM_RSRC2.USER_SGPR_COUNT using the layout for @p arch.
+void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch,
+                                           rocr::llvm::amdhsa::kernel_descriptor_t &desc,
+                                           uint32_t user_sgpr_count);
 
 } // namespace rocjitsu

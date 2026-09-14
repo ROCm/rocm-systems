@@ -54,8 +54,8 @@ protected:
     void create_libomptarget(const std::string& dir)
     {
         create_directory(dir);
-        std::string   lib_path = dir + "/libomptarget.so";
-        std::ofstream ofs(lib_path);
+        const std::string lib_path = dir + "/libomptarget.so";
+        std::ofstream     ofs(lib_path);
         ofs << "fake library content";
     }
 
@@ -100,108 +100,108 @@ protected:
 
 TEST_F(DiscoverLlvmLibdirTest, FindsLibInRocmPathLlvmLib)
 {
-    std::string rocm_path = m_test_dir + "/rocm";
-    std::string llvm_lib  = rocm_path + "/llvm/lib";
+    const std::string rocm_path = m_test_dir + "/rocm";
+    const std::string llvm_lib  = rocm_path + "/llvm/lib";
     create_libomptarget(llvm_lib);
 
     set_rocm_path(rocm_path);
     clear_rocmv_dir();
 
-    std::string result = discover_llvm_libdir_for_ompt();
+    const std::string result = discover_llvm_libdir_for_ompt();
 
     EXPECT_EQ(result, llvm_lib);
 }
 
 TEST_F(DiscoverLlvmLibdirTest, FindsLibInRocmPathLibLlvmLib)
 {
-    std::string rocm_path    = m_test_dir + "/rocm";
-    std::string lib_llvm_lib = rocm_path + "/lib/llvm/lib";
+    const std::string rocm_path    = m_test_dir + "/rocm";
+    const std::string lib_llvm_lib = rocm_path + "/lib/llvm/lib";
     create_libomptarget(lib_llvm_lib);
 
     set_rocm_path(rocm_path);
     clear_rocmv_dir();
 
-    std::string result = discover_llvm_libdir_for_ompt();
+    const std::string result = discover_llvm_libdir_for_ompt();
 
     EXPECT_EQ(result, lib_llvm_lib);
 }
 
 TEST_F(DiscoverLlvmLibdirTest, PrefersLlvmLibOverLibLlvmLib)
 {
-    std::string rocm_path    = m_test_dir + "/rocm";
-    std::string llvm_lib     = rocm_path + "/llvm/lib";
-    std::string lib_llvm_lib = rocm_path + "/lib/llvm/lib";
+    const std::string rocm_path    = m_test_dir + "/rocm";
+    const std::string llvm_lib     = rocm_path + "/llvm/lib";
+    const std::string lib_llvm_lib = rocm_path + "/lib/llvm/lib";
     create_libomptarget(llvm_lib);
     create_libomptarget(lib_llvm_lib);
 
     set_rocm_path(rocm_path);
     clear_rocmv_dir();
 
-    std::string result = discover_llvm_libdir_for_ompt();
+    const std::string result = discover_llvm_libdir_for_ompt();
 
     EXPECT_EQ(result, llvm_lib);
 }
 
 TEST_F(DiscoverLlvmLibdirTest, RocmVersionDirLlvmLib)
 {
-    std::string rocmv_dir = m_test_dir + "/rocm-version";
-    std::string llvm_lib  = rocmv_dir + "/llvm/lib";
+    const std::string rocmv_dir = m_test_dir + "/rocm-version";
+    const std::string llvm_lib  = rocmv_dir + "/llvm/lib";
     create_libomptarget(llvm_lib);
 
     clear_rocm_path();
     set_rocmv_dir(rocmv_dir);
 
-    std::string result = discover_llvm_libdir_for_ompt();
+    const std::string result = discover_llvm_libdir_for_ompt();
 
     EXPECT_EQ(result, llvm_lib);
 }
 
 TEST_F(DiscoverLlvmLibdirTest, RocmVersionDirLib)
 {
-    std::string rocmv_dir = m_test_dir + "/rocm-version";
-    std::string lib_dir   = rocmv_dir + "/lib";
+    const std::string rocmv_dir = m_test_dir + "/rocm-version";
+    const std::string lib_dir   = rocmv_dir + "/lib";
     create_libomptarget(lib_dir);
 
     clear_rocm_path();
     set_rocmv_dir(rocmv_dir);
 
-    std::string result = discover_llvm_libdir_for_ompt();
+    const std::string result = discover_llvm_libdir_for_ompt();
 
     EXPECT_EQ(result, lib_dir);
 }
 
 TEST_F(DiscoverLlvmLibdirTest, RocmVersionDirTakesPrecedence)
 {
-    std::string rocm_path     = m_test_dir + "/rocm";
-    std::string rocmv_dir     = m_test_dir + "/rocm-version";
-    std::string rocm_llvm_lib = rocm_path + "/llvm/lib";
-    std::string rocmv_lib     = rocmv_dir + "/llvm/lib";
+    const std::string rocm_path     = m_test_dir + "/rocm";
+    const std::string rocmv_dir     = m_test_dir + "/rocm-version";
+    const std::string rocm_llvm_lib = rocm_path + "/llvm/lib";
+    const std::string rocmv_lib     = rocmv_dir + "/llvm/lib";
     create_libomptarget(rocm_llvm_lib);
     create_libomptarget(rocmv_lib);
 
     set_rocm_path(rocm_path);
     set_rocmv_dir(rocmv_dir);
 
-    std::string result = discover_llvm_libdir_for_ompt();
+    const std::string result = discover_llvm_libdir_for_ompt();
 
     EXPECT_EQ(result, rocmv_lib);
 }
 
 TEST_F(DiscoverLlvmLibdirTest, NoLibomptargetFound_InCustomPath)
 {
-    std::string rocm_path = m_test_dir + "/rocm";
+    const std::string rocm_path = m_test_dir + "/rocm";
     create_directory(rocm_path + "/llvm/lib");
 
     set_rocm_path(rocm_path);
     clear_rocmv_dir();
 
-    std::string result = discover_llvm_libdir_for_ompt();
+    const std::string result = discover_llvm_libdir_for_ompt();
 
     // Result should either be empty (no ROCm installed) or one of the default
     // fallback paths if ROCm is installed on the system
     if(!result.empty())
     {
-        bool is_default_path =
+        const bool is_default_path =
             (result == "/opt/rocm/llvm/lib" || result == "/opt/rocm/lib/llvm/lib");
         EXPECT_TRUE(is_default_path)
             << "Expected empty or default ROCm path, got: " << result;
@@ -210,50 +210,50 @@ TEST_F(DiscoverLlvmLibdirTest, NoLibomptargetFound_InCustomPath)
 
 TEST_F(DiscoverLlvmLibdirTest, TrailingSlashInRocmPath)
 {
-    std::string rocm_path = m_test_dir + "/rocm";
-    std::string llvm_lib  = rocm_path + "/llvm/lib";
+    const std::string rocm_path = m_test_dir + "/rocm";
+    const std::string llvm_lib  = rocm_path + "/llvm/lib";
     create_libomptarget(llvm_lib);
 
     set_rocm_path(rocm_path + "/");
     clear_rocmv_dir();
 
-    std::string result = discover_llvm_libdir_for_ompt();
+    const std::string result = discover_llvm_libdir_for_ompt();
 
     EXPECT_EQ(result, llvm_lib);
 }
 
 TEST_F(DiscoverLlvmLibdirTest, TrailingSlashInRocmVersionDir)
 {
-    std::string rocmv_dir = m_test_dir + "/rocm-version";
-    std::string llvm_lib  = rocmv_dir + "/llvm/lib";
+    const std::string rocmv_dir = m_test_dir + "/rocm-version";
+    const std::string llvm_lib  = rocmv_dir + "/llvm/lib";
     create_libomptarget(llvm_lib);
 
     clear_rocm_path();
     set_rocmv_dir(rocmv_dir + "/");
 
-    std::string result = discover_llvm_libdir_for_ompt();
+    const std::string result = discover_llvm_libdir_for_ompt();
 
     EXPECT_EQ(result, llvm_lib);
 }
 
 TEST_F(DiscoverLlvmLibdirTest, EmptyRocmVersionDir)
 {
-    std::string rocm_path = m_test_dir + "/rocm";
-    std::string llvm_lib  = rocm_path + "/llvm/lib";
+    const std::string rocm_path = m_test_dir + "/rocm";
+    const std::string llvm_lib  = rocm_path + "/llvm/lib";
     create_libomptarget(llvm_lib);
 
     set_rocm_path(rocm_path);
     setenv("ROCmVersion_DIR", "", 1);
 
-    std::string result = discover_llvm_libdir_for_ompt();
+    const std::string result = discover_llvm_libdir_for_ompt();
 
     EXPECT_EQ(result, llvm_lib);
 }
 
 TEST_F(DiscoverLlvmLibdirTest, FoundLibDoesNotThrow)
 {
-    std::string rocm_path = m_test_dir + "/rocm";
-    std::string llvm_lib  = rocm_path + "/llvm/lib";
+    const std::string rocm_path = m_test_dir + "/rocm";
+    const std::string llvm_lib  = rocm_path + "/llvm/lib";
     create_libomptarget(llvm_lib);
 
     set_rocm_path(rocm_path);
@@ -264,7 +264,7 @@ TEST_F(DiscoverLlvmLibdirTest, FoundLibDoesNotThrow)
 
 TEST_F(DiscoverLlvmLibdirTest, NoLibFoundDoesNotThrow)
 {
-    std::string rocm_path = m_test_dir + "/rocm";
+    const std::string rocm_path = m_test_dir + "/rocm";
     create_directory(rocm_path);
 
     set_rocm_path(rocm_path);
@@ -275,46 +275,46 @@ TEST_F(DiscoverLlvmLibdirTest, NoLibFoundDoesNotThrow)
 
 TEST_F(DiscoverLlvmLibdirTest, RocmVersionDirLlvmLibPreferredOverLib)
 {
-    std::string rocmv_dir = m_test_dir + "/rocm-version";
-    std::string llvm_lib  = rocmv_dir + "/llvm/lib";
-    std::string lib_dir   = rocmv_dir + "/lib";
+    const std::string rocmv_dir = m_test_dir + "/rocm-version";
+    const std::string llvm_lib  = rocmv_dir + "/llvm/lib";
+    const std::string lib_dir   = rocmv_dir + "/lib";
     create_libomptarget(llvm_lib);
     create_libomptarget(lib_dir);
 
     clear_rocm_path();
     set_rocmv_dir(rocmv_dir);
 
-    std::string result = discover_llvm_libdir_for_ompt();
+    const std::string result = discover_llvm_libdir_for_ompt();
 
     EXPECT_EQ(result, llvm_lib);
 }
 
 TEST_F(DiscoverLlvmLibdirTest, FallsBackToRocmPathWhenRocmVersionDirHasNoLib)
 {
-    std::string rocm_path = m_test_dir + "/rocm";
-    std::string rocmv_dir = m_test_dir + "/rocm-version";
-    std::string llvm_lib  = rocm_path + "/llvm/lib";
+    const std::string rocm_path = m_test_dir + "/rocm";
+    const std::string rocmv_dir = m_test_dir + "/rocm-version";
+    const std::string llvm_lib  = rocm_path + "/llvm/lib";
     create_directory(rocmv_dir + "/llvm/lib");
     create_libomptarget(llvm_lib);
 
     set_rocm_path(rocm_path);
     set_rocmv_dir(rocmv_dir);
 
-    std::string result = discover_llvm_libdir_for_ompt();
+    const std::string result = discover_llvm_libdir_for_ompt();
 
     EXPECT_EQ(result, llvm_lib);
 }
 
 TEST_F(DiscoverLlvmLibdirTest, MultipleTrailingSlashes)
 {
-    std::string rocm_path = m_test_dir + "/rocm";
-    std::string llvm_lib  = rocm_path + "/llvm/lib";
+    const std::string rocm_path = m_test_dir + "/rocm";
+    const std::string llvm_lib  = rocm_path + "/llvm/lib";
     create_libomptarget(llvm_lib);
 
     set_rocm_path(rocm_path + "/");
     clear_rocmv_dir();
 
-    std::string result = discover_llvm_libdir_for_ompt();
+    const std::string result = discover_llvm_libdir_for_ompt();
 
     EXPECT_FALSE(result.empty());
     EXPECT_NE(result.find("llvm/lib"), std::string::npos);
@@ -322,21 +322,21 @@ TEST_F(DiscoverLlvmLibdirTest, MultipleTrailingSlashes)
 
 TEST_F(DiscoverLlvmLibdirTest, PathWithSpaces)
 {
-    std::string rocm_path = m_test_dir + "/rocm with spaces";
-    std::string llvm_lib  = rocm_path + "/llvm/lib";
+    const std::string rocm_path = m_test_dir + "/rocm with spaces";
+    const std::string llvm_lib  = rocm_path + "/llvm/lib";
 
     std::error_code ec;
     test_common::fs::create_directories(llvm_lib, ec);
 
-    std::string   lib_path = llvm_lib + "/libomptarget.so";
-    std::ofstream ofs(lib_path);
+    const std::string lib_path = llvm_lib + "/libomptarget.so";
+    std::ofstream     ofs(lib_path);
     ofs << "fake library content";
     ofs.close();
 
     set_rocm_path(rocm_path);
     clear_rocmv_dir();
 
-    std::string result = discover_llvm_libdir_for_ompt();
+    const std::string result = discover_llvm_libdir_for_ompt();
 
     EXPECT_EQ(result, llvm_lib);
 }
@@ -346,7 +346,7 @@ TEST_F(DiscoverLlvmLibdirTest, BothEnvVarsUnset_UsesDefaultRocmPath)
     clear_rocm_path();
     clear_rocmv_dir();
 
-    std::string result = discover_llvm_libdir_for_ompt();
+    const std::string result = discover_llvm_libdir_for_ompt();
 
     if(!result.empty())
     {
@@ -357,10 +357,10 @@ TEST_F(DiscoverLlvmLibdirTest, BothEnvVarsUnset_UsesDefaultRocmPath)
 
 TEST_F(DiscoverLlvmLibdirTest, SymlinkToLibomptarget)
 {
-    std::string rocm_path   = m_test_dir + "/rocm";
-    std::string llvm_lib    = rocm_path + "/llvm/lib";
-    std::string actual_dir  = m_test_dir + "/actual";
-    std::string actual_file = actual_dir + "/libomptarget.so";
+    const std::string rocm_path   = m_test_dir + "/rocm";
+    const std::string llvm_lib    = rocm_path + "/llvm/lib";
+    const std::string actual_dir  = m_test_dir + "/actual";
+    const std::string actual_file = actual_dir + "/libomptarget.so";
 
     create_directory(actual_dir);
     std::ofstream ofs(actual_file);
@@ -368,13 +368,13 @@ TEST_F(DiscoverLlvmLibdirTest, SymlinkToLibomptarget)
     ofs.close();
 
     create_directory(llvm_lib);
-    std::string link_path = llvm_lib + "/libomptarget.so";
+    const std::string link_path = llvm_lib + "/libomptarget.so";
     EXPECT_EQ(symlink(actual_file.c_str(), link_path.c_str()), 0);
 
     set_rocm_path(rocm_path);
     clear_rocmv_dir();
 
-    std::string result = discover_llvm_libdir_for_ompt();
+    const std::string result = discover_llvm_libdir_for_ompt();
 
     EXPECT_EQ(result, llvm_lib);
 }

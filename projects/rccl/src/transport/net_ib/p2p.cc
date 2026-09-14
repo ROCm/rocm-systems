@@ -10,6 +10,20 @@
 #include "compiler.h"
 #include "p2p_resiliency.h"
 
+#ifdef ENABLE_FAULT_INJECTION
+#include <atomic>
+#include "net_ib_flush_fault_inject.h"
+// Test-only: when armed, ncclIbIflush re-issues the pre-fix scratchpad
+// RDMA_WRITE so a regression test can prove the write is what faults.
+// Atomic because the arm/disarm (test thread) and the read in ncclIbIflush
+// can run concurrently.
+static std::atomic<bool> ncclIbFlushForceScratchpadWrite{false};
+ncclResult_t ncclIbFlushFaultForceScratchpadWrite(void* /*recvComm*/, bool enable) {
+  ncclIbFlushForceScratchpadWrite.store(enable, std::memory_order_relaxed);
+  return ncclSuccess;
+}
+#endif
+
 NCCL_PARAM(IbArThreshold, "IB_AR_THRESHOLD", -2);
 int64_t ncclIbArThreshold = 8192;
 
@@ -417,7 +431,6 @@ isendFail:
 
 ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* req, int slot) {
   ncclIbQp* ctsQp = NULL;
-  ;
   NCCLCHECK(ncclIbRecvCommGetQpForCts(comm, req->id, &ctsQp));
 
   struct ibv_send_wr wr;
@@ -635,25 +648,29 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
   // We don't know which devIndex the recv was on, so we flush on all devices
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
     struct ibv_send_wr wr;
-    // Check if GPU flush buffer was successfully registered
-    // If not, fall back to using user data buffer for flush
+    // RO=0 scratchpad read fences the data (no RDMA_WRITE: a dma-buf scratchpad
+    // is not a valid amdgpu write target and faults the QP).
     bool useGpuFlushMem = rcclParamIbGdrFlushGpuMemNoRelaxedOrdering() &&
                           comm->devs[i].gpuFlush.gpuFlushGpuMem != nullptr && comm->devs[i].gpuFlush.gpuMr != nullptr;
     memset(&wr, 0, sizeof(wr));
-    wr.wr_id = (req - comm->base.reqs) + NCCL_IB_FLUSH_REQ_WR_ID_OFFSET;
-
-    if (useGpuFlushMem) {
-      wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
-      wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
-      wr.sg_list = &comm->devs[i].gpuFlush.sge;
-      wr.num_sge = 1;
-      wr.opcode = IBV_WR_RDMA_WRITE;
-      wr.send_flags = 0;
-      struct ibv_send_wr* bad_wr;
-      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr), ret, iflushFail);
-    }
-    memset(&wr, 0, sizeof(wr));
     wr.wr_id = (uint64_t)(req - comm->base.reqs) + NCCL_IB_FLUSH_REQ_WR_ID_OFFSET;
+
+#ifdef ENABLE_FAULT_INJECTION
+    // Test-only regression guard: re-issue the removed scratchpad RDMA_WRITE.
+    if (useGpuFlushMem && ncclIbFlushForceScratchpadWrite.load(std::memory_order_relaxed)) {
+      struct ibv_send_wr writeWr;
+      memset(&writeWr, 0, sizeof(writeWr));
+      writeWr.wr_id = wr.wr_id;
+      writeWr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
+      writeWr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
+      writeWr.sg_list = &comm->devs[i].gpuFlush.sge;
+      writeWr.num_sge = 1;
+      writeWr.opcode = IBV_WR_RDMA_WRITE;
+      writeWr.send_flags = 0;
+      struct ibv_send_wr* badWriteWr;
+      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr), ret, iflushFail);
+    }
+#endif
     if (useGpuFlushMem) {
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
@@ -734,7 +751,8 @@ static inline ncclResult_t ncclIbRequestRetrieveFromCompletion(struct ncclIbNetC
           __func__, wc->wr_id, ibvWcOpcodeStr(wc->opcode), be32toh(wc->imm_data), wc->byte_len);
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)base;
     *req = recvComm->recvReqs[be32toh(wc->imm_data) % NET_IB_MAX_REQUESTS];
-  } else if (!base->isSend && wc->opcode == IBV_WC_RDMA_READ) { // Flush request completion
+  } else if (!base->isSend && wc->opcode == IBV_WC_RDMA_READ) {
+    // Flush request completion
     NCCLCHECK(ncclIbRequestRetrieveAsIndex(base->reqs, (wc->wr_id - NCCL_IB_FLUSH_REQ_WR_ID_OFFSET), req));
   } else if (!base->isSend) {
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)base;
@@ -825,6 +843,7 @@ static ncclResult_t ncclIbLogCompletionWithError(struct ncclIbNetCommBase* commB
   WARN("NET/IB: Got completion from peer %s with status=%s(%d) opcode=%s(%d) vendor_err=%u %s%s%s%s hca %s", sockStr,
        ibvWcStatusStr(wc->status), wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->vendor_err,
        localGidStr ? " localGid " : "", localGidString, remoteGidStr ? " remoteGids" : "", remoteGidString, hcaName);
+  printIbWcStatusHint(wc->status);
   return ncclSuccess;
 }
 

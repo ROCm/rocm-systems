@@ -37,6 +37,20 @@ namespace RcclUnitTesting
 
   size_t DataTypeToBytes(ncclDataType_t const dataType);
 
+  // Device-data mode (ON by default; set UT_DEVICE_DATA=0 to disable): when enabled,
+  // the unit-test data layer builds input/expected and validates on the GPU instead
+  // of the host. Cached once. Disabling restores the host reference path byte-for-byte.
+  bool UtDeviceDataEnabled();
+
+  // Whether the device-data kernels support this dtype. All host-supported dtypes are
+  // covered (fp8 via dedicated byte-based kernels). Kept as a hook for future gating.
+  bool UtDeviceDtypeSupported(ncclDataType_t const dataType);
+
+  // Minimum element count for the device-data path to engage. Below this, host prep is
+  // cheap relative to per-sub-case overhead (fork/comm-init/launch), so the device path
+  // gives no speedup and stays off. Default 1Mi; override with UT_DEVICE_DATA_MIN_ELEMS.
+  size_t UtDeviceDataMinElements();
+
   // PtrUnion encapsulates a pointer of all the different supported datatypes
   // NOTE: Currently half-precision float tests are unsupported due to half
   //       being supported on GPU only and not host
@@ -74,6 +88,33 @@ namespace RcclUnitTesting
                         size_t         const numElements,
                         int            const globalRank,
                         bool           const isGpuMem);
+
+    // Device data-op layer (reusable by any collective/test). Fills this (device)
+    // buffer with the shared pattern via a kernel; the pattern at position j uses
+    // global index (startIdx + j). IsEqualDevice compares two device buffers with
+    // the same per-type tolerance as IsEqual, returns the mismatch count, and on a
+    // mismatch logs the first divergent index with its expected/actual value.
+    ErrCode FillPatternDevice(ncclDataType_t const dataType,
+                              size_t         const numElements,
+                              int            const globalRank,
+                              size_t         const startIdx = 0);
+
+    static ErrCode IsEqualDevice(ncclDataType_t const dataType,
+                                 size_t         const numElements,
+                                 void*          const actualGpu,
+                                 void*          const expectedGpu,
+                                 size_t&              mismatches);
+
+    // Device-build the all-ranks reduction of the pattern into this (device) buffer,
+    // mirroring PtrUnion::Reduce + DivideByInt. Used for AllReduce's expected in
+    // device-data mode. Handles ncclSum/Prod/Max/Min/Avg (no scalar/bias/const).
+    // startIdx offsets the pattern's global element index (0 for AllReduce's full
+    // buffer; globalRank*numOutput for ReduceScatter's per-rank scattered slice).
+    ErrCode FillReducedPatternDevice(ncclDataType_t const dataType,
+                                     size_t         const numElements,
+                                     int            const totalRanks,
+                                     ncclRedOp_t    const op,
+                                     size_t         const startIdx = 0);
 
     ErrCode Set(ncclDataType_t const dataType, int const idx, int valueI, double valueF);
     ErrCode Get(ncclDataType_t const dataType, int const idx, int& valueI, double& valueF) const;

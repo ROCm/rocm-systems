@@ -662,7 +662,7 @@ def check_sanitizer_workflow(
     ok("sanitizer workflow is reusable and reports through artifacts")
 
 
-def write_fake_tool(bin_dir: Path, name: str, log_path: Path) -> None:
+def write_fake_tool(bin_dir: Path, name: str, log_path: Path, exit_code: int = 0) -> None:
     tool_path = bin_dir / name
     tool_path.write_text(
         "#!/usr/bin/env bash\n"
@@ -670,7 +670,7 @@ def write_fake_tool(bin_dir: Path, name: str, log_path: Path) -> None:
         f"{str(log_path)!r}\n"
         "printf '\\n' >> "
         f"{str(log_path)!r}\n"
-        "exit 0\n",
+        f"exit {exit_code}\n",
         encoding="utf-8",
     )
     tool_path.chmod(tool_path.stat().st_mode | stat.S_IXUSR)
@@ -1147,6 +1147,12 @@ def check_run_ci_split_stage_contract(verbose: bool) -> None:
 _FAILURE_SENTINEL = "SENTINEL_BUILD_FAILURE"
 _WARNING_SENTINEL = "SENTINEL_BUILD_WARNING"
 _NON_XML_ESC = "[NON-XML-CHAR-0x1B]"
+_TEST_PASS_SENTINEL = "SENTINEL_PASSING_TEST_OUTPUT"
+_TEST_FAIL_SENTINEL = "SENTINEL_FAILING_TEST_OUTPUT"
+# A test name carrying every character that terminates a workflow command, so
+# the check can prove the "::group::" title is escaped instead of being split
+# into a second, forged command.
+_HOSTILE_TEST_NAME = "bad%name\n::error::forged"
 
 
 def write_fake_build_xml_failure(bin_dir: Path, binary_dir: Path) -> None:
@@ -1202,6 +1208,43 @@ def write_fake_build_success_log(bin_dir: Path, binary_dir: Path) -> None:
         encoding="utf-8",
     )
     tool_path.chmod(tool_path.stat().st_mode | stat.S_IXUSR)
+
+
+def _ctest_measurement(text: str) -> str:
+    """Wrap *text* as a CTest <Measurement>, gzip+base64-encoded the way real
+    CTest stores a test's captured output once it holds the ESC bytes of
+    colored output."""
+    return (
+        '<Measurement><Value encoding="base64" compression="gzip">'
+        f"{_gzip_base64_value(text)}</Value></Measurement>"
+    )
+
+
+def write_fake_test_results(binary_dir: Path) -> None:
+    """Write what real ctest leaves behind after a failing test run: Test.xml,
+    which attributes the captured output per test, and LastTest*.log, which
+    concatenates the whole suite's output into one unattributed file.
+    """
+    testing_dir = binary_dir / "Testing"
+    tag_dir = testing_dir / "20260101-0000"
+    log_dir = testing_dir / "Temporary"
+    for directory in (tag_dir, log_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    (testing_dir / "TAG").write_text("20260101-0000\n", encoding="utf-8")
+    (log_dir / "LastTest_20260101-0000.log").write_text(
+        f"{_TEST_PASS_SENTINEL}\n{_TEST_FAIL_SENTINEL}\n", encoding="utf-8"
+    )
+    xml_name = _HOSTILE_TEST_NAME.replace("\n", "&#10;")
+    (tag_dir / "Test.xml").write_text(
+        "<Site><Testing>"
+        '<Test Status="passed"><Name>passing-test</Name>'
+        f"<Results>{_ctest_measurement(_TEST_PASS_SENTINEL)}</Results></Test>"
+        f'<Test Status="failed"><Name>{xml_name}</Name>'
+        f"<Results>{_ctest_measurement(_TEST_FAIL_SENTINEL)}</Results></Test>"
+        "</Testing></Site>\n",
+        encoding="utf-8",
+    )
 
 
 def check_run_ci_failure_colored_log(verbose: bool) -> None:
@@ -1311,6 +1354,73 @@ def check_run_ci_build_success_annotation(verbose: bool) -> None:
     ok("run-ci.py annotates build warnings correctly on a successful build")
 
 
+def check_run_ci_test_failure_filtering(verbose: bool) -> None:
+    """A failed test stage must print only the failing tests' output, recovered
+    per test from Test.xml, instead of dumping LastTest*.log with the whole
+    suite in it. The test name reaches the "::group::" title from that XML, so
+    it must be escaped or a malformed name could end the workflow command and
+    start one of its own (see run-ci.py print_failure_log())."""
+    with tempfile.TemporaryDirectory(prefix="rocprofsys-ci-test-fail-") as temp_dir:
+        temp_path = Path(temp_dir)
+        binary_dir = temp_path / "build"
+        fake_bin_dir = temp_path / "bin"
+        fake_bin_dir.mkdir()
+        fake_tool_log = temp_path / "fake-tools.log"
+
+        for tool in ("cmake", "git", "gcov"):
+            write_fake_tool(fake_bin_dir, tool, fake_tool_log)
+        write_fake_tool(fake_bin_dir, "ctest", fake_tool_log, exit_code=1)
+
+        common_args = [
+            "--name",
+            "local-ci-test-fail-check",
+            "--site",
+            "Local",
+            "-B",
+            str(binary_dir),
+        ]
+        env = {"TERM": "dumb", "GITHUB_ACTIONS": "true"}
+        run_ci_command(
+            ["--stage", "generate", *common_args], binary_dir, fake_bin_dir, env
+        )
+        write_fake_test_results(binary_dir)
+
+        test = run_ci_command(
+            ["--stage", "test", *common_args],
+            binary_dir,
+            fake_bin_dir,
+            env,
+            check=False,
+        )
+        require(
+            test.returncode != 0,
+            "fake failing ctest did not cause the run-ci.py test stage to fail",
+        )
+        require(
+            _TEST_FAIL_SENTINEL in test.stdout,
+            "run-ci.py must print the failing test's output recovered from Test.xml",
+        )
+        require(
+            _TEST_PASS_SENTINEL not in test.stdout,
+            "run-ci.py must not print passing tests' output when a test fails",
+        )
+        require(
+            "::group::test log: bad%25name%0A::error::forged (failed)" in test.stdout,
+            "run-ci.py must escape %, CR and LF in a test name used as a "
+            "::group:: title",
+        )
+        require(
+            not any(
+                line.strip() == "::error::forged" for line in test.stdout.splitlines()
+            ),
+            "an unescaped test name must not be able to emit its own workflow command",
+        )
+
+        if verbose:
+            print(test.stdout)
+    ok("run-ci.py prints only failing tests and escapes their names")
+
+
 def run_checks(args: argparse.Namespace) -> None:
     for path in TARGET_WORKFLOWS + [RUN_CI, SUMMARY_SCRIPT, MATRIX_HELPER, MATRIX_FILE]:
         require(path.exists(), f"required file is missing: {path.relative_to(REPO_ROOT)}")
@@ -1334,6 +1444,7 @@ def run_checks(args: argparse.Namespace) -> None:
     check_run_ci_split_stage_contract(args.verbose)
     check_run_ci_failure_colored_log(args.verbose)
     check_run_ci_build_success_annotation(args.verbose)
+    check_run_ci_test_failure_filtering(args.verbose)
     check_summarize_skipped_tests_unit(args.verbose)
     check_run_ci_skipped_tests_summary(args.verbose)
     check_summarize_junit_results_unit(args.verbose)

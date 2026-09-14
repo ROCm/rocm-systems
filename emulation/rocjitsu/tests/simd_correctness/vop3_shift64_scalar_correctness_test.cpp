@@ -25,6 +25,7 @@
 /// low-word-only read or a high-word-dropping write is visible. No SIMD is
 /// involved; this exercises the plain decode+execute scalar path.
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -105,7 +106,7 @@ struct Fixture {
     }
     wf->set_exec(~0ULL);
     uint32_t words[4] = {w.w0, w.w1, 0u, 0u};
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     ASSERT_NE(inst, nullptr) << "decode failed for " << expect_mnemonic;
     EXPECT_EQ(inst->mnemonic(), expect_mnemonic) << "decoded wrong op";
     cu->execute_instruction(inst, *wf);

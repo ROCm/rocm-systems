@@ -5,20 +5,8 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vglobal.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/compute_unit.h"
-#include "rocjitsu/vm/amdgpu/mem_state.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
-#include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <cstring>
-#include <limits>
 #include <memory>
 
 namespace rocjitsu {
@@ -33,7 +21,7 @@ template <typename VmemMachineInst> uint32_t vflat_vaddr_bits(const VmemMachineI
 
 GlobalLoadU8Vglobal::GlobalLoadU8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_u8", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadU8Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadU8Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -50,22 +38,20 @@ GlobalLoadU8Vglobal::GlobalLoadU8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadU8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalLoadU8Vglobal(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_u8", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadU8Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalLoadI8Vglobal::GlobalLoadI8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_i8", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadI8Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadI8Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -82,23 +68,20 @@ GlobalLoadI8Vglobal::GlobalLoadI8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadI8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->sign_extend = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalLoadI8Vglobal(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_i8", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadI8Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalLoadU16Vglobal::GlobalLoadU16Vglobal(const MachineInst *inst)
     : Vglobal("global_load_u16", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadU16Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadU16Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -115,22 +98,20 @@ GlobalLoadU16Vglobal::GlobalLoadU16Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadU16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalLoadU16Vglobal(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_u16", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadU16Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalLoadI16Vglobal::GlobalLoadI16Vglobal(const MachineInst *inst)
     : Vglobal("global_load_i16", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadI16Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadI16Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -147,23 +128,20 @@ GlobalLoadI16Vglobal::GlobalLoadI16Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadI16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->sign_extend = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalLoadI16Vglobal(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_i16", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadI16Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalLoadB32Vglobal::GlobalLoadB32Vglobal(const MachineInst *inst)
     : Vglobal("global_load_b32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadB32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadB32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -180,22 +158,20 @@ GlobalLoadB32Vglobal::GlobalLoadB32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalLoadB32Vglobal(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadB32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalLoadB64Vglobal::GlobalLoadB64Vglobal(const MachineInst *inst)
     : Vglobal("global_load_b64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadB64Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadB64Vglobal)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -212,22 +188,20 @@ GlobalLoadB64Vglobal::GlobalLoadB64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 2;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalLoadB64Vglobal(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_b64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadB64Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalLoadB96Vglobal::GlobalLoadB96Vglobal(const MachineInst *inst)
     : Vglobal("global_load_b96", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadB96Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadB96Vglobal)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -244,22 +218,20 @@ GlobalLoadB96Vglobal::GlobalLoadB96Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadB96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 3;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalLoadB96Vglobal(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_b96", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadB96Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalLoadB128Vglobal::GlobalLoadB128Vglobal(const MachineInst *inst)
     : Vglobal("global_load_b128", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadB128Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadB128Vglobal)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -276,22 +248,20 @@ GlobalLoadB128Vglobal::GlobalLoadB128Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 4;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalLoadB128Vglobal(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_b128", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadB128Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalStoreB8Vglobal::GlobalStoreB8Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b8", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalStoreB8Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalStoreB8Vglobal)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -308,31 +278,20 @@ GlobalStoreB8Vglobal::GlobalStoreB8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 1);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalStoreB8Vglobal(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_store_b8", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalStoreB8Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalStoreB16Vglobal::GlobalStoreB16Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b16", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalStoreB16Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalStoreB16Vglobal)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -349,31 +308,20 @@ GlobalStoreB16Vglobal::GlobalStoreB16Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 2);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalStoreB16Vglobal(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_store_b16", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalStoreB16Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalStoreB32Vglobal::GlobalStoreB32Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalStoreB32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalStoreB32Vglobal)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -390,31 +338,20 @@ GlobalStoreB32Vglobal::GlobalStoreB32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalStoreB32Vglobal(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_store_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalStoreB32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalStoreB64Vglobal::GlobalStoreB64Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalStoreB64Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalStoreB64Vglobal)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -431,33 +368,20 @@ GlobalStoreB64Vglobal::GlobalStoreB64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 2;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalStoreB64Vglobal(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_store_b64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalStoreB64Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalStoreB96Vglobal::GlobalStoreB96Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b96", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalStoreB96Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalStoreB96Vglobal)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -474,35 +398,20 @@ GlobalStoreB96Vglobal::GlobalStoreB96Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreB96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 3;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 12);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 12 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
-    std::memcpy(&d->store_data[lane * 12 + 8], &val2, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalStoreB96Vglobal(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_store_b96", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalStoreB96Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalStoreB128Vglobal::GlobalStoreB128Vglobal(const MachineInst *inst)
     : Vglobal("global_store_b128", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalStoreB128Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalStoreB128Vglobal)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -519,37 +428,20 @@ GlobalStoreB128Vglobal::GlobalStoreB128Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 4;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 16);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
-    std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 3, lane);
-    std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalStoreB128Vglobal(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_store_b128", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalStoreB128Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalLoadD16U8Vglobal::GlobalLoadD16U8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadD16U8Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadD16U8Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -565,6 +457,17 @@ GlobalLoadD16U8Vglobal::GlobalLoadD16U8Vglobal(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeGlobalLoadD16U8Vglobal(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_d16_u8", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadD16U8Vglobal>(opcode);
+}
+} // namespace detail
 
 void GlobalLoadD16U8Vglobal::implicit_uses(RegisterSet &uses) const {
   Vglobal::implicit_uses(uses);
@@ -572,23 +475,9 @@ void GlobalLoadD16U8Vglobal::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void GlobalLoadD16U8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->d16_lo = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 GlobalLoadD16I8Vglobal::GlobalLoadD16I8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadD16I8Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadD16I8Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -604,6 +493,17 @@ GlobalLoadD16I8Vglobal::GlobalLoadD16I8Vglobal(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeGlobalLoadD16I8Vglobal(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_d16_i8", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadD16I8Vglobal>(opcode);
+}
+} // namespace detail
 
 void GlobalLoadD16I8Vglobal::implicit_uses(RegisterSet &uses) const {
   Vglobal::implicit_uses(uses);
@@ -611,24 +511,9 @@ void GlobalLoadD16I8Vglobal::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void GlobalLoadD16I8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->sign_extend = true;
-  d->d16_lo = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 GlobalLoadD16B16Vglobal::GlobalLoadD16B16Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadD16B16Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadD16B16Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -644,6 +529,17 @@ GlobalLoadD16B16Vglobal::GlobalLoadD16B16Vglobal(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeGlobalLoadD16B16Vglobal(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_d16_b16", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadD16B16Vglobal>(opcode);
+}
+} // namespace detail
 
 void GlobalLoadD16B16Vglobal::implicit_uses(RegisterSet &uses) const {
   Vglobal::implicit_uses(uses);
@@ -651,23 +547,9 @@ void GlobalLoadD16B16Vglobal::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void GlobalLoadD16B16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->d16_lo = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 GlobalLoadD16HiU8Vglobal::GlobalLoadD16HiU8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadD16HiU8Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadD16HiU8Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -683,6 +565,17 @@ GlobalLoadD16HiU8Vglobal::GlobalLoadD16HiU8Vglobal(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeGlobalLoadD16HiU8Vglobal(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_d16_hi_u8", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadD16HiU8Vglobal>(opcode);
+}
+} // namespace detail
 
 void GlobalLoadD16HiU8Vglobal::implicit_uses(RegisterSet &uses) const {
   Vglobal::implicit_uses(uses);
@@ -690,23 +583,9 @@ void GlobalLoadD16HiU8Vglobal::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void GlobalLoadD16HiU8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->d16_hi = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 GlobalLoadD16HiI8Vglobal::GlobalLoadD16HiI8Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadD16HiI8Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadD16HiI8Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -722,6 +601,17 @@ GlobalLoadD16HiI8Vglobal::GlobalLoadD16HiI8Vglobal(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeGlobalLoadD16HiI8Vglobal(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_d16_hi_i8", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadD16HiI8Vglobal>(opcode);
+}
+} // namespace detail
 
 void GlobalLoadD16HiI8Vglobal::implicit_uses(RegisterSet &uses) const {
   Vglobal::implicit_uses(uses);
@@ -729,24 +619,9 @@ void GlobalLoadD16HiI8Vglobal::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void GlobalLoadD16HiI8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->sign_extend = true;
-  d->d16_hi = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 GlobalLoadD16HiB16Vglobal::GlobalLoadD16HiB16Vglobal(const MachineInst *inst)
     : Vglobal("global_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadD16HiB16Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadD16HiB16Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -763,29 +638,26 @@ GlobalLoadD16HiB16Vglobal::GlobalLoadD16HiB16Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeGlobalLoadD16HiB16Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_d16_hi_b16", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadD16HiB16Vglobal>(opcode);
+}
+} // namespace detail
+
 void GlobalLoadD16HiB16Vglobal::implicit_uses(RegisterSet &uses) const {
   Vglobal::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void GlobalLoadD16HiB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->d16_hi = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 GlobalStoreD16HiB8Vglobal::GlobalStoreD16HiB8Vglobal(const MachineInst *inst)
     : Vglobal("global_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalStoreD16HiB8Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalStoreD16HiB8Vglobal)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -802,32 +674,20 @@ GlobalStoreD16HiB8Vglobal::GlobalStoreD16HiB8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreD16HiB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 1);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    val0 >>= 16;
-    d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalStoreD16HiB8Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_store_d16_hi_b8", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalStoreD16HiB8Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalStoreD16HiB16Vglobal::GlobalStoreD16HiB16Vglobal(const MachineInst *inst)
     : Vglobal("global_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalStoreD16HiB16Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalStoreD16HiB16Vglobal)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -844,32 +704,20 @@ GlobalStoreD16HiB16Vglobal::GlobalStoreD16HiB16Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreD16HiB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 2);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    val0 >>= 16;
-    std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalStoreD16HiB16Vglobal(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_store_d16_hi_b16", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalStoreD16HiB16Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalLoadAddtidB32Vglobal::GlobalLoadAddtidB32Vglobal(const MachineInst *inst)
     : Vglobal("global_load_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadAddtidB32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadAddtidB32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0) {
@@ -883,38 +731,20 @@ GlobalLoadAddtidB32Vglobal::GlobalLoadAddtidB32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  {
-    uint64_t exec = wf.exec();
-    d->lane_mask = exec;
-    d->exec_mask = exec;
-    d->wf_size = wf.wf_size();
-    d->wg_id = wf.wg_id();
-    d->wf_id = wf.wf_id();
-    d->cu_path = wf.cu().full_path();
-    uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);
-    int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
-    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(exec & (1ULL << lane)))
-        continue;
-      d->per_lane_addr[lane] =
-          base + static_cast<uint64_t>(offset + static_cast<int64_t>(lane * 4));
-    }
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalLoadAddtidB32Vglobal(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_addtid_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadAddtidB32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalStoreAddtidB32Vglobal::GlobalStoreAddtidB32Vglobal(const MachineInst *inst)
     : Vglobal("global_store_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalStoreAddtidB32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalStoreAddtidB32Vglobal)),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0) {
@@ -928,69 +758,56 @@ GlobalStoreAddtidB32Vglobal::GlobalStoreAddtidB32Vglobal(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  {
-    uint64_t exec = wf.exec();
-    d->lane_mask = exec;
-    d->exec_mask = exec;
-    d->wf_size = wf.wf_size();
-    d->wg_id = wf.wg_id();
-    d->wf_id = wf.wf_id();
-    d->cu_path = wf.cu().full_path();
-    uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);
-    int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
-    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(exec & (1ULL << lane)))
-        continue;
-      d->per_lane_addr[lane] =
-          base + static_cast<uint64_t>(offset + static_cast<int64_t>(lane * 4));
-    }
-  }
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    std::memcpy(&d->store_data[lane * 4], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalStoreAddtidB32Vglobal(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_store_addtid_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalStoreAddtidB32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalInvVglobal::GlobalInvVglobal(const MachineInst *inst)
     : Vglobal("global_inv", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalInvVglobal>()) {
+              selected_exec_fn(InstructionExecutionId::GlobalInvVglobal)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
 
-void GlobalInvVglobal::execute_impl(amdgpu::Wavefront &wf) {
-  wf.cu().l1_vector().invalidate_all();
-  if (auto *l2 = wf.cu().l2())
-    l2->flush_all(wf.process_id());
+namespace detail {
+DecodeResult decodeGlobalInvVglobal(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_inv", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalInvVglobal>(opcode);
 }
+} // namespace detail
 
 GlobalWbVglobal::GlobalWbVglobal(const MachineInst *inst)
     : Vglobal("global_wb", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalWbVglobal>()) {
+              selected_exec_fn(InstructionExecutionId::GlobalWbVglobal)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
 
-void GlobalWbVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+namespace detail {
+DecodeResult decodeGlobalWbVglobal(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_wb", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalWbVglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicSwapB32Vglobal::GlobalAtomicSwapB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicSwapB32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicSwapB32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1012,33 +829,20 @@ GlobalAtomicSwapB32Vglobal::GlobalAtomicSwapB32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicSwapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::SWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicSwapB32Vglobal(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_swap_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicSwapB32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicCmpswapB32Vglobal::GlobalAtomicCmpswapB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicCmpswapB32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicCmpswapB32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1060,35 +864,21 @@ GlobalAtomicCmpswapB32Vglobal::GlobalAtomicCmpswapB32Vglobal(const MachineInst *
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicCmpswapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicCmpswapB32Vglobal(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vglobal::validate_encoding("global_atomic_cmpswap_b32",
+                                 reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicCmpswapB32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicAddU32Vglobal::GlobalAtomicAddU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicAddU32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicAddU32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1110,33 +900,20 @@ GlobalAtomicAddU32Vglobal::GlobalAtomicAddU32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicAddU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::ADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicAddU32Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_add_u32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicAddU32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicSubU32Vglobal::GlobalAtomicSubU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicSubU32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicSubU32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1158,33 +935,20 @@ GlobalAtomicSubU32Vglobal::GlobalAtomicSubU32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicSubU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicSubU32Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_sub_u32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicSubU32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicSubClampU32Vglobal::GlobalAtomicSubClampU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicSubClampU32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicSubClampU32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1206,33 +970,21 @@ GlobalAtomicSubClampU32Vglobal::GlobalAtomicSubClampU32Vglobal(const MachineInst
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicSubClampU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicSubClampU32Vglobal(const MachineInst *opcode,
+                                                  const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vglobal::validate_encoding("global_atomic_sub_clamp_u32",
+                                 reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicSubClampU32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicMinI32Vglobal::GlobalAtomicMinI32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicMinI32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicMinI32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1254,33 +1006,20 @@ GlobalAtomicMinI32Vglobal::GlobalAtomicMinI32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMinI32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::SMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicMinI32Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_min_i32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicMinI32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicMinU32Vglobal::GlobalAtomicMinU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicMinU32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicMinU32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1302,33 +1041,20 @@ GlobalAtomicMinU32Vglobal::GlobalAtomicMinU32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMinU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::UMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicMinU32Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_min_u32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicMinU32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicMaxI32Vglobal::GlobalAtomicMaxI32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicMaxI32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicMaxI32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1350,33 +1076,20 @@ GlobalAtomicMaxI32Vglobal::GlobalAtomicMaxI32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMaxI32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::SMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicMaxI32Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_max_i32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicMaxI32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicMaxU32Vglobal::GlobalAtomicMaxU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicMaxU32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicMaxU32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1398,33 +1111,20 @@ GlobalAtomicMaxU32Vglobal::GlobalAtomicMaxU32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMaxU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::UMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicMaxU32Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_max_u32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicMaxU32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicAndB32Vglobal::GlobalAtomicAndB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicAndB32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicAndB32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1446,33 +1146,20 @@ GlobalAtomicAndB32Vglobal::GlobalAtomicAndB32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicAndB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::AND;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicAndB32Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_and_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicAndB32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicOrB32Vglobal::GlobalAtomicOrB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicOrB32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicOrB32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1494,33 +1181,20 @@ GlobalAtomicOrB32Vglobal::GlobalAtomicOrB32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicOrB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::OR;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicOrB32Vglobal(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_or_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicOrB32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicXorB32Vglobal::GlobalAtomicXorB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicXorB32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicXorB32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1542,33 +1216,20 @@ GlobalAtomicXorB32Vglobal::GlobalAtomicXorB32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicXorB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::XOR;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicXorB32Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_xor_b32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicXorB32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicIncU32Vglobal::GlobalAtomicIncU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicIncU32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicIncU32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1590,33 +1251,20 @@ GlobalAtomicIncU32Vglobal::GlobalAtomicIncU32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicIncU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::INC;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicIncU32Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_inc_u32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicIncU32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicDecU32Vglobal::GlobalAtomicDecU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicDecU32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicDecU32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1638,33 +1286,20 @@ GlobalAtomicDecU32Vglobal::GlobalAtomicDecU32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicDecU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::DEC;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicDecU32Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_dec_u32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicDecU32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicSwapB64Vglobal::GlobalAtomicSwapB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicSwapB64Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicSwapB64Vglobal)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1686,35 +1321,20 @@ GlobalAtomicSwapB64Vglobal::GlobalAtomicSwapB64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicSwapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::SWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicSwapB64Vglobal(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_swap_b64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicSwapB64Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicCmpswapB64Vglobal::GlobalAtomicCmpswapB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicCmpswapB64Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicCmpswapB64Vglobal)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1736,39 +1356,21 @@ GlobalAtomicCmpswapB64Vglobal::GlobalAtomicCmpswapB64Vglobal(const MachineInst *
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicCmpswapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 16);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
-    std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 3, lane);
-    std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicCmpswapB64Vglobal(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vglobal::validate_encoding("global_atomic_cmpswap_b64",
+                                 reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicCmpswapB64Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicAddU64Vglobal::GlobalAtomicAddU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicAddU64Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicAddU64Vglobal)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1790,35 +1392,20 @@ GlobalAtomicAddU64Vglobal::GlobalAtomicAddU64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicAddU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::ADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicAddU64Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_add_u64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicAddU64Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicSubU64Vglobal::GlobalAtomicSubU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicSubU64Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicSubU64Vglobal)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1840,35 +1427,20 @@ GlobalAtomicSubU64Vglobal::GlobalAtomicSubU64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicSubU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicSubU64Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_sub_u64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicSubU64Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicMinI64Vglobal::GlobalAtomicMinI64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicMinI64Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicMinI64Vglobal)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1890,35 +1462,20 @@ GlobalAtomicMinI64Vglobal::GlobalAtomicMinI64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMinI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::SMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicMinI64Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_min_i64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicMinI64Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicMinU64Vglobal::GlobalAtomicMinU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicMinU64Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicMinU64Vglobal)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1940,35 +1497,20 @@ GlobalAtomicMinU64Vglobal::GlobalAtomicMinU64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMinU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::UMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicMinU64Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_min_u64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicMinU64Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicMaxI64Vglobal::GlobalAtomicMaxI64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicMaxI64Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicMaxI64Vglobal)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1990,35 +1532,20 @@ GlobalAtomicMaxI64Vglobal::GlobalAtomicMaxI64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMaxI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::SMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicMaxI64Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_max_i64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicMaxI64Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicMaxU64Vglobal::GlobalAtomicMaxU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicMaxU64Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicMaxU64Vglobal)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2040,35 +1567,20 @@ GlobalAtomicMaxU64Vglobal::GlobalAtomicMaxU64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMaxU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::UMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicMaxU64Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_max_u64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicMaxU64Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicAndB64Vglobal::GlobalAtomicAndB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicAndB64Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicAndB64Vglobal)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2090,35 +1602,20 @@ GlobalAtomicAndB64Vglobal::GlobalAtomicAndB64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicAndB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::AND;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicAndB64Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_and_b64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicAndB64Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicOrB64Vglobal::GlobalAtomicOrB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicOrB64Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicOrB64Vglobal)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2140,35 +1637,20 @@ GlobalAtomicOrB64Vglobal::GlobalAtomicOrB64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicOrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::OR;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicOrB64Vglobal(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_or_b64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicOrB64Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicXorB64Vglobal::GlobalAtomicXorB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicXorB64Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicXorB64Vglobal)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2190,35 +1672,20 @@ GlobalAtomicXorB64Vglobal::GlobalAtomicXorB64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicXorB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::XOR;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicXorB64Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_xor_b64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicXorB64Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicIncU64Vglobal::GlobalAtomicIncU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicIncU64Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicIncU64Vglobal)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2240,35 +1707,20 @@ GlobalAtomicIncU64Vglobal::GlobalAtomicIncU64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicIncU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::INC;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicIncU64Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_inc_u64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicIncU64Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicDecU64Vglobal::GlobalAtomicDecU64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicDecU64Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicDecU64Vglobal)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2290,44 +1742,38 @@ GlobalAtomicDecU64Vglobal::GlobalAtomicDecU64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicDecU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::DEC;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicDecU64Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_dec_u64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicDecU64Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalWbinvVglobal::GlobalWbinvVglobal(const MachineInst *inst)
     : Vglobal("global_wbinv", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalWbinvVglobal>()) {
+              selected_exec_fn(InstructionExecutionId::GlobalWbinvVglobal)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
 
-void GlobalWbinvVglobal::execute_impl(amdgpu::Wavefront &wf) { wf.cu().l1_vector().flush_all(); }
+namespace detail {
+DecodeResult decodeGlobalWbinvVglobal(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_wbinv", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalWbinvVglobal>(opcode);
+}
+} // namespace detail
 
 GlobalAtomicCondSubU32Vglobal::GlobalAtomicCondSubU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicCondSubU32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicCondSubU32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2349,33 +1795,21 @@ GlobalAtomicCondSubU32Vglobal::GlobalAtomicCondSubU32Vglobal(const MachineInst *
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicCondSubU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicCondSubU32Vglobal(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vglobal::validate_encoding("global_atomic_cond_sub_u32",
+                                 reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicCondSubU32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicMinNumF32Vglobal::GlobalAtomicMinNumF32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicMinNumF32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicMinNumF32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2397,33 +1831,21 @@ GlobalAtomicMinNumF32Vglobal::GlobalAtomicMinNumF32Vglobal(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMinNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::FMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicMinNumF32Vglobal(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vglobal::validate_encoding("global_atomic_min_num_f32",
+                                 reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicMinNumF32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicMaxNumF32Vglobal::GlobalAtomicMaxNumF32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicMaxNumF32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicMaxNumF32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2445,33 +1867,21 @@ GlobalAtomicMaxNumF32Vglobal::GlobalAtomicMaxNumF32Vglobal(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMaxNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::FMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicMaxNumF32Vglobal(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vglobal::validate_encoding("global_atomic_max_num_f32",
+                                 reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicMaxNumF32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
     : Vglobal("global_load_block", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadBlockVglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadBlockVglobal)),
       vdst(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2490,22 +1900,20 @@ GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 32;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalLoadBlockVglobal(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_block", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadBlockVglobal>(opcode);
 }
+} // namespace detail
 
 GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
     : Vglobal("global_store_block", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalStoreBlockVglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalStoreBlockVglobal)),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -2524,93 +1932,20 @@ GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 32;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 128);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 128 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 128 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
-    std::memcpy(&d->store_data[lane * 128 + 8], &val2, 4);
-    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 3, lane);
-    std::memcpy(&d->store_data[lane * 128 + 12], &val3, 4);
-    uint32_t val4 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 4, lane);
-    std::memcpy(&d->store_data[lane * 128 + 16], &val4, 4);
-    uint32_t val5 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 5, lane);
-    std::memcpy(&d->store_data[lane * 128 + 20], &val5, 4);
-    uint32_t val6 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 6, lane);
-    std::memcpy(&d->store_data[lane * 128 + 24], &val6, 4);
-    uint32_t val7 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 7, lane);
-    std::memcpy(&d->store_data[lane * 128 + 28], &val7, 4);
-    uint32_t val8 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 8, lane);
-    std::memcpy(&d->store_data[lane * 128 + 32], &val8, 4);
-    uint32_t val9 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 9, lane);
-    std::memcpy(&d->store_data[lane * 128 + 36], &val9, 4);
-    uint32_t val10 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 10, lane);
-    std::memcpy(&d->store_data[lane * 128 + 40], &val10, 4);
-    uint32_t val11 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 11, lane);
-    std::memcpy(&d->store_data[lane * 128 + 44], &val11, 4);
-    uint32_t val12 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 12, lane);
-    std::memcpy(&d->store_data[lane * 128 + 48], &val12, 4);
-    uint32_t val13 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 13, lane);
-    std::memcpy(&d->store_data[lane * 128 + 52], &val13, 4);
-    uint32_t val14 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 14, lane);
-    std::memcpy(&d->store_data[lane * 128 + 56], &val14, 4);
-    uint32_t val15 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 15, lane);
-    std::memcpy(&d->store_data[lane * 128 + 60], &val15, 4);
-    uint32_t val16 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 16, lane);
-    std::memcpy(&d->store_data[lane * 128 + 64], &val16, 4);
-    uint32_t val17 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 17, lane);
-    std::memcpy(&d->store_data[lane * 128 + 68], &val17, 4);
-    uint32_t val18 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 18, lane);
-    std::memcpy(&d->store_data[lane * 128 + 72], &val18, 4);
-    uint32_t val19 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 19, lane);
-    std::memcpy(&d->store_data[lane * 128 + 76], &val19, 4);
-    uint32_t val20 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 20, lane);
-    std::memcpy(&d->store_data[lane * 128 + 80], &val20, 4);
-    uint32_t val21 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 21, lane);
-    std::memcpy(&d->store_data[lane * 128 + 84], &val21, 4);
-    uint32_t val22 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 22, lane);
-    std::memcpy(&d->store_data[lane * 128 + 88], &val22, 4);
-    uint32_t val23 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 23, lane);
-    std::memcpy(&d->store_data[lane * 128 + 92], &val23, 4);
-    uint32_t val24 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 24, lane);
-    std::memcpy(&d->store_data[lane * 128 + 96], &val24, 4);
-    uint32_t val25 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 25, lane);
-    std::memcpy(&d->store_data[lane * 128 + 100], &val25, 4);
-    uint32_t val26 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 26, lane);
-    std::memcpy(&d->store_data[lane * 128 + 104], &val26, 4);
-    uint32_t val27 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 27, lane);
-    std::memcpy(&d->store_data[lane * 128 + 108], &val27, 4);
-    uint32_t val28 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 28, lane);
-    std::memcpy(&d->store_data[lane * 128 + 112], &val28, 4);
-    uint32_t val29 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 29, lane);
-    std::memcpy(&d->store_data[lane * 128 + 116], &val29, 4);
-    uint32_t val30 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 30, lane);
-    std::memcpy(&d->store_data[lane * 128 + 120], &val30, 4);
-    uint32_t val31 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 31, lane);
-    std::memcpy(&d->store_data[lane * 128 + 124], &val31, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalStoreBlockVglobal(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_store_block", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalStoreBlockVglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicAddF32Vglobal::GlobalAtomicAddF32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicAddF32Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicAddF32Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2632,33 +1967,20 @@ GlobalAtomicAddF32Vglobal::GlobalAtomicAddF32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicAddF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::FADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicAddF32Vglobal(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_atomic_add_f32", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicAddF32Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalLoadTrB128Vglobal::GlobalLoadTrB128Vglobal(const MachineInst *inst)
     : Vglobal("global_load_tr_b128", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadTrB128Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadTrB128Vglobal)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2675,23 +1997,20 @@ GlobalLoadTrB128Vglobal::GlobalLoadTrB128Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadTrB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 4;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->transpose = 4;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalLoadTrB128Vglobal(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_tr_b128", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadTrB128Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalLoadTrB64Vglobal::GlobalLoadTrB64Vglobal(const MachineInst *inst)
     : Vglobal("global_load_tr_b64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalLoadTrB64Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalLoadTrB64Vglobal)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2708,23 +2027,20 @@ GlobalLoadTrB64Vglobal::GlobalLoadTrB64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadTrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 2;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->transpose = 3;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalLoadTrB64Vglobal(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vglobal::validate_encoding(
+      "global_load_tr_b64", reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalLoadTrB64Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicPkAddF16Vglobal::GlobalAtomicPkAddF16Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicPkAddF16Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicPkAddF16Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2746,33 +2062,21 @@ GlobalAtomicPkAddF16Vglobal::GlobalAtomicPkAddF16Vglobal(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicPkAddF16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::FADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicPkAddF16Vglobal(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vglobal::validate_encoding("global_atomic_pk_add_f16",
+                                 reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicPkAddF16Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicPkAddBf16Vglobal::GlobalAtomicPkAddBf16Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicPkAddBf16Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicPkAddBf16Vglobal)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2794,33 +2098,21 @@ GlobalAtomicPkAddBf16Vglobal::GlobalAtomicPkAddBf16Vglobal(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicPkAddBf16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::FADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicPkAddBf16Vglobal(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vglobal::validate_encoding("global_atomic_pk_add_bf16",
+                                 reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicPkAddBf16Vglobal>(opcode);
 }
+} // namespace detail
 
 GlobalAtomicOrderedAddB64Vglobal::GlobalAtomicOrderedAddB64Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_ordered_add_b64", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalAtomicOrderedAddB64Vglobal>()),
+              selected_exec_fn(InstructionExecutionId::GlobalAtomicOrderedAddB64Vglobal)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2842,31 +2134,17 @@ GlobalAtomicOrderedAddB64Vglobal::GlobalAtomicOrderedAddB64Vglobal(const Machine
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicOrderedAddB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::ADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
-  d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.vsrc;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeGlobalAtomicOrderedAddB64Vglobal(const MachineInst *opcode,
+                                                    const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vglobal::validate_encoding("global_atomic_ordered_add_b64",
+                                 reinterpret_cast<const Vglobal::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<GlobalAtomicOrderedAddB64Vglobal>(opcode);
 }
+} // namespace detail
 
 } // namespace rdna4
 } // namespace rocjitsu

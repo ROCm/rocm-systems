@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: MIT
  */
 
+// This is the entry point of all APIs we need to support. This file needs to
+// guarantee ABI stability so we need to see all versions.
 #include <hip/amd_detail/hip_api_trace.hpp>
+#include <hip/hip_deprecated.h> // For hipDeviceProp_tR0000
 #include "hip_internal.hpp"
 #include "utils/flags.hpp"
 #include "utils/debug.hpp"
@@ -179,7 +182,7 @@ hipError_t hipBindTextureToMipmappedArray(const textureReference* tex,
   return hip::GetHipDispatchTable()->hipBindTextureToMipmappedArray_fn(tex, mipmappedArray, desc);
   CATCH;
 }
-extern "C" hipError_t hipChooseDevice(int* device, const hipDeviceProp_t* prop) {
+extern "C" hipError_t hipChooseDeviceR0600(int* device, const hipDeviceProp_tR0600* prop) {
   TRY;
   return hip::GetHipDispatchTable()->hipChooseDevice_fn(device, prop);
   CATCH;
@@ -400,6 +403,11 @@ hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPrio
 hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
   TRY;
   return hip::GetHipDispatchTable()->hipDeviceGetUuid_fn(uuid, device);
+  CATCH;
+}
+hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_t device) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDeviceGetLuid_fn(luid, deviceNodeMask, device);
   CATCH;
 }
 hipError_t hipDeviceGraphMemTrim(int device) {
@@ -1314,6 +1322,11 @@ hipError_t hipDrvGraphAddMemsetNode(hipGraphNode_t* phGraphNode, hipGraph_t hGra
 hipError_t hipInit(unsigned int flags) {
   TRY;
   return hip::GetHipDispatchTable()->hipInit_fn(flags);
+  CATCH;
+}
+hipError_t hipInitDevice(int device, unsigned int deviceFlags, unsigned int flags) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipInitDevice_fn(device, deviceFlags, flags);
   CATCH;
 }
 hipError_t hipIpcCloseMemHandle(void* devPtr) {

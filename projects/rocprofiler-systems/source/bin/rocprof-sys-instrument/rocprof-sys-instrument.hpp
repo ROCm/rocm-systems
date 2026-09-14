@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/path.hpp"
 #include "core/common_types.hpp"
 #include "core/demangler.hpp"
 #include "function_signature.hpp"
@@ -11,8 +12,7 @@
 #include "log.hpp"
 #include "module_function.hpp"
 
-#include <spdlog/fmt/ranges.h>
-#include <timemory/utility/filepath.hpp>
+#include <fmt/ranges.h>
 
 #include <dlfcn.h>
 #include <string>
@@ -27,17 +27,6 @@ bool
 is_text_file(const std::string& filename);
 
 //======================================================================================//
-
-inline string_t
-to_lower(string_t s)
-{
-    for(auto& itr : s)
-        itr = tolower(itr);
-    return s;
-}
-//
-//======================================================================================//
-//
 template <typename Tp>
     requires(!std::is_same_v<Tp, std::string>)
 snippet_pointer_t
@@ -63,7 +52,7 @@ snippet_pointer_vec_t
 get_snippets(Args&&... args)
 {
     snippet_pointer_vec_t _tmp{};
-    TIMEMORY_FOLD_EXPRESSION(_tmp.push_back(get_snippet(std::forward<Args>(args))));
+    (_tmp.push_back(get_snippet(std::forward<Args>(args))), ...);
     return _tmp;
 }
 //
@@ -130,13 +119,13 @@ private:
 //======================================================================================//
 //
 static inline bool
-rocprofsys_get_is_executable(std::string_view _cmd, bool _default_v)
+rocprofsys_get_is_executable(const std::string& _cmd, bool _default_v)
 {
     bool _is_executable = _default_v;
 
-    if(_cmd.empty())
+    if(!_cmd.empty())
     {
-        if(!tim::filepath::exists(std::string{ _cmd }))
+        if(!rocprofsys::path::is_regular_file(_cmd))
         {
             verbprintf(
                 0,
@@ -246,82 +235,6 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
     }
 
     return mutatee;
-}
-//
-//======================================================================================//
-//
-TIMEMORY_NOINLINE inline void
-rocprofsys_thread_exit(thread_t* thread, BPatch_exitType exit_type)
-{
-    if(!thread) return;
-
-    ROCPROFSYS_ADD_LOG_ENTRY("Executing the thread callback");
-
-    BPatch_process* app = thread->getProcess();
-
-    if(!terminate_expr)
-    {
-        fprintf(stderr, "[rocprof-sys][exe] continuing execution\n");
-        app->continueExecution();
-        return;
-    }
-
-    switch(exit_type)
-    {
-        case ExitedNormally:
-        {
-            fprintf(stderr, "[rocprof-sys][exe] Thread exited normally\n");
-            break;
-        }
-        case ExitedViaSignal:
-        {
-            fprintf(stderr, "[rocprof-sys][exe] Thread terminated unexpectedly\n");
-            break;
-        }
-        case NoExit:
-        default:
-        {
-            fprintf(stderr, "[rocprof-sys][exe] %s invoked with NoExit\n", __FUNCTION__);
-            break;
-        }
-    }
-
-    // terminate_expr = nullptr;
-    thread->oneTimeCode(*terminate_expr);
-
-    fprintf(stderr, "[rocprof-sys][exe] continuing execution\n");
-    app->continueExecution();
-}
-//
-//======================================================================================//
-//
-TIMEMORY_NOINLINE inline void
-rocprofsys_fork_callback(thread_t* parent, thread_t* child)
-{
-    ROCPROFSYS_ADD_LOG_ENTRY("Executing the fork callback");
-
-    if(child)
-    {
-        auto* app = child->getProcess();
-        if(app)
-        {
-            verbprintf(4, "Stopping execution and detaching child fork...\n");
-            app->stopExecution();
-            app->detach(true);
-            // app->terminateExecution();
-            // app->continueExecution();
-        }
-    }
-
-    if(parent)
-    {
-        auto* app = parent->getProcess();
-        if(app)
-        {
-            verbprintf(4, "Continuing execution on parent after fork callback...\n");
-            app->continueExecution();
-        }
-    }
 }
 //
 //======================================================================================//

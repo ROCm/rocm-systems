@@ -1,9 +1,18 @@
-// Modification Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier: MIT
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "sym_kernels.h"
+#if defined(__HIP_PLATFORM_AMD__)
 #include "symmetric/kernel.h"
 #include "symmetric/primitives.h"
+#else
+#include "kernel.cuh"
+#include "primitives.cuh"
+#endif
 
 template <int BytePerPack, int UnrollPacks, int UnrollPeers, bool EnableTma>
 static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int t, bool waitNeeded,
@@ -15,91 +24,118 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
   int lane = t % WARP_SIZE;
   int const& rank = handler.comm.rank;
   int const& nRanks = handler.comm.nRanks;
-  constexpr size_t tileSize = UnrollPacks * WARP_SIZE * BytePerPack;
 
-  Pack* inpPacks = (Pack*)input.localPtr() + intptr_t(w) * UnrollPacks * WARP_SIZE + (EnableTma ? 0 : lane);
-  ncclSymPtr<Pack> outPacks = (ncclSymPtr<Pack>)output + intptr_t(w) * UnrollPacks * WARP_SIZE + (EnableTma ? 0 : lane);
+  Pack* inpPacks = (Pack*)input.localPtr() + intptr_t(w) * UnrollPacks * WARP_SIZE +
+                   (
+#if __CUDA_ARCH__ >= 1000
+                     EnableTma ? 0 :
+#endif
+                                 lane);
+
+  ncclSymPtr<Pack> outPacks = (ncclSymPtr<Pack>)output + intptr_t(w) * UnrollPacks * WARP_SIZE +
+                              (
+#if __CUDA_ARCH__ >= 1000
+                                EnableTma ? 0 :
+#endif
+                                            lane);
+
   Pack tmp[UnrollPacks];
 
+#if __CUDA_ARCH__ >= 1000
   int lw = threadIdx.x / WARP_SIZE;
   extern __shared__ char smemScratch[];
   using tmaSmemStruct_t = tmaSmemStruct<Pack, UnrollPacks>;
   constexpr int smemSizePerWarp = ncclTmaShmemScratchWarpSize();
   tmaSmemStruct_t* tmaSmem = reinterpret_cast<tmaSmemStruct_t*>(smemScratch + lw * smemSizePerWarp);
+  constexpr size_t tileSize = UnrollPacks * WARP_SIZE * BytePerPack;
+#endif
   bool skip = false; // all lanes issue loads/stores
 
+#if __CUDA_ARCH__ >= 1000
   if NCCL_IF_CONSTEXPR (EnableTma) {
     if (lane == 0) {
       // lane0 issues async.cp.bulk commands
-      __mbarrier_init(&tmaSmem->bar, 1);
+      init(&tmaSmem->bar, 1);
     } else {
       // other lanes can skip the loop
       skip = true;
     }
   }
+#endif
 
   nIters -= w;
   if (0 < nIters) {
+#if __CUDA_ARCH__ >= 1000
     if NCCL_IF_CONSTEXPR (EnableTma) {
       if (lane == 0) {
-        cp_async_bulk_global_to_shared(tmaSmem->buff[0], inpPacks, &tmaSmem->bar, tileSize);
-        __mbarrier_token_t token = barrier_arrive1_tx_relaxed(&tmaSmem->bar, tileSize);
-        while (!barrier_try_wait_token_relaxed(&tmaSmem->bar, token)) {
-        }
+        cuda::device::memcpy_async_tx(tmaSmem->buff[0], inpPacks, cuda::aligned_size_t<16>(tileSize), tmaSmem->bar);
+        cuda::barrier<cuda::thread_scope_block>::arrival_token token =
+          cuda::device::barrier_arrive_tx(tmaSmem->bar, 1, tileSize);
+        tmaSmem->bar.wait(std::move(token));
       }
-    } else {
-#pragma unroll
+    } else
+#endif
+    {
+      NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < UnrollPacks; u++) {
         tmp[u] = inpPacks[u * WARP_SIZE];
       }
     }
   }
 
-  if (waitNeeded) bar.wait(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
+  if (waitNeeded) bar.wait(ncclCoopCta(), cuda::memory_order_acquire);
 
   if (0 < nIters) {
     while (true) {
       int dr = inPlace ? 1 : 0;
       int r = rank + dr;
       if (r == nRanks) r = 0;
-#pragma unroll 2
+      NVCC_PRAGMA_UNROLL(2)
       for (int partial = 0; partial <= 1 && !skip; partial++) {
-#pragma unroll 1
+        NVCC_PRAGMA_UNROLL_DISABLED
         for (int i = 0; partial ? i < 1 : (dr + UnrollPeers <= nRanks); partial ? i++ : (dr += UnrollPeers)) {
-#pragma unroll
+          NVCC_PRAGMA_UNROLL_AUTO
           for (int ur = 0; ur < UnrollPeers - partial; ur++) {
             if (partial && dr == nRanks) break;
+#if __CUDA_ARCH__ >= 1000
             if NCCL_IF_CONSTEXPR (EnableTma) {
-              cp_async_bulk_shared_to_global(outPacks.lsaPtr(r), tmaSmem->buff[0], tileSize);
-            } else {
-#pragma unroll UnrollPacks
+              ptx::cp_async_bulk(ptx::space_global, ptx::space_shared, outPacks.lsaPtr(r), tmaSmem->buff[0], tileSize);
+            } else
+#endif
+            {
+              NVCC_PRAGMA_UNROLL(UnrollPacks)
               for (int u = 0; u < UnrollPacks; u++) {
                 outPacks.lsaPtr(r)[u * WARP_SIZE] = tmp[u];
               }
             }
             if (++r == nRanks) r = 0;
           }
+#if __CUDA_ARCH__ >= 1000
           if NCCL_IF_CONSTEXPR (EnableTma) {
             if (lane == 0) {
-              cp_async_bulk_commit_group();
-              cp_async_bulk_wait_all_read();
+              ptx::cp_async_bulk_commit_group();
+              ptx::cp_async_bulk_wait_group_read(ptx::n32_t<0>());
             }
           }
+#endif
         }
       }
       inpPacks += intptr_t(wn) * UnrollPacks * WARP_SIZE;
       outPacks += intptr_t(wn) * UnrollPacks * WARP_SIZE;
       nIters -= wn;
       if (nIters <= 0) break;
+#if __CUDA_ARCH__ >= 1000
       if NCCL_IF_CONSTEXPR (EnableTma) {
         if (lane == 0) {
-          cp_async_bulk_global_to_shared(tmaSmem->buff[0], inpPacks, &tmaSmem->bar, tileSize);
-          __mbarrier_token_t token = barrier_arrive1_tx_relaxed(&tmaSmem->bar, tileSize);
-          while (!barrier_try_wait_token_relaxed(&tmaSmem->bar, token)) {
-          }
+          cuda::device::memcpy_async_tx(tmaSmem->buff[0], inpPacks, cuda::aligned_size_t<16>(tileSize), tmaSmem->bar);
+          cuda::barrier<cuda::thread_scope_block>::arrival_token token =
+            cuda::device::barrier_arrive_tx(tmaSmem->bar, 1, tileSize);
+          tmaSmem->bar.wait(std::move(token));
         }
-      } else {
-#pragma unroll
+      } else
+#endif
+      {
+        NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < UnrollPacks; u++) {
           tmp[u] = inpPacks[u * WARP_SIZE];
         }
@@ -115,22 +151,22 @@ static __device__ void bcastEnds(ncclSymkArgsHandler const& handler, int tn, int
   int const& nRanks = handler.comm.nRanks;
   BytePack<sizeof(T)>* inpPacks = (BytePack<sizeof(T)>*)input.localPtr();
   ncclSymPtr<BytePack<sizeof(T)>> outPacks = (ncclSymPtr<BytePack<sizeof(T)>>)output;
-#pragma unroll 1
+  NVCC_PRAGMA_UNROLL_DISABLED
   for (size_t i = t; i < nPreElts + nSufElts; i += tn) {
     size_t elt = i < nPreElts ? i : nElts - nPreElts - nSufElts + i;
     BytePack<sizeof(T)> tmp = inpPacks[elt];
     int dr = inPlace ? 1 : 0;
     int r = rank + dr;
     if (r == nRanks) r = 0;
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (; dr + UnrollPeers <= nRanks; dr += UnrollPeers) {
-#pragma unroll UnrollPeers
+      NVCC_PRAGMA_UNROLL(UnrollPeers)
       for (int u = 0; u < UnrollPeers; u++) {
         outPacks.lsaPtr(r)[elt] = tmp;
         if (++r == nRanks) r = 0;
       }
     }
-#pragma unroll UnrollPeers
+    NVCC_PRAGMA_UNROLL(UnrollPeers)
     for (int u = 0; u < UnrollPeers; u++) {
       if (dr + u == nRanks) break;
       outPacks.lsaPtr(r)[elt] = tmp;
@@ -148,11 +184,36 @@ static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, 
   uint32_t nBlocks_rcp32 = nccl::utility::idivRcp32_upto64(nBlocks);
 
   uint32_t alignment = uint32_t(input.offset - output.offset);
-  uint32_t nPreBytes = (EnableTma && alignment % 256 == 0) ? (256 - input.offset) % 256 : (16 - input.offset) % 16;
+  uint32_t nPreBytes =
+#if __CUDA_ARCH__ >= 1000
+    (EnableTma && alignment % 256 == 0) ? (256 - input.offset) % 256 :
+#endif
+                                          (16 - input.offset) % 16;
+
   nPreBytes = min((size_t)nPreBytes, nBytes);
   uintptr_t cursor = nPreBytes;
 
   constexpr int MinWarpPerBlock = 4;
+
+#if __CUDA_ARCH__ >= 1000
+  if NCCL_IF_CONSTEXPR (EnableTma) {
+    if (alignment % 256 == 0) {
+      constexpr int BytePerPack = 16, UnrollPacks = 16, UnrollPeers = 2;
+      constexpr int BytePerChunk = MinWarpPerBlock * UnrollPacks * WARP_SIZE * BytePerPack;
+      uint32_t chunks = (nBytes - cursor) / BytePerChunk;
+      chunks -= imodFast32(chunks, nBlocks, nBlocks_rcp32);
+      if (chunks != 0) {
+        uintptr_t cursorAfter = cursor + uintptr_t(chunks) * BytePerChunk;
+        bcastDeep<BytePerPack, UnrollPacks, UnrollPeers, EnableTma>(handler, tn, t, waitNeeded, bar,
+                                                                    (ncclSymPtr<char>)input + cursor,
+                                                                    (ncclSymPtr<char>)output + cursor, inPlace,
+                                                                    chunks * MinWarpPerBlock);
+        cursor = cursorAfter;
+        waitNeeded = false;
+      }
+    }
+  }
+#endif
 
   if (alignment % 16 == 0) {
     constexpr int BytePerPack = 16, UnrollPacks = 4, UnrollPeers = 2;
@@ -185,7 +246,7 @@ static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, 
     }
   }
 
-  if (waitNeeded) bar.wait(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
+  if (waitNeeded) bar.wait(ncclCoopCta(), cuda::memory_order_acquire);
 
   constexpr int UnrollPeers = 8;
   size_t nSufElts = (nBytes - cursor) / sizeof(T);
@@ -198,7 +259,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_ST_impl(ncclSymkDevWorkArg
   ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), handler.comm, ncclTeamTagLsa(), blockIdx.x};
   int const& rank = handler.comm.rank;
 
-  bar.arrive(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
+  bar.arrive(ncclCoopCta(), cuda::memory_order_relaxed);
 
   bool waitNeeded = true;
   handler.forEachWork<char>([&] __device__(int block, int nBlocks, size_t nElts, size_t nAllElts,
@@ -211,7 +272,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_ST_impl(ncclSymkDevWorkArg
     waitNeeded = false;
   });
 
-  bar.sync(ncclCoopCta(), NCCL_MEM_ORDER_RELEASE);
+  bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
 
 __device__ __forceinline__ void ncclSymkRun_AllGather_ST(ncclSymkDevWorkArgs const* args) {
@@ -228,7 +289,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_STMC_impl(ncclSymkDevWorkA
   ncclLsaBarrierSession<ncclCoopCta> bar(ncclCoopCta(), handler.comm, ncclTeamTagLsa(), blockIdx.x, /*multimem=*/true);
   int const& rank = handler.comm.rank;
 
-  bar.sync(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
+  bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
 
   handler.forEachWork<char>([&] __device__(int block, int nBlocks, size_t nElts, size_t nAllElts,
                                            ncclSymPtr<char> input, ncclSymPtr<char> output) {
@@ -239,7 +300,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_STMC_impl(ncclSymkDevWorkA
     bcastMultimem<char, EnableTma>(handler, tn, t, input, output + rank * nAllElts, nElts);
   });
 
-  bar.sync(ncclCoopCta(), NCCL_MEM_ORDER_RELEASE);
+  bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
 
 __device__ __forceinline__ void ncclSymkRun_AllGather_STMC(ncclSymkDevWorkArgs const* args) {
@@ -260,7 +321,7 @@ static __device__ void allgather_LL_body(ncclSymkArgsHandler& handler, ncclLLA2A
   int t = threadIdx.x;
   constexpr int tn = ncclSymkMaxThreads;
 
-#pragma unroll 1
+  NVCC_PRAGMA_UNROLL_DISABLED
   while (0 < nElts) {
     int nIterPacks = min(nPacks, tn);
     if (t < nIterPacks) {
@@ -273,13 +334,13 @@ static __device__ void allgather_LL_body(ncclSymkArgsHandler& handler, ncclLLA2A
     int peer = t / nIterPacks;
     int pack = t % nIterPacks;
 #if 1
-      // NOTE: Unrolling speedup on eos nranks=8 size=64K: 5.7us vs 6.7us
+    // NOTE: Unrolling speedup on eos nranks=8 size=64K: 5.7us vs 6.7us
     constexpr int Unroll = 4;
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (int i = t; i < (nRanks * nIterPacks & -(Unroll * tn)); i += Unroll * tn) {
       Pack got[Unroll];
       lla2a.template recvUnrolled<Unroll, Unroll>(i, Unroll, tn, /*&*/ got);
-#pragma unroll
+      NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < Unroll; u++) {
         storePack<Pack>(output + peer * nStrideElts, pack * EltPerPack, nElts, got[u]);
         peer += tn_div_nPacks;
@@ -297,7 +358,7 @@ static __device__ void allgather_LL_body(ncclSymkArgsHandler& handler, ncclLLA2A
     if (n != 0) {
       Pack got[Unroll];
       lla2a.template recvUnrolled<1, Unroll>(i, n, tn, /*&*/ got);
-#pragma unroll
+      NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < Unroll; u++) {
         if (u != 0 && u == n) break;
         storePack(output + peer * nStrideElts, pack * EltPerPack, nElts, got[u]);
@@ -310,8 +371,8 @@ static __device__ void allgather_LL_body(ncclSymkArgsHandler& handler, ncclLLA2A
       }
     }
 #else
-      // The non-unrolled but "obviously correct" implementation for reference.
-#pragma unroll 1
+    // The non-unrolled but "obviously correct" implementation for reference.
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (int i = t; i < nRanks * nIterPacks; i += tn) {
       Pack got = lla2a.template recv<Pack>(i);
       storePack(output + peer * nStrideElts, pack * EltPerPack, nElts, got);

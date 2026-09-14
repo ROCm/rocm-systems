@@ -70,8 +70,8 @@ class bin_expr_t {
   bin_expr_t() : arg1_(NULL), arg2_(NULL) {}
   bin_expr_t(const bin_expr_t* arg1, const bin_expr_t* arg2) : arg1_(arg1), arg2_(arg2) {}
   virtual ~bin_expr_t() {
-    if (arg1_) delete arg1_;
-    if (arg2_) delete arg2_;
+    delete arg1_;
+    delete arg2_;
   }
 
   virtual args_t Eval(const args_cache_t& args) const = 0;

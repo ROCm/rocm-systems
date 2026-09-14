@@ -95,14 +95,26 @@ class Bench_gfx9(benchmark_base.Bench_base):
         # All other cache and FLOPs definitions are completed in the Bench_base
         # class set_kernel_source()
 
-        # HBM Bandwidth benchmark
+        # HBM Bandwidth benchmark — read-only with non-temporal loads
         self.hbm_bw_src = """
-        template<typename T>
-        __global__ void HBM_bw(T *dst, const T *src)
+        extern "C" __global__ void HBM_bw(__uint128_t *src, long numSteps)
         {
-            const unsigned int gid = blockDim.x * blockIdx.x + threadIdx.x;
-            const unsigned int tid = threadIdx.x;
-            dst[gid] = src[gid];
+            unsigned long offset = (unsigned long)blockIdx.x * blockDim.x
+                                   + threadIdx.x;
+            const unsigned long stride = (unsigned long)gridDim.x * blockDim.x;
+            __uint128_t v = 0;
+
+            #pragma unroll 1
+            for (long step = 0; step < numSteps; step++)
+            {
+                #pragma unroll
+                for (int i = 0; i < 16; i++)
+                {
+                    v |= __builtin_nontemporal_load(&src[offset]);
+                    offset += stride;
+                }
+            }
+            if (v == 0) src[0] = v;
         }
         """
 

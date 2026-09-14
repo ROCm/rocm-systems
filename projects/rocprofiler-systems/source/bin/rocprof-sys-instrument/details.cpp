@@ -9,18 +9,23 @@
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
 
+#include <Symbol.h>
+
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "core/demangler.hpp"
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <algorithm>
+#include <array>
+#include <cstring>
 #include <link.h>
 #include <linux/limits.h>
 #include <string>
 #include <vector>
 
-static int expect_error = NO_ERROR;
+static int expect_error = -1;
 static int error_print  = 0;
 
 // set of whole function names to exclude
@@ -95,13 +100,12 @@ get_name(module_t* _module)
     auto itr = _v.find(_module);
     if(itr == _v.end())
     {
-        char _name[FUNCNAMELEN + 1];
-        memset(_name, '\0', FUNCNAMELEN + 1);
+        std::array<char, k_funcnamelen + 1> name{};
 
         if(_module)
         {
-            _module->getFullName(_name, FUNCNAMELEN);
-            _v.emplace(_module, std::string{ _name });
+            _module->getFullName(name.data(), k_funcnamelen);
+            _v.emplace(_module, std::string{ name.data() });
         }
         else
         {
@@ -568,7 +572,7 @@ find_undefined_function_symbol(const std::unordered_set<object_t*>& _objects,
     {
         if(!obj) continue;
 
-        std::string binary_path = obj->pathName();
+        const std::string binary_path = obj->pathName();
         // Open Symtab directly for comprehensive symbol access
         SymTab::Symtab* symtab = nullptr;
         if(!SymTab::Symtab::openFile(symtab, binary_path))
@@ -609,7 +613,7 @@ is_text_file(const std::string& filename)
     char             buffer[buffer_size];
     while(_file.read(buffer, sizeof(buffer)))
     {
-        for(char itr : buffer)
+        for(const char itr : buffer)
         {
             if(itr == '\0') return false;
         }
@@ -1347,27 +1351,18 @@ to_string(error_level_t _level)
     }
 }
 
-namespace
-{
-std::string&&
-to_lower(std::string&& _v)
-{
-    for(auto& itr : std::move(_v))
-        itr = tolower(itr);
-    return std::move(_v);
-}
-}  // namespace
-
 std::string
 to_string(symbol_visibility_t _v)
 {
-    return to_lower(SymTab::Symbol::symbolVisibility2Str(_v) + 3);
+    return rocprofsys::utility::string::to_lower(
+        SymTab::Symbol::symbolVisibility2Str(_v) + 3);
 }
 
 std::string
 to_string(symbol_linkage_t _v)
 {
-    return to_lower(SymTab::Symbol::symbolLinkage2Str(_v) + 3);
+    return rocprofsys::utility::string::to_lower(SymTab::Symbol::symbolLinkage2Str(_v) +
+                                                 3);
 }
 }  // namespace std
 

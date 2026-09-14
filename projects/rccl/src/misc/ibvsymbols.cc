@@ -53,6 +53,7 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
 
   ASSIGN_SYM(ibvSymbols, ibv_query_ece, ibv_internal_query_ece);
   ASSIGN_SYM(ibvSymbols, ibv_set_ece, ibv_internal_set_ece);
+  ASSIGN_SYM(ibvSymbols, ibv_query_port_speed, ibv_internal_query_port_speed);
 
   ibvSymbols->ibv_internal_reg_mr = &ibv_internal_reg_mr;
   ibvSymbols->ibv_internal_query_port = &ibv_internal_query_port;
@@ -134,6 +135,7 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
 
   LOAD_SYM_VERSION(ibvhandle, "ibv_query_ece", ibvSymbols->ibv_internal_query_ece, "IBVERBS_1.10");
   LOAD_SYM_VERSION(ibvhandle, "ibv_set_ece", ibvSymbols->ibv_internal_set_ece, "IBVERBS_1.10");
+  LOAD_SYM_VERSION(ibvhandle, "ibv_query_port_speed", ibvSymbols->ibv_internal_query_port_speed, "IBVERBS_1.16");
 
   return ncclSuccess;
 
@@ -164,6 +166,7 @@ teardown:
   ibvSymbols->ibv_internal_event_type_str = NULL;
   ibvSymbols->ibv_internal_query_ece = NULL;
   ibvSymbols->ibv_internal_set_ece = NULL;
+  ibvSymbols->ibv_internal_query_port_speed = NULL;
 
   if (ibvhandle != NULL) dlclose(ibvhandle);
   return ncclSystemError;

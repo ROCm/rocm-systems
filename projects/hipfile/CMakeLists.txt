@@ -17,7 +17,7 @@ endif()
 # Set the library version in a variable so we can use
 # it in *.in files and avoid version mismatch.
 set(AIS_LIBRARY_MAJOR 0)
-set(AIS_LIBRARY_MINOR 4)
+set(AIS_LIBRARY_MINOR 5)
 set(AIS_LIBRARY_PATCH 0)
 set(AIS_LIBRARY_VERSION "${AIS_LIBRARY_MAJOR}.${AIS_LIBRARY_MINOR}.${AIS_LIBRARY_PATCH}")
 
@@ -157,6 +157,28 @@ set(ROCM_VERSION "${ROCM_VERSION}" CACHE STRING "The version of ROCm to build wi
 
 message(STATUS "Using ROCM_VERSION: ${ROCM_VERSION}")
 message(STATUS "ROCM_PATH set to: ${ROCM_PATH}")
+
+# Report the GCC installation supplying libstdc++.
+#
+# Clang has no C++ standard library of its own: it scans for GCC installations
+# and compiles against that GCC's libstdc++. Which one it selects depends on the
+# clang build, so the C++ library in use is not obvious from the compiler name
+# alone. Print it so the choice is visible in build logs.
+# See `clang -v` ("Found candidate"/"Selected GCC installation").
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    execute_process(
+        COMMAND "${CMAKE_CXX_COMPILER}" -v -x c++ /dev/null -fsyntax-only
+        ERROR_VARIABLE _ais_cxx_verbose
+        OUTPUT_QUIET
+        ERROR_STRIP_TRAILING_WHITESPACE
+    )
+    if(_ais_cxx_verbose MATCHES "Selected GCC installation: ([^\n]+)")
+        message(STATUS "Selected GCC installation (libstdc++): ${CMAKE_MATCH_1}")
+    else()
+        message(STATUS "Selected GCC installation (libstdc++): <not reported>")
+    endif()
+    unset(_ais_cxx_verbose)
+endif()
 
 # Add ROCm search paths
 list(APPEND CMAKE_PREFIX_PATH

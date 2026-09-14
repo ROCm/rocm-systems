@@ -8,40 +8,20 @@
 
 #include <cstring>
 
+#include "algorithms/dda/device/CollCommon.h"
 #include "archinfo.h"
 #include "collectives.h"
 #include "comm.h"
 #include "enqueue.h"
 #include "group.h"
-#include "dda_init_detail.h"
+#include "algorithms/dda/dda_init_detail.h"
 #include "rccl_common.h"
 
 namespace RcclUnitTesting
 {
 
-// Mirrors collectives.cc rcclDdaEnabled() for unit tests only.
-constexpr size_t kDdaAlltoAllGfx942ThresholdBytes = 4194304;
-constexpr size_t kDdaAlltoAllGfx950ThresholdBytes = 4194304;
-
-inline bool testRcclDdaEnabled(
-    const ncclComm* comm,
-    size_t totalBytes,
-    size_t gfx942Default,
-    size_t gfx950Default = 0) {
-  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0 ||
-      comm->nRanks < 8 || comm->symmetricSupport) {
-    return false;
-  }
-  size_t threshold;
-  if (IsArchMatch(comm->archName, "gfx942")) {
-    threshold = gfx942Default;
-  } else if (IsArchMatch(comm->archName, "gfx950")) {
-    threshold = gfx950Default ? gfx950Default : static_cast<size_t>(rcclParamDdaThreshold());
-  } else {
-    return false;
-  }
-  return threshold > 0 && totalBytes <= threshold;
-}
+// Use the production rcclDdaEnabled() from rccl_common.h directly.
+// Threshold constants kDdaAlltoAllGfx{942,950,1250}ThresholdBytes are also in rccl_common.h.
 
 inline size_t testAlltoAllTotalBytes(size_t count, int nRanks, ncclDataType_t datatype) {
   return static_cast<size_t>(nRanks) * count * static_cast<size_t>(ncclTypeSize(datatype));
@@ -51,11 +31,19 @@ inline bool testRcclDdaAlltoAllThresholdEnabled(
     const ncclComm* comm,
     size_t count,
     ncclDataType_t datatype) {
-  return testRcclDdaEnabled(
+  return rcclDdaEnabled(
       comm,
       testAlltoAllTotalBytes(count, comm->nRanks, datatype),
       kDdaAlltoAllGfx942ThresholdBytes,
-      kDdaAlltoAllGfx950ThresholdBytes);
+      kDdaAlltoAllGfx950ThresholdBytes,
+      kDdaAlltoAllGfx1250ThresholdBytes);
+}
+
+// Mirrors dda_alltoall_ipc.cu: in-kernel staging copy on single-block launches only.
+// The fabric path always stages via a pre-kernel memcpy.
+inline bool testAlltoAllUsesInKernelStagingCopy(size_t countPerRank, ncclDataType_t datatype) {
+  const size_t bytesPerRank = countPerRank * static_cast<size_t>(ncclTypeSize(datatype));
+  return dda::common::ddaAlltoAllSingleBlockGrid(bytesPerRank, /* typeSize= */ 1);
 }
 
 inline size_t testAlltoAllDdaIpcStagingBytes(size_t count, int nRanks, size_t typeSize) {
@@ -85,7 +73,13 @@ struct DdaAlltoAllMockComm
 
 // Largest float32 per-rank count whose 8-rank AlltoAll totals exactly 4 MiB.
 constexpr size_t kAlltoAllFloat32CountAt4MbThreshold =
-    kDdaAlltoAllGfx950ThresholdBytes /
+    kDdaAlltoAllGfx942ThresholdBytes /
     (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
+
+// 4 KiB/rank float32: single-block grid on 8-rank IPC launch (in-kernel copy path).
+constexpr size_t kAlltoAllFloat32CountAt4KbPerRank = 1024;
+
+// 8 KiB/rank float32: multi-block grid (pre-kernel memcpy path).
+constexpr size_t kAlltoAllFloat32CountAt8KbPerRank = 2048;
 
 } // namespace RcclUnitTesting

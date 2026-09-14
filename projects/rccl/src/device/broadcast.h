@@ -48,9 +48,9 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
       // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
       // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
-    Primitives<T, RedOp, FanSymmetric<1>, 1, Proto, 0, false, RCCL_METADATA_EMPTY, 0, 0, UserRegMode>
-      prims(tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex,
-            work->connIndex, work);
+    Primitives<T, RedOp, FanSymmetric<1>, 1, Proto, 0, false, RCCL_METADATA_EMPTY, 0, 0, UserRegMode> prims(
+      tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex,
+      work->connIndex, work);
 
     for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
       offset = gridOffset + elemOffset;

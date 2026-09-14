@@ -75,14 +75,6 @@ option(GDA_BNXT "Build for Broadcom RDMA provider" OFF)
 option(GDA_MLX5 "Build for Mellanox MLX5 RDMA provider" OFF)
 option(ASAN "Enable AddressSanitizer" ${ASAN})
 
-if (ASAN)
-  execute_process(
-    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.asan-x86_64.so
-    OUTPUT_VARIABLE ASAN_RUNTIME_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
-  get_filename_component(ASAN_RUNTIME_DIR "${ASAN_RUNTIME_PATH}" DIRECTORY)
-  message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
-endif()
-
 set(USE_EXTERNAL_MPI AUTO CACHE STRING "Link with an external MPI (required if used MPI is ABI incompatible with Open MPI v5)")
 set_property(CACHE USE_EXTERNAL_MPI PROPERTY STRINGS AUTO ON OFF)
 
@@ -96,6 +88,17 @@ set(VERSION_STRING 3.7.0)
 message(STATUS "rocSHMEM Version: " "${VERSION_STRING}")
 
 project(rocshmem VERSION ${VERSION_STRING} LANGUAGES CXX)
+
+# Must run after project(... LANGUAGES CXX) so CMAKE_CXX_COMPILER is populated;
+# querying it any earlier silently returns an empty path here, which then
+# corrupts the -Wl,-rpath, link flag added for ASAN builds below.
+if (ASAN)
+  execute_process(
+    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.asan-x86_64.so
+    OUTPUT_VARIABLE ASAN_RUNTIME_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
+  get_filename_component(ASAN_RUNTIME_DIR "${ASAN_RUNTIME_PATH}" DIRECTORY)
+  message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
+endif()
 
 find_package(ROCmCMakeBuildTools)
 include(ROCMCreatePackage)
@@ -123,9 +126,17 @@ if(TARGET amd_smi)
   check_library_exists(amd_smi amdsmi_get_gpu_fabric_info "" HAVE_AMDSMI_FABRIC_FUNC)
   cmake_pop_check_state()
 
-  # Check if HIP runtime has hipMemFabricHandle_t
+  find_path(_hip_include_dir
+    hip/hip_runtime_api.h
+    HINTS "${ROCM_PATH}"
+    PATH_SUFFIXES include
+    NO_DEFAULT_PATH
+  )
   cmake_push_check_state(RESET)
-  set(CMAKE_REQUIRED_INCLUDES ${HIP_INCLUDE_DIRS})
+  if(_hip_include_dir)
+    set(CMAKE_REQUIRED_INCLUDES ${_hip_include_dir})
+  endif()
+  set(CMAKE_REQUIRED_DEFINITIONS -D__HIP_PLATFORM_AMD__)
   check_cxx_source_compiles("
     #include <hip/hip_runtime_api.h>
     int main() {
@@ -189,25 +200,22 @@ set(DEFAULT_GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING
 
 # When the user supplies GPU_TARGETS:
 #   - Normalise comma/semicolon separators
-#   - Build a base→full map so feature suffixes (e.g. gfx950:sramecc+:xnack-)
-#     can be restored after validation
-#   - Produce a bare-arch list for rocm_check_target_ids and HIP compilation,
-#     which both reject feature-suffixed entries in --offload-arch
+#   - Dedupe on the exact string, since the same base arch may legitimately
+#     appear more than once with different feature suffixes (e.g.
+#     gfx90a:xnack+;gfx90a:xnack-) to fat-binary both variants
+# rocm_check_target_ids validates each entry with a real compiler-flag check
+# (-xhip --offload-arch=<entry>), so feature-suffixed entries like
+# gfx950:sramecc+:xnack- are validated natively and echoed back verbatim on
+# success — no separate bare/full bookkeeping is needed.
 if(GPU_TARGETS)
   string(REPLACE "," ";" GPU_TARGETS "${GPU_TARGETS}")
-  set(_bare_targets "")
-  foreach(_t ${GPU_TARGETS})
-    string(REGEX REPLACE ":.*" "" _base "${_t}")
-    set(_USER_FULL_${_base} "${_t}")
-    list(APPEND _bare_targets "${_base}")
-  endforeach()
-  list(REMOVE_DUPLICATES _bare_targets)
+  list(REMOVE_DUPLICATES GPU_TARGETS)
 endif()
 
 if(COMMAND rocm_check_target_ids)
   if(GPU_TARGETS)
-    message(STATUS "Checking for ROCm support for GPU targets: " "${_bare_targets}")
-    rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${_bare_targets})
+    message(STATUS "Checking for ROCm support for GPU targets: " "${GPU_TARGETS}")
+    rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${GPU_TARGETS})
   else()
     message(STATUS "Checking for ROCm support for GPU targets: " "${DEFAULT_GPU_TARGETS}")
     rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${DEFAULT_GPU_TARGETS})
@@ -215,28 +223,20 @@ if(COMMAND rocm_check_target_ids)
 else()
   message(WARNING "Unable to check for supported GPU targets.")
   if(GPU_TARGETS)
-    set(SUPPORTED_GPUS ${_bare_targets})
+    set(SUPPORTED_GPUS ${GPU_TARGETS})
   else()
     set(SUPPORTED_GPUS ${DEFAULT_GPU_TARGETS})
   endif()
 endif()
 
-# GPU_TARGETS_FULL: validated arch strings with feature suffixes restored.
+# GPU_TARGETS_FULL: validated arch strings with feature suffixes intact.
 # Consumed by DeviceBitcode.cmake to embed correct amdhsa.target metadata in
-# HSACOs — HIP error 209 occurs if the suffix in the HSACO metadata does not
-# match the active feature configuration of the GPU.
+# the device bitcode — HIP error 209 occurs if the suffix in the bitcode
+# metadata does not match the active feature configuration of the GPU.
 # Explicitly cleared when GPU_TARGETS is not set so a stale cached value from a
 # previous -DGPU_TARGETS=... configure run cannot persist into the defaults path.
 if(GPU_TARGETS)
-  set(_full_validated "")
-  foreach(_base ${SUPPORTED_GPUS})
-    if(DEFINED _USER_FULL_${_base})
-      list(APPEND _full_validated "${_USER_FULL_${_base}}")
-    else()
-      list(APPEND _full_validated "${_base}")
-    endif()
-  endforeach()
-  set(GPU_TARGETS_FULL "${_full_validated}" CACHE STRING
+  set(GPU_TARGETS_FULL "${SUPPORTED_GPUS}" CACHE STRING
     "Validated GPU arch strings with feature suffixes (consumed by DeviceBitcode.cmake)" FORCE)
 else()
   unset(GPU_TARGETS_FULL CACHE)
@@ -305,6 +305,63 @@ if (NOT BUILD_TESTS_ONLY)
       message(FATAL_ERROR "External MPI support requested but MPI support not found. Build Aborted")
     endif()
   endif()
+
+  if (ASAN)
+    message(STATUS "Removing xnack- entries from GPU_TARGETS because they are invalid with AddressSanitizer (ASAN)")
+    list(FILTER GPU_TARGETS EXCLUDE REGEX ".*:xnack-$")
+    if(GPU_TARGETS_FULL)
+      list(FILTER GPU_TARGETS_FULL EXCLUDE REGEX ".*:xnack-$")
+    endif()
+
+    # RDNA archs (gfx11xx/gfx12xx) have no xnack+ variant at all, so device
+    # ASAN can never be enabled for them - clang just ignores
+    # -fsanitize=address for that offload arch with a warning. Drop them
+    # instead of leaving a target in GPU_TARGETS that silently gets no
+    # instrumentation.
+    set(_ASAN_INCOMPATIBLE_ARCHS gfx1100 gfx1201 gfx1250)
+    foreach(_asan_incompatible_arch ${_ASAN_INCOMPATIBLE_ARCHS})
+      list(FILTER GPU_TARGETS EXCLUDE REGEX "^${_asan_incompatible_arch}(:.*)?$")
+      if(GPU_TARGETS_FULL)
+        list(FILTER GPU_TARGETS_FULL EXCLUDE REGEX "^${_asan_incompatible_arch}(:.*)?$")
+      endif()
+    endforeach()
+
+    if(NOT GPU_TARGETS)
+      message(FATAL_ERROR "ASAN requires a GPU target that supports xnack+ (e.g. gfx90a, gfx942, gfx950). "
+        "None of the requested/default GPU_TARGETS support it.")
+    endif()
+
+    # CDNA archs (gfx90a/gfx942/gfx950) only get ASAN instrumentation with the
+    # xnack+ feature explicitly enabled; a bare arch name compiles without it.
+    # Force :xnack+ onto any entry that doesn't already request it.
+    set(_ASAN_GPU_TARGETS "")
+    foreach(_asan_target ${GPU_TARGETS})
+      if(NOT _asan_target MATCHES "xnack\\+")
+        message(STATUS "ASAN: appending :xnack+ to GPU target '${_asan_target}'")
+        set(_asan_target "${_asan_target}:xnack+")
+      endif()
+      list(APPEND _ASAN_GPU_TARGETS "${_asan_target}")
+    endforeach()
+    set(GPU_TARGETS "${_ASAN_GPU_TARGETS}")
+
+    if(GPU_TARGETS_FULL)
+      set(_ASAN_GPU_TARGETS_FULL "")
+      foreach(_asan_target ${GPU_TARGETS_FULL})
+        if(NOT _asan_target MATCHES "xnack\\+")
+          set(_asan_target "${_asan_target}:xnack+")
+        endif()
+        list(APPEND _ASAN_GPU_TARGETS_FULL "${_asan_target}")
+      endforeach()
+      set(GPU_TARGETS_FULL "${_ASAN_GPU_TARGETS_FULL}")
+    endif()
+  endif()
+
+  # hip-config-amd.cmake caches GPU_BUILD_TARGETS without FORCE, so on a
+  # reconfigure of an existing build directory it can retain a stale value
+  # (e.g. from before ASAN was enabled, or from a previous GPU_TARGETS) even
+  # though GPU_TARGETS itself was correctly refreshed above. Force it to match
+  # on every configure so hip::device's --offload-arch flags stay in sync.
+  set(GPU_BUILD_TARGETS "${GPU_TARGETS}" CACHE STRING "GPU targets to compile for" FORCE)
 
   find_package(hip REQUIRED)
   find_package(hsa-runtime64 REQUIRED)
@@ -456,9 +513,6 @@ if (NOT BUILD_TESTS_ONLY)
   )
 
   if (ASAN)
-    message(STATUS "Removing xnack- from GPU_TARGET as these are invalid with ASAN address sanitizer")
-    list(FILTER GPU_TARGETS EXCLUDE REGEX ".*:xnack-$")
-
     # Add ASAN runtime directory to RPATH so executables can find libclang_rt.asan at runtime
     target_link_options(
       ${PROJECT_NAME}

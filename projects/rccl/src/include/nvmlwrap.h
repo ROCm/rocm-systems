@@ -87,6 +87,25 @@ typedef struct nvmlPciInfo_st {
   unsigned int reserved3;
 } nvmlPciInfo_t;
 
+typedef struct {
+  unsigned int version; //!< The version number of this struct
+  unsigned int domain; //!< The PCI domain on which the device's bus resides, 0 to 0xffffffff
+  unsigned int bus; //!< The bus on which the device resides, 0 to 0xff
+  unsigned int device; //!< The device's id on the bus, 0 to 31
+
+  unsigned int pciDeviceId; //!< The combined 16-bit device id and 16-bit vendor id
+  unsigned int pciSubSystemId; //!< The 32-bit Sub System Device ID
+
+  unsigned int baseClass; //!< The 8-bit PCI base class code
+  unsigned int subClass; //!< The 8-bit PCI sub class code
+
+  char busId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE]; //!< The tuple domain:bus:device.function PCI identifier (&amp;
+  //!< NULL terminator)
+} nvmlPciInfoExt_v1_t;
+
+typedef nvmlPciInfoExt_v1_t nvmlPciInfoExt_t;
+#define nvmlPciInfoExt_v1 NVML_STRUCT_VERSION(PciInfoExt, 1)
+
 /* P2P Capability Index Status*/
 typedef enum nvmlGpuP2PStatus_enum {
   NVML_P2P_STATUS_OK = 0,
@@ -338,5 +357,10 @@ ncclResult_t ncclNvmlDeviceGetFieldValues(nvmlDevice_t device, int valuesCount, 
 ncclResult_t ncclNvmlDeviceGetGpuFabricInfoV(nvmlDevice_t device, nvmlGpuFabricInfoV_t* gpuFabricInfo);
 ncclResult_t ncclNvmlDeviceGetPlatformInfo(nvmlDevice_t device, nvmlPlatformInfo_t* plaformInfo);
 ncclResult_t ncclNvmlGetCCStatus(struct ncclNvmlCCStatus* status);
+ncclResult_t ncclNvmlDeviceGetPciInfo(nvmlDevice_t device, nvmlPciInfo_t* pci);
+ncclResult_t ncclNvmlDeviceGetPciInfoExt(nvmlDevice_t device, nvmlPciInfoExt_t* pciInfoExt);
+ncclResult_t ncclNvmlDeviceGetPcieLinkMaxSpeed(nvmlDevice_t device, int* maxSpeed);
+ncclResult_t ncclNvmlDeviceGetCurrPcieLinkGeneration(nvmlDevice_t device, unsigned int* currLinkGen);
+ncclResult_t ncclNvmlDeviceGetCurrPcieLinkWidth(nvmlDevice_t device, unsigned int* currLinkWidth);
 
 #endif // End include guard

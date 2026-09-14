@@ -5,21 +5,15 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vinterp.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
-#include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna3_5 {
 
 VInterpP10F32Vinterp::VInterpP10F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p10_f32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<VInterpP10F32Vinterp>()),
+              selected_exec_fn(InstructionExecutionId::VInterpP10F32Vinterp)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -32,13 +26,20 @@ VInterpP10F32Vinterp::VInterpP10F32Vinterp(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VInterpP10F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+namespace detail {
+DecodeResult decodeVInterpP10F32Vinterp(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vinterp::validate_encoding(
+      "v_interp_p10_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP10F32Vinterp>(opcode);
 }
+} // namespace detail
 
 VInterpP2F32Vinterp::VInterpP2F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p2_f32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<VInterpP2F32Vinterp>()),
+              selected_exec_fn(InstructionExecutionId::VInterpP2F32Vinterp)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -51,13 +52,20 @@ VInterpP2F32Vinterp::VInterpP2F32Vinterp(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VInterpP2F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+namespace detail {
+DecodeResult decodeVInterpP2F32Vinterp(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vinterp::validate_encoding(
+      "v_interp_p2_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP2F32Vinterp>(opcode);
 }
+} // namespace detail
 
 VInterpP10F16F32Vinterp::VInterpP10F16F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p10_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<VInterpP10F16F32Vinterp>()),
+              selected_exec_fn(InstructionExecutionId::VInterpP10F16F32Vinterp)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -70,13 +78,20 @@ VInterpP10F16F32Vinterp::VInterpP10F16F32Vinterp(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VInterpP10F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+namespace detail {
+DecodeResult decodeVInterpP10F16F32Vinterp(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vinterp::validate_encoding(
+      "v_interp_p10_f16_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP10F16F32Vinterp>(opcode);
 }
+} // namespace detail
 
 VInterpP2F16F32Vinterp::VInterpP2F16F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p2_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<VInterpP2F16F32Vinterp>()),
+              selected_exec_fn(InstructionExecutionId::VInterpP2F16F32Vinterp)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -88,6 +103,17 @@ VInterpP2F16F32Vinterp::VInterpP2F16F32Vinterp(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+DecodeResult decodeVInterpP2F16F32Vinterp(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vinterp::validate_encoding(
+      "v_interp_p2_f16_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP2F16F32Vinterp>(opcode);
+}
+} // namespace detail
 
 void VInterpP2F16F32Vinterp::implicit_uses(RegisterSet &uses) const {
   Vinterp::implicit_uses(uses);
@@ -95,13 +121,9 @@ void VInterpP2F16F32Vinterp::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VInterpP2F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
-}
-
 VInterpP10RtzF16F32Vinterp::VInterpP10RtzF16F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p10_rtz_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<VInterpP10RtzF16F32Vinterp>()),
+              selected_exec_fn(InstructionExecutionId::VInterpP10RtzF16F32Vinterp)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -114,13 +136,21 @@ VInterpP10RtzF16F32Vinterp::VInterpP10RtzF16F32Vinterp(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VInterpP10RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+namespace detail {
+DecodeResult decodeVInterpP10RtzF16F32Vinterp(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vinterp::validate_encoding("v_interp_p10_rtz_f16_f32",
+                                 reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP10RtzF16F32Vinterp>(opcode);
 }
+} // namespace detail
 
 VInterpP2RtzF16F32Vinterp::VInterpP2RtzF16F32Vinterp(const MachineInst *inst)
     : Vinterp("v_interp_p2_rtz_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<VInterpP2RtzF16F32Vinterp>()),
+              selected_exec_fn(InstructionExecutionId::VInterpP2RtzF16F32Vinterp)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -133,14 +163,21 @@ VInterpP2RtzF16F32Vinterp::VInterpP2RtzF16F32Vinterp(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+DecodeResult decodeVInterpP2RtzF16F32Vinterp(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vinterp::validate_encoding(
+      "v_interp_p2_rtz_f16_f32", reinterpret_cast<const Vinterp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP2RtzF16F32Vinterp>(opcode);
+}
+} // namespace detail
+
 void VInterpP2RtzF16F32Vinterp::implicit_uses(RegisterSet &uses) const {
   Vinterp::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
-}
-
-void VInterpP2RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
 } // namespace rdna3_5

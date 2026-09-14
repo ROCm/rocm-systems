@@ -109,6 +109,13 @@ def verify_deps() -> None:
                 dependency = dependency.strip()
                 if not dependency or dependency.startswith("#"):
                     continue
+
+                # Skip requirements whose marker excludes this interpreter.
+                requirement, _, marker = dependency.partition(";")
+                if marker and not _python_marker_applies(marker):
+                    continue
+                dependency = requirement.strip()
+
                 match = version_pattern.match(dependency)
                 if match:
                     package, operator, desired_version = match.groups()
@@ -170,6 +177,32 @@ def main() -> None:
         console_error("Unsupported execution mode")
 
     sys.exit(0)
+
+
+def _python_marker_applies(marker: str) -> bool:
+    """Evaluate a python_version environment marker from requirements.txt.
+
+    Only the python_version form used by the companion requirements file is
+    understood. An unrecognized marker is treated as applicable so that a
+    dependency is never silently skipped.
+    """
+    match = re.match(
+        r"^python_version\s*(==|!=|>=|<=|>|<)\s*[\"']([0-9.]+)[\"']$", marker.strip()
+    )
+    if not match:
+        return True
+
+    operator, target_version = match.groups()
+    ops = {
+        "==": lambda current, target: current == target,
+        "!=": lambda current, target: current != target,
+        ">=": lambda current, target: current >= target,
+        "<=": lambda current, target: current <= target,
+        ">": lambda current, target: current > target,
+        "<": lambda current, target: current < target,
+    }
+    target = tuple(int(part) for part in target_version.split("."))
+    return ops[operator](sys.version_info[: len(target)], target)
 
 
 if __name__ == "__main__":

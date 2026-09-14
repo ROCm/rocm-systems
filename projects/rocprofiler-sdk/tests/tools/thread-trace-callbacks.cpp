@@ -37,6 +37,7 @@ namespace Callbacks
 rocprofiler_thread_trace_decoder_id_t decoder{};
 std::atomic<size_t>                   latency{0};
 std::atomic<bool>                     has_sdata{false};
+std::atomic<bool>                     has_excess_detail{false};
 
 // defined in kernel_lds.cpp
 constexpr uint64_t SDATA_RECORD = 0xDEADBEEF;
@@ -88,9 +89,11 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
 
         for(size_t w = 0; w < trace_size; w++)
         {
-            auto* wave = static_cast<rocprofiler_thread_trace_decoder_wave_t*>(trace_events);
-            for(size_t i = 0; i < wave->instructions_size; i++)
-                latency += wave->instructions_array[i].duration;
+            const auto& wave =
+                static_cast<const rocprofiler_thread_trace_decoder_wave_t*>(trace_events)[w];
+            if(wave.instructions_size > 2) has_excess_detail = true;
+            for(size_t i = 0; i < wave.instructions_size; i++)
+                latency += wave.instructions_array[i].duration;
         }
     };
     DECODER_CALL(
@@ -113,7 +116,7 @@ finalize(void* /* tool_data */)
     // only check if we have a valid decoder
     if(decoder.handle != 0)
     {
-        if(extra_args && latency != 0)
+        if(extra_args && latency != 0 && has_excess_detail)
             throw std::runtime_error("Got detailed profiling in nondetail mode");
         else if(!extra_args && latency == 0)
             throw std::runtime_error("Missing detailed profiling!");

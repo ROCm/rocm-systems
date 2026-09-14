@@ -22,6 +22,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadFormatXyMtbuf : public Mtbuf {
@@ -32,6 +33,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadFormatXyzMtbuf : public Mtbuf {
@@ -42,6 +44,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadFormatXyzwMtbuf : public Mtbuf {
@@ -52,6 +55,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatXMtbuf : public Mtbuf {
@@ -62,6 +66,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatXyMtbuf : public Mtbuf {
@@ -72,6 +77,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatXyzMtbuf : public Mtbuf {
@@ -82,6 +88,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatXyzwMtbuf : public Mtbuf {
@@ -92,17 +99,18 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadFormatD16XMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatD16XMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadFormatD16XyMtbuf : public Mtbuf {
@@ -113,17 +121,18 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadFormatD16XyzMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatD16XyzMtbuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferLoadFormatD16XyzwMtbuf : public Mtbuf {
@@ -134,6 +143,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatD16XMtbuf : public Mtbuf {
@@ -144,6 +154,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatD16XyMtbuf : public Mtbuf {
@@ -154,6 +165,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatD16XyzMtbuf : public Mtbuf {
@@ -164,6 +176,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class TbufferStoreFormatD16XyzwMtbuf : public Mtbuf {
@@ -174,6 +187,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 } // namespace cdna2

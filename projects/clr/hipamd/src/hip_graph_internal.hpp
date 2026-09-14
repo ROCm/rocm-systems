@@ -212,7 +212,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     amd::ScopedLock lock(nodeSetLock_);
     nodeSet_.insert(this);
     isEnabled_ = node.isEnabled_;
-    dev_id_ = ihipGetDevice();
+    dev_id_ = node.dev_id_;
   }
 
   // Delete copy-assignment operator to prevent accidental copies causing unexpected behaviors.
@@ -1080,9 +1080,15 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   bool repeatLaunch_ = false;
   //! parallel streams per device
   std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
+  //! Extra capture-device stream created on first cross-device launch, covering
+  //! the stream slot the user's launch stream fills on same-device launches.
+  //! Null until then; owned by parallel_streams_.
+  hip::Stream* cross_device_stream_ = nullptr;
 
   //! Create parallel streams for a device
   hipError_t CreateStreams(uint32_t num_streams, int devId);
+  //! Create the extra capture-device stream needed on first cross-device launch
+  hipError_t EnsureCrossDeviceStream();
   //! Compute per-device stream requirements from streams_dev_ids_ mappings
   void FindStreamsReqPerDev();
   //! Update streams_ for a launch and resolve HW queue collisions.

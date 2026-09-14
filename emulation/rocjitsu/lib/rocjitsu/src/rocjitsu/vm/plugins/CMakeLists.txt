@@ -17,6 +17,11 @@ rj_add_object_library(
     race_detector/core/wave_race_state.cpp
 )
 
+rj_add_object_library(
+    rocjitsu_plugin_throughput
+    throughput/plugin.cpp
+)
+
 # Host-side loader: discovers and dlopen()s plugin shared objects named in the
 # config file. Linked into the interposer and main shared library.
 rj_add_object_library(
@@ -105,5 +110,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     rj_add_plugin_so(race rocjitsu_plugin_race_detector
         ${CMAKE_CURRENT_SOURCE_DIR}/race_detector/plugin_export.cpp
+    )
+    rj_add_plugin_so(throughput rocjitsu_plugin_throughput
+        ${CMAKE_CURRENT_SOURCE_DIR}/throughput/plugin_export.cpp
     )
 endif()

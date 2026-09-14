@@ -14,11 +14,21 @@
 
 namespace rocjitsu {
 
+enum class WaveStateLayout : uint8_t {
+  Legacy,
+  Gfx12,
+  Gfx12_5,
+};
+
 struct IsaProperties {
   bool supports_wgp_mode = false;
+  bool mode_has_gpr_idx_en = false;
   bool descriptor_sgpr_count_encoded = true;
   bool uses_ttmp_workgroup_ids = false;
   bool uses_cluster_ttmp_workgroup_ids = false;
+  WaveStateLayout wave_state_layout = WaveStateLayout::Legacy;
+  uint32_t compute_tmpring_wavesize_granule = 0;
+  uint32_t compute_tmpring_wavesize_bits = 0;
   uint32_t wave_size = 0;
   uint32_t wave_size_max = 0;
   uint32_t max_addressable_vgprs_per_wf = 0;
@@ -33,9 +43,13 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_CDNA1:
     return {
         .supports_wgp_mode = false,
+        .mode_has_gpr_idx_en = true,
         .descriptor_sgpr_count_encoded = true,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_state_layout = WaveStateLayout::Legacy,
+        .compute_tmpring_wavesize_granule = 1024,
+        .compute_tmpring_wavesize_bits = 13,
         .wave_size = 64,
         .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
@@ -45,9 +59,13 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_CDNA2:
     return {
         .supports_wgp_mode = false,
+        .mode_has_gpr_idx_en = true,
         .descriptor_sgpr_count_encoded = true,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_state_layout = WaveStateLayout::Legacy,
+        .compute_tmpring_wavesize_granule = 1024,
+        .compute_tmpring_wavesize_bits = 13,
         .wave_size = 64,
         .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
@@ -57,9 +75,13 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_CDNA3:
     return {
         .supports_wgp_mode = false,
+        .mode_has_gpr_idx_en = true,
         .descriptor_sgpr_count_encoded = true,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_state_layout = WaveStateLayout::Legacy,
+        .compute_tmpring_wavesize_granule = 1024,
+        .compute_tmpring_wavesize_bits = 13,
         .wave_size = 64,
         .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
@@ -69,9 +91,13 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_CDNA4:
     return {
         .supports_wgp_mode = false,
+        .mode_has_gpr_idx_en = true,
         .descriptor_sgpr_count_encoded = true,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_state_layout = WaveStateLayout::Legacy,
+        .compute_tmpring_wavesize_granule = 1024,
+        .compute_tmpring_wavesize_bits = 13,
         .wave_size = 64,
         .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
@@ -81,9 +107,13 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_RDNA1:
     return {
         .supports_wgp_mode = true,
+        .mode_has_gpr_idx_en = false,
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_state_layout = WaveStateLayout::Legacy,
+        .compute_tmpring_wavesize_granule = 1024,
+        .compute_tmpring_wavesize_bits = 13,
         .wave_size = 32,
         .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
@@ -93,9 +123,13 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_RDNA2:
     return {
         .supports_wgp_mode = true,
+        .mode_has_gpr_idx_en = false,
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_state_layout = WaveStateLayout::Legacy,
+        .compute_tmpring_wavesize_granule = 1024,
+        .compute_tmpring_wavesize_bits = 13,
         .wave_size = 32,
         .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
@@ -105,9 +139,13 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_RDNA3:
     return {
         .supports_wgp_mode = true,
+        .mode_has_gpr_idx_en = false,
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_state_layout = WaveStateLayout::Legacy,
+        .compute_tmpring_wavesize_granule = 256,
+        .compute_tmpring_wavesize_bits = 15,
         .wave_size = 32,
         .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
@@ -117,9 +155,13 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_RDNA3_5:
     return {
         .supports_wgp_mode = true,
+        .mode_has_gpr_idx_en = false,
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_state_layout = WaveStateLayout::Legacy,
+        .compute_tmpring_wavesize_granule = 256,
+        .compute_tmpring_wavesize_bits = 15,
         .wave_size = 32,
         .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
@@ -129,21 +171,29 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return {
         .supports_wgp_mode = true,
+        .mode_has_gpr_idx_en = false,
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = true,
         .uses_cluster_ttmp_workgroup_ids = false,
+        .wave_state_layout = WaveStateLayout::Gfx12,
+        .compute_tmpring_wavesize_granule = 256,
+        .compute_tmpring_wavesize_bits = 18,
         .wave_size = 32,
         .wave_size_max = 64,
         .max_addressable_vgprs_per_wf = 256,
         .descriptor_vgpr_count_granule_wave32 = 8,
         .descriptor_vgpr_count_granule_wave64 = 4,
     };
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return {
         .supports_wgp_mode = false,
+        .mode_has_gpr_idx_en = false,
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = true,
         .uses_cluster_ttmp_workgroup_ids = true,
+        .wave_state_layout = WaveStateLayout::Gfx12_5,
+        .compute_tmpring_wavesize_granule = 256,
+        .compute_tmpring_wavesize_bits = 18,
         .wave_size = 32,
         .wave_size_max = 32,
         .max_addressable_vgprs_per_wf = 1024,

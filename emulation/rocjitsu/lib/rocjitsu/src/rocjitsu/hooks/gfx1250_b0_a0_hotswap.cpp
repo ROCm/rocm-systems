@@ -21,11 +21,14 @@
 /// copying a large input adds pressure to a system that just ran out, and the
 /// bytes are not what failed.
 ///
-/// `HSA_HOTSWAP_DISABLE` belongs to CLR rather than this hook: it stops CLR
-/// forwarding anything here at all.
+/// `HSA_HOTSWAP_DISABLE` belongs to ROCr rather than this hook: it stops
+/// Runtime::LoadHotswapTool() loading this library at all.
 
 #include "hsa/hsa_api_trace_minimal.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/code_object_identity.h"
+#include "rocjitsu/code/dbt/gfx1250_b0_a0_cache.h"
+#include "rocjitsu/code/dbt/translation_store.h"
 #include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
 
 #include <algorithm>
@@ -59,6 +62,36 @@ using Blob = std::shared_ptr<std::vector<uint8_t>>;
 using VendorReaderCreate = hsa_status_t (*)(hsa_file_t, size_t, size_t, hsa_code_object_reader_t *);
 
 constexpr uint32_t kAmdAgentInfoAsicRevision = 0xA012;
+
+using rocjitsu::CacheKey;
+using rocjitsu::TranslationIdentity;
+using rocjitsu::TranslationStore;
+
+/// @brief The single configuration this hook translates under.
+/// @details Shared with the ahead-of-time tool, which must derive the same keys.
+constexpr TranslationIdentity kTranslationIdentity = rocjitsu::kGfx1250B0A0Identity;
+
+/// @brief Entries produced ahead of time, which this process only reads.
+///
+/// @details The objects that most need caching are the large device libraries --
+/// a few hundred megabytes, minutes to translate -- which no in-process cache can
+/// hold across runs. This tier is what a container image or a post-install step
+/// populates, on ordinary storage, once.
+///
+/// Read-only is a property of the tier and not a precaution: a runtime that wrote
+/// here would be writing outside its own trust boundary, and the entry it left
+/// would be refused by the next reader for exactly that reason.
+///
+/// The *new is deliberate and never freed: a load can arrive after static
+/// destructors would have run, so the store has to outlive them. It stays
+/// reachable through this reference, so LeakSanitizer does not report it.
+TranslationStore &pretranslation_store() {
+  static TranslationStore &store = *new TranslationStore(
+      rocjitsu::kGfx1250B0A0Domain, rocjitsu::gfx1250_b0_a0_translator_anchor(),
+      rocjitsu::shared_translation_root(rocjitsu::gfx1250_b0_a0_translator_anchor()),
+      TranslationStore::Access::kReadOnly, rocjitsu::kGfx1250B0A0KeyMode);
+  return store;
+}
 
 // Minimal mirror through the sole AMD loader entry intercepted by this hook.
 struct VendorLoaderTable {
@@ -1144,6 +1177,16 @@ void uninstall() {
   g_state.core = nullptr;
 }
 
+Blob adopt_bytes(std::vector<uint8_t> &&bytes) {
+  if (bytes.empty())
+    return nullptr;
+  try {
+    return std::make_shared<std::vector<uint8_t>>(std::move(bytes));
+  } catch (...) {
+    return nullptr;
+  }
+}
+
 Blob copy_bytes(const void *data, size_t size) {
   if (data == nullptr || size == 0)
     return nullptr;
@@ -1522,6 +1565,42 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
       return reused_status;
     }
 
+    // Only a load this process has not already answered reaches the store, which
+    // is what keeps its cost off the repeat path: a digest over the whole source
+    // and a file read, once per distinct object rather than once per load.
+    //
+    // The key names the translator, the configuration and the source -- never
+    // where the entry lives -- so the tool that wrote it and this reader agree by
+    // construction, which is the whole reason a translation performed ahead of
+    // time can be found at all.
+    const CacheKey cache_key = pretranslation_store().key_for(*source, kTranslationIdentity);
+    std::vector<uint8_t> cached = pretranslation_store().lookup(cache_key, kTranslationIdentity);
+    // Adopting the store's buffer rather than copying it again keeps a hit to one
+    // allocation; the bytes have already been read once.
+    const size_t cached_size = cached.size();
+    if (Blob reused = adopt_bytes(std::move(cached)); reused != nullptr) {
+      // Remember what the store gave us. Without this, every later load of these
+      // bytes would read the file again -- the repetition the memo exists to
+      // remove, moved from the translator to the filesystem.
+      TranslationRecord stored;
+      stored.output = reused;
+      // Only when someone is listening. This walks the whole source -- about
+      // 237 ms for the 212 MiB device library -- and its only consumer is a field
+      // in a log line that log_translation() drops unless verbose output is on.
+      // Paying that on the path whose entire purpose is to be fast, for output
+      // almost nobody asks for, is the wrong trade.
+      if (verbose_logging())
+        stored.info.source_code_object_id =
+            rocjitsu::stable_code_object_id(source->data(), source->size());
+      remember(stored);
+
+      const hsa_status_t reused_status =
+          load_owned_bytes(executable, agent, reused, options, loaded, *api, original_load);
+      log("reused tier=aot input_bytes=%zu output_bytes=%zu status=%d", source->size(), cached_size,
+          static_cast<int>(reused_status));
+      return reused_status;
+    }
+
     uint8_t *translated_data = nullptr;
     size_t translated_size = 0;
     g_state.translations.fetch_add(1, std::memory_order_relaxed);
@@ -1810,4 +1889,16 @@ rj_test_log_translation_diagnostic(uint64_t source_id,
                                    const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic) {
   log_translation_diagnostic(source_id, diagnostic);
 }
+// Test-only seam onto the pre-translated tier. Its production root is derived
+// from the translator's install prefix, so a test can only reach it by naming
+// one -- and only by counting its hits can a test show that a pre-translated
+// entry is what served a load.
+extern "C" RJ_HOOK_EXPORT void rj_test_set_pretranslation_root(const char *root) {
+  pretranslation_store().set_root_for_test(root);
+}
+
+extern "C" RJ_HOOK_EXPORT uint64_t rj_test_pretranslation_hits() {
+  return pretranslation_store().hits_for_test();
+}
+
 #endif // RJ_HOTSWAP_TEST_HOOKS

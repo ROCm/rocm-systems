@@ -19,6 +19,7 @@
 /// — the high 16 bits of the destination VGPR are zeroed. The CU and decoder
 /// are built for RDNA3; encoding marker is 0x35<<26.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -174,7 +175,7 @@ void check_binary(const BinCase &c, uint64_t exec) {
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     rdna3_vop3_encode(c.opcode, kDstVgpr, /*src0=*/256, /*src1=*/257, /*src2=*/0, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, rot, exec);
     delete inst;
@@ -210,7 +211,7 @@ void check_not_b16(uint64_t exec) {
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     rdna3_vop3_encode(/*op=*/489, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/0, /*src2=*/0, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_not_b16_vop3 decode failed";
     auto out = fx.run(inst, 0, exec);
     delete inst;
@@ -246,7 +247,7 @@ void check_cndmask_b16(uint64_t exec, uint64_t sel) {
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     rdna3_vop3_encode(/*op=*/605, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257, /*src2=*/sb,
                       words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_cndmask_b16_vop3 decode failed";
     auto out = fx.run(inst, rot, exec);
     delete inst;
@@ -335,7 +336,7 @@ void check_mov_b16(uint64_t exec, uint32_t omod, uint32_t clamp) {
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     rdna3_vop3_encode_mod(/*op=*/412, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/0, /*src2=*/0,
                           clamp, omod, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_mov_b16_vop3 decode failed";
     auto out = fx.run(inst, 0, exec);
     delete inst;

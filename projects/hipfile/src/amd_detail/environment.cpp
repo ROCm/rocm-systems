@@ -7,9 +7,6 @@
 #include "environment.h"
 #include "sys.h"
 
-#include <cerrno>
-#include <cstdlib>
-#include <limits>
 #include <strings.h>
 
 using namespace hipFile;
@@ -29,27 +26,6 @@ Environment::get<bool>(const char *key)
         }
     }
     return std::nullopt;
-}
-
-template <>
-std::optional<unsigned int>
-Environment::get<unsigned int>(const char *key)
-{
-    const char *value{Context<Sys>::get()->getenv(key)};
-    if (value == nullptr)
-        return std::nullopt;
-    errno = 0;
-    char         *end;
-    unsigned long x{std::strtoul(value, &end, 10)};
-    if (errno != 0)
-        return std::nullopt;
-    if (end == value)
-        return std::nullopt;
-    if (*end != '\0')
-        return std::nullopt;
-    if (x > static_cast<unsigned long>(std::numeric_limits<unsigned int>::max()))
-        return std::numeric_limits<unsigned int>::max();
-    return static_cast<unsigned int>(x);
 }
 
 optional<bool>
@@ -74,4 +50,10 @@ optional<unsigned int>
 Environment::stats_level()
 {
     return Environment::get<unsigned int>(Environment::STATS_LEVEL);
+}
+
+optional<size_t>
+Environment::async_buffer_size()
+{
+    return Environment::get<size_t>(Environment::ASYNC_BUFFER_SIZE);
 }
