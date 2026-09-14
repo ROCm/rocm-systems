@@ -73,9 +73,11 @@ public:
   /// Opt in to asynchronous arithmetic and its issue/retirement callbacks.
   /// Sampled once on add(). Register hooks may run on helpers concurrently with
   /// issuer hooks for the SAME wave, and may precede the issue notification.
-  /// Plugins must not inspect mutable wave state outside the current instruction's
-  /// operands, assume callback order equals program order, or require a complete
-  /// architectural snapshot. Serializing hooks alone does not meet this contract.
+  /// At issue, inspect only instruction/dispatch metadata and synchronized
+  /// plugin state: even sources may alias a destination currently being written.
+  /// At retirement, the instruction's register accesses are complete, but
+  /// unrelated wave state is not a snapshot. Do not assume program-order
+  /// callbacks; serializing hooks alone does not meet this contract.
   virtual bool supports_async_instructions() const { return false; }
 
   // -- Lifecycle hooks ------------------------------------------------------
@@ -105,8 +107,9 @@ public:
   virtual void onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
                                                amdgpu::Wavefront & /*wf*/) {}
 
-  /// Called on the issuer after an async job is accepted, before advancing PC.
-  /// The job may already be running or finished. Replaces the ordinary before/
+  /// Called on the issuer when an async job or batch is accepted, before PC advance.
+  /// The job may already be running or finished; no register snapshot is safe
+  /// to inspect here. Replaces the ordinary before/
   /// after pair. The instruction object remains alive until retirement.
   virtual void onAmdgpuAsyncInstructionIssued(uint64_t /*pc*/, const Instruction & /*inst*/,
                                               amdgpu::Wavefront & /*wf*/) {}

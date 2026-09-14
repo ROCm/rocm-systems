@@ -16,24 +16,6 @@ namespace rocjitsu::amdgpu::async_mma_policy {
 
 // Instruction semantics and target eligibility live together; configuration,
 // helper ownership and queue scheduling remain in the execution adapter.
-struct TargetTraits {
-  unsigned wave_size;
-  bool has_accvgprs;
-};
-
-constexpr TargetTraits target_traits(rj_code_arch_t arch) {
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    return {64, true};
-  case ROCJITSU_CODE_ARCH_CDNA5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    return {32, false};
-  default:
-    return {};
-  }
-}
-
 template <GpuIsa Isa> constexpr bool enabled(int mode, unsigned min_k, unsigned mfma_bits) {
   if constexpr (!HasAsyncMma<Isa>)
     return false;

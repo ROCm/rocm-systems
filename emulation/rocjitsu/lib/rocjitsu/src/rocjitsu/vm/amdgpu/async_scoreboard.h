@@ -3,17 +3,16 @@
 
 #pragma once
 
+#include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/log.h"
 
 #include <algorithm>
 #include <array>
-#include <bitset>
 #include <cstdlib>
-#include <memory>
+#include <format>
 #include <optional>
-#include <string_view>
 
 namespace rocjitsu::amdgpu {
 class ComputeUnitCore;
@@ -38,9 +37,10 @@ public:
   ~Stats() { flush(); }
   void flush() {
     if (windows)
-      util::Logger::warn("RJ_ASYNC windows=", windows, " mma=", mma,
-                         " inline_overlap=", inline_overlap, " hazards=", hazards,
-                         " boundaries=", boundaries, " full=", full, " retired_mma=", retired_mma);
+      util::Logger::warn(std::format("RJ_ASYNC windows={} mma={} inline_overlap={} hazards={} "
+                                     "boundaries={} full={} retired_mma={}",
+                                     windows, mma, inline_overlap, hazards, boundaries, full,
+                                     retired_mma));
     windows = mma = inline_overlap = hazards = boundaries = full = retired_mma = 0;
   }
 };
@@ -48,9 +48,9 @@ inline thread_local Stats stats;
 } // namespace async_execution
 
 /// @brief Bounded job queue with issuer-thread retirement.
-// Publication follows issue order. Completion can require an ordered prefix
-// or release independent arithmetic dependencies individually. Retirement
-// always runs on the instruction allocator's owner.
+/// @details Publication follows issue order. Completion can require an ordered prefix
+/// or release independent arithmetic dependencies individually. Retirement
+/// always runs on the instruction allocator's owner.
 class AsyncInstructionQueue {
 public:
   using Access = async_execution::Access;
@@ -141,10 +141,10 @@ private:
   std::exception_ptr error_;
 };
 
-/// @brief A bounded same-wave execution window. Instruction-family policy chooses
-// queues and work; AsyncInstructionQueue supplies the common execution/retirement
-// protocol. Draining before CU rescheduling keeps decoder pools, wave storage
-// and data caches owned by the issuing thread for this initial prototype.
+/// @brief A bounded same-wave execution window.
+/// @details Instruction-family policy chooses queues and work; AsyncInstructionQueue supplies the
+/// common execution/retirement protocol. Draining before CU rescheduling keeps decoder pools, wave
+/// storage and data caches owned by the issuing thread for this initial prototype.
 class AsyncInstructionWindow {
   using Access = async_execution::Access;
 
@@ -181,10 +181,9 @@ public:
   }
 
   bool submit_mma(Instruction *inst) {
-    namespace ae = async_execution;
     if (stopped_ || !matrix_coexecution::async_candidate(inst->mnemonic()))
       return false;
-    auto access = ae::footprint(*inst, wf_.num_vgprs(), has_accvgprs_);
+    auto access = async_execution::footprint(*inst, wf_.num_vgprs(), has_accvgprs_);
     const int sources = inst->num_src_operands();
     if (!access || inst->num_dst_operands() != 1 || (sources != 3 && sources != 5))
       return false;
@@ -203,20 +202,20 @@ public:
       return false;
     auto &pool = matrix_coexecution::shared_pool();
     if (!pool.available()) {
-      ++ae::stats.full;
+      ++async_execution::stats.full;
       return false;
     }
     materialize();
     if (!arithmetic_)
       arithmetic_.emplace(this, retire_arithmetic, AsyncInstructionQueue::Completion::Independent);
     if (arithmetic_->size() < limit && arithmetic_->submit(inst, *inst, &wf_, *access, wf_.pc)) {
-      ++ae::stats.mma;
+      ++async_execution::stats.mma;
       started();
       return true;
     }
     // before() has resolved true dependencies. The ordinary synchronous path
     // can complete this independent MMA without joining older arithmetic jobs.
-    ++ae::stats.full;
+    ++async_execution::stats.full;
     return false;
   }
 

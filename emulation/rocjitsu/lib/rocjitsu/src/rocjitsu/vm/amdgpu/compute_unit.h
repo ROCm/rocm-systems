@@ -967,7 +967,8 @@ protected:
   /// @brief Fetch, decode, execute one instruction from the given wavefront.
   void issue_instruction(Wavefront *wf);
   bool try_issue_adjacent_mma_batch(Wavefront *wf, Instruction *inst, const uint32_t *words);
-  void issue_async_instruction(Wavefront *wf, MmaAdmissionCache *admission, unsigned wave_size);
+  void issue_async_instruction(Wavefront *wf, MmaAdmissionCache *admission, unsigned wave_size,
+                               bool has_accvgprs);
   struct NoAsyncWindow {};
   template <bool EnableAsync>
   void issue_instruction_impl(
@@ -975,7 +976,8 @@ protected:
       std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window = {},
       std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage = {});
   template <bool EnableAsync>
-  bool step_impl(MmaAdmissionCache *admission = nullptr, unsigned async_wave_size = 0);
+  bool step_impl(MmaAdmissionCache *admission = nullptr, unsigned async_wave_size = 0,
+                 bool has_accvgprs = false);
 
   /// @brief Apply any I$ invalidation a debug attach or detach published.
   /// @details Runs on this CU's own thread, which is the I$'s sole accessor.

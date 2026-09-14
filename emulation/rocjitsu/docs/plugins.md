@@ -18,12 +18,15 @@ The race detector plugin contains both the core detection algorithm
 ### Throughput Plugin
 
 The throughput plugin counts one instruction whenever a wavefront reaches the
-before-execute hook. Counts are therefore executed **wave instructions**, not
+synchronous before-execute or asynchronous issue hook. Counts are **wave instructions**, not
 active-lane operations. It reports one JSON object per completed dispatch and
 one aggregate object at shutdown using the `rocjitsu.throughput.v2` JSONL
 schema. Each object contains wall time, total wave instructions, MIPS, and an
 exclusive breakdown into `scalar`, `vector`, `matrix`, `lds`, `global`,
 `control`, and `other`; the family counts always sum to the total. Each family
+reports `untimed_instructions` and `execution_timing_valid`. A family containing
+untimed async work sets validity to `false` and emits null `execution_seconds`
+and `execution_mips`; counts and `dispatch_mips` remain valid. Otherwise it
 reports `execution_seconds` measured between this plugin's before- and
 after-execute callbacks, `execution_mips` using only that family-local time, and
 `dispatch_mips` using the complete dispatch time. Scheduler gaps, dispatch
@@ -330,6 +333,11 @@ concurrently.
    consume `onAmdgpuReadSgpr`.
 7. Enable it by adding `"myname": { ... }` to the `plugins` section of
    the config file.
+8. Return `true` from `supports_async_instructions()` only when the plugin accepts
+   issuer-thread issue/retirement, independent completion order and concurrent
+   same-wave helper register hooks. Keep the default `false` for ordered event
+   state or complete architectural snapshots. One non-opted-in plugin disables
+   async execution for the entire group.
 
 ## Asynchronous arithmetic
 
@@ -340,8 +348,9 @@ pair for offloaded instructions. The group samples this capability on `add()`;
 all contained plugins must opt in.
 
 Both callbacks run on the issuer. The issue notification follows acceptance;
-helper register hooks may already have run. Retirement follows joining and
-carries the original PC and failure status. Independent jobs may retire out of
+helper register hooks may already have run. Issue callbacks may read metadata,
+not register values: even a source can alias a destination being written.
+Retirement follows joining and carries the original PC and failure status. Independent jobs may retire out of
 order; only the completed instruction's destinations are guaranteed ready.
 Other wave state may reflect later instructions. Holding the callback mutex does
 not restore program ordering or provide a complete architectural snapshot.

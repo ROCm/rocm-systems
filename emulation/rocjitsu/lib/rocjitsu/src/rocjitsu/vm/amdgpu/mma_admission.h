@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
 #pragma once
 
 #include "rocjitsu/isa/decoder.h"
@@ -7,12 +8,21 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "util/log.h"
+
+#include <algorithm>
+#include <array>
+#include <cstdlib>
+#include <format>
+#include <memory>
+#include <optional>
 #include <unordered_map>
+#include <vector>
 
 namespace rocjitsu::amdgpu {
 
-// Read-only decode objects belong to the optional CU adapter. Executing
-// instructions retain their separate per-issue state and pipeline ownership.
+/// @brief Bounded per-CU cache for speculative MMA admission.
+/// @details Read-only decode objects belong to the optional CU adapter. Executing
+/// instructions retain their separate per-issue state and pipeline ownership.
 class MmaAdmissionCache {
 public:
   using Words = std::array<uint32_t, 4>;
