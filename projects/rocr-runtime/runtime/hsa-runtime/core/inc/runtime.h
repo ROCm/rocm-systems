@@ -497,7 +497,14 @@ class Runtime {
 
   const std::vector<uint32_t>& gpu_ids() { return gpu_ids_; }
 
-  Agent* agent_by_gpuid(uint32_t gpuid) { return agents_by_gpuid_[gpuid]; }
+  // find() rather than operator[]: the latter inserts a null entry for an
+  // unknown gpuid, mutating a map that is otherwise only written during init
+  // and is guarded by no lock. Callers can pass driver-supplied ids that name
+  // a GPU outside this process's topology.
+  Agent* agent_by_gpuid(uint32_t gpuid) {
+    auto it = agents_by_gpuid_.find(gpuid);
+    return (it == agents_by_gpuid_.end()) ? nullptr : it->second;
+  }
 
   Agent* region_gpu() { return region_gpu_; }
 
