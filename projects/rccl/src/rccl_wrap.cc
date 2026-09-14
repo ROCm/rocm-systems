@@ -1038,7 +1038,7 @@ void rcclApplyUnrollForSize(ncclComm* comm, ncclFunc_t func, size_t msgBytes) {
     }
     if (map[i].maxBytes == SIZE_MAX) return;  // terminal entry (safety)
   }
-  }
+}
 
 inline bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold) {
   // The environment parameter can be NCCL_CONFIG_UNDEF_INT when launch order
