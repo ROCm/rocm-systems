@@ -7,21 +7,21 @@
 
 #include <memory>
 
-namespace rocjitsu::plugins::pffm {
+namespace rocjitsu::plugins::perfsim {
 
 /// Adapts RocJITsu execution observations to the FFM observer ABI consumed by
-/// pFFM. The pFFM backend remains a separate shared object and owns all of its
+/// Perfsim. The Perfsim backend remains a separate shared object and owns all of its
 /// configuration and report output.
-class PffmPlugin final : public ExecutionPlugin {
+class PerfsimPlugin final : public ExecutionPlugin {
 public:
   /// @param config_json Resolved plugin configuration containing the required
   ///        string field `library_path` and optional positive integer
   ///        `max_staged_bytes`.
-  explicit PffmPlugin(const char *config_json);
-  ~PffmPlugin() override;
+  explicit PerfsimPlugin(const char *config_json);
+  ~PerfsimPlugin() override;
 
-  PffmPlugin(const PffmPlugin &) = delete;
-  PffmPlugin &operator=(const PffmPlugin &) = delete;
+  PerfsimPlugin(const PerfsimPlugin &) = delete;
+  PerfsimPlugin &operator=(const PerfsimPlugin &) = delete;
 
   bool requires_serial_hot_hooks() const override { return true; }
   bool observes_memory_routing() const override { return true; }
@@ -51,4 +51,4 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
-} // namespace rocjitsu::plugins::pffm
+} // namespace rocjitsu::plugins::perfsim

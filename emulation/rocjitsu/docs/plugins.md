@@ -11,7 +11,7 @@ wavefront dispatches, memory instructions, register reads, barriers, etc.
 | `RaceDetectorPlugin` | `race_detector/` | Hooks memory instructions, register reads, barriers, and `s_waitcnt` to detect data races. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
 | `KernelLoggingPlugin` | `logging/` | Logs kernel dispatches and detects MMA instruction usage. |
 | `ThroughputPlugin` | `throughput/` | Reports per-dispatch and aggregate wave-instruction MIPS with an exclusive instruction-family breakdown. |
-| `PffmPlugin` | `pffm/` | Adapts gfx1250 execution observations to an external pFFM FFM-v8 backend. Built only when explicitly enabled. See the [pFFM adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/pffm/README.md). |
+| `PerfsimPlugin` | `perfsim/` | Adapts gfx1250 execution observations to an external Perfsim FFM-v8 backend. Built only when explicitly enabled. See the [Perfsim adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md). |
 
 The race detector plugin contains both the core detection algorithm
 (`race_detector/core/`) and the rocjitsu adapter (`race_detector/plugin.h`).
@@ -74,12 +74,12 @@ The logging plugin records kernel dispatch metadata and detects MMA
 - **MMA detection**: reports the first MFMA or WMMA instruction seen in
   each dispatch.
 
-### pFFM compatibility plugin
+### Perfsim compatibility plugin
 
-The optional Linux-only pFFM adapter loads a separately built pFFM backend at
-runtime. RocJITsu does not build, link, vendor, or install pFFM and does not
-write a persistent pFFM trace; pFFM continues to own its `GPUCSIM_*`
-configuration and reports. See the [pFFM adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/pffm/README.md)
+The optional Linux-only Perfsim adapter loads a separately built Perfsim backend at
+runtime. RocJITsu does not build, link, vendor, or install Perfsim and does not
+write a persistent Perfsim trace; Perfsim continues to own its `GPUCSIM_*`
+configuration and reports. See the [Perfsim adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md)
 for the runtime-first setup, independent build boundary, compatibility
 requirements, limitations, and validation procedure.
 
@@ -113,9 +113,9 @@ cannot be loaded. With strict loading, `plugins` must be an object when present,
 though omitting it is valid and creates an empty plugin group.
 
 The default bundled plugins are `race` (`RaceDetectorPlugin`), `logging`
-(`KernelLoggingPlugin`), and `throughput` (`ThroughputPlugin`). `pffm`
-(`PffmPlugin`) is available only in builds configured with
-`ROCJITSU_ENABLE_PFFM_PLUGIN=ON`.
+(`KernelLoggingPlugin`), and `throughput` (`ThroughputPlugin`). `perfsim`
+(`PerfsimPlugin`) is available only in builds configured with
+`ROCJITSU_ENABLE_PERFSIM_PLUGIN=ON`.
 
 ### Enabling plugins from the mirage CLI
 
@@ -197,7 +197,7 @@ sink-related environment variables.
 When `file` is in `types`, each plugin writes to
 `<dir>/<plugin_name>.log`. Plugin names are fixed:
 `race` for `RaceDetectorPlugin`, `logging` for `KernelLoggingPlugin`,
-`throughput` for `ThroughputPlugin`, and `pffm` for adapter diagnostics. pFFM's
+`throughput` for `ThroughputPlugin`, and `perfsim` for adapter diagnostics. Perfsim's
 own report remains controlled by its `GPUCSIM_*` configuration.
 
 ### Examples

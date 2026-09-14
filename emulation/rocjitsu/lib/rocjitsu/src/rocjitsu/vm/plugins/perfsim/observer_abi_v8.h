@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
+#include <utility>
 
 #if !defined(__linux__)
 #error "The private FFM v8 ABI mirror is supported only on Linux"
@@ -17,7 +18,7 @@
 #error "The private FFM v8 ABI mirror requires the GCC/Clang Itanium C++ ABI"
 #endif
 
-namespace rocjitsu::plugins::pffm::observer_abi_v8 {
+namespace rocjitsu::plugins::perfsim::observer_abi_v8 {
 
 inline constexpr std::uint32_t FFM_OBSERVER_PLUGIN_OLDEST_SUPPORTED_API_VERSION = 5;
 inline constexpr std::uint32_t FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION = 8;
@@ -196,6 +197,18 @@ struct FfmObserverPluginApiPrefix {
 struct FfmObserverPluginApi;
 using FfmObserverPluginGetApiFn = FfmObserverPluginApi *(*)(std::uint32_t host_api_version);
 
+// Calls cross an independently declared C++ ABI mirror. The layouts are
+// checked below, but Clang's function sanitizer compares nominal source types
+// and therefore cannot validate these foreign calls.
+template <typename Function, typename... Args>
+#if defined(__clang__)
+__attribute__((no_sanitize("function")))
+#endif
+decltype(auto)
+invoke_foreign_abi(Function function, Args &&...args) {
+  return function(std::forward<Args>(args)...);
+}
+
 static_assert(CHAR_BIT == 8);
 static_assert(std::endian::native == std::endian::little);
 static_assert(sizeof(short) == 2);
@@ -205,26 +218,26 @@ static_assert(sizeof(long long) == 8);
 static_assert(sizeof(void *) == 8);
 static_assert(sizeof(void (*)()) == 8);
 
-#define ROCJITSU_PFFM_ASSERT_RECORD(Type)                                                          \
+#define ROCJITSU_PERFSIM_ASSERT_RECORD(Type)                                                       \
   static_assert(std::is_standard_layout_v<Type>);                                                  \
   static_assert(std::is_trivially_copyable_v<Type>)
 
-ROCJITSU_PFFM_ASSERT_RECORD(FfmObserverInstruction);
-ROCJITSU_PFFM_ASSERT_RECORD(FfmDispatchInfo);
-ROCJITSU_PFFM_ASSERT_RECORD(FfmDispatchMetadata);
-ROCJITSU_PFFM_ASSERT_RECORD(FfmClusterInfo);
-ROCJITSU_PFFM_ASSERT_RECORD(FfmWorkgroupInfo);
-ROCJITSU_PFFM_ASSERT_RECORD(FfmWavegroupInfo);
-ROCJITSU_PFFM_ASSERT_RECORD(FfmWaveInfo);
-ROCJITSU_PFFM_ASSERT_RECORD(FfmWaitInfo);
-ROCJITSU_PFFM_ASSERT_RECORD(FfmInstructionCounters);
-ROCJITSU_PFFM_ASSERT_RECORD(FfmInstructionInfo);
-ROCJITSU_PFFM_ASSERT_RECORD(FfmMemoryAccess);
-ROCJITSU_PFFM_ASSERT_RECORD(FfmTdmMemoryAccess);
-ROCJITSU_PFFM_ASSERT_RECORD(FfmHostApi);
-ROCJITSU_PFFM_ASSERT_RECORD(FfmObserverPluginApiPrefix);
+ROCJITSU_PERFSIM_ASSERT_RECORD(FfmObserverInstruction);
+ROCJITSU_PERFSIM_ASSERT_RECORD(FfmDispatchInfo);
+ROCJITSU_PERFSIM_ASSERT_RECORD(FfmDispatchMetadata);
+ROCJITSU_PERFSIM_ASSERT_RECORD(FfmClusterInfo);
+ROCJITSU_PERFSIM_ASSERT_RECORD(FfmWorkgroupInfo);
+ROCJITSU_PERFSIM_ASSERT_RECORD(FfmWavegroupInfo);
+ROCJITSU_PERFSIM_ASSERT_RECORD(FfmWaveInfo);
+ROCJITSU_PERFSIM_ASSERT_RECORD(FfmWaitInfo);
+ROCJITSU_PERFSIM_ASSERT_RECORD(FfmInstructionCounters);
+ROCJITSU_PERFSIM_ASSERT_RECORD(FfmInstructionInfo);
+ROCJITSU_PERFSIM_ASSERT_RECORD(FfmMemoryAccess);
+ROCJITSU_PERFSIM_ASSERT_RECORD(FfmTdmMemoryAccess);
+ROCJITSU_PERFSIM_ASSERT_RECORD(FfmHostApi);
+ROCJITSU_PERFSIM_ASSERT_RECORD(FfmObserverPluginApiPrefix);
 
-#undef ROCJITSU_PFFM_ASSERT_RECORD
+#undef ROCJITSU_PERFSIM_ASSERT_RECORD
 
 static_assert(sizeof(FfmObserverInstruction) == 24);
 static_assert(alignof(FfmObserverInstruction) == 8);
@@ -353,4 +366,4 @@ static_assert(encode_tdm_flags(true, false) == 0x01);
 static_assert(encode_tdm_flags(false, true) == 0x02);
 static_assert(encode_tdm_flags(true, true) == 0x03);
 
-} // namespace rocjitsu::plugins::pffm::observer_abi_v8
+} // namespace rocjitsu::plugins::perfsim::observer_abi_v8

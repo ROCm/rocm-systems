@@ -25,6 +25,8 @@ using FfmWaitType = std::uint32_t;
 using FfmWaitName = std::uint32_t;
 
 inline constexpr std::uint32_t FFM_MAX_WAVE_SIZE = 64;
+inline constexpr std::uint32_t FFM_OBSERVER_PLUGIN_OLDEST_SUPPORTED_API_VERSION = 5;
+inline constexpr std::uint32_t FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION = 8;
 
 struct FfmObserverInstruction {
   std::uint64_t pc;
@@ -194,7 +196,7 @@ bool has_expected_native_bitfield_layout() {
 void trace(const std::string &line) noexcept {
   try {
     std::lock_guard<std::mutex> lock(trace_mutex);
-    const char *path = std::getenv("ROCJITSU_PFFM_FAKE_TRACE");
+    const char *path = std::getenv("ROCJITSU_PERFSIM_FAKE_TRACE");
     if (!path || !*path)
       return;
     std::ofstream output(path, std::ios::app);
@@ -204,12 +206,18 @@ void trace(const std::string &line) noexcept {
 }
 
 bool mode_is(const char *value) {
-  const char *mode = std::getenv("ROCJITSU_PFFM_FAKE_MODE");
+  const char *mode = std::getenv("ROCJITSU_PERFSIM_FAKE_MODE");
   return mode && std::strcmp(mode, value) == 0;
 }
 
 void on_init(const FfmHostApi *host) {
-  trace("init " + std::to_string(host ? host->api_version : 0));
+  const std::uint32_t version = host ? host->api_version : 0;
+  if (version < FFM_OBSERVER_PLUGIN_OLDEST_SUPPORTED_API_VERSION ||
+      version > FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION) {
+    trace("init_rejected " + std::to_string(version));
+    return;
+  }
+  trace("init " + std::to_string(version));
 }
 
 void append_dispatch(std::ostringstream &out, const FfmDispatchMetadata *dispatch) {
@@ -316,17 +324,10 @@ template <typename Callback> void maybe_remove(Callback &callback, const char *n
     callback = nullptr;
 }
 
-} // namespace
-
-extern "C" __attribute__((visibility("default"))) foreign_ffm_v8::FfmObserverPluginApi *
-ffm_observer_plugin_get_api(uint32_t host_api_version) {
-  trace("get_api " + std::to_string(host_api_version));
-  if (mode_is("reject_all") || !has_expected_native_bitfield_layout() || host_api_version != 8)
-    return nullptr;
-
+FfmObserverPluginApi *configure_api(std::uint32_t api_version) {
   api = {};
-  api.api_version = mode_is("old_version") ? 7 : (mode_is("bad_version") ? 9 : 8);
-  api.name = "rocjitsu-pffm-fake";
+  api.api_version = api_version;
+  api.name = "rocjitsu-perfsim-fake";
   api.on_init = on_init;
   api.on_dispatch_begin = on_dispatch_begin;
   api.on_dispatch_end = on_dispatch_end;
@@ -343,6 +344,21 @@ ffm_observer_plugin_get_api(uint32_t host_api_version) {
   maybe_remove(api.on_tdm_memory_access, "missing_on_tdm_memory_access");
   maybe_remove(api.on_shutdown, "missing_on_shutdown");
   return &api;
+}
+
+} // namespace
+
+extern "C" __attribute__((visibility("default"))) foreign_ffm_v8::FfmObserverPluginApi *
+ffm_observer_plugin_get_api(uint32_t host_api_version) {
+  trace("get_api " + std::to_string(host_api_version));
+  if (mode_is("reject_all") || !has_expected_native_bitfield_layout())
+    return nullptr;
+  if (mode_is("newer_backend") && host_api_version >= 13)
+    return configure_api(13);
+  if (host_api_version != 8)
+    return nullptr;
+
+  return configure_api(mode_is("old_version") ? 7 : (mode_is("bad_version") ? 9 : 8));
 }
 
 __attribute__((destructor)) static void on_unload() { trace("unload"); }

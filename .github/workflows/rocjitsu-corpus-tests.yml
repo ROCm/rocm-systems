@@ -260,6 +260,7 @@ jobs:
             "DaemonTest\.HipMemcpyRoundTripFloat"
             "DaemonTest\.HipMemcpyRoundTripInt"
             "DaemonTest\.HipMemcpyDeviceToDevice"
+            "DaemonTest\.HipMaskedStreamLdsReuse"
             "DaemonTest\.TwoIndependentClients"
             # This test has a five-second wall-clock assertion that becomes
             # load-sensitive at the TSan job's CI-level parallelism.
@@ -323,7 +324,7 @@ jobs:
             -DRJ_ENABLE_UBSAN=${{ matrix.enable_ubsan }} \
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
             -DRJ_ENABLE_EXPENSIVE_CHECKS=${{ matrix.enable_expensive_checks }} \
-            -DROCJITSU_ENABLE_PFFM_PLUGIN=ON \
+            -DROCJITSU_ENABLE_PERFSIM_PLUGIN=ON \
             -DRJ_SANITIZER_RUNTIME=${{ matrix.sanitizer_runtime }}
 
           # Set a conservative number of workers to avoid OOM and excessive system load.

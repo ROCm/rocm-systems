@@ -102,15 +102,15 @@ option(
 )
 option(RJ_INSTALL_TESTS "Install rocjitsu test binaries" OFF)
 option(
-    ROCJITSU_ENABLE_PFFM_PLUGIN
-    "Build the optional RocJITsu adapter for an external pFFM observer plugin"
+    ROCJITSU_ENABLE_PERFSIM_PLUGIN
+    "Build the optional RocJITsu adapter for an external Perfsim observer plugin"
     OFF
 )
-if(ROCJITSU_ENABLE_PFFM_PLUGIN)
+if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
         message(
             FATAL_ERROR
-            "ROCJITSU_ENABLE_PFFM_PLUGIN is supported only on Linux"
+            "ROCJITSU_ENABLE_PERFSIM_PLUGIN is supported only on Linux"
         )
     endif()
 endif()

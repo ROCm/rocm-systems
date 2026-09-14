@@ -27,8 +27,8 @@ set(RJ_OBJECT_LIBS
     rocjitsu_dbt_config
     rocjitsu_pci
 )
-if(ROCJITSU_ENABLE_PFFM_PLUGIN)
-    list(APPEND RJ_OBJECT_LIBS rocjitsu_plugin_pffm)
+if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+    list(APPEND RJ_OBJECT_LIBS rocjitsu_plugin_perfsim)
 endif()
 
 if(RJ_INSTALL_TESTS)
@@ -415,16 +415,20 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_add_plugin_loader_fixture(missing PLUGIN_FIXTURE_MISSING_DESTROY=1)
     rj_add_plugin_loader_fixture(duplicate)
 
-    if(ROCJITSU_ENABLE_PFFM_PLUGIN)
-        add_library(rocjitsu_pffm_fake_backend MODULE pffm_fake_backend.cpp)
+    if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+        add_library(
+            rocjitsu_perfsim_fake_backend
+            MODULE
+            perfsim_fake_backend.cpp
+        )
         set_target_properties(
-            rocjitsu_pffm_fake_backend
+            rocjitsu_perfsim_fake_backend
             PROPERTIES
                 CXX_VISIBILITY_PRESET hidden
                 C_VISIBILITY_PRESET hidden
                 VISIBILITY_INLINES_HIDDEN ON
         )
-        rj_configure_target(rocjitsu_pffm_fake_backend TEST)
+        rj_configure_target(rocjitsu_perfsim_fake_backend TEST)
     endif()
 endif()
 
@@ -578,8 +582,8 @@ add_executable(
     pci/scratch_pci_device_test.cpp
     pci/ip_discovery_test.cpp
 )
-if(ROCJITSU_ENABLE_PFFM_PLUGIN)
-    target_sources(rocjitsu_tests PRIVATE pffm_plugin_test.cpp)
+if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+    target_sources(rocjitsu_tests PRIVATE perfsim_plugin_test.cpp)
 endif()
 if(HAS_DEVICE_KERNELS)
     target_sources(
@@ -646,17 +650,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         plugin_loader_fixture_missing
         plugin_loader_fixture_duplicate
     )
-    if(ROCJITSU_ENABLE_PFFM_PLUGIN)
+    if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
         target_compile_definitions(
             rocjitsu_tests
             PRIVATE
-                PFFM_FAKE_BACKEND_PATH="$<TARGET_FILE:rocjitsu_pffm_fake_backend>"
-                PFFM_PLUGIN_DIR="${PROJECT_BINARY_DIR}"
+                PERFSIM_FAKE_BACKEND_PATH="$<TARGET_FILE:rocjitsu_perfsim_fake_backend>"
+                PERFSIM_PLUGIN_DIR="${PROJECT_BINARY_DIR}"
         )
         add_dependencies(
             rocjitsu_tests
-            rocjitsu_pffm_fake_backend
-            rocjitsu_plugin_pffm_so
+            rocjitsu_perfsim_fake_backend
+            rocjitsu_plugin_perfsim_so
         )
     endif()
 endif()

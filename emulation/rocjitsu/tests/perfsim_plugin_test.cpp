@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/vm/plugins/pffm/plugin.h"
+#include "rocjitsu/vm/plugins/perfsim/plugin.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -10,7 +10,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
-#include "rocjitsu/vm/plugins/pffm/observer_abi_v8.h"
+#include "rocjitsu/vm/plugins/perfsim/observer_abi_v8.h"
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 #include "scoped_temp.h"
@@ -33,19 +33,19 @@
 #include <string_view>
 #include <vector>
 
-#ifndef PFFM_FAKE_BACKEND_PATH
-#error "PFFM_FAKE_BACKEND_PATH must be defined"
+#ifndef PERFSIM_FAKE_BACKEND_PATH
+#error "PERFSIM_FAKE_BACKEND_PATH must be defined"
 #endif
-#ifndef PFFM_PLUGIN_DIR
-#error "PFFM_PLUGIN_DIR must be defined"
+#ifndef PERFSIM_PLUGIN_DIR
+#error "PERFSIM_PLUGIN_DIR must be defined"
 #endif
 
 namespace {
 
 using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
-using namespace rocjitsu::plugins::pffm::observer_abi_v8;
-using rocjitsu::plugins::pffm::PffmPlugin;
+using namespace rocjitsu::plugins::perfsim::observer_abi_v8;
+using rocjitsu::plugins::perfsim::PerfsimPlugin;
 
 FfmWaveInfo make_wave_info(EntityId dispatch_id, EntityId cluster_id, EntityId workgroup_id,
                            EntityId wavegroup_id, EntityId wave_id) {
@@ -109,8 +109,8 @@ private:
 };
 
 struct WaveFixture {
-  std::unique_ptr<GpuMemory> memory = std::make_unique<GpuMemory>("pffm_test_memory");
-  std::unique_ptr<L2Cache> l2 = std::make_unique<L2Cache>("pffm_test_l2");
+  std::unique_ptr<GpuMemory> memory = std::make_unique<GpuMemory>("perfsim_test_memory");
+  std::unique_ptr<L2Cache> l2 = std::make_unique<L2Cache>("perfsim_test_l2");
   std::unique_ptr<ComputeUnitCore> cu;
 
   explicit WaveFixture(uint32_t slots = 2) {
@@ -121,7 +121,7 @@ struct WaveFixture {
     config.sgprs_per_wf = 128;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    cu = ComputeUnitCore::create("pffm_test_cu", config, memory.get(), l2.get());
+    cu = ComputeUnitCore::create("perfsim_test_cu", config, memory.get(), l2.get());
   }
 
   Wavefront &wave(uint32_t dispatch_id, uint32_t rocjitsu_workgroup_id,
@@ -206,10 +206,10 @@ std::string plugin_config(std::string_view library_path) {
   return std::string{"{\"library_path\":"} + json_string(library_path) + "}";
 }
 
-std::string plugin_config() { return plugin_config(PFFM_FAKE_BACKEND_PATH); }
+std::string plugin_config() { return plugin_config(PERFSIM_FAKE_BACKEND_PATH); }
 
 std::string plugin_config_with_staging_budget(uint64_t max_staged_bytes) {
-  return std::string{"{\"library_path\":"} + json_string(PFFM_FAKE_BACKEND_PATH) +
+  return std::string{"{\"library_path\":"} + json_string(PERFSIM_FAKE_BACKEND_PATH) +
          ",\"max_staged_bytes\":" + std::to_string(max_staged_bytes) + "}";
 }
 
@@ -234,46 +234,47 @@ size_t line_with_prefix(const std::vector<std::string> &trace, std::string_view 
   return trace.size();
 }
 
-class PffmPluginTest : public ::testing::Test {
+class PerfsimPluginTest : public ::testing::Test {
 protected:
   void SetUp() override {
     trace_env_ = std::make_unique<rocjitsu::test::ScopedEnvironmentVariable>(
-        "ROCJITSU_PFFM_FAKE_TRACE", trace_.path());
-    mode_env_ =
-        std::make_unique<rocjitsu::test::ScopedEnvironmentVariable>("ROCJITSU_PFFM_FAKE_MODE", "");
+        "ROCJITSU_PERFSIM_FAKE_TRACE", trace_.path());
+    mode_env_ = std::make_unique<rocjitsu::test::ScopedEnvironmentVariable>(
+        "ROCJITSU_PERFSIM_FAKE_MODE", "");
   }
 
-  rocjitsu::test::ScopedTempFile trace_{"rocjitsu-pffm-"};
+  rocjitsu::test::ScopedTempFile trace_{"rocjitsu-perfsim-"};
   std::unique_ptr<rocjitsu::test::ScopedEnvironmentVariable> trace_env_;
   std::unique_ptr<rocjitsu::test::ScopedEnvironmentVariable> mode_env_;
 };
 
-TEST(PffmPluginConfigTest, EscapesBackendPathAsJson) {
+TEST(PerfsimPluginConfigTest, EscapesBackendPathAsJson) {
   std::string path{"a\"b\\c\n"};
   path.push_back('\x01');
   EXPECT_EQ(plugin_config(path), "{\"library_path\":\"a\\\"b\\\\c\\n\\u0001\"}");
 }
 
-TEST(PffmPluginConfigTest, RejectsRelativeBackendPath) {
-  EXPECT_THROW(PffmPlugin(R"({"library_path":"relative/libgpucsim_ffm_plugin.so"})"),
+TEST(PerfsimPluginConfigTest, RejectsRelativeBackendPath) {
+  EXPECT_THROW(PerfsimPlugin(R"({"library_path":"relative/libgpucsim_ffm_plugin.so"})"),
                std::invalid_argument);
 }
 
-TEST(PffmPluginConfigTest, RejectsInvalidStagingBudgets) {
+TEST(PerfsimPluginConfigTest, RejectsInvalidStagingBudgets) {
   const std::string prefix = std::string{"{\"library_path\":"} +
-                             json_string(PFFM_FAKE_BACKEND_PATH) + ",\"max_staged_bytes\":";
+                             json_string(PERFSIM_FAKE_BACKEND_PATH) + ",\"max_staged_bytes\":";
   for (std::string_view value : {"0", "-1", "1.5", "\"4096\""}) {
     SCOPED_TRACE(value);
     const std::string config = prefix + std::string(value) + "}";
-    EXPECT_THROW(PffmPlugin(config.c_str()), std::invalid_argument);
+    EXPECT_THROW(PerfsimPlugin(config.c_str()), std::invalid_argument);
   }
 }
 
-TEST_F(PffmPluginTest, NegotiatesV8AndForwardsOwnedFieldsInOrder) {
+TEST_F(PerfsimPluginTest, RequestsV8AndForwardsOwnedFieldsInOrder) {
+  setenv("ROCJITSU_PERFSIM_FAKE_MODE", "newer_backend", 1);
   WaveFixture fixture;
   const std::string config = plugin_config();
   {
-    PffmPlugin plugin(config.c_str());
+    PerfsimPlugin plugin(config.c_str());
     plugin.onInit();
     plugin.onInit();
 
@@ -343,13 +344,13 @@ TEST_F(PffmPluginTest, NegotiatesV8AndForwardsOwnedFieldsInOrder) {
   }
 
   const auto trace = lines(read_file(trace_.path()));
-  ASSERT_GE(trace.size(), 12u);
-  for (uint32_t version = 14; version >= 8; --version) {
-    EXPECT_NE(line_with_prefix(trace, "get_api " + std::to_string(version)), trace.size());
-    if (version == 8)
-      break;
-  }
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 14"), 1);
+  ASSERT_GE(trace.size(), 10u);
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 8"), 1);
+  EXPECT_EQ(std::count_if(trace.begin(), trace.end(),
+                          [](const std::string &line) { return line.starts_with("get_api "); }),
+            1);
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 8"), 1);
+  EXPECT_EQ(line_with_prefix(trace, "init_rejected "), trace.size());
   EXPECT_EQ(std::count(trace.begin(), trace.end(), "shutdown"), 1);
   const size_t shutdown = line_with_prefix(trace, "shutdown");
   ASSERT_LT(shutdown, trace.size());
@@ -380,12 +381,12 @@ TEST_F(PffmPluginTest, NegotiatesV8AndForwardsOwnedFieldsInOrder) {
   EXPECT_LT(end_instruction, end);
 }
 
-TEST_F(PffmPluginTest, RejectsMalformedTensorDmaElementSize) {
+TEST_F(PerfsimPluginTest, RejectsMalformedTensorDmaElementSize) {
   WaveFixture fixture;
   const std::string config = plugin_config();
   testing::internal::CaptureStderr();
   {
-    PffmPlugin plugin(config.c_str());
+    PerfsimPlugin plugin(config.c_str());
     plugin.onInit();
 
     const KernelDispatchInfo info = dispatch_info(18);
@@ -429,10 +430,10 @@ TEST_F(PffmPluginTest, RejectsMalformedTensorDmaElementSize) {
   EXPECT_EQ(line_with_prefix(trace, "end 18 "), trace.size());
 }
 
-TEST_F(PffmPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
+TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
   WaveFixture fixture;
   const std::string config = plugin_config();
-  PffmPlugin plugin(config.c_str());
+  PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
 
   const KernelDispatchInfo info = dispatch_info(11);
@@ -619,10 +620,10 @@ TEST_F(PffmPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
   }
 }
 
-TEST_F(PffmPluginTest, SplitsMixedFlatResourcesInFirstRequestLaneOrder) {
+TEST_F(PerfsimPluginTest, SplitsMixedFlatResourcesInFirstRequestLaneOrder) {
   WaveFixture fixture;
   const std::string config = plugin_config();
-  PffmPlugin plugin(config.c_str());
+  PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
 
   const KernelDispatchInfo info = dispatch_info(13);
@@ -711,10 +712,10 @@ TEST_F(PffmPluginTest, SplitsMixedFlatResourcesInFirstRequestLaneOrder) {
   }
 }
 
-TEST_F(PffmPluginTest, ReportsFlatDdsLoadsAsLdsWithOriginalAddresses) {
+TEST_F(PerfsimPluginTest, ReportsFlatDdsLoadsAsLdsWithOriginalAddresses) {
   WaveFixture fixture;
   const std::string config = plugin_config();
-  PffmPlugin plugin(config.c_str());
+  PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
 
   const KernelDispatchInfo info = dispatch_info(15);
@@ -770,7 +771,7 @@ TEST_F(PffmPluginTest, ReportsFlatDdsLoadsAsLdsWithOriginalAddresses) {
   EXPECT_NE(line_with_prefix(trace, memory_prefix), trace.size());
 }
 
-TEST_F(PffmPluginTest, RejectsWholeDispatchForFlatDdsStoresAndAtomics) {
+TEST_F(PerfsimPluginTest, RejectsWholeDispatchForFlatDdsStoresAndAtomics) {
   struct FailureCase {
     uint32_t dispatch_id;
     const char *mnemonic;
@@ -786,7 +787,7 @@ TEST_F(PffmPluginTest, RejectsWholeDispatchForFlatDdsStoresAndAtomics) {
   for (const auto &test : cases) {
     WaveFixture fixture;
     const std::string config = plugin_config();
-    PffmPlugin plugin(config.c_str());
+    PerfsimPlugin plugin(config.c_str());
     plugin.onInit();
 
     const KernelDispatchInfo info = dispatch_info(test.dispatch_id);
@@ -849,10 +850,10 @@ TEST_F(PffmPluginTest, RejectsWholeDispatchForFlatDdsStoresAndAtomics) {
   }
 }
 
-TEST_F(PffmPluginTest, MatchesFfmRegularMemoryCallbackSizes) {
+TEST_F(PerfsimPluginTest, MatchesFfmRegularMemoryCallbackSizes) {
   WaveFixture fixture;
   const std::string config = plugin_config();
-  PffmPlugin plugin(config.c_str());
+  PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
 
   const KernelDispatchInfo info = dispatch_info(14);
@@ -929,10 +930,10 @@ TEST_F(PffmPluginTest, MatchesFfmRegularMemoryCallbackSizes) {
   }
 }
 
-TEST_F(PffmPluginTest, ForwardsNominalWidthsForPartialOobVbufferAccesses) {
+TEST_F(PerfsimPluginTest, ForwardsNominalWidthsForPartialOobVbufferAccesses) {
   WaveFixture fixture;
   const std::string config = plugin_config();
-  PffmPlugin plugin(config.c_str());
+  PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
 
   const KernelDispatchInfo info = dispatch_info(15);
@@ -1015,12 +1016,12 @@ TEST_F(PffmPluginTest, ForwardsNominalWidthsForPartialOobVbufferAccesses) {
   }
 }
 
-TEST_F(PffmPluginTest, RejectsWholeDispatchWhenFlatAtomicResolvesToScratch) {
+TEST_F(PerfsimPluginTest, RejectsWholeDispatchWhenFlatAtomicResolvesToScratch) {
   WaveFixture fixture;
   const std::string config = plugin_config();
   testing::internal::CaptureStderr();
   {
-    PffmPlugin plugin(config.c_str());
+    PerfsimPlugin plugin(config.c_str());
     plugin.onInit();
 
     const KernelDispatchInfo info = dispatch_info(12);
@@ -1075,10 +1076,10 @@ TEST_F(PffmPluginTest, RejectsWholeDispatchWhenFlatAtomicResolvesToScratch) {
   EXPECT_EQ(line_with_prefix(trace, "end 12 "), trace.size());
 }
 
-TEST_F(PffmPluginTest, ReplaysInterleavedDispatchesAsOneGloballyOrderedEpoch) {
+TEST_F(PerfsimPluginTest, ReplaysInterleavedDispatchesAsOneGloballyOrderedEpoch) {
   WaveFixture fixture;
   const std::string config = plugin_config();
-  PffmPlugin plugin(config.c_str());
+  PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
 
   for (uint32_t id : {21u, 22u}) {
@@ -1122,10 +1123,10 @@ TEST_F(PffmPluginTest, ReplaysInterleavedDispatchesAsOneGloballyOrderedEpoch) {
   EXPECT_LT(end_first, end_second);
 }
 
-TEST_F(PffmPluginTest, ReplaysLargeEpochInOrder) {
+TEST_F(PerfsimPluginTest, ReplaysLargeEpochInOrder) {
   WaveFixture fixture;
   const std::string config = plugin_config();
-  PffmPlugin plugin(config.c_str());
+  PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
 
   const KernelDispatchInfo info = dispatch_info(24);
@@ -1163,10 +1164,10 @@ TEST_F(PffmPluginTest, ReplaysLargeEpochInOrder) {
   EXPECT_LT(last, line_with_prefix(trace, "end 24 "));
 }
 
-TEST_F(PffmPluginTest, CompactsInterleavedChunksWithoutReorderingSurvivors) {
+TEST_F(PerfsimPluginTest, CompactsInterleavedChunksWithoutReorderingSurvivors) {
   WaveFixture fixture;
   const std::string config = plugin_config_with_staging_budget(8 * 1024 * 1024);
-  PffmPlugin plugin(config.c_str());
+  PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
 
   for (uint32_t id : {33u, 34u}) {
@@ -1235,12 +1236,12 @@ TEST_F(PffmPluginTest, CompactsInterleavedChunksWithoutReorderingSurvivors) {
   plugin.onShutdown();
 }
 
-TEST_F(PffmPluginTest, RejectsLongLivedDispatchAtStagingBudgetAndReusesBudget) {
+TEST_F(PerfsimPluginTest, RejectsLongLivedDispatchAtStagingBudgetAndReusesBudget) {
   WaveFixture fixture;
   const std::string config = plugin_config_with_staging_budget(4096);
   testing::internal::CaptureStderr();
   {
-    PffmPlugin plugin(config.c_str());
+    PerfsimPlugin plugin(config.c_str());
     plugin.onInit();
 
     const KernelDispatchInfo rejected_info = dispatch_info(25);
@@ -1283,10 +1284,10 @@ TEST_F(PffmPluginTest, RejectsLongLivedDispatchAtStagingBudgetAndReusesBudget) {
   EXPECT_NE(line_with_prefix(trace, "end 26 "), trace.size());
 }
 
-TEST_F(PffmPluginTest, RejectedDispatchDoesNotBlockOverlappingSupportedDispatch) {
+TEST_F(PerfsimPluginTest, RejectedDispatchDoesNotBlockOverlappingSupportedDispatch) {
   WaveFixture fixture;
   const std::string config = plugin_config_with_staging_budget(4096);
-  PffmPlugin plugin(config.c_str());
+  PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
 
   for (uint32_t id : {27u, 28u}) {
@@ -1333,12 +1334,12 @@ TEST_F(PffmPluginTest, RejectedDispatchDoesNotBlockOverlappingSupportedDispatch)
   plugin.onShutdown();
 }
 
-TEST_F(PffmPluginTest, IgnoresCallbacksAfterEarlyDispatchRejection) {
+TEST_F(PerfsimPluginTest, IgnoresCallbacksAfterEarlyDispatchRejection) {
   WaveFixture fixture;
   const std::string config = plugin_config_with_staging_budget(4096);
   testing::internal::CaptureStderr();
   {
-    PffmPlugin plugin(config.c_str());
+    PerfsimPlugin plugin(config.c_str());
     plugin.onInit();
 
     KernelDispatchInfo rejected_info = dispatch_info(29);
@@ -1384,7 +1385,7 @@ TEST_F(PffmPluginTest, IgnoresCallbacksAfterEarlyDispatchRejection) {
   EXPECT_EQ(diagnostic.find("staging budget"), std::string::npos);
 }
 
-TEST_F(PffmPluginTest, RejectsTensorDmaBeforeMaterializingAddressesOverBudget) {
+TEST_F(PerfsimPluginTest, RejectsTensorDmaBeforeMaterializingAddressesOverBudget) {
   WaveFixture fixture;
   const std::string config = plugin_config_with_staging_budget(4096);
   bool addresses_materialized = false;
@@ -1393,7 +1394,7 @@ TEST_F(PffmPluginTest, RejectsTensorDmaBeforeMaterializingAddressesOverBudget) {
   } source{&addresses_materialized};
   testing::internal::CaptureStderr();
   {
-    PffmPlugin plugin(config.c_str());
+    PerfsimPlugin plugin(config.c_str());
     plugin.onInit();
 
     const KernelDispatchInfo info = dispatch_info(32);
@@ -1439,10 +1440,10 @@ TEST_F(PffmPluginTest, RejectsTensorDmaBeforeMaterializingAddressesOverBudget) {
   EXPECT_EQ(line_with_prefix(trace, "end 32 "), trace.size());
 }
 
-TEST_F(PffmPluginTest, PreservesCollidingWrappedFfmWaveIdentities) {
+TEST_F(PerfsimPluginTest, PreservesCollidingWrappedFfmWaveIdentities) {
   WaveFixture fixture;
   const std::string config = plugin_config();
-  PffmPlugin plugin(config.c_str());
+  PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
 
   const KernelDispatchInfo info = dispatch_info(23);
@@ -1472,12 +1473,12 @@ TEST_F(PffmPluginTest, PreservesCollidingWrappedFfmWaveIdentities) {
   EXPECT_NE(line_with_prefix(trace, "end 23 "), trace.size());
 }
 
-TEST_F(PffmPluginTest, RejectsWholeUnsupportedDispatchWithoutBackendCallbacks) {
+TEST_F(PerfsimPluginTest, RejectsWholeUnsupportedDispatchWithoutBackendCallbacks) {
   WaveFixture fixture;
   const std::string config = plugin_config();
   testing::internal::CaptureStderr();
   {
-    PffmPlugin plugin(config.c_str());
+    PerfsimPlugin plugin(config.c_str());
     plugin.onInit();
     KernelDispatchInfo info = dispatch_info(31);
     info.code_target = ROCJITSU_CODE_TARGET_GFX950;
@@ -1502,10 +1503,10 @@ TEST_F(PffmPluginTest, RejectsWholeUnsupportedDispatchWithoutBackendCallbacks) {
   EXPECT_EQ(line_with_prefix(trace, "end 31 "), trace.size());
 }
 
-TEST_F(PffmPluginTest, ReusesOnlyConsecutiveRepeatedWaitOrdinals) {
+TEST_F(PerfsimPluginTest, ReusesOnlyConsecutiveRepeatedWaitOrdinals) {
   WaveFixture fixture;
   const std::string config = plugin_config();
-  PffmPlugin plugin(config.c_str());
+  PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
 
   const KernelDispatchInfo info = dispatch_info(35);
@@ -1549,10 +1550,10 @@ TEST_F(PffmPluginTest, ReusesOnlyConsecutiveRepeatedWaitOrdinals) {
   EXPECT_EQ(count_prefix("instruction 35 0 0 0 0 2 24580 "), 1);
 }
 
-TEST_F(PffmPluginTest, MatchesFfmSwmmacSmemAndClusterInstructionCounters) {
+TEST_F(PerfsimPluginTest, MatchesFfmSwmmacSmemAndClusterInstructionCounters) {
   WaveFixture fixture;
   const std::string config = plugin_config();
-  PffmPlugin plugin(config.c_str());
+  PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
 
   const KernelDispatchInfo info = dispatch_info(36);
@@ -1598,86 +1599,88 @@ TEST_F(PffmPluginTest, MatchesFfmSwmmacSmemAndClusterInstructionCounters) {
             trace.size());
 }
 
-TEST_F(PffmPluginTest, ConstructorFailuresReleaseSingletonClaimAndRetainBackend) {
+TEST_F(PerfsimPluginTest, ConstructorFailuresReleaseSingletonClaimAndRetainBackend) {
   const std::string config = plugin_config();
   for (const char *mode :
        {"reject_all", "old_version", "bad_version", "missing_on_init", "missing_on_dispatch_begin",
         "missing_on_dispatch_end", "missing_on_instruction", "missing_on_memory_access",
         "missing_on_tdm_memory_access", "missing_on_shutdown"}) {
-    setenv("ROCJITSU_PFFM_FAKE_MODE", mode, 1);
-    EXPECT_THROW(PffmPlugin(config.c_str()), std::runtime_error) << mode;
+    setenv("ROCJITSU_PERFSIM_FAKE_MODE", mode, 1);
+    EXPECT_THROW(PerfsimPlugin(config.c_str()), std::runtime_error) << mode;
   }
 
-  setenv("ROCJITSU_PFFM_FAKE_MODE", "", 1);
-  auto first = std::make_unique<PffmPlugin>(config.c_str());
-  EXPECT_THROW(PffmPlugin(config.c_str()), std::runtime_error);
+  setenv("ROCJITSU_PERFSIM_FAKE_MODE", "", 1);
+  auto first = std::make_unique<PerfsimPlugin>(config.c_str());
+  EXPECT_THROW(PerfsimPlugin(config.c_str()), std::runtime_error);
   first.reset();
-  EXPECT_NO_THROW(PffmPlugin(config.c_str()));
-  EXPECT_THROW(PffmPlugin(R"({"library_path":"/does/not/exist.so"})"), std::runtime_error);
-  EXPECT_THROW(PffmPlugin("{}"), std::invalid_argument);
-  EXPECT_NO_THROW(PffmPlugin(config.c_str()));
+  EXPECT_NO_THROW(PerfsimPlugin(config.c_str()));
+  EXPECT_THROW(PerfsimPlugin(R"({"library_path":"/does/not/exist.so"})"), std::runtime_error);
+  EXPECT_THROW(PerfsimPlugin("{}"), std::invalid_argument);
+  EXPECT_NO_THROW(PerfsimPlugin(config.c_str()));
   const auto trace = lines(read_file(trace_.path()));
   EXPECT_EQ(line_with_prefix(trace, "unload"), trace.size());
 }
 
-TEST_F(PffmPluginTest, SequentialInstancesShutdownOnceWithoutUnloadingBackend) {
+TEST_F(PerfsimPluginTest, SequentialInstancesShutdownOnceWithoutUnloadingBackend) {
   const std::string config = plugin_config();
   for (int i = 0; i < 2; ++i) {
-    PffmPlugin plugin(config.c_str());
+    PerfsimPlugin plugin(config.c_str());
     plugin.onInit();
     plugin.onShutdown();
   }
 
   const auto trace = lines(read_file(trace_.path()));
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 14"), 2);
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 8"), 2);
   EXPECT_EQ(std::count(trace.begin(), trace.end(), "shutdown"), 2);
   EXPECT_EQ(line_with_prefix(trace, "unload"), trace.size());
 }
 
-TEST_F(PffmPluginTest, LoadsAsRocjitsuPluginWithStagingBudgetSchema) {
+TEST_F(PerfsimPluginTest, LoadsAsRocjitsuPluginWithStagingBudgetSchema) {
   const std::string config =
-      std::string{"{\"plugins\":{\"pffm\":"} + plugin_config_with_staging_budget(4096) + "}}";
+      std::string{"{\"plugins\":{\"perfsim\":"} + plugin_config_with_staging_budget(4096) + "}}";
   ExecutionPluginGroup group(PluginSinkConfig{});
   testing::internal::CaptureStderr();
-  const size_t loaded = PluginLoader::load_from_config(config, group, PFFM_PLUGIN_DIR);
+  const size_t loaded = PluginLoader::load_from_config(config, group, PERFSIM_PLUGIN_DIR);
   const std::string diagnostic = testing::internal::GetCapturedStderr();
   ASSERT_EQ(loaded, 1);
   EXPECT_EQ(diagnostic.find("not in schema"), std::string::npos);
   ASSERT_EQ(group.num_plugins(), 1u);
   group.onInit();
   group.onShutdown();
-  EXPECT_NE(read_file(trace_.path()).find("init 14\nshutdown\n"), std::string::npos);
+  EXPECT_NE(read_file(trace_.path()).find("init 8\nshutdown\n"), std::string::npos);
 }
 
-TEST_F(PffmPluginTest, RequiredLoaderRetriesAfterBackendFactoryFailure) {
+TEST_F(PerfsimPluginTest, RequiredLoaderRetriesAfterBackendFactoryFailure) {
   const std::string config =
-      std::string{"{\"require_all_plugins\":true,\"plugins\":{\"pffm\":"} + plugin_config() + "}}";
+      std::string{"{\"require_all_plugins\":true,\"plugins\":{\"perfsim\":"} + plugin_config() +
+      "}}";
 
-  setenv("ROCJITSU_PFFM_FAKE_MODE", "reject_all", 1);
-  EXPECT_THROW(PluginLoader::configure_plugin_group(config, PFFM_PLUGIN_DIR), std::runtime_error);
+  setenv("ROCJITSU_PERFSIM_FAKE_MODE", "reject_all", 1);
+  EXPECT_THROW(PluginLoader::configure_plugin_group(config, PERFSIM_PLUGIN_DIR),
+               std::runtime_error);
 
-  setenv("ROCJITSU_PFFM_FAKE_MODE", "", 1);
-  auto group = PluginLoader::configure_plugin_group(config, PFFM_PLUGIN_DIR);
+  setenv("ROCJITSU_PERFSIM_FAKE_MODE", "", 1);
+  auto group = PluginLoader::configure_plugin_group(config, PERFSIM_PLUGIN_DIR);
   ASSERT_NE(group, nullptr);
   ASSERT_EQ(group->num_plugins(), 1u);
   group->onInit();
   group->onShutdown();
 
   const auto trace = lines(read_file(trace_.path()));
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 14"), 1);
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 8"), 1);
   EXPECT_EQ(std::count(trace.begin(), trace.end(), "shutdown"), 1);
   EXPECT_EQ(line_with_prefix(trace, "unload"), trace.size());
 }
 
-TEST_F(PffmPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
-  const char *backend_path_env = std::getenv("ROCJITSU_PFFM_REAL_BACKEND");
+TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
+  const char *backend_path_env = std::getenv("ROCJITSU_PERFSIM_REAL_BACKEND");
   if (!backend_path_env || backend_path_env[0] == '\0')
-    GTEST_SKIP() << "set ROCJITSU_PFFM_REAL_BACKEND to libgpucsim_ffm_plugin.so";
+    GTEST_SKIP() << "set ROCJITSU_PERFSIM_REAL_BACKEND to libgpucsim_ffm_plugin.so";
   const std::string backend_path{backend_path_env};
 
   static_assert(FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION == 8);
-  rocjitsu::test::ScopedTempFile direct_report{"rocjitsu-pffm-direct-"};
-  rocjitsu::test::ScopedTempFile bridge_report{"rocjitsu-pffm-bridge-"};
+  rocjitsu::test::ScopedTempFile direct_report{"rocjitsu-perfsim-direct-"};
+  rocjitsu::test::ScopedTempFile bridge_report{"rocjitsu-perfsim-bridge-"};
   rocjitsu::test::ScopedEnvironmentVariable report_path{"GPUCSIM_REPORT_PATH",
                                                         direct_report.path()};
   rocjitsu::test::ScopedEnvironmentVariable target{"GPUCSIM_TARGET", "gfx1250"};
@@ -1689,20 +1692,14 @@ TEST_F(PffmPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
   rocjitsu::test::ScopedEnvironmentVariable ds_audit{"GPUCSIM_DS_AUDIT", ""};
 
   // The direct half retains its mapping for the process lifetime, matching the
-  // adapter. Some pFFM builds perform LLVM-global cleanup when finally unloaded.
+  // adapter. Some Perfsim builds perform LLVM-global cleanup when finally unloaded.
   const util::LibraryHandle direct_backend = util::open_library(backend_path.c_str());
   ASSERT_NE(direct_backend, nullptr) << util::last_library_error();
   const auto get_api =
       util::lookup_symbol<FfmObserverPluginGetApiFn>(direct_backend, "ffm_observer_plugin_get_api");
   ASSERT_NE(get_api, nullptr) << util::last_library_error();
-  constexpr uint32_t kHostApiVersion = 14;
-  FfmObserverPluginApi *raw_api = nullptr;
-  for (uint32_t version = kHostApiVersion;
-       !raw_api && version >= FFM_OBSERVER_PLUGIN_OLDEST_SUPPORTED_API_VERSION; --version) {
-    raw_api = get_api(version);
-    if (version == FFM_OBSERVER_PLUGIN_OLDEST_SUPPORTED_API_VERSION)
-      break;
-  }
+  FfmObserverPluginApi *raw_api =
+      invoke_foreign_abi(get_api, FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION);
   ASSERT_NE(raw_api, nullptr);
   uint32_t negotiated_version = 0;
   std::memcpy(&negotiated_version, raw_api, sizeof(negotiated_version));
@@ -1755,9 +1752,9 @@ TEST_F(PffmPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
   metadata.workgroup_size[1] = info.workgroup_size_y;
   metadata.workgroup_size[2] = info.workgroup_size_z;
 
-  const FfmHostApi direct_host{kHostApiVersion};
-  api.on_init(&direct_host);
-  api.on_dispatch_begin(&metadata);
+  const FfmHostApi direct_host{FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION};
+  invoke_foreign_abi(api.on_init, &direct_host);
+  invoke_foreign_abi(api.on_dispatch_begin, &metadata);
   const FfmWaveInfo direct_wave = make_wave_info(kDispatchId, kClusterId, 0, 0, 0);
   FfmInstructionCounters salu_counter{};
   salu_counter.salu_count = 1;
@@ -1777,14 +1774,14 @@ TEST_F(PffmPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
                             salu_counter, {FFM_WAIT_TYPE_LOAD, FFM_WAIT_NAME_S_WAIT_LOADCNT});
   FfmInstructionInfo direct_end = make_instruction_info(kDispatchId, kClusterId, 0, 0, 0, 4, kEndPc,
                                                         kEndFetch.data(), salu_counter);
-  api.on_instruction(&direct_nop);
-  api.on_instruction(&direct_global);
+  invoke_foreign_abi(api.on_instruction, &direct_nop);
+  invoke_foreign_abi(api.on_instruction, &direct_global);
   std::array<uint64_t, 32> global_addresses{};
   global_addresses[0] = kGlobalAddress;
   FfmMemoryAccess direct_memory = make_memory_access(1, direct_wave, 1, 32, global_addresses.data(),
                                                      4, FFM_RESOURCE_GLOBAL, false, true, false);
-  api.on_memory_access(&direct_memory);
-  api.on_instruction(&direct_tensor);
+  invoke_foreign_abi(api.on_memory_access, &direct_memory);
+  invoke_foreign_abi(api.on_instruction, &direct_tensor);
   FfmTdmMemoryAccess direct_tdm{};
   direct_tdm.instruction_id = 2;
   direct_tdm.wave_info = direct_wave;
@@ -1792,11 +1789,11 @@ TEST_F(PffmPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
   direct_tdm.addresses = kTensorAddresses.data();
   direct_tdm.data_size_bytes = 4;
   direct_tdm.flags = encode_tdm_flags(true, false);
-  api.on_tdm_memory_access(&direct_tdm);
-  api.on_instruction(&direct_wait);
-  api.on_instruction(&direct_end);
-  api.on_dispatch_end(&metadata);
-  api.on_shutdown();
+  invoke_foreign_abi(api.on_tdm_memory_access, &direct_tdm);
+  invoke_foreign_abi(api.on_instruction, &direct_wait);
+  invoke_foreign_abi(api.on_instruction, &direct_end);
+  invoke_foreign_abi(api.on_dispatch_end, &metadata);
+  invoke_foreign_abi(api.on_shutdown);
 
   const std::string direct_json = read_file(direct_report.path());
   ASSERT_FALSE(direct_json.empty());
@@ -1806,7 +1803,7 @@ TEST_F(PffmPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
   WaveFixture fixture;
   {
     const std::string config = plugin_config(backend_path);
-    PffmPlugin plugin(config.c_str());
+    PerfsimPlugin plugin(config.c_str());
     plugin.onInit();
     plugin.onAmdgpuDispatchPacketProcessed(info);
     plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
