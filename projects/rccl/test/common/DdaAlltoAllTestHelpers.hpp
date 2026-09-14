@@ -27,7 +27,7 @@ inline size_t testAlltoAllTotalBytes(size_t count, int nRanks, ncclDataType_t da
 }
 
 inline size_t testDdaAlltoAllThreshold(const ncclComm* comm) {
-  return rcclDdaVmmThreshold(comm, ncclFuncAlltoAll);
+  return rcclDdaEntryThreshold(comm, ncclFuncAlltoAll);
 }
 
 inline bool testRcclDdaAlltoAllThresholdEnabled(
