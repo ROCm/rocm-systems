@@ -8,7 +8,6 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/operations/types.hpp>
-#include <timemory/utility/macros.hpp>
 #include <timemory/utility/type_list.hpp>
 
 namespace rocprofsys
@@ -20,7 +19,7 @@ namespace
 template <typename... Tp>
 struct ensure_storage
 {
-    void operator()() const { ROCPROFSYS_FOLD_EXPRESSION((*this)(tim::type_list<Tp>{})); }
+    void operator()() const { (((*this)(tim::type_list<Tp>{})), ...); }
 
 private:
     template <typename Up>

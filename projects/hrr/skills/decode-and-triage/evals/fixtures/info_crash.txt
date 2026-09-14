@@ -1,0 +1,29 @@
+HRR Archive: /captures/crash_v4.hrr/pid-79
+========================================
+Complete:     NO (no shutdown trailer; capture likely crashed)
+Recovered:    5 events
+Events:       5
+Kernels:      1
+Blobs:        1
+Code Objects: 2
+Threads:      1
+
+Event Type Breakdown:
+  Type                   Count
+  ----                   -----
+  hipDeviceSynchronize   1
+  hipMalloc              1
+  hipMemcpy              1
+  hipModuleLaunchKernel  1
+  hipModuleLoad          1
+
+Kernel Summary (first 20):
+  ID   Kernel                                             Grid            Block           SharedMem
+  --   ------                                             ----            -----           ---------
+  0    crash_oob                                          [64,1,1]        [64,1,1]        0
+
+Kernel Call Counts:
+  Kernel                                                       Calls
+  ------                                                       -----
+  crash_oob                                                    1
+
