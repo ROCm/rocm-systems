@@ -47,7 +47,11 @@ typedef enum rocprofiler_thread_trace_decoder_info_t
     ROCPROFILER_THREAD_TRACE_DECODER_INFO_DATA_LOST,
     ROCPROFILER_THREAD_TRACE_DECODER_INFO_STITCH_INCOMPLETE,
     ROCPROFILER_THREAD_TRACE_DECODER_INFO_WAVE_INCOMPLETE,
+    ROCPROFILER_THREAD_TRACE_DECODER_INFO_ANALYSIS_MULTIPLE_BUFFERS,
     ROCPROFILER_THREAD_TRACE_DECODER_INFO_LAST
+
+    /// @var ROCPROFILER_THREAD_TRACE_DECODER_INFO_ANALYSIS_MULTIPLE_BUFFERS
+    /// @brief The parse spanned more than one capture, so an analysis merged unrelated waves.
 } rocprofiler_thread_trace_decoder_info_t;
 
 /**
@@ -238,6 +242,44 @@ typedef struct rocprofiler_thread_trace_decoder_inst_other_simd_t
     uint8_t category; ///< One of rocprofiler_thread_trace_decoder_inst_category_t
 } rocprofiler_thread_trace_decoder_inst_other_simd_t;
 
+/**
+ * @brief Latency hidden by concurrent instruction-pipe activity, for one program counter.
+ *
+ * Emitted once per (SIMD, program counter) after parsing completes, and only when
+ * ::ROCPROF_TRACE_DECODER_ANALYSIS_HIDDEN_LATENCY was requested. Sum over SIMDs for a
+ * per-program-counter total. Hidden cycles overlap work on another instruction pipe, so
+ * they are already accounted for by that other work; the exposed cost of an instruction is
+ * its latency plus idle time, minus its hidden total, clamped at zero.
+ *
+ * Cycles are attributed against four instruction-pipe groups, highest priority first: MATRIX,
+ * VALU, vector memory (VMEM, LDS, FLAT) and scalar (SMEM, SALU). Each instruction is scored
+ * against its own pipe and against the union of every higher-priority pipe, and the larger
+ * total wins. Categories belonging to no pipe are scored once against the union of all four.
+ * The own-pipe score omits its issue component, because an instruction's contribution to its
+ * own pipe is exactly its issue window and counting it would let every instruction hide
+ * behind itself.
+ *
+ * MATRIX is not a decoder instruction category. Matrix instructions are recognized from the
+ * ISA text the decoder caches while stitching, so v_mfma*, v_smfma*, v_wmma* and v_swmma* are
+ * treated as MATRIX rather than the VALU the decoder reports, and each contributes its full
+ * interval to MATRIX and three quarters of it to VALU. Without an ISA source they stay VALU,
+ * measurably changing results on traces that mix matrix and non-matrix work.
+ *
+ * Overlapping intervals within one pipe are coalesced by adding their durations rather than
+ * only extending to the latest endpoint, so a hidden total can exceed the span it covers.
+ * Added in rocprof-trace-decoder 0.2.3
+ */
+typedef struct rocprofiler_thread_trace_decoder_hidden_latency_t
+{
+    uint64_t size;                            ///< Size of this struct.
+    rocprofiler_thread_trace_decoder_pc_t pc; ///< Program counter these cycles belong to.
+    int64_t idle;                             ///< Hidden cycles before the instruction was attempted.
+    int64_t stall;                            ///< Hidden cycles waiting to issue.
+    int64_t issue;                            ///< Hidden issue (gfx9) or execution (gfx10+) cycles.
+    uint8_t simd;                             ///< SIMD ID [0,3] this estimate is scoped to.
+    uint8_t reserved[7];                      ///< Reserved
+} rocprofiler_thread_trace_decoder_hidden_latency_t;
+
 typedef enum rocprofiler_thread_trace_decoder_event_type_t
 {
     ROCPROF_TRACE_DECODER_EVENT_NONE = 0,
@@ -338,12 +380,15 @@ typedef enum rocprofiler_thread_trace_decoder_record_type_t
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY,
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INST_OTHER_SIMD,
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DISPATCH,
+    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_HIDDEN_LATENCY,
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST
 
     /// @var ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY
     /// @brief uint64_t*. Realtime clock frequency in Hz.
     /// @var ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INST_OTHER_SIMD
     /// @brief rocprofiler_thread_trace_decoder_inst_other_simd_t*. Instruction issue on other simd.
+    /// @var ROCPROFILER_THREAD_TRACE_DECODER_RECORD_HIDDEN_LATENCY
+    /// @brief rocprofiler_thread_trace_decoder_hidden_latency_t*. Opt-in, emitted after parsing.
 } rocprofiler_thread_trace_decoder_record_type_t;
 
 /** @} */

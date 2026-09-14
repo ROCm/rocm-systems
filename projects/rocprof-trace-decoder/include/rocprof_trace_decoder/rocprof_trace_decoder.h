@@ -278,6 +278,45 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 );
 
 /**
+ * @brief Optional analyses the decoder can compute while parsing.
+ */
+typedef enum rocprof_trace_decoder_analysis_flags_t
+{
+    ROCPROF_TRACE_DECODER_ANALYSIS_NONE = 0,
+    ROCPROF_TRACE_DECODER_ANALYSIS_HIDDEN_LATENCY = 0x1,
+    ROCPROF_TRACE_DECODER_ANALYSIS_LAST = ROCPROF_TRACE_DECODER_ANALYSIS_HIDDEN_LATENCY,
+
+    /// @var ROCPROF_TRACE_DECODER_ANALYSIS_HIDDEN_LATENCY
+    /// @brief Emit ::ROCPROFILER_THREAD_TRACE_DECODER_RECORD_HIDDEN_LATENCY records.
+} rocprof_trace_decoder_analysis_flags_t;
+
+/**
+ * @brief Requests optional analyses for subsequent rocprof_trace_decoder_parse() calls.
+ *
+ * Analyses are off by default because they require the decoder to retain each shader
+ * engine's instruction-pipe activity across wave callbacks, which costs memory and time.
+ * Results are emitted through the parse trace callback once parsing has finished, since
+ * waves are stitched out of order and other-SIMD activity is not fully known until then.
+ *
+ * Each parse() call must cover exactly one capture from one shader engine. Concurrency is
+ * scoped to (shader engine, SIMD), and SIMD ids repeat in every shader engine, so merging two
+ * captures would treat unrelated waves as competing for the same instruction pipe. Callers with
+ * several shader engines should parse each separately and aggregate the results. Every buffer is
+ * a complete capture with its own header, so a parse that consumes more than one reports
+ * ::ROCPROFILER_THREAD_TRACE_DECODER_INFO_ANALYSIS_MULTIPLE_BUFFERS.
+ *
+ * Added in 0.2.3.
+ *
+ * @param[in] handle The decoder handle.
+ * @param[in] flags Bitmask of ::rocprof_trace_decoder_analysis_flags_t, or 0 to disable.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT on an invalid
+ * handle or an unknown flag bit.
+ */
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_set_analysis(rocprof_trace_decoder_handle_t handle, uint64_t flags);
+
+/**
  * @brief Parses a buffer of thread trace data (V2 API).
  *
  * Requires either loaded code objects (Mode 1) or a custom ISA callback (Mode 2)

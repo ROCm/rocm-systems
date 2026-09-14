@@ -133,6 +133,7 @@ set(TEST_FILES
     sqttparser_test.cpp
     mi400_test.cpp
     funcmap_test.cpp
+    hidden_latency_test.cpp
     version_test.cpp)
 
 # Function to create a test executable with specific sanitizer options Re-list library sources for sanitizer builds
@@ -142,6 +143,7 @@ file(
     UNIT_TEST_LIB_SOURCES
     ${SRC_DIR}/trie.cpp
     ${SRC_DIR}/rocprof_trace_decoder.cpp
+    ${SRC_DIR}/hidden_latency.cpp
     ${SRC_DIR}/quick_scan_export.cpp
     ${SRC_DIR}/stitch/stitch.cpp
     ${SRC_DIR}/stitch/pctranslator.cpp
