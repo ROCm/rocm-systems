@@ -5,7 +5,7 @@ import csv
 from dataclasses import dataclass
 from enum import Flag
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, SupportsFloat, Tuple, Union
+from typing import Any, Optional, SupportsFloat, Union
 
 import numpy as np
 import pandas as pd
@@ -218,8 +218,8 @@ class GraphPoints:
 class RooflineCsvData:
     """Parsed roofline.csv device IDs and benchmark columns by row order."""
 
-    device_ids: List[int]
-    columns: Dict[str, List[str]]
+    device_ids: list[int]
+    columns: dict[str, list[str]]
 
 
 ################################################
@@ -276,17 +276,17 @@ def sanitize_mem_level(mem_level: Union[list[str], str], gpu_model: str) -> list
 #                           Plot BW at each cache level
 # -------------------------------------------------------------------------------------
 def calc_ceilings(
-    roofline_parameters: Dict[str, Any],
+    roofline_parameters: dict[str, Any],
     dtype: str,
-    benchmark_data: Dict[str, List[str]],
+    benchmark_data: dict[str, list[str]],
     mspec: MachineSpecs,
     device_row_index: int,
-) -> Dict[str, List[Union[List[float], float, None]]]:
+) -> dict[str, list[Union[list[float], float, None]]]:
     """Given benchmarking data, calculate ceilings (or peak performance) for
     empirical roofline"""
 
     # TODO: This is where filtering by memory level will need to occur for standalone
-    graph_points: Dict[str, List[Union[List[float], float, None]]] = {
+    graph_points: dict[str, list[Union[list[float], float, None]]] = {
         "hbm": [],
         "l2": [],
         "l1": [],
@@ -631,9 +631,9 @@ def calc_ai_analyze(
 
 
 def machine_ceilings(
-    roofline_parameters: Dict[str, Any],
+    roofline_parameters: dict[str, Any],
     mspec: MachineSpecs,
-) -> Tuple[List[float], List[float]]:
+) -> tuple[list[float], list[float]]:
     """Return positive bandwidth and compute ceilings for one device."""
     base_dir = _workload_base_dir(roofline_parameters.get("workload_dir"))
     if base_dir is None:
@@ -677,10 +677,10 @@ def machine_ceilings(
 
 
 def construct_roof(
-    roofline_parameters: Dict[str, Any],
+    roofline_parameters: dict[str, Any],
     dtype: str,
     mspec: MachineSpecs,
-) -> Dict[str, List[Union[List[float], float, None]]]:
+) -> dict[str, list[Union[list[float], float, None]]]:
     """Load benchmark results from disk and compute the empirical roofline."""
     base_dir = _workload_base_dir(roofline_parameters.get("workload_dir"))
 
@@ -728,10 +728,10 @@ def construct_roof(
 
 def _parse_roofline_csv(benchmark_results: Path) -> RooflineCsvData:
     """Parse roofline.csv into device IDs and benchmark columns by row order."""
-    device_ids: List[int] = []
-    seen_device_ids: Set[int] = set()
-    columns: Dict[str, List[str]] = {}
-    headers: List[str] = []
+    device_ids: list[int] = []
+    seen_device_ids: set[int] = set()
+    columns: dict[str, list[str]] = {}
+    headers: list[str] = []
     expected_width = 0
 
     with open(benchmark_results, newline="", encoding="utf-8") as csvfile:
@@ -742,7 +742,7 @@ def _parse_roofline_csv(benchmark_results: Path) -> RooflineCsvData:
                         f"roofline.csv row {row_number} is missing benchmark columns"
                     )
                 headers = row[1:]
-                seen_headers: Set[str] = set()
+                seen_headers: set[str] = set()
                 for header in headers:
                     if header in seen_headers:
                         raise ValueError(
@@ -829,11 +829,11 @@ def _parse_integral_id(value: Union[int, float, str], *, label: str) -> int:
 
 
 def _expected_benchmark_columns(
-    roofline_parameters: Dict[str, Any], dtype: str, mspec: MachineSpecs
-) -> List[str]:
+    roofline_parameters: dict[str, Any], dtype: str, mspec: MachineSpecs
+) -> list[str]:
     """Benchmark columns the roofline needs for this datatype and mem levels."""
     ops_flops = "Ops" if dtype.startswith("I") else "Flops"
-    columns: List[str] = []
+    columns: list[str] = []
 
     if OpsSupport.VALU in SUPPORTED_DATATYPES[mspec.gpu_arch][dtype]:
         columns.append(f"{dtype}{ops_flops}")
@@ -852,12 +852,12 @@ def _expected_benchmark_columns(
 
 
 def _device_values(
-    benchmark_data: Dict[str, List[str]],
+    benchmark_data: dict[str, list[str]],
     row_index: int,
-    column_suffixes: Tuple[str, ...],
-) -> List[float]:
+    column_suffixes: tuple[str, ...],
+) -> list[float]:
     """Collect positive finite values from columns ending in the given suffixes."""
-    values: List[float] = []
+    values: list[float] = []
     for column, rows in benchmark_data.items():
         if not any(column.endswith(suffix) for suffix in column_suffixes):
             continue

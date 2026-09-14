@@ -59,11 +59,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
-* Fixed standalone roofline HTML opening axes to derive from machine ceilings
-  instead of kernel data. **Fit to data** and off-plot kernel badges provide
-  recovery when kernel points fall outside the stable comparison frame, and
-  keep the opening frame's decade ratio so a zoom does not change the angle
-  where a bandwidth roof meets a compute ceiling.
+* Fixed the standalone roofline HTML so it always opens with the same axes for a given GPU, which makes two runs comparable. The axes come from the benchmarked bandwidth and compute ceilings, not from the kernels in the run.
 
 * Fixed `L2 Cache (per Channel)` labels to use a `Metric` column and numbered `Channel` row labels in CLI, TUI, and analysis database output.
 

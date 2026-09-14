@@ -8,7 +8,6 @@ page.
 
 import argparse
 import json
-import logging
 import math
 import re
 from pathlib import Path
@@ -18,18 +17,14 @@ import plotly.graph_objects as go
 import pytest
 
 import roofline.roofline_html as roofline_html
-from roofline.roofline_frame import (
-    FRAME_X_MIN,
-    canonical_frame,
-    points_outside_frame,
-)
+from roofline.roofline_frame import FRAME_X_MIN, canonical_frame
 from roofline.roofline_hover import wrap_hover_name
 from roofline.roofline_html import RooflineViewModel, build_interactive_document
 
 if TYPE_CHECKING:
     from roofline.roofline_main import Roofline
 
-_ASSETS = Path(__file__).resolve().parents[3] / "src" / "roofline" / "assets"
+_ASSETS = Path(roofline_html.__file__).parent / "assets"
 
 
 class MockMspec:
@@ -315,28 +310,6 @@ def test_canonical_frame_subnormal_degenerate_preserves_decade_alignment() -> No
     assert int(round(math.log10(y_high))) == int(round(math.log10(y_low))) + 1
 
 
-def test_points_outside_frame_detects_nextafter_above_high() -> None:
-    """Values just above a decade high must still register as outside."""
-    frame = (1e-2, 1e2, 1e0, 10.0)
-    point = (1.0, math.nextafter(10.0, math.inf))
-    outside = points_outside_frame(frame, [point])
-    assert len(outside) == 1
-    assert outside[0][0] == 0
-    assert outside[0][2] > 0.0
-
-
-def test_points_outside_frame_reports_signed_decades() -> None:
-    """Overflow is signed in decades; boundary values stay inside."""
-    frame = (1e-2, 1e2, 1e0, 1e5)
-    points = [(1.0, 100.0), (1.0, 0.1), (1e3, 1e6), (0.0, 100.0)]
-
-    assert points_outside_frame(frame, points) == [
-        (1, 0.0, -1.0),
-        (2, 1.0, 1.0),
-        (3, -math.inf, 0.0),
-    ]
-
-
 def drawn_roof_knees(fig: go.Figure) -> Dict[str, Tuple[float, float]]:
     """The knee each bandwidth roof is drawn to, read back off the figure."""
     return {
@@ -376,56 +349,26 @@ def test_the_figure_uses_the_machine_frame_while_preserving_roof_knees(
     assert [knee[1] for knee in knees.values()] == pytest.approx([12000.0] * len(knees))
 
 
-def test_kernel_under_the_frame_warns_without_clamping(
-    benchmarked_roofline, caplog
-) -> None:
-    """A kernel below y_low warns once, keeps true coordinates, and leaves axes
-    on the machine frame."""
+def test_kernel_under_the_frame_is_not_clamped(benchmarked_roofline) -> None:
+    """A kernel below y_low keeps its true coordinates and leaves the axes on the
+    machine frame."""
     ai_data = {
         "ai_hbm": [[1.0, 1.0], [0.1, 500.0]],
         "kernelNames": ["sunken", "framed"],
     }
     inside_only = {"ai_hbm": [[1.0], [500.0]], "kernelNames": ["framed"]}
 
-    with caplog.at_level(logging.WARNING):
-        _, figure, _, _ = benchmarked_roofline(["FP64"]).construct_plotly_figures(
-            ai_data, datatypes=["FP64"]
-        )
-        _, reference, _, _ = benchmarked_roofline(["FP64"]).construct_plotly_figures(
-            inside_only, datatypes=["FP64"]
-        )
-
-    falls_outside = [r for r in caplog.records if "falls outside" in r.message]
-    assert len(falls_outside) == 1
-    assert "sunken" in falls_outside[0].message
-    assert "1.00 decades below the performance axis" in falls_outside[0].message
+    _, figure, _, _ = benchmarked_roofline(["FP64"]).construct_plotly_figures(
+        ai_data, datatypes=["FP64"]
+    )
+    _, reference, _, _ = benchmarked_roofline(["FP64"]).construct_plotly_figures(
+        inside_only, datatypes=["FP64"]
+    )
 
     assert layout_bounds(figure) == layout_bounds(reference)
 
     sunken_trace = next(trace for trace in figure.data if trace.name == "sunken")
     assert sunken_trace.y == (0.1,)
-
-
-def test_kernel_on_frame_edge_does_not_warn(benchmarked_roofline, caplog) -> None:
-    """A point exactly on the canonical frame edge stays inside and silent."""
-    # Match benchmarked_roofline CSV row bandwidths and peaks.
-    frame = canonical_frame(
-        [500.0, 500.0, 500.0, 500.0], [3000.0, 10000.0, 11000.0, 12000.0]
-    )
-    assert frame is not None
-    x_lo, x_hi, y_lo, y_hi = frame
-    ai_data = {
-        "ai_hbm": [[x_lo], [y_lo]],
-        "kernelNames": ["on_edge"],
-    }
-
-    with caplog.at_level(logging.WARNING):
-        benchmarked_roofline(["FP64"]).construct_plotly_figures(
-            ai_data, datatypes=["FP64"]
-        )
-
-    falls_outside = [r for r in caplog.records if "falls outside" in r.message]
-    assert not falls_outside
 
 
 def test_kernel_data_does_not_change_machine_axis_ranges(benchmarked_roofline) -> None:
@@ -508,9 +451,9 @@ def test_title_names_the_stable_frame_across_precisions_and_combining(
 
 
 def test_fallback_frame_has_truthful_subtitle(
-    benchmarked_roofline, monkeypatch, caplog
+    benchmarked_roofline, monkeypatch
 ) -> None:
-    """Fallback ranges identify their source and warn about off-frame kernels."""
+    """Fallback ranges identify their source in the subtitle."""
     roofline = benchmarked_roofline(["FP64"])
     machine_figure = roofline.generate_plot("FP64")
     assert "Axes fixed to this GPU" in machine_figure.layout.title.text
@@ -519,24 +462,19 @@ def test_fallback_frame_has_truthful_subtitle(
         "roofline.roofline_main.machine_ceilings",
         lambda *_args: ([], []),
     )
-    with caplog.at_level(logging.WARNING):
-        _, fallback_figure, _, _ = roofline.construct_plotly_figures(
-            {
-                "ai_hbm": [[1e4], [1e7]],
-                "kernelNames": ["outside_default_frame"],
-            },
-            datatypes=["FP64"],
-        )
+    _, fallback_figure, _, _ = roofline.construct_plotly_figures(
+        {
+            "ai_hbm": [[1e4], [1e7]],
+            "kernelNames": ["outside_default_frame"],
+        },
+        datatypes=["FP64"],
+    )
 
     assert layout_bounds(fallback_figure) == [[1e-2, 1e3], [1.0, 1e6]]
     assert fallback_figure.layout.title.text == (
         "Empirical Roofline Analysis<br><sup>Default axes - benchmark ceilings "
         "unavailable - AI 1e-2 to 1e3 - performance 1e0 to 1e6</sup>"
     )
-    falls_outside = [r.message for r in caplog.records if "falls outside" in r.message]
-    assert len(falls_outside) == 1
-    assert "current fixed roofline frame" in falls_outside[0]
-    assert "GPU ceilings" not in falls_outside[0]
 
 
 def test_view_model_carries_the_drawn_knee(benchmarked_roofline) -> None:

@@ -5,7 +5,7 @@ import argparse
 import math
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import numpy as np
 import plotext as plt
@@ -13,7 +13,7 @@ import plotly.colors as pcolors
 import plotly.graph_objects as go
 from dash import dcc, html
 
-from roofline.roofline_frame import canonical_frame, points_outside_frame
+from roofline.roofline_frame import canonical_frame
 from roofline.roofline_hover import (
     build_compute_peak_hover,
     build_kernel_hover_template,
@@ -139,37 +139,8 @@ def _decade_label(value: float) -> str:
     return f"1e{int(round(math.log10(value)))}"
 
 
-def _off_plot_phrase(
-    point: Dict[str, Any], x_overflow: float, y_overflow: float
-) -> str:
-    """Describe one kernel point's signed overflow relative to the frame."""
-    assert x_overflow != 0.0 or y_overflow != 0.0
-    parts: List[str] = []
-    if x_overflow != 0.0:
-        if math.isfinite(x_overflow):
-            direction = "below" if x_overflow < 0 else "above"
-            parts.append(
-                f"{point['ai']:g} sits {abs(x_overflow):.2f} decades "
-                f"{direction} the arithmetic intensity axis"
-            )
-        else:
-            parts.append(
-                f"{point['ai']:g} cannot be placed on the arithmetic intensity axis"
-            )
-    if y_overflow != 0.0:
-        if math.isfinite(y_overflow):
-            direction = "below" if y_overflow < 0 else "above"
-            parts.append(
-                f"{point['perf']:g} sits {abs(y_overflow):.2f} decades "
-                f"{direction} the performance axis"
-            )
-        else:
-            parts.append(f"{point['perf']:g} cannot be placed on the performance axis")
-    return f"at {point['peak']}, " + "; ".join(parts)
-
-
 def _frame_subtitle(
-    bounds: Tuple[float, float, float, float], is_machine_frame: bool
+    bounds: tuple[float, float, float, float], is_machine_frame: bool
 ) -> str:
     """Name the source and bounds of the frame shown by both axes."""
     x_lo, x_hi, y_lo, y_hi = bounds
@@ -200,7 +171,7 @@ class Roofline:
         self.__view_models: dict[str, RooflineViewModel] = {}
         self.__compute_peaks: dict[str, list[tuple[str, float]]] = {}
         self.__ceiling_by_dtype: dict[str, dict[str, Any]] = {}
-        self.__frame_bounds: Optional[Tuple[float, float, float, float]] = None
+        self.__frame_bounds: Optional[tuple[float, float, float, float]] = None
         self.__frame_from_machine_ceilings: Optional[bool] = None
 
     def _ceiling_for_dtype(self, dtype: str) -> dict[str, Any]:
@@ -212,7 +183,7 @@ class Roofline:
             )
         return self.__ceiling_by_dtype[dtype]
 
-    def _canonical_frame_bounds(self) -> Tuple[float, float, float, float]:
+    def _canonical_frame_bounds(self) -> tuple[float, float, float, float]:
         """Return this machine's shared frame, computing it only once."""
         if self.__frame_bounds is None:
             machine_frame = canonical_frame(
@@ -836,10 +807,6 @@ class Roofline:
                 ops_flops,
                 compute_peaks,
             )
-            self._warn_off_plot_kernels(
-                self.__view_models[ops_flops].kernels,
-                (x_lo, x_hi, y_lo, y_hi),
-            )
 
         # Roofs are densely sampled across so they stay hoverable
         # throughout the visible range.
@@ -865,29 +832,6 @@ class Roofline:
             self._apply_plotly_layout(fig, dtype, ops_flops, (x_lo, x_hi, y_lo, y_hi))
 
         return fig
-
-    @staticmethod
-    def _warn_off_plot_kernels(
-        kernels_model: List[Dict[str, Any]],
-        frame: Tuple[float, float, float, float],
-    ) -> None:
-        """Warn when kernel points fall outside the canonical frame."""
-        for kernel in kernels_model:
-            points = kernel.get("points", [])
-            outside = points_outside_frame(
-                frame, [(point["ai"], point["perf"]) for point in points]
-            )
-            if not outside:
-                continue
-            details = "; ".join(
-                _off_plot_phrase(points[index], x_overflow, y_overflow)
-                for index, x_overflow, y_overflow in outside
-            )
-            console_warning(
-                f"Roofline kernel '{kernel['name']}' falls outside the current "
-                f"fixed roofline frame: {details}. Drawn at its true position; "
-                "axes remain fixed to the current roofline frame."
-            )
 
     def _add_kernel_traces(
         self,

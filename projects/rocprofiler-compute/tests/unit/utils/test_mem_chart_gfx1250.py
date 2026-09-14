@@ -6,12 +6,21 @@
 import re
 from pathlib import Path
 
+import common
 import yaml
 
 from utils import mem_chart_gfx1250
 from utils.mem_chart_common import strip_ansi
 
 DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
+
+MEM_CHART_PANEL_YAML = (
+    Path(common.SRC)
+    / "rocprof_compute_soc"
+    / "analysis_configs"
+    / "gfx1250"
+    / "0300_memory_chart.yaml"
+)
 
 
 # =============================================================================
@@ -167,13 +176,7 @@ class TestDefaultSampleMetricsGfx1250:
         assert any("DRAM" in k for k in metrics)
 
     def test_keys_match_memory_chart_panel(self):
-        project_root = Path(__file__).parents[3]
-        config_path = (
-            project_root
-            / "src/rocprof_compute_soc/analysis_configs/gfx1250"
-            / "0300_memory_chart.yaml"
-        )
-        with config_path.open(encoding="utf-8") as config_file:
+        with MEM_CHART_PANEL_YAML.open(encoding="utf-8") as config_file:
             panel_config = yaml.safe_load(config_file)["Panel Config"]
 
         panel_metric_keys = tuple(
