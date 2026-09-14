@@ -137,7 +137,7 @@ postfork_child()
     settings::enabled() = false;
     settings::verbose() = -127;
     settings::debug()   = false;
-    rocprofsys::sampling::shutdown();
+    rocprofsys::sampling::postfork_child_release_samplers();
     rocprofsys::categories::shutdown();
     state::thread::set(state::thread::Disabled);
 

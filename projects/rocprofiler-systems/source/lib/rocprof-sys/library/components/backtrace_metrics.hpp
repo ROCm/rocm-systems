@@ -13,7 +13,6 @@
 #include <timemory/components/base.hpp>
 #include <timemory/components/papi/papi_array.hpp>
 #include <timemory/components/papi/types.hpp>
-#include <timemory/macros/language.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/utility/type_list.hpp>
 #include <timemory/variadic/types.hpp>

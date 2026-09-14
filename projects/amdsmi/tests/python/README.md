@@ -34,7 +34,7 @@ tests/python/
 ├── common/                 # shared runner + helpers (common.py, runcmd.py)
 ├── unit/                   # pure-logic tests
 │   ├── system/             #   test_bdf.py, test_check_res.py
-│   └── gpu/                #   apu_metrics, gfx_activity_silence, ...
+│   └── gpu/                #   apu_metrics, ...
 ├── functional/             # hardware tests (require a live device + root)
 │   ├── gpu/  cpu/  nic/  ifoe/  system/
 └── cli/                    # exercise the installed `amd-smi` binary

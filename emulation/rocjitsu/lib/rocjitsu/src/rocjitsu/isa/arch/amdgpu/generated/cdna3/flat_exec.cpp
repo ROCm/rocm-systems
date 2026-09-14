@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/flat.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx940_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -728,6 +729,9 @@ void FlatAtomicAddF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.sc0 != 0);
   d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_denorm_mode = 2;
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_legacy_minmax = true;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
@@ -751,7 +755,7 @@ void FlatAtomicPkAddF16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_op = amdgpu::AtomicOp::PK_ADD_F16;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
@@ -776,6 +780,9 @@ void FlatAtomicAddF64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.sc0 != 0);
   d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = 3;
+  d->atomic_legacy_minmax = true;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
@@ -802,6 +809,9 @@ void FlatAtomicMinF64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.sc0 != 0);
   d->atomic_op = amdgpu::AtomicOp::FMIN;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
+  d->atomic_legacy_minmax = true;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
@@ -828,6 +838,9 @@ void FlatAtomicMaxF64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.sc0 != 0);
   d->atomic_op = amdgpu::AtomicOp::FMAX;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
+  d->atomic_legacy_minmax = true;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
@@ -853,7 +866,7 @@ void FlatAtomicPkAddBf16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_op = amdgpu::AtomicOp::PK_ADD_BF16;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
@@ -1211,6 +1224,31 @@ void FlatAtomicDecX2Flat::execute_impl(amdgpu::Wavefront &wf) {
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
+}
+
+void GlobalLoadLdsUbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
+
+void GlobalLoadLdsSbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
+
+void GlobalLoadLdsUshortFlat::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
+
+void GlobalLoadLdsSshortFlat::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
+
+void GlobalLoadLdsDwordFlat::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 } // namespace cdna3

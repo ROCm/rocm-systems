@@ -7,6 +7,7 @@
 #pragma once
 
 #include "algorithms/dda/device/CollCommon.h"
+#include "algorithms/dda/device/CollCommon_ll128.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 #include "algorithms/dda/ipc/ipc_gpu_barrier.h"
 
@@ -23,19 +24,10 @@
 
 namespace nccl_dda_detail {
 
+using dda::common::ddaLL128AGSlices;
+using dda::common::kDdaLL128WireBytesPerSlice;
 using dda::common::kDdaLLMaxBytes;
 constexpr int kDdaNranks = dda::common::NRANKS;
-
-// LL/LL128 fixed slot layout constants. These define the per-rank slot stride
-// used by the kernels, which must be known at compile time so all ranks use
-// identical offsets. The values match the algorithm headers:
-//   LL128: 512 KiB per rank (all_gather_dda_fabric_ll128.h, etc.)
-constexpr size_t kDdaLL128MaxPerRankBytes = 524288;   // 512 KiB
-constexpr int kDdaLL128DataElems = 15;                // payload words per 128B line
-
-// Derive slot stride from max per-rank bytes.
-constexpr size_t kDdaLL128SlotStrideLines =
-  (kDdaLL128MaxPerRankBytes / 8 + kDdaLL128DataElems - 1) / kDdaLL128DataElems;  // 4370 lines
 
 // Compute the fabric scratch allocation from the runtime configuration.
 // An explicit buffer-size override takes precedence over derived sizing.
@@ -43,13 +35,13 @@ constexpr size_t kDdaLL128SlotStrideLines =
 // The derived size is: max(simpleCap, llFloor, ll128Floor) where:
 // - simpleCap: DDA_THRESHOLD (default 128 MiB)
 // - llFloor:   2 banks * nRanks * kDdaLLMaxBytes (when LL enabled)
-// - ll128Floor: 2 banks * nRanks * kDdaLL128SlotStrideLines * 128B (when LL128 enabled)
+// - ll128Floor: whole slices per rank to carry DDA_LL128_THRESHOLD, 2 banks
 //
 // Collectives that need more scratch (e.g., LL128 AR with large messages) are
 // bounded by the eligibility check (scratchNeeded > ddaScratchBytes), which
 // causes them to fall through to Simple path.
 inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t ddaEnabled, int64_t ddaThreshold,
-                                     int64_t llEnabled, int64_t ll128Enabled) {
+                                     int64_t llEnabled, int64_t ll128Enabled, int64_t ll128Threshold = 0) {
   if (overrideBytes >= 0) {
     return overrideBytes > 0 ? (size_t)overrideBytes : 0;
   }
@@ -64,8 +56,13 @@ inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t 
   // LL fixed slot arrays: 2 banks * nRanks * slotMaxBytes.
   const size_t llFloor = llEnabled ? (size_t)2 * nRanks * kDdaLLMaxBytes : 0;
 
-  // LL128 fixed slot arrays: 2 banks * nRanks * slotStrideLines * 128B.
-  const size_t ll128Floor = ll128Enabled ? (size_t)2 * nRanks * kDdaLL128SlotStrideLines * 128 : 0;
+  // LL128 slot arrays sized to carry the LL128 threshold: whole slices per rank,
+  // nRanks slots, 2 banks.
+  size_t ll128Floor = 0;
+  if ((llEnabled || ll128Enabled) && ll128Threshold > 0) {
+    const size_t perRank = ((size_t)ll128Threshold + (size_t)nRanks - 1) / (size_t)nRanks;
+    ll128Floor = (size_t)2 * nRanks * ddaLL128AGSlices(perRank) * (size_t)kDdaLL128WireBytesPerSlice;
+  }
 
   size_t bytes = simpleCap;
   if (llFloor > bytes) bytes = llFloor;

@@ -221,19 +221,19 @@ try {
     CUfileBatchHandle_t cu_batch_idp = batch_idp;
     CUfileError_t       status;
 
-    if (iocbp) {
-        vector<CUfileIOEvents> io_events(*nr);
-
-        status = cuFileBatchIOGetStatus(cu_batch_idp, min_nr, nr, io_events.data(), timeout);
-
-        if (status.err == CU_FILE_SUCCESS) {
-            for (unsigned i = 0; i < *nr; i++) {
-                iocbp[i] = toHipFileIOEvents(io_events[i]);
-            }
-        }
+    vector<CUfileIOEvents> io_events;
+    CUfileIOEvents_t      *cu_iocbp = nullptr;
+    if (nr && *nr > 0 && iocbp) {
+        io_events.resize(*nr);
+        cu_iocbp = io_events.data();
     }
-    else {
-        status = cuFileBatchIOGetStatus(cu_batch_idp, min_nr, nr, nullptr, timeout);
+
+    status = cuFileBatchIOGetStatus(cu_batch_idp, min_nr, nr, cu_iocbp, timeout);
+
+    if (status.err == CU_FILE_SUCCESS && nr && iocbp) {
+        for (unsigned i = 0; i < *nr; i++) {
+            iocbp[i] = toHipFileIOEvents(io_events[i]);
+        }
     }
 
     return toHipFileError(status);

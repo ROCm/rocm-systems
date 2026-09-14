@@ -524,7 +524,9 @@ pub(crate) fn assert_suite_can_run() {
         "the `{TEST_EMULATOR}` runtime was not found, so every session test \
 in this suite skipped and the suite proves nothing.\n\n\
          Build the sibling `emulation/rocjitsu` project, or set ROCM_HOME to \
-an install that provides librocjitsu.so.\n\n\
+an install that provides librocjitsu.so — or, if a `<prefix>/lib` beside \
+the test binary already has one and you want a different build, \
+ROCJITSU_LIB, which is the only override that outranks it.\n\n\
          If this build deliberately excludes rocjitsu, set \
 {ENV_ALLOW_SKIP}=1 to accept the skips."
     );

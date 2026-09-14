@@ -259,7 +259,22 @@ additional architectural callbacks.
 Asynchronous memory operations are modeled separately. The race detector
 records their register dependencies when they are issued. A later completion
 updates storage without emitting the same instruction-level write again.
-Synchronization retires the corresponding outstanding operations.
+Synchronization retires the corresponding outstanding operations using the
+counter family captured at issue. This distinguishes legacy combined
+`vmcnt`/`lgkmcnt` waits from split `loadcnt`, `storecnt`, `dscnt`, and `kmcnt`
+waits on newer targets.
+
+### Scalar register identity
+
+`onAmdgpuReadScalarRegister` and `onAmdgpuWriteScalarRegister` carry a
+`RegisterRef` whose class and index identify the architectural register. This
+keeps plugins independent of encoded selector values and of the simulator's
+physical storage layout. In particular, ordinary SGPRs and wave-private TTMPs
+have distinct identities even though both can appear in scalar operand fields.
+
+The older `onAmdgpuReadSgpr` hook continues to expose physical SGPR indices for
+compatibility. New consumers that need architectural identity should use the
+typed scalar-register hooks. Scalar writes have only the typed callback.
 
 ### Dispatch threading
 
@@ -285,8 +300,9 @@ every high-frequency callback, serializing it with the infrequent callbacks
 without a per-instruction scan of the plugin list. Plugins that protect their
 own shared state should retain the parallel default.
 
-SGPR owner resolution is skipped when no contained plugin observes SGPR reads.
-Plugins that do not consume `onAmdgpuReadSgpr` should override
+SGPR owner resolution is skipped when no contained plugin observes scalar
+register reads. Plugins that consume neither `onAmdgpuReadScalarRegister` nor
+`onAmdgpuReadSgpr` should override
 `observes_sgpr_reads()` to return `false`. The group samples this policy when
 each plugin is added. Its conservative default is `true`, so existing plugins
 continue receiving SGPR read callbacks unless they explicitly opt out.

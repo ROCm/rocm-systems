@@ -31,6 +31,7 @@
 #include "group.h"
 
 #include "fakes/comm_fakes.h"    // controllable ncclCommSetAsyncError seam
+#include "fakes/recorder_fakes.h"  // g_recorderResult, shared with the other micro binaries
 #include "fakes/nccl_fakes.h"    // g_loadParam, used by param_redirect.h
 #include "ScopedHook.h"          // RAII install/restore for controllable seams
 
@@ -63,6 +64,8 @@ static std::function<bool()> g_threadCreateShouldFail = [] { return false; };
     } \
   } while (0)
 
+#include "fakes/nvtx_redirect.h"  // neuter / block nvtx.h before group.cc includes it
+
 // Pull in the unit under test so its file-static helpers (groupLaunch,
 // asyncJobLaunch, groupLaunchNonBlocking, ...) are visible. Must come after the
 // headers / fakes it depends on are in scope.
@@ -85,6 +88,7 @@ class GroupEndInternalTest : public ::testing::Test {
 
   void SetUp() override {
     ResetCommFakes();
+    ResetRecorderFakes();  // recorder_fakes.cc is linked here too; g_recorderResult is process state
 
     // Reset the thread-local group state group.cc reads. ncclGroupEndInternal
     // runs on this thread, so the thread-locals it inspects are these.
@@ -114,6 +118,7 @@ class GroupEndInternalTest : public ::testing::Test {
       comm_->groupJob = nullptr;
     }
     ResetCommFakes();
+    ResetRecorderFakes();  // recorder_fakes.cc is linked here too; g_recorderResult is process state
   }
 
   // Queue a single pending async job owned by comm_ and enter a group whose

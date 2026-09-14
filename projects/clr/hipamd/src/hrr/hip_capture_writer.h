@@ -6,7 +6,7 @@
 #pragma once
 
 #include "hip_capture.h"
-#include "hrr_api_args.h"
+#include "hrr/hrr_api_args.h"
 
 #include <cstddef>
 #include <cstdint>

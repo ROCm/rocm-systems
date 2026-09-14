@@ -19,6 +19,7 @@ set(rocprofiler_lib_sources
     hsa.cpp
     late_start.cpp
     naming.cpp
+    queue_controller.cpp
     queue_interposition.cpp
     timestamp.cpp
     version.cpp

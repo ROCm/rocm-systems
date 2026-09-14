@@ -23,7 +23,7 @@
 ///                                     (GFX11/12: op=1 is s_setkill; s_endpgm moved to op=48)
 
 #include "decode_test_util.h"
-#include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
@@ -1075,6 +1075,15 @@ TEST(FieldlessOperandDecodeTest, SaveexecExposesInertExecAndSccOperands) {
   expect_inert_fieldless_operand(inst->dst_operand(1), 64, 126); // EXEC write.
   expect_inert_fieldless_operand(inst->dst_operand(2), 1, 253);  // SCC write.
   expect_inert_fieldless_operand(inst->src_operand(1), 64, 126); // EXEC read.
+
+  // The fieldless special operands are inert for ordinary register/SIMD access
+  // (asserted above), but each still reports its architectural special register
+  // through to_special_reg_class() -- the special-effect counterpart of
+  // to_register_ref(). The ordinary sdst carries no special class.
+  EXPECT_EQ(sdst->to_special_reg_class(), std::nullopt);
+  EXPECT_EQ(inst->dst_operand(1)->to_special_reg_class(), RegClass::EXEC);
+  EXPECT_EQ(inst->dst_operand(2)->to_special_reg_class(), RegClass::SCC);
+  EXPECT_EQ(inst->src_operand(1)->to_special_reg_class(), RegClass::EXEC);
 
   EXPECT_EQ(inst->disassemble(), "s_and_saveexec_b64 s[0:1], s[0:1]");
 }
