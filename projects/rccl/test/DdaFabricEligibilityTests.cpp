@@ -1221,6 +1221,23 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_HalvedSlotStillReachesFur
         mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32, ncclSum));
 }
 
+// ncclAllReduceDdaFabricLL128Eligible threshold tests: at-cap and past-cap
+// via the resolved threshold (rcclDdaLL128Threshold). With
+// comm->archThresholds == nullptr the resolver falls back to kDdaLL128BaseDefault (32 MiB).
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128_AtCapEligible)
+{
+    // kDdaLL128BaseDefault = 32 MiB; 32 MiB / 4 bytes = 8388608 float32
+    EXPECT_TRUE(ncclAllReduceDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 8388608, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128_PastCapRejected)
+{
+    // 8388610 * 4 = 33554440 bytes = 32 MiB + 8 bytes; %8 == 0
+    EXPECT_FALSE(ncclAllReduceDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 8388610, ncclFloat32, ncclSum));
+}
+
 // ---------------------------------------------------------------------------
 // AllToAll
 // ---------------------------------------------------------------------------
