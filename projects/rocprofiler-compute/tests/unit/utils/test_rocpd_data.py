@@ -149,6 +149,11 @@ def test_kernel_symbols_query_reads_the_kernel_symbols_view():
     assert "truncated_kernel_name as Kernel_Short_Name" in KERNEL_SYMBOLS_QUERY
 
 
+def test_kernel_symbols_query_orders_its_rows():
+    """Sorting keeps the CSV byte-identical across runs and SQLite versions."""
+    assert "ORDER BY Kernel_Name, Kernel_Short_Name" in KERNEL_SYMBOLS_QUERY
+
+
 def test_counters_query_carries_no_short_name():
     """The counter query streams row by row, so it stays at counter grain."""
     assert "Kernel_Short_Name" not in COUNTERS_COLLECTION_QUERY
@@ -263,9 +268,10 @@ def test_kernel_symbols_csv_pairs_each_kernel_name_with_its_short_name():
 
     df = pd.read_csv(kernel_symbols_csv)
     assert list(df.columns) == ["Kernel_Name", "Kernel_Short_Name"]
-    assert list(zip(df["Kernel_Name"], df["Kernel_Short_Name"])) == [
-        (display_name, short_name) for display_name, short_name in KERNEL_SYMBOL_ROWS
-    ]
+    # The query sorts, so the CSV holds the symbols in name order.
+    assert list(zip(df["Kernel_Name"], df["Kernel_Short_Name"])) == sorted(
+        KERNEL_SYMBOL_ROWS
+    )
 
     common.clean_output_dir(True, workload_dir)
 

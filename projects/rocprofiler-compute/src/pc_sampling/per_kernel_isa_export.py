@@ -17,13 +17,11 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any, List, NamedTuple, Optional, Tuple
 
+from utils.analysis_orm import PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT
 from utils.logger import console_debug, console_warning
 
 PER_KERNEL_DIRECTORY_NAME = "per_kernel_pc_sampling"
 STALL_COLUMN_PREFIX = "Stall "
-
-# The row columns naming the file, ahead of the columns written into it.
-FILE_KEY_COLUMN_COUNT = 6
 
 # Characters a short name can hold that a path component should not. `_` is
 # not in the safe set, so consecutive underscores are collapsed into one.
@@ -50,6 +48,7 @@ TRAILING_COLUMNS = (
     "Pid",
 )
 
+# The leading row columns, in the order analysis_orm selects them:
 # (workload name, workload sub-name, kernel uuid, short name, code object id, pid)
 FileKey = Tuple[str, str, int, Optional[str], int, int]
 
@@ -184,13 +183,13 @@ def _group_rows_by_file(
     current_key = None
     current_rows: List[Tuple[Any, ...]] = []
     for row in isa_rows:
-        file_key: FileKey = row[:FILE_KEY_COLUMN_COUNT]
+        file_key: FileKey = row[:PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT]
         if file_key != current_key:
             if current_key is not None:
                 yield current_key, current_rows
             current_key = file_key
             current_rows = []
-        current_rows.append(row[FILE_KEY_COLUMN_COUNT:])
+        current_rows.append(row[PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT:])
 
     if current_key is not None:
         yield current_key, current_rows

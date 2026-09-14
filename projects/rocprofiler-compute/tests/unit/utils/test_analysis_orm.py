@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from pc_sampling.source_snapshot_analysis import parse_source_frames
 from utils.analysis_orm import (
+    PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT,
     CodeObjectStore,
     Database,
     Dispatch,
@@ -1015,4 +1016,21 @@ def test_pc_sampling_summary_view_keeps_frames_of_one_instruction_together(db_se
     assert [row["source"] for row in rows] == [
         "/s/hip.h:317 -> /s/a.cpp:36",
         "/s/a.cpp:36",
+    ]
+
+
+def test_per_kernel_isa_select_leads_with_the_file_key_columns():
+    """The exporter slices the key off by count, so order and count must hold."""
+    statement = Database._per_kernel_isa_statement(workload_id=1, stall_reasons=[])
+    leading_columns = list(statement.selected_columns)[
+        :PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT
+    ]
+
+    assert [column.name for column in leading_columns] == [
+        "workload_name",
+        "workload_sub_name",
+        "kernel_uuid",
+        "kernel_short_name",
+        "code_object_id",
+        "pid",
     ]

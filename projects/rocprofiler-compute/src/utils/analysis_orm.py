@@ -541,6 +541,26 @@ class Metadata(Base):
     schema_version = Column(String)
 
 
+def per_kernel_isa_file_key_columns() -> list[Any]:
+    """Return the columns naming the file a per-kernel ISA row is written to.
+
+    The exporter splits each row at the end of this list, so the select and the
+    split have to agree. Building the select from this one list is what keeps
+    them in step.
+    """
+    return [
+        Workload.name.label("workload_name"),
+        Workload.sub_name.label("workload_sub_name"),
+        Kernel.kernel_uuid.label("kernel_uuid"),
+        Kernel.short_name.label("kernel_short_name"),
+        CodeObjectStore.code_object_id.label("code_object_id"),
+        CodeObjectStore.pid.label("pid"),
+    ]
+
+
+PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT = len(per_kernel_isa_file_key_columns())
+
+
 class Database:
     _session: Optional[Session] = None
     _engine: Optional[Engine] = None
@@ -829,12 +849,7 @@ class Database:
 
         return (
             select(
-                Workload.name.label("workload_name"),
-                Workload.sub_name.label("workload_sub_name"),
-                Kernel.kernel_uuid.label("kernel_uuid"),
-                Kernel.short_name.label("kernel_short_name"),
-                CodeObjectStore.code_object_id.label("code_object_id"),
-                CodeObjectStore.pid.label("pid"),
+                *per_kernel_isa_file_key_columns(),
                 InstructionLine.code_object_offset.label("offset"),
                 InstructionLine.instruction,
                 PCSampleState.total_count.label("count"),

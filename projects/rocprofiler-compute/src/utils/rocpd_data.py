@@ -52,6 +52,7 @@ SELECT
     display_name as Kernel_Name,
     truncated_kernel_name as Kernel_Short_Name
 FROM kernel_symbols
+ORDER BY Kernel_Name, Kernel_Short_Name
 """
 KERNEL_DISPATCH_QUERY = """
 SELECT dispatch_id, event_id, guid
