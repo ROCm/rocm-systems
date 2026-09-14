@@ -89,6 +89,20 @@ static inline bool ncclIbSegmentsUniform(int nSegments, const size_t* segLen) {
   return true;
 }
 
+// Peer CTS side table is usable iff nSegments is in [1, maxSegments], remDevIdx
+// is in range, segStart is strictly increasing, and every rkey is nonzero.
+static inline bool ncclIbCtsRemoteLayoutValid(uint32_t nSegments, int remDevIdx, int maxDevs, int maxSegments,
+                                              const uint64_t* segStart, const uint32_t* rkeys) {
+  if (nSegments < 1 || nSegments > (uint32_t)maxSegments) return false;
+  if (remDevIdx < 0 || remDevIdx >= maxDevs) return false;
+  if (segStart == NULL || rkeys == NULL) return false;
+  for (uint32_t s = 0; s < nSegments; s++) {
+    if (s > 0 && segStart[s] <= segStart[s - 1]) return false;
+    if (rkeys[s] == 0) return false;
+  }
+  return true;
+}
+
 // Write the indices of segments that overlap [addr, addr+len) into out[0..n).
 // Returns the count, 0 if len==0 or nothing overlaps, or -1 on overflow /
 // out-of-space. Used by classic IFlush to fence every GPUDirect segment the
