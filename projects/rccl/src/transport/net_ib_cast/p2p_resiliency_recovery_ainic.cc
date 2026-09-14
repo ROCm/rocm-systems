@@ -85,7 +85,6 @@ ncclResult_t IbCastPortRecoveryQpsRestoreAinic(struct ncclIbPortRecoveryContext*
         struct ncclIbQpCreateAttr flushCreateAttr;
         IbCastBuildDataQpCreateAttr(recoveryContext->resCtx->baseComm, recoveryContext->devIndex, &flushCreateAttr);
         flushCreateAttr.maxRecvWorkRequest = 0;
-        flushCreateAttr.maxSendWorkRequest = IbCastFlushQpSendDepth();
         flushCreateAttr.channelId = flushQp->channelId;
         flushCreateAttr.isDataQp = flushQp->isDataQp;
         // Loopback flush QP carries no classification, as at connect time.

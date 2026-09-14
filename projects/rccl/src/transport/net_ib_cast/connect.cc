@@ -612,9 +612,14 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
                                          : (IbCastAdvertiseMultiSeg() ? NCCL_IB_MAX_SEND_WRS : 2 * NET_IB_MAX_REQUESTS);
   } else {
     IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
-    // Multi-segment matches IbCastReceiverQpsCreateToRts (side-table WR per CTS WR) for AINIC recovery rebuilds.
+    // Match ToRts: P2P CTS posts an unsignaled side-table WR before the CTS WR.
+    // Resiliency signals every CTS WR, so 1x times two WRs; otherwise 2x times
+    // two WRs. RMA recv QPs are flush QPs. AINIC recovery rebuilds through this
+    // builder. Multi-segment matches IbCastReceiverQpsCreateToRts.
     out->maxSendWorkRequest =
-      IbCastAdvertiseMultiSeg() ? NET_IB_MAX_REQUESTS * (base->resiliency ? 1 : 2) * 2 : NET_IB_MAX_REQUESTS;
+      base->isRma ? NCCL_IB_RMA_MAX_FLUSH_WRS
+                  : (IbCastAdvertiseMultiSeg() ? NET_IB_MAX_REQUESTS * (base->resiliency ? 1 : 2) * 2
+                                               : NET_IB_MAX_REQUESTS);
   }
 }
 
