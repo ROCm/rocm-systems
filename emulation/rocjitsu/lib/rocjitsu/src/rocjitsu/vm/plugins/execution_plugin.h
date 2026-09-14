@@ -71,6 +71,10 @@ public:
   virtual bool requires_serial_hot_hooks() const { return false; }
 
   /// Opt in to asynchronous arithmetic and its issue/retirement callbacks.
+  /// Leave false when relying on synchronous before/after state inspection:
+  /// any such plugin disables offload for its group. Async-aware plugins must
+  /// handle both callback pairs, since offload can fall back to synchronous
+  /// execution. The group samples this capability outside the instruction path.
   /// Sampled once on add(). Register hooks may run on helpers concurrently with
   /// issuer hooks for the SAME wave, and may precede the issue notification.
   /// At issue, inspect only instruction/dispatch metadata and synchronized
