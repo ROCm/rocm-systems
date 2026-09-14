@@ -1331,8 +1331,10 @@ TEST_F(UBR_MultiSegment, Generic)
 /**
  * @brief BEFORE control for the symmetric LSA receive-offset corruption.
  *
- * CE_FAULT_LEGACY_RECV_OFFSET: Phase 3 uses rank * shardBytes with no window
- * offset, so remote shards land in the send half and recvBuf stays zero.
+ * CE_FAULT_LEGACY_RECV_OFFSET: Phase 3 LSA peer copies use rank * shardBytes
+ * with no window offset, so remote shards land in the send half. The reduce
+ * kernel still writes this rank's shard into recvbuff, so recvBuf is not
+ * all-zero; the AllReduce result is incomplete.
  *
  * Symmetric_Lsa is the corresponding AFTER regression: the same non-zero
  * recvBuf offset must produce a fully correct AllReduce without fault injection.
@@ -1404,8 +1406,6 @@ TEST_F(UBR_MultiSegment, Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult)
         getActiveCommunicator(), getActiveStream()));
     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
-    EXPECT_TRUE(verifyBufferData<T>(recvBuf, count, [](size_t) { return T{}; }))
-        << "legacy offset must leave recvBuf zero (remote shards wrote into the send half)";
     EXPECT_FALSE(verifyAllReduceResult<T>(recvBuf, count, nRanks))
         << "BEFORE control did not reproduce the legacy receive-window offset corruption";
 }
