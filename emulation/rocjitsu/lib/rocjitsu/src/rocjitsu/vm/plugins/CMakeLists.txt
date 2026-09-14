@@ -162,6 +162,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_add_plugin_so(data_hazard rocjitsu_plugin_data_hazard
         ${CMAKE_CURRENT_SOURCE_DIR}/data_hazard/plugin_export.cpp
     )
+    rj_add_plugin_so(throughput rocjitsu_plugin_throughput
+        ${CMAKE_CURRENT_SOURCE_DIR}/throughput/plugin_export.cpp
+    )
 endif()
 
 # Standalone hazard engine for consumers outside this tree, built from the same
