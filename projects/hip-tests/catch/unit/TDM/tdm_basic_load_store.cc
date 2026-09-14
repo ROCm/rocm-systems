@@ -96,6 +96,80 @@ __global__ void TDM_load_store_tester_nd(const int* data, int* result, int e0, i
     }
 }
 
+// Gather mode: a 2D row gather where tile_dim1 is repurposed to hold the number of valid
+// indices, and D2/D3 carry the index list instead of tensor_dim2/3/tile_dim3. In 16-bit
+// index mode, up to 16 indices are packed two-per-dword (low half = even index, high half
+// = odd index) across D2 (indices 0-7) and D3 (indices 8-15).
+constexpr int kGatherNumRows = 8;
+constexpr int kGatherRowWidth = 4;
+constexpr int kGatherNumIndices = 16;
+// Deliberately non-monotonic with repeats, to confirm gather doesn't require sorted or
+// unique indices -- each source row (0..7) is visited exactly twice, in scrambled order.
+constexpr uint16_t kGatherIndices[kGatherNumIndices] = {5, 0, 7, 2, 6, 3, 1, 4,
+                                                         4, 1, 3, 6, 2, 7, 0, 5};
+
+__global__ void TDM_gather_load_tester(const int* data, int* result)
+{
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_tensor_load_to_lds)) {
+    __shared__ int shmem[kGatherNumIndices * kGatherRowWidth];
+    auto* pShmem = static_cast<int*>(shmem);
+
+    gfx1250_TDM_GROUP0 group0;
+    group0.globalAddr((uintptr_t)data);
+    group0.ldsAddr((uintptr_t)pShmem);
+    group0.gatherMode(/*enable=*/1, /*value=*/0);  // enabled, 16-bit indices
+
+    gfx1250_TDM_GROUP1 group1;
+    group1.dataSize(2);
+    group1.tensorDim0(kGatherRowWidth);  // row-width bound
+    group1.tensorDim1(kGatherNumRows);   // row-index bound
+    group1.tensorDim0Stride(kGatherRowWidth);
+    group1.tileDim0(kGatherRowWidth);    // elements copied per gathered row
+    group1.tileDim1(kGatherNumIndices);  // repurposed: number of valid indices
+
+    // Packed with literal (compile-time-constant) indices rather than a runtime loop over
+    // kGatherIndices: a runtime-indexed access would require kGatherIndices to exist as
+    // addressable device memory, which a plain (non-__device__) constexpr array is not
+    // guaranteed to have -- it's only usable in device code as a compile-time constant.
+    gfx1250_TDM_GROUP2 group2;
+    group2.m_bitfield[0] = uint32_t{kGatherIndices[0]} | (uint32_t{kGatherIndices[1]} << 16);
+    group2.m_bitfield[1] = uint32_t{kGatherIndices[2]} | (uint32_t{kGatherIndices[3]} << 16);
+    group2.m_bitfield[2] = uint32_t{kGatherIndices[4]} | (uint32_t{kGatherIndices[5]} << 16);
+    group2.m_bitfield[3] = uint32_t{kGatherIndices[6]} | (uint32_t{kGatherIndices[7]} << 16);
+
+    gfx1250_TDM_GROUP3 group3;
+    group3.m_bitfield[0] = uint32_t{kGatherIndices[8]} | (uint32_t{kGatherIndices[9]} << 16);
+    group3.m_bitfield[1] = uint32_t{kGatherIndices[10]} | (uint32_t{kGatherIndices[11]} << 16);
+    group3.m_bitfield[2] = uint32_t{kGatherIndices[12]} | (uint32_t{kGatherIndices[13]} << 16);
+    group3.m_bitfield[3] = uint32_t{kGatherIndices[14]} | (uint32_t{kGatherIndices[15]} << 16);
+
+    v8i v8i_zeros{0, 0, 0, 0, 0, 0, 0, 0};
+    __builtin_amdgcn_tensor_load_to_lds(group0.m_bitfield, group1.m_bitfield, group2.m_bitfield,
+                                         group3.m_bitfield, v8i_zeros, 0);
+    __builtin_amdgcn_s_wait_tensorcnt(0);
+    __syncthreads();
+
+    // Write the gathered rows back out densely via an ordinary (non-gather) store, so
+    // verification is a plain host-side comparison against the expected gathered rows.
+    gfx1250_TDM_GROUP0 store_group0;
+    store_group0.globalAddr((uintptr_t)result);
+    store_group0.ldsAddr((uintptr_t)pShmem);
+
+    gfx1250_TDM_GROUP1 store_group1;
+    store_group1.dataSize(2);
+    store_group1.tensorDim0(kGatherRowWidth);
+    store_group1.tensorDim1(kGatherNumIndices);
+    store_group1.tensorDim0Stride(kGatherRowWidth);
+    store_group1.tileDim0(kGatherRowWidth);
+    store_group1.tileDim1(kGatherNumIndices);
+
+    v4i v4i_zeros{0, 0, 0, 0};
+    __builtin_amdgcn_tensor_store_from_lds(store_group0.m_bitfield, store_group1.m_bitfield,
+                                            v4i_zeros, v4i_zeros, v8i_zeros, 0);
+    __builtin_amdgcn_s_wait_tensorcnt(0);
+    }
+}
+
 // Verifies that stride setters spanning the 48-bit lo/hi split (GROUP1's dim0/dim1
 // strides, GROUP2's dim2 stride, GROUP3's dim3 stride) pack their upper bits into the
 // correct SGPR without disturbing neighboring bitfields. Writes the raw SGPR words back
@@ -209,6 +283,41 @@ TEST_CASE("TDM_Basic_load_4d")
 TEST_CASE("TDM_Basic_load_5d")
 {
     RunTdmNdTest<5, 2 * 3 * 2 * 2 * 3>("TDM_Basic_load_5d", 2, 3, 2, 2, 3);
+}
+
+TEST_CASE("TDM_Gather_load_16bit_indices")
+{
+    SkipIfNotTDMCapable("TDM_Gather_load_16bit_indices");
+
+    constexpr int kSourceElems = kGatherNumRows * kGatherRowWidth;
+    constexpr int kResultElems = kGatherNumIndices * kGatherRowWidth;
+
+    LinearAllocGuard<int> input_dev(LinearAllocs::hipMalloc, kSourceElems * sizeof(int));
+    LinearAllocGuard<int> input(LinearAllocs::hipHostMalloc, kSourceElems * sizeof(int));
+    LinearAllocGuard<int> result_dev(LinearAllocs::hipMalloc, kResultElems * sizeof(int));
+    LinearAllocGuard<int> result(LinearAllocs::hipHostMalloc, kResultElems * sizeof(int));
+    HIP_CHECK(hipMemset(result_dev.ptr(), 0, kResultElems * sizeof(int)));
+
+    for (int i = 0; i < kSourceElems; ++i)
+    {
+        input.ptr()[i] = i;
+    }
+
+    HIP_CHECK(hipMemcpy(input_dev.ptr(), input.ptr(), kSourceElems * sizeof(int),
+                         hipMemcpyHostToDevice));
+    TDM_gather_load_tester<<<1, 32>>>(input_dev.ptr(), result_dev.ptr());
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipMemcpy(result.ptr(), result_dev.ptr(), kResultElems * sizeof(int),
+                         hipMemcpyDeviceToHost));
+
+    for (int i = 0; i < kGatherNumIndices; ++i)
+    {
+        for (int c = 0; c < kGatherRowWidth; ++c)
+        {
+            REQUIRE(result.ptr()[i * kGatherRowWidth + c] ==
+                    kGatherIndices[i] * kGatherRowWidth + c);
+        }
+    }
 }
 
 TEST_CASE("TDM_Stride_Encoding")
