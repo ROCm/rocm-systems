@@ -2569,8 +2569,9 @@ bool VirtualGPU::create() {
     LogError("Could not create signal for copy queue!");
     return false;
   }
-  // Create managed buffer for staging copies
-  if (!managed_buffer_.Create(Device::MemorySegment::kNoAtomics)) {
+  // Create managed buffer for staging copies: fine-grained if available, else coarse-grained
+  if (!managed_buffer_.Create(dev().hasHostFineGrainPool() ? Device::MemorySegment::kAtomics
+                                                           : Device::MemorySegment::kNoAtomics)) {
     LogError("Could not create managed buffer for this queue!");
     return false;
   }
