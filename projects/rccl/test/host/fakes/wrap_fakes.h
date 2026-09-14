@@ -4,18 +4,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// NOT to be confused with fakes/rccl_wrap_fakes.h, which sits on the OPPOSITE
-// side of the dependency graph:
-//
-//   rccl_wrap_fakes.h  fakes the symbols rccl_wrap.cc DEFINES, for targets
-//                      that do not compile it (rccl-UnitTestsMicroEnqueue).
-//   wrap_fakes.h       (this file) fakes the symbols rccl_wrap.cc DEPENDS ON,
-//                      for rccl-UnitTestsMicro, which compiles the real file
-//                      and tests it directly.
-//
-// The two never define the same symbol, which is why both can exist. If you
-// arrived here by grep and wanted rccl_wrap.cc's own entry points, you want
-// the other header. See MICROTEST_README.md's fakes-ownership table.
+// Remaining dependency seams used by wrap-test.cc that do not yet have a
+// dedicated shared header. DDA seams live in dda_fakes.h; shared subsystem
+// seams are included from their production-owned headers below.
 
 #ifndef RCCL_TEST_HOST_WRAP_FAKES_H_
 #define RCCL_TEST_HOST_WRAP_FAKES_H_
@@ -28,6 +19,7 @@
 // ncclComm, task, datatype, and algorithm types used below.
 #include "ce_fakes.h"
 #include "comm.h"
+#include "dda_fakes.h"
 #include "dev_runtime_fakes.h"
 #include "enqueue.h"
 #include "nccl.h"
@@ -70,42 +62,5 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, i
     g_getAlgoInfo;
 extern std::function<int(struct ncclComm*, ncclFunc_t, size_t, ncclDataType_t, int, int)> g_kernelPackedChannels;
 extern std::function<ncclResult_t(const ncclComm_t, int*)> g_commCount;
-
-// --- Per-collective DDA eligibility/blocks (24 hooks total) ---
-extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
-    g_allReduceDdaIpcEligible;
-extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
-    g_allReduceDdaFabricEligible;
-extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
-    g_allReduceDdaFabricLLEligible;
-extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
-    g_allReduceDdaFabricLL128Eligible;
-extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allReduceDdaIpcBlocks;
-extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allReduceDdaFabricBlocks;
-extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allReduceDdaFabricLLBlocks;
-extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allReduceDdaFabricLL128Blocks;
-
-extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t)> g_allGatherDdaIpcEligible;
-extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t)> g_allGatherDdaFabricEligible;
-extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t)> g_allGatherDdaFabricLLEligible;
-extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t)>
-    g_allGatherDdaFabricLL128Eligible;
-extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allGatherDdaIpcBlocks;
-extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allGatherDdaFabricBlocks;
-extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allGatherDdaFabricLLBlocks;
-extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allGatherDdaFabricLL128Blocks;
-
-extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
-    g_reduceScatterDdaIpcEligible;
-extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
-    g_reduceScatterDdaFabricEligible;
-extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
-    g_reduceScatterDdaFabricLLEligible;
-extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
-    g_reduceScatterDdaFabricLL128Eligible;
-extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_reduceScatterDdaIpcBlocks;
-extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_reduceScatterDdaFabricBlocks;
-extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_reduceScatterDdaFabricLLBlocks;
-extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_reduceScatterDdaFabricLL128Blocks;
 
 #endif  // RCCL_TEST_HOST_WRAP_FAKES_H_

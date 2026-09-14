@@ -166,11 +166,6 @@ ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* comm, int rank, void*
 }
 
 // ---------------------------------------------------------------------------
-// Symmetric kernels.
-// ---------------------------------------------------------------------------
-// ncclSymkInitOnce (src/sym_kernels.cc): sym_kernels_fakes.cc.
-
-// ---------------------------------------------------------------------------
 // Space allocator.
 // ---------------------------------------------------------------------------
 void         ncclSpaceConstruct(struct ncclSpace*) {}

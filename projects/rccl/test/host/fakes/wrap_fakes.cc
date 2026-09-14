@@ -33,9 +33,6 @@
 #include <cstdint>
 #include <functional>
 
-#include "algorithms/dda/all_gather/dda_all_gather.h"
-#include "algorithms/dda/all_reduce/dda_all_reduce.h"
-#include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "amdsmi_wrap.h"
 #include "ce_coll.h"
 #include "comm.h"
@@ -54,28 +51,6 @@ ASSERT_HOOK_MATCHES_PROD(g_isSymmetricKernelRequested, isSymmetricKernelRequeste
 ASSERT_HOOK_MATCHES_PROD(g_allReduceShouldTakeDdaPath, rcclAllReduceShouldTakeDdaPath);
 ASSERT_HOOK_MATCHES_PROD(g_commCount, ncclCommCount);
 
-ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaIpcEligible, ncclAllReduceDdaIpcEligible);
-ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaFabricEligible, ncclAllReduceDdaFabricEligible);
-ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaFabricLLEligible, ncclAllReduceDdaFabricLLEligible);
-ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaFabricLL128Eligible, ncclAllReduceDdaFabricLL128Eligible);
-ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaIpcBlocks, ncclAllReduceDdaIpcBlocks);
-ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaFabricBlocks, ncclAllReduceDdaFabricBlocks);
-ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaFabricLLBlocks, ncclAllReduceDdaFabricLLBlocks);
-ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaFabricLL128Blocks, ncclAllReduceDdaFabricLL128Blocks);
-
-ASSERT_HOOK_MATCHES_PROD(g_allGatherDdaIpcEligible, ncclAllGatherDdaIpcEligible);
-ASSERT_HOOK_MATCHES_PROD(g_allGatherDdaFabricEligible, ncclAllGatherDdaFabricEligible);
-ASSERT_HOOK_MATCHES_PROD(g_allGatherDdaFabricLLEligible, ncclAllGatherDdaFabricLLEligible);
-ASSERT_HOOK_MATCHES_PROD(g_allGatherDdaFabricLL128Eligible, ncclAllGatherDdaFabricLL128Eligible);
-ASSERT_HOOK_MATCHES_PROD(g_allGatherDdaIpcBlocks, ncclAllGatherDdaIpcBlocks);
-ASSERT_HOOK_MATCHES_PROD(g_allGatherDdaFabricBlocks, ncclAllGatherDdaFabricBlocks);
-ASSERT_HOOK_MATCHES_PROD(g_allGatherDdaFabricLLBlocks, ncclAllGatherDdaFabricLLBlocks);
-ASSERT_HOOK_MATCHES_PROD(g_allGatherDdaFabricLL128Blocks, ncclAllGatherDdaFabricLL128Blocks);
-
-ASSERT_HOOK_MATCHES_PROD(g_reduceScatterDdaIpcEligible, ncclReduceScatterDdaIpcEligible);
-ASSERT_HOOK_MATCHES_PROD(g_reduceScatterDdaFabricEligible, ncclReduceScatterDdaFabricEligible);
-ASSERT_HOOK_MATCHES_PROD(g_reduceScatterDdaFabricLLEligible, ncclReduceScatterDdaFabricLLEligible);
-ASSERT_HOOK_MATCHES_PROD(g_reduceScatterDdaFabricLL128Eligible, ncclReduceScatterDdaFabricLL128Eligible);
 // getAlgoInfo, rcclKernelPackedChannels, and the four ReduceScatter *Blocks
 // hooks are link-closure symbols with no production header declaration, so
 // there is no header-visible signature to pin here.
@@ -255,84 +230,3 @@ std::function<ncclResult_t(uint32_t, uint64_t*)> g_amdSmiGetFirmwareVersion = De
 ncclResult_t amd_smi_getFirmwareVersion(uint32_t devIdx, uint64_t* fwVersion) {
   return g_amdSmiGetFirmwareVersion(devIdx, fwVersion);
 }
-
-// --- Per-collective DDA eligibility/blocks (24 functions total) ---
-// Every *Eligible defaults false (DDA path not eligible by default, letting
-// CE-registered/symmetric/hierarchical/Direct/plain-kernel run, matching
-// every existing test's expectations). Every reachable *Blocks hook has a
-// distinct 11x/12x sentinel, and selecting tests assert those values to prove
-// which path supplied nMaxChannels. The unused 13x hooks remain distinct so a
-// future production call cannot silently agree with a neighboring path.
-
-#define DEFINE_DDA_REDUCTION_ELIGIBLE(hook, prod)                                                        \
-  std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)> g_##hook =     \
-      [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return false; };          \
-  bool prod(ncclComm* comm, const void* send, void* recv, size_t count, ncclDataType_t type,             \
-            ncclRedOp_t op) {                                                                            \
-    return g_##hook(comm, send, recv, count, type, op);                                                   \
-  }
-
-#define DEFINE_DDA_ALLGATHER_ELIGIBLE(hook, prod)                                                         \
-  std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t)> g_##hook =                   \
-      [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return false; };                        \
-  bool prod(ncclComm* comm, const void* send, void* recv, size_t count, ncclDataType_t type) {            \
-    return g_##hook(comm, send, recv, count, type);                                                       \
-  }
-
-#define DEFINE_DDA_BLOCKS(hook, prod, sentinel)                                                           \
-  std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_##hook =                                  \
-      [](ncclComm*, size_t, ncclDataType_t) { return sentinel; };                                        \
-  uint32_t prod(ncclComm* comm, size_t count, ncclDataType_t type) {                                     \
-    return g_##hook(comm, count, type);                                                                   \
-  }
-
-// --- AllReduce DDA (dda_all_reduce.h) ---
-DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaIpcEligible, ncclAllReduceDdaIpcEligible)
-DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaFabricEligible, ncclAllReduceDdaFabricEligible)
-DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaFabricLLEligible, ncclAllReduceDdaFabricLLEligible)
-DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaFabricLL128Eligible, ncclAllReduceDdaFabricLL128Eligible)
-
-// The twelve *DdaBlocks fakes below each return a DISTINCT sentinel rather
-// than a shared value. Their results land in decision->nMaxChannels, so if
-// they all returned the same number the tests could not tell which one a
-// dispatcher actually called: swapping an LL blocks call for the LL128 one
-// would be invisible, as would hardcoding the field. The AllReduce and
-// AllGather tests that select each path assert its sentinel, which pins both.
-//
-// Numbering is 1yz: y = 1 AllReduce, 2 AllGather, 3 ReduceScatter;
-// z = 1 Ipc, 2 Fabric/VMM, 3 FabricLL, 4 FabricLL128 (so 111-114,
-// 121-124, 131-134).
-//
-// The four 13x (ReduceScatter) entries are link-only: rcclSelectReduceScatter
-// sets algo and protocol on its DDA paths but never nMaxChannels, and nothing
-// in rccl_wrap.cc calls those four symbols. They keep distinct values anyway
-// so that if a channel count is ever wired up there, the existing tests fail
-// loudly rather than silently agreeing with a neighbouring path's value.
-DEFINE_DDA_BLOCKS(allReduceDdaIpcBlocks, ncclAllReduceDdaIpcBlocks, 111)
-DEFINE_DDA_BLOCKS(allReduceDdaFabricBlocks, ncclAllReduceDdaFabricBlocks, 112)
-DEFINE_DDA_BLOCKS(allReduceDdaFabricLLBlocks, ncclAllReduceDdaFabricLLBlocks, 113)
-DEFINE_DDA_BLOCKS(allReduceDdaFabricLL128Blocks, ncclAllReduceDdaFabricLL128Blocks, 114)
-
-// --- AllGather DDA (dda_all_gather.h) ---
-DEFINE_DDA_ALLGATHER_ELIGIBLE(allGatherDdaIpcEligible, ncclAllGatherDdaIpcEligible)
-DEFINE_DDA_ALLGATHER_ELIGIBLE(allGatherDdaFabricEligible, ncclAllGatherDdaFabricEligible)
-DEFINE_DDA_ALLGATHER_ELIGIBLE(allGatherDdaFabricLLEligible, ncclAllGatherDdaFabricLLEligible)
-DEFINE_DDA_ALLGATHER_ELIGIBLE(allGatherDdaFabricLL128Eligible, ncclAllGatherDdaFabricLL128Eligible)
-DEFINE_DDA_BLOCKS(allGatherDdaIpcBlocks, ncclAllGatherDdaIpcBlocks, 121)
-DEFINE_DDA_BLOCKS(allGatherDdaFabricBlocks, ncclAllGatherDdaFabricBlocks, 122)
-DEFINE_DDA_BLOCKS(allGatherDdaFabricLLBlocks, ncclAllGatherDdaFabricLLBlocks, 123)
-DEFINE_DDA_BLOCKS(allGatherDdaFabricLL128Blocks, ncclAllGatherDdaFabricLL128Blocks, 124)
-
-// --- ReduceScatter DDA (dda_reduce_scatter.h) ---
-DEFINE_DDA_REDUCTION_ELIGIBLE(reduceScatterDdaIpcEligible, ncclReduceScatterDdaIpcEligible)
-DEFINE_DDA_REDUCTION_ELIGIBLE(reduceScatterDdaFabricEligible, ncclReduceScatterDdaFabricEligible)
-DEFINE_DDA_REDUCTION_ELIGIBLE(reduceScatterDdaFabricLLEligible, ncclReduceScatterDdaFabricLLEligible)
-DEFINE_DDA_REDUCTION_ELIGIBLE(reduceScatterDdaFabricLL128Eligible, ncclReduceScatterDdaFabricLL128Eligible)
-DEFINE_DDA_BLOCKS(reduceScatterDdaIpcBlocks, ncclReduceScatterDdaIpcBlocks, 131)
-DEFINE_DDA_BLOCKS(reduceScatterDdaFabricBlocks, ncclReduceScatterDdaFabricBlocks, 132)
-DEFINE_DDA_BLOCKS(reduceScatterDdaFabricLLBlocks, ncclReduceScatterDdaFabricLLBlocks, 133)
-DEFINE_DDA_BLOCKS(reduceScatterDdaFabricLL128Blocks, ncclReduceScatterDdaFabricLL128Blocks, 134)
-
-#undef DEFINE_DDA_BLOCKS
-#undef DEFINE_DDA_ALLGATHER_ELIGIBLE
-#undef DEFINE_DDA_REDUCTION_ELIGIBLE

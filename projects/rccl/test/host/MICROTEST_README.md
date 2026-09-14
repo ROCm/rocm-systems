@@ -209,6 +209,7 @@ symbol.
 
 | Production TU | Fakes file |
 |---|---|
+| `src/algorithms/dda/*.cc` | `fakes/dda_fakes.cc` |
 | `src/bootstrap.cc` | `fakes/bootstrap_stubs.cc` |
 | `src/ce_coll.cc` | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
