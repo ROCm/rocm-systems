@@ -2045,11 +2045,15 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   // (4) CE registered: single-node, symmetric-registered buffers, CTA_POLICY_ZERO.
   // Live returns RCCL_CE_REGISTERED / RCCL_CE_SCRATCH and enqueues; taskAppend
   // dispatches from that algo (mirroring rcclSelectAllGather).
+  // Hoisted above the ceCapturing gate so both Branch (4) and HierCE (5) see it;
+  // ncclCeAvailable does not check sysmem segments itself (ce_coll.cc:301).
+  const bool a2aHasSysmem = ncclDevrWindowHasSysmemSegment(a2aSendWin) ||
+                             ncclDevrWindowHasSysmemSegment(a2aRecvWin);
   if (!ceCapturing) {
     // Probe real window registration on both paths so the reported decision and
     // the dispatched one cannot disagree. The lookups are null-safe, so the
     // buffer-less ABI (rcclSymKGetInfo) simply sees unregistered buffers.
-    if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
+    if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !a2aHasSysmem &&
         ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType)) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
@@ -2057,8 +2061,6 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
 
     // (5) Hierarchical CE: multi-node, non-LSA-spanning.
     // Require CTA_POLICY_ZERO and no sysmem segment, matching the AllGather twin.
-    const bool a2aHasSysmem = ncclDevrWindowHasSysmemSegment(a2aSendWin) ||
-                               ncclDevrWindowHasSysmemSegment(a2aRecvWin);
     if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !a2aHasSysmem &&
         ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType)) {
       decision->algo = RCCL_CE_REGISTERED;  // reports as CE; hier dispatch in taskAppend
