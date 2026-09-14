@@ -4545,9 +4545,23 @@
       ]
     },
     "multisegment_cast_rma_multinode": {
-      "extends": "multisegment_transport_multinode",
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 300,
       "env_variables": {
-        "NCCL_NET": "IB-CAST"
+        "NCCL_NET": "IB-CAST",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2"
       },
       "tests": [
         {

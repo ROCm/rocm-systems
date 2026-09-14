@@ -483,7 +483,7 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
     out->maxSendWorkRequest = base->isRma ? NCCL_IB_RMA_MAX_SEND_WRS : NCCL_IB_MAX_SEND_WRS;
   } else {
     IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
-    out->maxSendWorkRequest = NET_IB_MAX_REQUESTS;
+    out->maxSendWorkRequest = base->isRma ? NCCL_IB_RMA_MAX_FLUSH_WRS : NET_IB_MAX_REQUESTS;
   }
 }
 
