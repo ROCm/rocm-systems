@@ -704,8 +704,16 @@ void disassemble_window(const MappedLocation &mapped, rj_code_arch_t arch, uint6
     std::unique_ptr<Instruction> inst;
     try {
       const std::size_t word_index = decode_offset / sizeof(uint32_t);
-      inst.reset(decoder->decode_window(std::span<const uint32_t>(words).subspan(word_index),
-                                        decode_offset));
+      const auto emit_decode_error = [&](std::string_view message) {
+        std::cerr << "decode failed at .text+" << hex_value(decode_offset) << ": " << message
+                  << "\n";
+      };
+      DecodeResult decoded = decoder->decode_window(
+          std::span<const uint32_t>(words).subspan(word_index), decode_offset,
+          DecodeErrorEmitter(emit_decode_error));
+      if (decoded.failed())
+        return;
+      inst = std::move(decoded).value();
     } catch (const util::Exception &ex) {
       std::cerr << "decode failed at .text+" << hex_value(decode_offset) << ": " << ex.what()
                 << "\n";

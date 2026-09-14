@@ -370,13 +370,9 @@ if(RJ_CLANG_TIDY)
     endif()
 endif()
 
-# Third-party dependencies (fetched into third_party/).
-# Third-party dependencies (fetched into third_party/).
-# Third-party dependencies (fetched into third_party/ by default).
-# Override with -DFETCHCONTENT_BASE_DIR=/path for container builds.
-if(NOT FETCHCONTENT_BASE_DIR)
-    set(FETCHCONTENT_BASE_DIR ${PROJECT_SOURCE_DIR}/third_party)
-endif()
+# Keep dependency builds isolated with this compiler/sanitizer configuration.
+# FetchContent defaults to ${CMAKE_BINARY_DIR}/_deps; callers can override
+# FETCHCONTENT_BASE_DIR or share downloads with FETCHCONTENT_SOURCE_DIR_<NAME>.
 include(FetchContent)
 
 # Google Test
