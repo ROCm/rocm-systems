@@ -156,9 +156,9 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   //
   // The host-side h_ptrs below is value-initialised, so copying the full table
   // instead of the live prefix would leave the same nulls in the tail with one
-  // fewer CUDA call. This explicit device-side zero is kept deliberately: it was
-  // asked for in review, and it makes the tail defined at the point of allocation
-  // rather than as a side effect of how much of h_ptrs is later copied.
+  // fewer CUDA call. The explicit device-side zero is kept anyway: it makes the
+  // tail defined at the point of allocation rather than as a side effect of how
+  // much of h_ptrs is later copied.
   cudaError_t mce = cudaMemset(peerDev, 0, kDdaNranks * sizeof(void*));
   if (mce != cudaSuccess) {
     CUDACHECKIGNORE(cudaFree(peerDev));

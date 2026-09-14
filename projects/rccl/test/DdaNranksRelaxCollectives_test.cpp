@@ -8,18 +8,20 @@
 // AllGather / ReduceScatter / AllToAll DDA IPC paths (the non-AllReduce
 // single-node DDA collectives). Mirrors the AllReduce DdaNranksRelax tests:
 // with relax off only the full kDdaNranks clique is eligible; with relax on
-// any 2..kDdaNranks participant count is eligible. End-to-end low-rank GPU
-// speedups are covered by the rccl-tests collective sweeps.
+// any 2..kDdaNranks participant count is eligible. No CI config sets
+// RCCL_DDA_NRANKS_RELAX, so the low-rank runtime kernel these collectives
+// dispatch to (NRANKS == 0) does not execute anywhere in CI; DispatchEnters*
+// below is what actually covers the dispatch, in-process.
 
 #include "common/DdaAlltoAllTestHelpers.hpp"
 #include "common/DdaIpcTestHelpers.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 
 #include "algorithms/dda/all_gather/dda_all_gather.h"
-#include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
-#include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "algorithms/dda/dda_init_detail.h"
+#include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "gtest/gtest.h"
 
 namespace RcclUnitTesting
@@ -127,8 +129,53 @@ TEST(DdaCollectivesNranksRelaxIsolatedTest, RelaxedPathAdmitsTwoThroughEightRank
                     << "AllToAll nRanks=" << nRanks;
             }
 
+            // Eligibility alone does not prove the dispatch routes the count: with
+            // only the checks above, deleting a supported count from any of the
+            // three *DdaIpcTyped() dispatchers would still pass. Drive the real
+            // entry points and separate the two failure modes by rank count, the
+            // same way the AllReduce isolated test does (DdaNranksRelax_test.cpp).
+            //
+            // ddaScratchBytes = 0 makes every supported count fail the scratch-size
+            // check inside each collective's launch wrapper and return
+            // ncclInvalidArgument, reached only after the dispatch has accepted the
+            // count and before any barrier deref or kernel launch, so this needs no
+            // GPU. An unsupported count is rejected earlier by the shared
+            // ncclDdaIpcNranksSupported() gate and returns ncclInvalidUsage.
+            mockComm.comm.ddaScratchBytes = 0;
+
+            for (int nRanks = 2; nRanks <= nccl_dda_detail::kDdaNranks; ++nRanks)
+            {
+                mockComm.comm.nRanks = nRanks;
+                EXPECT_EQ(ncclAllGatherDdaIpc(sendbuff, recvbuff, count, ncclFloat32, mockComm.get(), nullptr),
+                          ncclInvalidArgument)
+                    << "AllGather nRanks=" << nRanks << " should reach the launch path";
+                EXPECT_EQ(
+                    ncclReduceScatterDdaIpc(sendbuff, recvbuff, count, ncclFloat32, ncclSum, mockComm.get(), nullptr),
+                    ncclInvalidArgument)
+                    << "ReduceScatter nRanks=" << nRanks << " should reach the launch path";
+                EXPECT_EQ(ncclAllToAllDdaIpc(sendbuff, recvbuff, count, ncclFloat32, mockComm.get(), nullptr),
+                          ncclInvalidArgument)
+                    << "AllToAll nRanks=" << nRanks << " should reach the launch path";
+            }
+
+            for (int nRanks : {1, 9, 16})
+            {
+                mockComm.comm.nRanks = nRanks;
+                EXPECT_EQ(ncclAllGatherDdaIpc(sendbuff, recvbuff, count, ncclFloat32, mockComm.get(), nullptr),
+                          ncclInvalidUsage)
+                    << "AllGather nRanks=" << nRanks << " must be refused by the dispatch gate";
+                EXPECT_EQ(
+                    ncclReduceScatterDdaIpc(sendbuff, recvbuff, count, ncclFloat32, ncclSum, mockComm.get(), nullptr),
+                    ncclInvalidUsage)
+                    << "ReduceScatter nRanks=" << nRanks << " must be refused by the dispatch gate";
+                EXPECT_EQ(ncclAllToAllDdaIpc(sendbuff, recvbuff, count, ncclFloat32, mockComm.get(), nullptr),
+                          ncclInvalidUsage)
+                    << "AllToAll nRanks=" << nRanks << " must be refused by the dispatch gate";
+            }
+
             // Relax must not open the multi-node door: nNodes != 1 still rejects
             // every count, including ones the relaxed rank gate would admit.
+            mockComm.comm.ddaScratchBytes = DDA_IPC_BUFFER_SIZE;
             mockComm.comm.nNodes = 2;
             for (int nRanks : {2, 4, nccl_dda_detail::kDdaNranks})
             {
