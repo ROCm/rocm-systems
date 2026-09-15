@@ -1942,8 +1942,12 @@ static hsa_status_t SubmitAndWaitChain(int fd, const BOHandle* cmd_bos, size_t n
 
 hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
                                         uint64_t first_pkt_idx, uint64_t num_pkts,
-                                        const core::Agent& agent) {
+                                        const core::Agent& agent, uint64_t* num_completed) {
   auto kmq_metadata = static_cast<KmqMetadata*>(queue_metadata);
+
+  // Nothing has executed until a chain comes back. Every early return below leaves this at zero,
+  // which is correct for all of them: they all refuse the batch before anything is submitted.
+  *num_completed = 0;
 
   auto* queue = static_cast<hsa_amd_aie_kernel_dispatch_packet_t*>(q.base_address);
   const uint64_t mask = q.size - 1;
@@ -2102,13 +2106,15 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
       // ran, plus however far into it the device got. Those packets executed and wrote their
       // output; retiring them here is what keeps a waiter on an earlier packet of a partially
       // failed batch from blocking forever. The rest never ran and get nothing.
-      RetireCompletedPackets(queue, mask, first_pkt_idx, chunk_start + chunk_completed);
+      *num_completed = chunk_start + chunk_completed;
+      RetireCompletedPackets(queue, mask, first_pkt_idx, *num_completed);
       return status;
     }
 
     chunk_start += chunk_len;
   }
 
+  *num_completed = num_pkts;
   RetireCompletedPackets(queue, mask, first_pkt_idx, num_pkts);
 
   return HSA_STATUS_SUCCESS;

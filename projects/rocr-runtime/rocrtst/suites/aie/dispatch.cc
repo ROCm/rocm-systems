@@ -2131,6 +2131,10 @@ void ExpectRejected(const dispatch_error& err, hsa_queue_t* queue, hsa_signal_t 
   EXPECT_EQ(err.source, queue);
   EXPECT_EQ(hsa_signal_load_scacquire(signal), initial)
       << "completion signal fired for a packet that never executed";
+  // The refused packet is still in the ring: only packets that ran are consumed, so the read
+  // index cannot have caught up with the write index.
+  EXPECT_LT(hsa_queue_load_read_index_scacquire(queue), hsa_queue_load_write_index_scacquire(queue))
+      << "a refused packet was consumed from the ring";
 }
 
 TEST_F(FullElfDispatchTest, ElfMisalignedControlCodeRejected) {
@@ -2669,6 +2673,14 @@ TEST_F(DispatchTest, PartiallyFailedBatchRetiresCompletedPackets) {
   ASSERT_GT(remaining, 0) << "the failing packet was credited with a completion it never reached";
 
   const std::uint32_t retired = total_num_dispatches - static_cast<std::uint32_t>(remaining);
+
+  // The ring agrees with the signal: the packets that ran are consumed, the failing one and
+  // everything behind it are not. This queue started empty, so the read index is the count.
+  EXPECT_EQ(hsa_queue_load_read_index_scacquire(queue), retired)
+      << "read index does not match the packets that were completed";
+  EXPECT_LT(hsa_queue_load_read_index_scacquire(queue), hsa_queue_load_write_index_scacquire(queue))
+      << "the failing packet was consumed from the ring";
+
   for (std::uint32_t d = 0; d < retired; ++d) {
     SCOPED_TRACE(d);
     for (std::size_t e = 0; e < n; ++e) {

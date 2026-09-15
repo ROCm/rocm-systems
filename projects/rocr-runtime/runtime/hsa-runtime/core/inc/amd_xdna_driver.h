@@ -145,8 +145,13 @@ public:
   /// @param[in] first_pkt_idx index of the first packet in the queue
   /// @param[in] num_pkts number of packets in the queue to be submitted. Must be greater than 0.
   /// @param[in] agent agent that owns the queue
+  /// @param[out] num_completed how many packets, counting from @p first_pkt_idx, executed and had
+  /// their completion signals released. @p num_pkts on success. On failure this is the prefix the
+  /// device got through before it stopped, so the caller can consume exactly those and leave the
+  /// failing packet and everything after it in the ring.
   hsa_status_t SubmitCmdChain(hsa_queue_t& q, void* queue_metadata, uint64_t first_pkt_idx,
-                              uint64_t num_pkts, const core::Agent& agent);
+                              uint64_t num_pkts, const core::Agent& agent,
+                              uint64_t* num_completed);
 
   hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
   hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
