@@ -84,4 +84,6 @@ typedef __attribute__((address_space(1))) v4i* v4i_gptr;
 #else
 #define RCCL_LL_FIFO_SYS_SCOPE 0
 #endif
+// Deprecated alias for RCCL_LL_FIFO_SYS_SCOPE; kept for source-level backward
+// compatibility with out-of-tree users of this installed header.
 #define RCCL_LL_FIFO_SYS_SCOPE_LOAD RCCL_LL_FIFO_SYS_SCOPE

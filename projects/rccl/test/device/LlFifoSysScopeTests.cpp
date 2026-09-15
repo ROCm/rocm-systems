@@ -11,8 +11,9 @@
 //
 //   Gfx1250EnablesSysScope     — device compile of the guard (1 GPU)
 //   FifoLineSysScopeRoundtrip  — storeLL-shaped b128 store + load on one GPU
-//   SiblingBroadcastSlotReuse  — 9 Ring/LL broadcasts on a sibling pair
-//                                (the hang the store-side fix closed)
+//   SiblingBroadcastSlotReuse  — 64 Ring broadcasts (LL and LL128) on a sibling
+//                                pair; slot reuse begins at the 9th (the hang
+//                                the store-side fix closed)
 
 #include "DeviceTestBase.hpp"
 
@@ -41,8 +42,7 @@ union alignas(16) TestLLLine {
   uint64_t v[2];
 };
 
-__global__ void kernelSysScopeEnabled(int* out)
-{
+__global__ void kernelSysScopeEnabled(int* out) {
 #if RCCL_LL_FIFO_SYS_SCOPE
   *out = 1;
 #else
@@ -173,7 +173,11 @@ TEST_F(DeviceTestBase, Gfx1250EnablesSysScope)
   syncAndCheck();
   const int enabled = d_out.download();
   if (isGfx1250(0)) {
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     EXPECT_EQ(enabled, 1) << "RCCL_LL_FIFO_SYS_SCOPE must be 1 in gfx1250 device code";
+#else
+    EXPECT_EQ(enabled, 0) << "DWORDX4_INTRINSICS=OFF disables sys-scope even on gfx1250";
+#endif
   } else {
     EXPECT_EQ(enabled, 0) << "RCCL_LL_FIFO_SYS_SCOPE is gfx1250-only";
   }

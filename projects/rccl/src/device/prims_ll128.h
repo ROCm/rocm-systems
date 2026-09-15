@@ -36,10 +36,9 @@ inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1
 #endif
 }
 
-// Plain (cacheable) 128-bit store for non-registered user buffers. Not used for
-// the LL128 comm FIFO: those writes go through store128Fifo so gfx1250 sibling
-// P2P sees the flag. Width is still one b128 so data and flag stay one txn if
-// a caller ever embeds a flag here.
+// Plain (cacheable) 128-bit store. Used for non-registered user buffers, and off
+// gfx1250 it is also where store128Fifo sends the LL128 comm FIFO. Width is one
+// b128 so data and flag stay in a single transaction.
 inline __device__ void store128Plain(uint64_t* ptr, uint64_t v0, uint64_t v1) {
   union {
     v4u v;
