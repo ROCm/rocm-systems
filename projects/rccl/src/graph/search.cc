@@ -1381,12 +1381,9 @@ search:
     }
     tmpGraph.crossNic = crossNic == 1 ? 1 : 0;
 
-    // RCCL: a topology can have no solution within the cap on typeInter at all, so give the cap up
-    // and search once more. The step belongs here, after the ones on path types and before the ones
-    // on bandwidth, which is the order the search relaxes in. It restores the budget as well: the
-    // step runs only with no solution at hand, where the guard above cannot have ended the capped
-    // walk, so the retry would otherwise start on whatever that walk left and the guard would
-    // freeze the first solution it finds.
+    // RCCL: with no solution inside the cap on typeInter, give the cap up and search once more,
+    // here rather than later because the search relaxes path types before bandwidth. The budget
+    // goes back too, or the guard above freezes the first solution the retry finds.
     if (graph->nChannels == 0 && maxTypeInter < maxTypeInterUnbounded) {
       maxTypeInter = maxTypeInterUnbounded;
       globalTimeout = NCCL_SEARCH_GLOBAL_TIMEOUT;
