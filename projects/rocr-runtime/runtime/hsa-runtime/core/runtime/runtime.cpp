@@ -2889,10 +2889,10 @@ hsa_status_t Runtime::Load() {
   // itself by then.
   //
   // The loader, the aqlprofile probe handle and the extensions are all
-  // acquired below and before the only failure return left - PostToolsInit() -
-  // so the guard has to give those back too, and give them back first. It runs
-  // only on a failure return: the success path dismisses it, leaving the
-  // teardown to Unload().
+  // acquired below and before the two failure returns left - PostToolsInit()
+  // and LoadHotswapTool() - so the guard has to give those back too, and give
+  // them back first. It runs only on a failure return: the success path
+  // dismisses it, leaving the teardown to Unload().
   MAKE_NAMED_SCOPE_GUARD(loadGuard, [this]() {
     DestroyLoaderAndExtensions();
     DestroyTopology();

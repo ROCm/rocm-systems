@@ -111,40 +111,51 @@ __forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
 } // namespace
 
 KfdDriver::KfdDriver(std::string devnode_name)
-    : core::Driver(core::DriverType::KFD, std::move(devnode_name)) {}
+    : core::Driver(core::DriverType::KFD, std::move(devnode_name)),
+      owner_pid_(os::GetProcessId()) {}
 
-KfdLifecycleOps KfdDriver::ThunkOps() {
-  KfdLifecycleOps ops;
-  ops.disable_runtime = []() {
-    const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
-    return (ret == HSAKMT_STATUS_SUCCESS || ret == HSAKMT_STATUS_NOT_SUPPORTED) ? HSA_STATUS_SUCCESS
-                                                                                : HSA_STATUS_ERROR;
-  };
-  ops.release_snapshot = []() {
-    return HSAKMT_CALL(hsaKmtReleaseSystemProperties()) == HSAKMT_STATUS_SUCCESS
-        ? HSA_STATUS_SUCCESS
-        : HSA_STATUS_ERROR;
-  };
-  ops.close = []() {
-    return HSAKMT_CALL(hsaKmtCloseKFD()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
-                                                                  : HSA_STATUS_ERROR;
-  };
-  ops.get_pid = []() { return os::GetProcessId(); };
-  return ops;
+hsa_status_t KfdDriver::AcquireTopologySnapshot() const {
+  if (topology_snapshot_acquired_) return HSA_STATUS_SUCCESS;
+
+  HsaSystemProperties props = {};
+  if (HSAKMT_CALL(hsaKmtAcquireSystemProperties(&props)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  sys_props_ = props;
+  topology_snapshot_acquired_ = true;
+  return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::Init() {
-  const hsa_status_t acquired = AcquireTopologySnapshot();
-  if (acquired != HSA_STATUS_SUCCESS) return acquired;
+hsa_status_t KfdDriver::ReleaseTopologySnapshot() {
+  if (!topology_snapshot_acquired_) return HSA_STATUS_SUCCESS;
 
-  HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
-  const hsa_status_t enabled = lifecycle_.EnableRuntime([&ret]() {
-    ret = HSAKMT_CALL(
-        hsaKmtRuntimeEnable(&_amdgpu_r_debug, core::Runtime::runtime_singleton_->flag().debug()));
-    return (ret == HSAKMT_STATUS_SUCCESS || ret == HSAKMT_STATUS_NOT_SUPPORTED) ? HSA_STATUS_SUCCESS
-                                                                                : HSA_STATUS_ERROR;
-  });
-  if (enabled != HSA_STATUS_SUCCESS) return enabled;
+  topology_snapshot_acquired_ = false;
+  return HSAKMT_CALL(hsaKmtReleaseSystemProperties()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
+                                                                               : HSA_STATUS_ERROR;
+}
+
+hsa_status_t KfdDriver::DisableRuntime() {
+  if (!runtime_enabled_) return HSA_STATUS_SUCCESS;
+
+  runtime_enabled_ = false;
+  const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
+  return (ret == HSAKMT_STATUS_SUCCESS || ret == HSAKMT_STATUS_NOT_SUPPORTED) ? HSA_STATUS_SUCCESS
+                                                                              : HSA_STATUS_ERROR;
+}
+
+bool KfdDriver::InheritedAcrossFork() const { return os::GetProcessId() != owner_pid_; }
+
+hsa_status_t KfdDriver::Init() {
+  // Own one snapshot from before the debug probe through BuildTopology().
+  if (AcquireTopologySnapshot() != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  MAKE_NAMED_SCOPE_GUARD(snapshot_guard, [this]() { ReleaseTopologySnapshot(); });
+
+  HSAKMT_STATUS ret = HSAKMT_CALL(
+      hsaKmtRuntimeEnable(&_amdgpu_r_debug, core::Runtime::runtime_singleton_->flag().debug()));
+  if (ret != HSAKMT_STATUS_SUCCESS && ret != HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR;
+
+  runtime_enabled_ = true;
+  MAKE_NAMED_SCOPE_GUARD(runtime_guard, [this]() { DisableRuntime(); });
 
   uint32_t caps_mask = 0;
   if (HSAKMT_CALL(hsaKmtGetRuntimeCapabilities(&caps_mask)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
@@ -167,10 +178,44 @@ hsa_status_t KfdDriver::Init() {
   bool xnack_mode = BindXnackMode();
   core::Runtime::runtime_singleton_->XnackEnabled(xnack_mode);
 
+  runtime_guard.Dismiss();
+  snapshot_guard.Dismiss();
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::ShutDown() { return lifecycle_.ShutDown(); }
+hsa_status_t KfdDriver::ShutDown() {
+  // A forked child inherited these claims but none of the references they
+  // describe: the thunk zeroes its own counters from child_fork_handler(). So
+  // drop the claims and call no thunk - Close() below has what calling one in
+  // a child would cost.
+  if (InheritedAcrossFork()) {
+    runtime_enabled_ = false;
+    topology_snapshot_acquired_ = false;
+    kfd_opened_ = false;
+    return HSA_STATUS_SUCCESS;
+  }
+
+  // Name the stage that failed. The caller usually discards this status and
+  // only the first error survives below, so without a diagnostic a failed
+  // release is indistinguishable from a clean shutdown.
+  hsa_status_t status = HSA_STATUS_SUCCESS;
+  auto record = [&status](const char* stage, hsa_status_t err) {
+    if (err == HSA_STATUS_SUCCESS) return;
+
+    debug_print("KfdDriver::ShutDown() failed to %s: 0x%x\n", stage, static_cast<unsigned>(err));
+    if (status == HSA_STATUS_SUCCESS) status = err;
+  };
+
+  // Every stage runs even if an earlier one fails: stopping at the first error
+  // would strand the references the remaining stages give back. Each stage
+  // drops its own ownership before calling the thunk, so a failed release is
+  // not retried into a double release later.
+  record("disable runtime", DisableRuntime());
+  record("release topology snapshot", ReleaseTopologySnapshot());
+  record("close KFD", Close());
+
+  return status;
+}
 
 hsa_status_t KfdDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
   auto tmp_driver = std::unique_ptr<core::Driver>(new KfdDriver("/dev/kfd"));
@@ -193,35 +238,62 @@ hsa_status_t KfdDriver::QueryKernelModeDriver(core::DriverQuery query) {
 // success because hsaKmtOpenKFD()'s already-opened branch in
 // libhsakmt/src/dxg/openclose.cpp increments dxg_open_count just as the first
 // open does: this driver holds a real reference and owes a real close. That is
-// why lifecycle_.Open() recording ownership here is correct and not a
-// double-count.
+// why recording kfd_opened_ here is correct and not a double-count.
 //
 // libhsakmt/src/openclose.c increments hsakmt_kfd_open_count on its
 // already-opened branch too, so the same argument would hold for native KFD,
 // but this path still fails there, stranding that reference. Known,
 // pre-existing on develop, and out of scope for this change.
 hsa_status_t KfdDriver::Open() {
-  return lifecycle_.Open([]() {
-    const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtOpenKFD());
-    if (ret == HSAKMT_STATUS_SUCCESS) return HSA_STATUS_SUCCESS;
-    if (ret == HSAKMT_STATUS_KERNEL_ALREADY_OPENED &&
-        core::Runtime::runtime_singleton_->thunkLoader()->IsDXG())
-      return HSA_STATUS_SUCCESS;
-    return HSA_STATUS_ERROR;
-  });
+  // A second open would take a second reference that nothing gives back, so
+  // once the open is owned this reports success without calling the thunk.
+  if (kfd_opened_) return HSA_STATUS_SUCCESS;
+
+  const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtOpenKFD());
+  if (ret == HSAKMT_STATUS_SUCCESS ||
+      (ret == HSAKMT_STATUS_KERNEL_ALREADY_OPENED &&
+       core::Runtime::runtime_singleton_->thunkLoader()->IsDXG())) {
+    kfd_opened_ = true;
+    return HSA_STATUS_SUCCESS;
+  }
+
+  return HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdDriver::Close() { return lifecycle_.Close(); }
-
-hsa_status_t KfdDriver::AcquireTopologySnapshot() const {
-  return lifecycle_.AcquireSnapshot([this]() {
-    HsaSystemProperties props = {};
-    if (HSAKMT_CALL(hsaKmtAcquireSystemProperties(&props)) != HSAKMT_STATUS_SUCCESS)
-      return HSA_STATUS_ERROR;
-
-    sys_props_ = props;
+// The inverse of Open(), not a teardown: core::Driver documents Close() as
+// closing a connection to an open driver, and a caller asking for that must
+// not also lose the runtime enable and the topology snapshot. ShutDown() is
+// the method that gives back everything.
+hsa_status_t KfdDriver::Close() {
+  // In a forked child the inherited open reference is the parent's, so drop
+  // the claim without closing.
+  //
+  // The damage this avoids is child-local, not damage to the parent. fork()
+  // gives the child its own descriptor table, so a close here would drop only
+  // the child's reference and the parent's fd would survive it; and
+  // hsaKmtOpenKFD()'s clear_after_fork() replaces *dxg_runtime wholesale, so
+  // the parent's heap state is not even reachable from the child. What an
+  // inherited claim destroys is the session the child just re-created: the
+  // count starts from zero in the child, so this close is the 1->0 transition
+  // that tears DXCore down and turns the WDDMDevice objects a consumer built
+  // after the fork into pointers into a dead session. amdsmi's WSL backend
+  // (projects/amdsmi/src/amd_smi/amd_smi_wsl_device.cc) is that consumer
+  // today: it dlopens librocdxg.so.1, calls hsaKmtOpenKFD(), accepts
+  // HSAKMT_STATUS_KERNEL_ALREADY_OPENED, and holds the snapshot for the
+  // process lifetime.
+  if (InheritedAcrossFork()) {
+    kfd_opened_ = false;
     return HSA_STATUS_SUCCESS;
-  });
+  }
+
+  // Owning no open reference is success: there is nothing to give back.
+  if (!kfd_opened_) return HSA_STATUS_SUCCESS;
+
+  // Dropped before the call rather than after, so a failed close is not
+  // retried into a double close.
+  kfd_opened_ = false;
+  return HSAKMT_CALL(hsaKmtCloseKFD()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
+                                                                : HSA_STATUS_ERROR;
 }
 
 hsa_status_t KfdDriver::GetSystemProperties(HsaSystemProperties& sys_props) const {

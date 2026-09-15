@@ -111,10 +111,12 @@ void DiscoverDrivers() {
 }
 
 bool InitializeDriver(std::unique_ptr<core::Driver>& driver) {
-  // ShutDown() rather than Close(): Init() can fail partway through, after it
-  // has already enabled the KFD runtime, and closing the device without
-  // disabling first strands that. ShutDown() gives back whatever the driver
-  // actually took, which on this path is the open plus however far Init() got.
+  // ShutDown() rather than Close(), because this runs over whichever driver
+  // Init() failed on and only ShutDown() gives back everything Init() took.
+  // KfdDriver::Init() unwinds itself with scope guards, but
+  // KfdVirtioDriver::Init() enables the virtio runtime and then has two failure
+  // returns that leave it enabled, and closing the device without disabling
+  // first strands that.
   MAKE_NAMED_SCOPE_GUARD(driver_guard, [&]() { driver->ShutDown(); });
 
   if (driver->Init() != HSA_STATUS_SUCCESS) {
