@@ -39,7 +39,8 @@ BufferLoadFormatXVbuffer::BufferLoadFormatXVbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -70,7 +71,8 @@ BufferLoadFormatXyVbuffer::BufferLoadFormatXyVbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -101,7 +103,8 @@ BufferLoadFormatXyzVbuffer::BufferLoadFormatXyzVbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -132,7 +135,8 @@ BufferLoadFormatXyzwVbuffer::BufferLoadFormatXyzwVbuffer(const MachineInst *inst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -163,8 +167,8 @@ BufferStoreFormatXVbuffer::BufferStoreFormatXVbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -195,8 +199,8 @@ BufferStoreFormatXyVbuffer::BufferStoreFormatXyVbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -227,8 +231,8 @@ BufferStoreFormatXyzVbuffer::BufferStoreFormatXyzVbuffer(const MachineInst *inst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -259,8 +263,8 @@ BufferStoreFormatXyzwVbuffer::BufferStoreFormatXyzwVbuffer(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -292,7 +296,8 @@ BufferLoadD16FormatXVbuffer::BufferLoadD16FormatXVbuffer(const MachineInst *inst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -330,7 +335,8 @@ BufferLoadD16FormatXyVbuffer::BufferLoadD16FormatXyVbuffer(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -362,7 +368,8 @@ BufferLoadD16FormatXyzVbuffer::BufferLoadD16FormatXyzVbuffer(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -400,7 +407,8 @@ BufferLoadD16FormatXyzwVbuffer::BufferLoadD16FormatXyzwVbuffer(const MachineInst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -432,8 +440,8 @@ BufferStoreD16FormatXVbuffer::BufferStoreD16FormatXVbuffer(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -465,8 +473,8 @@ BufferStoreD16FormatXyVbuffer::BufferStoreD16FormatXyVbuffer(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -498,8 +506,8 @@ BufferStoreD16FormatXyzVbuffer::BufferStoreD16FormatXyzVbuffer(const MachineInst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -531,8 +539,8 @@ BufferStoreD16FormatXyzwVbuffer::BufferStoreD16FormatXyzwVbuffer(const MachineIn
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -564,7 +572,8 @@ BufferLoadU8Vbuffer::BufferLoadU8Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -595,7 +604,8 @@ BufferLoadI8Vbuffer::BufferLoadI8Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -626,7 +636,8 @@ BufferLoadU16Vbuffer::BufferLoadU16Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -657,7 +668,8 @@ BufferLoadI16Vbuffer::BufferLoadI16Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -688,7 +700,8 @@ BufferLoadB32Vbuffer::BufferLoadB32Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -719,7 +732,8 @@ BufferLoadB64Vbuffer::BufferLoadB64Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -750,7 +764,8 @@ BufferLoadB96Vbuffer::BufferLoadB96Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -781,7 +796,8 @@ BufferLoadB128Vbuffer::BufferLoadB128Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -812,8 +828,8 @@ BufferStoreB8Vbuffer::BufferStoreB8Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -844,8 +860,8 @@ BufferStoreB16Vbuffer::BufferStoreB16Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -876,8 +892,8 @@ BufferStoreB32Vbuffer::BufferStoreB32Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -908,8 +924,8 @@ BufferStoreB64Vbuffer::BufferStoreB64Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -940,8 +956,8 @@ BufferStoreB96Vbuffer::BufferStoreB96Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -972,8 +988,8 @@ BufferStoreB128Vbuffer::BufferStoreB128Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -1004,7 +1020,8 @@ BufferLoadD16U8Vbuffer::BufferLoadD16U8Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -1041,7 +1058,8 @@ BufferLoadD16I8Vbuffer::BufferLoadD16I8Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -1078,7 +1096,8 @@ BufferLoadD16B16Vbuffer::BufferLoadD16B16Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -1115,7 +1134,8 @@ BufferLoadD16HiU8Vbuffer::BufferLoadD16HiU8Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -1152,7 +1172,8 @@ BufferLoadD16HiI8Vbuffer::BufferLoadD16HiI8Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -1189,7 +1210,8 @@ BufferLoadD16HiB16Vbuffer::BufferLoadD16HiB16Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -1226,8 +1248,8 @@ BufferStoreD16HiB8Vbuffer::BufferStoreD16HiB8Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -1258,8 +1280,8 @@ BufferStoreD16HiB16Vbuffer::BufferStoreD16HiB16Vbuffer(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -1290,7 +1312,8 @@ BufferLoadD16HiFormatXVbuffer::BufferLoadD16HiFormatXVbuffer(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -1328,8 +1351,8 @@ BufferStoreD16HiFormatXVbuffer::BufferStoreD16HiFormatXVbuffer(const MachineInst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -1365,11 +1388,11 @@ BufferAtomicSwapB32Vbuffer::BufferAtomicSwapB32Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -1405,11 +1428,11 @@ BufferAtomicCmpswapB32Vbuffer::BufferAtomicCmpswapB32Vbuffer(const MachineInst *
     dst_operands_[num_dst_++] = &vdata_return;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -1445,11 +1468,11 @@ BufferAtomicAddU32Vbuffer::BufferAtomicAddU32Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -1484,11 +1507,11 @@ BufferAtomicSubU32Vbuffer::BufferAtomicSubU32Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -1523,11 +1546,11 @@ BufferAtomicSubClampU32Vbuffer::BufferAtomicSubClampU32Vbuffer(const MachineInst
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -1563,11 +1586,11 @@ BufferAtomicMinI32Vbuffer::BufferAtomicMinI32Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -1602,11 +1625,11 @@ BufferAtomicMinU32Vbuffer::BufferAtomicMinU32Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -1641,11 +1664,11 @@ BufferAtomicMaxI32Vbuffer::BufferAtomicMaxI32Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -1680,11 +1703,11 @@ BufferAtomicMaxU32Vbuffer::BufferAtomicMaxU32Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -1719,11 +1742,11 @@ BufferAtomicAndB32Vbuffer::BufferAtomicAndB32Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -1758,11 +1781,11 @@ BufferAtomicOrB32Vbuffer::BufferAtomicOrB32Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -1797,11 +1820,11 @@ BufferAtomicXorB32Vbuffer::BufferAtomicXorB32Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -1836,11 +1859,11 @@ BufferAtomicIncU32Vbuffer::BufferAtomicIncU32Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -1875,11 +1898,11 @@ BufferAtomicDecU32Vbuffer::BufferAtomicDecU32Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -1914,11 +1937,11 @@ BufferAtomicSwapB64Vbuffer::BufferAtomicSwapB64Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -1954,11 +1977,11 @@ BufferAtomicCmpswapB64Vbuffer::BufferAtomicCmpswapB64Vbuffer(const MachineInst *
     dst_operands_[num_dst_++] = &vdata_return;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -1994,11 +2017,11 @@ BufferAtomicAddU64Vbuffer::BufferAtomicAddU64Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -2033,11 +2056,11 @@ BufferAtomicSubU64Vbuffer::BufferAtomicSubU64Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -2072,11 +2095,11 @@ BufferAtomicMinI64Vbuffer::BufferAtomicMinI64Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -2111,11 +2134,11 @@ BufferAtomicMinU64Vbuffer::BufferAtomicMinU64Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -2150,11 +2173,11 @@ BufferAtomicMaxI64Vbuffer::BufferAtomicMaxI64Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -2189,11 +2212,11 @@ BufferAtomicMaxU64Vbuffer::BufferAtomicMaxU64Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -2228,11 +2251,11 @@ BufferAtomicAndB64Vbuffer::BufferAtomicAndB64Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -2267,11 +2290,11 @@ BufferAtomicOrB64Vbuffer::BufferAtomicOrB64Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -2306,11 +2329,11 @@ BufferAtomicXorB64Vbuffer::BufferAtomicXorB64Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -2345,11 +2368,11 @@ BufferAtomicIncU64Vbuffer::BufferAtomicIncU64Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -2384,11 +2407,11 @@ BufferAtomicDecU64Vbuffer::BufferAtomicDecU64Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -2423,11 +2446,11 @@ BufferAtomicCondSubU32Vbuffer::BufferAtomicCondSubU32Vbuffer(const MachineInst *
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -2463,11 +2486,11 @@ BufferAtomicMinNumF32Vbuffer::BufferAtomicMinNumF32Vbuffer(const MachineInst *in
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -2503,11 +2526,11 @@ BufferAtomicMaxNumF32Vbuffer::BufferAtomicMaxNumF32Vbuffer(const MachineInst *in
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -2543,11 +2566,11 @@ BufferAtomicAddF32Vbuffer::BufferAtomicAddF32Vbuffer(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -2582,11 +2605,11 @@ BufferAtomicPkAddF16Vbuffer::BufferAtomicPkAddF16Vbuffer(const MachineInst *inst
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -2622,11 +2645,11 @@ BufferAtomicPkAddBf16Vbuffer::BufferAtomicPkAddBf16Vbuffer(const MachineInst *in
     dst_operands_[num_dst_++] = &vdata;
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
-                                              : amdgpu::MemoryCompletionClass::UNORDERED));
+                                              : amdgpu::MemoryCompletionClass::UNORDERED)}});
 }
 
 namespace detail {
@@ -2901,7 +2924,8 @@ TbufferLoadD16FormatXVbuffer::TbufferLoadD16FormatXVbuffer(const MachineInst *in
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -2939,7 +2963,8 @@ TbufferLoadD16FormatXyVbuffer::TbufferLoadD16FormatXyVbuffer(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -2971,7 +2996,8 @@ TbufferLoadD16FormatXyzVbuffer::TbufferLoadD16FormatXyzVbuffer(const MachineInst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -3009,7 +3035,8 @@ TbufferLoadD16FormatXyzwVbuffer::TbufferLoadD16FormatXyzwVbuffer(const MachineIn
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::LOADCNT, amdgpu::MemoryCompletionClass::VMEM);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -3041,8 +3068,8 @@ TbufferStoreD16FormatXVbuffer::TbufferStoreD16FormatXVbuffer(const MachineInst *
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -3074,8 +3101,8 @@ TbufferStoreD16FormatXyVbuffer::TbufferStoreD16FormatXyVbuffer(const MachineInst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -3107,8 +3134,8 @@ TbufferStoreD16FormatXyzVbuffer::TbufferStoreD16FormatXyzVbuffer(const MachineIn
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
@@ -3140,8 +3167,8 @@ TbufferStoreD16FormatXyzwVbuffer::TbufferStoreD16FormatXyzwVbuffer(const Machine
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info(amdgpu::WaitCounterType::STORECNT,
-                        amdgpu::MemoryCompletionClass::UNORDERED);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
 
 namespace detail {
