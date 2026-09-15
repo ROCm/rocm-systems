@@ -54,6 +54,7 @@ class FillMemoryCommand;
 class CopyMemoryCommand;
 class CopyMemoryP2PCommand;
 class BatchCopyMemoryCommand;
+class BatchCopyRectMemoryCommand;
 class BatchWriteMemoryCommand;
 class BatchReadMemoryCommand;
 class MapMemoryCommand;
@@ -1325,6 +1326,9 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
   virtual void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) = 0;
   virtual void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) = 0;
+  //! Batched rect copy.  Deliberately not pure: only the ROCm backend implements it, and
+  //! callers only ever construct the command when the backend advertises support.
+  virtual void submitBatchCopyRectMemory(amd::BatchCopyRectMemoryCommand& cmd);
   virtual void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) = 0;
   virtual void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) = 0;
   virtual void submitMapMemory(amd::MapMemoryCommand& cmd) = 0;

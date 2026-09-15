@@ -2500,6 +2500,41 @@ hsa_status_t HSA_API hsa_amd_memory_async_copy_rect(
     hsa_amd_copy_direction_t dir, uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
     hsa_signal_t completion_signal);
 
+/*
+[Provisional API]
+One rect copy operand of a batched rect copy.  Fields carry the same meaning as the
+corresponding arguments of hsa_amd_memory_async_copy_rect.
+*/
+typedef struct hsa_amd_memory_copy_rect_op_s {
+  hsa_pitched_ptr_t dst;
+  hsa_dim3_t dst_offset;
+  hsa_pitched_ptr_t src;
+  hsa_dim3_t src_offset;
+  hsa_dim3_t range;
+} hsa_amd_memory_copy_rect_op_t;
+
+/*
+[Provisional API]
+Batched SDMA 3D memory copy API.  Performs @p num_ops independent rect copies, all in the
+same direction @p dir, as a SINGLE SDMA submission guarded by a SINGLE completion signal.
+
+Each operand must individually satisfy every requirement of hsa_amd_memory_async_copy_rect.
+The operands are lowered to SDMA packets in array order and appended to one command buffer,
+so they execute in order on the copy engine, but no ordering is observable between them:
+only one completion signal is produced, after the last operand retires.  The rects of
+different operands must not overlap.
+
+@p completion_signal is decremented once, after all @p num_ops copies have completed.
+Dependent signals are waited on once, before the first copy.
+
+Returns HSA_STATUS_ERROR_INVALID_ARGUMENT if any operand fails validation, in which case
+no copy is submitted.
+*/
+hsa_status_t HSA_API hsa_amd_memory_async_batch_copy_rect(
+    const hsa_amd_memory_copy_rect_op_t* ops, size_t num_ops, hsa_agent_t copy_agent,
+    hsa_amd_copy_direction_t dir, uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+    hsa_signal_t completion_signal);
+
 /**
  * @brief Type of accesses to a memory pool from a given agent.
  */

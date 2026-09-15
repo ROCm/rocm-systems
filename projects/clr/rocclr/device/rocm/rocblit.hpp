@@ -133,6 +133,14 @@ class DmaBlitManager : public device::HostBlitManager {
       const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
   ) const;
 
+  //! Copies multiple rect (3D) regions as a single SDMA submission when every operand is
+  //! an SDMA-capable host<->device rect copy, otherwise one copyBufferRect per operand.
+  bool copyBufferRectBatch(
+      const std::vector<device::Memory*>& srcMemories,   //!< Per-op source device memory
+      const std::vector<device::Memory*>& dstMemories,   //!< Per-op destination device memory
+      const std::vector<amd::BatchCopyRectOp>& copyOps   //!< Batch of rect copy operations
+  ) const;
+
   //! Copies an image object to a buffer object
   virtual bool copyImageToBuffer(
       device::Memory& srcMemory,                            //!< Source memory object

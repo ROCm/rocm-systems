@@ -330,6 +330,12 @@ class GpuAgent : public GpuAgentInt {
                            const hsa_dim3_t* range, hsa_amd_copy_direction_t dir,
                            std::vector<core::Signal*>& dep_signals, core::Signal& out_signal);
 
+  // @brief Submit num_ops independent rect copies as one SDMA submission.
+  hsa_status_t DmaBatchCopyRect(const hsa_amd_memory_copy_rect_op_t* ops, size_t num_ops,
+                                hsa_amd_copy_direction_t dir,
+                                std::vector<core::Signal*>& dep_signals,
+                                core::Signal& out_signal);
+
   // @brief Override from core::Agent.
   hsa_status_t DmaFill(void* ptr, uint32_t value, size_t count) override;
 
