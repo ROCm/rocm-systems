@@ -48,6 +48,16 @@ constexpr int    kScaleOutIters   = 3;      // repeated RMA sequence reuse in hi
 // 68 MiB per rank/peer crosses the 64 MiB hierarchical chunk size, exercising the
 // multi-chunk plan and the per-chunk scratch release.
 constexpr size_t kChunkBoundaryCount = (68ull * 1024 * 1024) / sizeof(float);
+// The count above is per rank/peer, so the buffers and their host verification
+// mirrors grow with world size: 1.1 GiB each at 16 ranks, 17 GiB at 256. Cap the
+// two chunk-boundary cases at the two-node shape they are meant to cover; past
+// it the host mirror alone would throw out of its vector constructor.
+constexpr int kChunkBoundaryMaxRanks = 16;
+// Coarse offset applied to the upper half of every sent slice, so a chunk landing
+// at the wrong offset changes the received bytes. It has to be coarse: at this
+// element count a per-element term would exceed the range float represents
+// exactly, while the biased values stay well inside it.
+constexpr float kUpperHalfBias = 1048576.0f;
 } // namespace CeMPITestConstants
 
 using namespace CeMPITestConstants;
@@ -159,7 +169,11 @@ protected:
         MPI_Allreduce(&localSize, &minLocalSize, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
         MPI_Allreduce(&localSize, &maxLocalSize, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 
-        return worldSize > maxLocalSize && minLocalSize >= 2;
+        // Equal ranks per node is a requirement, not a convenience: lsaSize is a
+        // comm-wide gcd, so on unequal nodes it cannot cover the largest node and
+        // ncclHierCeAvailable declines. Admitting such a job here would fire
+        // neither skip and then fail on the missing marker.
+        return worldSize > maxLocalSize && minLocalSize >= 2 && minLocalSize == maxLocalSize;
     }
 
     // MPI topology alone does not imply hierarchical CE is reachable: it also needs
@@ -341,10 +355,14 @@ class CeMPI_AllGather : public CeMPITest
 {
 protected:
     void runAllGather(int minRanks, size_t count, const char* testId,
-                      bool requireScaleOut = false, int scaleOutIters = kScaleOutIters)
+                      bool requireScaleOut = false, int scaleOutIters = kScaleOutIters,
+                      int maxRanks = MPITestConstants::kNoProcessLimit)
     {
-        if(!validateTestPrerequisites(minRanks))
-            GTEST_SKIP() << "Need >= " << minRanks << " MPI ranks";
+        if(!validateTestPrerequisites(minRanks, maxRanks))
+            GTEST_SKIP() << "Need >= " << minRanks << " MPI ranks"
+                         << (maxRanks != MPITestConstants::kNoProcessLimit
+                                 ? " and <= " + std::to_string(maxRanks)
+                                 : std::string());
         if(requireScaleOut && !isScaleOutTopology())
             GTEST_SKIP() << "Need at least 2 nodes and 2 MPI ranks per node";
 
@@ -367,11 +385,19 @@ protected:
         for(int iter = 0; iter < iterations; ++iter)
         {
             const int epoch = iter * nRanks;
+            // The upper half of the slice carries kUpperHalfBias so the payload
+            // varies within one rank's contribution. Without it every chunk of a
+            // slice holds identical bytes, and a chunk written at the wrong
+            // offset would leave the result bit-identical.
+            const size_t halfCount = count / 2;
             ASSERT_EQ(
                 hipSuccess,
                 initializeBufferWithPattern<float>(
                     sendSym.ptr, count,
-                    [rank, epoch](size_t) { return static_cast<float>(epoch + rank + 1); }));
+                    [rank, epoch, halfCount](size_t i) {
+                        return static_cast<float>(epoch + rank + 1) +
+                               (i >= halfCount ? kUpperHalfBias : 0.0f);
+                    }));
 
             ASSERT_EQ(ncclSuccess,
                       ncclAllGather(sendSym.ptr, recvSym.ptr, count, ncclFloat32,
@@ -380,8 +406,9 @@ protected:
 
             ASSERT_TRUE(verifyBufferData<float>(
                 recvSym.ptr, count * static_cast<size_t>(nRanks),
-                [count, epoch](size_t i) {
-                    return static_cast<float>(epoch + i / count + 1);
+                [count, epoch, halfCount](size_t i) {
+                    return static_cast<float>(epoch + i / count + 1) +
+                           (i % count >= halfCount ? kUpperHalfBias : 0.0f);
                 }))
                 << "Rank " << rank << ": AllGather data verification failed at iteration "
                 << iter;
@@ -418,7 +445,8 @@ TEST_F(CeMPI_AllGather, MultiNodeHierarchical)
 TEST_F(CeMPI_AllGather, MultiNodeHierarchicalChunkBoundary)
 {
     runAllGather(kMinRanks4, kChunkBoundaryCount,
-                 "CeMPI_AllGather/MultiNodeHierarchicalChunkBoundary", true, 1);
+                 "CeMPI_AllGather/MultiNodeHierarchicalChunkBoundary", true, 1,
+                 kChunkBoundaryMaxRanks);
 }
 
 // ===========================================================================
@@ -430,10 +458,14 @@ class CeMPI_AlltoAll : public CeMPITest
 protected:
     // count is per-rank-per-destination; total send/recv buffer = count * nRanks.
     void runAlltoAll(int minRanks, size_t count, const char* testId,
-                     bool requireScaleOut = false, int scaleOutIters = kScaleOutIters)
+                     bool requireScaleOut = false, int scaleOutIters = kScaleOutIters,
+                     int maxRanks = MPITestConstants::kNoProcessLimit)
     {
-        if(!validateTestPrerequisites(minRanks))
-            GTEST_SKIP() << "Need >= " << minRanks << " MPI ranks";
+        if(!validateTestPrerequisites(minRanks, maxRanks))
+            GTEST_SKIP() << "Need >= " << minRanks << " MPI ranks"
+                         << (maxRanks != MPITestConstants::kNoProcessLimit
+                                 ? " and <= " + std::to_string(maxRanks)
+                                 : std::string());
         if(requireScaleOut && !isScaleOutTopology())
             GTEST_SKIP() << "Need at least 2 nodes and 2 MPI ranks per node";
 
@@ -464,13 +496,17 @@ protected:
             const int epoch = iter * nRanks;
             // Value depends on both endpoints: sender s writes epoch + s*nRanks + j + 1
             // into the slice bound for rank j. A wrong source slice therefore changes the
-            // received bytes, which a sender-only pattern could not detect.
+            // received bytes, which a sender-only pattern could not detect. The upper
+            // half of each per-destination slice additionally carries kUpperHalfBias, so
+            // a chunk written at the wrong offset within a slice is detectable too.
+            const size_t halfCount = count / 2;
             ASSERT_EQ(
                 hipSuccess,
                 initializeBufferWithPattern<float>(
                     sendSym.ptr, totalElem,
-                    [rank, nRanks, count, epoch](size_t i) {
-                        return static_cast<float>(epoch + rank * nRanks + i / count + 1);
+                    [rank, nRanks, count, epoch, halfCount](size_t i) {
+                        return static_cast<float>(epoch + rank * nRanks + i / count + 1) +
+                               (i % count >= halfCount ? kUpperHalfBias : 0.0f);
                     }));
 
             ASSERT_EQ(ncclSuccess,
@@ -481,8 +517,9 @@ protected:
             // Slice s of the result is what rank s sent to us, i.e. epoch + s*nRanks + rank + 1.
             ASSERT_TRUE(verifyBufferData<float>(
                 recvSym.ptr, totalElem,
-                [count, nRanks, rank, epoch](size_t i) {
-                    return static_cast<float>(epoch + (i / count) * nRanks + rank + 1);
+                [count, nRanks, rank, epoch, halfCount](size_t i) {
+                    return static_cast<float>(epoch + (i / count) * nRanks + rank + 1) +
+                           (i % count >= halfCount ? kUpperHalfBias : 0.0f);
                 }))
                 << "Rank " << rank << ": AlltoAll data verification failed at iteration "
                 << iter;
@@ -519,7 +556,8 @@ TEST_F(CeMPI_AlltoAll, MultiNodeHierarchical)
 TEST_F(CeMPI_AlltoAll, MultiNodeHierarchicalChunkBoundary)
 {
     runAlltoAll(kMinRanks4, kChunkBoundaryCount,
-                "CeMPI_AlltoAll/MultiNodeHierarchicalChunkBoundary", true, 1);
+                "CeMPI_AlltoAll/MultiNodeHierarchicalChunkBoundary", true, 1,
+                kChunkBoundaryMaxRanks);
 }
 
 // ===========================================================================

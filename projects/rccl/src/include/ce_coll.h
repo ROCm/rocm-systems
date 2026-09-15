@@ -160,7 +160,7 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRe
 // True when an admitted CE task must run on the hierarchical path. The launch
 // site and the selection marker share this so they cannot disagree about which
 // algorithm a task got.
-bool ncclCeHierDispatch(struct ncclComm* comm);
+bool ncclHierCeDispatch(struct ncclComm* comm);
 
 ncclResult_t ncclCeInit(struct ncclComm* comm);
 

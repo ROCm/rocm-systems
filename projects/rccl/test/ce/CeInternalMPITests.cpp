@@ -477,6 +477,15 @@ TEST_F(CeInternalMPITest, FreeBatchOpsParamsIsIdempotent)
     ASSERT_NE(params.attrIdxs, nullptr);
 #endif
 
+    // ncclCeInitBatchOpsParams already leaves the counters and the sync flag at
+    // 0/false, so drive them off those values first. Otherwise the assertions
+    // below would pass without the release ever clearing anything.
+    params.numOps         = 4;
+    params.intraBatchSync = true;
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    params.numAttrs = 4;
+#endif
+
     ncclCeFreeBatchOpsParams(&params);
     EXPECT_EQ(params.srcs, nullptr);
     EXPECT_EQ(params.dsts, nullptr);

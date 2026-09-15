@@ -1163,8 +1163,11 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRe
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: LSA spans the comm; use CE path instead");
     return false;
   }
-  // Intra-node CE scatter writes via LSA pointers
-  if (ncclTeamLsa(comm).nRanks < comm->localRanks) {
+  // Intra-node CE scatter writes via LSA pointers. Compare against the largest
+  // node rather than this rank's own node: lsaSize is a comm-wide gcd, so with
+  // unequal ranks per node comm->localRanks would clear this on the small nodes
+  // and not on the large ones, and the answer gates a group join in taskAppend.
+  if (ncclTeamLsa(comm).nRanks < comm->maxLocalRanks) {
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: LSA team does not cover all local ranks");
     return false;
   }
@@ -1186,7 +1189,7 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRe
   return true;
 }
 
-bool ncclCeHierDispatch(struct ncclComm* comm) {
+bool ncclHierCeDispatch(struct ncclComm* comm) {
   return comm->nNodes > 1 && !ncclDevrIsOneLsaTeam(comm);
 }
 
@@ -2061,7 +2064,7 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
   // match the one ncclHierCeAvailable admitted the task under, otherwise a
   // single-node comm with a reduced LSA team (NCCL_LSA_TEAM_SIZE) would be
   // dispatched here without the RMA prerequisites having been checked.
-  if (ncclCeHierDispatch(comm)) {
+  if (ncclHierCeDispatch(comm)) {
     switch (args->func) {
     case ncclFuncAllGather:
       NCCLCHECKGOTO(ncclHierCeAllGather(comm, plan, stream), ret, fail);
@@ -2169,11 +2172,15 @@ ncclResult_t scheduleCeCollTaskToPlan(struct ncclComm* comm, struct ncclKernelPl
   plan->ceCollArgs->sizes = (task->func == ncclFuncAlltoAllv) ? task->sizes : nullptr;
 
   if (comm->rank == 0) {
-    if (!ncclDevrIsOneLsaTeam(comm)) {
+    // Same predicate ncclLaunchCeColl dispatches on, so the marker cannot claim
+    // a path the launch did not take.
+    if (ncclHierCeDispatch(comm)) {
       INFO(NCCL_TUNING, "%s " RCCL_CE_HIER_SELECTED_TAG ": %ld Bytes -> RMA proxy + CE", ncclFuncToString(task->func),
            task->count * ncclTypeSize(task->datatype));
     } else {
-      const char* nvlsSync = comm->nvlsSupport ? "; CE synchronization with NVLS" : "";
+      // Matches the useMCSync predicate in ncclMemOpSync: multicast sync is not
+      // available across scale-up cliques.
+      const char* nvlsSync = comm->nvlsSupport && !comm->p2pCrossClique ? "; CE synchronization with NVLS" : "";
       INFO(NCCL_TUNING, "%s [Copy Engine]: %ld Bytes -> cudaMemcpy%s", ncclFuncToString(task->func),
            task->count * ncclTypeSize(task->datatype), nvlsSync);
     }
