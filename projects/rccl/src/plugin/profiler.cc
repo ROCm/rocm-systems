@@ -429,6 +429,7 @@ ncclResult_t ncclProfilerStartCollApiEvent(struct ncclInfo* info, bool isGraphCa
 ncclResult_t ncclProfilerStopCollApiEvent() {
   if (COMPILER_EXPECT(ncclProfiler != NULL, 0) && ncclProfilerApiState.collApiEventHandle) {
     ncclProfiler->stopEvent(ncclProfilerApiState.collApiEventHandle);
+    ncclProfilerApiState.collApiEventHandle = nullptr;
   }
   return ncclSuccess;
 }
