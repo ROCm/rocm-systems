@@ -78,6 +78,13 @@ namespace RcclUnitTesting
   {
     InteractiveWait("Starting InitComms");
 
+    #ifndef ENABLE_OPENMP
+    if (ev.useMultithreading)
+    {
+      FAIL() << "UT_MULTITHREAD=1 requires a unit-test build with OPENMP_TESTS_ENABLED=ON";
+    }
+    #endif
+
     // If children/comms from a previous test mode (e.g. SP) are still active,
     // ensure they are cleanly stopped before creating new ones for MP mode
     if (this->numActiveChildren > 0)
@@ -144,6 +151,16 @@ namespace RcclUnitTesting
           pid_t pid = fork();
           if (pid == 0)
           {
+            // Pool workers are forked sequentially, so this child inherits the
+            // parent's pipe ends for its own worker and every earlier worker.
+            // Close all of them so an unexpected parent exit delivers EOF to
+            // each worker's command pipe instead of leaving orphaned workers.
+            for (int i = 0; i <= d; ++i)
+            {
+              if (this->poolChildren[i] == nullptr) continue;
+              close(this->poolChildren[i]->parentWriteFd);
+              close(this->poolChildren[i]->parentReadFd);
+            }
             this->poolChildren[d]->StartExecutionLoop();
             return;
           }
