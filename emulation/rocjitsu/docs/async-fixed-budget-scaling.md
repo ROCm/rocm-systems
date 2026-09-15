@@ -68,7 +68,8 @@ ordinary mode 0. H>0 selects async mode 4, seven outstanding jobs per wave, 512-
 warm waits, lookahead 8 and target-default admission. The same GPU inputs and kernels
 are retained after removing the numerical comparisons during screening.
 
-With D>1, one SoC-wide dispatch pool serializes complete submissions from the XCDs,
+In the runtime measured here, D>1 uses one SoC-wide dispatch pool that serializes
+complete submissions from the XCDs,
 so at most D CUs plus H helper MMAs can advance concurrently. Other engines can do
 scheduling work but cannot submit concurrent CU batches. At D=1 the pool is absent,
 and all E engines can independently advance CUs. This explains why increasing E can

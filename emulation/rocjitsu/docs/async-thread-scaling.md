@@ -54,7 +54,8 @@ host. Small differences with overlapping ranges should not be treated as reliabl
 = cpu_dispatch_threads` includes the submitting engine thread, so it adds D-1 retained pool
 workers. `H = RJ_MMA_SHARED_HELPERS` adds H process-wide helpers. Execution-thread slots total E
 + D - 1 + H, excluding launcher, doorbell and other runtime threads. At D=1, up to E CUs execute
-concurrently; at D>1, same-SoC batches serialize and at most D CUs execute concurrently, plus at
+concurrently; in the runtime measured here, D>1 same-SoC batches serialize and at most
+D CUs execute concurrently, plus at
 most H offloaded MMAs. These are capacity bounds, not measured utilization.
 
 The proposed E=8,D=32 settings allocate 39 execution slots without helpers, 43 with H=4, 55 with

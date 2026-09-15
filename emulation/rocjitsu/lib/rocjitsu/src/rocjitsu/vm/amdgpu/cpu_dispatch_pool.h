@@ -29,12 +29,13 @@ class CpuDispatchPoolTestAccess;
 
 /// @brief Pool of host threads executing one functional quantum per active CU.
 ///
+/// @details This is host acceleration, not a modeled GPU resource. Changing the
+/// width must preserve the observable result of a race-free workload.
 /// run() distributes a submission across its caller and up to N-1 shared workers.
 /// Concurrent submissions must own disjoint CUs and result storage. Each CU runs
 /// exactly once per submission; results and exceptions belong to that submission.
 /// The caller keeps its spans alive until run() returns, and the pool must outlive
-/// all run() calls. Command processors already retain their own scratch arrays and
-/// apply stateful retirement only after their submission joins.
+/// all run() calls.
 ///
 /// Workers take submission assignments under a short shared lock, then claim CUs
 /// with a submission-local atomic counter. Callers always drain their own work.
@@ -95,7 +96,7 @@ public:
     if (submission.queued)
       unlink(submission);
     submission.worker_tickets = 0;
-    submission.done.wait(lock, [&] { return submission.active_workers == 0; });
+    submission.done_cv.wait(lock, [&] { return submission.active_workers == 0; });
     auto first_exception = submission.first_exception;
     lock.unlock();
     if (first_exception)
@@ -118,7 +119,7 @@ private:
     const std::span<FunctionalQuantumResult> results;
     std::atomic<size_t> next_task{0};
     // Remaining fields are protected by the pool mutex.
-    std::condition_variable done;
+    std::condition_variable done_cv;
     std::exception_ptr first_exception;
     uint32_t worker_tickets;
     uint32_t active_workers = 0;
@@ -197,7 +198,7 @@ private:
       drain_tasks(submission);
       lock.lock();
       if (--submission.active_workers == 0)
-        submission.done.notify_one();
+        submission.done_cv.notify_one();
     }
   }
 

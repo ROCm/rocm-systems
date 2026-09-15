@@ -89,9 +89,9 @@ public:
       throw std::runtime_error("gated submission failed");
   }
 
-  bool wait_for_entries(size_t count) {
+  bool wait_for_entries(size_t count, std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
     std::unique_lock lock(mutex_);
-    return changed_.wait_for(lock, std::chrono::seconds(2), [&] { return entered_ >= count; });
+    return changed_.wait_for(lock, timeout, [&] { return entered_ >= count; });
   }
 
   void release() {
@@ -113,7 +113,8 @@ GatedInstructionPlugin *gate_fixture(DispatchPoolFixture &fixture, bool fail = f
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto plugin = std::make_unique<GatedInstructionPlugin>(fail);
   auto *gate = plugin.get();
-  EXPECT_TRUE(group->add(std::move(plugin)));
+  if (!group->add(std::move(plugin)))
+    throw std::runtime_error("failed to install gated instruction plugin");
   for (auto &cu : fixture.cus)
     cu->set_plugin_group(group);
   return gate;
@@ -128,6 +129,8 @@ TEST(CpuDispatchPoolTest, ConcurrentSubmissionsUseWorkersAndCompleteIndependentl
   auto first_run = std::async(std::launch::async,
                               [&] { return pool.run(first.tasks, /*threads=*/2, first_results); });
   // One CU blocks its caller and one blocks a worker, leaving other pool workers free.
+  // Use nonfatal checks after launching: every gate must be released before a
+  // future is destroyed, including when a wait times out.
   EXPECT_TRUE(first_gate->wait_for_entries(2));
   auto second_run = std::async(
       std::launch::async, [&] { return pool.run(second.tasks, /*threads=*/2, second_results); });
@@ -147,18 +150,41 @@ TEST(CpuDispatchPoolTest, ConcurrentSubmissionsUseWorkersAndCompleteIndependentl
 TEST(CpuDispatchPoolTest, ConcurrentFailureStaysWithItsSubmission) {
   DispatchPoolFixture failing(/*cu_count=*/2), succeeding(/*cu_count=*/4);
   auto *gate = gate_fixture(failing, /*fail=*/true);
+  auto *successful_gate = gate_fixture(succeeding);
   amdgpu::CpuDispatchPool pool(/*threads=*/4);
   auto failed_run = std::async(std::launch::async, [&] { pool.run(failing.tasks, 2); });
   EXPECT_TRUE(gate->wait_for_entries(2));
   auto successful_run = std::async(std::launch::async, [&] { pool.run(succeeding.tasks, 2); });
-  const auto successful_status = successful_run.wait_for(std::chrono::seconds(2));
+  EXPECT_TRUE(successful_gate->wait_for_entries(2));
+  // Keep a successful submission active while its peer records and rethrows an
+  // exception. That exception must not escape through the successful caller.
   gate->release();
-  EXPECT_EQ(successful_status, std::future_status::ready);
+  const auto failed_status = failed_run.wait_for(std::chrono::seconds(2));
+  successful_gate->release();
+  EXPECT_EQ(failed_status, std::future_status::ready);
   EXPECT_THROW(failed_run.get(), std::runtime_error);
   EXPECT_NO_THROW(successful_run.get());
   for (auto *wf : succeeding.wfs)
     EXPECT_EQ(wf->pc, kProgramBase + sizeof(uint32_t));
   EXPECT_NO_THROW(pool.run(succeeding.tasks, 4));
+}
+
+TEST(CpuDispatchPoolTest, SubmissionsRespectRequestedWidthWithIdleWorkers) {
+  amdgpu::CpuDispatchPool pool(/*threads=*/4);
+  for (uint32_t width : {1u, 2u}) {
+    DispatchPoolFixture fixture(/*cu_count=*/8);
+    auto *gate = gate_fixture(fixture);
+    auto run = std::async(std::launch::async, [&] { pool.run(fixture.tasks, width); });
+    EXPECT_TRUE(gate->wait_for_entries(width));
+    // All entered CUs remain blocked. Extra entries would require exceeding the
+    // requested width, even though the pool has more idle workers available.
+    const bool exceeded_width = gate->wait_for_entries(width + 1, std::chrono::milliseconds(100));
+    gate->release();
+    EXPECT_FALSE(exceeded_width) << "requested width " << width;
+    EXPECT_NO_THROW(run.get());
+    for (auto *wf : fixture.wfs)
+      EXPECT_EQ(wf->pc, kProgramBase + sizeof(uint32_t));
+  }
 }
 
 TEST(CpuDispatchPoolTest, ConcurrentReusedSubmissionsRunEveryCuOnce) {

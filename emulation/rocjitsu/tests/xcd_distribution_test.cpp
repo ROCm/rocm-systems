@@ -727,6 +727,7 @@ TEST(XcdDistributionTest, FanoutFiresTheCompletionSignalExactlyOnceThreaded) {
 }
 
 TEST(XcdDistributionTest, SharedPoolFiresTheCompletionSignalExactlyOnceThreaded) {
+  // Eight XCD engines share three pool workers and join their batches independently.
   run_fanout_completion_signal(Threading::ThreadPerXcd, /*dispatch_threads=*/4);
 }
 
@@ -806,6 +807,7 @@ TEST(XcdDistributionTest, BarrierBitWaitsForEveryXcdsShareThreaded) {
 }
 
 TEST(XcdDistributionTest, SharedPoolBarrierWaitsForEveryXcdsShareThreaded) {
+  // Exercise barrier ordering when peer XCDs execute and join shared-pool work concurrently.
   run_threaded_fanout_barrier(/*dispatch_threads=*/4);
 }
 

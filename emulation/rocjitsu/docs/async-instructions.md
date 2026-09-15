@@ -112,8 +112,10 @@ storage valid, at the cost of missed overlap across scheduling boundaries.
 Lazy register storage is materialized before publication to avoid races with
 inline instructions allocating new chunks.
 
-The process-wide helper pool is reused across issuers and XCDs. The existing
-CU dispatch pool still serializes complete command-processor submissions.
+The process-wide helper pool is reused across issuers and XCDs. The CU dispatch
+pool also shares its workers across concurrent command-processor submissions.
+Each caller executes its own batch and joins only the workers assigned to that
+batch before applying its command processor's stateful completion actions.
 Fork, concurrent independent VM instances, hardware numerical qualification,
 and architectural tracing with jobs in flight remain unqualified.
 

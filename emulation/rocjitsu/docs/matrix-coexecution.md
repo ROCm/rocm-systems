@@ -30,8 +30,8 @@ transferred with each job.
 
 Choose N together with `cpu_dispatch_threads` and `num_threads` in the simulator
 configuration. These are limits, not counts of continuously busy cores. The
-shared CU pool currently serializes complete command-processor submissions;
-small grids can leave much of the host idle despite a large pool. Conversely,
+shared CU pool accepts concurrent command-processor submissions, but small grids
+can leave much of the host idle despite a large pool. Conversely,
 adding helpers to a busy host can oversubscribe it. `RJ_MMA_SHARED_HELPERS`
 bounds the total helpers independently of the batch width. There is no
 automatic tuning in this prototype.
@@ -50,8 +50,8 @@ before propagating an unexpected callback exception.
 instructions actually offloaded (`shared_submitted`), inline execution
 (`shared_inline`, including the issuer's normal final instruction), failed
 claim attempts (`shared_full`) and slots probed (`shared_probes`). The current
-CU dispatch pool serializes complete XCD submissions; helper reuse across XCDs
-does not by itself remove that scheduling limit. The process-wide pool is an
+CU dispatch pool permits concurrent XCD submissions, with each caller joining
+only its own batch. The process-wide helper pool is an
 opt-in experiment; fork and multiple-VM lifecycle integration remain unqualified.
 
 ## Scope and semantics
