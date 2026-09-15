@@ -186,9 +186,9 @@ TEST(DdaFabricScratchSizingTest, LL128FloorDominatesWhenLargerThanSimpleCap)
     EXPECT_GT(sizing, (size_t)smallSimpleCap);
 }
 
-// AllGather LL128 gates on RCCL_DDA_LL, not RCCL_DDA_LL128, so the LL128 floor
-// has to apply with only the LL flag set. Two ranks keeps the LL floor at 64 MiB
-// so the threshold-derived floor is what shows through.
+// Scratch sizing arms the LL128 floor when either LL or LL128 is enabled (for
+// backwards compatibility), so the floor applies with only the LL flag set.
+// Two ranks keeps the LL floor at 64 MiB so the threshold-derived floor shows.
 TEST(DdaFabricScratchSizingTest, LL128FloorArmedByLLFlagAlone)
 {
     constexpr int nRanks = 2;

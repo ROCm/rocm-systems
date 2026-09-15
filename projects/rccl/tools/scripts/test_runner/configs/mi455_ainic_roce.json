@@ -1249,6 +1249,21 @@
           "test_filter": "DdaIpcEligibilityTest.*"
         },
         {
+          "name": "DdaFabricEligibilityTest",
+          "description": "DDA fabric eligibility tests (gfx1250)",
+          "test_filter": "DdaFabricEligibilityTest.*"
+        },
+        {
+          "name": "DdaFabricMaxBlocksTest",
+          "description": "DDA fabric max blocks tests (gfx1250)",
+          "test_filter": "DdaFabricMaxBlocksTest.*"
+        },
+        {
+          "name": "DdaFabricScratchSizingTest",
+          "description": "DDA fabric scratch sizing tests (gfx1250)",
+          "test_filter": "DdaFabricScratchSizingTest.*"
+        },
+        {
           "name": "CeAlltoAllEligibilityTest",
           "description": "CE AlltoAll eligibility gating tests matching taskAppend (CTA_POLICY_ZERO, sysmem, capture, group depth)",
           "test_filter": "CeAlltoAllEligibilityTest.*"
