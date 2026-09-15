@@ -33,7 +33,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS transpose-roctracer-roctx
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     DISABLED "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}"
     FIXTURES_SETUP rocprofv3-test-roctracer-roctx-trace)
 

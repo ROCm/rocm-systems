@@ -11,8 +11,6 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 find_package(Python3 REQUIRED)
 
-set(PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
-
 # disable when GPU-0 is navi2, navi3, and navi4
 list(GET rocprofiler-sdk-tests-gfx-info 0 pc-sampling-gpu-0-gfx-info)
 # Disable for all sanitizers - Python tests cannot load sanitizer libs dynamically due to
@@ -35,7 +33,6 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3-avail
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION
         "GPU:[0-9]*\\n*;Name:\\t[a-zA-Z_]*\\n;Counter_Name:\\t[a-zA-Z_]*\\n;Description:\\t(.*)\\n*;Expression:\\t(.)*\\n*;Block:\\t[a-zA-Z]*\\n*;Dimensions:\\t([A-Z_]*)\\t([[0-9]*:[0-9]*\\])*\\n*"
     DISABLED "${IS_DISABLED}")
@@ -47,7 +44,6 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3-avail
     TIMEOUT 45
     LABELS "integration-tests;spm"
-    PRELOAD "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION
         "GPU:[0-9]*\\n*;Name:\\t[a-zA-Z_]*\\n;Counter_Name:\\t[a-zA-Z_]*\\n;Description:\\t(.*)\\n*;Expression:\\t(.)*\\n*;Block:\\t[a-zA-Z]*\\n*;Dimensions:\\t([A-Z_]*)\\t([[0-9]*:[0-9]*\\])*\\n*"
     DISABLED "${IS_SPM_DISABLED}")
@@ -59,7 +55,6 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3-avail
     TIMEOUT 45
     LABELS "integration-tests;pc-sampling"
-    PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on"
     PASS_REGULAR_EXPRESSION
         "GPU[:0-9 ]+\\n*;Name[:a-zA-Z_ ]+\\n;configs[: ]+;Method:(.*)\\n*;Unit:(.*)\\n*;Min_Interval:[0-9]*\\n*;Max_Interval:[0-9]*\\n*;Flags:(.*)\\n*"
@@ -72,7 +67,6 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3-avail
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
     DISABLED "${IS_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
@@ -82,7 +76,6 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3-avail
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
     DISABLED "${IS_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
@@ -91,7 +84,6 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3-avail
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION "GPU:[0-9]*\\n*";
     DISABLED "${IS_DISABLED}")
 
@@ -101,7 +93,6 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3-avail
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION "GPU"[ \t\r]":[0-9]*\\n*";
     DISABLED "${IS_DISABLED}")
 
@@ -112,6 +103,6 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     ARGS --rocm-path ${rocprofiler-sdk_ROOT_DIR}
     TIMEOUT 45
-    PRELOAD "${PRELOAD_ENV}"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     LABELS "integration-tests"
     DISABLED "${IS_DISABLED}")

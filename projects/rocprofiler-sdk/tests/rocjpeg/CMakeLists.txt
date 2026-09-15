@@ -54,8 +54,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}
-    PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>" "${PRELOAD_ENV}"
-    ENVIRONMENT "ROCPROFILER_TOOL_OUTPUT_FILE=rocjpeg-tracing-test.json"
+    PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
+    ENVIRONMENT "${PRELOAD_ENV}" "ROCPROFILER_TOOL_OUTPUT_FILE=rocjpeg-tracing-test.json"
     FIXTURES_SETUP rocjpeg-tracing)
 
 rocprofiler_add_integration_validate_test(

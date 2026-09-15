@@ -17,7 +17,6 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk-late-start-tool
     TIMEOUT 120
     LABELS "integration-tests;late-start"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${late-start-tracing-env}"
                 "ROCPROFILER_TOOL_OUTPUT_FILE=late-start-tracing.json"
     SKIP_REGULAR_EXPRESSION "test skipped"

@@ -29,7 +29,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS simple-transpose
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-trace
     FAIL_REGULAR_EXPRESSION
         "HSA_API|HIP_API|HIP_COMPILER_API|MARKER_CORE_API|MARKER_CONTROL_API|MARKER_NAME_API|KERNEL_DISPATCH|CODE_OBJECT"
@@ -70,7 +70,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS simple-transpose
     TIMEOUT 45
     LABELS "integration-tests;rocpd"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-trace-input-json
     FAIL_REGULAR_EXPRESSION
         "HSA_API|HIP_API|HIP_COMPILER_API|MARKER_CORE_API|MARKER_CONTROL_API|MARKER_NAME_API|KERNEL_DISPATCH|CODE_OBJECT"
@@ -113,7 +113,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS simple-transpose
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-systrace
     FAIL_REGULAR_EXPRESSION
         "HSA_API|HIP_API|HIP_COMPILER_API|MARKER_CORE_API|MARKER_CONTROL_API|MARKER_NAME_API|KERNEL_DISPATCH|CODE_OBJECT"
@@ -154,7 +154,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS simple-transpose
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-systrace-input-json
     FAIL_REGULAR_EXPRESSION
         "HSA_API|HIP_API|HIP_COMPILER_API|MARKER_CORE_API|MARKER_CONTROL_API|MARKER_NAME_API|KERNEL_DISPATCH|CODE_OBJECT"
