@@ -1471,7 +1471,8 @@ ncclResult_t ncclTopoGetGpuMaxPath(struct ncclTopoSystem* system, int type, int*
 }
 
 // RCCL: worst case over the GPUs of the best path each of them has to a NIC of its own. A PXN
-// relay counts as one, since it reaches the NIC through the GPU that owns it.
+// relay counts as one, since it reaches the NIC through the GPU that owns it, and a single relay
+// raises the result for the whole system, so a search bounded by it still reaches the relays.
 ncclResult_t ncclTopoGetGpuMaxLocalNetPath(struct ncclTopoSystem* system, int* max) {
   int maxPath = PATH_LOC;
   bool hasPxnRelay = false;
