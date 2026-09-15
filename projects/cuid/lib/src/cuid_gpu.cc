@@ -22,10 +22,12 @@
 
 CuidGpu::CuidGpu(const amdcuid_gpu_info& i) : m_info(i) {}
 
+namespace {
+
 // Helper to check if a /sys/class/drm entry name is a card device (e.g.,
 // "card0", "card1"). Excludes connector entries like "card0-DP-1" or
 // "card0-HDMI-A-1".
-static bool is_card_entry(const char* name) {
+bool is_card_entry(const char* name) {
   if (strncmp(name, "card", 4) != 0 || !isdigit(name[4])) return false;
   for (size_t i = 4; name[i] != '\0'; ++i) {
     if (!isdigit(name[i])) return false;
@@ -36,11 +38,14 @@ static bool is_card_entry(const char* name) {
 // Resolve the renderD node path for a given card path.
 // If a renderD node exists under the card's device/drm directory, returns
 // "/sys/class/drm/renderDXXX". Otherwise, returns the original card path.
-static std::string resolve_render_node(const std::string& card_path) {
+std::string resolve_render_node(const std::string& card_path) {
   std::string drm_dir = card_path + "/device/drm";
   DIR* dir = opendir(drm_dir.c_str());
   if (dir) {
     struct dirent* entry;
+    // This call site owns its DIR*, which is all POSIX requires for readdir to be
+    // safe; readdir_r is deprecated and must not be adopted.
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     while ((entry = readdir(dir)) != nullptr) {
       if (strncmp(entry->d_name, "renderD", 7) == 0 && isdigit(entry->d_name[7])) {
         std::string result = "/sys/class/drm/" + std::string(entry->d_name);
@@ -52,6 +57,8 @@ static std::string resolve_render_node(const std::string& card_path) {
   }
   return card_path;
 }
+
+}  // namespace
 
 // Callers from /sys/class/drm enumeration pass paths of the form
 // "/sys/class/drm/<card>/device" and expect the trailing "/device" component
@@ -95,6 +102,9 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr>& gpus) {
   DIR* dir = opendir(drm_path);
   if (dir != nullptr) {
     struct dirent* entry;
+    // This call site owns its DIR*, which is all POSIX requires for readdir to be
+    // safe; readdir_r is deprecated and must not be adopted.
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     while ((entry = readdir(dir)) != NULL) {
       // Use card entries (e.g., card0, card1) which are always present for DRM
       // devices, unlike renderD nodes which may be absent with certain drivers
@@ -185,7 +195,7 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info,
     uint8_t vendor_id_bytes[2] = {0};
     const uint16_t offset = 0x0;
     amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, vendor_id_bytes, 2, offset);
-    uint16_t vendor_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(vendor_id_bytes));
+    uint16_t vendor_id_int = PciUtil::load_le16(vendor_id_bytes);
     info.header.fields.gpu.vendor_id = (status == AMDCUID_STATUS_SUCCESS) ? vendor_id_int : 0;
   } else {
     info.header.fields.gpu.vendor_id = (uint16_t)strtol(vendor.c_str(), nullptr, 16);
@@ -197,7 +207,7 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info,
     uint8_t device_id_bytes[2] = {0};
     const uint16_t offset = 0x2;
     amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, device_id_bytes, 2, offset);
-    uint16_t device_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(device_id_bytes));
+    uint16_t device_id_int = PciUtil::load_le16(device_id_bytes);
     info.header.fields.gpu.device_id = (status == AMDCUID_STATUS_SUCCESS) ? device_id_int : 0;
   } else {
     info.header.fields.gpu.device_id = (uint16_t)strtol(device.c_str(), nullptr, 16);
@@ -210,7 +220,7 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info,
     uint8_t class_id_bytes[2] = {0};
     const uint16_t offset = 0xa;
     amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, class_id_bytes, 2, offset);
-    uint16_t class_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(class_id_bytes));
+    uint16_t class_id_int = PciUtil::load_le16(class_id_bytes);
     pci_class_integer = (status == AMDCUID_STATUS_SUCCESS) ? class_id_int : 0;
   } else {
     // sysfs class file returns 24-bit value (class:subclass:prog_if), shift
@@ -222,12 +232,13 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info,
   std::string revision_id = CuidUtilities::read_sysfs_file(device_path + "/revision");
   if (revision_id.empty() && !bdf.empty()) {
     // if file read fails, attempt to get from pci config
-    uint8_t revision_id_bytes[2] = {0};
+    // RevisionID is the single byte at 0x08. The byte at 0x09 is prog-if and
+    // must not be folded in: revision_id is a uint8_t, so a two-byte load left
+    // prog-if in the low half and the revision was discarded by the narrowing.
+    uint8_t revision_id_byte = 0;
     const uint16_t offset = 0x8;
-    amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, revision_id_bytes, 2, offset);
-    uint16_t revision_id_int =
-        PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(revision_id_bytes));
-    info.header.fields.gpu.revision_id = (status == AMDCUID_STATUS_SUCCESS) ? revision_id_int : 0;
+    amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, &revision_id_byte, 1, offset);
+    info.header.fields.gpu.revision_id = (status == AMDCUID_STATUS_SUCCESS) ? revision_id_byte : 0;
   } else {
     info.header.fields.gpu.revision_id = (uint16_t)strtol(revision_id.c_str(), nullptr, 16);
   }
@@ -294,7 +305,7 @@ amdcuid_status_t CuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) const 
   // ASIC serial captured during discovery as the fingerprint.
   if (render_node_is_pci_dir && m_info.gim_fingerprint_valid) {
     fingerprint = m_info.gim_fingerprint;
-    return AMDCUID_STATUS_SUCCESS;
+    return CuidUtilities::validate_fingerprint(fingerprint);
   }
 
   const std::string device_attr_prefix =
@@ -357,7 +368,7 @@ amdcuid_status_t CuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) const 
     fingerprint = 0;
     return AMDCUID_STATUS_UNSUPPORTED;
   }
-  return AMDCUID_STATUS_SUCCESS;
+  return CuidUtilities::validate_fingerprint(fingerprint);
 }
 
 amdcuid_status_t CuidGpu::get_primary_cuid(amdcuid_primary_id& id) const {

@@ -41,9 +41,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <optional>
-#include <set>
 
 namespace rocprofiler
 {
@@ -442,60 +440,44 @@ QueueController::add_queue(hsa_queue_t*           id,
     // dispatches still owns its slot); the clock is read once, before the map lock.
     if(is_compute && kfd::signal_less_feature_enabled() && !kfd::signal_less_child_stale())
     {
-        if(const auto* _q = get_queue(*id))
+        if(const auto* _q = get_queue(*id);
+           _q && kfd::gpu_supports_dispatch_log(
+                     static_cast<uint32_t>(_q->get_agent().get_rocp_agent()->gpu_id)))
         {
-            // T-CLK per-SKU gate (section 5.9): open owner windows only on a SKU whose
-            // clock domain passed the T-CLK Tier-1 screen. On any other SKU the
-            // firmware<->KFD clock offset is unscreened, so a record could be
-            // mis-windowed -- open no window (and do not register), so every dispatch
-            // there takes the signal path. Do NOT disable process-wide: another agent
-            // may be a validated SKU.
-            const auto* _rocp = _q->get_agent().get_rocp_agent();
-            if(kfd::tclk_validated_sku(_rocp->gfx_target_version))
+            // T-CLK: gate all window/registry bookkeeping on this GPU's dispatch-log
+            // capability FIRST. A compute queue on an unsupported/attached GPU is not a
+            // dispatch-log participant, so it must not open windows, register ownership,
+            // or trip signal_less_disable_permanently() process-wide.
+            // Open the owner window on any dispatch_log_stream_format-capable compute
+            // agent: the record tick and gpu_tick_now are the same free-running GPU
+            // clock counter, so the capability probe already covers the clock domain.
+            const auto* _rocp    = _q->get_agent().get_rocp_agent();
+            const auto  _gpu     = static_cast<uint32_t>(_rocp->gpu_id);
+            auto        _slot    = std::optional<uint32_t>{};
+            bool        _poison  = false;
+            bool        _disable = is_attach;  // an adopted queue's history is unseen
+            if(auto _db = capture_doorbell_key(_q->intercept_queue()))
             {
-                const auto _gpu     = static_cast<uint32_t>(_rocp->gpu_id);
-                auto       _slot    = std::optional<uint32_t>{};
-                bool       _poison  = false;
-                bool       _disable = is_attach;  // an adopted queue's history is unseen
-                if(auto _db = capture_doorbell_key(_q->intercept_queue()))
+                _slot = *_db;  // a live owner, always registered with its real slot
+                if(!is_attach)
                 {
-                    _slot = *_db;  // a live owner, always registered with its real slot
-                    if(!is_attach)
-                    {
-                        const uint64_t _tick =
-                            gpu_tick_now(get_core_table(), _q->get_agent().get_hsa_agent());
-                        if(_tick == 0)
-                            _poison = true;  // clock failure: slot-scoped poison
-                        else
-                            _poison = kfd::doorbell_map()
-                                          .open_window(_gpu, _q->get_id(), *_slot, _tick)
-                                          .overlapped;  // two live owners
-                    }
+                    const uint64_t _tick =
+                        gpu_tick_now(get_core_table(), _q->get_agent().get_hsa_agent());
+                    if(_tick == 0)
+                        _poison = true;  // clock failure: slot-scoped poison
+                    else
+                        _poison = kfd::doorbell_map()
+                                      .open_window(_gpu, _q->get_id(), *_slot, _tick)
+                                      .overlapped;  // two live owners
                 }
-                else
-                {
-                    _disable = true;  // capture failed: an unwindowed owner exists
-                }
-                kfd::add_live_queue(_q->get_id().handle, _gpu, _slot);
-                if(_poison && _slot) kfd::poison_slot(_gpu, *_slot);
-                if(_disable) kfd::signal_less_disable_permanently();
             }
             else
             {
-                // Record the arch once per distinct SKU so an operator sees why
-                // signal-less is inactive on this GPU. Interposition still proceeds
-                // below, so signal-based tracing is unaffected.
-                static auto _warned_mu   = std::mutex{};
-                static auto _warned_arch = std::set<uint32_t>{};
-                auto        _lk          = std::lock_guard<std::mutex>{_warned_mu};
-                if(_warned_arch.insert(_rocp->gfx_target_version).second)
-                    ROCP_WARNING << fmt::format(
-                        "KFD dispatch-log: signal-less gated off on {} (gfx_target_version {}): "
-                        "not "
-                        "a T-CLK-validated SKU; its dispatches use the signal path (design 5.9).",
-                        _rocp->name != nullptr ? _rocp->name : "?",
-                        _rocp->gfx_target_version);
+                _disable = true;  // capture failed: an unwindowed owner exists
             }
+            kfd::add_live_queue(_q->get_id().handle, _gpu, _slot);
+            if(_poison && _slot) kfd::poison_slot(_gpu, *_slot);
+            if(_disable) kfd::signal_less_disable_permanently();
         }
     }
 
@@ -524,11 +506,20 @@ QueueController::destroy_queue(hsa_queue_t* id)
     // at any instant, so no lock cycle exists. Never blocks on the reader.
     if(kfd::signal_less_feature_enabled() && !kfd::signal_less_child_stale())
     {
+        // F1: hold drain_mu across the whole close/drain/close-window sequence, so
+        // finalization's concurrent drain either wins the mutex (and blocks us before
+        // the runtime queue is freed) or observes rdid_valid==false and skips. The
+        // state shared_ptr keeps QueueState (and drain_mu) alive across the erase.
+        auto _state    = queue_interposition::lookup_queue_state(id, /*create_if_missing=*/false);
+        auto _drain_lk = _state ? std::unique_lock<std::mutex>{_state->drain_mu}
+                                : std::unique_lock<std::mutex>{};
+
         // Step 0: latch admission AND snapshot next_submit_pos in ONE gate_lock
         // section. The latch precedes the snapshot; both are ordered
         // against every publishing critical section by that lock, so no separate
         // fence is needed and every already-registered packet is <= P.
-        const uint64_t _P = queue_interposition::close_admission_and_snapshot(id);
+        const uint64_t _P =
+            _state ? queue_interposition::close_admission_and_snapshot_locked(*_state) : 0;
 
         // Step 0b: derive (gpu, slot) BEFORE step 6 destroys the mapping; skip the
         // window work entirely when this queue never resolved a slot.
@@ -541,7 +532,9 @@ QueueController::destroy_queue(hsa_queue_t* id)
             // unanchored t_close could misattribute. Bounded by the
             // per-close budget; the aggregate pool is deleted.
             const uint64_t _deadline = kfd::steady_now_ns() + kfd::close_drain_budget_ns();
-            const bool     _drained = queue_interposition::wait_queue_hw_drained(id, _P, _deadline);
+            const bool     _drained =
+                _state ? queue_interposition::wait_queue_hw_drained_locked(*_state, _P, _deadline)
+                           : true;
             // Step 3: read t_close AFTER the drain, before any lock, from this
             // queue's agent.
             const uint64_t _tick =
@@ -556,6 +549,16 @@ QueueController::destroy_queue(hsa_queue_t* id)
 
         // Step 6: drop ownership so a surviving co-owner becomes injective again.
         kfd::remove_live_queue(_queue_token);
+
+        // Last action under drain_mu: invalidate the interlock BEFORE releasing it,
+        // so finalization can never load a real_rdid the runtime is about to free.
+        if(_state)
+        {
+            _state->rdid_valid = false;
+            _state->real_rdid  = nullptr;
+        }
+        // Release drain_mu here (end of the `if` scope) -- BEFORE destroy_queue_state/
+        // sync/erase, i.e. before anything can free amd_queue_t.
     }
 
     queue_interposition::destroy_queue_state(id);
@@ -846,10 +849,19 @@ enable_queue_intercept()
         // Keep interception active for HIP_GRAPH subscribers (drives kernel_dispatch_count).
         bool has_hip_graph_tracing = itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_GRAPH);
 
+        // Kernel replay drives its multi-pass loop from WriteInterceptor, so it needs the queue
+        // interceptor even when no other service is configured.
+        bool has_kernel_replay = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY);
+
+        // HIP event tracing is currently only implemented for the queue interceptor path.
+        bool has_hip_event_tracing = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_HIP_EVENT) ||
+                                     itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_EVENT);
+
         if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
            itr->dispatch_spm || has_scratch_reporting || itr->device_counter_collection ||
            (itr->device_thread_trace && itr->device_thread_trace->requires_queue_intercept()) ||
-           itr->dispatch_thread_trace || has_hip_graph_tracing)
+           itr->dispatch_thread_trace || has_hip_graph_tracing || has_kernel_replay ||
+           has_hip_event_tracing)
             return true;
     }
     return false;
@@ -861,7 +873,8 @@ context_needs_queue_interposition_tracing(const context::context* ctx)
     return ctx != nullptr && ctx->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
                                                     ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                                     ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
-                                                    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
+                                                    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+                                                    ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY);
 }
 
 void

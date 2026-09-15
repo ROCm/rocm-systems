@@ -4,9 +4,10 @@
 ## rocSHMEM 3.7.0 for ROCm 10.1
 
 ### Added
-* Added new APIs:
+* Added new APIs (#8350):
     * `rocshmem_tile_{min, max, sum}_reduce{_wave}{_wg}` variants for the IPC backend
     * `rocshmem_ctx_tile_{min, max, sum}_reduce{_wave}{_wg}` variants for the IPC backend
+* Added tile RMA and collectives support for GDA backend (#10056)
 * Added `--num_wf` argument to functional test harness for runtime wavefront size detection on architectures with wave size 32 (gfx1100, gfx1201, gfx1250) (#9312)
 * Added LTO inline-remarks comparison toolset and interactive resource-usage dashboards under `scripts/analysis/` (#10872)
 * Optimized device API wrappers to remove double-indirection in cross-TU calls, enabling more reliable LTO inlining (#9729)

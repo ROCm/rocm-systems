@@ -40,12 +40,60 @@ endif()
 
 set(AMDCUID_TST_EXECUTABLE amdcuid_test)
 
-# Collect all test sources from the three source locations.
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} TEST_SOURCES_ROOT)
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/unit TEST_SOURCES_UNIT)
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/functional TEST_SOURCES_FUNCTIONAL)
+# Sources listed explicitly, as lib/CMakeLists.txt does. aux_source_directory()
+# is evaluated at configure time, so adding a file did not regenerate the build
+# and failed at link until cmake was re-run by hand.
+set(TEST_SOURCES_ROOT
+    ${CMAKE_CURRENT_SOURCE_DIR}/main.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_base.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_common.cc
+)
 
-set(TEST_SOURCES ${TEST_SOURCES_ROOT} ${TEST_SOURCES_UNIT} ${TEST_SOURCES_FUNCTIONAL})
+set(TEST_SOURCES_UNIT
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/acpi_parser_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/concurrency_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/cuid_gpu_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/file_lock_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/gim_util_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/id_string_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/pci_util_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/sha256_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/status_string_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/utilities_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/version_read_test.cc
+)
+
+set(TEST_SOURCES_FUNCTIONAL
+    ${CMAKE_CURRENT_SOURCE_DIR}/functional/device_handles_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/functional/device_query_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/functional/device_refresh_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/functional/hmac_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/functional/reverse_lookup_test.cc
+)
+
+# Headers are listed so they show up in IDE project trees, as lib/ does.
+set(TEST_HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_base.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_common.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/acpi_parser_test.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/concurrency_test.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/cuid_gpu_test.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/file_lock_test.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/gim_util_test.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/id_string_test.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/pci_util_test.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/sha256_test.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/status_string_test.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/utilities_test.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/version_read_test.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/functional/device_handles_test.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/functional/device_query_test.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/functional/device_refresh_test.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/functional/hmac_test.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/functional/reverse_lookup_test.h
+)
+
+set(TEST_SOURCES ${TEST_SOURCES_ROOT} ${TEST_SOURCES_UNIT} ${TEST_SOURCES_FUNCTIONAL} ${TEST_HEADERS})
 
 # Enable testing
 enable_testing()
@@ -62,7 +110,11 @@ target_include_directories(
         ${CMAKE_SOURCE_DIR}/lib
 )
 
-target_link_libraries(${AMDCUID_TST_EXECUTABLE} amdcuid_static GTest::gtest)
+# concurrency_test.cc spawns std::thread, so the suite needs a threading
+# implementation of its own.
+find_package(Threads REQUIRED)
+
+target_link_libraries(${AMDCUID_TST_EXECUTABLE} amdcuid_static GTest::gtest Threads::Threads)
 
 # Register two CTest targets split by privilege level.
 add_test(NAME cuid_unprivileged_tests COMMAND ${AMDCUID_TST_EXECUTABLE} --gtest_filter=cuidtstUnprivileged.*)
