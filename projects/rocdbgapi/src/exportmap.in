@@ -38,13 +38,9 @@ global: amd_dbgapi_address_is_in_address_class;
 local:  *;
 };
 
-@AMD_DBGAPI_NAME@_0.56 {
-global: amd_dbgapi_process_attach;
-} @AMD_DBGAPI_NAME@_0.54;
-
 @AMD_DBGAPI_NAME@_0.58 {
 global: amd_dbgapi_classify_instruction;
-} @AMD_DBGAPI_NAME@_0.56;
+} @AMD_DBGAPI_NAME@_0.54;
 
 @AMD_DBGAPI_NAME@_0.62 {
 global: amd_dbgapi_address_class_get_info;
@@ -105,3 +101,7 @@ global:	amd_dbgapi_address_dependency;
 @AMD_DBGAPI_NAME@_0.80 {
 global: amd_dbgapi_process_get_info;
 } @AMD_DBGAPI_NAME@_0.79;
+
+@AMD_DBGAPI_NAME@_0.81 {
+global: amd_dbgapi_process_attach;
+} @AMD_DBGAPI_NAME@_0.80;
