@@ -172,8 +172,8 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     // them here or the producer aborts with small_vector::at out_of_range.
     control_packet->populate_before();
     control_packet->populate_after();
-    auto buffer_packet    = std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn);
-    buffer_packet->header = 1;
+    auto buffer_packet      = std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn);
+    buffer_packet->header   = 1;
     buffer_packet->drain_fn = std::move(drain_fn);
 
     auto mock_queue          = make_mock_queue(agent_id);
@@ -261,6 +261,7 @@ TEST(thread_trace, status_query)
 TEST(thread_trace, final_drain_preserves_data_and_end)
 {
     using namespace rocprofiler::thread_trace;
+    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
     test_init();
     struct callback_state
     {
@@ -291,10 +292,20 @@ TEST(thread_trace, final_drain_preserves_data_and_end)
                 cb(0, size ? bytes.data() : nullptr, size, data);
                 return status;
             };
-            auto threads = start_threads(
-                callback, [] { return std::nullopt; }, {.ptr = &state}, mock_submit, drain);
-            threads.flag->store(WORKER_FLAG_STOP);
-            threads.join_all();
+            auto run = [&] {
+                auto threads = start_threads(
+                    callback, [] { return std::nullopt; }, {.ptr = &state}, mock_submit, drain);
+                threads.flag->store(WORKER_FLAG_STOP);
+                threads.join_all();
+            };
+#if defined(ROCPROFILER_CI)
+            if(status == HSA_STATUS_ERROR)
+            {
+                EXPECT_DEATH(run(), "Discarding ATT drain payload");
+                continue;
+            }
+#endif
+            run();
             EXPECT_EQ(state.end_count, 1);
             EXPECT_EQ(state.tail_size, status == HSA_STATUS_SUCCESS ? size : 0);
             EXPECT_EQ(state.flags,

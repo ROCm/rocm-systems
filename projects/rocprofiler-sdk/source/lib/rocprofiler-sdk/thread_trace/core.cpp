@@ -165,8 +165,9 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
         {
             static auto once = std::once_flag{};
             std::call_once(once, []() {
-                ROCP_WARNING << "Direct KFD thread trace is unavailable or unsupported for this "
-                                "GPU; using the ROCr/HSA thread-trace backend";
+                ROCP_CI_LOG(WARNING)
+                    << "Direct KFD thread trace is unavailable or unsupported for this "
+                       "GPU; using the ROCr/HSA thread-trace backend";
             });
         }
     }
@@ -177,14 +178,6 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
     factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(
         agent_id, params, memory, queue->kfd_copy_queue);
     control_packet = factory->construct_control_packet();
-    if(multi_buffer)
-    {
-        int shader_engine_id = 0;
-        for(uint64_t mask = params.shader_engine_mask; mask > 1; mask >>= 1)
-            ++shader_engine_id;
-        buffering_packets = std::make_shared<hsa::SQTTBufferingPackets>(control_packet->GetHandle(),
-                                                                        shader_engine_id);
-    }
 
     codeobj_reg = std::make_unique<code_object::CodeobjCallbackRegistry>(
         [this](rocprofiler_agent_id_t _agent, uint64_t codeobj_id, uint64_t addr, uint64_t size) {
@@ -236,7 +229,7 @@ ThreadTracerAgent::get_control(bool bStart)
 std::unique_ptr<hsa::TraceControlAQLPacket>
 ThreadTracerAgent::get_start_packet()
 {
-    auto lock = std::unique_lock{trace_resources_mut};
+    auto lock        = std::unique_lock{trace_resources_mut};
     auto marker_lock = std::unique_lock{codeobj_mut};
     return get_control(true);
 }
@@ -304,7 +297,7 @@ ThreadTracerAgent::unload_codeobj(code_object_id_t id)
     if(sig) signal_wait(*sig);
 }
 
-std::shared_ptr<att_signal_t>
+signal_ptr_t
 ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
 {
     ROCP_TRACE << "Starting thread trace for agent " << agent_id.handle;
@@ -317,16 +310,20 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
     }
     worker_flag = std::move(_flag);
 
-    if(params.num_buffers == 1 && !stop_signal)
+    signal_ptr_t                               producer_signal;
+    std::unique_ptr<hsa::SQTTBufferingPackets> buffer_packet;
+    if(params.num_buffers > 1)
     {
-        stop_signal = make_signal(*queue);
-        if(!stop_signal) return nullptr;
+        producer_signal = make_signal(*queue);
+        if(!producer_signal) return nullptr;
+        int shader_engine_id = 0;
+        for(uint64_t mask = params.shader_engine_mask; mask > 1; mask >>= 1)
+            ++shader_engine_id;
+        buffer_packet = std::make_unique<hsa::SQTTBufferingPackets>(control_packet->GetHandle(),
+                                                                    shader_engine_id);
     }
-    auto producer_signal = params.num_buffers > 1 ? make_signal(*queue) : nullptr;
-    if(params.num_buffers > 1 && !producer_signal) return nullptr;
     auto marker_lock         = std::unique_lock{codeobj_mut};
     auto control_packet_copy = get_control(true);
-    control_packet_copy->clear();
     control_packet_copy->populate_before();
     control_packet_copy->populate_after();
 
@@ -342,13 +339,12 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
     }
 
     // Submit without waiting so all agents can be started in parallel.
-    auto unique_signal = att_queue_submit_signal_last(*queue, control_packet_copy->before_krn_pkt);
-    if(!unique_signal)
+    auto start_signal = att_queue_submit_signal_last(*queue, control_packet_copy->before_krn_pkt);
+    if(!start_signal)
     {
         active_traces.fetch_sub(1);
         return nullptr;
     }
-    auto shared_signal = std::shared_ptr<att_signal_t>(std::move(unique_signal));
     marker_lock.unlock();
 
     if(params.num_buffers > 1)
@@ -371,8 +367,7 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         producer_data.control_packet   = std::move(control_packet_copy);
         producer_data.copy_data_fn     = att_queue_copy;
         producer_data.shared           = worker_data;
-        producer_data.buffer_packet    = buffering_packets;
-        producer_data.shader_engine_id = buffering_packets->shader_engine_id;
+        producer_data.buffer_packet    = std::move(buffer_packet);
         producer_data.restart_trace    = [this](auto& snapshot) {
             auto snapshot_lock = std::unique_lock{codeobj_mut};
             // Keep marker allocations alive in the producer until the next completed stop.
@@ -404,7 +399,7 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
             internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
         }
     }
-    return shared_signal;
+    return start_signal;
 }
 
 signal_ptr_t
@@ -430,20 +425,13 @@ ThreadTracerAgent::stop_thread_trace()
     }
     else
     {
-        if(!stop_signal)
-        {
-            ROCP_ERROR << "Thread trace has no stop completion signal";
-            return nullptr;
-        }
         auto marker_lock = std::unique_lock{codeobj_mut};
         control_packet->clear();
         control_packet->populate_after();
         // Submit without waiting; DeviceThreadTracer::stop_context fans out
         // submissions across agents and waits on every signal in parallel
         // before calling iterate_data.
-        if(!att_queue_submit(*queue, &control_packet->after_krn_pkt.at(0), stop_signal.get()))
-            return nullptr;
-        return std::move(stop_signal);
+        return att_queue_submit_signal_last(*queue, control_packet->after_krn_pkt);
     }
 }
 
@@ -683,10 +671,10 @@ DeviceThreadTracer::start_context()
     int expected = WORKER_FLAG_STOP;
     if(!worker_flag->compare_exchange_strong(expected, WORKER_FLAG_RUNNING))
     {
-        ROCP_ERROR << "Unable to start thread trace worker thread";
+        ROCP_CI_LOG(ERROR) << "Unable to start thread trace worker thread";
         return;
     }
-    auto wait_list = std::vector<std::shared_ptr<att_signal_t>>{};
+    auto wait_list = std::vector<signal_ptr_t>{};
 
     for(auto& [_, tracer] : agents)
         wait_list.emplace_back(tracer->start_thread_trace(worker_flag));

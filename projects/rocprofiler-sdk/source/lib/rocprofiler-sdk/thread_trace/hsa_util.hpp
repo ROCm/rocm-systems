@@ -65,6 +65,8 @@ using signal_ptr_t = std::unique_ptr<att_signal_t>;
 
 struct att_queue_t
 {
+    ~att_queue_t();
+
     std::shared_ptr<kfd_memory_pool_t> kfd_memory{};
     std::shared_ptr<kfd_copy_queue_t>  kfd_copy_queue{};
     signal_ptr_t                       copy_signal{};
@@ -75,9 +77,8 @@ struct att_queue_t
     hsa_agent_t                        hsa_agent{};
     hsa_agent_t                        near_cpu{};
 
-    // Serializes submissions with terminal disable after GPU overflow. Heap-owned
-    // so the queue remains movable; a null submit_fn means it cannot be restarted.
-    std::unique_ptr<std::mutex> submit_mutex{std::make_unique<std::mutex>()};
+    // Serializes submissions with terminal disable after GPU overflow.
+    mutable std::mutex submit_mutex{};
     bool (*submit_fn)(const att_queue_t&            self,
                       hsa_ext_amd_aql_pm4_packet_t* packet,
                       att_signal_t*                 completion){nullptr};
@@ -88,9 +89,6 @@ signal_wait(const att_signal_t& signal);
 
 signal_ptr_t
 make_signal(const att_queue_t& queue);
-
-void
-att_queue_destroy(att_queue_t& queue);
 
 bool
 att_queue_enabled(const att_queue_t& queue);
@@ -128,12 +126,7 @@ att_queue_submit_signal_last(const att_queue_t& queue, VecType& packets)
     return signal;
 }
 
-struct att_queue_deleter_t
-{
-    void operator()(att_queue_t* queue) const;
-};
-
-using att_queue_ptr_t = std::unique_ptr<att_queue_t, att_queue_deleter_t>;
+using att_queue_ptr_t = std::unique_ptr<att_queue_t>;
 
 att_queue_ptr_t
 make_att_queue(rocprofiler_agent_id_t             agent_id,

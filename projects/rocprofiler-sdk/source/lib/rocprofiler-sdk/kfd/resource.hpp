@@ -104,7 +104,7 @@ private:
 class kfd_aql_queue_t
 {
 public:
-    static std::shared_ptr<kfd_aql_queue_t> create(std::shared_ptr<kfd_memory_pool_t> memory);
+    static std::unique_ptr<kfd_aql_queue_t> create(std::shared_ptr<kfd_memory_pool_t> memory);
     ~kfd_aql_queue_t();
 
     kfd_aql_queue_t(const kfd_aql_queue_t&) = delete;
@@ -123,7 +123,7 @@ private:
 class kfd_copy_queue_t
 {
 public:
-    static bool is_supported(uint32_t gfx_target_version);
+    static bool                              is_supported(uint32_t gfx_target_version);
     static std::shared_ptr<kfd_copy_queue_t> create(
         const std::shared_ptr<kfd_memory_pool_t>& memory,
         size_t                                    max_copy_size);

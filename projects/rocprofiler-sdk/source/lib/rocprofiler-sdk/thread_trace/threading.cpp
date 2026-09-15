@@ -144,7 +144,6 @@ producer_loop(
     auto     start_t0 = std::chrono::system_clock::now();
     bool     do_sleep{false};
     uint64_t next_chunk_index = 0;
-    int64_t  shader_engine_id = parameters.shader_engine_id;
 
     auto sleep_fn = [&]() {
         sched_yield();
@@ -179,7 +178,7 @@ producer_loop(
         auto& buffer       = buffers[slot_idx];
         buffer.flags       = flags;
         buffer.size        = size;
-        buffer.se_id       = shader_engine_id;
+        buffer.se_id       = buffer_packet.shader_engine_id;
         buffer.chunk_index = next_chunk_index++;
         buffer.read_offset = read_offset;
 
@@ -189,7 +188,7 @@ producer_loop(
                 std::memcpy(buffer.memory, src, size);
             else if(!parameters.copy_data_fn(queue, buffer.memory, src, size))
             {
-                ROCP_ERROR << "Discarding ATT chunk after copy failure";
+                ROCP_CI_LOG(ERROR) << "Discarding ATT chunk after copy failure";
                 buffer.size = 0;
             }
         }
@@ -211,8 +210,8 @@ producer_loop(
         if(!att_queue_submit(
                queue, &parameters.control_packet->after_krn_pkt.at(0), &submit_signal))
         {
-            ROCP_ERROR << "Failed to submit thread-trace stop packet for agent "
-                       << queue.agent_id.handle;
+            ROCP_CI_LOG(ERROR) << "Failed to submit thread-trace stop packet for agent "
+                               << queue.agent_id.handle;
             return false;
         }
         signal_wait(submit_signal);
@@ -230,8 +229,11 @@ producer_loop(
         if(wptr.status != HSA_STATUS_SUCCESS || (wptr.size > 0 && !wptr.data) ||
            wptr.size > buffer_size)
         {
-            ROCP_WARNING << "Discarding ATT drain payload: status " << wptr.status << ", size "
-                         << wptr.size;
+            if(wptr.status == HSA_STATUS_ERROR_OUT_OF_RESOURCES)
+                ROCP_WARNING << "Discarding ATT drain payload after GPU buffer overflow";
+            else
+                ROCP_CI_LOG(ERROR) << "Discarding ATT drain payload: status " << wptr.status
+                                   << ", size " << wptr.size;
             wptr.size = 0;
         }
         ROCP_INFO << "Iterate data with size: " << wptr.size;
@@ -268,7 +270,7 @@ producer_loop(
         {
             if(status->gpu_full)
             {
-                auto submit_lock = std::unique_lock{*queue.submit_mutex};
+                auto submit_lock = std::unique_lock{queue.submit_mutex};
                 queue.submit_fn  = nullptr;
 
                 // Leave SQTT untouched after overflow: no swap, stop, restart,

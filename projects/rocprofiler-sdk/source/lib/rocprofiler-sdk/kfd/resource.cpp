@@ -138,7 +138,7 @@ check_ioctl(int result, const char* operation)
 {
     if(result == 0) return true;
     const auto error = errno;
-    ROCP_ERROR << operation << " failed: " << std::strerror(error);
+    ROCP_CI_LOG(ERROR) << operation << " failed: " << std::strerror(error);
     return false;
 }
 
@@ -245,7 +245,7 @@ public:
     kfd_runtime_t()
     {
         _kfd_fd = ::open("/dev/kfd", O_RDWR | O_CLOEXEC);
-        if(_kfd_fd < 0) ROCP_ERROR << "Could not open /dev/kfd: " << std::strerror(errno);
+        if(_kfd_fd < 0) ROCP_CI_LOG(ERROR) << "Could not open /dev/kfd: " << std::strerror(errno);
     }
 
     ~kfd_runtime_t()
@@ -279,7 +279,7 @@ public:
             }
             if(fd < 0)
             {
-                ROCP_ERROR << "Could not acquire the KFD VM's " << path << " descriptor";
+                ROCP_CI_LOG(ERROR) << "Could not acquire the KFD VM's " << path << " descriptor";
                 return -1;
             }
             return render_fds.emplace(render_minor, fd).first->second;
@@ -399,7 +399,7 @@ struct kfd_memory_pool_t::impl
 
         if(waves == 0 || cus == 0)
         {
-            ROCP_ERROR << "KFD topology does not describe the GPU's wave capacity";
+            ROCP_CI_LOG(ERROR) << "KFD topology does not describe the GPU's wave capacity";
             return false;
         }
 
@@ -494,7 +494,7 @@ kfd_memory_pool_t::create(const rocprofiler_agent_t& agent)
         return std::shared_ptr<kfd_memory_pool_t>{new kfd_memory_pool_t{std::move(state)}};
     } catch(const std::bad_alloc&)
     {
-        ROCP_ERROR << "Could not allocate KFD memory pool";
+        ROCP_CI_LOG(ERROR) << "Could not allocate KFD memory pool";
         return nullptr;
     }
 }
@@ -520,7 +520,7 @@ kfd_memory_pool_t::allocate(size_t size, kfd_memory_kind_t kind, size_t alignmen
     void*      ptr             = reserve_aligned(allocation_size, alignment);
     if(ptr == nullptr)
     {
-        ROCP_ERROR << "Could not reserve " << allocation_size << " bytes for KFD memory";
+        ROCP_CI_LOG(ERROR) << "Could not reserve " << allocation_size << " bytes for KFD memory";
         return nullptr;
     }
 
@@ -537,7 +537,7 @@ kfd_memory_pool_t::allocate(size_t size, kfd_memory_kind_t kind, size_t alignmen
     {
         const auto error = errno;
         ::munmap(ptr, allocation_size);
-        ROCP_ERROR << "AMDKFD_IOC_ALLOC_MEMORY_OF_GPU failed: " << std::strerror(error);
+        ROCP_CI_LOG(ERROR) << "AMDKFD_IOC_ALLOC_MEMORY_OF_GPU failed: " << std::strerror(error);
         return nullptr;
     }
 
@@ -555,7 +555,7 @@ kfd_memory_pool_t::allocate(size_t size, kfd_memory_kind_t kind, size_t alignmen
             auto       free_args = kfd_ioctl_free_memory_of_gpu_args{args.handle};
             kfd_ioctl(_impl->runtime->kfd_fd(), AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args);
             ::munmap(ptr, allocation_size);
-            ROCP_ERROR << "mmap of KFD GTT allocation failed: " << std::strerror(error);
+            ROCP_CI_LOG(ERROR) << "mmap of KFD GTT allocation failed: " << std::strerror(error);
             return nullptr;
         }
         std::memset(ptr, 0, allocation_size);
@@ -574,7 +574,7 @@ kfd_memory_pool_t::allocate(size_t size, kfd_memory_kind_t kind, size_t alignmen
         auto       free_args = kfd_ioctl_free_memory_of_gpu_args{args.handle};
         kfd_ioctl(_impl->runtime->kfd_fd(), AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args);
         ::munmap(ptr, allocation_size);
-        ROCP_ERROR << "AMDKFD_IOC_MAP_MEMORY_TO_GPU failed: " << std::strerror(error);
+        ROCP_CI_LOG(ERROR) << "AMDKFD_IOC_MAP_MEMORY_TO_GPU failed: " << std::strerror(error);
         return nullptr;
     }
 
@@ -586,7 +586,7 @@ kfd_memory_pool_t::allocate(size_t size, kfd_memory_kind_t kind, size_t alignmen
     } catch(const std::bad_alloc&)
     {
         _impl->release(ptr, {allocation_size, args.handle, kind});
-        ROCP_ERROR << "Could not track KFD allocation";
+        ROCP_CI_LOG(ERROR) << "Could not track KFD allocation";
         return nullptr;
     }
     return ptr;
@@ -600,7 +600,7 @@ kfd_memory_pool_t::deallocate(void* ptr)
     auto allocation = _impl->allocations.wlock([&](auto& entries) { return entries.extract(ptr); });
     if(allocation.empty())
     {
-        ROCP_WARNING << "Ignoring unknown KFD allocation " << ptr;
+        ROCP_CI_LOG(WARNING) << "Ignoring unknown KFD allocation " << ptr;
         return;
     }
     _impl->release(ptr, allocation.mapped());
@@ -693,7 +693,7 @@ kfd_signal_t::create(std::shared_ptr<kfd_memory_pool_t> memory)
     if(!result)
     {
         memory->deallocate(signal);
-        ROCP_ERROR << "Could not allocate KFD signal";
+        ROCP_CI_LOG(ERROR) << "Could not allocate KFD signal";
     }
     return result;
 }
@@ -849,7 +849,7 @@ struct direct_queue_t
         if(doorbell_mapping == MAP_FAILED)
         {
             doorbell_mapping = nullptr;
-            ROCP_ERROR << "KFD doorbell mmap failed: " << std::strerror(errno);
+            ROCP_CI_LOG(ERROR) << "KFD doorbell mmap failed: " << std::strerror(errno);
             return false;
         }
         doorbell = reinterpret_cast<volatile uint64_t*>(static_cast<char*>(doorbell_mapping) +
@@ -873,9 +873,9 @@ struct direct_queue_t
         auto args = kfd_ioctl_destroy_queue_args{queue_id, 0};
         if(kfd_ioctl(memory->kfd_fd(), AMDKFD_IOC_DESTROY_QUEUE, &args) != 0)
         {
-            ROCP_ERROR << "AMDKFD_IOC_DESTROY_QUEUE failed: " << std::strerror(errno)
-                       << ", type=" << name() << ", queue_id=" << queue_id
-                       << ", gpu_id=" << memory->gpu_id();
+            ROCP_CI_LOG(ERROR) << "AMDKFD_IOC_DESTROY_QUEUE failed: " << std::strerror(errno)
+                               << ", type=" << name() << ", queue_id=" << queue_id
+                               << ", gpu_id=" << memory->gpu_id();
             return false;
         }
         created = false;
@@ -961,7 +961,7 @@ kfd_aql_queue_t::kfd_aql_queue_t(std::unique_ptr<impl> state)
 : _impl{std::move(state)}
 {}
 
-std::shared_ptr<kfd_aql_queue_t>
+std::unique_ptr<kfd_aql_queue_t>
 kfd_aql_queue_t::create(std::shared_ptr<kfd_memory_pool_t> memory)
 {
     if(!memory) return nullptr;
@@ -969,10 +969,10 @@ kfd_aql_queue_t::create(std::shared_ptr<kfd_memory_pool_t> memory)
     {
         auto state = std::make_unique<impl>(std::move(memory));
         if(!state->queue.initialize(KFD_IOC_QUEUE_TYPE_COMPUTE_AQL, AQL_QUEUE_SIZE)) return nullptr;
-        return std::shared_ptr<kfd_aql_queue_t>{new kfd_aql_queue_t{std::move(state)}};
+        return std::unique_ptr<kfd_aql_queue_t>{new kfd_aql_queue_t{std::move(state)}};
     } catch(const std::bad_alloc&)
     {
-        ROCP_ERROR << "Could not allocate KFD AQL queue";
+        ROCP_CI_LOG(ERROR) << "Could not allocate KFD AQL queue";
         return nullptr;
     }
 }
@@ -1016,9 +1016,9 @@ struct sdma_queue_t
 
     bool initialize(size_t requested_copy_size)
     {
-        max_copy_size = requested_copy_size;
-        const size_t packets =
-            max_copy_size / SDMA_MAX_COPY_SIZE + (max_copy_size % SDMA_MAX_COPY_SIZE != 0);
+        max_copy_size        = requested_copy_size;
+        const size_t packets = max_copy_size / SDMA_MAX_COPY_SIZE +
+                               static_cast<size_t>(max_copy_size % SDMA_MAX_COPY_SIZE != 0);
         if(packets > (UINT32_MAX - KFD_PAGE_SIZE) / (7 * sizeof(uint32_t))) return false;
         const size_t words = packets * 7 + (use_gcr ? 10 : 0) + 4;
         commands.resize(words);
@@ -1100,7 +1100,7 @@ struct sdma_queue_t
 
 struct kfd_copy_queue_t::impl
 {
-    std::shared_ptr<kfd_aql_queue_t> aql_queue{};
+    std::unique_ptr<kfd_aql_queue_t> aql_queue{};
     std::unique_ptr<sdma_queue_t>    sdma_queue{};
 };
 
@@ -1128,7 +1128,7 @@ kfd_copy_queue_t::create(const std::shared_ptr<kfd_memory_pool_t>& memory, size_
         return std::shared_ptr<kfd_copy_queue_t>{new kfd_copy_queue_t{std::move(state)}};
     } catch(const std::bad_alloc&)
     {
-        ROCP_ERROR << "Could not allocate KFD copy queue";
+        ROCP_CI_LOG(ERROR) << "Could not allocate KFD copy queue";
         return nullptr;
     }
 }

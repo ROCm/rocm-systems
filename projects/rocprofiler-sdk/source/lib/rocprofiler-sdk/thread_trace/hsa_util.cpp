@@ -76,7 +76,7 @@ kfd_submit(const att_queue_t& queue, hsa_ext_amd_aql_pm4_packet_t* packet, att_s
     if(!CHECK_NOTNULL(queue.kfd_copy_queue.get())->submit(*packet, completion_handle))
     {
         if(completion) completion->reset(0);
-        ROCP_ERROR << "KFD ATT packet submission rejected";
+        ROCP_CI_LOG(ERROR) << "KFD ATT packet submission rejected";
         return false;
     }
     return true;
@@ -98,10 +98,11 @@ att_signal_t::att_signal_t(std::shared_ptr<kfd_memory_pool_t> kfd_memory)
 
 att_signal_t::~att_signal_t()
 {
-    if(_kfd_signal || !_hsa_signal.handle) return;
+    if(_kfd_signal || _hsa_signal.handle == 0) return;
     wait();
     auto status = CHECK_NOTNULL(hsa::get_core_table())->hsa_signal_destroy_fn(_hsa_signal);
-    ROCP_WARNING_IF(status != HSA_STATUS_SUCCESS) << "Failed to destroy thread trace signal";
+    ROCP_CI_LOG_IF(WARNING, status != HSA_STATUS_SUCCESS)
+        << "Failed to destroy thread trace signal";
 }
 
 hsa_signal_t
@@ -129,7 +130,7 @@ att_signal_t::wait() const
     }
 
     auto wait_fn = CHECK_NOTNULL(hsa::get_core_table())->hsa_signal_wait_scacquire_fn;
-    if(!_hsa_signal.handle) return;
+    if(_hsa_signal.handle == 0) return;
     while(wait_fn(_hsa_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) != 0)
         std::this_thread::yield();
 }
@@ -144,7 +145,7 @@ signal_ptr_t
 make_signal(const att_queue_t& queue)
 {
     auto result = std::make_unique<att_signal_t>(queue.kfd_memory);
-    if(!result->handle().handle) return nullptr;
+    if(result->handle().handle == 0) return nullptr;
     return result;
 }
 
@@ -154,7 +155,7 @@ make_att_queue(rocprofiler_agent_id_t             agent_id,
                size_t                             num_buffers,
                std::shared_ptr<kfd_memory_pool_t> kfd_memory)
 {
-    auto  result      = att_queue_ptr_t{new att_queue_t{}};
+    auto  result      = std::make_unique<att_queue_t>();
     auto& queue       = *result;
     queue.agent_id    = agent_id;
     queue.buffer_size = buffer_size;
@@ -164,7 +165,7 @@ make_att_queue(rocprofiler_agent_id_t             agent_id,
     {
         queue.kfd_copy_queue = kfd_copy_queue_t::create(queue.kfd_memory, buffer_size);
         if(!queue.kfd_copy_queue) return nullptr;
-        queue.submit_fn      = kfd_submit;
+        queue.submit_fn = kfd_submit;
         queue.cpu_buffers.resize(num_buffers, nullptr);
         for(auto& memory : queue.cpu_buffers)
         {
@@ -206,39 +207,35 @@ make_att_queue(rocprofiler_agent_id_t             agent_id,
     return result;
 }
 
-void
-att_queue_destroy(att_queue_t& queue)
+att_queue_t::~att_queue_t()
 {
-    queue.copy_signal.reset();
-    if(queue.kfd_memory)
+    copy_signal.reset();
+    if(kfd_memory)
     {
-        if(queue.kfd_copy_queue) queue.kfd_copy_queue->close();
-        queue.kfd_copy_queue.reset();
-        for(auto* memory : queue.cpu_buffers)
-            queue.kfd_memory->deallocate(memory);
-        queue.kfd_memory.reset();
+        if(kfd_copy_queue) kfd_copy_queue->close();
+        for(auto* memory : cpu_buffers)
+            kfd_memory->deallocate(memory);
     }
     else
     {
         auto* core   = CHECK_NOTNULL(hsa::get_core_table());
         auto* ext    = CHECK_NOTNULL(hsa::get_amd_ext_table());
-        auto  status =
-            queue.hsa_queue ? core->hsa_queue_destroy_fn(queue.hsa_queue) : HSA_STATUS_SUCCESS;
-        ROCP_WARNING_IF(status != HSA_STATUS_SUCCESS) << "Failed to destroy thread trace queue";
-        for(auto* memory : queue.cpu_buffers)
+        auto  status = hsa_queue ? core->hsa_queue_destroy_fn(hsa_queue) : HSA_STATUS_SUCCESS;
+        ROCP_CI_LOG_IF(WARNING, status != HSA_STATUS_SUCCESS)
+            << "Failed to destroy thread trace queue";
+        for(auto* memory : cpu_buffers)
         {
             status = ext->hsa_amd_memory_pool_free_fn(memory);
-            ROCP_WARNING_IF(status != HSA_STATUS_SUCCESS) << "Failed to free thread trace memory";
+            ROCP_CI_LOG_IF(WARNING, status != HSA_STATUS_SUCCESS)
+                << "Failed to free thread trace memory";
         }
-        queue.hsa_queue = nullptr;
     }
-    queue.cpu_buffers.clear();
 }
 
 bool
 att_queue_enabled(const att_queue_t& queue)
 {
-    auto lock = std::unique_lock{*queue.submit_mutex};
+    auto lock = std::unique_lock{queue.submit_mutex};
     return queue.submit_fn != nullptr;
 }
 
@@ -247,7 +244,7 @@ att_queue_submit(const att_queue_t&            queue,
                  hsa_ext_amd_aql_pm4_packet_t* packet,
                  att_signal_t*                 completion)
 {
-    auto lock = std::unique_lock{*queue.submit_mutex};
+    auto lock = std::unique_lock{queue.submit_mutex};
     if(!queue.submit_fn)
     {
         ROCP_TRACE << "Discarding ATT packet submission on disabled queue for agent "
@@ -288,21 +285,11 @@ att_queue_copy(att_queue_t& queue, void* dst, const void* src, size_t size)
     if(status != HSA_STATUS_SUCCESS)
     {
         CHECK_NOTNULL(hsa::get_core_table())->hsa_signal_store_screlease_fn(completion.handle(), 0);
-        ROCP_ERROR << "Failed to copy thread trace memory: " << status;
+        ROCP_CI_LOG(ERROR) << "Failed to copy thread trace memory: " << status;
         return false;
     }
     completion.wait();
     return true;
-}
-
-void
-att_queue_deleter_t::operator()(att_queue_t* queue) const
-{
-    if(queue)
-    {
-        att_queue_destroy(*queue);
-        delete queue;
-    }
 }
 
 }  // namespace thread_trace

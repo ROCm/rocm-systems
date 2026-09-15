@@ -119,8 +119,7 @@ public:
     std::unique_ptr<aql::ThreadTraceAQLPacketFactory> factory{nullptr};
 
     /// Start the trace and spawn helper threads when triple buffering is used.
-    std::shared_ptr<att_signal_t> start_thread_trace(
-        std::shared_ptr<std::atomic<int>> running_flag);
+    signal_ptr_t start_thread_trace(std::shared_ptr<std::atomic<int>> running_flag);
     /// Stop the trace and flush the outstanding hardware packets.
     signal_ptr_t stop_thread_trace();
 
@@ -129,14 +128,12 @@ private:
     std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart = false);
 
     att_queue_ptr_t queue{};
-    signal_ptr_t    stop_signal{};
 
     std::atomic<int> active_traces{0};
     std::mutex       trace_resources_mut{};
     std::mutex       codeobj_mut{};
 
     std::unique_ptr<hsa::TraceControlAQLPacket>           control_packet{nullptr};
-    std::shared_ptr<hsa::SQTTBufferingPackets>            buffering_packets{};
     std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
 
     std::vector<std::thread>          consumers{};

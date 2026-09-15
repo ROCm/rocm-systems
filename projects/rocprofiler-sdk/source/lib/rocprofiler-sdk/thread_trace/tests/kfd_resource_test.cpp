@@ -230,11 +230,13 @@ TEST(kfd_resource, unrelated_render_descriptor)
     {
         if(entry.path().filename().string().find("renderD") != 0) continue;
         const int fd = ::open(entry.path().c_str(), O_RDWR | O_CLOEXEC);
-        ASSERT_GE(fd, 0);
-        descriptors.push_back(fd);
+        // Multi-XCD GPUs and container filtering leave some render nodes unusable.
+        if(fd >= 0) descriptors.push_back(fd);
     }
+    ASSERT_FALSE(descriptors.empty()) << "No accessible DRM render nodes";
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
+    ASSERT_FALSE(hsa::get_queue_controller()->get_supported_agents().empty());
     for(const auto& [_, agent] : hsa::get_queue_controller()->get_supported_agents())
     {
         auto memory = kfd::kfd_memory_pool_t::create(*agent.get_rocp_agent());
