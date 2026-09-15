@@ -3803,9 +3803,10 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     // collTaskAppend is used for both RCCL_SYMMETRIC and ring/tree. Without this,
     // ncclMakeSymmetricTaskList would still extract -R 2 after the selector
     // withdrew symk (NCCL_ALGO, or AllReduce/AllGather size windows).
-    t->symkExtract = 0;
+    t->symkExtract = RCCL_SYMK_EXTRACT_NONE;
     if (info->decisionValid) {
-      t->symkExtract = (info->decision.algo == RCCL_SYMMETRIC) ? 1 : -1;
+      t->symkExtract =
+        (info->decision.algo == RCCL_SYMMETRIC) ? RCCL_SYMK_EXTRACT_ALLOW : RCCL_SYMK_EXTRACT_DENY;
     }
 
     planner->nTasksColl += 1;
