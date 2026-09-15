@@ -480,6 +480,8 @@ add_executable(
     simd_correctness/mfma_lazy_storage_test.cpp
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
+    division_test.cpp
+    division_macro_test.cpp
     valu_floating_policy_test.cpp
     atomic_semantics_and_decode_test.cpp
     isa_target_registry_test.cpp
@@ -701,6 +703,18 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${CMAKE_CURRENT_SOURCE_DIR}/check_static_analysis_symbols.cmake
     )
 endif()
+
+add_executable(waitcheck_target_test analysis/waitcheck_target_test.cpp)
+target_link_libraries(
+    waitcheck_target_test
+    PRIVATE
+        rocjitsu_waitcheck_target
+        rocjitsu_analysis_internal
+        rocjitsu_amdgpu_isa_model_registry
+        GTest::gtest_main
+)
+rj_configure_target(waitcheck_target_test WARNINGS)
+rj_add_gtest_tests(waitcheck_target_test)
 
 # Exercise the Linux-only model ISA contract in a decoder-only final link.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

@@ -6607,10 +6607,22 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'tensor_load_to_lds':
-            return '  amdgpu::execute_tensor_load_to_lds(*this, wf);'
+            return (
+                '  if (amdgpu::execute_tensor_load_to_lds(*this, wf).failed()) [[unlikely]] {\n'
+                '    wf.report_instruction_execution_error(\n'
+                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
+                '    return;\n'
+                '  }'
+            )
 
         if cls == 'tensor_store_from_lds':
-            return '  amdgpu::execute_tensor_store_from_lds(*this, wf);'
+            return (
+                '  if (amdgpu::execute_tensor_store_from_lds(*this, wf).failed()) [[unlikely]] {\n'
+                '    wf.report_instruction_execution_error(\n'
+                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
+                '    return;\n'
+                '  }'
+            )
 
         if cls == 'barrier':
             L.append('  wf.set_state(amdgpu::WfState::BARRIER);')
@@ -12324,6 +12336,7 @@ class CodeGenerator:
                     ),
                     ('rocjitsu/isa/arch/amdgpu/shared/simd_glue.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/fp_mode.h', False),
+                    ('rocjitsu/isa/arch/amdgpu/shared/division.h', False),
                     ('util/except.h', False),
                 ]
                 _MEM_ENC_NAMES = frozenset(
@@ -12863,6 +12876,11 @@ class CodeGenerator:
                 'optional': 'std::optional',
                 'rocjitsu/base/rj_compiler.h': 'RJ_NOINLINE',
                 'rocjitsu/isa/arch/amdgpu/shared/fp_mode.h': 'fp_mode::',
+                'rocjitsu/isa/arch/amdgpu/shared/division.h': (
+                    'div_scale(',
+                    'div_fmas(',
+                    'div_fixup(',
+                ),
                 'rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h': 'pseudo_scalar::',
             }
             result: list[tuple[str, bool]] = []
@@ -13311,6 +13329,7 @@ class CodeGenerator:
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/division.h"',
             *simd_extra_includes(),
             '#include "util/data_types.h"',
             '#include "util/except.h"',
@@ -13361,6 +13380,7 @@ class CodeGenerator:
                 'v_sqrt_f32_vop1': 'classify_sqrt_f32_vop1',
                 'v_sqrt_f32_vop3': 'classify_sqrt_f32_vop3',
                 'v_div_fixup_f32_vop3': 'classify_div_fixup_f32_exceptions',
+                'v_div_fixup_f64_vop3': 'classify_div_fixup_f64_exceptions',
                 'v_rcp_iflag_f32_vop1': 'classify_rcp_iflag_f32_exceptions',
                 'v_rcp_iflag_f32_vop3': 'classify_rcp_iflag_f32_exceptions',
             }

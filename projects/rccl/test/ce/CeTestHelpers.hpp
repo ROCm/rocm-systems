@@ -68,6 +68,15 @@ inline bool isCeDispatchConfigured()
            MPIHelpers::getEnvParam("NCCL_CUMEM_ENABLE",          kCuMemEnableDefault)       == kCuMemEnable;
 }
 
+// Returns true when CE AlltoAll dispatch is expected (CE prerequisites + RCCL_DDA_ENABLE=0).
+inline bool isCeAlltoAllDispatchConfigured()
+{
+    constexpr int kDdaEnableDefault = 1; // RCCL_DDA_ENABLE defaults on
+    constexpr int kDdaDisabled      = 0;
+    return isCeDispatchConfigured() &&
+           MPIHelpers::getEnvParam("RCCL_DDA_ENABLE", kDdaEnableDefault) == kDdaDisabled;
+}
+
 // Returns true when CE AllReduce dispatch is expected (CE prerequisites + RCCL_CE_ALLREDUCE=1).
 inline bool isCeAllReduceDispatchConfigured()
 {
