@@ -913,6 +913,11 @@ function(rj_add_consan_device_conformance_cases)
                 # default on any simulator target under the front-loaded
                 # contention of the full gate.
                 set(_workload_timeout 180)
+                if(RJ_ENABLE_ASAN)
+                    # CDNA many-owner cases take 169--188 seconds under
+                    # ASan+UBSan; preserve the same workload with headroom.
+                    set(_workload_timeout 300)
+                endif()
             elseif(
                 _mode_value STREQUAL "sampled"
                 AND _workload_name STREQUAL "AtomicCasPublication"
