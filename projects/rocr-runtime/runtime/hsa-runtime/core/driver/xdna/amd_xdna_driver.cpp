@@ -84,7 +84,7 @@ static_assert((sizeof(DriverMemoryHandleWord) >= sizeof(uint32_t)) &&
 
 /// @brief Opcode types for commands.
 ///
-/// This is the opcode type defined in xdna-driver and XRT ERT (ert_cmd_opcode).
+/// This is the opcode type defined in xdna-driver (ert_cmd_opcode).
 enum ert_cmd_opcode {
   /// @brief Invalid command.
   ERT_INVALID_CMD = ~0U,
@@ -102,7 +102,7 @@ enum ert_cmd_opcode {
 
 /// @brief Command state.
 ///
-/// This is the command state struct defined in xdna-driver and XRT ERT (ert_cmd_state).
+/// This is the command state struct defined in xdna-driver (ert_cmd_state).
 enum ert_cmd_state {
   /// @brief Invalid state.
   ERT_CMD_STATE_INVALID,
@@ -202,9 +202,10 @@ struct ert_cmd_chain_data {
 enum class XDNADeviceType {
   /// @brief Unknown device.
   Unknown = 0,
-  /// @brief Phoenix (npu1), aie2. PDI + instruction sequence dispatch only.
+  /// @brief Phoenix (npu1), aie2 architecture. PDI + instruction sequence dispatch only.
   Phx,
-  /// @brief Strix / Strix Halo / Krackan (npu4/5/6), aie2p. PDI + instruction sequence and full-ELF
+  /// @brief Strix / Strix Halo / Krackan (npu4/5/6), aie2p architecture. PDI + instruction sequence
+  /// and full-ELF
   /// dispatch.
   Stx,
 };
@@ -331,7 +332,7 @@ class PDICache {
   /// @brief Returns the index of the BO handle if it is the cache, otherwise @ref NotFound.
   ///
   /// This function does a linear search because the mask is small (32 elements).
-  size_type GetIndex(uint32_t pdi_handle) const {
+  constexpr size_type GetIndex(uint32_t pdi_handle) const {
     for (size_type i = 0; i < entry_count; ++i) {
       if (entries[i] == pdi_handle) {
         return i;
@@ -341,7 +342,7 @@ class PDICache {
   }
 
   /// @brief Sets the next cache entry.
-  hsa_status_t SetNext(uint32_t pdi_bo_handle, size_type& index) {
+  constexpr hsa_status_t SetNext(uint32_t pdi_bo_handle, size_type& index) {
     if (entry_count == entries.size()) {
       // cache is full
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -353,10 +354,7 @@ class PDICache {
   }
 
   /// @brief Drops every entry added since the cache held @p count of them.
-  void Truncate(size_type count) {
-    assert(count <= entry_count);
-    entry_count = count;
-  }
+  constexpr void Truncate(size_type count) { entry_count = count; }
 
   constexpr uint32_t operator[](size_type index) const { return entries[index]; }
 };
@@ -372,9 +370,37 @@ struct CmdBOPool {
   // must not shrink that ceiling from what dynamically-sized command BOs supported before.
   static constexpr uint32_t kEntryByteSize =
       sizeof(ert_start_kernel_cmd) + MAX_CMD_COUNT * sizeof(uint32_t);
+  /// @brief The pooled BOs, all of @ref kEntryByteSize bytes. Allocated by @ref Initialize and
+  /// valid until @ref Finalize; never resized in between, so @ref AcquireCmdBO can hand out
+  /// references that stay good for the life of the queue.
   std::vector<BOHandle> entries = {};
+  /// @brief Round-robin cursor into @ref entries. Counts up without wrapping and is taken modulo
+  /// the pool size on use.
   size_t next = 0;
 
+  /// @brief Pre-allocates @p count entries, so dispatch never pays a create/destroy ioctl pair
+  /// per command.
+  ///
+  /// All or nothing: if one allocation fails, the entries created before it are destroyed before
+  /// returning, so a failed Initialize leaves an empty pool rather than a partial one the caller
+  /// has to unwind.
+  ///
+  /// @param[in] fd driver file descriptor
+  /// @param[in] heap_base device heap base the entries are carved from
+  /// @param[in] count number of entries to allocate
+  hsa_status_t Initialize(int fd, const void* heap_base, size_t count);
+
+  /// @brief Destroys every entry and empties the pool.
+  ///
+  /// Always attempts all of them and reports the first failure, so one bad handle does not strand
+  /// the rest. Safe to call on an already-empty pool, which is what makes it usable both for
+  /// unwinding a failed @ref Initialize and for tearing a live queue down.
+  ///
+  /// @param[in] fd driver file descriptor
+  /// @param[in] heap_base device heap base the entries were carved from
+  hsa_status_t Finalize(int fd, const void* heap_base);
+
+  /// @brief Returns a pre-allocated BO.
   BOHandle& AcquireCmdBO() {
     assert(!entries.empty());
     auto idx = next % entries.size();
@@ -388,7 +414,7 @@ struct CmdBOPool {
 ///
 /// The two modes need incompatible hardware contexts - PDI + instruction sequence needs CU
 /// configuration, full-ELF must not have any - and a hardware context's CU configuration cannot
-/// be changed once set. That rules out switching a *live* context, not a queue: one batch is one
+/// be changed once set. That rules out switching a live context, not a queue: one batch is one
 /// mode, and between batches the queue is drained, so the context can be torn down and rebuilt
 /// then. This records which mode the current context was built for.
 enum class QueueMode {
@@ -400,7 +426,7 @@ enum class QueueMode {
   FullElf,
 };
 
-/// @brief Returns the dispatch shape @p pkt is asking for.
+/// @brief Returns the dispatch mode @p pkt is asking for.
 ///
 /// A packet asks for a full-ELF dispatch by giving the offset at which its control code takes the
 /// PDI's device address; a PDI plus instruction sequence has no such patch site and leaves the
@@ -413,17 +439,30 @@ static QueueMode PacketMode(const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
 
 /// @brief Metadata for a Kernel Mode Queue (KMQ).
 struct KmqMetadata {
-  /// @brief Hardware context.
+  /// @brief Hardware context the queue dispatches against. Torn down and rebuilt whenever the
+  /// batch about to be submitted needs a configuration this one does not have -- a new PDI, or
+  /// the other dispatch mode -- so it is not fixed for the life of the queue.
   uint32_t hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
+  /// @brief DRM sync object the hardware context signals command completion on, created with the
+  /// context and reset to 0 with it. Zero means the driver did not give the context a timeline,
+  /// in which case @ref WaitCommand falls back to the WAIT_CMD ioctl.
   uint32_t syncobj_handle = 0;
   /// @brief Core tiles the queue's hardware context is created with. Fixed for the life of the
   /// queue.
   uint32_t num_core_tiles = 0;
   /// @brief Device the queue dispatches to, resolved once at creation.
   XDNADeviceType device_type = XDNADeviceType::Unknown;
+  /// @brief PDIs the current hardware context has compute units configured for, indexed by CU.
+  /// A packet's PDI is looked up here to build its CU mask; a miss means the context has to be
+  /// rebuilt with the new PDI added. Dropped wholesale when the queue switches to full ELF,
+  /// which configures no CUs at all.
   PDICache pdi_cache;
+  /// @brief Dispatch ABI the current hardware context was built for. The two need incompatible
+  /// CU configurations, so a batch in the other mode forces a rebuild.
   QueueMode mode = QueueMode::Undecided;
-  /// @brief BO pool.
+  /// @brief Command BOs pre-allocated for the life of the queue, so dispatch never pays a
+  /// create/destroy ioctl pair per command. Filled by CmdBOPool::Initialize at queue creation and
+  /// released by CmdBOPool::Finalize at destruction.
   CmdBOPool cmd_bo_pool;
 };
 
@@ -840,6 +879,34 @@ static hsa_status_t CreateCmdBO(int fd, const void* heap_base, uint32_t size,
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t CmdBOPool::Initialize(int fd, const void* heap_base, size_t count) {
+  entries.reserve(count);
+  for (size_t i = 0; i < count; ++i) {
+    BOHandle bo_handle;
+    const hsa_status_t err = CreateCmdBO(fd, heap_base, kEntryByteSize, bo_handle);
+    if (err != HSA_STATUS_SUCCESS) {
+      // Leave nothing half-built for the caller to clean up.
+      Finalize(fd, heap_base);
+      return err;
+    }
+    entries.push_back(bo_handle);
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t CmdBOPool::Finalize(int fd, const void* heap_base) {
+  hsa_status_t first_err = HSA_STATUS_SUCCESS;
+  for (auto& bo_handle : entries) {
+    const hsa_status_t err = DestroyBOHandle(fd, heap_base, bo_handle);
+    if (err != HSA_STATUS_SUCCESS && first_err == HSA_STATUS_SUCCESS) {
+      first_err = err;
+    }
+  }
+  entries.clear();
+  next = 0;
+  return first_err;
+}
+
 /// @brief Resolves each of the packet's kernel arguments and adds its BO to @p bo_handles.
 ///
 /// The hardware reaches argument buffers through DMA descriptors rather than fetching them, so
@@ -1239,14 +1306,9 @@ hsa_status_t XdnaDriver::CreateKernelModeQueue(size_t queue_size, uint32_t num_c
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
-  // Destroys the hardware context and any pool entries created so far if pool pre-allocation
-  // fails partway through; dismissed once the queue is fully constructed.
+  // Destroys the hardware context if pool pre-allocation fails; dismissed once the queue is fully
+  // constructed. Initialize cleans up its own entries, so there is no partial pool to unwind here.
   MAKE_NAMED_SCOPE_GUARD(kmq_metadata_guard, [&] {
-    for (auto& bo_handle : kmq_metadata->cmd_bo_pool.entries) {
-      if (DestroyBOHandle(fd_, dev_heap_vaddr, bo_handle) != HSA_STATUS_SUCCESS) {
-        log_warning_n(10, "AIE: failed to destroy a command BO while unwinding queue creation.\n");
-      }
-    }
     if (DestroyHwCtx(fd_, kmq_metadata->hw_ctx_handle) != HSA_STATUS_SUCCESS) {
       log_warning_n(10,
                     "AIE: failed to destroy a hardware context while unwinding queue "
@@ -1254,18 +1316,11 @@ hsa_status_t XdnaDriver::CreateKernelModeQueue(size_t queue_size, uint32_t num_c
     }
   });
 
-  // Pre-allocate the command BO pool for the life of the queue, so dispatch never pays a
-  // create/destroy ioctl pair per command. A full queue needs one entry per packet plus one for
-  // the chain wrapper; the pool is sized to twice the queue so a batch never laps itself.
-  const size_t pooled_cmd_bo_count = 2 * queue_size;
-  kmq_metadata->cmd_bo_pool.entries.reserve(pooled_cmd_bo_count);
-  for (size_t i = 0; i < pooled_cmd_bo_count; ++i) {
-    BOHandle bo_handle;
-    err = CreateCmdBO(fd_, dev_heap_vaddr, CmdBOPool::kEntryByteSize, bo_handle);
-    if (err != HSA_STATUS_SUCCESS) {
-      return err;
-    }
-    kmq_metadata->cmd_bo_pool.entries.push_back(bo_handle);
+  // A full queue needs one entry per packet plus one for the chain wrapper; the pool is sized to
+  // twice the queue so a batch never laps itself.
+  err = kmq_metadata->cmd_bo_pool.Initialize(fd_, dev_heap_vaddr, 2 * queue_size);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   kmq_metadata_guard.Dismiss();
@@ -1284,15 +1339,9 @@ hsa_status_t XdnaDriver::DestroyKernelModeQueue(void* queue_metadata) const {
   std::unique_ptr<KmqMetadata> kmq_metadata;
   kmq_metadata.reset(static_cast<KmqMetadata*>(queue_metadata));
 
-  // Destroy command BO pool entries, keeping the first failure to report after the rest have
-  // still been given a chance to tear down.
-  hsa_status_t first_err = HSA_STATUS_SUCCESS;
-  for (auto& bo_handle : kmq_metadata->cmd_bo_pool.entries) {
-    const hsa_status_t err = DestroyBOHandle(fd_, dev_heap_vaddr, bo_handle);
-    if (err != HSA_STATUS_SUCCESS && first_err == HSA_STATUS_SUCCESS) {
-      first_err = err;
-    }
-  }
+  // Keeps the first failure to report after the hardware context has still been given a chance to
+  // tear down.
+  const hsa_status_t first_err = kmq_metadata->cmd_bo_pool.Finalize(fd_, dev_heap_vaddr);
 
   // Destroy hardware context associated with the queue.
   if (kmq_metadata->hw_ctx_handle != AMDXDNA_INVALID_CTX_HANDLE) {
