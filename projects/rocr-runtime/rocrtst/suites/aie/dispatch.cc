@@ -21,6 +21,7 @@
 #include "gtest/gtest.h"
 
 #include "aie_full_elf.h"
+#include "aie_test_env.h"
 
 #include "hsa/hsa.h"
 #include "hsa/hsa_ext_amd.h"
@@ -31,31 +32,11 @@
 
 namespace {
 
+using namespace aie_test;  // NOLINT -- test translation unit
+
 // ---------------------------------------------------------------------------
 // Agent discovery
 // ---------------------------------------------------------------------------
-
-// HSA agent iteration callback: appends every agent of type DeviceType to the
-// std::vector<hsa_agent_t>* stored in `data`.
-template <hsa_device_type_t DeviceType>
-hsa_status_t discover_agents(hsa_agent_t agent, void* data) {
-  if (!data) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
-  hsa_device_type_t device_type = {};
-  const auto status = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type);
-  if (status != HSA_STATUS_SUCCESS) {
-    return status;
-  }
-
-  if (device_type == DeviceType) {
-    auto* const agents = static_cast<std::vector<hsa_agent_t>*>(data);
-    agents->push_back(agent);
-  }
-
-  return HSA_STATUS_SUCCESS;
-}
 
 // ---------------------------------------------------------------------------
 // Memory pool discovery
@@ -72,6 +53,10 @@ struct find_pool_data {
 // HSA memory-pool iteration callback: stops at the first global pool that
 // matches the flags and allocatability recorded in the find_pool_data* stored
 // in `data`, storing the result there and returning HSA_STATUS_INFO_BREAK.
+//
+// Note this keys on RUNTIME_ALLOC_REC_GRANULE where memory.cc's equivalent keys on
+// RUNTIME_ALLOC_GRANULE. The two very likely select the same pool, but that has not been
+// established, so the two files keep their own predicate rather than sharing one.
 hsa_status_t find_memory_pool(hsa_amd_memory_pool_t pool, void* data) {
   hsa_amd_segment_t segment{};
   auto s = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
@@ -575,23 +560,19 @@ TEST(Dispatch, LoadInstructions) {
   EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-class DispatchTest : public ::testing::Test {
+// The dispatch tests' environment. The runtime and the AIE agent come from the shared base in
+// aie_test_env.h; the pools and the queue sizing below are specific to this binary.
+class DispatchTest : public aie_test::AieTestBase {
  protected:
-  std::vector<hsa_agent_t> aie_agents;
   hsa_amd_memory_pool_t dev_pool{};
   hsa_amd_memory_pool_t data_pool{};
   hsa_amd_memory_pool_t kernarg_pool{};
   std::uint32_t min_queue_size = 0;
 
   void SetUp() override {
-    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-    // --- Discover AIE agent ---
-    ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
-              HSA_STATUS_SUCCESS);
+    ASSERT_NO_FATAL_FAILURE(AieTestBase::SetUp());
     ASSERT_FALSE(aie_agents.empty());
 
-    // --- Discover memory pools ---
     // dev pool: coarse-grained, non-allocatable (for PDI and instructions)
     find_pool_data dev_pool_data{};
     dev_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
@@ -620,13 +601,10 @@ class DispatchTest : public ::testing::Test {
     }
     kernarg_pool = kernarg_pool_data.pool;
 
-    // --- Get queue size info ---
     ASSERT_EQ(
         hsa_agent_get_info(aie_agents.front(), HSA_AGENT_INFO_QUEUE_MIN_SIZE, &min_queue_size),
         HSA_STATUS_SUCCESS);
   }
-
-  void TearDown() override { ASSERT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS); }
 };
 
 TEST_F(DispatchTest, SingleDispatch) {
@@ -2099,31 +2077,9 @@ TEST_F(FullElfDispatchTest, ElfNoPdiCeiling) {
 // reusing the suspended one.
 // ===========================================================================
 
-// Captures the arguments of a queue error callback.
-struct dispatch_error {
-  std::atomic<bool> invoked{false};
-  hsa_status_t status{HSA_STATUS_SUCCESS};
-  hsa_queue_t* source{nullptr};
-
-  static void callback(hsa_status_t status, hsa_queue_t* source, void* data) {
-    auto& self = *static_cast<dispatch_error*>(data);
-    self.status = status;
-    self.source = source;
-    self.invoked.store(true, std::memory_order_release);
-  }
-};
-
-// Creates a queue whose errors land in @p err.
-[[nodiscard]] hsa_status_t create_queue_with_error_callback(hsa_agent_t agent, std::uint32_t size,
-                                                            dispatch_error* err,
-                                                            hsa_queue_t** queue) {
-  return hsa_queue_create(agent, size, HSA_QUEUE_TYPE_SINGLE, dispatch_error::callback, err, 0, 0,
-                          queue);
-}
-
 // Asserts the dispatch was refused: reported once through the error callback, and its completion
 // signal left untouched because the packet never executed.
-void ExpectRejected(const dispatch_error& err, hsa_queue_t* queue, hsa_signal_t signal,
+void ExpectRejected(const aie_test::dispatch_error& err, hsa_queue_t* queue, hsa_signal_t signal,
                     hsa_signal_value_t initial) {
   EXPECT_TRUE(err.invoked.load(std::memory_order_acquire))
       << "a rejected dispatch did not report through the queue error callback";

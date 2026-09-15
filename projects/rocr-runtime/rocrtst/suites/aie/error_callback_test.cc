@@ -10,92 +10,30 @@
 
 #include "gtest/gtest.h"
 
+#include "aie_test_env.h"
+
 #include "hsa/hsa.h"
 #include "hsa/hsa_ext_amd.h"
 #include "hsa/hsa_ext_amd_aie.h"
 
-namespace {
-
-// ---------------------------------------------------------------------------
-// Agent discovery
-// ---------------------------------------------------------------------------
-
-template <hsa_device_type_t DeviceType>
-hsa_status_t discover_agents(hsa_agent_t agent, void* data) {
-  if (!data) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
-  hsa_device_type_t device_type = {};
-  const auto status = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type);
-  if (status != HSA_STATUS_SUCCESS) {
-    return status;
-  }
-
-  if (device_type == DeviceType) {
-    static_cast<std::vector<hsa_agent_t>*>(data)->push_back(agent);
-  }
-
-  return HSA_STATUS_SUCCESS;
-}
-
-// ---------------------------------------------------------------------------
-// Error-callback capture
-// ---------------------------------------------------------------------------
-
-struct error_capture {
-  std::atomic<bool> invoked{false};
-  hsa_status_t status{HSA_STATUS_SUCCESS};
-  hsa_queue_t* source{nullptr};
-};
-
-void error_callback(hsa_status_t status, hsa_queue_t* source, void* data) {
-  auto& capture = *static_cast<error_capture*>(data);
-  capture.status = status;
-  capture.source = source;
-  capture.invoked.store(true, std::memory_order_release);
-}
-
-// Returns the first AIE agent; sets @p found to false if there is no AIE device.
-hsa_agent_t first_aie_agent(bool& found) {
-  std::vector<hsa_agent_t> aie_agents;
-  found = (hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents) ==
-           HSA_STATUS_SUCCESS) &&
-          !aie_agents.empty();
-  return found ? aie_agents.front() : hsa_agent_t{};
-}
-
-}  // namespace
+using aie_test::dispatch_error;
 
 // Shared fixture: initializes the HSA runtime once for the suite (always tearing it down, even when
 // individual tests skip) and resolves the first AIE agent per test, skipping when no NPU is present.
-class ErrorCallback : public ::testing::Test {
+// Unlike the dispatch and memory fixtures, this one skips rather than fails when there is no
+// NPU: these tests need no kernel artifacts, so the binary is expected to run anywhere.
+class ErrorCallback : public aie_test::AieTestBase {
  protected:
-  static void SetUpTestSuite() {
-    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-    initialized_ = true;
-  }
-
-  static void TearDownTestSuite() {
-    if (initialized_) {
-      EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
-      initialized_ = false;
-    }
-  }
+  hsa_agent_t agent_{};
 
   void SetUp() override {
-    bool found = false;
-    agent_ = first_aie_agent(found);
-    if (!found) {
+    ASSERT_NO_FATAL_FAILURE(AieTestBase::SetUp());
+    if (aie_agents.empty()) {
       GTEST_SKIP() << "No AIE device found; skipping test";
     }
+    agent_ = aie_agents.front();
   }
-
-  hsa_agent_t agent_{};
-  static bool initialized_;
 };
-
-bool ErrorCallback::initialized_ = false;
 
 // Creating a queue with an error callback must succeed, and the callback must not fire while no
 // error has occurred.
@@ -104,10 +42,9 @@ TEST_F(ErrorCallback, QueueCreateWithCallback) {
   ASSERT_EQ(hsa_agent_get_info(agent_, HSA_AGENT_INFO_QUEUE_MIN_SIZE, &min_queue_size),
             HSA_STATUS_SUCCESS);
 
-  error_capture capture;
+  dispatch_error capture;
   hsa_queue_t* queue = nullptr;
-  ASSERT_EQ(hsa_queue_create(agent_, min_queue_size, HSA_QUEUE_TYPE_SINGLE, error_callback, &capture,
-                             0, 0, &queue),
+  ASSERT_EQ(aie_test::create_queue_with_error_callback(agent_, min_queue_size, &capture, &queue),
             HSA_STATUS_SUCCESS);
   ASSERT_NE(queue, nullptr);
 
@@ -123,10 +60,9 @@ TEST_F(ErrorCallback, InvalidDispatchInvokesCallback) {
   ASSERT_EQ(hsa_agent_get_info(agent_, HSA_AGENT_INFO_QUEUE_MIN_SIZE, &min_queue_size),
             HSA_STATUS_SUCCESS);
 
-  error_capture capture;
+  dispatch_error capture;
   hsa_queue_t* queue = nullptr;
-  ASSERT_EQ(hsa_queue_create(agent_, min_queue_size, HSA_QUEUE_TYPE_SINGLE, error_callback, &capture,
-                             0, 0, &queue),
+  ASSERT_EQ(aie_test::create_queue_with_error_callback(agent_, min_queue_size, &capture, &queue),
             HSA_STATUS_SUCCESS);
   ASSERT_NE(queue, nullptr);
 
