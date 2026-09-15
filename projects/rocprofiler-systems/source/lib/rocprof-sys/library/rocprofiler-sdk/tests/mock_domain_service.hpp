@@ -5,10 +5,13 @@
 
 #include <gmock/gmock.h>
 
+#include <fmt/format.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -374,6 +377,11 @@ struct gmock_externals
 
 inline std::unique_ptr<::testing::StrictMock<gmock_externals>> g_externals_mock;
 
+// Set by a test to make agent_manager_t::get_agent_by_handle(std::uint64_t) throw
+// std::out_of_range for that specific handle, simulating an unregistered KFD agent.
+// Reset to nullopt (the default "always succeeds") when the test is done.
+inline std::optional<std::uint64_t> g_unregistered_agent_handle;
+
 // Externals mirrors the real ExternalDeps policy surface used by every on_kfd_* and
 // on_kfd_*_configure, plus domain_service<>/registry<>. The on_records-only members
 // (add_thread_info/add_track/buffer_storage_store) stay plain no-ops -- only
@@ -460,8 +468,17 @@ struct externals
             return k_placeholder;
         }
 
-        [[nodiscard]] const agent_t& get_agent_by_handle(std::uint64_t /*handle*/) const
+        // Opt-in knob for exercising the not-found path: unset by default (mirrors
+        // pre-existing "always succeeds" behavior for every test that doesn't touch
+        // it); a test sets g_unregistered_agent_handle to the handle it wants to
+        // simulate as unregistered.
+        [[nodiscard]] const agent_t& get_agent_by_handle(std::uint64_t handle) const
         {
+            if(g_unregistered_agent_handle && *g_unregistered_agent_handle == handle)
+            {
+                throw std::out_of_range(
+                    fmt::format("Agent not found for device handle: {}", handle));
+            }
             static const agent_t k_placeholder{};
             return k_placeholder;
         }

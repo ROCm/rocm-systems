@@ -66,6 +66,17 @@ TEST(kfd_queue_test, on_kfd_queue_handles_empty_record_batch_without_crashing)
     on_kfd_queue<mock_sdk, externals>(&record, nullptr);
 }
 
+TEST(kfd_queue_test, on_kfd_queue_survives_unregistered_agent_handle)
+{
+    mock_sdk::kfd_queue_record record{};
+    record.agent_id.handle                    = 0xDEAD;
+    test_support::g_unregistered_agent_handle = 0xDEAD;
+
+    EXPECT_NO_THROW((on_kfd_queue<mock_sdk, externals>(&record, nullptr)));
+
+    test_support::g_unregistered_agent_handle.reset();
+}
+
 TEST(kfd_queue_test,
      on_configure_registers_category_string_and_skips_pmc_info_without_gpu_agents)
 {
