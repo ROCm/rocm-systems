@@ -2752,6 +2752,7 @@ TEST(ExecutionPluginTest, MemoryPipelineWideDwordCompletionWritesSparseLanesDire
   constexpr uint64_t kLane5Address = 0xA000;
   constexpr uint32_t kDst = 7;
   constexpr uint32_t kSentinel = 0xA5A5A5A5u;
+  constexpr uint32_t kInactiveLane = 2;
   constexpr std::array<uint32_t, 4> kLane1Values = {0x11111111u, 0x22222222u, 0x33333333u,
                                                     0x44444444u};
   constexpr std::array<uint32_t, 4> kLane5Values = {0x55555555u, 0x66666666u, 0x77777777u,
@@ -2760,8 +2761,10 @@ TEST(ExecutionPluginTest, MemoryPipelineWideDwordCompletionWritesSparseLanesDire
                     kLane1Address);
   f.mem->load_image(reinterpret_cast<const uint8_t *>(kLane5Values.data()), sizeof(kLane5Values),
                     kLane5Address);
-  for (uint32_t reg = 0; reg < 4; ++reg)
+  for (uint32_t reg = 0; reg < 4; ++reg) {
     cu->write_vgpr(wf->vgpr_alloc().base + kDst + reg, 0, kSentinel);
+    cu->write_vgpr(wf->vgpr_alloc().base + kDst + reg, kInactiveLane, kSentinel);
+  }
 
   auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
   state->elem_size = sizeof(uint32_t);
@@ -2782,6 +2785,7 @@ TEST(ExecutionPluginTest, MemoryPipelineWideDwordCompletionWritesSparseLanesDire
   for (uint32_t reg = 0; reg < 4; ++reg) {
     EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst + reg, 0), kSentinel);
     EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst + reg, 1), kLane1Values[reg]);
+    EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst + reg, kInactiveLane), kSentinel);
     EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst + reg, 5), kLane5Values[reg]);
   }
 }
