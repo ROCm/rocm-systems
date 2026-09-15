@@ -69,7 +69,7 @@ generate_unified_memory_output_path(int pid, const std::string& output_dir,
 is_known_agent_type(std::uint8_t raw_type) noexcept
 {
     using agent_type_underlying = std::underlying_type_t<agent_type>;
-    return raw_type <= static_cast<agent_type_underlying>(agent_type::NIC);
+    return raw_type <= static_cast<agent_type_underlying>(agent_type::nic);
 }
 
 [[nodiscard]] inline std::string
@@ -106,12 +106,17 @@ unified_memory_processor_t::unified_memory_processor_t(
     const auto& all_agents = m_agent_manager->get_agents();
     for(const auto& agent_ptr : all_agents)
     {
-        if(!agent_ptr) continue;
+        if(!agent_ptr)
+        {
+            continue;
+        }
 
         m_node_type_cache[agent_ptr->node_id] = agent_ptr->type;
 
-        if(agent_ptr->type == agent_type::GPU)
+        if(agent_ptr->type == agent_type::gpu)
+        {
             m_gpu_name_cache[agent_ptr->node_id] = agent_ptr->name;
+        }
     }
 }
 
@@ -227,16 +232,16 @@ unified_memory_processor_t::handle_page_migrate(const kfd_sample& sample)
 
         switch(direction)
         {
-            case migration_direction::HOST_TO_DEVICE:
+            case migration_direction::host_to_device:
                 device_summary.host_to_device.add_migration(size_bytes, duration_ns);
                 break;
-            case migration_direction::DEVICE_TO_HOST:
+            case migration_direction::device_to_host:
                 device_summary.device_to_host.add_migration(size_bytes, duration_ns);
                 break;
-            case migration_direction::DEVICE_TO_DEVICE:
+            case migration_direction::device_to_device:
                 device_summary.device_to_device.add_migration(size_bytes, duration_ns);
                 break;
-            case migration_direction::UNKNOWN: break;
+            case migration_direction::unknown: break;
         }
     }
     else
@@ -291,19 +296,19 @@ unified_memory_processor_t::resolve_gpu_bucket_id(const std::string&  src_label,
     const auto [src_node_id, dst_node_id] = *ids;
     const auto is_gpu_node                = [this](std::uint32_t node_id) {
         auto it = m_node_type_cache.find(node_id);
-        return it != m_node_type_cache.end() && it->second == agent_type::GPU;
+        return it != m_node_type_cache.end() && it->second == agent_type::gpu;
     };
 
     switch(direction)
     {
-        case migration_direction::HOST_TO_DEVICE:
+        case migration_direction::host_to_device:
             if(is_gpu_node(dst_node_id)) return dst_node_id;
             break;
-        case migration_direction::DEVICE_TO_HOST:
-        case migration_direction::DEVICE_TO_DEVICE:
+        case migration_direction::device_to_host:
+        case migration_direction::device_to_device:
             if(is_gpu_node(src_node_id)) return src_node_id;
             break;
-        case migration_direction::UNKNOWN: break;
+        case migration_direction::unknown: break;
     }
 
     return std::nullopt;
@@ -314,7 +319,10 @@ unified_memory_processor_t::classify_direction(const std::string& src_label,
                                                const std::string& dst_label) const
 {
     auto ids = parse_node_id_pair(src_label, dst_label);
-    if(!ids.has_value()) return migration_direction::UNKNOWN;
+    if(!ids.has_value())
+    {
+        return migration_direction::unknown;
+    }
     const auto [src_node_id, dst_node_id] = *ids;
 
     auto src_it = m_node_type_cache.find(src_node_id);
@@ -324,20 +332,20 @@ unified_memory_processor_t::classify_direction(const std::string& src_label,
     {
         LOG_TRACE("Node IDs not found in cache: src={}, dst={}", src_node_id,
                   dst_node_id);
-        return migration_direction::UNKNOWN;
+        return migration_direction::unknown;
     }
 
-    const bool src_is_cpu = (src_it->second == agent_type::CPU);
-    const bool dst_is_cpu = (dst_it->second == agent_type::CPU);
+    const bool src_is_cpu = (src_it->second == agent_type::cpu);
+    const bool dst_is_cpu = (dst_it->second == agent_type::cpu);
 
     if(src_is_cpu && !dst_is_cpu)
-        return migration_direction::HOST_TO_DEVICE;
+        return migration_direction::host_to_device;
     else if(!src_is_cpu && dst_is_cpu)
-        return migration_direction::DEVICE_TO_HOST;
+        return migration_direction::device_to_host;
     else if(!src_is_cpu && !dst_is_cpu)
-        return migration_direction::DEVICE_TO_DEVICE;
+        return migration_direction::device_to_device;
     else
-        return migration_direction::UNKNOWN;
+        return migration_direction::unknown;
 }
 
 std::optional<std::pair<std::string, std::string>>

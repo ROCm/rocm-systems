@@ -319,6 +319,15 @@ bool ncclCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncc
   return ncclCeAvailable(comm, ncclFuncAlltoAllv, ncclDevSum, datatype, winRegType);
 }
 
+bool ncclCeAlltoAllEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
+                            bool hasSysmemSegment, bool capturing) {
+  if (ncclGroupDepth != 0) return false;
+  if (!(comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) return false;
+  if (hasSysmemSegment || capturing) return false;
+  // Single-node CE only: hier CE is multi-node and launch is still LSA-only.
+  return ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType);
+}
+
 bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                             ncclSymRegType_t winRegType) {
   if (!ncclCeImplemented(coll, red, ty)) {

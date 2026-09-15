@@ -33,7 +33,7 @@
 #include "hip_capture_writer.h"
 
 // hrr_api_args.h — for hrr_args_* struct types and hrr_api_id_t enum
-#include "hrr_api_args.h"
+#include "hrr/hrr_api_args.h"
 
 // HIP runtime internals
 #include "../hip_global.hpp"       // hip::asKernel()

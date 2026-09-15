@@ -24,6 +24,7 @@ junits/
 tags
 *.swp
 .cache/
+*.log
 
 # Visual Studio Code
 .vscode

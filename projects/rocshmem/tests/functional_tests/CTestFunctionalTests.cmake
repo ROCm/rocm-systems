@@ -1129,7 +1129,7 @@ function(add_stream_tests)
     begin_test_group(CATEGORY "COLLECTIVE;STREAM" TIER full BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME quiet_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME sync_all_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
-        add_rocshmem_functional_test(NAME reduce_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576 
+        add_rocshmem_functional_test(NAME reduce_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576
             ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024;ROCSHMEM_MAX_NUM_HOST_CONTEXTS=1024")
         add_rocshmem_functional_test(NAME alltoallmem_on_stream RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
         add_rocshmem_functional_test(NAME broadcastmem_on_stream RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)

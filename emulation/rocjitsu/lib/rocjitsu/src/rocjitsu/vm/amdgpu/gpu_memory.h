@@ -378,7 +378,8 @@ public:
   /// would cost one syscall per page across transfers measured in megabytes.
   /// The accesses themselves are validated, which is what stops the host being
   /// corrupted; reconciling the gates needs a mechanism that does not scale with
-  /// range size.
+  /// range size. For allocation probes, has_host_backing() instead checks live
+  /// extents without reporting faults; its argument order matches resolve_host_ptr().
   bool has_page_mapping(uint64_t addr, uint32_t vmid = 0) const {
     if (vmid == 0)
       return passthrough_ && addr < kUserSpaceLimit && addr != 0;
@@ -425,6 +426,27 @@ public:
         first_host_ptr = host_ptr;
     });
     return contiguous ? first_host_ptr : nullptr;
+  }
+
+  /// @brief Check for host backing without reporting an absent range as a GPU fault.
+  /// @details Allocation probes must accept valid local identity mappings as well
+  /// as translated pages. The pages need not be contiguous in host memory. This
+  /// is only a snapshot; actual accesses still validate and report failures.
+  bool has_host_backing(uint64_t addr, uint32_t vmid, size_t size) const {
+    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - addr)
+      return false;
+    return for_each_page_chunk_until(addr, size, [&](uint64_t ea, size_t, size_t chunk) {
+      return with_page_mapping(
+          ea, vmid, [&](const KfdProcess::PageTableEntry *pte, IdentityPage page) {
+            const size_t page_offset = ea & PAGE_MASK;
+            if (pte)
+              return for_each_mapped_span(
+                         *pte, page_offset, chunk,
+                         [](size_t, uint8_t *, size_t, const KfdProcess::HostExtent &) {}) == chunk;
+            return ea < kUserSpaceLimit && chunk <= kUserSpaceLimit - ea &&
+                   page.read_valid_pointer(page_offset, chunk) != nullptr;
+          });
+    });
   }
 
   /// @brief Return whether a GPU VA has a VMID page-table mapping.

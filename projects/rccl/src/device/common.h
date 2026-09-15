@@ -21,8 +21,8 @@
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
 #define STORE(DST, SRC) \
   { \
-    __hip_atomic_store((__attribute__((address_space(1))) __typeof__(*(DST))*)(DST), (SRC), __ATOMIC_RELAXED, \
-                       __HIP_MEMORY_SCOPE_SYSTEM); \
+    __scoped_atomic_store_n((__attribute__((address_space(1))) __typeof__(*(DST))*)(DST), (SRC), __ATOMIC_RELAXED, \
+                            __MEMORY_SCOPE_SYSTEM); \
   }
 #elif defined(__GFX9__)
 #define STORE(DST, SRC) \
@@ -367,7 +367,7 @@ struct RunWorkBatch;
 
 // Specialized for P2p in sendrecv.h. The add_unroll.sh hipify pass appends the trailing
 // USE_ACC/COLL_UNROLL/Pipeline/UserRegMode template parameters; UserRegMode selects the
-// latency-protocol kernel variant (0 = legacy LL, 1 = LL128, gfx942/gfx950 only).
+// latency-protocol kernel variant (0 = legacy LL, 1 = LL128, launched on gfx942/gfx950 only).
 template <typename T, typename RedOp>
 struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE>;
 

@@ -45,21 +45,20 @@ namespace component
 //--------------------------------------------------------------------------------------//
 //
 template <typename Toolset, typename Tag>
-TIMEMORY_VISIBILITY("default")
-TIMEMORY_NOINLINE void configure_mpip(const std::set<std::string>& permit = {},
-                                      const std::set<std::string>& reject = {});
+void
+configure_mpip(const std::set<std::string>& permit = {},
+               const std::set<std::string>& reject = {});
 //
 //--------------------------------------------------------------------------------------//
 //
 template <typename Toolset, typename Tag>
-TIMEMORY_VISIBILITY("default")
-TIMEMORY_NOINLINE std::uint64_t activate_mpip();
+std::uint64_t
+activate_mpip();
 //
 //--------------------------------------------------------------------------------------//
 //
 template <typename Toolset, typename Tag>
-TIMEMORY_VISIBILITY("default")
-TIMEMORY_NOINLINE std::uint64_t deactivate_mpip(std::uint64_t);
+std::uint64_t deactivate_mpip(std::uint64_t);
 //
 //--------------------------------------------------------------------------------------//
 //

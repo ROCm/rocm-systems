@@ -1063,5 +1063,56 @@ void FlatAtomicDecX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
+void GlobalAtomicAddF32Flat::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_denorm_mode = 2;
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_legacy_minmax = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, *d);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
+}
+
+void GlobalAtomicPkAddF16Flat::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::PK_ADD_F16;
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, *d);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
+}
+
 } // namespace cdna1
 } // namespace rocjitsu

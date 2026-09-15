@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
+#include "lib/rocprofiler-sdk/hip/event.hpp"
 #include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
@@ -109,6 +110,7 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_GRAPH)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCSHMEM_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIPFILE_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(KERNEL_REPLAY)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_EVENT)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -199,6 +201,9 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
         // Configuration succeeded: keep the claim taken above.
         claimed_replay = false;
     }
+
+    if(kind == ROCPROFILER_CALLBACK_TRACING_HIP_EVENT)
+        rocprofiler::hip::event::set_service_configured(true);
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -303,6 +308,11 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY:
         {
             val = rocprofiler::kernel_replay::name_by_id(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIP_EVENT:
+        {
+            val = rocprofiler::hip::event::name_by_id(operation);
             break;
         }
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
@@ -474,6 +484,11 @@ rocprofiler_iterate_callback_tracing_kind_operations(
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY:
         {
             ops = rocprofiler::kernel_replay::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIP_EVENT:
+        {
+            ops = rocprofiler::hip::event::get_ids();
             break;
         }
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
@@ -710,6 +725,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
         case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
         case ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH:
+        case ROCPROFILER_CALLBACK_TRACING_HIP_EVENT:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }

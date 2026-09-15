@@ -102,7 +102,7 @@ static std::shared_ptr<rocprofsys::agent>
 make_agent(std::uint64_t handle, size_t device_type_index, const std::string& name)
 {
     auto a               = std::make_shared<rocprofsys::agent>();
-    a->type              = agent_type::GPU;
+    a->type              = agent_type::gpu;
     a->handle            = handle;
     a->device_id         = device_type_index;
     a->device_type_index = device_type_index;

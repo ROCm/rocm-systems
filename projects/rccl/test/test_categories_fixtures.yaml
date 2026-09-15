@@ -38,6 +38,7 @@ test_categories:
       - "PackRoundtripTest.LoadStorePack_*"
       - "PackRoundtripTest.L2_StorePackBoundary"
       - "PackRoundtripTest.Store16Load16Global_Direct"
+      - "RcclEpLayoutTest.*"
       - "HierarchicalShuffleTest.*"
     exclude_windows:
       - "*"
@@ -71,6 +72,8 @@ test_categories:
       - "u32fpDecode.*"
       - "getHash.*"
       - "eatHash.*"
+      - "RcclEpWaveTest.*"
+      - "RcclEpLayoutTest.*"
     exclude_windows:
       - "*"
     labels:

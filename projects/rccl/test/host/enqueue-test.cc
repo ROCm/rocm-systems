@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "../common/LogCapture.hpp"
+#include "ScopedHook.h"
 #include "fakes/enqueue_fakes.h"
 
 // alloc.h first, so its macros are visible to be #undef'd before enqueue.cc's
@@ -2349,6 +2350,32 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_EveryItemLandsInExactlyOneBatch) {
   EXPECT_EQ(kItems, bits) << "every call must set exactly one slot bit";
   EXPECT_EQ(bp.queueLength(), bp.p()->nWorkBatches)
       << "plan->nWorkBatches must track the queue length";
+}
+
+// ===========================================================================
+// ncclTasksRegAndEnqueue (enqueue.cc:414)
+// ===========================================================================
+
+TEST_F(EnqueueMicrotest, TasksRegAndEnqueue_UnresolvableRegVariantId_IsInvalidUsage) {
+  // nccl_stubs.cc leaves ncclDevFuncNameToId empty, so the reg-variant arm's
+  // ncclDevFuncId returns -1 by construction. Unchecked it would dispatch as a funcId.
+  BatchPlanComm bp;
+  ScopedHook reg(g_ncclRegisterCollBuffers,
+                 [](struct ncclComm*, struct ncclTaskColl*, void**, void**,
+                    struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>*,
+                    bool* needConnect) {
+                   if (needConnect) *needConnect = false;
+                   return ncclSuccess;
+                 });
+
+  ncclTaskColl task = {};
+  task.func = ncclFuncAllReduce;      // in ll128_reg_variant_colls
+  task.protocol = NCCL_PROTO_LL128;   // ...and LL128, so the reg-variant arm runs
+  task.algorithm = NCCL_ALGO_RING;    // not NVLS: those skip the arm entirely
+  ncclIntruQueueEnqueue(&bp.c()->planner.collTaskQueue, &task);
+
+  EXPECT_EQ(ncclInvalidUsage, ncclTasksRegAndEnqueue(bp.c()));
+  EXPECT_EQ(1, reg.calls);
 }
 
 // ===========================================================================

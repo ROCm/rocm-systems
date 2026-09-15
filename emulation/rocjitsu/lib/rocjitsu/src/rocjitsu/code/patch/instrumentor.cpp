@@ -15,6 +15,7 @@
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
+#include "rocjitsu/code/patch/probe_live_in.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/isa/decoder.h"
@@ -92,23 +93,32 @@ struct AppliedSite {
   uint16_t target_pair_base = 0;
 };
 
-// Human-readable single-lane register name for spill diagnostics.
+// Human-readable register name for spill diagnostics. Ordinary registers are
+// named by prefix and index (s5, v3, acc2); special singletons carry no index.
 std::string reg_name(RegisterRef ref) {
-  const char *prefix = "?";
   switch (ref.cls) {
   case RegClass::SGPR:
-    prefix = "s";
-    break;
+    return "s" + std::to_string(ref.index);
   case RegClass::VGPR:
-    prefix = "v";
-    break;
+    return "v" + std::to_string(ref.index);
   case RegClass::ACC_VGPR:
-    prefix = "acc";
-    break;
-  default:
-    break;
+    return "acc" + std::to_string(ref.index);
+  case RegClass::TTMP:
+    return "ttmp" + std::to_string(ref.index);
+  case RegClass::EXEC:
+    return "exec";
+  case RegClass::VCC:
+    return "vcc";
+  case RegClass::SCC:
+    return "scc";
+  case RegClass::M0:
+    return "m0";
+  case RegClass::FLAT_SCRATCH:
+    return "flat_scratch";
+  case RegClass::PC:
+    return "pc";
   }
-  return std::string(prefix) + std::to_string(ref.index);
+  return "?" + std::to_string(ref.index);
 }
 
 // Largest positive byte offset encodable in the scratch store/load offset field,
@@ -686,6 +696,19 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     auto callable = build_probe_callable(*pt.probe_obj, *sym, arch_, &perr);
     if (!callable)
       return std::nullopt;
+    // Inputs the probe reads that its convention does not supply. Typically a
+    // value only the kernel prologue produces -- workitem_id_x in v31, say --
+    // which a trampoline at an arbitrary site cannot reproduce, so the probe
+    // would read whatever the instrumented kernel left behind. An ordinary
+    // uninitialized read lands here too, and is equally unusable.
+    auto live_ins = analyze_probe_live_ins(*pt.probe_obj, *sym, arch_, callable->cc, &perr);
+    if (!live_ins)
+      return std::nullopt;
+    if (!live_ins->none()) {
+      perr = "probe '" + pt.probe_symbol + "' reads " + format_register_set(*live_ins) +
+             " before defining it, and the calling convention does not supply it";
+      return std::nullopt;
+    }
     out.probes.push_back(std::move(*callable));
     probe_keys.emplace_back(pt.probe_obj, pt.probe_symbol);
     return out.probes.size() - 1;

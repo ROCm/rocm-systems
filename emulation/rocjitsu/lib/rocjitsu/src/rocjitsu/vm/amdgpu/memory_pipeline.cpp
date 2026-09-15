@@ -3,7 +3,9 @@
 
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
+#include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -22,6 +24,7 @@
 #include <cstring>
 #include <format>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -58,9 +61,10 @@ std::vector<ClusterLdsTarget> resolve_lds_write_targets(VectorMemState &d, Wavef
   return targets;
 }
 
-void write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_lane_bytes) {
+void write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_lane_bytes,
+                               uint64_t write_mask) {
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-    if ((d.lane_mask & (1ULL << lane)) == 0)
+    if ((write_mask & (1ULL << lane)) == 0)
       continue;
     uint32_t data_offset = lane * per_lane_bytes;
     if (data_offset + per_lane_bytes > d.response_data.size()) {
@@ -112,7 +116,9 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
   });
 
   if (!d.cluster_multicast || cluster_downgrades_to_ordinary) {
-    write_lds_dst_load_direct(d, wf.lds(), per_lane_bytes);
+    // GFX9/CDNA: out-of-range lanes return zeros, and those zeros are written to LDS.
+    const uint64_t write_mask = arch_is_cdna_4_or_lower(cu.arch()) ? d.exec_mask : d.lane_mask;
+    write_lds_dst_load_direct(d, wf.lds(), per_lane_bytes, write_mask);
     return MemoryAccessCompletion::Complete;
   }
 
@@ -261,6 +267,17 @@ template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cm
   switch (op) {
   case AtomicOp::SWAP:
     return src_val;
+  case AtomicOp::CONDXCHG32: {
+    static_assert(sizeof(T) == 4 || sizeof(T) == 8);
+    T result = old_val;
+    for (uint32_t shift = 0; shift < sizeof(T) * 8; shift += 32) {
+      const T half_mask = T{0xffffffffu} << shift;
+      const T store_mask = T{0x7fffffffu} << shift;
+      if ((src_val >> shift) & 0x80000000u)
+        result = (result & ~half_mask) | (src_val & store_mask);
+    }
+    return result;
+  }
   case AtomicOp::CMPSWAP:
     return (old_val == cmp_val) ? src_val : old_val;
   case AtomicOp::MSKOR:
@@ -269,6 +286,10 @@ template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cm
     return old_val + src_val;
   case AtomicOp::SUB:
     return old_val - src_val;
+  case AtomicOp::SUB_CLAMP:
+    return old_val >= src_val ? old_val - src_val : T{0};
+  case AtomicOp::COND_SUB:
+    return old_val >= src_val ? old_val - src_val : old_val;
   case AtomicOp::RSUB:
     return src_val - old_val;
   case AtomicOp::SMIN:
@@ -294,23 +315,39 @@ template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cm
   }
 }
 
-/// @brief Apply a floating-point atomic RMW operation.
-template <typename F> F apply_fp_atomic(AtomicOp op, F old_val, F src_val) {
-  switch (op) {
+// Translate the deferred request into the shared ISA floating-point contract.
+template <typename Bits>
+Bits apply_fp_atomic(const VectorMemState &state, Bits old_bits, Bits source_bits,
+                     Bits compare_bits, uint32_t denorm_mode) {
+  fp_mode::ScalarAtomicOp operation;
+  switch (state.atomic_op) {
   case AtomicOp::FADD:
-    return old_val + src_val;
+    operation = fp_mode::ScalarAtomicOp::FADD;
+    break;
   case AtomicOp::FMIN:
-    return std::fmin(old_val, src_val);
+    operation = fp_mode::ScalarAtomicOp::FMIN;
+    break;
   case AtomicOp::FMAX:
-    return std::fmax(old_val, src_val);
+    operation = fp_mode::ScalarAtomicOp::FMAX;
+    break;
+  case AtomicOp::FCMPSWAP:
+    operation = fp_mode::ScalarAtomicOp::FCMPSWAP;
+    break;
   default:
-    return old_val;
+    return old_bits;
   }
+  return fp_mode::atomic_scalar(operation, old_bits, source_bits, compare_bits, denorm_mode,
+                                state.atomic_legacy_minmax);
+}
+
+bool is_packed_add(AtomicOp op) {
+  return op == AtomicOp::PK_ADD_F16 || op == AtomicOp::PK_ADD_BF16;
 }
 
 uint32_t atomic_source_stride(const VectorMemState &d, const std::vector<uint8_t> &store_data) {
   const bool uses_two_sources =
-      (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::MSKOR);
+      (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::FCMPSWAP ||
+       d.atomic_op == AtomicOp::MSKOR);
   const uint32_t fallback = uses_two_sources ? d.elem_size * 2 : d.elem_size;
   if (d.wf_size == 0 || store_data.empty())
     return fallback;
@@ -329,10 +366,11 @@ void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid) {
   const uint32_t esz = d.elem_size;
   d.response_data.resize(d.wf_size * esz);
   const bool uses_two_sources =
-      (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::MSKOR);
+      (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::FCMPSWAP ||
+       d.atomic_op == AtomicOp::MSKOR);
   const uint32_t src_stride = atomic_source_stride(d, d.store_data);
   const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
-                      d.atomic_op == AtomicOp::FMAX);
+                      d.atomic_op == AtomicOp::FMAX || d.atomic_op == AtomicOp::FCMPSWAP);
 
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
     if (!(d.lane_mask & (1ULL << lane)))
@@ -349,11 +387,19 @@ void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid) {
             std::memcpy(&old_val, line_data + offset, 4);
 
             uint32_t new_val;
-            if (is_fp) {
-              float old_f = std::bit_cast<float>(old_val);
-              float src_f;
-              std::memcpy(&src_f, &d.store_data[lane * src_stride], 4);
-              new_val = std::bit_cast<uint32_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
+            if (is_packed_add(d.atomic_op)) {
+              uint32_t src_val;
+              std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
+              new_val = fp_mode::atomic_add_packed_16(old_val, src_val,
+                                                      d.atomic_op == AtomicOp::PK_ADD_BF16,
+                                                      /*denorm_mode=*/3);
+            } else if (is_fp) {
+              uint32_t source_bits = 0, compare_bits = 0;
+              std::memcpy(&source_bits, &d.store_data[lane * src_stride], 4);
+              if (uses_two_sources)
+                std::memcpy(&compare_bits, &d.store_data[lane * src_stride + 4], 4);
+              new_val =
+                  apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_denorm_mode);
             } else {
               uint32_t src_val = 0, cmp_val = 0;
               std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
@@ -370,10 +416,12 @@ void execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid) {
 
             uint64_t new_val;
             if (is_fp) {
-              double old_f = std::bit_cast<double>(old_val);
-              double src_f;
-              std::memcpy(&src_f, &d.store_data[lane * src_stride], 8);
-              new_val = std::bit_cast<uint64_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
+              uint64_t source_bits = 0, compare_bits = 0;
+              std::memcpy(&source_bits, &d.store_data[lane * src_stride], 8);
+              if (uses_two_sources)
+                std::memcpy(&compare_bits, &d.store_data[lane * src_stride + 8], 8);
+              new_val =
+                  apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_denorm_mode);
             } else {
               uint64_t src_val = 0, cmp_val = 0;
               std::memcpy(&src_val, &d.store_data[lane * src_stride], 8);
@@ -398,10 +446,11 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
   const uint32_t esz = d.elem_size;
   response_data.resize(d.wf_size * esz);
   const bool uses_two_sources =
-      (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::MSKOR);
+      (d.atomic_op == AtomicOp::CMPSWAP || d.atomic_op == AtomicOp::FCMPSWAP ||
+       d.atomic_op == AtomicOp::MSKOR);
   const uint32_t src_stride = atomic_source_stride(d, store_data);
   const bool is_fp = (d.atomic_op == AtomicOp::FADD || d.atomic_op == AtomicOp::FMIN ||
-                      d.atomic_op == AtomicOp::FMAX);
+                      d.atomic_op == AtomicOp::FMAX || d.atomic_op == AtomicOp::FCMPSWAP);
 
   if (d.atomic_op == AtomicOp::APPEND || d.atomic_op == AtomicOp::CONSUME) {
     uint32_t addr = 0;
@@ -442,11 +491,17 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
     if (esz == 4) {
       uint32_t old_val = lds->read32(addr);
       uint32_t new_val;
-      if (is_fp) {
-        float old_f = std::bit_cast<float>(old_val);
-        float src_f;
-        std::memcpy(&src_f, &store_data[lane * src_stride], 4);
-        new_val = std::bit_cast<uint32_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
+      if (is_packed_add(d.atomic_op)) {
+        uint32_t src_val;
+        std::memcpy(&src_val, &store_data[lane * src_stride], 4);
+        new_val = fp_mode::atomic_add_packed_16(
+            old_val, src_val, d.atomic_op == AtomicOp::PK_ADD_BF16, d.packed_denorm_mode);
+      } else if (is_fp) {
+        uint32_t source_bits = 0, compare_bits = 0;
+        std::memcpy(&source_bits, &store_data[lane * src_stride], 4);
+        if (uses_two_sources)
+          std::memcpy(&compare_bits, &store_data[lane * src_stride + 4], 4);
+        new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_lds_denorm_mode);
       } else {
         uint32_t src_val = 0, cmp_val = 0;
         std::memcpy(&src_val, &store_data[lane * src_stride], 4);
@@ -466,10 +521,11 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
           std::memcpy(&decrement, &store_data[lane * src_stride], 8);
         new_val = lds_barrier_cell_update_arrive(old_val, has_decrement ? decrement : 1);
       } else if (is_fp) {
-        double old_f = std::bit_cast<double>(old_val);
-        double src_f;
-        std::memcpy(&src_f, &store_data[lane * src_stride], 8);
-        new_val = std::bit_cast<uint64_t>(apply_fp_atomic(d.atomic_op, old_f, src_f));
+        uint64_t source_bits = 0, compare_bits = 0;
+        std::memcpy(&source_bits, &store_data[lane * src_stride], 8);
+        if (uses_two_sources)
+          std::memcpy(&compare_bits, &store_data[lane * src_stride + 8], 8);
+        new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_lds_denorm_mode);
       } else {
         uint64_t src_val = 0, cmp_val = 0;
         std::memcpy(&src_val, &store_data[lane * src_stride], 8);
@@ -503,6 +559,7 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   const uint64_t scratch_lanes = d.scratch_swizzle ? d.scratch_lane_mask & request_lanes : 0;
   const uint64_t plain_lanes = request_lanes & ~scratch_lanes;
   const uint32_t stride = d.scratch_addr_stride;
+  const uint32_t base_offset = d.scratch_addr_base_offset;
 
   if (d.is_load) {
     const uint64_t request_lanes = transpose_request_lane_mask(d);
@@ -512,20 +569,20 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
     if (scratch_request_lanes)
       l1_->load(d.per_lane_addr.data(), scratch_request_lanes, d.elem_size, d.num_elems,
                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
-                d.wf_size, wf.process_id(), stride, d.element_lane_masks.view());
+                d.wf_size, wf.process_id(), stride, base_offset, d.element_lane_masks.view());
     if (plain_request_lanes)
       l1_->load(d.per_lane_addr.data(), plain_request_lanes, d.elem_size, d.num_elems,
                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
-                d.wf_size, wf.process_id(), 0, d.element_lane_masks.view());
+                d.wf_size, wf.process_id(), 0, /*addr_base_offset=*/0, d.element_lane_masks.view());
   } else {
     if (scratch_lanes)
       l1_->store(d.per_lane_addr.data(), scratch_lanes, d.elem_size, d.num_elems,
                  d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(), stride,
-                 d.element_lane_masks.view());
+                 base_offset, d.element_lane_masks.view());
     if (plain_lanes)
       l1_->store(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems, d.store_data.data(),
                  d.mtype, d.non_temporal, d.wf_size, wf.process_id(), 0,
-                 d.element_lane_masks.view());
+                 /*addr_base_offset=*/0, d.element_lane_masks.view());
   }
 }
 

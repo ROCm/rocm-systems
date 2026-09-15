@@ -1368,7 +1368,7 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{host} @endcond
  */
 typedef struct {
-  uint32_t clk;            //!< In MHz
+  uint32_t clk;            //!< In MHz. UINT32_MAX when the clock is unavailable
   uint32_t min_clk;        //!< In MHz
   uint32_t max_clk;        //!< In MHz
   uint8_t clk_locked;      //!< True/False
@@ -2227,9 +2227,9 @@ typedef struct {
   uint16_t average_ipu_activity[AMDSMI_APU_MAX_IPU];        //!< v3_0
   uint16_t average_core_c0_activity[AMDSMI_APU_MAX_CORES];  //!< v3_0
   uint16_t average_dram_reads;                              //!< v3_0 [MB/s]
-  uint16_t average_dram_writes;                             //!< v3_0
-  uint16_t average_ipu_reads;                               //!< v3_0
-  uint16_t average_ipu_writes;                              //!< v3_0
+  uint16_t average_dram_writes;                             //!< v3_0 [MB/s]
+  uint16_t average_ipu_reads;                               //!< v3_0 [MB/s]
+  uint16_t average_ipu_writes;                              //!< v3_0 [MB/s]
 
   /**
    * @brief Power [mW]
@@ -6138,7 +6138,16 @@ typedef struct {
  *  if enough memory had been provided. It is suggest to pass AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD
  * for all AF Ids.
  *
+ *  @note A section whose offset or register count falls outside the record is skipped and the
+ *  remaining sections still decode, so a partial AF ID list returns ::AMDSMI_STATUS_SUCCESS.
+ *  The caller cannot tell an empty list from a malformed record.
+ *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @retval ::AMDSMI_STATUS_INVAL @p cper_buffer, @p afids, or @p num_afids is NULL, or @p buf_size
+ *  or @p *num_afids is zero
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_SIZE @p buf_size is smaller than a CPER header, or the
+ *  record's own length field is smaller than a CPER header or larger than @p buf_size
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA @p cper_buffer does not start with a CPER signature
  */
 amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size, uint64_t* afids,
                                            uint32_t* num_afids);
@@ -6181,6 +6190,10 @@ amdsmi_status_t amdsmi_get_gpu_ras_feature_info(amdsmi_processor_handle processo
  *
  * An empty CPER ring (no records) also returns AMDSMI_STATUS_SUCCESS with
  * entry_count == 0 and buf_size == 0.
+ *
+ * A record the library cannot parse is dropped and the scan continues, so a short entry_count
+ * does not distinguish "the ring held fewer records" from "some records were malformed". The
+ * dropped records are named in the debug log.
  *
  * @ingroup tagRasInfo
  *
@@ -9720,6 +9733,11 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
  *  depending on the driver package). No libdrm dependency is required for
  *  these APIs.
  *
+ *  @note UMA carveout is read and written through the fwupd daemon over
+ *  D-Bus. Therefore, the fwupd daemon and libdbus typically need to be present at
+ *  runtime; writes are authorized by PolicyKit (or root). When fwupd is unavailable,
+ *  these functions fall back to direct sysfs access.
+ *
  *  @par Supported ASICs (UMA carveout)
  *  UMA carveout is only available on APU parts whose VBIOS exposes the
  *  ATCS function code 0xA ("Set UMA Allocation Size") together with an
@@ -9772,7 +9790,8 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
-  uint32_t current_index; /**< Currently active carveout index */
+  uint32_t current_index; /**< Currently active carveout index; equals num_options
+                                when unknown (e.g. redacted for an unprivileged caller) */
   uint32_t num_options;   /**< Number of available options */
   amdsmi_uma_carveout_option_t
       options[AMDSMI_MAX_CARVEOUT_OPTIONS]; /**< Available carveout options */
@@ -9794,7 +9813,10 @@ typedef struct {
  *  configuration for the specified GPU. UMA carveout controls dedicated GPU memory
  *  allocation on APU systems.
  *
- *  @note This uses a kernel UAPI sysfs interface, not libdrm.
+ *  @note reads and writes through the fwupd daemon over D-Bus, which is
+ *  brokered by PolicyKit. Falls back to sysfs when fwupd is unavailable
+ *  or redacts the information for an unprivileged caller. Reading
+ *  requires fwupd >= 1.8.4; writing requires fwupd >= 2.1.1 (Ubuntu 26.04+).
  *
  *  @ingroup tagMemConfig
  *
@@ -9817,7 +9839,10 @@ amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(amdsmi_processor_handle process
  *  This function sets the UMA carveout configuration for the specified GPU.
  *  The system must be rebooted for changes to take effect.
  *
- *  @note This uses a kernel UAPI sysfs interface, not libdrm.
+ *  @note reads and writes through the fwupd daemon over D-Bus, which is
+ *  brokered by PolicyKit. Falls back to sysfs when fwupd is unavailable
+ *  or redacts the information for an unprivileged caller. Reading
+ *  requires fwupd >= 1.8.4; writing requires fwupd >= 2.1.1 (Ubuntu 26.04+).
  *
  *  @ingroup tagMemConfig
  *

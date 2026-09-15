@@ -25,8 +25,11 @@ namespace config {
 /// @param soc The SoC to serialize.
 /// @param tick Current simulation tick.
 /// @param engine_config Engine configuration to persist alongside the SoC state.
+/// @param cpu_dispatch_threads Original functional dispatch-width request. Zero
+/// selects automatic sizing; nonzero values are explicit per-SoC widths.
 void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
-                     const simdojo::SimulationEngine::Config &engine_config);
+                     const simdojo::SimulationEngine::Config &engine_config,
+                     uint32_t cpu_dispatch_threads);
 
 /// @brief Restore simulation state from a binary FlatBuffer checkpoint.
 ///
