@@ -6,8 +6,10 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter.h"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
-#include <optional>
+#include <span>
 
 namespace rocjitsu::amdgpu {
 
@@ -18,16 +20,49 @@ enum class MemoryCompletionClass : uint8_t {
   UNCLASSIFIED,
   VMEM,
   LDS,
+  GDS,
+  ASYNC_LOAD,
+  ASYNC_STORE,
   UNORDERED,
+};
+
+/// @brief One counter increment and the FIFO class used to prove its progress.
+/// @details This is byte-packed so three obligations plus EXEC policy fit in
+/// Instruction's existing padding. Consumers should use the accessors rather
+/// than depend on the encoding.
+class MemoryCounterObligation {
+public:
+  constexpr MemoryCounterObligation() = default;
+  constexpr MemoryCounterObligation(WaitCounterType wait_counter_type,
+                                    MemoryCompletionClass completion_class)
+      : encoded_((static_cast<uint8_t>(completion_class) << 4) |
+                 static_cast<uint8_t>(wait_counter_type)) {}
+
+  [[nodiscard]] constexpr bool valid() const {
+    return completion_class() != MemoryCompletionClass::UNCLASSIFIED;
+  }
+  [[nodiscard]] constexpr WaitCounterType wait_counter_type() const {
+    return static_cast<WaitCounterType>(encoded_ & 0x0f);
+  }
+  [[nodiscard]] constexpr MemoryCompletionClass completion_class() const {
+    return static_cast<MemoryCompletionClass>(encoded_ >> 4);
+  }
+
+private:
+  static_assert(static_cast<uint8_t>(WaitCounterType::ASYNCCNT) < 16);
+  static_assert(static_cast<uint8_t>(MemoryCompletionClass::UNORDERED) < 16);
+  uint8_t encoded_ = 0;
 };
 
 /// @brief Typed description of an AMDGPU instruction's memory-issue semantics.
 /// @details Most instructions contribute to one wait-counter domain. Generic
-/// FLAT instructions contribute to two simultaneous domains because hardware
-/// issues complementary vector-memory and LDS portions. The memory route does
-/// not change these obligations. exec_masked distinguishes ordinary vector
-/// memory operations from scalar memory and the few vector operations that
-/// execute independently of EXEC.
+/// FLAT and pre-GFX12 stores can contribute to multiple simultaneous domains.
+/// Each obligation carries its own completion-order class because operations
+/// sharing one counter need not form one FIFO, and one instruction's different
+/// counter domains can have different ordering guarantees. The memory route
+/// does not change these obligations. exec_masked distinguishes ordinary
+/// vector memory operations from scalar memory and the few vector operations
+/// that execute independently of EXEC.
 ///
 /// This descriptor covers instructions modeled through rocJITsu's scalar,
 /// vector, and local memory pipelines. It is not a complete inventory of every
@@ -35,9 +70,15 @@ enum class MemoryCompletionClass : uint8_t {
 /// outside those pipelines, such as messages and timestamp queries, require
 /// separate accounting by consumers that model total counter occupancy.
 struct MemoryIssueInfo {
-  WaitCounterType wait_counter_type = WaitCounterType::VMCNT;
-  MemoryCompletionClass completion_class = MemoryCompletionClass::UNCLASSIFIED;
-  std::optional<WaitCounterType> additional_wait_counter_type;
+  static constexpr size_t MAX_COUNTER_OBLIGATIONS = 3;
+
+  [[nodiscard]] std::span<const MemoryCounterObligation> counter_obligations() const {
+    return {counter_obligations_.data(), num_counter_obligations_};
+  }
+  [[nodiscard]] bool empty() const { return num_counter_obligations_ == 0; }
+
+  std::array<MemoryCounterObligation, MAX_COUNTER_OBLIGATIONS> counter_obligations_{};
+  uint8_t num_counter_obligations_ = 0;
   bool exec_masked = true;
 };
 

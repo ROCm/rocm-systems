@@ -15,6 +15,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <string>
@@ -291,9 +292,7 @@ public:
   /// @details AMDGPU generated memory-instruction constructors populate this
   /// descriptor. Other architectures and non-memory instructions return nullptr.
   [[nodiscard]] const amdgpu::MemoryIssueInfo *amdgpu_memory_issue_info() const {
-    return memory_issue_info_.completion_class == amdgpu::MemoryCompletionClass::UNCLASSIFIED
-               ? nullptr
-               : &memory_issue_info_;
+    return memory_issue_info_.empty() ? nullptr : &memory_issue_info_;
   }
 
   uint64_t flags() const { return flags_; }
@@ -392,19 +391,21 @@ public:
 protected:
   friend class Decoder;
 
-  void set_memory_issue_info(
-      amdgpu::WaitCounterType wait_counter_type, amdgpu::MemoryCompletionClass completion_class,
-      std::optional<amdgpu::WaitCounterType> additional_wait_counter_type = std::nullopt,
-      bool exec_masked = true) {
-    assert(completion_class != amdgpu::MemoryCompletionClass::UNCLASSIFIED);
-    memory_issue_info_ = {wait_counter_type, completion_class, additional_wait_counter_type,
-                          exec_masked};
+  void
+  set_memory_issue_info(std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations,
+                        bool exec_masked = true) {
+    memory_issue_info_ = {};
+    memory_issue_info_.exec_masked = exec_masked;
+    for (const auto obligation : counter_obligations) {
+      if (!obligation.valid())
+        continue;
+      assert(memory_issue_info_.num_counter_obligations_ <
+             amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS);
+      memory_issue_info_.counter_obligations_[memory_issue_info_.num_counter_obligations_++] =
+          obligation;
+    }
+    assert(!memory_issue_info_.empty());
     flags_ |= MEMORY_OP;
-  }
-
-  void set_memory_issue_info(amdgpu::WaitCounterType wait_counter_type,
-                             amdgpu::MemoryCompletionClass completion_class, bool exec_masked) {
-    set_memory_issue_info(wait_counter_type, completion_class, std::nullopt, exec_masked);
   }
 
   /// @brief Size of the instruction's encoding in bytes.

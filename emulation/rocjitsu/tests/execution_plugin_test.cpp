@@ -17,6 +17,8 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/vop1.h"
@@ -31,6 +33,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
@@ -240,9 +244,7 @@ struct HookEvent {
   uint8_t byte_mask = 0;
   uint64_t pc = 0;
   std::thread::id callback_thread;
-  WaitCounterType wait_counter_type = WaitCounterType::VMCNT;
-  MemoryCompletionClass completion_class = MemoryCompletionClass::UNCLASSIFIED;
-  std::optional<WaitCounterType> additional_wait_counter_type;
+  std::vector<MemoryCounterObligation> counter_obligations;
   std::string mnemonic;
   std::string kernel_name;
   std::string kernel_symbol;
@@ -321,9 +323,8 @@ public:
     e.pc = pc;
     e.mnemonic = inst.mnemonic();
     if (const auto *info = inst.amdgpu_memory_issue_info()) {
-      e.wait_counter_type = info->wait_counter_type;
-      e.completion_class = info->completion_class;
-      e.additional_wait_counter_type = info->additional_wait_counter_type;
+      const auto obligations = info->counter_obligations();
+      e.counter_obligations.assign(obligations.begin(), obligations.end());
     }
     events.push_back(e);
   }
@@ -3885,9 +3886,11 @@ TEST(HookOrderingTest, BeforeInstructionExposesMemoryIssueBeforeOperandReadsAndR
         return e.kind == HookEvent::BEFORE_INSTRUCTION && e.mnemonic == "s_load_dword";
       });
   ASSERT_NE(before_instruction, p->events.end());
-  EXPECT_EQ(before_instruction->wait_counter_type, WaitCounterType::LGKMCNT);
-  EXPECT_EQ(before_instruction->completion_class, MemoryCompletionClass::UNORDERED);
-  EXPECT_FALSE(before_instruction->additional_wait_counter_type);
+  ASSERT_EQ(before_instruction->counter_obligations.size(), 1u);
+  EXPECT_EQ(before_instruction->counter_obligations[0].wait_counter_type(),
+            WaitCounterType::LGKMCNT);
+  EXPECT_EQ(before_instruction->counter_obligations[0].completion_class(),
+            MemoryCompletionClass::UNORDERED);
 
   const auto first_operand_read =
       std::find_if(std::next(before_instruction), p->events.end(),
@@ -3912,10 +3915,12 @@ TEST(InstructionMetadataTest, GenericFlatHasTwoCounterObligations) {
   ASSERT_NE(generic_flat, nullptr);
   const auto *generic_issue = generic_flat->amdgpu_memory_issue_info();
   ASSERT_NE(generic_issue, nullptr);
-  EXPECT_EQ(generic_issue->wait_counter_type, WaitCounterType::VMCNT);
-  ASSERT_TRUE(generic_issue->additional_wait_counter_type);
-  EXPECT_EQ(*generic_issue->additional_wait_counter_type, WaitCounterType::LGKMCNT);
-  EXPECT_EQ(generic_issue->completion_class, MemoryCompletionClass::UNORDERED);
+  const auto generic_obligations = generic_issue->counter_obligations();
+  ASSERT_EQ(generic_obligations.size(), 2u);
+  EXPECT_EQ(generic_obligations[0].wait_counter_type(), WaitCounterType::VMCNT);
+  EXPECT_EQ(generic_obligations[0].completion_class(), MemoryCompletionClass::VMEM);
+  EXPECT_EQ(generic_obligations[1].wait_counter_type(), WaitCounterType::LGKMCNT);
+  EXPECT_EQ(generic_obligations[1].completion_class(), MemoryCompletionClass::LDS);
 
   const auto global_words =
       cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.seg = 2, .addr = 0, .saddr = 0x7F, .vdst = 1});
@@ -3923,9 +3928,64 @@ TEST(InstructionMetadataTest, GenericFlatHasTwoCounterObligations) {
   ASSERT_NE(global, nullptr);
   const auto *global_issue = global->amdgpu_memory_issue_info();
   ASSERT_NE(global_issue, nullptr);
-  EXPECT_EQ(global_issue->wait_counter_type, WaitCounterType::VMCNT);
-  EXPECT_FALSE(global_issue->additional_wait_counter_type);
-  EXPECT_EQ(global_issue->completion_class, MemoryCompletionClass::VMEM);
+  const auto global_obligations = global_issue->counter_obligations();
+  ASSERT_EQ(global_obligations.size(), 1u);
+  EXPECT_EQ(global_obligations[0].wait_counter_type(), WaitCounterType::VMCNT);
+  EXPECT_EQ(global_obligations[0].completion_class(), MemoryCompletionClass::VMEM);
+}
+
+TEST(InstructionMetadataTest, StoresAndGdsExposeEveryCounterObligation) {
+  for (const auto [arch, words] : std::array{
+           std::pair{ROCJITSU_CODE_ARCH_CDNA2, cdna2::build_mubuf(cdna2::kBufferStoreDwordMubuf)},
+           std::pair{ROCJITSU_CODE_ARCH_RDNA2,
+                     rdna2::build_mubuf(rdna2::kBufferStoreDwordMubuf)}}) {
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
+    ASSERT_NE(store, nullptr);
+    const auto *issue = store->amdgpu_memory_issue_info();
+    ASSERT_NE(issue, nullptr);
+    const auto obligations = issue->counter_obligations();
+    ASSERT_EQ(obligations.size(), 2u);
+    EXPECT_EQ(obligations[1].wait_counter_type(), WaitCounterType::EXPCNT);
+    EXPECT_EQ(obligations[1].completion_class(), MemoryCompletionClass::UNORDERED);
+  }
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  ASSERT_NE(decoder, nullptr);
+  const auto lds_words = cdna2::build_ds(cdna2::kDsReadB32Ds, {.gds = 0});
+  const auto gds_words = cdna2::build_ds(cdna2::kDsReadB32Ds, {.gds = 1});
+  std::unique_ptr<Instruction> lds(decode_valid(*decoder, lds_words.data()));
+  std::unique_ptr<Instruction> gds(decode_valid(*decoder, gds_words.data()));
+  ASSERT_NE(lds, nullptr);
+  ASSERT_NE(gds, nullptr);
+  const auto lds_obligations = lds->amdgpu_memory_issue_info()->counter_obligations();
+  const auto gds_obligations = gds->amdgpu_memory_issue_info()->counter_obligations();
+  ASSERT_EQ(lds_obligations.size(), 1u);
+  EXPECT_EQ(lds_obligations[0].completion_class(), MemoryCompletionClass::LDS);
+  ASSERT_EQ(gds_obligations.size(), 2u);
+  EXPECT_EQ(gds_obligations[0].completion_class(), MemoryCompletionClass::GDS);
+  EXPECT_EQ(gds_obligations[1].wait_counter_type(), WaitCounterType::EXPCNT);
+}
+
+TEST(InstructionMetadataTest, Cdna5AsyncOperationsExposeDistinctCompletionDomains) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  const auto load_words = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB32Vglobal);
+  const auto store_words = cdna5::build_vglobal(cdna5::kGlobalStoreAsyncFromLdsB32Vglobal);
+  const auto barrier_words = cdna5::build_vds(cdna5::kDsAtomicAsyncBarrierArriveB64Vds);
+
+  const auto expect = [&](const auto &words, MemoryCompletionClass completion) {
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    const auto obligations = inst->amdgpu_memory_issue_info()->counter_obligations();
+    ASSERT_EQ(obligations.size(), 1u);
+    EXPECT_EQ(obligations[0].wait_counter_type(), WaitCounterType::ASYNCCNT);
+    EXPECT_EQ(obligations[0].completion_class(), completion);
+  };
+  expect(load_words, MemoryCompletionClass::ASYNC_LOAD);
+  expect(store_words, MemoryCompletionClass::ASYNC_STORE);
+  expect(barrier_words, MemoryCompletionClass::ASYNC_LOAD);
 }
 
 // The immediate-halt branch frees a wave's registers the instant s_endpgm
