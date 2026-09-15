@@ -85,7 +85,7 @@ protected:
     {
         m_backend       = std::make_shared<mock_backend>();
         m_device        = std::make_shared<device_t>(m_backend, 0);
-        m_enabled.value = ALL_HIPFILE_METRICS;
+        m_enabled.value = k_all_hipfile_metrics;
     }
 
     [[nodiscard]] metrics sample(std::uint64_t timestamp)
@@ -96,7 +96,10 @@ protected:
     /// Sample for the side effect alone. Several tests need a reading already on
     /// record - to seed the bandwidth delta or the counter baseline - and never
     /// inspect it.
-    void discard_sample(std::uint64_t timestamp) { static_cast<void>(sample(timestamp)); }
+    void discard_sample(std::uint64_t timestamp)
+    {
+        static_cast<void>(sample(timestamp));
+    }
 
     std::shared_ptr<mock_backend> m_backend;
     std::shared_ptr<device_t>     m_device;
@@ -116,16 +119,16 @@ TEST_F(HipFileDeviceTest, index_and_name_track_the_profiler_device_index)
 
 TEST_F(HipFileDeviceTest, is_supported_bounds_the_hipfile_slot_not_the_profiler_index)
 {
-    const device_t high_profiler_index{ m_backend, 0, MAX_GPUS + 4 };
+    const device_t high_profiler_index{ m_backend, 0, k_max_gpus + 4 };
     EXPECT_TRUE(high_profiler_index.is_supported());
 
-    const device_t slot_past_capacity{ m_backend, MAX_GPUS, 0 };
+    const device_t slot_past_capacity{ m_backend, k_max_gpus, 0 };
     EXPECT_FALSE(slot_past_capacity.is_supported());
 }
 
 TEST_F(HipFileDeviceTest, all_metrics_supported_for_valid_ordinal)
 {
-    EXPECT_EQ(m_device->get_supported_metrics().value, ALL_HIPFILE_METRICS);
+    EXPECT_EQ(m_device->get_supported_metrics().value, k_all_hipfile_metrics);
 }
 
 TEST_F(HipFileDeviceTest, metrics_are_read_from_the_hipfile_slot_not_the_profiler_index)
@@ -141,7 +144,7 @@ TEST_F(HipFileDeviceTest, metrics_are_read_from_the_hipfile_slot_not_the_profile
 TEST_F(HipFileDeviceTest, ordinal_beyond_snapshot_supports_nothing)
 {
     // Guards the read that would otherwise run off the end of per_gpu.
-    device_t out_of_range{ m_backend, MAX_GPUS };
+    device_t out_of_range{ m_backend, k_max_gpus };
 
     EXPECT_FALSE(out_of_range.is_supported());
     EXPECT_EQ(out_of_range.get_supported_metrics().value, 0U);

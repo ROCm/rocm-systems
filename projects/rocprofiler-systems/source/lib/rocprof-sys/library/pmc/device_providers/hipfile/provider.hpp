@@ -52,7 +52,7 @@ public:
         const std::vector<std::size_t>& type_indices)
     {
         const auto slots =
-            std::min<std::size_t>(type_indices.size(), backends::hipfile::MAX_GPUS);
+            std::min<std::size_t>(type_indices.size(), backends::hipfile::k_max_gpus);
 
         std::vector<std::shared_ptr<Device>> devices;
         devices.reserve(slots);

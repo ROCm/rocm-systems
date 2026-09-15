@@ -33,6 +33,7 @@ public:
     void prepare_for_processing() override;
     void finalize_processing() override;
 
+<<<<<<< HEAD
     void handle(const kernel_dispatch_sample& sample) override;
     void handle(const scratch_memory_sample& sample) override;
     void handle(const memory_copy_sample& sample) override;
@@ -47,6 +48,24 @@ public:
     void handle(const gpu_perf_counter_sample& sample) override;
     void handle(const hipfile_pmc_sample& sample) override;
     void handle(const kfd_sample& sample) override;
+=======
+    void handle(const kernel_dispatch_sample& sample);
+    void handle(const scratch_memory_sample& sample);
+    void handle(const memory_copy_sample& sample);
+    void handle(const memory_allocate_sample& sample);
+    void handle(const region_sample& sample);
+    void handle(const in_time_sample& sample);
+    void handle(const pmc_event_with_sample& sample);
+    void handle(const backtrace_region_sample& sample);
+    void handle(const gpu_pmc_sample& sample);
+    void handle(const ainic_pmc_sample& sample);
+    void handle(const cpu_pmc_sample& sample);
+    void handle(const gpu_perf_counter_sample& sample);
+    // needs a refactor of sample_processor's handle for all modes
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
+    void handle(const hipfile_pmc_sample& sample);
+    void handle(const kfd_sample& sample);
+>>>>>>> c2bf847c1a (chore: bulk `clang-tidy` clean up)
 
 private:
     void post_process_metadata();

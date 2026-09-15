@@ -43,7 +43,7 @@ struct recorded_sample
  * same decisions without a trace cache behind them.
  *
  * The real policy stores the whole per-GPU snapshot as one hipfile_pmc_sample and lets
- * the Perfetto and RocPD processors expand it over METRIC_TABLE. This stub expands
+ * the Perfetto and RocPD processors expand it over k_metric_table. This stub expands
  * eagerly instead, because these tests assert on individual metric values; the gating
  * decisions under test are the same either way.
  */
@@ -67,8 +67,8 @@ struct stub_cache
         metadata_gpus.push_back(gpu_id);
     }
 
-    // NOLINTNEXTLINE(readability-function-size) -- needs a refactor of every collector's
-    // store_sample
+    // needs a refactor of every collector's store_sample
+    // NOLINTNEXTLINE(readability-function-size)
     static void store_sample(std::size_t device_id, const std::string& /*device_name*/,
                              const enabled_metrics& enabled_cfg,
                              const enabled_metrics& supported, const metrics& values,
@@ -80,7 +80,7 @@ struct stub_cache
         }
 
         const std::uint32_t active = enabled_cfg.value & supported.value;
-        for(const auto& metric : METRIC_TABLE)
+        for(const auto& metric : k_metric_table)
         {
             if((active & (1U << metric.bit)) == 0U)
             {
@@ -124,7 +124,12 @@ struct stub_settings
         gpu_filter      = device_filter{};
         gpu_filter.mode = device_selection_mode::all;
         set_visible_identity(2);
+<<<<<<< HEAD
         hipfile_metrics.value = ALL_HIPFILE_METRICS;
+=======
+        hipfile_metrics.value = k_all_hipfile_metrics;
+        perfetto_legacy       = false;
+>>>>>>> c2bf847c1a (chore: bulk `clang-tidy` clean up)
     }
 
     static device_filter            get_gpu_device_filter() { return gpu_filter; }
@@ -208,7 +213,7 @@ TEST_F(HipFileCollectorTest, sample_emits_every_metric_for_every_gpu)
 
     m_collector->sample(static_cast<std::int64_t>(k_ts_1));
 
-    EXPECT_EQ(stub_cache::samples.size(), 2U * METRIC_TABLE.size());
+    EXPECT_EQ(stub_cache::samples.size(), 2U * k_metric_table.size());
 }
 
 TEST_F(HipFileCollectorTest, shutdown_propagates_to_provider)
@@ -315,8 +320,8 @@ TEST(HipFileMetricGroups, groups_partition_the_metric_table)
         bits += std::popcount(metric_group_mask(group));
     }
 
-    EXPECT_EQ(combined, ALL_HIPFILE_METRICS);
-    EXPECT_EQ(bits, static_cast<int>(METRIC_TABLE.size()));
+    EXPECT_EQ(combined, k_all_hipfile_metrics);
+    EXPECT_EQ(bits, static_cast<int>(k_metric_table.size()));
 }
 
 TEST(HipFileMetricGroups, unknown_group_selects_nothing)
@@ -407,6 +412,27 @@ TEST_F(HipFileCollectorTest, devices_survive_an_unavailable_interval)
     EXPECT_FALSE(stub_cache::samples.empty());
 }
 
+<<<<<<< HEAD
+=======
+// ── Perfetto ────────────────────────────────────────────────────────────────
+
+TEST_F(HipFileCollectorTest, enabling_perfetto_does_not_change_pmc_output)
+{
+    stub_settings::set_visible_identity(1);
+    stub_settings::perfetto_legacy = true;
+    setup_and_config();
+
+    m_collector->sample(static_cast<std::int64_t>(k_ts_1));
+
+    // base::collector routes to PerfettoApi once per device whenever the legacy path is
+    // on. hipFile plugs a no-op in there (perfetto_policy), because its tracks already
+    // reach Perfetto as PMC records; a real writer would put two producers on every
+    // track. What must hold either way is that the PMC output is unchanged.
+    EXPECT_EQ(stub_perfetto::store_count, 1U);
+    EXPECT_EQ(stub_cache::samples.size(), k_metric_table.size());
+}
+
+>>>>>>> c2bf847c1a (chore: bulk `clang-tidy` clean up)
 // ── Pause ───────────────────────────────────────────────────────────────────
 
 TEST_F(HipFileCollectorTest, pause_emits_zeros_for_every_track)
@@ -420,7 +446,7 @@ TEST_F(HipFileCollectorTest, pause_emits_zeros_for_every_track)
 
     m_collector->pause(static_cast<std::int64_t>(k_ts_2));
 
-    ASSERT_EQ(stub_cache::samples.size(), METRIC_TABLE.size());
+    ASSERT_EQ(stub_cache::samples.size(), k_metric_table.size());
     for(const auto& sample : stub_cache::samples)
     {
         EXPECT_DOUBLE_EQ(sample.value, 0.0) << sample.metric;
