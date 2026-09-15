@@ -871,7 +871,7 @@ class Runtime {
   /// loaded library.
   void LoadTools();
 
-  /// @brief Load the rocjitsu hotswap hook as the first HSA tool.
+  /// @brief Load the rocjitsu hotswap hook as the first HSA tool when enabled.
   hsa_status_t LoadHotswapTool();
 
   /// @brief Call OnUnload method of each tool library.
