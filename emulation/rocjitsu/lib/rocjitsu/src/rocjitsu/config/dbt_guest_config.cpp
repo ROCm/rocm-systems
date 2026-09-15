@@ -131,7 +131,7 @@ DbtGuestConfigResult dbt_guest_from_fb(const fb::DbtGuestConfig *guest,
                                        util::DiagnosticEmitter emit_error) {
   DbtGuestConfig config;
   if (guest == nullptr)
-    return std::move(config);
+    return config;
 
   config.enabled = guest->enabled();
   if (guest->guest_isa())
@@ -169,7 +169,7 @@ DbtGuestConfigResult dbt_guest_from_fb(const fb::DbtGuestConfig *guest,
       !config.host.simulator_config_path.empty())
     return emit_error.emit()
            << "dbt_guest.simulator_config requires execution_backend=\"simulator\"";
-  return std::move(config);
+  return config;
 }
 
 std::string resolve_dbt_host_config_path(const std::string &dbt_config_path,
@@ -285,7 +285,7 @@ DbtGuestConfigResult load_dbt_guest_config_from_handoff(const DbtRuntimeConfigHa
   if (!handoff.resolved_gpu_id && config.enabled && config.host.gpu_id == 0)
     return emit_error.emit() << "runtime config handoff must contain a resolved KFD gpu_id for "
                                 "automatic DBT host selection";
-  return std::move(config);
+  return config;
 }
 
 DbtGuestConfigResult load_dbt_guest_config_from_runtime_config(util::DiagnosticEmitter emit_error) {

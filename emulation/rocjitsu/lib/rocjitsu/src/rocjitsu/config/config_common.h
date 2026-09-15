@@ -88,7 +88,7 @@ inline FailureOr<KfdDeviceConfig> kfd_device_from_fb(const fb::KfdDeviceInfo *de
                                                      util::DiagnosticEmitter emit_error = {}) {
   KfdDeviceConfig config;
   if (device == nullptr)
-    return std::move(config);
+    return config;
 
   config.present = true;
   config.gpu_id = device->gpu_id();
@@ -135,7 +135,7 @@ inline FailureOr<KfdDeviceConfig> kfd_device_from_fb(const fb::KfdDeviceInfo *de
   config.capability = device->capability();
   config.capability2 = device->capability2();
   config.debug_prop = device->debug_prop();
-  return std::move(config);
+  return config;
 }
 
 } // namespace config
