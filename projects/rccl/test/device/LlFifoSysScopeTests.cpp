@@ -9,8 +9,8 @@
 // hangs at slot reuse (NCCL_STEPS=8, first hang on the 9th op) unless both the
 // flag poll and the FIFO store use system-scope b128.
 //
-//   Gfx1250EnablesSysScope     — compile-time guard check (1 GPU); verifies the
-//                                macro is 1 on gfx1250, 0 elsewhere
+//   Gfx1250EnablesSysScope     — device-side guard check (1 GPU); verifies the
+//                                macro is 1 on gfx1250 (default build), 0 elsewhere
 //   FifoLineSysScopeRoundtrip  — b128 store+load intrinsic sanity check (1 GPU);
 //                                mirrors prims_ll storeLL/loadLLLineB128 shape
 //   SiblingBroadcastSlotReuse  — 64 Ring broadcasts (LL and LL128) on a sibling
@@ -44,11 +44,14 @@ union alignas(16) TestLLLine {
   uint64_t v[2];
 };
 
-__global__ void kernelSysScopeEnabled(int* out) {
-#if RCCL_LL_FIFO_SYS_SCOPE
-  *out = 1;
+// Writes RCCL_LL_FIFO_SYS_SCOPE to out[0] and the expected value to out[1].
+// Both are evaluated in the device pass, avoiding the host/device macro mismatch.
+__global__ void kernelSysScopeEnabled(int* out, bool isGfx1250Device) {
+  out[0] = RCCL_LL_FIFO_SYS_SCOPE;
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  out[1] = isGfx1250Device ? 1 : 0;
 #else
-  *out = 0;
+  out[1] = 0;  // builtins disabled at build time
 #endif
 }
 
@@ -110,8 +113,27 @@ bool findSiblingPair(int* devA, int* devB)
   return false;
 }
 
-void runSiblingBroadcastSlotReuse(int devA, int devB)
-{
+// Factory for sibling broadcast test configs. The parent TEST body gates on
+// findSiblingPair so the skip is visible in the report; the child just runs.
+ProcessIsolatedTestRunner::TestConfig makeSiblingBroadcastConfig(const char* name,
+                                                                  const char* proto) {
+  return ProcessIsolatedTestRunner::TestConfig(name, []() {
+           int a = 0, b = 1;
+           ASSERT_TRUE(findSiblingPair(&a, &b)) << "parent should have skipped";
+           runSiblingBroadcastSlotReuse(a, b);
+         })
+    .withEnvironment({
+      {"NCCL_PROTO", proto},
+      {"NCCL_ALGO", "Ring"},
+      {"RCCL_DDA_ENABLE", "0"},
+      {"NCCL_IB_DISABLE", "1"},
+      {"NCCL_SOCKET_IFNAME", "lo"},
+    })
+    .withTimeout(std::chrono::seconds(180))
+    .withNumGpus(2);
+}
+
+void runSiblingBroadcastSlotReuse(int devA, int devB) {
   const int devs[2] = {devA, devB};
   ncclComm_t comms[2] = {};
   ASSERT_EQ(ncclCommInitAll(comms, 2, devs), ncclSuccess);
@@ -172,19 +194,17 @@ void runSiblingBroadcastSlotReuse(int devA, int devB)
 
 TEST_F(DeviceTestBase, Gfx1250EnablesSysScope)
 {
-  DeviceBuffer<int> d_out(1);
-  kernelSysScopeEnabled<<<1, 1>>>(d_out.ptr);
+  DeviceBuffer<int> d_out(2);
+  const bool gfx1250 = isGfx1250(0);
+  kernelSysScopeEnabled<<<1, 1>>>(d_out.ptr, gfx1250);
   syncAndCheck();
-  const int enabled = d_out.download();
-  if (isGfx1250(0)) {
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-    EXPECT_EQ(enabled, 1) << "RCCL_LL_FIFO_SYS_SCOPE must be 1 in gfx1250 device code";
-#else
-    EXPECT_EQ(enabled, 0) << "DWORDX4_INTRINSICS=OFF disables sys-scope even on gfx1250";
-#endif
-  } else {
-    EXPECT_EQ(enabled, 0) << "RCCL_LL_FIFO_SYS_SCOPE is gfx1250-only";
-  }
+  std::vector<int> h(2);
+  ASSERT_EQ(hipMemcpy(h.data(), d_out.ptr, 2 * sizeof(int), hipMemcpyDeviceToHost), hipSuccess);
+  const int actual = h[0];
+  const int expected = h[1];
+  EXPECT_EQ(actual, expected)
+    << "RCCL_LL_FIFO_SYS_SCOPE mismatch: got " << actual << ", expected " << expected
+    << " (gfx1250=" << gfx1250 << ")";
 }
 
 TEST_F(DeviceTestBase, FifoLineSysScopeRoundtrip)
@@ -201,48 +221,21 @@ TEST_F(DeviceTestBase, FifoLineSysScopeRoundtrip)
 
 TEST(LlFifoSysScope, SiblingBroadcastSlotReuse_LL)
 {
-  RUN_ISOLATED_TESTS(
-    ProcessIsolatedTestRunner::TestConfig("LlFifoSysScope.SiblingBroadcastSlotReuse_LL",
-                                          []() {
-                                            int a = 0, b = 1;
-                                            if (!findSiblingPair(&a, &b)) {
-                                              GTEST_SKIP()
-                                                << "needs visible gfx1250 DPX sibling devices";
-                                            }
-                                            runSiblingBroadcastSlotReuse(a, b);
-                                          })
-      .withEnvironment({
-        {"NCCL_PROTO", "LL"},
-        {"NCCL_ALGO", "Ring"},
-        {"RCCL_DDA_ENABLE", "0"},
-        {"NCCL_IB_DISABLE", "1"},
-        {"NCCL_SOCKET_IFNAME", "lo"},
-      })
-      .withTimeout(std::chrono::seconds(180))
-      .withNumGpus(2));
+  int a, b;
+  if (!findSiblingPair(&a, &b)) {
+    GTEST_SKIP() << "needs visible gfx1250 DPX sibling devices";
+  }
+  RUN_ISOLATED_TESTS(makeSiblingBroadcastConfig("LlFifoSysScope.SiblingBroadcastSlotReuse_LL", "LL"));
 }
 
 TEST(LlFifoSysScope, SiblingBroadcastSlotReuse_LL128)
 {
+  int a, b;
+  if (!findSiblingPair(&a, &b)) {
+    GTEST_SKIP() << "needs visible gfx1250 DPX sibling devices";
+  }
   RUN_ISOLATED_TESTS(
-    ProcessIsolatedTestRunner::TestConfig("LlFifoSysScope.SiblingBroadcastSlotReuse_LL128",
-                                          []() {
-                                            int a = 0, b = 1;
-                                            if (!findSiblingPair(&a, &b)) {
-                                              GTEST_SKIP()
-                                                << "needs visible gfx1250 DPX sibling devices";
-                                            }
-                                            runSiblingBroadcastSlotReuse(a, b);
-                                          })
-      .withEnvironment({
-        {"NCCL_PROTO", "LL128"},
-        {"NCCL_ALGO", "Ring"},
-        {"RCCL_DDA_ENABLE", "0"},
-        {"NCCL_IB_DISABLE", "1"},
-        {"NCCL_SOCKET_IFNAME", "lo"},
-      })
-      .withTimeout(std::chrono::seconds(180))
-      .withNumGpus(2));
+    makeSiblingBroadcastConfig("LlFifoSysScope.SiblingBroadcastSlotReuse_LL128", "LL128"));
 }
 
 } // namespace RcclUnitTesting
