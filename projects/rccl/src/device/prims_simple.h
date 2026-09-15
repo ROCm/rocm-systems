@@ -118,6 +118,7 @@ class Primitives<T, RedOp, Fan, Direct,
 
   template <int DirectRecv, int DirectSend, int Recv, int Send, int Src, int Dst>
   __device__ __forceinline__ void waitPeer(intptr_t srcIx, intptr_t dstIx, int offset, int nelts) {
+    sqtt_marker_enter("PRIM_SIMPLE_WAIT_PEER");
     const bool isSendNotRecv = (Send && Recv) ? (flags & RoleWaitSend) : Send;
     // Yes, for some template arguments this code will be unreachable.  That's fine.
     // coverity[dead_error_line]
@@ -185,6 +186,7 @@ class Primitives<T, RedOp, Fan, Direct,
       }
       step += StepPerSlice;
     }
+    sqtt_marker_exit("PRIM_SIMPLE_WAIT_PEER");
   }
 
   template <int Recv, int Send>

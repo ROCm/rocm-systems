@@ -25,7 +25,7 @@
 
 #include "libhsakmt.h"
 #include "fmm.h"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>

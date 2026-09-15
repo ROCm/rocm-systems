@@ -160,12 +160,23 @@ public:
     waves_[wave]->checkVgprWriteLanes(reg, laneMask, byteMask);
   }
 
-  void checkSgprRead(int wave, int reg) {
-    waves_[wave]->checkScalarRead(RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg), 1});
+  void checkSgprRead(int wave, int reg, int width = 1) {
+    waves_[wave]->checkScalarRead(
+        RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg), static_cast<uint8_t>(width)});
+  }
+
+  void checkSgprWrite(int wave, int reg, int width = 1) {
+    waves_[wave]->checkScalarWrite(
+        RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg), static_cast<uint8_t>(width)});
   }
 
   void checkTtmpRead(int wave, int reg) {
     waves_[wave]->checkScalarRead(RegisterRef{RegClass::TTMP, static_cast<uint16_t>(reg), 1});
+  }
+
+  void checkTtmpWrite(int wave, int reg, int width = 1) {
+    waves_[wave]->checkScalarWrite(
+        RegisterRef{RegClass::TTMP, static_cast<uint16_t>(reg), static_cast<uint8_t>(width)});
   }
 
   void checkLdsRead(int wave, int lane, int addr, int bytes) {

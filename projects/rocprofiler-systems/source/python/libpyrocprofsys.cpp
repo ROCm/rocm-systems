@@ -22,14 +22,13 @@
 #include <timemory/mpl/policy.hpp>
 #include <timemory/operations/types/file_output_message.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
-#include <timemory/utility/filepath.hpp>
-#include <timemory/utility/macros.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic/macros.hpp>
 
 #include <pybind11/detail/common.h>
 #include <pybind11/operators.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/pytypes.h>
 #include <pyerrors.h>
 
 #include <atomic>
@@ -132,7 +131,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             _is_initialized = true;
             _register_pause_callbacks();
             rocprofsys_set_instrumented(
-                static_cast<int>(rocprofsys::dl::InstrumentMode::PythonProfile));
+                static_cast<int>(rocprofsys::dl::instrument_mode::python_profile));
             rocprofsys_set_mpi(_get_use_mpi());
             std::string _cmd      = {};
             std::string _cmd_line = {};
@@ -302,7 +301,7 @@ get_frame_code(PyFrameObject* frame)
 }
 //
 void
-profiler_function(py::object pframe, const char* swhat, py::object arg)
+profiler_function(py::object pframe, const char* swhat, [[maybe_unused]] py::object arg)
 {
     if(get_paused() > 0 || g_library_paused.load(std::memory_order_relaxed)) return;
 
@@ -545,9 +544,6 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         case PyTrace_C_RETURN: _profiler_return(); break;
         default: break;
     }
-
-    // don't do anything with arg
-    tim::consume_parameters(arg);
 }
 //
 py::module
@@ -815,7 +811,7 @@ generate(py::module& _pymod)
         _name = fmt::format(
             "{}.json", std::regex_replace(_name, std::regex{ "(.*)(\\.json$)" }, "$1"));
         std::ofstream ofs{};
-        if(tim::filepath::open(ofs, _name))
+        if(rocprofsys::path::create_parent_dirs_and_open_ofstream(ofs, _name))
         {
             tim::operation::file_output_message<rocprofsys::coverage::code_coverage>{}(
                 _name, std::string{ "coverage" });

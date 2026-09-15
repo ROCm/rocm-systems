@@ -18,3 +18,4 @@ functions themselves.
 
 .. doxygengroup:: sync
    :content-only:
+   :members:

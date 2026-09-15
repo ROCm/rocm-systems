@@ -248,20 +248,13 @@ protected:
 class TraceMemoryManager : public MemoryManager
 {
 public:
-    TraceMemoryManager(hsa_agent_t                          agent,
+    TraceMemoryManager(aqlprofile_agent_handle_t            agent,
                        aqlprofile_memory_alloc_callback_t   alloc,
                        aqlprofile_memory_dealloc_callback_t dealloc,
                        aqlprofile_memory_copy_t             _copy_fn,
                        void*                                data)
     : MemoryManager(agent, alloc, dealloc, data)
     , copy_fn(_copy_fn)
-    {}
-
-    TraceMemoryManager(aqlprofile_agent_handle_t            agent,
-                       aqlprofile_memory_alloc_callback_t   alloc,
-                       aqlprofile_memory_dealloc_callback_t dealloc,
-                       void*                                data)
-    : MemoryManager(agent, alloc, dealloc, data)
     {}
 
     void* AddExtraOutputBuf()
@@ -271,6 +264,15 @@ public:
         flags.memory_hint   = AQLPROFILE_MEMORY_HINT_DEVICE_NONCOHERENT;
         extra_output_buffers.emplace_back(AllocMemory(outputbuf_size, flags));
         return extra_output_buffers.back().get();
+    }
+
+    // Host-visible, GPU-mapped scratch used as the landing buffer for trace readback.
+    std::unique_ptr<void, MemoryDeleter> AllocHostBuffer(size_t size)
+    {
+        aqlprofile_buffer_desc_flags_t flags{};
+        flags.host_access = flags.device_access = true;
+        flags.memory_hint                       = AQLPROFILE_MEMORY_HINT_HOST;
+        return AllocMemory(size, flags);
     }
 
     void* AddExtraCmdBuf(size_t size)
@@ -351,7 +353,7 @@ protected:
 class CodeobjMemoryManager : public MemoryManager
 {
 public:
-    CodeobjMemoryManager(hsa_agent_t                          agent,
+    CodeobjMemoryManager(aqlprofile_agent_handle_t            agent,
                          aqlprofile_memory_alloc_callback_t   alloc,
                          aqlprofile_memory_dealloc_callback_t dealloc,
                          size_t                               size,
