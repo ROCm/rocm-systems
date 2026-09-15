@@ -218,9 +218,10 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
                                         uint32_t dispatch_id) {
   const uint32_t ordinary_vgprs =
       std::min(num_vgprs, isa_properties(arch()).max_addressable_vgprs_per_wf);
-  const uint32_t accvgpr_capacity = vgpr_allocation_block_size() > ACC_VGPR_OFFSET
-                                        ? vgpr_allocation_block_size() - ACC_VGPR_OFFSET
-                                        : 0;
+  const uint32_t accvgpr_capacity =
+      arch_is_cdna_4_or_lower(arch()) && vgpr_allocation_block_size() > ACC_VGPR_OFFSET
+          ? vgpr_allocation_block_size() - ACC_VGPR_OFFSET
+          : 0;
   return dispatch_wf(wg_id, pc, num_sgprs,
                      WaveVgprAllocation{num_vgprs, ordinary_vgprs, accvgpr_capacity}, wave_size,
                      dispatch_id);
@@ -259,9 +260,10 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
                                            uint32_t wave_size, uint32_t dispatch_id) {
   const uint32_t ordinary_vgprs =
       std::min(num_vgprs, isa_properties(arch()).max_addressable_vgprs_per_wf);
-  const uint32_t accvgpr_capacity = vgpr_allocation_block_size() > ACC_VGPR_OFFSET
-                                        ? vgpr_allocation_block_size() - ACC_VGPR_OFFSET
-                                        : 0;
+  const uint32_t accvgpr_capacity =
+      arch_is_cdna_4_or_lower(arch()) && vgpr_allocation_block_size() > ACC_VGPR_OFFSET
+          ? vgpr_allocation_block_size() - ACC_VGPR_OFFSET
+          : 0;
   return dispatch_wf_at(wf_id, wg_id, pc, num_sgprs,
                         WaveVgprAllocation{num_vgprs, ordinary_vgprs, accvgpr_capacity}, wave_size,
                         dispatch_id);
@@ -281,9 +283,10 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
       dispatched_wave_size > wf->max_wf_size_)
     return nullptr;
   const uint32_t ordinary_limit = isa_properties(arch()).max_addressable_vgprs_per_wf;
-  const uint32_t accvgpr_capacity = vgpr_allocation_block_size() > ACC_VGPR_OFFSET
-                                        ? vgpr_allocation_block_size() - ACC_VGPR_OFFSET
-                                        : 0;
+  const uint32_t accvgpr_capacity =
+      arch_is_cdna_4_or_lower(arch()) && vgpr_allocation_block_size() > ACC_VGPR_OFFSET
+          ? vgpr_allocation_block_size() - ACC_VGPR_OFFSET
+          : 0;
   if (num_sgprs == 0 || num_sgprs > config_.sgprs_per_wf || vgprs.total == 0 ||
       vgprs.total > vgpr_allocation_block_size() || vgprs.ordinary > ordinary_limit ||
       vgprs.accumulator > accvgpr_capacity)

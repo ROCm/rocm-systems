@@ -58,6 +58,25 @@ struct WaveDebugFixture {
   }
 };
 
+TEST(WaveDebugTest, ArchitecturesWithoutAccumulatorsDoNotAllocateAnAccumulatorBank) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    WaveDebugFixture fx(arch);
+    // Reject an explicitly requested accumulator bank before allocating a slot.
+    EXPECT_EQ(fx.cu->dispatch_wf(0, kKernelAddr, SGPRS_PER_WF,
+                                amdgpu::WaveVgprAllocation{VGPRS_PER_WF, VGPRS_PER_WF, 1}),
+              nullptr);
+    auto *wave = fx.dispatch(kKernelAddr);
+    ASSERT_NE(wave, nullptr);
+    EXPECT_EQ(wave->num_accvgprs(), 0u);
+
+    WaveDebugFixture fixed_slot(arch);
+    wave = fixed_slot.cu->dispatch_wf_at(0, 0, kKernelAddr, SGPRS_PER_WF, VGPRS_PER_WF);
+    ASSERT_NE(wave, nullptr);
+    EXPECT_EQ(wave->num_accvgprs(), 0u);
+  }
+}
+
 TEST(WaveDebugTest, STrapExecutesConfiguredTrapHandlerInstructions) {
   WaveDebugFixture fx;
   fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
