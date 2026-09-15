@@ -76,6 +76,7 @@ SUPPORTED_DATATYPES: dict[str, dict[str, OpsSupport]] = {
         "FP4": OpsSupport.MATRIX,
         "FP6": OpsSupport.MATRIX,
         "FP8": OpsSupport.MATRIX,
+        "MXFP8": OpsSupport.MATRIX,
         "FP16": OpsSupport.VALU | OpsSupport.MATRIX,
         "BF16": OpsSupport.MATRIX,
         "FP32": OpsSupport.VALU | OpsSupport.MATRIX,
@@ -366,7 +367,12 @@ def calc_ceilings(
 
         peak_matrix = 0.0
         if OpsSupport.MATRIX in SUPPORTED_DATATYPES[mspec.gpu_arch][dtype]:
-            target_precision = dtype if dtype.startswith("I") else f"F{dtype[2:]}"
+            if dtype.startswith("I"):
+                target_precision = dtype
+            elif dtype.startswith("MX"):
+                target_precision = f"MXF{dtype[4:]}"
+            else:
+                target_precision = f"F{dtype[2:]}"
 
             try:
                 matrix_key = (
@@ -844,7 +850,12 @@ def _expected_benchmark_columns(
     columns.extend(f"{cache_level}Bw" for cache_level in cache_hierarchy)
 
     if OpsSupport.MATRIX in SUPPORTED_DATATYPES[mspec.gpu_arch][dtype]:
-        target_precision = dtype if dtype.startswith("I") else f"F{dtype[2:]}"
+        if dtype.startswith("I"):
+            target_precision = dtype
+        elif dtype.startswith("MX"):
+            target_precision = f"MXF{dtype[4:]}"
+        else:
+            target_precision = f"F{dtype[2:]}"
         columns.append(
             f"{roofline_parameters['matrix_ops_type']}{target_precision}{ops_flops}"
         )
