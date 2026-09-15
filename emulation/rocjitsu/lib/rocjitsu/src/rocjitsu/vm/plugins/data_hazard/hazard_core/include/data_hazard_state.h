@@ -181,16 +181,34 @@ struct EngineGlobalAccessInfo {
   bool valid = false;
 };
 
+/// A global shadow entry spans four bytes (one aligned dword); retention is
+/// partitioned into one bucket per byte.
+inline constexpr size_t kGlobalShadowEntryBytes = 4;
+
+/// Distinct foreign workgroups retained per byte. Two is the tight bound for the
+/// pairwise cross-workgroup race check: any later access to a byte differs from
+/// at least one of the two workgroups held for it, so a conflicting partner is
+/// always still there to find. A third distinct workgroup on a byte evicts the
+/// older of its two, and the byte still keeps two distinct foreign workgroups.
+inline constexpr size_t kGlobalBytePartners = 2;
+
 /// Accesses held per four-byte entry so a later conflicting access can still
-/// find the one it races. One entry spans four bytes, and accesses narrower
-/// than a dword share it through their byte masks, so disjoint sub-dword
-/// accesses from different workgroups accumulate here without racing each
-/// other. Too few slots evict an earlier access before a later one can conflict
-/// with it, missing the race (writers self-report, but reads and atomics do
-/// not). Eight is the tight bound for a four-byte entry: each of the four bytes
-/// can be read by two foreign workgroups before a write to any one byte must
-/// still find that byte's partner reader.
-using EngineGlobalAccessSlots = std::array<EngineGlobalAccessInfo, 8>;
+/// find the one it races. Accesses narrower than a dword share the entry through
+/// their byte masks, so disjoint sub-dword accesses from different workgroups
+/// accumulate without racing each other. Too few retained partners evict an
+/// earlier access before a later one can conflict with it, missing the race
+/// (writers self-report, but reads and atomics do not).
+///
+/// Retention is partitioned by byte, not pooled across the entry: a flood of
+/// accesses on one byte can only evict within that byte's own bucket, never
+/// displace another byte's retained partner. That makes the bound hold by
+/// construction -- eight entries in total, but as four bytes each keeping two
+/// distinct foreign workgroups -- so a write to any byte still finds that byte's
+/// partner however the accesses interleave. A flat pool of the same eight would
+/// be order-dependent: seven readers of one byte could consume the slots a later
+/// byte's reader needs, and its WAR race would be missed.
+using EngineGlobalBytePartners = std::array<EngineGlobalAccessInfo, kGlobalBytePartners>;
+using EngineGlobalAccessSlots = std::array<EngineGlobalBytePartners, kGlobalShadowEntryBytes>;
 
 struct EngineGlobalShadowEntry {
   EngineGlobalAccessSlots writers;

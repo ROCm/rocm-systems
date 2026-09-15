@@ -22,6 +22,8 @@ namespace {
 
 constexpr uint64_t kGlobalShadowAlignment = 4;
 constexpr uint64_t kGlobalShadowAlignMask = ~(kGlobalShadowAlignment - 1);
+static_assert(kGlobalShadowAlignment == kGlobalShadowEntryBytes,
+              "byte-partitioned retention must span exactly one shadow entry");
 
 // How one vector register file is looked up in wave state and named in a
 // report. VGPRs and accumulator VGPRs run the same hazard logic over their own
@@ -254,10 +256,16 @@ uint8_t entry_byte_mask(uint64_t entry_address, uint64_t start, uint64_t end) {
 const EngineGlobalAccessInfo *find_conflicting_access(const EngineGlobalAccessSlots &slots,
                                                       const EngineInstructionContext &ctx,
                                                       uint8_t byte_mask, bool writers_only) {
-  for (const auto &slot : slots) {
-    if (slot.valid && (slot.byte_mask & byte_mask) != 0 && !same_workgroup(slot, ctx) &&
-        (!writers_only || slot.is_write))
-      return &slot;
+  // Retention is partitioned by byte, so only the buckets of the bytes this
+  // access touches can hold a conflict. A slot in bucket @p byte covers that
+  // byte by construction, which is the overlap the flat scan used to test.
+  for (size_t byte = 0; byte < slots.size(); ++byte) {
+    if ((byte_mask & (1u << byte)) == 0)
+      continue;
+    for (const auto &slot : slots[byte]) {
+      if (slot.valid && !same_workgroup(slot, ctx) && (!writers_only || slot.is_write))
+        return &slot;
+    }
   }
   return nullptr;
 }
@@ -268,39 +276,63 @@ const EngineGlobalAccessInfo *find_conflicting_access(const EngineGlobalAccessSl
 uint8_t coverage_by_same_workgroup(const EngineGlobalAccessSlots &slots,
                                    const EngineInstructionContext &ctx, uint8_t byte_mask) {
   uint8_t covered = 0;
-  for (const auto &slot : slots) {
-    if (slot.valid && same_workgroup(slot, ctx))
-      covered = static_cast<uint8_t>(covered | slot.byte_mask);
+  for (size_t byte = 0; byte < slots.size(); ++byte) {
+    if ((byte_mask & (1u << byte)) == 0)
+      continue;
+    for (const auto &slot : slots[byte]) {
+      if (slot.valid && same_workgroup(slot, ctx)) {
+        covered = static_cast<uint8_t>(covered | (1u << byte));
+        break;
+      }
+    }
   }
-  return static_cast<uint8_t>(covered & byte_mask);
+  return covered;
 }
 
-/// Retains @p current while keeping the slots on distinct workgroups: a repeat
-/// from a workgroup already held widens that slot's byte coverage instead of
-/// consuming the slot holding another workgroup, and a newcomer takes a free
-/// slot before any is displaced. When every slot is full -- more distinct
-/// workgroups have touched the entry than it can hold before any synchronizing
-/// event -- the newcomer displaces the last slot, so the earlier accesses a
-/// future conflict is most likely to need stay retained. This is only reached
-/// once the whole array is exhausted, which for a four-byte entry means more
-/// distinct workgroups than its eight slots.
+/// Retains @p current in the per-byte bucket of every byte it covers, keeping
+/// each bucket on distinct workgroups. Within a byte: a repeat from a workgroup
+/// already held refreshes its slot instead of consuming the slot holding another
+/// workgroup, a newcomer takes a free slot before any is displaced, and when
+/// both partners are full the byte drops its oldest and keeps the newest beside
+/// the newcomer -- so the byte always retains two distinct foreign workgroups a
+/// later conflict can find. Eviction is confined to the contended byte, so a
+/// flood of accesses on one byte never displaces another byte's partner.
 void record_access(EngineGlobalAccessSlots &slots, const EngineInstructionContext &ctx,
                    const EngineGlobalAccessInfo &current) {
-  for (auto &slot : slots) {
-    if (slot.valid && same_workgroup(slot, ctx)) {
-      const uint8_t covered = static_cast<uint8_t>(slot.byte_mask | current.byte_mask);
-      slot = current;
-      slot.byte_mask = covered;
-      return;
+  for (size_t byte = 0; byte < slots.size(); ++byte) {
+    if ((current.byte_mask & (1u << byte)) == 0)
+      continue;
+    auto &partners = slots[byte];
+
+    bool placed = false;
+    for (auto &slot : partners) {
+      if (slot.valid && same_workgroup(slot, ctx)) {
+        slot = current;
+        placed = true;
+        break;
+      }
     }
-  }
-  for (auto &slot : slots) {
-    if (!slot.valid) {
-      slot = current;
-      return;
+    if (placed)
+      continue;
+
+    for (auto &slot : partners) {
+      if (!slot.valid) {
+        slot = current;
+        placed = true;
+        break;
+      }
     }
+    if (placed)
+      continue;
+
+    // Every partner holds another workgroup: drop the oldest and append the
+    // newcomer, retaining the most recent distinct foreign workgroups for this
+    // byte. Same-workgroup repeats never reach here, so the kept slots stay
+    // distinct from each other and from the newcomer.
+    for (size_t i = 1; i < partners.size(); ++i)
+      partners[i - 1] = partners[i];
+    partners.back() = current;
   }
-  slots.back() = current;
 }
 
 EngineWarning make_global_race_warning(const EngineInstructionContext &ctx,

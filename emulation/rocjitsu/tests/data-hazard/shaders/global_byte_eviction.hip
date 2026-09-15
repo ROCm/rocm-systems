@@ -11,45 +11,54 @@
 
 // mutate: memory
 //
-// Cross-workgroup sub-dword eviction pattern.
+// Cross-workgroup sub-dword eviction under a single-byte flood.
 //
-// Four single-thread workgroups touch bytes of ONE 4-byte global word:
+// Ten single-thread workgroups touch bytes of ONE 4-byte global word. Byte 0 is
+// read heavily so it floods the shadow's access history; byte 1 keeps a lone
+// reader that a later write to byte 1 must still race:
 //
-//     WG0 reads data[0]   (byte 0)   ─┐
-//     WG1 reads data[1]   (byte 1)    ├─ disjoint byte READS, one shared load
-//     WG2 reads data[2]   (byte 2)   ─┘
-//     WG3 reads data[1]   (byte 1)   ── the PROBE, a separate load
+//     WG0..6 read data[0]  (byte 0)  ─ seven readers flood byte 0
+//     WG7    reads data[1] (byte 1)  ─ byte 1's lone reader (must survive)
+//     WG8    reads data[0] (byte 0)  ─ one more byte-0 read, forcing an eviction
+//     WG9    reads data[1] (byte 1)  ─ the PROBE, a separate load
 //
 // Every access is an ordinary read, so the baseline is race-free and
 // deterministic: reads never race reads, whatever order the workgroups run in.
 //
-// The `data_hazard` global shadow keeps a small array of per-workgroup access
-// slots per 4-byte word. WG0/1/2's disjoint-byte reads accumulate in that
-// array WITHOUT flagging (reads do not race reads). With only two slots, the
-// middle byte's reader (WG1 @ byte 1) is evicted before it can be raced.
+// The `data_hazard` global shadow keeps a small, fixed number of per-workgroup
+// access slots per 4-byte word. A FLAT pool of those slots is order-dependent:
+// byte 0's seven readers fill the slots, byte 1's reader (WG7) takes the last
+// one, then WG8's byte-0 read overwrites it — evicting byte 1's only reader.
 //
 // The mutation harness turns the PROBE load into a byte store (read -> write).
-// WG3 then WRITES byte 1, which must race WG1's read of byte 1 (WAR). With the
-// buggy two-slot array WG1's read has already been evicted, so the race is
-// MISSED -> false negative. Growing the slot array so every byte keeps its
-// foreign readers restores detection -> the mutant is DETECTED.
+// WG9 then WRITES byte 1, which must race WG7's read of byte 1 (WAR). With the
+// evicted reader gone the race is MISSED -> false negative. Partitioning
+// retention per byte keeps byte 1's reader however busy byte 0 gets, so the
+// mutant is DETECTED.
 //
-// The disjoint-byte load `data[wg]` and the probe load `data[1]` must stay two
-// distinct instructions so the harness can mutate the probe alone; `volatile`
-// keeps the compiler from folding them into one address-selected load.
+// Only bytes 0 and 1 are touched, and each by more than one workgroup, so every
+// load the harness may rewrite as a store forms a real cross-workgroup race —
+// no rewrite yields a spurious race-free "miss". The flood load `data[0]` and
+// the byte-1 loads must stay distinct instructions so the harness can mutate the
+// probe alone; `volatile` keeps the compiler from folding them into one
+// address-selected load.
 __global__ void global_byte_eviction(const volatile unsigned char* data, int* result) {
     unsigned int wg = blockIdx.x;
     int          v;
-    if (wg < 3) {
-        v = data[wg]; // disjoint byte reads: WG0->b0, WG1->b1, WG2->b2
+    if (wg < 7) {
+        v = data[0]; // WG0..6: flood byte 0
+    } else if (wg == 7) {
+        v = data[1]; // WG7: byte 1's lone reader (must survive the flood)
+    } else if (wg == 8) {
+        v = data[0]; // WG8: one more byte-0 read, evicting the last flat slot
     } else {
-        v = data[1]; // PROBE read of byte 1 (mutated to a byte store)
+        v = data[1]; // WG9: PROBE read of byte 1 (mutated to a byte store)
     }
     result[wg] = v;
 }
 
 int main() {
-    constexpr int numBlocks = 4;
+    constexpr int numBlocks = 10;
 
     // One 4-byte word, one distinct nonzero value per byte.
     std::vector<unsigned char> data = {10, 20, 30, 40};
@@ -80,8 +89,9 @@ int main() {
     }
     std::cout << "]" << std::endl;
 
-    // WG0..2 read their own byte; WG3 reads byte 1 like WG1.
-    const int expected[numBlocks] = {data[0], data[1], data[2], data[1]};
+    // WG0..6 and WG8 read byte 0; WG7 and WG9 read byte 1.
+    const int expected[numBlocks] = {data[0], data[0], data[0], data[0], data[0],
+                                     data[0], data[0], data[1], data[0], data[1]};
     bool      pass                = true;
     for (int i = 0; i < numBlocks; ++i) {
         if (result[i] != expected[i]) {

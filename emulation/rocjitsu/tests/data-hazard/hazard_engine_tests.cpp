@@ -2502,6 +2502,138 @@ TEST(GenericDataHazardEngineTest, ReadRetainsTheBytesItsOwnWorkgroupDidNotWrite)
       << "the read is what the write races with";
 }
 
+// The eight slots are enough only when the four bytes share them evenly. The
+// previous tests balance the load two-per-byte; these load one byte heavily to
+// pin down that retention is partitioned *per byte*, not counted against the
+// whole granule. Under a flat history a flood of readers on one byte spends the
+// slots and evicts another byte's only reader, so the WAR race a later write to
+// that byte should raise is missed. Per-byte retention keeps each byte's
+// partners no matter how busy its neighbours are.
+
+// Byte 0 is read by seven workgroups; bytes 1, 2 and 3 get one reader each. A
+// flat eight-slot history fills slots 0-6 with byte 0, drops byte 1's reader
+// into slot 7, then overwrites that last slot for bytes 2 and 3 -- so byte 1's
+// reader is gone and the write to byte 1 finds nothing.
+TEST(GenericDataHazardEngineTest, AFloodOfReadersOnOneByteDoesNotEvictByte1sReader) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings = run_global_access_sequence(
+      engine, {read_byte(0, 0x3000), read_byte(1, 0x3000), read_byte(2, 0x3000),
+               read_byte(3, 0x3000), read_byte(4, 0x3000), read_byte(5, 0x3000),
+               read_byte(6, 0x3000),     // seven distinct workgroups read byte 0
+               read_byte(7, 0x3001),     // byte 1's only reader
+               read_byte(8, 0x3002),     // byte 2's only reader
+               read_byte(9, 0x3003),     // byte 3's only reader
+               write_byte(10, 0x3001)}); // races byte 1's reader
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 10's write to byte 0x3001 races workgroup 7's read of it";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory WAR data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 7u)
+      << "byte 1's reader must survive byte 0's flood of readers";
+}
+
+// The same flood, probing a different victim. Byte 2's reader lands in the
+// churned last slot too and is overwritten by byte 3's, so a flat history misses
+// the write to byte 2 as well. Two victims from one eviction pattern guard
+// against a fix that only rescues a single byte.
+TEST(GenericDataHazardEngineTest, AFloodOfReadersOnOneByteDoesNotEvictByte2sReader) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings = run_global_access_sequence(
+      engine, {read_byte(0, 0x3000), read_byte(1, 0x3000), read_byte(2, 0x3000),
+               read_byte(3, 0x3000), read_byte(4, 0x3000), read_byte(5, 0x3000),
+               read_byte(6, 0x3000),     // seven distinct workgroups read byte 0
+               read_byte(7, 0x3001),     // byte 1
+               read_byte(8, 0x3002),     // byte 2's only reader
+               read_byte(9, 0x3003),     // byte 3
+               write_byte(10, 0x3002)}); // races byte 2's reader
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 10's write to byte 0x3002 races workgroup 8's read of it";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory WAR data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 8u)
+      << "byte 2's reader must survive byte 0's flood of readers";
+}
+
+// Atomics are the other silent accumulator: two atomics never race, so a flood
+// of them on one byte flags nothing while it consumes the shared history, and a
+// later ordinary read of an evicted byte misses the RAW race with the atomic
+// that byte still holds.
+TEST(GenericDataHazardEngineTest, AFloodOfAtomicsOnOneByteDoesNotEvictByte1sAtomic) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings = run_global_access_sequence(
+      engine, {atomic_byte(0, 0x3000), atomic_byte(1, 0x3000), atomic_byte(2, 0x3000),
+               atomic_byte(3, 0x3000), atomic_byte(4, 0x3000), atomic_byte(5, 0x3000),
+               atomic_byte(6, 0x3000),  // seven distinct workgroups' atomics on byte 0
+               atomic_byte(7, 0x3001),  // byte 1's only atomic
+               atomic_byte(8, 0x3002),  // byte 2
+               atomic_byte(9, 0x3003),  // byte 3
+               read_byte(10, 0x3001)}); // races byte 1's atomic
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 10's read of byte 0x3001 races workgroup 7's atomic there";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory RAW data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 7u)
+      << "byte 1's atomic must survive byte 0's flood of atomics";
+}
+
+// The atomic flood, probing byte 2, mirrors the reader case's second victim.
+TEST(GenericDataHazardEngineTest, AFloodOfAtomicsOnOneByteDoesNotEvictByte2sAtomic) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings = run_global_access_sequence(
+      engine, {atomic_byte(0, 0x3000), atomic_byte(1, 0x3000), atomic_byte(2, 0x3000),
+               atomic_byte(3, 0x3000), atomic_byte(4, 0x3000), atomic_byte(5, 0x3000),
+               atomic_byte(6, 0x3000),  // seven distinct workgroups' atomics on byte 0
+               atomic_byte(7, 0x3001),  // byte 1
+               atomic_byte(8, 0x3002),  // byte 2's only atomic
+               atomic_byte(9, 0x3003),  // byte 3
+               read_byte(10, 0x3002)}); // races byte 2's atomic
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 10's read of byte 0x3002 races workgroup 8's atomic there";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory RAW data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 8u)
+      << "byte 2's atomic must survive byte 0's flood of atomics";
+}
+
+// Within one byte the retention must still hold two *distinct* foreign
+// workgroups. Three workgroups read byte 0; when the third arrives the byte's
+// bucket is full and one is evicted, but a fourth workgroup writing that byte
+// must still find a retained reader that is not itself. This guards the eviction
+// policy: overwriting must drop one partner, never collapse the byte to a single
+// workgroup that a later same-workgroup access would fail to race.
+TEST(GenericDataHazardEngineTest, AByteReadByThreeWorkgroupsStillRacesAFourthsWrite) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings =
+      run_global_access_sequence(engine, {read_byte(0, 0x3000), read_byte(1, 0x3000),
+                                          read_byte(2, 0x3000), write_byte(0, 0x3000)});
+
+  ASSERT_EQ(warnings.size(), 1u)
+      << "workgroup 0's write to byte 0x3000 races a foreign reader that byte still holds";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory WAR data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_NE(warnings[0].finding.source_instruction.execution.workgroup_id, 0u)
+      << "the race must be with another workgroup's read, never workgroup 0's own";
+}
+
 namespace {
 
 /// What one global access does to the location. An atomic reads and writes it
