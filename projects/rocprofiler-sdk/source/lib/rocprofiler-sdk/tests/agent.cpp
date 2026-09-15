@@ -31,6 +31,7 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 #include <rocprofiler-sdk/cxx/enum_string.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 #include <rocprofiler-sdk/cxx/utility.hpp>
@@ -45,9 +46,11 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <random>
 #include <sstream>
+#include <string_view>
 #include <type_traits>
 #include <typeinfo>
 
@@ -117,15 +120,40 @@ TEST(rocprofiler_lib, agent_abi)
     EXPECT_EQ(offsetof(rocprofiler_agent_t, logical_node_type_id), 288) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, runtime_visibility), 292) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, uuid), 296) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_t, fw_info), 312) << msg;
     // Add test for offset of new field above this. Do NOT change any existing values!
 
-    constexpr auto expected_rocp_agent_size = 312;
+    constexpr auto expected_rocp_agent_size = 368;
     // If a new field is added, increase this value by the size of the new field(s)
     EXPECT_EQ(sizeof(rocprofiler_agent_t), expected_rocp_agent_size)
         << "ABI break. If you added a new field, make sure that this is the only new check that "
            "failed. Please add a check for the new field at the offset and update this test to the "
            "new size";
     static_assert(sizeof(rocprofiler_agent_t) == expected_rocp_agent_size, "Update agent size!");
+}
+
+TEST(rocprofiler_lib, agent_firmware_info_abi)
+{
+    constexpr auto msg = "ABI break in rocprofiler_agent_firmware_info_v0_t";
+
+    EXPECT_EQ(offsetof(rocprofiler_agent_firmware_info_v0_t, mec2_version), 0) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_firmware_info_v0_t, mec_version), 4) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_firmware_info_v0_t, rlc_version), 8) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_firmware_info_v0_t, rlc_srlc_version), 12) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_firmware_info_v0_t, rlc_srlg_version), 16) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_firmware_info_v0_t, rlc_srls_version), 20) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_firmware_info_v0_t, sdma2_version), 24) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_firmware_info_v0_t, sdma_version), 28) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_firmware_info_v0_t, smc_version), 32) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_firmware_info_v0_t, sos_version), 36) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_firmware_info_v0_t, ta_ras_version), 40) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_firmware_info_v0_t, ta_xgmi_version), 44) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_firmware_info_v0_t, vcn_version), 48) << msg;
+
+    constexpr auto expected_fw_info_size = 52;
+    EXPECT_EQ(sizeof(rocprofiler_agent_firmware_info_v0_t), expected_fw_info_size) << msg;
+    static_assert(sizeof(rocprofiler_agent_firmware_info_v0_t) == expected_fw_info_size,
+                  "Update fw_info size!");
 }
 
 TEST(rocprofiler_lib, agent)
@@ -285,6 +313,24 @@ TEST(rocprofiler_lib, agent)
         {
             // HSA lib doesn't set family ID for CPU-only but we do
             EXPECT_EQ(agent->family_id, hsa_agent->family_id) << msg;
+
+            const auto check_fw_version = [&msg](uint32_t version, const char* field) {
+                EXPECT_TRUE(version == ROCPROFILER_FIRMWARE_VERSION_NONE || version > 0)
+                    << msg << " :: invalid " << field << " firmware version: " << version;
+            };
+            check_fw_version(agent->fw_info.mec2_version, "mec2");
+            check_fw_version(agent->fw_info.mec_version, "mec");
+            check_fw_version(agent->fw_info.rlc_version, "rlc");
+            check_fw_version(agent->fw_info.rlc_srlc_version, "rlc_srlc");
+            check_fw_version(agent->fw_info.rlc_srlg_version, "rlc_srlg");
+            check_fw_version(agent->fw_info.rlc_srls_version, "rlc_srls");
+            check_fw_version(agent->fw_info.sdma2_version, "sdma2");
+            check_fw_version(agent->fw_info.sdma_version, "sdma");
+            check_fw_version(agent->fw_info.smc_version, "smc");
+            check_fw_version(agent->fw_info.sos_version, "sos");
+            check_fw_version(agent->fw_info.ta_ras_version, "ta_ras");
+            check_fw_version(agent->fw_info.ta_xgmi_version, "ta_xgmi");
+            check_fw_version(agent->fw_info.vcn_version, "vcn");
         }
         EXPECT_EQ(agent->fw_version.ui32.uCode, hsa_agent->ucode_version) << msg;
         EXPECT_EQ(agent->sdma_fw_version.uCodeSDMA, hsa_agent->sdma_ucode_version) << msg;
@@ -489,7 +535,76 @@ get_gpu_agents()
 
     return _gpu_agents;
 }
+
+uint32_t
+read_sysfs_fw_info(std::string_view fname, uint32_t drm_render_minor)
+{
+    namespace sdk = ::rocprofiler::sdk;
+
+    auto fw_path =
+        fmt::format("/sys/class/drm/renderD{}/device/fw_version/{}", drm_render_minor, fname);
+    auto fw_file = std::ifstream{fw_path};
+    if(!fw_file) return ROCPROFILER_FIRMWARE_VERSION_NONE;
+
+    auto fw_value = std::string{};
+    if(!std::getline(fw_file, fw_value)) return ROCPROFILER_FIRMWARE_VERSION_NONE;
+    if(fw_value.empty()) return ROCPROFILER_FIRMWARE_VERSION_NONE;
+
+    auto tokens = sdk::parse::tokenize(fw_value, " \t\n\r");
+    if(tokens.size() != 1) return ROCPROFILER_FIRMWARE_VERSION_NONE;
+
+    try
+    {
+        const auto& token = tokens.at(0);
+        if(token.find("0x") == 0 || token.find("0X") == 0)
+            return static_cast<uint32_t>(std::stoul(token, nullptr, 0));
+        return sdk::parse::from_string<uint32_t>(token);
+    } catch(const std::exception&)
+    {}
+
+    return ROCPROFILER_FIRMWARE_VERSION_NONE;
+}
+
+void
+expect_fw_info_matches_sysfs(const rocprofiler_agent_t* agent)
+{
+    const auto msg   = fmt::format("gpu agent-{}", agent->node_id);
+    const auto minor = agent->drm_render_minor;
+
+    const auto check = [&](uint32_t actual, std::string_view sysfs_fname, const char* field) {
+        EXPECT_EQ(actual, read_sysfs_fw_info(sysfs_fname, minor))
+            << msg << " :: " << field << " (renderD" << minor << ")";
+    };
+
+    check(agent->fw_info.mec2_version, "mec2_fw_version", "mec2_version");
+    check(agent->fw_info.mec_version, "mec_fw_version", "mec_version");
+    check(agent->fw_info.rlc_version, "rlc_fw_version", "rlc_version");
+    check(agent->fw_info.rlc_srlc_version, "rlc_srlc_fw_version", "rlc_srlc_version");
+    check(agent->fw_info.rlc_srlg_version, "rlc_srlg_fw_version", "rlc_srlg_version");
+    check(agent->fw_info.rlc_srls_version, "rlc_srls_fw_version", "rlc_srls_version");
+    check(agent->fw_info.sdma2_version, "sdma2_fw_version", "sdma2_version");
+    check(agent->fw_info.sdma_version, "sdma_fw_version", "sdma_version");
+    check(agent->fw_info.smc_version, "smc_fw_version", "smc_version");
+    check(agent->fw_info.sos_version, "sos_fw_version", "sos_version");
+    check(agent->fw_info.ta_ras_version, "ta_ras_fw_version", "ta_ras_version");
+    check(agent->fw_info.ta_xgmi_version, "ta_xgmi_fw_version", "ta_xgmi_version");
+    check(agent->fw_info.vcn_version, "vcn_fw_version", "vcn_version");
+}
 }  // namespace
+
+TEST(rocprofiler_lib, agent_fw_info)
+{
+    auto gpu_agents = get_gpu_agents();
+    if(gpu_agents.empty())
+    {
+        GTEST_SKIP() << "no gpu agents";
+    }
+
+    for(const auto* agent : gpu_agents)
+    {
+        expect_fw_info_matches_sysfs(agent);
+    }
+}
 
 TEST(rocprofiler_lib, agent_visibility)
 {

@@ -118,6 +118,31 @@ ROCPROFILER_CXX_CODE(
         "Increasing the size of the rocprofiler_agent_runtime_visiblity_t is not permitted");)
 
 /**
+ * @brief Firmware version information for a GPU agent.
+ *
+ * This struct contains the firmware version numbers for various GPU microcontrollers and engines.
+ * All fields are 32-bit unsigned integers representing the firmware version as reported by the
+ * corresponding sysfs files in /sys/class/drm/renderD{}/device/fw_version/
+ * A value of 0 for a field means no version info was found for the corresponding engine.
+ */
+typedef struct rocprofiler_agent_firmware_info_v0_t
+{
+    uint32_t mec2_version;      ///< Firmware version for MEC2 engine
+    uint32_t mec_version;       ///< Firmware version for MEC engine
+    uint32_t rlc_version;       ///< Firmware version for RLC engine
+    uint32_t rlc_srlc_version;  ///< Firmware version for RLC SRLC engine
+    uint32_t rlc_srlg_version;  ///< Firmware version for RLC SRLG engine
+    uint32_t rlc_srls_version;  ///< Firmware version for RLC SRLS engine
+    uint32_t sdma2_version;     ///< Firmware version for SDMA2 engine
+    uint32_t sdma_version;      ///< Firmware version for SDMA engine
+    uint32_t smc_version;       ///< Firmware version for SMC engine
+    uint32_t sos_version;       ///< Firmware version for Secure OS (PSP)
+    uint32_t ta_ras_version;    ///< Firmware version for TA RAS microcontroller
+    uint32_t ta_xgmi_version;   ///< Firmware version for TA XGMI microcontroller
+    uint32_t vcn_version;       ///< Firmware version for VCN engine
+} rocprofiler_agent_firmware_info_v0_t;
+
+/**
  * @brief Stores the properties of an agent (CPU, GPU, etc.)
  *
  * The `node_id` member is the KFD topology node id. It should be considered the "universal"
@@ -210,6 +235,9 @@ typedef struct rocprofiler_agent_v0_t
     int32_t                               logical_node_type_id;
     rocprofiler_agent_runtime_visiblity_t runtime_visibility;
     rocprofiler_uuid_t                    uuid;  ///< GPU only. Universally unique identifier.
+    rocprofiler_agent_firmware_info_v0_t
+        fw_info;  ///< GPU only. Detailed firmware version information
+                  ///< for the agent's microcontrollers and engines.
 
     /// @var fw_version
     /// @brief GPU only. Identifier (rev) of the GPU uEngine or Firmware, may be 0
