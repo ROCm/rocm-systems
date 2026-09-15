@@ -624,8 +624,6 @@ void ComputeUnitCore::tick_pipelines() {
 
 void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
   std::unique_ptr<Instruction> owned_inst(inst);
-  plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
-
   if (inst->data()->tag() == GLOBAL_MEM && shared_aperture_base_ != 0) {
     auto &d = *inst->data_as<VectorMemState>();
     uint64_t probe = 0;
@@ -635,8 +633,10 @@ void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
         break;
       }
     }
-    // FLAT ops targeting the shared aperture are routed to LDS (LGKMCNT,
-    // not VMCNT).  Scratch-targeting FLATs stay on the global path.
+    // Under the current uniform-address-space assumption, FLAT operations
+    // targeting the shared aperture use the LDS pipeline. Architectural
+    // wait-counter obligations remain properties of the decoded instruction;
+    // this route selects only the memory path used by the emulator.
     if (probe >= shared_aperture_base_ && probe <= shared_aperture_limit_) {
       for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
         if (d.lane_mask & (1ULL << lane))
@@ -644,11 +644,22 @@ void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
       }
       inst->data()->set_tag(LOCAL_MEM);
       d.wait_counter_type = WaitCounterType::LGKMCNT;
+      const auto *issue = inst->amdgpu_memory_issue_info();
+      if (issue) {
+        for (const auto obligation : issue->counter_obligations()) {
+          if (obligation.completion_class() == MemoryCompletionClass::LDS) {
+            d.wait_counter_type = obligation.wait_counter_type();
+            break;
+          }
+        }
+      }
+      plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
       local_mem_pipeline_.issue(owned_inst.release(), wf);
       return;
     }
   }
 
+  plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
   const uint8_t route_tag = inst->data()->tag();
   switch (route_tag) {
   case SCALAR_MEM:

@@ -5,8 +5,11 @@
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
+#include <array>
 #include <cassert>
 #include <cstdint>
+#include <optional>
+#include <ranges>
 #include <span>
 #include <vector>
 
@@ -35,7 +38,11 @@ class EventRegistry {
     WaveId waveId;
     uint64_t pc;
     MemoryEventType type;
-    amdgpu::WaitCounterType waitCounterType;
+    std::array<amdgpu::MemoryCounterObligation, amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS>
+        counterObligations;
+    uint8_t numCounterObligations;
+    uint8_t satisfiedCounterMask;
+    MemoryOrderClass memoryOrder;
     EventStatus status;
     uint8_t byteMask;
     uint64_t execMask;
@@ -44,13 +51,28 @@ class EventRegistry {
   };
 
 public:
-  /// Allocate a new event. Returns a unique EventId.
+  /// Allocate a new event with every simultaneous counter obligation.
   EventId add(WaveId waveId, uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
               uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
-              amdgpu::WaitCounterType waitCounterType) {
+              std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+              MemoryOrderClass memoryOrder) {
     int id = base_offset_ + static_cast<int>(entries_.size());
-    entries_.push_back({waveId, pc, type, waitCounterType, EventStatus::ACTIVE, byteMask, execMask,
-                        std::move(registers), std::move(ldsIntervals)});
+    assert(!counterObligations.empty());
+    assert(counterObligations.size() <= amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS);
+    EventInfo event{waveId,
+                    pc,
+                    type,
+                    {},
+                    static_cast<uint8_t>(counterObligations.size()),
+                    0,
+                    memoryOrder,
+                    EventStatus::ACTIVE,
+                    byteMask,
+                    execMask,
+                    std::move(registers),
+                    std::move(ldsIntervals)};
+    std::ranges::copy(counterObligations, event.counterObligations.begin());
+    entries_.push_back(std::move(event));
 
     // To prevent the number of events recorded growing indefinitely, we try to
     // remove retired events from time to time.
@@ -62,6 +84,7 @@ public:
   /// Transition ACTIVE → WAVE_COMPLETE (s_waitcnt resolved this event).
   void markComplete(EventId id) {
     assert(entries_[index(id)].status == EventStatus::ACTIVE);
+    assert(allWaitCountersSatisfied(id));
     entries_[index(id)].status = EventStatus::WAVE_COMPLETE;
   }
 
@@ -72,8 +95,52 @@ public:
 
   MemoryEventType type(EventId id) const { return entries_[index(id)].type; }
   amdgpu::WaitCounterType waitCounterType(EventId id) const {
-    return entries_[index(id)].waitCounterType;
+    return entries_[index(id)].counterObligations[0].wait_counter_type();
   }
+  std::optional<amdgpu::WaitCounterType> additionalWaitCounterType(EventId id) const {
+    const auto obligations = counterObligations(id);
+    if (obligations.size() < 2)
+      return std::nullopt;
+    return obligations[1].wait_counter_type();
+  }
+  std::span<const amdgpu::MemoryCounterObligation> counterObligations(EventId id) const {
+    const auto &event = entries_[index(id)];
+    return {event.counterObligations.data(), event.numCounterObligations};
+  }
+  bool hasPendingWaitCounter(EventId id, amdgpu::WaitCounterType waitType) const {
+    const auto &event = entries_[index(id)];
+    for (uint8_t i = 0; i < event.numCounterObligations; ++i) {
+      if ((event.satisfiedCounterMask & (uint8_t{1} << i)) == 0 &&
+          amdgpu::wait_counter_covers(waitType, event.counterObligations[i].wait_counter_type()))
+        return true;
+    }
+    return false;
+  }
+  std::optional<MemoryOrderClass> pendingCompletionClass(EventId id,
+                                                         amdgpu::WaitCounterType waitType) const {
+    const auto &event = entries_[index(id)];
+    for (uint8_t i = 0; i < event.numCounterObligations; ++i) {
+      if ((event.satisfiedCounterMask & (uint8_t{1} << i)) == 0 &&
+          amdgpu::wait_counter_covers(waitType, event.counterObligations[i].wait_counter_type()))
+        return event.counterObligations[i].completion_class();
+    }
+    return std::nullopt;
+  }
+  bool satisfyWaitCounter(EventId id, amdgpu::WaitCounterType waitType) {
+    auto &event = entries_[index(id)];
+    assert(event.status == EventStatus::ACTIVE);
+    for (uint8_t i = 0; i < event.numCounterObligations; ++i) {
+      if (amdgpu::wait_counter_covers(waitType, event.counterObligations[i].wait_counter_type()))
+        event.satisfiedCounterMask |= uint8_t{1} << i;
+    }
+    return allWaitCountersSatisfied(id);
+  }
+  bool allWaitCountersSatisfied(EventId id) const {
+    const auto &event = entries_[index(id)];
+    return event.satisfiedCounterMask ==
+           static_cast<uint8_t>((uint8_t{1} << event.numCounterObligations) - 1);
+  }
+  MemoryOrderClass memoryOrder(EventId id) const { return entries_[index(id)].memoryOrder; }
   EventStatus status(EventId id) const { return entries_[index(id)].status; }
   bool isTrimmable(EventId id) const { return isEntryTrimmable(entries_[index(id)]); }
   uint64_t pc(EventId id) const { return entries_[index(id)].pc; }
