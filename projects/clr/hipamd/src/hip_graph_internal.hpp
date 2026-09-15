@@ -7,9 +7,13 @@
 #pragma once
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
+#include <deque>
 #include <queue>
+#include <set>
 #include <stack>
 #include <iostream>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <shared_mutex>
@@ -160,6 +164,19 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
   // If kernel arg pool is full allocate new chunck and alloc kern args from new pool.
   address AllocKernArg(size_t size, size_t alignment, int devId) override;
 
+  //! Start tracking kernarg allocations for a node packet capture.
+  void BeginCapture(const void* owner);
+
+  //! Commit the new allocations and release the owner's previous slots, or roll back on failure.
+  void EndCapture(const void* owner, bool success);
+
+  //! Register a graph launch before its packets are queued.
+  //! The returned sequence ID must be passed to CompleteLaunch after GPU completion.
+  uint64_t RegisterLaunch();
+
+  //! Mark a registered launch complete and reclaim slots that it could have referenced.
+  void CompleteLaunch(uint64_t launch_id);
+
   // Do HDP flush/When HDP flush register is invalid fallback to Readback
   void ReadBackOrFlush();
 
@@ -171,9 +188,64 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
     size_t kernarg_pool_size_;    //! Size of the pool
     size_t kernarg_pool_offset_;  //! Current offset in the kernel arg alloc
   };
+
+  struct KernelArgAllocation {
+    KernelArgAllocation(address addr, size_t size, amd::Device* device)
+        : kernarg_addr_(addr), size_(size), device_(device) {}
+    address kernarg_addr_;
+    size_t size_;
+    amd::Device* device_;
+    //! First launch ID that could contain a packet referencing this ownership generation.
+    uint64_t first_launch_id_ = 0;
+  };
+
+  struct DeferredAllocation {
+    DeferredAllocation(const KernelArgAllocation& allocation, uint64_t last_launch_id)
+        : allocation_(allocation), last_launch_id_(last_launch_id) {}
+    KernelArgAllocation allocation_;
+    //! Upper bound of [first_launch_id_, last_launch_id_] for launches that may reference |allocation_|.
+    uint64_t last_launch_id_;
+  };
+
+  //! True if |block| can satisfy |size| at |alignment| without splitting the block.
+  static bool FreeBlockFits(const KernelArgAllocation& block, size_t size, size_t alignment,
+                            address* aligned_addr);
+
+  //! Take a whole free block that fits. Prefers the most recently freed block (LIFO),
+  //! then the smallest remaining fit. Never splits, so sequential same-size updates
+  //! share one extra generation across nodes instead of pinning a spare per node.
+  address AllocKernArgFromFreeList(size_t size, size_t alignment, amd::Device* device);
+
+  //! Try a bump allocation from the most recently created pool.
+  //! Caller must hold |allocation_lock_|.
+  address AllocKernArgFromCurrentPool(size_t size, size_t alignment, amd::Device* device);
+
+  //! Remove |index| from the free list and assign the whole block to the in-progress capture.
+  address TakeFreeBlock(size_t index, address aligned_addr);
+
+  //! Retire allocations replaced by a successful capture. The blocks become reusable only
+  //! after launches that could still reference their addresses have completed.
+  //! Caller must hold |allocation_lock_|.
+  void RetireAllocations(const std::vector<KernelArgAllocation>& allocations);
+
+  //! Move deferred allocations no active launch can reference to |free_allocations_|.
+  //! Caller must hold |allocation_lock_|.
+  void ReclaimDeferredAllocations();
+
   bool device_kernarg_pool_ = false;  //! Indicate if kernel pool in device mem
   std::unordered_map<amd::Device*, std::vector<KernelArgPoolGraph>>
       kernarg_graph_;  //! Vector of allocated kernarg pool per device
+  std::unordered_map<const void*, std::vector<KernelArgAllocation>>
+      owner_allocations_;  //! Current live kernarg slots for every captured graph node
+  std::vector<KernelArgAllocation> free_allocations_;  //! Slots available for packet recapture
+  const void* capture_owner_ = nullptr;                 //! Node currently being captured
+  std::vector<KernelArgAllocation>
+      capture_allocations_;  //! Slots allocated by the in-progress capture
+  std::deque<DeferredAllocation>
+      deferred_allocations_;  //! Retired slots still referenced by queued/running launches
+  std::set<uint64_t> active_launch_ids_;  //! Registered launches not yet GPU-complete
+  uint64_t next_launch_id_ = 1;
+  std::mutex allocation_lock_;  //! Protects capture, free/deferred, and launch-lifetime state
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };
 
@@ -282,29 +354,60 @@ class GraphNode : public hipGraphNodeDOTAttribute {
       return status;
     }
 
-    // Release last created packet memory before they are overwritten with new packets
-    std::for_each(gpuPackets_.begin(), gpuPackets_.end(), [](auto p) { delete[] p; });
-    std::for_each(gpuMetadataPackets_.begin(), gpuMetadataPackets_.end(),
-                  [](auto p) { delete[] p; });
-    // Clear the pointer array
-    gpuPackets_.clear();
-    gpuMetadataPackets_.clear();
+    std::vector<uint8_t*> newGpuPackets;
+    std::vector<uint8_t*> newGpuMetadataPackets;
+    const std::string* newCapturedKernelName = capturedKernelName_;
+    hipError_t captureStatus = hipSuccess;
+
+    kernArgMgr->BeginCapture(this);
 
     for (auto& command : commands_) {
-      command->setPktCapturingState(true, &gpuPackets_, kernArgMgr, &capturedKernelName_,
-                                    &gpuMetadataPackets_);
-      // Enqueue command to capture GPU Packet. The packet is not submitted to the device.
-      // The packet is stored in gpuPacket_ and submitted during graph launch.
-      command->submit(*(command->queue())->vdev());
+      if (captureStatus == hipSuccess) {
+        command->setPktCapturingState(true, &newGpuPackets, kernArgMgr,
+                                      &newCapturedKernelName, &newGpuMetadataPackets);
+        // Enqueue command to capture GPU Packet. The packet is not submitted to the device.
+        // The packet is stored in gpuPacket_ and submitted during graph launch.
+        command->submit(*(command->queue())->vdev());
+        if (command->status() == CL_OUT_OF_RESOURCES) {
+          captureStatus = hipErrorOutOfMemory;
+        } else if (command->status() == CL_INVALID_OPERATION) {
+          captureStatus = hipErrorIllegalState;
+        }
+      }
       command->release();
+    }
+    commands_.clear();
+
+    if (captureStatus != hipSuccess) {
+      for (auto packet : newGpuPackets) {
+        delete[] packet;
+      }
+      for (auto packet : newGpuMetadataPackets) {
+        delete[] packet;
+      }
+      kernArgMgr->EndCapture(this, false);
+      return captureStatus;
     }
 
     // The metadata capture path appends one metadata packet per AQL packet, but
     // only on devices with a metadata ring buffer. Normalize to be pointer-parallel
     // with gpuPackets_ so downstream flattening can rely on a 1:1 index mapping.
-    if (gpuMetadataPackets_.empty()) {
-      gpuMetadataPackets_.resize(gpuPackets_.size(), nullptr);
+    if (newGpuMetadataPackets.empty()) {
+      newGpuMetadataPackets.resize(newGpuPackets.size(), nullptr);
     }
+
+    // Packet capture succeeded. It is now safe to replace the old packet set and
+    // make its kernarg slots available to a later capture.
+    for (auto packet : gpuPackets_) {
+      delete[] packet;
+    }
+    for (auto packet : gpuMetadataPackets_) {
+      delete[] packet;
+    }
+    gpuPackets_ = std::move(newGpuPackets);
+    gpuMetadataPackets_ = std::move(newGpuMetadataPackets);
+    capturedKernelName_ = newCapturedKernelName;
+    kernArgMgr->EndCapture(this, true);
 
     // Accumulate packets directly into the batch (only if batch vectors are provided)
     if (batchPackets != nullptr && batchKernelNames != nullptr) {
@@ -317,9 +420,6 @@ class GraphNode : public hipGraphNodeDOTAttribute {
         }
       }
     }
-
-    // Commands are captured and released. Clear them from the object.
-    commands_.clear();
 
     return status;
   }
