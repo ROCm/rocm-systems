@@ -1230,6 +1230,12 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRe
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: not multi-node");
     return false;
   }
+  // Sub-comms are only built at nNodes >= 8; rcclHierarchicalAlgoInfo dereferences
+  // them unconditionally, so bail out here if they are not initialized.
+  if (!comm->hierarchicalCommsInitialized) {
+    TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: hierarchical sub-comms not initialized");
+    return false;
+  }
   // If LSA already spans the whole comm, use CE path instead
   if (ncclDevrIsOneLsaTeam(comm)) {
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: LSA spans the comm; use CE path instead");
