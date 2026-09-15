@@ -29,13 +29,13 @@ rj_add_hip_race_test(
     hip_race_tests_gfx950
     ARCH gfx950
     SOURCE hip_race_gfx950_test.hip
-    DEPENDENCIES ${RJ_RACE_TEST_SUPPORT_HEADERS}
+    EXTRA_DEPENDS ${RJ_RACE_TEST_SUPPORT_HEADERS}
 )
 rj_add_hip_race_test(
     hip_race_tests_gfx1151
     ARCH gfx1151
     SOURCE hip_race_gfx1151_test.hip
-    DEPENDENCIES ${RJ_RACE_TEST_SUPPORT_HEADERS}
+    EXTRA_DEPENDS ${RJ_RACE_TEST_SUPPORT_HEADERS}
 )
 set(RJ_RACE_GFX950_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/race_test_config.json)
 if(RJ_INSTALL_TESTS)

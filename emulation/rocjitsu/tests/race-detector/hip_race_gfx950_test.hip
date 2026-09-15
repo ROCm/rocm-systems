@@ -1047,6 +1047,12 @@ TEST_F(Gfx950RaceTest, dual_offset_lds_race) {
 
 __global__ void scratch_vmcnt_safe_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  // Inline assembly does not tell the compiler to allocate private memory.
+  // Reserve the two bytes used below, and finish this setup before measuring
+  // the global-load/scratch-store vmcnt ordering in the assembly block.
+  volatile uint8_t scratch_space[2];
+  scratch_space[tid & 1] = 0;
+  asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
   float val;
   float tmp1 = 1.0f, tmp2 = 2.0f;
   asm volatile(
@@ -1068,6 +1074,12 @@ static constexpr RaceExpectation kScratchVmcntRaceExpectation{
 
 __global__ void scratch_vmcnt_race_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  // Inline assembly does not tell the compiler to allocate private memory.
+  // Reserve the two bytes used below, and finish this setup before measuring
+  // the global-load/scratch-store vmcnt ordering in the assembly block.
+  volatile uint8_t scratch_space[2];
+  scratch_space[tid & 1] = 0;
+  asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
   float val;
   float tmp1 = 1.0f;
   asm volatile(
