@@ -936,8 +936,7 @@ void RunStreamingTransferTest(uint64_t iova_base, std::size_t window_count) {
   const uint64_t total = window_count * page_size;
   BackingFile backing(total);
   for (uint64_t i = 0; i < window_count; ++i) {
-    ASSERT_TRUE(
-        client.dma_map(iova_base + i * page_size, page_size, backing.fd(), i * page_size));
+    ASSERT_TRUE(client.dma_map(iova_base + i * page_size, page_size, backing.fd(), i * page_size));
   }
   ASSERT_EQ(served.device().mapped_regions(), window_count);
 
@@ -1016,8 +1015,7 @@ TEST(VfioDeviceHostDma, RejectsTransfersThroughAnUnmappedGap) {
   EXPECT_EQ(unchanged, first_sentinel) << "the rejected crossing write touched the first window";
   ASSERT_TRUE(read_all_at(backing.fd(), 2 * page_size, unchanged));
   EXPECT_EQ(unchanged, second_sentinel) << "the rejected crossing write touched the second window";
-  EXPECT_EQ(read_destination,
-            std::vector<std::byte>(kBoundaryHalfBytes * 2, std::byte{0xEE}))
+  EXPECT_EQ(read_destination, std::vector<std::byte>(kBoundaryHalfBytes * 2, std::byte{0xEE}))
       << "the rejected crossing read modified its destination";
 }
 
@@ -1111,10 +1109,8 @@ TEST(VfioDeviceHostDma, CompletesMultiSegmentTransfersAndReleasesTheWindowSet) {
   // transfer takes, is rejected in both directions at both former addresses.
   for (const uint64_t withdrawn : {kMultiSegmentIova, kMultiSegmentIova + page_size}) {
     std::vector<std::byte> probe(4, std::byte{0});
-    EXPECT_FALSE(served.dma().read(withdrawn, probe))
-        << "a read of a withdrawn window must fail";
-    EXPECT_FALSE(served.dma().write(withdrawn, probe))
-        << "a write of a withdrawn window must fail";
+    EXPECT_FALSE(served.dma().read(withdrawn, probe)) << "a read of a withdrawn window must fail";
+    EXPECT_FALSE(served.dma().write(withdrawn, probe)) << "a write of a withdrawn window must fail";
   }
 }
 
