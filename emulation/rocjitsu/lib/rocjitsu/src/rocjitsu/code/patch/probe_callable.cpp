@@ -113,6 +113,16 @@ template <typename T>
 
 } // namespace
 
+RegisterSet supplied_registers(const ProbeAbi &abi) {
+  RegisterSet regs;
+  // Report nothing rather than guess: a live-in subtraction that excused a pair
+  // this ABI never committed to writing would excuse the probe reading it cold.
+  if (!is_valid_probe_abi(abi))
+    return regs;
+  regs.expand(probe_link_pair(abi));
+  return regs;
+}
+
 std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_obj,
                                                   const ResolvedProbeSymbol &sym,
                                                   rj_code_arch_t arch, std::string *error_out) {
@@ -231,7 +241,13 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
   callable.arch = arch;
   callable.target = target;
   callable.body_words.assign(words.begin(), words.begin() + num_words);
-  callable.cc = ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31;
+  // The body was just verified to return through s[30:31], which is the whole
+  // of this convention, so the derivation cannot fail. static_assert rather
+  // than a runtime check, since derive_probe_abi is constexpr.
+  constexpr std::optional<ProbeAbi> kVerifiedAbi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31);
+  static_assert(kVerifiedAbi.has_value() && is_valid_probe_abi(*kVerifiedAbi));
+  callable.abi = *kVerifiedAbi;
   // output_text_offset stays 0 — assigned by the later layout step.
   return callable;
 }

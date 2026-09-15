@@ -158,8 +158,8 @@ public:
   /// returns true. (`preserve_scc`/`preserve_*` are inputs, read but not written.)
   ///
   /// Policy:
-  ///   - Link pair is derived from @p cc via link_pair_for(); an unknown
-  ///     convention fails. If either lane of the derived pair is live at the
+  ///   - Link pair is read off @p abi; one that fails is_valid_probe_abi()
+  ///     fails here. If either lane of the pair is live at the
   ///     anchor, fail. Extending the supported conventions is deferred.
   ///   - Target-address pair is a dead, even-aligned SGPR pair (excluding the
   ///     link pair). It is consumed by s_swappc before the probe body runs, so it
@@ -178,15 +178,15 @@ public:
   ///     plan.special_state_saves, drawn from the same dead pool as the SCC temp.
   ///
   /// Returns false and writes a diagnostic naming the unavailable resource to
-  /// @p error_out (if non-null) when @p cc is unknown, the link pair is live, or
-  /// no dead target pair / SCC temp can be found. The plan is left unmodified on
-  /// failure.
+  /// @p error_out (if non-null) when @p abi is unusable, the link pair is live,
+  /// or no dead target pair / SCC temp can be found. The plan is left unmodified
+  /// on failure.
   ///
   /// @param plan                Trampoline plan whose resource fields are filled.
-  /// @param cc                  Probe calling convention; sets the link pair.
+  /// @param abi                 Probe ABI; supplies the link pair.
   /// @param live_at_anchor      Registers live immediately before the anchor.
   /// @param probe_body_clobbers Ordinary registers the copied probe body writes.
-  [[nodiscard]] static bool plan_probe_call(TrampolinePlan &plan, ProbeCallingConvention cc,
+  [[nodiscard]] static bool plan_probe_call(TrampolinePlan &plan, const ProbeAbi &abi,
                                             const RegisterSet &live_at_anchor,
                                             const RegisterSet &probe_body_clobbers,
                                             std::string *error_out = nullptr);
