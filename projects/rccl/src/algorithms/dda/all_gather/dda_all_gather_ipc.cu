@@ -15,6 +15,7 @@
 #include "algorithms/dda/dda_init_detail.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <cstddef>
 #include <cstdlib>
@@ -59,8 +60,10 @@ static ncclResult_t ncclAllGatherDdaIpcTyped(const void* sendbuff, void* recvbuf
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  dda::common::ddaAllGatherIpc<T, kDdaNranks, false><<<grid, block, 0, stream>>>(
-    d_ipcbuffs, static_cast<T*>(recvbuff), sendcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+  hipExtLaunchKernelGGL((dda::common::ddaAllGatherIpc<T, kDdaNranks, false>), grid, block, 0, stream,
+                        /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                        sendcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
 
   CUDACHECK(cudaGetLastError());
 
