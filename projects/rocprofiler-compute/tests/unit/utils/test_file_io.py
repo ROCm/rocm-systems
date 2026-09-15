@@ -3,6 +3,7 @@
 
 """Unit tests for utils.file_io."""
 
+import gzip
 import tempfile
 
 import common
@@ -328,6 +329,30 @@ def test_load_kernel_short_names_prefers_the_profiled_csv(tmp_path):
     assert load_kernel_short_names(str(tmp_path), tool_data_records) == {
         "vecCopy(double*)": "vecCopy"
     }
+
+
+def test_load_kernel_short_names_falls_back_past_an_empty_csv(tmp_path):
+    """A failed extract leaves the file behind, which is a miss, not a mapping."""
+    gzip.open(tmp_path / "kernel_symbols_run0.csv.gz", "wt").close()
+    tool_data_records = [
+        {
+            "kernel_symbols": [
+                {
+                    "formatted_kernel_name": "vecAdd()",
+                    "truncated_kernel_name": "vecAdd",
+                }
+            ]
+        }
+    ]
+
+    assert load_kernel_short_names(str(tmp_path), tool_data_records) == {
+        "vecAdd()": "vecAdd"
+    }
+
+
+def test_load_kernel_short_names_tolerates_a_record_without_symbols(tmp_path):
+    """The fallback runs when things went wrong, so a bare record is not fatal."""
+    assert load_kernel_short_names(str(tmp_path), [{"metadata": {"pid": 1}}]) == {}
 
 
 @pytest.mark.misc
