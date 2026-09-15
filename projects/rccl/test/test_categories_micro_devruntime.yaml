@@ -2,9 +2,9 @@
 # Host-only micro-tests for src/dev_runtime.cc (no GPU, no librccl/HIP runtime); build in Release and Debug.
 # RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
 #
-# Patterns are prefix globs rather than an enumeration of every suite, so adding
-# a suite in an existing family (Devr*, Sym*, Win*, ...) does not silently fall
-# out of CI gating.
+# Every pattern is a prefix glob rather than a named suite, so adding a suite in
+# an existing family (Comm*, Dev*, Sym*, Win*, ...) does not silently fall out of
+# CI gating.
 #
 # Tiers:
 #   quick — canonical anchor.
@@ -16,13 +16,13 @@ test_categories:
   quick: &micro_devruntime_quick
     description: "Smoke — host-only src/dev_runtime.cc micro-tests (symmetric memory, windows, devcomm), sub-second."
     test_patterns:
-      - "AllocAndPopulateSegmentWindowsTest.*"
+      - "Alloc*"
       - "Comm*"
-      - "ComputeLsaSizeTest.*"
-      - "DeepCopyDevCommRequirementsTest.*"
+      - "Compute*"
+      - "DeepCopy*"
       - "Dev*"
-      - "GinResourcesRequestedTest.*"
-      - "NcclVersionCompatTest.*"
+      - "Gin*"
+      - "Nccl*"
       - "Sym*"
       - "Win*"
     exclude_windows:

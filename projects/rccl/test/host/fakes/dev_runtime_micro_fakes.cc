@@ -32,15 +32,16 @@
 
 #include "fakes/dev_runtime_micro_fakes.h"
 
+#include <fcntl.h>
+#include <sys/mman.h>
+
 #include <cassert>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fcntl.h>
 #include <functional>
 #include <set>
-#include <sys/mman.h>
 
 // ---------------------------------------------------------------------------
 // Globals the translation unit references.
@@ -303,8 +304,8 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirement
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
 #ifdef ENABLE_ROCSHMEM_GIN
 // Only referenced from ncclDevrCommCreateInternal's SDMA signal-binding block,
-// which is itself behind ENABLE_ROCSHMEM_GIN. Ported from develop's
-// test/DevRuntimeTestsStubs.cc (#10388) when that file moved here.
+// which is itself behind ENABLE_ROCSHMEM_GIN. Copied from develop's
+// test/DevRuntimeTestsStubs.cc (#10388), which still backs rccl-UnitTestsDevRuntime.
 ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm*, void*, size_t, int, int) {
   return ncclSuccess;
 }
@@ -448,7 +449,10 @@ HIP_FAKE hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t align, 
   return g_devrHipMemAddressReserve(ptr, size, align, addr, flags);
 }
 static hipError_t DefaultMemAddressFree(void* devPtr, size_t size) {
-  assert(size != 0);
+  // Not assert(): NDEBUG strips it, and this binary is built Release as well as
+  // Debug. There munmap(ptr, 0) fails with EINVAL, the result is discarded, and
+  // a zero-size free would report success instead of surfacing.
+  if (size == 0) return hipErrorInvalidValue;
   munmap(devPtr, size);
   return hipSuccess;
 }

@@ -426,14 +426,14 @@ if(BUILD_TESTS)
   # suite needs a real mmap-backed flat VA and per-call controllable failure,
   # where hip_fakes returns fixed canned values. Merging them would mean
   # rewriting shared fakes used by four other suites to no one's benefit.
-  # Same ROCm floor the target carried in test/CMakeLists.txt before the move:
-  # dev_runtime.cc's VMM paths need the 6.4 cuMem surface.
+  # Same ROCm floor as rccl-UnitTestsDevRuntime, the separate binary that still
+  # lives in test/CMakeLists.txt alongside this one: dev_runtime.cc's VMM paths
+  # need the 6.4 cuMem surface.
   if(ROCM_VERSION VERSION_GREATER_EQUAL "60400")
     set(TEST_MICRO_DEVRUNTIME_SOURCE_FILES
       dev-runtime-test.cc
       fakes/dev_runtime_micro_fakes.cc
       ../common/main_altrsmi.cpp
-      ../common/ProcessIsolatedTestRunner.cpp
     )
 
     add_executable(rccl-UnitTestsMicroDevRuntime ${TEST_MICRO_DEVRUNTIME_SOURCE_FILES})
@@ -1012,7 +1012,6 @@ add_test_executable(rccl-UnitTestsMicroDevRuntime
   dev-runtime-test.cc
   fakes/dev_runtime_micro_fakes.cc
   ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
-  ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
 )
 
 target_compile_options(rccl-UnitTestsMicroDevRuntime PRIVATE

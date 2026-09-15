@@ -32,6 +32,9 @@
 // TRAP: both statics are TU-local, so a fixture must reset them itself --
 // ResetDevRuntimeMicroFakes() cannot see them.
 #include "alloc.h"
+
+#include <utility>  // std::forward, used by MicroCalloc below
+
 static int g_devrCallocCallIndex = 0;
 static int g_devrCallocFailAt = -1;  // -1 = never fail; otherwise a 0-based call index
 template <typename... Args>
@@ -57,7 +60,6 @@ static ncclResult_t MicroCalloc(const char* file, int line, const char* fn, Args
 #include <memory>
 #include <string>
 #include <unistd.h>
-#include <utility>
 #include <vector>
 
 // The host location types, chosen per ROCm version.
@@ -75,6 +77,33 @@ static ncclResult_t MicroCalloc(const char* file, int line, const char* fn, Args
 //
 // static const, not constexpr: below 7.12 these values fall outside the enum's
 // range, which makes them ill-formed as constant expressions.
+// ---------------------------------------------------------------------------
+// Shared fixture teardown for suites that leave windows registered.
+//
+// Tests that make a teardown path fail deliberately leave the window on
+// devrState.winSorted, so production never frees it, and a symmetric
+// registration also leaves its ncclDevrMemory linked on memHead. Four fixtures
+// open-coded this reclaim in three subtly different spellings (one omitted the
+// ipcPeerPtrs frees, only one null-checked); a window field that later needs
+// releasing had to be added in four places. One helper so it is added once.
+//
+// memHead is drained the way ncclDevrFinalize does -- symMemoryDestroy unlinks
+// the head, so the loop terminates.
+static void ReclaimDevrWindows(ncclComm* comm) {
+  ncclDevrState* devr = &comm->devrState;
+  for (int i = 0; i < devr->winSortedCount; i++) {
+    ncclDevrWindow* w = devr->winSorted[i].win;
+    if (w == nullptr) continue;
+    free(w->ipcPeerPtrs);
+    free(w->ipcPeerPtrsAllocBase);
+    free(w);
+  }
+  free(devr->winSorted);
+  devr->winSorted = nullptr;
+  devr->winSortedCount = devr->winSortedCapacity = 0;
+  while (devr->memHead != nullptr) symMemoryDestroy(comm, devr->memHead);
+}
+
 #if defined(__HIP_PLATFORM_AMD__) && ROCM_VERSION < 71200
 static const hipMemLocationType kLocHostNuma =
     static_cast<hipMemLocationType>(CU_MEM_LOCATION_TYPE_HOST_NUMA);
@@ -388,6 +417,12 @@ protected:
   }
 
   std::vector<int> localRankToRank;
+
+  // The only fixture here that installs hooks without a reset otherwise:
+  // ProxyOnlyDrainFails_StillEmptiesWindowList leaves a non-freeing
+  // g_devrShadowPoolFree behind, which is exactly the case the shadow-pool
+  // liveness reset exists to clean up.
+  void TearDown() override { ResetDevRuntimeMicroFakes(); }
 };
 
 // Branch: bigSize == 0 means init never ran, so there is nothing to tear down.
@@ -2466,10 +2501,7 @@ protected:
 
   void TearDown() override {
     ncclDevrState* devr = &comm->devrState;
-    for (int i = 0; i < devr->winSortedCount; i++) free(devr->winSorted[i].win);
-    free(devr->winSorted);
-    devr->winSorted = nullptr;
-    devr->winSortedCount = devr->winSortedCapacity = 0;
+    ReclaimDevrWindows(comm);
     // The table is a chain of shadow-pool buffers; the fake's reset owns them.
     devr->windowTable = nullptr;
     ResetDevRuntimeMicroFakes();
@@ -2486,6 +2518,20 @@ protected:
 // derived from a different input, so a swapped assignment would show here and
 // nowhere else.
 TEST_F(SymWindowCreateTest, PopulatesDeviceDescriptor) {
+  // The shadow-pool fake hands the same buffer back as both device and host
+  // object, so the publish to the device is a self-copy and the field
+  // assertions below would still pass with it deleted -- they read the host
+  // shadow production already filled directly. Record the copy so the publish
+  // itself is pinned. The hook deliberately omits a dst != src guard, which
+  // would stop it observing.
+  std::vector<std::pair<void*, size_t>> published;
+  ScopedHook pub(g_devrHipMemcpyAsync,
+                 [&](void* dst, const void* src, size_t n, hipMemcpyKind, hipStream_t) {
+                   published.emplace_back(dst, n);
+                   if (dst != nullptr && src != nullptr && dst != src) memcpy(dst, src, n);
+                   return hipSuccess;
+                 });
+
   ncclWindow_vidmem* winDev = nullptr;
   ncclDevrWindow* win = nullptr;
   ASSERT_EQ(Create(reinterpret_cast<void*>(0x100000), 8192, /*memOffset=*/8192, &winDev, &win), ncclSuccess);
@@ -2505,6 +2551,12 @@ TEST_F(SymWindowCreateTest, PopulatesDeviceDescriptor) {
   EXPECT_EQ(winDev->winHost, static_cast<void*>(win));
   EXPECT_EQ(winDev->ginOffset4K, 8192u >> 12);
   EXPECT_EQ(winDev->numSegments, mem.numGinSegments);
+
+  // The descriptor was actually pushed to the device object, not merely filled
+  // in the host shadow.
+  EXPECT_NE(std::find(published.begin(), published.end(),
+                      std::pair<void*, size_t>{winDev, sizeof(ncclWindow_vidmem)}),
+            published.end());
 }
 
 // Branch: a caller with no VA of its own gets the LSA flat mapping.
@@ -2629,16 +2681,7 @@ protected:
     // so production never frees it. Mirror DevrWindowRegisterInGroupTest's
     // TearDown and reclaim whatever is still on the sorted list -- otherwise
     // those cases leak a window per run, which the sanitiser build reports.
-    for (int i = 0; i < devr->winSortedCount; i++) {
-      ncclDevrWindow* w = devr->winSorted[i].win;
-      if (w == nullptr) continue;
-      free(w->ipcPeerPtrs);
-      free(w->ipcPeerPtrsAllocBase);
-      free(w);
-    }
-    devr->winSortedCount = devr->winSortedCapacity = 0;
-    free(devr->winSorted);
-    devr->winSorted = nullptr;
+    ReclaimDevrWindows(comm);
     devr->windowTable = nullptr;  // chain of shadow-pool buffers; the fake's reset owns them
     devr->lsaRankList = nullptr;  // borrowed, not malloc'd
     g_devrCallocCallIndex = 0;
@@ -2650,6 +2693,10 @@ protected:
   ncclWindow_vidmem* MakeWindow(void* userPtr) {
     ncclDevrMemory* mem = nullptr;
     EXPECT_EQ(symMemoryObtain(comm, memHandles.data(), 1, userPtr, 4096, 0, &mem, false), ncclSuccess);
+    // EXPECT_ does not return, and symWindowCreate dereferences mem
+    // (dev_runtime.cc, win->memory = mem then mem->bigOffset), so a failed
+    // obtain would turn a reported failure into a segfault with no gtest output.
+    if (mem == nullptr) return nullptr;
     ncclWindow_vidmem* winDev = nullptr;
     EXPECT_EQ(symWindowCreate(comm, mem, 0, userPtr, 4096, 0, nullptr, &winDev, nullptr, nullptr), ncclSuccess);
     return winDev;
@@ -2843,15 +2890,7 @@ protected:
 
   void TearDown() override {
     ncclDevrState* devr = &comm->devrState;
-    for (int i = 0; i < devr->winSortedCount; i++) {
-      ncclDevrWindow* w = devr->winSorted[i].win;
-      free(w->ipcPeerPtrs);
-      free(w->ipcPeerPtrsAllocBase);
-      free(w);
-    }
-    free(devr->winSorted);
-    devr->winSorted = nullptr;
-    devr->winSortedCount = devr->winSortedCapacity = 0;
+    ReclaimDevrWindows(comm);
     devr->lsaRankList = nullptr;  // borrowed, not malloc'd
     ResetDevRuntimeMicroFakes();
   }
@@ -3170,15 +3209,7 @@ protected:
 
   void TearDown() override {
     ncclDevrState* devr = &comm->devrState;
-    for (int i = 0; i < devr->winSortedCount; i++) {
-      ncclDevrWindow* w = devr->winSorted[i].win;
-      free(w->ipcPeerPtrs);
-      free(w->ipcPeerPtrsAllocBase);
-      free(w);
-    }
-    free(devr->winSorted);
-    devr->winSorted = nullptr;
-    devr->winSortedCount = devr->winSortedCapacity = 0;
+    ReclaimDevrWindows(comm);
     devr->lsaRankList = nullptr;  // borrowed, not malloc'd
     ResetDevRuntimeMicroFakes();
   }
@@ -4728,9 +4759,15 @@ TEST(DevCommDumpTest, DispatchesPerConnectionDumps) {
   devComm.ginHandles[0] = reinterpret_cast<void*>(0x1000);
   devComm.ginHandles[1] = reinterpret_cast<void*>(0x2000);
 
-  std::vector<const void*> readFrom;
+  // Record the size as well as the handle. Neither the handle order nor the
+  // printed strings can tell the two helpers apart -- swapping the device types
+  // still reads both handles in order and still prints both strings -- but the
+  // two contexts differ in size, so the pair pins which helper decoded which
+  // handle. The hook must not repeat production's dst != src guard, or it stops
+  // observing.
+  std::vector<std::pair<const void*, size_t>> readFrom;
   ScopedHook copy(g_devrHipMemcpy, [&](void* dst, const void* src, size_t n, hipMemcpyKind) {
-    readFrom.push_back(src);
+    readFrom.emplace_back(src, n);
     if (dst) memset(dst, 0, n);  // the helpers print through the context they read
     return hipSuccess;
   });
@@ -4739,7 +4776,9 @@ TEST(DevCommDumpTest, DispatchesPerConnectionDumps) {
   ncclDevCommDump(&devComm);
   std::string out = testing::internal::GetCapturedStdout();
 
-  EXPECT_EQ(readFrom, (std::vector<const void*>{devComm.ginHandles[0], devComm.ginHandles[1]}));
+  EXPECT_EQ(readFrom, (std::vector<std::pair<const void*, size_t>>{
+                          {devComm.ginHandles[0], sizeof(ncclGinGdakiGPUContext)},
+                          {devComm.ginHandles[1], sizeof(ncclGinProxyGpuCtx_t)}}));
   EXPECT_NE(out.find("GDAKI qp"), std::string::npos);
   EXPECT_NE(out.find("PROXY nranks"), std::string::npos);
 }
