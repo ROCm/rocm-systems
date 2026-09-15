@@ -46,6 +46,7 @@
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/variadic/lightweight_tuple.hpp>
 
+#include <array>
 #include <exception>
 #include <string_view>
 #include <type_traits>
@@ -2710,63 +2711,42 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     std::vector<domain_selection> domain_selection_list;
 
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT))
+    struct kfd_domain_entry
     {
-        domain_selection selection;
-        selection.name = "kfd_page_fault";
-        domain_selection_list.push_back(selection);
-    }
+        production_backend::buffer_tracing_kind_t kind;
+        std::string_view                          name;
+        std::vector<std::string_view>             operations = {};
+    };
 
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE))
+    // NB: to add a new KFD buffered domain, add one entry here (this loop) —
+    // the CMake source list, header include, and external_dependencies member
+    // for the new event kind still need to be added separately.
+    static const std::array<kfd_domain_entry, 8> k_kfd_domain_table = { {
+        { ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT, "kfd_page_fault" },
+        { ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE, "kfd_page_migrate" },
+        { ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT, "kfd_event_page_fault" },
+        { ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE, "kfd_event_page_migrate" },
+        { ROCPROFILER_BUFFER_TRACING_KFD_QUEUE, "kfd_queue" },
+        { ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
+          "kfd_event_queue",
+          { "ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED" } },
+        { ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+          "kfd_event_unmap_from_gpu" },
+        { ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
+          "kfd_event_dropped_events" },
+    } };
+
+    for(const auto& entry : k_kfd_domain_table)
     {
+        if(!_buffered_domain.contains(entry.kind)) continue;
+
         domain_selection selection;
-        selection.name = "kfd_page_migrate";
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT))
-    {
-        domain_selection selection;
-        selection.name = "kfd_event_page_fault";
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE))
-    {
-        domain_selection selection;
-        selection.name = "kfd_event_page_migrate";
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE))
-    {
-        domain_selection selection;
-        selection.name = "kfd_queue";
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE))
-    {
-        domain_selection selection;
-        selection.name       = "kfd_event_queue";
-        selection.operations = { "ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED" };
-
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU))
-    {
-        domain_selection selection;
-        selection.name = "kfd_event_unmap_from_gpu";
-
-        domain_selection_list.push_back(selection);
-    }
-
-    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS))
-    {
-        domain_selection selection;
-        selection.name = "kfd_event_dropped_events";
-
+        selection.name = std::string{ entry.name };
+        if(!entry.operations.empty())
+        {
+            selection.operations = std::vector<std::string>{ entry.operations.begin(),
+                                                             entry.operations.end() };
+        }
         domain_selection_list.push_back(selection);
     }
 
