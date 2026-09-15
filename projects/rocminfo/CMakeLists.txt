@@ -34,6 +34,9 @@
 #
 # Minimum version of cmake required
 #
+
+# Temporary no-op change on rocminfo to exercise TheRock Multi-arch CI
+
 cmake_minimum_required(VERSION 3.25)
 
 set(ROCMINFO_EXE "rocminfo")
