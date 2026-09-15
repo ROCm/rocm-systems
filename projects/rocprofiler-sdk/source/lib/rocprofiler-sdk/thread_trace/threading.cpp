@@ -27,8 +27,6 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
-#include <fmt/format.h>
-
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -51,7 +49,7 @@ struct trace_callback_data_t
 };
 
 trace_callback_data_t
-iterate_data(aqlprofile_handle_t handle)
+iterate_data(hsa::SQTTBufferingPackets& packets)
 {
     auto thread_trace_callback = [](uint32_t, void* buffer, uint64_t size, void* userdata) {
         auto& data = *static_cast<trace_callback_data_t*>(userdata);
@@ -60,19 +58,10 @@ iterate_data(aqlprofile_handle_t handle)
         return HSA_STATUS_SUCCESS;
     };
     trace_callback_data_t data{};
-    data.status = aqlprofile_att_iterate_data(handle, thread_trace_callback, &data);
+    data.status = packets.iterate_data(thread_trace_callback, &data);
     return data;
 }
 };  // namespace
-
-// Performs a synchronous GPU-to-CPU copy using the queue's preallocated
-// completion signal, so the producer loop never allocates GPU resources.
-void
-copy_data_sync(att_queue_t& queue, void* dst, const void* src, size_t size)
-{
-    ROCP_TRACE << fmt::format("Executing KFD copy from {} to {}", src, dst);
-    att_queue_copy(queue, dst, src, size);
-}
 
 // Worker thread body. One instance per slot; each owns a single slot index.
 // Waits on its slot's cv until the slot is filled or the global stop flag is
@@ -155,7 +144,6 @@ producer_loop(
     auto     start_t0 = std::chrono::system_clock::now();
     bool     do_sleep{false};
     uint64_t next_chunk_index = 0;
-    int64_t  shader_engine_id = parameters.shader_engine_id;
 
     auto sleep_fn = [&]() {
         sched_yield();
@@ -190,14 +178,20 @@ producer_loop(
         auto& buffer       = buffers[slot_idx];
         buffer.flags       = flags;
         buffer.size        = size;
-        buffer.se_id       = shader_engine_id;
+        buffer.se_id       = buffer_packet.shader_engine_id;
         buffer.chunk_index = next_chunk_index++;
         buffer.read_offset = read_offset;
 
-        if(!isHeader)
-            parameters.copy_data_fn(queue, buffer.memory, src, size);
-        else
-            std::memcpy(buffer.memory, src, size);
+        if(size > 0)
+        {
+            if(isHeader)
+                std::memcpy(buffer.memory, src, size);
+            else if(!parameters.copy_data_fn(queue, buffer.memory, src, size))
+            {
+                ROCP_CI_LOG(ERROR) << "Discarding ATT chunk after copy failure";
+                buffer.size = 0;
+            }
+        }
 
         auto copy_time = (std::chrono::system_clock::now() - t0).count() * 1E-9f;
         ROCP_TRACE << "Copy: " << copy_time << " s. BW: " << size / copy_time;
@@ -213,23 +207,37 @@ producer_loop(
 
     auto stop_trace = [&]() {
         ROCP_INFO << "Stopping the trace";
-        att_queue_submit(queue, &parameters.control_packet->after_krn_pkt.at(0), &submit_signal);
+        if(!att_queue_submit(
+               queue, &parameters.control_packet->after_krn_pkt.at(0), &submit_signal))
+        {
+            ROCP_CI_LOG(ERROR) << "Failed to submit thread-trace stop packet for agent "
+                               << queue.agent_id.handle;
+            return false;
+        }
         signal_wait(submit_signal);
+        return true;
     };
 
     // Drain remaining ATT data after a stop; waits for a free slot to land it in.
     auto iterate_trace = [&]() {
         size_t idx  = wait_for_free_slot();
-        auto   wptr = iterate_data(parameters.control_packet->GetHandle());
+        auto   wptr = iterate_data(buffer_packet);
         buffer_packet.reset_current_buffer();
-        if(wptr.status != HSA_STATUS_SUCCESS || wptr.data == nullptr || wptr.size == 0)
+        int flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END;
+        if(wptr.status == HSA_STATUS_ERROR_OUT_OF_RESOURCES)
+            flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL;
+        if(wptr.status != HSA_STATUS_SUCCESS || (wptr.size > 0 && !wptr.data) ||
+           wptr.size > buffer_size)
         {
-            ROCP_WARNING << "Discarding ATT drain: status " << wptr.status << ", size "
-                         << wptr.size;
-            return;
+            if(wptr.status == HSA_STATUS_ERROR_OUT_OF_RESOURCES)
+                ROCP_WARNING << "Discarding ATT drain payload after GPU buffer overflow";
+            else
+                ROCP_CI_LOG(ERROR) << "Discarding ATT drain payload: status " << wptr.status
+                                   << ", size " << wptr.size;
+            wptr.size = 0;
         }
         ROCP_INFO << "Iterate data with size: " << wptr.size;
-        send_to_consumer(wptr.data, wptr.size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END, idx);
+        send_to_consumer(wptr.data, wptr.size, flags, idx);
     };
 
     std::array<uint64_t, 4> header_plus_zeros{};  // Used for warmup the decoder path
@@ -255,14 +263,14 @@ producer_loop(
         do_sleep = true;  // Reset value
 
         // PHASE 1: Poll SQTT buffer status
-        att_queue_submit(queue, &buffer_packet.query_status, &submit_signal);
+        if(!att_queue_submit(queue, &buffer_packet.query_status, &submit_signal)) break;
         signal_wait(submit_signal);
 
         if(auto status = buffer_packet.query_buffer_status())
         {
             if(status->gpu_full)
             {
-                auto submit_lock = std::unique_lock{*queue.submit_mutex};
+                auto submit_lock = std::unique_lock{queue.submit_mutex};
                 queue.submit_fn  = nullptr;
 
                 // Leave SQTT untouched after overflow: no swap, stop, restart,
@@ -281,7 +289,7 @@ producer_loop(
             // The copy runs on a different engine than the AQL queue, so the packet's
             // barrier bit does not order it. The retired buffer is only complete once
             // the swap has executed.
-            att_queue_submit(queue, &status->packet, &submit_signal);
+            if(!att_queue_submit(queue, &status->packet, &submit_signal)) break;
             signal_wait(submit_signal);
 
             ROCP_FATAL_IF(status->size != buffer_size)
@@ -292,7 +300,7 @@ producer_loop(
             size_t     slot_idx = try_claim_slot();
             const bool cpu_full = (slot_idx == num_buffers);
 
-            if(cpu_full) stop_trace();
+            if(cpu_full && !stop_trace()) break;
 
             int flags = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE;
             if(cpu_full) flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL;
@@ -307,8 +315,7 @@ producer_loop(
                 iterate_trace();
                 send_header();
 
-                for(auto& packet : parameters.control_packet->before_krn_pkt)
-                    att_queue_submit(queue, &packet, nullptr);
+                if(!parameters.restart_trace(parameters.control_packet)) break;
             }
             // The status_query test verifies we immediately poll again after consuming a
             // buffer, so skip the backoff when a flip just occurred.
@@ -316,9 +323,8 @@ producer_loop(
         }
     }
 
-    if(att_queue_enabled(queue))
+    if(att_queue_enabled(queue) && stop_trace())
     {
-        stop_trace();
         iterate_trace();
     }
 
