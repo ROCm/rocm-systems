@@ -347,3 +347,48 @@ TEST(common, pool_clear_races_acquire_release)
     EXPECT_LT(_obj.index(), batch_size);
     EXPECT_TRUE(_obj.release());
 }
+
+// pool<Tp>::acquire(FuncT&&, Args&&...) runs the callable on every acquire, reused objects
+// included, not only on the ones it had to create. hsa::construct_hsa_signal depends on that:
+// the signal pool's batch constructor is a no-op once finalization has started, so a batch
+// grown then holds objects whose handle is null, and this call is what lazily creates their
+// signal. Deleting the call would leave those objects null instead.
+//
+// This pins that precondition, not the signal leak it guards: construct_hsa_signal needs HSA,
+// so nothing here reaches it.
+TEST(common, pool_acquire_runs_ctor_on_reused_object)
+{
+    container::pool<payload> _pool{std::piecewise_construct, batch_size, init_payload};
+
+    auto _ctor_calls    = size_t{0};
+    auto _counting_ctor = [&_ctor_calls](payload& obj) {
+        ++_ctor_calls;
+        obj.value = payload_sentinel;
+    };
+
+    // drains the initial batch without growing it, so every object here is a first use
+    auto _held = std::vector<container::pool_object<payload>*>{};
+    for(size_t i = 0; i < batch_size; ++i)
+        _held.emplace_back(&_pool.acquire(_counting_ctor));
+    EXPECT_EQ(_ctor_calls, batch_size);
+
+    for(auto* itr : _held)
+        EXPECT_TRUE(itr->release());
+
+    // zeroed so that the sentinel below can only have come from the callable running again
+    for(auto* itr : _held)
+        itr->get().value = 0;
+
+    // and now every object is a reuse
+    for(size_t i = 0; i < batch_size; ++i)
+    {
+        auto& _obj = _pool.acquire(_counting_ctor);
+        EXPECT_EQ(_obj.get().value, payload_sentinel) << "the callable did not run on a reuse";
+        EXPECT_TRUE(_obj.release());
+    }
+
+    auto _report = _pool.get_usage_report();
+    EXPECT_EQ(usage_field(_report, "batches"), 0) << "the pool grew: " << _report;
+    EXPECT_EQ(usage_field(_report, "reused"), batch_size) << _report;
+    EXPECT_EQ(_ctor_calls, 2 * batch_size) << "the callable must run on reused objects too";
+}

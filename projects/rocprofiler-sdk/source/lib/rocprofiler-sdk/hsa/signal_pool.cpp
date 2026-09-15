@@ -47,6 +47,17 @@ construct_hsa_signal(signal_t&          signal,
                      const hsa_agent_t* consumers,
                      uint64_t           attributes)
 {
+    // pool<Tp>::acquire(FuncT&&, Args&&...) runs this on every acquire, reused objects
+    // included, and nothing in the pool destroys a handle between acquires: release() is
+    // bookkeeping only and destroy_signal() runs from clear(), which retires the object rather
+    // than returning it to the free list. Creating unconditionally therefore overwrote a live
+    // handle with a fresh one on every reuse and leaked the old one -- one signal per
+    // intercepted dispatch, against a 4096 KFD event limit per process that HSA exhausts
+    // silently. Reuse the handle instead. A null handle still takes the create path: it is the
+    // pool's batch constructor that skips creating once finalization has started, and this call
+    // is the lazy-creation path those objects depend on.
+    if(signal.value.handle != 0) return signal;
+
     auto status = HSA_STATUS_SUCCESS;
     if(!get_amd_ext_table() || !get_amd_ext_table()->hsa_amd_signal_create_fn)
         status = HSA_STATUS_ERROR;
