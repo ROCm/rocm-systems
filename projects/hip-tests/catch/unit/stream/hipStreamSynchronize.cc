@@ -87,22 +87,18 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_NullStreamSynchronization) {
  * streams. Check that querying the nullStream does not affect synchronization of other streams.
  */
 HIP_TEST_CASE(Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream) {
-#if HT_AMD
-  HIP_SKIP_TEST("tracked issue EXSWCPHIPT-22.");
-#else
-
   hipStream_t stream1;
   hipStream_t stream2;
 
   HIP_CHECK(hipStreamCreate(&stream1));
   HIP_CHECK(hipStreamCreate(&stream2));
 
-  LaunchDelayKernel(std::chrono::milliseconds(500), stream1);
-  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 2000), stream2);
+  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 100 : 500), stream1);
+  LaunchDelayKernel(std::chrono::milliseconds(isQuickLevel() ? 400 : 2000), stream2);
 
   SECTION("Do not use NullStream") {}
   SECTION("Submit Kernel to NullStream") {
-    hip::stream::empty_kernel<<<1, 1, 0, hip::nullStream> > >();
+    hip::stream::empty_kernel<<<1, 1, 0, hip::nullStream>>>();
   }
   SECTION("Query NullStream") {
     HIP_CHECK_ERROR(hipStreamQuery(hip::nullStream), hipErrorNotReady);
@@ -122,7 +118,6 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream) {
 
   HIP_CHECK(hipStreamDestroy(stream1));
   HIP_CHECK(hipStreamDestroy(stream2));
-#endif
 }
 
 /**
