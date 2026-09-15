@@ -1251,11 +1251,49 @@ static bool svm_api_range_get_locked(struct hsa_kfd_fmm_context *fmm_ctx,
 }
 
 /*
+ * Find the tracked range whose page-rounded extent covers @addr, for callers
+ * that hand back an address inside a registered buffer rather than the pointer
+ * it was registered with. Scans from base - svm_api_max_extent for the same
+ * reason svm_api_range_put_locked does: a longer range further left can still
+ * reach @addr.
+ */
+static svm_api_range_t *svm_api_range_find_containing(struct hsa_kfd_fmm_context *fmm_ctx,
+						      void *addr)
+{
+	HSAuint64 a = (HSAuint64)addr;
+	HSAuint64 scan = a > fmm_ctx->svm_api_max_extent ? a - fmm_ctx->svm_api_max_extent : 0;
+	rbtree_key_t key = rbtree_key(scan, 0);
+	rbtree_node_t *node = rbtree_lookup_nearest(&fmm_ctx->svm_api_range_tree, &key,
+						    LKP_ADDR, RIGHT);
+
+	while (node) {
+		svm_api_range_t *r = rb_entry(node, svm_api_range_t, node);
+		HSAuint64 start = (HSAuint64)r->start;
+
+		if (start > a)
+			break;
+		if (a < start + r->size)
+			return r;
+		node = hsakmt_rbtree_next(&fmm_ctx->svm_api_range_tree, node);
+	}
+	return NULL;
+}
+
+/*
  * Record the GPUs a range was just mapped to, so deregistration revokes only
  * those. The grant happens in fmm_map_mem_svm_api(), which is the only place
  * that knows which GPUs the caller asked for; register sees no node list at
  * all. Repeated maps of the same pointer accumulate, so the revoke covers
  * every GPU that was ever granted.
+ *
+ * A map can arrive for a range that is not tracked under @user_addr:
+ * hsa_amd_agents_allow_access() maps without registering first and may pass an
+ * address inside the buffer, and tracking at register time is best-effort and
+ * skipped if it could not allocate. The containing-range lookup handles the
+ * first case. If nothing tracked covers the address there is nothing to attach
+ * the GPUs to, so the grant is simply left in place - the same direction as a
+ * range that fills no whole page, and it cannot produce the stale NO_ACCESS
+ * this path exists to avoid.
  */
 static void svm_api_range_add_gpus_locked(struct hsa_kfd_fmm_context *fmm_ctx,
 					  void *user_addr, const uint32_t *gpu_ids,
@@ -1265,6 +1303,8 @@ static void svm_api_range_add_gpus_locked(struct hsa_kfd_fmm_context *fmm_ctx,
 	svm_api_range_t *r = svm_api_range_find(fmm_ctx, user_addr);
 	uint32_t i, j;
 
+	if (!r)
+		r = svm_api_range_find_containing(fmm_ctx, user_addr);
 	if (!r)
 		return;
 
@@ -1452,6 +1492,13 @@ static HSAKMT_STATUS fmm_unregister_mem_svm_api(HsaKFDContext *ctx,
 	 * the kernel default, so clearing them drops whatever else shares those
 	 * pages below default; on gfx942/950 that also turns a live mapping
 	 * cached. NO_ACCESS is what the unmap and eviction skip key off.
+	 */
+	/* @gpu_all deliberately over-revokes: the mask holds one bit per GPU
+	 * and anything beyond it sets @gpu_all instead, which then revokes
+	 * every GPU rather than tracking which. NO_ACCESS for a GPU that was
+	 * never granted is a no-op, and the ranges reaching here are only the
+	 * ones no surviving registration covers, so it costs attributes and
+	 * nothing else.
 	 */
 	nattr = 0;
 	for (i = 0; i < num_gpus; i++)
