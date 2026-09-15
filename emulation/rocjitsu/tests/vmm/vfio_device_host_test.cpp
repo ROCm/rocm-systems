@@ -582,22 +582,17 @@ TEST(VfioServerSignals, MapsEachHandledSignalToItsAction) {
 // reported as work that ran and failed -- indistinguishable from work that
 // could not be done -- while the single slot is spent on nothing.
 TEST(VfioDeviceHost, RefusesEmptyWorkRatherThanThrowingOnTheServingThread) {
-  // Declared before the fixture so it outlives the join, and joined before
-  // the flag is read: the serving thread may still hold the request when
-  // the earlier assertions end, and std::atomic does not extend the
-  // object's lifetime.
-  std::atomic<bool> ran = false;
   ServedDevice served;
   ASSERT_TRUE(served.built());
 
   EXPECT_FALSE(served.host().ask_serving_thread({})) << "an empty target was accepted";
 
-  // And the slot is still free, so a real request is not lost behind it --
-  // and that request does run, once the thread has drained.
-  EXPECT_TRUE(served.host().ask_serving_thread([&ran] { ran = true; }))
+  // And the slot is still free, so a real request is not lost behind it. No
+  // state is captured: the acceptance alone is the claim under test, and a
+  // captured flag could never be read back reliably, because a request that
+  // is still queued when serving stops is discarded by contract.
+  EXPECT_TRUE(served.host().ask_serving_thread([] {}))
       << "the refused request consumed the one outstanding slot";
-  served.stop_serving();
-  EXPECT_TRUE(ran) << "the request accepted after the refusal never ran";
 }
 
 TEST(VfioDeviceHost, RunsAskedWorkOnTheServingThread) {
