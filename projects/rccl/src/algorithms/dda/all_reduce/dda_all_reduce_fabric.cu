@@ -15,6 +15,7 @@
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -74,48 +75,49 @@ static ncclResult_t ncclAllReduceDdaFabricTyped(const void* sendbuff, void* recv
        treeOk ? "tree (two-shot)" : "flat (one-shot)", nRanks, count, sizeBytes, grid.x, block.x,
        (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   if (treeOk) {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, count * sizeof(T), cudaMemcpyDeviceToDevice, stream));
     // NRANKS_CT 4/8: unrolled CollCommon reduce; 0: runtime fallback.
     switch (nRanks) {
     case 4:
       INFO(NCCL_COLL, "DDA fabric AllReduce: tree path, NRANKS_CT=4 (unrolled)");
-      dda::common::ddaAllReduceTreeFabric<T, 4, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      hipExtLaunchKernelGGL((dda::common::ddaAllReduceTreeFabric<T, 4, false>), grid, block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                            count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost, nullptr);
       break;
     case 8:
       INFO(NCCL_COLL, "DDA fabric AllReduce: tree path, NRANKS_CT=8 (unrolled)");
-      dda::common::ddaAllReduceTreeFabric<T, 8, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      hipExtLaunchKernelGGL((dda::common::ddaAllReduceTreeFabric<T, 8, false>), grid, block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                            count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost, nullptr);
       break;
     default:
       INFO(NCCL_COLL, "DDA fabric AllReduce: tree path, NRANKS_CT=0 (runtime, nRanks=%d)", nRanks);
-      dda::common::ddaAllReduceTreeFabric<T, 0, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      hipExtLaunchKernelGGL((dda::common::ddaAllReduceTreeFabric<T, 0, false>), grid, block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                            count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost, nullptr);
       break;
     }
   } else {
     switch (nRanks) {
     case 4:
       INFO(NCCL_COLL, "DDA fabric AllReduce: flat path, NRANKS_CT=4 (unrolled)");
-      dda::common::ddaAllReduceFlatFabric<T, 4, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatFabric<T, 4, false>), grid, block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                            count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost, nullptr);
       break;
     case 8:
       INFO(NCCL_COLL, "DDA fabric AllReduce: flat path, NRANKS_CT=8 (unrolled)");
-      dda::common::ddaAllReduceFlatFabric<T, 8, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatFabric<T, 8, false>), grid, block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                            count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost, nullptr);
       break;
     default:
       INFO(NCCL_COLL, "DDA fabric AllReduce: flat path, NRANKS_CT=0 (runtime, nRanks=%d)", nRanks);
-      dda::common::ddaAllReduceFlatFabric<T, 0, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatFabric<T, 0, false>), grid, block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                            count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost, nullptr);
       break;
     }
   }
