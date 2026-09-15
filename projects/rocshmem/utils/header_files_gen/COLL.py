@@ -131,7 +131,7 @@ def generate_alltoall_wg_api():
  *
  * This function must be called as a work-group collective.
  *
- * @param[in] ctx          The ROCSHMEM context associated with this operation.    
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
  * @param[in] team         The team participating in the collective.
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
@@ -190,7 +190,7 @@ def generate_alltoall_wave_api():
  *
  * This function must be called as a wave collective.
  *
- * @param[in] ctx          The ROCSHMEM context associated with this operation.    
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
  * @param[in] team         The team participating in the collective.
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
