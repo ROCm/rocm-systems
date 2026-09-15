@@ -3,7 +3,7 @@
 
 include_guard(DIRECTORY)
 
-set(FMT_VERSION "11.2.0" CACHE STRING "fmt version")
+set(FMT_VERSION "11.1.3" CACHE STRING "Minimum fmt version")
 
 find_package(fmt ${FMT_VERSION} QUIET)
 
