@@ -1479,6 +1479,16 @@ class _AmdgpuProfileBase(IsaProfile):
         return False
 
     @property
+    def vmem_writes_use_expcnt(self) -> bool:
+        """Whether vector-memory writes also contribute to EXPCNT."""
+        return False
+
+    @property
+    def gds_uses_expcnt(self) -> bool:
+        """Whether GDS operations also contribute to EXPCNT."""
+        return False
+
+    @property
     def has_mfma(self) -> bool:
         """True if this ISA has MFMA matrix instructions (all CDNA)."""
         return False
@@ -1659,6 +1669,14 @@ class CdnaProfile(_AmdgpuProfileBase):
 
     @property
     def vmem_stores_complete_in_order(self) -> bool:
+        return True
+
+    @property
+    def vmem_writes_use_expcnt(self) -> bool:
+        return True
+
+    @property
+    def gds_uses_expcnt(self) -> bool:
         return True
 
     @property
@@ -2007,6 +2025,14 @@ class Rdna1Profile(_AmdgpuProfileBase):
     _SKIP_DPP_SDWA = True
 
     @property
+    def vmem_writes_use_expcnt(self) -> bool:
+        return True
+
+    @property
+    def gds_uses_expcnt(self) -> bool:
+        return True
+
+    @property
     def ds_compare_store_compare_first(self) -> bool:
         # CDNA1-4 / RDNA1-2 DS CMPST reverses the BUFFER operand order.
         return True
@@ -2130,6 +2156,14 @@ class Rdna3Profile(_AmdgpuProfileBase):
     _SKIP_DPP_SDWA = True
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
     _SOP1_BASE_COND = 'Nothas_lit_0_Nothas_lit_1'
+
+    @property
+    def vmem_writes_use_expcnt(self) -> bool:
+        return True
+
+    @property
+    def gds_uses_expcnt(self) -> bool:
+        return True
 
     def normalize_encoding_condition(self, enc_name: str, cond_name: str) -> str:
         if enc_name.upper() == 'ENC_SOP1' and cond_name == self._SOP1_BASE_COND:

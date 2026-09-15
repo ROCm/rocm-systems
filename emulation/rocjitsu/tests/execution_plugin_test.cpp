@@ -4482,6 +4482,16 @@ TEST(InstructionMetadataTest, StoresAndGdsExposeEveryCounterObligation) {
   ASSERT_EQ(gds_obligations.size(), 2u);
   EXPECT_EQ(gds_obligations[0].completion_class(), MemoryCompletionClass::GDS);
   EXPECT_EQ(gds_obligations[1].wait_counter_type(), WaitCounterType::EXPCNT);
+
+  const auto flat_store_words = cdna2::build_flat(cdna2::kFlatStoreDwordFlat,
+                                                  {.seg = 0, .addr = 0, .data = 1, .saddr = 0x7F});
+  std::unique_ptr<Instruction> flat_store(decode_valid(*decoder, flat_store_words.data()));
+  ASSERT_NE(flat_store, nullptr);
+  const auto flat_store_obligations = flat_store->amdgpu_memory_issue_info()->counter_obligations();
+  ASSERT_EQ(flat_store_obligations.size(), 3u);
+  EXPECT_EQ(flat_store_obligations[0].wait_counter_type(), WaitCounterType::VMCNT);
+  EXPECT_EQ(flat_store_obligations[1].wait_counter_type(), WaitCounterType::LGKMCNT);
+  EXPECT_EQ(flat_store_obligations[2].wait_counter_type(), WaitCounterType::EXPCNT);
 }
 
 TEST(InstructionMetadataTest, Cdna5AsyncOperationsExposeDistinctCompletionDomains) {
@@ -4515,6 +4525,17 @@ TEST(InstructionMetadataTest, WideScalarLoadContributesTwoCounterTokens) {
   ASSERT_EQ(obligations.size(), 1u);
   EXPECT_EQ(obligations[0].wait_counter_type(), WaitCounterType::LGKMCNT);
   EXPECT_EQ(obligations[0].counter_increment(), 2u);
+}
+
+TEST(InstructionMetadataTest, CounterObligationPackingRoundTrips) {
+  constexpr MemoryCounterObligation obligation{WaitCounterType::ASYNCCNT,
+                                               MemoryCompletionClass::ASYNC_STORE, 2};
+  static_assert(sizeof(MemoryCounterObligation) == 1);
+  EXPECT_TRUE(obligation.valid());
+  EXPECT_EQ(obligation.wait_counter_type(), WaitCounterType::ASYNCCNT);
+  EXPECT_EQ(obligation.completion_class(), MemoryCompletionClass::ASYNC_STORE);
+  EXPECT_EQ(obligation.counter_increment(), 2u);
+  EXPECT_FALSE(MemoryCounterObligation{}.valid());
 }
 
 // The immediate-halt branch frees a wave's registers the instant s_endpgm

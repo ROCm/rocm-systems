@@ -7288,6 +7288,7 @@ def test_pre_gfx12_stores_and_gds_preserve_expcnt_obligations():
     for arch_name, profile in (
         ('cdna2', Cdna2Profile()),
         ('rdna2', Rdna2Profile()),
+        ('rdna3', Rdna3Profile()),
     ):
         codegen.isa_spec = SimpleNamespace(arch_name=arch_name, profile=profile)
         store_info = codegen._memory_issue_initializer(store, set())

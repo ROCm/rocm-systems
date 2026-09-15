@@ -326,6 +326,7 @@ class CodeGenerator:
     # vice versa).
     _SRC_OPERANDS_CAPACITY = 6
     _DST_OPERANDS_CAPACITY = 3
+    _MEMORY_COUNTER_OBLIGATIONS_CAPACITY = 3
 
     # Memory-pipeline semantics recognized by code generation. This table is
     # also the source of truth for the MEMORY_OP instruction flag: every entry
@@ -7880,16 +7881,23 @@ class CodeGenerator:
         self, sem_class: str, inst_fields: set[str]
     ) -> str | None:
         """Return the pre-GFX12 write-data/GDS EXPCNT obligation."""
-        if self.isa_spec.profile.waitcnt_family not in ('gfx9', 'gfx10'):
-            return None
         kind = self._MEMORY_ISSUE_KINDS[sem_class]
         obligation = self._memory_counter_obligation(
             'amdgpu::WaitCounterType::EXPCNT',
             'amdgpu::MemoryCompletionClass::UNORDERED',
         )
-        if kind in ('flat_store', 'vmem_store', 'flat_atomic', 'vmem_atomic'):
+        if self.isa_spec.profile.vmem_writes_use_expcnt and kind in (
+            'flat_store',
+            'vmem_store',
+            'flat_atomic',
+            'vmem_atomic',
+        ):
             return obligation
-        if kind == 'local' and 'gds' in inst_fields:
+        if (
+            self.isa_spec.profile.gds_uses_expcnt
+            and kind == 'local'
+            and 'gds' in inst_fields
+        ):
             return (
                 f'(inst_.gds != 0 ? {obligation} : '
                 'amdgpu::MemoryCounterObligation{})'
@@ -7941,6 +7949,11 @@ class CodeGenerator:
         expcnt = self._expcnt_memory_obligation(sem_class, inst_fields)
         if expcnt is not None:
             obligations.append(expcnt)
+        if len(obligations) > self._MEMORY_COUNTER_OBLIGATIONS_CAPACITY:
+            raise ValueError(
+                f'{sem.name}: {len(obligations)} memory counter obligations exceed '
+                f'capacity {self._MEMORY_COUNTER_OBLIGATIONS_CAPACITY}'
+            )
         exec_masked = not (
             self._MEMORY_ISSUE_KINDS[sem_class] == 'scalar'
             or (
