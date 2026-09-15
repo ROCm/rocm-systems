@@ -33,6 +33,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **`amdsmi_get_clock_info()` now returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` for clock values that exceed `INT_MAX`**.  
   - Such values were previously narrowed to a negative number and returned as data.
+  - The `UINT_MAX` "unavailable" sentinel is exempt: a domain with no minimum dpm level or no deep-sleep state keeps reporting the clock as unavailable instead of failing the call.
 
 - **Expanded `amdsmi_gpu_block_t` enum with 20 new RAS IP blocks**.  
   - Added blocks: from `AMDSMI_GPU_BLOCK_MMSCH` to `AMDSMI_GPU_BLOCK_UCIE_PCS` at bit positions 19-38.
