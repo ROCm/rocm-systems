@@ -100,11 +100,9 @@ HIP_TEST_CASE(Unit_hipGraphStreamPool_InstantiateFootprint) {
   }
 
   const size_t free_after = freeDeviceMemory();
-  REQUIRE(free_after <= free_before);
-  const size_t used = free_before - free_after;
+  const size_t used = (free_after <= free_before) ? (free_before - free_after) : 0;
   const size_t per_graph = used / kGraphs;
   INFO("device memory per instantiate: " << per_graph << " bytes over " << kGraphs << " graphs");
-  REQUIRE(used <= kGraphs * kMaxBytesPerGraph);
 
   for (int i = 0; i < kGraphs; ++i) {
     HIP_CHECK(hipGraphExecDestroy(execs[i]));
@@ -115,7 +113,10 @@ HIP_TEST_CASE(Unit_hipGraphStreamPool_InstantiateFootprint) {
   const size_t free_end = freeDeviceMemory();
   const size_t retained = (free_before > free_end) ? (free_before - free_end) : 0;
   INFO("device memory retained after destroy: " << retained << " bytes");
-  REQUIRE(retained <= kMaxBytesPerGraph);
 
   HIP_CHECK(hipFree(buf));
+
+  REQUIRE(free_after <= free_before);
+  REQUIRE(used <= kGraphs * kMaxBytesPerGraph);
+  REQUIRE(retained <= kMaxBytesPerGraph);
 }
