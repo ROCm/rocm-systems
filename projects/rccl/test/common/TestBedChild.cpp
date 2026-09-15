@@ -1409,8 +1409,6 @@ namespace RcclUnitTesting
                                      &(collArg.outputWin),
                                      NCCL_WIN_COLL_SYMMETRIC),
               "ncclCommWindowRegister (output in-place)");
-              // Just to indicate windows are same, this assignment doesn't affect functionality.
-              collArg.inputWin = collArg.outputWin;
            }
            else
            {
@@ -1490,7 +1488,55 @@ namespace RcclUnitTesting
       CHECK_HIP(hipDeviceSynchronize());
     }
 
+    ErrCode status = TEST_SUCCESS;
+    if (this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN)
+    {
+      for (int localRank : localRanks)
+      {
+        for (size_t collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
+        {
+          if (collId != -1 && collId != static_cast<int>(collIdx)) continue;
+
+          CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
+          if (collArg.inPlace)
+          {
+            // Window registration is deferred until ncclGroupEnd(), so only
+            // now is the returned handle final.
+            collArg.inputWin = collArg.outputWin;
+            if (collArg.outputWin == nullptr)
+            {
+              TEST_ERROR("Child %d rank %d group %d collective %zu: "
+                         "in-place symmetric window registration returned a null handle",
+                         this->childId, localRank, groupId, collIdx);
+              status = TEST_FAIL;
+            }
+          }
+          else
+          {
+            if (collArg.inputGpu.ptr != nullptr &&
+                collArg.numInputBytesAllocated > 0 &&
+                collArg.inputWin == nullptr)
+            {
+              TEST_ERROR("Child %d rank %d group %d collective %zu: "
+                         "input symmetric window registration returned a null handle",
+                         this->childId, localRank, groupId, collIdx);
+              status = TEST_FAIL;
+            }
+            if (collArg.outputGpu.ptr != nullptr &&
+                collArg.numOutputBytesAllocated > 0 &&
+                collArg.outputWin == nullptr)
+            {
+              TEST_ERROR("Child %d rank %d group %d collective %zu: "
+                         "output symmetric window registration returned a null handle",
+                         this->childId, localRank, groupId, collIdx);
+              status = TEST_FAIL;
+            }
+          }
+        }
+      }
+    }
+
     if (this->verbose) TEST_INFO("Child %d finishes RegisterMem()", this->childId);
-    return TEST_SUCCESS;
+    return status;
   }
 }
