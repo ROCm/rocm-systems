@@ -50,13 +50,16 @@ jobs:
     # were only on ubuntu-20.04, itself being retired). The images are archived,
     # not deleted, so this stays green after the runner EOL. Newer minors run
     # natively via setup-python. Empty matrix.container = no container.
+    # The non-slim variants are used because they already bundle git, which
+    # actions/checkout needs. The slim ones would have to apt-get it, and
+    # bullseye is EOL: its security suite still indexes packages that 404.
     container: ${{matrix.container}}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { python-version: '3.6',  container: 'python:3.6-slim-bullseye' }
-          - { python-version: '3.7',  container: 'python:3.7-slim-bullseye' }
+          - { python-version: '3.6',  container: 'python:3.6-bullseye' }
+          - { python-version: '3.7',  container: 'python:3.7-bullseye' }
           - { python-version: '3.8',  container: '' }
           - { python-version: '3.9',  container: '' }
           - { python-version: '3.10', container: '' }
@@ -66,13 +69,6 @@ jobs:
           - { python-version: '3.14', container: '' }
 
     steps:
-      # The slim python images ship without git; actions/checkout needs it.
-      - name: Install git (container legs only)
-        if: matrix.container != ''
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends git ca-certificates
-
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           # rocm-systems is a large monorepo; only the amdsmi tests are needed.
