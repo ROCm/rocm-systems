@@ -201,6 +201,33 @@ owner would retire the grid and fire the completion signal for workgroups that
 never executed. KFD teardown is what reaches this window, since it removes
 replicas in XCD order while a later owner is still registered.
 
+### Queue exceptions and debugger notification
+
+A trap exception has one owner for its complete mask. The send site records
+whether the debugger or ROCr owns it; trap completion preserves that decision.
+Runtime delivery freezes all replicas of the logical queue before publishing
+one shared exception status and interrupt. A debugger can recover a retained
+fatal stop through a valid CWSR suspend/resume. Successful recovery clears the
+exception gate on every replica, preserves independent runtime and debugger
+suspension reasons, and schedules deferred queue work when all gates open.
+
+Debugger publication separates the event from the notifier transport. Queue
+status stays hidden while a write is in flight so a failed publication can roll
+back a debugger-only stop. If QUERY arrives after reading the wake but before
+that write commits, the session records a replacement-wake obligation. Once
+status is visible, the retry worker sends that wake under the session lock,
+without hiding the event again. The recovery write is bounded and holds no CU
+or allocation lock. Retained events, including queue creation, survive transport
+failures until acknowledged. Process events are already queryable during a
+write; their claims record which bits QUERY consumed so completion cannot mark
+a later event as already notified.
+
+The notifier uses a disposable child because another holder of the shared file
+description can change its blocking mode. Application signal handlers are
+blocked before cloning and remain blocked in the child; the parent restores
+its original mask. A deadline bounds the parent's wait, and a process-owned
+reaper handles a child that has not exited after cancellation.
+
 ### Event-Driven Dispatch
 
 The CP is event-driven, and work reaches it only through a registered queue --
