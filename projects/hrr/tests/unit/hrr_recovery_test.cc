@@ -32,12 +32,6 @@
 
 namespace fs = std::filesystem;
 
-#ifdef _WIN32
-static constexpr char kPathSep = ';';
-#else
-static constexpr char kPathSep = ':';
-#endif
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -150,15 +144,9 @@ struct TmpRootArchive {
   }
 };
 
-static void set_proc_search_path(hrr::test::SpawnProc& proc) {
-  const char* cur_path = getenv("PATH");
-  proc.setEnv("PATH",
-              std::string(ROCM_BIN_PATH) + kPathSep + (cur_path ? cur_path : ""));
-}
-
 static std::pair<int, std::string> run_hrr_playback(const fs::path& archive,
                                                     const std::string& args) {
-  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
   set_proc_search_path(proc);
 #ifdef _WIN32
   std::string path_arg = "\"" + archive.string() + "\"";
@@ -233,6 +221,28 @@ HRR_TEST_CASE(Unit_HRR_Recovery_TornPayload) {
   hrr::Archive a;
   REQUIRE(hrr::load_archive(arc.path(), a));
   CHECK(a.events.size() == 3);
+  CHECK_FALSE(a.complete);
+  CHECK(a.truncated);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - N complete records followed by a header whose payload_length is a
+ *     file-supplied ~4 GiB claim. The reader must refuse to allocate that and
+ *     treat the record as torn, keeping the complete records already parsed.
+ */
+HRR_TEST_CASE(Unit_HRR_Recovery_ImplausiblePayloadLength) {
+  TmpArchive arc("huge_payload");
+  arc.write_records(2);
+  hrr_event_header h = make_min_record(2);
+  h.payload_length = 0xFFFFFFF0u;
+  arc.write_bytes(&h, sizeof(h));
+  arc.finish();
+
+  hrr::Archive a;
+  REQUIRE(hrr::load_archive(arc.path(), a));
+  CHECK(a.events.size() == 2);
   CHECK_FALSE(a.complete);
   CHECK(a.truncated);
 }

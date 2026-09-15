@@ -193,6 +193,12 @@ class StatCO : public CodeObject {
   // Iterate all registered fat binary data pointers — for HRR capture post-registration sweep.
   void ForEachFatBinaryBlob(void (*cb)(const void*)) const;
 
+  // Iterate all registered __device__ globals as (host shadow address, symbol
+  // name, size, device address) — the same post-registration sweep for HRR,
+  // which otherwise never sees __hipRegisterVar because it fires at
+  // static-init time. The device address is null if it cannot be resolved yet.
+  void ForEachGlobalVar(void (*cb)(const void*, const char*, size_t, const void*));
+
  private:
   mutable std::recursive_mutex sclock_;    //!< Guards Static Code object
   const PlatformState& owner_;             //!< Reference to owning PlatformState
