@@ -5586,8 +5586,7 @@ rsmi_status_t rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst, 
         *type = RSMI_IOLINK_TYPE_PCIEXPRESS;
         status = RSMI_STATUS_SUCCESS;
       } else {
-        assert(false);  // Error to get numa node number
-        status = RSMI_STATUS_INIT_ERROR;
+        status = RSMI_STATUS_NOT_SUPPORTED;
       }
     } else {
       status = RSMI_STATUS_NOT_SUPPORTED;
