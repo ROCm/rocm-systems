@@ -6367,7 +6367,8 @@ def test_generated_execute_shared_calls_have_definitions(
         for path in shared_root.glob('*.h'):
             definitions.update(
                 re.findall(
-                    r'(?:inline\s+)?void\s+(execute_[A-Za-z0-9_]+)\s*\(',
+                    r'(?:inline\s+)?(?:void|util::Result)\s+'
+                    r'(execute_[A-Za-z0-9_]+)\s*\(',
                     path.read_text(),
                 )
             )

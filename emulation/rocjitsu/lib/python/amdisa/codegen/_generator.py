@@ -6607,10 +6607,22 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'tensor_load_to_lds':
-            return '  amdgpu::execute_tensor_load_to_lds(*this, wf);'
+            return (
+                '  if (amdgpu::execute_tensor_load_to_lds(*this, wf).failed()) [[unlikely]] {\n'
+                '    wf.report_instruction_execution_error(\n'
+                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
+                '    return;\n'
+                '  }'
+            )
 
         if cls == 'tensor_store_from_lds':
-            return '  amdgpu::execute_tensor_store_from_lds(*this, wf);'
+            return (
+                '  if (amdgpu::execute_tensor_store_from_lds(*this, wf).failed()) [[unlikely]] {\n'
+                '    wf.report_instruction_execution_error(\n'
+                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
+                '    return;\n'
+                '  }'
+            )
 
         if cls == 'barrier':
             L.append('  wf.set_state(amdgpu::WfState::BARRIER);')
