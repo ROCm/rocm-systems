@@ -1912,7 +1912,7 @@ TEST(RcclCeGraphLatch, SetsLatchOnFirstCapture)
     rcclCeAllReduceGraphLatchTick(comm.get(), /*ceCapturing=*/true);
 
     EXPECT_TRUE(comm->ceColl.graphModeSeen);
-    EXPECT_FALSE(rcclCeAllReduceAllowed(comm.get()));
+    EXPECT_FALSE(rcclCeArGraphSafe(comm.get()));
 }
 
 TEST(RcclCeGraphLatch, StaysSetAcrossRepeatedCaptureTicks)
@@ -1939,7 +1939,7 @@ TEST(RcclCeGraphLatch, DoesNotClearMidCaptureEvenWithZeroRefs)
     rcclCeAllReduceGraphLatchTick(comm.get(), /*ceCapturing=*/true);
 
     EXPECT_TRUE(comm->ceColl.graphModeSeen);
-    EXPECT_FALSE(rcclCeAllReduceAllowed(comm.get()));
+    EXPECT_FALSE(rcclCeArGraphSafe(comm.get()));
 }
 
 TEST(RcclCeGraphLatch, ClearsWhenCaptureEndsAndNoRefsRemain)
@@ -1951,7 +1951,7 @@ TEST(RcclCeGraphLatch, ClearsWhenCaptureEndsAndNoRefsRemain)
     rcclCeAllReduceGraphLatchTick(comm.get(), /*ceCapturing=*/false);
 
     EXPECT_FALSE(comm->ceColl.graphModeSeen);
-    EXPECT_TRUE(rcclCeAllReduceAllowed(comm.get()));
+    EXPECT_TRUE(rcclCeArGraphSafe(comm.get()));
 }
 
 TEST(RcclCeGraphLatch, StaysSetWhileCapturedPlanStillReferencesComm)
@@ -1964,13 +1964,13 @@ TEST(RcclCeGraphLatch, StaysSetWhileCapturedPlanStillReferencesComm)
 
     EXPECT_TRUE(comm->ceColl.graphModeSeen)
         << "Latch must stay set until every captured plan is reclaimed";
-    EXPECT_FALSE(rcclCeAllReduceAllowed(comm.get()));
+    EXPECT_FALSE(rcclCeArGraphSafe(comm.get()));
 
     // Reclaim completes: the next tick clears the latch.
     comm->localPersistentRefs = 0;
     rcclCeAllReduceGraphLatchTick(comm.get(), /*ceCapturing=*/false);
     EXPECT_FALSE(comm->ceColl.graphModeSeen);
-    EXPECT_TRUE(rcclCeAllReduceAllowed(comm.get()));
+    EXPECT_TRUE(rcclCeArGraphSafe(comm.get()));
 }
 
 TEST(RcclCeGraphLatch, AllowedQueryHasNoSideEffects)
@@ -1980,7 +1980,7 @@ TEST(RcclCeGraphLatch, AllowedQueryHasNoSideEffects)
 
     for(int i = 0; i < 5; ++i)
     {
-        EXPECT_FALSE(rcclCeAllReduceAllowed(comm.get()));
+        EXPECT_FALSE(rcclCeArGraphSafe(comm.get()));
     }
     EXPECT_TRUE(comm->ceColl.graphModeSeen) << "Query must be a pure read, not a state transition";
 }
@@ -1990,7 +1990,7 @@ TEST(RcclCeGraphLatch, NeverLatchedAllowsCeAllReduceByDefault)
     auto comm = std::make_unique<ncclComm>();
     comm->ceColl.graphModeSeen = false;
 
-    EXPECT_TRUE(rcclCeAllReduceAllowed(comm.get()));
+    EXPECT_TRUE(rcclCeArGraphSafe(comm.get()));
 }
 
 #ifdef ENABLE_WARP_SPEED
