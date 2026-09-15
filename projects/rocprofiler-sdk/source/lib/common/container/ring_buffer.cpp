@@ -213,7 +213,7 @@ ring_buffer::reset()
 }
 //
 
-void
+bool
 ring_buffer::save(std::fstream& _fs)
 {
     auto _read_count  = m_read_count.load();
@@ -222,6 +222,7 @@ ring_buffer::save(std::fstream& _fs)
     _fs.write(reinterpret_cast<char*>(&_read_count), sizeof(_read_count));
     _fs.write(reinterpret_cast<char*>(&_write_count), sizeof(_write_count));
     _fs.write(reinterpret_cast<char*>(m_ptr), m_size * sizeof(char));
+    return _fs.good();
 }
 //
 

@@ -117,7 +117,7 @@ struct tool_counter_record_t
     }
 
     container_type read() const;
-    void           write(const container_type& data);
+    bool           write(const container_type& data);
 };
 
 struct tool_spm_counter_value_t
@@ -157,7 +157,7 @@ struct tool_spm_counter_record_t
     }
 
     container_type read() const;
-    void           write(const container_type& data);
+    bool           write(const container_type& data);
 };
 }  // namespace tool
 }  // namespace rocprofiler
