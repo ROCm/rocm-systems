@@ -251,3 +251,31 @@ TEST(SkipCuMemFreePolicy, IsolatedArchAndEnvBranches) {
           .setVariable("RCCL_TEST_GCN_ARCH", "gfx900")
           .clearVariable("NCCL_CUMEM_SKIP_FREE"));
 }
+
+// ---------------------------------------------------------------------------
+// ncclDevrGetWinOffset: the window's position inside its backing allocation.
+//
+// The RMA memory region is registered on the backing allocation's primaryAddr,
+// so a put has to add this delta to the caller's in-window offset. Both
+// ncclRmaProxyPutBuildOp callers depend on it, including the single-put path
+// through ncclRmaProxyPutBuildDesc, and neither asserts the arithmetic.
+TEST(DevrGetWinOffsetTest, OffsetIsWindowPositionWithinBackingMemory) {
+  EXPECT_EQ(ncclDevrGetWinOffset(nullptr), 0u);
+
+  // Non-symmetric proxy windows carry no backing memory: the window is the
+  // allocation, so there is nothing to offset by.
+  ncclDevrWindow winNoMemory{};
+  winNoMemory.bigOffset = 0x1400;
+  EXPECT_EQ(ncclDevrGetWinOffset(&winNoMemory), 0u);
+
+  ncclDevrMemory mem{};
+  mem.bigOffset = 0x1000;
+  ncclDevrWindow win{};
+  win.memory = &mem;
+  win.bigOffset = 0x1400;
+  EXPECT_EQ(ncclDevrGetWinOffset(&win), 0x400u);
+
+  // A window registered at the head of its allocation adds nothing.
+  win.bigOffset = mem.bigOffset;
+  EXPECT_EQ(ncclDevrGetWinOffset(&win), 0u);
+}
