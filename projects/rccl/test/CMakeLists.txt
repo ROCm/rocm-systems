@@ -167,7 +167,7 @@ if(BUILD_TESTS)
     ${PROJECT_BINARY_DIR}/hipify/src # for graph/topo.h
     ${PROJECT_BINARY_DIR}/hipify/src/include/plugin # for recorder tests, nccl_tuner.h
     ${PROJECT_BINARY_DIR}/hipify/src/transport/net_ib_cast # for net_ib_fault_inject.h, net_ib_cast_inspect.h
-    ${PROJECT_BINARY_DIR}/hipify/src/transport             # for net_ib_limits.h, net_ib/net_ib_flush_fault_inject.h
+    ${PROJECT_BINARY_DIR}/hipify/src/transport             # for net_ib_limits.h
     ${ROCM_PATH}/include
     ${ROCM_PATH}
   )
@@ -624,6 +624,7 @@ if(BUILD_TESTS)
       AllocTests.cpp
       ParamTests.cpp
       ParameterApiTests.cpp
+      EnvPluginTests.cpp
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
       ChannelDefaultsTests.cpp
@@ -662,6 +663,13 @@ if(BUILD_TESTS)
     )
 
     add_executable(rccl-UnitTestsFixturesDebug ${TEST_FIXTURE_DEBUG_SOURCE_FILES})
+
+    if(TARGET rccl-env-json)
+      add_dependencies(rccl-UnitTestsFixturesDebug rccl-env-json)
+    endif()
+    if(TARGET rccl-env-example)
+      add_dependencies(rccl-UnitTestsFixturesDebug rccl-env-example)
+    endif()
 
     # Hide the test executable's own symbols so it does NOT interpose
     # librccl.so's weak alloc.h template/global symbols (e.g.
@@ -826,21 +834,23 @@ if(BUILD_TESTS)
   # Build the GIN example plugin for host-API custom-plugin regression tests.
   if(ENABLE_MPI_TESTS AND ENABLE_HOST_API_TESTS)
     set(RCCL_GIN_EXAMPLE_PLUGIN_DIR "${CMAKE_BINARY_DIR}/test/unit/plugins")
-    set(RCCL_GIN_EXAMPLE_PLUGIN "${RCCL_GIN_EXAMPLE_PLUGIN_DIR}/libnccl-gin-example.so")
-    find_program(RCCL_GIN_EXAMPLE_CC NAMES gcc cc REQUIRED)
-    add_custom_command(
-      OUTPUT "${RCCL_GIN_EXAMPLE_PLUGIN}"
-      COMMAND ${CMAKE_COMMAND} -E make_directory "${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
-      COMMAND ${RCCL_GIN_EXAMPLE_CC}
-              -I${PROJECT_SOURCE_DIR}/plugins/gin/example/nccl
-              -fPIC -shared
-              -o "${RCCL_GIN_EXAMPLE_PLUGIN}"
-              ${PROJECT_SOURCE_DIR}/plugins/gin/example/plugin.c
-      DEPENDS ${PROJECT_SOURCE_DIR}/plugins/gin/example/plugin.c
-      COMMENT "Building libnccl-gin-example.so for Host API regression tests"
-      VERBATIM
-    )
-    add_custom_target(nccl-gin-example DEPENDS "${RCCL_GIN_EXAMPLE_PLUGIN}")
+    set(RCCL_GIN_EXAMPLE_PLUGIN "${RCCL_GIN_EXAMPLE_PLUGIN_DIR}/librccl-gin-example.so")
+    if(NOT TARGET rccl-gin-example)
+      find_program(RCCL_GIN_EXAMPLE_CC NAMES gcc cc REQUIRED)
+      add_custom_command(
+        OUTPUT "${RCCL_GIN_EXAMPLE_PLUGIN}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
+        COMMAND ${RCCL_GIN_EXAMPLE_CC}
+                -I${PROJECT_SOURCE_DIR}/plugins/gin/example/nccl
+                -fPIC -shared
+                -o "${RCCL_GIN_EXAMPLE_PLUGIN}"
+                ${PROJECT_SOURCE_DIR}/plugins/gin/example/plugin.c
+        DEPENDS ${PROJECT_SOURCE_DIR}/plugins/gin/example/plugin.c
+        COMMENT "Building librccl-gin-example.so for Host API regression tests"
+        VERBATIM
+      )
+      add_custom_target(rccl-gin-example DEPENDS "${RCCL_GIN_EXAMPLE_PLUGIN}")
+    endif()
   endif()
 
   # Create separate MPI test binary if MPI tests are enabled
@@ -927,7 +937,7 @@ if(BUILD_TESTS)
     endif()
 
     if(ENABLE_HOST_API_TESTS)
-      add_dependencies(rccl-UnitTestsMPI nccl-gin-example)
+      add_dependencies(rccl-UnitTestsMPI rccl-gin-example)
       target_compile_definitions(rccl-UnitTestsMPI PRIVATE
         RCCL_GIN_EXAMPLE_PLUGIN_DIR="${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
       )
@@ -945,7 +955,7 @@ if(BUILD_TESTS)
         HostApiCustomGinPluginMPITests.cpp
       )
       list(APPEND RCCL_TEST_EXECUTABLES rccl-HostApiCustomGinPluginMPI)
-      add_dependencies(rccl-HostApiCustomGinPluginMPI nccl-gin-example)
+      add_dependencies(rccl-HostApiCustomGinPluginMPI rccl-gin-example)
       target_compile_definitions(rccl-HostApiCustomGinPluginMPI PRIVATE
         RCCL_GIN_EXAMPLE_PLUGIN_DIR="${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
       )

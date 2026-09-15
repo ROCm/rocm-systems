@@ -2,6 +2,8 @@
  * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
+ * Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
  * See LICENSE.txt for more license information
  *************************************************************************/
 
@@ -292,6 +294,14 @@ void ceProfilerRegisterContext(struct context* ctx) {
   // Must not be skipped: an unregistered context is never polled.
   pthread_mutex_lock(&ceProfilerCtxt.mutex);
 
+  // Non-CE activation masks do not initialize the global poller. Keep the
+  // per-context mutex valid for unconditional cleanup, but do not register
+  // the context or make finalize attempt to join an uninitialized thread.
+  if (ceProfilerCtxt.contextRegistry == NULL) {
+    pthread_mutex_unlock(&ceProfilerCtxt.mutex);
+    return;
+  }
+
   // Check if context with this commHash+rank already exists
   for (int i = 0; i < ceProfilerCtxt.contextCount; i++) {
     if (ceProfilerCtxt.contextRegistry[i] &&
@@ -422,8 +432,8 @@ ncclResult_t ceProfilerStartCeCollEvent(struct context* ctx, void** eHandle, ncc
 
     // Create CUDA events with appropriate flags
     if (ceProfilerCtxt.timingMode == CE_TIMING_GPU) {
-      cudaEventCreate(&event->startEvent, 0);
-      cudaEventCreate(&event->stopEvent, 0);
+      cudaEventCreateWithFlags(&event->startEvent, 0);
+      cudaEventCreateWithFlags(&event->stopEvent, 0);
     } else {
       cudaEventCreateWithFlags(&event->startEvent, cudaEventDisableTiming);
       cudaEventCreateWithFlags(&event->stopEvent, cudaEventDisableTiming);
@@ -498,8 +508,8 @@ ncclResult_t ceProfilerStartCeSyncEvent(struct context* ctx, void** eHandle, ncc
 
     // Create CUDA events with appropriate flags
     if (ceProfilerCtxt.timingMode == CE_TIMING_GPU) {
-      cudaEventCreate(&event->startEvent, 0);
-      cudaEventCreate(&event->stopEvent, 0);
+      cudaEventCreateWithFlags(&event->startEvent, 0);
+      cudaEventCreateWithFlags(&event->stopEvent, 0);
     } else {
       cudaEventCreateWithFlags(&event->startEvent, cudaEventDisableTiming);
       cudaEventCreateWithFlags(&event->stopEvent, cudaEventDisableTiming);
@@ -572,8 +582,8 @@ ncclResult_t ceProfilerStartCeBatchEvent(struct context* ctx, void** eHandle, nc
 
     // Create CUDA events with appropriate flags
     if (ceProfilerCtxt.timingMode == CE_TIMING_GPU) {
-      cudaEventCreate(&event->startEvent, 0);
-      cudaEventCreate(&event->stopEvent, 0);
+      cudaEventCreateWithFlags(&event->startEvent, 0);
+      cudaEventCreateWithFlags(&event->stopEvent, 0);
     } else {
       cudaEventCreateWithFlags(&event->startEvent, cudaEventDisableTiming);
       cudaEventCreateWithFlags(&event->stopEvent, cudaEventDisableTiming);

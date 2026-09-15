@@ -75,6 +75,21 @@ in the following table.
       - | Positive integer (values ``<= 0`` are ignored).
         | Default: unset (uses the RCCL default).
 
+    * - | ``NCCL_ENV_PLUGIN``
+        | Loads an external environment plugin that intercepts all RCCL parameter
+          lookups. See :ref:`using-rccl-env-plugin` for full details.
+      - | Path to a plugin ``.so`` file, a bare name expanded to
+          ``librccl-env-<name>.so``, or ``none`` to disable.
+        | Default: unset (tries ``librccl-env.so``, then reads from the process
+          environment).
+
+    * - | ``NCCL_ENV_JSON_FILE``
+        | Path to a JSON configuration file used by ``librccl-env-json.so``.
+          Has no effect unless ``NCCL_ENV_PLUGIN`` points to that plugin.
+      - | Path to a flat JSON file mapping variable names to string values.
+          Relative paths are resolved from the application's working directory.
+        | Default: unset (falls back to ``getenv()`` for all lookups).
+
     * - | ``NCCL_ALLGATHERV_ENABLE``
         | Fuses grouped multi-root ``ncclBroadcast`` calls into a single AllGatherV
           ring kernel when two or more distinct roots appear in a group.

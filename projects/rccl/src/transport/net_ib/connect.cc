@@ -1367,7 +1367,7 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     initAttr->state = IBV_QPS_INIT;
     initAttr->pkeyIndex = rCommDev->base.pkeyIndex;
     initAttr->portNum = ibDev->portNum;
-    initAttr->qpAccessFlags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ;
+    initAttr->qpAccessFlags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
     NCCLCHECK(ncclIbQpInit(flushQp));
 
     // The flush QP is a loopback QP (connected to itself), so the "remote" target is

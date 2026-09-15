@@ -2,6 +2,8 @@
  * SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
+ * Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
  * See LICENSE.txt for more license information
  *************************************************************************/
 
@@ -23,16 +25,16 @@ static int initialized;             // initialization counter for profiler
 static double startTime;            // profiler start time
 
 static const int defaultEActivationMask = ncclProfileColl | ncclProfileP2p;
-static const int defaultGroupApiPoolSize = 8;
-static const int defaultCollApiPoolSize = 8;
-static const int defaultP2pApiPoolSize = 8;
-static const int defaultKernelLaunchPoolSize = 8;
-static const int defaultGroupPoolSize = 8;
-static const int defaultCeCollPoolSize = 8;
-static const int defaultCeSyncPoolSize = 8;
-static const int defaultCeBatchPoolSize = 8;
-static const int defaultCollPoolSize = 8;
-static const int defaultP2pPoolSize = 8;
+static const int defaultGroupApiPoolSize = 256;
+static const int defaultCollApiPoolSize = 256;
+static const int defaultP2pApiPoolSize = 256;
+static const int defaultKernelLaunchPoolSize = 256;
+static const int defaultGroupPoolSize = 256;
+static const int defaultCeCollPoolSize = 256;
+static const int defaultCeSyncPoolSize = 256;
+static const int defaultCeBatchPoolSize = 256;
+static const int defaultCollPoolSize = 256;
+static const int defaultP2pPoolSize = 256;
 static const int defaultProxyCtrlPoolSize = 16;
 static const int defaultDetachPoolSize = 8;
 
@@ -55,6 +57,7 @@ static struct proxyOp* detachPool;
 
 ncclDebugLogger_t logFn;
 #define INFO(FLAGS, ...) logFn(NCCL_LOG_INFO, (FLAGS), __func__, __LINE__, __VA_ARGS__)
+#define WARN(...) logFn(NCCL_LOG_WARN, NCCL_ALL, __func__, __LINE__, __VA_ARGS__)
 
 __hidden double gettime(void) {
   using namespace std::chrono;
@@ -79,8 +82,12 @@ static void deferContextFree(struct context* ctx) {
   pthread_mutex_lock(&deferredCtxLock);
   if (deferredCtxCount < 1024) {
     deferredCtxList[deferredCtxCount++] = ctx;
+    pthread_mutex_unlock(&deferredCtxLock);
+  } else {
+    pthread_mutex_unlock(&deferredCtxLock);
+    freeContextPools(ctx);
+    free(ctx);
   }
-  pthread_mutex_unlock(&deferredCtxLock);
 }
 
 static void freeDeferredContexts() {
@@ -284,6 +291,8 @@ static ncclResult_t initGlobalProfiler(int* eActivationMask) {
       (ceCollPoolSize > 0 || ceSyncPoolSize > 0 || ceBatchPoolSize > 0)) {
     ncclResult_t ret = ceProfilerInitGlobal();
     if (ret != ncclSuccess) {
+      free(detachPool);
+      detachPool = NULL;
       return ret;
     }
   }
@@ -456,15 +465,37 @@ __hidden ncclResult_t exampleProfilerFinalize(void* context) {
   // Stop accepting any further updates for this context while dumping.
   __atomic_store_n(&ctx->finalizing, 1, __ATOMIC_RELAXED);
 
-  // Wait for poller to complete pending events
-  usleep(10000);
+  // Wait for the CE poller to mark all pending events complete, up to 500 ms.
+  {
+    const int kMaxWaitUs = 500000;
+    const int kPollIntervalUs = 1000;
+    int waitedUs = 0;
+    bool allComplete = true;
+    if (ctx->ceCollPool && ctx->ceCollPoolSize > 0) {
+      while (waitedUs < kMaxWaitUs) {
+        allComplete = true;
+        int start = (ctx->ceCollPoolIndex - ctx->ceCollPoolSize >= 0) ? ctx->ceCollPoolIndex - ctx->ceCollPoolSize : 0;
+        for (int i = start; i < ctx->ceCollPoolIndex; i++) {
+          struct ceColl* ev = &ctx->ceCollPool[i % ctx->ceCollPoolSize];
+          if (!ev->stopCompleted) { allComplete = false; break; }
+        }
+        if (allComplete) break;
+        usleep(kPollIntervalUs);
+        waitedUs += kPollIntervalUs;
+      }
+      if (!allComplete) {
+        WARN("PROFILER/Plugin: CE events not all complete after %d ms, some may be missing from trace",
+             kMaxWaitUs / 1000);
+      }
+    }
+  }
 
-  // Check how many completed events we have
+  // Log completion stats
   int completedCount = 0;
-  int totalCount = 0;
-  for (int i = 0; i < ctx->ceCollPoolSize && i < ctx->ceCollPoolIndex; i++) {
-    totalCount++;
-    if (ctx->ceCollPool[i].stopCompleted) completedCount++;
+  int totalCount = (ctx->ceCollPoolIndex < ctx->ceCollPoolSize) ? ctx->ceCollPoolIndex : ctx->ceCollPoolSize;
+  int startIdx = (ctx->ceCollPoolIndex - totalCount + ctx->ceCollPoolSize) % ctx->ceCollPoolSize;
+  for (int i = 0; i < totalCount; i++) {
+    if (ctx->ceCollPool[(startIdx + i) % ctx->ceCollPoolSize].stopCompleted) completedCount++;
   }
   INFO(NCCL_INIT, "PROFILER/Plugin: CeColl events - total=%d completed=%d", totalCount, completedCount);
 
@@ -761,6 +792,11 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     if (eventBase->type == ncclProfileColl) {
       struct collective* parent = (struct collective *)eDescr->parentObj;
       int channelId = eDescr->proxyOp.channelId;
+      // The MAX_CHANNELS arrays below can be smaller than the channel limit; drop
+      // out-of-range channels.
+      if (channelId < 0 || channelId >= MAX_CHANNELS) return ncclSuccess;
+      int opIdx = parent->nProxyOps[channelId];
+      if (opIdx >= 2 * MAX_OPS) return ncclSuccess;
       struct proxyOp* event = &parent->op[channelId][parent->nProxyOps[channelId]++];
 
       event->type = ncclProfileProxyOp;
@@ -780,6 +816,7 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     } else { // ncclProfileP2p
       struct p2p* parent = (struct p2p *)eDescr->parentObj;
       int channelId = eDescr->proxyOp.channelId;
+      if (channelId < 0 || channelId >= MAX_CHANNELS) return ncclSuccess;
       struct proxyOp* event = &parent->op[channelId];
       event->type = ncclProfileProxyOp;
       event->channelId = channelId;
@@ -817,9 +854,11 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     if (eventBase == NULL) return ncclSuccess;
     if (eventBase->type == ncclProfileColl) {
       struct collective* parent = (struct collective *)eDescr->parentObj;
-      struct kernelCh* event = &parent->kernel[eDescr->kernelCh.channelId];
+      int channelId = eDescr->kernelCh.channelId;
+      if (channelId < 0 || channelId >= MAX_CHANNELS) return ncclSuccess;
+      struct kernelCh* event = &parent->kernel[channelId];
       event->type = ncclProfileKernelCh;
-      event->channelId = eDescr->kernelCh.channelId;
+      event->channelId = channelId;
       event->startGpuClk = eDescr->kernelCh.pTimer;
       event->parent = eventBase;
       event->startTs = gettime() - startTime;
@@ -829,9 +868,11 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
       debugEvent(event, "KernelChStart");
     } else { // ncclProfileP2p
       struct p2p* parent = (struct p2p *)eDescr->parentObj;
-      struct kernelCh* event = &parent->kernel[eDescr->kernelCh.channelId];
+      int channelId = eDescr->kernelCh.channelId;
+      if (channelId < 0 || channelId >= MAX_CHANNELS) return ncclSuccess;
+      struct kernelCh* event = &parent->kernel[channelId];
       event->type = ncclProfileKernelCh;
-      event->channelId = eDescr->kernelCh.channelId;
+      event->channelId = channelId;
       event->startGpuClk = eDescr->kernelCh.pTimer;
       event->parent = eventBase;
       event->startTs = gettime() - startTime;
@@ -850,7 +891,12 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     if (type == NCCL_PROFILER_NET_TYPE_IB) {
       if (ver == 1) {
         ncclProfilerNetIbDescr_v1_t* descr = (ncclProfilerNetIbDescr_v1_t *)eDescr->netPlugin.data;
-        struct netPlugin* event = parent->net + __atomic_fetch_add(&parent->nNetEvents, 1, __ATOMIC_RELAXED);
+        int netIdx = __atomic_fetch_add(&parent->nNetEvents, 1, __ATOMIC_RELAXED);
+        if (netIdx >= MAX_EVENTS_PER_REQ) {
+          __atomic_fetch_sub(&parent->nNetEvents, 1, __ATOMIC_RELAXED);
+          return ncclSuccess;
+        }
+        struct netPlugin* event = parent->net + netIdx;
         event->type = ncclProfileNetPlugin;
         event->pluginType = type;
         event->pluginVer = ver;
@@ -869,7 +915,12 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     } else if (type == NCCL_PROFILER_NET_TYPE_SOCK) {
       if (ver == 1) {
         ncclProfilerNetSockDescr_v1_t* descr = (ncclProfilerNetSockDescr_v1_t *)eDescr->netPlugin.data;
-        struct netPlugin* event = parent->net + __atomic_fetch_add(&parent->nNetEvents, 1, __ATOMIC_RELAXED);
+        int netIdx = __atomic_fetch_add(&parent->nNetEvents, 1, __ATOMIC_RELAXED);
+        if (netIdx >= MAX_EVENTS_PER_REQ) {
+          __atomic_fetch_sub(&parent->nNetEvents, 1, __ATOMIC_RELAXED);
+          return ncclSuccess;
+        }
+        struct netPlugin* event = parent->net + netIdx;
         event->type = ncclProfileNetPlugin;
         event->pluginType = type;
         event->pluginVer = ver;
@@ -1037,9 +1088,9 @@ __hidden ncclResult_t exampleProfilerRecordEventState(void* eHandle, ncclProfile
   uint64_t type = *(uint64_t *)eHandle;
   if (type == ncclProfileGroupApi) {
     struct groupApi* event = (struct groupApi*) eHandle;
-    if (eState == ncclProfilerGroupEndApiStart) {
+    if (eState == ncclProfilerGroupStartApiStop) {
       event->endOfncclGroupStartTs = gettime() - startTime;
-    } else if (eState == ncclProfilerGroupStartApiStop) {
+    } else if (eState == ncclProfilerGroupEndApiStart) {
       event->startOfncclGroupEndTs = gettime() - startTime;
     }
   } else if (type == ncclProfileProxyOp) {
@@ -1182,76 +1233,4 @@ ncclProfiler_v6_t ncclProfiler_v6 = {
   exampleProfilerFinalize,
 };
 
-// ============================================================================
-// v7 implementation: kernel phase sub-events + symmetric-kernel coll metadata
-// ============================================================================
-
-#include "nccl/profiler_v7.h"
-
-__hidden ncclResult_t exampleProfilerStartEvent_v7(void* context, void** eHandle, ncclProfilerEventDescr_v7_t* eDescr) {
-  struct context* ctx = (struct context*)context;
-  if (ctx == NULL) { *eHandle = NULL; return ncclSuccess; }
-
-  // v7 adds the kernel phase sub-event: a child of a kernelCh, stored in the parent.
-  if (eDescr->type == ncclProfileKernelPhase) {
-    *eHandle = NULL;
-    if (__atomic_load_n(&ctx->finalizing, __ATOMIC_RELAXED)) return ncclSuccess;
-    struct kernelCh* parent = (struct kernelCh*)eDescr->parentObj;
-    if (parent == NULL || parent->type != ncclProfileKernelCh) return ncclSuccess;
-    int idx = eDescr->kernelPhase.phaseId;
-    if (idx < 0 || idx >= MAX_KERNEL_PHASES) return ncclSuccess;
-    struct kernelPhase* phase = &parent->phases[idx];
-    phase->type = ncclProfileKernelPhase;
-    phase->channelId = eDescr->kernelPhase.channelId;
-    phase->phaseId = eDescr->kernelPhase.phaseId;
-    phase->phaseName = eDescr->kernelPhase.phaseName;
-    phase->startGpuClk = eDescr->kernelPhase.pTimer;
-    phase->stopGpuClk = 0;
-    phase->startTs = gettime() - startTime;
-    phase->parent = parent;
-    *eHandle = phase;
-    return ncclSuccess;
-  }
-
-  // Other events: the v6 coll layout is a prefix of v7, so the v6 handler reads it
-  // safely. Capture the v7-only coll metadata on the created event afterwards.
-  ncclResult_t ret = exampleProfilerStartEvent_v6(context, eHandle, (ncclProfilerEventDescr_v6_t*)eDescr);
-  if (eDescr->type == ncclProfileColl && *eHandle) {
-    struct collective* c = (struct collective*)*eHandle;
-    c->kernelVariant = eDescr->coll.kernelVariant;
-    c->isSymColl = eDescr->coll.isSymColl;
-  }
-  return ret;
-}
-
-__hidden ncclResult_t exampleProfilerStopEvent_v7(void* eHandle) {
-  if (eHandle == NULL) return ncclSuccess;
-  if (*(uint64_t*)eHandle == ncclProfileKernelPhase) {
-    struct kernelPhase* phase = (struct kernelPhase*)eHandle;
-    phase->stopTs = gettime() - startTime;
-    return ncclSuccess;
-  }
-  return exampleProfilerStopEvent_v6(eHandle);
-}
-
-__hidden ncclResult_t exampleProfilerRecordEventState_v7(void* eHandle, ncclProfilerEventState_v7_t eState, ncclProfilerEventStateArgs_v7_t* eStateArgs) {
-  if (eHandle == NULL) return ncclSuccess;
-  if (*(uint64_t*)eHandle == ncclProfileKernelPhase) {
-    if (eState == ncclProfilerKernelPhaseStop) {
-      struct kernelPhase* phase = (struct kernelPhase*)eHandle;
-      phase->stopGpuClk = eStateArgs->kernelCh.pTimer;
-    }
-    return ncclSuccess;
-  }
-  return exampleProfilerRecordEventState_v6(eHandle, (ncclProfilerEventState_v6_t)eState, (ncclProfilerEventStateArgs_v6_t*)eStateArgs);
-}
-
-ncclProfiler_v7_t ncclProfiler_v7 = {
-  "Example-profiler-v7",
-  exampleProfilerInit,
-  exampleProfilerStartEvent_v7,
-  exampleProfilerStopEvent_v7,
-  exampleProfilerRecordEventState_v7,
-  exampleProfilerFinalize,
-};
-
+// =====================================================================

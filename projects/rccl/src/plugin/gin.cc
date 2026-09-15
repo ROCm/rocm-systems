@@ -2,6 +2,8 @@
  * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
+ * Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
  * See LICENSE.txt for more license information
  *************************************************************************/
 
@@ -230,7 +232,7 @@ static ncclResult_t ncclGinPluginAssignToComm(struct ncclComm* comm, int pluginI
 
 static void initPluginLibsOnceFunc() {
   char* ginPluginName = nullptr;
-  const char* defaultGinPlugin = "libnccl-gin.so";
+  const char* defaultGinPlugin = "librccl-gin.so";
   const char* envGinPlugin = nullptr;
   char* envGinPluginList = nullptr;
   char* savePtr = nullptr;
