@@ -961,9 +961,8 @@ class Graph {
     // Hierarchical child graph information
     Graph* child_graph_ptr = nullptr;           // Direct pointer to child graph for quick access
 
-    //! Same-stream producers whose completion signal this segment's leading uncaptured
-    //! SDMA memcpy must wait on; the HW event slot is looked up at dispatch.
-    std::vector<int> sdma_wait_producers;
+    //! First node is an uncaptured memcpy that runs on the SDMA engine.
+    bool leads_with_uncaptured_sdma = false;
     bool needs_completion_signal = false;        // True if any downstream segment is on a different stream/device, or this is a leaf
   };
 
