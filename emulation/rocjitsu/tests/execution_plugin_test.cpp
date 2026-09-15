@@ -4451,7 +4451,7 @@ TEST(InstructionMetadataTest, GenericFlatHasTwoCounterObligations) {
 }
 
 TEST(InstructionMetadataTest, StoresAndGdsExposeEveryCounterObligation) {
-  for (const auto [arch, words] : std::array{
+  for (const auto &[arch, words] : std::array{
            std::pair{ROCJITSU_CODE_ARCH_CDNA2, cdna2::build_mubuf(cdna2::kBufferStoreDwordMubuf)},
            std::pair{ROCJITSU_CODE_ARCH_RDNA2,
                      rdna2::build_mubuf(rdna2::kBufferStoreDwordMubuf)}}) {
