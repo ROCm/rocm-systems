@@ -18,36 +18,49 @@ Prerequisites
 
 Complete the following steps before attaching to a running process.
 
-**1. Enable attachment support in the target process**
+.. _process_attachment_enable:
 
-A process only accepts attachment if ``rocprofiler-register`` created an attachment thread when the process started. Otherwise attachment fails. Enable this in one of two ways.
+Enable attachment support in the target process
+-----------------------------------------------
 
-Set ``ROCP_TOOL_ATTACH=1`` in the environment of the target process before it starts. This is the recommended approach, and applies only to the processes you launch with it set.
+A process only accepts an attachment if ``rocprofiler-register`` loaded the attachment library when the process started. Otherwise, attachment fails. Enable attachment support in one of these two ways:
+
+- Set ``ROCP_TOOL_ATTACH=1`` in the environment of the target process before it starts. This is the recommended approach. It applies only to processes you launch after setting the variable.
+
+  .. code-block:: shell
+
+     $ export ROCP_TOOL_ATTACH=1
+     $ ./myapp &
+
+- Build and install ``rocprofiler-register`` with ``ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON``. This makes attachment the default for every process that loads the resulting library, so no environment variable is needed.
+
+  .. code-block:: shell
+
+     $ cmake -B build-rocp-reg /path/to/rocprofiler-register \
+           -DROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON \
+           -DCMAKE_INSTALL_PREFIX=/opt/rocm
+     $ cmake --build build-rocp-reg --target all --parallel $(nproc)
+     $ cmake --build build-rocp-reg --target install
+
+  Because this behavior is compiled into ``librocprofiler-register.so``, the target process must load the rebuilt library for the change to take effect. For the full build and install procedure, see the `rocprofiler-register README <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-register#build-and-installation>`_.
+
+.. _process_attachment_permissions:
+
+Obtain permission to trace the target process
+---------------------------------------------
+
+Attachment requires permission to trace the target process. Run the attaching tool as the user owning the target process or as root. To confirm you have the required access, check whether you can open the ``/proc/<PID>/mem`` file of the target process.
 
 .. code-block:: shell
 
-   $ export ROCP_TOOL_ATTACH=1
-   $ ./myapp &
+   $ PID=12345
+   $ { : < /proc/$PID/mem; } 2>/dev/null && echo "ptrace allowed" || echo "ptrace denied"
 
-Alternatively, build and install ``rocprofiler-register`` with ``ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON``. This makes attachment the default for every process that loads the resulting library, with no environment variable required.
+The kernel guards this file with the same permission check it applies to a ``ptrace`` attach. A successful open confirms user ownership and the correct Yama ptrace scope, but not container restrictions or the other mechanisms described below. If the open is denied, or if attachment fails despite a successful open, review the restrictions that follow.
 
-.. code-block:: shell
+**Yama ptrace scope**
 
-   $ cmake -B build-rocp-reg /path/to/rocprofiler-register \
-         -DROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON \
-         -DCMAKE_INSTALL_PREFIX=/opt/rocm
-   $ cmake --build build-rocp-reg --target all --parallel $(nproc)
-   $ cmake --build build-rocp-reg --target install
-
-Because the setting is compiled into ``librocprofiler-register.so``, the target process must load the rebuilt library for it to take effect. For the full build and install procedure, see the `rocprofiler-register README <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-register#build-and-installation>`_.
-
-**2. Run as the owner of the target process or as root**
-
-Attachment requires permission to trace the target process. Run the attaching tool as the user that owns the target process, or as root.
-
-**3. Allow attachment in the ptrace scope**
-
-Some Linux distributions, including recent Ubuntu releases, use the Yama security module to restrict which processes can be traced. Set the scope to ``0`` to permit attachment.
+Some Linux distributions, including recent Ubuntu releases, use the Yama security module to restrict which processes can be traced. Set the scope to ``0`` to permit attachment. The value reverts to the distribution default on reboot. To persist the change, write the setting to a ``.conf`` file under ``/etc/sysctl.d/``.
 
 .. code-block:: shell
 
@@ -57,13 +70,21 @@ Some Linux distributions, including recent Ubuntu releases, use the Yama securit
    # Temporarily allow attachment (requires root)
    $ sudo sysctl kernel.yama.ptrace_scope=0
 
-**4. Grant the ptrace capability to Docker containers**
+.. warning::
 
-To attach inside or into a Docker container, start the container with ``SYS_PTRACE``.
+   ``kernel.yama.ptrace_scope`` is a system-wide security setting. Setting it to ``0`` allows every process on the system to ``ptrace`` any other process running under the same user, not just the attaching tool.
+
+**Docker containers**
+
+To attach to a process running in a Docker container, start the container with the ``SYS_PTRACE`` capability.
 
 .. code-block:: shell
 
    $ docker run --cap-add SYS_PTRACE ...
+
+**Other security modules**
+
+Linux security modules such as SELinux and AppArmor, container runtimes, and sandboxing policies can each deny ``ptrace``. If attachment still fails, consult the documentation for the security software in use on your system.
 
 Direct Python execution
 ===================================

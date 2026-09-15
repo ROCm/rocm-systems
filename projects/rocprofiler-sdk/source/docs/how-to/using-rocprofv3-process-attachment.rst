@@ -16,52 +16,21 @@ Prerequisites
 
 Complete the following steps before using ``rocprofv3 --attach``.
 
-**1. Enable attachment support in the target process**
+#. **Enable attachment support in the target process**
 
-A process only accepts attachment if ``rocprofiler-register`` created an attachment thread when the process started. Otherwise ``rocprofv3 --attach`` fails. Enable this in one of two ways.
+   Start the target process with ``ROCP_TOOL_ATTACH=1`` set in its environment. For other ways to enable attachment, see :ref:`enabling attachment support <process_attachment_enable>`.
 
-Set ``ROCP_TOOL_ATTACH=1`` in the environment of the target process before it starts. This is the recommended approach, and applies only to the processes you launch with it set.
+#. **Obtain permission to trace the target process**
 
-.. code-block:: shell
+   Run ``rocprofv3`` as the user owning the target process or as root. On distributions that enable the Yama security module, including recent Ubuntu releases, also set the ptrace scope to ``0``. For Docker requirements and other restrictions, see :ref:`trace permissions <process_attachment_permissions>`.
 
-   $ export ROCP_TOOL_ATTACH=1
-   $ ./myapp &
+   .. code-block:: shell
 
-Alternatively, build and install ``rocprofiler-register`` with ``ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON``. This makes attachment the default for every process that loads the resulting library, with no environment variable required.
+      $ sudo sysctl kernel.yama.ptrace_scope=0
 
-.. code-block:: shell
+   .. warning::
 
-   $ cmake -B build-rocp-reg /path/to/rocprofiler-register \
-         -DROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON \
-         -DCMAKE_INSTALL_PREFIX=/opt/rocm
-   $ cmake --build build-rocp-reg --target all --parallel $(nproc)
-   $ cmake --build build-rocp-reg --target install
-
-Because the setting is compiled into ``librocprofiler-register.so``, the target process must load the rebuilt library for it to take effect. For the full build and install procedure, see the `rocprofiler-register README <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-register#build-and-installation>`_.
-
-**2. Run as the owner of the target process or as root**
-
-Attachment requires permission to trace the target process. Run ``rocprofv3`` as the user that owns the target process, or as root.
-
-**3. Allow attachment in the ptrace scope**
-
-Some Linux distributions, including recent Ubuntu releases, use the Yama security module to restrict which processes can be traced. Set the scope to ``0`` to permit attachment.
-
-.. code-block:: shell
-
-   # Check current setting
-   $ cat /proc/sys/kernel/yama/ptrace_scope
-
-   # Temporarily allow attachment (requires root)
-   $ sudo sysctl kernel.yama.ptrace_scope=0
-
-**4. Grant the ptrace capability to Docker containers**
-
-To attach inside or into a Docker container, start the container with ``SYS_PTRACE``.
-
-.. code-block:: shell
-
-   $ docker run --cap-add SYS_PTRACE ...
+      ``kernel.yama.ptrace_scope`` is a system-wide setting. Setting it to ``0`` allows any process to ``ptrace`` any other process running under the same user, not just ``rocprofv3``.
 
 Basic usage
 ------------
