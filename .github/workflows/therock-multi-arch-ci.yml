@@ -128,6 +128,7 @@ jobs:
           sparse-checkout: |
             .github/repos-config.json
             .github/scripts/compute_build_stages.py
+            .github/scripts/configure_multi_arch_changed_projects.py
           sparse-checkout-cone-mode: false
 
       - name: Checkout TheRock for configure script
@@ -153,7 +154,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
+          python3 .github/scripts/configure_multi_arch_changed_projects.py \
             --event-name "${{ github.event_name }}" \
             --github-repo "${{ github.repository }}" \
             --base-sha "${{ github.event.pull_request.base.sha }}" \
