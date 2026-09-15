@@ -52,7 +52,8 @@ core::SharedQueue* AllocateSdmaSharedQueue(core::Agent* agent, uint64_t flags) {
 
 }  // namespace
 
-SdmaQueue::SdmaQueue(core::Agent* agent, size_t size_bytes, uint64_t flags, int32_t sdma_engine_id)
+SdmaQueue::SdmaQueue(core::Agent* agent, size_t size_bytes, uint64_t flags, int32_t sdma_engine_id,
+                     core::HsaEventCallback callback, void* err_data)
     : core::Queue(AllocateSdmaSharedQueue(agent, flags), flags,
                   !static_cast<AMD::GpuAgent*>(agent)->is_xgmi_cpu_gpu(), agent),
       core::LocalSignal(0, false),
@@ -64,11 +65,18 @@ SdmaQueue::SdmaQueue(core::Agent* agent, size_t size_bytes, uint64_t flags, int3
       queue_rptr_(nullptr),
       queue_doorbell_(nullptr),
       sdma_engine_id_(sdma_engine_id),
-      active_(false) {
+      active_(false),
+      errors_callback_(callback),
+      errors_data_(err_data) {
   memset(&queue_resource_, 0, sizeof(queue_resource_));
 }
 
 SdmaQueue::~SdmaQueue() {
+  // Detach before tearing the queue down: destroying a queue whose packets hung
+  // the engine is what triggers the driver's reset, so the exception arrives
+  // after this point and must still find the registration.
+  core::Runtime::runtime_singleton_->DetachSdmaErrorHandler(public_handle());
+
   hsa_status_t err = Inactivate();
   assert(err == HSA_STATUS_SUCCESS && "Destroy SDMA queue failed.");
   (void)err;
@@ -186,6 +194,9 @@ hsa_status_t SdmaQueue::Initialize() {
   signal_.kind = AMD_SIGNAL_KIND_DOORBELL;
   signal_.hardware_doorbell_ptr = queue_doorbell_;
   signal_.queue_ptr = &amd_queue_;
+
+  core::Runtime::runtime_singleton_->RegisterSdmaErrorHandler(
+      public_handle(), agent->node_id(), errors_callback_, errors_data_);
 
   return HSA_STATUS_SUCCESS;
 }
