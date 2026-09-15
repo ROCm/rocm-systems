@@ -177,8 +177,24 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
       continue;
     }
 
-    ensure_line(ea, vmid);
-    cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
+    simdojo::CacheTag *tag = nullptr;
+    // A full-line miss has no old bytes to preserve, so allocate it without a
+    // read-for-ownership from L2.
+    if (line_offset == 0 && chunk == LINE_SIZE) {
+      if (!cache_.lookup(ea, &tag, vmid)) {
+        simdojo::CacheTag evicted;
+        auto allocated = cache_.allocate_with_data(ea, vmid, &evicted);
+        assert(!evicted.dirty && "L1 V$ is write-through; lines should never be dirty");
+        std::memcpy(allocated.data, src + copied, LINE_SIZE);
+        tag = allocated.tag;
+      } else {
+        cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
+      }
+    } else {
+      ensure_line(ea, vmid);
+      cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
+      cache_.lookup(ea, &tag, vmid);
+    }
 
     // Write through to L2 for all cacheable stores. This ensures partial writes
     // from different CUs sharing the same L2 are properly merged at byte
@@ -186,8 +202,6 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
     // writeback_line() during L1 eviction/flush.
     l2_->write(ea, src + copied, chunk, chunk_mtype, vmid);
 
-    simdojo::CacheTag *tag = nullptr;
-    cache_.lookup(ea, &tag, vmid);
     assert(tag != nullptr && "ensure_line must guarantee hit");
 
     // L1 line stays clean since L2 has the authoritative copy.
