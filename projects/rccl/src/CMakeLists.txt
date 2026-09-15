@@ -143,7 +143,7 @@ set(SRC_FILES
   algorithms/gin/gin_alltoall.h
   algorithms/gin/gin_all_reduce.h
   algorithms/gin/gin_all_reduce_policy.h
-  algorithms/gin/sdma/all_reduce_gin_sdma.h 
+  algorithms/gin/sdma/all_reduce_gin_sdma.h
   include/alltoallv_meta.h
   include/alt_rsmi.h
   include/archinfo.h
@@ -191,6 +191,8 @@ set(SRC_FILES
   include/gin/gin_host_rocshmem_gda.h
   include/gin/gin_rocshmem_gda_factory.h
   include/gin/gin_host_anvil_sdma.h
+  include/gin/gin_fabric_a2a_host.h
+  include/gin/gin_bootstrap_agree.h
   include/hip_rocm_version_info.h
   include/ibvcore.h
   include/ibvsymbols.h
@@ -267,6 +269,12 @@ set(SRC_FILES
   include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table_device.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h
+  include/nccl_device/gin/anvil_sdma/gin_fabric_a2a_lane.h
+  include/nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h
+  include/nccl_device/gin/anvil_sdma/gin_fabric_ll_device_prims.h
+  include/nccl_device/gin/anvil_sdma/gin_fabric_ll_a2a_device.h
+  include/nccl_device/gin/anvil_sdma/gin_fabric_lsa_policy.h
+  include/nccl_device/gin/anvil_sdma/gin_fabric_lsa_a2a_device.h
   include/nccl_device/ll_a2a.h
   include/nccl_device/lsa_barrier.h
   include/nccl_device/ptr.h
@@ -500,6 +508,7 @@ set(SRC_FILES
   transport/profiler.cc
   transport/shm.cc
   gin/gin_host.cc
+  gin/gin_fabric_a2a_lane.cc
   gin/gin_host_proxy.cc
   gin/proxy_gpucontext/gpucontext.h
   gin/proxy_gpucontext/gpucontext_v1.h
@@ -526,7 +535,7 @@ if(ENABLE_ROCSHMEM_GIN)
     src/gin/gin_plugin_anvil_sdma.cc
     src/gin/gin_anvil_ipc_table_host.cc
     src/algorithms/gin/sdma/gin_alltoall_sdma.cu
-    src/algorithms/gin/sdma/gin_all_reduce_sdma.cu 
+    src/algorithms/gin/sdma/gin_all_reduce_sdma.cu
   )
 endif()
 

@@ -13,8 +13,15 @@
 #include "register_inline.h"
 #include "gin/gin_host.h"
 #include "gin/gin_host_proxy.h"
+#include "algorithms/dda/fabric/fabric_init.h"
+#include "rccl_common.h"
+#include "nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h"
+#include "gin/gin_fabric_a2a_host.h"
+#include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
+#include "alloc.h"
 #include "compiler.h"
 #include <cmath>
+#include <cstring>
 
 NCCL_PARAM(GinEnable, "GIN_ENABLE", 1);
 NCCL_PARAM(DevApiJit, "DEV_API_JIT", 0);
@@ -311,6 +318,12 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
   }
 
   ncclResult_t ret = ncclSuccess;
+  // Set only once this call publishes a fabric A2A lane, so the failure path
+  // erases the key it actually inserted. devComm->ginHandles[0] is not a safe
+  // substitute: createContext can fail at n == 0, before this function has
+  // written that field, and this is a non-static entry point that states no
+  // precondition on the caller's devComm contents.
+  void* publishedLaneHandle = nullptr;
 
   ncclGinConfig_t ginConfig = {
     reqs->ginSignalCount,
@@ -341,6 +354,29 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
     if (ginStateDevComm->devHandles[n]->needsProxyProgress) ginState->needsProxyProgress = 1;
   }
 
+  // Fabric LL lane lives off ncclDevComm (host table keyed by ginHandles[0]).
+  // ginAnvilUseFabricMem already requires a single clique; the clique WARN is unreachable.
+  if (ginState->ginType == NCCL_GIN_TYPE_ANVIL_SDMA && ginAnvilUseFabricMem(comm)) {
+    ncclGinAnvilSdmaGPUContext gpu{};
+    CUDACHECKGOTO(cudaMemcpy(&gpu, devComm->ginHandles[0], sizeof(gpu), cudaMemcpyDeviceToHost), ret, end);
+    if (gpu.fabricA2AEnabled) {
+      ncclGinFabricA2ALane lane{};
+      lane.enabled = 1;
+      lane.peerScratch = gpu.fabricA2APeerScratch;
+      lane.llEpoch = gpu.fabricA2ALlEpoch;
+      lane.llEpochLen = gpu.fabricA2ALlEpochLen;
+      lane.scratchBytes = gpu.fabricA2AScratchBytes;
+      lane.llThreshold = gpu.fabricA2ALlThreshold;
+      ncclGinFabricA2ALanePublish(devComm->ginHandles[0], lane);
+      publishedLaneHandle = devComm->ginHandles[0];
+      INFO(NCCL_INIT, "GIN A2A: fabric LL small-msg lane enabled (nRanks=%d scratchBytes=%zu llThreshold=%zu)",
+           comm->nRanks, lane.scratchBytes, lane.llThreshold);
+    } else if (comm->ddaFabricMemHandler == nullptr || comm->ddaPeerPtrsDev == nullptr ||
+               comm->ddaLLEpochDev == nullptr || comm->ddaScratch == nullptr) {
+      WARN("GIN A2A: fabric small-msg lane unavailable: missing DDA fabric resources");
+    }
+  }
+
   if (ginState->needsProxyProgress && ginState->ginProgress == 0) {
     ginState->cpuAffinity = comm->cpuAffinity;
     ginState->ginProgress = 1;
@@ -362,6 +398,7 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
 
 end:
   if (ret != ncclSuccess) {
+    if (publishedLaneHandle) ncclGinFabricA2ALaneErase(publishedLaneHandle);
     for (int n = 0; n < ginState->ginCommCount; n++) {
       if (ginStateDevComm->ginCtx[n]) ginState->ncclGin->destroyContext(ginStateDevComm->ginCtx[n]);
     }
@@ -390,6 +427,8 @@ ncclResult_t ncclGinDevCommFree(struct ncclComm* comm, struct ncclDevComm const*
   else ginState->devComms = dc->next;
   lock.unlock();
 
+  ncclGinFabricA2ALaneErase(devComm->ginHandles[0]);
+
   // Free GIN contexts
   for (int n = 0; n < ginState->ginCommCount; n++) {
     NCCLCHECK(ginState->ncclGin->destroyContext(dc->ginCtx[n]));
@@ -415,6 +454,12 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
     if (ginState->ginComms[n] != NULL) {
       NCCLCHECK(ginState->ncclGin->closeColl(ginState->ginComms[n]));
       ginState->ginComms[n] = NULL;
+    }
+  }
+  // Per-comm: do not wipe other live communicators' lanes in this process.
+  for (struct ncclGinStateDevComm* dc = ginState->devComms; dc != nullptr; dc = dc->next) {
+    if (dc->devHandles[0] && dc->devHandles[0]->handle) {
+      ncclGinFabricA2ALaneErase(dc->devHandles[0]->handle);
     }
   }
   memset((void*)ginState, 0, sizeof(*ginState));

@@ -15,6 +15,7 @@
 #include "algorithms/dda/dda_init_detail.h" // nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer
 #include "debug.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
+#include "nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h"
 
 #include <cuda_runtime.h>
 
@@ -23,32 +24,32 @@
 
 namespace {
 
-using dda::common::kDdaLLA2ASlotStridePkts;
 using dda::common::kDdaLLMaxBytes;
-using dda::common::LLPacket16;
-using nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer;
 
-// LL scratch: 2 banks * nRanks slots * kDdaLLA2ASlotStridePkts * 16B.
-static inline size_t ddaLLA2AScratchSize(int nRanks) {
-  return (size_t)2 * (size_t)nRanks * kDdaLLA2ASlotStridePkts * sizeof(LLPacket16);
-}
+// The host DDA launcher below and the GIN device-API launcher
+// (GinAlltoAllKernel in rccl-tests) drive the same ddaAllToAllFabricLL kernel
+// over LL packet cells of the same geometry. Every constant that geometry
+// depends on therefore exists in two headers, so pin all six pairs here: this
+// is the one translation unit that sees both sides.
+static_assert(gin::fabric::kGinFabricLlMaxNranks == dda::common::kDdaMaxNranks,
+              "GIN device-API and host DDA max-rank limits must match");
+static_assert(gin::fabric::kGinFabricLlMaxBytes == dda::common::kDdaLLMaxBytes,
+              "GIN device-API and host DDA LL size limits must match");
+static_assert(gin::fabric::kGinFabricLlAgMaxBlocksPerPeer == nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer,
+              "GIN device-API and host DDA block limits must match");
+static_assert(gin::fabric::kGinFabricLlPacketBytes == sizeof(dda::common::LLPacket16),
+              "GIN device-API and host DDA LL packet size must match");
+static_assert(gin::fabric::kGinFabricLlA2ASlotStridePkts == dda::common::kDdaLLA2ASlotStridePkts,
+              "GIN device-API and host DDA LL slot stride must match");
 
-// Adaptive block-per-peer fan-out. One block per peer for small chunks; larger
-// ones split a peer's packet range across blocksPerPeer blocks. 256 pkts/block
-// is one packet per thread at 256 threads.
-constexpr size_t kDdaLLA2APktsPerBlock = 256;
-
-static inline int ddaLLA2ABlocksPerPeer(size_t perChunkBytes) {
-  const size_t nPk = perChunkBytes >> 3; // 8 payload bytes per packet
-  if (nPk <= kDdaLLA2APktsPerBlock) {
-    return 1;
-  }
-  size_t bpp = (nPk + kDdaLLA2APktsPerBlock - 1) / kDdaLLA2APktsPerBlock;
-  if (bpp > (size_t)kDdaLLAgMaxBlocksPerPeer) {
-    bpp = (size_t)kDdaLLAgMaxBlocksPerPeer;
-  }
-  return (int)bpp;
-}
+// Scratch sizing and the block-per-peer fan-out are taken from the GIN policy
+// header rather than recomputed here: a local copy would size the same arena
+// and pick grid.y from a second body that no static_assert can pin.
+// ginFabricLlA2AScratchBytes: 2 banks * nRanks slots * slot stride * 16B.
+// ginFabricLlAlltoAllBlocksPerPeer: one block per peer for small chunks, else
+// split a peer's packet range over up to kGinFabricLlAgMaxBlocksPerPeer blocks.
+using gin::fabric::ginFabricLlA2AScratchBytes;
+using gin::fabric::ginFabricLlAlltoAllBlocksPerPeer;
 
 template <typename T>
 static ncclResult_t ncclAllToAllDdaFabricLLTyped(
@@ -59,7 +60,7 @@ static ncclResult_t ncclAllToAllDdaFabricLLTyped(
   const size_t perChunkBytes = count * sizeof(T);
 
   const unsigned threads = 256;
-  const int blocksPerPeer = ddaLLA2ABlocksPerPeer(perChunkBytes);
+  const int blocksPerPeer = ginFabricLlAlltoAllBlocksPerPeer(perChunkBytes);
   dim3 block(threads);
   dim3 grid((unsigned)nRanks, (unsigned)blocksPerPeer);
 
@@ -124,7 +125,7 @@ bool ncclAllToAllDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void*
   if (perChunkBytes * 2 > kDdaLLMaxBytes) {
     return false;
   }
-  if (ddaLLA2AScratchSize(comm->nRanks) > comm->ddaScratchBytes) {
+  if (ginFabricLlA2AScratchBytes(comm->nRanks) > comm->ddaScratchBytes) {
     return false;
   }
 
