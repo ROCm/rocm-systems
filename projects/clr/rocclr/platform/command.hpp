@@ -1350,7 +1350,11 @@ class BatchCopyRectMemoryCommand : public Command {
   BatchCopyRectMemoryCommand(HostQueue& queue, cl_command_type cmdType,
                              const EventWaitList& eventWaitList,
                              std::vector<BatchCopyRectOp>&& copyOps)
-      : Command(queue, cmdType, eventWaitList), copyOps_(std::move(copyOps)) {}
+      : Command(queue, cmdType, eventWaitList), copyOps_(std::move(copyOps)) {
+    // Sanity check: activity reporting downcasts on the command kind, so any other kind
+    // would resolve to a type this command does not derive from.
+    assert(cmdType == ROCCLR_COMMAND_BATCH_COPY_BUFFER_RECT && "Invalid batch rect copy");
+  }
 
   virtual void submit(device::VirtualDevice& device) { device.submitBatchCopyRectMemory(*this); }
 

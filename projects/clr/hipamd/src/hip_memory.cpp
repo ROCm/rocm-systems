@@ -3406,7 +3406,7 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
 
     if (fastPath && !batchOps.empty()) {
       amd::BatchCopyRectMemoryCommand* command = new amd::BatchCopyRectMemoryCommand(
-          *hip_stream, CL_COMMAND_COPY_BUFFER_RECT, amd::Command::EventWaitList{},
+          *hip_stream, ROCCLR_COMMAND_BATCH_COPY_BUFFER_RECT, amd::Command::EventWaitList{},
           std::move(batchOps));
       if (command == nullptr) {
         HIP_RETURN(hipErrorOutOfMemory);
