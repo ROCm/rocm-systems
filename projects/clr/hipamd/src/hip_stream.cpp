@@ -60,56 +60,21 @@ void Stream::InvalidateCapture() {
 
   auto* owner = reinterpret_cast<hip::Stream*>(captureOwner_);
   assert(owner != nullptr && "a stream mid-capture always has a capture owner");
+
   owner->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
-  std::unordered_set<hipStream_t> participants;
-  {
-    std::scoped_lock lock(owner->lock_);
-    participants = owner->captureStreams_;
-  }
-  for (auto stream : participants) {
+  std::scoped_lock lock(owner->lock_);
+  for (auto stream : owner->captureStreams_) {
     reinterpret_cast<hip::Stream*>(stream)->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
   }
 }
 
 // ================================================================================================
-void Stream::EndCapture(bool preserveInvalidated) {
-  if (originStream_) {
-    // Swap the participant set out before walking it, so each participant is free to erase
-    // itself from the owner on the way through. Iterating a local copy also means the walk
-    // terminates whatever shape the set is in, which is what makes a cycle among forked
-    // streams safe to tear down.
-    //
-    // The lock is released before the walk begins, which is what keeps the ordering rule
-    // below satisfiable: each participant takes this origin's lock to erase itself.
-    //
-    // Holding the lock across the walk is not a way to make teardown concurrency-safe, only
-    // a way to deadlock on anything but a recursive mutex. Racing teardown against
-    // hipStreamDestroy on a participant, or against a wait that enrols a new one, is still
-    // caller error: the pointers in this copy can be freed under us, and a stream enrolled
-    // after the swap keeps an owner pointer this call is about to invalidate.
-    std::unordered_set<hipStream_t> participants;
-    {
-      std::scoped_lock lock(lock_);
-      participants.swap(captureStreams_);
-    }
-    for (auto stream : participants) {
-      reinterpret_cast<hip::Stream*>(stream)->EndCapture(preserveInvalidated);
-    }
-  } else if (captureOwner_ != nullptr) {
-    // A participant leaving the capture on its own, via hipStreamDestroy or Detach.
-    reinterpret_cast<hip::Stream*>(captureOwner_)
-        ->EraseCaptureStream(reinterpret_cast<hipStream_t>(this));
+void Stream::ResetCaptureStateLocked(bool preserveInvalidated) {
+  for (auto event : captureEvents_) {
+    reinterpret_cast<hip::Event*>(event)->SetCaptureStream(nullptr);
   }
-
-  // Clear this stream's own capture state.
-  {
-    std::scoped_lock lock(lock_);
-    for (auto event : captureEvents_) {
-      reinterpret_cast<hip::Event*>(event)->SetCaptureStream(nullptr);
-    }
-    captureEvents_.clear();
-    captureStreams_.clear();
-  }
+  captureEvents_.clear();
+  captureStreams_.clear();
 
   captureStatus_ =
       preserveInvalidated ? hipStreamCaptureStatusInvalidated : hipStreamCaptureStatusNone;
@@ -117,6 +82,27 @@ void Stream::EndCapture(bool preserveInvalidated) {
   originStream_ = false;
   captureOwner_ = nullptr;
   lastCapturedNodes_.clear();
+}
+
+// ================================================================================================
+void Stream::EndCapture(bool preserveInvalidated) {
+  if (!originStream_ && captureOwner_ != nullptr) {
+    // A participant leaving the capture on its own, via hipStreamDestroy or Detach.
+    reinterpret_cast<hip::Stream*>(captureOwner_)
+        ->EraseCaptureStream(reinterpret_cast<hipStream_t>(this));
+  }
+
+  std::scoped_lock lock(lock_);
+  if (originStream_) {
+    // Holding this lock across the walk is what keeps the participants alive for its
+    // duration: hipStreamDestroy has to take it to erase a stream before freeing it.
+    for (auto stream : captureStreams_) {
+      auto* participant = reinterpret_cast<hip::Stream*>(stream);
+      std::scoped_lock participantLock(participant->lock_);
+      participant->ResetCaptureStateLocked(preserveInvalidated);
+    }
+  }
+  ResetCaptureStateLocked(preserveInvalidated);
 }
 
 // ================================================================================================
@@ -559,7 +545,7 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
     if (waitStream == nullptr) {
       return hipErrorInvalidHandle;
     }
-    
+
     if (waitStream->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
       return hipErrorStreamCaptureInvalidated;
     }

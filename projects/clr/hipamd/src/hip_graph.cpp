@@ -1201,9 +1201,7 @@ hipError_t hipStreamBeginCapture_common(hipStream_t stream, hipStreamCaptureMode
     return hipErrorIllegalState;
   }
   // The origin owns its own capture, so GetCaptureOwner() resolves to the origin from any
-  // stream taking part, including the origin itself. This runs ahead of SetCaptureGraph
-  // because that call is what flips the status to Active, and a stream seen as Active is
-  // required to have an owner.
+  // stream taking part, including the origin itself.
   s->SetCaptureOwner(stream);
   if (graph == nullptr) {
     s->SetCaptureGraph(new hip::Graph(s->GetDevice()));

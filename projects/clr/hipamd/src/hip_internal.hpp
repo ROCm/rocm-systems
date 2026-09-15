@@ -514,6 +514,10 @@ namespace hip {
   private:
     ~Stream() = default;
 
+    /// Return this stream's capture fields to defaults. Requires lock_ to be held, since
+    /// EndCapture applies it to a participant while holding the origin's lock too.
+    void ResetCaptureStateLocked(bool preserveInvalidated);
+
     mutable std::recursive_mutex lock_;      //!< Guards captureEvents_ and captureStreams_
     Device* device_;                         //!< Device that owns this stream
     Priority priority_;                      //!< Scheduling priority (High / Normal / Low)
