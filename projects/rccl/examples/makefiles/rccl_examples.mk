@@ -52,7 +52,7 @@ endif
 # Hipify and compile rules for upstream .cu sources.
 $(HIPIFY_DIR)/%.cu.cpp: %.cu
 	@mkdir -p $(dir $@)
-	$(HIPIFY) -experimental -quiet-warnings $< -o $@
+	$(HIPIFY) -experimental -quiet-warnings $< -o $@.tmp && mv -f $@.tmp $@
 
 $(HIPIFY_DIR)/%.cu.o: $(HIPIFY_DIR)/%.cu.cpp
 ifeq ($(MPI),1)

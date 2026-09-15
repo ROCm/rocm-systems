@@ -14,7 +14,7 @@ This is the C/CUDA implementation using NCCL Device API with hybrid LSA+GIN.
 From this directory:
 
 ```shell
-make [MPI=1] [MPI_HOME=<path-to-mpi>] [RCCL_HOME=<path-to-rccl>] [ROCM_PATH=<path-to-rocm>] [GPU_TARGETS=<gfx-arch>]
+make [MPI=1] [MPI_HOME=<path-to-mpi>] [RCCL_HOME=<path-to-rccl>] [ROCM_PATH=<path-to-rocm>] [GPU_TARGETS="<gfx-arch> ..."]
 ```
 ## Run
 

@@ -5,9 +5,6 @@
 # See LICENSE.txt for more license information
 #
 
-# Include common build rules
-include ../makefiles/rccl_examples.mk
-
 # NCCL Device API Examples
 EXAMPLES = 01_allreduce_lsa 02_alltoall_gin 03_alltoall_hybrid
 
