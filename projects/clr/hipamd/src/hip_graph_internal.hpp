@@ -878,12 +878,6 @@ class Graph {
       return nullptr;
     }
 
-    // Set Access to read write for all devices.
-    for (size_t dev_idx = 0; dev_idx < g_devices.size(); ++dev_idx) {
-      amd::Device* device = g_devices[dev_idx]->devices()[0];
-      device->SetMemAccess(ptr, size, amd::Device::VmmAccess::kReadWrite);
-    }
-
     return ptr;
   }
 
@@ -3159,8 +3153,12 @@ class GraphMemAllocNode final : public GraphNode {
       if (!relaunch || remap_needed) {
         amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(va_->getSvmPtr());
         assert(vaddr_sub_obj != nullptr);
-        queue()->device().SetMemAccess(vaddr_sub_obj->getSvmPtr(), aligned_size,
-                                       amd::Device::VmmAccess::kReadWrite);
+
+        for (size_t dev_idx = 0; dev_idx < g_devices.size(); ++dev_idx) {
+          amd::Device* device = g_devices[dev_idx]->devices()[0];
+          device->SetMemAccess(vaddr_sub_obj->getSvmPtr(), aligned_size,
+                               amd::Device::VmmAccess::kReadWrite);
+        }
 
         bool has_matching_free = (graph_->memAllocNodePtrs_.find(va_->getSvmPtr())
                                   == graph_->memAllocNodePtrs_.end());
