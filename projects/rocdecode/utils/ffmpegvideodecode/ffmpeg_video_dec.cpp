@@ -149,6 +149,8 @@ int FFMpegVideoDecoder::HandleVideoSequence(RocdecVideoFormatHost *format_host) 
         // rocdecCreateDecoder() has been called before, and now there's possible config change
         return ReconfigureDecoder(p_video_format);
     }
+    num_decode_surfaces_ = num_decode_surfaces;
+    sei_message_display_q_.resize(num_decode_surfaces_);
     // e_codec has been set in the constructor (for parser). Here it's set again for potential correction
     codec_id_ = p_video_format->codec;
     video_chroma_format_ = p_video_format->chroma_format;
@@ -254,8 +256,13 @@ int FFMpegVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
                                      p_video_format->display_area.top == disp_rect_.top &&
                                      p_video_format->display_area.left == disp_rect_.left &&
                                      p_video_format->display_area.right == disp_rect_.right);
+    bool is_dec_surface_num_changed = p_video_format->min_num_decode_surfaces != num_decode_surfaces_;
 
     if (!is_decode_res_changed && !is_display_rect_changed && !b_force_recofig_flush_) {
+        if (is_dec_surface_num_changed) {
+            num_decode_surfaces_ = p_video_format->min_num_decode_surfaces;
+            sei_message_display_q_.resize(num_decode_surfaces_);
+        }
         return 1;
     }
 
@@ -280,6 +287,8 @@ int FFMpegVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
         }
     }
     output_frame_cnt_ = 0;     // reset frame_count
+    num_decode_surfaces_ = p_video_format->min_num_decode_surfaces;
+    sei_message_display_q_.resize(num_decode_surfaces_);
     if (is_decode_res_changed) {
         coded_width_ = p_video_format->coded_width;
         coded_height_ = p_video_format->coded_height;
@@ -349,37 +358,15 @@ int FFMpegVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
  * @return int 0:fail 1: success
  */
 int FFMpegVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
-    if (b_extract_sei_message_) {
-        if (sei_message_display_q_[pDispInfo->picture_index].sei_data) {
-            // Write SEI Message
-            uint8_t *sei_buffer = static_cast<uint8_t *>(sei_message_display_q_[pDispInfo->picture_index].sei_data);
-            uint32_t sei_num_messages = sei_message_display_q_[pDispInfo->picture_index].sei_message_count;
-            RocdecSeiMessage *sei_message = sei_message_display_q_[pDispInfo->picture_index].sei_message;
-            if (fp_sei_) {
-                for (uint32_t i = 0; i < sei_num_messages; i++) {
-                    if (codec_id_ == rocDecVideoCodec_AVC || codec_id_ == rocDecVideoCodec_HEVC) {
-                        switch (sei_message[i].sei_message_type) {
-                            case SEI_TYPE_TIME_CODE: {
-                                //todo:: check if we need to write timecode
-                            }
-                            break;
-                            case SEI_TYPE_USER_DATA_UNREGISTERED: {
-                                fwrite(sei_buffer, sei_message[i].sei_message_size, 1, fp_sei_);
-                            }
-                            break;
-                        }
-                    }
-                    if (codec_id_ == rocDecVideoCodec_AV1) {
-                        fwrite(sei_buffer, sei_message[i].sei_message_size, 1, fp_sei_);
-                    }    
-                    sei_buffer += sei_message[i].sei_message_size;
-                }
-            }
-            free(sei_message_display_q_[pDispInfo->picture_index].sei_data);
-            sei_message_display_q_[pDispInfo->picture_index].sei_data = NULL; // to avoid double free
-            free(sei_message_display_q_[pDispInfo->picture_index].sei_message);
-            sei_message_display_q_[pDispInfo->picture_index].sei_message = NULL; // to avoid double free
-        }
+    if (!pDispInfo || pDispInfo->picture_index < 0 ||
+        static_cast<uint32_t>(pDispInfo->picture_index) >= num_decode_surfaces_) {
+        RocVideoDecCriticalLog("Invalid display picture index");
+        return 0;
+    }
+
+    if (b_extract_sei_message_ &&
+        !HandleSeiMessageDisplay(pDispInfo->picture_index)) {
+        return 0;
     }
 
     RocdecParserDispInfo *p_disp_info = static_cast<RocdecParserDispInfo *>(pDispInfo);
