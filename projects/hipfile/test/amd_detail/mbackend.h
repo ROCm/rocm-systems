@@ -27,6 +27,10 @@ struct MBackend : Backend {
                 (hipFile::IoType type, std::shared_ptr<IFile>, std::shared_ptr<IBuffer>, size_t *, hoff_t *,
                  hoff_t *, ssize_t *, std::shared_ptr<IStream>),
                 (override));
+    MOCK_METHOD(void, enqueueAsyncIo,
+                (hipFile::IoType type, std::shared_ptr<IFile>, std::shared_ptr<IBuffer>, size_t *, hoff_t *,
+                 hoff_t *, ssize_t *, std::shared_ptr<IStream>, std::shared_ptr<AsyncFailoverState>),
+                (override));
     MOCK_METHOD(ssize_t, _io_impl,
                 (hipFile::IoType type, std::shared_ptr<IFile>, std::shared_ptr<IBuffer>, size_t, hoff_t,
                  hoff_t),
@@ -41,9 +45,9 @@ struct MBackendWithFallback : BackendWithFallback {
                 (IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
                  hoff_t file_offset, hoff_t buffer_offset),
                 (override));
-    MOCK_METHOD(void, async_io,
+    MOCK_METHOD(void, enqueueAsyncIo,
                 (hipFile::IoType type, std::shared_ptr<IFile>, std::shared_ptr<IBuffer>, size_t *, hoff_t *,
-                 hoff_t *, ssize_t *, std::shared_ptr<IStream>),
+                 hoff_t *, ssize_t *, std::shared_ptr<IStream>, std::shared_ptr<AsyncFailoverState>),
                 (override));
     MOCK_METHOD(bool, is_fallback_eligible, (std::exception_ptr e_ptr, ssize_t nbytes), (const, override));
 };

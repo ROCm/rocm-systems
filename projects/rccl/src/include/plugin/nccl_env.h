@@ -8,6 +8,7 @@
 #ifndef NCCL_ENV_H_
 #define NCCL_ENV_H_
 
+#include "nccl_common.h"
 #include "env/env_v1.h"
 #include "env/env_v2.h"
 

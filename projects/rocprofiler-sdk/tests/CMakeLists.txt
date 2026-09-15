@@ -91,6 +91,7 @@ add_subdirectory(c-tool)
 add_subdirectory(thread-trace)
 add_subdirectory(pc_sampling)
 add_subdirectory(hip-graph-tracing)
+add_subdirectory(hip-graph-forkjoin-deadlock)
 add_subdirectory(counter-collection)
 add_subdirectory(kernel-replay-concurrency)
 add_subdirectory(kernel-replay-local-context)
@@ -98,6 +99,7 @@ add_subdirectory(perf-common)
 add_subdirectory(kernel-replay-perf)
 add_subdirectory(queue-hooks-perf)
 add_subdirectory(openmp-tools)
+add_subdirectory(openmp-tools-coexist)
 add_subdirectory(rocdecode)
 add_subdirectory(rocjpeg)
 add_subdirectory(hipfile)
@@ -125,6 +127,9 @@ add_subdirectory(late-start-tracing)
 
 # multiple anytime tool configuration validation tests
 add_subdirectory(multi-tool-test)
+
+# duplicate rocprofiler-sdk initialization validation test
+add_subdirectory(duplicate-sdk-initialization)
 
 # anytime tool configuration (force_configure) validation tests
 add_subdirectory(anytime-tool-config)
