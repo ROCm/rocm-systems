@@ -442,9 +442,11 @@ intended for debugging and development purposes.
         | Enabling this at 2 to 7 ranks also has a side effect beyond the four
           collectives above: the DDA IPC scratch buffer it allocates is reused
           by ``RCCL_FORCE_CE``'s generic CE-collective fast path (default on)
-          for Scatter and Gather too, which previously never engaged below the
-          full 8-rank clique because that buffer did not exist yet at those
-          counts.
+          for Scatter, Gather, and AlltoAllv too, which previously did not
+          engage below the full 8-rank clique on ``gfx942``/``gfx950`` because
+          that buffer did not exist yet at those counts on this path (the
+          separate DDA fabric path can populate it at low rank counts on other
+          architectures).
         | Must be set to the same value on every rank of a communicator. The
           variable is read per process; communicator initialization checks
           agreement across ranks and fails cleanly, naming the disagreeing
