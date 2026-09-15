@@ -707,6 +707,56 @@ TEST_F(TopoTest, GpuMaxLocalNetPath_GpuOffTheRailsWidensTheBound) {
   ncclTopoFree(built);
 }
 
+// A relay entry has to raise the answer even where every GPU has a nearer NIC of its own, or a
+// search bounded by it would never reach the step at which relays are accepted. The relay is
+// written by hand, the way CheckGdr_MloPartIgnoresDivertedPartitionPath stands in for a diverted
+// path, because PXN is off by default in this tree and NCCL_PARAM caches that per process.
+TEST_F(TopoTest, GpuMaxLocalNetPath_RelayRaisesTheBoundToPxn) {
+  const uint64_t host = 0xe2;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  addRail(cpu, /*rail=*/0);
+  addRail(cpu, /*rail=*/1);
+
+  struct ncclTopoSystem* built = buildSystemWithPaths(host);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+  ASSERT_EQ(built->nodes[NET].count, 2);
+
+  for (int g = 0; g < built->nodes[GPU].count; g++) {
+    struct ncclTopoLinkList* paths = built->nodes[GPU].nodes[g].paths[NET];
+    SCOPED_TRACE(testing::Message() << "gpu " << g);
+    for (int n = 0; n < built->nodes[NET].count; n++)
+      if (paths[n].type == PATH_PHB) paths[n].type = PATH_PXN;
+    EXPECT_EQ(std::min(paths[0].type, paths[1].type), PATH_PXB);
+    EXPECT_EQ(std::max(paths[0].type, paths[1].type), PATH_PXN);
+  }
+
+  int maxPath = PATH_DIS;
+  ASSERT_EQ(ncclTopoGetGpuMaxLocalNetPath(built, &maxPath), ncclSuccess);
+  EXPECT_EQ(maxPath, PATH_PXN);
+
+  ncclTopoFree(built);
+}
+
+// A GPU that reaches no NIC has nothing to say about the bound. Were it counted, a node with no
+// NIC at all would answer PATH_DIS, which is no bound on the search whatsoever.
+TEST_F(TopoTest, GpuMaxLocalNetPath_NodeWithoutNicsBoundsNothing) {
+  const uint64_t host = 0xe3;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  addGpuPci(cpu, "0000:0c:00.0", "gfx942", /*rank=*/0, /*dev=*/0);
+
+  struct ncclTopoSystem* built = buildSystemWithPaths(host);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[GPU].count, 1);
+  ASSERT_EQ(built->nodes[NET].count, 0);
+
+  int maxPath = PATH_DIS;
+  ASSERT_EQ(ncclTopoGetGpuMaxLocalNetPath(built, &maxPath), ncclSuccess);
+  EXPECT_EQ(maxPath, PATH_LOC);
+
+  ncclTopoFree(built);
+}
+
 #else // !(__HIP_PLATFORM_AMD__ || __HIPCC__)
 
 // ncclTopoAddXGMI() is not built on non-HIP platforms, so register one skipped
