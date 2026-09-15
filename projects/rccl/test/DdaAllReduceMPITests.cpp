@@ -389,14 +389,23 @@ TEST_F(DdaMPI_AllReduce, StreamAlternationUngrouped)
 
     // Each iteration reduces the previous one's output, so the final value depends on the order the
     // iterations ran in. Reducing the same operand every time would pass under any interleaving.
+    // The addon backends decline a grouped call, so wrapping the odd iterations in a group puts them
+    // on the native path and makes each handoff between the two paths carry the ordering edge.
     for(int iter = 0; iter < kContractIters; ++iter)
     {
         const bool  even   = (iter % 2 == 0);
         hipStream_t stream = even ? getActiveStream() : altStream;
-        ASSERT_EQ(ncclSuccess,
-                  ncclAllReduce(even ? bufA : bufB, even ? bufB : bufA, kContractCount, ncclFloat32,
-                                ncclSum, getActiveCommunicator(), stream))
-            << "Rank " << rank << ": iteration " << iter;
+        if(!even)
+            ASSERT_EQ(ncclSuccess, ncclGroupStart());
+        ncclResult_t res = ncclAllReduce(even ? bufA : bufB, even ? bufB : bufA, kContractCount,
+                                         ncclFloat32, ncclSum, getActiveCommunicator(), stream);
+        if(!even)
+        {
+            const ncclResult_t endRes = ncclGroupEnd();
+            if(res == ncclSuccess)
+                res = endRes;
+        }
+        ASSERT_EQ(ncclSuccess, res) << "Rank " << rank << ": iteration " << iter;
     }
 
     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
