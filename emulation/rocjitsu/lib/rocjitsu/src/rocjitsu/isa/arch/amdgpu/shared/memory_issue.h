@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter.h"
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -34,9 +35,13 @@ class MemoryCounterObligation {
 public:
   constexpr MemoryCounterObligation() = default;
   constexpr MemoryCounterObligation(WaitCounterType wait_counter_type,
-                                    MemoryCompletionClass completion_class)
-      : encoded_((static_cast<uint8_t>(completion_class) << 4) |
-                 static_cast<uint8_t>(wait_counter_type)) {}
+                                    MemoryCompletionClass completion_class,
+                                    uint8_t counter_increment = 1)
+      : encoded_(((counter_increment - 1) << 7) | (static_cast<uint8_t>(completion_class) << 4) |
+                 static_cast<uint8_t>(wait_counter_type)) {
+    assert(counter_increment == 1 || counter_increment == 2);
+    assert(completion_class != MemoryCompletionClass::UNCLASSIFIED);
+  }
 
   [[nodiscard]] constexpr bool valid() const {
     return completion_class() != MemoryCompletionClass::UNCLASSIFIED;
@@ -45,12 +50,13 @@ public:
     return static_cast<WaitCounterType>(encoded_ & 0x0f);
   }
   [[nodiscard]] constexpr MemoryCompletionClass completion_class() const {
-    return static_cast<MemoryCompletionClass>(encoded_ >> 4);
+    return static_cast<MemoryCompletionClass>((encoded_ >> 4) & 0x07);
   }
+  [[nodiscard]] constexpr uint8_t counter_increment() const { return 1 + (encoded_ >> 7); }
 
 private:
   static_assert(static_cast<uint8_t>(WaitCounterType::ASYNCCNT) < 16);
-  static_assert(static_cast<uint8_t>(MemoryCompletionClass::UNORDERED) < 16);
+  static_assert(static_cast<uint8_t>(MemoryCompletionClass::UNORDERED) < 8);
   uint8_t encoded_ = 0;
 };
 
