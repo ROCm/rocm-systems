@@ -13,8 +13,15 @@
 #include "register_inline.h"
 #include "gin/gin_host.h"
 #include "gin/gin_host_proxy.h"
+#include "algorithms/dda/fabric/fabric_init.h"
+#include "rccl_common.h"
+#include "nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h"
+#include "gin/gin_fabric_a2a_host.h"
+#include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
+#include "alloc.h"
 #include "compiler.h"
 #include <cmath>
+#include <cstring>
 
 NCCL_PARAM(GinEnable, "GIN_ENABLE", 1);
 
@@ -313,6 +320,11 @@ static ncclResult_t ginDevCommSetupWithBackend(struct ncclComm* comm, struct ncc
 
   ncclResult_t ret = ncclSuccess;
   bool needsProxyProgress = false;
+  // Set only once this call publishes a fabric A2A lane, so the failure path
+  // erases the key it actually inserted. devComm->ginHandles[0] is not a safe
+  // substitute: createContext can fail at n == 0, before this function has
+  // written that field.
+  void* publishedLaneHandle = nullptr;
 
   int connectedStride =
     comm->sharedRes->ginState.ginConnectionType == NCCL_GIN_CONNECTION_FULL ? 1 : comm->contiguousRanksPerHost;
@@ -375,6 +387,28 @@ static ncclResult_t ginDevCommSetupWithBackend(struct ncclComm* comm, struct ncc
     if (ginStateDevComm->devHandles[commIdx]->needsProxyProgress) needsProxyProgress = true;
   }
 
+  // Fabric LL lane lives off ncclDevComm (host table keyed by ginHandles[0]).
+  if (backend->ginType == NCCL_GIN_TYPE_ANVIL_SDMA && ginAnvilUseFabricMem(comm)) {
+    ncclGinAnvilSdmaGPUContext gpu{};
+    CUDACHECKGOTO(cudaMemcpy(&gpu, devComm->ginHandles[0], sizeof(gpu), cudaMemcpyDeviceToHost), ret, end);
+    if (gpu.fabricA2AEnabled) {
+      ncclGinFabricA2ALane lane{};
+      lane.enabled = 1;
+      lane.peerScratch = gpu.fabricA2APeerScratch;
+      lane.llEpoch = gpu.fabricA2ALlEpoch;
+      lane.llEpochLen = gpu.fabricA2ALlEpochLen;
+      lane.scratchBytes = gpu.fabricA2AScratchBytes;
+      lane.llThreshold = gpu.fabricA2ALlThreshold;
+      ncclGinFabricA2ALanePublish(devComm->ginHandles[0], lane);
+      publishedLaneHandle = devComm->ginHandles[0];
+      INFO(NCCL_INIT, "GIN A2A: fabric LL small-msg lane enabled (nRanks=%d scratchBytes=%zu llThreshold=%zu)",
+           comm->nRanks, lane.scratchBytes, lane.llThreshold);
+    } else if (comm->ddaFabricMemHandler == nullptr || comm->ddaPeerPtrsDev == nullptr ||
+               comm->ddaLLEpochDev == nullptr || comm->ddaScratch == nullptr) {
+      WARN("GIN A2A: fabric small-msg lane unavailable: missing DDA fabric resources");
+    }
+  }
+
   // Add devComm and (re)start progress threads as needed.
   {
     bool needsStart = needsProxyProgress && !ginState->proxyThreadsCreated;
@@ -401,6 +435,7 @@ static ncclResult_t ginDevCommSetupWithBackend(struct ncclComm* comm, struct ncc
 
 end:
   if (ret != ncclSuccess) {
+    if (publishedLaneHandle) ncclGinFabricA2ALaneErase(publishedLaneHandle);
     for (int commIdx = 0; commIdx < backend->ginCommCount; commIdx++) {
       if (ginStateDevComm->ginCtx[commIdx]) backend->ncclGin->destroyContext(ginStateDevComm->ginCtx[commIdx]);
     }
@@ -475,6 +510,8 @@ ncclResult_t ncclGinDevCommFree(struct ncclComm* comm, struct ncclDevComm const*
   else ginState->devComms = dc->next;
   ginProgressWriteUnlock(ginState);
 
+  ncclGinFabricA2ALaneErase(devComm->ginHandles[0]);
+
   struct ncclGinBackendState* backend = &ginState->backends[dc->backendIndex];
   // The devComm is now unreachable by any progress thread; safe to destroy
   // its contexts while the workers keep progressing the rest of the list.
@@ -503,6 +540,12 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
         NCCLCHECK(backend->ncclGin->closeColl(backend->ginComms[commIdx]));
         backend->ginComms[commIdx] = NULL;
       }
+    }
+  }
+  // Per-comm: do not wipe other live communicators' lanes in this process.
+  for (struct ncclGinStateDevComm* dc = ginState->devComms; dc != nullptr; dc = dc->next) {
+    if (dc->devHandles[0] && dc->devHandles[0]->handle) {
+      ncclGinFabricA2ALaneErase(dc->devHandles[0]->handle);
     }
   }
   memset((void*)ginState, 0, sizeof(*ginState));

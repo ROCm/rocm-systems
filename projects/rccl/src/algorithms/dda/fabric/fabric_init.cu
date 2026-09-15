@@ -4,6 +4,8 @@
  * See LICENSE.txt for license information.
  ************************************************************************/
 
+#include <cstring>
+#include <string.h>
 #include "algorithms/dda/fabric/fabric_init.h"
 
 #include "alloc.h"
@@ -17,8 +19,16 @@
 #include "bootstrap.h"
 #include "rccl_common.h"
 #include "param.h"
+#include "cudawrap.h"
+#include "nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h"
+#include "nccl_device/gin/anvil_sdma/gin_fabric_lsa_policy.h"
 
 #include <cuda_runtime.h>
+
+#include <utility>
+#include <vector>
+
+using gin::fabric::ginAnvilUseFabricMemPredicate;
 
 #include <utility>
 #include <vector>
@@ -37,6 +47,19 @@ bool ncclDdaUseFabricPath(ncclComm* comm) {
     return false;
   }
   return comm->MNNVL == 1 && IsArchMatch(comm->archName, "gfx1250");
+}
+
+bool ginAnvilUseFabricMem(ncclComm* comm) {
+  if (comm == nullptr) return false;
+  return ginAnvilUseFabricMemPredicate(ncclDdaUseFabricPath(comm), comm->clique.size, comm->nRanks,
+                                       ncclCuMemEnable());
+}
+
+bool ginFabricLsaA2ACapable(ncclComm* comm, int ginNranks) {
+  if (comm == nullptr) return false;
+  return gin::fabric::ginFabricLsaA2ACapablePredicate(ginAnvilUseFabricMem(comm), comm->MNNVL != 0,
+                                                      ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_FABRIC, ginNranks,
+                                                      comm->nRanks, comm->devrState.lsaSize);
 }
 
 ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
