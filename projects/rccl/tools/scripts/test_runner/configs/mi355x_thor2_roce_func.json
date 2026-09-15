@@ -560,6 +560,11 @@
           "name": "Cast_RegistrationRejectsBadArguments",
           "description": "regMr, regMrDmaBuf and deregMr reject a null communicator, and regMr rejects a zero size, instead of dereferencing it",
           "test_filter": "NetIbMPITest.CastRegistrationRejectsBadArguments"
+        },
+        {
+          "name": "Cast_SetupUnilateralConnectFailureReported",
+          "description": "Connect-side device is invalid on one rank only; both ranks must report the setup failure and reach the same barrier, not hang",
+          "test_filter": "NetIbMPITest.CastSetupUnilateralConnectFailureReported"
         }
       ]
     },
@@ -816,6 +821,11 @@
           "name": "NetIB_Branch_NullCommClose",
           "description": "closeSend/closeRecv/closeListen on NULL comm returns ncclSuccess without crash",
           "test_filter": "NetIbMPITest.NullCommClose"
+        },
+        {
+          "name": "NetIB_Branch_NullCommCastDataPath",
+          "description": "IB-CAST isend/irecv/iflush reject a NULL comm instead of dereferencing it",
+          "test_filter": "NetIbMPITest.NullCommCastDataPath"
         },
         {
           "name": "NetIB_Branch_SetNetAttrNoOp",

@@ -23,6 +23,24 @@
 
 namespace {
 
+// The returned status is not the whole verdict. Helpers the burst calls --
+// AssertInitAndGetDevices and PostSendWithRetry -- assert fatally and return from
+// themselves, so the burst can reach its own "return ncclSuccess" with a fatal
+// failure already recorded. Asserting on the status alone would let the test carry
+// on and fail later on an out-parameter nobody wrote, which is what the
+// ASSERT_NO_FATAL_FAILURE this replaced used to catch. Checking HasFatalFailure
+// stops the test at the cause instead.
+#define ASSERT_RECV_FLUSH_BURST(iterations, verifyData, lastFlush)                   \
+    do {                                                                             \
+        std::string _burstWhy;                                                       \
+        ncclResult_t _burstRet = RunRecvFlushBurst((iterations), (verifyData),       \
+                                                  (lastFlush), &_burstWhy);          \
+        ASSERT_EQ(_burstRet, ncclSuccess)                                            \
+            << "GDR recv+flush burst setup failed on at least one rank (this rank: " \
+            << _burstWhy << ")";                                                     \
+        if (::testing::Test::HasFatalFailure()) return;                              \
+    } while (0)
+
 class GdrFlushTest : public NetIbMPITest {
 protected:
     // NCCL_CUMEM_ENABLE=1 makes the flush scratchpad dma-buf-backed (the path
@@ -80,15 +98,26 @@ protected:
     // exercised scratchpad is the recv comm's INTERNAL gpuFlush, which becomes
     // dma-buf-backed purely from NCCL_CUMEM_ENABLE=1 - independent of how the data
     // buffer is allocated or registered.
-    void RunRecvFlushBurst(int iterations, bool verifyData,
-                           ncclResult_t* rank0LastFlush) {
+    //
+    // Returns the setup verdict rather than asserting on it. A fatal assertion
+    // inside a void helper returns from the helper alone, so the caller carried on
+    // with the comms SetupConnectionWithGuard had already closed unless it
+    // remembered ASSERT_NO_FATAL_FAILURE -- a wrapper nothing enforced. The status
+    // is [[nodiscard]] and these sources build with -Werror=unused-result, so the
+    // call sites cannot drop it. Only the rank-agreed setup failure travels back
+    // this way; everything below stays EXPECT_, because a rank-local failure that
+    // ended the test on one rank would strand its peer at the next collective.
+    [[nodiscard]] ncclResult_t RunRecvFlushBurst(int iterations, bool verifyData,
+                                                ncclResult_t* rank0LastFlush,
+                                                std::string* setupWhy = nullptr) {
         const int rank = MPIEnvironment::world_rank;
 
         AssertInitAndGetDevices(nullptr);
 
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+        const ncclResult_t setup = SetupConnectionWithGuard(0, pair, connGuard, setupWhy);
+        if (setup != ncclSuccess) return setup;
 
         const size_t bufferSize = kSmallBufferSize;
         void* buffer = nullptr;
@@ -148,6 +177,7 @@ protected:
         }
 
         if (rank == 0 && rank0LastFlush) *rank0LastFlush = lastFlush;
+        return ncclSuccess;
     }
 };
 
@@ -161,8 +191,7 @@ TEST_F(GdrFlushTest, CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal) {
     if (!gdrPtrSupport()) GTEST_SKIP() << "no GDR backend (neither peermem nor dma-buf) on this device";
 
     ncclResult_t flush = ncclSuccess;
-    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
-                                              &flush));
+    ASSERT_RECV_FLUSH_BURST(/*iterations=*/4, /*verifyData=*/true, &flush);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "write+read flush over dma-buf scratchpad must not fault";
 }
@@ -178,8 +207,7 @@ TEST_F(GdrFlushTest, Peermem_GpuRecvFlush_NoAsyncFatal) {
         GTEST_SKIP() << "peermem (NCCL_PTR_CUDA) not available for the reg_mr scratchpad";
 
     ncclResult_t flush = ncclSuccess;
-    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
-                                              &flush));
+    ASSERT_RECV_FLUSH_BURST(/*iterations=*/4, /*verifyData=*/true, &flush);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "peermem RO=0 scratchpad flush must succeed";
 }
@@ -195,8 +223,7 @@ TEST_F(GdrFlushTest, FeatureDisabled_FallbackReadRecvBuffer) {
     if (!gdrPtrSupport()) GTEST_SKIP() << "no GDR backend (neither peermem nor dma-buf) on this device";
 
     ncclResult_t flush = ncclSuccess;
-    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
-                                              &flush));
+    ASSERT_RECV_FLUSH_BURST(/*iterations=*/4, /*verifyData=*/true, &flush);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "fallback flush (read recv buffer) must succeed";
 }
@@ -210,8 +237,7 @@ TEST_F(GdrFlushTest, RepeatedFlush_NoFaultBurst) {
     if (!gdrPtrSupport()) GTEST_SKIP() << "no GDR backend (neither peermem nor dma-buf) on this device";
 
     ncclResult_t flush = ncclSuccess;
-    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/50, /*verifyData=*/false,
-                                              &flush));
+    ASSERT_RECV_FLUSH_BURST(/*iterations=*/50, /*verifyData=*/false, &flush);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "no flush in the burst may raise a QP async-fatal";
 }
