@@ -14,10 +14,11 @@ PROBE_CXX ?= $(shell \
 ifeq ($(strip $(PROBE_CXX)),)
 $(error Cannot find amdclang++/clang++ under $(ROCM_PATH)/bin or $(ROCM_PATH)/llvm/bin. Set PROBE_CXX explicitly.)
 endif
-ifeq ($(wildcard $(PROBE_CXX)),)
-ifeq ($(shell command -v $(PROBE_CXX) >/dev/null 2>&1 && echo ok),)
+# Resolve PROBE_CXX (absolute path or bare name on PATH) and confirm the target
+# is executable. Testing -x on the resolved path catches the exists-but-not-
+# runnable case that a bare command -v would still report as found.
+ifeq ($(shell p=$$(command -v $(PROBE_CXX) 2>/dev/null); [ -n "$$p" ] && [ -x "$$p" ] && echo ok),)
 $(error PROBE_CXX ($(PROBE_CXX)) is not executable. Set PROBE_CXX to a valid C++ compiler.)
-endif
 endif
 HIPIFY_PL_EXE ?= $(ROCM_PATH)/bin/hipify-perl
 HIPIFY_PL_FLAGS = -inplace -quiet-warnings
