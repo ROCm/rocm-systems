@@ -3901,9 +3901,14 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // ceCollTaskAppend path when user buffers are not symmetrically registered.
       // Without this trigger, CE AllReduce-only workloads would never initialize
       // the CE runtime (ceARTmpBuf stays NULL). Hierarchical CE is multi-node by
-      // construction, so it needs the same trigger despite nNodes > 1.
+      // construction, so it needs the same trigger despite nNodes > 1. Keep
+      // that arm behind the policy bit which actually selects hierarchical CE;
+      // otherwise a default-policy collective initializes and registers CE
+      // resources only to take the kernel path.
       if (!ceCapturing && ncclCeImplemented(info->coll, info->op, info->datatype) && comm->symmetricSupport &&
-          (comm->nNodes == 1 || hierCeAvailable) && comm->ceColl.baseUCSymReadyPtr == NULL &&
+          (comm->nNodes == 1 ||
+           (hierCeAvailable && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO))) &&
+          comm->ceColl.baseUCSymReadyPtr == NULL &&
           ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
         struct ncclCeInitTask* ceTask;
         NCCLCHECK(ncclCalloc(&ceTask, 1));

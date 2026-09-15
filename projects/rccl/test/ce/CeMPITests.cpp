@@ -191,7 +191,8 @@ protected:
         if(comm == nullptr)
             return false;
 
-        return comm->nNodes > 1 && comm->symmetricSupport && comm->hostRmaSupport &&
+        return comm->nNodes > 1 && !ncclDevrIsOneLsaTeam(comm) &&
+               comm->symmetricSupport && comm->hostRmaSupport &&
                comm->config.numRmaCtx > 0;
     }
 

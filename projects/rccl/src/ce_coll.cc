@@ -111,9 +111,11 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   size_t ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
   int i = 0;
   int targetStreams = 0;
+  bool isOneLsaTeam = false;
   uint32_t graphSyncValue = GRAPH_SYNC_VALUE;
   // Symmetric memory runtime must be initialized before any window registration.
   NCCLCHECKGOTO(ncclDevrInitOnce(comm), ret, fail);
+  isOneLsaTeam = ncclDevrIsOneLsaTeam(comm);
 
   // Sync window holds one ready and one complete slot per LSA-local rank.
   ceDevBaseSize = alignUp(comm->devrState.lsaSize * sizeof(uint32_t), 16) * 2;
@@ -124,15 +126,19 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
                 ret, fail);
   CUDACHECKGOTO(cudaStreamCreateWithFlags(&comm->ceColl.scatterStream, cudaStreamNonBlocking), ret, fail);
   CUDACHECKGOTO(cudaEventCreateWithFlags(&comm->ceColl.synceEvent, cudaEventDisableTiming), ret, fail);
-  // Signal buffer: [NUM_SLOTS][nRanks], indexed slot*nRanks + r. Symmetric window
-  // so peers can ring each other's doorbells via LSA (same pattern as ceARTmpWin).
-  NCCLCHECKGOTO(ncclMemAlloc((void**)&signalBuf, sigBufferSize), ret, fail);
-  NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, signalBuf, sigBufferSize, NCCL_WIN_COLL_SYMMETRIC, &sigWinDev), ret,
-                fail);
-  NCCLCHECKGOTO(ncclShadowPoolToHost(&comm->devrState.shadows, sigWinDev, &sigWinDevHost), ret, fail);
-  comm->ceColl.signalWin = (struct ncclDevrWindow*)sigWinDevHost->winHost;
-  comm->ceColl.signalBuffer = (uint32_t*)comm->ceColl.signalWin->userPtr;
-  CUDACHECKGOTO(hipMemset(comm->ceColl.signalBuffer, 0, sigBufferSize), ret, fail);
+  // The signal buffer is consumed only by CE AllReduce, which is LSA-local.
+  // Communicators initialized solely for hierarchical CE do not need it.
+  if (isOneLsaTeam) {
+    // [NUM_SLOTS][nRanks], indexed slot*nRanks + r. Symmetric so peers can
+    // ring each other's doorbells via LSA (same pattern as ceARTmpWin).
+    NCCLCHECKGOTO(ncclMemAlloc((void**)&signalBuf, sigBufferSize), ret, fail);
+    NCCLCHECKGOTO(
+      ncclDevrWindowRegisterInGroup(comm, signalBuf, sigBufferSize, NCCL_WIN_COLL_SYMMETRIC, &sigWinDev), ret, fail);
+    NCCLCHECKGOTO(ncclShadowPoolToHost(&comm->devrState.shadows, sigWinDev, &sigWinDevHost), ret, fail);
+    comm->ceColl.signalWin = (struct ncclDevrWindow*)sigWinDevHost->winHost;
+    comm->ceColl.signalBuffer = (uint32_t*)comm->ceColl.signalWin->userPtr;
+    CUDACHECKGOTO(hipMemset(comm->ceColl.signalBuffer, 0, sigBufferSize), ret, fail);
+  }
 
   // ceSync window (ready/complete flag arrays).
   NCCLCHECKGOTO(ncclMemAlloc((void**)&ceDevBase, ceDevBaseSize), ret, fail);
@@ -176,7 +182,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   //   [slot 0: nRanks chunks][slot 1: nRanks chunks].
   // CE AllReduce is LSA-local only, so skip the staging buffer on communicators
   // that reach ncclCeInit solely for the hierarchical path.
-  if (rcclParamCeAllReduce() && ncclDevrIsOneLsaTeam(comm)) {
+  if (rcclParamCeAllReduce() && isOneLsaTeam) {
     NCCLCHECKGOTO(ncclMemAlloc((void**)&ceARTmpBuf, ceARTmpBufSize), ret, fail_ar);
     NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, ceARTmpBuf, ceARTmpBufSize, NCCL_WIN_COLL_SYMMETRIC, &arWinDev),
                   ret, fail_ar);
@@ -296,8 +302,8 @@ fail:
 
 bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty);
 
-bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                     ncclSymRegType_t winRegType) {
+bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
+                            ncclSymRegType_t winRegType) {
   if (!ncclCeImplemented(coll, red, ty)) {
     TRACE(NCCL_TUNING, "Skipping CE collective: not implemented");
     return false;
@@ -315,6 +321,14 @@ bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_
   }
   if (!comm->symmetricSupport) {
     TRACE(NCCL_TUNING, "Skipping CE collective: symmetric support is not enabled");
+    return false;
+  }
+  return true;
+}
+
+bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
+                     ncclSymRegType_t winRegType) {
+  if (!ncclCeScratchAvailable(comm, coll, red, ty, winRegType)) {
     return false;
   }
   if (winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendNonregRecvReg) {
@@ -339,27 +353,6 @@ bool ncclCeAlltoAllEligible(struct ncclComm* comm, ncclDataType_t datatype, nccl
   if (hasSysmemSegment || capturing) return false;
   // Single-node CE only: hier CE is multi-node and launch is still LSA-only.
   return ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType);
-}
-
-bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                            ncclSymRegType_t winRegType) {
-  if (!ncclCeImplemented(coll, red, ty)) {
-    TRACE(NCCL_TUNING, "Skipping CE collective: not implemented");
-    return false;
-  }
-  if (comm->nNodes > 1) {
-    TRACE(NCCL_TUNING, "Skipping CE collective: comm is not a single node");
-    return false;
-  }
-  if (!ncclDevrIsOneLsaTeam(comm)) {
-    TRACE(NCCL_TUNING, "Skipping CE collective: LSA team does not cover the comm");
-    return false;
-  }
-  if (!comm->symmetricSupport) {
-    TRACE(NCCL_TUNING, "Skipping CE collective: symmetric support is not enabled");
-    return false;
-  }
-  return true;
 }
 
 bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty) {
@@ -582,7 +575,9 @@ ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream, struct nc
   // wait for the wait ops, so a reset can clobber a peer's flag mid-barrier
   // and hang graph replay. Issuing them as a separate, stream-ordered batch
   // forces reset-after-wait.
-  CUCHECKGOTO(hipStreamBatchMemOp(stream, opIdx, batchParams, 0), ret, fail);
+  if (opIdx) {
+    CUCHECKGOTO(hipStreamBatchMemOp(stream, opIdx, batchParams, 0), ret, fail);
+  }
 
   // For graph capture, reset our flag array to 0 in a separate batch so the
   // fixed-value barrier can be replayed.

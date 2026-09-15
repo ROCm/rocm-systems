@@ -267,15 +267,23 @@ TEST(DevrGetWinOffsetTest, OffsetIsWindowPositionWithinBackingMemory) {
   ncclDevrWindow winNoMemory{};
   winNoMemory.bigOffset = 0x1400;
   EXPECT_EQ(ncclDevrGetWinOffset(&winNoMemory), 0u);
+  winNoMemory.rmaHostWins[0] = reinterpret_cast<void*>(0x1234);
+  EXPECT_EQ(ncclDevrGetRmaWin(&winNoMemory, 0), winNoMemory.rmaHostWins[0]);
 
   ncclDevrMemory mem{};
   mem.bigOffset = 0x1000;
+  mem.rmaHostWins[0] = reinterpret_cast<void*>(0x5678);
   ncclDevrWindow win{};
   win.memory = &mem;
   win.bigOffset = 0x1400;
   EXPECT_EQ(ncclDevrGetWinOffset(&win), 0x400u);
+  EXPECT_EQ(ncclDevrGetRmaWin(&win, 0), mem.rmaHostWins[0]);
 
   // A window registered at the head of its allocation adds nothing.
   win.bigOffset = mem.bigOffset;
   EXPECT_EQ(ncclDevrGetWinOffset(&win), 0u);
+
+  EXPECT_EQ(ncclDevrGetRmaWin(nullptr, 0), nullptr);
+  EXPECT_EQ(ncclDevrGetRmaWin(&win, -1), nullptr);
+  EXPECT_EQ(ncclDevrGetRmaWin(&win, NCCL_GIN_MAX_CONNECTIONS), nullptr);
 }
