@@ -83,7 +83,7 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
       if (i == cudaDev || (CUDASUCCESS(cudaDeviceCanAccessPeer(&p2p, i, cudaDev)) && p2p)) {
         // Initialize & increment refcount for GPU i
         hipCtx_t ctx;
-        hipError_t err = hipDevicePrimaryCtxRetain(&ctx, i); 
+        hipError_t err = hipDevicePrimaryCtxRetain(&ctx, i);
         if (err == hipSuccess) {
           accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
           accessDesc.location.id = i;

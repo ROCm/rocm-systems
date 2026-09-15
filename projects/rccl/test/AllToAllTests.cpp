@@ -102,7 +102,7 @@ namespace RcclUnitTesting
         std::vector<bool>           const inPlaceList     = {false};
         std::vector<bool>           const managedMemList  = {false};
         std::vector<bool>           const useHipGraphList = {false, true};
-        std::vector<const char *>   const channelList     = {"112"}; 
+        std::vector<const char *>   const channelList     = {"112"};
         bool                        const enableSweep     = false;
         for (auto channel : channelList) {
           setenv("NCCL_MIN_NCHANNELS", channel, 1);
@@ -121,7 +121,7 @@ namespace RcclUnitTesting
     int hipRuntimeVer = 0;
     HIPCALL(hipRuntimeGetVersion(&hipRuntimeVer));
     if (hipRuntimeVer < 71260540) {
-      GTEST_SKIP() << "Skipping SingleProcMemReg: HIP runtime version (" 
+      GTEST_SKIP() << "Skipping SingleProcMemReg: HIP runtime version ("
                    << hipRuntimeVer << ") is lower than 71260540";
     }
 
@@ -142,7 +142,7 @@ namespace RcclUnitTesting
 
     testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
                            inPlaceList, managedMemList, useHipGraphList,true,MEM_ALLOC_SYMMETRIC_WIN);
-    
+
     testBed.Finalize();
   }
 
@@ -151,7 +151,7 @@ namespace RcclUnitTesting
     int hipRuntimeVer = 0;
     HIPCALL(hipRuntimeGetVersion(&hipRuntimeVer));
     if (hipRuntimeVer < 71260540) {
-      GTEST_SKIP() << "Skipping SingleProcMemRegGraph: HIP runtime version (" 
+      GTEST_SKIP() << "Skipping SingleProcMemRegGraph: HIP runtime version ("
                    << hipRuntimeVer << ") is lower than 71260540";
     }
     ScopedEnvVar pool("UT_COMM_POOL", "0");
@@ -171,7 +171,7 @@ namespace RcclUnitTesting
 
     testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
                            inPlaceList, managedMemList, useHipGraphList,true,MEM_ALLOC_SYMMETRIC_WIN);
-    
+
     testBed.Finalize();
   }
 }

@@ -1352,9 +1352,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
           for (int part = 0; part < nChannelsMax; part++) {
             int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, nChannelsMax, comm->nNodes,
                                                   comm->p2pChannelShiftSize);
-            struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers; 
+            struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
             int peerRank = dir ? sendRank : recvRank;
-            struct ncclConnector* conn =  
+            struct ncclConnector* conn =
               dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
             if (conn->conn.flags & NCCL_DIRECT_NIC) {
               ncclRegisterP2pNetBuffer(comm, addrs[dir], bytes[dir], conn, &regFlag, &handles[dir][part],
@@ -3883,7 +3883,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         WARN("AllToAll: Overlapping/In-Place buffers detected [%p, %p) vs [%p, %p). "
             "this may lead to data corruption.",
             info->sendbuff, (const char*)(info->sendbuff) + totalBytes,
-            info->recvbuff, (const char*)(info->recvbuff) + totalBytes);    
+            info->recvbuff, (const char*)(info->recvbuff) + totalBytes);
       }
 
       // CE collectives are not graph-capture-safe (hipMemcpyBatchAsync and the
@@ -4005,7 +4005,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         // For cuda graph checking
         NCCLCHECK(ncclCudaGetCapturingGraph(&graph, info->stream, comm->config.graphUsageMode));
         captured = ncclCudaGraphValid(graph);
-        if (info->coll == ncclFuncAlltoAll) { 
+        if (info->coll == ncclFuncAlltoAll) {
           bool sendLocalValid = false;
           bool recvLocalValid = false;
           NCCLCHECK(ncclRegFind(comm, info->sendbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
@@ -4013,8 +4013,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           NCCLCHECK(ncclRegFind(comm, info->recvbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
                                 &recvReg));
           if (sendReg) NCCLCHECK(ncclRegLocalIsValid(sendReg, &sendLocalValid));
-          if (recvReg) NCCLCHECK(ncclRegLocalIsValid(recvReg, &recvLocalValid));   
-                
+          if (recvReg) NCCLCHECK(ncclRegLocalIsValid(recvReg, &recvLocalValid));
+
           allowUB = (captured || (sendLocalValid && recvLocalValid));
           for (int r = 0; r < comm->nRanks; r++) {
             NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI,

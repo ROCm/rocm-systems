@@ -35,7 +35,7 @@ namespace RcclUnitTesting
     this->dataType          = dataType;
     this->numInputElements  = numInputElements;
     this->numOutputElements = numOutputElements;
-    if (this->inputGpu.ptr != nullptr || this->outputGpu.ptr != nullptr) 
+    if (this->inputGpu.ptr != nullptr || this->outputGpu.ptr != nullptr)
     {
       CHECK_CALL(this->AttachMem());
     }
@@ -65,7 +65,7 @@ namespace RcclUnitTesting
     // Calculate the current active bytes based on this iteration's element count
      size_t currentInputBytes = this->numInputElements * DataTypeToBytes(this->dataType);
      size_t currentOutputBytes = this->numOutputElements * DataTypeToBytes(this->dataType);
-     
+
     // For out-of-place, both pointers remain at the start of their respective base allocations.
     // No attachment/offsetting is necessary.
     if (this->inPlace)
@@ -118,7 +118,7 @@ namespace RcclUnitTesting
         size_t const numBytes = std::max(this->numInputBytesAllocated, this->numOutputBytesAllocated);
         CHECK_CALL(this->inputGpu.AllocateGpuMem(numBytes, useManagedMem, userRegistered));
       }
-      CHECK_CALL(this->AttachMem());  
+      CHECK_CALL(this->AttachMem());
     }
     else
     {
@@ -138,7 +138,7 @@ namespace RcclUnitTesting
          || this->funcType == ncclCollReduceScatter))
     {
       // userRegistered must be passed, otherwise in the case of symmetric memory,
-      // data validation failures show up with UT_DEVICE_DATA=1 but not with 0 
+      // data validation failures show up with UT_DEVICE_DATA=1 but not with 0
       // it is verified that even expected [CPU data] !=  expectedGpu .
       // ncclMemAlloc() +  hipMallocManaged/hipMalloc is not compatible.
       CHECK_CALL(this->expectedGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));

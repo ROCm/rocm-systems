@@ -176,7 +176,7 @@ namespace RcclUnitTesting
         // Do NOT pre-warm workers: under the runner's --jobs N it storms
         // ncclCommInitAll across all GPUs and fails intermittently.
       }
-      
+
 
       // Map this config's children onto distinct pool workers by representative device.
       bool mappable = true;
@@ -258,7 +258,7 @@ namespace RcclUnitTesting
           close(childList[childId]->childWriteFd);
           close(childList[childId]->childReadFd);
         }
-        else 
+        else
         {
           // No child exists to close its inherited descriptors. Close all
           // descriptors owned by the parent for this failed fork, then remove
@@ -432,7 +432,7 @@ namespace RcclUnitTesting
                                     int    const groupId,
                                     int    const collId,
                                     int    const rank,
-                                    bool   const userRegistered) 
+                                    bool   const userRegistered)
   {
     InteractiveWait("Starting AllocateMemInternal");
 
@@ -1065,7 +1065,7 @@ namespace RcclUnitTesting
         //  GUARD: Symmetric Memory is incompatible with Managed memory
         if (memAllocType == MEM_ALLOC_SYMMETRIC_WIN && managedMemList[mmIdx])
         {
-          continue; 
+          continue;
         }
         for (int neIdx = 0; neIdx < numElements.size() && isCorrect; ++neIdx)
         {
@@ -1182,7 +1182,7 @@ namespace RcclUnitTesting
        PIPE_WRITE(childId, cmd);
        // 2. Wait for child process to exit cleanly before closing pipes
        int status;
-       waitpid(child->pid, &status, 0); 
+       waitpid(child->pid, &status, 0);
        // 3. Close pipes and delete object
        close(child->parentWriteFd);
        close(child->parentReadFd);

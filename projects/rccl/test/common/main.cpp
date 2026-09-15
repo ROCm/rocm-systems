@@ -19,11 +19,11 @@ int main(int argc, char **argv)
         int printValues       = std::stoi(argv[6]);
         bool useRankThreading = (std::stoi(argv[7]) != 0);
         RcclUnitTesting::MemAllocType memAllocType = static_cast<RcclUnitTesting::MemAllocType>(std::stoi(argv[8]));
-        
+
 
         // Verify pipe file descriptors survived execl()
         if (fcntl(childReadFd, F_GETFD) == -1 || fcntl(childWriteFd, F_GETFD) == -1) {
-            std::cerr << "[CHILD FATAL] Pipe FDs (" << childReadFd << ", " << childWriteFd 
+            std::cerr << "[CHILD FATAL] Pipe FDs (" << childReadFd << ", " << childWriteFd
                       << ") are invalid or closed in child process " << childId << std::endl;
             return 1;
         }

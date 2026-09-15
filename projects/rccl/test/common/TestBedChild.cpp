@@ -146,7 +146,7 @@ namespace RcclUnitTesting
       case CHILD_DESTROY_COMMS   : status = DestroyComms();         break;
       case CHILD_DESTROY_GRAPHS  : status = DestroyGraphs();        break;
       case CHILD_STOP            : goto stop;
-      default: 
+      default:
         TEST_ERROR("Child %d received unknown command ID: %d", this->childId, command);
         status = TEST_FAIL;
         goto stop;
@@ -241,13 +241,13 @@ namespace RcclUnitTesting
     PIPE_READ(numGpus);
 
     // Destroy existing HIP streams before clearing vector to prevent hardware queue leak!
-    for (auto& groupStreams : this->streams) 
+    for (auto& groupStreams : this->streams)
     {
-      for (auto& rankStreams : groupStreams) 
+      for (auto& rankStreams : groupStreams)
       {
-        for (hipStream_t& stream : rankStreams) 
+        for (hipStream_t& stream : rankStreams)
         {
-          if (stream != nullptr) 
+          if (stream != nullptr)
           {
             hipStreamDestroy(stream);
             stream = nullptr;
@@ -309,7 +309,7 @@ namespace RcclUnitTesting
           hipError_t err = hipStreamCreate(&(this->streams[groupCallIdx][localRank][i]));
           if (err != hipSuccess)
           {
-            TEST_ERROR("Rank %d on child %d unable to create stream %d for GPU %d in group %d. HIP Error: %s (%d)", 
+            TEST_ERROR("Rank %d on child %d unable to create stream %d for GPU %d in group %d. HIP Error: %s (%d)",
                        globalRank, this->childId, i, currGpu, groupCallIdx, hipGetErrorString(err), err);
             status = TEST_FAIL;
             break;
@@ -370,7 +370,7 @@ namespace RcclUnitTesting
       status = TEST_FAIL;
     }
 
-    if (this->verbose) 
+    if (this->verbose)
     {
       TEST_INFO("Child %d finishes InitComms() [%s]", this->childId, status == TEST_SUCCESS ? "SUCCESS" : "FAIL");
     }
@@ -559,7 +559,7 @@ namespace RcclUnitTesting
     }
 
     numRanksToExecute = (int)localRanksToExecute.size();
- 
+
     // =========================================================================
     // STAGE 1: PRE-COLLECTIVE DEBUG PRINTING (BEFORE ncclGroupStart)
     // =========================================================================
@@ -576,7 +576,7 @@ namespace RcclUnitTesting
           PtrUnion inputCpu;
           size_t const numInputBytes = numInputElementsToPrint * DataTypeToBytes(collArg.dataType);
           inputCpu.AllocateCpuMem(numInputBytes);
-        
+
           // Safe hipMemcpy BEFORE collective launch
           CHECK_HIP(hipMemcpy(inputCpu.ptr, collArg.inputGpu.ptr, numInputBytes, hipMemcpyDeviceToHost));
           printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Input",
@@ -1236,7 +1236,7 @@ namespace RcclUnitTesting
   ErrCode TestBedChild::DestroyComms()
   {
     if (this->verbose) TEST_INFO("Child %d begins DestroyComms", this->childId);
-    
+
     // 1. Release NCCL communicators
     for (int i = 0; i < this->comms.size(); ++i)
     {
@@ -1251,7 +1251,7 @@ namespace RcclUnitTesting
         CHILD_NCCL_CALL(ncclCommFinalize(this->comms[i]), "ncclCommFinalize");
       }
     }
-    
+
     for (int i = 0; i < this->comms.size(); ++i)
     {
       if (this->comms[i] != nullptr)
@@ -1294,8 +1294,8 @@ namespace RcclUnitTesting
     int groupId = -1;
     PIPE_READ(groupId);
 
-    if (groupId < 0 || 
-      groupId >= static_cast<int>(this->graphs.size()) || 
+    if (groupId < 0 ||
+      groupId >= static_cast<int>(this->graphs.size()) ||
       this->graphs[groupId].empty())
       {
         if (this->verbose) TEST_INFO("Child %d: No graphs present to destroy for group %d", this->childId, groupId);
@@ -1450,7 +1450,7 @@ namespace RcclUnitTesting
                                  &(collArg.outputRegHandle)),
                 "ncclCommRegister (output in-place)");
               }
-           } 
+           }
            else
            {
               // Register BOTH input AND output buffers for out-of-place operations
