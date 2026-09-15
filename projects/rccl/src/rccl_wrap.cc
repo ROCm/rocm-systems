@@ -1453,9 +1453,9 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     ceAvailable = false;
   }
   // Tuning cap only: registered CE has no staging allocation, so this does not
-  // size a buffer. 0 (or unset table) means no upper bound. Independent of the
-  // 2-shot selector (table/env cap, 0 = off). Independent of the allocated
-  // ceARTmpBuf size used by registered CE.
+  // size a buffer. kThreshUnlimited (or null table) = no upper bound;
+  // env var 0 returns 0, making ceRegInWindow false (disables registered CE).
+  // Independent of the 2-shot selector (ceNonRegMax/env, 0 = off) and ceARTmpBuf sizing.
   const size_t ceArRegMax = rcclCeRegMaxTab(archTable, ncclFuncAllReduce);
   const bool ceRegInWindow = ceArRegMax == kThreshUnlimited || msgBytes <= ceArRegMax;
   if (!symEligible && ceRegInWindow && ceAvailable && !hasSysmemSegment &&
