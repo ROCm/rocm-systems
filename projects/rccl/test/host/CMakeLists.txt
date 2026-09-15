@@ -4,6 +4,7 @@ set(RCCL_MICRO_TEST_SOURCES
   p2p-test.cc
   rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
   ras-client-test.cc                   # src/ras/client.cc: libc-only seams, no HIP/nccl deps
+  ras-test.cc                          # src/ras/ras.cc: message and poll-state helpers
   group-test.cc
   devcomm-test.cc
   fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
@@ -80,6 +81,7 @@ if(BUILD_TESTS)
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE
     P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p_tmp.cc"
     RAS_CLIENT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/ras/client.cc"
+    RAS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/ras/ras.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rma/rma_proxy_progress.cc"
     GROUP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/group.cc"
     DEVCOMM_V22902_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/devcomm/devcomm_v22902.cc"
@@ -97,9 +99,11 @@ if(BUILD_TESTS)
   # symbols (__llvm_profile_raw_version, __start___llvm_prf_cnts, ...) that do
   # not exist on device, making amdgcn-link fail. --offload-host-only removes the
   # device pass entirely, which is robust across clang toolchains that ignore the
-  # older -Xarch_device coverage split.
-  target_compile_options(rccl-UnitTestsMicro PRIVATE --offload-host-only)
-  target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt)
+  # older -Xarch_device coverage split. ras.cc also has deep thread/network
+  # paths outside this first focused batch; function sections let the linker
+  # discard those paths and their otherwise-unneeded dependencies.
+  target_compile_options(rccl-UnitTestsMicro PRIVATE --offload-host-only -ffunction-sections)
+  target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -Wl,--gc-sections)
 
   target_compile_options(rccl-UnitTestsMicro PRIVATE
     -fprofile-instr-generate -fcoverage-mapping)
@@ -785,7 +789,7 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
 add_test_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
 
 target_compile_options(rccl-UnitTestsMicro PRIVATE
-  -Wno-unused-parameter -Wno-unused-variable)
+  -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
 
 target_include_directories(rccl-UnitTestsMicro PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
@@ -799,6 +803,7 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   ROCM_VERSION=70000
   P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
   RAS_CLIENT_CC_PATH="${RCCL_HIPIFY_DIR}/src/ras/client.cc"
+  RAS_CC_PATH="${RCCL_HIPIFY_DIR}/src/ras/ras.cc"
   RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
   GROUP_CC_PATH="${RCCL_HIPIFY_DIR}/src/group.cc"
   DEVCOMM_V22902_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
@@ -813,7 +818,9 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
 # -no-pie for the same reason as rccl-HostUnitTests: the RCCL-vendored
 # libgtest.a used by this standalone path is built without -fPIC, so a PIE
 # link fails with "relocation R_X86_64_32 cannot be used against local symbol".
-target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -no-pie)
+# Function-section GC keeps ras.cc's out-of-scope thread/network paths out of
+# this intentionally small first batch.
+target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -no-pie -Wl,--gc-sections)
 target_link_libraries(rccl-UnitTestsMicro PRIVATE
   GTest::GTest
   Threads::Threads
