@@ -171,6 +171,18 @@ public:
     virtual bool IsGFX11() const { return false; }
     virtual bool IsGFX12() const { return false; }
     virtual bool IsGFX1250() const { return false; }
+
+    virtual uint32_t EncodeSpmBlockIndex(uint32_t inst_index, uint32_t sa_index,
+                                         uint32_t wgp_index) const
+    {
+        return inst_index;
+    }
+    virtual uint32_t DecodeSpmInstanceIndex(const GpuBlockInfo* block_info,
+                                            uint32_t            block_index) const
+    {
+        return block_index;
+    }
+
     // Return number of XCC on the GPU
     uint32_t GetXccNumber() const { return agent_info_->xcc_num; }
     // Return number of XCC per AID
@@ -184,7 +196,8 @@ public:
         const GpuBlockInfo* info = block_map_.Get(event->block_name);
         if(info == nullptr) throw std::runtime_error("Bad Block");
         // Checking that the block index is in proper range
-        if(event->block_index >= info->instance_count) throw std::runtime_error("Bad Index");
+        if(DecodeSpmInstanceIndex(info, event->block_index) >= info->instance_count)
+            throw std::runtime_error("Bad Index");
             // Checking that the counter event index is in proper range
 #if 0
     if (event->counter_id > info->event_id_max)
@@ -199,7 +212,7 @@ public:
         const GpuBlockInfo* info = block_map_.Get(event->block_name);
         if(info == nullptr) throw event_exception(std::string("Bad block, "), *event);
         // Checking that the block index is in proper range
-        if(event->block_index >= info->instance_count)
+        if(DecodeSpmInstanceIndex(info, event->block_index) >= info->instance_count)
             throw event_exception(std::string("Bad block index, "), *event);
             // Checking that the counter event index is in proper range
 #if 0
