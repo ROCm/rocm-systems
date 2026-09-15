@@ -3627,6 +3627,16 @@ function(rj_add_consan_hip_tests)
                 INCLUDE_DIRS "${_rj_consan_include_dir}"
                 EXTRA_DEPENDS "${_rj_consan_moi_hip_fixture_headers}"
         )
+        foreach(_spill_case IN ITEMS Gfx950VgprScratchRoundTrip
+                Gfx950PartialExecVgprScratchRoundTrip Gfx950RepeatedScratchRoundTrips)
+            rj_add_consan_hip_case(
+                NAME "ConSanSpillGfx950Sim.${_spill_case}"
+                TARGET hip_consan_spill_gfx950_test
+                FILTER "ConSanSpillHipTest.${_spill_case}"
+                CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json"
+                LABELS consan consan-device gfx950 simulator
+            )
+        endforeach()
         add_dependencies(hip_consan_lds_gfx950_test_target rocjitsu_dbi_hooks)
         add_dependencies(hip_consan_moi_gfx950_test_target rocjitsu_dbi_hooks)
         rj_add_consan_cdna_sim_cases(
@@ -3657,18 +3667,17 @@ function(rj_add_consan_hip_tests)
             # Successful per-site resource plans are intentionally summarized
             # to keep normal hook logging bounded. Spill cases match the
             # aggregate emission proof or a typed patch record at log level 3.
-            rj_add_consan_hip_case(
-                NAME "ConSanSpillHipTest.Gfx950VgprScratchRoundTrip"
-                TARGET hip_consan_spill_gfx950_test
-                FILTER "ConSanSpillHipTest.Gfx950VgprScratchRoundTrip"
-                RUN_SERIAL
-            )
-            rj_add_consan_hip_case(
-                NAME "ConSanSpillHipTest.Gfx950PartialExecVgprScratchRoundTrip"
-                TARGET hip_consan_spill_gfx950_test
-                FILTER "ConSanSpillHipTest.Gfx950PartialExecVgprScratchRoundTrip"
-                RUN_SERIAL
-            )
+            foreach(_spill_case IN ITEMS Gfx950VgprScratchRoundTrip
+                    Gfx950PartialExecVgprScratchRoundTrip Gfx950RepeatedScratchRoundTrips)
+                rj_add_consan_hip_case(
+                    NAME "ConSanSpillHipTest.${_spill_case}"
+                    TARGET hip_consan_spill_gfx950_test
+                    FILTER "ConSanSpillHipTest.${_spill_case}"
+                    LABELS consan consan-device gfx950 physical
+                    RESOURCE_LOCK consan_physical_gfx950
+                    RUN_SERIAL
+                )
+            endforeach()
             rj_add_consan_hip_case(
                 NAME "ConSanMoiCdnaTest.DbiForcedSpillRecordReplay"
                 TARGET hip_consan_moi_gfx950_test

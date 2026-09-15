@@ -48,12 +48,18 @@ __global__ __launch_bounds__(64) void gfx950_partial_exec_scratch_roundtrip(uint
   out[tid] = value;
 }
 
-template <auto Kernel> void run_roundtrip(uint32_t expected_prefix) {
+template <bool PartialExec> void run_roundtrip(uint32_t expected_prefix) {
   constexpr uint32_t kThreads = 64;
   uint32_t *device_out = nullptr;
   HIP_ASSERT(hipMalloc(&device_out, kThreads * sizeof(uint32_t)));
   HIP_ASSERT(hipMemset(device_out, 0, kThreads * sizeof(uint32_t)));
-  Kernel<<<1, kThreads>>>(device_out);
+  // Name the launch stubs explicitly. With host ASan enabled, the TheRock
+  // compiler can turn a launch through a non-type kernel template parameter
+  // into a successful no-op, even though its device code is unchanged.
+  if constexpr (PartialExec)
+    gfx950_partial_exec_scratch_roundtrip<<<1, kThreads>>>(device_out);
+  else
+    gfx950_vgpr_scratch_roundtrip<<<1, kThreads>>>(device_out);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
   std::vector<uint32_t> out(kThreads);
@@ -63,12 +69,17 @@ template <auto Kernel> void run_roundtrip(uint32_t expected_prefix) {
     EXPECT_EQ(out[tid], expected_prefix ^ tid) << "tid=" << tid;
 }
 
-TEST(ConSanSpillHipTest, Gfx950VgprScratchRoundTrip) {
-  run_roundtrip<gfx950_vgpr_scratch_roundtrip>(0x95000000u);
-}
+TEST(ConSanSpillHipTest, Gfx950VgprScratchRoundTrip) { run_roundtrip<false>(0x95000000u); }
 
 TEST(ConSanSpillHipTest, Gfx950PartialExecVgprScratchRoundTrip) {
-  run_roundtrip<gfx950_partial_exec_scratch_roundtrip>(0x95010000u);
+  run_roundtrip<true>(0x95010000u);
+}
+
+TEST(ConSanSpillHipTest, Gfx950RepeatedScratchRoundTrips) {
+  for (unsigned repeat = 0; repeat < 2; ++repeat) {
+    run_roundtrip<false>(0x95000000u);
+    run_roundtrip<true>(0x95010000u);
+  }
 }
 
 } // namespace
