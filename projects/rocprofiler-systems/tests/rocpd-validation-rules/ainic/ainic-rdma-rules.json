@@ -80,10 +80,36 @@
             ]
         },
         {
+            "name": "rocpd_info_agent",
+            "required_columns": [
+                "id",
+                "guid",
+                "type",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "description": "Check that AI NIC agents are registered with type NIC",
+                    "error_message": "No NIC agents found in rocpd_info_agent — Agent.Type must be NIC, not NULL",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_info_agent WHERE type = 'NIC'"
+                },
+                {
+                    "description": "Check that no agents have NULL type",
+                    "error_message": "Found agents with NULL type in rocpd_info_agent",
+                    "comparison": "equals",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_info_agent WHERE type IS NULL"
+                }
+            ]
+        },
+        {
             "name_prefix": "rocpd_info_pmc_",
             "min_rows": 10,
             "required_columns": [
                 "name",
+                "agent_id",
                 "units",
                 "value_type"
             ],
@@ -157,6 +183,27 @@
                     "comparison": "greater_than",
                     "expected_result": 0,
                     "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'nic_req_rx_impl_nak_seq_err'"
+                },
+                {
+                    "description": "Check that AI NIC PMCs have a non-NULL agent_id",
+                    "error_message": "Found AI NIC PMC rows with NULL agent_id",
+                    "comparison": "equals",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name LIKE 'nic_%' AND agent_id IS NULL"
+                },
+                {
+                    "description": "Check that AI NIC PMCs are linked to NIC agents",
+                    "error_message": "Found AI NIC PMC rows not linked to an agent with type NIC",
+                    "comparison": "equals",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} pmc LEFT JOIN rocpd_info_agent ag ON pmc.agent_id = ag.id AND pmc.guid = ag.guid WHERE pmc.name LIKE 'nic_%' AND (ag.id IS NULL OR ag.type != 'NIC')"
+                },
+                {
+                    "description": "Check that AI NIC PMCs use target_arch NIC",
+                    "error_message": "Found AI NIC PMC rows without target_arch = 'NIC'",
+                    "comparison": "equals",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name LIKE 'nic_%' AND (target_arch IS NULL OR target_arch != 'NIC')"
                 }
             ]
         }

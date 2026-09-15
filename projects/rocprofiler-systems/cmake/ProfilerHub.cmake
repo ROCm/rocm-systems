@@ -14,9 +14,9 @@ set(ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY
 )
 
 set(ROCPROFSYS_PROFILER_HUB_GIT_TAG
-    "aacea4ed5c99bdc9e537778859b5136d7d086ddb"
+    "37d64c8ace8a3637c6ff4a1df60bc9bdb419eb1a"
     CACHE STRING
-    "Git commit for profiler-hub fallback sparse checkout (pinned to merged #10459: NIC agent support and RocPD schema 3.0.1)"
+    "Git commit for profiler-hub fallback sparse checkout (pinned to merged #9968: C++20; includes #10459 NIC agent and RocPD schema 3.0.1)"
 )
 
 set(ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR
@@ -34,21 +34,31 @@ option(ROCPROFSYS_PROFILER_HUB_LINK_STATIC "Link profiler-hub statically" OFF)
 #   2. fallback: sparse checkout of ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR from
 #      ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY at ROCPROFSYS_PROFILER_HUB_GIT_TAG
 # ------------------------------------------------------------------------------
+set(ROCPROFSYS_PROFILER_HUB_MIN_VERSION
+    "0.2.0"
+    CACHE STRING
+    "Minimum profiler-hub package version; older installs fall back to the git pin"
+)
 
 set(_PROFILER_HUB_IS_EXTERNAL FALSE)
 set(_PROFILER_HUB_SOURCE_DIR "")
 
-find_package(profiler-hub QUIET CONFIG)
+# Pass the min version into find_package so an old install is skipped, not loaded.
+# Not REQUIRED: we fall back to git. ~/.cmake/packages can still pick another tree.
+find_package(profiler-hub ${ROCPROFSYS_PROFILER_HUB_MIN_VERSION})
 
 if(profiler-hub_FOUND)
-    message(STATUS "[profiler-hub] Using installed package: ${profiler-hub_DIR}")
+    message(
+        STATUS
+        "[profiler-hub] Using installed package version ${profiler-hub_VERSION} from "
+        "${profiler-hub_DIR}"
+    )
     set(_PROFILER_HUB_IS_EXTERNAL TRUE)
 else()
     message(
         STATUS
-        "[profiler-hub] find_package failed; falling back to "
-        "sparse checkout of ${ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY} "
-        "(${ROCPROFSYS_PROFILER_HUB_GIT_TAG})"
+        "[profiler-hub] find_package failed for required version ${ROCPROFSYS_PROFILER_HUB_MIN_VERSION}; "
+        "therefore building from source"
     )
 
     find_package(Git REQUIRED)
@@ -75,7 +85,8 @@ else()
     if(_PROFILER_HUB_NEEDS_CHECKOUT)
         message(
             STATUS
-            "[profiler-hub] Sparse-checking out ${ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR} into ${_PROFILER_HUB_CHECKOUT}"
+            "[profiler-hub] Fetching ${ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR} "
+            "@ ${ROCPROFSYS_PROFILER_HUB_GIT_TAG} into ${_PROFILER_HUB_CHECKOUT}"
         )
 
         if(EXISTS "${_PROFILER_HUB_CHECKOUT}")
@@ -176,7 +187,8 @@ else()
     else()
         message(
             STATUS
-            "[profiler-hub] Reusing existing sparse checkout at ${_PROFILER_HUB_SOURCE_DIR}"
+            "[profiler-hub] Already have pin ${ROCPROFSYS_PROFILER_HUB_GIT_TAG} at "
+            "${_PROFILER_HUB_SOURCE_DIR}"
         )
     endif()
 endif()
