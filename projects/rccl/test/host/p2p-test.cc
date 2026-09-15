@@ -106,34 +106,24 @@ static void ResetP2pFakes();
 // ===========================================================================
 // p2p.cc link-satisfying stubs + this file's controllable alloc seams.
 //
-// Defined here (not in a shared fakes/ .cc) because they are used only by
-// this test: the arch/topo/busId stubs satisfy symbols that p2p.cc alone
-// references, and the ncclCudaCallocAsync / ncclCudaMemcpyAsync emulators
-// back the macro shims above. They must land after #include P2P_CC_PATH so
-// the production types they mention (allocationTracker, the alloc.h
-// templates, etc.) are already in scope.
+// Defined here (not in a shared fakes/ .cc) because they have no owning fakes
+// file: IsArchMatch is owned by archinfo.h (header-only, no TU to fake) and
+// allocTracker is an alloc.h data symbol p2p.cc alone references. The
+// ncclCudaCallocAsync / ncclCudaMemcpyAsync emulators back the macro shims
+// above. They must land after #include P2P_CC_PATH so the production types
+// they mention (allocationTracker, the alloc.h templates, etc.) are already
+// in scope. busIdToInt64 / getBusId are owned by src/misc/utils.cc, so they
+// live in fakes/utils_fakes.cc, not here.
 // ---------------------------------------------------------------------------
 
 // allocTracker is an array of per-device counters in alloc.h; size it to the
 // same MAX_ALLOC_TRACK_NGPU the header uses. Zero-initialised.
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 
-// Arch / topology / busId helpers p2p.cc references but doesn't define here.
+// Arch helper p2p.cc references but doesn't define here.
 bool IsArchMatch(char const* /*arch*/, char const* /*target*/)
 {
     return false;
-}
-
-ncclResult_t busIdToInt64(const char* /*busId*/, int64_t* id)
-{
-    if (id) *id = 0;
-    return ncclSuccess;
-}
-
-ncclResult_t getBusId(int /*cudaDev*/, int64_t* busId)
-{
-    if (busId) *busId = 0;
-    return ncclSuccess;
 }
 
 // Controllable seams: ncclCudaCallocAsync / ncclCudaMemcpyAsync. Substitutes
@@ -2058,6 +2048,15 @@ inline auto RetainSentinelHandle()
     };
 }
 
+// FailRetainAllocationHandle -- the hipMemRetainAllocationHandle hook that
+// fails the cuMem-arm entry seam, driving the retry-as-legacy fallback.
+inline auto FailRetainAllocationHandle()
+{
+    return [](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
+        return hipErrorInvalidValue;
+    };
+}
+
 // ExpectReleaseSentinelHandle -- the hipMemRelease hook that asserts it is
 // handed the sentinel handle (the handle-leak guard contract) and succeeds.
 inline auto ExpectReleaseSentinelHandle()
@@ -2371,10 +2370,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureFallsBackToLegacyExport)
         });
 
     // Retain *fails* -- the key seam for this test.
-    ScopedHook retain(g_hipMemRetainAllocationHandle,
-        [](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
-            return hipErrorInvalidValue;
-        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle, FailRetainAllocationHandle());
     // Export and Release must NOT fire on the fallback arm.
     ScopedHook xport(g_hipMemExportToShareableHandle,
         [](void*, hipMemGenericAllocationHandle_t,
@@ -2469,10 +2465,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureDirectModeShortCircuits)
             if (psize) *psize = kBaseSize;
             return hipSuccess;
         });
-    ScopedHook retain(g_hipMemRetainAllocationHandle,
-        [](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
-            return hipErrorInvalidValue;
-        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle, FailRetainAllocationHandle());
     // Nothing else may fire: the guard short-circuits to goto fail
     // before any of these are touched.
     ScopedHook ipcGet(g_hipIpcGetMemHandle,
@@ -2657,10 +2650,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemNullIsLegacyIpcPointerRetryArmSkipped)
     ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
     InstallLegacyCudaRegisterHook();
     auto memGet = MakeDefaultMemGetHook();
-    ScopedHook retain(g_hipMemRetainAllocationHandle,
-        [](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
-            return hipErrorInvalidValue;
-        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle, FailRetainAllocationHandle());
     ScopedHook ipcGet(g_hipIpcGetMemHandle,
         [](hipIpcMemHandle_t* h, void*) -> hipError_t {
             if (h) std::memset(h, 0x5A, sizeof(*h));
@@ -2772,10 +2762,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureParamOffShortCircuits)
             if (psize) *psize = kBaseSize;
             return hipSuccess;
         });
-    ScopedHook retain(g_hipMemRetainAllocationHandle,
-        [](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
-            return hipErrorInvalidValue;
-        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle, FailRetainAllocationHandle());
     ScopedHook ipcGet(g_hipIpcGetMemHandle,
         [](hipIpcMemHandle_t*, void*) -> hipError_t {
             ADD_FAILURE() << "short-circuit must not reach hipIpcGetMemHandle";

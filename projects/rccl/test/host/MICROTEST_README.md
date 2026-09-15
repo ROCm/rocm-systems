@@ -280,6 +280,13 @@ Five things do NOT follow the TU-per-file rule, deliberately:
   that target to avoid fakes-versus-fakes duplicate definitions.
 - `rcclParamIntraGraphGen` stays in `fakes/init_fakes.cc` because its owner
   (`graph/rccl_graph_gen.cc:34`) has no fakes file at all.
+- `IsArchMatch` and the `allocTracker` data symbol stay in `p2p-test.cc`
+  itself rather than a fakes file, because neither has an owning production
+  TU to name a fakes file after: `IsArchMatch` is declared in the
+  header-only `archinfo.h`, and `allocTracker` is an `alloc.h` data symbol
+  that only `p2p.cc` references in this target. (The busId helpers alongside
+  them *do* have an owner — `src/misc/utils.cc` — so they live in
+  `fakes/utils_fakes.cc`, not here.)
 
 `<uut>_fakes.h` (e.g. `enqueue_fakes.h`) is an aggregation header: it includes
 the per-TU headers that unit's tests use and declares the `Reset<Uut>Fakes()`
@@ -434,14 +441,18 @@ When the link fails with `undefined symbol: foo`, find `foo` and
 triage it into the right bucket:
 
 - **It's a global variable (`extern int foo;`)** → add a definition
-  to the relevant module's fakes file, or, if only one test TU
-  references it, directly in that test (e.g. the `allocTracker` array
-  in `p2p-test.cc`). Use a sensible default (usually zero).
+  to its owning TU's fakes file. If it has no owning TU (e.g. a data
+  symbol declared in a header-only file) and only one test TU
+  references it, define it in that test (the fifth exception below —
+  e.g. the `allocTracker` array in `p2p-test.cc`). Use a sensible
+  default (usually zero).
 - **It's a plain function the module references but doesn't define**
-  (e.g. the arch/topo/busId helpers `IsArchMatch`, `busIdToInt64`,
-  `getBusId` in `p2p-test.cc`) → add a definition returning a sensible
-  default, either to the relevant fakes file or, if only one test TU
-  references it, directly in that test.
+  → add a definition returning a sensible default to its owning TU's
+  fakes file (e.g. `busIdToInt64` / `getBusId` go in
+  `fakes/utils_fakes.cc`, since `src/misc/utils.cc` owns them). Only
+  when the symbol has no owning TU does it belong in the test itself
+  (the fifth exception below — e.g. `IsArchMatch`, owned by the
+  header-only `archinfo.h`, in `p2p-test.cc`).
 - **It's a logging or env-param helper** → already covered by the
   no-op `ncclDebugLog` / `ncclLoadParam`. If a new logging primitive
   appears, follow the same pattern.
