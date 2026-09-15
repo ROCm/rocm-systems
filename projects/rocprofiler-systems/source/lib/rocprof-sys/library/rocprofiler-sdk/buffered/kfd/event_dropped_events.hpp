@@ -16,6 +16,8 @@
 
 namespace rocprofsys::domains::buffered
 {
+namespace kfd
+{
 
 template <policies::domain_service::externals Externals>
 inline void
@@ -100,7 +102,7 @@ on_kfd_event_dropped_events(typename SdkBackend::kfd_event_dropped_record* recor
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
-inline constexpr auto k_kfd_event_dropped_events = buffered_domain_definition<SdkBackend>{
+inline constexpr auto k_event_dropped_events = buffered_domain_definition<SdkBackend>{
     .meta =
         domain_descriptor{
             .name  = "kfd_event_dropped_events",
@@ -113,5 +115,7 @@ inline constexpr auto k_kfd_event_dropped_events = buffered_domain_definition<Sd
         on_kfd_event_dropped_events<SdkBackend, Externals>>::callback,
     .on_configure = on_kfd_event_dropped_events_configure<Externals>
 };
+
+}  // namespace kfd
 
 }  // namespace rocprofsys::domains::buffered

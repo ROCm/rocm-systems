@@ -18,6 +18,8 @@
 
 namespace rocprofsys::domains::buffered
 {
+namespace kfd
+{
 
 template <policies::domain_service::externals Externals>
 inline void
@@ -118,7 +120,7 @@ on_kfd_page_fault(typename SdkBackend::kfd_page_fault_record* record, void* data
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
-inline constexpr auto k_kfd_page_fault = buffered_domain_definition<SdkBackend>{
+inline constexpr auto k_page_fault = buffered_domain_definition<SdkBackend>{
     .meta =
         domain_descriptor{
             .name  = "kfd_page_fault",
@@ -132,5 +134,7 @@ inline constexpr auto k_kfd_page_fault = buffered_domain_definition<SdkBackend>{
                                      on_kfd_page_fault<SdkBackend, Externals>>::callback,
     .on_configure = on_kfd_page_fault_configure<Externals>
 };
+
+}  // namespace kfd
 
 }  // namespace rocprofsys::domains::buffered

@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "library/rocprofiler-sdk/buffered/kfd_event_page_migrate.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd/event_page_migrate.hpp"
 #include "library/rocprofiler-sdk/tests/mock_domain_service.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 
@@ -14,6 +14,8 @@
 #include <vector>
 
 namespace rocprofsys::domains::buffered
+{
+namespace kfd
 {
 namespace
 {
@@ -38,7 +40,7 @@ TEST(kfd_event_page_migrate_test, descriptor_reports_correct_metadata)
     using mock_dispatcher =
         buffered_callback_dispatcher<mock_sdk, mock_sdk::kfd_event_page_migrate_record,
                                      on_kfd_event_page_migrate<mock_sdk, externals>>;
-    constexpr const auto& k_domain = k_kfd_event_page_migrate<mock_sdk, externals>;
+    constexpr const auto& k_domain = k_event_page_migrate<mock_sdk, externals>;
 
     EXPECT_EQ(k_domain.meta.name, "kfd_event_page_migrate");
     EXPECT_EQ(k_domain.meta.id, mock_sdk::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE);
@@ -50,7 +52,7 @@ TEST(kfd_event_page_migrate_test, descriptor_reports_correct_metadata)
 
 TEST(kfd_event_page_migrate_test, descriptor_uses_default_buffer_properties)
 {
-    constexpr const auto& k_domain = k_kfd_event_page_migrate<mock_sdk, externals>;
+    constexpr const auto& k_domain = k_event_page_migrate<mock_sdk, externals>;
 
     EXPECT_EQ(k_domain.buffer.buffer_size, k_default_buffer_properties.buffer_size);
     EXPECT_EQ(k_domain.buffer.buffer_watermark,
@@ -139,5 +141,7 @@ TEST(kfd_event_page_migrate_test,
 
     g_externals_mock.reset();
 }
+
+}  // namespace kfd
 
 }  // namespace rocprofsys::domains::buffered

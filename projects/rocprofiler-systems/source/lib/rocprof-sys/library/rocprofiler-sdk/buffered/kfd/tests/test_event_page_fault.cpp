@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "library/rocprofiler-sdk/buffered/kfd_page_fault.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd/event_page_fault.hpp"
 #include "library/rocprofiler-sdk/tests/mock_domain_service.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 
@@ -14,6 +14,8 @@
 #include <vector>
 
 namespace rocprofsys::domains::buffered
+{
+namespace kfd
 {
 namespace
 {
@@ -33,55 +35,56 @@ using test_support::pmc_info_data_t;
 
 }  // namespace
 
-TEST(kfd_page_fault_test, descriptor_reports_correct_metadata)
+TEST(kfd_event_page_fault_test, descriptor_reports_correct_metadata)
 {
     using mock_dispatcher =
-        buffered_callback_dispatcher<mock_sdk, mock_sdk::kfd_page_fault_record,
-                                     on_kfd_page_fault<mock_sdk, externals>>;
-    constexpr const auto& k_domain = k_kfd_page_fault<mock_sdk, externals>;
+        buffered_callback_dispatcher<mock_sdk, mock_sdk::kfd_event_page_fault_record,
+                                     on_kfd_event_page_fault<mock_sdk, externals>>;
+    constexpr const auto& k_domain = k_event_page_fault<mock_sdk, externals>;
 
-    EXPECT_EQ(k_domain.meta.name, "kfd_page_fault");
-    EXPECT_EQ(k_domain.meta.id, mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT);
+    EXPECT_EQ(k_domain.meta.name, "kfd_event_page_fault");
+    EXPECT_EQ(k_domain.meta.id, mock_sdk::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT);
     EXPECT_EQ(k_domain.meta.mode, collection_mode::buffered);
     ASSERT_TRUE(k_domain.meta.group.has_value());
     EXPECT_EQ(k_domain.meta.group.value().name, "kfd_events");
     EXPECT_EQ(k_domain.on_records, &mock_dispatcher::callback);
 }
 
-TEST(kfd_page_fault_test, descriptor_uses_default_buffer_properties)
+TEST(kfd_event_page_fault_test, descriptor_uses_default_buffer_properties)
 {
-    constexpr const auto& k_domain = k_kfd_page_fault<mock_sdk, externals>;
+    constexpr const auto& k_domain = k_event_page_fault<mock_sdk, externals>;
 
     EXPECT_EQ(k_domain.buffer.buffer_size, k_default_buffer_properties.buffer_size);
     EXPECT_EQ(k_domain.buffer.buffer_watermark,
               k_default_buffer_properties.buffer_watermark);
 }
 
-TEST(kfd_page_fault_test, on_kfd_page_fault_handles_empty_record_batch_without_crashing)
+TEST(kfd_event_page_fault_test,
+     on_kfd_event_page_fault_handles_empty_record_batch_without_crashing)
 {
-    mock_sdk::kfd_page_fault_record record{};
+    mock_sdk::kfd_event_page_fault_record record{};
 
-    on_kfd_page_fault<mock_sdk, externals>(&record, nullptr);
+    on_kfd_event_page_fault<mock_sdk, externals>(&record, nullptr);
 }
 
-TEST(kfd_page_fault_test,
+TEST(kfd_event_page_fault_test,
      on_configure_registers_category_string_and_skips_pmc_info_without_gpu_agents)
 {
     g_externals_mock = std::make_unique<StrictMock<gmock_externals>>();
 
     EXPECT_CALL(*g_externals_mock,
-                add_string(Eq(externals::k_kfd_page_fault_category_name)))
+                add_string(Eq(externals::k_kfd_event_page_fault_category_name)))
         .Times(1);
     EXPECT_CALL(*g_externals_mock, get_agents_by_type(Eq(externals::k_agent_type_gpu)))
         .Times(1)
         .WillOnce(Return(std::vector<std::shared_ptr<agent_t>>{}));
 
-    on_kfd_page_fault_configure<externals>();
+    on_kfd_event_page_fault_configure<externals>();
 
     g_externals_mock.reset();
 }
 
-TEST(kfd_page_fault_test, on_configure_registers_pmc_info_for_each_gpu_agent)
+TEST(kfd_event_page_fault_test, on_configure_registers_pmc_info_for_each_gpu_agent)
 {
     g_externals_mock = std::make_unique<StrictMock<gmock_externals>>();
 
@@ -90,7 +93,7 @@ TEST(kfd_page_fault_test, on_configure_registers_pmc_info_for_each_gpu_agent)
     gpu_agent->device_type_index = 1;
 
     EXPECT_CALL(*g_externals_mock,
-                add_string(Eq(externals::k_kfd_page_fault_category_name)))
+                add_string(Eq(externals::k_kfd_event_page_fault_category_name)))
         .Times(1);
     EXPECT_CALL(*g_externals_mock, get_agents_by_type(Eq(externals::k_agent_type_gpu)))
         .Times(1)
@@ -102,15 +105,19 @@ TEST(kfd_page_fault_test, on_configure_registers_pmc_info_for_each_gpu_agent)
             Field(&pmc_info_data_t::agent_type_index, Eq(std::size_t{ 1 })),
             Field(&pmc_info_data_t::target_arch, Eq(std::string{ "GPU" })),
             Field(&pmc_info_data_t::name,
-                  Eq(std::string{ externals::k_kfd_page_fault_category_name })),
-            Field(&pmc_info_data_t::symbol, Eq(std::string{ "KFD Page Fault Events" })),
+                  Eq(std::string{ externals::k_kfd_event_page_fault_category_name })),
+            Field(&pmc_info_data_t::symbol,
+                  Eq(std::string{ "KFD Event Page Fault Events" })),
             Field(&pmc_info_data_t::description,
-                  Eq(std::string{ externals::k_kfd_page_fault_category_description })))))
+                  Eq(std::string{
+                      externals::k_kfd_event_page_fault_category_description })))))
         .Times(1);
 
-    on_kfd_page_fault_configure<externals>();
+    on_kfd_event_page_fault_configure<externals>();
 
     g_externals_mock.reset();
 }
+
+}  // namespace kfd
 
 }  // namespace rocprofsys::domains::buffered

@@ -6,14 +6,14 @@
 #include "common/string_utility.hpp"
 #include "common/version.hpp"
 
-#include "library/rocprofiler-sdk/buffered/kfd_event_dropped_events.hpp"
-#include "library/rocprofiler-sdk/buffered/kfd_event_page_fault.hpp"
-#include "library/rocprofiler-sdk/buffered/kfd_event_page_migrate.hpp"
-#include "library/rocprofiler-sdk/buffered/kfd_event_queue.hpp"
-#include "library/rocprofiler-sdk/buffered/kfd_event_unmap_from_gpu.hpp"
-#include "library/rocprofiler-sdk/buffered/kfd_page_fault.hpp"
-#include "library/rocprofiler-sdk/buffered/kfd_page_migrate.hpp"
-#include "library/rocprofiler-sdk/buffered/kfd_queue.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd/event_dropped_events.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd/event_page_fault.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd/event_page_migrate.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd/event_queue.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd/event_unmap_from_gpu.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd/page_fault.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd/page_migrate.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd/queue.hpp"
 
 #include "library/rocprofiler-sdk/callback/code_object.hpp"
 
@@ -126,14 +126,14 @@ private:
         if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
                      version{ .major = 1, .minor = 2, .patch = 2 })
         {
-            result.add(buffered::k_kfd_event_dropped_events<SdkBackend, Externals>);
-            result.add(buffered::k_kfd_event_page_fault<SdkBackend, Externals>);
-            result.add(buffered::k_kfd_event_page_migrate<SdkBackend, Externals>);
-            result.add(buffered::k_kfd_event_queue<SdkBackend, Externals>);
-            result.add(buffered::k_kfd_event_unmap_from_gpu<SdkBackend, Externals>);
-            result.add(buffered::k_kfd_page_fault<SdkBackend, Externals>);
-            result.add(buffered::k_kfd_page_migrate<SdkBackend, Externals>);
-            result.add(buffered::k_kfd_queue<SdkBackend, Externals>);
+            result.add(buffered::kfd::k_event_dropped_events<SdkBackend, Externals>);
+            result.add(buffered::kfd::k_event_page_fault<SdkBackend, Externals>);
+            result.add(buffered::kfd::k_event_page_migrate<SdkBackend, Externals>);
+            result.add(buffered::kfd::k_event_queue<SdkBackend, Externals>);
+            result.add(buffered::kfd::k_event_unmap_from_gpu<SdkBackend, Externals>);
+            result.add(buffered::kfd::k_page_fault<SdkBackend, Externals>);
+            result.add(buffered::kfd::k_page_migrate<SdkBackend, Externals>);
+            result.add(buffered::kfd::k_queue<SdkBackend, Externals>);
         }
 
         return result;

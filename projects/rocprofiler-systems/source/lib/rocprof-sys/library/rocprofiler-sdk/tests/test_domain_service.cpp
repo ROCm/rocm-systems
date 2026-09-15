@@ -1,9 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "library/rocprofiler-sdk/buffered/kfd_event_page_fault.hpp"
-#include "library/rocprofiler-sdk/buffered/kfd_page_fault.hpp"
-#include "library/rocprofiler-sdk/buffered/kfd_queue.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd/event_page_fault.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd/page_fault.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd/queue.hpp"
 #include "library/rocprofiler-sdk/callback/code_object.hpp"
 #include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/domain_service.hpp"
@@ -220,7 +220,7 @@ TEST_F(domain_service_test,
     expect_configure_buffered(
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
-        domains::buffered::k_kfd_queue<mock_sdk, externals>.on_records, { 0, 1 });
+        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, { 0, 1 });
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
     expect_start_context(context);
 
@@ -349,7 +349,7 @@ TEST_F(domain_service_test,
     expect_configure_buffered(
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
-        domains::buffered::k_kfd_queue<mock_sdk, externals>.on_records, { 0, 1 });
+        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, { 0, 1 });
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
     expect_start_context(context);
 
@@ -386,7 +386,7 @@ TEST_F(domain_service_test, flush_calls_flush_on_each_configured_buffered_domain
     expect_configure_buffered(
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
-        domains::buffered::k_kfd_queue<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, { 0 });
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
     expect_start_context(context);
 
@@ -418,7 +418,7 @@ TEST_F(domain_service_test, configure_calls_on_configure_when_domain_defines_it)
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(
             mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
-        domains::buffered::k_kfd_page_fault<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, { 0 });
     expect_on_configure_ran(externals::k_kfd_page_fault_category_name);
     expect_start_context(context);
 
@@ -447,7 +447,8 @@ TEST_F(domain_service_test, configure_calls_on_configure_for_event_domain_that_d
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(
             mock_sdk::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT),
-        domains::buffered::k_kfd_event_page_fault<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_event_page_fault<mock_sdk, externals>.on_records,
+        { 0 });
     expect_on_configure_ran(externals::k_kfd_event_page_fault_category_name);
     expect_start_context(context);
 
@@ -519,13 +520,13 @@ TEST_F(domain_service_test,
     expect_configure_buffered(
         context, queue_buffer, queue_thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
-        domains::buffered::k_kfd_queue<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, { 0 });
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
     expect_configure_buffered(
         context, page_fault_buffer, page_fault_thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(
             mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
-        domains::buffered::k_kfd_page_fault<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, { 0 });
     expect_on_configure_ran(externals::k_kfd_page_fault_category_name);
     expect_start_context(context);
 
@@ -565,13 +566,13 @@ TEST_F(domain_service_test,
     expect_configure_buffered(
         context, queue_buffer, queue_thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
-        domains::buffered::k_kfd_queue<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, { 0 });
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
     expect_configure_buffered(
         context, page_fault_buffer, page_fault_thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(
             mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
-        domains::buffered::k_kfd_page_fault<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, { 0 });
     expect_on_configure_ran(externals::k_kfd_page_fault_category_name);
     expect_start_context(context);
 

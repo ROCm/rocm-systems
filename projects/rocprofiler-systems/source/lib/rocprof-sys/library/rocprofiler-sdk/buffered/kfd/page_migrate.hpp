@@ -18,19 +18,22 @@
 
 namespace rocprofsys::domains::buffered
 {
+namespace kfd
+{
+
 template <policies::domain_service::externals Externals>
 inline void
-on_kfd_event_page_migrate_configure()
+on_kfd_page_migrate_configure()
 {
-    Externals::add_string(Externals::k_kfd_event_page_migrate_category_name);
+    Externals::add_string(Externals::k_kfd_page_migrate_category_name);
 
     auto& agent_mgr  = Externals::get_agent_manager();
     auto  gpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_gpu);
     auto  cpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_cpu);
     if(gpu_agents.empty() && cpu_agents.empty())
     {
-        LOG_DEBUG("kfd_event_page_migrate: no GPU or CPU agents found; no PMC info will "
-                  "be registered");
+        LOG_DEBUG("kfd_page_migrate: no GPU or CPU agents found; no PMC info will be "
+                  "registered");
     }
 
     constexpr std::size_t k_event_code  = 0;
@@ -49,11 +52,11 @@ on_kfd_event_page_migrate_configure()
             .target_arch      = "GPU",
             .event_code       = k_event_code,
             .instance_id      = k_instance_id,
-            .name   = std::string{ Externals::k_kfd_event_page_migrate_category_name },
-            .symbol = "KFD Event Page Migration Events",
+            .name   = std::string{ Externals::k_kfd_page_migrate_category_name },
+            .symbol = "KFD Page Migration Events",
             .description =
-                std::string{ Externals::k_kfd_event_page_migrate_category_description },
-            .long_description = "KFD page migration events",
+                std::string{ Externals::k_kfd_page_migrate_category_description },
+            .long_description = "KFD page migration paired records",
             .component        = k_component,
             .units            = "events",
             .value_type       = value_type_absolute,
@@ -74,11 +77,11 @@ on_kfd_event_page_migrate_configure()
             .target_arch      = "CPU",
             .event_code       = k_event_code,
             .instance_id      = k_instance_id,
-            .name   = std::string{ Externals::k_kfd_event_page_migrate_category_name },
-            .symbol = "KFD Event Page Migration Events",
+            .name   = std::string{ Externals::k_kfd_page_migrate_category_name },
+            .symbol = "KFD Page Migration Events",
             .description =
-                std::string{ Externals::k_kfd_event_page_migrate_category_description },
-            .long_description = "KFD page migration events",
+                std::string{ Externals::k_kfd_page_migrate_category_description },
+            .long_description = "KFD page migration paired records",
             .component        = k_component,
             .units            = "events",
             .value_type       = value_type_absolute,
@@ -94,8 +97,7 @@ on_kfd_event_page_migrate_configure()
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline void
-on_kfd_event_page_migrate(typename SdkBackend::kfd_event_page_migrate_record* record,
-                          void*                                               data)
+on_kfd_page_migrate(typename SdkBackend::kfd_page_migrate_record* record, void* data)
 {
     (void) data;
     if(!record)
@@ -104,7 +106,7 @@ on_kfd_event_page_migrate(typename SdkBackend::kfd_event_page_migrate_record* re
     }
 
     const auto name = std::string{ SdkBackend::get_buffer_tracing_names().at(
-        SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE, record->operation) };
+        SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE, record->operation) };
     const auto tid  = static_cast<std::uint64_t>(record->pid);
 
     const typename Externals::agent_t* src_agent = nullptr;
@@ -114,7 +116,7 @@ on_kfd_event_page_migrate(typename SdkBackend::kfd_event_page_migrate_record* re
             &Externals::get_agent_manager().get_agent_by_handle(record->src_agent.handle);
     } catch(const std::exception& e)
     {
-        LOG_DEBUG("kfd_event_page_migrate: src_agent lookup failed for handle {} ({})",
+        LOG_DEBUG("kfd_page_migrate: src_agent lookup failed for handle {} ({})",
                   record->src_agent.handle, e.what());
     }
 
@@ -125,7 +127,7 @@ on_kfd_event_page_migrate(typename SdkBackend::kfd_event_page_migrate_record* re
             &Externals::get_agent_manager().get_agent_by_handle(record->dst_agent.handle);
     } catch(const std::exception& e)
     {
-        LOG_DEBUG("kfd_event_page_migrate: dst_agent lookup failed for handle {} ({})",
+        LOG_DEBUG("kfd_page_migrate: dst_agent lookup failed for handle {} ({})",
                   record->dst_agent.handle, e.what());
     }
 
@@ -142,44 +144,39 @@ on_kfd_event_page_migrate(typename SdkBackend::kfd_event_page_migrate_record* re
         return fmt::format("{} {}", is_gpu ? "GPU" : "CPU", agent_ptr->device_type_index);
     };
 
-    auto track_name = fmt::format("KFD Event Page Migrate [{}->{}]",
-                                  agent_label(src_agent), agent_label(dst_agent));
+    auto track_name = fmt::format("KFD Page Migrate [{}->{}]", agent_label(src_agent),
+                                  agent_label(dst_agent));
     Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
     const auto pmc_value =
         static_cast<double>(record->end_address.value - record->start_address.value);
 
-    auto event_metadata = fmt::format(
-        R"({{"start_address":{},"end_address":{},"prefetch_agent":{},"preferred_agent":{},"error_code":{}}})",
-        record->start_address.value, record->end_address.value,
-        record->prefetch_agent.handle, record->preferred_agent.handle,
-        record->error_code);
-
     Externals::buffer_storage_store(typename Externals::kfd_sample_t{
-        tid, name, record->timestamp, record->timestamp, "" /*empty args*/,
-        std::string{ Externals::k_kfd_event_page_migrate_category_name },
-        std::move(track_name), std::move(event_metadata),
-        static_cast<std::uint32_t>(src_agent ? src_agent->device_type_index : 0),
+        tid, name, record->start_timestamp, record->end_timestamp, "" /*empty args*/,
+        std::string{ Externals::k_kfd_page_migrate_category_name }, std::move(track_name),
+        "{}", static_cast<std::uint32_t>(src_agent ? src_agent->device_type_index : 0),
         static_cast<std::uint8_t>(src_agent ? src_agent->type
                                             : Externals::k_agent_type_cpu),
-        std::string{ Externals::k_kfd_event_page_migrate_category_name }, pmc_value,
+        std::string{ Externals::k_kfd_page_migrate_category_name }, pmc_value,
         std::optional<std::int64_t>(record->pid) });
 }
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
-inline constexpr auto k_kfd_event_page_migrate = buffered_domain_definition<SdkBackend>{
+inline constexpr auto k_page_migrate = buffered_domain_definition<SdkBackend>{
     .meta =
         domain_descriptor{
-            .name  = "kfd_event_page_migrate",
-            .id    = SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
+            .name  = "kfd_page_migrate",
+            .id    = SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE,
             .mode  = collection_mode::buffered,
             .group = domain_group{ .name = "kfd_events" },
         },
     .on_records = buffered_callback_dispatcher<
-        SdkBackend, typename SdkBackend::kfd_event_page_migrate_record,
-        on_kfd_event_page_migrate<SdkBackend, Externals>>::callback,
-    .on_configure = on_kfd_event_page_migrate_configure<Externals>
+        SdkBackend, typename SdkBackend::kfd_page_migrate_record,
+        on_kfd_page_migrate<SdkBackend, Externals>>::callback,
+    .on_configure = on_kfd_page_migrate_configure<Externals>
 };
+
+}  // namespace kfd
 
 }  // namespace rocprofsys::domains::buffered

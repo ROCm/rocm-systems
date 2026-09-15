@@ -4,14 +4,14 @@
 add_library(
     buffered-domains-unit-tests
     OBJECT
-    test_kfd_queue.cpp
-    test_kfd_page_fault.cpp
-    test_kfd_page_migrate.cpp
-    test_kfd_event_queue.cpp
-    test_kfd_event_unmap_from_gpu.cpp
-    test_kfd_event_dropped_events.cpp
-    test_kfd_event_page_fault.cpp
-    test_kfd_event_page_migrate.cpp
+    test_queue.cpp
+    test_page_fault.cpp
+    test_page_migrate.cpp
+    test_event_queue.cpp
+    test_event_unmap_from_gpu.cpp
+    test_event_dropped_events.cpp
+    test_event_page_fault.cpp
+    test_event_page_migrate.cpp
 )
 
 target_link_libraries(
