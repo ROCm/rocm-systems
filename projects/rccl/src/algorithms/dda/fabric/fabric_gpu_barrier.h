@@ -43,7 +43,8 @@ public:
   // Allocates this rank's flag buffer, exchanges peer flag-buffer pointers via
   // fabric shareable handles and builds a device-resident pointer table.
   static __host__ std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier> mallocAndInit(
-    int nRanks, int nBlocks, int selfRank, void* bootstrap, struct ncclMemManager* manager);
+    int nRanks, int nBlocks, int selfRank, void* bootstrap, struct ncclMemManager* manager,
+    const uint32_t* abortFlag = nullptr);
 
   template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess>
   __device__ __forceinline__ void syncOnSameBlockIdx() {
@@ -72,20 +73,24 @@ public:
     FlagType* selfBuf = peerFlags_[selfRank_];
     for (int peerRank = threadIdx.x; peerRank < nRanks_; peerRank += blockDim.x) {
       FlagType* peerBuf = peerFlags_[peerRank];
+      bool signaled = false;
 
       // Signal the peer that this rank reached the barrier for this block.
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
-        putFlag<std::memory_order_relaxed>(peerBuf + getFlagIdx(selfRank_, blockIdx.x));
+        signaled = putFlag<std::memory_order_relaxed>(peerBuf + getFlagIdx(selfRank_, blockIdx.x), abortFlag_);
       } else {
-        putFlag<std::memory_order_release>(peerBuf + getFlagIdx(selfRank_, blockIdx.x));
+        signaled = putFlag<std::memory_order_release>(peerBuf + getFlagIdx(selfRank_, blockIdx.x), abortFlag_);
       }
+      if (!signaled) break;
 
       // Wait for the peer's signal in this rank's own buffer.
+      bool arrived = false;
       if constexpr (fenceType == MemFenceType::RELEASE_ONLY) {
-        waitFlag<std::memory_order_relaxed>(selfBuf + getFlagIdx(peerRank, blockIdx.x));
+        arrived = waitFlag<std::memory_order_relaxed>(selfBuf + getFlagIdx(peerRank, blockIdx.x), abortFlag_);
       } else {
-        waitFlag<std::memory_order_acquire>(selfBuf + getFlagIdx(peerRank, blockIdx.x));
+        arrived = waitFlag<std::memory_order_acquire>(selfBuf + getFlagIdx(peerRank, blockIdx.x), abortFlag_);
       }
+      if (!arrived) break;
     }
     if constexpr (hasSubsequentMemAccess) {
       __syncthreads();
@@ -97,9 +102,10 @@ private:
   int selfRank_{-1};
   int nRanks_{-1};
   FlagType** peerFlags_{nullptr};
+  const uint32_t* abortFlag_{nullptr};
 
-  __host__ FabricGpuBarrier(int nBlocks, int selfRank, int nRanks, FlagType** peerFlags)
-    : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), peerFlags_(peerFlags) {}
+  __host__ FabricGpuBarrier(int nBlocks, int selfRank, int nRanks, FlagType** peerFlags, const uint32_t* abortFlag)
+    : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), peerFlags_(peerFlags), abortFlag_(abortFlag) {}
 
   __device__ inline int getFlagIdx(int rank, int block) {
     return block * nRanks_ + rank;

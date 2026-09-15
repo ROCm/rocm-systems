@@ -75,7 +75,8 @@ __launch_bounds__(1024)
                                         size_t count,                       // full-message element count
                                         int selfRank, int nRanksRt,
                                         uint32_t* __restrict__ epochDev,    // per-block LL epoch cells (shared AG+AR)
-                                        int epochLen) {                     // number of cells in epochDev
+                                        int epochLen,                       // number of cells in epochDev
+                                        const uint32_t* __restrict__ abortFlag) { // comm->abortFlagDev
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
@@ -133,9 +134,11 @@ __launch_bounds__(1024)
       const int peer = (selfRank + r) % nRanks;
       volatile LLPacket16* src = myBase + (size_t)peer * slot;
       uint32_t d0, f0, d1, f1;
-      do {
-        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
-      } while (f0 != flag || f1 != flag);
+      if (!ddaLLWaitLineFlags(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), flag, abortFlag, d0,
+                              f0, d1, f1)) {
+        ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
+        return;
+      }
       acc0 = vecElementAdd<T>(acc0, d0);
       acc1 = vecElementAdd<T>(acc1, d1);
     }
@@ -159,9 +162,11 @@ __launch_bounds__(1024)
       uint32_t *peer_out = reinterpret_cast<uint32_t*>(recvbuff) + peer * nPk_rank * 2;
       volatile LLPacket16* src = myBase + (size_t)peer * slot;
       uint32_t d0, f0, d1, f1;
-      do {
-        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
-      } while (f0 != flag || f1 != flag);
+      if (!ddaLLWaitLineFlags(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), flag, abortFlag, d0,
+                              f0, d1, f1)) {
+        ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
+        return;
+      }
       peer_out[2 * pk] = d0;
       peer_out[2 * pk + 1] = d1;
     }
