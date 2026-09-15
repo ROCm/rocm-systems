@@ -1623,6 +1623,29 @@ TEST(WaitcheckTest, Gfx950AcceptsSWaitcntVmcntZeroBeforeBufferLoadUse) {
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
+TEST(WaitcheckTest, Gfx950UncertainLoadOrderAtLoopingCfgMergeDoesNotAbort) {
+  // Two swapped buffer-load paths join, then the join loops. Distinct pending
+  // loadcnt identities at the merge set uncertain-order; the analysis must
+  // still produce a verdict instead of aborting CFG dataflow (ROCm/aorta#453).
+  std::vector<uint32_t> program;
+  program.push_back(0xBF840005u); // 0: s_cbranch_scc0 to the else path (5 dwords).
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+  append_gfx950_buffer_load_dword_v1_v8_s0_offen(program);
+  program.push_back(0xBF820004u); // s_branch over the else path (4 dwords).
+  append_gfx950_buffer_load_dword_v1_v8_s0_offen(program);
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+  program.push_back(0xBF840001u); // join: s_cbranch_scc0 to the drain (exit loop).
+  program.push_back(0xBF82FFF4u); // s_branch back to the header.
+  append_gfx950_s_waitcnt_vmcnt_0(program);
+  append_gfx950_v_mov_b32_v1_v0(program);
+  program.push_back(0xBF810000u); // s_endpgm.
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.analysis_error.empty()) << report.analysis_error;
+}
+
 TEST(WaitcheckTest, Gfx950NonReturningFlatAtomicDoesNotDefineVdst) {
   std::vector<uint32_t> program;
   append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);

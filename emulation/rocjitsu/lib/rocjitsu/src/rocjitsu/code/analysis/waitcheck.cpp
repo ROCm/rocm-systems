@@ -1031,8 +1031,8 @@ struct Analyzer {
       }
       PendingState next_out =
           analyze_block(*analysis_blocks[i], merged, section_name, file_offset_base, arch, false);
-      const bool input_changed = !(merged == in[i]);
-      const bool output_changed = out_initialized[i] == 0 || !(next_out == out[i]);
+      const bool input_changed = !same_dataflow_state(merged, in[i]);
+      const bool output_changed = out_initialized[i] == 0 || !same_dataflow_state(next_out, out[i]);
       if (!input_changed && !output_changed)
         continue;
 
@@ -1060,14 +1060,71 @@ struct Analyzer {
     }
 
     if (!dataflow_worklist.empty()) {
-      report_.supported = false;
-      std::ostringstream os;
-      os << "waitcheck CFG dataflow did not converge at .text+0x" << std::hex
-         << analysis_blocks[last_changed_node]->start_offset();
-      if (!last_changed_components.empty())
-        os << " (" << last_changed_components << ')';
-      report_.analysis_error = os.str();
-      return;
+      // Remaining work is unordered-counter churn, not an unsound CFG.
+      // Widen those counters to top and drain once more; if the worklist
+      // still is not empty, emit diagnostics from the last states rather
+      // than aborting with no waitcheck signal (ROCm/aorta#453).
+      static_cast<void>(last_changed_node);
+      static_cast<void>(last_changed_components);
+      for (size_t n = 0; n < analysis_blocks.size(); ++n) {
+        widen_uncertain_counters(in[n]);
+        if (out_initialized[n] != 0)
+          widen_uncertain_counters(out[n]);
+      }
+      dataflow_worklist.clear();
+      std::fill(queued.begin(), queued.end(), 1);
+      for (size_t n = 0; n < analysis_blocks.size(); ++n)
+        dataflow_worklist.push_back(n);
+      node_visits = 0;
+      while (!dataflow_worklist.empty() && node_visits++ < max_node_visits) {
+        const size_t i = dataflow_worklist.front();
+        dataflow_worklist.pop_front();
+        queued[i] = 0;
+
+        PendingState merged = merge_predecessors(cfg_predecessors[i], out, out_initialized);
+        if (conservative_sgpr_entries[i] != 0) {
+          merged.sgpr_hazards.tracked_pairs.set();
+          merged.sgpr_hazards.tracked_vcc = true;
+        }
+        if (const auto &continuation = std::get<2>(analysis_node_keys[i])) {
+          const auto [return_sreg, source_call_offset] = *continuation;
+          const auto source = instruction_by_offset.find(source_call_offset);
+          const SgprHazardProducer producer{
+              .section_name = section_name,
+              .section_offset = source_call_offset,
+              .file_offset = file_offset_base + source_call_offset,
+              .instruction = source == instruction_by_offset.end() ? std::string{}
+                                                                   : source->second->disassemble(),
+          };
+          set_sgpr_hazard(merged.sgpr_hazards, RegisterRef{RegClass::SGPR, return_sreg, 1},
+                          /*is_valu=*/false, producer);
+          if (return_sreg < 127) {
+            set_sgpr_hazard(merged.sgpr_hazards,
+                            RegisterRef{RegClass::SGPR, static_cast<uint16_t>(return_sreg + 1), 1},
+                            /*is_valu=*/false, producer);
+          }
+        }
+        widen_uncertain_counters(merged);
+        PendingState next_out =
+            analyze_block(*analysis_blocks[i], merged, section_name, file_offset_base, arch, false);
+        widen_uncertain_counters(next_out);
+        const bool input_changed = !same_dataflow_state(merged, in[i]);
+        const bool output_changed =
+            out_initialized[i] == 0 || !same_dataflow_state(next_out, out[i]);
+        if (!input_changed && !output_changed)
+          continue;
+        in[i] = std::move(merged);
+        out[i] = std::move(next_out);
+        out_initialized[i] = 1;
+        if (output_changed) {
+          for (size_t successor : cfg_successors[i]) {
+            if (queued[successor] != 0)
+              continue;
+            queued[successor] = 1;
+            dataflow_worklist.push_back(successor);
+          }
+        }
+      }
     }
 
     prepare_cfg_path_filter(analysis_blocks, cfg_predecessors, cfg_successors);
@@ -2485,6 +2542,38 @@ private:
     }
   }
 
+  // Once a counter is unordered, the precise pending-event list is no longer
+  // a useful dataflow fact: any later consumer already requires a full wait.
+  // Treating those lists as equal stops CFG joins from oscillating on
+  // loadcnt/uncertain-order (ROCm/aorta#453) and lets analysis finish.
+  [[nodiscard]] static bool same_dataflow_state(const PendingState &lhs, const PendingState &rhs) {
+    for (size_t i = 0; i < kCounterCount; ++i) {
+      if (lhs.uncertain_order[i] && rhs.uncertain_order[i])
+        continue;
+      if (lhs.pending[i] != rhs.pending[i] ||
+          lhs.pending_event_ages[i] != rhs.pending_event_ages[i] ||
+          lhs.pending_smem[i] != rhs.pending_smem[i] ||
+          lhs.uncertain_order[i] != rhs.uncertain_order[i])
+        return false;
+    }
+    return lhs.ready_regs == rhs.ready_regs && lhs.sgpr_hazards == rhs.sgpr_hazards &&
+           lhs.va_vdst_hazards == rhs.va_vdst_hazards && lhs.vgpr_msb == rhs.vgpr_msb &&
+           lhs.vgpr_msb_setreg_hazard == rhs.vgpr_msb_setreg_hazard &&
+           lhs.previous_vm_vsrc_zero_wait == rhs.previous_vm_vsrc_zero_wait &&
+           lhs.async_barrier_post_wait == rhs.async_barrier_post_wait &&
+           lhs.delay_alu == rhs.delay_alu && lhs.expert_scheduling == rhs.expert_scheduling;
+  }
+
+  static void widen_uncertain_counters(PendingState &state) {
+    for (size_t i = 0; i < kCounterCount; ++i) {
+      if (state.pending[i].empty() && !state.uncertain_order[i])
+        continue;
+      state.uncertain_order[i] = true;
+      for (PendingEvent &event : state.pending[i])
+        event.min_younger = 0;
+    }
+  }
+
   static void merge_into(PendingState &dst, const PendingState &src) {
     for (size_t i = 0; i < kCounterCount; ++i) {
       for (size_t kind = 0; kind < kWaitEventKindCount; ++kind) {
@@ -2575,6 +2664,12 @@ private:
       merged.ready_regs = *ready_regs;
     if (all_previous_vm_vsrc_zero_wait)
       merged.previous_vm_vsrc_zero_wait = *all_previous_vm_vsrc_zero_wait;
+    for (size_t i = 0; i < kCounterCount; ++i) {
+      if (!merged.uncertain_order[i])
+        continue;
+      for (PendingEvent &event : merged.pending[i])
+        event.min_younger = 0;
+    }
     return merged;
   }
 
