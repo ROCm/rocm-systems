@@ -167,7 +167,7 @@ TEST_F(FallbackScoring, ScoreAcceptsIoTargetingDeviceMemory)
 TEST_F(FallbackScoring, ScoreRejectsIoTargetingUnsupportedMemoryType)
 {
     EXPECT_CALL(mcfg, fallback()).WillRepeatedly(Return(true));
-    for (const auto memoryType : UnsupportedHipMemoryTypes) {
+    for (const auto memoryType : set_difference(KnownHipMemoryTypes, SupportedFastpathMemoryTypes)) {
         EXPECT_CALL(*mbuffer, getType).WillOnce(Return(memoryType));
         ASSERT_EQ(Fallback().score(mfile, mbuffer, io_size, file_offset, buffer_offset), -1);
     }
