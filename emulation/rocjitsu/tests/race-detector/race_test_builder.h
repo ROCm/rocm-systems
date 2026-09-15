@@ -101,21 +101,27 @@ public:
   /// Register a scalar load into SGPRs with its architecture-specific counter.
   void scalarLoad(int wave, int sgprBase, int numRegs,
                   amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT) {
-    waves_[wave]->prepareForCounterIncrement(waitCounterType);
+    const uint8_t increment = numRegs > 1 ? 2 : 1;
+    waves_[wave]->prepareForCounterIncrement(waitCounterType, increment);
+    const std::array obligations{
+        amdgpu::MemoryCounterObligation{waitCounterType, MemoryOrderClass::UNORDERED, increment}};
     waves_[wave]->registerScalarLoad(
         pc_++,
         RegisterRef{RegClass::SGPR, static_cast<uint16_t>(sgprBase), static_cast<uint8_t>(numRegs)},
-        defaultExec_, waitCounterType, MemoryOrderClass::UNORDERED);
+        defaultExec_, obligations, MemoryOrderClass::UNORDERED);
   }
 
   /// Register a scalar load into TTMPs with its architecture-specific counter.
   void ttmpLoad(int wave, int ttmpBase, int numRegs,
                 amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT) {
-    waves_[wave]->prepareForCounterIncrement(waitCounterType);
+    const uint8_t increment = numRegs > 1 ? 2 : 1;
+    waves_[wave]->prepareForCounterIncrement(waitCounterType, increment);
+    const std::array obligations{
+        amdgpu::MemoryCounterObligation{waitCounterType, MemoryOrderClass::UNORDERED, increment}};
     waves_[wave]->registerScalarLoad(
         pc_++,
         RegisterRef{RegClass::TTMP, static_cast<uint16_t>(ttmpBase), static_cast<uint8_t>(numRegs)},
-        defaultExec_, waitCounterType, MemoryOrderClass::UNORDERED);
+        defaultExec_, obligations, MemoryOrderClass::UNORDERED);
   }
 
   /// Register a scalar store so partial waits retain counter ordering.

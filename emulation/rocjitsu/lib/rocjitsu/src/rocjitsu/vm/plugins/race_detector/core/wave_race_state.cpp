@@ -142,7 +142,7 @@ void WaveRaceState::registerEventWithIntervals(
   waveMemoryEvents.push_back(eventId);
 }
 
-void WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType type) {
+void WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType type, uint8_t increment) {
   // The runtime plugin calls this only for pre-GFX12 capacity models, where
   // these internal split names alias the combined architectural counters.
   if (amdgpu::wait_counter_covers(amdgpu::WaitCounterType::VMCNT, type))
@@ -172,16 +172,19 @@ void WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType type) {
   }
   if (capacity <= 0)
     throw std::logic_error("counter capacity is not configured");
+  if (increment == 0 || increment > capacity)
+    throw std::invalid_argument("counter increment is outside the configured capacity");
 
-  // The total event count is an inexpensive upper bound for either counter.
-  // Below that bound, the common path returns without scanning any events.
-  if (static_cast<int>(waveMemoryEvents.size()) < capacity)
+  int pending_tokens = 0;
+  for (const EventId event_id : waveMemoryEvents)
+    pending_tokens += detector->events().pendingCounterIncrement(event_id, type);
+  if (pending_tokens + increment <= capacity)
     return;
 
   // An instruction cannot issue if adding its counter token would overflow the
   // finite counter. Immediately before it reads its operands, hardware has
   // therefore established the same upper bound as an implicit partial wait.
-  applyCounterConstraint(type, capacity - 1, /*includeUnordered=*/false);
+  applyCounterConstraint(type, capacity - increment, /*includeUnordered=*/false);
 }
 
 void WaveRaceState::prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &info) {
@@ -189,7 +192,7 @@ void WaveRaceState::prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &info) {
     const auto counter = obligation.wait_counter_type();
     if (amdgpu::wait_counter_covers(amdgpu::WaitCounterType::VMCNT, counter) ||
         amdgpu::wait_counter_covers(amdgpu::WaitCounterType::LGKMCNT, counter))
-      prepareForCounterIncrement(counter);
+      prepareForCounterIncrement(counter, obligation.counter_increment());
   }
 }
 
@@ -321,7 +324,7 @@ void WaveRaceState::satisfyOldestCounterObligations(int count, amdgpu::WaitCount
     const EventId eventId = waveMemoryEvents[read];
     bool eventComplete = false;
     if (matches(eventId) && satisfied < count) {
-      ++satisfied;
+      satisfied += detector->events().pendingCounterIncrement(eventId, waitCounter);
       eventComplete = detector->satisfyEventWaitCounter(eventId, waitCounter);
       if (eventComplete) {
         retireEventRegisters(eventId);
@@ -344,10 +347,16 @@ void WaveRaceState::applyCounterConstraint(amdgpu::WaitCounterType type, int max
   auto targetsCounter = [&](EventId eventId) {
     return detector->events().hasPendingWaitCounter(eventId, type);
   };
+  auto pending_tokens = [&](auto matches) {
+    int total = 0;
+    for (const EventId event_id : waveMemoryEvents) {
+      if (matches(event_id))
+        total += detector->events().pendingCounterIncrement(event_id, type);
+    }
+    return total;
+  };
   if (includeUnordered) {
-    satisfyOldestCounterObligations(
-        static_cast<int>(std::ranges::count_if(waveMemoryEvents, targetsCounter)), type,
-        targetsCounter);
+    satisfyOldestCounterObligations(pending_tokens(targetsCounter), type, targetsCounter);
     return;
   }
 
@@ -360,7 +369,7 @@ void WaveRaceState::applyCounterConstraint(amdgpu::WaitCounterType type, int max
     auto belongsToOrder = [&](EventId eventId) {
       return detector->events().pendingCompletionClass(eventId, type) == order;
     };
-    const int pending = static_cast<int>(std::ranges::count_if(waveMemoryEvents, belongsToOrder));
+    const int pending = pending_tokens(belongsToOrder);
     satisfyOldestCounterObligations(pending - maximumRemaining, type, belongsToOrder);
   }
 }

@@ -116,6 +116,15 @@ public:
     }
     return std::nullopt;
   }
+  uint8_t pendingCounterIncrement(EventId id, amdgpu::WaitCounterType waitType) const {
+    const auto &event = entries_[index(id)];
+    for (uint8_t i = 0; i < event.numCounterObligations; ++i) {
+      if ((event.satisfiedCounterMask & (uint8_t{1} << i)) == 0 &&
+          amdgpu::wait_counter_covers(waitType, event.counterObligations[i].wait_counter_type()))
+        return event.counterObligations[i].counter_increment();
+    }
+    return 0;
+  }
   bool satisfyWaitCounter(EventId id, amdgpu::WaitCounterType waitType) {
     auto &event = entries_[index(id)];
     assert(event.status == EventStatus::ACTIVE);

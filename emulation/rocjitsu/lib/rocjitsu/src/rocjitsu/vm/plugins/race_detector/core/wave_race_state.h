@@ -45,7 +45,7 @@ public:
   /// Apply the issue backpressure required before an instruction adds one
   /// token to a finite hardware counter. This must run before checking that
   /// instruction's operands.
-  void prepareForCounterIncrement(amdgpu::WaitCounterType);
+  void prepareForCounterIncrement(amdgpu::WaitCounterType, uint8_t increment = 1);
 
   /// Apply pre-operand backpressure to every counter incremented by an issue.
   void prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &);
