@@ -6,6 +6,7 @@
 set(TEST_SRC
   hipMemsetAsyncMultiThread.cc
   hipMultiThreadDevice.cc
+  hipMultiThreadOrderedDoorbell.cc
   hipMultiThreadStreams1.cc
   hipMultiThreadStreams2.cc
 )

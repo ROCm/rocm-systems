@@ -1279,6 +1279,7 @@ void VirtualGPU::SetGpuQueue(hsa_queue_t* queue) {
     use_movdir64b_ = roc_device_.info().movdir64b_ && device_mem_ring_buf_;
     doorbell_ptr_ = extras.doorbellPtr;
     largest_aql_barrier_bit_slot_ = extras.largestAqlBarrierBitSlot;
+    aql_ordered_publish_state_ = extras.aqlPublishState;
     metadata_preloader_.SetQueueBase(extras.metadataRingBuffer,
                                      roc_device_.MetadataVersionHeader());
   } else {
@@ -1286,6 +1287,7 @@ void VirtualGPU::SetGpuQueue(hsa_queue_t* queue) {
     use_movdir64b_ = false;
     doorbell_ptr_ = nullptr;
     largest_aql_barrier_bit_slot_.reset();
+    aql_ordered_publish_state_ = nullptr;
     metadata_preloader_.SetQueueBase(nullptr, roc_device_.MetadataVersionHeader());
   }
 }
@@ -1471,6 +1473,41 @@ void VirtualGPU::ringQueueDoorbell(uint64_t index) {
 }
 
 // ================================================================================================
+// Streams outnumber hardware queues, so several VirtualGPUs end up multiplexed onto one physical
+// AQL ring, and hsa_queue_add_write_index_screlease() reserves a slot and advances the GPU-visible
+// write_dispatch_id in one step. The ring therefore advertises slots whose packets are still being
+// written, and CPF is sent to fetch one either by a doorbell from a producer holding a later slot
+// or by an HWS queue remap that re-reads write_dispatch_id:
+//
+//   RPTR = WPTR = 0
+//   T1 claims slot 0                           (write_dispatch_id -> 1)
+//   T2 claims slot 1                           (write_dispatch_id -> 2)
+//   T2 fills slot 1 and rings doorbell(1)
+//   CPF fetches slot 0, MEC sees an INVALID header and discards the ROQ    // defined behavior
+//   CPF re-fetches slot 0, but the 64B fetch is split into smaller reads somewhere on the way
+//   the read of the last 32B returns first, carrying junk from the previous trip through the ring
+//   T1 writes the body of slot 0, then releases its header
+//   the read of the first 32B returns, carrying the header T1 just wrote
+//   CPF assembles 64B that is half junk and half fresh, and the fresh half is a valid header, so
+//   MEC runs the packet with the junk body
+//
+// "INVALID header -> discard the ROQ" only covers the first look; on the re-fetch the header is
+// valid by the time it arrives, so nothing catches the torn packet. CPF asks for the packet as one
+// 64B unit and a fetch that stayed 64B would be a consistent snapshot; on Intel hosts it does not
+// appear to stay 64B, which is why this has only been seen there and why the ordering is gated on
+// the host vendor.
+//
+// What closes this is ordering the doorbell rather than the reservation: slots are still claimed
+// with one atomic add, so producers own disjoint slots and fill them in parallel, but a producer
+// holds its doorbell until every earlier slot has been written. T2 above then waits for T1, so no
+// doorbell sends CPF at a slot that is still being filled, and the doorbell values stay monotonic.
+//
+// Two ways in are left open, both of which predate this and are far rarer than the case above:
+// anything outside CLR ringing this ring's doorbell behind us - a profiler submitting to the same
+// ring - and an HWS queue remap re-reading write_dispatch_id while a reservation is still being
+// written. Holding the write index back until the packets were written would close both, but CLR
+// does not own that index: rocprofiler virtualizes it, and a store from here rewinds the shadow it
+// keeps, which is what hung counter collection.
 AqlSlotReservation VirtualGPU::ReserveAqlSlots(size_t packet_count) {
   assert(packet_count > 0);
   assert(largest_aql_barrier_bit_slot_ != nullptr);
@@ -1479,6 +1516,46 @@ AqlSlotReservation VirtualGPU::ReserveAqlSlots(size_t packet_count) {
       largest_aql_barrier_bit_slot_->load(std::memory_order_acquire);
   const uint64_t start_slot = Hsa::queue_add_write_index_screlease(gpu_queue_, packet_count);
   return {start_slot, packet_count, barrier_bit_slot_before_reservation};
+}
+
+// ================================================================================================
+void VirtualGPU::CommitAqlSlots(const AqlSlotReservation& reservation, size_t packet_offset,
+                                size_t packet_count, bool ring_doorbell) {
+  assert(packet_count > 0);
+  assert(packet_offset + packet_count <= reservation.packet_count);
+
+  const uint64_t commit_start = reservation.start_slot + packet_offset;
+  const uint64_t commit_end = commit_start + packet_count;
+  if (aql_ordered_publish_state_ == nullptr) {
+    if (ring_doorbell) {
+      ringQueueDoorbell(commit_end - 1);
+    }
+    return;
+  }
+
+  // Wait for every earlier slot's doorbell. A read index that reached this submission ends the
+  // wait too: those slots are already consumed, so nothing is remaining, and a slot reserved
+  // here by anything other than CLR cannot stall the streams behind it.
+  //
+  // @note: an earlier producer holding a large reservation can keep this thread spinning for as
+  //        long as it takes to write all of its packets. If that ever costs a core, back off
+  //        exponentially instead of spinning.
+  while (aql_ordered_publish_state_->DoorbellSlot() < commit_start &&
+         Hsa::queue_load_read_index_relaxed(gpu_queue_) < commit_start) {
+    amd::Os::spinPause();
+  }
+
+  if (ring_doorbell) {
+    // Drains these packets from the WC buffer first, unless MOVDIR64B already closed it.
+    ringQueueDoorbell(commit_end - 1);
+  } else {
+    // The next reservation's doorbell covers these packets, but its fence runs on its own core
+    // and cannot drain this one's WC buffer, so they have to be drained here.
+    amd::nontemporalStoreFence();
+  }
+  // Let the next reservation ring. Skipping the doorbell above does not change what this promises:
+  // every slot below commit_end is written, and the next doorbell covers them too.
+  aql_ordered_publish_state_->AdvanceDoorbell(commit_end);
 }
 
 // ================================================================================================
@@ -1596,8 +1673,8 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   bool ring_for_non_profiler_signal = attach_signal && (packet->completion_signal.handle != 0);
   bool ring_doorbell = IS_LINUX || dev().IsPm4Emulation() || blocking ||
                        (skippedDispatches_ >= skip_limit) || ring_for_non_profiler_signal;
+  CommitAqlSlots(reservation, 0, 1, ring_doorbell);
   if (ring_doorbell) {
-    ringQueueDoorbell(index);
     skippedDispatches_ = 0;
   } else {
     ++skippedDispatches_;
@@ -2102,11 +2179,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       }
     }
 
-    if (doorbell_ptr_) {
-      amd::ringDoorbell(doorbell_ptr_, startIndex + chunkEnd - 1);
-    } else {
-      Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, startIndex + chunkEnd - 1);
-    }
+    CommitAqlSlots(reservation, chunkStart, thisChunk, true);
 
     chunkStart = chunkEnd;
   }
@@ -2217,7 +2290,7 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
       &(reinterpret_cast<hsa_barrier_and_packet_t*>(gpu_queue_->base_address))[index & queueMask];
 
   writePacketToRingBuffer(aql_loc, &barrier_packet_, packetHeader, uint16_t{0}, index & queueMask);
-  ringQueueDoorbell(index);
+  CommitAqlSlots(reservation, 0, 1, true);
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
     logAqlBarrierPacket(roc_device_, gpu_queue_, packetHeader, &barrier_packet_, index, priority_);
   }
@@ -2299,7 +2372,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   hsa_amd_barrier_value_packet_t* aql_loc = &(reinterpret_cast<hsa_amd_barrier_value_packet_t*>(
       gpu_queue_->base_address))[index & queueMask];
   writePacketToRingBuffer(aql_loc, &barrier_value_packet_, packetHeader, rest, index & queueMask);
-  ringQueueDoorbell(index);
+  CommitAqlSlots(reservation, 0, 1, true);
 
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
     logAqlBarrierValuePacket(roc_device_, gpu_queue_, packetHeader, &barrier_value_packet_, index,
