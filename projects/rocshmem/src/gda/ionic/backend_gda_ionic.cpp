@@ -43,10 +43,8 @@ void GDABackend::ionic_create_cqs(int ncqes) {
   cq_attr.comp_mask     = IBV_CQ_INIT_ATTR_MASK_PD;
 
   memset(&ionic_cq_attr, 0, sizeof(ionic_cq_attr));
-  if (ionic_dv.create_cq_ex) {
-    ionic_cq_attr.comp_mask = IONIC_CQ_INIT_ATTR_MASK_FLAGS;
-    ionic_cq_attr.flags = IONIC_CQ_INIT_ATTR_CCQE;
-  }
+  ionic_cq_attr.flags     = IONIC_CQ_INIT_ATTR_CCQE;
+  ionic_cq_attr.comp_mask = IONIC_CQ_INIT_ATTR_MASK_FLAGS;
 
   for (size_t i = 0; i < qps.size(); i++) {
     NicDevice &nic = nic_for_qp(i);
@@ -54,15 +52,8 @@ void GDABackend::ionic_create_cqs(int ncqes) {
 
     cq_attr.parent_domain = nic.pd_uxdma[i & 1];
 
-    if (ionic_dv.create_cq_ex) {
-      cq_ex = ionic_dv.create_cq_ex(nic.context, &cq_attr, &ionic_cq_attr);
-      // If cq_ex is nullptr, fallback to ibv_create_cq_ex below.
-    }
-
-    if (!cq_ex) {
-      cq_ex = ibv_create_cq_ex(nic.context, &cq_attr);
-      CHECK_NNULL(cq_ex, "ibv_create_cq_ex");
-    }
+    cq_ex = ionic_dv.create_cq_ex(nic.context, &cq_attr, &ionic_cq_attr);
+    CHECK_NNULL(cq_ex, "ionic_dv_create_cq_ex");
 
     cqs[i] = ibv.cq_ex_to_cq(cq_ex);
     CHECK_NNULL(cqs[i], "ibv_cq_ex_to_cq");
@@ -183,7 +174,7 @@ int GDABackend::ionic_dv_dl_init() {
   DLSYM_HELPER(ionic_dv, ionic_dv_, ionicdv_handle_, pd_set_sqcmb);
   DLSYM_HELPER(ionic_dv, ionic_dv_, ionicdv_handle_, pd_set_rqcmb);
   DLSYM_HELPER(ionic_dv, ionic_dv_, ionicdv_handle_, pd_set_udma_mask);
-  DLSYM_OPT_HELPER(ionic_dv, ionic_dv_, ionicdv_handle_, create_cq_ex);
+  DLSYM_HELPER(ionic_dv, ionic_dv_, ionicdv_handle_, create_cq_ex);
 
   return ROCSHMEM_SUCCESS;
 }
