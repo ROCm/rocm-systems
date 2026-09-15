@@ -1752,7 +1752,6 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
 
   const size_t typeSize = ncclTypeSize(datatype);
   const size_t totalBytes = (size_t)comm->nRanks * recvcount * typeSize;
-  const size_t rsShardBytes = recvcount * typeSize;
 
   // When NCCL_ALGO is set, skip CE/DDA/Symmetric and let getAlgoInfo() pick Ring/Tree.
   if (rcclNcclAlgoEnvIsSet()) {
