@@ -399,8 +399,11 @@ protected:
     for (const auto obligation : counter_obligations) {
       if (!obligation.valid())
         continue;
-      assert(memory_issue_info_.num_counter_obligations_ <
-             amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS);
+      if (memory_issue_info_.num_counter_obligations_ ==
+          amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS) {
+        assert(false && "too many memory counter obligations");
+        break;
+      }
       memory_issue_info_.counter_obligations_[memory_issue_info_.num_counter_obligations_++] =
           obligation;
     }
