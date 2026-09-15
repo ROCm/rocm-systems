@@ -31,7 +31,7 @@ TEST_F(NetIbMPITest, CastEqualWeightsTwoQPsTokenCounts) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kMsgSize = 1024;
     char sendBuf[kMsgSize], recvBuf[kMsgSize];
@@ -93,7 +93,7 @@ TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr int    kTotTokens = 100;
     constexpr size_t kMsgSz     = 64;
@@ -203,7 +203,7 @@ TEST_F(NetIbMPITest, CastTokenSumInvariantAfterConsumption) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kMsgSize = 128;
     constexpr int    kNMsgs   = 10;
@@ -257,7 +257,7 @@ TEST_F(NetIbMPITest, CastSingleQPBypassesWrr) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kMsgSize = 256;
     char sendBuf[kMsgSize], recvBuf[kMsgSize];
@@ -311,7 +311,7 @@ TEST_F(NetIbMPITest, CastSchedParmsReflectEnvVars) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kMsgSize = 64;
     char sendBuf[kMsgSize], recvBuf[kMsgSize];
@@ -358,7 +358,7 @@ TEST_F(NetIbMPITest, CastCursorWrapsAtNqpsBoundary) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kMsgSize = 128;
     char sendBuf[kMsgSize], recvBuf[kMsgSize];
@@ -418,7 +418,7 @@ TEST_F(NetIbMPITest, CastMaxQPCount128) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kMsgSz  = 32;
     constexpr size_t kBufSz  = (NCCL_IB_MAX_QPS + 1)  * kMsgSz;
@@ -493,7 +493,7 @@ TEST_F(NetIbMPITest, CastFourQPsMonotonicOrder) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr int    kNMsgs  = 100;
     constexpr size_t kMsgSz  = 32;
@@ -593,7 +593,7 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     void* comm = (rank == 0) ? recvComm : sendComm;
 
@@ -689,7 +689,7 @@ TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr int    kPhase  = 10;
     constexpr size_t kMsgSz  = 64;
@@ -820,7 +820,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     void* comm = (rank == 0) ? recvComm : sendComm;
 
@@ -929,7 +929,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     // Must be strictly below splitDataMin so dataPerQp < splitDataMin for any nqps,
     // ensuring messages take the WRR path (not the split path).
@@ -1032,7 +1032,7 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kBufSz = 524288; // 512 KB — fits all test sizes
     std::vector<char> sendBuf(kBufSz);
@@ -1143,7 +1143,7 @@ TEST_F(NetIbMPITest, CastLargeTransfer) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kMsgSz = kLargeBufferSize; // 16 MB
     std::vector<char> sendBuf(kMsgSz);
@@ -1209,7 +1209,7 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
 
     constexpr size_t kRegSz = 64;
     char buf[kRegSz];
@@ -1284,8 +1284,42 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     std::vector<void*> listenComms(kNConns, nullptr);
     std::vector<void*> sendComms(kNConns, nullptr);
     std::vector<void*> recvComms(kNConns, nullptr);
-    for (int c = 0; c < kNConns; c++)
-        SetupCastConnection(/*dev=*/0, &listenComms[c], &sendComms[c], &recvComms[c]);
+    // Declared here rather than beside their registration loops so the guard below can
+    // release them: closing a communicator releases the plugin's own memory regions, not
+    // the ones a test registered, and the IB-CAST registration cache is per device -- so
+    // a wrapper left behind outlives this test, and its cache reference with it.
+    std::vector<void*> mhandles(kNConns, nullptr);
+    std::vector<void*> rampHandles(kNConns, nullptr);
+    // Declared before the guard, and sized once their sizes are known, because
+    // destruction runs in reverse: declared after it, their storage would be freed while
+    // the guard's registrations still described it, and the guard would then deregister
+    // memory that no longer exists.
+    std::vector<std::vector<char>> sendBufs, recvBufs, rampSend, rampRecv;
+
+    // Releases whatever is still held on any exit from here, the teardown's own failures
+    // included: otherwise a setup, registration or close failure returns from this body
+    // and leaves connections open and memory still registered for the rest of the
+    // process, which is the contamination the helper stopped creating inside itself.
+    // Registrations go before the communicator they belong to. The teardown nulls each
+    // slot as it releases it, so nothing is released twice.
+    auto connsScope = makeScopeGuard([&]() {
+        for (int c = 0; c < kNConns; c++) {
+            void* comm = (rank == 0) ? recvComms[c] : sendComms[c];
+            if (comm && rampHandles[c]) DeregisterMemory(comm, rampHandles[c]);
+            if (comm && mhandles[c])    DeregisterMemory(comm, mhandles[c]);
+            if (recvComms[c])   CloseRecvComm(recvComms[c]);
+            if (sendComms[c])   CloseSendComm(sendComms[c]);
+            if (listenComms[c]) CloseListenComm(listenComms[c]);
+        }
+    });
+
+    // Wrapped, because the helper ends in a fatal assertion: without this a failed setup
+    // returns from the helper and not from here, and the loop would work through the
+    // remaining connections at up to 30 s each instead of reporting what went wrong.
+    for (int c = 0; c < kNConns; c++) {
+        ASSERT_NO_FATAL_FAILURE(
+            SetupCastConnection(/*dev=*/0, &listenComms[c], &sendComms[c], &recvComms[c]));
+    }
 
     // Scale msgs per connection inversely with connection count so total work stays constant.
     constexpr int kNMsgsTotal = 10000;
@@ -1297,8 +1331,8 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     const size_t kBufSz = static_cast<size_t>(kNMsgs) * kMsgSz;
 
     // One send/recv buffer pair per connection.
-    std::vector<std::vector<char>> sendBufs(kNConns, std::vector<char>(kBufSz));
-    std::vector<std::vector<char>> recvBufs(kNConns, std::vector<char>(kBufSz));
+    sendBufs.assign(kNConns, std::vector<char>(kBufSz));
+    recvBufs.assign(kNConns, std::vector<char>(kBufSz));
     for (int c = 0; c < kNConns; c++) {
         for (size_t i = 0; i < kBufSz; i++) {
             sendBufs[c][i] = static_cast<char>(((i + c) * 3 + 7)  & 0xFF);
@@ -1306,7 +1340,6 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
         memset(recvBufs[c].data(), 0, kBufSz);
     }
 
-    std::vector<void*> mhandles(kNConns, nullptr);
     for (int c = 0; c < kNConns; c++) {
         void* comm   = (rank == 0) ? recvComms[c] : sendComms[c];
         char* regBuf = (rank == 0) ? recvBufs[c].data() : sendBufs[c].data();
@@ -1424,15 +1457,14 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     constexpr int kLargeRounds = 20;
     const size_t  kRampBufSz   = kRampSizes.back();   // one MR per conn, sized for largest
 
-    std::vector<std::vector<char>> rampSend(kNConns, std::vector<char>(kRampBufSz));
-    std::vector<std::vector<char>> rampRecv(kNConns, std::vector<char>(kRampBufSz));
+    rampSend.assign(kNConns, std::vector<char>(kRampBufSz));
+    rampRecv.assign(kNConns, std::vector<char>(kRampBufSz));
     for (int c = 0; c < kNConns; c++) {
         for (size_t i = 0; i < kRampBufSz; i++)
             rampSend[c][i] = static_cast<char>(((i + c) * 7 + 3) & 0xFF);
         memset(rampRecv[c].data(), 0, kRampBufSz);
     }
 
-    std::vector<void*> rampHandles(kNConns, nullptr);
     for (int c = 0; c < kNConns; c++) {
         void* comm   = (rank == 0) ? recvComms[c] : sendComms[c];
         char* regBuf = (rank == 0) ? rampRecv[c].data() : rampSend[c].data();
@@ -1465,19 +1497,115 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     MPI_Barrier(MPI_COMM_WORLD);
 
     // ── Teardown ─────────────────────────────────────────────────────────────
+    // Reported, not asserted, and for the barrier below: these checks are rank-local, so a
+    // fatal one would return from this rank while its peer waited in that collective --
+    // the hang ListenCloseListen was rewritten to remove. Each slot is also nulled as it
+    // is closed, so the guard can stay armed through the loop and close whatever a failure
+    // leaves behind.
     for (int c = 0; c < kNConns; c++) {
         void* comm = (rank == 0) ? recvComms[c] : sendComms[c];
-        ASSERT_EQ(DeregisterMemory(comm, rampHandles[c]), ncclSuccess);
-        ASSERT_EQ(DeregisterMemory(comm, mhandles[c]), ncclSuccess);
+        const ncclResult_t deregRamp = DeregisterMemory(comm, rampHandles[c]);
+        rampHandles[c] = nullptr;
+        const ncclResult_t deregMsg = DeregisterMemory(comm, mhandles[c]);
+        mhandles[c] = nullptr;
+        EXPECT_EQ(deregRamp, ncclSuccess)
+            << "deregistering the ramp buffer failed on conn " << c;
+        EXPECT_EQ(deregMsg, ncclSuccess)
+            << "deregistering the phase-1 buffer failed on conn " << c;
         if (rank == 0) {
-            ASSERT_EQ(CloseRecvComm(recvComms[c]), ncclSuccess);
-            ASSERT_EQ(CloseListenComm(listenComms[c]), ncclSuccess);
+            const ncclResult_t closedRecv = CloseRecvComm(recvComms[c]);
+            recvComms[c] = nullptr;
+            const ncclResult_t closedListen = CloseListenComm(listenComms[c]);
+            listenComms[c] = nullptr;
+            EXPECT_EQ(closedRecv, ncclSuccess) << "CloseRecvComm failed on conn " << c;
+            EXPECT_EQ(closedListen, ncclSuccess) << "CloseListenComm failed on conn " << c;
         } else {
-            ASSERT_EQ(CloseSendComm(sendComms[c]), ncclSuccess);
+            const ncclResult_t closedSend = CloseSendComm(sendComms[c]);
+            sendComms[c] = nullptr;
+            EXPECT_EQ(closedSend, ncclSuccess) << "CloseSendComm failed on conn " << c;
         }
     }
+    connsScope.dismiss();
 
     MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// =============================================================================
+// Test: CastRegistrationRejectsBadArguments
+//
+// Regression cover for the production guard this branch adds to net_ib_cast's
+// regMr/regMrDmaBuf/deregMr. On develop each of these dereferences the
+// communicator or the handle before looking at them, so the suite's reaction to a
+// failed connection setup was a SIGSEGV inside librccl rather than a readable
+// failure; the guard returns ncclInvalidArgument instead.
+//
+// The existing negative registration tests pass a null *buffer* with a valid
+// communicator, and the new setup wrappers return before registration when setup
+// fails, so nothing else in the suite reaches these arms.
+//
+// A null communicator needs no connection: the guard runs before the arguments reach
+// the device. deregMr is the exception -- it answers a null handle with success
+// before it looks at the communicator -- so the null-comm arm there has to carry a
+// handle, and the documented shortcut is checked on its own. The zero-size arm does
+// need a live communicator, since with a null one the null-comm check answers first.
+// Both ranks run the same checks and reach the barrier from the same place.
+// =============================================================================
+TEST_F(NetIbMPITest, CastRegistrationRejectsBadArguments) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    // No CAST_ENV_CHECK_OR_SKIP here, unlike the 16 tests above: the arms under test
+    // are argument checks that run before the scheduler, so the WRR env vars are not
+    // needed and the macro would only turn a pass into a skip.
+    net_ = &netIbCast;
+    // Wrapped for the same reason this branch wraps the setup helpers: the fatal
+    // assertions inside return from the helper, not from here, so a failed init would
+    // otherwise leave this body asserting on argument checks against an uninitialised
+    // plugin and report that instead of the real cause.
+    ASSERT_NO_FATAL_FAILURE(AssertInitAndGetDevices(nullptr));
+
+    // Fixed, not allocated: a rank-local allocation failure would end this rank
+    // before the barrier below while its peer waited there.
+    static char buffer[4096];
+    void* mhandle = nullptr;
+
+    // No connection required for these three.
+    EXPECT_EQ(RegisterMemory(nullptr, buffer, sizeof(buffer), NCCL_PTR_HOST, &mhandle),
+              ncclInvalidArgument)
+        << "regMr must reject a null communicator instead of dereferencing it";
+    EXPECT_EQ(RegisterDmaBufMemory(nullptr, buffer, sizeof(buffer), NCCL_PTR_HOST,
+                                   /*offset=*/0, /*fd=*/-1, &mhandle),
+              ncclInvalidArgument)
+        << "regMrDmaBuf must reject a null communicator";
+    // Not the mhandle above: it is still null, since the two calls above return before
+    // assigning it, and a null handle takes deregMr's early success. The guard rejects
+    // the communicator before the handle is read, so a value that points at nothing
+    // usable reaches the arm under test safely.
+    void* const unusedMhandle = reinterpret_cast<void*>(0x1);
+    EXPECT_EQ(DeregisterMemory(nullptr, unusedMhandle), ncclInvalidArgument)
+        << "deregMr must reject a null communicator";
+    EXPECT_EQ(DeregisterMemory(nullptr, nullptr), ncclSuccess)
+        << "deregMr must keep treating a null handle as a no-op, ahead of the comm check";
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+
+    const int rank = MPIEnvironment::world_rank;
+    void* comm = (rank == 0) ? recvComm : sendComm;
+    ASSERT_NE(comm, nullptr);
+
+    EXPECT_EQ(RegisterMemory(comm, buffer, /*size=*/0, NCCL_PTR_HOST, &mhandle),
+              ncclInvalidArgument)
+        << "regMr must reject a zero size";
+    EXPECT_EQ(RegisterMemory(comm, buffer, sizeof(buffer), NCCL_PTR_HOST, nullptr),
+              ncclInvalidArgument)
+        << "regMr must reject a null out-handle";
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, nullptr);
 }
 
 #endif // MPI_TESTS_ENABLED
