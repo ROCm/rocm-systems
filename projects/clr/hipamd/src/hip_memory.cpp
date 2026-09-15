@@ -3344,7 +3344,10 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
   }
 
   hip::Stream* hip_stream = hip::getStream(stream);
-  if (fastPath && hip_stream != nullptr) {
+  // Backends that do not implement submitBatchCopyRectMemory must never be handed the
+  // command; they take the per-operand path below.
+  if (fastPath && hip_stream != nullptr &&
+      hip_stream->device().settings().batch_copy_rect_supported_) {
     std::vector<amd::BatchCopyRectOp> batchOps;
     batchOps.reserve(numOps);
 
