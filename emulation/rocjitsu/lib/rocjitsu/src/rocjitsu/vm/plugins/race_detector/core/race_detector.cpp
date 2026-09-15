@@ -34,10 +34,25 @@ RaceDetector::allocateEventId(WaveId waveId, uint64_t pc, MemoryEventType type,
                               IntervalSet ldsIntervals, amdgpu::WaitCounterType waitCounterType,
                               MemoryOrderClass memoryOrder,
                               std::optional<amdgpu::WaitCounterType> additionalWaitCounterType) {
+  std::array<amdgpu::MemoryCounterObligation, 2> obligations{
+      amdgpu::MemoryCounterObligation{waitCounterType, memoryOrder}, {}};
+  size_t count = 1;
+  if (additionalWaitCounterType)
+    obligations[count++] = {*additionalWaitCounterType, memoryOrder};
+  return allocateEventId(waveId, pc, type, std::move(registers), execMask, byteMask,
+                         std::move(ldsIntervals), std::span(obligations.data(), count),
+                         memoryOrder);
+}
+
+EventId
+RaceDetector::allocateEventId(WaveId waveId, uint64_t pc, MemoryEventType type,
+                              std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
+                              IntervalSet ldsIntervals,
+                              std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                              MemoryOrderClass memoryOrder) {
   bool hasLds = !ldsIntervals.empty();
-  EventId eid =
-      events_.add(waveId, pc, type, std::move(registers), execMask, byteMask,
-                  std::move(ldsIntervals), waitCounterType, memoryOrder, additionalWaitCounterType);
+  EventId eid = events_.add(waveId, pc, type, std::move(registers), execMask, byteMask,
+                            std::move(ldsIntervals), counterObligations, memoryOrder);
   if (hasLds) {
     const auto &ivs = events_.ldsIntervals(eid);
     if (isToLds(type)) {
