@@ -192,7 +192,9 @@ void runSiblingBroadcastSlotReuse(int devA, int devB) {
 
 } // namespace
 
-TEST_F(DeviceTestBase, Gfx1250EnablesSysScope)
+class LlFifoSysScopeDeviceTest : public DeviceTestBase {};
+
+TEST_F(LlFifoSysScopeDeviceTest, Gfx1250EnablesSysScope)
 {
   DeviceBuffer<int> d_out(2);
   const bool gfx1250 = isGfx1250(0);
@@ -207,7 +209,7 @@ TEST_F(DeviceTestBase, Gfx1250EnablesSysScope)
     << " (gfx1250=" << gfx1250 << ")";
 }
 
-TEST_F(DeviceTestBase, FifoLineSysScopeRoundtrip)
+TEST_F(LlFifoSysScopeDeviceTest, FifoLineSysScopeRoundtrip)
 {
   DeviceBuffer<TestLLLine> d_line(1);
   DeviceBuffer<int> d_ok(1);

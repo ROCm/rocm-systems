@@ -40,8 +40,8 @@ test_categories:
       - "PackRoundtripTest.Store16Load16Global_Direct"
       - "RcclEpLayoutTest.*"
       - "HierarchicalShuffleTest.*"
-      - "DeviceTestBase.Gfx1250EnablesSysScope"
-      - "DeviceTestBase.FifoLineSysScopeRoundtrip"
+      - "LlFifoSysScopeDeviceTest.Gfx1250EnablesSysScope"
+      - "LlFifoSysScopeDeviceTest.FifoLineSysScopeRoundtrip"
       - "LlFifoSysScope.SiblingBroadcastSlotReuse_LL"
       - "LlFifoSysScope.SiblingBroadcastSlotReuse_LL128"
     exclude_windows:
