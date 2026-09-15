@@ -25,6 +25,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_vm_risc_v
     rocjitsu_config
     rocjitsu_dbt_config
+    rocjitsu_ip_discovery
     rocjitsu_pci
 )
 
