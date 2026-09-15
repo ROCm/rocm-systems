@@ -106,6 +106,14 @@ def is_fat_binary(file_path: Path, toolchain: Toolchain) -> bool:
     the shape of a separated debug file produced by `objcopy --only-keep-debug`
     (TheRock's `*_dbg` artifacts), which carries no device code to split.
 
+    A binary that already carries a kpack marker section (.rocm_kpack_ref for
+    ELF, .kpackrf for COFF) is likewise *not* a fat binary: its device code has
+    already been moved into a .kpack archive. Such a binary keeps its
+    .hip_fatbin/.hip_fat section header, so the name check alone would send it
+    back through the splitter and `add_section()` would then fail with
+    "Section '.rocm_kpack_ref' already exists". Reporting False here is what
+    makes re-splitting an already-split tree a no-op instead of a hard error.
+
     Args:
         file_path: Path to the file to check
         toolchain: Toolchain instance with readelf path
@@ -133,12 +141,17 @@ def is_fat_binary(file_path: Path, toolchain: Toolchain) -> bool:
 
     if fmt == "elf":
         surgery = ElfSurgery.load(file_path)
+        if surgery.find_section(".rocm_kpack_ref") is not None:
+            return False
         section = surgery.find_section(".hip_fatbin")
         if section is None:
             return False
         return not section.header.is_nobits
     else:
         surgery = CoffSurgery.load(file_path)
+        # .kpackrf is the 8-char PE spelling of .rocm_kpack_ref.
+        if surgery.find_section(".kpackrf") is not None:
+            return False
         return surgery.find_section(".hip_fat") is not None
 
 
