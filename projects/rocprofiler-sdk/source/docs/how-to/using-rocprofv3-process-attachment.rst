@@ -11,9 +11,60 @@ Dynamic process attachment using rocprofv3
 
 For profiling long-running applications or services where restarting the application is not feasible, ``rocprofv3`` provides dynamic process attachment using the ``--attach`` option. This feature facilitates attaching the profiler to a running application without the need to restart it. The attachment is performed using the ``ptrace`` system call, which enables the profiler to monitor and collect performance data from the target process.
 
-.. note::
+Prerequisites
+--------------
 
-   The target process must have attach support enabled before you can attach to it: use a ``rocprofiler-register`` build configured with ``ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON``. Without this, ``rocprofv3 --attach`` fails because the target process doesn't have the required attachment thread.
+Complete the following steps before using ``rocprofv3 --attach``.
+
+**1. Enable attachment support in the target process**
+
+A process only accepts attachment if ``rocprofiler-register`` created an attachment thread when the process started. Otherwise ``rocprofv3 --attach`` fails. Enable this in one of two ways.
+
+Set ``ROCP_TOOL_ATTACH=1`` in the environment of the target process before it starts. This is the recommended approach, and applies only to the processes you launch with it set.
+
+.. code-block:: shell
+
+   $ export ROCP_TOOL_ATTACH=1
+   $ ./myapp &
+
+Alternatively, build and install ``rocprofiler-register`` with ``ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON``. This makes attachment the default for every process that loads the resulting library, with no environment variable required.
+
+.. code-block:: shell
+
+   $ cmake -B build-rocp-reg /path/to/rocprofiler-register \
+         -DROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON \
+         -DCMAKE_INSTALL_PREFIX=/opt/rocm
+   $ cmake --build build-rocp-reg --target all --parallel $(nproc)
+   $ cmake --build build-rocp-reg --target install
+
+Because the setting is compiled into ``librocprofiler-register.so``, the target process must load the rebuilt library for it to take effect. For the full build and install procedure, see the `rocprofiler-register README <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-register#build-and-installation>`_.
+
+**2. Run as the owner of the target process or as root**
+
+Attachment requires permission to trace the target process. Run ``rocprofv3`` as the user that owns the target process, or as root.
+
+**3. Allow attachment in the ptrace scope**
+
+Some Linux distributions, including recent Ubuntu releases, use the Yama security module to restrict which processes can be traced. Set the scope to ``0`` to permit attachment.
+
+.. code-block:: shell
+
+   # Check current setting
+   $ cat /proc/sys/kernel/yama/ptrace_scope
+
+   # Temporarily allow attachment (requires root)
+   $ sudo sysctl kernel.yama.ptrace_scope=0
+
+**4. Grant the ptrace capability to Docker containers**
+
+To attach inside or into a Docker container, start the container with ``SYS_PTRACE``.
+
+.. code-block:: shell
+
+   $ docker run --cap-add SYS_PTRACE ...
+
+Basic usage
+------------
 
 Here is an example syntax for dynamic process attachment:
 
@@ -199,10 +250,6 @@ Key considerations
 Here are some important points to be noted while using dynamic process attachment:
 
 - The target process must be running and actively using GPU resources for meaningful profiling data.
-
-- Attachment requires appropriate system permissions. It might even need elevated privileges depending on the target process.
-
-- To use attachment in a docker container, add the ``ptrace`` capability to the container (``SYS_PTRACE``).
 
 - The profiler collects data for the entire remaining lifetime of the process or until the configured collection period expires. To learn how to configure the collection period, see :ref:`duration-specific`.
 

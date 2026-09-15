@@ -13,6 +13,58 @@ Overview
 
 This topic provides the technical details needed to implement a process attachment tool similar to ``rocprofv3 --attach``. Process attachment allows profiling tools to dynamically attach to running GPU applications without requiring application restart. The implementation can use either the provided Python or exported C functions.
 
+Prerequisites
+=============
+
+Complete the following steps before attaching to a running process.
+
+**1. Enable attachment support in the target process**
+
+A process only accepts attachment if ``rocprofiler-register`` created an attachment thread when the process started. Otherwise attachment fails. Enable this in one of two ways.
+
+Set ``ROCP_TOOL_ATTACH=1`` in the environment of the target process before it starts. This is the recommended approach, and applies only to the processes you launch with it set.
+
+.. code-block:: shell
+
+   $ export ROCP_TOOL_ATTACH=1
+   $ ./myapp &
+
+Alternatively, build and install ``rocprofiler-register`` with ``ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON``. This makes attachment the default for every process that loads the resulting library, with no environment variable required.
+
+.. code-block:: shell
+
+   $ cmake -B build-rocp-reg /path/to/rocprofiler-register \
+         -DROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON \
+         -DCMAKE_INSTALL_PREFIX=/opt/rocm
+   $ cmake --build build-rocp-reg --target all --parallel $(nproc)
+   $ cmake --build build-rocp-reg --target install
+
+Because the setting is compiled into ``librocprofiler-register.so``, the target process must load the rebuilt library for it to take effect. For the full build and install procedure, see the `rocprofiler-register README <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-register#build-and-installation>`_.
+
+**2. Run as the owner of the target process or as root**
+
+Attachment requires permission to trace the target process. Run the attaching tool as the user that owns the target process, or as root.
+
+**3. Allow attachment in the ptrace scope**
+
+Some Linux distributions, including recent Ubuntu releases, use the Yama security module to restrict which processes can be traced. Set the scope to ``0`` to permit attachment.
+
+.. code-block:: shell
+
+   # Check current setting
+   $ cat /proc/sys/kernel/yama/ptrace_scope
+
+   # Temporarily allow attachment (requires root)
+   $ sudo sysctl kernel.yama.ptrace_scope=0
+
+**4. Grant the ptrace capability to Docker containers**
+
+To attach inside or into a Docker container, start the container with ``SYS_PTRACE``.
+
+.. code-block:: shell
+
+   $ docker run --cap-add SYS_PTRACE ...
+
 Direct Python execution
 ===================================
 
@@ -142,24 +194,8 @@ For reattachment to a previously attached process:
 6. ptrace calls rocprofiler_register_detach()
 7. tool_library::tool_detach(...)
 
-Environment variable configuration
-==================================
-
-This section lists the environment variables required for process attachment.
-
-Required variables
-------------------
-
-The target process must have ``ROCP_TOOL_ATTACH=1`` set, or be using a version of ``rocprofiler-register`` configured with the CMake flag ``ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON``.
-
-.. code-block:: text
-
-   export ROCP_TOOL_ATTACH=1
-   OR
-   cmake /path/to/rocprofiler-register -DROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON
-
 Tool library configuration
----------------------------
+==========================
 
 The attachment system can use any tool library. ``librocprofiler-sdk-tool.so`` is used when the environment variable is not set.
 
