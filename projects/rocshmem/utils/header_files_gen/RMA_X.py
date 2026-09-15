@@ -165,7 +165,7 @@ __device__ ATTR_NO_INLINE void rocshmem_putmem_wg(void *dest,
                                                    size_t nelems, int pe);
 
 """
-    
+
 
     return expanded_code
 
