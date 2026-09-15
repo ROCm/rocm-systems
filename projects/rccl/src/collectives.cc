@@ -28,6 +28,8 @@
 #include "strongstream.h"
 #include "mem_manager.h"
 
+#include <hip/hip_ext.h>
+
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
 #endif
@@ -410,8 +412,10 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
   // Step 3: Shuffle tempBuffer (local-rank-major) -> recvbuff (node-major).
   size_t totalAGBytes = (size_t)nNodes * localRanks * rankOffset;
   int numBlocks = hierarchicalShuffleNumBlocks(totalAGBytes);
-  hierarchicalShuffle<<<numBlocks, HIERARCHICAL_SHUFFLE_THREADS, 0, stream>>>((const char*)tempBuffer, (char*)recvbuff,
-                                                                              rankOffset, nNodes, localRanks);
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+  hipExtLaunchKernelGGL(hierarchicalShuffle, numBlocks, HIERARCHICAL_SHUFFLE_THREADS, 0, stream, /*startEvent=*/nullptr,
+                        stopEvent, /*flags=*/0, (const char*)tempBuffer, (char*)recvbuff, rankOffset, nNodes,
+                        localRanks);
   CUDACHECK(hipGetLastError());
 
   return ncclSuccess;
