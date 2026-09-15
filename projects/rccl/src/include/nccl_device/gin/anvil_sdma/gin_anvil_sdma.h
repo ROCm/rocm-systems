@@ -483,7 +483,10 @@ struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     if (remoteMh == nullptr || localMh == nullptr) return;
     void* remoteSrc = resolveRemotePeerVa(rsCtx, remoteMh, peer, remoteOff);
     void* localDst = reinterpret_cast<void*>(loadConst(&localMh->baseAddr) + localOff);
-    if (remoteSrc == nullptr || localDst == nullptr) return;
+    // Pre-PR Get trapped here. Returning would let a following Get-fenced
+    // barrier complete over a stale local buffer. AICOMRCCL-2241 is still the
+    // host-side registration fix; this path must not look like success.
+    if (remoteSrc == nullptr || localDst == nullptr) __builtin_trap();
 
     size_t threshold = loadConst(&rsCtx->sdmaThreshold);
     auto* handle = bytes > threshold ? queueHandle(rsCtx, peer, blockId) : nullptr;
