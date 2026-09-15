@@ -280,6 +280,7 @@ jobs:
       - name: Install
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
         timeout-minutes: 10
+        shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
@@ -290,6 +291,7 @@ jobs:
       - name: Build Packaging
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
         timeout-minutes: 10
+        shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
