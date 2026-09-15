@@ -11,6 +11,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -54,8 +55,16 @@ public:
   /// global memory. Generic FLAT retains both architectural counter
   /// obligations even though its memory route is known here.
   void flatGlobalLoad(int wave, int vgprBase, int numRegs, uint64_t exec = 0) {
-    globalLoad(wave, vgprBase, numRegs, exec, /*byteMask=*/0xF, MemoryOrderClass::UNORDERED,
-               amdgpu::WaitCounterType::LGKMCNT);
+    if (!exec)
+      exec = defaultExec_;
+    const std::array obligations{
+        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::VMEM},
+        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::LDS}};
+    std::vector<uint32_t> registers(numRegs);
+    for (int i = 0; i < numRegs; ++i)
+      registers[i] = vgprBase + i;
+    waves_[wave]->registerEvent(pc_++, MemoryEventType::GLOBAL_TO_VGPR, std::move(registers), exec,
+                                /*byteMask=*/0xF, obligations, MemoryOrderClass::VMEM);
   }
 
   /// Register a Direct-to-LDS global load (tracked by vmcnt).

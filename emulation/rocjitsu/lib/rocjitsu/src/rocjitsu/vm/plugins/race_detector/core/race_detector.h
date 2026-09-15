@@ -52,6 +52,10 @@ public:
                   uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
                   amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
                   std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
+  EventId allocateEventId(WaveId, uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
+                          uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
+                          std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                          MemoryOrderClass memoryOrder);
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);

@@ -12,10 +12,10 @@
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <functional>
-#include <optional>
 #include <queue>
 #include <utility>
 
@@ -62,14 +62,15 @@ public:
   /// finishes all writeback work. A timing backend may return Deferred and
   /// release the counters later through finish_completed_access().
   void issue(Instruction *inst, Wavefront &wf) {
-    WaitCounterType issue_counter = counter_type_;
-    std::optional<WaitCounterType> additional_issue_counter;
+    std::array<WaitCounterType, MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS> issue_counters{};
+    uint8_t num_issue_counters = 0;
     const auto *issue = inst->amdgpu_memory_issue_info();
     if (issue) {
-      issue_counter = issue->wait_counter_type;
-      additional_issue_counter = issue->additional_wait_counter_type;
+      for (const auto obligation : issue->counter_obligations())
+        issue_counters[num_issue_counters++] = obligation.wait_counter_type();
     }
     if (!issue) {
+      WaitCounterType issue_counter = counter_type_;
       auto *state = inst->data();
       assert(state && "memory instruction has no dynamic state");
       switch (state->tag()) {
@@ -83,21 +84,21 @@ public:
       default:
         break;
       }
+      issue_counters[num_issue_counters++] = issue_counter;
     }
-    wf.wait_counters().increment(issue_counter);
-    if (additional_issue_counter)
-      wf.wait_counters().increment(*additional_issue_counter);
+    for (uint8_t i = 0; i < num_issue_counters; ++i)
+      wf.wait_counters().increment(issue_counters[i]);
     initiate_access(*inst, wf);
     // The wait counters pin wf/inst ownership until this callback releases them.
     // ComputeUnitCore retires ENDING wavefronts only after wait_counters().empty(),
     // so a deferred backend must invoke this exactly once while that counter is held.
-    MemoryAccessDeferredCompletion deferred_completion = [this, inst, &wf, issue_counter,
-                                                          additional_issue_counter]() {
-      finish_completed_access(inst, wf, issue_counter, additional_issue_counter);
+    MemoryAccessDeferredCompletion deferred_completion = [this, inst, &wf, issue_counters,
+                                                          num_issue_counters]() {
+      finish_completed_access(inst, wf, issue_counters, num_issue_counters);
     };
     MemoryAccessCompletion completion = complete_access(*inst, wf, std::move(deferred_completion));
     if (completion == MemoryAccessCompletion::Complete)
-      finish_completed_access(inst, wf, issue_counter, additional_issue_counter);
+      finish_completed_access(inst, wf, issue_counters, num_issue_counters);
   }
 
   /// @brief Advance the pipeline by one cycle (no-op in functional mode).
@@ -114,11 +115,12 @@ protected:
   virtual MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
                                                  MemoryAccessDeferredCompletion complete) = 0;
 
-  void finish_completed_access(Instruction *inst, Wavefront &wf, WaitCounterType counter,
-                               std::optional<WaitCounterType> additionalCounter) {
-    wf.release_wait_counter(counter);
-    if (additionalCounter)
-      wf.release_wait_counter(*additionalCounter);
+  void finish_completed_access(
+      Instruction *inst, Wavefront &wf,
+      const std::array<WaitCounterType, MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS> &counters,
+      uint8_t num_counters) {
+    for (uint8_t i = 0; i < num_counters; ++i)
+      wf.release_wait_counter(counters[i]);
     delete inst;
   }
 

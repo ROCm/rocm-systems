@@ -41,12 +41,19 @@ public:
                 uint64_t execMask, uint8_t byteMask, amdgpu::WaitCounterType waitCounterType,
                 MemoryOrderClass memoryOrder,
                 std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
+  void registerEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
+                     uint64_t execMask, uint8_t byteMask,
+                     std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                     MemoryOrderClass memoryOrder);
 
   /// Register an in-flight scalar load using its architectural destination.
   void registerScalarLoad(
       uint64_t pc, RegisterRef destination, uint64_t execMask,
       amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
       std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
+  void registerScalarLoad(uint64_t pc, RegisterRef destination, uint64_t execMask,
+                          std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                          MemoryOrderClass memoryOrder);
 
   /// Register an in-flight memory event that involves LDS.
   /// The LDS memory involved is defined by `laneBaseAddresses` and `bytesPerLane`. Each active lane
@@ -61,6 +68,19 @@ public:
                    int bytesPerLane, uint8_t byteMask, amdgpu::WaitCounterType waitCounterType,
                    MemoryOrderClass memoryOrder,
                    std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
+  void registerLdsEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
+                        uint64_t execMask, int waveSize,
+                        std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
+                        uint8_t byteMask,
+                        std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                        MemoryOrderClass memoryOrder);
+  void registerLdsEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
+                        uint64_t execMask, int waveSize,
+                        std::span<const uint32_t> firstLaneBaseAddresses,
+                        std::span<const uint32_t> secondLaneBaseAddresses, int bytesPerLane,
+                        uint8_t byteMask,
+                        std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                        MemoryOrderClass memoryOrder);
 
   /// Register an LDS event with dual-offset intervals. Each active lane
   /// contributes two 8-byte intervals at laneBaseAddresses[lane] + offset0*8
@@ -75,6 +95,11 @@ public:
       int waveSize, std::span<const uint32_t> laneBaseAddresses, int32_t offset0, int32_t offset1,
       amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
       std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
+  void registerDualOffsetLdsEvent(
+      uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers, uint64_t execMask,
+      int waveSize, std::span<const uint32_t> laneBaseAddresses, int32_t offset0, int32_t offset1,
+      std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+      MemoryOrderClass memoryOrder);
 
   /// Dispatch the counter thresholds changed by one wait instruction.
   void dispatch(const PendingWaitCount &);
@@ -135,9 +160,8 @@ public:
 private:
   void registerEventWithIntervals(uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
                                   uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
-                                  amdgpu::WaitCounterType waitCounterType,
-                                  MemoryOrderClass memoryOrder,
-                                  std::optional<amdgpu::WaitCounterType> additionalWaitCounterType);
+                                  std::span<const amdgpu::MemoryCounterObligation>,
+                                  MemoryOrderClass memoryOrder);
   void retireEventRegisters(EventId);
   void checkScalarAccess(RegisterRef reg, bool isWrite) const;
 
