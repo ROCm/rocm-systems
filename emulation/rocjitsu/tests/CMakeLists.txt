@@ -676,6 +676,7 @@ add_executable(
     rocjitsu_analysis_tests
     analysis/decoder_window_test.cpp
     analysis/free_registers_test.cpp
+    analysis/reachable_cfg_test.cpp
     code/amdgpu_code_object_test.cpp
     code/kernel_descriptor_scan_test.cpp
     code/kernel_scope_test.cpp
