@@ -118,6 +118,7 @@ set(SRC_FILES
   gin/proxy_gpucontext/gpucontext_v1.cc
   gin/proxy_gpucontext/gpucontext_v1.h
   graph/connect.cc
+  graph/rccl_graph_gen.cc
   graph/paths.cc
   graph/rings.cc
   graph/rings.h
