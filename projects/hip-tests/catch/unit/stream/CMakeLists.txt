@@ -71,6 +71,22 @@ set_source_files_properties(hipStreamLegacy_exe.cc PROPERTIES LANGUAGE ${GPGPU_L
 add_dependencies(StreamTest hipStreamLegacy_exe)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipStreamLegacy_exe)
 
+if(WIN32)
+  set(TEST_SRC hipGracefulExit.cc)
+  hip_add_exe_to_target(
+    NAME GracefulExit
+    TEST_SRC ${TEST_SRC}
+    TEST_TARGET_NAME build_tests)
+
+  add_executable(hipGracefulExit_exe EXCLUDE_FROM_ALL hipGracefulExit_exe.cc)
+  set_source_files_properties(hipGracefulExit_exe.cc PROPERTIES LANGUAGE HIP)
+  set_target_properties(hipGracefulExit_exe PROPERTIES LINKER_LANGUAGE HIP)
+  target_link_libraries(hipGracefulExit_exe hip::host hip::device)
+
+  add_dependencies(GracefulExit hipGracefulExit_exe)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipGracefulExit_exe)
+endif()
+
 if(WIN32 AND HIP_PLATFORM MATCHES "amd")
   add_executable(hipStreamKilledWorkerThread_exe EXCLUDE_FROM_ALL
                  hipStreamKilledWorkerThread_exe.cc)
