@@ -30,7 +30,7 @@ itself has none.
 | `mirage_core`       | Shared types (`ProfileDef`, `SessionDef`, `ExecDef`, …), XDG path resolution for configuration, atomic file I/O and the config store built on it, the `run`↔`exec` wire protocol, and the emulator/registry traits. |
 | `mirage_supervisor` | The engine a `mirage run` is built out of: `Run`, `Session`, `Exec`, the shared spec builder, process spawn/supervise/reap, and the socket a run serves. |
 | `mirage_container`  | Container provider abstraction (podman/docker) for containerised sessions. |
-| `mirage_builtin`    | Embedded builtin agents, topologies, and profiles, plus their unpackers. |
+| `mirage_builtin`    | The RocJITsu configs embedded as builtin agents and the unpacker that seeds them, Mirage's system topologies, and the builtin profiles it generates from those agents rather than storing. |
 | `mirage_rocjitsu`   | The `rocjitsu` (and `rocjitsu-dbt`) backend.                         |
 | `mirage_hotswap`    | The `hotswap` load-time ISA-rewriting backend.                       |
 | `rocjitsu_sys`      | FFI bindings to `librocjitsu.so`, plus safe RAII wrappers over them.  |
