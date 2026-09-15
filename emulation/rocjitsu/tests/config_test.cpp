@@ -21,6 +21,7 @@
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
+#include "util/diagnostic.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -192,6 +193,36 @@ std::pair<uint32_t, uint32_t> run_two_spi_dispatch() {
 
   return {dispatch_count->for_cu(xcd->shader_engine(0)->compute_unit(0)),
           dispatch_count->for_cu(xcd->shader_engine(1)->compute_unit(0))};
+}
+
+config::DbtGuestConfig load_dbt_guest_config(const std::string &path) {
+  util::StringDiagnostic diagnostic;
+  config::DbtGuestConfigResult result =
+      config::load_dbt_guest_config_from_file(path, diagnostic.emitter());
+  if (result.failed()) {
+    ADD_FAILURE() << diagnostic.message();
+    return {};
+  }
+  return std::move(result).value();
+}
+
+config::DbtGuestConfig load_runtime_dbt_guest_config() {
+  util::StringDiagnostic diagnostic;
+  config::DbtGuestConfigResult result =
+      config::load_dbt_guest_config_from_runtime_config(diagnostic.emitter());
+  if (result.failed()) {
+    ADD_FAILURE() << diagnostic.message();
+    return {};
+  }
+  return std::move(result).value();
+}
+
+std::string get_dbt_guest_config_error(const std::string &path) {
+  util::StringDiagnostic diagnostic;
+  config::DbtGuestConfigResult result =
+      config::load_dbt_guest_config_from_file(path, diagnostic.emitter());
+  EXPECT_TRUE(result.failed());
+  return diagnostic.message();
 }
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
@@ -670,7 +701,7 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
       }
     })");
 
-  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+  auto dbt = load_dbt_guest_config(file.path());
 
   EXPECT_TRUE(dbt.enabled);
   EXPECT_EQ(dbt.guest_isa, "gfx950");
@@ -713,10 +744,9 @@ TEST(ConfigLoaderTest, RejectsMissingOrZeroSdmaQueuesWhenRegularEnginesArePresen
     })");
 
   for (const auto &path : {missing.path(), zero.path()})
-    EXPECT_THAT([&] { (void)config::load_dbt_guest_config_from_file(path); },
-                testing::ThrowsMessage<std::runtime_error>(
-                    testing::AllOf(testing::HasSubstr("dbt_guest.guest_device."),
-                                   testing::HasSubstr("num_sdma_queues_per_engine"))));
+    EXPECT_THAT(get_dbt_guest_config_error(path),
+                testing::AllOf(testing::HasSubstr("dbt_guest.guest_device."),
+                               testing::HasSubstr("num_sdma_queues_per_engine")));
 }
 
 TEST(ConfigLoaderTest, SdmaQueueValidationIdentifiesVmDevicePath) {
@@ -763,7 +793,7 @@ TEST(ConfigLoaderTest, AllowsZeroSdmaQueuesWithoutRegularEngines) {
       }
     })");
 
-  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+  auto dbt = load_dbt_guest_config(file.path());
 
   ASSERT_TRUE(dbt.guest_device.present);
   EXPECT_EQ(dbt.guest_device.num_sdma_engines, 0u);
@@ -786,7 +816,7 @@ TEST(ConfigLoaderTest, ShippedDevicesDeclareSdmaQueues) {
     const std::string name = entry.path().filename().string();
     SCOPED_TRACE(name);
     if (name.rfind("guest_", 0) == 0) {
-      auto dbt = config::load_dbt_guest_config_from_file(entry.path().string());
+      auto dbt = load_dbt_guest_config(entry.path().string());
       ASSERT_TRUE(dbt.guest_device.present);
       ASSERT_NE(dbt.guest_device.num_sdma_engines, 0u);
       EXPECT_NE(dbt.guest_device.num_sdma_queues_per_engine, 0u);
@@ -828,7 +858,7 @@ TEST(ConfigLoaderTest, ShippedGfx950GuestsUseCapturedSdmaQueueCount) {
         entry.path().filename().string().rfind("guest_", 0) != 0)
       continue;
 
-    auto dbt = config::load_dbt_guest_config_from_file(entry.path().string());
+    auto dbt = load_dbt_guest_config(entry.path().string());
     if (dbt.guest_isa != "gfx950")
       continue;
 
@@ -860,7 +890,7 @@ TEST(ConfigLoaderTest, LoadsDbtGuestSiliconRevisions) {
       }
     })");
 
-  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+  auto dbt = load_dbt_guest_config(file.path());
 
   EXPECT_EQ(dbt.guest_revision, config::DbtSiliconRevision::Gfx1250B0);
   EXPECT_EQ(dbt.host_revision, config::DbtSiliconRevision::Gfx1250A0);
@@ -884,7 +914,7 @@ TEST(ConfigLoaderTest, RejectsDbtGuestDeviceWithInconsistentSimdCount) {
       }
     })");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+  EXPECT_THAT(get_dbt_guest_config_error(file.path()), testing::HasSubstr("simd_count"));
 }
 
 TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
@@ -939,7 +969,7 @@ TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
 TEST(ConfigLoaderTest, MissingDbtGuestConfigReturnsDefaults) {
   const auto file = write_temp_config("{}");
 
-  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+  auto dbt = load_dbt_guest_config(file.path());
 
   EXPECT_FALSE(dbt.enabled);
   EXPECT_TRUE(dbt.guest_isa.empty());
@@ -960,7 +990,7 @@ TEST(ConfigLoaderTest, MissingDbtGuestDeviceLeavesDeviceAbsent) {
         }
       })");
 
-  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+  auto dbt = load_dbt_guest_config(file.path());
 
   EXPECT_TRUE(dbt.enabled);
   EXPECT_EQ(dbt.guest_isa, "gfx950");
@@ -968,10 +998,18 @@ TEST(ConfigLoaderTest, MissingDbtGuestDeviceLeavesDeviceAbsent) {
   EXPECT_FALSE(dbt.guest_device.present);
 }
 
-TEST(ConfigLoaderTest, MalformedDbtGuestConfigThrows) {
+TEST(ConfigLoaderTest, MalformedDbtGuestConfigReturnsFailureWithDiagnostic) {
   const auto file = write_temp_config(R"({ "dbt_guest": )");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+  EXPECT_THAT(get_dbt_guest_config_error(file.path()),
+              testing::HasSubstr("Failed to parse JSON config"));
+}
+
+TEST(ConfigLoaderTest, MissingDbtGuestConfigFileReturnsFailureWithDiagnostic) {
+  const test::ScopedTempDirectory directory("rocjitsu-missing-dbt-config-");
+
+  EXPECT_THAT(get_dbt_guest_config_error(directory.path() + "/missing.json"),
+              testing::HasSubstr("Cannot open file"));
 }
 
 TEST(ConfigLoaderTest, LoadsSimulatorDbtBackendConfig) {
@@ -993,8 +1031,8 @@ TEST(ConfigLoaderTest, LoadsSimulatorDbtBackendConfig) {
         }
       })");
 
-  auto external = config::load_dbt_guest_config_from_file(external_file.path());
-  auto self_contained = config::load_dbt_guest_config_from_file(self_contained_file.path());
+  auto external = load_dbt_guest_config(external_file.path());
+  auto self_contained = load_dbt_guest_config(self_contained_file.path());
 
   EXPECT_EQ(external.host.isa, "gfx942");
   EXPECT_EQ(external.host.backend, config::DbtExecutionBackend::Simulator);
@@ -1011,7 +1049,7 @@ TEST(ConfigLoaderTest, LoadsExplicitHardwareDbtBackendConfig) {
         }
       })");
 
-  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+  auto dbt = load_dbt_guest_config(file.path());
 
   EXPECT_EQ(dbt.host.backend, config::DbtExecutionBackend::Hardware);
 }
@@ -1025,9 +1063,9 @@ TEST(ConfigLoaderTest, AppliesResolvedDbtHostGpuId) {
   config::DbtGuestConfig simulator = automatic;
   simulator.host.backend = config::DbtExecutionBackend::Simulator;
 
-  config::apply_resolved_dbt_host_gpu_id(automatic, "28851");
-  config::apply_resolved_dbt_host_gpu_id(explicit_id, "28851");
-  config::apply_resolved_dbt_host_gpu_id(simulator, "28851");
+  EXPECT_TRUE(config::apply_resolved_dbt_host_gpu_id(automatic, "28851").succeeded());
+  EXPECT_TRUE(config::apply_resolved_dbt_host_gpu_id(explicit_id, "28851").succeeded());
+  EXPECT_TRUE(config::apply_resolved_dbt_host_gpu_id(simulator, "28851").succeeded());
 
   EXPECT_EQ(automatic.host.gpu_id, 28851u);
   EXPECT_EQ(explicit_id.host.gpu_id, 8716u);
@@ -1040,7 +1078,10 @@ TEST(ConfigLoaderTest, RejectsInvalidResolvedDbtHostGpuId) {
   for (std::string_view value : invalid_values) {
     config::DbtGuestConfig dbt;
     dbt.enabled = true;
-    EXPECT_THROW(config::apply_resolved_dbt_host_gpu_id(dbt, value), std::runtime_error) << value;
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(config::apply_resolved_dbt_host_gpu_id(dbt, value, diagnostic.emitter()).failed())
+        << value;
+    EXPECT_THAT(diagnostic.message(), testing::HasSubstr("nonzero KFD gpu_id")) << value;
   }
 }
 
@@ -1049,7 +1090,7 @@ TEST(ConfigLoaderTest, ExplicitDbtHostGpuIdOverridesResolvedHandoff) {
   dbt.enabled = true;
   dbt.host.gpu_id = 8716;
 
-  EXPECT_NO_THROW(config::apply_resolved_dbt_host_gpu_id(dbt, "invalid-but-ignored"));
+  EXPECT_TRUE(config::apply_resolved_dbt_host_gpu_id(dbt, "invalid-but-ignored").succeeded());
   EXPECT_EQ(dbt.host.gpu_id, 8716u);
 }
 
@@ -1119,8 +1160,37 @@ TEST(ConfigLoaderTest, RejectsEmptyResolvedGpuIdLineForEnabledDbt) {
 
   config::DbtGuestConfig dbt;
   dbt.enabled = true;
-  EXPECT_THROW(config::apply_resolved_dbt_host_gpu_id(dbt, *handoff->resolved_gpu_id),
-               std::runtime_error);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(
+      config::apply_resolved_dbt_host_gpu_id(dbt, *handoff->resolved_gpu_id, diagnostic.emitter())
+          .failed());
+  EXPECT_THAT(diagnostic.message(), testing::HasSubstr("nonzero KFD gpu_id"));
+}
+
+TEST(ConfigLoaderTest, MissingRuntimeConfigHandoffReturnsFailure) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-missing-");
+  test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  util::StringDiagnostic diagnostic;
+
+  config::DbtGuestConfigResult loaded =
+      config::load_dbt_guest_config_from_runtime_config(diagnostic.emitter());
+
+  EXPECT_TRUE(loaded.failed());
+  EXPECT_THAT(diagnostic.message(), testing::HasSubstr("handoff was not found"));
+}
+
+TEST(ConfigLoaderTest, EmptyRuntimeConfigHandoffReturnsFailure) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-empty-");
+  std::ofstream(std::filesystem::path(runtime.path()) / "config_path");
+  test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
+  util::StringDiagnostic diagnostic;
+
+  config::DbtGuestConfigResult loaded =
+      config::load_dbt_guest_config_from_runtime_config(diagnostic.emitter());
+
+  EXPECT_TRUE(loaded.failed());
+  EXPECT_THAT(diagnostic.message(), testing::HasSubstr("does not contain a config path"));
 }
 
 TEST(ConfigLoaderTest, LoadsDbtRuntimeConfigHandoffFromInvocationDirectory) {
@@ -1138,12 +1208,10 @@ TEST(ConfigLoaderTest, LoadsDbtRuntimeConfigHandoffFromInvocationDirectory) {
   }
   test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
 
-  const std::optional<config::DbtGuestConfig> loaded =
-      config::load_dbt_guest_config_from_runtime_config();
+  const config::DbtGuestConfig loaded = load_runtime_dbt_guest_config();
 
-  ASSERT_TRUE(loaded);
-  EXPECT_TRUE(loaded->enabled);
-  EXPECT_EQ(loaded->host.gpu_id, 28851u);
+  EXPECT_TRUE(loaded.enabled);
+  EXPECT_EQ(loaded.host.gpu_id, 28851u);
 }
 
 // The HSA-hook half of a pair. GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes drives
@@ -1172,12 +1240,10 @@ TEST(ConfigLoaderTest, ReadsRuntimeHandoffLargerThan4095Bytes) {
 
   const test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv,
                                                        runtime.path());
-  const std::optional<config::DbtGuestConfig> loaded =
-      config::load_dbt_guest_config_from_runtime_config();
+  const config::DbtGuestConfig loaded = load_runtime_dbt_guest_config();
 
-  ASSERT_TRUE(loaded);
-  EXPECT_TRUE(loaded->enabled);
-  EXPECT_EQ(loaded->host.gpu_id, test::kOversizedHandoffHostGpuId);
+  EXPECT_TRUE(loaded.enabled);
+  EXPECT_EQ(loaded.host.gpu_id, test::kOversizedHandoffHostGpuId);
 }
 
 TEST(ConfigLoaderTest, RejectsPathOnlyHandoffForAutomaticDbtHost) {
@@ -1195,7 +1261,11 @@ TEST(ConfigLoaderTest, RejectsPathOnlyHandoffForAutomaticDbtHost) {
   }
   test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_runtime_config(), std::runtime_error);
+  util::StringDiagnostic diagnostic;
+  config::DbtGuestConfigResult loaded =
+      config::load_dbt_guest_config_from_runtime_config(diagnostic.emitter());
+  EXPECT_TRUE(loaded.failed());
+  EXPECT_THAT(diagnostic.message(), testing::HasSubstr("resolved KFD gpu_id"));
 }
 
 TEST(ConfigLoaderTest, AllowsPathOnlyHandoffWithoutAutomaticDbtHost) {
@@ -1212,9 +1282,8 @@ TEST(ConfigLoaderTest, AllowsPathOnlyHandoffWithoutAutomaticDbtHost) {
       handoff << config_file.path() << '\n';
     }
 
-    const auto loaded = config::load_dbt_guest_config_from_runtime_config();
-    ASSERT_TRUE(loaded);
-    EXPECT_EQ(loaded->host.gpu_id, dbt_guest.find("28851") == std::string_view::npos ? 0u : 28851u);
+    const auto loaded = load_runtime_dbt_guest_config();
+    EXPECT_EQ(loaded.host.gpu_id, dbt_guest.find("28851") == std::string_view::npos ? 0u : 28851u);
   }
 }
 
@@ -1226,7 +1295,7 @@ TEST(ConfigLoaderTest, RejectsEmptyDbtExecutionBackend) {
         }
       })");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+  EXPECT_THAT(get_dbt_guest_config_error(file.path()), testing::HasSubstr("invalid number"));
 }
 
 TEST(ConfigLoaderTest, RejectsMisspelledDbtExecutionBackend) {
@@ -1237,7 +1306,7 @@ TEST(ConfigLoaderTest, RejectsMisspelledDbtExecutionBackend) {
         }
       })");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+  EXPECT_THAT(get_dbt_guest_config_error(file.path()), testing::HasSubstr("execution_backed"));
 }
 
 TEST(ConfigLoaderTest, ValidatesSimulatorDbtGuestDeviceLimits) {
@@ -1257,12 +1326,17 @@ TEST(ConfigLoaderTest, ValidatesSimulatorDbtGuestDeviceLimits) {
   simulator.max_waves_per_simd = 8;
   simulator.wave_front_size = 64;
 
-  EXPECT_NO_THROW(config::validate_dbt_simulator_device_limits(guest, simulator));
+  EXPECT_TRUE(config::validate_dbt_simulator_device_limits(guest, simulator).succeeded());
   guest.guest_device.lds_size_kb = 65;
-  EXPECT_THROW(config::validate_dbt_simulator_device_limits(guest, simulator), std::runtime_error);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(config::validate_dbt_simulator_device_limits(guest, simulator, diagnostic.emitter())
+                  .failed());
+  EXPECT_THAT(diagnostic.message(), testing::HasSubstr("lds_size_kb"));
   guest.guest_device.lds_size_kb = 64;
   guest.guest_device.max_slots_scratch_cu = 33;
-  EXPECT_THROW(config::validate_dbt_simulator_device_limits(guest, simulator), std::runtime_error);
+  EXPECT_TRUE(config::validate_dbt_simulator_device_limits(guest, simulator, diagnostic.emitter())
+                  .failed());
+  EXPECT_THAT(diagnostic.message(), testing::HasSubstr("max_slots_scratch_cu"));
 }
 
 TEST(ConfigLoaderTest, DisabledDbtBackendSkipsBackendSpecificValidation) {
@@ -1280,8 +1354,8 @@ TEST(ConfigLoaderTest, DisabledDbtBackendSkipsBackendSpecificValidation) {
         }
       })");
 
-  EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(simulator_file.path()));
-  EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(hardware_file.path()));
+  EXPECT_TRUE(config::load_dbt_guest_config_from_file(simulator_file.path()).succeeded());
+  EXPECT_TRUE(config::load_dbt_guest_config_from_file(hardware_file.path()).succeeded());
 }
 
 TEST(ConfigLoaderTest, ResolvesDbtHostConfigPath) {
@@ -1301,7 +1375,7 @@ TEST(ConfigLoaderTest, RejectsUnknownDbtExecutionBackend) {
         }
       })");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+  EXPECT_THAT(get_dbt_guest_config_error(file.path()), testing::HasSubstr("unknown enum value"));
 }
 
 TEST(ConfigLoaderTest, RejectsSimulatorConfigForHardwareDbtBackend) {
@@ -1313,7 +1387,7 @@ TEST(ConfigLoaderTest, RejectsSimulatorConfigForHardwareDbtBackend) {
         }
       })");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+  EXPECT_THAT(get_dbt_guest_config_error(file.path()), testing::HasSubstr("simulator_config"));
 }
 
 TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {

@@ -9,6 +9,9 @@
 
 #include "rocjitsu/config/kfd_device_config.h"
 #include "rocjitsu/config/pci_device_config.h"
+#include "rocjitsu/result.h"
+
+#include "util/diagnostic.h"
 
 #include "flatbuffers/idl.h"
 #include "simulation_config_generated.h"
@@ -80,8 +83,9 @@ inline PciDeviceConfig pci_device_from_fb(const fb::PciDeviceInfo *pci) {
 /// config owns its marketing-name string so it is safe after the FlatBuffers
 /// parser storage goes out of scope.
 /// @param json_path JSON path of @p device, used in validation diagnostics.
-inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device,
-                                          std::string_view json_path) {
+inline FailureOr<KfdDeviceConfig> kfd_device_from_fb(const fb::KfdDeviceInfo *device,
+                                                     std::string_view json_path,
+                                                     util::DiagnosticEmitter emit_error = {}) {
   KfdDeviceConfig config;
   if (device == nullptr)
     return config;
@@ -121,9 +125,8 @@ inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device,
   config.num_sdma_xgmi_engines = device->num_sdma_xgmi_engines();
   config.num_sdma_queues_per_engine = device->num_sdma_queues_per_engine();
   if (config.num_sdma_engines != 0 && config.num_sdma_queues_per_engine == 0)
-    throw std::runtime_error(std::string(json_path) +
-                             ".num_sdma_queues_per_engine must be nonzero when " +
-                             std::string(json_path) + ".num_sdma_engines is nonzero");
+    return emit_error.emit() << json_path << ".num_sdma_queues_per_engine must be nonzero when "
+                             << json_path << ".num_sdma_engines is nonzero";
   config.num_cp_queues = device->num_cp_queues();
   config.max_engine_clk_fcompute = device->max_engine_clk_fcompute();
   config.location_id = device->location_id();
