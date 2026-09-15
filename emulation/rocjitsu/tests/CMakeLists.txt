@@ -3761,12 +3761,20 @@ if(RJ_ENABLE_HIP_TESTS)
                 RcclDaemonTest.ReduceScatter
                 RcclDaemonTest.SendRecv
             )
+            set(_rccl_test_environment)
+            if(EXISTS "${ROCM_PATH}/.kpack/rccl_lib_gfx950.kpack")
+                # TheRock ships RCCL device code separately. Resolve the
+                # archive independently of the test process's working directory.
+                list(APPEND _rccl_test_environment
+                    "ROCM_KPACK_PATH=${ROCM_PATH}/.kpack/rccl_lib_gfx950.kpack")
+            endif()
             foreach(TC IN LISTS RJ_RCCL_TESTS)
                 rj_add_test(
                     NAME ${TC}
                     COMMAND daemon_test --gtest_filter=${TC}
                     TIMEOUT 180
                     LABELS daemon rccl
+                    ENVIRONMENT ${_rccl_test_environment}
                     INSTALL_COMMAND
                         "bin/daemon_test"
                         "--gtest_filter=${TC}"
