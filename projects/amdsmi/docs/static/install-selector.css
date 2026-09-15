@@ -1,0 +1,80 @@
+/* Install-page selector. Colors come from the theme so light and dark both work. */
+
+.amdsmi-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin: 1.5rem 0 2rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--pst-color-border, #ced6dd);
+  border-radius: 0.5rem;
+  background: var(--pst-color-surface, #f7f9fb);
+}
+
+.amdsmi-selector__axis {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.amdsmi-selector__legend {
+  flex: 0 0 10.5rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--pst-color-text-muted, #646776);
+}
+
+.amdsmi-selector__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.amdsmi-selector__option {
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--pst-color-border, #ced6dd);
+  border-radius: 2rem;
+  background: var(--pst-color-background, #fff);
+  color: var(--pst-color-text-base, #323232);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.amdsmi-selector__option:hover {
+  border-color: var(--pst-color-primary, #0071c5);
+}
+
+.amdsmi-selector__option:focus-visible {
+  outline: 2px solid var(--pst-color-primary, #0071c5);
+  outline-offset: 2px;
+}
+
+.amdsmi-selector__option[aria-pressed="true"] {
+  background: var(--pst-color-primary, #0071c5);
+  border-color: var(--pst-color-primary, #0071c5);
+  color: #fff;
+  font-weight: 600;
+}
+
+.amdsmi-selector__noscript {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--pst-color-text-muted, #646776);
+}
+
+/* The theme sets display on divs, so the hidden attribute needs reinforcing. */
+.amdsmi-selector__axis[hidden],
+.amdsmi-when[hidden],
+section[hidden],
+li[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 720px) {
+  .amdsmi-selector__legend {
+    flex-basis: 100%;
+  }
+}
