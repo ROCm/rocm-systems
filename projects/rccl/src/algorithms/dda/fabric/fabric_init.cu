@@ -68,9 +68,9 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   // is allocated once and exported across the clique, so a later graph AR
   // must still fit. On gfx1250 that is a silent 256 MiB tax vs eager VMM.
   // RCCL_DDA_FABRIC_BUFFER_SIZE overrides.
-  const int64_t llThresh = (int64_t)rcclDdaLLThreshold(comm, ncclFuncAllReduce);
-  const int64_t ll128Thresh = (int64_t)rcclDdaLL128Threshold(comm, ncclFuncAllReduce);
-  const int64_t simpleThresh = (int64_t)rcclDdaScratchPayloadCap(comm);
+  const size_t llThresh = rcclDdaLLThreshold(comm, ncclFuncAllReduce);
+  const size_t ll128Thresh = rcclDdaLL128Threshold(comm, ncclFuncAllReduce);
+  const size_t simpleThresh = rcclDdaScratchPayloadCap(comm);
   const int64_t fabricScratchOverride = rcclParamDdaFabricBufferSizeForScratch();
 
   // Right-sized from the DDA thresholds and nRanks (env-overridable) instead of

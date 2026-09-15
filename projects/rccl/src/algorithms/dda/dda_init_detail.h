@@ -43,13 +43,13 @@ constexpr int kDdaNranks = dda::common::NRANKS;
 // slot arrays can still exceed that at high rank counts, which is why the
 // floors remain. Kernel-internal slot caps (kDdaLLArMaxBytes, etc.) may still
 // refuse a message even when scratch is large enough.
-inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t ddaEnabled, int64_t ddaThreshold,
-                                     int64_t llEnabled, int64_t ll128Enabled, int64_t ll128Threshold = 0) {
+inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t ddaEnabled, size_t ddaThreshold,
+                                     int64_t llEnabled, int64_t ll128Enabled, size_t ll128Threshold = 0) {
   if (overrideBytes >= 0) {
     return overrideBytes > 0 ? (size_t)overrideBytes : 0;
   }
 
-  const size_t simpleCap = ddaEnabled && ddaThreshold > 0 ? (size_t)ddaThreshold : 0;
+  const size_t simpleCap = ddaEnabled && ddaThreshold > 0 ? ddaThreshold : 0;
   if (simpleCap == 0) {
     return 0;
   }
@@ -63,7 +63,7 @@ inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t 
   // nRanks slots, 2 banks.
   size_t ll128Floor = 0;
   if ((llEnabled || ll128Enabled) && ll128Threshold > 0) {
-    const size_t perRank = ((size_t)ll128Threshold + (size_t)nRanks - 1) / (size_t)nRanks;
+    const size_t perRank = (ll128Threshold + (size_t)nRanks - 1) / (size_t)nRanks;
     size_t slotSlices = ddaLL128Slices(perRank);
     slotSlices += slotSlices & 1; // even: the two-shot tier halves this slot
     ll128Floor = (size_t)2 * nRanks * slotSlices * (size_t)kDdaLL128WireBytesPerSlice;
