@@ -391,7 +391,7 @@ write_in_time_sample_data(CategoryT, const in_time_sample& _sample, bool use_ann
     const auto event_metadata = nlohmann::json::parse(_sample.event_metadata);
 
     const auto track_name = std::string(_sample.track_name);
-    const auto _timestamp = _sample.timestamp_ns;
+    const auto timestamp  = _sample.timestamp_ns;
 
     const std::string _name       = event_metadata.value("name", "");
     const std::string _event_type = event_metadata.value("event_type", "");
@@ -403,13 +403,13 @@ write_in_time_sample_data(CategoryT, const in_time_sample& _sample, bool use_ann
     auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
         if(!use_annotations) return;
 
-        annotate_perfetto(ctx, { { "timestamp_ns", _timestamp },
+        annotate_perfetto(ctx, { { "timestamp_ns", timestamp },
                                  { "event_type", _event_type },
                                  { "target", _target } });
     };
 
     TRACE_EVENT_INSTANT(trait::name<CategoryT>::value, ::perfetto::DynamicString{ _name },
-                        track, _timestamp, add_perfetto_annotations);
+                        track, timestamp, add_perfetto_annotations);
 }
 
 // Dispatch to write_in_time_sample_data with the correct category type
@@ -1212,11 +1212,11 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
     };
 
     const auto track_name = std::string(_pmc.track_name);
-    const auto _value     = _pmc.value;
-    const auto _beg_ts    = _pmc.timestamp_ns;
-    const auto _device_id = _pmc.device_id;
+    const auto value      = _pmc.value;
+    const auto beg_ts     = _pmc.timestamp_ns;
+    const auto device_id  = _pmc.device_id;
 
-    auto track_key = std::hash<std::string>{}(track_name + std::to_string(_device_id));
+    auto track_key = std::hash<std::string>{}(track_name + std::to_string(device_id));
 
     auto track_it = PMC_TRACK_MAP.find(_pmc.category_enum_id);
     if(track_it != PMC_TRACK_MAP.end())
@@ -1228,7 +1228,7 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
             track_info.emplace_fn(track_key, track_name, track_info.default_units);
         }
 
-        track_info.trace_fn(track_key, 0, _beg_ts, _value);
+        track_info.trace_fn(track_key, 0, beg_ts, value);
     }
     else
     {
