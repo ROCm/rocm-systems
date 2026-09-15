@@ -24,6 +24,21 @@ static void unlinkCeCollFromParent(struct collApi* parent, struct taskEventBase*
   __atomic_fetch_sub(&parent->refCount, 1, __ATOMIC_RELAXED);
 }
 
+// Claim a poller-list slot, refusing one whose previous occupant is still linked.
+static bool reservePollerSlot(struct context* ctx, bool* linked) {
+  pthread_mutex_lock(&ctx->ceEvents.mutex);
+  if (*linked) {
+    pthread_mutex_unlock(&ctx->ceEvents.mutex);
+    // A refused CeColl takes its CeSync/CeBatch children with it, since core
+    // gates those on the parent handle. Count it so finalize can report the gap.
+    __atomic_fetch_add(&ctx->ceDroppedEvents, 1, __ATOMIC_RELAXED);
+    return false;
+  }
+  *linked = true;
+  pthread_mutex_unlock(&ctx->ceEvents.mutex);
+  return true;
+}
+
 static void unlinkCeChildFromParent(struct ceColl* parent, struct taskEventBase* base) {
   if (parent == NULL) return;
   taskEventQueueUnlink(parent, base);
@@ -73,7 +88,9 @@ static void pollCeCollEvents(struct context* ctx) {
       event->base.startTs = gettime() - startTime;
     }
 
-    if (event->startCompleted && !event->stopCompleted && cudaEventQuery(event->stopEvent) == cudaSuccess) {
+    if (event->startCompleted && !event->stopCompleted &&
+        __atomic_load_n(&event->stopRecorded, __ATOMIC_ACQUIRE) &&
+        cudaEventQuery(event->stopEvent) == cudaSuccess) {
       event->stopCompleted = true;
       event->cpuStopTime = gettime();
       event->base.stopTs = gettime() - startTime;
@@ -102,6 +119,7 @@ static void pollCeCollEvents(struct context* ctx) {
       // Return event to pool for reuse (ring buffer behavior)
       __atomic_fetch_add(&ctx->ceCollPoolBase, 1, __ATOMIC_RELAXED);
 
+      event->pollerLinked = false;
       *ceCollPtr = event->pollerNext;
       continue;
     }
@@ -125,7 +143,9 @@ static void pollCeSyncEvents(struct context* ctx) {
       event->base.startTs = gettime() - startTime;
     }
 
-    if (event->startCompleted && !event->stopCompleted && cudaEventQuery(event->stopEvent) == cudaSuccess) {
+    if (event->startCompleted && !event->stopCompleted &&
+        __atomic_load_n(&event->stopRecorded, __ATOMIC_ACQUIRE) &&
+        cudaEventQuery(event->stopEvent) == cudaSuccess) {
       event->stopCompleted = true;
       event->cpuStopTime = gettime();
       event->base.stopTs = gettime() - startTime;
@@ -153,6 +173,7 @@ static void pollCeSyncEvents(struct context* ctx) {
       // Return event to pool for reuse (ring buffer behavior)
       __atomic_fetch_add(&ctx->ceSyncPoolBase, 1, __ATOMIC_RELAXED);
 
+      event->pollerLinked = false;
       *ceSyncPtr = event->pollerNext;
       continue;
     }
@@ -176,7 +197,9 @@ static void pollCeBatchEvents(struct context* ctx) {
       event->base.startTs = gettime() - startTime;
     }
 
-    if (event->startCompleted && !event->stopCompleted && cudaEventQuery(event->stopEvent) == cudaSuccess) {
+    if (event->startCompleted && !event->stopCompleted &&
+        __atomic_load_n(&event->stopRecorded, __ATOMIC_ACQUIRE) &&
+        cudaEventQuery(event->stopEvent) == cudaSuccess) {
       event->stopCompleted = true;
       event->cpuStopTime = gettime();
       event->base.stopTs = gettime() - startTime;
@@ -204,6 +227,7 @@ static void pollCeBatchEvents(struct context* ctx) {
       // Return event to pool for reuse (ring buffer behavior)
       __atomic_fetch_add(&ctx->ceBatchPoolBase, 1, __ATOMIC_RELAXED);
 
+      event->pollerLinked = false;
       *ceBatchPtr = event->pollerNext;
       continue;
     }
@@ -268,7 +292,11 @@ ncclResult_t ceProfilerInitGlobal(void) {
 
   ceProfilerCtxt.pollerRunning = true;
   if (pthread_create(&ceProfilerCtxt.pollerThread, NULL, cePollerThreadMain, NULL) != 0) {
+    // Both fields gate later registration and the finalize-time join, so clear
+    // them rather than leaving a freed pointer and a "running" poller behind.
     free(ceProfilerCtxt.contextRegistry);
+    ceProfilerCtxt.contextRegistry = NULL;
+    ceProfilerCtxt.pollerRunning = false;
     return ncclSystemError;
   }
 
@@ -364,6 +392,7 @@ void ceProfilerCleanupPendingEvents(struct context* ctx) {
   while (ceColl) {
     if (ceColl->startEvent) cudaEventDestroy(ceColl->startEvent);
     if (ceColl->stopEvent) cudaEventDestroy(ceColl->stopEvent);
+    ceColl->pollerLinked = false;
     ceColl = ceColl->pollerNext;
   }
 
@@ -371,6 +400,7 @@ void ceProfilerCleanupPendingEvents(struct context* ctx) {
   while (ceSync) {
     if (ceSync->startEvent) cudaEventDestroy(ceSync->startEvent);
     if (ceSync->stopEvent) cudaEventDestroy(ceSync->stopEvent);
+    ceSync->pollerLinked = false;
     ceSync = ceSync->pollerNext;
   }
 
@@ -378,6 +408,7 @@ void ceProfilerCleanupPendingEvents(struct context* ctx) {
   while (ceBatch) {
     if (ceBatch->startEvent) cudaEventDestroy(ceBatch->startEvent);
     if (ceBatch->stopEvent) cudaEventDestroy(ceBatch->stopEvent);
+    ceBatch->pollerLinked = false;
     ceBatch = ceBatch->pollerNext;
   }
 
@@ -400,7 +431,15 @@ ncclResult_t ceProfilerStartCeCollEvent(struct context* ctx, void** eHandle, ncc
   int ceCollId = __atomic_fetch_add(&ctx->ceCollPoolIndex, 1, __ATOMIC_RELAXED);
   if ((ceCollId - __atomic_load_n(&ctx->ceCollPoolBase, __ATOMIC_RELAXED)) < ctx->ceCollPoolSize) {
     event = &ctx->ceCollPool[ceCollId % ctx->ceCollPoolSize];
+    // The poller retires in completion order, so reuse can land on a still-linked
+    // slot. Relinking it would cycle the poller list, so drop this event instead.
+    if (!reservePollerSlot(ctx, &event->pollerLinked)) {
+      __atomic_fetch_add(&ctx->ceCollPoolBase, 1, __ATOMIC_RELAXED);
+      *eHandle = NULL;
+      return ncclSuccess;
+    }
     event->parent = (struct collApi*)eDescr->parentObj;
+    event->ctx = ctx;
     event->ceCollId = ceCollId;
     event->seqNumber = eDescr->ceColl.seqNumber;
     event->count = eDescr->ceColl.count;
@@ -412,6 +451,7 @@ ncclResult_t ceProfilerStartCeCollEvent(struct context* ctx, void** eHandle, ncc
     event->timingMode = ceProfilerCtxt.timingMode;
     event->startCompleted = false;
     event->stopCompleted = false;
+    event->stopRecorded = false;
 
     // Initialize taskEventBase fields
     event->base.type = eDescr->type;
@@ -462,6 +502,7 @@ ncclResult_t ceProfilerStartCeCollEvent(struct context* ctx, void** eHandle, ncc
 ncclResult_t ceProfilerStopCeCollEvent(void* eHandle) {
   struct ceColl* event = (struct ceColl*)eHandle;
   cudaEventRecord(event->stopEvent, event->stream);
+  __atomic_store_n(&event->stopRecorded, true, __ATOMIC_RELEASE);
   debugEvent(eHandle, "CeCollStopEvent");
   return ncclSuccess;
 }
@@ -472,7 +513,13 @@ ncclResult_t ceProfilerStartCeSyncEvent(struct context* ctx, void** eHandle, ncc
   int ceSyncId = __atomic_fetch_add(&ctx->ceSyncPoolIndex, 1, __ATOMIC_RELAXED);
   if ((ceSyncId - __atomic_load_n(&ctx->ceSyncPoolBase, __ATOMIC_RELAXED)) < ctx->ceSyncPoolSize) {
     event = &ctx->ceSyncPool[ceSyncId % ctx->ceSyncPoolSize];
+    if (!reservePollerSlot(ctx, &event->pollerLinked)) {
+      __atomic_fetch_add(&ctx->ceSyncPoolBase, 1, __ATOMIC_RELAXED);
+      *eHandle = NULL;
+      return ncclSuccess;
+    }
     event->parent = (struct ceColl*)eDescr->parentObj;
+    event->ctx = ctx;
     event->ceSyncId = ceSyncId;
     event->isComplete = eDescr->ceCollSync.isComplete;
     event->nRanks = eDescr->ceCollSync.nRanks;
@@ -487,6 +534,7 @@ ncclResult_t ceProfilerStartCeSyncEvent(struct context* ctx, void** eHandle, ncc
     event->timingMode = ceProfilerCtxt.timingMode;
     event->startCompleted = false;
     event->stopCompleted = false;
+    event->stopRecorded = false;
 
     // Initialize taskEventBase fields
     event->base.type = eDescr->type;
@@ -532,6 +580,7 @@ ncclResult_t ceProfilerStartCeSyncEvent(struct context* ctx, void** eHandle, ncc
 ncclResult_t ceProfilerStopCeSyncEvent(void* eHandle) {
   struct ceSync* event = (struct ceSync*)eHandle;
   cudaEventRecord(event->stopEvent, event->stream);
+  __atomic_store_n(&event->stopRecorded, true, __ATOMIC_RELEASE);
   debugEvent(eHandle, "CeSyncStopEvent");
   return ncclSuccess;
 }
@@ -542,7 +591,13 @@ ncclResult_t ceProfilerStartCeBatchEvent(struct context* ctx, void** eHandle, nc
   int ceBatchId = __atomic_fetch_add(&ctx->ceBatchPoolIndex, 1, __ATOMIC_RELAXED);
   if ((ceBatchId - __atomic_load_n(&ctx->ceBatchPoolBase, __ATOMIC_RELAXED)) < ctx->ceBatchPoolSize) {
     event = &ctx->ceBatchPool[ceBatchId % ctx->ceBatchPoolSize];
+    if (!reservePollerSlot(ctx, &event->pollerLinked)) {
+      __atomic_fetch_add(&ctx->ceBatchPoolBase, 1, __ATOMIC_RELAXED);
+      *eHandle = NULL;
+      return ncclSuccess;
+    }
     event->parent = (struct ceColl*)eDescr->parentObj;
+    event->ctx = ctx;
     event->ceBatchId = ceBatchId;
     event->numOps = eDescr->ceCollBatch.numOps;
     event->totalBytes = eDescr->ceCollBatch.totalBytes;
@@ -556,6 +611,7 @@ ncclResult_t ceProfilerStartCeBatchEvent(struct context* ctx, void** eHandle, nc
     event->timingMode = ceProfilerCtxt.timingMode;
     event->startCompleted = false;
     event->stopCompleted = false;
+    event->stopRecorded = false;
 
     // Initialize taskEventBase fields
     event->base.type = eDescr->type;
@@ -601,6 +657,7 @@ ncclResult_t ceProfilerStartCeBatchEvent(struct context* ctx, void** eHandle, nc
 ncclResult_t ceProfilerStopCeBatchEvent(void* eHandle) {
   struct ceBatch* event = (struct ceBatch*)eHandle;
   cudaEventRecord(event->stopEvent, event->stream);
+  __atomic_store_n(&event->stopRecorded, true, __ATOMIC_RELEASE);
   debugEvent(eHandle, "CeBatchStopEvent");
   return ncclSuccess;
 }

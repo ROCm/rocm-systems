@@ -432,6 +432,64 @@ def test_ce_events_traced(paths):
 
 @pytest.mark.ext_profiler
 @pytest.mark.allreduce
+def test_ce_pool_wrap_does_not_hang(paths):
+    """A CE pool smaller than the collective count must recycle its slots.
+
+    The poller retires events in completion order, so a slot can be reused while
+    still on the poller list. Relinking it splices that singly-linked list into a
+    cycle, and the sweep then spins forever holding ceEvents.mutex, so the next
+    collective blocks in the plugin and the job hangs.
+    """
+
+    log_dir = os.path.join(paths.LOGDIR, "allreduce_ext_profiler_test_logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, "ce_pool_wrap.log")
+
+    env = os.environ.copy()
+    env.update({
+        "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
+        "LD_LIBRARY_PATH": f"{paths.RCCL_INSTALL_DIR}:{paths.OMPI_INSTALL_DIR}/lib:{paths.PROFILER_DIR}:{env.get('LD_LIBRARY_PATH', '')}",
+        "HSA_NO_SCRATCH_RECLAIM": "1",
+        "NCCL_PROFILER_PLUGIN": paths.PROFILER_SO,
+        "NCCL_PROFILE_EVENT_MASK": "28672",
+        # Far fewer slots than collectives, so the ring wraps many times over.
+        "NCCL_PROFILE_CE_COLL_POOL_SIZE": "4",
+        "NCCL_PROFILE_CE_SYNC_POOL_SIZE": "4",
+        "NCCL_PROFILE_CE_BATCH_POOL_SIZE": "4",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1",
+        "NCCL_CTA_POLICY": "2",
+        "NCCL_LOCAL_REGISTER": "0",
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_DDA_ENABLE": "0",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "INIT,COLL",
+    })
+
+    args = [
+        f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "8",
+        "--mca", "pml", "ucx",
+        "--mca", "btl", "^vader,openib",
+        f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
+        "-b", "1M", "-e", "4M", "-f", "2", "-g", "1", "-n", "100", "-w", "20",
+    ]
+
+    with open(log_file, "w") as logfile:
+        try:
+            result = subprocess.run(args, env=env, stdout=logfile,
+                                    stderr=subprocess.STDOUT, universal_newlines=True,
+                                    timeout=300)
+        except subprocess.TimeoutExpired:
+            pytest.fail(f"CE pool wrap hung, see {log_file}")
+
+    if not paths.check_event_in_log(log_file, "CE 2-shot AllReduce"):
+        pytest.skip(f"CE AllReduce was not dispatched on this configuration, see {log_file}")
+
+    assert result.returncode == 0, f"CE AllReduce with a wrapping pool failed, see {log_file}"
+
+
+@pytest.mark.ext_profiler
+@pytest.mark.allreduce
 def test_invalid_mask_value(paths):
     """Test profiler behavior with invalid event mask (0 = no events)"""
     

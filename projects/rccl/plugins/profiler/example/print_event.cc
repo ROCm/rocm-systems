@@ -226,7 +226,7 @@ static void debugCeCollEvent(FILE* fh, struct ceColl* event, const char* tag) {
   fprintf(fh, "  stopCompleted     = %d\n", event->stopCompleted);
   fprintf(fh, "  startTs           = %f\n", event->base.startTs);
   fprintf(fh, "  stopTs            = %f\n", event->base.stopTs);
-  fprintf(fh, "  cpuDuration       = %lu us\n", event->cpuDuration);
+  fprintf(fh, "  cpuDuration       = %f us\n", event->cpuDuration);
   fprintf(fh, "  elapsedTime       = %lu us\n", event->elapsedTime);
   fprintf(fh, "}\n");
 }
@@ -240,7 +240,7 @@ static void debugCeSyncEvent(FILE* fh, struct ceSync* event, const char* tag) {
   fprintf(fh, "  stopCompleted     = %d\n", event->stopCompleted);
   fprintf(fh, "  startTs           = %f\n", event->base.startTs);
   fprintf(fh, "  stopTs            = %f\n", event->base.stopTs);
-  fprintf(fh, "  cpuDuration       = %lu us\n", event->cpuDuration);
+  fprintf(fh, "  cpuDuration       = %f us\n", event->cpuDuration);
   fprintf(fh, "}\n");
 }
 
@@ -254,7 +254,7 @@ static void debugCeBatchEvent(FILE* fh, struct ceBatch* event, const char* tag) 
   fprintf(fh, "  stopCompleted     = %d\n", event->stopCompleted);
   fprintf(fh, "  startTs           = %f\n", event->base.startTs);
   fprintf(fh, "  stopTs            = %f\n", event->base.stopTs);
-  fprintf(fh, "  cpuDuration       = %lu us\n", event->cpuDuration);
+  fprintf(fh, "  cpuDuration       = %f us\n", event->cpuDuration);
   fprintf(fh, "}\n");
 }
 #endif
@@ -339,6 +339,7 @@ void debugEvent(void* eHandle, const char* tag) {
 // CE event print functions
 static __thread int ceCollId;
 static void printCeCollEvent(FILE* fh, struct ceColl* event) {
+  if (!event->stopCompleted) return;
   if (event->timingMode == CE_TIMING_GPU) {
     fprintf(fh, "{\"name\": \"%s\", \"cat\": \"CE_COLL\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"eventId\": %lu, \"count\": %lu, \"datatype\": \"%s\", \"strategy\": \"%s\", \"start_ts_cpu\": %f, \"stop_ts_cpu\": %f, \"duration_cpu_us\": %f, \"duration_gpu_us\": %lu}},\n",
             event->base.func, ceCollId, getpid(), 1, event->base.startTs, event->eventId, event->count, event->datatype, event->syncStrategy, event->cpuStartTime, event->cpuStopTime, event->cpuDuration, event->elapsedTime);
@@ -361,6 +362,7 @@ static void printCeCollEvent(FILE* fh, struct ceColl* event) {
 
 static __thread int ceSyncId;
 static void printCeSyncEvent(FILE* fh, struct ceSync* event) {
+  if (!event->stopCompleted) return;
   const char* syncTypeStr = event->isComplete ? "Complete" : "Ready";
   const char* strategy = (event->parent && event->parent->syncStrategy) ? event->parent->syncStrategy : "unknown";
   if (event->timingMode == CE_TIMING_GPU) {
@@ -376,6 +378,7 @@ static void printCeSyncEvent(FILE* fh, struct ceSync* event) {
 
 static __thread int ceBatchId;
 static void printCeBatchEvent(FILE* fh, struct ceBatch* event) {
+  if (!event->stopCompleted) return;
   if (event->timingMode == CE_TIMING_GPU) {
     fprintf(fh, "{\"name\": \"CeBatch\", \"cat\": \"CE_BATCH\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"eventId\": %lu, \"numOps\": %d, \"totalBytes\": %lu, \"start_ts_cpu\": %f, \"stop_ts_cpu\": %f, \"duration_cpu_us\": %f, \"duration_gpu_us\": %lu}},\n",
             ceBatchId, getpid(), 1, event->base.startTs, event->eventId, event->numOps, event->totalBytes, event->cpuStartTime, event->cpuStopTime, event->cpuDuration, event->elapsedTime);
@@ -479,7 +482,10 @@ void printEvent(FILE* fh, void* handle) {
   } else if (type == ncclProfileProxyOp) {
     struct proxyOp* p = (struct proxyOp *)handle;
     printProxyOpEventHeader(fh, p);
-    for (int i = 0; i < MAX_STEPS; i++) {
+    // Collective reuse clears nProxyOps but not op[][], so slots past
+    // stepCount can still hold the previous collective's steps.
+    int nSteps = p->stepCount < MAX_STEPS ? p->stepCount : MAX_STEPS;
+    for (int i = 0; i < nSteps; i++) {
       printEvent(fh, &p->step[i]);
     }
     printProxyOpEventTrailer(fh, p);

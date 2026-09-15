@@ -4,6 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include <stdlib.h>
 #include "tuner.h"
 #define __hidden __attribute__ ((visibility("hidden")))
 #define HOPPER_COMPCAP_IDX 2
@@ -61,18 +62,23 @@ static struct tuningModel tuning_model = {
   },
 };
 
-float latencies[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
-float bandwidths[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
+// The model is a function of (nRanks, nNodes), so it is per-communicator:
+// file-scope tables would retune existing comms on the next ncclCommInitRank.
+struct modelTables {
+  float latencies[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
+  float bandwidths[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
+};
 
-ncclResult_t ncclTopoGetAlgoTime_Tuner(ncclFunc_t collType, int algorithm, int protocol, int numPipeOps, float* time, size_t nBytes) {
+static ncclResult_t ncclTopoGetAlgoTime_Tuner(const struct modelTables* m, ncclFunc_t collType, int algorithm,
+                                              int protocol, int numPipeOps, float* time, size_t nBytes) {
   // collType is an ncclFunc_t, which runs past the five collectives the model covers.
   if (collType < 0 || collType >= NCCL_NUM_FUNCTIONS ||
       algorithm < 0 || algorithm >= NCCL_NUM_ALGORITHMS ||
       protocol < 0 || protocol >= NCCL_NUM_PROTOCOLS) {
     *time = -1.0; return ncclSuccess;
   }
-  float bw = bandwidths[collType][algorithm][protocol];
-  float lat = latencies[collType][algorithm][protocol];
+  float bw = m->bandwidths[collType][algorithm][protocol];
+  float lat = m->latencies[collType][algorithm][protocol];
 
   if (bw == 0) {
     *time = -1.0; return ncclSuccess;
@@ -93,9 +99,13 @@ ncclResult_t ncclTopoGetAlgoTime_Tuner(ncclFunc_t collType, int algorithm, int p
 }
 
 __hidden ncclResult_t pluginInit(size_t nRanks, size_t nNodes, ncclDebugLogger_t logFunction, void** context) {
-  // The model is held in file-scope tables, so no per-communicator state is needed.
   if (context) *context = NULL;
-  if (nRanks <= 1) return ncclSuccess;
+  if (nRanks <= 1 || !context) return ncclSuccess;
+  struct modelTables* m = (struct modelTables*)calloc(1, sizeof(*m));
+  if (!m) return ncclSystemError;
+  // Aliases so the model below indexes the per-comm tables unchanged.
+  float (*latencies)[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = m->latencies;
+  float (*bandwidths)[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = m->bandwidths;
   int compCapIndex = HOPPER_COMPCAP_IDX;
   int index2 = nNodes <= 2 ? nNodes-1 : 2;
   int index1 = nNodes == 1 ? compCapIndex : 1;
@@ -200,6 +210,7 @@ __hidden ncclResult_t pluginInit(size_t nRanks, size_t nNodes, ncclDebugLogger_t
     if (pEnable == 0) bandwidths[c][a][p] = 0;
     if (algoEnable[a] == 0) bandwidths[c][a][p] = 0;
   }
+  *context = m;
   return ncclSuccess;
 }
 
@@ -211,6 +222,10 @@ __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size
   // Leave channel count to RCCL's own selection logic.
   *nChannels = 0;
 
+  // No model for this comm (single rank, or init failed): keep RCCL's own costs.
+  const struct modelTables* m = (const struct modelTables*)context;
+  if (!m) return ncclSuccess;
+
   int nAlgos = numAlgo < NCCL_NUM_ALGORITHMS ? numAlgo : NCCL_NUM_ALGORITHMS;
   int nProtos = numProto < NCCL_NUM_PROTOCOLS ? numProto : NCCL_NUM_PROTOCOLS;
   int bestAlgo = -1, bestProto = -1;
@@ -220,7 +235,7 @@ __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size
       // RCCL marks combinations it cannot use; leave those untouched.
       if (table[a][p] == NCCL_ALGO_PROTO_IGNORE) continue;
       float time;
-      ncclTopoGetAlgoTime_Tuner(collType, a, p, numPipeOps, &time, nBytes);
+      ncclTopoGetAlgoTime_Tuner(m, collType, a, p, numPipeOps, &time, nBytes);
       // A negative time means the model has no bandwidth data for this
       // combination, so keep the cost RCCL estimated itself.
       if (time < 0) continue;
@@ -234,7 +249,7 @@ __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size
   return ncclSuccess;
 }
 
-__hidden ncclResult_t pluginDestroy(void* context) { return ncclSuccess; }
+__hidden ncclResult_t pluginDestroy(void* context) { free(context); return ncclSuccess; }
 
 #define PLUGIN_NAME "Example"
 

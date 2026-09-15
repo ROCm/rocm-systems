@@ -635,7 +635,6 @@ void inspectorDumpThread::startThread() {
     return;
   }
   threadStarted = true;
-  periodicDumpRan = true;
   TRACE_INSPECTOR("NCCL Inspector inspectorDumpThread: created");
 }
 
@@ -756,6 +755,14 @@ void* inspectorDumpThread::dumpMain(void* arg) {
     if (res == inspectorFileOpenError || res == inspectorDisabledError) {
       inspectorUnlockRWLock(&dumper->guard);
       break;
+    }
+    // The destructor rotates the files named here, so only claim a periodic dump
+    // ran once one produced a file. Thread creation alone is not enough.
+    for (size_t i = 0; i < dumper->deviceFlushEntries.size(); i++) {
+      if (dumper->deviceFlushEntries[i].filename[0] != '\0') {
+        dumper->periodicDumpRan = true;
+        break;
+      }
     }
     inspectorUnlockRWLock(&dumper->guard);
 

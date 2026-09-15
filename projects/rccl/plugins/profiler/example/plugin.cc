@@ -143,18 +143,10 @@ static struct context* contextFromEventHandle(void* eHandle) {
     struct kernelCh* ev = (struct kernelCh*)eHandle;
     return getTaskEventCtx(ev->parent);
   }
-  case ncclProfileCeColl: {
-    struct ceColl* ev = (struct ceColl*)eHandle;
-    return ev->parent ? ev->parent->ctx : nullptr;
-  }
-  case ncclProfileCeSync: {
-    struct ceSync* ev = (struct ceSync*)eHandle;
-    return (ev->parent && ev->parent->parent) ? ev->parent->parent->ctx : nullptr;
-  }
-  case ncclProfileCeBatch: {
-    struct ceBatch* ev = (struct ceBatch*)eHandle;
-    return (ev->parent && ev->parent->parent) ? ev->parent->parent->ctx : nullptr;
-  }
+  // CE events carry their own ctx: a root CE event has no parent to walk.
+  case ncclProfileCeColl: return ((struct ceColl*)eHandle)->ctx;
+  case ncclProfileCeSync: return ((struct ceSync*)eHandle)->ctx;
+  case ncclProfileCeBatch: return ((struct ceBatch*)eHandle)->ctx;
   default: return nullptr;
   }
 }
@@ -462,23 +454,32 @@ __hidden ncclResult_t exampleProfilerFinalize(void* context) {
     }
   }
 
-  // Log completion stats
-  int completedCount = 0;
-  int totalCount = (ctx->ceCollPoolIndex < ctx->ceCollPoolSize) ? ctx->ceCollPoolIndex : ctx->ceCollPoolSize;
-  int startIdx = (ctx->ceCollPoolIndex - totalCount + ctx->ceCollPoolSize) % ctx->ceCollPoolSize;
-  for (int i = 0; i < totalCount; i++) {
-    if (ctx->ceCollPool[(startIdx + i) % ctx->ceCollPoolSize].stopCompleted) completedCount++;
+  // Log completion stats. Guarded like the wait loop above: a pool size of 0 is
+  // a valid override and would divide by zero here.
+  if (ctx->ceCollPool && ctx->ceCollPoolSize > 0) {
+    int completedCount = 0;
+    int totalCount = (ctx->ceCollPoolIndex < ctx->ceCollPoolSize) ? ctx->ceCollPoolIndex : ctx->ceCollPoolSize;
+    int startIdx = (ctx->ceCollPoolIndex - totalCount + ctx->ceCollPoolSize) % ctx->ceCollPoolSize;
+    for (int i = 0; i < totalCount; i++) {
+      if (ctx->ceCollPool[(startIdx + i) % ctx->ceCollPoolSize].stopCompleted) completedCount++;
+    }
+    INFO(NCCL_INIT, "PROFILER/Plugin: CeColl events - total=%d completed=%d", totalCount, completedCount);
   }
-  INFO(NCCL_INIT, "PROFILER/Plugin: CeColl events - total=%d completed=%d", totalCount, completedCount);
+  int ceDropped = __atomic_load_n(&ctx->ceDroppedEvents, __ATOMIC_RELAXED);
+  if (ceDropped) {
+    WARN("PROFILER/Plugin: dropped %d CE event(s) whose pool slot was still in flight; "
+         "the trace has gaps. Raise NCCL_PROFILE_CE_COLL_POOL_SIZE to reduce this.",
+         ceDropped);
+  }
+
+  // Deregister before touching the events: this blocks on the registry mutex,
+  // which the poller holds for a whole sweep, so no sweep can be mid-pass.
+  ceProfilerDeregisterContext(ctx);
 
   // Print events first (while pools are still valid)
   printAllEvents(fh, ctx);
 
-  // Then cleanup and free resources. The cleanup clears the poller lists under
-  // ceEvents.mutex, so a concurrent sweep walks empty lists rather than events
-  // whose cudaEvents it just destroyed.
   ceProfilerCleanupPendingEvents(ctx);
-  ceProfilerDeregisterContext(ctx);
   deferContextFree(ctx);
 
   if (__atomic_sub_fetch(&initialized, 1, __ATOMIC_RELAXED) == 0) {
@@ -509,16 +510,19 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     if ((groupApiId - __atomic_load_n(&ctx->groupApiPoolBase, __ATOMIC_RELAXED)) < groupApiPoolSize) {
       // if there are available group API events grab one
       event = &ctx->groupApiPool[groupApiId%groupApiPoolSize];
-      // Make sure all child events of the picked group API event are cleared
+      // Make sure all child events of the picked group API event are cleared.
+      // ceEvents.mutex keeps resetTaskEvents off the CE poller's unlink target.
       while (!profilerQueueEmpty(&event->collApiEvents)) {
         struct collApi *collApiEvent = profilerQueueDequeue(&event->collApiEvents);
+        pthread_mutex_lock(&ctx->ceEvents.mutex);
         resetTaskEvents(collApiEvent, ctx);
-        __atomic_fetch_add(&ctx->collApiPoolBase, 1, __ATOMIC_RELAXED);
+        pthread_mutex_unlock(&ctx->ceEvents.mutex);
+        creditApiPoolOnce(collApiEvent, &ctx->collApiPoolBase);
       }
       while (!profilerQueueEmpty(&event->p2pApiEvents)) {
         struct p2pApi *p2pApiEvent = profilerQueueDequeue(&event->p2pApiEvents);
         resetTaskEvents(p2pApiEvent, ctx);
-        __atomic_fetch_add(&ctx->p2pApiPoolBase, 1, __ATOMIC_RELAXED);
+        creditApiPoolOnce(p2pApiEvent, &ctx->p2pApiPoolBase);
       }
       while (!profilerQueueEmpty(&event->kernelLaunchEvents)) {
         profilerQueueDequeue(&event->kernelLaunchEvents);
@@ -543,7 +547,17 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     if ((collApiId - __atomic_load_n(&ctx->collApiPoolBase, __ATOMIC_RELAXED)) < collApiPoolSize) {
       // if there are available Coll API events grab one
       event = &ctx->collApiPool[collApiId%collApiPoolSize];
+      // Slot choice is positional: a free credit does not mean this slot is free,
+      // since a CE child of the previous occupant may still reference it.
+      pthread_mutex_lock(&ctx->ceEvents.mutex);
+      if (__atomic_load_n(&event->refCount, __ATOMIC_ACQUIRE) != 0) {
+        pthread_mutex_unlock(&ctx->ceEvents.mutex);
+        __atomic_fetch_add(&ctx->collApiPoolBase, 1, __ATOMIC_RELAXED);
+        return ncclSuccess;
+      }
       resetTaskEvents(event, ctx);
+      __atomic_store_n(&event->credited, 0, __ATOMIC_RELAXED);
+      pthread_mutex_unlock(&ctx->ceEvents.mutex);
     } else {
       // else drop this event
       __atomic_fetch_sub(&ctx->collApiPoolIndex, 1, __ATOMIC_RELAXED);
@@ -578,6 +592,7 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     }
     event->type = ncclProfileP2pApi;
     event->p2pApiId = p2pApiId;
+    event->credited = 0;
     event->ctx = ctx;
     event->func = eDescr->p2pApi.func;
     event->stream = (cudaStream_t) eDescr->p2pApi.stream;
@@ -676,9 +691,10 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
     event->algo = eDescr->coll.algo;
     event->proto = eDescr->coll.proto;
     *eHandle = event;
+    pthread_mutex_lock(&ctx->ceEvents.mutex);
     taskEventQueueEnqueue(parent, (struct taskEventBase *)event);
-    // increment the group ref counter so the event will stay open
     __atomic_fetch_add(&parent->refCount, 1, __ATOMIC_RELAXED);
+    pthread_mutex_unlock(&ctx->ceEvents.mutex);
     debugEvent(event, "CollStart");
   } else if (eDescr->type == ncclProfileP2p) {
     // the parent might be null if we run out of events
@@ -913,7 +929,7 @@ void updateEvent(void* handle) {
     struct collApi* event = (struct collApi*) handle;
     if (__atomic_sub_fetch(&event->refCount, 1, __ATOMIC_RELAXED) == 0) {
       event->stopTs = gettime() - startTime;
-      __atomic_fetch_add(&event->ctx->collApiPoolBase, 1, __ATOMIC_RELAXED);
+      creditApiPoolOnce(event, &event->ctx->collApiPoolBase);
     }
     updateEvent(event->parent);
     return;
@@ -921,7 +937,7 @@ void updateEvent(void* handle) {
     struct p2pApi* event = (struct p2pApi*) handle;
     if (__atomic_sub_fetch(&event->refCount, 1, __ATOMIC_RELAXED) == 0) {
       event->stopTs = gettime() - startTime;
-      __atomic_fetch_add(&event->ctx->p2pApiPoolBase, 1, __ATOMIC_RELAXED);
+      creditApiPoolOnce(event, &event->ctx->p2pApiPoolBase);
     }
     updateEvent(event->parent);
     event->stopTs = gettime() - startTime;
