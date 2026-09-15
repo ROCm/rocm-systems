@@ -71,7 +71,6 @@ class GpuSpmBuilder
 , protected Primitives
 {
     typedef typename Primitives::mux_info_t mux_info_t;
-    uint32_t                                wgp_per_sa_;
     uint32_t                                grbm_index_value_last_;
 
     void DebugTrace(uint32_t value)
@@ -95,22 +94,8 @@ public:
     explicit GpuSpmBuilder(const AgentInfo* agent_info)
     : SpmBuilder()
     , builder(acquire_ip_offset_table(agent_info))
-    , wgp_per_sa_(1)
     , grbm_index_value_last_(~uint32_t{0})
-    {
-        if constexpr(Primitives::GFXIP_LEVEL >= 11)
-        {
-            const uint32_t xcc_number = agent_info->xcc_num ? agent_info->xcc_num : 1;
-            const uint32_t se_number  = agent_info->se_num / xcc_number;
-            const uint32_t sa_number  = agent_info->shader_arrays_per_se;
-            if(se_number && sa_number)
-            {
-                wgp_per_sa_ =
-                    (agent_info->cu_num / 2 + sa_number * se_number - 1) / (se_number * sa_number);
-                wgp_per_sa_ /= xcc_number;
-            }
-        }
-    }
+    {}
 
     void Begin(CmdBuffer* cmd_buffer, const SpmConfig* config, const counters_vector& counters_vec)
     {
@@ -672,7 +657,7 @@ public:
         spm_buffer_desc->se_num_line     = se_count;
         spm_buffer_desc->num_se          = config->se_number;
         spm_buffer_desc->num_sa          = config->sa_number;
-        spm_buffer_desc->num_wgp         = wgp_per_sa_;
+        spm_buffer_desc->num_wgp         = config->wgp_per_sa;
         spm_buffer_desc->num_xcc         = config->xcc_number;
         spm_buffer_desc->num_events      = original_event_count;
 
