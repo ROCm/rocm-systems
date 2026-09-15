@@ -7,6 +7,7 @@
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
+#include "core/control/clocks/posix.hpp"
 #include "core/demangler.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
@@ -751,7 +752,7 @@ configure(bool _setup, std::int64_t _tid)
 
         if(_signal_types->contains(get_sampling_realtime_signal()))
         {
-            _sampler->configure(timer{ get_sampling_realtime_signal(), CLOCK_REALTIME,
+            _sampler->configure(timer{ get_sampling_realtime_signal(), CLOCK_BOOTTIME,
                                        SIGEV_THREAD_ID, get_sampling_realtime_freq(),
                                        get_sampling_realtime_delay(), _tid,
                                        threading::get_sys_tid() });
@@ -798,7 +799,7 @@ configure(bool _setup, std::int64_t _tid)
             if(_pe.type == PERF_TYPE_SOFTWARE)
             {
                 _pe.use_clockid = 1;
-                _pe.clockid     = CLOCK_REALTIME;
+                _pe.clockid     = CLOCK_BOOTTIME;
             }
 
             auto _perf_open_error =
@@ -2112,7 +2113,7 @@ pause()
     }
 
     LOG_DEBUG("Pausing sampling...");
-    pending_pause_ts.store(tim::get_clock_real_now<std::uint64_t, std::nano>());
+    pending_pause_ts.store(control::clocks::timeline_ns());
     block_samples();
     set_sampler_timers(timer_state::stopped);
 }
@@ -2131,7 +2132,7 @@ resume()
 
     LOG_DEBUG("Resuming sampling...");
     auto const _pause_ts  = pending_pause_ts.exchange(0);
-    auto const _resume_ts = tim::get_clock_real_now<std::uint64_t, std::nano>();
+    auto const _resume_ts = control::clocks::timeline_ns();
     if(_pause_ts > 0)
     {
         auto const _lk = std::lock_guard<std::mutex>{ pause_mutex };
