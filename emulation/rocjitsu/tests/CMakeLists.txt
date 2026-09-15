@@ -490,6 +490,7 @@ add_executable(
     wave_debug_test.cpp
     decode_execute_benchmark.cpp
     util_observable_shared_mutex_test.cpp
+    host_mapping_lock_test.cpp
     util_result_test.cpp
     util_unique_handle_test.cpp
     util_simd_test.cpp
@@ -549,6 +550,7 @@ add_executable(
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
     race-detector/race_log_expectation_test.cpp
+    big_int_test.cpp
     data_types_test.cpp
     drm_info_layout_test.cpp
     pci/bar_access_trace_test.cpp
@@ -699,6 +701,18 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${CMAKE_CURRENT_SOURCE_DIR}/check_static_analysis_symbols.cmake
     )
 endif()
+
+add_executable(waitcheck_target_test analysis/waitcheck_target_test.cpp)
+target_link_libraries(
+    waitcheck_target_test
+    PRIVATE
+        rocjitsu_waitcheck_target
+        rocjitsu_analysis_internal
+        rocjitsu_amdgpu_isa_model_registry
+        GTest::gtest_main
+)
+rj_configure_target(waitcheck_target_test WARNINGS)
+rj_add_gtest_tests(waitcheck_target_test)
 
 # Exercise the Linux-only model ISA contract in a decoder-only final link.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -1566,6 +1580,22 @@ rj_add_interposer_test_suite(
     InterposerDrmTest
     DeviceInfoReportsActiveCuCount
 )
+
+rj_add_interposer_test_suite(
+    InterposerFreshForkTest
+    ChildAndGrandchildInitializeIndependentBackends
+    ChildFopenPreservesLibcModeSemantics
+)
+
+# TSan cannot start backend threads after a multithreaded fork. Keep the
+# single-threaded nested-fork case above in TSan, and run concurrent mappings in
+# regular and ASan/UBSan builds without disabling TSan's post-fork checks.
+if(NOT RJ_ENABLE_TSAN)
+    rj_add_interposer_test_suite(
+        InterposerFreshForkTest
+        ConcurrentMappingsPreserveIndependentChildBackends
+    )
+endif()
 
 rj_add_interposer_test_suite(
     InterposerForkTest
@@ -3129,6 +3159,7 @@ if(RJ_ENABLE_HIP_TESTS)
         set(RJ_DAEMON_TESTS
             RocjitsuCliDaemon.LaunchesApplicationAfterDaemonIsReady
             DaemonTest.HipVectorAdd
+            DaemonTest.ForkserverChildrenInitializeIndependentBackends
             DaemonTest.AttachExecFailurePreservesDaemonSocket
             DaemonTest.HipMemcpyRoundTripFloat
             DaemonTest.HipMemcpyRoundTripInt
