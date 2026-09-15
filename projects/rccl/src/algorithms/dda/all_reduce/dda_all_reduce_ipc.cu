@@ -15,6 +15,7 @@
 #include "algorithms/dda/dda_init_detail.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <cstddef>
 #include <cstdlib>
@@ -39,7 +40,7 @@ static inline std::pair<dim3, dim3> ddaAllReduceIpcGeom(size_t count, int typeSi
 
 template <typename T>
 static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
-                                             cudaStream_t stream) {
+                                             cudaStream_t stream, hipEvent_t stopEvent) {
   if (comm->ddaIpcMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaIpcBarrierState == nullptr) {
     return ncclInvalidUsage;
@@ -70,13 +71,20 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuf
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
+  T* const* ipcbuffsArg = d_ipcbuffs;
+  T* recvArg = static_cast<T*>(recvbuff);
+  const T* sendArg = static_cast<const T*>(sendbuff);
+  const T* accArg = nullptr;
+
   if (treeOk) {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, count * sizeof(T), cudaMemcpyDeviceToDevice, stream));
-    dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr);
+    hipExtLaunchKernelGGL((dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, ipcbuffsArg, recvArg, count, sendArg,
+                          comm->rank, barrierHost, accArg);
   } else {
-    dda::common::ddaAllReduceFlatIpc<T, kDdaNranks, false><<<grid, block, 0, stream>>>(
-      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr);
+    hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatIpc<T, kDdaNranks, false>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, ipcbuffsArg, recvArg, count, sendArg,
+                          comm->rank, barrierHost, accArg);
   }
 
   CUDACHECK(cudaGetLastError());
@@ -146,15 +154,15 @@ uint32_t ncclAllReduceDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t 
 }
 
 ncclResult_t ncclAllReduceDdaIpc(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                 ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
+                                 ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
   (void)op;
   switch (datatype) {
   case ncclFloat32:
-    return ncclAllReduceDdaIpcTyped<float>(sendbuff, recvbuff, count, comm, stream);
+    return ncclAllReduceDdaIpcTyped<float>(sendbuff, recvbuff, count, comm, stream, stopEvent);
   case ncclFloat16:
-    return ncclAllReduceDdaIpcTyped<half>(sendbuff, recvbuff, count, comm, stream);
+    return ncclAllReduceDdaIpcTyped<half>(sendbuff, recvbuff, count, comm, stream, stopEvent);
   case ncclBfloat16:
-    return ncclAllReduceDdaIpcTyped<bf16>(sendbuff, recvbuff, count, comm, stream);
+    return ncclAllReduceDdaIpcTyped<bf16>(sendbuff, recvbuff, count, comm, stream, stopEvent);
   default:
     return ncclInvalidArgument;
   }

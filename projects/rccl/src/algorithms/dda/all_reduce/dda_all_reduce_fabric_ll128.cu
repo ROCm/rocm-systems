@@ -18,6 +18,7 @@
 #include "param.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -82,7 +83,7 @@ static inline std::pair<dim3, dim3> ddaAllReduceFabricLL128Geom(ncclComm* comm, 
 
 template <typename T>
 static ncclResult_t ncclAllReduceDdaFabricLL128Typed(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
-                                                     cudaStream_t stream) {
+                                                     cudaStream_t stream, hipEvent_t stopEvent) {
   const int nRanks = comm->nRanks;
   const size_t bytes = count * sizeof(T);
   const size_t nWords = bytes >> 3;
@@ -97,25 +98,29 @@ static ncclResult_t ncclAllReduceDdaFabricLL128Typed(const void* sendbuff, void*
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
+  T* const* peersArg = peers;
+  T* recvArg = static_cast<T*>(recvbuff);
+  const T* sendArg = static_cast<const T*>(sendbuff);
+
   INFO(NCCL_COLL, "DDA fabric AllReduce LL128: nRanks=%d bytes=%zu numLines=%zu grid=%u block=%u", nRanks, bytes,
        numLines, grid.x, block.x);
 
   // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback.
   switch (nRanks) {
   case 4:
-    dda::common::ddaAllReduceFlatLL128<T, 4>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank,
-                                   nRanks, epochDev, epochLen, slotStrideLines);
+    hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128<T, 4>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, count,
+                          comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
     break;
   case 8:
-    dda::common::ddaAllReduceFlatLL128<T, 8>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank,
-                                   nRanks, epochDev, epochLen, slotStrideLines);
+    hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128<T, 8>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, count,
+                          comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
     break;
   default:
-    dda::common::ddaAllReduceFlatLL128<T, 0>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank,
-                                   nRanks, epochDev, epochLen, slotStrideLines);
+    hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128<T, 0>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, count,
+                          comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
     break;
   }
 
@@ -176,15 +181,15 @@ uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDat
 }
 
 ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                         ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
+                                         ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
   (void)op;
   switch (datatype) {
   case ncclFloat32:
-    return ncclAllReduceDdaFabricLL128Typed<float>(sendbuff, recvbuff, count, comm, stream);
+    return ncclAllReduceDdaFabricLL128Typed<float>(sendbuff, recvbuff, count, comm, stream, stopEvent);
   case ncclFloat16:
-    return ncclAllReduceDdaFabricLL128Typed<half>(sendbuff, recvbuff, count, comm, stream);
+    return ncclAllReduceDdaFabricLL128Typed<half>(sendbuff, recvbuff, count, comm, stream, stopEvent);
   case ncclBfloat16:
-    return ncclAllReduceDdaFabricLL128Typed<bf16>(sendbuff, recvbuff, count, comm, stream);
+    return ncclAllReduceDdaFabricLL128Typed<bf16>(sendbuff, recvbuff, count, comm, stream, stopEvent);
   default:
     return ncclInvalidArgument;
   }
