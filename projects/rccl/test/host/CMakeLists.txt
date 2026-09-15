@@ -6,7 +6,6 @@ set(RCCL_MICRO_TEST_SOURCES
   group-test.cc
   devcomm-test.cc
   fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
-  fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
   fakes/rma_fakes.cc                   # rma_proxy_progress externals (circular-buf / destroy)
   fakes/comm_fakes.cc                  # comm-lifecycle seams (real in init.cc; faked here)
   fakes/recorder_fakes.cc              # src/recorder.cc
