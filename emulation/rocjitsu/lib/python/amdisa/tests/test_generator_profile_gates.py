@@ -2888,13 +2888,17 @@ def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():
         assert 's2, const_acc, 0u);' in body
 
 
-def test_div_scale_uses_signed_tiny_exponent_threshold():
+@pytest.mark.parametrize('dtype, mode', [('f32', 'f32'), ('f64', 'f16_f64')])
+def test_div_scale_delegates_classification_and_preserves_explicit_mask(dtype, mode):
     body = gen_vector_div_scale(
-        ['vdst', 'sdst'], ['src0', 'src1', 'src2'], 'f32', is_vop3=True
+        ['vdst', 'sdst'], ['src0', 'src1', 'src2'], dtype, is_vop3=True
     )
 
-    assert 'exp2 <= -23' in body
-    assert 'exp2 <= 23' not in body
+    assert (
+        f'div_scale(s0, s1, s2, wf.fp_round_mode_{mode}(), wf.fp_denorm_mode_{mode}())'
+        in body
+    )
+    assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc)' in body
 
 
 def test_gfx1250_profile_enables_generator_backed_quirks():
