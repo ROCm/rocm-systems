@@ -349,7 +349,7 @@ unified_memory_processor_t::classify_direction(const std::string& src_label,
 }
 
 std::optional<std::pair<std::string, std::string>>
-unified_memory_processor_t::parse_agent_ids_from_args(const std::string& args_str) const
+unified_memory_processor_t::parse_agent_ids_from_args(std::string_view args_str) const
 {
     std::string src_agent;
     std::string dst_agent;

@@ -61,9 +61,12 @@ get_size(Type&& val)
 {
     using DecayedType = std::decay_t<Type>;
 
-    if constexpr(type_traits::is_string_view_v<DecayedType> ||
-                 type_traits::is_vector_v<DecayedType> ||
-                 type_traits::is_span_v<DecayedType>)
+    if constexpr(type_traits::is_string_view_v<DecayedType>)
+    {
+        return val.size() + sizeof(char) + sizeof(size_t);
+    }
+    else if constexpr(type_traits::is_vector_v<DecayedType> ||
+                      type_traits::is_span_v<DecayedType>)
     {
         using ContainerType     = std::decay_t<decltype(val)>;
         const size_t item_size  = sizeof(typename ContainerType::value_type);
@@ -100,9 +103,16 @@ store_value(const Type& value, std::uint8_t* buffer, size_t& position)
 
     auto* dest = buffer + position;
 
-    if constexpr(type_traits::is_string_view_v<DecayedType> ||
-                 type_traits::is_vector_v<DecayedType> ||
-                 type_traits::is_span_v<DecayedType>)
+    if constexpr(type_traits::is_string_view_v<DecayedType>)
+    {
+        const size_t data_size = value.size();
+        std::memcpy(dest, &data_size, sizeof(size_t));
+        std::memcpy(dest + sizeof(size_t), value.data(), data_size);
+        dest[sizeof(size_t) + data_size] = '\0';
+        position += get_size(value);
+    }
+    else if constexpr(type_traits::is_vector_v<DecayedType> ||
+                      type_traits::is_span_v<DecayedType>)
     {
         const size_t total_size  = get_size(value);
         const size_t header_size = sizeof(size_t);
@@ -150,7 +160,7 @@ parse_value(std::uint8_t*& data_pos, Type& arg)
         std::memcpy(&string_size, data_pos, sizeof(size_t));
         data_pos += sizeof(size_t);
         arg = std::string_view{ reinterpret_cast<const char*>(data_pos), string_size };
-        data_pos += string_size;
+        data_pos += string_size + sizeof(char);
     }
     else if constexpr(type_traits::is_vector_v<DecayedType> ||
                       type_traits::is_span_v<DecayedType>)
