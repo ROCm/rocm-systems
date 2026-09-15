@@ -3,38 +3,46 @@
 
 include_guard(DIRECTORY)
 
-set(SPDLOG_VERSION "1.15.3" CACHE STRING "spdlog version")
+set(SPDLOG_VERSION "1.15.3" CACHE STRING "Minimum spdlog version")
 
-find_package(spdlog ${SPDLOG_VERSION} QUIET)
+find_package(spdlog QUIET)
 
-# A system spdlog is only safe to reuse if it was built with external fmt.
-# If it was built against its bundled fmt, its public headers pull in
-# <spdlog/fmt/bundled/...> and libspdlog exports bundled-fmt symbols, which
-# would coexist with the external fmt that profiler-hub links - two fmt
-# copies in one binary. Detect this via the interface compile definition
-# that spdlog's exported target carries when SPDLOG_FMT_EXTERNAL was set.
-if(spdlog_FOUND)
+set(_spdlog_reason "")
+if(NOT spdlog_FOUND)
+    set(_spdlog_reason "no package was found on CMAKE_PREFIX_PATH")
+elseif(spdlog_VERSION VERSION_LESS SPDLOG_VERSION)
+    set(_spdlog_reason
+        "version ${spdlog_VERSION} was found, but ${SPDLOG_VERSION} or newer is required"
+    )
+else()
+    # A system spdlog is only safe to reuse if it was built with external fmt.
+    # If it was built against its bundled fmt, its public headers pull in
+    # <spdlog/fmt/bundled/...> and libspdlog exports bundled-fmt symbols, which
+    # would coexist with the external fmt that profiler-hub links - two fmt
+    # copies in one binary. Detect this via the interface compile definition
+    # that spdlog's exported target carries when SPDLOG_FMT_EXTERNAL was set.
     get_target_property(
         _spdlog_iface_defs
         spdlog::spdlog
         INTERFACE_COMPILE_DEFINITIONS
     )
     if(NOT _spdlog_iface_defs MATCHES "SPDLOG_FMT_EXTERNAL")
-        message(
-            STATUS
-            "System spdlog uses bundled fmt; falling back to FetchContent with external fmt"
+        set(_spdlog_reason
+            "version ${spdlog_VERSION} was found, but it is built against its bundled fmt, which would put two fmt copies in one binary"
         )
-        set(spdlog_FOUND FALSE)
     endif()
+    unset(_spdlog_iface_defs)
 endif()
 
-if(spdlog_FOUND)
+if(_spdlog_reason STREQUAL "")
     message(STATUS "Using system spdlog (version ${spdlog_VERSION})")
-else()
+elseif(NOT PROFILER_HUB_FETCH_DEPENDENCIES)
     message(
-        STATUS
-        "System spdlog not found, fetching version ${SPDLOG_VERSION}"
+        FATAL_ERROR
+        "profiler-hub requires spdlog: ${_spdlog_reason}. Provide it on CMAKE_PREFIX_PATH, or configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it."
     )
+else()
+    message(STATUS "Fetching spdlog ${SPDLOG_VERSION}: ${_spdlog_reason}")
     include(FetchContent)
 
     FetchContent_Declare(
@@ -66,3 +74,5 @@ else()
         add_library(spdlog::spdlog ALIAS spdlog)
     endif()
 endif()
+
+unset(_spdlog_reason)
