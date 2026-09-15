@@ -13,6 +13,7 @@
 #include "utils/debug.hpp"
 #include <algorithm>
 #include <map>
+#include <string>
 
 namespace amd::roc {
 DmaBlitManager::DmaBlitManager(VirtualGPU& gpu, Setup setup)
@@ -2207,6 +2208,15 @@ bool KernelBlitManager::readBufferRect(device::Memory& srcMemory, void* dstHost,
   std::scoped_lock k(lockXferOps_);
   bool result = false;
 
+  // gfx1201: KernelBlit pin+copyBufferRect hangs on tall/unaligned H2D
+  // (e.g. w=272 h=360448 spitch=748). Line DMA avoids that path.
+  if (dev().isa().isaName().find("gfx1201") != std::string::npos) {
+    result = DmaBlitManager::readBufferRect(srcMemory, dstHost, bufRect, hostRect, size, entire,
+                                            copyMetadata);
+    synchronize();
+    return result;
+  }
+
   // Use host copy if memory has direct access
   if (setup_.disableReadBufferRect_ ||
       (srcMemory.isHostMemDirectAccess() && !srcMemory.isCpuUncached())) {
@@ -2343,6 +2353,15 @@ bool KernelBlitManager::writeBufferRect(const void* srcHost, device::Memory& dst
                                         bool entire, amd::CopyMetadata copyMetadata) const {
   std::scoped_lock k(lockXferOps_);
   bool result = false;
+
+  // gfx1201: KernelBlit pin+copyBufferRect hangs on tall/unaligned H2D
+  // (e.g. w=272 h=360448 spitch=748). Line DMA avoids that path.
+  if (dev().isa().isaName().find("gfx1201") != std::string::npos) {
+    result = DmaBlitManager::writeBufferRect(srcHost, dstMemory, hostRect, bufRect, size, entire,
+                                             copyMetadata);
+    synchronize();
+    return result;
+  }
 
   // Use host copy if memory has direct access
   if (setup_.disableWriteBufferRect_ || dstMemory.isHostMemDirectAccess() ||
