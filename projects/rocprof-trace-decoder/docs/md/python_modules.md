@@ -228,11 +228,20 @@ hidden_for_pc = result.by_pc[pc]
 `HiddenLatency` reports hidden `idle`, `stall`, and `issue` cycles.
 `HiddenLatencyResult.by_scope` retains independent `(shader engine, SIMD)`
 results, keyed by whatever the caller passed for shader engine; `by_pc` is the
-sum over those scopes. Estimate non-hidden cost as
-`max(CodeEntry.latency + CodeEntry.idle - HiddenLatency.total(), 0)`: to
-preserve viewer parity, overlapping or touching intervals within one pipe are
-coalesced by adding their durations rather than only extending to the latest
-endpoint, so hidden latency can exceed the aggregate total.
+sum over those scopes. Each component is bounded by the window it was measured
+against, so estimate non-hidden cost per component rather than from the totals:
+
+```python
+non_hidden = (entry.latency - hidden.stall - hidden.issue) + (
+    entry.idle - min(hidden.idle, entry.idle)
+)
+```
+
+`hidden.stall` and `hidden.issue` cannot exceed the instruction's own stall and
+issue cycles, so they need no bound. `hidden.idle` is measured from the end of
+the previous instruction while `CodeEntry.idle` is measured from the furthest
+instruction end reached so far, so the two disagree when instructions overlap
+and only that component needs one.
 
 Busy intervals are built per `(shader engine, SIMD)` for four pipe groups,
 highest priority first:
@@ -257,9 +266,7 @@ MATRIX and VALU, so both of their scores are zeroed.
 
 MATRIX is not a decoder category. Pass a `CodeIndex` so `v_mfma*`, `v_smfma*`,
 `v_wmma*`, and `v_swmma*` instructions are treated as MATRIX instead of the
-`VALU` the decoder reports. Each then contributes its full interval to MATRIX
-and a truncated `3 * cycles / 4` to VALU, matching `buildUtil` in the viewer's
-`hidden_latency.cpp`. Without a `CodeIndex` they stay `VALU`, measurably
+`VALU` the decoder reports. Without a `CodeIndex` they stay `VALU`, measurably
 changing results on traces that mix matrix and non-matrix work.
 
 ## `rocprof_trace_decoder.analysis.rcv`
