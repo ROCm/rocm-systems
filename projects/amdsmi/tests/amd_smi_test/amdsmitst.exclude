@@ -93,13 +93,3 @@ FILTER[gfx1150]=${FILTER[strix_point]}
 FILTER[gfx1151]=${FILTER[strix_point]}
 FILTER[gfx1152]=${FILTER[strix_point]}
 FILTER[gfx1153]=${FILTER[strix_point]}
-
-# Hawk Point (gfx1103) APU shares the same unsupported driver metrics v3.0
-# read/write paths as the gfx115X APUs above, so these temperature and
-# frequency subtests fail. Blacklist until driver metrics support is available.
-FILTER[hawk_point]=\
-$BLACKLIST_ALL_ASICS\
-"GpuFunctionalReadOnly.TempRead:"\
-"GpuFunctionalReadOnly.TestFrequenciesRead:"\
-"GpuFunctionalReadWrite.TestFrequenciesReadWrite"
-FILTER[gfx1103]=${FILTER[hawk_point]}
