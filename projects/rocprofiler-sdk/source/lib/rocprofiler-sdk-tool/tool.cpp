@@ -1793,8 +1793,13 @@ get_att_perfcounter_params(rocprofiler_agent_id_t                           agen
             break;
         }
 
-        ROCP_WARNING_IF(!counter_found)
-            << "Agent " << agent.handle << " counter not found: " << att_perf_counter.counter_name;
+        if(!counter_found)
+        {
+            ROCP_FATAL << "Counter '" << att_perf_counter.counter_name
+                       << "' specified via -E is not supported for this agent (id=" << agent.handle
+                       << "). Please verify the counter name and architecture.\n"
+                       << "ATT tracing cannot be initialized.";
+        }
     }
 
     return _data;
