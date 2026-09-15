@@ -1241,7 +1241,8 @@ __device__ __forceinline__ typename DirectBackend<B>::Type *get_backend(
   return static_cast<typename DirectBackend<B>::Type *>(b);
 }
 
-__device__ __forceinline__ bool direct_create_ctx(int64_t options,
+// __noinline__ for the same reason as barrier/sync
+__device__ __noinline__ bool direct_create_ctx(int64_t options,
                                                    rocshmem_ctx_t *ctx) {
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
   switch (constmem.backend_type) {
@@ -1268,7 +1269,7 @@ __device__ __forceinline__ bool direct_create_ctx(int64_t options,
 #endif
 }
 
-__device__ __forceinline__ void direct_destroy_ctx(rocshmem_ctx_t *ctx) {
+__device__ __noinline__ void direct_destroy_ctx(rocshmem_ctx_t *ctx) {
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
   switch (constmem.backend_type) {
     case BackendType::GDA_BACKEND:
