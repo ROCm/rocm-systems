@@ -459,9 +459,9 @@ namespace hip {
     void SetCaptureStatus(hipStreamCaptureStatus captureStatus) { captureStatus_ = captureStatus; }
     /// Set capture mode
     void SetCaptureMode(hipStreamCaptureMode captureMode) { captureMode_ = captureMode; }
-    /// Set the origin stream that owns the capture this stream takes part in
+    /// Set the origin stream that owns the capture this stream takes part in.
     void SetCaptureOwner(hipStream_t captureOwner) { captureOwner_ = captureOwner; }
-    /// Get the origin stream that owns the capture this stream takes part in
+    /// Get the origin stream that owns the capture this stream takes part in.
     hipStream_t GetCaptureOwner() const { return captureOwner_; }
     /// Get capture ID
     uint64_t GetCaptureID() const { return captureID_; }
@@ -482,16 +482,18 @@ namespace hip {
     }
     /// Enroll a stream in this capture. Only meaningful on the origin stream.
     void AddCaptureStream(hipStream_t s) {
+      assert(originStream_ && "capture membership is tracked on the origin only");
       std::scoped_lock lock(lock_);
       captureStreams_.insert(s);
     }
     /// Remove a stream from this capture. Only meaningful on the origin stream.
     void EraseCaptureStream(hipStream_t s) {
+      assert(originStream_ && "capture membership is tracked on the origin only");
       std::scoped_lock lock(lock_);
       captureStreams_.erase(s);
     }
-    /// Mark the whole capture this stream belongs to as invalidated: the origin and every
-    /// stream enrolled in it. Callable from the origin or from any participant.
+    /// Mark the whole capture that this stream belongs to as invalidated: the origin and
+    /// every stream enrolled in it. Callable from the origin or from any participant.
     void InvalidateCapture();
 
     // --- Execution context (green context) lifecycle ---
@@ -511,10 +513,6 @@ namespace hip {
 
   private:
     ~Stream() = default;
-
-    /// Return this stream's own capture fields to defaults. Called only from EndCapture, so
-    /// that capture teardown keeps a single entry point.
-    void ResetCaptureState(bool preserveInvalidated);
 
     mutable std::recursive_mutex lock_;      //!< Guards captureEvents_ and captureStreams_
     Device* device_;                         //!< Device that owns this stream

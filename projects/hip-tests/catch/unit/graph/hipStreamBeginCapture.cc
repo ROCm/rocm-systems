@@ -1712,10 +1712,12 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_DestroyForkedStreamDuringCaptu
 /**
  * Test Description
  * ------------------------
- *    - Test to verify that a self-wait does not resurrect a capture that has already been
- *      invalidated. Querying an event recorded inside a capture is illegal and invalidates
- *      the forked stream; a self-wait issued afterwards must leave it invalidated rather than
- *      quietly returning it to the active state.
+ *    - Test to verify that a stream whose capture has been invalidated refuses further
+ *      capture work. Querying an event recorded inside a capture is illegal and invalidates
+ *      the forked stream; a wait issued afterwards must report
+ *      hipErrorStreamCaptureInvalidated rather than being accepted and silently ignored,
+ *      which is what CUDA returns and what every operation routed through the
+ *      STREAM_CAPTURE macro already did.
  * Test source
  * ------------------------
  *    - catch\unit\graph\hipStreamBeginCapture.cc
@@ -1759,9 +1761,12 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_SelfWaitOnInvalidatedForkedStr
   HIP_CHECK(hipStreamIsCapturing(forkedStream, &captureStatus));
   REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
 
-  // The self-wait must not put the forked stream back into the active state.
-  HIP_CHECK(hipStreamWaitEvent(forkedStream, selfEvent, 0));
+  // An invalidated stream takes no further part in the capture, so the wait is refused
+  // rather than accepted and silently ignored. Measured on CUDA, which returns the same
+  // error here.
+  HIP_CHECK_ERROR(hipStreamWaitEvent(forkedStream, selfEvent, 0), hipErrorStreamCaptureInvalidated);
 
+  // The refusal leaves the status alone; it does not resurrect the stream or escalate it.
   HIP_CHECK(hipStreamIsCapturing(forkedStream, &captureStatus));
   REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
 
