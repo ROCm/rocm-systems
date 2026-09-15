@@ -207,7 +207,7 @@ inline hipError_t GetDeviceKernel(const void* func, device::Kernel** d_kernel) {
 
   hipError_t err = PlatformState::Instance().StatCO().GetFunc(&h_func, func, ihipGetDevice());
   if (h_func == nullptr) {
-    if (PlatformState::Instance().IsValidDynFunc(func)) {
+    if (PlatformState::Instance().IsValidFuncHandle(func)) {
       h_func = reinterpret_cast<hipFunction_t>(const_cast<void*>(func));
     } else {
       return hipErrorInvalidDeviceFunction;
@@ -238,7 +238,7 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
 
   hipError_t err = PlatformState::Instance().StatCO().GetFunc(&h_func, func, ihipGetDevice());
   if (h_func == nullptr) {
-    if (PlatformState::Instance().IsValidDynFunc((func))) {
+    if (PlatformState::Instance().IsValidFuncHandle((func))) {
       h_func = reinterpret_cast<hipFunction_t>(const_cast<void*>(func));
     } else {
       HIP_RETURN(hipErrorInvalidDeviceFunction);
