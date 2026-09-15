@@ -79,7 +79,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          ref: ec26b5e6128bcef52e1d36199f16042bee19cf36 # 2026-09-09 commit
+          ref: 0a5e4387afebb9aba2cd3b79e7a5f4376ce1ccd0 # 2026-09-13 commit
 
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
