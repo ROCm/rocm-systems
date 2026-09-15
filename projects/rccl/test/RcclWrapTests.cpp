@@ -3139,4 +3139,76 @@ TEST(RcclAlltoAllDecision, UnsupportedArch_DirectFallback)
     EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
 }
 
+
+// ---------------------------------------------------------------------------
+// rcclAllGatherCeRegisteredWindow -- four-outcome gate test.
+//
+// The function is a pure CE-capability gate: recv registered AND totalBytes
+// within ceRegMax[AG].  symMaxR2 arbitration is a selector-level concern
+// (symEligible) and is intentionally absent here, matching AllReduce and
+// AlltoAll.  gfx1250 table: ceRegMax[AG] = 8 GiB.
+// ---------------------------------------------------------------------------
+namespace
+{
+rcclArchThresholds MakeAgCeRegTable(size_t ceRegMaxAg)
+{
+    rcclArchThresholds t{};
+    for(int i = 0; i < NCCL_NUM_FUNCTIONS; ++i)
+        t.ceRegMax[i] = SIZE_MAX;
+    t.ceRegMax[ncclFuncAllGather] = ceRegMaxAg;
+    return t;
+}
+} // namespace
+
+// Outcome 1: recv not registered -> false regardless of size.
+TEST(RcclAllGatherCeRegisteredWindow, RecvNotRegistered_ReturnsFalse)
+{
+    constexpr size_t kRegMax = 8ull * 1024 * 1024 * 1024;
+    rcclArchThresholds tbl   = MakeAgCeRegTable(kRegMax);
+    constexpr size_t kMid    = 4ull * 1024 * 1024;
+
+    EXPECT_FALSE(rcclAllGatherCeRegisteredWindowTab(&tbl, kMid,
+                 ncclSymSendRegRecvNonreg, /*graphMode=*/false));
+    EXPECT_FALSE(rcclAllGatherCeRegisteredWindowTab(&tbl, kMid,
+                 ncclSymSendNonregRecvNonreg, /*graphMode=*/false));
+}
+
+// Outcome 2: totalBytes > ceRegMax -> false (message too large for CE hardware).
+TEST(RcclAllGatherCeRegisteredWindow, AboveCeRegMax_ReturnsFalse)
+{
+    constexpr size_t kRegMax = 8ull * 1024 * 1024 * 1024;
+    rcclArchThresholds tbl   = MakeAgCeRegTable(kRegMax);
+
+    EXPECT_FALSE(rcclAllGatherCeRegisteredWindowTab(&tbl, kRegMax + 1,
+                 ncclSymSendNonregRecvReg, /*graphMode=*/false));
+    EXPECT_FALSE(rcclAllGatherCeRegisteredWindowTab(&tbl, kRegMax + 1,
+                 ncclSymSendRegRecvReg, /*graphMode=*/false));
+}
+
+// Outcome 3: totalBytes <= ceRegMax, recv registered, small message -> true.
+// (symMaxR2 suppression is a selector-level concern; this function does not check it.)
+TEST(RcclAllGatherCeRegisteredWindow, BelowCeRegMax_RecvRegistered_ReturnsTrue)
+{
+    constexpr size_t kRegMax = 8ull * 1024 * 1024 * 1024;
+    rcclArchThresholds tbl   = MakeAgCeRegTable(kRegMax);
+    constexpr size_t kSmall  = 2ull * 1024 * 1024;  // 2 MiB -- below symMaxR2 crossover
+
+    EXPECT_TRUE(rcclAllGatherCeRegisteredWindowTab(&tbl, kSmall,
+                ncclSymSendNonregRecvReg, /*graphMode=*/false));
+    EXPECT_TRUE(rcclAllGatherCeRegisteredWindowTab(&tbl, kSmall,
+                ncclSymSendRegRecvReg, /*graphMode=*/false));
+}
+
+// Outcome 4: exactly at ceRegMax, recv registered -> true (boundary is inclusive).
+TEST(RcclAllGatherCeRegisteredWindow, AtCeRegMax_RecvRegistered_ReturnsTrue)
+{
+    constexpr size_t kRegMax = 8ull * 1024 * 1024 * 1024;
+    rcclArchThresholds tbl   = MakeAgCeRegTable(kRegMax);
+
+    EXPECT_TRUE(rcclAllGatherCeRegisteredWindowTab(&tbl, kRegMax,
+                ncclSymSendNonregRecvReg, /*graphMode=*/false));
+    EXPECT_TRUE(rcclAllGatherCeRegisteredWindowTab(&tbl, kRegMax,
+                ncclSymSendRegRecvReg, /*graphMode=*/false));
+}
+
 } // namespace RcclUnitTesting

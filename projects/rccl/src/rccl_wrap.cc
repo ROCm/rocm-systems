@@ -875,16 +875,20 @@ inline size_t rcclCeNonRegMin(const ncclComm* comm, ncclFunc_t func) {
 
 // Returns true when the message is within the CE-registered (2-shot) AllGather
 // window. Does not check symk eligibility -- callers gate on !symEligible explicitly.
+// CE-registered gate: recv buffer registered and message within ceRegMax[AG].
+// symMaxR2 arbitration is handled upstream via symEligible in the selectors;
+// graphMode is accepted but unused here so enqueue.cc can pass ceCapturing
+// without a separate overload.
 inline bool rcclAllGatherCeRegisteredWindowTab(const rcclArchThresholds* table, size_t totalBytes,
-                                               ncclSymRegType_t winRegType) {
+                                               ncclSymRegType_t winRegType, bool /*graphMode*/) {
   const bool recvReg = (winRegType == ncclSymSendRegRecvReg || winRegType == ncclSymSendNonregRecvReg);
   if (!recvReg) return false;
   const size_t regMax = rcclCeRegMaxTab(table, ncclFuncAllGather);
   return regMax == kThreshUnlimited || totalBytes <= regMax;
 }
 bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes,
-                                            ncclSymRegType_t winRegType) {
-  return rcclAllGatherCeRegisteredWindowTab(extAlgoArchTable(comm), totalBytes, winRegType);
+                                            ncclSymRegType_t winRegType, bool graphMode) {
+  return rcclAllGatherCeRegisteredWindowTab(extAlgoArchTable(comm), totalBytes, winRegType, graphMode);
 }
 
 
@@ -1713,7 +1717,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType, sendWin, recvWin);
     if (ceAvailable && !hasSysmemSegment &&
         ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) ||
-         (!symEligible && rcclAllGatherCeRegisteredWindowTab(archTable, totalBytes, winRegType)))) {
+         (!symEligible && rcclAllGatherCeRegisteredWindowTab(archTable, totalBytes, winRegType, ceCapturing)))) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }

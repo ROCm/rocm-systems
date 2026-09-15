@@ -33,6 +33,7 @@ test_categories:
       - "RcclAllReduceDdaDecision.*"
       - "CeAllReduceEligibilityTest.*"
       - "RcclCeAllReduceEligibility.*"
+      - "RcclAllGatherCeRegisteredWindow.*"
       - "RcclCeGraphLatch.*"
       - "CeAlltoAllvEligibilityTest.*"
       - "CeAlltoAllEligibilityTest.*"
