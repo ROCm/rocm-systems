@@ -19,8 +19,8 @@
  */
 texture<float, 2, hipReadModeElementType> texRef;
 
-// MipMap is currently supported only on windows
-#if (defined(_WIN32) && !__HIP_NO_IMAGE_SUPPORT)
+// MipMap is supported on Windows and Linux with image support.
+#if !__HIP_NO_IMAGE_SUPPORT
 __global__ void tex2DKernel(float* outputData, int width, int height, float level) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -127,7 +127,7 @@ HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Positive_Check) {
   // Height Width Vector
   std::vector<unsigned int> hw_vec = {2048, 1024, 512, 256, 64};
   std::vector<unsigned int> mip_vec = {8, 4, 2, 1};
-#if (defined(_WIN32) && !__HIP_NO_IMAGE_SUPPORT)
+#if !__HIP_NO_IMAGE_SUPPORT
   for (auto& hw : hw_vec) {
     for (auto& mip : mip_vec) {
       if ((hw / static_cast<int>(pow(2, (mip * 2)))) > 0) {
@@ -162,7 +162,7 @@ HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Positive_Check) {
 HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__linux__)
   unsigned int width = 64;
   unsigned int height = 64;
   unsigned int mipmap_level = 1;
