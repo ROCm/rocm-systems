@@ -384,7 +384,7 @@ jobs:
           test -d "${ROCJITSU_INCLUDE_DIR}"
           unset MIRAGE_E2E_ALLOW_SKIP
           cargo test --locked --workspace --no-fail-fast -- --test-threads=4 --nocapture
-          
+
       # This lane exists to race the engine's worker threads against each
       # other, and the shipped configs get there by omitting num_threads and
       # taking the default of min(available host threads, XCD count). That
