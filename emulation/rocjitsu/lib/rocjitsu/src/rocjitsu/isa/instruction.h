@@ -191,6 +191,8 @@ public:
   /// Each derived instruction class sets this to a trampoline that calls
   /// its ``execute_impl()`` method. In a model-only DBT image this is nullptr
   /// and must not be called. No virtual dispatch.
+  /// This is a low-level backend callback. AMDGPU callers should use the CU's
+  /// execute_instruction() API to reset and check simulator execution failures.
   const ExecuteFn execute;
 
   /// @brief Access the attached dynamic state, or nullptr if none.
