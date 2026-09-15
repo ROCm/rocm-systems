@@ -135,6 +135,9 @@ bool IsArchMatch(char const* /*arch*/, char const* /*target*/)
 // memcpy bytes between host pointers. ResetP2pFakes() frees any allocations
 // the default hook handed out so individual tests don't have to. Tests that
 // install their own hook also take responsibility for any memory they hand out.
+//
+// Scope: the shim macros above intercept every call site in the included
+// p2p.cc, not just ipcRegisterBuffer's fresh-registration arm.
 namespace {
 std::vector<void*> g_fakeAllocations;
 
@@ -2039,7 +2042,9 @@ bool HandleHasSentinel(const hipMemGenericAllocationHandle_t& h)
 }
 
 // RetainSentinelHandle -- the hipMemRetainAllocationHandle hook that hands
-// back the sentinel handle and succeeds. The common cuMem-arm entry seam.
+// back the sentinel handle and succeeds. The common cuMem-arm entry seam;
+// tests that want to pin the retain address keep their own inline hook (e.g.
+// CuMemSameProcessSucceeds, which also asserts EXPECT_EQ(addr, kBaseAddr)).
 inline auto RetainSentinelHandle()
 {
     return [](hipMemGenericAllocationHandle_t* h, void*) -> hipError_t {
