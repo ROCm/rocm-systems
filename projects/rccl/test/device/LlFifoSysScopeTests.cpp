@@ -113,6 +113,8 @@ bool findSiblingPair(int* devA, int* devB)
   return false;
 }
 
+void runSiblingBroadcastSlotReuse(int devA, int devB);
+
 // Factory for sibling broadcast test configs. The parent TEST body gates on
 // findSiblingPair so the skip is visible in the report; the child just runs.
 ProcessIsolatedTestRunner::TestConfig makeSiblingBroadcastConfig(const char* name,

@@ -65,7 +65,7 @@ test_categories:
       - "BitOpsTemplateUnsignedTestsFixture.*"
       - "PackRoundtripTest.*"
       - "HierarchicalShuffleTest.*"
-      - "DeviceTestBase.*"
+      - "LlFifoSysScopeDeviceTest.*"
       - "LlFifoSysScope.*"
       - "DIVUP.*"
       - "ROUNDUP.*"
