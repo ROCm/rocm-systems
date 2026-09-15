@@ -81,7 +81,3 @@ class TestFabricLazyInit(unittest.TestCase):
                 pass
         elapsed = time.monotonic() - start
         self.assertLess(elapsed, MAX_SECONDS, f"Fabric queries took {elapsed:.2f}s")
-
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
