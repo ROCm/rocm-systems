@@ -67,6 +67,16 @@
 // PowerPC compatibility shim for x86 intrinsics
 #define NO_WARN_X86_INTRINSICS
 #include <x86intrin.h>
+#elif defined(__loongarch64)
+// See linux-kernel arch/loongarch/include/asm/barrier.h
+// full barrier-mb
+static inline void _mm_clflush(const void* ptr) { (void)ptr; asm volatile ("dbar 0" ::: "memory"); }
+// sfence->wmb->c_wsync->c_w_w
+static inline void _mm_sfence(void) { asm volatile ("dbar 0xa" ::: "memory"); }
+// mfence->mb->c_sync->crwrw
+static inline void _mm_mfence(void) { asm volatile ("dbar 0" ::: "memory"); }
+// LoongArch does not have an alternative to mm_pause
+static inline void _mm_pause(void) {}
 #endif
 #endif
 #if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
