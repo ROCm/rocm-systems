@@ -1747,7 +1747,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
      * We prefer intraGraphGen = true in case of p2pDisabled && isGfx_110x_120x for better performance
      */
     const bool intraGraphGen = rcclParamIntraGraphGen() || (p2pDisabled && isGfx_110x_120x);
-    
+
     if (isGfx1151 || intraGraphGen) {
       /**
       * GFX1151 (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
@@ -1759,8 +1759,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       * Recommended: Set nChannels via environment variable (e.g., 6 channels for
       * optimal 4-node load balancing). Missing channel data is backfilled
       * by repairMissingChannels() during Postset.
-      * 
-      * In isGfx_110x_120x ,defaultNumChannels = 56 is due to Minimum edge-balanced Hamiltonian 
+      *
+      * In isGfx_110x_120x ,defaultNumChannels = 56 is due to Minimum edge-balanced Hamiltonian
       * cycles in graph K8 (8 GPU case) = 14 , and 56 is 14*4.
       * */
       int initChannels = (int)rcclParamInitChannels();
@@ -3792,6 +3792,9 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
       }
     }
   }
+
+  // Finalization is null-safe and also releases partially initialized state.
+  NCCLCHECKGOTO(ncclRmaCeFinalize(comm), ret, fail);
 
   if ((ret = ncclProxyStop(comm)) != ncclSuccess) {
     WARN("ncclProxyStop: comm %p (rank = %d) destroys proxy resource error %d", comm, comm->rank, ret);

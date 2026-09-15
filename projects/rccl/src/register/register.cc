@@ -167,6 +167,11 @@ ncclResult_t ncclCommRegister_impl(const ncclComm_t comm, void* buff, size_t siz
   if (!ncclParamLocalRegister()) *handle = NULL;
   else {
     INFO(NCCL_INIT, "RCCL: ncclCommRegister");
+    // Explicit host registration must observe completed graph reclamation
+    // before looking up a virtual address that VMM may have reused. Internal
+    // graph registration intentionally relies on group.cc's throttled drain.
+    NCCLCHECKGOTO(CommCheck(comm, "ncclCommRegister", "comm"), ret, end);
+    NCCLCHECKGOTO(ncclCommPollCallbacks(comm, /*waitSome=*/false), ret, end);
     NCCLCHECKGOTO(ncclRegister(comm, buff, size, false, handle), ret, end);
   }
 end:
@@ -188,6 +193,11 @@ ncclResult_t ncclCommGraphRegister(const ncclComm_t comm, void* buff, size_t siz
 
 static ncclResult_t commDeregister(struct ncclComm* comm, bool isGraph, struct ncclReg* reg) {
   NCCLCHECK(CommCheck(comm, "ncclCommRegister", "comm"));
+
+  // Validate comm before polling its callback queue. This also protects the
+  // graph deregistration path, which shares this helper.
+  NCCLCHECK(ncclCommPollCallbacks(comm, /*waitSome=*/false));
+
   struct ncclRegCache* cache = &comm->regCache;
   int slot;
   int saveDev;
@@ -214,7 +224,6 @@ exit:
 NCCL_API(ncclResult_t, ncclCommDeregister, const ncclComm_t comm, void* handle);
 ncclResult_t ncclCommDeregister_impl(const ncclComm_t comm, void* handle) {
   NCCLCHECK(Recorder::instance().record(rrCommDeregister, comm, handle));
-
   NCCLCHECK(commDeregister(comm, false, (struct ncclReg*)handle));
   return ncclSuccess;
 }

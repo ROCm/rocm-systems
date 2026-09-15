@@ -103,6 +103,10 @@ fail:
 }
 
 ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) {
+  if (!comm) {
+    return ncclSuccess;
+  }
+
   ncclResult_t ret = ncclSuccess;
 
   // Clean up rmaCeInitTaskQueue
@@ -122,28 +126,31 @@ ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) {
     comm->rmaState.rmaCeState.ceEvent = NULL;
   }
 
-  for (int i = 0; i < comm->rmaState.rmaCeState.rmaCeCtxCount; i++) {
-    struct ncclRmaCeCtx* ceCtx = (struct ncclRmaCeCtx*)comm->rmaState.rmaCeState.rmaCeCtxs[i];
+  if (comm->rmaState.rmaCeState.rmaCeCtxs != nullptr) {
+    for (int i = 0; i < comm->rmaState.rmaCeState.rmaCeCtxCount; i++) {
+      struct ncclRmaCeCtx* ceCtx = (struct ncclRmaCeCtx*)comm->rmaState.rmaCeState.rmaCeCtxs[i];
+      if (ceCtx == nullptr) continue;
 
-    // Free per-rank operation sequence counters
-    if (ceCtx->signalOpSeqs) free(ceCtx->signalOpSeqs);
-    if (ceCtx->signalOpSeqsDev) NCCLCHECKGOTO(ncclCudaFree(ceCtx->signalOpSeqsDev, comm->memManager), ret, fail);
+      // Free per-rank operation sequence counters
+      if (ceCtx->signalOpSeqs) free(ceCtx->signalOpSeqs);
+      if (ceCtx->signalOpSeqsDev) NCCLCHECKGOTO(ncclCudaFree(ceCtx->signalOpSeqsDev, comm->memManager), ret, fail);
 
-    // Free host signals buffer
-    if (ceCtx->signalsHost) free(ceCtx->signalsHost);
+      // Free host signals buffer
+      if (ceCtx->signalsHost) free(ceCtx->signalsHost);
 
-    // Free device-resident constants
-    if (ceCtx->signalConstDev) NCCLCHECKGOTO(ncclCudaFree(ceCtx->signalConstDev, comm->memManager), ret, fail);
+      // Free device-resident constants
+      if (ceCtx->signalConstDev) NCCLCHECKGOTO(ncclCudaFree(ceCtx->signalConstDev, comm->memManager), ret, fail);
 
-    // Deregister and free signal window
-    if (ceCtx->signalsWin) NCCLCHECKGOTO(ncclCommWindowDeregister(comm, ceCtx->signalsWin->vidmem), ret, fail);
+      // Deregister and free signal window
+      if (ceCtx->signalsWin) NCCLCHECKGOTO(ncclCommWindowDeregister(comm, ceCtx->signalsWin->vidmem), ret, fail);
 
-    // Free signal device memory
-    if (ceCtx->signalsDev) NCCLCHECKGOTO(ncclMemFree(ceCtx->signalsDev), ret, fail);
+      // Free signal device memory
+      if (ceCtx->signalsDev) NCCLCHECKGOTO(ncclMemFree(ceCtx->signalsDev), ret, fail);
 
-    // Free the context itself
-    free(ceCtx);
-    comm->rmaState.rmaCeState.rmaCeCtxs[i] = NULL;
+      // Free the context itself
+      free(ceCtx);
+      comm->rmaState.rmaCeState.rmaCeCtxs[i] = NULL;
+    }
   }
 
   // Reset the number of contexts and initialized flag
