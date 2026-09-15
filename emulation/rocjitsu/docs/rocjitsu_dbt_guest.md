@@ -210,11 +210,10 @@ rocjitsu goes through the patched table and is covered.
 
   Note that `HSA_TOOLS_LIB` does not decide this. ROCR loads the hotswap hook
   itself from `Runtime::LoadHotswapTool()`, before it reads `HSA_TOOLS_LIB` at
-  all, whenever a gfx1250 A0 agent is present and `HSA_HOTSWAP_DISABLE` is not
-  set. So on such a machine the hotswap hook is always first and the DBT hook
-  always wraps it, whatever `HSA_TOOLS_LIB` says — and merely leaving the hotswap
-  hook out of that variable does not keep it out of the process. To run the DBT
-  hook there, set `HSA_HOTSWAP_DISABLE`.
+  all, whenever `HSA_HOTSWAP_ENABLE` is set to a true value and a gfx1250 A0
+  agent is present. So when enabled the hotswap hook is always first and the DBT
+  hook always wraps it, whatever `HSA_TOOLS_LIB` says. Leave
+  `HSA_HOTSWAP_ENABLE` unset when running the DBT hook by itself.
 
   Everywhere else the hotswap hook never loads, `HSA_TOOLS_LIB` is the only
   thing naming a tool, and the supported launch path keeps it to one: `rocjitsu`
