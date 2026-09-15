@@ -1634,11 +1634,17 @@ TEST_F(NetIbMPITest, CastSetupUnilateralConnectFailureReported) {
         << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     net_ = &netIbCast;
-    ASSERT_NO_FATAL_FAILURE(AssertInitAndGetDevices(nullptr));
-
+    // Init and device discovery happen before any MPI exchange in this test, so a
+    // unilateral fatal assert here -- one rank failing init while the other does not --
+    // would exit only that rank and strand its peer waiting on the setup handshake
+    // below: the exact hang this branch exists to remove, just moved earlier. EXPECT_
+    // records the local outcome, then both ranks agree on it before anything fatal.
+    EXPECT_EQ(InitNetIb(), ncclSuccess) << "InitNetIb failed";
     int ndev = 0;
-    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
-    ASSERT_GT(ndev, 0);
+    EXPECT_EQ(GetDeviceCount(&ndev), ncclSuccess) << "GetDeviceCount failed";
+    int ready = (ndev > 0) ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE, &ready, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+    ASSERT_EQ(ready, 1) << "init or device discovery failed on at least one rank";
 
     const int rank = MPIEnvironment::world_rank;
     // Valid for rank 0 (the listener); one past the last real index for rank 1 (the
