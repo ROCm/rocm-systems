@@ -143,29 +143,37 @@ context_filter(const context::context* ctx)
     return (has_buffered || has_callback);
 }
 
-struct async_copy_data
+struct traced_copy_data
 {
     using timestamp_t     = rocprofiler_timestamp_t;
     using callback_data_t = rocprofiler_callback_tracing_memory_copy_data_t;
     using buffered_data_t = rocprofiler_buffer_tracing_memory_copy_record_t;
 
-    hsa_signal_t                        orig_signal    = {};
-    hsa_signal_t                        rocp_signal    = {};
-    rocprofiler_thread_id_t             tid            = common::get_tid();
-    rocprofiler_agent_id_t              dst_agent      = sdk::null_agent_id;
-    rocprofiler_agent_id_t              src_agent      = sdk::null_agent_id;
-    rocprofiler_address_t               dst_address    = {.value = 0};
-    rocprofiler_address_t               src_address    = {.value = 0};
-    rocprofiler_memory_copy_operation_t direction      = ROCPROFILER_MEMORY_COPY_NONE;
-    uint64_t                            bytes_copied   = 0;
-    uint64_t                            start_ts       = 0;
-    context::correlation_id*            correlation_id = nullptr;
-    tracing::tracing_data               tracing_data   = {};
+    rocprofiler_agent_id_t              dst_agent    = sdk::null_agent_id;
+    rocprofiler_agent_id_t              src_agent    = sdk::null_agent_id;
+    rocprofiler_address_t               dst_address  = {.value = 0};
+    rocprofiler_address_t               src_address  = {.value = 0};
+    rocprofiler_memory_copy_operation_t direction    = ROCPROFILER_MEMORY_COPY_NONE;
+    uint64_t                            bytes_copied = 0;
+    tracing::tracing_data               tracing_data = {};
 
     callback_data_t get_callback_data(timestamp_t _beg = 0, timestamp_t _end = 0) const;
-    buffered_data_t get_buffered_record(const context_t* _ctx,
-                                        timestamp_t      _beg = 0,
-                                        timestamp_t      _end = 0) const;
+    buffered_data_t get_buffered_record(const context_t*               _ctx,
+                                        const context::correlation_id* _corr_id,
+                                        timestamp_t                    _beg = 0,
+                                        timestamp_t                    _end = 0) const;
+};
+
+using traced_copy_data_vec_t = common::container::small_vector<traced_copy_data, 1>;
+
+struct async_copy_data
+{
+    hsa_signal_t                  orig_signal    = {};
+    hsa_signal_t                  rocp_signal    = {};
+    rocprofiler_thread_id_t       tid            = common::get_tid();
+    uint64_t                      start_ts       = 0;
+    context::correlation_id*      correlation_id = nullptr;
+    traced_copy_data_vec_t        traced_copies  = {};
 
     auto get_lock() { return std::make_unique<std::unique_lock<std::mutex>>(m_mtx); }
 
@@ -173,8 +181,11 @@ private:
     std::mutex m_mtx = {};
 };
 
-async_copy_data::callback_data_t
-async_copy_data::get_callback_data(timestamp_t _beg, timestamp_t _end) const
+/**
+ * @brief Builds the callback payload for one logical copy described by a traced signal.
+ */
+traced_copy_data::callback_data_t
+traced_copy_data::get_callback_data(timestamp_t _beg, timestamp_t _end) const
 {
     ROCP_FATAL_IF(direction == ROCPROFILER_MEMORY_COPY_NONE) << "direction has not been set";
 
@@ -188,22 +199,27 @@ async_copy_data::get_callback_data(timestamp_t _beg, timestamp_t _end) const
                                           src_address);
 }
 
-async_copy_data::buffered_data_t
-async_copy_data::get_buffered_record(const context_t* _ctx,
-                                     timestamp_t      _beg,
-                                     timestamp_t      _end) const
+/**
+ * @brief Builds the buffered tracing record for one logical copy.
+ */
+traced_copy_data::buffered_data_t
+traced_copy_data::get_buffered_record(const context_t*               _ctx,
+                                      const context::correlation_id* _corr_id,
+                                      timestamp_t                    _beg,
+                                      timestamp_t                    _end) const
 {
     ROCP_FATAL_IF(direction == ROCPROFILER_MEMORY_COPY_NONE) << "direction has not been set";
+    ROCP_FATAL_IF(_corr_id == nullptr) << "correlation id has not been set";
 
     auto _external_corr_id =
         (_ctx) ? tracing_data.external_correlation_ids.at(_ctx) : context::null_user_data;
-    auto _corr_id = rocprofiler_async_correlation_id_t{correlation_id->internal, _external_corr_id};
+    auto _async_corr_id = rocprofiler_async_correlation_id_t{_corr_id->internal, _external_corr_id};
 
     return common::init_public_api_struct(buffered_data_t{},
                                           ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
                                           direction,
-                                          _corr_id,
-                                          correlation_id->thread_idx,
+                                          _async_corr_id,
+                                          _corr_id->thread_idx,
                                           _beg,
                                           _end,
                                           dst_agent,
@@ -337,6 +353,236 @@ convert_hsa_handle(Up _hsa_object)
     return reinterpret_cast<Tp*>(_hsa_object.handle);
 }
 
+struct copy_metadata
+{
+    rocprofiler_agent_id_t              dst_agent = sdk::null_agent_id;
+    rocprofiler_agent_id_t              src_agent = sdk::null_agent_id;
+    rocprofiler_memory_copy_operation_t direction = ROCPROFILER_MEMORY_COPY_NONE;
+};
+
+bool
+async_copy_handler(hsa_signal_value_t, void* arg);
+
+/**
+ * @brief Resolves rocprofiler agent ids and copy direction from HSA agents.
+ *
+ * When both HSA agents are GPU type, the agent handles alone are not sufficient to determine
+ * the true transfer direction. OpenMP RTL (libomptarget) pins host memory and registers it
+ * under a GPU agent, causing HSA to report src_agent == dst_agent (both GPU) even for
+ * HOST<->DEVICE transfers. In that case, hsa_amd_pointer_info::agentOwner is consulted to
+ * recover the true direction (fix for ROCM-9863).
+ */
+copy_metadata
+get_copy_metadata(hsa_agent_t      _hsa_dst_agent,
+                  hsa_agent_t      _hsa_src_agent,
+                  const void*      _dst_address,
+                  const void*      _src_address,
+                  std::string_view _name)
+{
+    auto        _copy_meta      = copy_metadata{};
+    const auto* _rocp_dst_agent = agent::get_rocprofiler_agent(_hsa_dst_agent);
+    const auto* _rocp_src_agent = agent::get_rocprofiler_agent(_hsa_src_agent);
+
+    if(_rocp_dst_agent && _rocp_src_agent)
+    {
+        _copy_meta.src_agent = _rocp_src_agent->id;
+        _copy_meta.dst_agent = _rocp_dst_agent->id;
+
+        if(_rocp_src_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
+        {
+            if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
+                _copy_meta.direction = ROCPROFILER_MEMORY_COPY_HOST_TO_HOST;
+            else if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+                _copy_meta.direction = ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE;
+            else
+                ROCP_CI_LOG(WARNING)
+                    << _name << " had an unhandled destination type: " << _rocp_dst_agent->type;
+        }
+        else if(_rocp_src_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+        {
+            if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
+                _copy_meta.direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST;
+            else if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+            {
+                // ROCM-9863: when both HSA agents are GPU type, inspect the actual ownership
+                // of each pointer with hsa_amd_pointer_info to disambiguate HOST<->DEVICE
+                // copies that OpenMP RTL routes through a GPU-registered host staging buffer.
+                auto _src_info = hsa_amd_pointer_info_t{};
+                auto _dst_info = hsa_amd_pointer_info_t{};
+                _src_info.size = sizeof(hsa_amd_pointer_info_t);
+                _dst_info.size = sizeof(hsa_amd_pointer_info_t);
+
+                auto* _ptr_info_fn = get_amd_ext_table()->hsa_amd_pointer_info_fn;
+
+                bool _src_query_ok = false;
+                bool _dst_query_ok = false;
+                if(_ptr_info_fn)
+                {
+                    _src_query_ok =
+                        (_ptr_info_fn(_src_address, &_src_info, nullptr, nullptr, nullptr) ==
+                         HSA_STATUS_SUCCESS);
+                    _dst_query_ok =
+                        (_ptr_info_fn(_dst_address, &_dst_info, nullptr, nullptr, nullptr) ==
+                         HSA_STATUS_SUCCESS);
+                }
+
+                // A pointer is considered GPU device memory if its agentOwner matches
+                // the GPU agent handle passed to the copy operation.
+                const bool _src_is_device =
+                    _src_query_ok && (_src_info.agentOwner == _hsa_src_agent);
+                const bool _dst_is_device =
+                    _dst_query_ok && (_dst_info.agentOwner == _hsa_dst_agent);
+
+                if(!_src_is_device && _dst_is_device)
+                    _copy_meta.direction = ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE;
+                else if(_src_is_device && !_dst_is_device)
+                    _copy_meta.direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST;
+                else
+                    _copy_meta.direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE;
+            }
+            else
+                ROCP_CI_LOG(WARNING)
+                    << _name << " had an unhandled destination type: " << _rocp_dst_agent->type;
+        }
+        else
+        {
+            ROCP_CI_LOG(WARNING) << _name
+                                 << " had an unhandled source type: " << _rocp_src_agent->type;
+        }
+    }
+    else
+    {
+        ROCP_ERROR_IF(!_rocp_src_agent)
+            << "failed to find source rocprofiler agent for hsa agent with handle="
+            << _hsa_src_agent.handle;
+        ROCP_ERROR_IF(!_rocp_dst_agent)
+            << "failed to find destination rocprofiler agent for hsa agent with handle="
+            << _hsa_dst_agent.handle;
+    }
+
+    return _copy_meta;
+}
+
+/**
+ * @brief Fills a logical copy record and captures the tracing contexts interested in it.
+ */
+bool
+populate_traced_copy_data(traced_copy_data&     _traced_copy,
+                          const copy_metadata&  _copy_meta,
+                          uint64_t              _bytes_copied,
+                          rocprofiler_address_t _dst_address,
+                          rocprofiler_address_t _src_address)
+{
+    if(_copy_meta.direction == ROCPROFILER_MEMORY_COPY_NONE) return false;
+
+    _traced_copy.dst_agent    = _copy_meta.dst_agent;
+    _traced_copy.src_agent    = _copy_meta.src_agent;
+    _traced_copy.direction    = _copy_meta.direction;
+    _traced_copy.bytes_copied = _bytes_copied;
+    _traced_copy.dst_address  = _dst_address;
+    _traced_copy.src_address  = _src_address;
+
+    tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
+                               ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                               _traced_copy.direction,
+                               _traced_copy.tracing_data);
+
+    return !_traced_copy.tracing_data.empty();
+}
+
+/**
+ * @brief Creates the rocprofiler-owned completion signal and installs its async handler.
+ */
+bool
+create_async_copy_signal(async_copy_data* _data)
+{
+    constexpr auto     _completion_signal_val = hsa_signal_value_t{1};
+    const uint32_t     _num_consumers         = 0;
+    const hsa_agent_t* _consumers             = nullptr;
+    hsa_status_t       _status                = HSA_STATUS_SUCCESS;
+
+    _status = get_core_table()->hsa_signal_create_fn(
+        _completion_signal_val, _num_consumers, _consumers, &_data->rocp_signal);
+
+    if(_status != HSA_STATUS_SUCCESS)
+    {
+        ROCP_ERROR << "hsa_signal_create returned non-zero error code " << _status;
+        return false;
+    }
+
+    _status = get_amd_ext_table()->hsa_amd_signal_async_handler_fn(_data->rocp_signal,
+                                                                   HSA_SIGNAL_CONDITION_LT,
+                                                                   _completion_signal_val,
+                                                                   async_copy_handler,
+                                                                   _data);
+
+    if(_status != HSA_STATUS_SUCCESS)
+    {
+        ROCP_ERROR << "hsa_amd_signal_async_handler returned non-zero error code " << _status;
+
+        ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal))
+            << ":: failed to destroy signal after async handler failed";
+
+        _data->rocp_signal = {};
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * @brief Tears down rocprofiler-owned signal state for an intercepted copy submission.
+ */
+void
+destroy_async_copy_data(async_copy_data* _data)
+{
+    if(!_data) return;
+
+    if(_data->rocp_signal.handle != 0 && get_core_table()->hsa_signal_destroy_fn)
+    {
+        ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal));
+        _data->rocp_signal = {};
+    }
+
+    delete _data;
+}
+
+/**
+ * @brief Emits enter callbacks and external correlation ids for all logical copies on a signal.
+ */
+void
+initialize_async_copy_tracing(async_copy_data* _data)
+{
+    ROCP_FATAL_IF(_data == nullptr || _data->correlation_id == nullptr)
+        << "async copy tracing requires valid correlation data";
+
+    auto _thread_id = _data->correlation_id->thread_idx;
+
+    for(auto& _copy : _data->traced_copies)
+    {
+        tracing::populate_external_correlation_ids(
+            _copy.tracing_data.external_correlation_ids,
+            _thread_id,
+            ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
+            _copy.direction,
+            _data->correlation_id->internal);
+
+        if(!_copy.tracing_data.callback_contexts.empty())
+        {
+            auto _tracer_data = _copy.get_callback_data();
+
+            tracing::execute_phase_enter_callbacks(_copy.tracing_data.callback_contexts,
+                                                   _thread_id,
+                                                   _data->correlation_id->internal,
+                                                   _copy.tracing_data.external_correlation_ids,
+                                                   _data->correlation_id->ancestor,
+                                                   ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
+                                                   _copy.direction,
+                                                   _tracer_data);
+        }
+    }
+}
+
 bool
 async_copy_handler(hsa_signal_value_t, void* arg)
 {
@@ -376,45 +622,55 @@ async_copy_handler(hsa_signal_value_t, void* arg)
     }
     else
     {
-        ROCP_CI_LOG(ERROR) << fmt::format(
-            "hsa_amd_profiling_get_async_copy_time for the {} copy operation from agent-{} to "
-            "agent-{} returned status={} :: {}",
-            std::string_view{hsa::async_copy::name_by_id(_data->direction)},
-            CHECK_NOTNULL(agent::get_agent(_data->src_agent))->node_id,
-            CHECK_NOTNULL(agent::get_agent(_data->dst_agent))->node_id,
-            static_cast<int>(copy_time_status),
-            hsa::get_hsa_status_string(copy_time_status));
+        if(!_data->traced_copies.empty())
+        {
+            const auto& _copy = _data->traced_copies.front();
+            ROCP_CI_LOG(ERROR) << fmt::format(
+                "hsa_amd_profiling_get_async_copy_time for the {} copy operation from agent-{} "
+                "to agent-{} returned status={} :: {}",
+                std::string_view{hsa::async_copy::name_by_id(_copy.direction)},
+                CHECK_NOTNULL(agent::get_agent(_copy.src_agent))->node_id,
+                CHECK_NOTNULL(agent::get_agent(_copy.dst_agent))->node_id,
+                static_cast<int>(copy_time_status),
+                hsa::get_hsa_status_string(copy_time_status));
+        }
     }
 
-    // get the contexts that were active when the signal was created
-    const auto& tracing_data = _data->tracing_data;
-
-    if(_profile_time.status == HSA_STATUS_SUCCESS && !tracing_data.empty())
+    if(_profile_time.status == HSA_STATUS_SUCCESS)
     {
-        if(!_data->tracing_data.callback_contexts.empty())
+        for(auto& _copy : _data->traced_copies)
         {
-            auto _tracer_data = _data->get_callback_data(_profile_time.start, _profile_time.end);
+            if(!_copy.tracing_data.empty())
+            {
+                if(!_copy.tracing_data.callback_contexts.empty())
+                {
+                    auto _tracer_data =
+                        _copy.get_callback_data(_profile_time.start, _profile_time.end);
 
-            tracing::execute_phase_exit_callbacks(_data->tracing_data.callback_contexts,
-                                                  _data->tracing_data.external_correlation_ids,
-                                                  ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
-                                                  _data->direction,
-                                                  _tracer_data);
-        }
+                    tracing::execute_phase_exit_callbacks(
+                        _copy.tracing_data.callback_contexts,
+                        _copy.tracing_data.external_correlation_ids,
+                        ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
+                        _copy.direction,
+                        _tracer_data);
+                }
 
-        if(!_data->tracing_data.buffered_contexts.empty())
-        {
-            auto record =
-                _data->get_buffered_record(nullptr, _profile_time.start, _profile_time.end);
+                if(!_copy.tracing_data.buffered_contexts.empty())
+                {
+                    auto _record = _copy.get_buffered_record(
+                        nullptr, _data->correlation_id, _profile_time.start, _profile_time.end);
 
-            tracing::execute_buffer_record_emplace(_data->tracing_data.buffered_contexts,
-                                                   _data->tid,
-                                                   _data->correlation_id->internal,
-                                                   _data->tracing_data.external_correlation_ids,
-                                                   _data->correlation_id->ancestor,
-                                                   ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
-                                                   _data->direction,
-                                                   record);
+                    tracing::execute_buffer_record_emplace(
+                        _copy.tracing_data.buffered_contexts,
+                        _data->tid,
+                        _data->correlation_id->internal,
+                        _copy.tracing_data.external_correlation_ids,
+                        _data->correlation_id->ancestor,
+                        ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                        _copy.direction,
+                        _record);
+                }
+            }
         }
     }
 
@@ -432,8 +688,7 @@ async_copy_handler(hsa_signal_value_t, void* arg)
         std::tie(orig_amd_signal->start_ts, orig_amd_signal->end_ts) =
             std::tie(rocp_amd_signal->start_ts, rocp_amd_signal->end_ts);
 
-        // Move to ROCP_TRACE when rebasing
-        ROCP_INFO << "Decrementing Signal: " << std::hex << _data->orig_signal.handle << std::dec;
+        ROCP_TRACE << "Decrementing Signal: " << std::hex << _data->orig_signal.handle << std::dec;
         get_core_table()->hsa_signal_subtract_screlease_fn(_data->orig_signal, 1);
     }
 
@@ -447,6 +702,9 @@ enum async_copy_id
     async_copy_id           = ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_copy,
     async_copy_on_engine_id = ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_copy_on_engine,
     async_copy_rect_id      = ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_copy_rect,
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0A
+    async_batch_copy_id = ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_batch_copy,
+#endif
 };
 
 template <size_t TableIdx, size_t OpIdx>
@@ -525,6 +783,264 @@ compute_address(const hsa_pitched_ptr_t* val)
     return rocprofiler_address_t{.ptr = val->base};
 }
 
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0A
+/**
+ * @brief Appends one logical copy from a batch descriptor when tracing is enabled for it.
+ */
+bool
+append_batch_traced_copy_data(traced_copy_data_vec_t& _traced_copies,
+                              hsa_agent_t             _dst_agent,
+                              hsa_agent_t             _src_agent,
+                              const void*             _dst_address,
+                              const void*             _src_address,
+                              uint64_t                _bytes_copied,
+                              std::string_view        _name)
+{
+    if(_bytes_copied == 0) return false;
+
+    auto _traced_copy = traced_copy_data{};
+    auto _copy_meta = get_copy_metadata(_dst_agent, _src_agent, _dst_address, _src_address, _name);
+
+    if(!populate_traced_copy_data(_traced_copy,
+                                  _copy_meta,
+                                  _bytes_copied,
+                                  compute_address(_dst_address),
+                                  compute_address(_src_address)))
+        return false;
+
+    _traced_copies.emplace_back(std::move(_traced_copy));
+    return true;
+}
+
+/**
+ * @brief Expands a batch descriptor into the logical copy records rocprofiler can represent.
+ */
+void
+populate_batch_traced_copy_data(traced_copy_data_vec_t&         _traced_copies,
+                                const hsa_amd_memory_copy_op_t& _copy_op,
+                                std::string_view                _name)
+{
+    switch(_copy_op.type)
+    {
+        case HSA_AMD_MEMORY_COPY_OP_LINEAR:
+            if(_copy_op.num_entries > 0)
+            {
+                for(uint32_t i = 0; i < _copy_op.num_entries; ++i)
+                {
+                    append_batch_traced_copy_data(_traced_copies,
+                                                  _copy_op.dst_agent_list[i],
+                                                  _copy_op.src_agent,
+                                                  _copy_op.dst_list[i],
+                                                  _copy_op.src_list[i],
+                                                  _copy_op.size_list[i],
+                                                  _name);
+                }
+            }
+            else
+            {
+                append_batch_traced_copy_data(_traced_copies,
+                                              _copy_op.dst_agent,
+                                              _copy_op.src_agent,
+                                              _copy_op.dst,
+                                              _copy_op.src,
+                                              _copy_op.size,
+                                              _name);
+            }
+            break;
+        case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
+            for(uint32_t i = 0; i < _copy_op.num_entries; ++i)
+            {
+                append_batch_traced_copy_data(_traced_copies,
+                                              _copy_op.dst_agent_list[i],
+                                              _copy_op.src_agent,
+                                              _copy_op.dst_list[i],
+                                              _copy_op.src,
+                                              _copy_op.size,
+                                              _name);
+            }
+            break;
+        case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
+            if(_copy_op.num_entries > 0)
+            {
+                for(uint32_t i = 0; i < _copy_op.num_entries; ++i)
+                {
+                    append_batch_traced_copy_data(_traced_copies,
+                                                  _copy_op.dst_agent_list[i],
+                                                  _copy_op.src_agent,
+                                                  _copy_op.dst_list[i],
+                                                  _copy_op.src_list[i],
+                                                  _copy_op.size_list[i],
+                                                  _name);
+                    append_batch_traced_copy_data(_traced_copies,
+                                                  _copy_op.src_agent,
+                                                  _copy_op.dst_agent_list[i],
+                                                  _copy_op.src_list[i],
+                                                  _copy_op.dst_list[i],
+                                                  _copy_op.size_list[i],
+                                                  _name);
+                }
+            }
+            else
+            {
+                append_batch_traced_copy_data(_traced_copies,
+                                              _copy_op.dst_agent,
+                                              _copy_op.src_agent,
+                                              _copy_op.dst,
+                                              _copy_op.src,
+                                              _copy_op.src_size,
+                                              _name);
+                append_batch_traced_copy_data(_traced_copies,
+                                              _copy_op.src_agent,
+                                              _copy_op.dst_agent,
+                                              _copy_op.src,
+                                              _copy_op.dst,
+                                              _copy_op.dst_size,
+                                              _name);
+            }
+            break;
+        case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
+        case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
+        case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
+            append_batch_traced_copy_data(_traced_copies,
+                                          _copy_op.dst_agent,
+                                          _copy_op.src_agent,
+                                          _copy_op.dst,
+                                          _copy_op.src,
+                                          _copy_op.size,
+                                          _name);
+            break;
+        default: break;
+    }
+}
+
+/**
+ * @brief Intercepts batch copy submission and replaces traced op signals with rocprofiler signals.
+ */
+template <size_t TableIdx, size_t OpIdx>
+hsa_status_t
+async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
+                      uint32_t                        num_copy_ops,
+                      uint32_t                        num_dep_signals,
+                      const hsa_signal_t*             dep_signals)
+{
+    using meta_type        = hsa_api_meta<TableIdx, OpIdx>;
+    using intercept_data_t = std::pair<uint32_t, async_copy_data*>;
+    using intercept_lock_t = std::unique_ptr<std::unique_lock<std::mutex>>;
+
+    auto& _dispatch = get_next_dispatch<TableIdx, OpIdx>();
+
+    if(copy_ops == nullptr || num_copy_ops == 0)
+        return _dispatch(copy_ops, num_copy_ops, num_dep_signals, dep_signals);
+
+    auto _intercept_data  = std::vector<intercept_data_t>{};
+    auto _intercept_locks = std::vector<intercept_lock_t>{};
+
+    _intercept_data.reserve(num_copy_ops);
+    _intercept_locks.reserve(num_copy_ops);
+
+    for(uint32_t i = 0; i < num_copy_ops; ++i)
+    {
+        auto _traced_copies = traced_copy_data_vec_t{};
+        populate_batch_traced_copy_data(_traced_copies, copy_ops[i], meta_type::name);
+
+        if(_traced_copies.empty()) continue;
+
+        auto* _data          = new async_copy_data{};
+        _data->traced_copies = std::move(_traced_copies);
+
+        if(!create_async_copy_signal(_data))
+        {
+            destroy_async_copy_data(_data);
+            continue;
+        }
+
+        _intercept_data.emplace_back(i, _data);
+    }
+
+    if(_intercept_data.empty())
+        return _dispatch(copy_ops, num_copy_ops, num_dep_signals, dep_signals);
+
+    auto _wrapped_copy_ops =
+        std::vector<hsa_amd_memory_copy_op_t>{copy_ops, copy_ops + num_copy_ops};
+
+    auto _cleanup = [&_intercept_data](bool _decrement_active_signals,
+                                       bool _decrement_corr_ref_count) {
+        for(auto& [_idx, _data] : _intercept_data)
+        {
+            if(_decrement_active_signals && get_active_signals())
+                get_active_signals()->fetch_sub(1);
+
+            if(_decrement_corr_ref_count && _data && _data->correlation_id)
+                _data->correlation_id->sub_ref_count();
+
+            destroy_async_copy_data(_data);
+            _data = nullptr;
+        }
+    };
+
+    auto*                    _corr_id     = context::get_latest_correlation_id();
+    context::correlation_id* _corr_id_pop = nullptr;
+
+    if(!_corr_id)
+    {
+        constexpr auto ref_count = 1;
+        _corr_id                 = context::correlation_tracing_service::construct(ref_count);
+        _corr_id_pop             = _corr_id;
+    }
+
+    if(!_corr_id)
+    {
+        _cleanup(false, false);
+        return _dispatch(copy_ops, num_copy_ops, num_dep_signals, dep_signals);
+    }
+
+    for(auto& [_idx, _data] : _intercept_data)
+    {
+        _intercept_locks.emplace_back(_data->get_lock());
+        _data->correlation_id = _corr_id;
+        _data->correlation_id->add_ref_count();
+
+        auto& _completion_signal = _wrapped_copy_ops.at(_idx).completion_signal;
+        auto  _original_value = get_core_table()->hsa_signal_load_scacquire_fn(_completion_signal);
+
+        _data->orig_signal = _completion_signal;
+        _completion_signal = _data->rocp_signal;
+
+        ROCP_TRACE << "Memcpy Batch Original Signal " << std::hex << _data->orig_signal.handle
+                   << std::dec << ": " << _original_value << " | Replacement Signal: " << std::hex
+                   << _completion_signal.handle << std::dec << ": 1";
+
+        CHECK_NOTNULL(get_active_signals())->fetch_add(1);
+    }
+
+    auto _start_ts = common::timestamp_ns();
+    for(auto& [_idx, _data] : _intercept_data)
+    {
+        _data->start_ts = _start_ts;
+        initialize_async_copy_tracing(_data);
+    }
+
+    auto _status = _dispatch(_wrapped_copy_ops.data(), num_copy_ops, num_dep_signals, dep_signals);
+
+    if(_corr_id_pop)
+    {
+        context::pop_latest_correlation_id(_corr_id_pop);
+        _corr_id_pop->sub_ref_count();
+    }
+
+    if(_status != HSA_STATUS_SUCCESS)
+    {
+        _intercept_locks.clear();
+        _cleanup(true, true);
+        return _status;
+    }
+
+    _intercept_locks.clear();
+
+    return _status;
+}
+#endif
+
 template <size_t TableIdx, size_t OpIdx, typename... Args>
 hsa_status_t
 async_copy_impl(Args... args)
@@ -535,209 +1051,49 @@ async_copy_impl(Args... args)
     constexpr auto copy_size_idx = arg_indices<OpIdx>::copy_size_idx;
     constexpr auto dst_addr_idx  = arg_indices<OpIdx>::dst_address_idx;
     constexpr auto src_addr_idx  = arg_indices<OpIdx>::src_address_idx;
+    constexpr auto dst_agent_idx = arg_indices<OpIdx>::dst_agent_idx;
+    constexpr auto src_agent_idx = arg_indices<OpIdx>::src_agent_idx;
 
     auto&& _tied_args = std::tie(args...);
-
-    // determine the direction of the memory copy
-    auto _direction    = ROCPROFILER_MEMORY_COPY_NONE;
-    auto _src_agent_id = rocprofiler_agent_id_t{};
-    auto _dst_agent_id = rocprofiler_agent_id_t{};
-    {
-        // indices in the tuple with references to the arguments
-        constexpr auto dst_agent_idx = arg_indices<OpIdx>::dst_agent_idx;
-        constexpr auto src_agent_idx = arg_indices<OpIdx>::src_agent_idx;
-
-        // extract the completion signal argument and the destination hsa_agent_t
-        auto _hsa_dst_agent = std::get<dst_agent_idx>(_tied_args);
-        auto _hsa_src_agent = std::get<src_agent_idx>(_tied_args);
-
-        // map the hsa agents to rocprofiler agents
-        auto _rocp_dst_agent = agent::get_rocprofiler_agent(_hsa_dst_agent);
-        auto _rocp_src_agent = agent::get_rocprofiler_agent(_hsa_src_agent);
-
-        if(_rocp_dst_agent && _rocp_src_agent)
-        {
-            _src_agent_id = _rocp_src_agent->id;
-            _dst_agent_id = _rocp_dst_agent->id;
-            if(_rocp_src_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-            {
-                if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                    _direction = ROCPROFILER_MEMORY_COPY_HOST_TO_HOST;
-                else if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                    _direction = ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE;
-                else
-                {
-                    ROCP_CI_LOG(WARNING)
-                        << meta_type::name
-                        << " had an unhandled destination type: " << _rocp_dst_agent->type;
-                }
-            }
-            else if(_rocp_src_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-            {
-                if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                    _direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST;
-                else if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                {
-                    // When both agents are GPU type, the HSA agent handles alone are not
-                    // sufficient to determine the true transfer direction. OpenMP RTL
-                    // (libomptarget) pins host memory and registers it under a GPU agent, causing
-                    // HSA to report src_agent == dst_agent (both GPU) even for HOST<->DEVICE
-                    // transfers. Use hsa_amd_pointer_info to inspect the actual memory type of each
-                    // pointer:
-                    //   HSA_EXT_POINTER_TYPE_UNKNOWN (0) = unregistered host memory (e.g. MI300X
-                    //   APU) HSA_EXT_POINTER_TYPE_LOCKED  (2) = pinned host memory (discrete GPU)
-                    //   HSA_EXT_POINTER_TYPE_HSA     (1) = true device (GPU) memory
-                    // This fixes ROCM-9863: OpenMP offload transfers incorrectly reported as
-                    // MEMORY_COPY_DEVICE_TO_DEVICE instead of HOST_TO_DEVICE / DEVICE_TO_HOST.
-                    constexpr auto dst_addr_idx_inner = arg_indices<OpIdx>::dst_address_idx;
-                    constexpr auto src_addr_idx_inner = arg_indices<OpIdx>::src_address_idx;
-                    const void*    _src_ptr =
-                        compute_address(std::get<src_addr_idx_inner>(_tied_args)).ptr;
-                    const void* _dst_ptr =
-                        compute_address(std::get<dst_addr_idx_inner>(_tied_args)).ptr;
-
-                    auto _src_info = hsa_amd_pointer_info_t{};
-                    auto _dst_info = hsa_amd_pointer_info_t{};
-                    _src_info.size = sizeof(hsa_amd_pointer_info_t);
-                    _dst_info.size = sizeof(hsa_amd_pointer_info_t);
-
-                    auto* _ptr_info_fn = get_amd_ext_table()->hsa_amd_pointer_info_fn;
-
-                    // When both HSA agents are GPU type, the agent handles alone are not
-                    // sufficient to determine the true transfer direction. OpenMP RTL
-                    // (libomptarget) allocates a host-accessible staging buffer and registers it
-                    // under the GPU agent, making both src and dst appear as GPU-type agents.
-                    //
-                    // The hsa_amd_pointer_info_t::agentOwner field reveals which HSA agent
-                    // actually owns each allocation. Pinned host buffers created by OpenMP RTL
-                    // have a different agentOwner than the GPU agent used for the copy.
-                    //
-                    // Fix for ROCM-9863: compare agentOwner of src and dst against the GPU
-                    // agent handle to correctly classify HOST_TO_DEVICE and DEVICE_TO_HOST.
-                    bool _src_query_ok = false, _dst_query_ok = false;
-                    if(_ptr_info_fn)
-                    {
-                        _src_query_ok =
-                            (_ptr_info_fn(_src_ptr, &_src_info, nullptr, nullptr, nullptr) ==
-                             HSA_STATUS_SUCCESS);
-                        _dst_query_ok =
-                            (_ptr_info_fn(_dst_ptr, &_dst_info, nullptr, nullptr, nullptr) ==
-                             HSA_STATUS_SUCCESS);
-                    }
-
-                    // A pointer is considered GPU device memory if its agentOwner matches
-                    // the GPU agent handle passed to the copy operation.
-                    const bool _src_is_device =
-                        _src_query_ok && (_src_info.agentOwner == _hsa_dst_agent);
-                    const bool _dst_is_device =
-                        _dst_query_ok && (_dst_info.agentOwner == _hsa_dst_agent);
-
-                    if(!_src_is_device && _dst_is_device)
-                        _direction = ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE;
-                    else if(_src_is_device && !_dst_is_device)
-                        _direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST;
-                    else
-                        _direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE;
-                }
-                else
-                {
-                    ROCP_CI_LOG(WARNING)
-                        << meta_type::name
-                        << " had an unhandled destination type: " << _rocp_dst_agent->type;
-                }
-            }
-            else
-            {
-                ROCP_CI_LOG(WARNING) << meta_type::name
-                                     << " had an unhandled source type: " << _rocp_dst_agent->type;
-            }
-        }
-        else
-        {
-            ROCP_ERROR_IF(!_rocp_src_agent)
-                << "failed to find source rocprofiler agent for hsa agent with handle="
-                << _hsa_src_agent.handle;
-            ROCP_ERROR_IF(!_rocp_dst_agent)
-                << "failed to find destination rocprofiler agent for hsa agent with handle="
-                << _hsa_dst_agent.handle;
-        }
-    }
 
     async_copy_data* _data = nullptr;
 
     {
-        auto tracing_data = tracing::tracing_data{};
+        auto _traced_copy = traced_copy_data{};
+        auto _copy_meta   = get_copy_metadata(std::get<dst_agent_idx>(_tied_args),
+                                            std::get<src_agent_idx>(_tied_args),
+                                            compute_address(std::get<dst_addr_idx>(_tied_args)).ptr,
+                                            compute_address(std::get<src_addr_idx>(_tied_args)).ptr,
+                                            meta_type::name);
 
-        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
-                                   ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
-                                   _direction,
-                                   tracing_data);
-        // if no contexts are tracing memory copies for this direction, execute as usual
-        if(tracing_data.empty())
+        if(!populate_traced_copy_data(_traced_copy,
+                                      _copy_meta,
+                                      compute_copy_bytes(std::get<copy_size_idx>(_tied_args)),
+                                      compute_address(std::get<dst_addr_idx>(_tied_args)),
+                                      compute_address(std::get<src_addr_idx>(_tied_args))))
         {
             return invoke(get_next_dispatch<TableIdx, OpIdx>(),
                           std::move(_tied_args),
                           std::make_index_sequence<N>{});
         }
 
-        _data               = new async_copy_data{};
-        _data->tracing_data = std::move(tracing_data);
+        _data = new async_copy_data{};
+        _data->traced_copies.emplace_back(std::move(_traced_copy));
     }
 
-    auto  _lk          = _data->get_lock();
-    auto& tracing_data = _data->tracing_data;
+    auto _lk = _data->get_lock();
 
-    // at this point, we want to install our own signal handler
-    _data->tid          = common::get_tid();
-    _data->dst_agent    = _dst_agent_id;
-    _data->src_agent    = _src_agent_id;
-    _data->direction    = _direction;
-    _data->bytes_copied = compute_copy_bytes(std::get<copy_size_idx>(_tied_args));
-    _data->dst_address  = compute_address(std::get<dst_addr_idx>(_tied_args));
-    _data->src_address  = compute_address(std::get<src_addr_idx>(_tied_args));
-
-    constexpr auto           completion_signal_idx  = arg_indices<OpIdx>::completion_signal_idx;
-    auto&                    _completion_signal     = std::get<completion_signal_idx>(_tied_args);
-    const hsa_signal_value_t _completion_signal_val = 1;
-
+    constexpr auto completion_signal_idx = arg_indices<OpIdx>::completion_signal_idx;
+    auto&          _completion_signal    = std::get<completion_signal_idx>(_tied_args);
     auto original_value = get_core_table()->hsa_signal_load_scacquire_fn(_completion_signal);
 
+    if(!create_async_copy_signal(_data))
     {
-        const uint32_t     num_consumers = 0;
-        const hsa_agent_t* consumers     = nullptr;
-        auto               _status       = get_core_table()->hsa_signal_create_fn(
-            _completion_signal_val, num_consumers, consumers, &_data->rocp_signal);
-
-        if(_status != HSA_STATUS_SUCCESS)
-        {
-            ROCP_ERROR << "hsa_signal_create returned non-zero error code " << _status;
-
-            delete _data;
-            return invoke(get_next_dispatch<TableIdx, OpIdx>(),
-                          std::move(_tied_args),
-                          std::make_index_sequence<N>{});
-        }
-    }
-
-    {
-        auto _status = get_amd_ext_table()->hsa_amd_signal_async_handler_fn(_data->rocp_signal,
-                                                                            HSA_SIGNAL_CONDITION_LT,
-                                                                            _completion_signal_val,
-                                                                            async_copy_handler,
-                                                                            _data);
-
-        if(_status != HSA_STATUS_SUCCESS)
-        {
-            ROCP_ERROR << "hsa_amd_signal_async_handler returned non-zero error code " << _status;
-
-            ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal))
-                << ":: failed to destroy signal after async handler failed";
-
-            delete _data;
-            return invoke(get_next_dispatch<TableIdx, OpIdx>(),
-                          std::move(_tied_args),
-                          std::make_index_sequence<N>{});
-        }
+        _lk.reset();
+        destroy_async_copy_data(_data);
+        return invoke(get_next_dispatch<TableIdx, OpIdx>(),
+                      std::move(_tied_args),
+                      std::make_index_sequence<N>{});
     }
 
     _data->correlation_id                 = context::get_latest_correlation_id();
@@ -753,8 +1109,8 @@ async_copy_impl(Args... args)
     if(!_data->correlation_id)
     {
         // During finalization - cleanup and execute without tracing
-        ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal));
-        delete _data;
+        _lk.reset();
+        destroy_async_copy_data(_data);
         return invoke(get_next_dispatch<TableIdx, OpIdx>(),
                       std::move(_tied_args),
                       std::make_index_sequence<N>{});
@@ -763,55 +1119,48 @@ async_copy_impl(Args... args)
     // increase the reference count to denote that this correlation id is being used in a kernel
     _data->correlation_id->add_ref_count();
 
-    // if we constructed a correlation id, this decrements the reference count after the underlying
-    // function returns
-    auto _corr_id_dtor = common::scope_destructor{[_corr_id_pop, _data]() {
-        if(_corr_id_pop)
-        {
-            context::pop_latest_correlation_id(_corr_id_pop);
-            _corr_id_pop->sub_ref_count();
-        }
-        _data->start_ts = common::timestamp_ns();
-    }};
-
-    auto thr_id = _data->correlation_id->thread_idx;
-    tracing::populate_external_correlation_ids(tracing_data.external_correlation_ids,
-                                               thr_id,
-                                               ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
-                                               _direction,
-                                               _data->correlation_id->internal);
-
-    if(!tracing_data.callback_contexts.empty())
-    {
-        auto _tracer_data = _data->get_callback_data();
-
-        tracing::execute_phase_enter_callbacks(tracing_data.callback_contexts,
-                                               thr_id,
-                                               _data->correlation_id->internal,
-                                               tracing_data.external_correlation_ids,
-                                               _data->correlation_id->ancestor,
-                                               ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
-                                               _direction,
-                                               _tracer_data);
-    }
-
     _data->orig_signal = _completion_signal;
     _completion_signal = _data->rocp_signal;
 
-    ROCP_INFO << "Memcpy Original Signal " << std::hex << _data->orig_signal.handle << std::dec
-              << ": " << original_value << " | Replacement Signal: " << std::hex
-              << _completion_signal.handle << std::dec << ": 1";
+    ROCP_TRACE << "Memcpy Original Signal " << std::hex << _data->orig_signal.handle << std::dec
+               << ": " << original_value << " | Replacement Signal: " << std::hex
+               << _completion_signal.handle << std::dec << ": 1";
 
     CHECK_NOTNULL(get_active_signals())->fetch_add(1);
 
-    return invoke(
+    _data->start_ts = common::timestamp_ns();
+    initialize_async_copy_tracing(_data);
+
+    auto _status = invoke(
         get_next_dispatch<TableIdx, OpIdx>(), std::move(_tied_args), std::make_index_sequence<N>{});
+
+    if(_corr_id_pop)
+    {
+        context::pop_latest_correlation_id(_corr_id_pop);
+        _corr_id_pop->sub_ref_count();
+    }
+
+    if(_status != HSA_STATUS_SUCCESS)
+    {
+        if(get_active_signals()) get_active_signals()->fetch_sub(1);
+        if(_data->correlation_id) _data->correlation_id->sub_ref_count();
+        _lk.reset();
+        destroy_async_copy_data(_data);
+        return _status;
+    }
+
+    return _status;
 }
 
 template <size_t TableIdx, size_t OpIdx, typename RetT, typename... Args>
 auto get_async_copy_impl(RetT (*)(Args...))
 {
-    return &async_copy_impl<TableIdx, OpIdx, Args...>;
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0A
+    if constexpr(OpIdx == async_batch_copy_id)
+        return &async_batch_copy_impl<TableIdx, OpIdx>;
+    else
+#endif
+        return &async_copy_impl<TableIdx, OpIdx, Args...>;
 }
 
 template <size_t TableIdx, size_t OpIdx>
@@ -882,8 +1231,14 @@ async_copy_wrap(hsa_amd_ext_table_t* _orig, std::index_sequence<OpIdx...>)
     (async_copy_wrap<TableIdx, OpIdx>(_orig), ...);
 }
 
-using async_copy_index_seq_t =
-    std::index_sequence<async_copy_id, async_copy_on_engine_id, async_copy_rect_id>;
+using async_copy_index_seq_t = std::index_sequence<async_copy_id,
+                                                   async_copy_on_engine_id,
+                                                   async_copy_rect_id
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0A
+                                                   ,
+                                                   async_batch_copy_id
+#endif
+                                                   >;
 }  // namespace
 
 // check out the assembly here... this compiles to a switch statement
