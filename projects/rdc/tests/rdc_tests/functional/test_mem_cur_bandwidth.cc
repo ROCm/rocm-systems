@@ -92,6 +92,17 @@ TEST(MemCurBandwidthTest, RejectsUnsupportedSentinel) {
                                                               1000 * kMsUnits));
 }
 
+// A sample window that exceeds the staleness bound (for example a watcher that
+// paused for a long time) must be ignored so a recent burst is not diluted
+// across an unbounded gap; the helper falls back to the instantaneous reading.
+TEST(MemCurBandwidthTest, IgnoresStaleWindowBeyondCap) {
+  // ~1 hour window with a large accumulator delta that would otherwise clamp to
+  // 100%; the staleness cap rejects it and the instantaneous reading is returned.
+  const uint64_t one_hour_ms = 3600ULL * 1000ULL;
+  EXPECT_DOUBLE_EQ(5.0, amd::rdc::derive_mem_activity_percent(5.0, true, 0, 0, 999999999,
+                                                              one_hour_ms * kMsUnits));
+}
+
 // The derived percentage is clamped to 100.
 TEST(MemCurBandwidthTest, ClampsToOneHundredPercent) {
   EXPECT_DOUBLE_EQ(100.0,
