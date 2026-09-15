@@ -249,6 +249,7 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
+          # cmake searches the ROCm LLVM prefix first, where clang-tidy is too new for the linter
           export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
           source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
@@ -268,6 +269,7 @@ jobs:
             -DCPACK_GENERATOR='DEB;RPM;TGZ' \
             -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath ${{ env.ROCM_PATH }})" \
             -DPython3_EXECUTABLE=$(which python3) \
+            -DROCPROFILER_CLANG_TIDY_EXE=${VIRTUAL_ENV}/bin/clang-tidy \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
             ${{ env.GLOBAL_CMAKE_OPTIONS }} \
             -- \

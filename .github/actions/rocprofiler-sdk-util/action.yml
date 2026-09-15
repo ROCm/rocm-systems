@@ -110,16 +110,6 @@ runs:
         echo "LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib64:${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
         echo "PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:$HOME/.local/bin:${PATH}" >> $GITHUB_ENV
 
-    # TEMPORARY: remove before merge. Shows the PATH the dependency builds actually run with.
-    - name: DEBUG environment
-      shell: bash
-      run: |
-        echo "PATH=${PATH}"
-        echo "cmake:   $(command -v cmake || echo none)"
-        cmake --version | head -n 1 || true
-        echo "python3: $(command -v python3 || echo none)"
-        python3 -c 'import CppHeaderParser; print(CppHeaderParser.__file__)' || true
-
     - name: Build and Install ROCR-Runtime
       if: ${{ inputs.enable-rocr-build == 'true' }}
       shell: bash
