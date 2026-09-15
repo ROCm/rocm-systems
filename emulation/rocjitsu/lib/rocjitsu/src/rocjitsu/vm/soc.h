@@ -198,9 +198,9 @@ public:
   /// @details This controls host acceleration rather than modeled GPU
   /// resources or timing. The count includes the command-processor thread that
   /// calls the pool. The effective width is clamped to the largest CU count of
-  /// any command processor in the SoC. One pool is shared across the SoC, and
-  /// its current single-submission implementation serializes batches from
-  /// different CPs.
+  /// any command processor in the SoC. One pool is shared across the SoC, so
+  /// concurrent CP submissions share the effective width rather than each
+  /// creating that many host threads.
   void set_dispatch_threads(uint32_t threads);
   /// @returns The effective functional dispatch width after mode and CU-capacity clamps.
   uint32_t dispatch_threads() const { return dispatch_threads_; }

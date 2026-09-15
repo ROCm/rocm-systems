@@ -42,7 +42,7 @@ inline constexpr uint32_t kDefaultCpuDispatchThreadCap = 32;
 ///
 /// A nonzero request is applied independently to every SoC. Zero selects one
 /// capped host-wide budget that is divided as evenly as possible across the
-/// SoCs. Every SoC retains a minimum width of one (serial dispatch).
+/// SoCs. Every SoC retains a minimum per-batch width of one.
 /// A zero SoC count returns an empty vector. This is a defensive path for an
 /// empty or already-consumed LoadedConfig; VM creation rejects a missing
 /// primary SoC before applying the policy.

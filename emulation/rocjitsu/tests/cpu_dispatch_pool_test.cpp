@@ -9,12 +9,21 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
+#include <barrier>
+#include <chrono>
+#include <condition_variable>
+#include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <exception>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace rocjitsu::amdgpu {
@@ -36,6 +45,48 @@ constexpr uint32_t kSNop = 0xBF800000u;
 constexpr uint32_t kSMovB32 = 0xBE800000u; // s_mov_b32 s0, s0
 constexpr uint32_t kSSetvskip = 0xBF100000u;
 constexpr uint64_t kProgramBase = 0x100000;
+
+class SubmissionOverlapPlugin final : public ExecutionPlugin {
+public:
+  explicit SubmissionOverlapPlugin(uint32_t expected_overlap)
+      : ExecutionPlugin("submission_overlap"), expected_overlap_(expected_overlap) {}
+
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
+                                        amdgpu::Wavefront &) override {
+    std::unique_lock<std::mutex> lock(mutex_);
+    ++active_callbacks_;
+    max_active_callbacks_ = std::max(max_active_callbacks_, active_callbacks_);
+    if (active_callbacks_ >= expected_overlap_) {
+      overlap_reached_ = true;
+      cv_.notify_all();
+    } else if (!cv_.wait_for(lock, std::chrono::seconds(2),
+                             [this]() { return overlap_reached_; })) {
+      timed_out_ = true;
+      overlap_reached_ = true;
+      cv_.notify_all();
+    }
+    --active_callbacks_;
+  }
+
+  bool timed_out() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return timed_out_;
+  }
+
+  uint32_t max_active_callbacks() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return max_active_callbacks_;
+  }
+
+private:
+  const uint32_t expected_overlap_;
+  mutable std::mutex mutex_;
+  std::condition_variable cv_;
+  uint32_t active_callbacks_ = 0;
+  uint32_t max_active_callbacks_ = 0;
+  bool overlap_reached_ = false;
+  bool timed_out_ = false;
+};
 
 struct DispatchPoolFixture {
   explicit DispatchPoolFixture(uint32_t cu_count, uint32_t functional_quantum = 1) : l2("pool_l2") {
@@ -185,6 +236,139 @@ TEST(CpuDispatchPoolTest, PartialConstructionJoinsParkedWorkers) {
   EXPECT_THROW(amdgpu::CpuDispatchPoolTestAccess::construct_with_failure(/*threads=*/8,
                                                                          /*fail_after=*/2),
                std::runtime_error);
+}
+
+TEST(CpuDispatchPoolTest, ConcurrentSubmissionsShareWorkerCapacity) {
+  constexpr uint32_t kSubmissionCount = 8;
+  constexpr uint32_t kPoolThreads = 4;
+  DispatchPoolFixture fixture(kSubmissionCount);
+  amdgpu::CpuDispatchPool pool(kPoolThreads);
+
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto overlap_plugin = std::make_unique<SubmissionOverlapPlugin>(kPoolThreads);
+  auto *overlap = overlap_plugin.get();
+  ASSERT_TRUE(group->add(std::move(overlap_plugin)));
+  for (auto &cu : fixture.cus)
+    cu->set_plugin_group(group);
+
+  std::barrier start(static_cast<std::ptrdiff_t>(kSubmissionCount + 1));
+  std::array<std::exception_ptr, kSubmissionCount> errors{};
+  std::vector<std::jthread> submitters;
+  submitters.reserve(kSubmissionCount);
+  for (uint32_t i = 0; i < kSubmissionCount; ++i) {
+    submitters.emplace_back([&, i]() {
+      start.arrive_and_wait();
+      try {
+        pool.run(std::span<amdgpu::ComputeUnitCore *>(&fixture.tasks[i], 1), kPoolThreads);
+      } catch (...) {
+        errors[i] = std::current_exception();
+      }
+    });
+  }
+  start.arrive_and_wait();
+  submitters.clear();
+
+  for (const auto &error : errors)
+    EXPECT_EQ(error, nullptr);
+  EXPECT_FALSE(overlap->timed_out());
+  EXPECT_EQ(overlap->max_active_callbacks(), kPoolThreads);
+  for (const auto *wf : fixture.wfs)
+    EXPECT_EQ(wf->trace_inst_count_, 1u);
+}
+
+TEST(CpuDispatchPoolTest, ConcurrentSubmissionsKeepExceptionsIndependent) {
+  DispatchPoolFixture fixture(/*cu_count=*/2);
+  amdgpu::CpuDispatchPool pool(/*threads=*/2);
+  fixture.memory.write32(kProgramBase, kSMovB32);
+
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::make_unique<test::ThrowingInstructionPlugin>()));
+  fixture.cus[0]->set_plugin_group(group);
+
+  std::barrier start(3);
+  std::array<std::exception_ptr, 2> errors{};
+  std::array<amdgpu::FunctionalQuantumResult, 2> results{};
+  std::vector<std::jthread> submitters;
+  submitters.reserve(2);
+  for (size_t i = 0; i < 2; ++i) {
+    submitters.emplace_back([&, i]() {
+      start.arrive_and_wait();
+      try {
+        pool.run(std::span<amdgpu::ComputeUnitCore *>(&fixture.tasks[i], 1), /*threads=*/2,
+                 std::span<amdgpu::FunctionalQuantumResult>(&results[i], 1));
+      } catch (...) {
+        errors[i] = std::current_exception();
+      }
+    });
+  }
+  start.arrive_and_wait();
+  submitters.clear();
+
+  EXPECT_NE(errors[0], nullptr);
+  EXPECT_EQ(errors[1], nullptr);
+  EXPECT_FALSE(results[0].ran);
+  EXPECT_TRUE(results[1].ran);
+  EXPECT_EQ(fixture.wfs[1]->pc, kProgramBase + sizeof(uint32_t));
+}
+
+// Measures the sparse-XCD shape that motivated concurrent submissions: eight
+// command processors share one SoC pool, but each has only a few runnable CUs.
+// This is deliberately excluded from the default CTest run with the other
+// *Benchmark* tests. Invoke it directly and compare identical builds/configs.
+TEST(CpuDispatchPoolBenchmark, SparseConcurrentSubmissions) {
+  constexpr uint32_t kSubmissions = 8;
+  constexpr uint32_t kPoolThreads = 32;
+  constexpr uint32_t kFunctionalQuantum = 100000;
+  constexpr uint32_t kWarmupRounds = 1;
+  constexpr uint32_t kMeasuredRounds = 3;
+  constexpr uint32_t kSBranchSelf = 0xBF82FFFFu; // s_branch -1
+
+  for (uint32_t cus_per_submission : {1u, 2u, 4u, 8u, 16u, 32u}) {
+    amdgpu::CpuDispatchPool pool(kPoolThreads);
+    std::vector<std::unique_ptr<DispatchPoolFixture>> fixtures;
+    fixtures.reserve(kSubmissions);
+    for (uint32_t i = 0; i < kSubmissions; ++i) {
+      auto fixture = std::make_unique<DispatchPoolFixture>(cus_per_submission, kFunctionalQuantum);
+      fixture->memory.write32(kProgramBase, kSBranchSelf);
+      fixtures.push_back(std::move(fixture));
+    }
+
+    std::barrier start_round(static_cast<std::ptrdiff_t>(kSubmissions + 1));
+    std::barrier finish_round(static_cast<std::ptrdiff_t>(kSubmissions + 1));
+    std::vector<std::jthread> submitters;
+    submitters.reserve(kSubmissions);
+    for (uint32_t i = 0; i < kSubmissions; ++i) {
+      submitters.emplace_back([&, i]() {
+        for (uint32_t round = 0; round < kWarmupRounds + kMeasuredRounds; ++round) {
+          start_round.arrive_and_wait();
+          pool.run(std::span<amdgpu::ComputeUnitCore *>(fixtures[i]->tasks), kPoolThreads);
+          finish_round.arrive_and_wait();
+        }
+      });
+    }
+
+    start_round.arrive_and_wait();
+    finish_round.arrive_and_wait();
+    const auto begin = std::chrono::steady_clock::now();
+    for (uint32_t round = 0; round < kMeasuredRounds; ++round) {
+      start_round.arrive_and_wait();
+      finish_round.arrive_and_wait();
+    }
+    const auto elapsed = std::chrono::steady_clock::now() - begin;
+    const double elapsed_ms = std::chrono::duration<double, std::milli>(elapsed).count();
+    const uint64_t instructions = static_cast<uint64_t>(kSubmissions) * cus_per_submission *
+                                  kFunctionalQuantum * kMeasuredRounds;
+    std::printf("  submissions=%u cus/submission=%u pool_threads=%u elapsed_ms=%.3f "
+                "throughput_minst_s=%.3f\n",
+                kSubmissions, cus_per_submission, kPoolThreads, elapsed_ms,
+                static_cast<double>(instructions) / (elapsed_ms * 1000.0));
+
+    const uint64_t expected_instructions =
+        static_cast<uint64_t>(kFunctionalQuantum) * (kWarmupRounds + kMeasuredRounds);
+    for (const auto &fixture : fixtures)
+      for (const auto *wf : fixture->wfs)
+        EXPECT_EQ(wf->trace_inst_count_, expected_instructions);
+  }
 }
 
 } // namespace
