@@ -778,16 +778,38 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     case RDC_FI_GPU_MEMORY_CUR_BANDWIDTH: {
       amdsmi_engine_usage_t engine_usage;
       amdsmi_vram_info_t vram_info;
+      amdsmi_gpu_metrics_t gpu_metrics;
 
+      // Instantaneous UMC controller activity. On some ASICs this only reflects
+      // compute-shader memory traffic and reads zero under DMA/copy traffic.
       value->status = amdsmi_get_gpu_activity(processor_handle, &engine_usage);
       value->type = INTEGER;
-      if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = static_cast<int64_t>(engine_usage.umc_activity);
+      double activity_pct = (value->status == AMDSMI_STATUS_SUCCESS)
+                                ? static_cast<double>(engine_usage.umc_activity)
+                                : 0.0;
+
+      // Prefer the memory-activity accumulator when available: unlike the
+      // instantaneous reading it also captures DMA/copy traffic. Track the
+      // previous sample per GPU and derive a percentage from the accumulator
+      // delta over firmware time (see derive_mem_activity_percent()).
+      if (amdsmi_get_gpu_metrics_info(processor_handle, &gpu_metrics) == AMDSMI_STATUS_SUCCESS &&
+          gpu_metrics.firmware_timestamp != 0) {
+        std::lock_guard<std::mutex> lock(mem_activity_mutex_);
+        auto prev = mem_activity_cache_.find(gpu_index);
+        const bool have_prev = prev != mem_activity_cache_.end();
+        activity_pct = derive_mem_activity_percent(
+            activity_pct, have_prev, have_prev ? prev->second.mem_activity_acc : 0,
+            have_prev ? prev->second.firmware_timestamp : 0, gpu_metrics.mem_activity_acc,
+            gpu_metrics.firmware_timestamp);
+        mem_activity_cache_[gpu_index] = {gpu_metrics.mem_activity_acc,
+                                          gpu_metrics.firmware_timestamp};
       }
 
+      value->value.l_int = static_cast<int64_t>(activity_pct);
       value->status = amdsmi_get_gpu_vram_info(processor_handle, &vram_info);
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = value->value.l_int * vram_info.vram_max_bandwidth / 100;
+        value->value.l_int =
+            static_cast<int64_t>(activity_pct * vram_info.vram_max_bandwidth / 100.0);
       }
       break;
     }

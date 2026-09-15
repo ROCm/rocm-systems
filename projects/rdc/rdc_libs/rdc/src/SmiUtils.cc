@@ -395,5 +395,26 @@ uint64_t count_pending_bad_pages(const amdsmi_retired_page_record_t* records, ui
   return pending;
 }
 
+double derive_mem_activity_percent(double umc_activity_pct, bool have_prev,
+                                   uint64_t prev_mem_activity_acc, uint64_t prev_firmware_ts,
+                                   uint64_t cur_mem_activity_acc, uint64_t cur_firmware_ts) {
+  double activity_pct = umc_activity_pct;
+  if (have_prev && cur_firmware_ts > prev_firmware_ts &&
+      cur_mem_activity_acc >= prev_mem_activity_acc) {
+    // Firmware timestamps are 10ns units; the accumulator advances by the
+    // activity percentage every firmware millisecond (1ms == 100000 units).
+    const double elapsed_ms = static_cast<double>(cur_firmware_ts - prev_firmware_ts) / 100000.0;
+    if (elapsed_ms > 0.0) {
+      double acc_pct =
+          static_cast<double>(cur_mem_activity_acc - prev_mem_activity_acc) / elapsed_ms;
+      if (acc_pct < 0.0) acc_pct = 0.0;
+      if (acc_pct > 100.0) acc_pct = 100.0;
+      // Never report below the instantaneous UMC-activity reading.
+      if (acc_pct > activity_pct) activity_pct = acc_pct;
+    }
+  }
+  return activity_pct;
+}
+
 }  // namespace rdc
 }  // namespace amd
