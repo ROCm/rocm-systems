@@ -29,6 +29,14 @@ constexpr uint32_t kInvalidLdsAddress = UINT32_MAX;
 /// as zero, while writes and workgroup reservations grow a contiguous,
 /// prefix in fixed 4 KiB backing granules. Clearing LDS retains the materialized
 /// prefix for reuse.
+///
+/// @par Thread safety
+/// LDS is placement-owned mutable state and is not internally synchronized.
+/// A CU-owned instance is confined to one functional worker. An RDNA WGP-owned
+/// instance may be accessed by sibling-CU workers concurrently only after its
+/// host backing is stable and while they access disjoint allocated workgroup
+/// ranges. Allocation, growth, and clearing must be serialized with execution.
+/// Distinct placements own distinct Lds instances and may execute concurrently.
 class Lds : public simdojo::MemoryInterface {
 public:
   /// @brief Construct LDS with the given size in kilobytes.
@@ -159,6 +167,11 @@ public:
   void vector_load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                    uint32_t num_elems, uint8_t *dst, uint32_t base_offset = 0) {
     uint32_t stride = num_elems * elem_size;
+    uint32_t bulk_base = 0;
+    if (contiguous_full_wave_access(addrs, lane_mask, stride, base_offset, bulk_base)) {
+      read_backing(bulk_base, dst, static_cast<uint32_t>(64u * stride));
+      return;
+    }
     for (uint32_t lane = 0; lane < 64; ++lane) {
       if (!(lane_mask & (1ULL << lane)))
         continue;
@@ -178,6 +191,11 @@ public:
   void vector_store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                     uint32_t num_elems, const uint8_t *src, uint32_t base_offset = 0) {
     uint32_t stride = num_elems * elem_size;
+    uint32_t bulk_base = 0;
+    if (contiguous_full_wave_access(addrs, lane_mask, stride, base_offset, bulk_base)) {
+      write_backing(bulk_base, src, static_cast<size_t>(64) * stride);
+      return;
+    }
     for (uint32_t lane = 0; lane < 64; ++lane) {
       if (!(lane_mask & (1ULL << lane)))
         continue;
@@ -244,6 +262,28 @@ private:
       rounded = increment <= capacity_bytes_ - rounded ? rounded + increment : capacity_bytes_;
     }
     data_.resize(rounded, 0);
+  }
+
+  bool contiguous_full_wave_access(const uint64_t *addrs, uint64_t lane_mask, uint32_t stride,
+                                   uint32_t base_offset, uint32_t &bulk_base) const {
+    if (stride == 0)
+      return false;
+    if (lane_mask != ~uint64_t{0})
+      return false;
+
+    uint64_t base = static_cast<uint64_t>(static_cast<uint32_t>(addrs[0])) + base_offset;
+    uint64_t total = static_cast<uint64_t>(stride) * 64u;
+    if (base > capacity_bytes_ || total > capacity_bytes_ - base)
+      return false;
+
+    for (uint32_t lane = 1; lane < 64; ++lane) {
+      uint64_t lane_addr = static_cast<uint64_t>(static_cast<uint32_t>(addrs[lane])) + base_offset;
+      if (lane_addr != base + static_cast<uint64_t>(lane) * stride)
+        return false;
+    }
+
+    bulk_base = static_cast<uint32_t>(base);
+    return true;
   }
 
   size_t capacity_bytes_ = 0;

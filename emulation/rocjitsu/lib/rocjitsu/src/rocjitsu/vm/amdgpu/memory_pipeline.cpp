@@ -129,6 +129,11 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
                                                        : MemoryAccessCompletion::Complete;
 }
 
+/// Shared complete_access logic for vector/LDS loads (write VGPRs from
+/// response data). Used by both GlobalMemPipeline and LocalMemPipeline.
+///
+/// For atomics with elem_size=8 and num_elems=1, the 8-byte old value
+/// occupies two consecutive VGPRs (low dword in vdst, high in vdst+1).
 MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, ComputeUnitCore &cu,
                                        MemoryAccessDeferredCompletion complete) {
   if (!d.is_load)
@@ -180,6 +185,14 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       }
     }
   }
+
+  if (!is_atomic && d.elem_size == sizeof(uint32_t) && !d.sign_extend && !d.d16_hi && !d.d16_lo) {
+    for (uint32_t i = 0; i < vgpr_count; ++i)
+      cu.write_vgpr_lanes32(d.dst_reg_base + i, d.lane_mask, d.response_data.data() + i * 4, stride,
+                            d.wf_size);
+    return MemoryAccessCompletion::Complete;
+  }
+
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
     if (!(d.lane_mask & (1ULL << lane)))
       continue;
