@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/defines.h"
+#include "core/control/clocks/posix.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
@@ -132,7 +133,7 @@ template <typename Tp = std::uint64_t>
 ROCPROFSYS_INLINE auto
 now()
 {
-    return ::tim::get_clock_real_now<Tp, std::nano>();
+    return control::clocks::timeline_ns<Tp>();
 }
 
 inline auto&
