@@ -211,7 +211,7 @@ jobs:
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential ccache cmake python3-pip python3-venv gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
-        python3 -m venv ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}
+        python3 -m venv --system-site-packages ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}
         source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
         python3 -m pip install --upgrade pip
         python3 -m pip install --upgrade -r requirements.txt
