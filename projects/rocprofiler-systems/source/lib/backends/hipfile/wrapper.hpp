@@ -45,7 +45,7 @@ version_ordinal(unsigned major, unsigned minor, unsigned patch) noexcept
 }
 
 /// @brief First hipFile release exposing the per-GPU stats API this backend needs.
-inline constexpr unsigned long MIN_HIPFILE_VERSION = version_ordinal(
+inline constexpr unsigned long k_min_hipfile_version = version_ordinal(
     ROCPROFSYS_HIPFILE_MIN_VERSION_MAJOR, ROCPROFSYS_HIPFILE_MIN_VERSION_MINOR,
     ROCPROFSYS_HIPFILE_MIN_VERSION_PATCH);
 
@@ -53,7 +53,7 @@ inline constexpr unsigned long MIN_HIPFILE_VERSION = version_ordinal(
 // lands on the include path: a stale hipfile.h from another prefix would otherwise fail
 // much later with a confusing "hipFileGetStatsL3 was not declared".
 static_assert(version_ordinal(HIPFILE_VERSION_MAJOR, HIPFILE_VERSION_MINOR,
-                              HIPFILE_VERSION_PATCH) >= MIN_HIPFILE_VERSION,
+                              HIPFILE_VERSION_PATCH) >= k_min_hipfile_version,
               "hipfile.h predates the per-GPU stats API (hipFileGetStatsL3); reconfigure "
               "against a newer hipFile or build with ROCPROFSYS_USE_HIPFILE=OFF");
 
@@ -68,7 +68,7 @@ struct wrapper
 {
     using stats_l3_t = hipFileStatsLevel3_t;
 
-    static constexpr std::size_t MAX_GPU_SLOTS = HIPFILE_MAX_GPUS;
+    static constexpr std::size_t k_max_gpu_slots = HIPFILE_MAX_GPUS;
 
     /**
      * @brief Whether the libhipfile loaded into this process is new enough to query.
@@ -81,7 +81,7 @@ struct wrapper
      */
     static bool runtime_version_supported() noexcept
     {
-        static const bool _supported = []() {
+        static const bool k_supported = []() {
             // NOLINTBEGIN(misc-const-correctness) -- hipFileGetVersion writes through
             // unsigned*; these cannot be const
             unsigned major = 0;
@@ -96,7 +96,7 @@ struct wrapper
                 return false;
             }
 
-            if(version_ordinal(major, minor, patch) < MIN_HIPFILE_VERSION)
+            if(version_ordinal(major, minor, patch) < k_min_hipfile_version)
             {
                 LOG_WARNING(
                     "hipFile telemetry unavailable: the loaded hipFile runtime is "
@@ -109,7 +109,7 @@ struct wrapper
 
             return true;
         }();
-        return _supported;
+        return k_supported;
     }
 
     /**
@@ -127,8 +127,8 @@ struct wrapper
     }
 };
 
-static_assert(wrapper::MAX_GPU_SLOTS == MAX_GPUS,
-              "backends::hipfile::MAX_GPUS is out of sync with HIPFILE_MAX_GPUS; the "
+static_assert(wrapper::k_max_gpu_slots == k_max_gpus,
+              "backends::hipfile::k_max_gpus is out of sync with HIPFILE_MAX_GPUS; the "
               "snapshot would silently drop or over-read per-GPU slots");
 
 /// @brief Contract for a per-GPU counter: convertible to std::uint64_t without losing

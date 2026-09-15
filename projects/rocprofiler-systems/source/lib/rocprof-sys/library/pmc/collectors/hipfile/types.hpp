@@ -5,6 +5,7 @@
 
 #include "backends/hipfile/types.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstddef>
@@ -20,13 +21,13 @@ namespace rocprofsys::pmc::collectors::hipfile
 namespace backend = ::rocprofsys::backends::hipfile;
 
 using backend::gpu_stats;
-using backend::MAX_GPUS;
+using backend::k_max_gpus;
 using backend::stats_snapshot;
 
 /**
  * @brief Bitfield for selecting which hipFile metrics to collect.
  *
- * Bit positions match the order of @c METRIC_TABLE below; @c metric_desc::bit is the
+ * Bit positions match the order of @c k_metric_table below; @c metric_desc::bit is the
  * single source of truth tying a metric to its bit.
  */
 union enabled_metrics
@@ -51,8 +52,9 @@ union enabled_metrics
     std::uint32_t value = 0;
 };
 
-inline constexpr std::uint32_t HIPFILE_METRICS_COUNT = 14;
-inline constexpr std::uint32_t ALL_HIPFILE_METRICS   = (1U << HIPFILE_METRICS_COUNT) - 1U;
+inline constexpr std::uint32_t k_hipfile_metrics_count = 14;
+inline constexpr std::uint32_t k_all_hipfile_metrics =
+    (1U << k_hipfile_metrics_count) - 1U;
 
 /**
  * @brief One per-GPU hipFile sample.
@@ -115,7 +117,7 @@ struct metric_desc
 // Units follow the established collectors: `bytes` as AMD SMI's PCIe bandwidth
 // accumulator and the NIC byte counters use, `bytes/s` as AMD SMI's instantaneous PCIe
 // bandwidth uses, `count` as the CPU collector's context switches and page faults use.
-inline constexpr std::array<metric_desc, HIPFILE_METRICS_COUNT> METRIC_TABLE{
+inline constexpr std::array<metric_desc, k_hipfile_metrics_count> k_metric_table{
     { { .suffix = "Read Bytes",
         .unit   = "bytes",
         .key    = "bytes",
@@ -228,16 +230,11 @@ inline constexpr std::array<metric_desc, HIPFILE_METRICS_COUNT> METRIC_TABLE{
             } } }
 };
 
-static_assert([]() constexpr {
-    for(const auto& metric : METRIC_TABLE)
-    {
-        if(metric.unit == nullptr || metric.unit[0] == '\0')
-        {
-            return false;
-        }
-    }
-    return true;
-}());
+static_assert(std::ranges::all_of(k_metric_table,
+                                  [](const metric_desc& metric) constexpr {
+                                      return metric.unit != nullptr &&
+                                             metric.unit[0] != '\0';
+                                  }));
 
 /**
  * @brief Bits of every metric in @p group, or 0 when the group is unknown.
@@ -251,7 +248,7 @@ static_assert([]() constexpr {
 metric_group_mask(std::string_view group) noexcept
 {
     std::uint32_t mask = 0;
-    for(const auto& metric : METRIC_TABLE)
+    for(const auto& metric : k_metric_table)
     {
         if(group == metric.key)
         {
@@ -270,7 +267,7 @@ metric_group_mask(std::string_view group) noexcept
 [[nodiscard]] constexpr std::uint32_t
 metric_bit_mask(std::string_view suffix) noexcept
 {
-    for(const auto& metric : METRIC_TABLE)
+    for(const auto& metric : k_metric_table)
     {
         if(suffix == metric.suffix)
         {

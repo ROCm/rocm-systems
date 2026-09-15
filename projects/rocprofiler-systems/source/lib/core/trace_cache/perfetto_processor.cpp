@@ -1445,6 +1445,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
 }
 
 void
+// NOLINTNEXTLINE(readability-function-size)
 perfetto_processor_t::handle(const hipfile_pmc_sample& _hipfile_sample)
 {
     using hipfile_track = core::perfetto::counter_track<category::hipfile>;
@@ -1454,7 +1455,7 @@ perfetto_processor_t::handle(const hipfile_pmc_sample& _hipfile_sample)
     const auto _device_id = _hipfile_sample.device_id;
     const auto _enabled   = _hipfile_sample.enabled_metric.value;
 
-    for(const auto& _metric : collector::METRIC_TABLE)
+    for(const auto& _metric : collector::k_metric_table)
     {
         if((_enabled & (1U << _metric.bit)) == 0U)
         {
