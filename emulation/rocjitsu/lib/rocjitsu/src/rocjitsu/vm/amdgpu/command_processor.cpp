@@ -781,8 +781,22 @@ void CommandProcessor::fan_out_dispatch(DispatchEntry &dp) {
   auto grid = std::make_shared<GridCompletion>();
   grid->grid_wgs = grid_wgs;
 
-  for (uint32_t rank = 0; rank < participant_count; ++rank) {
-    const uint32_t physical_rank = dp.enabled_cus ? participants[rank] : rank;
+  const auto apply_share = [&](DispatchEntry &entry, uint32_t physical_rank) {
+    if (!entry.enabled_cus) {
+      entry.apply_shard(XcdShard(physical_rank, num_xcds));
+      return;
+    }
+    const auto participant = std::ranges::find(participants, physical_rank);
+    if (participant == participants.end())
+      entry.total_wgs = 0;
+    else
+      entry.apply_shard(
+          XcdShard(static_cast<uint32_t>(participant - participants.begin()), participant_count));
+  };
+
+  // Excluded XCDs need empty shares too: a later CU-mask change can route work
+  // to them, and barriers must still wait for the same predecessors everywhere.
+  for (uint32_t physical_rank = 0; physical_rank < num_xcds; ++physical_rank) {
     if (physical_rank == xcd_rank_)
       continue;
     DispatchEntry shard = dp;
@@ -791,21 +805,12 @@ void CommandProcessor::fan_out_dispatch(DispatchEntry &dp) {
     // The peer must not fire the dispatch's completion signal; the owning XCD
     // does that once the grid counter shows every share retired.
     shard.completion_signal = 0;
-    shard.apply_shard(XcdShard(rank, participant_count));
+    apply_share(shard, physical_rank);
     xcd_peers_[physical_rank]->accept_fanout_shard(std::move(shard));
   }
 
   dp.grid_completion = std::move(grid);
-  if (!dp.enabled_cus) {
-    dp.apply_shard(XcdShard(xcd_rank_, num_xcds));
-    return;
-  }
-  const auto owner = std::ranges::find(participants, xcd_rank_);
-  if (owner == participants.end())
-    dp.total_wgs = 0;
-  else
-    dp.apply_shard(XcdShard(static_cast<uint32_t>(owner - participants.begin()),
-                            static_cast<uint32_t>(participants.size())));
+  apply_share(dp, xcd_rank_);
 }
 
 void CommandProcessor::replicate_non_kernel_entry(const DispatchEntry &dp) {

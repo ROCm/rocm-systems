@@ -449,8 +449,8 @@ private:
   /// the peer XCDs, all sharing one GridCompletion so the completion signal fires
   /// once. Does nothing when the SoC has a single XCD.
   ///
-  /// Every XCD gets an entry even when the grid is too small to give it any
-  /// workgroups. An empty share is what keeps the replicas' queues in step with
+  /// Every XCD gets an entry even when the CU mask excludes it or the grid
+  /// gives it no workgroups. An empty share keeps the replicas' queues in step with
   /// the owner's for the packets that are replicated, and barrier_satisfied()
   /// reads that ordering from the entries sitting ahead of a barrier'd packet;
   /// skipping the empty ones would leave a replica with a shorter prefix than the
