@@ -8,6 +8,9 @@
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
+
+#include <array>
+#include <cstddef>
 #include <cstdint>
 
 #include <rocprofiler-sdk/agent.h>
@@ -22,7 +25,10 @@
 
 #include "logger/debug.hpp"
 
+#include <atomic>
 #include <memory>
+#include <optional>
+#include <unordered_map>
 #include <vector>
 
 namespace rocprofsys
@@ -100,21 +106,31 @@ using counter_id_vec_t = std::vector<rocprofiler_counter_id_t>;
 using agent_counter_id_map_t =
     std::unordered_map<rocprofiler_agent_id_t, counter_id_vec_t>;
 
+struct spm_counter_config_id_t
+{
+    std::uint64_t handle = 0;
+};
+
+// Deliberately not guarded by ROCPROFSYS_USE_SPM: keep client_data layout stable
+// even when some SDK versions do not declare rocprofiler_counter_config_id_t.
+using agent_spm_counter_config_map_t =
+    std::unordered_map<rocprofiler_agent_id_t, spm_counter_config_id_t>;
+
 using backtrace_operation_map_t =
     std::unordered_map<rocprofiler_callback_tracing_kind_t,
                        std::unordered_set<rocprofiler_tracing_operation_t>>;
 
 struct client_data
 {
-    static constexpr size_t num_buffers  = 11;
-    static constexpr size_t num_contexts = 5;
+    static constexpr size_t k_num_buffers  = 11;
+    static constexpr size_t k_num_contexts = 4;
 
     using buffer_name_info_t   = rocprofiler::sdk::buffer_name_info_t<std::string_view>;
     using callback_name_info_t = rocprofiler::sdk::callback_name_info_t<std::string_view>;
     using kernel_symbol_vec_t  = std::vector<kernel_symbol_callback_record_t>;
     using code_object_vec_t    = std::vector<code_object_callback_record_t>;
-    using buffer_id_vec_t      = std::array<rocprofiler_buffer_id_t, num_buffers>;
-    using context_id_vec_t     = std::array<rocprofiler_context_id_t, num_contexts>;
+    using buffer_id_vec_t      = std::array<rocprofiler_buffer_id_t, k_num_buffers>;
+    using context_id_vec_t     = std::array<rocprofiler_context_id_t, k_num_contexts>;
     using agent_vec_t          = std::vector<rocprofiler_agent_v0_t>;
 
     rocprofiler_client_id_t*           client_id                 = nullptr;
@@ -140,21 +156,29 @@ struct client_data
     agent_counter_id_map_t             agent_events              = {};
     agent_counter_info_map_t           agent_counter_info        = {};
     agent_counter_profile_map_t        agent_counter_profiles    = {};
-    common::synchronized<code_object_vec_t, state::thread>   code_object_records   = {};
+    // Unconditional so client_data has one layout regardless of ROCPROFSYS_USE_SPM.
+    // A translation unit that misses the macro would otherwise see a shorter struct
+    // and read past the end of every member below.
+    common::synchronized<agent_spm_counter_config_map_t, state::thread>
+                                                             agent_spm_counter_configs;
+    std::atomic<std::uint64_t>                               spm_data_loss_reports{ 0 };
+    common::synchronized<code_object_vec_t, state::thread>   code_object_records;
     common::synchronized<kernel_symbol_vec_t, state::thread> kernel_symbol_records = {};
     buffer_name_info_t                                       buffered_tracing_info = {};
     callback_name_info_t                                     callback_tracing_info = {};
     backtrace_operation_map_t                                backtrace_operations  = {};
 
-    void                        initialize();
-    void                        initialize_event_info();
-    void                        set_agents();
-    context_id_vec_t            get_all_contexts() const;
-    context_id_vec_t            get_main_contexts() const;
-    rocprofiler_context_id_t    get_control_context() const;
-    rocprofiler_context_id_t    get_code_obj_context() const;
-    buffer_id_vec_t             get_buffers() const;
-    const rocprofsys_agent_t*   get_agent(rocprofiler_agent_id_t _id) const;
+    void initialize();
+    void initialize_event_info();
+    void set_agents();
+    /// Create the shared counter context on first use.
+    [[nodiscard]] rocprofiler_status_t ensure_counter_context();
+    context_id_vec_t                   get_all_contexts() const;
+    context_id_vec_t                   get_main_contexts() const;
+    rocprofiler_context_id_t           get_control_context() const;
+    rocprofiler_context_id_t           get_code_obj_context() const;
+    buffer_id_vec_t                    get_buffers() const;
+    const rocprofsys_agent_t*          get_agent(rocprofiler_agent_id_t agent_id) const;
     const tool_agent*           get_gpu_tool_agent(rocprofiler_agent_id_t id) const;
     const kernel_symbol_data_t* get_kernel_symbol_info(std::uint64_t _kernel_id) const;
     const rocprofiler_tool_counter_info_t* get_tool_counter_info(
@@ -202,9 +226,9 @@ client_data::get_buffers() const
 }
 
 inline const rocprofsys_agent_t*
-client_data::get_agent(rocprofiler_agent_id_t _id) const
+client_data::get_agent(rocprofiler_agent_id_t agent_id) const
 {
-    const auto& agent = get_agent_manager_instance().get_agent_by_handle(_id.handle);
+    const auto& agent = get_agent_manager_instance().get_agent_by_handle(agent_id.handle);
     return &agent;
 }
 

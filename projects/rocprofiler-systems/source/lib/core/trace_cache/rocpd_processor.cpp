@@ -17,6 +17,7 @@
 #include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/pmc/collectors/nic/sample.hpp"
+#include "library/rocprofiler-sdk/spm_sample.hpp"
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 
@@ -692,6 +693,14 @@ rocpd_processor_t::handle(
 
         try_insert_pmc_event(pmc_data, pmc_uid, "GPU perf-counter sample");
     }
+}
+
+void
+rocpd_processor_t::handle([[maybe_unused]] const spm_sample& spm_data)
+{
+    // SPM samples are Perfetto-only in this beta PR. The runtime emits a config-time
+    // warning when SPM is requested with RocPD enabled; keep this handler explicit so
+    // the visitor surface is complete without silently implying RocPD export exists.
 }
 
 void

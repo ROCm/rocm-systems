@@ -216,6 +216,39 @@ rocprofiler_systems_add_feature(ROCPROFSYS_ROCM_VERSION
 find_package(rocprofiler-sdk ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
 target_link_libraries(rocprofiler-systems-rocm INTERFACE rocprofiler-sdk::rocprofiler-sdk)
 
+set(ROCPROFSYS_USE_SPM OFF CACHE INTERNAL "rocprofiler-sdk SPM API availability")
+set(_ROCPROFILER_SDK_INCLUDE_CANDIDATES
+    ${rocprofiler-sdk_INCLUDE_DIR}
+    ${ROCmVersion_DIR}/include
+    ${ROCM_PATH}/include
+)
+foreach(_ROCPROFILER_SDK_INCLUDE_DIR ${_ROCPROFILER_SDK_INCLUDE_CANDIDATES})
+    if(
+        _ROCPROFILER_SDK_INCLUDE_DIR
+        AND EXISTS "${_ROCPROFILER_SDK_INCLUDE_DIR}/rocprofiler-sdk/experimental/spm.h"
+    )
+        set(ROCPROFSYS_USE_SPM
+            ON
+            CACHE INTERNAL
+            "rocprofiler-sdk SPM API availability"
+            FORCE
+        )
+        break()
+    endif()
+endforeach()
+
+if(ROCPROFSYS_USE_SPM)
+    rocprofiler_systems_target_compile_definitions(
+        rocprofiler-systems-rocm INTERFACE ROCPROFSYS_USE_SPM=1
+    )
+    message(STATUS "rocprofiler-sdk SPM API found - enabling SPM runtime wiring")
+else()
+    rocprofiler_systems_target_compile_definitions(
+        rocprofiler-systems-rocm INTERFACE ROCPROFSYS_USE_SPM=0
+    )
+    message(STATUS "rocprofiler-sdk SPM API not found - SPM runtime wiring disabled")
+endif()
+
 # AMD SMI
 find_package(
     amd_smi

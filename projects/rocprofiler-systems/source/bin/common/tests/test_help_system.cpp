@@ -60,6 +60,8 @@ Options:
 
     -C, --cpu-events               Set CPU hardware counter events (min: 1, dtype: [EVENT])
     -G, --gpu-events               Set GPU hardware counter events (min: 1, dtype: [EVENT])
+    --spm-events                   Set GPU SPM hardware counter events (min: 1, dtype: [EVENT])
+    --spm-sample-interval          Set GPU SPM sample interval (count: 1, dtype: uint64)
 
     [HOST/DEVICE (PROCESS SAMPLING) OPTIONS]
 
@@ -311,6 +313,8 @@ TEST_F(help_system_test, domain_gpu_extracts_related_options)
     EXPECT_NE(output.find("--process-freq"), std::string::npos);
     EXPECT_NE(output.find("--device"), std::string::npos);
     EXPECT_NE(output.find("--gpu-events"), std::string::npos);
+    EXPECT_NE(output.find("--spm-events"), std::string::npos);
+    EXPECT_NE(output.find("--spm-sample-interval"), std::string::npos);
     EXPECT_NE(output.find("--ai-nics"), std::string::npos);
     // Should NOT include CPU-only options
     EXPECT_EQ(output.find("--cpu-events"), std::string::npos);

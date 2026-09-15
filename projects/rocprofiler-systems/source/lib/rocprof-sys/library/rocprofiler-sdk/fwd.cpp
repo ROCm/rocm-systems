@@ -8,6 +8,7 @@
 
 #include <exception>
 #include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -124,6 +125,23 @@ client_data::initialize()
     callback_tracing_info = rocprofiler::sdk::get_callback_tracing_names();
 
     set_agents();
+}
+
+rocprofiler_status_t
+client_data::ensure_counter_context()
+{
+    if(counter_ctx.handle > 0)
+    {
+        return ROCPROFILER_STATUS_SUCCESS;
+    }
+
+    auto       context = rocprofiler_context_id_t{};
+    const auto status  = rocprofiler_create_context(&context);
+    if(status == ROCPROFILER_STATUS_SUCCESS)
+    {
+        counter_ctx = context;
+    }
+    return status;
 }
 
 void

@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/sample_type.hpp"
+#include "library/rocprofiler-sdk/spm_sample.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <numeric>
 #include <vector>
 
 using namespace rocprofsys::trace_cache;
@@ -17,6 +20,62 @@ protected:
 
     std::array<std::uint8_t, 4096> buffer;
 };
+
+namespace
+{
+constexpr auto k_spm_counter_id_0          = std::uint64_t{ 11 };
+constexpr auto k_spm_counter_id_1          = std::uint64_t{ 12 };
+constexpr auto k_spm_counter_instance_id_0 = std::uint64_t{ 111 };
+constexpr auto k_spm_counter_instance_id_1 = std::uint64_t{ 222 };
+constexpr auto k_spm_timestamp_0           = std::uint64_t{ 1000 };
+constexpr auto k_spm_timestamp_1           = std::uint64_t{ 1200 };
+constexpr auto k_spm_value_0               = 123.5;
+constexpr auto k_spm_value_1               = 456.75;
+constexpr auto k_spm_value_2               = 789.25;
+constexpr auto k_spm_agent_id              = std::uint64_t{ 7 };
+constexpr auto k_spm_dispatch_id           = std::uint64_t{ 42 };
+constexpr auto k_spm_kernel_id             = std::uint64_t{ 99 };
+constexpr auto k_spm_queue_id              = std::uint64_t{ 1234 };
+constexpr auto k_spm_correlation_id        = std::uint64_t{ 5678 };
+constexpr auto k_spm_ancestor_id           = std::uint64_t{ 9876 };
+constexpr auto k_spm_stream_handle         = std::uint64_t{ 55 };
+
+spm_sample
+make_spm_sample()
+{
+    return spm_sample{
+        .agent_id_handle         = k_spm_agent_id,
+        .dispatch_id             = k_spm_dispatch_id,
+        .kernel_id               = k_spm_kernel_id,
+        .queue_id_handle         = k_spm_queue_id,
+        .correlation_id_internal = k_spm_correlation_id,
+        .correlation_id_ancestor = k_spm_ancestor_id,
+        .stream_handle           = k_spm_stream_handle,
+        .data_loss               = true,
+        .counters =
+            {
+                { .counter_id          = k_spm_counter_id_0,
+                  .counter_instance_id = k_spm_counter_instance_id_0 },
+                { .counter_id          = k_spm_counter_id_1,
+                  .counter_instance_id = k_spm_counter_instance_id_1 },
+            },
+        .samples =
+            {
+                { .timestamp = k_spm_timestamp_0,
+                  .values =
+                      {
+                          { .counter_info_index = 0, .value = k_spm_value_0 },
+                          { .counter_info_index = 1, .value = k_spm_value_1 },
+                      } },
+                { .timestamp = k_spm_timestamp_1,
+                  .values =
+                      {
+                          { .counter_info_index = 0, .value = k_spm_value_2 },
+                      } },
+            },
+    };
+}
+}  // namespace
 
 TEST_F(sample_type_test, kernel_dispatch_sample_serialize_deserialize)
 {
@@ -478,6 +537,12 @@ TEST_F(sample_type_test, type_identifier_enum_values)
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::cpu_pmc_sample), 0x0007);
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::backtrace_region_sample),
               0x0008);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::scratch_memory), 0x0009);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::ainic_pmc_sample), 0x000A);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::kfd_sample), 0x000B);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::gpu_perf_counter_sample),
+              0x000C);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::spm_sample), 0x000D);
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::fragmented_space), 0xFFFF);
 }
 
@@ -517,10 +582,103 @@ TEST_F(sample_type_test, pmc_event_with_sample_default_constructor)
     EXPECT_EQ(sample.type_identifier, type_identifier_t::pmc_event_with_sample);
 }
 
+TEST_F(sample_type_test, spm_sample_default_constructor)
+{
+    const spm_sample sample;
+    EXPECT_EQ(sample.type_identifier, type_identifier_t::spm_sample);
+}
+
 TEST_F(sample_type_test, backtrace_region_sample_default_constructor)
 {
     const backtrace_region_sample sample{};
     EXPECT_EQ(sample.type_identifier, type_identifier_t::backtrace_region_sample);
+}
+
+// GoogleTest assertion macros inflate this test's measured control-flow complexity.
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+TEST_F(sample_type_test, spm_sample_serialize_deserialize)
+{
+    const auto original = make_spm_sample();
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<spm_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.agent_id_handle, original.agent_id_handle);
+    EXPECT_EQ(deserialized.dispatch_id, original.dispatch_id);
+    EXPECT_EQ(deserialized.kernel_id, original.kernel_id);
+    EXPECT_EQ(deserialized.queue_id_handle, original.queue_id_handle);
+    EXPECT_EQ(deserialized.correlation_id_internal, original.correlation_id_internal);
+    EXPECT_EQ(deserialized.correlation_id_ancestor, original.correlation_id_ancestor);
+    EXPECT_EQ(deserialized.stream_handle, original.stream_handle);
+    EXPECT_EQ(deserialized.data_loss, original.data_loss);
+    ASSERT_EQ(deserialized.counters.size(), original.counters.size());
+    for(size_t i = 0; i < original.counters.size(); ++i)
+    {
+        EXPECT_EQ(deserialized.counters.at(i).counter_id,
+                  original.counters.at(i).counter_id);
+        EXPECT_EQ(deserialized.counters.at(i).counter_instance_id,
+                  original.counters.at(i).counter_instance_id);
+    }
+
+    ASSERT_EQ(deserialized.samples.size(), original.samples.size());
+
+    for(size_t i = 0; i < original.samples.size(); ++i)
+    {
+        EXPECT_EQ(deserialized.samples.at(i).timestamp, original.samples.at(i).timestamp);
+        ASSERT_EQ(deserialized.samples.at(i).values.size(),
+                  original.samples.at(i).values.size());
+        for(size_t j = 0; j < original.samples.at(i).values.size(); ++j)
+        {
+            EXPECT_EQ(deserialized.samples.at(i).values.at(j).counter_info_index,
+                      original.samples.at(i).values.at(j).counter_info_index);
+            EXPECT_DOUBLE_EQ(deserialized.samples.at(i).values.at(j).value,
+                             original.samples.at(i).values.at(j).value);
+        }
+    }
+}
+
+TEST_F(sample_type_test, spm_sample_get_size)
+{
+    const auto sample = make_spm_sample();
+    const auto value_count =
+        std::accumulate(sample.samples.begin(), sample.samples.end(), std::size_t{ 0 },
+                        [](std::size_t total, const auto& timestamp) {
+                            return total + timestamp.values.size();
+                        });
+
+    const auto expected_size =
+        sizeof(std::uint64_t) * 7 + sizeof(bool) + sizeof(std::uint32_t) * 2 +
+        sample.counters.size() * (sizeof(std::uint64_t) * 2) +
+        sample.samples.size() * (sizeof(std::uint64_t) + sizeof(std::uint32_t)) +
+        value_count * (sizeof(std::uint32_t) + sizeof(double));
+
+    EXPECT_EQ(get_size(sample), expected_size);
+}
+
+TEST_F(sample_type_test, spm_sample_empty_samples_and_no_data_loss)
+{
+    auto original      = make_spm_sample();
+    original.data_loss = false;
+    original.counters.clear();
+    original.samples.clear();
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<spm_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.agent_id_handle, original.agent_id_handle);
+    EXPECT_EQ(deserialized.dispatch_id, original.dispatch_id);
+    EXPECT_EQ(deserialized.kernel_id, original.kernel_id);
+    EXPECT_EQ(deserialized.queue_id_handle, original.queue_id_handle);
+    EXPECT_EQ(deserialized.correlation_id_internal, original.correlation_id_internal);
+    EXPECT_EQ(deserialized.correlation_id_ancestor, original.correlation_id_ancestor);
+    EXPECT_EQ(deserialized.stream_handle, original.stream_handle);
+    EXPECT_FALSE(deserialized.data_loss);
+    EXPECT_TRUE(deserialized.counters.empty());
+    EXPECT_TRUE(deserialized.samples.empty());
 }
 
 TEST_F(sample_type_test, kernel_dispatch_sample_large_values)
