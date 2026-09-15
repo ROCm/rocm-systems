@@ -123,8 +123,8 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   CUDACHECKGOTO(cudaMemcpy(peerHost, h_ptrs.data(), nRanks * sizeof(void*), cudaMemcpyHostToHost), res, fail);
 
   {
-    auto barrierPair =
-      dda::common::FabricGpuBarrier::mallocAndInit(nRanks, nBlocksMax, comm->rank, comm->bootstrap, comm->memManager);
+    auto barrierPair = dda::common::FabricGpuBarrier::mallocAndInit(
+      nRanks, nBlocksMax, comm->rank, comm->bootstrap, comm->memManager, comm->abortFlagDev);
     if (!barrierPair.first) {
       WARN("ncclDdaFabricCommInit: FabricGpuBarrier malloc/init failed");
       goto fail;
