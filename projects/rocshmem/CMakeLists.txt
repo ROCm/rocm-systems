@@ -179,7 +179,7 @@ if(${ROCM_MAJOR_VERSION} GREATER 6)
 endif()
 
 if(${ROCM_MAJOR_VERSION} GREATER 7 OR (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 14))
-  list(APPEND DEFAULT_GPUS gfx1250)
+  list(APPEND DEFAULT_GPUS gfx1250 gfx1250-strict)
 endif()
 
 if($ENV{BUILD_LOCAL_GPU_TARGET_ONLY})
@@ -318,7 +318,7 @@ if (NOT BUILD_TESTS_ONLY)
     # -fsanitize=address for that offload arch with a warning. Drop them
     # instead of leaving a target in GPU_TARGETS that silently gets no
     # instrumentation.
-    set(_ASAN_INCOMPATIBLE_ARCHS gfx1100 gfx1201 gfx1250)
+    set(_ASAN_INCOMPATIBLE_ARCHS gfx1100 gfx1201 gfx1250 gfx1250-strict)
     foreach(_asan_incompatible_arch ${_ASAN_INCOMPATIBLE_ARCHS})
       list(FILTER GPU_TARGETS EXCLUDE REGEX "^${_asan_incompatible_arch}(:.*)?$")
       if(GPU_TARGETS_FULL)

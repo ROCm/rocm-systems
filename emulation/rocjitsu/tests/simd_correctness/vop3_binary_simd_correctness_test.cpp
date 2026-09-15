@@ -229,7 +229,7 @@ struct Fixture {
 
   std::array<uint32_t, WF_SIZE> run(Instruction *inst, Kind k, uint64_t exec) {
     seed_inputs(k, exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     uint32_t vb = wf->vgpr_alloc().base;
     std::array<uint32_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)

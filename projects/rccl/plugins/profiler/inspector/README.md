@@ -79,7 +79,7 @@ export NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS=500
 - `NCCL_INSPECTOR_DUMP_THREAD_ENABLE=<0|1>` (default: `1`)
   Enables or disables the internal dump thread.
 - `NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS=<interval>` (default: `-1`)
-  Sets the interval (in microseconds) for the internal dump thread to write output. A value of `-1` (default) disables periodic dumping — output is written only at communicator teardown/finalization. A value of `0` enables continuous dumping (dumps as fast as possible). Set to a positive value to enable periodic dumps at the specified interval (e.g., `500` for every 500 µs). When Prometheus mode is enabled (`NCCL_INSPECTOR_PROM_DUMP=1`), a minimum of `30000000` (30 seconds) is enforced to align with the node exporter polling interval.
+  Sets the interval (in microseconds) for the internal dump thread to write output. A value of `-1` (default) disables periodic dumping — output is written only at communicator teardown/finalization. A value of `0` enables continuous dumping (dumps as fast as possible). Set to a positive value to enable periodic dumps at the specified interval (e.g., `500` for every 500 µs). When Prometheus mode is enabled (`NCCL_INSPECTOR_PROM_DUMP=1`), a minimum of `30000000` (30 seconds) is enforced to align with the node exporter polling interval. Communicator teardown always writes a final dump, whatever the interval, so records completed after the last periodic dump are not lost.
 - `NCCL_INSPECTOR_DUMP_DIR=<output_dir>`
   Sets the output directory for logs. If not set, defaults to `nccl-inspector-unknown-jobid` or `nccl-inspector-<slurm_job_id>` if running under SLURM.
 - `NCCL_INSPECTOR_DUMP_VERBOSE=<0|1>` (default: `0`)
@@ -100,6 +100,17 @@ export NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS=500
   Comm pool initial size/stride.
 - `NCCL_INSPECTOR_REQUIRE_KERNEL_TIMING=<0|1>` (default: `1`)
   When enabled (default), only events with GPU-based kernel timing (`kernel_gpu`) are recorded. Events that fall back to CPU-measured timing (`kernel_cpu` or `collective_cpu`) are silently discarded. Set to `0` to restore the previous fallback behaviour and retain all events regardless of timing source.
+
+#### Collectives using RCCL DDA are not traced
+
+The direct device access (DDA) path launches its own kernels and bypasses the proxy and plan
+machinery the profiler interface is built on, so the Inspector never sees a collective that DDA
+services. Set `RCCL_DDA_ENABLE=0` to route the
+collectives through the instrumented path while collecting Inspector data.
+
+Note that an empty output is also expected when every record is filtered: by default
+`NCCL_INSPECTOR_DUMP_MIN_SIZE_BYTES` drops operations below 8 KiB, and
+`NCCL_INSPECTOR_REQUIRE_KERNEL_TIMING` drops any record without GPU kernel timing.
 
 ### Debugging
 
@@ -277,6 +288,43 @@ This will include additional event trace information in the JSON output, showing
 
 Multiple such JSON objects are written, one per collective operation per communicator.
 
+Point-to-point operations are reported the same way, under a `p2p_perf` object instead of
+`coll_perf`. Tracking is on by default and can be turned off with
+`NCCL_INSPECTOR_ENABLE_P2P=0`:
+
+```json
+{
+  "header": { "...": "same as above" },
+  "metadata": { "...": "same as above" },
+  "p2p_perf": {
+    "p2p": "Recv",
+    "p2p_sn": 1,
+    "p2p_peer": 10,
+    "p2p_msg_size_bytes": 1048576,
+    "p2p_exec_time_us": 4,
+    "p2p_timing_source": "kernel_gpu",
+    "p2p_algobw_gbs": 262.144000,
+    "p2p_busbw_gbs": 262.144000,
+    "event_trace_sn": {
+      "p2p_start_sn": 2,
+      "p2p_stop_sn": 3,
+      "kernel_events": [
+        { "channel_id": 4, "kernel_start_sn": 4, "kernel_stop_sn": 5, "kernel_record_sn": 5 }
+      ]
+    },
+    "event_trace_ts": {
+      "p2p_start_ts": 1752867229235059,
+      "p2p_stop_ts": 1752867229235064,
+      "kernel_events": [
+        { "channel_id": 4, "kernel_start_ts": 1752867229235181, "kernel_stop_ts": 1752867229235195, "kernel_record_ts": 1752867229235195 }
+      ]
+    }
+  }
+}
+```
+
+Unlike a collective, the busbw of a point-to-point operation is always equal to its algobw.
+
 ## Output Directory
 
 - By default, output directory is auto-generated based on:
@@ -300,7 +348,7 @@ The size of output files depends on the output format and usage patterns:
 
 **Prometheus Mode** (`NCCL_INSPECTOR_PROM_DUMP=1`):
 - File size is **bounded** (does not grow indefinitely)
-- Files are rewritten periodically (default: every 30 seconds based on `NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS`)
+- Files are rewritten at every dump driven by `NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS`; with its default of `-1` there is no periodic dump and the files are written once at communicator teardown. A positive interval is clamped to a 30-second minimum in this mode.
 - File size is proportional to:
   - Number of parallel/overlapping communicators using the same GPU device
 - Each file contains only the most recent metrics snapshot
