@@ -29,9 +29,14 @@
 #include "MPIHelpers.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
+#ifdef ENABLE_FAULT_INJECTION
+#include "ce_fault_inject.h"
+#endif
+#include <cctype>
 #include <cstdlib>
 #include <regex>
 #include <sstream>
+#include <string>
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -47,6 +52,18 @@
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
+
+// NCCL_CTA_POLICY accepts the documented alias ZERO as well as the integer 2.
+static bool envCtaPolicyIsZero()
+{
+    const char* p = std::getenv("NCCL_CTA_POLICY");
+    if (p == nullptr || p[0] == '\0') return false;
+    if (std::atoi(p) == 2) return true;
+    std::string s(p);
+    for (char& c : s)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return s == "ZERO";
+}
 
 // Test Configuration
 namespace RegTestConfig {
@@ -854,6 +871,14 @@ protected:
         }
     }
 
+    // Rank-local GTEST_SKIP after alloc failure hangs peers in WindowRegister.
+    void skipUnlessAllRanksAllocated(bool allocated, const char* msg)
+    {
+        if (!MPIHelpers::allRanksTrue(allocated)) {
+            GTEST_SKIP() << msg;
+        }
+    }
+
     struct MultiSegmentBuffer
     {
         hipDeviceptr_t                                vaBase      = 0;
@@ -1198,11 +1223,26 @@ TEST_F(UBR_MultiSegment, Generic)
  * Unlike the ncclCommRegister path, the multi-segment registration happens once
  * at ncclCommWindowRegister time. The two AllReduce calls then reuse the same
  * window, confirming it stays valid and correct across collectives.
+ *
+ * This is the AFTER regression for the CE AllReduce receive-window offset:
+ * recvBuf sits at a non-zero offset from the window base, so Phase 3 must use
+ * (recvbuff - recvWin->userPtr) + rank * shardBytes. The BEFORE control is
+ * Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult.
  */
  TEST_F(UBR_MultiSegment, Symmetric_Lsa)
  {
-     if (!validateTestPrerequisites(/*min_processes=*/2)) {
-         GTEST_SKIP() << "Requires 2+ ranks";
+     if (!validateTestPrerequisites(
+             /*min_processes=*/2, /*max_processes=*/kNoProcessLimit,
+             /*require_power_of_two=*/kNoPowerOfTwoRequired,
+             /*min_nodes=*/1, /*max_nodes=*/1)) {
+         GTEST_SKIP() << "Requires 2+ ranks on exactly one node";
+     }
+     const char* ceAllReduce = std::getenv("RCCL_CE_ALLREDUCE");
+     if (ceAllReduce == nullptr || std::atoi(ceAllReduce) != 1) {
+         GTEST_SKIP() << "CE receive-offset regression requires RCCL_CE_ALLREDUCE=1";
+     }
+     if (!envCtaPolicyIsZero()) {
+         GTEST_SKIP() << "CE receive-offset regression requires NCCL_CTA_POLICY=2 or ZERO";
      }
      ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
  
@@ -1225,9 +1265,8 @@ TEST_F(UBR_MultiSegment, Generic)
  
      MultiSegmentBuffer buf;
      ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, buf));
-     if (buf.totalSize == 0) {
-         GTEST_SKIP() << "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime";
-     }
+     skipUnlessAllRanksAllocated(buf.totalSize != 0,
+         "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
      auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
  
      const size_t halfSize = buf.totalSize / 2;
@@ -1236,6 +1275,9 @@ TEST_F(UBR_MultiSegment, Generic)
      void*  sendBuf = base;
      void*  recvBuf = base + halfSize;
      size_t count   = halfSize / sizeof(T);
+     if (nRanks <= 0 || count % static_cast<size_t>(nRanks) != 0) {
+         GTEST_SKIP() << "CE shard path requires count divisible by nRanks";
+     }
  
      ncclWindow_t win = nullptr;
      ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &win, NCCL_WIN_COLL_SYMMETRIC));
@@ -1258,6 +1300,90 @@ TEST_F(UBR_MultiSegment, Generic)
          << "' in log - the symmetric-window multi-segment LSA registration "
             "(symMemoryMapLsaTeam) did not fire";
  }
+
+#ifdef ENABLE_FAULT_INJECTION
+/**
+ * @brief BEFORE control for the symmetric LSA receive-offset corruption.
+ *
+ * CE_FAULT_LEGACY_RECV_OFFSET: Phase 3 LSA peer copies use rank * shardBytes
+ * with no window offset, so remote shards land in the send half. The reduce
+ * kernel still writes this rank's shard into recvbuff, so recvBuf is not
+ * all-zero; the AllReduce result is incomplete.
+ *
+ * Symmetric_Lsa is the corresponding AFTER regression: the same non-zero
+ * recvBuf offset must produce a fully correct AllReduce without fault injection.
+ */
+TEST_F(UBR_MultiSegment, Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult)
+{
+    if (!validateTestPrerequisites(
+            /*min_processes=*/2, /*max_processes=*/kNoProcessLimit,
+            /*require_power_of_two=*/kNoPowerOfTwoRequired,
+            /*min_nodes=*/1, /*max_nodes=*/1)) {
+        GTEST_SKIP() << "Requires 2+ ranks on exactly one node";
+    }
+    const char* ceAllReduce = std::getenv("RCCL_CE_ALLREDUCE");
+    if (ceAllReduce == nullptr || std::atoi(ceAllReduce) != 1) {
+        GTEST_SKIP() << "BEFORE control requires RCCL_CE_ALLREDUCE=1";
+    }
+    if (!envCtaPolicyIsZero()) {
+        GTEST_SKIP() << "BEFORE control requires NCCL_CTA_POLICY=2 or ZERO";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+    ASSERT_TRUE(isWinEnabled()) << "NCCL_WIN_ENABLE must not be set to 0";
+
+    int dev = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+
+    constexpr size_t kSegmentSize = 32 * 1024 * 1024;
+    constexpr int kNumSegments = 4;
+    MultiSegmentBuffer buf;
+    ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, buf));
+    skipUnlessAllRanksAllocated(buf.totalSize != 0,
+        "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+
+    int rank = 0;
+    int nRanks = 0;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    const size_t halfSize = buf.totalSize / 2;
+    char* base = reinterpret_cast<char*>(buf.vaBase);
+    void* sendBuf = base;
+    void* recvBuf = base + halfSize;
+    const size_t count = halfSize / sizeof(T);
+    if (nRanks <= 0 || count % static_cast<size_t>(nRanks) != 0) {
+        GTEST_SKIP() << "CE shard path requires count divisible by nRanks";
+    }
+
+    ncclWindow_t win = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(
+        getActiveCommunicator(), buf.vaBase, buf.totalSize, &win, NCCL_WIN_COLL_SYMMETRIC));
+    auto winCleanup = makeScopeGuard([&]() {
+        if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
+    });
+    ASSERT_MPI_NE(win, nullptr);
+
+    initSendBuffer<T>(sendBuf, count, rank);
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, halfSize));
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCeFaultSet(
+        getActiveCommunicator(), CE_FAULT_LEGACY_RECV_OFFSET));
+    auto faultCleanup = makeScopeGuard([&]() {
+        HIP_EXPECT(ncclCeFaultClear(getActiveCommunicator()));
+    });
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(
+        sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,
+        getActiveCommunicator(), getActiveStream()));
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    EXPECT_FALSE(verifyAllReduceResult<T>(recvBuf, count, nRanks))
+        << "BEFORE control did not reproduce the legacy receive-window offset corruption";
+}
+#endif
 
 /**
  * @brief Multi-segment registration on the combined LSA + GIN symmetric path.

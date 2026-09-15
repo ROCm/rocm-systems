@@ -49,6 +49,14 @@ static int ncclCeBatchAsyncSupported() {
 }
 #endif
 
+// ncclDevrGetLsaRankPtr takes an LSA-team index, not a world rank.
+static ncclResult_t ncclCePeerLsaPtr(struct ncclComm* comm, struct ncclDevrWindow* win, size_t offset, int worldRank,
+                                    void** outPtr) {
+  int lsaRank;
+  NCCLCHECK(ncclDevrWorldToLsaRank(comm, worldRank, &lsaRank));
+  return ncclDevrGetLsaRankPtr(comm, win, offset, lsaRank, outPtr);
+}
+
 static int ncclCeBatchAsyncEnable() {
   // Called once per CE collective; warn at most once to avoid flooding the log.
   static std::atomic<bool> warnedUnsupported{false};
@@ -1818,7 +1826,15 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   if (recvWin == nullptr) {
     NCCLCHECKGOTO(ncclDevrFindWindow(comm, recvbuff, &recvWin), ret, fail);
   }
-  fastPath = (recvWin != nullptr) && (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC);
+  if (recvWin != nullptr && (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
+    const uintptr_t winStart = (uintptr_t)recvWin->userPtr;
+    const uintptr_t recvStart = (uintptr_t)recvbuff;
+    // A pointer-only window lookup is insufficient: Phase 3 writes the complete
+    // receive range through peer mappings. Fall back to the temporary CE window
+    // unless [recvbuff, recvbuff + totalBytes) is contained in recvWin.
+    fastPath =
+      recvStart >= winStart && totalBytes <= recvWin->size && recvStart - winStart <= recvWin->size - totalBytes;
+  }
   collArgs.recvWin = recvWin;
 
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
@@ -1854,7 +1870,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
       mySlotOffset = (slot * (size_t)comm->nRanks + comm->rank) * sizeof(uint32_t);
       for (int r = 0; r < comm->nRanks; r++) {
         if (r != comm->rank) {
-          NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, mySlotOffset, r, &peerSig), ret, fail);
+          NCCLCHECKGOTO(ncclCePeerLsaPtr(comm, ceColl->signalWin, mySlotOffset, r, &peerSig), ret, fail);
           basePeerSignalAddr[r] = (uint32_t*)peerSig;
         }
       }
@@ -1885,7 +1901,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
       if (r == comm->rank) {
         dstPtr = tmpBuf + dstSlotOffsetBytes;
       } else {
-        NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->ceARTmpWin, dstSlotOffsetBytes, r, &dstPtr), ret, fail);
+        NCCLCHECKGOTO(ncclCePeerLsaPtr(comm, ceColl->ceARTmpWin, dstSlotOffsetBytes, r, &dstPtr), ret, fail);
       }
       batchOpsParams.srcs[batchOpsParams.numOps] = (void*)srcShard;
       batchOpsParams.dsts[batchOpsParams.numOps] = dstPtr;
@@ -1926,7 +1942,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
         if (r == comm->rank) {
           waits[r].waitValue.address = &signalBuffer[drainSlot * comm->nRanks + comm->rank];
         } else {
-          NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, slotOffset, r, &peerSig), ret, fail);
+          NCCLCHECKGOTO(ncclCePeerLsaPtr(comm, ceColl->signalWin, slotOffset, r, &peerSig), ret, fail);
           waits[r].waitValue.address = (uint32_t*)peerSig;
         }
       }
@@ -1934,10 +1950,18 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     }
   }
   if (fastPath) {
-    // Phase 3: allgather
+    // Phase 3: allgather directly into the user's receive window.
     batchOpsParams.numOps = 0;
     myRecvSlot = (uint8_t*)recvbuff + (size_t)comm->rank * shardBytes;
-    recvSlotOffset = (size_t)comm->rank * shardBytes;
+    size_t recvWindowOffset = (size_t)((uint8_t*)recvbuff - (uint8_t*)recvWin->userPtr);
+#ifdef ENABLE_FAULT_INJECTION
+    if (comm->ceColl.ceFaults & CE_FAULT_LEGACY_RECV_OFFSET) {
+      // WARN only: BEFORE needs AllReduce to finish with a corrupted recv window.
+      WARN("CE: fault injection: CE_FAULT_LEGACY_RECV_OFFSET omitting recv window base (rank %d)", comm->rank);
+      recvWindowOffset = 0;
+    }
+#endif
+    recvSlotOffset = recvWindowOffset + (size_t)comm->rank * shardBytes;
 
     // The reduce kernel writes the reduced shard straight into recvbuff, so outShard and
     // myRecvSlot alias; copying would be a self-overlapping D2D transfer.
@@ -1951,7 +1975,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     for (int r = 1; r < comm->nRanks; r++) {
       int targetRank = (comm->rank + r) % comm->nRanks;
       void* peerRecvBuff;
-      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, recvWin, recvSlotOffset, targetRank, &peerRecvBuff), ret, fail);
+      NCCLCHECKGOTO(ncclCePeerLsaPtr(comm, recvWin, recvSlotOffset, targetRank, &peerRecvBuff), ret, fail);
       batchOpsParams.srcs[batchOpsParams.numOps] = (void*)outShard;
       batchOpsParams.dsts[batchOpsParams.numOps] = peerRecvBuff;
       batchOpsParams.sizes[batchOpsParams.numOps] = shardBytes;
