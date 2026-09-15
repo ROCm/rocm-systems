@@ -59,6 +59,15 @@ TEST_F(RasMicrotest, MessageLengthsCoverEveryFixedAndCollectiveType) {
   EXPECT_EQ(offsetof(rasMsg, collResp) + sizeof(rasMsg{}.collResp), rasMsgLength(RAS_MSG_COLLRESP));
   EXPECT_EQ(offsetof(rasMsg, collReq) + rasCollDataLength(RAS_BC_DEADPEER),
             rasMsgLength(RAS_MSG_COLLREQ, RAS_BC_DEADPEER));
+  EXPECT_EQ(offsetof(rasCollRequest, conns) + sizeof(rasCollRequest{}.conns), rasCollDataLength(RAS_COLL_CONNS));
+  EXPECT_EQ(offsetof(rasMsg, collReq) + rasCollDataLength(RAS_COLL_CONNS),
+            rasMsgLength(RAS_MSG_COLLREQ, RAS_COLL_CONNS));
+  EXPECT_EQ(offsetof(rasCollRequest, comms) + sizeof(rasCollRequest{}.comms), rasCollDataLength(RAS_COLL_COMMS));
+  EXPECT_EQ(offsetof(rasMsg, collReq) + rasCollDataLength(RAS_COLL_COMMS),
+            rasMsgLength(RAS_MSG_COLLREQ, RAS_COLL_COMMS));
+  EXPECT_EQ(0u, rasCollDataLength(RAS_MSG_NONE));
+  EXPECT_EQ(0u, rasCollDataLength(static_cast<rasCollectiveType>(-1)));
+  EXPECT_EQ(0u, rasMsgLength(static_cast<rasMsgType>(0)));
   EXPECT_EQ(0u, rasMsgLength(static_cast<rasMsgType>(-1)));
 }
 
