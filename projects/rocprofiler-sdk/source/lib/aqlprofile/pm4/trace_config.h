@@ -64,25 +64,37 @@ struct TraceConfig
     // concurrent kernels mode
     uint32_t concurrent = 0;
     // SE mask for tracing; note -> replicated for all XCCs
-    uint64_t se_mask = 0x11;
+    uint64_t se_mask            = 0x11;
+    uint64_t active_se          = 2;
+    uint64_t per_se_buffer_size = 0;
 
     // Maps shader engine IDs to list of buffers
     std::unordered_map<int, std::vector<void*>> buffer_data{};
 
-    uint64_t                          capacity_per_se          = 0x1000;
-    uint64_t                          capacity_per_disabled_se = 0;
-    std::unordered_map<int, int>      target_cu_per_se{};
-    std::unordered_map<int, uint64_t> se_base_addresses{};
+    uint64_t                     capacity_per_se          = 0x1000;
+    uint64_t                     capacity_per_disabled_se = 0;
+    std::unordered_map<int, int> target_cu_per_se{};
 
     bool enable_rt_timestamp{false};
 
     int      GetTargetCU(int SE) const { return target_cu_per_se.at(SE); };
     uint64_t GetSEmask() const { return se_mask; };
-    uint64_t GetSEBaseAddr(int SE) const { return se_base_addresses.at(SE); }
+    void*    GetSEBaseAddr(int SE) const
+    {
+        auto& buffer = buffer_data.at(SE);
+        return buffer.at(buffer.size() - 1);
+    }
     uint64_t GetCapacity(int SE) const
     {
         return (GetTargetCU(SE) >= 0) ? capacity_per_se : capacity_per_disabled_se;
     }
+};
+
+struct double_buffer_query_t
+{
+    int       se_id{};
+    uint32_t* wptr{};
+    uint32_t* status{};
 };
 
 }  // namespace pm4_builder

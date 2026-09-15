@@ -86,13 +86,23 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_sdk_sqtt_triple_buffer_disabled(TRIPLE_BUFFER_DISABLED)
 set(TRIPLE_BUFFER_DISABLED ${TRIPLE_BUFFER_DISABLED} OR ${IS_DISABLED})
 
-# Checks for data integrity with ttracedata
+# Checks data integrity with ttracedata on a single shader engine.
 rocprofiler_add_integration_execute_test(
     thread-trace-api-triple-buffer-consistency-test
     TARGET thread-trace-test-app
     TIMEOUT 120
     PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
     ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=0"
+    DISABLED ${TRIPLE_BUFFER_DISABLED})
+
+# Checks per-SE data integrity with tagged ttracedata across every shader engine.
+rocprofiler_add_integration_execute_test(
+    thread-trace-api-triple-buffer-multi-se-consistency-test
+    TARGET thread-trace-test-app
+    TIMEOUT 120
+    PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
+    ENVIRONMENT
+        "TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=0;ATT_MULTI_SE=1;ATT_LOOP_COUNT=100"
     DISABLED ${TRIPLE_BUFFER_DISABLED})
 
 # Collects a lot of data, and check if parsing works successfully
