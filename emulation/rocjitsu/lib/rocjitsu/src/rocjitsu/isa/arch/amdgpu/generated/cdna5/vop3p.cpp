@@ -4258,7 +4258,9 @@ DecodeResult decodeVPkMulF64Vop3p(const MachineInst *opcode, const DecodeErrorEm
       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi != 3u ||
       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi_2 != 1u) [[unlikely]]
     return emit_error.emit() << "V_PK_MUL_F64 has an invalid packed F64 element layout";
-  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 128u) [[unlikely]]
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 128u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg & 4u) != 0u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg_hi & 4u) != 0u) [[unlikely]]
     return emit_error.emit() << "V_PK_MUL_F64 has an invalid unused src2 encoding";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst > 252u) [[unlikely]]
     return emit_error.emit()
@@ -4370,7 +4372,9 @@ DecodeResult decodeVPkAddF64Vop3p(const MachineInst *opcode, const DecodeErrorEm
       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi != 3u ||
       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi_2 != 1u) [[unlikely]]
     return emit_error.emit() << "V_PK_ADD_F64 has an invalid packed F64 element layout";
-  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 128u) [[unlikely]]
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 128u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg & 4u) != 0u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg_hi & 4u) != 0u) [[unlikely]]
     return emit_error.emit() << "V_PK_ADD_F64 has an invalid unused src2 encoding";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst > 252u) [[unlikely]]
     return emit_error.emit()
@@ -4717,7 +4721,9 @@ DecodeResult decodeVPkMaxNumF64Vop3p(const MachineInst *opcode,
       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi != 3u ||
       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi_2 != 1u) [[unlikely]]
     return emit_error.emit() << "V_PK_MAX_NUM_F64 has an invalid packed F64 element layout";
-  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 128u) [[unlikely]]
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 128u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg & 4u) != 0u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg_hi & 4u) != 0u) [[unlikely]]
     return emit_error.emit() << "V_PK_MAX_NUM_F64 has an invalid unused src2 encoding";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst > 252u) [[unlikely]]
     return emit_error.emit()
@@ -4830,7 +4836,9 @@ DecodeResult decodeVPkMinNumF64Vop3p(const MachineInst *opcode,
       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi != 3u ||
       reinterpret_cast<const Vop3p::OpEncoding *>(inst)->opsel_hi_2 != 1u) [[unlikely]]
     return emit_error.emit() << "V_PK_MIN_NUM_F64 has an invalid packed F64 element layout";
-  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 128u) [[unlikely]]
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 128u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg & 4u) != 0u ||
+      (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->neg_hi & 4u) != 0u) [[unlikely]]
     return emit_error.emit() << "V_PK_MIN_NUM_F64 has an invalid unused src2 encoding";
   if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->vdst > 252u) [[unlikely]]
     return emit_error.emit()

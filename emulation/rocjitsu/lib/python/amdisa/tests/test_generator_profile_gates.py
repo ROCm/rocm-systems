@@ -5285,6 +5285,8 @@ def test_gfx1251_packed_f64_decode_rejects_undefined_layouts_and_register_tuples
         assert 'invalid src0 packed F64 source selector' in body
         assert 'invalid src1 packed F64 source selector' in body
         for operand_name in ('src0', 'src1'):
+            assert f'{operand_name} != 104u' not in body
+            assert f'{operand_name} == 104u' not in body
             assert f'{operand_name} <= 100u' in body
             assert f'{operand_name} >= 108u' in body
             assert f'{operand_name} <= 120u' in body
