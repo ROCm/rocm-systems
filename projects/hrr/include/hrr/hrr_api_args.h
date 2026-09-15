@@ -342,7 +342,7 @@ typedef struct {
     uint64_t desc;
 } hrr_args_hipBindTextureToMipmappedArray;
 
-/* hipError_t hipChooseDevice(int* device, const hipDeviceProp_t* prop) */
+/* hipError_t hipChooseDevice(int* device, const hipDeviceProp_tR0600* prop) */
 typedef struct {
     hrr_event_header hdr;
     int32_t ret;
