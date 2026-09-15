@@ -259,6 +259,7 @@ if(BUILD_TESTS)
     fakes/strongstream_stubs.cc          # src/misc/strongstream.cc
     fakes/sym_kernels_fakes.cc            # src/sym_kernels.cc
     fakes/tuning_fakes.cc                # src/graph/tuning.cc
+    fakes/rccl_arch_thresholds_fakes.cc  # src/rccl_arch_thresholds.cc
     ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
     ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc  # real IsArchMatch/GcnArchNameFormat
     ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc     # real busId/hash helpers
@@ -415,6 +416,7 @@ if(BUILD_TESTS)
     fakes/strongstream_stubs.cc          # src/misc/strongstream.cc
     fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc
     fakes/tuning_fakes.cc                # src/graph/tuning.cc
+    fakes/rccl_arch_thresholds_fakes.cc  # src/rccl_arch_thresholds.cc
     ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
     ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc  # real IsArchMatch
     ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc     # real busId/hash helpers
@@ -904,6 +906,7 @@ set(TEST_MICRO_INIT_SOURCE_FILES
   fakes/strongstream_stubs.cc
   fakes/sym_kernels_fakes.cc
   fakes/tuning_fakes.cc
+  fakes/rccl_arch_thresholds_fakes.cc
   ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc
   ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
   ${RCCL_HIPIFY_DIR}/src/misc/utils.cc
@@ -987,6 +990,7 @@ set(TEST_MICRO_ENQUEUE_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/strongstream_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/sym_kernels_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/tuning_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/rccl_arch_thresholds_fakes.cc
   ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc
   ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
   ${RCCL_HIPIFY_DIR}/src/misc/utils.cc
