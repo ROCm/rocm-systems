@@ -78,6 +78,8 @@ ncclResult_t IbCastPortRecoveryQpsRestoreAinic(struct ncclIbPortRecoveryContext*
         flushCreateAttr.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
         flushCreateAttr.channelId = flushQp->channelId;
         flushCreateAttr.isDataQp = flushQp->isDataQp;
+        // Loopback flush QP carries no classification, as at connect time.
+        flushCreateAttr.isP2p = 0;
         NCCLCHECK(IbCastQpCreate(flushQp, &flushCreateAttr));
         INFO(NCCL_NET, "NET/IB: %s: Recreated Flush QP on device %d (comm=%p, new_qp_num=%u)", __func__, i,
              recoveryContext->resCtx->baseComm, flushQp->qp->qp_num);

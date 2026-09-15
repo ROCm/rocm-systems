@@ -38,7 +38,6 @@ class Function {
   ~Function();
 
   hipError_t GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod);
-  bool IsValidDynFunc(const void* hfunc);
   hipError_t GetStatFunc(hipFunction_t* hfunc, int deviceId);
   hipError_t GetStatFuncAttr(hipFuncAttributes* func_attr, int deviceId);
   void ResizeDFunc(size_t size) { dFunc_.resize(size); }
