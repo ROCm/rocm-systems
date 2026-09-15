@@ -65,6 +65,9 @@ Settings::Settings() {
 
   rocr_backend_ = true;
 
+  // VirtualGPU::submitBatchCopyRectMemory exists only here; the base implementation aborts.
+  batch_copy_rect_supported_ = true;
+
   cpu_wait_for_signal_ = ROC_CPU_WAIT_FOR_SIGNAL;
   system_scope_signal_ = ROC_SYSTEM_SCOPE_SIGNAL;
 

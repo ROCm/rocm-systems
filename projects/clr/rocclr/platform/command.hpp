@@ -1193,6 +1193,21 @@ struct BatchCopyOp {
         dstOffset(dstOff), size(sz), metadata(meta) {}
 };
 
+//! Structure to hold individual rect copy operation info for batch rect copies
+struct BatchCopyRectOp {
+  Memory* srcMemory;      //!< Source memory object
+  Memory* dstMemory;      //!< Destination memory object
+  BufferRect srcRect;     //!< Source rect: start offset plus row and slice pitch
+  BufferRect dstRect;     //!< Destination rect
+  Coord3D size;           //!< Copy extent {bytes, rows, slices}
+  CopyMetadata metadata;  //!< Copy metadata for this operation
+
+  BatchCopyRectOp(Memory* src, Memory* dst, const BufferRect& sRect, const BufferRect& dRect,
+                  const Coord3D& sz, CopyMetadata meta = CopyMetadata())
+      : srcMemory(src), dstMemory(dst), srcRect(sRect), dstRect(dRect), size(sz),
+        metadata(meta) {}
+};
+
 //! Structure to hold pageable host-to-device write operation info for batch
 //! writes
 struct BatchWriteMemoryOp {
@@ -1269,6 +1284,35 @@ class BatchCopyMemoryCommand : public Command {
     }
     return true;
   }
+};
+
+/*! \brief  A batch rect copy command for multiple 3D (rect) copies
+ *
+ *  \details Carries N independent rect copies in one command so the device layer can
+ *           lower them into a single SDMA submission.  Copies within a batch are not
+ *           ordered relative to each other and share one completion signal.
+ */
+class BatchCopyRectMemoryCommand : public Command {
+ private:
+  std::vector<BatchCopyRectOp> copyOps_;  //!< Vector of rect copy operations
+
+ public:
+  BatchCopyRectMemoryCommand(HostQueue& queue, cl_command_type cmdType,
+                             const EventWaitList& eventWaitList,
+                             std::vector<BatchCopyRectOp>&& copyOps)
+      : Command(queue, cmdType, eventWaitList), copyOps_(std::move(copyOps)) {
+    // Sanity check: activity reporting downcasts on the command kind, so any other kind
+    // would resolve to a type this command does not derive from.
+    assert(cmdType == ROCCLR_COMMAND_BATCH_COPY_BUFFER_RECT && "Invalid batch rect copy");
+  }
+
+  virtual void submit(device::VirtualDevice& device) { device.submitBatchCopyRectMemory(*this); }
+
+  //! Return the vector of rect copy operations
+  const std::vector<BatchCopyRectOp>& copyOps() const { return copyOps_; }
+
+  //! Return the number of rect copy operations in the batch
+  size_t count() const { return copyOps_.size(); }
 };
 
 /*! \brief  A batch write memory command for multiple pageable host-to-device

@@ -846,6 +846,54 @@ hsa_status_t hsa_amd_memory_async_copy_rect(
   CATCH;
 }
 
+hsa_status_t hsa_amd_memory_async_batch_copy_rect(
+    const hsa_amd_memory_copy_rect_op_t* ops, size_t num_ops, hsa_agent_t copy_agent,
+    hsa_amd_copy_direction_t dir, uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+    hsa_signal_t completion_signal) {
+  TRY;
+  if (ops == nullptr || num_ops == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  if ((num_dep_signals == 0 && dep_signals != NULL) ||
+      (num_dep_signals > 0 && dep_signals == NULL)) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // BlitSdma::SubmitCommand caches the dependent signal values in a fixed HSA_MAX_DEP_SIGNALS
+  // stack array, so a larger count has to be rejected here rather than truncated.
+  if (num_dep_signals > HSA_MAX_DEP_SIGNALS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  if (dir == hsaHostToHost) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // Unlike the single-op entry point, a degenerate range cannot be silently turned into a
+  // no-op here: every operand has to contribute at least one packet for the batch to keep a
+  // one-to-one operand/packet mapping.  Callers must filter empty copies out.
+  for (size_t i = 0; i < num_ops; ++i) {
+    if (ops[i].range.x == 0 || ops[i].range.y == 0 || ops[i].range.z == 0)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  core::Agent* base_agent = core::Agent::Convert(copy_agent);
+  IS_VALID(base_agent);
+  if (base_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice)
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  AMD::GpuAgent* agent = static_cast<AMD::GpuAgent*>(base_agent);
+
+  std::vector<core::Signal*> dep_signal_list(num_dep_signals);
+  if (num_dep_signals > 0) {
+    for (size_t i = 0; i < num_dep_signals; ++i) {
+      core::Signal* dep_signal_obj = core::Signal::Convert(dep_signals[i]);
+      IS_VALID(dep_signal_obj);
+      dep_signal_list[i] = dep_signal_obj;
+    }
+  }
+
+  core::Signal* out_signal_obj = core::Signal::Convert(completion_signal);
+  IS_VALID(out_signal_obj);
+
+  return agent->DmaBatchCopyRect(ops, num_ops, dir, dep_signal_list, *out_signal_obj);
+  CATCH;
+}
+
 
 hsa_status_t hsa_amd_profiling_set_profiler_enabled(hsa_queue_t* queue, int enable) {
   TRY;
@@ -2619,3 +2667,15 @@ hsa_status_t hsa_amd_queue_create(hsa_agent_t agent_handle,
 
 }   //  namespace amd
 }   //  namespace rocr
+
+// Exported directly instead of through the AMD extension API table.  Adding a slot to
+// AmdExtTable would change its size, which rocprofiler and the loader validate against the
+// table version, so for this provisional entry point the table is left untouched.  The cost
+// is that the call is not interceptable by the profiler.
+extern "C" hsa_status_t HSA_API hsa_amd_memory_async_batch_copy_rect(
+    const hsa_amd_memory_copy_rect_op_t* ops, size_t num_ops, hsa_agent_t copy_agent,
+    hsa_amd_copy_direction_t dir, uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+    hsa_signal_t completion_signal) {
+  return rocr::AMD::hsa_amd_memory_async_batch_copy_rect(
+      ops, num_ops, copy_agent, dir, num_dep_signals, dep_signals, completion_signal);
+}

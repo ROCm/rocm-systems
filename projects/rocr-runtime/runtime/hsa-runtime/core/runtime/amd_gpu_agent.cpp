@@ -2260,6 +2260,31 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_
   return stat;
 }
 
+hsa_status_t GpuAgent::DmaBatchCopyRect(const hsa_amd_memory_copy_rect_op_t* ops, size_t num_ops,
+                                        hsa_amd_copy_direction_t dir,
+                                        std::vector<core::Signal*>& dep_signals,
+                                        core::Signal& out_signal) {
+  if (supported_isas()[0]->GetMajorVersion() < 9) return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  SetCopyRequestRefCount(true);
+  MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
+  lazy_ptr<core::Blit>& blit = GetBlitObject((dir == hsaHostToDevice) ? BlitHostToDev :
+                                                                        BlitDevToHost);
+
+  if (!blit->isSDMA()) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  if (profiling_enabled()) {
+    // Track the agent so we could translate the resulting timestamp to system
+    // domain correctly.
+    out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
+  }
+
+  BlitSdmaBase* sdmaBlit = static_cast<BlitSdmaBase*>((*blit).get());
+  return sdmaBlit->SubmitBatchCopyRectCommand(ops, num_ops, dep_signals, out_signal);
+}
+
 hsa_status_t GpuAgent::DmaFill(void* ptr, uint32_t value, size_t count) {
   return blits_[BlitDevToDev]->SubmitLinearFillCommand(ptr, value, count);
 }
