@@ -374,8 +374,7 @@ def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataF
 
 def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
     """Apply dispatch ID filters."""
-    # NB: support ignoring the 1st n dispatched execution by '> n'
-    #     The better way may be parsing python slice string
+    # '> n' keeps the dispatches whose id is greater than n.
     available_dispatch_ids = set(df["Dispatch_ID"].astype(int))
     if available_dispatch_ids:
         available_ids_hint = (
@@ -387,13 +386,10 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
 
     for dispatch_id in workload.filter_dispatch_ids:
         if isinstance(dispatch_id, str) and ">" in dispatch_id:
-            # '> n' skips the first n dispatches, so n is a number of
-            # dispatches, not an id.
-            skipped = int(re.match(r"\>\s*(\d+)", dispatch_id).group(1))
-            if available_dispatch_ids:
-                valid = 0 <= skipped <= max(available_dispatch_ids)
-            else:
-                valid = False
+            threshold = int(re.match(r"\>\s*(\d+)", dispatch_id).group(1))
+            valid = bool(available_dispatch_ids) and threshold <= max(
+                available_dispatch_ids
+            )
         else:
             valid = int(dispatch_id) in available_dispatch_ids
         if not valid:

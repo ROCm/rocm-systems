@@ -424,6 +424,17 @@ def _filter_workload() -> SimpleNamespace:
     )
 
 
+def record_and_exit_stub():
+    """Return a calls list and a stub that records its args, then raises SystemExit."""
+    calls = []
+
+    def stub(*args, **_kwargs):
+        calls.append(args)
+        raise SystemExit(1)
+
+    return calls, stub
+
+
 def _kernel_filter_workload() -> SimpleNamespace:
     """Workload stub with dfs populated for apply_kernel_filter tests."""
     return SimpleNamespace(
@@ -488,12 +499,7 @@ class TestApplyFilters:
 
     def test_unknown_dispatch_id_errors(self, monkeypatch) -> None:
         """Dispatch 0 and other IDs absent from the column exit with a range hint."""
-        error_calls = []
-
-        def record_and_exit(*args, **_kwargs):
-            error_calls.append(args)
-            raise SystemExit(1)
-
+        error_calls, record_and_exit = record_and_exit_stub()
         common.patch_console(
             monkeypatch, "utils.parser", "error", error=record_and_exit
         )
@@ -518,8 +524,7 @@ class TestApplyFilters:
         assert apply_filters(workload, "/tmp", False, False).empty
 
     def test_dispatch_greater_than_threshold_keeps_sparse_ids(self) -> None:
-        """'> n' where n is any integer greater than the number of
-        available dispatches, dispatch ids above n are kept."""
+        """'> n' compares against dispatch ids, not the dispatch count."""
         workload = _filter_workload()
         workload.raw_pmc = pd.DataFrame({
             "GPU_ID": [0, 0],
@@ -529,6 +534,32 @@ class TestApplyFilters:
         workload.filter_dispatch_ids = [">4"]
         filtered = apply_filters(workload, "/tmp", False, False)
         assert list(filtered["Dispatch_ID"]) == [6]
+
+    def test_dispatch_greater_than_highest_id_errors(self, monkeypatch) -> None:
+        """'> n' past the highest dispatch id exits with a range hint."""
+        error_calls, record_and_exit = record_and_exit_stub()
+        common.patch_console(
+            monkeypatch, "utils.parser", "error", error=record_and_exit
+        )
+        workload = _filter_workload()
+        workload.filter_dispatch_ids = [">5"]
+        with pytest.raises(SystemExit):
+            apply_filters(workload, "/tmp", False, False)
+        assert ">5 is an invalid dispatch id" in str(error_calls[0])
+        assert "from 1 to 4" in str(error_calls[0])
+
+    def test_dispatch_filter_without_dispatches_errors(self, monkeypatch) -> None:
+        """A dispatch filter on a workload with no dispatches exits."""
+        error_calls, record_and_exit = record_and_exit_stub()
+        common.patch_console(
+            monkeypatch, "utils.parser", "error", error=record_and_exit
+        )
+        workload = _filter_workload()
+        workload.raw_pmc = workload.raw_pmc.iloc[0:0]
+        workload.filter_dispatch_ids = [">0"]
+        with pytest.raises(SystemExit):
+            apply_filters(workload, "/tmp", False, False)
+        assert "This workload has no dispatches." in str(error_calls[0])
 
     def test_gpu_integer_list_filter(self) -> None:
         """A GPU filter given as a list of integers keeps all matching rows."""
