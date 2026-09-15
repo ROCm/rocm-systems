@@ -294,6 +294,323 @@ TEST_F(DdaFabricEligibilityTest, AllGather_InvalidDatatypeDispatch)
 }
 
 // ---------------------------------------------------------------------------
+// AllGather LL
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// Mirrors ddaLLAgSlotPkts in all_gather_dda_fabric_ll.h: the bank splits across
+// ranks, and each 16B packet of a slot carries 8B of payload.
+size_t ddaLLAgPerRankCapBytes(int nRanks, size_t scratchBytes)
+{
+    const size_t slotPkts = dda::common::ddaLLSlotPkts(
+        dda::common::ddaBankSize(scratchBytes),
+        sizeof(dda::common::LLPacket16) * (size_t)nRanks,
+        16);
+    return slotPkts * 8;
+}
+
+// DDA_LL_THRESHOLD default, on the whole gathered message.
+constexpr size_t kDdaLLThresholdBytes = 64u * 1024u;
+} // namespace
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL_EligibleFloat32)
+{
+    EXPECT_TRUE(ncclAllGatherDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL_EligibleFloat16)
+{
+    EXPECT_TRUE(ncclAllGatherDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 8, ncclFloat16));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL_EligibleBfloat16)
+{
+    EXPECT_TRUE(ncclAllGatherDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 8, ncclBfloat16));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL_UnsupportedDatatype)
+{
+    EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclInt32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL_NullComm)
+{
+    EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(
+        nullptr, sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL_MissingBootstrap)
+{
+    mockComm_.comm.bootstrap = nullptr;
+    EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL_MissingFabricResources)
+{
+    mockComm_.setFabricResourcesPresent(false);
+    EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL_ZeroCount)
+{
+    EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 0, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL_TooFewRanks)
+{
+    mockComm_.comm.nRanks = 1;
+    EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL_TooManyRanks)
+{
+    mockComm_.comm.nRanks = dda::common::kDdaMaxNranks + 1;
+    EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL_MaxRanksEligible)
+{
+    mockComm_.comm.nRanks = dda::common::kDdaMaxNranks;
+    EXPECT_TRUE(ncclAllGatherDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+// A packet is 16B, so a per-rank payload that is not a whole number of them
+// cannot be staged.
+TEST_F(DdaFabricEligibilityTest, AllGatherLL_UnalignedCount)
+{
+    EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 2, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL_AtThresholdEligible)
+{
+    const size_t perRankBytes = kDdaLLThresholdBytes / (size_t)mockComm_.comm.nRanks;
+    EXPECT_TRUE(ncclAllGatherDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL_PastThresholdRejected)
+{
+    const size_t perRankBytes = kDdaLLThresholdBytes / (size_t)mockComm_.comm.nRanks + 16;
+    EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
+}
+
+// Scratch small enough that the slot, not the threshold, is the binding limit:
+// at 128 KiB and 8 ranks a slot holds 4 KiB of payload while the threshold still
+// allows 8 KiB. Exactly filling the slot is admitted.
+TEST_F(DdaFabricEligibilityTest, AllGatherLL_PerRankSlotExactlyFits)
+{
+    mockComm_.comm.ddaScratchBytes = 128 * 1024;
+    const size_t capBytes =
+        ddaLLAgPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes);
+    ASSERT_LT(capBytes * (size_t)mockComm_.comm.nRanks, kDdaLLThresholdBytes);
+    EXPECT_TRUE(ncclAllGatherDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, capBytes / sizeof(float), ncclFloat32));
+}
+
+// One packet past the cap: still under the threshold and still 16B-aligned, so
+// only the slot bound can reject it.
+TEST_F(DdaFabricEligibilityTest, AllGatherLL_PerRankSlotOverflow)
+{
+    mockComm_.comm.ddaScratchBytes = 128 * 1024;
+    const size_t capBytes =
+        ddaLLAgPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes);
+    ASSERT_LT((capBytes + 16) * (size_t)mockComm_.comm.nRanks, kDdaLLThresholdBytes);
+    EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, (capBytes + 16) / sizeof(float), ncclFloat32));
+}
+
+// Below a bank of 16 packets per rank the slot rounds to zero, so nothing fits.
+TEST_F(DdaFabricEligibilityTest, AllGatherLL_ScratchTooSmallForOnePacket)
+{
+    mockComm_.comm.ddaScratchBytes = 2048;
+    ASSERT_EQ(ddaLLAgPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes), 0u);
+    EXPECT_FALSE(ncclAllGatherDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+// ---------------------------------------------------------------------------
+// AllGather LL128
+// ---------------------------------------------------------------------------
+
+// Mirrors ddaLL128AGMaxPerRankBytes in dda_all_gather_fabric_ll128.cu. The scratch
+// holds 2 banks of nRanks slots, so this is the payload of one rank's slot.
+static size_t ddaLL128AGPerRankCapBytes(int nRanks, size_t scratchBytes)
+{
+    const size_t slices =
+        scratchBytes / ((size_t)2 * (size_t)nRanks * (size_t)dda::common::kDdaLL128WireBytesPerSlice);
+    return slices * (size_t)dda::common::kDdaLL128DataBytesPerSlice;
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_EligibleFloat32)
+{
+    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_EligibleFloat16)
+{
+    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 8, ncclFloat16));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_EligibleBfloat16)
+{
+    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 8, ncclBfloat16));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_UnsupportedDatatype)
+{
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclInt32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_NullComm)
+{
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        nullptr, sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_MissingBootstrap)
+{
+    mockComm_.comm.bootstrap = nullptr;
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_MissingFabricResources)
+{
+    mockComm_.setFabricResourcesPresent(false);
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+// The kernel derives its flag from a per-block epoch cell, so the path is only
+// reachable once fabric init has allocated the array.
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_MissingEpochCells)
+{
+    mockComm_.comm.ddaLLEpochDev = nullptr;
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_EmptyEpochArray)
+{
+    mockComm_.comm.ddaLLEpochLen = 0;
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_ZeroCount)
+{
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 0, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_TooFewRanks)
+{
+    mockComm_.comm.nRanks = 1;
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_TooManyRanks)
+{
+    mockComm_.comm.nRanks = dda::common::kDdaMaxNranks + 1;
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_MaxRanksEligible)
+{
+    mockComm_.comm.nRanks = dda::common::kDdaMaxNranks;
+    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+// 3 floats is 12B, so the per-rank payload is not a whole number of 16B chunks.
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_UnalignedCount)
+{
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 3, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_UnalignedSendbuff)
+{
+    void* unaligned = reinterpret_cast<void*>(0x1008);
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), unaligned, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_UnalignedRecvbuff)
+{
+    void* unaligned = reinterpret_cast<void*>(0x2008);
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, unaligned, 4, ncclFloat32));
+}
+
+// The cap is derived from the scratch rather than fixed, so shrinking the
+// allocation to 1 MiB still leaves a 32-slice slot that a small message fits in.
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_PerRankSlotWithSmallScratch)
+{
+    mockComm_.comm.ddaScratchBytes = 1 * 1024 * 1024;  // 32 slices at 8 ranks
+    ASSERT_GT(ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes),
+              4u * sizeof(float));
+    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+// One 16B chunk past the cap: still alignment-legal, but a partial trailing
+// slice would run into the next rank's slot.
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_PerRankSlotOverflow)
+{
+    mockComm_.comm.ddaScratchBytes = 1 * 1024 * 1024;
+    const size_t capBytes =
+        ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes);
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, (capBytes + 16) / sizeof(float), ncclFloat32));
+}
+
+// Below 2 banks * nRanks * 2 KiB the slot holds zero whole slices, so the cap is
+// zero and nothing fits.
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_ScratchTooSmallForOneSlice)
+{
+    mockComm_.comm.ddaScratchBytes = 16 * 1024;
+    ASSERT_EQ(ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes), 0u);
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_AtThresholdEligible)
+{
+    constexpr size_t totalCap = 64u * 1024u * 1024u;  // DDA_LL128_THRESHOLD default
+    const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks;
+    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_PastThresholdRejected)
+{
+    constexpr size_t totalCap = 64u * 1024u * 1024u;
+    const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks + 16;
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
+}
+
+// ---------------------------------------------------------------------------
 // AllReduce
 // ---------------------------------------------------------------------------
 
@@ -843,175 +1160,6 @@ TEST_F(DdaFabricEligibilityTest, ReduceScatter_InvalidDatatypeDispatch)
                                          mockComm_.get(),
                                          nullptr),
               ncclInvalidArgument);
-}
-
-// ---------------------------------------------------------------------------
-// AllGather LL128
-// ---------------------------------------------------------------------------
-
-// Mirrors ddaLL128AGMaxPerRankBytes in dda_all_gather_fabric_ll128.cu. The scratch
-// holds 2 banks of nRanks slots, so this is the payload of one rank's slot.
-static size_t ddaLL128AGPerRankCapBytes(int nRanks, size_t scratchBytes)
-{
-    const size_t slices =
-        scratchBytes / ((size_t)2 * (size_t)nRanks * (size_t)dda::common::kDdaLL128WireBytesPerSlice);
-    return slices * (size_t)dda::common::kDdaLL128DataBytesPerSlice;
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_EligibleFloat32)
-{
-    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_EligibleFloat16)
-{
-    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 8, ncclFloat16));
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_EligibleBfloat16)
-{
-    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 8, ncclBfloat16));
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_UnsupportedDatatype)
-{
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclInt32));
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_NullComm)
-{
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        nullptr, sendbuff_, recvbuff_, 4, ncclFloat32));
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_MissingBootstrap)
-{
-    mockComm_.comm.bootstrap = nullptr;
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_MissingFabricResources)
-{
-    mockComm_.setFabricResourcesPresent(false);
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
-}
-
-// The kernel derives its flag from a per-block epoch cell, so the path is only
-// reachable once fabric init has allocated the array.
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_MissingEpochCells)
-{
-    mockComm_.comm.ddaLLEpochDev = nullptr;
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_EmptyEpochArray)
-{
-    mockComm_.comm.ddaLLEpochLen = 0;
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_ZeroCount)
-{
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 0, ncclFloat32));
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_TooFewRanks)
-{
-    mockComm_.comm.nRanks = 1;
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_TooManyRanks)
-{
-    mockComm_.comm.nRanks = dda::common::kDdaMaxNranks + 1;
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_MaxRanksEligible)
-{
-    mockComm_.comm.nRanks = dda::common::kDdaMaxNranks;
-    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
-}
-
-// 3 floats is 12B, so the per-rank payload is not a whole number of 16B chunks.
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_UnalignedCount)
-{
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 3, ncclFloat32));
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_UnalignedSendbuff)
-{
-    void* unaligned = reinterpret_cast<void*>(0x1008);
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), unaligned, recvbuff_, 4, ncclFloat32));
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_UnalignedRecvbuff)
-{
-    void* unaligned = reinterpret_cast<void*>(0x2008);
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, unaligned, 4, ncclFloat32));
-}
-
-// The cap is derived from the scratch rather than fixed, so shrinking the
-// allocation to 1 MiB still leaves a 32-slice slot that a small message fits in.
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_PerRankSlotWithSmallScratch)
-{
-    mockComm_.comm.ddaScratchBytes = 1 * 1024 * 1024;  // 32 slices at 8 ranks
-    ASSERT_GT(ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes),
-              4u * sizeof(float));
-    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
-}
-
-// One 16B chunk past the cap: still alignment-legal, but a partial trailing
-// slice would run into the next rank's slot.
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_PerRankSlotOverflow)
-{
-    mockComm_.comm.ddaScratchBytes = 1 * 1024 * 1024;
-    const size_t capBytes =
-        ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes);
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, (capBytes + 16) / sizeof(float), ncclFloat32));
-}
-
-// Below 2 banks * nRanks * 2 KiB the slot holds zero whole slices, so the cap is
-// zero and nothing fits.
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_ScratchTooSmallForOneSlice)
-{
-    mockComm_.comm.ddaScratchBytes = 16 * 1024;
-    ASSERT_EQ(ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes), 0u);
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_AtThresholdEligible)
-{
-    constexpr size_t totalCap = 64u * 1024u * 1024u;  // DDA_LL128_THRESHOLD default
-    const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks;
-    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_PastThresholdRejected)
-{
-    constexpr size_t totalCap = 64u * 1024u * 1024u;
-    const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks + 16;
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
 }
 
 } // namespace RcclUnitTesting
