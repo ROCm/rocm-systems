@@ -766,9 +766,11 @@ protected:
     // and both ranks always reach the same collectives, so a caller that checks its
     // communicator (they all should) can report and bail out with its peer.
     //
-    // The handle is sent even when listen failed, for the same reason: otherwise the
-    // peer blocks in MPI_Recv. It is zeroed, so the peer's connect fails on its own
-    // and both sides end up reporting.
+    // A message is sent even when listen failed, for the same reason: otherwise the
+    // peer blocks in MPI_Recv. What it carries is a status word, not a zeroed handle
+    // for the peer to try anyway -- interpreting a handle that was never filled in can
+    // block rather than fail, which would put back the hang this helper exists to
+    // remove. The peer reads that word, skips the connect, and reports.
     void SetupCastConnection(int dev,
                              void** listenComm, void** sendComm, void** recvComm) {
         const int rank = MPIEnvironment::world_rank;
@@ -2193,8 +2195,23 @@ protected:
         ThreadResult result;
         if (!request) return result;
 
-        for (int qp = 0; qp < kQpProbeLimit; qp++) {
-            if (ncclIbCastFaultDriveRecvQpToError(recvComm, qp) != ncclSuccess) break;
+        // Only ncclInvalidArgument means "past the last queue pair": that is the code the
+        // API answers an out-of-range index with, and it is the sentinel this walk stops
+        // on. A transition that genuinely failed comes back differently -- the call ends
+        // in NCCLCHECK(wrap_ibv_modify_qp(...)) on an existing queue pair (p2p.cc) -- and
+        // treating that as the end would leave every higher member undriven while the
+        // wait below still saw an error from one that was. That is the case the whole
+        // safety argument turns on, so it is carried out rather than folded in.
+        // Probing one index past the bound, so the sentinel is reachable even for a
+        // connection holding exactly kQpProbeLimit queue pairs; without that, such a
+        // connection would exhaust the loop with every drive succeeding and be reported
+        // as short of the end when it was not.
+        bool droveWholeRange = false;
+        for (int qp = 0; qp <= kQpProbeLimit; qp++) {
+            const ncclResult_t ret = ncclIbCastFaultDriveRecvQpToError(recvComm, qp);
+            if (ret == ncclSuccess) continue;
+            droveWholeRange = ret == ncclInvalidArgument;
+            break;
         }
 
         // A flush completion surfaces as an error, and that is the expected
@@ -2203,11 +2220,26 @@ protected:
         // What makes the error safe to accept is the walk above, not the error itself.
         // IbCastTest returns ncclRemoteError on the first error CQE and never sets done
         // afterwards, so an error is the only end this wait can ever see; treating it as
-        // the end is sound because the loop drove every queue pair the connection has,
-        // stopping at the first index the API refused, so no member is left with work
-        // still able to touch the buffer. It walked a fixed eight before, which happened
-        // to equal the count these suites run with -- and it is that, not the error
-        // status, that could have released memory a higher queue pair still referenced.
+        // the end is sound only because the loop drove every queue pair the connection
+        // has, so no member is left with work still able to touch the buffer. It walked a
+        // fixed eight before, which happened to equal the count these suites run with --
+        // and it is that, not the error status, that could have released memory a higher
+        // queue pair still referenced.
+        if (!droveWholeRange) {
+            // The range was cut short by a real transition failure, so an error seen below
+            // would prove nothing about the members never reached. Report and retain
+            // rather than wait on a guarantee that was not established.
+            result.ok = false;
+            result.msg = "driving the receive queue pairs to error stopped short of the end "
+                         "of the range, so the abandoned receive cannot be assumed retired";
+            if (registration || allocation) {
+                result.msg += "; the buffer and its registration are retained, since the "
+                              "request may still reference them";
+                if (registration) registration->release();
+                if (allocation) allocation->release();
+            }
+            return result;
+        }
         static constexpr int kFlushPolls = 500;  // 500 * 10ms = 5s
         for (int poll = 0; poll < kFlushPolls; poll++) {
             int done = 0;
