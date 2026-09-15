@@ -12,6 +12,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Added `install.sh --all_unrolls` (`-DBUILD_ALL_UNROLLS=ON`) to generate every unroll factor (1, 2, 4, 8, 16, 32) for the targeted GPU architecture(s), for measuring unroll factors that the default per-arch matrix does not build. The flag also drops the per-architecture pin, so such a build accepts every `RCCL_UNROLL_FACTOR` value on any targeted architecture.
 * Added an experimental gfx1250 (MI450) Tensor Data Mover path for copy-shaped SIMPLE-protocol transfers. All collectives can reach it, but reduction collectives only qualify on slices that carry no reduction operation. Excluded from the default build: it requires `--enable-tdm-simple` at build time and `RCCL_TDM_SIMPLE_ENABLE=1` at runtime. Reduction into LDS staging buffers and double buffering are not yet implemented.
 * Added the strict `--enable-full-coverage` install flag for unified host + device LLVM source-based code coverage. It requires `--debug`, the device linker, and ROCm 7.15 or newer. The test runner uses the CMake-level `ENABLE_FULL_COVERAGE=AUTO` mode, which falls back to host-only coverage when device instrumentation is unavailable.
+* Enabled the Copy-Engine profiler path (`ncclProfiler_v6`): Copy-Engine events are emitted for CE collectives, and the example profiler plugin reports them.
 
 ### Changed
 * Narrowed unroll-factor kernel generation: gfx1250 (MI450/MI455) local builds now generate only unroll 32, its runtime default, instead of 8/16/32, and a multi-arch build generates 1/2/4/32 instead of all six factors. This cuts the multi-arch kernel count by roughly a third; use `--all_unrolls` to build 8 and 16.
@@ -30,6 +31,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Known issues
 * The improved AllGatherV support breaks the NCCL profiler support for ncclBroadcast operations, limiting visibility to API events. `NCCL_ALLGATHERV_ENABLE=0` can be used as a workaround until it is fixed in a future release.
 * Multi-node multi-segment and Elastic Buffer symmetric-window registration is not yet enabled; NET and LSA+GIN multi-segment paths depend on runtime support for exporting contiguous DMA-BUF handles across all physical segments.
+* Collectives that select the RCCL DDA path are not traced by the profiler plugins. `RCCL_DDA_ENABLE=0` can be used to route the collectives through the instrumented path while profiling.
 
 ## RCCL 2.30.4 for ROCm 7.14.0
 

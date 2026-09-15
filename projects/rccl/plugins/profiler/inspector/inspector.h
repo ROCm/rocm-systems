@@ -19,7 +19,7 @@
 #include "common.h"
 #include "version.h"
 
-#define MAX_CHANNELS                     64
+#define MAX_CHANNELS                     256 // RCCL MAXCHANNELS
 
 // Bump when ncclProfiler_t alias changes to a new interface version.
 #define NCCL_PROFILER_INTERFACE_VERSION 5
