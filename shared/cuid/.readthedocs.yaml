@@ -4,13 +4,13 @@
 version: 2
 
 sphinx:
-   configuration: projects/cuid/docs/conf.py
+   configuration: shared/cuid/docs/conf.py
 
 formats: [htmlzip, pdf, epub]
 
 python:
    install:
-   - requirements: projects/cuid/docs/sphinx/requirements.txt
+   - requirements: shared/cuid/docs/sphinx/requirements.txt
 
 build:
    os: ubuntu-22.04

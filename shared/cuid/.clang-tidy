@@ -1,4 +1,4 @@
-# Check list for projects/cuid. Each disable below is here on its own merits.
+# Check list for shared/cuid. Each disable below is here on its own merits.
 Checks:
   bugprone*,
   clang-analyzer*,
@@ -52,5 +52,5 @@ Checks:
 #                   links it. Unnamed namespace is the idiom, per SF.22.
 #
 # WarningsAsErrors is clean today; everything else is advisory.
-HeaderFilterRegex: 'projects/cuid/(lib|cli|daemon)/.*\.(h|hpp)$'
+HeaderFilterRegex: 'shared/cuid/(lib|cli|daemon)/.*\.(h|hpp)$'
 WarningsAsErrors: 'bugprone-*,cert-*,concurrency-*,clang-analyzer-*,misc-use-internal-linkage,misc-use-anonymous-namespace'

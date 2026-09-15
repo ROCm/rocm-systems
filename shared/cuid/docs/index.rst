@@ -14,7 +14,7 @@ The Component Unified Identifier (CUID or CUUID) library solves this problem by 
 
 The CUID library also provides a command-line (CLI) tool to detect devices and generate CUIDs. The CLI tool can help administrators simplify device management and integration.
 
-The code is open and hosted at `<https://github.com/ROCm/rocm-systems/blob/develop/projects/cuid>`_.
+The code is open and hosted at `<https://github.com/ROCm/rocm-systems/blob/develop/shared/cuid>`_.
 
 The documentation is structured as follows:
 
@@ -28,7 +28,7 @@ The documentation is structured as follows:
   .. grid-item-card:: How to
 
     * :ref:`cuid-cli-tool`
-    * `Sample program using CUID API <https://github.com/ROCm/rocm-systems/blob/develop/projects/cuid/example/main.cc>`_
+    * `Sample program using CUID API <https://github.com/ROCm/rocm-systems/blob/develop/shared/cuid/example/main.cc>`_
 
   .. grid-item-card:: API reference
 

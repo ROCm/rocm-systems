@@ -50,7 +50,7 @@ The normative worked examples live in
 `changes/pin-cuid-cross-layer-contract/specs/cuid/conformance-vectors/spec.md`
 and exist as a generated artifact shared byte-for-byte between the kernel tree
 (`tools/testing/selftests/amdgpu/cuid_vectors.txt`) and the library
-(`projects/cuid/tests/vectors/cuid_vectors.txt`).
+(`shared/cuid/tests/vectors/cuid_vectors.txt`).
 
 Each tree checks its own copy against the generator, so a hand-edited vector
 fails a build: in this tree that is `cuid_vectors.py --check`, run by the

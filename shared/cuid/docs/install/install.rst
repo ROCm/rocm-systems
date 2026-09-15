@@ -31,9 +31,9 @@ To build and install the CUID library from source, follow these steps:
     git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
     cd rocm-systems
     git sparse-checkout init --cone
-    git sparse-checkout set projects/cuid
+    git sparse-checkout set shared/cuid
     git checkout develop
-    cd rocm-systems/projects/cuid
+    cd rocm-systems/shared/cuid
 
 2. Build the project using CMake. Run as root or use ``sudo`` before running ``make install``.
 

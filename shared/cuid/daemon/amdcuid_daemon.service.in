@@ -1,6 +1,6 @@
 [Unit]
 Description=AMD Component Unified ID Daemon
-Documentation=https://github.com/ROCm/rocm-systems/projects/cuid
+Documentation=https://github.com/ROCm/rocm-systems/shared/cuid
 After=network.target local-fs.target
 
 [Service]

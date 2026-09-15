@@ -94,7 +94,7 @@ length, is called out in that change's tasks instead._
   to `112:116`, and the fallback section's fields repaired to `0:15` / `16:143`.
   S3 needs its device-type enumeration renumbered, and S4 should be retired in
   favour of S1. Tracked in full in `amend-published-cuid-spec`.
-- **Userspace library** (`projects/cuid`): the device-type enumeration, the
+- **Userspace library** (`shared/cuid`): the device-type enumeration, the
   component-type high-bit packing, the last octet of the UUIDv8 framing, the
   temporary-CUID operand order and key, the Platform fingerprint collapse, and
   the kernel-consumption path. This is the bulk of the work.

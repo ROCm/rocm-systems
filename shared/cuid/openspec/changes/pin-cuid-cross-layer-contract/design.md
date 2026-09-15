@@ -1,7 +1,7 @@
 ## Context
 
 Two independent producers exist: the kernel driver (`amdgpu_cuid.c`) and the
-userspace library (`projects/cuid`). Each computes the whole format from scratch,
+userspace library (`shared/cuid`). Each computes the whole format from scratch,
 nothing forces them to agree, and they have been verified to agree exactly once,
 by hand, on two W6800s. The kernel is already conforming for the parts this
 change touches; the library is not.
