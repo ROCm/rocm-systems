@@ -24,8 +24,7 @@ find_package(
     PATHS "${ROCM_PATH}"
     PATH_SUFFIXES "llvm/lib/cmake/clang")
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/modules"
-                      "${ROCM_PATH}/lib/cmake/hip")
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/modules")
 find_package(LibElf REQUIRED)
 find_package(LibDw REQUIRED)
 
