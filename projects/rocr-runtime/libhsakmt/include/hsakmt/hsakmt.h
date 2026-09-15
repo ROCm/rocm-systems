@@ -1442,6 +1442,18 @@ hsaKmtHandleImport(
     HsaHandleImportFlags* Flags
 );
 
+/**
+  Queries the placement and size of an allocation from its DMA-BUF fd.
+  The fd is not consumed. Returns HSAKMT_STATUS_NOT_SUPPORTED when the
+  kernel cannot describe the buffer.
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueryDmaBufInfo(
+    int DMABufFd,           // IN
+    HsaDmaBufInfo* Info     // OUT
+);
+
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtHandleExport(

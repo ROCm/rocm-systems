@@ -474,6 +474,10 @@ class Runtime {
   hsa_status_t VMemoryGetAllocPropertiesFromHandle(const hsa_amd_vmem_alloc_handle_t memoryHandle,
                                                    const core::MemoryRegion** mem_region,
                                                    hsa_amd_memory_type_t* type);
+
+  hsa_status_t VMemoryGetAllocSizeFromHandle(const hsa_amd_vmem_alloc_handle_t memoryHandle,
+                                             size_t* size);
+
   hsa_status_t VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_handle,
                                          hsa_amd_vmem_alloc_handle_t handle, uint64_t flags);
   hsa_status_t VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handle,
@@ -493,7 +497,14 @@ class Runtime {
 
   const std::vector<uint32_t>& gpu_ids() { return gpu_ids_; }
 
-  Agent* agent_by_gpuid(uint32_t gpuid) { return agents_by_gpuid_[gpuid]; }
+  // find() rather than operator[]: the latter inserts a null entry for an
+  // unknown gpuid, mutating a map that is otherwise only written during init
+  // and is guarded by no lock. Callers can pass driver-supplied ids that name
+  // a GPU outside this process's topology.
+  Agent* agent_by_gpuid(uint32_t gpuid) {
+    auto it = agents_by_gpuid_.find(gpuid);
+    return (it == agents_by_gpuid_.end()) ? nullptr : it->second;
+  }
 
   Agent* region_gpu() { return region_gpu_; }
 
@@ -1121,6 +1132,15 @@ class Runtime {
     MemoryRegion::AllocateFlags alloc_flag;
     core::Agent* drm_owner;  // Gpu agent used for import of host memory, NULL for device
                              // memory/imported handles
+
+    /* Placement recovered at import time. Imported handles have no region of
+     * their own and must not be given one - ~MemoryHandle branches on
+     * region == nullptr to choose its teardown path - so the recovered values
+     * live in separate fields. All three stay zero/null when the driver could
+     * not describe the buffer, which reproduces pre-fix behaviour. */
+    const MemoryRegion* imported_region;
+    MemoryRegion::AllocateFlags imported_alloc_flag;
+    uint64_t imported_size;
   };
   // hsa_amd_vmem_alloc_handle_t (MemoryHandle*) to MemoryHandle mapping. Owns MemoryHandle
   // lifetime. Uniqueness is guaranteed by the runtime, independent of any driver-supplied
@@ -1129,6 +1149,8 @@ class Runtime {
 
   MemoryHandle* FindMemoryHandle(MemoryHandle* handle);
   void ReleaseMemoryHandle(MemoryHandle* handle);
+
+  const MemoryRegion* ResolveImportedRegion(const core::DmaBufInfo& info);
 
   struct MappedHandle;
   struct MappedHandleAllowedAgent {

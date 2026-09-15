@@ -2472,6 +2472,35 @@ uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const 
   return hsa_vmem_handle.handle;
 }
 
+bool Device::getVmmAllocInfo(uint64_t hsa_handle, amd::Device::VmmLocationType* location_type,
+                             size_t* size) const {
+  if (location_type == nullptr || size == nullptr || hsa_handle == 0) return false;
+
+  hsa_amd_vmem_alloc_handle_t handle{hsa_handle};
+  hsa_amd_memory_pool_t pool{};
+  hsa_amd_memory_type_t type{};
+
+  if (Hsa::vmem_get_alloc_properties_from_handle(handle, &pool, &type) != HSA_STATUS_SUCCESS ||
+      pool.handle == 0) {
+    return false;
+  }
+  if (Hsa::vmem_get_alloc_size_from_handle(handle, size) != HSA_STATUS_SUCCESS) {
+    return false;
+  }
+
+  // Any pool belonging to a CPU agent is host memory; everything else is device local.
+  *location_type = amd::Device::VmmLocationType::kDevice;
+  for (const auto& cpu_agent : cpu_agents_) {
+    if (pool.handle == cpu_agent.fine_grain_pool.handle ||
+        pool.handle == cpu_agent.coarse_grain_pool.handle ||
+        pool.handle == cpu_agent.ext_fine_grain_pool.handle) {
+      *location_type = amd::Device::VmmLocationType::kHost;
+      break;
+    }
+  }
+  return true;
+}
+
 void* Device::reserveMemory(size_t size, size_t alignment) const {
   void* ptr = nullptr;
   // Reserves non registered VA memory using HSA APIs.

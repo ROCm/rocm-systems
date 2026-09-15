@@ -480,6 +480,14 @@ class Device : public NullDevice {
   //! to the calling thread's current node (HostNumaCurrent). Returns 0 on failure.
   uint64_t hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const;
 
+  //! Recovers the location and size of a VMM allocation from its ROCr handle.
+  //! Returns false when ROCr cannot report them - notably an imported handle
+  //! whose placement the kernel could not describe - leaving the caller on its
+  //! default. Note this is not a guard against an older ROCr: these symbols bind
+  //! at link time, so a runtime lacking them fails to load libamdhip64 entirely.
+  bool getVmmAllocInfo(uint64_t handle, amd::Device::VmmLocationType* location_type,
+                       size_t* size) const override;
+
   void* deviceLocalAlloc(size_t size,
                         const AllocationFlags& flags = AllocationFlags{}, bool allowAllAgentsAccess = true) const override;
   void* reserveMemory(size_t size, size_t alignment) const;

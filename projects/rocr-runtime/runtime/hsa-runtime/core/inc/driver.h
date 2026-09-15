@@ -96,6 +96,18 @@ struct DriverMemoryHandle {
   bool owns_allocation{true};
 };
 
+/// @brief Placement of a dmabuf-backed allocation as reported by the kernel driver.
+struct DmaBufInfo {
+  /// @brief Allocation size in bytes.
+  uint64_t size{0};
+  /// @brief Driver id of the node owning the buffer object. For host memory this is
+  /// the GPU that performed the DRM import, not a CPU node, so it must not be used
+  /// to infer host-vs-device.
+  uint32_t node_id{0};
+  /// @brief True when the buffer is device-local (VRAM); false for host (GTT/USERPTR).
+  bool is_device_memory{false};
+};
+
 /// @brief Format of a shareable memory handle for export and import.
 ///
 /// Selects how @ref ExportMemoryHandle and @ref ImportMemoryHandle encode the
@@ -259,6 +271,20 @@ public:
   virtual hsa_status_t ImportMemoryHandle(const core::Agent& agent, DriverMemoryHandle* handle,
                                           ShareType type, void* import_handle,
                                           void* mem = nullptr) = 0;
+
+  /// @brief Queries the placement of an allocation from its dmabuf fd alone.
+  ///
+  /// Used to recover the properties of an imported allocation, which carries no
+  /// region of its own. Deliberately takes only an fd: the per-GPU import stays
+  /// deferred until set-access time.
+  ///
+  /// @param[in] dmabuf_fd fd to query; not consumed
+  /// @param[out] info placement of the underlying allocation
+  /// @retval HSA_STATUS_ERROR_INVALID_ARGUMENT driver cannot describe this fd;
+  ///         callers leave the placement unresolved and keep legacy behaviour.
+  virtual hsa_status_t QueryDmaBufInfo(int dmabuf_fd, DmaBufInfo* info) const {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   /// @brief Maps the memory associated with the handle.
   ///
