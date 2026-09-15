@@ -1182,7 +1182,8 @@ ncclResult_t ncclTopoCompute(ncclTopoSystem* system, struct ncclTopoGraph* graph
 
   // RCCL: cap how far the search may widen typeInter, the GPU-to-NIC path type it accepts. The cap
   // makes a ring pick the closest NIC of each GPU, or a PXN relay. Farther NICs have no GDR, and a
-  // ring can use the crossNic step below instead of them; a tree cannot.
+  // ring can use the crossNic step below instead of them; a tree cannot. The steps below hold
+  // typeIntra at typeInter, so the cap limits the GPU-to-GPU type as well.
   int maxTypeInterUnbounded = maxTypeInter;
   if (system->inter && crossNic == 2 && graph->pattern == NCCL_TOPO_PATTERN_RING) {
     int localNetPath;
@@ -1380,6 +1381,14 @@ search:
     }
     tmpGraph.crossNic = crossNic == 1 ? 1 : 0;
 
+    // RCCL: a topology can have no solution within the cap on typeInter at all, so give the cap up
+    // and search once more. The step belongs here, after the ones on path types and before the ones
+    // on bandwidth, which is the order the search relaxes in.
+    if (graph->nChannels == 0 && maxTypeInter < maxTypeInterUnbounded) {
+      maxTypeInter = maxTypeInterUnbounded;
+      goto search;
+    }
+
     // Decrease bw until we find a solution
     if ((speedIndex < nspeeds - 1) && (graph->nChannels == 0 || (speedArray[speedIndex + 1] / graph->bwInter > .49))) {
       tmpGraph.bwInter = tmpGraph.bwIntra = speedArray[++speedIndex];
@@ -1388,13 +1397,6 @@ search:
     speedIndex = 0;
     while (speedArray[speedIndex] > maxBw && speedIndex < nspeeds - 1) speedIndex++;
     tmpGraph.bwIntra = tmpGraph.bwInter = speedArray[speedIndex];
-
-    // RCCL: a topology can have no solution at all within the bound on typeInter, and would then be
-    // left with the fallback order below. Give the bound up and search once more.
-    if (graph->nChannels == 0 && maxTypeInter < maxTypeInterUnbounded) {
-      maxTypeInter = maxTypeInterUnbounded;
-      goto search;
-    }
   }
 
 done:
