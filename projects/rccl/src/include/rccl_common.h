@@ -251,8 +251,7 @@ size_t rcclCeAr2ShotMax(const ncclComm* comm);
 // True when NCCL_ALGO is set by the user. Used to skip CE/DDA/Symmetric in
 // both the selector (rccl_wrap.cc) and taskAppend (enqueue.cc).
 bool rcclNcclAlgoEnvIsSet();
-// Registered CE AllReduce AUTO size cap. Env RCCL_CE_AR_REG_MAX_MSG_BYTES wins;
-// else arch table ceRegMax[AR]; 0 means no upper bound.
+// Registered CE AllReduce AUTO size cap. Env RCCL_CE_AR_REG_MAX_MSG_BYTES wins
 // Decides whether ncclAllReduce_impl takes the DDA path for this call. Mirrors the guard in
 // collectives.cc exactly: DDA requires !symEligible on every arch (gfx1250 fabric included).
 // Non-gfx1250 also requires CE AllReduce not to service the call (`ceAllReduceAllowed`);
