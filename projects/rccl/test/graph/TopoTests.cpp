@@ -203,37 +203,45 @@ protected:
     }
     addNic(nicLeg, "0000:0d:00.0", /*dev=*/0);
 
+    return buildSystem(host);
+  }
+
+  // ncclTopoGetSystemFromXml() leaves netGdrLevel zeroed; initTransportsRank() is what
+  // arms the "use the default level" sentinel, so do the same before computing paths.
+  struct ncclTopoSystem* buildSystem(uint64_t host) {
     struct ncclTopoSystem* built = nullptr;
     EXPECT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
-    // ncclTopoGetSystemFromXml() leaves netGdrLevel zeroed; initTransportsRank() is what
-    // arms the "use the default level" sentinel, so do the same before computing paths.
     if (built) built->netGdrLevel = -2;
     return built;
   }
 
+  // XGMI link entries name their peer by bus id, so a caller that links two rails needs this.
+  static void railGpuBusId(int rail, char* busId, size_t len) {
+    snprintf(busId, len, "0000:%02x:00.0", 0x0c + rail * 0x10);
+  }
+
   // One rail of a rail-optimised node: a GPU and a NIC on separate legs of their own PCIe switch,
   // which puts a GPU at PATH_PXB from the NIC of its rail and at PATH_PHB from any other one.
-  void addRail(struct ncclXmlNode* cpu, int rail) {
+  // Returns the GPU's pci node, to attach <xgmi> entries below it.
+  struct ncclXmlNode* addRail(struct ncclXmlNode* cpu, int rail) {
     const int busBase = 0x0b + rail * 0x10;
     char switchBus[32], gpuLegBus[32], nicLegBus[32], gpuBus[32], nicBus[32];
     snprintf(switchBus, sizeof(switchBus), "0000:%02x:00.0", busBase);
     snprintf(gpuLegBus, sizeof(gpuLegBus), "0000:%02x:01.0", busBase);
     snprintf(nicLegBus, sizeof(nicLegBus), "0000:%02x:02.0", busBase);
-    snprintf(gpuBus, sizeof(gpuBus), "0000:%02x:00.0", busBase + 1);
+    railGpuBusId(rail, gpuBus, sizeof(gpuBus));
     snprintf(nicBus, sizeof(nicBus), "0000:%02x:00.0", busBase + 2);
 
     struct ncclXmlNode* pciSwitch = addPciBridge(cpu, switchBus);
-    addGpuPci(addPciBridge(pciSwitch, gpuLegBus), gpuBus, "gfx942", /*rank=*/rail, /*dev=*/rail);
+    struct ncclXmlNode* gpuPci =
+        addGpuPci(addPciBridge(pciSwitch, gpuLegBus), gpuBus, "gfx942", /*rank=*/rail, /*dev=*/rail);
     addNic(addPciBridge(pciSwitch, nicLegBus), nicBus, /*dev=*/rail);
+    return gpuPci;
   }
 
-  // netGdrLevel has to carry the sentinel initTransportsRank() arms before the paths are computed.
-  // Without it GDR is refused and every rail-local GPU<->NET path is diverted through the CPU.
   struct ncclTopoSystem* buildSystemWithPaths(uint64_t host) {
-    struct ncclTopoSystem* built = nullptr;
-    EXPECT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+    struct ncclTopoSystem* built = buildSystem(host);
     if (built == nullptr) return nullptr;
-    built->netGdrLevel = -2;
     EXPECT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
     return built;
   }
@@ -738,8 +746,9 @@ TEST_F(TopoTest, GpuMaxLocalNetPath_RelayRaisesTheBoundToPxn) {
   ncclTopoFree(built);
 }
 
-// A GPU that reaches no NIC has nothing to say about the bound. Were it counted, a node with no
-// NIC at all would answer PATH_DIS, which is no bound on the search whatsoever.
+// With no NIC in the system a GPU never gets a paths[NET] array at all, since those are allocated
+// as the search from each NIC reaches a node. The answer then has to be PATH_LOC, where PATH_DIS
+// would leave the ring search with no bound whatsoever.
 TEST_F(TopoTest, GpuMaxLocalNetPath_NodeWithoutNicsBoundsNothing) {
   const uint64_t host = 0xe3;
   struct ncclXmlNode* cpu = addSystemCpu(host);
@@ -753,6 +762,46 @@ TEST_F(TopoTest, GpuMaxLocalNetPath_NodeWithoutNicsBoundsNothing) {
   int maxPath = PATH_DIS;
   ASSERT_EQ(ncclTopoGetGpuMaxLocalNetPath(built, &maxPath), ncclSuccess);
   EXPECT_EQ(maxPath, PATH_LOC);
+
+  ncclTopoFree(built);
+}
+
+// The ring graph of a two-rail node has to come out on the NIC of each GPU (ROCM-30906). The
+// search widens the GPU-to-NIC path type before it tries the two-NIC form of a ring, so without a
+// cap it settles on PATH_PHB, where both legs fit on one NIC and the second GPU loses GDR.
+TEST_F(TopoTest, RingSearch_TwoRailNode_StaysOnTheLocalNicPathType) {
+  const uint64_t host = 0xe4;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* gpu0 = addRail(cpu, /*rail=*/0);
+  struct ncclXmlNode* gpu1 = addRail(cpu, /*rail=*/1);
+
+  // A ring needs a way from GPU to GPU that the cap admits as well, which XGMI is and PCIe is not.
+  char gpu0Bus[32], gpu1Bus[32];
+  railGpuBusId(0, gpu0Bus, sizeof(gpu0Bus));
+  railGpuBusId(1, gpu1Bus, sizeof(gpu1Bus));
+  addGpuLink(gpu0, gpu1Bus, /*count=*/8);
+  addGpuLink(gpu1, gpu0Bus, /*count=*/8);
+
+  struct ncclTopoSystem* built = buildSystemWithPaths(host);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+  ASSERT_EQ(built->nodes[NET].count, 2);
+
+  // Two nodes of two GPUs, which is what makes the search look for net legs at all.
+  built->nRanks = 2 * built->nodes[GPU].count;
+  built->inter = 1;
+
+  struct ncclTopoGraph ring;
+  memset(&ring, 0, sizeof(ring));
+  ring.id = 0;
+  ring.pattern = NCCL_TOPO_PATTERN_RING;
+  ring.minChannels = 1;
+  ring.maxChannels = MAXCHANNELS / 2;
+
+  ASSERT_EQ(ncclTopoSearchInit(built), ncclSuccess);
+  ASSERT_EQ(ncclTopoCompute(built, &ring), ncclSuccess);
+  EXPECT_GT(ring.nChannels, 0);
+  EXPECT_EQ(ring.typeInter, PATH_PXB);
 
   ncclTopoFree(built);
 }
