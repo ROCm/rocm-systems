@@ -785,7 +785,8 @@ For attachment profiling of running processes:
         help=(
             "Acknowledge that kernel replay (--replay-mode kernel) is a beta feature and its "
             "behaviour may change in a future release. Required when --replay-mode kernel is "
-            "specified."
+            "specified. This does not select kernel replay on its own: pass --replay-mode kernel "
+            "as well, otherwise the acknowledgement is rejected rather than silently ignored."
         ),
     )
 
@@ -2239,6 +2240,16 @@ def run(app_args, args, **kwargs):
         # there is nothing else to communicate.
         update_env("ROCPROF_KERNEL_REPLAY", True, overwrite_if_true=True)
 
+    elif getattr(args, "kernel_replay_beta_enabled", None):
+        # The flag only acknowledges the beta; it does not select replay. Its name reads as if it
+        # did, so accepting it alone would silently give application replay to someone who asked
+        # for kernel replay and believes they got it.
+        fatal_error(
+            "--kernel-replay-beta-enabled acknowledges that kernel replay is a beta feature but "
+            "does not select it. Add --replay-mode kernel to use kernel replay, or drop the "
+            "acknowledgement to use application replay"
+        )
+
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
 
@@ -2597,6 +2608,18 @@ def main(argv=None):
         fatal_error(
             "--replay-mode kernel requires counter collection "
             "(--pmc, input-file pmc, or pmc_groups)"
+        )
+    # An input file job may be the thing asking for replay, so the acknowledgement is only
+    # unaccompanied when nothing anywhere selected kernel replay.
+    if (
+        getattr(cmd_args, "kernel_replay_beta_enabled", None)
+        and not replay_enabled
+        and not any(getattr(inp, "replay_mode", None) == "kernel" for inp in inp_args)
+    ):
+        fatal_error(
+            "--kernel-replay-beta-enabled acknowledges that kernel replay is a beta feature but "
+            "does not select it. Add --replay-mode kernel to use kernel replay, or drop the "
+            "acknowledgement to use application replay"
         )
 
     # Kernel replay replays each dispatch once per counter group within one application run, so

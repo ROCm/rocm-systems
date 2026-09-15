@@ -243,6 +243,36 @@ def test_replay_without_counter_collection_is_rejected():
         )
 
 
+def test_beta_acknowledgement_without_replay_mode_is_rejected():
+    """The flag's name reads as if it enabled replay. Accepting it alone would hand back
+    application replay to someone who believes they are running kernel replay, and the counter
+    values they get are indistinguishable from replayed ones."""
+    try:
+        launched_runs("--pmc", "SQ_WAVES", "--kernel-replay-beta-enabled")
+    except SystemExit as exc:
+        assert exc.code != 0
+    else:
+        raise AssertionError(
+            "--kernel-replay-beta-enabled without --replay-mode kernel should have been rejected"
+        )
+
+
+def test_beta_acknowledgement_is_accepted_for_an_input_file_job_that_asks_for_replay():
+    """The acknowledgement can only be given on the command line, so a job that selects replay
+    from an input file has to be able to claim it."""
+    runs = launched_runs(
+        "--kernel-replay-beta-enabled",
+        jobs=[{"pmc": ["SQ_WAVES"], "replay_mode": "kernel"}],
+    )
+    assert [itr.pmc for itr in runs] == [["SQ_WAVES"]]
+
+
+def test_application_replay_is_unaffected_without_the_acknowledgement():
+    # Confirms the rejection above is about the unaccompanied flag, not about --pmc.
+    runs = launched_runs("--pmc", "SQ_WAVES")
+    assert [itr.pmc for itr in runs] == [["SQ_WAVES"]]
+
+
 def service_conflicts(environ=None, **attrs):
     return rocprofv3().services_conflicting_with_kernel_replay(
         rocprofv3().dotdict(attrs), environ={} if environ is None else environ
