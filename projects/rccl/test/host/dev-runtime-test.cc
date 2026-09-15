@@ -37,11 +37,33 @@
 
 static int g_devrCallocCallIndex = 0;
 static int g_devrCallocFailAt = -1;  // -1 = never fail; otherwise a 0-based call index
+
 template <typename... Args>
 static ncclResult_t MicroCalloc(const char* file, int line, const char* fn, Args&&... args) {
   if (g_devrCallocCallIndex++ == g_devrCallocFailAt) return ncclSystemError;
   return ncclCallocDebug(std::forward<Args>(args)..., file, line, fn, true);
 }
+
+// RAII arming of that counter, mirroring ScopedHook. Both globals are TU-local,
+// so ResetDevRuntimeMicroFakes() does not cover them and an armed failure left
+// behind would fire inside an unrelated test. `skip` is how many ncclCalloc
+// calls succeed before the failing one.
+class ScopedCallocFailure {
+public:
+  explicit ScopedCallocFailure(int skip = 0)
+      : savedIndex_(g_devrCallocCallIndex), savedFailAt_(g_devrCallocFailAt) {
+    g_devrCallocFailAt = g_devrCallocCallIndex + skip;
+  }
+  ~ScopedCallocFailure() {
+    g_devrCallocCallIndex = savedIndex_;
+    g_devrCallocFailAt = savedFailAt_;
+  }
+  ScopedCallocFailure(const ScopedCallocFailure&) = delete;
+  ScopedCallocFailure& operator=(const ScopedCallocFailure&) = delete;
+
+private:
+  int savedIndex_, savedFailAt_;
+};
 #undef ncclCalloc
 #define ncclCalloc(...) MicroCalloc(__FILE__, __LINE__, __func__, __VA_ARGS__)
 
@@ -133,7 +155,8 @@ TEST(SymIsHostSegment, Host_ReturnsTrue) {
 //
 // Spelled as its numeric value: hipMemLocationTypeHost only exists from ROCm
 // 7.12 (hip/driver_types.h), which is exactly why production names it only
-// inside this same guard (dev_runtime.cc:45). The 7.0.2 compatibility build
+// inside this same guard (ncclSymIsHostSegment's ROCM_VERSION >= 71200 arm).
+// The 7.0.2 compatibility build
 // compiles this arm, so the enumerator cannot appear here.
 TEST(SymIsHostSegment, Host_ReturnsFalse) {
   EXPECT_FALSE(ncclSymIsHostSegment(kLocHost));
@@ -471,7 +494,7 @@ TEST_F(DevrFinalizeTest, ProxyOnly_SkipsSymmetricTeardown) {
 // finalize runs on the abort path, where giving up would leak.
 //
 // The success assertion pins that documented contract, not the state of the
-// stream: `cudaStream_t stream` is declared uninitialised (dev_runtime.cc:211)
+// stream: ncclDevrFinalize declares `cudaStream_t stream` uninitialised
 // and its create is CUDACHECKIGNORE'd, so when the create fails the six later
 // uses pass an indeterminate handle to the driver. See AICOMRCCL-2180
 // finding 16. Nothing here dereferences it because every stream call is hooked.
@@ -486,7 +509,7 @@ TEST_F(DevrFinalizeTest, StreamCallsFail_StillCompletes) {
 
   EXPECT_EQ(ncclDevrFinalize(comm), ncclSuccess);
   EXPECT_GT(create.calls, 0);
-  // Twice: swapped in on entry (dev_runtime.cc:217) and restored on exit
+  // Twice: ncclDevrFinalize swaps the capture mode in on entry and restores it on exit
   // (:295). The restore was added by the graph-capture hang fix (#9334); a
   // count of 1 here would mean finalize left the caller's capture mode
   // clobbered.
@@ -847,7 +870,8 @@ TEST_F(SymImportAndMapSegmentTest, ImportFails_ReturnsErrorWithoutMapping) {
 // from the fabric one above.
 //
 // The descriptor is owned by the test rather than by DefaultProxyClientGetFdBlocking
-// so the leak below is contained: dev_runtime.cc:359 jumps to fail on import
+// so the leak below is contained: symMemoryImportAndMapSegmentHandle's POSIX-FD
+// arm jumps to fail on import
 // failure, skipping the close(fd) at :362, so the fd is still open when this
 // returns -- one leaked descriptor per failed import. EXPECT_EQ(fcntl(fd,
 // F_GETFD), -1) is the assertion that belongs here and fails today; see
@@ -1114,8 +1138,6 @@ protected:
 
   void TearDown() override {
     comm->devrState.lsaRankList = nullptr;  // borrowed, not malloc'd
-    g_devrCallocCallIndex = 0;                  // TU-local, not covered by the reset below
-    g_devrCallocFailAt = -1;
     ResetDevRuntimeMicroFakes();
   }
 };
@@ -1169,7 +1191,7 @@ TEST_F(SymMemoryMapLsaTeamTest, SizesMessagesFromWidestRank) {
 
 // Branch: the message allocation fails before anything is exported.
 TEST_F(SymMemoryMapLsaTeamTest, MessageAllocFails_ReturnsError) {
-  g_devrCallocFailAt = g_devrCallocCallIndex;  // fail the next ncclCalloc
+  ScopedCallocFailure callocFail;  // fail the next ncclCalloc
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
                     [](void*, int*, int, int, void*, int) { return ncclSuccess; });
 
@@ -1601,8 +1623,6 @@ protected:
   void TearDown() override {
     free(mem.ginSegmentInfos);
     mem.ginSegmentInfos = nullptr;
-    g_devrCallocCallIndex = 0;  // TU-local, not covered by the reset below
-    g_devrCallocFailAt = -1;
     ResetDevRuntimeMicroFakes();
   }
 };
@@ -1664,7 +1684,7 @@ TEST_F(SymMemoryRegisterGinTest, RegisterFails_ReturnsErrorWithoutSegmentInfo) {
 TEST_F(SymMemoryRegisterGinTest, SegmentInfoAllocFails_ReturnsError) {
   ScopedHook reg(g_devrGinRegister,
                  [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
-  g_devrCallocFailAt = g_devrCallocCallIndex;  // fail the next ncclCalloc
+  ScopedCallocFailure callocFail;  // fail the next ncclCalloc
 
   EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
   EXPECT_EQ(mem.numGinSegments, 0);
@@ -1942,8 +1962,6 @@ protected:
   void TearDown() override {
     if (obtained != nullptr) symMemoryDestroy(comm, obtained);
     comm->devrState.lsaRankList = nullptr;  // borrowed, not malloc'd
-    g_devrCallocCallIndex = 0;                  // TU-local, not covered by the reset below
-    g_devrCallocFailAt = -1;
     ResetDevRuntimeMicroFakes();
   }
 
@@ -2042,7 +2060,7 @@ TEST_F(SymMemoryObtainSetupTest, PopulateSegmentSizesFails_ReturnsError) {
 
 // Branch: the very first allocation fails, before any member is written.
 TEST_F(SymMemoryObtainSetupTest, MemoryAllocFails_ReturnsErrorWithoutLinking) {
-  g_devrCallocFailAt = g_devrCallocCallIndex;  // fail the next ncclCalloc
+  ScopedCallocFailure callocFail;  // fail the next ncclCalloc
   ScopedHook gather(g_devrBootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
 
   EXPECT_NE(Obtain(), ncclSuccess);
@@ -2638,6 +2656,38 @@ TEST_F(SymWindowCreateTest, DescriptorAllocFails_ReturnsError) {
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
+// Branch: the descriptor copy to the device fails. It is the first copy the
+// function makes, so the window table is never reached and the sorted list
+// never grows.
+TEST_F(SymWindowCreateTest, DescriptorCopyFails_ReturnsErrorWithoutPublishing) {
+  ScopedHook copy(g_devrHipMemcpyAsync,
+                  [](void*, const void*, size_t, hipMemcpyKind, hipStream_t) { return hipErrorInvalidValue; });
+
+  EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
+  EXPECT_EQ(copy.calls, 1);  // failed on the descriptor, before the table copy
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+// Branch: the descriptor copy lands but publishing the entry into the window
+// table does not, so the window is still absent from the sorted list. Fails the
+// second copy rather than all of them, which is what separates this arm from
+// DescriptorCopyFails above.
+TEST_F(SymWindowCreateTest, TablePublishCopyFails_ReturnsErrorWithoutPublishing) {
+  int n = 0;
+  ScopedHook copy(g_devrHipMemcpyAsync,
+                  [&n](void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
+                    if (++n == 2) return hipErrorInvalidValue;
+                    // Mirrors the fake's default: the earlier copies must still
+                    // land, or the table walk reads uninitialised entries.
+                    if (dst != nullptr && src != nullptr && dst != src) memcpy(dst, src, size);
+                    return hipSuccess;
+                  });
+
+  EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
+  EXPECT_EQ(n, 2);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
 
 // ---------------------------------------------------------------------------
 // symWindowDestroy undoes symWindowCreate: release the underlying memory, clear
@@ -2684,8 +2734,6 @@ protected:
     ReclaimDevrWindows(comm);
     devr->windowTable = nullptr;  // chain of shadow-pool buffers; the fake's reset owns them
     devr->lsaRankList = nullptr;  // borrowed, not malloc'd
-    g_devrCallocCallIndex = 0;
-    g_devrCallocFailAt = -1;
     ResetDevRuntimeMicroFakes();
   }
 
@@ -2776,6 +2824,26 @@ TEST_F(SymWindowDestroyTest, TeardownFailure_StillRemovesFromSortedList) {
   symWindowDestroy(comm, winDev, nullptr);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
   EXPECT_EQ(poolFree.calls, 1);
+}
+
+// Branch: clearing the window's slot in the device-side table fails. That jumps
+// straight to remove_winSorted, so the later shadow frees and the deregister
+// are all skipped -- but the sorted list is still tidied up. As with
+// TeardownFailure above, the returned code is not asserted: the same
+// overwrite-with-success at the cleanup label applies here.
+TEST_F(SymWindowDestroyTest, TableClearFails_StillRemovesFromSortedList) {
+  ncclWindow_vidmem* winDev = MakeWindow(reinterpret_cast<void*>(0x100000));
+  ASSERT_EQ(comm->devrState.winSortedCount, 1);
+
+  ScopedHook clear(g_devrHipMemsetAsync,
+                   [](void*, int, size_t, hipStream_t) { return hipErrorInvalidValue; });
+  ScopedHook poolFree(g_devrShadowPoolFree,
+                      [](ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; });
+
+  symWindowDestroy(comm, winDev, nullptr);
+  EXPECT_EQ(clear.calls, 1);
+  EXPECT_EQ(poolFree.calls, 0);  // jumped past the frees
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
 
@@ -2964,6 +3032,19 @@ TEST_F(WindowRegisterNonSymTest, ShadowAllocFails_ClearsOutputAndPublishesNothin
 TEST_F(WindowRegisterNonSymTest, StreamCreateFails_ClearsOutput) {
   ScopedHook create(g_devrHipStreamCreateWithFlags,
                     [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+
+  ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
+  EXPECT_NE(Register(&out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+}
+
+// Branch: the window header copy fails. Unlike the rest of this function that
+// check is hand-rolled rather than a CUDACHECK, so it is worth driving: it
+// warns and jumps to fail, leaving nothing in the sorted list.
+TEST_F(WindowRegisterNonSymTest, HeaderCopyFails_ClearsOutput) {
+  ScopedHook copy(g_devrHipMemcpyAsync,
+                  [](void*, const void*, size_t, hipMemcpyKind, hipStream_t) { return hipErrorInvalidValue; });
 
   ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
   EXPECT_NE(Register(&out), ncclSuccess);
@@ -3340,10 +3421,74 @@ TEST_F(DevrWindowRegisterInGroupSymTest, SingleDeviceSegment_RegistersWindow) {
 // needs it exists, so it is only paid for on request.
 TEST_F(DevrWindowRegisterInGroupSymTest, CollSymmetricFlag_InitialisesSymKernels) {
   ScopedHook range(g_devrHipMemGetAddressRange, AddressRangeOf(4096));
+  // winFlags alone does not pin this: symWindowCreate stores it unconditionally,
+  // so the whole symk block could be deleted and the flag assertion would still
+  // hold. The init call is the behaviour the name claims.
+  ScopedHook symk(g_devrSymkInitOnce, [](ncclComm*) { return ncclSuccess; });
 
   ncclWindow_t out = nullptr;
   ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, NCCL_WIN_COLL_SYMMETRIC, &out), ncclSuccess);
   EXPECT_EQ(comm->devrState.winSorted[0].win->winFlags, NCCL_WIN_COLL_SYMMETRIC);
+  EXPECT_EQ(symk.calls, 1);
+}
+
+// Branch: the symmetric-kernel init is deferred, so a window without the flag
+// must not pay for it. The counterpart to the case above.
+TEST_F(DevrWindowRegisterInGroupSymTest, WithoutCollSymmetricFlag_SkipsSymKernelInit) {
+  ScopedHook range(g_devrHipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook symk(g_devrSymkInitOnce, [](ncclComm*) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_EQ(symk.calls, 0);
+}
+
+// Branch: the deepest rollback. cudaStreamSynchronize is the only checked call
+// that jumps to fail_locReg_memHandle_mem_stream_win, so failing it is what
+// drives symWindowDestroy and the labels below it.
+TEST_F(DevrWindowRegisterInGroupSymTest, StreamSyncFails_UnwindsTheCreatedWindow) {
+  ScopedHook range(g_devrHipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook sync(g_devrHipStreamSynchronize, [](hipStream_t) { return hipErrorInvalidValue; });
+  ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);                          // the caller's handle is cleared
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);     // and the window left no trace
+
+  // dereg.calls is deliberately not asserted. This label deregisters the local
+  // registration twice: symWindowDestroy releases win->localRegHandle, which
+  // symWindowCreate set to the very handle this function then releases again at
+  // fail_locReg. See AICOMRCCL-2180 finding 17. Pinning either count would lock
+  // that in, so only the unwind's observable outcome is checked.
+}
+
+// Branch: the closing barrier is NCCLCHECKGOTO'd at the same depth, so its
+// failure must unwind the same way.
+TEST_F(DevrWindowRegisterInGroupSymTest, ClosingBarrierFails_UnwindsTheCreatedWindow) {
+  ScopedHook range(g_devrHipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook barrier(g_devrBootstrapBarrier, [](void*, int, int, int) { return ncclSystemError; });
+  ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  // Same double-deregister as above (AICOMRCCL-2180 finding 17); not asserted.
+}
+
+// Branch: the window-map insert is the last checked call before success.
+TEST_F(DevrWindowRegisterInGroupSymTest, MapInsertFails_UnwindsTheCreatedWindow) {
+  ScopedHook range(g_devrHipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook insert(g_devrIntruAddressMapInsert,
+                    [](ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void*) { return ncclSystemError; });
+  ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+
+  ncclWindow_t out = nullptr;
+  EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  EXPECT_EQ(insert.calls, 1);
 }
 
 // Branch: resolving the allocation fails, so nothing is registered.
@@ -3363,7 +3508,8 @@ TEST_F(DevrWindowRegisterInGroupSymTest, AddressRangeFails_ReleasesLocalRegistra
 // which is the smallest offset that cannot satisfy the requirement.
 //
 // Unlike every other rejection in this function, this one is *not* asserted to
-// deregister: dev_runtime.cc:1336 jumps to fail, not fail_locReg, so
+// deregister: windowRegisterInGroup's NCCL_WIN_REQUIRED_ALIGNMENT check jumps
+// to fail, not fail_locReg, so
 // ncclCommDeregister never runs and the local registration taken at :1284 leaks
 // (as does the memHandles array allocated at :1304). EXPECT_EQ(dereg.calls, 1)
 // belongs here and fails today; see AICOMRCCL-2180 finding 13. Asserting
@@ -3385,7 +3531,7 @@ TEST_F(DevrWindowRegisterInGroupSymTest, MisalignedWindow_ReturnsInvalidArgument
 //
 // Both this and the accepting case below depend on hipMemLocationTypeHost being
 // recognised as CPU-backed, which ncclSymIsHostSegment only does at
-// ROCM_VERSION >= 71200 (dev_runtime.cc:44). Below that the segment is instead
+// ROCM_VERSION >= 71200 (ncclSymIsHostSegment). Below that the segment is instead
 // rejected as an unsupported location type -- which for this test is the same
 // return code for an entirely different reason, so it would pass without
 // exercising the elastic-buffer gate at all.
@@ -3442,11 +3588,12 @@ TEST_F(DevrWindowRegisterInGroupSymTest, UnsupportedSegmentType_ReturnsInvalidAr
 // once per iteration, and userSize=8192 over 4096-byte segments gives it two
 // iterations, so retains 1 and 2 are the walk's and are already released by the
 // time it returns. numSegments is then 2, so the validation loop
-// (dev_runtime.cc:1339) retains again per segment: retain 3 lands in
+// (windowRegisterInGroup's segment-validation loop) retains again per segment:
+// retain 3 lands in
 // memHandles[0], and retain 4 is the one made to fail.
 //
 // Deliberately NOT asserting that memHandles[0] is released: it is not.
-// dev_runtime.cc:1344 jumps to fail_locReg, which is *below*
+// that loop's cuMemRetainAllocationHandle check jumps to fail_locReg, which is *below*
 // fail_locReg_memHandle's release loop and free(memHandles), so both are
 // skipped -- the retained handle and the array leak. Same for the two other
 // exits in this loop (:1346, :1354). Asserting the release count here would
@@ -3754,6 +3901,55 @@ TEST_F(DevrWorldToLsaRankTest, FirstMember_ReturnsZero) {
 TEST_F(DevrWorldToLsaRankTest, NonMemberRank_ReturnsError) {
   int lsaRank = -1;
   EXPECT_NE(ncclDevrWorldToLsaRank(comm, 9, &lsaRank), ncclSuccess);
+}
+
+// With symmetric support the lsaRankList search is skipped entirely and the
+// answer comes from the team descriptors instead. The two arms are separate
+// implementations of the same question, so both need driving.
+class DevrWorldToLsaRankSymTest : public DevrWorldToLsaRankTest {
+protected:
+  void SetUp() override {
+    DevrWorldToLsaRankTest::SetUp();
+    comm->symmetricSupport = 1;
+    comm->nRanks = 8;
+    comm->rank = 4;
+    // An LSA team of 4 sitting at world ranks 4..7, with us at its head. Both
+    // descriptors carry *our own* position in that team -- the member test is
+    // relative to it -- so world rank 4 is lsa rank 0, and a returned index is
+    // plainly distinguishable from the world rank it came from.
+    g_devrTeamWorld = [](ncclComm_t) { return ncclTeam_t{8, 4, 1}; };
+    g_devrTeamLsa   = [](ncclComm_t) { return ncclTeam_t{4, 0, 1}; };
+  }
+  void TearDown() override {
+    ResetDevRuntimeMicroFakes();
+    DevrWorldToLsaRankTest::TearDown();
+  }
+};
+
+// A member of the LSA team maps to its index within that team.
+TEST_F(DevrWorldToLsaRankSymTest, MemberRank_ReturnsTeamIndex) {
+  int lsaRank = -1;
+  ASSERT_EQ(ncclDevrWorldToLsaRank(comm, 6, &lsaRank), ncclSuccess);
+  EXPECT_EQ(lsaRank, 2);  // world 4,5,6,7 -> lsa 0,1,2,3
+}
+
+// Branch: a world rank outside the LSA team is rejected here rather than
+// producing an out-of-range index.
+TEST_F(DevrWorldToLsaRankSymTest, NonMemberRank_ReturnsError) {
+  int lsaRank = -1;
+  EXPECT_NE(ncclDevrWorldToLsaRank(comm, 1, &lsaRank), ncclSuccess);
+}
+
+// A strided LSA team (every other world rank), which is where the modulus in
+// ncclTeamRankIsMember earns its keep: an odd rank lands mid-stride and is not
+// a member even though it falls inside the team's span.
+TEST_F(DevrWorldToLsaRankSymTest, StridedTeam_RejectsMidStrideRank) {
+  g_devrTeamLsa = [](ncclComm_t) { return ncclTeam_t{4, 0, 2}; };
+
+  int lsaRank = -1;
+  ASSERT_EQ(ncclDevrWorldToLsaRank(comm, 6, &lsaRank), ncclSuccess);
+  EXPECT_EQ(lsaRank, 1);  // world 4,6,8,10 -> lsa 0,1,2,3
+  EXPECT_NE(ncclDevrWorldToLsaRank(comm, 5, &lsaRank), ncclSuccess);  // mid-stride
 }
 
 
@@ -4176,8 +4372,6 @@ protected:
       free(ncclIntruQueueDequeue(&comm->rmaCeInitTaskQueue));
     }
     free(comm->devrState.lsaRankList);
-    g_devrCallocCallIndex = 0;
-    g_devrCallocFailAt = -1;
     ResetDevRuntimeMicroFakes();
   }
 };
@@ -4245,7 +4439,7 @@ TEST_F(CommWindowRegisterImplTest, RmaCeAlreadyInitialised_SkipsInitTask) {
 
 // Branch: the task allocation fails, so nothing is queued.
 TEST_F(CommWindowRegisterImplTest, TaskAllocFails_ReturnsErrorWithoutQueueing) {
-  g_devrCallocFailAt = g_devrCallocCallIndex;  // the register task is the next ncclCalloc
+  ScopedCallocFailure callocFail;  // the register task is the next ncclCalloc
 
   EXPECT_NE(ncclCommWindowRegister_impl(comm, kUserPtr, 8192, &out, 0), ncclSuccess);
   EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.regTaskQueue));
@@ -4284,6 +4478,46 @@ TEST_F(CommWindowDeregisterImplTest, NonSymmetricUnknownWindow_PropagatesError) 
   EXPECT_NE(ncclCommWindowDeregister_impl(comm, &stranger), ncclSuccess);
 }
 
+// The symmetric arm needs a real symmetric window to tear down, so it borrows
+// SymWindowDestroyTest's fixture rather than the non-symmetric one above.
+class CommWindowDeregisterImplSymTest : public SymWindowDestroyTest {};
+
+// Branch: with symmetric support the device is switched, a stream is created
+// for the teardown, and symWindowDestroy runs -- then the epilogue restores the
+// device and the capture mode on the way out.
+TEST_F(CommWindowDeregisterImplSymTest, SymmetricWindow_RoutesToSymTeardown) {
+  comm->symmetricSupport = 1;
+  ncclWindow_vidmem* winDev = MakeWindow(reinterpret_cast<void*>(0x100000));
+  ASSERT_EQ(comm->devrState.winSortedCount, 1);
+
+  ScopedHook mode(g_devrHipThreadExchangeStreamCaptureMode, [](hipStreamCaptureMode*) { return hipSuccess; });
+  ScopedHook setDev(g_devrHipSetDevice, [](int) { return hipSuccess; });
+
+  EXPECT_EQ(ncclCommWindowDeregister_impl(comm, winDev), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  // Swapped in on entry and restored at the shared epilogue.
+  EXPECT_EQ(mode.calls, 2);
+  // comm->cudaDev on the way in, the saved device on the way out.
+  EXPECT_EQ(setDev.calls, 2);
+}
+
+// Branch: the teardown stream cannot be created, so symWindowDestroy never
+// runs and the window survives -- but the device is still restored.
+TEST_F(CommWindowDeregisterImplSymTest, SymmetricStreamCreateFails_LeavesWindowAndRestoresDevice) {
+  comm->symmetricSupport = 1;
+  ncclWindow_vidmem* winDev = MakeWindow(reinterpret_cast<void*>(0x100000));
+
+  ScopedHook mode(g_devrHipThreadExchangeStreamCaptureMode, [](hipStreamCaptureMode*) { return hipSuccess; });
+  ScopedHook setDev(g_devrHipSetDevice, [](int) { return hipSuccess; });
+  ScopedHook create(g_devrHipStreamCreateWithFlags,
+                    [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+
+  EXPECT_NE(ncclCommWindowDeregister_impl(comm, winDev), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSortedCount, 1);  // teardown was skipped
+  EXPECT_EQ(setDev.calls, 2);                    // restored via fail_dev
+  EXPECT_EQ(mode.calls, 2);
+}
+
 
 // ---------------------------------------------------------------------------
 // deepCopyDevCommRequirements takes a private copy of a caller's requirements,
@@ -4300,8 +4534,6 @@ protected:
   void TearDown() override {
     freeDevCommRequirements(dst);
     dst = nullptr;
-    g_devrCallocCallIndex = 0;
-    g_devrCallocFailAt = -1;
     ResetDevRuntimeMicroFakes();
   }
 };
@@ -4361,7 +4593,8 @@ TEST_F(DeepCopyDevCommRequirementsTest, NoLists_LeavesBothEmpty) {
 // reports nothing back, rather than handing over a half-copied structure.
 //
 // +2, deliberately, not +1. deepCopyDevCommRequirements memcpys the whole
-// source struct (dev_runtime.cc:1430), which copies the caller's list-head
+// source struct (deepCopyDevCommRequirements' memcpy), which copies the
+// caller's list-head
 // pointers into the copy, and only overwrites them on the first *successful*
 // node alloc. ncclCallocDebug returns without touching *ptr on failure
 // (alloc.h:415-418), so failing the first node alloc leaves the copy's
@@ -4373,7 +4606,7 @@ TEST_F(DeepCopyDevCommRequirementsTest, NoLists_LeavesBothEmpty) {
 TEST_F(DeepCopyDevCommRequirementsTest, NodeAllocFails_ReleasesPartialCopy) {
   res1.next = &res2;
   src.resourceRequirementsList = &res1;
-  g_devrCallocFailAt = g_devrCallocCallIndex + 2;  // the top-level object and one node succeed
+  ScopedCallocFailure callocFail(2);  // the top-level object and one node succeed
 
   EXPECT_NE(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
   EXPECT_EQ(dst, nullptr);
@@ -4745,7 +4978,8 @@ TEST(DevCommDumpTest, DumpsWithoutReadableHandles) {
 }
 
 // Branch: per-connection dumps are dispatched by device type -- GDAKI to
-// ncclDevCommGdakiDump, PROXY to ncclDevCommProxyDump (dev_runtime.cc:1524-25).
+// ncclDevCommGdakiDump, PROXY to ncclDevCommProxyDump (ncclDevCommDump's
+// per-connection loop).
 // Both helpers read their context through cudaMemcpy before printing, so the
 // copy seam is what proves the dispatch actually happened and that each handle
 // reached the right helper. Asserting only on "Connections 2" would not: that
@@ -4826,8 +5060,6 @@ protected:
       free(t);
     }
     free(comm->devrState.lsaRankList);
-    g_devrCallocCallIndex = 0;
-    g_devrCallocFailAt = -1;
     NcclVersionCompatTest::TearDown();
   }
 };
@@ -4878,7 +5110,7 @@ TEST_F(DevCommCreateTest, UnsupportedVersion_ReturnsErrorWithoutQueueing) {
 
 // Branch: the task allocation fails.
 TEST_F(DevCommCreateTest, TaskAllocFails_ReturnsErrorWithoutQueueing) {
-  g_devrCallocFailAt = g_devrCallocCallIndex;
+  ScopedCallocFailure callocFail;
 
   EXPECT_NE(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
   EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));

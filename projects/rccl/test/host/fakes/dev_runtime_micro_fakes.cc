@@ -77,7 +77,15 @@ static ncclResult_t DefaultAllGather(void*, void*, int) { return ncclSuccess; }
 std::function<ncclResult_t(void*, void*, int)> g_devrBootstrapAllGather = DefaultAllGather;
 
 ncclResult_t bootstrapAllGather(void* bs, void* buf, int bytes) { return g_devrBootstrapAllGather(bs, buf, bytes); }
-ncclResult_t bootstrapBarrier(void*, int, int, int) { return ncclSuccess; }
+// Seam: ncclDevrWindowRegisterInGroup and ncclDevrCommCreateInternal both
+// NCCLCHECKGOTO this, so their closing-barrier failure arms are only reachable
+// by driving it.
+static ncclResult_t DefaultBootstrapBarrier(void*, int, int, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, int, int, int)> g_devrBootstrapBarrier = DefaultBootstrapBarrier;
+
+ncclResult_t bootstrapBarrier(void* b, int rank, int nRanks, int tag) {
+  return g_devrBootstrapBarrier(b, rank, nRanks, tag);
+}
 // Seams: symMemoryMapLsaTeam NCCLCHECKGOTOs both of these, so their failure
 // arms are only reachable by driving them.
 static ncclResult_t DefaultIntraNodeBarrier(void*, int*, int, int, int) { return ncclSuccess; }
@@ -100,7 +108,12 @@ ncclResult_t bootstrapIntraNodeAllGather(void* bs, int* ranks, int self, int siz
 // ---------------------------------------------------------------------------
 ncclResult_t PtrCheck(const void*, const char*, const char*) { return ncclSuccess; }
 ncclResult_t CommCheck(struct ncclComm*, const char*, const char*) { return ncclSuccess; }
-ncclResult_t ncclCommEnsureReady(ncclComm_t) { return ncclSuccess; }
+// Seam: NCCLCHECK'd on entry to ncclCommWindowRegister_impl, so the
+// not-ready rejection is only reachable by driving it.
+static ncclResult_t DefaultCommEnsureReady(ncclComm_t) { return ncclSuccess; }
+std::function<ncclResult_t(ncclComm_t)> g_devrCommEnsureReady = DefaultCommEnsureReady;
+
+ncclResult_t ncclCommEnsureReady(ncclComm_t c) { return g_devrCommEnsureReady(c); }
 
 // ---------------------------------------------------------------------------
 // Public registration API.
@@ -170,7 +183,12 @@ ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* comm, int rank, void*
 // ---------------------------------------------------------------------------
 // Symmetric kernels.
 // ---------------------------------------------------------------------------
-ncclResult_t ncclSymkInitOnce(struct ncclComm*) { return ncclSuccess; }
+// Seam: deferred symmetric-kernel init, NCCLCHECKGOTO'd behind the
+// NCCL_WIN_COLL_SYMMETRIC flag. Counting calls is what proves the flag gates it.
+static ncclResult_t DefaultSymkInitOnce(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_devrSymkInitOnce = DefaultSymkInitOnce;
+
+ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) { return g_devrSymkInitOnce(comm); }
 
 // ---------------------------------------------------------------------------
 // Space allocator.
@@ -255,8 +273,18 @@ ncclResult_t ncclShadowPoolToHost(struct ncclShadowPool* pool, void* devObj, voi
 // ---------------------------------------------------------------------------
 // Intrusive address map.
 // ---------------------------------------------------------------------------
-ncclResult_t ncclIntruAddressMapInsert_untyped(struct ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void*) {
+// Seam: the window-map insert is NCCLCHECKGOTO'd at the deepest rollback in
+// ncclDevrWindowRegisterInGroup, so that unwind needs this to be drivable.
+static ncclResult_t DefaultIntruAddressMapInsert(struct ncclIntruAddressMap_untyped*, int, int, int, uintptr_t,
+                                                void*) {
   return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void*)>
+    g_devrIntruAddressMapInsert = DefaultIntruAddressMapInsert;
+
+ncclResult_t ncclIntruAddressMapInsert_untyped(struct ncclIntruAddressMap_untyped* m, int a, int b, int c,
+                                               uintptr_t k, void* v) {
+  return g_devrIntruAddressMapInsert(m, a, b, c, k, v);
 }
 // Seam: findCommAndHostWindowFromDeviceWindow resolves a device window through
 // this map, so every public pointer accessor needs it to answer.
@@ -390,8 +418,24 @@ ncclResult_t ncclDevrAllocAndPopulateSegmentWindows(struct ncclDevrState* devr, 
 // ---------------------------------------------------------------------------
 // Team accessors (host variants).
 // ---------------------------------------------------------------------------
-extern "C" ncclTeam_t ncclTeamWorld(ncclComm_t) { return ncclTeam_t{}; }
-extern "C" ncclTeam_t ncclTeamLsa(ncclComm_t) { return ncclTeam_t{}; }
+// Seams rather than fixed returns: ncclTeamRankIsMember/ncclTeamRankToTeam are
+// real inline code that divides by the team's stride, so a zero-initialised
+// ncclTeam_t here would SIGFPE the moment a test reached the symmetric arm of
+// ncclDevrWorldToLsaRank. The defaults describe the contiguous, stride-1 team
+// the comm already says it has; a test that needs a strided or offset team
+// installs its own.
+static ncclTeam_t DefaultTeamWorld(ncclComm_t comm) {
+  if (comm == nullptr) return ncclTeam_t{0, 0, 1};
+  return ncclTeam_t{comm->nRanks, comm->rank, 1};
+}
+static ncclTeam_t DefaultTeamLsa(ncclComm_t comm) {
+  if (comm == nullptr) return ncclTeam_t{0, 0, 1};
+  return ncclTeam_t{comm->devrState.lsaSize, comm->devrState.lsaSelf, 1};
+}
+std::function<ncclTeam_t(ncclComm_t)> g_devrTeamWorld = DefaultTeamWorld;
+std::function<ncclTeam_t(ncclComm_t)> g_devrTeamLsa   = DefaultTeamLsa;
+extern "C" ncclTeam_t ncclTeamWorld(ncclComm_t comm) { return g_devrTeamWorld(comm); }
+extern "C" ncclTeam_t ncclTeamLsa(ncclComm_t comm) { return g_devrTeamLsa(comm); }
 extern "C" ncclTeam_t ncclTeamRail(ncclComm_t) { return ncclTeam_t{}; }
 
 // ---------------------------------------------------------------------------
@@ -432,13 +476,26 @@ extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, 
 // which the resource-window path does, via cudaMemsetAsync -- faults on a
 // PROT_NONE range. MAP_NORESERVE means the pages still cost nothing until
 // written.
-static hipError_t DefaultMemAddressReserve(void** ptr, size_t size, size_t, void*, unsigned long long) {
+static hipError_t DefaultMemAddressReserve(void** ptr, size_t size, size_t alignment, void*, unsigned long long) {
   // The real driver rejects a zero-size reservation; a zero here would be a bug
   // in the code under test, so surface it rather than silently substituting one.
   assert(size != 0);
-  void* p = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-  if (p == MAP_FAILED) return hipErrorOutOfMemory;
-  *ptr = p;
+  // Honour the requested alignment rather than ignoring it: production asks for
+  // NCCL_MAX_PAGE_SIZE, and mmap only guarantees page alignment, so a returned
+  // base that happened to be page- but not NCCL_MAX_PAGE_SIZE-aligned would let
+  // an alignment regression through unseen. Over-map, trim to an aligned base,
+  // and give the slack back.
+  if (alignment <= 1) alignment = 1;
+  size_t over = size + alignment;
+  char* raw = static_cast<char*>(
+      mmap(nullptr, over, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0));
+  if (raw == MAP_FAILED) return hipErrorOutOfMemory;
+  uintptr_t base = (reinterpret_cast<uintptr_t>(raw) + alignment - 1) & ~(uintptr_t)(alignment - 1);
+  size_t head = base - reinterpret_cast<uintptr_t>(raw);
+  if (head != 0) munmap(raw, head);
+  size_t tail = over - head - size;
+  if (tail != 0) munmap(reinterpret_cast<void*>(base + size), tail);
+  *ptr = reinterpret_cast<void*>(base);
   return hipSuccess;
 }
 std::function<hipError_t(void**, size_t, size_t, void*, unsigned long long)> g_devrHipMemAddressReserve =
@@ -760,11 +817,17 @@ void ResetDevRuntimeMicroFakes() {
   g_devrShadowPoolToHost                        = DefaultShadowPoolToHost;
   g_devrIntruAddressMapFind                     = DefaultIntruAddressMapFind;
   g_devrHipGetDevice                            = DefaultGetDevice;
+  g_devrBootstrapBarrier                        = DefaultBootstrapBarrier;
+  g_devrSymkInitOnce                            = DefaultSymkInitOnce;
+  g_devrIntruAddressMapInsert                   = DefaultIntruAddressMapInsert;
+  g_devrCommEnsureReady                         = DefaultCommEnsureReady;
   g_devrHipGetDeviceProperties                  = DefaultGetDeviceProperties;
   g_devrHipSetDevice                            = DefaultSetDevice;
   g_devrHipMemcpy                               = DefaultMemcpy;
   g_devrNcclCommWindowDeregister                = DefaultCommWindowDeregister;
   g_devrHipMemcpyAsync                          = DefaultMemcpyAsync;
+  g_devrTeamWorld                               = DefaultTeamWorld;
+  g_devrTeamLsa                                 = DefaultTeamLsa;
   g_devrHipMemsetAsync                          = DefaultMemsetAsync;
   g_devrHipIpcGetMemHandle                      = DefaultIpcGetMemHandle;
   g_devrHipIpcOpenMemHandle                     = DefaultIpcOpenMemHandle;

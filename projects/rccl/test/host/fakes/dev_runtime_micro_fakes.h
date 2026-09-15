@@ -56,10 +56,20 @@ extern std::function<hipError_t(void*, size_t)> g_devrHipMemUnmap;
 extern std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)> g_devrHipMemcpyAsync;
 extern std::function<hipError_t(void*, int, size_t, hipStream_t)> g_devrHipMemsetAsync;
 
+// Team shape seen by ncclDevrWorldToLsaRank's symmetric arm. Default to the
+// comm's own contiguous stride-1 team; override for strided/offset layouts.
+extern std::function<ncclTeam_t(ncclComm_t)> g_devrTeamWorld;
+extern std::function<ncclTeam_t(ncclComm_t)> g_devrTeamLsa;
+
 extern std::function<hipError_t(hipIpcMemHandle_t*, void*)> g_devrHipIpcGetMemHandle;
 extern std::function<hipError_t(void**, hipIpcMemHandle_t, unsigned int)> g_devrHipIpcOpenMemHandle;
 extern std::function<hipError_t(void*)> g_devrHipIpcCloseMemHandle;
 extern std::function<hipError_t(int*)> g_devrHipGetDevice;
+extern std::function<ncclResult_t(void*, int, int, int)> g_devrBootstrapBarrier;
+extern std::function<ncclResult_t(struct ncclComm*)> g_devrSymkInitOnce;
+extern std::function<ncclResult_t(struct ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void*)>
+    g_devrIntruAddressMapInsert;
+extern std::function<ncclResult_t(ncclComm_t)> g_devrCommEnsureReady;
 extern std::function<hipError_t(hipDeviceProp_t*, int)> g_devrHipGetDeviceProperties;
 extern std::function<hipError_t(int)> g_devrHipSetDevice;
 extern std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind)> g_devrHipMemcpy;
