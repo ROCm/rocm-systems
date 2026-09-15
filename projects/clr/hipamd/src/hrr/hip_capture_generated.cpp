@@ -1150,6 +1150,8 @@ static hipError_t capture_hipExtLaunchKernel(const void* function_address, dim3 
 
 // Generated shim
 static hipError_t capture_hipExtLaunchMultiKernelMultiDevice(hipLaunchParams* launchParamsList, int numDevices, unsigned int flags) {
+  hrr_cap::writer::note_unreplayable("hipExtLaunchMultiKernelMultiDevice",
+      "each hipLaunchParams entry names its kernel by a host function address in the capturing process, and a cooperative multi-device launch cannot be decomposed into per-device launches without breaking the grid-wide barrier it exists for");
   hipError_t r = g_real_table.hipExtLaunchMultiKernelMultiDevice_fn(launchParamsList, numDevices, flags);
   if (r == hipSuccess) {
     hrr_args_hipExtLaunchMultiKernelMultiDevice a{};
@@ -1758,6 +1760,8 @@ static hipError_t capture_hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode, h
 
 // Generated shim
 static hipError_t capture_hipGraphAddHostNode(hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies, size_t numDependencies, const hipHostNodeParams* pNodeParams) {
+  hrr_cap::writer::note_unreplayable("hipGraphAddHostNode",
+      "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
   hipError_t r = g_real_table.hipGraphAddHostNode_fn(pGraphNode, graph, pDependencies, numDependencies, pNodeParams);
   if (r == hipSuccess) {
     hrr_args_hipGraphAddHostNode a{};
@@ -2140,6 +2144,8 @@ static hipError_t capture_hipGraphExecEventWaitNodeSetEvent(hipGraphExec_t hGrap
 
 // Generated shim
 static hipError_t capture_hipGraphExecHostNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node, const hipHostNodeParams* pNodeParams) {
+  hrr_cap::writer::note_unreplayable("hipGraphExecHostNodeSetParams",
+      "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
   hipError_t r = g_real_table.hipGraphExecHostNodeSetParams_fn(hGraphExec, node, pNodeParams);
   if (r == hipSuccess) {
     hrr_args_hipGraphExecHostNodeSetParams a{};
@@ -2298,6 +2304,8 @@ static hipError_t capture_hipGraphHostNodeGetParams(hipGraphNode_t node, hipHost
 
 // Generated shim
 static hipError_t capture_hipGraphHostNodeSetParams(hipGraphNode_t node, const hipHostNodeParams* pNodeParams) {
+  hrr_cap::writer::note_unreplayable("hipGraphHostNodeSetParams",
+      "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
   hipError_t r = g_real_table.hipGraphHostNodeSetParams_fn(node, pNodeParams);
   if (r == hipSuccess) {
     hrr_args_hipGraphHostNodeSetParams a{};
@@ -2974,6 +2982,8 @@ static const char* capture_hipKernelNameRefByPtr(const void* hostFunction, hipSt
 
 // Generated shim
 static hipError_t capture_hipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsList, int numDevices, unsigned int flags) {
+  hrr_cap::writer::note_unreplayable("hipLaunchCooperativeKernelMultiDevice",
+      "each hipLaunchParams entry names its kernel by a host function address in the capturing process, and a cooperative multi-device launch cannot be decomposed into per-device launches without breaking the grid-wide barrier it exists for");
   hipError_t r = g_real_table.hipLaunchCooperativeKernelMultiDevice_fn(launchParamsList, numDevices, flags);
   if (r == hipSuccess) {
     hrr_args_hipLaunchCooperativeKernelMultiDevice a{};
@@ -2988,6 +2998,8 @@ static hipError_t capture_hipLaunchCooperativeKernelMultiDevice(hipLaunchParams*
 
 // Generated shim
 static hipError_t capture_hipLaunchHostFunc(hipStream_t stream, hipHostFn_t fn, void* userData) {
+  hrr_cap::writer::note_unreplayable("hipLaunchHostFunc",
+      "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
   hipError_t r = g_real_table.hipLaunchHostFunc_fn(stream, fn, userData);
   if (r == hipSuccess) {
     hrr_args_hipLaunchHostFunc a{};
@@ -3317,6 +3329,8 @@ static hipError_t capture_hipMemGetInfo(size_t* free, size_t* total) {
 
 // Generated shim
 static hipError_t capture_hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* handle, void* osHandle, hipMemAllocationHandleType shHandleType) {
+  hrr_cap::writer::note_unreplayable("hipMemImportFromShareableHandle",
+      "the recorded argument is an OS handle (a POSIX fd or a Win32 HANDLE) belonging to the process that exported it, and the same number in the replaying process names a different object or nothing at all");
   hipError_t r = g_real_table.hipMemImportFromShareableHandle_fn(handle, osHandle, shHandleType);
   if (r == hipSuccess) {
     hrr_args_hipMemImportFromShareableHandle a{};
@@ -3430,6 +3444,8 @@ static hipError_t capture_hipMemPoolGetAttribute(hipMemPool_t mem_pool, hipMemPo
 
 // Generated shim
 static hipError_t capture_hipMemPoolImportFromShareableHandle(hipMemPool_t* mem_pool, void* shared_handle, hipMemAllocationHandleType handle_type, unsigned int flags) {
+  hrr_cap::writer::note_unreplayable("hipMemPoolImportFromShareableHandle",
+      "the recorded argument is an OS handle (a POSIX fd or a Win32 HANDLE) belonging to the process that exported it, and the same number in the replaying process names a different object or nothing at all");
   hipError_t r = g_real_table.hipMemPoolImportFromShareableHandle_fn(mem_pool, shared_handle, handle_type, flags);
   if (r == hipSuccess) {
     hrr_args_hipMemPoolImportFromShareableHandle a{};
@@ -4408,6 +4424,8 @@ static hipError_t capture_hipSignalExternalSemaphoresAsync(const hipExternalSema
 
 // Generated shim
 static hipError_t capture_hipStreamAddCallback(hipStream_t stream, hipStreamCallback_t callback, void* userData, unsigned int flags) {
+  hrr_cap::writer::note_unreplayable("hipStreamAddCallback",
+      "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
   hipError_t r = g_real_table.hipStreamAddCallback_fn(stream, callback, userData, flags);
   if (r == hipSuccess) {
     hrr_args_hipStreamAddCallback a{};
@@ -5115,6 +5133,8 @@ static hipError_t capture_hipUnbindTexture(const textureReference* tex) {
 
 // Generated shim
 static hipError_t capture_hipUserObjectCreate(hipUserObject_t* object_out, void* ptr, hipHostFn_t destroy, unsigned int initialRefcount, unsigned int flags) {
+  hrr_cap::writer::note_unreplayable("hipUserObjectCreate",
+      "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
   hipError_t r = g_real_table.hipUserObjectCreate_fn(object_out, ptr, destroy, initialRefcount, flags);
   if (r == hipSuccess) {
     hrr_args_hipUserObjectCreate a{};
@@ -5588,6 +5608,8 @@ static hipError_t capture_hipStreamGetFlags_spt(hipStream_t stream, unsigned int
 
 // Generated shim
 static hipError_t capture_hipStreamAddCallback_spt(hipStream_t stream, hipStreamCallback_t callback, void* userData, unsigned int flags) {
+  hrr_cap::writer::note_unreplayable("hipStreamAddCallback_spt",
+      "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
   hipError_t r = g_real_table.hipStreamAddCallback_spt_fn(stream, callback, userData, flags);
   if (r == hipSuccess) {
     hrr_args_hipStreamAddCallback_spt a{};
@@ -5701,6 +5723,8 @@ static hipError_t capture_hipStreamGetCaptureInfo_v2_spt(hipStream_t stream, hip
 
 // Generated shim
 static hipError_t capture_hipLaunchHostFunc_spt(hipStream_t stream, hipHostFn_t fn, void* userData) {
+  hrr_cap::writer::note_unreplayable("hipLaunchHostFunc_spt",
+      "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
   hipError_t r = g_real_table.hipLaunchHostFunc_spt_fn(stream, fn, userData);
   if (r == hipSuccess) {
     hrr_args_hipLaunchHostFunc_spt a{};
