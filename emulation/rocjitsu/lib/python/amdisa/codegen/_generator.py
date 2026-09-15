@@ -5987,6 +5987,19 @@ class CodeGenerator:
             return _MaskResultKind.IMPLICIT_VCC
         return None
 
+    @staticmethod
+    def _is_unimplemented_execute_stub(body: str) -> bool:
+        # Comments may precede the stub or follow its throw. Require the whole
+        # body to match so conditional failures and side effects stay intact.
+        statements = re.sub(r'//[^\n]*|/\*.*?\*/', '', body, flags=re.DOTALL)
+        return (
+            re.fullmatch(
+                r'\s*\(void\)wf;\s*throw\s+util::UnimplementedInst\(mnemonic\(\)\);\s*',
+                statements,
+            )
+            is not None
+        )
+
     def _gen_execute_body(
         self,
         inst: Instruction,
@@ -11875,12 +11888,7 @@ class CodeGenerator:
                         # instructions whose body is ONLY a throw — the cleanup
                         # code after the throw would be unreachable. Only match
                         # pure-throw bodies, not bodies with conditional throws.
-                        body_stripped = body.strip().rstrip(';').strip()
-                        body_throws = (
-                            body_stripped.startswith('(void)wf;')
-                            and 'throw util::UnimplementedInst' in body_stripped
-                            and body_stripped.count('\n') <= 1
-                        )
+                        body_throws = self._is_unimplemented_execute_stub(body)
                         can_share = self._can_share_execute(
                             inst.mnemonic, inst, enc.enc_name
                         )
@@ -11952,7 +11960,10 @@ class CodeGenerator:
                         if body_throws:
                             exec_impl = cgen.Line(
                                 f'void {inst.fmt_name}::execute_impl'
-                                f'(amdgpu::Wavefront &wf) {{ (void)wf; throw util::UnimplementedInst(mnemonic()); }}'
+                                f'(amdgpu::Wavefront &wf) {{\n'
+                                '  wf.report_instruction_execution_error(\n'
+                                '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                                '}'
                             )
                         elif can_share or _portable_probe:
                             enc_key = enc.enc_name.lower().replace('enc_', '')
@@ -12091,7 +12102,10 @@ class CodeGenerator:
                     else:
                         exec_impl = cgen.Line(
                             f'void {inst.fmt_name}::execute_impl'
-                            f'(amdgpu::Wavefront &wf) {{ (void)wf; throw util::UnimplementedInst(mnemonic()); }}'
+                            f'(amdgpu::Wavefront &wf) {{\n'
+                            '  wf.report_instruction_execution_error(\n'
+                            '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                            '}'
                         )
 
                     s = cgen.Struct(
@@ -16095,8 +16109,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
         Produces ``test_encodings.h`` containing a constexpr array of
         ``{mnemonic, {word0, word1}}`` entries.  The test harness decodes
-        each entry and calls ``execute()`` to verify no ``UnimplementedInst``
-        is thrown.
+        each entry and checks execution results against the expected coverage.
         """
         entries: list[str] = []
         profile = self.isa_spec.profile
