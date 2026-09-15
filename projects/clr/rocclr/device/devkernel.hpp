@@ -291,6 +291,11 @@ class Kernel {
   //! set dynamic parallelism flag
   void setDynamicParallelFlag(bool flag) { flags_.dynamicParallelism_ = flag; }
 
+  //! The kernel declares a hostcall buffer and this device cannot build one:
+  //! decided once, when the metadata is read, not at every dispatch
+  bool hostcallUnsatisfiable() const { return (flags_.hostcallUnsatisfiable_) ? true : false; }
+  void setHostcallUnsatisfiable(bool flag) { flags_.hostcallUnsatisfiable_ = flag; }
+
   //! Returns TRUE if kernel is internal kernel
   bool isInternalKernel() const { return (flags_.internalKernel_) ? true : false; }
 
@@ -386,6 +391,7 @@ class Kernel {
       uint imageEna_ : 1;            //!< Kernel uses images
       uint imageWriteEna_ : 1;       //!< Kernel uses image writes
       uint dynamicParallelism_ : 1;  //!< Dynamic parallelism enabled
+      uint hostcallUnsatisfiable_ : 1;  //!< Declares hidden_hostcall_buffer on a device without PCIe atomics
       uint internalKernel_ : 1;      //!< True: internal kernel
       uint hsa_ : 1;                 //!< HSA kernel
     };
