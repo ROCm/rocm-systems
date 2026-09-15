@@ -566,12 +566,17 @@ class CheckRunPaginationTests(unittest.TestCase):
     """get_check_runs must read every page, not just the first 100."""
 
     def _fake_gh_get(self, pages: List[Dict[str, Any]]):
+        # Real query-string parsing, not a substring split: "page=" is also a
+        # suffix of "per_page=", so a plain rsplit("page=", ...) silently reads
+        # per_page's value as the page number if the params are ever reordered.
+        import urllib.parse
+
         calls: List[str] = []
 
         def _get(url: str, token: str) -> Dict[str, Any]:
             calls.append(url)
-            # page= is 1-based; return an empty payload past the end.
-            idx = int(url.rsplit("page=", 1)[1]) - 1
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+            idx = int(query["page"][0]) - 1  # page= is 1-based
             return pages[idx] if idx < len(pages) else {"check_runs": []}
 
         return _get, calls
@@ -599,6 +604,11 @@ class CheckRunPaginationTests(unittest.TestCase):
         self.assertEqual(len(runs), 117)
         self.assertIn("pre-commit", {r["name"] for r in runs})
         self.assertEqual(len(calls), 2)
+        # Assert the actual requests, not just their count: dropping per_page
+        # from the URL construction would still satisfy every check above.
+        self.assertIn(f"per_page={pc.CHECK_RUNS_PER_PAGE}", calls[0])
+        self.assertIn("page=1", calls[0])
+        self.assertIn("page=2", calls[1])
 
     def test_stops_once_total_count_is_reached(self) -> None:
         page1 = {
@@ -722,13 +732,15 @@ class DuplicateCheckRunNameTests(unittest.TestCase):
                 self.assertEqual(conc["pre-commit"], "null")
 
     def test_build_check_results_reports_the_failing_duplicate(self) -> None:
-        runs = [
-            {"name": "pre-commit", "conclusion": "success"},
-            {"name": "pre-commit", "conclusion": "failure"},
-        ]
-        rows = pc.build_check_results(self._policy(), runs)
-        row = next(r for r in rows if r.name == "pre-commit")
-        self.assertFalse(row.passed)
+        # Both orderings: a last-wins collapse would pass this if the failure
+        # happened to be listed last, which is the only ordering tried before.
+        passing = {"name": "pre-commit", "conclusion": "success"}
+        failing = {"name": "pre-commit", "conclusion": "failure"}
+        for runs in ([passing, failing], [failing, passing]):
+            with self.subTest(order=[r["conclusion"] for r in runs]):
+                rows = pc.build_check_results(self._policy(), runs)
+                row = next(r for r in rows if r.name == "pre-commit")
+                self.assertFalse(row.passed)
 
 
 class PrecommitHelpCommentTests(unittest.TestCase):
