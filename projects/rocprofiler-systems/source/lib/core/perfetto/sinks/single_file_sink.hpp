@@ -3,11 +3,12 @@
 
 #pragma once
 
+#include "core/perfetto/packet_framing.hpp"
 #include "core/perfetto/sinks/append_mode.hpp"
+#include "core/perfetto/sinks/trace_sink.hpp"
 
 #include <cstdint>
 #include <functional>
-#include <limits>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -21,27 +22,20 @@ namespace core
 // Cached-mode sink: concatenates per-pid bytes into one .proto file.
 // Each source_id receives a disjoint trusted_packet_sequence_id range before
 // packets are appended, preserving Perfetto interned-data namespaces.
-class single_file_sink
+class single_file_sink : public trace_sink_interface
 {
 public:
-    // output_filename_override empty -> resolve via
-    // config::get_perfetto_output_filename() at finalize time. Set to a concrete
-    // path to write to a different location than the configured base.
+    // An empty output_filename_override defers to config::get_perfetto_output_filename(),
+    // resolved lazily in finalize() rather than at construction time.
     explicit single_file_sink(output_file_registry& registry,
                               std::string           output_filename_override = {});
 
-    single_file_sink(single_file_sink&&) noexcept            = default;
-    single_file_sink& operator=(single_file_sink&&) noexcept = default;
-    single_file_sink(const single_file_sink&)                = delete;
-    single_file_sink& operator=(const single_file_sink&)     = delete;
-    ~single_file_sink()                                      = default;
+    void on_source_drained(int source_id, std::vector<char> bytes) override;
+    void finalize() override;
 
-    void on_source_drained(int source_id, std::vector<char> bytes);
-    void finalize();
-
-    // Switch the sink into append-with-file-lock mode for cross-process
-    // aggregation. `seq_id_base` shifts this process's seq_id namespace so
-    // concurrent appenders do not collide on trusted_packet_sequence_id.
+    // Enables cross-process aggregation into one shared output file. seq_id_base
+    // gives this process's sources a disjoint trusted_packet_sequence_id range so
+    // concurrently-appending processes cannot collide on the same sequence IDs.
     void set_append_mode(append_mode_config config) noexcept;
 
     [[nodiscard]] const std::vector<char>& buffer_for_testing() const noexcept
@@ -52,8 +46,6 @@ public:
 private:
     static constexpr std::uint32_t PER_SOURCE_SEQ_ID_BASE_STRIDE = 1u << 16;
 
-    static constexpr std::uint64_t TRUSTED_SEQ_ID_MAX_EXCLUSIVE =
-        static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
     std::reference_wrapper<output_file_registry> m_registry;
     std::string                                  m_output_filename_override{};
     std::vector<char>                            m_buffer{};

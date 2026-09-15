@@ -3,18 +3,27 @@
 
 #pragma once
 
-#include "core/perfetto/sinks/per_pid_file_sink.hpp"
-#include "core/perfetto/sinks/polymorphic_sink_view.hpp"
-#include "core/perfetto/sinks/recording_sink.hpp"
-#include "core/perfetto/sinks/single_file_sink.hpp"
-#include "core/perfetto/sinks/tee_sink.hpp"
-
-#include <variant>
+#include <vector>
 
 namespace rocprofsys::core
 {
-// Cached trace bytes are dispatched to one of these alternatives via std::visit.
-// polymorphic_sink_view lets tests inject arbitrary fixtures.
-using trace_sink = std::variant<per_pid_file_sink, single_file_sink, recording_sink,
-                                polymorphic_sink_view, tee_sink>;
+// Passed to basic_cached_perfetto_engine::start() as a shared_ptr; the engine
+// keeps only a weak_ptr, so it never extends the sink's lifetime. The caller
+// must keep the sink alive until stop() returns. on_source_drained() and
+// finalize() are invoked synchronously, from within stop(), on whichever
+// thread calls it.
+class trace_sink_interface
+{
+public:
+    trace_sink_interface()          = default;
+    virtual ~trace_sink_interface() = default;
+
+    trace_sink_interface(const trace_sink_interface&)            = delete;
+    trace_sink_interface& operator=(const trace_sink_interface&) = delete;
+    trace_sink_interface(trace_sink_interface&&)                 = delete;
+    trace_sink_interface& operator=(trace_sink_interface&&)      = delete;
+
+    virtual void on_source_drained(int source_id, std::vector<char> bytes) = 0;
+    virtual void finalize()                                                = 0;
+};
 }  // namespace rocprofsys::core
