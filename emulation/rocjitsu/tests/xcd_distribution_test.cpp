@@ -806,7 +806,7 @@ TEST(XcdDistributionTest, BarrierBitWaitsForEveryXcdsShareThreaded) {
   run_threaded_fanout_barrier(/*dispatch_threads=*/1);
 }
 
-TEST(XcdDistributionTest, SharedPoolBarrierWaitsForEveryXcdsShareThreaded) {
+TEST(XcdDistributionTest, SharedPoolBarrierBitWaitsForEveryXcdsShareThreaded) {
   // Exercise barrier ordering when peer XCDs execute and join shared-pool work concurrently.
   run_threaded_fanout_barrier(/*dispatch_threads=*/4);
 }

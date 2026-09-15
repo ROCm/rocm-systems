@@ -31,7 +31,8 @@ class CpuDispatchPoolTestAccess;
 ///
 /// @details This is host acceleration, not a modeled GPU resource. Changing the
 /// width must preserve the observable result of a race-free workload.
-/// run() distributes a submission across its caller and up to N-1 shared workers.
+/// For a pool constructed with N threads, run() uses its caller and up to N-1
+/// shared workers, capped by that call's requested thread count.
 /// Concurrent submissions must own disjoint CUs and result storage. Each CU runs
 /// exactly once per submission; results and exceptions belong to that submission.
 /// The caller keeps its spans alive until run() returns, and the pool must outlive

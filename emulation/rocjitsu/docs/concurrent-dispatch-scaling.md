@@ -6,13 +6,13 @@ latest cache rebase, using the same launch-only GEMMs and reserved CPU cores.
 
 At an exact 32-thread budget, the selected new allocation cuts dispatch time by
 **21.1% on gfx950** and **19.8% on gfx1250** versus the previous heuristic on the
-serialized runtime. Process wall falls **3.9%** and **5.1%**, respectively. These
-are medians of four fresh adjacent comparisons with equal total thread budgets.
+serialized runtime. Process wall falls **3.9%** and **5.1%**, respectively. Times
+are medians of four fresh adjacent pairs with equal total thread budgets;
+percentages compare those medians.
 At four threads the change is small; the larger budgets benefit more from
 concurrent XCD engines. See the fixed-budget comparison below for every budget.
 
-The E=1 controls show 0.3-2.9% higher dispatch medians, so this prototype is not an
-across-the-board reduction in pool overhead. With E=8 and D=8, dispatch falls
+The E=1 controls show 0.3-2.9% higher dispatch medians. At E=8 and D=8, dispatch falls
 43.5%/35.7% without helpers and 22.7%/29.1% with eight helpers on gfx950/gfx1250.
 Those fixed-D/H controls isolate cross-XCD concurrency; their total thread budgets
 rise with E and should not be confused with the equal-budget comparison.
@@ -40,7 +40,7 @@ submission. Publication and cancellation allocate no queue nodes.
 
 Workers rotate pending submissions when taking assignments. An assigned worker
 still drains that submission's remaining CUs; the pool is not a preemptive
-scheduler. Busy workers may delay a new submission's access to helpers from the
+scheduler. Busy workers may delay a new submission's access to workers from the
 CU pool, but its own caller can always make progress. Simulation-engine barriers,
 queue ordering and the process-wide async MMA helper pool are unchanged.
 
@@ -84,9 +84,9 @@ synchronization, assembly dumping and shutdown.
 Screening covers every integer E/D/H split at budgets 4 and 8. At 16, 24 and 32,
 E is 1, 2, 4 or 8 and H uses a coarse grid including zero, small counts, multiples
 of four and budget fractions. Prior heuristic allocations are also eligible as
-finalists, using their repeated concurrent-control measurements. The two fastest screened allocations per target and
-budget receive four fresh, balanced serialized/concurrent pairs. Selection uses
-median dispatch time. Four fresh pairs also cover the prior heuristic and E=1/E=8
+finalists, using their repeated concurrent-control measurements. The two fastest
+screened allocations per target and budget receive four fresh, balanced
+serialized/concurrent pairs. Selection uses median dispatch time. Four fresh pairs also cover the prior heuristic and E=1/E=8
 controls at D=8. Pilot and screening samples are excluded from confirmation medians.
 These are the best allocations in this search, not a global optimum for other
 workloads. Small differences with overlapping ranges should be treated as ties.
@@ -95,17 +95,17 @@ CPU cycles per task-clock millisecond dropped between the early samples and the
 main campaign. Fourteen early screening measurements were therefore replaced
 with fresh measurements before selecting finalists; their originals remain in
 the raw evidence. This avoids favoring allocations that happened to run before
-the shift. Finalist pairs use consecutive processes at the same settings and alternate
-which implementation runs first. Control pairs use the same alternating order,
-with screening processes interleaved under the shared lock.
+the shift. Finalist pairs use consecutive processes at the same settings and
+alternate which implementation runs first. Control pairs use the same alternating
+order, with screening processes interleaved under the shared lock.
 
 ## Retuning within the same thread budget
 
 The previous heuristic on the serialized runtime is compared with the best
 confirmed allocation on the concurrent runtime. These rows include both the
-implementation change and retuning. These rows use four fresh adjacent pairs
-with alternating implementation order;
-the old and new triples differ while their total budgets match.
+implementation change and retuning, using four fresh adjacent pairs with
+alternating implementation order. The old and new triples differ while their
+total budgets match.
 
 | Target | Budget | Previous E/D/H | New E/D/H | Previous dispatch s | New dispatch s | Change | Previous wall s | New wall s | Change |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -206,9 +206,11 @@ This separates implementation gains from choosing a different triple.
 
 The two gated concurrency regressions fail against the serialized pool and pass
 against the prototype. They verify simultaneous use of shared workers and
-independent completion. The strengthened exception test keeps a successful
-submission active while a peer throws and joins. Additional tests enforce widths
-1 and 2 with idle workers available, repeatedly reuse submissions from eight
+independent completion. The exception test keeps a failing submission open after
+its first CU throws, then requires an unrelated submission to complete before the
+failing caller joins. A deliberately broken pool with one shared exception slot
+fails this test by both leaking and losing the exception. Additional tests enforce
+widths 1 and 2 with idle workers available, repeatedly reuse submissions from eight
 callers, and exercise XCD fanout completion and barrier ordering with a shared pool.
 
 The current focused suite passes all 237 tests with async mode 4 and shared

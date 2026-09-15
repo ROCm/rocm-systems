@@ -75,20 +75,21 @@ struct DispatchPoolFixture {
   std::vector<amdgpu::Wavefront *> wfs;
 };
 
+// Hold CUs at an observable instruction callback so tests can count overlapping
+// execution and keep submissions open until every waiter is explicitly released.
 class GatedInstructionPlugin final : public ExecutionPlugin {
 public:
-  explicit GatedInstructionPlugin(bool throw_after_release = false)
-      : ExecutionPlugin("gated_instruction"), throw_after_release_(throw_after_release) {}
+  GatedInstructionPlugin() : ExecutionPlugin("gated_instruction") {}
 
   void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override {
     std::unique_lock lock(mutex_);
     ++entered_;
     changed_.notify_all();
     changed_.wait(lock, [this] { return released_; });
-    if (throw_after_release_)
-      throw std::runtime_error("gated submission failed");
   }
 
+  // Checks after launching gated work must stay nonfatal: even a timeout must
+  // be followed by release() before a future is destroyed and joins its task.
   bool wait_for_entries(size_t count, std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
     std::unique_lock lock(mutex_);
     return changed_.wait_for(lock, timeout, [&] { return entered_ >= count; });
@@ -105,13 +106,12 @@ private:
   std::condition_variable changed_;
   size_t entered_ = 0;
   bool released_ = false;
-  bool throw_after_release_;
 };
 
-GatedInstructionPlugin *gate_fixture(DispatchPoolFixture &fixture, bool fail = false) {
+GatedInstructionPlugin *gate_fixture(DispatchPoolFixture &fixture) {
   fixture.memory.write32(kProgramBase, kSMovB32);
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-  auto plugin = std::make_unique<GatedInstructionPlugin>(fail);
+  auto plugin = std::make_unique<GatedInstructionPlugin>();
   auto *gate = plugin.get();
   if (!group->add(std::move(plugin)))
     throw std::runtime_error("failed to install gated instruction plugin");
@@ -129,8 +129,6 @@ TEST(CpuDispatchPoolTest, ConcurrentSubmissionsUseWorkersAndCompleteIndependentl
   auto first_run = std::async(std::launch::async,
                               [&] { return pool.run(first.tasks, /*threads=*/2, first_results); });
   // One CU blocks its caller and one blocks a worker, leaving other pool workers free.
-  // Use nonfatal checks after launching: every gate must be released before a
-  // future is destroyed, including when a wait times out.
   EXPECT_TRUE(first_gate->wait_for_entries(2));
   auto second_run = std::async(
       std::launch::async, [&] { return pool.run(second.tasks, /*threads=*/2, second_results); });
@@ -148,25 +146,34 @@ TEST(CpuDispatchPoolTest, ConcurrentSubmissionsUseWorkersAndCompleteIndependentl
 }
 
 TEST(CpuDispatchPoolTest, ConcurrentFailureStaysWithItsSubmission) {
-  DispatchPoolFixture failing(/*cu_count=*/2), succeeding(/*cu_count=*/4);
-  auto *gate = gate_fixture(failing, /*fail=*/true);
-  auto *successful_gate = gate_fixture(succeeding);
+  DispatchPoolFixture failing(/*cu_count=*/3), succeeding(/*cu_count=*/4);
+  auto *gate = gate_fixture(failing);
+  auto throwing = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(throwing->add(std::make_unique<test::ThrowingInstructionPlugin>()));
+  failing.cus[0]->set_plugin_group(throwing);
   amdgpu::CpuDispatchPool pool(/*threads=*/4);
-  auto failed_run = std::async(std::launch::async, [&] { pool.run(failing.tasks, 2); });
+  auto failed_run = std::async(std::launch::async, [&] { pool.run(failing.tasks, /*threads=*/2); });
+  // With two executors and three CUs, reaching both gates proves one executor
+  // has already caught the first CU's exception and advanced to another task.
+  // The exception stays pending until these two remaining CUs are released.
   EXPECT_TRUE(gate->wait_for_entries(2));
-  auto successful_run = std::async(std::launch::async, [&] { pool.run(succeeding.tasks, 2); });
-  EXPECT_TRUE(successful_gate->wait_for_entries(2));
-  // Keep a successful submission active while its peer records and rethrows an
-  // exception. That exception must not escape through the successful caller.
+  auto successful_run =
+      std::async(std::launch::async, [&] { pool.run(succeeding.tasks, /*threads=*/2); });
+  const auto successful_status = successful_run.wait_for(std::chrono::seconds(2));
+  // Complete the unrelated join while the failing caller cannot yet consume
+  // its exception. A shared exception slot would leak or lose that exception.
+  if (successful_status == std::future_status::ready) {
+    EXPECT_NO_THROW(successful_run.get());
+  }
   gate->release();
-  const auto failed_status = failed_run.wait_for(std::chrono::seconds(2));
-  successful_gate->release();
-  EXPECT_EQ(failed_status, std::future_status::ready);
+  EXPECT_EQ(successful_status, std::future_status::ready);
   EXPECT_THROW(failed_run.get(), std::runtime_error);
-  EXPECT_NO_THROW(successful_run.get());
+  if (successful_run.valid()) {
+    EXPECT_NO_THROW(successful_run.get());
+  }
   for (auto *wf : succeeding.wfs)
     EXPECT_EQ(wf->pc, kProgramBase + sizeof(uint32_t));
-  EXPECT_NO_THROW(pool.run(succeeding.tasks, 4));
+  EXPECT_NO_THROW(pool.run(succeeding.tasks, /*threads=*/4));
 }
 
 TEST(CpuDispatchPoolTest, SubmissionsRespectRequestedWidthWithIdleWorkers) {
@@ -174,7 +181,7 @@ TEST(CpuDispatchPoolTest, SubmissionsRespectRequestedWidthWithIdleWorkers) {
   for (uint32_t width : {1u, 2u}) {
     DispatchPoolFixture fixture(/*cu_count=*/8);
     auto *gate = gate_fixture(fixture);
-    auto run = std::async(std::launch::async, [&] { pool.run(fixture.tasks, width); });
+    auto run = std::async(std::launch::async, [&] { pool.run(fixture.tasks, /*threads=*/width); });
     EXPECT_TRUE(gate->wait_for_entries(width));
     // All entered CUs remain blocked. Extra entries would require exceeding the
     // requested width, even though the pool has more idle workers available.
@@ -200,7 +207,7 @@ TEST(CpuDispatchPoolTest, ConcurrentReusedSubmissionsRunEveryCuOnce) {
     runs.push_back(std::async(std::launch::async, [&, i] {
       start.arrive_and_wait();
       for (uint32_t round = 0; round < kRounds; ++round)
-        pool.run(fixtures[i]->tasks, 1 + (round + i) % 4);
+        pool.run(fixtures[i]->tasks, /*threads=*/1 + (round + i) % 4);
     }));
   }
   for (auto &run : runs)
