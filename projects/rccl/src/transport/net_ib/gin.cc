@@ -7,6 +7,8 @@
 
 #include "common.h"
 
+#include "archinfo.h"
+#include "cudawrap.h"
 #include "gin/gin_host.h"
 #include "gin.h"
 
@@ -86,7 +88,26 @@ ncclResult_t ncclGinIbGdakiInitOnce() {
 
 // Initlialize GDAKI or PROXY backend. ginType can force a particular backend.
 // If provided, overwrite ginIb with the backend (generic ginIb case).
+static bool ncclGinIbSkipVerbsInit(int type) {
+  if (type == (int)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return true;
+  if (type >= 0) return false;
+  // Unset NCCL_GIN_TYPE (-1): only skip on gfx1250, where a second ibv_get_device_list
+  // after NET/IB-CAST can SIGSEGV on some MI455 rdma-core stacks.
+  int dev = 0;
+  if (cudaGetDevice(&dev) != cudaSuccess) return false;
+  char arch[64];
+  if (GetGcnArchName(dev, arch) != 0) return false;
+  return IsArchMatch(arch, "gfx1250");
+}
+
 ncclResult_t ncclGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction, int type) {
+  // Anvil-SDMA does not use the IB RMA proxy. commAlloc still walks internal RMA
+  // plugins, and a second ibv_get_device_list after NET/IB-CAST loaded providers
+  // SIGSEGVs on some MI455 rdma-core stacks (ionic / bng_re).
+  if (ncclGinIbSkipVerbsInit(type)) {
+    INFO(NCCL_INIT | NCCL_NET, "RMA/IB: skip verbs init (NCCL_GIN_TYPE=%d)", type);
+    return ncclInternalError;
+  }
   NCCLCHECK(ncclIbInitDevices(logFunction, nullptr));
   if (ncclNIbDevs == 0) return ncclInternalError; // Caught in plugin init code, not propagated to user.
 
