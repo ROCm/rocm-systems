@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_resources.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -114,10 +115,11 @@ class ThreadTraceAQLPacketFactory
     using thread_trace_parameter_pack = thread_trace::thread_trace_parameter_pack;
 
 public:
-    ThreadTraceAQLPacketFactory(const hsa::AgentCache&             agent,
-                                const thread_trace_parameter_pack& params,
-                                const CoreApiTable&                coreapi,
-                                const AmdExtTable&                 ext);
+    ThreadTraceAQLPacketFactory(const hsa::AgentCache&                    agent,
+                                const thread_trace_parameter_pack&        params,
+                                const CoreApiTable&                       coreapi,
+                                const AmdExtTable&                        ext,
+                                thread_trace::agent_trace_resources_ptr_t resources);
 
     std::unique_ptr<hsa::TraceControlAQLPacket>  construct_control_packet();
     std::unique_ptr<hsa::CodeobjMarkerAQLPacket> construct_load_marker_packet(uint64_t id,
