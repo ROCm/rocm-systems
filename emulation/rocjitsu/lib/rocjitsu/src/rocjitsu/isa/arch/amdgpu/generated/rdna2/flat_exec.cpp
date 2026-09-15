@@ -414,7 +414,8 @@ void FlatAtomicSwapFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::SWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -438,7 +439,8 @@ void FlatAtomicCmpswapFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -464,7 +466,8 @@ void FlatAtomicAddFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::ADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -488,7 +491,8 @@ void FlatAtomicSubFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -512,7 +516,8 @@ void FlatAtomicSminFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::SMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -536,7 +541,8 @@ void FlatAtomicUminFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::UMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -560,7 +566,8 @@ void FlatAtomicSmaxFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::SMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -584,7 +591,8 @@ void FlatAtomicUmaxFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::UMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -608,7 +616,8 @@ void FlatAtomicAndFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::AND;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -632,7 +641,8 @@ void FlatAtomicOrFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::OR;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -656,7 +666,8 @@ void FlatAtomicXorFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::XOR;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -680,7 +691,8 @@ void FlatAtomicIncFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::INC;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -704,7 +716,8 @@ void FlatAtomicDecFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::DEC;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -731,7 +744,8 @@ void FlatAtomicFcmpswapFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_denorm_mode = wf.fp_denorm_mode_f32();
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
   d->atomic_legacy_minmax = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -760,7 +774,8 @@ void FlatAtomicFminFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_denorm_mode = wf.fp_denorm_mode_f32();
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
   d->atomic_legacy_minmax = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -787,7 +802,8 @@ void FlatAtomicFmaxFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_denorm_mode = wf.fp_denorm_mode_f32();
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
   d->atomic_legacy_minmax = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -811,7 +827,8 @@ void FlatAtomicSwapX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::SWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -837,7 +854,8 @@ void FlatAtomicCmpswapX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -867,7 +885,8 @@ void FlatAtomicAddX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::ADD;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -893,7 +912,8 @@ void FlatAtomicSubX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -919,7 +939,8 @@ void FlatAtomicSminX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::SMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -945,7 +966,8 @@ void FlatAtomicUminX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::UMIN;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -971,7 +993,8 @@ void FlatAtomicSmaxX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::SMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -997,7 +1020,8 @@ void FlatAtomicUmaxX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::UMAX;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1023,7 +1047,8 @@ void FlatAtomicAndX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::AND;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1049,7 +1074,8 @@ void FlatAtomicOrX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::OR;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1075,7 +1101,8 @@ void FlatAtomicXorX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::XOR;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1101,7 +1128,8 @@ void FlatAtomicIncX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::INC;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1127,7 +1155,8 @@ void FlatAtomicDecX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::DEC;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1156,7 +1185,8 @@ void FlatAtomicFcmpswapX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_denorm_mode = wf.fp_denorm_mode_f16_f64();
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
   d->atomic_legacy_minmax = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1189,7 +1219,8 @@ void FlatAtomicFminX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_denorm_mode = 3;
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
   d->atomic_legacy_minmax = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1218,7 +1249,8 @@ void FlatAtomicFmaxX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_denorm_mode = 3;
   d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
   d->atomic_legacy_minmax = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1309,7 +1341,8 @@ void GlobalAtomicCsubFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::SUB_CLAMP;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->wait_counter_type =
+      ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT);
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
