@@ -9263,17 +9263,32 @@ TEST_F(InitMicrotest, InitTransportsRank_RomeConsensusFails_PropagatesThatCode) 
 // depend on the env var and a per-rank mismatch there cannot cause ranks to
 // disagree on whether to enter the DDA IPC path.
 TEST_F(InitMicrotest, InitTransportsRank_DdaNranksRelaxConsensusCheck_SeesThisRanksValue) {
+  // g_ncclDdaNranksRelaxEnabled defaults to false (ResetNcclStubs), so it alone
+  // would leave "the real read ran and returned false" indistinguishable from
+  // "init.cc:2011 was skipped and the recorder's own false default was never
+  // overwritten." Set it true so the marshalled value can only match if the
+  // real call happened.
+  g_ncclDdaNranksRelaxEnabled = true;
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
   const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_ncclCheckDdaNranksRelaxConsensusCalls);
   EXPECT_EQ(4, g_ncclDdaNranksRelaxConsensusNranks);
-  // ncclDdaNranksRelaxEnabled() is stubbed off in this binary (nccl_stubs.cc), so
-  // rank 0's real reading is false; this pins that the check saw the real value
-  // rather than some default.
-  EXPECT_FALSE(g_ncclDdaNranksRelaxConsensusValue0);
+  EXPECT_TRUE(g_ncclDdaNranksRelaxConsensusValue0);
   EXPECT_FALSE(g_ncclDdaNranksRelaxConsensusHost0.empty());
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_DdaNranksRelaxConsensusCheck_SeesRanksDefaultValue) {
+  // Positive twin of the above: the default-false reading also has to reach the
+  // check, not just the overridden-true one, or the two tests together still
+  // would not distinguish "reads the real value" from "always reports true."
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_ncclCheckDdaNranksRelaxConsensusCalls);
+  EXPECT_FALSE(g_ncclDdaNranksRelaxConsensusValue0);
 }
 
 // nRanks == kDdaNranks (8): ncclDdaIpcNranksSupported() returns true regardless
