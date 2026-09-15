@@ -55,13 +55,19 @@ rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)
 
 set(external-correlation-id-request-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV})
 
+# WSL2/DXG has no /dev/kfd and schedules GPU work through the dxg path. Under WSL2/DXG
+# these workloads run slower in practice and need more timeout headroom (root cause TBD),
+# so scale the timeout only there. Non-WSL keeps the develop baseline (45); WSL scales it
+# up.
+rocprofiler_sdk_wsl_timeout_scale(_EXTERNAL_CORRELATION_ID_TIMEOUT BASE 45)
+
 add_test(NAME external-correlation-id-request
          COMMAND $<TARGET_FILE:external-correlation-id-request>)
 
 set_tests_properties(
     external-correlation-id-request
     PROPERTIES TIMEOUT
-               45
+               ${_EXTERNAL_CORRELATION_ID_TIMEOUT}
                LABELS
                "samples"
                ENVIRONMENT
