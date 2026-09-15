@@ -9,11 +9,13 @@
 // hangs at slot reuse (NCCL_STEPS=8, first hang on the 9th op) unless both the
 // flag poll and the FIFO store use system-scope b128.
 //
-//   Gfx1250EnablesSysScope     — device compile of the guard (1 GPU)
-//   FifoLineSysScopeRoundtrip  — storeLL-shaped b128 store + load on one GPU
+//   Gfx1250EnablesSysScope     — compile-time guard check (1 GPU); verifies the
+//                                macro is 1 on gfx1250, 0 elsewhere
+//   FifoLineSysScopeRoundtrip  — b128 store+load intrinsic sanity check (1 GPU);
+//                                mirrors prims_ll storeLL/loadLLLineB128 shape
 //   SiblingBroadcastSlotReuse  — 64 Ring broadcasts (LL and LL128) on a sibling
-//                                pair; slot reuse begins at the 9th (the hang
-//                                the store-side fix closed)
+//                                pair; the only behavioral test of the fix,
+//                                requires gfx1250 DPX siblings (same PCI bus)
 
 #include "DeviceTestBase.hpp"
 
@@ -50,9 +52,11 @@ __global__ void kernelSysScopeEnabled(int* out) {
 #endif
 }
 
-// Mirrors storeLL + loadLLLineB128: one 16-byte FIFO line, data+flag together.
-__global__ void kernelFifoLineRoundtrip(TestLLLine* line, uint32_t data, uint32_t flag, int* ok)
-{
+// Sanity check for the b128 intrinsics used by prims_ll storeLL/loadLLLineB128.
+// This is NOT a behavioral test of the production code (the device helpers are
+// template class members and cannot be called directly from a test kernel).
+// SiblingBroadcastSlotReuse provides the behavioral coverage via ncclBroadcast.
+__global__ void kernelFifoLineRoundtrip(TestLLLine* line, uint32_t data, uint32_t flag, int* ok) {
 #if RCCL_LL_FIFO_SYS_SCOPE
   union {
     v4u v;
