@@ -4,6 +4,8 @@
 #==================================================================================================
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
+# Temporary no-op change on rccl-tests to exercise TheRock Multi-arch CI
+
 # CMake Toolchain file to define compilers and path to ROCm
 #==================================================================================================
 if (NOT CMAKE_TOOLCHAIN_FILE)
