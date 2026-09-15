@@ -241,7 +241,9 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
         "amdgcn-amd-amdhsa--" + isa->GetProcessorName() + "-strict";
     const core::Isa* strict_isa = core::IsaRegistry::GetIsa(strict_name);
     // gfx1250 (12.5.0) A0 must have a registered strict variant.
-    if (isa->GetMajorVersion() == 12 && isa->GetMinorVersion() == 5)
+    // Later 12.5 steppings (e.g. gfx1251) have no -strict target.
+    if (isa->GetMajorVersion() == 12 && isa->GetMinorVersion() == 5 &&
+        isa->GetStepping() == 0)
       assert(strict_isa != nullptr && "A0 strict ISA variant is not registered.");
     if (strict_isa != nullptr) isa = strict_isa;
   }
