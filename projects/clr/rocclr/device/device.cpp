@@ -59,6 +59,13 @@ extern const char* BlitImageSourceCode;
 
 bool VirtualDevice::ActiveWait() const { return device_().ActiveWait(); }
 
+void VirtualDevice::submitBatchCopyRectMemory(amd::BatchCopyRectMemoryCommand& cmd) {
+  // Only the ROCm backend lowers rect batches into a single submission.  Callers gate on
+  // that, so reaching the base implementation means the command was built for a backend
+  // that cannot execute it.
+  ShouldNotReachHere();
+}
+
 }  // namespace amd::device
 
 static_assert(static_cast<uint32_t>(device::Memory::MemAccess::kMemAccessNone) ==

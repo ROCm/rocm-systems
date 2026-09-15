@@ -29,6 +29,11 @@
 typedef hsa_status_t HSA_API hsa_amd_queue_create_fn(
     hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t num_descs);
 
+typedef hsa_status_t HSA_API hsa_amd_memory_async_batch_copy_rect_fn(
+    const hsa_amd_memory_copy_rect_op_t* ops, size_t num_ops, hsa_agent_t copy_agent,
+    hsa_amd_copy_direction_t dir, uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+    hsa_signal_t completion_signal);
+
 namespace amd {
 namespace roc {
 
@@ -111,6 +116,7 @@ struct RocrEntryPoints {
   decltype(hsa_amd_queue_set_priority)* hsa_amd_queue_set_priority_;
   hsa_amd_queue_create_fn* hsa_amd_queue_create_;
   decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_;
+  hsa_amd_memory_async_batch_copy_rect_fn* hsa_amd_memory_async_batch_copy_rect_;
   decltype(hsa_amd_memory_lock_to_pool)* hsa_amd_memory_lock_to_pool_;
   decltype(hsa_amd_signal_value_pointer)* hsa_amd_signal_value_pointer_;
   decltype(hsa_amd_svm_attributes_set)* hsa_amd_svm_attributes_set_;
@@ -480,6 +486,31 @@ class Hsa : public amd::AllStatic {
     return ROCR_DYN(hsa_amd_memory_async_copy_rect)(dst, dst_offset, src, src_offset, range,
                                                     copy_agent, dir, num_dep_signals, dep_signals,
                                                     completion_signal);
+  }
+  //! Provisional ROCR entry point, loaded optionally so that a CLR built against a newer
+  //! ROCR still runs on an older libhsa-runtime64. Callers must check availability and
+  //! fall back to per-operand rect copies when it is missing.
+  static bool memory_async_batch_copy_rect_available() {
+#ifdef ROCR_DYN_DLL
+    return ROCR_DYN(hsa_amd_memory_async_batch_copy_rect) != nullptr;
+#else
+    return true;
+#endif
+  }
+  static hsa_status_t memory_async_batch_copy_rect(
+    const hsa_amd_memory_copy_rect_op_t* ops, size_t num_ops, hsa_agent_t copy_agent,
+    hsa_amd_copy_direction_t dir, uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+    hsa_signal_t completion_signal) {
+#ifdef ROCR_DYN_DLL
+    auto fn = ROCR_DYN(hsa_amd_memory_async_batch_copy_rect);
+    if (fn == nullptr) {
+      return HSA_STATUS_ERROR;
+    }
+    return fn(ops, num_ops, copy_agent, dir, num_dep_signals, dep_signals, completion_signal);
+#else
+    return hsa_amd_memory_async_batch_copy_rect(ops, num_ops, copy_agent, dir, num_dep_signals,
+                                                dep_signals, completion_signal);
+#endif
   }
   static hsa_status_t signal_value_pointer(hsa_signal_t signal,
     volatile hsa_signal_value_t** value_ptr) {

@@ -3738,6 +3738,66 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
 }
 
 // ================================================================================================
+void VirtualGPU::submitBatchCopyRectMemory(amd::BatchCopyRectMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd, true);
+
+  auto& copyOps = cmd.copyOps();
+  if (copyOps.empty()) {
+    profilingEnd();
+    return;
+  }
+
+  device::Memory::SyncFlags syncFlags;
+  syncFlags.skipEntire_ = false;
+
+  std::vector<device::Memory*> srcDevMems(copyOps.size());
+  std::vector<device::Memory*> dstDevMems(copyOps.size());
+
+  for (size_t i = 0; i < copyOps.size(); ++i) {
+    Memory* srcDevMem = dev().getRocMemory(copyOps[i].srcMemory);
+    Memory* dstDevMem = dev().getRocMemory(copyOps[i].dstMemory);
+
+    if (srcDevMem == nullptr || dstDevMem == nullptr) {
+      LogError("submitBatchCopyRectMemory: Invalid memory objects!");
+      cmd.setStatus(CL_INVALID_MEM_OBJECT);
+      profilingEnd();
+      return;
+    }
+
+    dstDevMem->syncCacheFromHost(*this, syncFlags);
+    srcDevMem->syncCacheFromHost(*this);
+
+    srcDevMems[i] = srcDevMem;
+    dstDevMems[i] = dstDevMem;
+  }
+
+  // copyBufferRectBatch issues the whole batch as one SDMA submission when every operand
+  // qualifies, and otherwise falls back to one copyBufferRect per operand.
+  bool result = static_cast<DmaBlitManager&>(blitMgr())
+                    .copyBufferRectBatch(srcDevMems, dstDevMems, copyOps);
+
+  // Same reasoning as submitBatchCopyMemory: join any signals that are not implicitly
+  // ordered behind the one attached to this command.
+  if (result && !Barriers().IsExternalSignalListEmpty()) {
+    dispatchBarrierPacket(kNopPacketHeader);
+  }
+
+  if (!result) {
+    LogError("submitBatchCopyRectMemory failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+  } else {
+    for (const auto& op : copyOps) {
+      op.dstMemory->signalWrite(&dev());
+    }
+  }
+
+  profilingEnd();
+}
+
+// ================================================================================================
 void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());

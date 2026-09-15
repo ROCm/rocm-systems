@@ -3329,6 +3329,94 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
   hipError_t status = hipSuccess;
 
   *failIdx = SIZE_MAX;
+
+  // Fast path: when every operand is a plain pointer rect copy between two resolvable
+  // memory objects, the whole list goes into one command.  The device layer fuses it into
+  // a single SDMA submission for same-direction host<->device batches and falls back to
+  // per-operand copies otherwise, so behaviour is unchanged in every other case.
+  bool fastPath = true;
+  for (size_t i = 0; i < numOps; ++i) {
+    if (opList[i].src.type != hipMemcpyOperandTypePointer ||
+        opList[i].dst.type != hipMemcpyOperandTypePointer) {
+      fastPath = false;
+      break;
+    }
+  }
+
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (fastPath && hip_stream != nullptr) {
+    std::vector<amd::BatchCopyRectOp> batchOps;
+    batchOps.reserve(numOps);
+
+    for (size_t i = 0; i < numOps && fastPath; ++i) {
+      hipMemcpy3DParms parms = getMemcpy3DParms(opList[i]);
+      status = ihipMemcpy3D_validate(&parms);
+      if (status != hipSuccess) {
+        *failIdx = i;
+        HIP_RETURN(status);
+      }
+
+      HIP_MEMCPY3D desc = hip::getDrvMemcpy3DDesc(parms);
+      if (desc.WidthInBytes == 0 || desc.Height == 0 || desc.Depth == 0) {
+        fastPath = false;
+        break;
+      }
+
+      // Resolves hipMemoryTypeUnified into Host/Device in place.  ihipDrvMemcpy3D_validate
+      // keys off those resolved types, so it has to run first.
+      hipMemoryType srcMemoryType;
+      hipMemoryType dstMemoryType;
+      ihipCopyMemParamSet(&desc, srcMemoryType, dstMemoryType);
+      if ((srcMemoryType != hipMemoryTypeHost && srcMemoryType != hipMemoryTypeDevice) ||
+          (dstMemoryType != hipMemoryTypeHost && dstMemoryType != hipMemoryTypeDevice)) {
+        fastPath = false;
+        break;
+      }
+
+      amd::Coord3D srcOrigin = {desc.srcXInBytes, desc.srcY, desc.srcZ};
+      amd::Coord3D dstOrigin = {desc.dstXInBytes, desc.dstY, desc.dstZ};
+      amd::Coord3D copyRegion = {desc.WidthInBytes, desc.Height, desc.Depth};
+      amd::BufferRect srcRect;
+      amd::BufferRect dstRect;
+      amd::Image* srcImage = nullptr;
+      amd::Image* dstImage = nullptr;
+      status = ihipDrvMemcpy3D_validate(&desc, srcOrigin, dstOrigin, copyRegion, &srcRect,
+                                        &dstRect, &srcImage, &dstImage);
+      if (status != hipSuccess) {
+        *failIdx = i;
+        HIP_RETURN(status);
+      }
+
+      size_t sOffset = 0;
+      size_t dOffset = 0;
+      amd::Memory* srcMemory = nullptr;
+      amd::Memory* dstMemory = nullptr;
+      getMemoryObjectPairs(hip::getCurrentDevice(), opList[i].src.op.ptr.ptr,
+                           opList[i].dst.op.ptr.ptr, srcMemory, dstMemory, sOffset, dOffset);
+      if (srcMemory == nullptr || dstMemory == nullptr) {
+        // Pageable host memory needs the staging path in ihipMemcpy3D.
+        fastPath = false;
+        break;
+      }
+
+      batchOps.emplace_back(
+          srcMemory, dstMemory, srcRect, dstRect, copyRegion,
+          amd::CopyMetadata(true, amd::CopyMetadata::CopyEnginePreference::NONE));
+    }
+
+    if (fastPath && !batchOps.empty()) {
+      amd::BatchCopyRectMemoryCommand* command = new amd::BatchCopyRectMemoryCommand(
+          *hip_stream, CL_COMMAND_COPY_BUFFER_RECT, amd::Command::EventWaitList{},
+          std::move(batchOps));
+      if (command == nullptr) {
+        HIP_RETURN(hipErrorOutOfMemory);
+      }
+      command->enqueue();
+      command->release();
+      HIP_RETURN(hipSuccess);
+    }
+  }
+
   for (int i = 0; i < numOps; ++i) {
     hipMemcpy3DParms parms = getMemcpy3DParms(opList[i]);
     status = ihipMemcpy3D(&parms, stream, true);
