@@ -1821,6 +1821,11 @@
           "name": "Cast_RegistrationRejectsBadArguments",
           "description": "regMr, regMrDmaBuf and deregMr reject a null communicator, and regMr rejects a zero size, instead of dereferencing it",
           "test_filter": "NetIbMPITest.CastRegistrationRejectsBadArguments"
+        },
+        {
+          "name": "Cast_SetupUnilateralConnectFailureReported",
+          "description": "Connect-side device is invalid on one rank only; both ranks must report the setup failure and reach the same barrier, not hang",
+          "test_filter": "NetIbMPITest.CastSetupUnilateralConnectFailureReported"
         }
       ]
     },

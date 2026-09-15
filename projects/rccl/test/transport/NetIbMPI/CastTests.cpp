@@ -1606,4 +1606,69 @@ TEST_F(NetIbMPITest, CastRegistrationRejectsBadArguments) {
     TeardownConnection(recvComm, listenComm, sendComm, nullptr);
 }
 
+// =============================================================================
+// Test: CastSetupUnilateralConnectFailureReported
+//
+// Regression cover for the handshake this branch's SetupCastConnection adds: the case
+// the PR describes but does not otherwise test, where the failure happens on only one
+// rank. Every other setup test in this suite fails at listen (dev=0 is valid on both
+// sides, so accept/connect never runs) or does not fail at all; this is the first to
+// reach the connect-side failure branch, which is the one the handshake status word
+// exists for. It also exercises accept's timeout loop on the listen side, since rank 0
+// waits out the full window with no connector ever arriving.
+//
+// The trigger: IbCastListen never validates dev -- it stores it and only bounds-checks
+// inside an optional GID-embedding block gated on the same subnet-routing flag, so a
+// bad index there still returns ncclSuccess. IbCastConnectImpl does check
+// (dev >= IbCastNMergedDevs -> ncclInternalError), and only after the async connect's
+// ncclSocketReady() first reports ready -- there is no synchronous failure to catch
+// before that. So rank 1 (the connector) is handed an out-of-range device and rank 0
+// (the listener) a valid one: listen succeeds, accept then times out because nothing
+// ever connects, and the two independent failures are exactly what a real unilateral
+// setup failure produces -- neither rank crashes into the other's absence, and both
+// converge on the same reported outcome.
+// =============================================================================
+TEST_F(NetIbMPITest, CastSetupUnilateralConnectFailureReported) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    net_ = &netIbCast;
+    ASSERT_NO_FATAL_FAILURE(AssertInitAndGetDevices(nullptr));
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+    ASSERT_GT(ndev, 0);
+
+    const int rank = MPIEnvironment::world_rank;
+    // Valid for rank 0 (the listener); one past the last real index for rank 1 (the
+    // connector), which IbCastConnectImpl's own bounds check refuses.
+    const int dev = (rank == 0) ? 0 : ndev;
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    std::string why;
+    const ncclResult_t setupRet = SetupCastConnection(dev, &listenComm, &sendComm, &recvComm, &why);
+
+    EXPECT_NE(setupRet, ncclSuccess)
+        << "setup with an out-of-range connect-side device must not report success";
+    // The handshake makes both ranks agree, so both must report failure, not only the
+    // one that failed locally -- proving the status word actually crossed, not just
+    // that rank 1's local connect failed.
+    EXPECT_EQ(why.empty(), false) << "a failed setup must explain itself";
+
+    // Neither side may hand back a live communicator on the failure path: the
+    // no-fatal-assertion contract this branch adds means the caller has to be able to
+    // trust a non-success return without inspecting the out-parameters.
+    EXPECT_EQ(listenComm, nullptr);
+    EXPECT_EQ(sendComm, nullptr);
+    EXPECT_EQ(recvComm, nullptr);
+
+    // Both ranks reach this collective from the setup failure, which is the property
+    // the handshake exists to guarantee -- the bug it replaced would have left rank 0
+    // here alone.
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 #endif // MPI_TESTS_ENABLED
