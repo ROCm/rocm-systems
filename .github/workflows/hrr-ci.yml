@@ -23,7 +23,12 @@ env:
   # family: linux-gfx110X-gpu-rocm and linux-gfx120X-gpu-rocm are wildcard
   # pools, and a machine whose arch is missing from the binary fails every
   # workload with hipErrorInvalidImage (200) rather than skipping.
-  HRR_ARCHS: "gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1153;gfx1200;gfx1201"
+  # Every arch a pool can hand out, not one per family: a machine whose arch
+  # is missing from the fat binary fails every workload with
+  # hipErrorInvalidImage (200) instead of skipping. gfx1250 (MI455,
+  # linux-mi455-gpu-rocm) is carried here so the binary is ready the moment
+  # that pool is healthy -- see the note on the integration matrix below.
+  HRR_ARCHS: "gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1153;gfx1200;gfx1201;gfx1250"
   ROCM_INDEX_URL: "https://rocm.nightlies.amd.com/whl-multi-arch/"
 
 jobs:
@@ -167,6 +172,12 @@ jobs:
   build:
     name: "Build (multi-arch)"
     runs-on: azure-linux-scale-rocm
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      # Hash the compiler by content, not mtime: the SDK wheel is reinstalled
+      # every run, so an mtime check would miss on every single object.
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: "5G"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -186,7 +197,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             ninja-build pkg-config libnuma-dev libelf-dev libdrm-dev \
             libgl1-mesa-dev libglx-dev mesa-common-dev \
-            libclang-rt-18-dev
+            libclang-rt-18-dev ccache
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -200,9 +211,35 @@ jobs:
           rocm-sdk init
           echo "ROCM_SDK=$(python -c 'import _rocm_sdk_devel,os;print(os.path.dirname(_rocm_sdk_devel.__file__))')" >> "$GITHUB_ENV"
 
+      # Nothing survived between runs before this: the artifact fan-out only
+      # reuses a build WITHIN a run. ccache is the house convention (15
+      # workflows) and is carried across runs by actions/cache (9 workflows)
+      # because azure-linux-scale-rocm is ephemeral and keeps no state.
+      #
+      # This cache is a SPEED optimisation only and can never make a stale
+      # binary look fresh. The key exists to pick a good starting point; it
+      # is ccache itself that decides reuse, and it keys on the preprocessed
+      # source plus the command line plus the compiler contents. A changed
+      # input is therefore a miss by construction -- restoring a stale cache
+      # costs misses, never a wrong object. Do not replace this with a
+      # "skip the build if the key matches" scheme: that trades a correctness
+      # property for the same speed.
+      - name: Restore ccache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: hrr-ccache-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            hrr-ccache-${{ runner.os }}-
+
+      - name: Zero ccache statistics
+        run: ccache --zero-stats
+
       - name: Build amdhip64 with the HRR capture shims
         run: |
           cmake -S projects/clr -B build/clr -GNinja -Wno-dev \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${ROCM_SDK}" \
             -DROCM_PATH="${ROCM_SDK}" \
@@ -214,7 +251,18 @@ jobs:
 
       - name: Build projects/hrr for every testable architecture
         run: |
+          # C and C++ only. CMAKE_HIP_COMPILER_LAUNCHER is deliberately NOT
+          # set: HIP device compilation fans one TU out to a code object per
+          # --offload-arch and bundles them, and ccache's handling of that
+          # multi-output bundling is not something this workflow has proven.
+          # A wrong hit there would mean testing a binary that does not match
+          # its source, which is exactly the failure mode this cache is
+          # required not to introduce. The C++ half (CLR/amdhip64, the bulk of
+          # the wall clock) is cached; extend to HIP only after a run proves
+          # the arch-embedding check still passes on a fully cached build.
           cmake -S projects/hrr -B build/hrr -GNinja -Wno-dev \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${ROCM_SDK}" \
             -DROCM_PATH="${ROCM_SDK}" \
@@ -226,6 +274,10 @@ jobs:
             -DHRR_BUILD_TESTS=ON \
             -DHRR_BUILD_INTEGRATION_TESTS=ON
           cmake --build build/hrr -j
+
+      - name: ccache statistics
+        if: always()
+        run: ccache --show-stats --verbose || ccache --show-stats
 
       - name: Assert the expected integration cases are present
         run: |
@@ -294,6 +346,32 @@ jobs:
           # Not exposed by resolve-ci-config; taken from TheRock's family matrix.
           - { family: gfx1150, runner: "linux-gfx1150-gpu-rocm" }
           - { family: gfx1153, runner: "linux-gfx1153-gpu-rocm" }
+          # gfx1250 (MI455) is WITHHELD, not forgotten. The binary already
+          # carries it via HRR_ARCHS, so enabling this is one line:
+          #
+          #   - { family: gfx1250, runner: "linux-mi455-gpu-rocm" }
+          #
+          # The pool label is named for the product, not the arch, which is why
+          # searching for linux-gfx125X-* finds nothing. gfx125x is a real
+          # family key (therock-multi-arch-ci-nightly.yml) and hip-tests already
+          # reaches gfx1250 through therock-test-linux-mi455 in therock-ci.yml.
+          #
+          # It is withheld because the machines are unhealthy, not because the
+          # wiring is unknown. As of 2026-09-15: therock-multi-arch-ci.yml sets
+          # this family test-runs-on: "" with the note "MI455 machine is down";
+          # no MI455 *test* job has executed in the last 30 therock-ci runs, only
+          # builds; and the last one that did run (PR #10632, 2026-09-14) waited
+          # 79 minutes in queue, was picked up by
+          # linux-mi455-gpu-rocm-spur-196145-0017, then died in 9 seconds when
+          # its container vanished.
+          #
+          # Adding it to THIS matrix would make report wait out that queue on
+          # every run, which is the opposite of what this workflow needs, and
+          # then publish an infra failure. therock-ci.yml keeps MI455 in a
+          # separate non-blocking job excluded from the summary for the same
+          # reason; if gfx1250 is wanted before the pool is healthy, copy that
+          # posture rather than adding the line above, so nothing here waits on
+          # it. Re-check the three signals above before enabling.
     steps:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
