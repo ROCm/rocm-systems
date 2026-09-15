@@ -28,7 +28,6 @@
 #include "gtest/gtest.h"
 
 #include <numeric>
-#include <mpi.h>
 
 #include "../src/atomic.hpp"
 #include "../src/ipc_policy.hpp"

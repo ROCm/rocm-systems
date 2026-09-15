@@ -34,6 +34,19 @@ project(rocshmem_unit_tests VERSION 1.0.0 LANGUAGES CXX)
 option(ASAN "Enable AddressSanitizer" ${ASAN})
 
 ###############################################################################
+# ROCSHMEM / MPI early check — must happen before add_executable so that
+# return() skips target creation entirely when MPI is absent.
+###############################################################################
+find_package(hip REQUIRED)
+if (NOT USE_EXTERNAL_MPI STREQUAL "OFF")
+  find_package(MPI)
+endif()
+if (NOT MPI_FOUND)
+  message(WARNING "MPI not found or disabled (USE_EXTERNAL_MPI=OFF) — skipping unit tests")
+  return()
+endif()
+
+###############################################################################
 # SOURCES
 ###############################################################################
 add_executable(${PROJECT_NAME} "")
@@ -97,12 +110,6 @@ if (USE_GDA)
       topology_gtest.cpp
   )
 endif()
-
-###############################################################################
-# ROCSHMEM DEPENDENCY
-###############################################################################
-find_package(hip REQUIRED)
-find_package(MPI REQUIRED)
 
 if (BUILD_TESTS_ONLY)
   find_package(rocshmem REQUIRED)

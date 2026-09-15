@@ -24,6 +24,39 @@ you must select the device that this PE is associated to by calling
 <https://rocm.docs.amd.com/projects/HIP/en/docs-6.0.0/doxygen/html/group___device.html#ga43c1e7f15925eeb762195ccb5e063eae>`_.
 
 .. WARNING::
+   The following two overloads are deprecated. Use :cpp:func:`rocshmem_init_attr`
+   with the ``ROCSHMEM_INIT_WITH_MPI_COMM`` flag instead.
+
+.. cpp:function:: [[deprecated]] __host__ void rocshmem_init(MPI_Comm comm)
+
+  :param comm: MPI communicator to use. If ``MPI_COMM_NULL``, ``MPI_COMM_WORLD`` is used.
+  :returns: None.
+
+**Description:**
+This routine initializes the rocSHMEM library using the provided MPI communicator.
+
+.. note::
+
+   This overload is only declared when ``<mpi.h>`` is included **before**
+   ``<rocshmem/rocshmem.hpp>``.
+
+.. cpp:function:: [[deprecated]] __host__ int rocshmem_init_thread(int requested, int *provided, MPI_Comm comm)
+
+  :param requested: Requested thread mode (from ``rocshmem_thread_ops``).
+  :param provided:  Thread mode selected by the runtime. May differ from ``requested``.
+  :param comm:      MPI communicator to use. If ``MPI_COMM_NULL``, ``MPI_COMM_WORLD`` is used.
+  :returns int:     Returns ``0`` on success; otherwise, returns a nonzero value.
+
+**Description:**
+This routine initializes the rocSHMEM library with thread support negotiation,
+using the provided MPI communicator.
+
+.. note::
+
+   This overload is only declared when ``<mpi.h>`` is included **before**
+   ``<rocshmem/rocshmem.hpp>``.
+
+.. WARNING::
    Routine `rocshmem_wg_init` has been deprecated.
 
 .. cpp:function:: [[deprecated]] __device__ void rocshmem_wg_init(void)
