@@ -342,6 +342,9 @@ void run_tier(const std::string& tier) {
   REQUIRE_FALSE(obs.workloads.empty());
 
   int covered = 0, not_exercised = 0, skipped = 0;
+  // Rows declared as never captured. Kept apart from `covered`: see the
+  // floor comment below for why their absence is not evidence of coverage.
+  int absent_asserted = 0;
   std::vector<std::string> missing;
   for (size_t i = 0; i < kHrrApiMatrixCount; ++i) {
     const HrrApiExpectation& e = kHrrApiMatrix[i];
@@ -359,7 +362,7 @@ void run_tier(const std::string& tier) {
       INFO("API: " << e.api << " (tier " << tier
                    << ") is declared as never captured");
       CHECK(count == 0);
-      ++covered;
+      ++absent_asserted;
       continue;
     }
 
@@ -418,11 +421,29 @@ void run_tier(const std::string& tier) {
     if (!missing_list.empty()) missing_list += ", ";
     missing_list += m;
   }
-  INFO("Tier " << tier << ": " << covered << " covered, " << not_exercised
+  // An expect_captured == false row asserts an absence, and an absence is
+  // true whether the workload reached the API or never got near it: a
+  // capability-guarded block that quietly skips its call sites produces the
+  // same count == 0 as a block that ran. Counting those rows as coverage
+  // therefore credits the floor with APIs nothing shows were reached, which
+  // is precisely the loss min_covered exists to catch. They are reported on
+  // their own line and subtracted from the floor instead, so `covered` means
+  // "APIs with positive evidence".
+  //
+  // This keeps the same effective threshold as before rather than raising
+  // it: min_covered is generated counting these rows (T1 is 10 of 14, T0 6
+  // of 67 against a floor of 65), so tightening the floor as well needs
+  // check_matrix.py to re-emit min_covered over assertable rows only.
+  const int evidence_floor = floor.min_covered - absent_asserted;
+  INFO("Tier " << tier << ": " << covered << " covered with evidence, "
+               << absent_asserted << " absence-asserted, " << not_exercised
                << " not exercised, " << skipped << " skipped");
+  INFO("Evidence floor: " << evidence_floor << " (min_covered "
+               << floor.min_covered << " less " << absent_asserted
+               << " absence rows)");
   INFO("Not exercised: " << missing_list);
   INFO("Workloads that contributed: " << obs.workloads.size());
-  CHECK(covered >= floor.min_covered);
+  CHECK(covered >= evidence_floor);
 }
 
 }  // namespace
