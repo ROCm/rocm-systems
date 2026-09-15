@@ -11,6 +11,7 @@
 #include "hip_code_object.hpp"
 #include "platform/program.hpp"
 #include <hip/hip_version.h>
+#include <mutex>
 
 const char* amd_dbgapi_get_build_name(void) { return HIP_VERSION_BUILD_NAME; }
 
@@ -66,13 +67,18 @@ amd::Kernel* Function::BuildKernel(hipModule_t hmod) const {
 }
 
 // ================================================================================================
-hipError_t Function::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod) {
+hipError_t Function::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod, int deviceId) {
   guarantee((dFunc_.size() == g_devices.size()), "dFunc Size mismatch");
-  int dev = ihipGetDevice();
-  if (dFunc_[dev] == nullptr) {
-    dFunc_[dev] = BuildKernel(hmod);
+  if (deviceId < 0 || static_cast<size_t>(deviceId) >= dFunc_.size()) {
+    return hipErrorInvalidDevice;
   }
-  *hfunc = asHipFunction(dFunc_[dev]);
+
+  if (dFunc_[deviceId] == nullptr) {
+    dFunc_[deviceId] = BuildKernel(hmod);
+  }
+
+  *hfunc = asHipFunction(dFunc_[deviceId]);
+
   return hipSuccess;
 }
 
@@ -116,8 +122,12 @@ hipError_t Function::GetStatFuncAttr(hipFuncAttributes* func_attr, int deviceId)
   const std::vector<amd::Device*>& devices = amd::Device::getDevices(CL_DEVICE_TYPE_GPU, false);
   amd::Kernel* kernel = dFunc_[deviceId];
   auto* device_handle = devices[deviceId];
-  const device::Kernel::WorkGroupInfo* wginfo =
-      kernel->getDeviceKernel(*device_handle)->workGroupInfo();
+  auto* device_kernel = kernel->getDeviceKernel(*device_handle);
+  if (device_kernel == nullptr) {
+    return hipErrorInvalidDeviceFunction;
+  }
+  std::scoped_lock lock(device_kernel->attributeLock());
+  const device::Kernel::WorkGroupInfo* wginfo = device_kernel->workGroupInfo();
   int binaryVersion =
       device_handle->isa().versionMajor() * 10 + device_handle->isa().versionMinor();
   func_attr->sharedSizeBytes = static_cast<int>(wginfo->localMemSize_);
