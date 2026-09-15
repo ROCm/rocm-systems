@@ -1989,6 +1989,7 @@ if(ROCMINFO_EXECUTABLE AND RJ_HAS_KFD_DEVICE)
         _rocminfo_test
         IN
         ITEMS
+            RealpathSupportsAllocatedOutput
             ExitsSuccessfully
             InterposerActive
             HsaSystemAttributes

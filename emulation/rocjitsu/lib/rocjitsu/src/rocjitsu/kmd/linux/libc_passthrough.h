@@ -51,7 +51,8 @@ public:
   int (*access)(const char *, int) = nullptr;
   int (*fstat_fn)(int, struct stat *) = nullptr;
   ssize_t (*readlink_fn)(const char *, char *, size_t) = nullptr;
-  char *(*realpath_fn)(const char *, char *) = nullptr;
+  using RealpathFn = char *(*)(const char *, char *);
+  RealpathFn realpath_fn = nullptr;
   /// @brief The nine legacy stat aliases rocJITsu also exports.
   /// @details Resolved EAGERLY here rather than through a function-local static in
   /// each wrapper. A lazy static's C++ initialization guard can be inherited
@@ -76,6 +77,9 @@ public:
 
   /// @brief Resolve the real libc functions from the next dynamic object.
   void resolve();
+
+  /// @brief Resolve the realpath ABI that accepts a null output buffer.
+  static RealpathFn resolve_realpath();
 
 private:
   bool initialized_ = false;

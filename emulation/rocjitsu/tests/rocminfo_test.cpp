@@ -9,15 +9,27 @@
 
 #include <array>
 #include <charconv>
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
 
 namespace {
+
+TEST(RocminfoTest, RealpathSupportsAllocatedOutput) {
+  // The launcher uses filesystem::canonical to locate its runtime libraries.
+  // Under LD_PRELOAD, realpath must retain its allocating POSIX behavior.
+  std::array<char, PATH_MAX> buffer{};
+  ASSERT_NE(::realpath(".", buffer.data()), nullptr);
+  std::unique_ptr<char, decltype(&std::free)> allocated(::realpath(".", nullptr), &std::free);
+  ASSERT_NE(allocated, nullptr);
+  EXPECT_STREQ(allocated.get(), buffer.data());
+}
 
 struct ProcessResult {
   std::string output;

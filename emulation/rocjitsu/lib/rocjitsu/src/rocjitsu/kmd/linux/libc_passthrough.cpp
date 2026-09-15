@@ -13,6 +13,16 @@
 
 namespace rocjitsu {
 
+LibcPassthrough::RealpathFn LibcPassthrough::resolve_realpath() {
+#if defined(__GLIBC__) && defined(__x86_64__)
+  // On older glibc, unversioned RTLD_NEXT lookup can select realpath@GLIBC_2.2.5,
+  // which rejects a null output buffer. Request the allocating ABI explicitly.
+  return reinterpret_cast<RealpathFn>(dlvsym(RTLD_NEXT, "realpath", "GLIBC_2.3"));
+#else
+  return util::lookup_symbol<RealpathFn>(RTLD_NEXT, "realpath");
+#endif
+}
+
 void LibcPassthrough::resolve() {
   if (initialized_)
     return;
@@ -54,7 +64,7 @@ void LibcPassthrough::resolve() {
   lxstat_fn = util::lookup_symbol<decltype(lxstat_fn)>(handle, "__lxstat");
   lxstat64_fn = util::lookup_symbol<decltype(lxstat64_fn)>(handle, "__lxstat64");
   readlink_fn = util::lookup_symbol<decltype(readlink_fn)>(handle, "readlink");
-  realpath_fn = util::lookup_symbol<decltype(realpath_fn)>(handle, "realpath");
+  realpath_fn = resolve_realpath();
   fork = util::lookup_symbol<decltype(fork)>(handle, "fork");
   // Keep ready() false unless every required interposed libc entry point was
   // resolved. In release builds the asserts disappear, so the boolean must not

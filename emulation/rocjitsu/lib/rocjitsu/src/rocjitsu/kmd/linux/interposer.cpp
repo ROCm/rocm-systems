@@ -4539,7 +4539,7 @@ RJ_INTERPOSER_EXPORT ssize_t readlink(const char *path, char *buf, size_t bufsiz
 
 RJ_INTERPOSER_EXPORT char *realpath(const char *path, char *resolved_path) {
   if (!InterposerContext::real().ready()) {
-    auto fn = util::lookup_symbol<char *(*)(const char *, char *)>(RTLD_NEXT, "realpath");
+    auto fn = LibcPassthrough::resolve_realpath();
     return fn ? fn(path, resolved_path) : nullptr;
   }
   if (!rj_owns_interposer_state())
