@@ -38,6 +38,37 @@ class GraphExecSegmented;
 class UserObject;
 class GraphKernelNode;
 typedef GraphNode* Node;
+enum class GraphMemcpyNodeKind {
+  None,
+  ThreeD,
+  OneD,
+  FromSymbol,
+  ToSymbol,
+  Driver,
+};
+
+// Symbol nodes can switch to generic 1D operation through the 1D setter APIs.
+inline bool IsMemcpy1DFamily(GraphMemcpyNodeKind kind) {
+  return kind == GraphMemcpyNodeKind::OneD || kind == GraphMemcpyNodeKind::FromSymbol ||
+         kind == GraphMemcpyNodeKind::ToSymbol;
+}
+
+// Compares two dependency lists as sets, mapping new nodes to old through newToOld.
+inline bool HasMatchingDependencies(const std::vector<Node>& oldDependencies,
+                                    const std::vector<Node>& newDependencies,
+                                    const std::unordered_map<Node, Node>& newToOld) {
+  if (newDependencies.size() != oldDependencies.size()) {
+    return false;
+  }
+  const std::unordered_set<Node> oldDependencySet(oldDependencies.begin(), oldDependencies.end());
+  for (const Node& newDep : newDependencies) {
+    auto it = newToOld.find(newDep);
+    if (it == newToOld.end() || oldDependencySet.find(it->second) == oldDependencySet.end()) {
+      return false;
+    }
+  }
+  return true;
+}
 hipError_t ihipGraphAddNode(hip::GraphNode* graphNode, hip::Graph* graph,
                             hip::GraphNode* const* pDependencies, size_t numDependencies,
                             bool capture = true, int devId = 0);
@@ -275,24 +306,29 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   hipError_t CaptureAndFormPacket(GraphKernelArgManager* kernArgMgr,
                                   std::vector<uint8_t*>* batchPackets = nullptr,
                                   std::vector<const std::string*>* batchKernelNames = nullptr,
-                                  std::vector<uint8_t*>* batchMetadataPackets = nullptr) {
+                                  std::vector<uint8_t*>* batchMetadataPackets = nullptr,
+                                  bool reuseKernargSlots = true) {
     auto capture_stream = hip::getNullStream(g_devices[dev_id_]->devices()[0]->context(), false);
     hipError_t status = CreateCommand(capture_stream);
     if (status != hipSuccess) {
       return status;
     }
 
-    // Release last created packet memory before they are overwritten with new packets
-    std::for_each(gpuPackets_.begin(), gpuPackets_.end(), [](auto p) { delete[] p; });
-    std::for_each(gpuMetadataPackets_.begin(), gpuMetadataPackets_.end(),
-                  [](auto p) { delete[] p; });
-    // Clear the pointer array
-    gpuPackets_.clear();
-    gpuMetadataPackets_.clear();
+    gpuPacketScratch_.clear();
+    gpuMetadataPacketScratch_.clear();
+    kernargSlotIndex_ = 0;
+    captureCtx_.gpuPackets = &gpuPacketScratch_;
+    captureCtx_.gpuMetadataPackets = &gpuMetadataPacketScratch_;
+    captureCtx_.reusableGpuPackets = &gpuPackets_;
+    captureCtx_.reusableGpuMetadataPackets = &gpuMetadataPackets_;
+    captureCtx_.kernargSlots = &kernargSlots_;
+    captureCtx_.kernargSlotIndex = &kernargSlotIndex_;
+    captureCtx_.reuseKernargSlots = reuseKernargSlots;
+    captureCtx_.kernArgMgr = kernArgMgr;
+    captureCtx_.capturedKernelName = &capturedKernelName_;
 
     for (auto& command : commands_) {
-      command->setPktCapturingState(true, &gpuPackets_, kernArgMgr, &capturedKernelName_,
-                                    &gpuMetadataPackets_);
+      command->setPktCapturingState(true, &captureCtx_);
       // Enqueue command to capture GPU Packet. The packet is not submitted to the device.
       // The packet is stored in gpuPacket_ and submitted during graph launch.
       command->submit(*(command->queue())->vdev());
@@ -302,9 +338,19 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     // The metadata capture path appends one metadata packet per AQL packet, but
     // only on devices with a metadata ring buffer. Normalize to be pointer-parallel
     // with gpuPackets_ so downstream flattening can rely on a 1:1 index mapping.
+    std::for_each(gpuPackets_.begin(), gpuPackets_.end(), [](auto p) { delete[] p; });
+    std::for_each(gpuMetadataPackets_.begin(), gpuMetadataPackets_.end(),
+                  [](auto p) { delete[] p; });
+    gpuPackets_.clear();
+    gpuMetadataPackets_.clear();
+    gpuPackets_.swap(gpuPacketScratch_);
+    gpuMetadataPackets_.swap(gpuMetadataPacketScratch_);
+
     if (gpuMetadataPackets_.empty()) {
       gpuMetadataPackets_.resize(gpuPackets_.size(), nullptr);
     }
+    gpuPacketScratch_.reserve(gpuPackets_.size());
+    gpuMetadataPacketScratch_.reserve(gpuMetadataPackets_.size());
 
     // Accumulate packets directly into the batch (only if batch vectors are provided)
     if (batchPackets != nullptr && batchKernelNames != nullptr) {
@@ -355,6 +401,9 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   size_t GetOutDegree() const { return edges_.size(); }
   /// Returns graph node dependencies
   const std::vector<Node>& GetDependencies() const { return dependencies_; }
+
+ private:
+  friend class Graph;
   /// Update graph node dependecies
   void SetDependencies(std::vector<Node>& dependencies) {
     dependencies_.clear();
@@ -377,26 +426,6 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   void AddEdge(const Node& childNode) {
     edges_.push_back(childNode);
   }
-  /// Add edge, update parent node outdegree, child node indegree and dependency
-  void AddEdgeDep(const Node& childNode) {
-    AddEdge(childNode);
-    childNode->AddDependency(this);
-  }
-  /// Remove edge, update parent node outdegree, child node indegree and dependency
-  bool RemoveEdgeDep(const Node& childNode) {
-    // std::remove changes the end() hence saving it before hand for validation
-    auto currEdgeEnd = edges_.end();
-    auto it = std::remove(edges_.begin(), edges_.end(), childNode);
-    if (it == currEdgeEnd) {
-      // Should come here if childNode is not present in the edge list
-      return false;
-    }
-    edges_.erase(it, edges_.end());
-    childNode->RemoveDependency(this);
-    return true;
-  }
-  /// Return graph node children
-  const std::vector<Node>& GetEdges() const { return edges_; }
   /// Updates graph node children
   void SetEdges(std::vector<Node>& edges) {
     edges_.clear();
@@ -404,6 +433,14 @@ class GraphNode : public hipGraphNodeDOTAttribute {
       edges_.push_back(entry);
     }
   }
+
+ public:
+  /// Add edge, update parent node outdegree, child node indegree and dependency.
+  void AddEdgeDep(const Node& childNode);
+  /// Remove edge, update parent node outdegree, child node indegree and dependency.
+  bool RemoveEdgeDep(const Node& childNode);
+  /// Return graph node children
+  const std::vector<Node>& GetEdges() const { return edges_; }
   /// Get topological sort of the nodes embedded as part of the graphnode(e.g. ChildGraph)
   virtual bool TopologicalOrder(std::vector<Node>& TopoOrder) { return true; }
   /// Update waitlist of the nodes embedded as part of the graphnode(e.g. ChildGraph)
@@ -434,9 +471,18 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     return hipSuccess;
   }
   Graph* GetParentGraph() { return parentGraph_; }
+  GraphNode* GetOriginalNode() const { return originalNode_; }
+  //! True when committed params have stale packets from a failed recapture.
+  bool NeedsRecapture() const { return needsRecapture_; }
+  void SetNeedsRecapture(bool needsRecapture) { needsRecapture_ = needsRecapture; }
   virtual Graph* GetChildGraph() { return nullptr; }
   void SetParentGraph(Graph* graph) { parentGraph_ = graph; }
   virtual hipError_t SetParams(GraphNode* node) { return hipSuccess; }
+  // Default true: only child-graph nodes carry nested topology to compare.
+  virtual bool HasSameTopology(const GraphNode* node) const { return true; }
+  // Default false: conservatively forces SetParams for node types without an override.
+  virtual bool HasSameParams(const GraphNode* node) const { return false; }
+  virtual GraphMemcpyNodeKind GetMemcpyNodeKind() const { return GraphMemcpyNodeKind::None; }
   virtual void GenerateDOT(std::ostream& fout, hipGraphDebugDotFlags flag) {}
   virtual void GenerateDOTNode(size_t graphId, std::ostream& fout, hipGraphDebugDotFlags flag) {
     fout << "\n";
@@ -527,9 +573,16 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   static amd::Monitor nodeSetLock_;
   static amd::Monitor WorkerThreadLock_;
   unsigned int isEnabled_;
+  GraphNode* originalNode_ = nullptr;
+  bool needsRecapture_ = false;       //!< Committed params, stale packets (see NeedsRecapture)
   bool signal_is_required_ = false;   //!< This node requires a signal on the command
   std::vector<uint8_t*> gpuPackets_;  //!< GPU Packet to enqueue during graph launch
   std::vector<uint8_t*> gpuMetadataPackets_;  //!< Metadata prefetch packets (parallel to gpuPackets_)
+  std::vector<uint8_t*> gpuPacketScratch_;
+  std::vector<uint8_t*> gpuMetadataPacketScratch_;
+  std::vector<amd::GraphKernargSlot> kernargSlots_;
+  size_t kernargSlotIndex_ = 0;
+  amd::GraphPacketCaptureContext captureCtx_;  //!< Installed on commands during packet capture
   const std::string* capturedKernelName_ = nullptr;
   size_t alignedKernArgSize_ = 256;       //!< Aligned size required for kernel args
   size_t kernargSegmentByteSize_ = 512;   //!< Kernel arg segment byte size
@@ -690,6 +743,10 @@ class Graph {
 
   /// Return graph unique ID
   int GetID() const { return id_; }
+  uint64_t GetTopologyVersion() const { return topologyVersion_; }
+  uint64_t GetOriginalTopologyVersion() const { return originalTopologyVersion_; }
+  int GetOriginalGraphID() const { return originalGraphId_; }
+  void MarkTopologyChanged() { ++topologyVersion_; }
 
   // check graphs validity
   static bool isGraphValid(Graph* pGraph);
@@ -708,6 +765,8 @@ class Graph {
   /// returns all the nodes in the graph
   const std::vector<Node>& GetNodes() const { return vertices_; }
   const std::vector<Node>& GetTopoOrder() const { return topoOrder_; }
+  //! Returns an owned copy of the update topological order.
+  std::vector<Node> GetUpdateTopoOrder();
   /// returns all the edges in the graph
   std::vector<std::pair<Node, Node>> GetEdges() const;
   // returns the original graph ptr if cloned
@@ -997,6 +1056,12 @@ class Graph {
   hip::MemoryPool* mem_pool_;          //!< Memory pool, associated with this graph
   std::unordered_set<GraphNode*> capturedNodes_;
   bool graphInstantiated_;
+  uint64_t topologyVersion_ = 0;
+  uint64_t originalTopologyVersion_ = 0;
+  int originalGraphId_ = -1;
+  uint64_t updateTopoOrderVersion_ = ~uint64_t{0};
+  std::vector<Node> updateTopoOrder_;
+  amd::Monitor updateTopoOrderLock_;  //!< Guards the updateTopoOrder_ cache rebuild
   //! Map of device ID to vector of streams allocated for that device during graph execution.
   //! Each device may require multiple streams to handle parallel execution of graph nodes.
   std::unordered_map<int, std::vector<hip::Stream*>> streams_dev_;
@@ -1017,6 +1082,31 @@ class Graph {
   std::vector<Batch> batches_;
 };
 
+// Bumps Graph::topologyVersion_, which the exec-update fast path and cached topo order key off.
+inline void GraphNode::AddEdgeDep(const Node& childNode) {
+  AddEdge(childNode);
+  childNode->AddDependency(this);
+  if (parentGraph_ != nullptr) {
+    parentGraph_->MarkTopologyChanged();
+  }
+}
+
+inline bool GraphNode::RemoveEdgeDep(const Node& childNode) {
+  // std::remove changes the end() hence saving it before hand for validation
+  auto currEdgeEnd = edges_.end();
+  auto it = std::remove(edges_.begin(), edges_.end(), childNode);
+  if (it == currEdgeEnd) {
+    // Should come here if childNode is not present in the edge list
+    return false;
+  }
+  edges_.erase(it, edges_.end());
+  childNode->RemoveDependency(this);
+  if (parentGraph_ != nullptr) {
+    parentGraph_->MarkTopologyChanged();
+  }
+  return true;
+}
+
 // ================================================================================================
 // GraphExecBase — shared statics and interface for all graph-exec variants.
 // GraphExecClassic (PAL/Windows) and GraphExecSegmented (Linux/ROCm) inherit from this.
@@ -1026,6 +1116,8 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   static std::recursive_mutex graphExecSetLock_;
   static std::recursive_mutex graphExecStreamCreateLock_;
   static std::shared_mutex graphExecTrimLock_;
+  //! Held exclusively by exec updates and shared by Run(), so a refcount observed as 1 stays 1.
+  std::shared_mutex execUpdateLock_;
 
   GraphExecBase(uint64_t flags = 0)
       : ReferenceCountedObject(), Graph(hip::getCurrentDevice()), flags_(flags) {
@@ -1069,6 +1161,8 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   virtual hipError_t Run(hip::Stream* stream) = 0;
   // AQL packet update — no-op on the classic path (PAL has no AQL capture).
   virtual hipError_t UpdateAQLPacket(hip::GraphNode* node) { return hipSuccess; }
+  virtual void BeginAQLPacketUpdates(bool allowKernargReuse = true) {}
+  virtual void EndAQLPacketUpdates() {}
   virtual hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) {
     return hipSuccess;
   }
@@ -1138,6 +1232,9 @@ class GraphExecSegmented : public GraphExecBase {
   // Capture GPU Packets from graph commands
   hipError_t CaptureAQLPackets();
   hipError_t UpdateAQLPacket(hip::GraphNode* node) override;
+  // No default: on virtuals a default binds to the static type, so callers pass the flag explicitly.
+  void BeginAQLPacketUpdates(bool allowKernargReuse) override;
+  void EndAQLPacketUpdates() override;
   // Handle packetBatches_ updates when nodes are enabled/disabled
   hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) override;
   //! Recycle HW event signals borrowed for a launch back to the signal pool.
@@ -1153,7 +1250,7 @@ class GraphExecSegmented : public GraphExecBase {
     kernArgManager_ = kernArgManager;
   }
   GraphKernelArgManager* GetKernelArgManager() { return kernArgManager_; }
-  hipError_t CaptureAndFormPacketsForGraph();
+  hipError_t CaptureAndFormPacketsForGraph(bool reuseKernargSlots = true);
   void GetKernelArgSizeForGraph(std::unordered_map<int, size_t>& kernArgSizeForGraph);
 
   //! out_signal_set, when non-null, marks the top-level launch path: signals
@@ -1238,6 +1335,7 @@ class GraphExecSegmented : public GraphExecBase {
     std::vector<NodeRange> nodeRanges;
     std::unordered_map<GraphNode*, size_t> nodeToRangeIndex;  // O(1) lookup
     int disabledNodeCount = 0;  // Count of currently disabled nodes
+    bool updatePending = false;
     // Standalone barrier reserved (at BuildSyncPlan) for the last batch of a
     // segment whose completion signal is embedded on its last kernel packet.
     // Only spliced into the *filtered* dispatch buffer by rebuildFilteredLists
@@ -1260,7 +1358,7 @@ class GraphExecSegmented : public GraphExecBase {
     // (ApplyHwEventPatches re-patches it directly via flat_packet pointers at launch).
     // Also appends the matching kMetadataPktSize metadata packet to flatMetadata,
     // keeping it index-aligned with flatData. |metadata_raw| may be nullptr, in
-    // which case a zeroed metadata slot is appended.
+    // which case an invalid metadata slot is appended.
     static void appendPacketToFlatBuffer(const uint8_t* pkt_raw,
                                          const uint8_t* metadata_raw,
                                          amd::AlignedVector64<uint8_t>& flatData,
@@ -1284,6 +1382,9 @@ class GraphExecSegmented : public GraphExecBase {
   //! Batches of accumulated packets and kernel names for batch dispatch optimization
   //! Map from segment ID to SegmentBatch for O(1) lookup
   std::unordered_map<int, SegmentBatch> segmentBatches_;
+  bool batchAQLPacketUpdates_ = false;
+  bool reuseKernargSlots_ = false;
+  std::vector<PacketBatch*> updatedPacketBatches_;
 
   struct SyncPlan {
     int num_segments = 0;   // total segment count (used for bounds checks)
@@ -1310,6 +1411,7 @@ class GraphExecSegmented : public GraphExecBase {
   bool collapsed_to_single_stream_ = false;
 
   void BuildSyncPlan();
+  void RebuildAQLPacketBatch(PacketBatch& packetBatch);
 };
 
 
@@ -1398,20 +1500,56 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
   }
 
   hipError_t SetParams(const Graph* childGraph) {
-    const std::vector<Node>& newNodes = childGraph->GetNodes();
-    const std::vector<Node>& oldNodes = Graph::GetNodes();
-    for (std::vector<Node>::size_type i = 0; i != newNodes.size(); i++) {
-      hipError_t status = oldNodes[i]->SetParams(newNodes[i]);
-      if (status != hipSuccess) {
-        return status;
-      }
+    if (!HasSameTopology(childGraph)) {
+      return hipErrorInvalidValue;
     }
-    return hipSuccess;
+    return SetParamsInternal(childGraph, false);
   }
 
   hipError_t SetParams(GraphNode* node) override {
     const ChildGraphNode* childGraphNode = static_cast<ChildGraphNode const*>(node);
-    return SetParams(static_cast<const Graph*>(childGraphNode));
+    return SetParamsInternal(static_cast<const Graph*>(childGraphNode),
+                             parentAllowsKernargReuse_);
+  }
+
+  //! Set by the parent exec's BeginAQLPacketUpdates with its kernarg-reuse decision.
+  void SetParentKernargReuse(bool allow) { parentAllowsKernargReuse_ = allow; }
+
+  bool HasSameTopology(const Graph* childGraph) const {
+    const std::vector<Node>& newNodes = childGraph->GetNodes();
+    const std::vector<Node>& oldNodes = Graph::GetNodes();
+    if (newNodes.size() != oldNodes.size()) {
+      return false;
+    }
+
+    std::unordered_map<Node, Node> nodeMap;
+    nodeMap.reserve(newNodes.size());
+    for (size_t i = 0; i < newNodes.size(); ++i) {
+      if (oldNodes[i]->GetType() != newNodes[i]->GetType()) {
+        return false;
+      }
+      if (oldNodes[i]->GetType() == hipGraphNodeTypeMemcpy &&
+          oldNodes[i]->GetMemcpyNodeKind() != newNodes[i]->GetMemcpyNodeKind()) {
+        return false;
+      }
+      if (!oldNodes[i]->HasSameTopology(newNodes[i])) {
+        return false;
+      }
+      nodeMap.emplace(newNodes[i], oldNodes[i]);
+    }
+
+    for (size_t i = 0; i < newNodes.size(); ++i) {
+      if (!HasMatchingDependencies(oldNodes[i]->GetDependencies(), newNodes[i]->GetDependencies(),
+                                   nodeMap)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool HasSameTopology(const GraphNode* node) const override {
+    const ChildGraphNode* childGraphNode = static_cast<const ChildGraphNode*>(node);
+    return HasSameTopology(static_cast<const Graph*>(childGraphNode));
   }
 
   virtual std::string GetLabel(hipGraphDebugDotFlags flag) override {
@@ -1423,16 +1561,39 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
   }
 
  private:
+  hipError_t SetParamsInternal(const Graph* childGraph, bool allowKernargReuse) {
+    const std::vector<Node>& newNodes = childGraph->GetNodes();
+    const std::vector<Node>& oldNodes = Graph::GetNodes();
+    BeginAQLPacketUpdates(allowKernargReuse);
+    MAKE_SCOPE_GUARD(endAQLPacketUpdates, [&]() { EndAQLPacketUpdates(); });
+    for (std::vector<Node>::size_type i = 0; i != newNodes.size(); i++) {
+      if (!oldNodes[i]->NeedsRecapture() && oldNodes[i]->HasSameParams(newNodes[i])) {
+        continue;
+      }
+      hipError_t status = oldNodes[i]->SetParams(newNodes[i]);
+      if (status != hipSuccess) {
+        return status;
+      }
+      status = UpdateAQLPacket(oldNodes[i]);
+      oldNodes[i]->SetNeedsRecapture(status != hipSuccess);
+      if (status != hipSuccess) {
+        return status;
+      }
+    }
+    return hipSuccess;
+  }
+
   bool graphCaptureStatus_;
+  bool parentAllowsKernargReuse_ = false;
 };
 
 class GraphKernelNode : public GraphNode {
-  hipKernelNodeParams kernelParams_;   //!< Kernel node parameters
-  unsigned int numParams_;             //!< No. of kernel params as part of signature
+  hipKernelNodeParams kernelParams_{};  //!< Kernel node parameters
+  unsigned int numParams_ = 0;          //!< No. of kernel params as part of signature
   hipKernelNodeAttrValue kernelAttr_;  //!< Kernel node attributes
   unsigned int kernelAttrInUse_;       //!< Kernel attributes in use
   ihipExtKernelEvents kernelEvents_;   //!< Events for Ext launch kernel
-  bool hasHiddenHeap_;                 //!< Kernel has hidden heap(device side allocation)
+  bool hasHiddenHeap_ = false;         //!< Kernel has hidden heap(device side allocation)
   int coopKernel_;                     //!< Launch cooperative kernel
   int globalWorkSizeX_remainder_;
   int globalWorkSizeY_remainder_;
@@ -1440,6 +1601,9 @@ class GraphKernelNode : public GraphNode {
   dim3 clusterDim_;                    //!< Cluster dimensions for cluster launch
   uint32_t launchFlags_;               //!< Ext launch flags (e.g. hipExtAnyOrderLaunch)
   hipFunction_t resolvedFunc_ = nullptr;  //!< Cached resolved function to avoid redundant lookups
+  hipError_t paramCopyStatus_ = hipSuccess;
+  bool paramsValidated_ = false;
+  std::vector<uint8_t> paramsStorage_;
 
  protected:
   // Copy Constructor. This is protected to prevent accidental copies causing unexpected behaviors.
@@ -1453,7 +1617,10 @@ class GraphKernelNode : public GraphNode {
     clusterDim_ = rhs.clusterDim_;
     launchFlags_ = rhs.launchFlags_;
     hipError_t status = copyParams(&rhs.kernelParams_);
+    paramCopyStatus_ = status;
     if (status != hipSuccess) {
+      freeParams();
+      kernelParams_ = {};
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to allocate memory to copy params");
     }
     memset(&kernelAttr_, 0, sizeof(kernelAttr_));
@@ -1597,46 +1764,64 @@ class GraphKernelNode : public GraphNode {
   }
 
   hipError_t copyParams(const hipKernelNodeParams* pNodeParams) {
-    hasHiddenHeap_ = false;
     hipFunction_t func = getFunc(*pNodeParams, dev_id_);
     if (!func) {
       return hipErrorInvalidDeviceFunction;
     }
-    resolvedFunc_ = func;
+
     amd::Kernel* kernel = hip::asKernel(func);
+    size_t newKernargSegmentByteSize = kernargSegmentByteSize_;
+    size_t newKernargSegmentAlignment = kernargSegmentAlignment_;
+    size_t newAlignedKernArgSize = alignedKernArgSize_;
     if (parentGraph_ != nullptr) {
       auto device = g_devices[dev_id_]->devices()[0];
       device::Kernel* devKernel = const_cast<device::Kernel*>(kernel->getDeviceKernel(*device));
-      kernargSegmentByteSize_ = devKernel->KernargSegmentByteSize();
-      kernargSegmentAlignment_ = devKernel->KernargSegmentAlignment();
-      alignedKernArgSize_ =
+      newKernargSegmentByteSize = devKernel->KernargSegmentByteSize();
+      newKernargSegmentAlignment = devKernel->KernargSegmentAlignment();
+      newAlignedKernArgSize =
           amd::alignUp(devKernel->KernargSegmentByteSize(), devKernel->KernargSegmentAlignment());
     }
-    const amd::KernelSignature& signature = kernel->signature();
-    numParams_ = signature.numParameters();
 
-    // Copy gridDim, blockDim, sharedMemBytes and func
-    kernelParams_ = *pNodeParams;
+    const amd::KernelSignature& signature = kernel->signature();
+    const uint32_t newNumParams = signature.numParameters();
+    bool newHasHiddenHeap = false;
+    for (uint32_t i = signature.numParameters(); i < signature.numParametersAll(); ++i) {
+      if (signature.at(i).info_.oclObject_ == amd::KernelParameterDescriptor::HiddenHeap) {
+        newHasHiddenHeap = true;
+      }
+    }
+
+    hipKernelNodeParams newKernelParams = *pNodeParams;
+    const size_t maxStorageSize = paramsStorage_.max_size();
 
     // Allocate/assign memory if params are passed part of 'kernelParams'
     if (pNodeParams->kernelParams != nullptr) {
-      kernelParams_.kernelParams = (void**)malloc(numParams_ * sizeof(void*));
-      if (kernelParams_.kernelParams == nullptr) {
-        return hipErrorOutOfMemory;
-      }
-
-      for (uint32_t i = 0; i < numParams_; ++i) {
-        const amd::KernelParameterDescriptor& desc = signature.at(i);
-        kernelParams_.kernelParams[i] = malloc(desc.size_);
-        if (kernelParams_.kernelParams[i] == nullptr) {
+      // Payloads keep max_align_t alignment because consumers do typed loads from them.
+      constexpr size_t kParamAlignment = alignof(std::max_align_t);
+      size_t paramsSize = newNumParams * sizeof(void*);
+      for (uint32_t i = 0; i < newNumParams; ++i) {
+        const size_t padding = amd::alignUp(paramsSize, kParamAlignment) - paramsSize;
+        const size_t paramSize = signature.at(i).size_;
+        if (padding > maxStorageSize - paramsSize ||
+            paramSize > maxStorageSize - paramsSize - padding) {
           return hipErrorOutOfMemory;
         }
-        ::memcpy(kernelParams_.kernelParams[i], (pNodeParams->kernelParams[i]), desc.size_);
+        paramsSize += padding + paramSize;
       }
-      for (uint32_t i = signature.numParameters(); i < signature.numParametersAll(); ++i) {
-        if (signature.at(i).info_.oclObject_ == amd::KernelParameterDescriptor::HiddenHeap) {
-          hasHiddenHeap_ = true;
-        }
+      try {
+        paramsStorage_.resize(std::max(paramsSize, sizeof(void*)));
+      } catch (const std::exception&) {
+        return hipErrorOutOfMemory;
+      }
+      newKernelParams.kernelParams = reinterpret_cast<void**>(paramsStorage_.data());
+
+      size_t offset = newNumParams * sizeof(void*);
+      for (uint32_t i = 0; i < newNumParams; ++i) {
+        const amd::KernelParameterDescriptor& desc = signature.at(i);
+        offset = amd::alignUp(offset, kParamAlignment);
+        newKernelParams.kernelParams[i] = paramsStorage_.data() + offset;
+        ::memcpy(newKernelParams.kernelParams[i], pNodeParams->kernelParams[i], desc.size_);
+        offset += desc.size_;
       }
     }
 
@@ -1646,26 +1831,44 @@ class GraphKernelNode : public GraphNode {
       // HIP_LAUNCH_PARAM_BUFFER_POINTER, kernargs,
       // HIP_LAUNCH_PARAM_BUFFER_SIZE, &kernargs_size,
       // HIP_LAUNCH_PARAM_END }
-      unsigned int numExtra = 5;
-      kernelParams_.extra = (void**)malloc(numExtra * sizeof(void*));
-      if (kernelParams_.extra == nullptr) {
+      constexpr unsigned int numExtra = 5;
+      constexpr size_t storageOffset = numExtra * sizeof(void*) + sizeof(size_t);
+      if (pNodeParams->extra[0] != HIP_LAUNCH_PARAM_BUFFER_POINTER ||
+          pNodeParams->extra[2] != HIP_LAUNCH_PARAM_BUFFER_SIZE ||
+          pNodeParams->extra[3] == nullptr || pNodeParams->extra[4] != HIP_LAUNCH_PARAM_END) {
+        return hipErrorInvalidValue;
+      }
+      const size_t kernargs_size = *static_cast<size_t*>(pNodeParams->extra[3]);
+      if ((kernargs_size > 0 && pNodeParams->extra[1] == nullptr) ||
+          kernargs_size > maxStorageSize - storageOffset) {
+        return hipErrorInvalidValue;
+      }
+      try {
+        paramsStorage_.resize(storageOffset + kernargs_size);
+      } catch (const std::exception&) {
         return hipErrorOutOfMemory;
       }
-      kernelParams_.extra[0] = pNodeParams->extra[0];
-      size_t kernargs_size = *((size_t*)pNodeParams->extra[3]);
-      kernelParams_.extra[1] = malloc(kernargs_size);
-      if (kernelParams_.extra[1] == nullptr) {
-        return hipErrorOutOfMemory;
+      newKernelParams.extra = reinterpret_cast<void**>(paramsStorage_.data());
+      newKernelParams.extra[0] = pNodeParams->extra[0];
+      newKernelParams.extra[1] = paramsStorage_.data() + storageOffset;
+      newKernelParams.extra[2] = pNodeParams->extra[2];
+      newKernelParams.extra[3] = paramsStorage_.data() + numExtra * sizeof(void*);
+      *static_cast<size_t*>(newKernelParams.extra[3]) = kernargs_size;
+      if (kernargs_size > 0) {
+        ::memcpy(newKernelParams.extra[1], pNodeParams->extra[1], kernargs_size);
       }
-      kernelParams_.extra[2] = pNodeParams->extra[2];
-      kernelParams_.extra[3] = malloc(sizeof(void*));
-      if (kernelParams_.extra[3] == nullptr) {
-        return hipErrorOutOfMemory;
-      }
-      *((size_t*)kernelParams_.extra[3]) = kernargs_size;
-      ::memcpy(kernelParams_.extra[1], (pNodeParams->extra[1]), kernargs_size);
-      kernelParams_.extra[4] = pNodeParams->extra[4];
+      newKernelParams.extra[4] = pNodeParams->extra[4];
+    } else {
+      paramsStorage_.clear();
     }
+
+    kernelParams_ = newKernelParams;
+    numParams_ = newNumParams;
+    hasHiddenHeap_ = newHasHiddenHeap;
+    resolvedFunc_ = func;
+    kernargSegmentByteSize_ = newKernargSegmentByteSize;
+    kernargSegmentAlignment_ = newKernargSegmentAlignment;
+    alignedKernArgSize_ = newAlignedKernArgSize;
     return hipSuccess;
   }
 
@@ -1681,12 +1884,12 @@ class GraphKernelNode : public GraphNode {
     if (pEvents != nullptr) {
       kernelEvents_ = *pEvents;
     }
-    if (copyParams(pNodeParams) != hipSuccess) {
+    paramCopyStatus_ = copyParams(pNodeParams);
+    if (paramCopyStatus_ != hipSuccess) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to copy params");
     }
     memset(&kernelAttr_, 0, sizeof(kernelAttr_));
     kernelAttrInUse_ = 0;
-    hasHiddenHeap_ = false;
     coopKernel_ = coopKernel;
     globalWorkSizeX_remainder_ = globalWorkSizeX_remainder;
     globalWorkSizeY_remainder_ = globalWorkSizeY_remainder;
@@ -1697,26 +1900,12 @@ class GraphKernelNode : public GraphNode {
 
   ~GraphKernelNode() { freeParams(); }
 
+  hipError_t GetParamCopyStatus() const { return paramCopyStatus_; }
+
   void freeParams() {
-    // Deallocate memory allocated for kernargs passed via 'kernelParams'
-    if (kernelParams_.kernelParams != nullptr) {
-      for (size_t i = 0; i < numParams_; ++i) {
-        if (kernelParams_.kernelParams[i] != nullptr) {
-          free(kernelParams_.kernelParams[i]);
-        }
-        kernelParams_.kernelParams[i] = nullptr;
-      }
-      free(kernelParams_.kernelParams);
-      kernelParams_.kernelParams = nullptr;
-    }
-    // Deallocate memory allocated for kernargs passed via 'extra'
-    else if (kernelParams_.extra != nullptr) {
-      free(kernelParams_.extra[1]);
-      free(kernelParams_.extra[3]);
-      memset(kernelParams_.extra, 0, 5 * sizeof(kernelParams_.extra[0]));  // 5 items
-      free(kernelParams_.extra);
-      kernelParams_.extra = nullptr;
-    }
+    kernelParams_.kernelParams = nullptr;
+    kernelParams_.extra = nullptr;
+    paramsStorage_.clear();
   }
 
   // Delete copy-assignment operator to prevent accidental copies causing unexpected behaviors.
@@ -1730,6 +1919,57 @@ class GraphKernelNode : public GraphNode {
     const dim3& g = kernelParams_.gridDim;
     const dim3& b = kernelParams_.blockDim;
     return static_cast<size_t>(g.x) * g.y * g.z * static_cast<size_t>(b.x) * b.y * b.z;
+  }
+
+  bool HasSameParams(const GraphNode* node) const override {
+    const GraphKernelNode* other = static_cast<const GraphKernelNode*>(node);
+    const hipKernelNodeParams& lhs = kernelParams_;
+    const hipKernelNodeParams& rhs = other->kernelParams_;
+    if (lhs.func != rhs.func || lhs.gridDim.x != rhs.gridDim.x || lhs.gridDim.y != rhs.gridDim.y ||
+        lhs.gridDim.z != rhs.gridDim.z || lhs.blockDim.x != rhs.blockDim.x ||
+        lhs.blockDim.y != rhs.blockDim.y || lhs.blockDim.z != rhs.blockDim.z ||
+        lhs.sharedMemBytes != rhs.sharedMemBytes || numParams_ != other->numParams_ ||
+        coopKernel_ != other->coopKernel_ ||
+        globalWorkSizeX_remainder_ != other->globalWorkSizeX_remainder_ ||
+        globalWorkSizeY_remainder_ != other->globalWorkSizeY_remainder_ ||
+        globalWorkSizeZ_remainder_ != other->globalWorkSizeZ_remainder_ ||
+        clusterDim_.x != other->clusterDim_.x || clusterDim_.y != other->clusterDim_.y ||
+        clusterDim_.z != other->clusterDim_.z || launchFlags_ != other->launchFlags_ ||
+        kernelAttrInUse_ != other->kernelAttrInUse_ ||
+        std::memcmp(&kernelAttr_, &other->kernelAttr_, sizeof(kernelAttr_)) != 0 ||
+        std::memcmp(&kernelEvents_, &other->kernelEvents_, sizeof(kernelEvents_)) != 0) {
+      return false;
+    }
+
+    if ((lhs.kernelParams == nullptr) != (rhs.kernelParams == nullptr) ||
+        (lhs.extra == nullptr) != (rhs.extra == nullptr)) {
+      return false;
+    }
+    if (lhs.kernelParams != nullptr) {
+      hipFunction_t func = resolvedFunc_ ? resolvedFunc_ : getFunc(lhs, dev_id_);
+      if (func == nullptr) {
+        return false;
+      }
+      const amd::KernelSignature& signature = hip::asKernel(func)->signature();
+      for (uint32_t i = 0; i < numParams_; ++i) {
+        if (lhs.kernelParams[i] == nullptr || rhs.kernelParams[i] == nullptr ||
+            std::memcmp(lhs.kernelParams[i], rhs.kernelParams[i], signature.at(i).size_) != 0) {
+          return false;
+        }
+      }
+    } else if (lhs.extra != nullptr) {
+      if (lhs.extra[0] != rhs.extra[0] || lhs.extra[2] != rhs.extra[2] ||
+          lhs.extra[4] != rhs.extra[4] || lhs.extra[1] == nullptr || rhs.extra[1] == nullptr ||
+          lhs.extra[3] == nullptr || rhs.extra[3] == nullptr) {
+        return false;
+      }
+      const size_t lhsSize = *static_cast<const size_t*>(lhs.extra[3]);
+      const size_t rhsSize = *static_cast<const size_t*>(rhs.extra[3]);
+      if (lhsSize != rhsSize || std::memcmp(lhs.extra[1], rhs.extra[1], lhsSize) != 0) {
+        return false;
+      }
+    }
+    return true;
   }
 
   hipError_t CreateCommand(hip::Stream* stream) override {
@@ -1749,9 +1989,12 @@ class GraphKernelNode : public GraphNode {
       }
       resolvedFunc_ = func;
     }
-    status = validateKernelParams(&kernelParams_, func, dev_id_);
-    if (hipSuccess != status) {
-      return status;
+    if (!paramsValidated_) {
+      status = validateKernelParams(&kernelParams_, func, dev_id_);
+      if (hipSuccess != status) {
+        return status;
+      }
+      paramsValidated_ = true;
     }
     commands_.reserve(1);
     amd::Command* command;
@@ -1765,10 +2008,6 @@ class GraphKernelNode : public GraphNode {
                                        kernelParams_.sharedMemBytes, *device, globalWorkSizeX_remainder_,
                                        globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
                                        clusterDim_.x, clusterDim_.y, clusterDim_.z);
-
-    if (!launch_params.IsValidConfig()) {
-      return hipErrorInvalidConfiguration;
-    }
 
     status = ihipLaunchKernelCommand(
         command, func, launch_params, stream, kernelParams_.kernelParams, kernelParams_.extra,
@@ -1786,7 +2025,7 @@ class GraphKernelNode : public GraphNode {
   hipError_t SetParams(const hipKernelNodeParams* params) {
     // Update device ID since new params may require validation for the current device.
     dev_id_ = ihipGetDevice();
-    hipFunction_t func = getFunc(kernelParams_, dev_id_);
+    hipFunction_t func = getFunc(*params, dev_id_);
     if (!func) {
       return hipErrorInvalidDeviceFunction;
     }
@@ -1800,12 +2039,16 @@ class GraphKernelNode : public GraphNode {
         (kernelParams_.extra && kernelParams_.extra == params->extra)) {
       // params is copied from kernelParams_ and then updated, so just copy it back
       kernelParams_ = *params;
+      resolvedFunc_ = func;
+      paramsValidated_ = true;
       return status;
     }
-    freeParams();
     status = copyParams(params);
+    paramCopyStatus_ = status;
     if (status != hipSuccess) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to set params");
+    } else {
+      paramsValidated_ = true;
     }
     return status;
   }
@@ -1928,14 +2171,30 @@ class GraphKernelNode : public GraphNode {
   }
 
   hipError_t SetParams(GraphNode* node) override {
-    dev_id_ = ihipGetDevice();
     const GraphKernelNode* kernelNode = static_cast<GraphKernelNode const*>(node);
+    if (coopKernel_ != kernelNode->coopKernel_) {
+      return hipErrorInvalidValue;
+    }
     dim3 oldClusterDim = clusterDim_;
+    int oldGlobalWorkSizeX_remainder = globalWorkSizeX_remainder_;
+    int oldGlobalWorkSizeY_remainder = globalWorkSizeY_remainder_;
+    int oldGlobalWorkSizeZ_remainder = globalWorkSizeZ_remainder_;
     clusterDim_ = kernelNode->clusterDim_;
+    globalWorkSizeX_remainder_ = kernelNode->globalWorkSizeX_remainder_;
+    globalWorkSizeY_remainder_ = kernelNode->globalWorkSizeY_remainder_;
+    globalWorkSizeZ_remainder_ = kernelNode->globalWorkSizeZ_remainder_;
     hipError_t status = SetParams(&kernelNode->kernelParams_);
     if (status != hipSuccess) {
       clusterDim_ = oldClusterDim;
+      globalWorkSizeX_remainder_ = oldGlobalWorkSizeX_remainder;
+      globalWorkSizeY_remainder_ = oldGlobalWorkSizeY_remainder;
+      globalWorkSizeZ_remainder_ = oldGlobalWorkSizeZ_remainder;
+      return status;
     }
+    launchFlags_ = kernelNode->launchFlags_;
+    kernelEvents_ = kernelNode->kernelEvents_;
+    kernelAttr_ = kernelNode->kernelAttr_;
+    kernelAttrInUse_ = kernelNode->kernelAttrInUse_;
     return status;
   }
 
@@ -1989,6 +2248,8 @@ class GraphMemcpyNode : public GraphNode {
 
   GraphNode* clone() const override { return new GraphMemcpyNode(*this); }
 
+  GraphMemcpyNodeKind GetMemcpyNodeKind() const override { return GraphMemcpyNodeKind::ThreeD; }
+
   virtual hipError_t CreateCommand(hip::Stream* stream) override {
     // Clear commands_ first, even if node is disabled
     hipError_t status = GraphNode::CreateCommand(stream);
@@ -2023,6 +2284,24 @@ class GraphMemcpyNode : public GraphNode {
     std::memcpy(params, &copyParams_, sizeof(hipMemcpy3DParms));
   }
 
+  bool HasSameParams(const GraphNode* node) const override {
+    if (node->GetMemcpyNodeKind() != GetMemcpyNodeKind()) {
+      return false;
+    }
+    const GraphMemcpyNode* other = static_cast<const GraphMemcpyNode*>(node);
+    const hipMemcpy3DParms& l = copyParams_;
+    const hipMemcpy3DParms& r = other->copyParams_;
+    return l.srcArray == r.srcArray && l.srcPos.x == r.srcPos.x && l.srcPos.y == r.srcPos.y &&
+           l.srcPos.z == r.srcPos.z && l.srcPtr.ptr == r.srcPtr.ptr &&
+           l.srcPtr.pitch == r.srcPtr.pitch && l.srcPtr.xsize == r.srcPtr.xsize &&
+           l.srcPtr.ysize == r.srcPtr.ysize && l.dstArray == r.dstArray &&
+           l.dstPos.x == r.dstPos.x && l.dstPos.y == r.dstPos.y && l.dstPos.z == r.dstPos.z &&
+           l.dstPtr.ptr == r.dstPtr.ptr && l.dstPtr.pitch == r.dstPtr.pitch &&
+           l.dstPtr.xsize == r.dstPtr.xsize && l.dstPtr.ysize == r.dstPtr.ysize &&
+           l.extent.width == r.extent.width && l.extent.height == r.extent.height &&
+           l.extent.depth == r.extent.depth && l.kind == r.kind;
+  }
+
   virtual hipMemcpyKind GetMemcpyKind() const { return copyParams_.kind; };
 
   hipError_t SetParams(const hipMemcpy3DParms* params) {
@@ -2035,6 +2314,9 @@ class GraphMemcpyNode : public GraphNode {
   }
 
   virtual hipError_t SetParams(GraphNode* node) override {
+    if (node->GetMemcpyNodeKind() != GetMemcpyNodeKind()) {
+      return hipErrorInvalidValue;
+    }
     const GraphMemcpyNode* memcpyNode = static_cast<GraphMemcpyNode const*>(node);
     return SetParams(&memcpyNode->copyParams_);
   }
@@ -2336,7 +2618,18 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
 
   hipMemcpyKind GetMemcpyKind() const override { return kind_; }
 
-  hipError_t SetParams(void* dst, const void* src, size_t count, hipMemcpyKind kind) {
+  GraphMemcpyNodeKind GetMemcpyNodeKind() const override { return GraphMemcpyNodeKind::OneD; }
+
+  bool HasSameParams(const GraphNode* node) const override {
+    if (node->GetMemcpyNodeKind() != GetMemcpyNodeKind()) {
+      return false;
+    }
+    const GraphMemcpyNode1D* other = static_cast<const GraphMemcpyNode1D*>(node);
+    return dst_ == other->dst_ && src_ == other->src_ && count_ == other->count_ &&
+           kind_ == other->kind_;
+  }
+
+  virtual hipError_t SetParams(void* dst, const void* src, size_t count, hipMemcpyKind kind) {
     hipError_t status = ValidateParams(dst, src, count, kind);
     if (status != hipSuccess) {
       return status;
@@ -2345,11 +2638,20 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     src_ = src;
     count_ = count;
     kind_ = kind;
+    copyParams_.srcPtr.ptr = const_cast<void*>(src);
+    copyParams_.dstPtr.ptr = dst;
+    copyParams_.extent.width = count;
+    copyParams_.extent.height = 1;
+    copyParams_.extent.depth = 1;
+    copyParams_.kind = kind;
     UpdateDevId();
     return hipSuccess;
   }
 
   virtual hipError_t SetParams(GraphNode* node) override {
+    if (node->GetMemcpyNodeKind() != GetMemcpyNodeKind()) {
+      return hipErrorInvalidValue;
+    }
     const GraphMemcpyNode1D* memcpy1DNode = static_cast<GraphMemcpyNode1D const*>(node);
     return SetParams(memcpy1DNode->dst_, memcpy1DNode->src_, memcpy1DNode->count_,
                      memcpy1DNode->kind_);
@@ -2469,12 +2771,14 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
 class GraphMemcpyNodeFromSymbol : public GraphMemcpyNode1D {
   const void* symbol_;
   size_t offset_;
+  bool usesSymbol_ = true;
 
  protected:
   // Copy Constructor. This is protected to prevent accidental copies causing unexpected behaviors.
   GraphMemcpyNodeFromSymbol(const GraphMemcpyNodeFromSymbol& rhs) : GraphMemcpyNode1D(rhs) {
     symbol_ = rhs.symbol_;
     offset_ = rhs.offset_;
+    usesSymbol_ = rhs.usesSymbol_;
   }
 
  public:
@@ -2491,7 +2795,20 @@ class GraphMemcpyNodeFromSymbol : public GraphMemcpyNode1D {
 
   GraphNode* clone() const override { return new GraphMemcpyNodeFromSymbol(*this); }
 
+  GraphMemcpyNodeKind GetMemcpyNodeKind() const override {
+    return GraphMemcpyNodeKind::FromSymbol;
+  }
+
+  bool HasSameParams(const GraphNode* node) const override {
+    const GraphMemcpyNodeFromSymbol* other = static_cast<const GraphMemcpyNodeFromSymbol*>(node);
+    return usesSymbol_ == other->usesSymbol_ && GraphMemcpyNode1D::HasSameParams(node) &&
+           (!usesSymbol_ || (symbol_ == other->symbol_ && offset_ == other->offset_));
+  }
+
   virtual hipError_t CreateCommand(hip::Stream* stream) override {
+    if (!usesSymbol_) {
+      return GraphMemcpyNode1D::CreateCommand(stream);
+    }
     hipError_t status = GraphNode::CreateCommand(stream);
     if (status != hipSuccess) {
       return status;
@@ -2524,6 +2841,14 @@ class GraphMemcpyNodeFromSymbol : public GraphMemcpyNode1D {
       return status;
     }
     commands_.emplace_back(command);
+    return status;
+  }
+
+  hipError_t SetParams(void* dst, const void* src, size_t count, hipMemcpyKind kind) override {
+    hipError_t status = GraphMemcpyNode1D::SetParams(dst, src, count, kind);
+    if (status == hipSuccess) {
+      usesSymbol_ = false;
+    }
     return status;
   }
 
@@ -2566,29 +2891,47 @@ class GraphMemcpyNodeFromSymbol : public GraphMemcpyNode1D {
     }
 
     dst_ = dst;
+    src_ = nullptr;
     symbol_ = symbol;
     count_ = count;
     offset_ = offset;
     kind_ = kind;
+    usesSymbol_ = true;
     return hipSuccess;
   }
 
   virtual hipError_t SetParams(GraphNode* node) override {
+    if (node->GetMemcpyNodeKind() != GetMemcpyNodeKind()) {
+      return hipErrorInvalidValue;
+    }
     const GraphMemcpyNodeFromSymbol* memcpyNode =
         static_cast<GraphMemcpyNodeFromSymbol const*>(node);
+    if (!memcpyNode->usesSymbol_) {
+      return SetParams(memcpyNode->dst_, memcpyNode->src_, memcpyNode->count_, memcpyNode->kind_);
+    }
     return SetParams(memcpyNode->dst_, memcpyNode->symbol_, memcpyNode->count_, memcpyNode->offset_,
                      memcpyNode->kind_);
+  }
+
+  bool GraphCaptureEnabled() override {
+    return !usesSymbol_ && GraphMemcpyNode1D::GraphCaptureEnabled();
+  }
+
+  bool WillBypassSdmaEngine() const override {
+    return !usesSymbol_ && GraphMemcpyNode1D::WillBypassSdmaEngine();
   }
 };
 class GraphMemcpyNodeToSymbol : public GraphMemcpyNode1D {
   const void* symbol_;
   size_t offset_;
+  bool usesSymbol_ = true;
 
  protected:
   // Copy Constructor. This is protected to prevent accidental copies causing unexpected behaviors.
   GraphMemcpyNodeToSymbol(const GraphMemcpyNodeToSymbol& rhs) : GraphMemcpyNode1D(rhs) {
     symbol_ = rhs.symbol_;
     offset_ = rhs.offset_;
+    usesSymbol_ = rhs.usesSymbol_;
   }
 
  public:
@@ -2605,7 +2948,20 @@ class GraphMemcpyNodeToSymbol : public GraphMemcpyNode1D {
 
   GraphNode* clone() const override { return new GraphMemcpyNodeToSymbol(*this); }
 
+  GraphMemcpyNodeKind GetMemcpyNodeKind() const override {
+    return GraphMemcpyNodeKind::ToSymbol;
+  }
+
+  bool HasSameParams(const GraphNode* node) const override {
+    const GraphMemcpyNodeToSymbol* other = static_cast<const GraphMemcpyNodeToSymbol*>(node);
+    return usesSymbol_ == other->usesSymbol_ && GraphMemcpyNode1D::HasSameParams(node) &&
+           (!usesSymbol_ || (symbol_ == other->symbol_ && offset_ == other->offset_));
+  }
+
   virtual hipError_t CreateCommand(hip::Stream* stream) override {
+    if (!usesSymbol_) {
+      return GraphMemcpyNode1D::CreateCommand(stream);
+    }
     hipError_t status = GraphNode::CreateCommand(stream);
     if (status != hipSuccess) {
       return status;
@@ -2638,6 +2994,14 @@ class GraphMemcpyNodeToSymbol : public GraphMemcpyNode1D {
       return status;
     }
     commands_.emplace_back(command);
+    return status;
+  }
+
+  hipError_t SetParams(void* dst, const void* src, size_t count, hipMemcpyKind kind) override {
+    hipError_t status = GraphMemcpyNode1D::SetParams(dst, src, count, kind);
+    if (status == hipSuccess) {
+      usesSymbol_ = false;
+    }
     return status;
   }
 
@@ -2684,17 +3048,33 @@ class GraphMemcpyNodeToSymbol : public GraphMemcpyNode1D {
       return hipErrorInvalidValue;
     }
     symbol_ = symbol;
+    dst_ = nullptr;
     src_ = src;
     count_ = count;
     offset_ = offset;
     kind_ = kind;
+    usesSymbol_ = true;
     return hipSuccess;
   }
 
   virtual hipError_t SetParams(GraphNode* node) override {
+    if (node->GetMemcpyNodeKind() != GetMemcpyNodeKind()) {
+      return hipErrorInvalidValue;
+    }
     const GraphMemcpyNodeToSymbol* memcpyNode = static_cast<GraphMemcpyNodeToSymbol const*>(node);
-    return SetParams(memcpyNode->src_, memcpyNode->symbol_, memcpyNode->count_, memcpyNode->offset_,
+    if (!memcpyNode->usesSymbol_) {
+      return SetParams(memcpyNode->dst_, memcpyNode->src_, memcpyNode->count_, memcpyNode->kind_);
+    }
+    return SetParams(memcpyNode->symbol_, memcpyNode->src_, memcpyNode->count_, memcpyNode->offset_,
                      memcpyNode->kind_);
+  }
+
+  bool GraphCaptureEnabled() override {
+    return !usesSymbol_ && GraphMemcpyNode1D::GraphCaptureEnabled();
+  }
+
+  bool WillBypassSdmaEngine() const override {
+    return !usesSymbol_ && GraphMemcpyNode1D::WillBypassSdmaEngine();
   }
 };
 class GraphMemsetNode : public GraphNode {
@@ -2889,9 +3269,24 @@ class GraphMemsetNode : public GraphNode {
     return SetParamsInternal(params, isExec, depth);
   }
 
+  bool HasSameParams(const GraphNode* node) const override {
+    const GraphMemsetNode* other = static_cast<const GraphMemsetNode*>(node);
+    const hipMemsetParams& l = memsetParams_;
+    const hipMemsetParams& r = other->memsetParams_;
+    return l.dst == r.dst && l.elementSize == r.elementSize && l.width == r.width &&
+           l.height == r.height && l.pitch == r.pitch && l.value == r.value &&
+           depth_ == other->depth_ && arrWidth_ == other->arrWidth_ &&
+           arrHeight_ == other->arrHeight_;
+  }
+
   hipError_t SetParams(GraphNode* node) override {
     const GraphMemsetNode* memsetNode = static_cast<GraphMemsetNode const*>(node);
-    return SetParams(&memsetNode->memsetParams_, true, memsetNode->depth_);
+    hipError_t status = SetParams(&memsetNode->memsetParams_, true, memsetNode->depth_);
+    if (status == hipSuccess) {
+      arrWidth_ = memsetNode->arrWidth_;
+      arrHeight_ = memsetNode->arrHeight_;
+    }
+    return status;
   }
 };
 
@@ -3449,6 +3844,8 @@ class GraphDrvMemcpyNode : public GraphNode {
 
   GraphNode* clone() const override { return new GraphDrvMemcpyNode(*this); }
 
+  GraphMemcpyNodeKind GetMemcpyNodeKind() const override { return GraphMemcpyNodeKind::Driver; }
+
   hipError_t CreateCommand(hip::Stream* stream) override {
     if (!isEnabled_ || (copyParams_.srcMemoryType == hipMemoryTypeHost &&
                         copyParams_.dstMemoryType == hipMemoryTypeHost &&
@@ -3482,6 +3879,23 @@ class GraphDrvMemcpyNode : public GraphNode {
   }
 
   void GetParams(HIP_MEMCPY3D* params) { std::memcpy(params, &copyParams_, sizeof(HIP_MEMCPY3D)); }
+  bool HasSameParams(const GraphNode* node) const override {
+    if (node->GetMemcpyNodeKind() != GetMemcpyNodeKind()) {
+      return false;
+    }
+    const GraphDrvMemcpyNode* other = static_cast<const GraphDrvMemcpyNode*>(node);
+    const HIP_MEMCPY3D& l = copyParams_;
+    const HIP_MEMCPY3D& r = other->copyParams_;
+    return l.srcXInBytes == r.srcXInBytes && l.srcY == r.srcY && l.srcZ == r.srcZ &&
+           l.srcLOD == r.srcLOD && l.srcMemoryType == r.srcMemoryType &&
+           l.srcHost == r.srcHost && l.srcDevice == r.srcDevice && l.srcArray == r.srcArray &&
+           l.srcPitch == r.srcPitch && l.srcHeight == r.srcHeight &&
+           l.dstXInBytes == r.dstXInBytes && l.dstY == r.dstY && l.dstZ == r.dstZ &&
+           l.dstLOD == r.dstLOD && l.dstMemoryType == r.dstMemoryType &&
+           l.dstHost == r.dstHost && l.dstDevice == r.dstDevice && l.dstArray == r.dstArray &&
+           l.dstPitch == r.dstPitch && l.dstHeight == r.dstHeight &&
+           l.WidthInBytes == r.WidthInBytes && l.Height == r.Height && l.Depth == r.Depth;
+  }
   hipError_t SetParams(const HIP_MEMCPY3D* params) {
     hipError_t status = ValidateParams(params);
     if (status != hipSuccess) {
@@ -3491,6 +3905,9 @@ class GraphDrvMemcpyNode : public GraphNode {
     return hipSuccess;
   }
   hipError_t SetParams(GraphNode* node) override {
+    if (node->GetMemcpyNodeKind() != GetMemcpyNodeKind()) {
+      return hipErrorInvalidValue;
+    }
     const GraphDrvMemcpyNode* memcpyNode = static_cast<GraphDrvMemcpyNode const*>(node);
     return SetParams(&memcpyNode->copyParams_);
   }
@@ -3559,6 +3976,12 @@ class hipGraphExternalSemSignalNode : public GraphNode {
                 sizeof(hipExternalSemaphoreSignalNodeParams));
     return hipSuccess;
   }
+
+  hipError_t SetParams(GraphNode* node) override {
+    const hipGraphExternalSemSignalNode* other =
+        static_cast<hipGraphExternalSemSignalNode const*>(node);
+    return SetParams(&other->externalSemaphorNodeParam_);
+  }
 };
 
 class hipGraphExternalSemWaitNode : public GraphNode {
@@ -3615,6 +4038,12 @@ class hipGraphExternalSemWaitNode : public GraphNode {
     std::memcpy(&externalSemaphorNodeParam_, pNodeParams,
                 sizeof(hipExternalSemaphoreWaitNodeParams));
     return hipSuccess;
+  }
+
+  hipError_t SetParams(GraphNode* node) override {
+    const hipGraphExternalSemWaitNode* other =
+        static_cast<hipGraphExternalSemWaitNode const*>(node);
+    return SetParams(&other->externalSemaphorNodeParam_);
   }
 };
 
@@ -3676,6 +4105,21 @@ class hipGraphBatchMemOpNode : public GraphNode {
   hipError_t SetParams(const hipBatchMemOpNodeParams* pNodeParams) {
     copyParams(pNodeParams);
     return hipSuccess;
+  }
+
+  bool HasSameParams(const GraphNode* node) const override {
+    const hipGraphBatchMemOpNode* other = static_cast<const hipGraphBatchMemOpNode*>(node);
+    const hipBatchMemOpNodeParams& l = batchMemOpNodeParam_;
+    const hipBatchMemOpNodeParams& r = other->batchMemOpNodeParam_;
+    return l.ctx == r.ctx && l.count == r.count && l.flags == r.flags &&
+           l.paramArray != nullptr && r.paramArray != nullptr &&
+           std::memcmp(l.paramArray, r.paramArray,
+                       l.count * sizeof(hipStreamBatchMemOpParams)) == 0;
+  }
+
+  hipError_t SetParams(GraphNode* node) override {
+    const hipGraphBatchMemOpNode* other = static_cast<hipGraphBatchMemOpNode const*>(node);
+    return SetParams(&other->batchMemOpNodeParam_);
   }
 };
 
