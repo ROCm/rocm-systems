@@ -140,6 +140,110 @@ class WaitForJobTest(unittest.TestCase):
         self.assertEqual(remaining, [])
 
 
+class WaitForJobTimingTest(unittest.TestCase):
+    """Deterministic clock tests for wait_for_job's timer-reset and sleep-
+    slicing logic, off the real wall clock.
+
+    WaitForJobTest._run() above pins poll_interval=0, which skips the sleep
+    loop entirely; these tests fake time.monotonic/time.sleep instead so the
+    timer reset on a non-empty state, and the 1s-slice sleeping, actually run.
+    """
+
+    def _patched(self, states, cancelled, poll_interval, missing_row_timeout):
+        """Patch time.monotonic/sleep with a shared fake clock and drive
+        wait_for_job over a canned sacct state sequence."""
+        clock = [0.0]
+        sleeps = []
+        scancelled = []
+        remaining = list(states)
+
+        def fake_monotonic():
+            return clock[0]
+
+        def fake_sleep(seconds):
+            sleeps.append(seconds)
+            clock[0] += seconds
+
+        def fake_query_job(job_id, retries, interval):
+            return JobResult(state=remaining.pop(0), exit_code="0:0")
+
+        with mock.patch.object(submit_slurm_job.time, "monotonic", fake_monotonic):
+            with mock.patch.object(submit_slurm_job.time, "sleep", fake_sleep):
+                with mock.patch.object(submit_slurm_job, "query_job", fake_query_job):
+                    with mock.patch.object(
+                        submit_slurm_job, "scancel_job", scancelled.append
+                    ):
+                        rc, result = wait_for_job(
+                            "19010",
+                            poll_interval,
+                            cancelled,
+                            missing_row_timeout=missing_row_timeout,
+                        )
+        return rc, result, clock, sleeps, scancelled
+
+    def test_missing_row_timer_resets_on_state_sighting(self) -> None:
+        # Without the last_state_seen reset on a non-empty state, the second
+        # "" below would read as 2.0s of silence (>= the 1.5s timeout) instead
+        # of 1.0s since the RUNNING sighting, and wait_for_job would give up
+        # instead of reaching the COMPLETED that follows.
+        rc, result, clock, sleeps, scancelled = self._patched(
+            ["", "RUNNING", "", "COMPLETED"],
+            cancelled=lambda: False,
+            poll_interval=1.0,
+            missing_row_timeout=1.5,
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(result.state, "COMPLETED")
+        self.assertEqual(scancelled, [])
+        # 3 non-terminal iterations, each sleeping the full 1.0s poll_interval.
+        self.assertEqual(sleeps, [1.0, 1.0, 1.0])
+
+    def test_sleeps_in_one_second_slices_and_stops_promptly_on_cancel(self) -> None:
+        # A poll_interval far longer than 1s must still be sliced into <=1s
+        # sleeps so a cancel flag flipping mid-wait is noticed promptly,
+        # instead of blocking for the whole interval in one sleep() call.
+        cancel_after = 2
+        seen = []
+
+        def cancelled():
+            triggered = len(seen) >= cancel_after
+            seen.append(1)
+            return triggered
+
+        clock = [0.0]
+        sleeps = []
+        scancelled = []
+        remaining = ["RUNNING"]
+
+        def fake_monotonic():
+            return clock[0]
+
+        def fake_sleep(seconds):
+            sleeps.append(seconds)
+            clock[0] += seconds
+
+        def fake_query_job(job_id, retries, interval):
+            return JobResult(state=remaining[0], exit_code="")
+
+        with mock.patch.object(submit_slurm_job.time, "monotonic", fake_monotonic):
+            with mock.patch.object(submit_slurm_job.time, "sleep", fake_sleep):
+                with mock.patch.object(submit_slurm_job, "query_job", fake_query_job):
+                    with mock.patch.object(
+                        submit_slurm_job, "scancel_job", scancelled.append
+                    ):
+                        rc, result = wait_for_job(
+                            "19010", 5.0, cancelled, missing_row_timeout=9999.0
+                        )
+
+        self.assertEqual(rc, 1)
+        self.assertIsNone(result)
+        self.assertEqual(scancelled, ["19010"])
+        # Each slice is capped at 1s, and the cancel is caught inside the
+        # sleep loop -- well short of the full 5.0s poll_interval.
+        self.assertTrue(all(s <= 1.0 for s in sleeps))
+        self.assertLess(clock[0], 5.0)
+
+
 class SubmitCommandTest(unittest.TestCase):
     def test_submit_does_not_use_sbatch_wait(self) -> None:
         """`sbatch --wait` is what leaked nodes on cancel; pin its absence.
@@ -347,6 +451,14 @@ class EvaluateTest(unittest.TestCase):
     def test_non_completed_state_is_failure(self) -> None:
         self.assertEqual(
             submit_slurm_job.evaluate(0, "19010", JobResult("FAILED", "1:0")), 1
+        )
+
+    def test_non_completed_state_with_zero_exit_is_still_failure(self) -> None:
+        # FAILED|1:0 above also trips the exit-code check, so it stays green
+        # even if the state check is deleted. TIMEOUT|0:0 has a "successful"
+        # exit code, so this only fails if the state check itself runs.
+        self.assertEqual(
+            submit_slurm_job.evaluate(0, "19010", JobResult("TIMEOUT", "0:0")), 1
         )
 
     def test_nonzero_exit_code_is_failure(self) -> None:

@@ -135,14 +135,18 @@ jobs:
               # Normalize here too: a signal can land after the sbatch
               # assignment below but before the ;cluster strip that follows
               # it, in which case JOB_ID still holds the raw `<id>;<cluster>`
-              # value and a bare scancel on it would silently no-op into
-              # 2>/dev/null, orphaning the allocation.
+              # value and a bare scancel on it would fail, orphaning the
+              # allocation.
               local id="${JOB_ID}"
               id="${id##*$'\n'}"
               id="${id%%;*}"
               if [[ -n "${id}" ]]; then
                 echo "==> cancelling sp_build job ${id}"
-                scancel "${id}" 2>/dev/null || true
+                # Leave scancel's stderr visible: it used to be redirected to
+                # /dev/null, which hid the reason a cancel failed (e.g. a
+                # malformed id from the case above) instead of just its
+                # cosmetic "no jobs" noise on the common no-op path.
+                scancel "${id}" || true
               fi
             }
             # A bash trap *returns* to where the signal interrupted, so a
@@ -346,3 +350,26 @@ jobs:
             "${RCCL_CI_ROOT}/ab_artifacts/ab_regression_report.json" \
             --no-exit-code \
             --output /dev/null
+
+  cleanup_orphaned_run_config:
+    # detect's own "Clean up per-run config copy" step is `if: always()`, but
+    # that only runs once the detect job itself starts -- if it is cancelled
+    # while still queued (e.g. waiting on the pinned-nodes concurrency group),
+    # none of its steps ever execute and the per-run config copy build made is
+    # never removed. `needs: [build, detect]` plus `if: always()` here means
+    # this job runs regardless of whether detect ran, was skipped, or was
+    # cancelled, so it is the backstop for exactly that gap. `rm -f` makes it
+    # a harmless no-op on the normal path where detect's own step already
+    # removed the file.
+    needs: [build, detect]
+    if: always() && needs.build.result == 'success'
+    runs-on: [rccl-build]
+    timeout-minutes: 5
+    steps:
+      - name: Remove per-run config if detect never cleaned it up
+        env:
+          _CONFIG: ${{ needs.build.outputs.config_json }}
+        run: |
+          case "${_CONFIG}" in
+            "${RCCL_CI_ROOT}"/run-configs/ci_detect_run_*.json|"${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
+          esac
