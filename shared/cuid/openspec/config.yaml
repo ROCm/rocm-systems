@@ -1,16 +1,16 @@
 schema: spec-driven
 
-source: https://github.com/ROCm/rocm-systems/tree/develop/projects/cuid
+source: https://github.com/ROCm/rocm-systems/tree/develop/shared/cuid
 
 context: |
   CUID (Component Unified Identifier): a deterministic, per-component identity
   for GPUs, CPUs, NICs, NPUs and platforms, so that tools which today each
   invent their own device naming can correlate on one value. Sources live at
-  projects/cuid in the ROCm/rocm-systems monorepo; PRs target develop. Titles
+  shared/cuid in the ROCm/rocm-systems monorepo; PRs target develop. Titles
   use Conventional Commits: type(cuid): description.
 
   What is built: amdcuid_static (aliased amdcuid::amdcuid) from
-  projects/cuid/lib, an amdcuid CLI tool, and a daemon. AMD SMI links the
+  shared/cuid/lib, an amdcuid CLI tool, and a daemon. AMD SMI links the
   library through find_package(amdcuid CONFIG QUIET) and exposes the identity
   through its own API and CLI. That integration is specified in
   changes/integrate-cuid-into-amdsmi and lands in projects/amdsmi.

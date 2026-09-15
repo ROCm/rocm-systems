@@ -78,7 +78,7 @@ shape the library expects to consume, recorded in `lib/src/cuid_util.h`.
   collides with the MIT licence on the amdgpu files. Tolerable while the code is
   built into `amdgpu`; it must be resolved before the core is split into a
   standalone `amd_cuid.ko` that AINIC and NPU also register with.
-- **Userspace**: the ROCm CUID library (`projects/cuid`) is the consumer.
+- **Userspace**: the ROCm CUID library (`shared/cuid`) is the consumer.
   `CuidDevice` reads `cuid_primary` and `cuid_secondary` as stage 1 of its lookup
   for every component with a PCI routing ID, and stops recomputing where the
   driver answers.

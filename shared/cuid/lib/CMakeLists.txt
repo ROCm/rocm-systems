@@ -73,6 +73,11 @@ set_property(TARGET amdcuid_static PROPERTY EXPORT_NAME amdcuid)
 
 set_property(TARGET amdcuid_static PROPERTY POSITION_INDEPENDENT_CODE ON)
 
+# Hide symbols by default so a static library that later gets absorbed into a
+# shared object (e.g. amd-smi) does not leak amdcuid's internal symbols into
+# that library's exported ABI.
+set_target_properties(amdcuid_static PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+
 # The public surface is include/ and nothing else, in the build tree exactly as
 # in the install tree. With this directory itself PUBLIC, an in-tree consumer
 # could write #include "src/hmac.h" and compile, then fail once installed
