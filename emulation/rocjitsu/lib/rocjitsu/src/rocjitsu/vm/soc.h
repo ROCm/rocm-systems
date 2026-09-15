@@ -193,7 +193,7 @@ public:
   /// @brief Set the execution plugin group and distribute to CPs/CUs.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
 
-  /// @brief Set the requested shared host-thread budget for functional CU execution.
+  /// @brief Set the requested shared CPU pool width for functional CU execution.
   ///
   /// @details This controls host acceleration rather than modeled GPU
   /// resources or timing. The count includes the command-processor thread that
