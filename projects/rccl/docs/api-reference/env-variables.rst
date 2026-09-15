@@ -383,6 +383,21 @@ in the following table.
         | Values ``> MAXCHANNELS`` set through ``ncclConfig_t`` are rejected
         | with ``ncclInvalidArgument`` at communicator initialization.
 
+    * - | ``NCCL_P2P_MAX_PEERS``
+        | Sets the maximum number of peers a rank communicates with concurrently
+        | over P2P. This overrides the value of the ``maxP2pPeers`` field in
+        | ``ncclConfig_t``. RCCL divides the P2P channel pool among this many
+        | peers instead of among all ranks, so a smaller value gives each peer
+        | more channels. It affects ``ncclSend``/``ncclRecv`` and the
+        | send/recv-based collectives (all-to-all, scatter, gather). It does not
+        | restrict which peers a rank is allowed to communicate with.
+      - | Integer value, ``1`` to the number of ranks (default: unset, which
+        | means the number of ranks in the communicator)
+        | Values ``<= 0`` are ignored and a message is logged.
+        | Values greater than the communicator size are capped to it.
+        | Values ``<= 0`` set through ``ncclConfig_t`` are rejected with
+        | ``ncclInvalidArgument`` at communicator initialization.
+
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.
       - | Ring topology specification string

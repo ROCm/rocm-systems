@@ -314,7 +314,25 @@ ncclConfig_t
 
  .. c:macro:: maxP2pPeers
 
-  Set the maximum number of peers any rank will concurrently communicate with using P2P communication. Setting this value will influence all send/recv and send/recv-based collectives (all-to-all, scatter, gather). Values less than one or greater than the number of ranks will default to the number of ranks in the communicator.
+  (since 2.30)
+
+  Set the maximum number of peers any rank will concurrently communicate with
+  using P2P communication. Setting this value will influence all send/recv and
+  send/recv-based collectives (all-to-all, scatter, gather): RCCL divides the P2P
+  channel pool among this many peers rather than among all ranks, so a smaller
+  value gives each peer more channels. It does not restrict which peers a rank is
+  allowed to communicate with.
+
+  Defaults to ``NCCL_CONFIG_UNDEF_INT``, which resolves to the number of ranks in
+  the communicator. Values greater than the number of ranks are capped to the
+  communicator size, with a message logged at ``NCCL_DEBUG=INFO``. Values less
+  than one are rejected: ``ncclCommInitRankConfig`` returns
+  ``ncclInvalidArgument``. The field is ignored when ``config.version`` is below
+  ``2.30``.
+
+  Setting the ``NCCL_P2P_MAX_PEERS`` environment variable overrides this field.
+  Values ``<= 0`` in that variable are ignored rather than rejected, and the
+  field keeps its value.
 
 .. _ncclsiminfo:
 
