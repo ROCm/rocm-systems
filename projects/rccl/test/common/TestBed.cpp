@@ -51,7 +51,7 @@ namespace RcclUnitTesting
 {
   namespace
   {
-    // Matched by suite, not by test: the observed failures are one sweep's sample, so naming exact tests leaves sibling variants exposed.
+    // Matched by suite, not by test: one sweep's sample, so exact test names leave siblings exposed.
     char const* const kGfx95NoPoolSuites[] = {"AlltoAll", "ReduceScatter", "AllGather"};
   }
 
@@ -73,10 +73,11 @@ namespace RcclUnitTesting
     this->poolMode = ev.commPool;
 
     // The kGfx95NoPoolSuites suites are unstable on gfx950 when workers/comms are reused across configs (AICOMRCCL-2275).
-    // Unconditional on gfx950, so UT_COMM_POOL=1 cannot defeat it; exact match still excludes AlltoAllv, whose hang is AICOMRCCL-1900.
+    // Unstable on gfx95 when comms/workers are reused across configs (AICOMRCCL-2275); unconditional,
+    // so UT_COMM_POOL=1 cannot defeat it. Exact match excludes AlltoAllv, whose hang is AICOMRCCL-1900.
     if (this->poolMode && ev.isGfx95)
     {
-      // TestBed is a local in each TEST body, so current_test_info() names the running test; null only if used outside one.
+      // TestBed is a local in each TEST body, so current_test_info() is null only outside one.
       ::testing::TestInfo const* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
       if (testInfo != nullptr && testInfo->test_suite_name() != nullptr)
       {
