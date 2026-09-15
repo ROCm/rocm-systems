@@ -38,6 +38,8 @@ constexpr uint32_t kSMovS4Zero = 0xbe840080;         // s_mov_b32 s4, 0
 constexpr uint32_t kSCbranchScc0Skip1 = 0xbf840001;  // s_cbranch_scc0 over one word
 constexpr uint32_t kSSetGprIdxOnS0Src0 = 0xbf110100; // s_set_gpr_idx_on s0, gpr_idx(SRC0)
 constexpr uint32_t kSMovrelsS5S4 = 0xbe852a04;       // s_movrels_b32 s5, s4
+constexpr uint32_t kVMovV2V0 = 0x7e040300;           // v_mov_b32 v2, v0
+constexpr uint32_t kVMovV2V1 = 0x7e040301;           // v_mov_b32 v2, v1
 
 constexpr uint64_t kTextAddr = 0x1000;
 constexpr uint64_t kTextOffset = 0x100;
@@ -177,13 +179,15 @@ ResolvedProbeSymbol whole_body_symbol(const std::vector<uint32_t> &body) {
   return sym;
 }
 
-// Run the analysis over @p body under the only supported convention.
-std::optional<RegisterSet> live_ins(const std::vector<uint32_t> &body, std::string *err) {
+// Run the analysis over @p body under the only supported convention, called with
+// @p num_arg_dwords declared argument dwords.
+std::optional<RegisterSet> live_ins(const std::vector<uint32_t> &body, std::string *err,
+                                    uint8_t num_arg_dwords = 0) {
   const auto image = make_elf(body);
   const AmdGpuCodeObject obj(image.data(), image.size());
-  return analyze_probe_live_ins(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
-                                *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
-                                err);
+  return analyze_probe_live_ins(
+      obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+      *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, num_arg_dwords), err);
 }
 
 TEST(ProbeLiveInTest, NopProbeHasNoLiveIns) {
@@ -249,6 +253,36 @@ TEST(ProbeLiveInTest, LinkPairIsNotALiveIn) {
   ASSERT_TRUE(set.has_value()) << err;
   EXPECT_FALSE(set->contains(RegisterRef{RegClass::SGPR, 30, 1}));
   EXPECT_FALSE(set->contains(RegisterRef{RegClass::SGPR, 31, 1}));
+}
+
+// Nothing in the body says whether v0 is argument zero or an uninitialized
+// read, so the same body is accepted at count 1 and rejected at count 0.
+TEST(ProbeLiveInTest, ADeclaredArgumentIsNotALiveIn) {
+  std::string err;
+  const auto declared = live_ins({kVMovV2V0, kSSetpcS30S31}, &err, /*num_arg_dwords=*/1);
+  ASSERT_TRUE(declared.has_value()) << err;
+  EXPECT_TRUE(declared->none()) << format_register_set(*declared);
+
+  const auto undeclared = live_ins({kVMovV2V0, kSSetpcS30S31}, &err, /*num_arg_dwords=*/0);
+  ASSERT_TRUE(undeclared.has_value()) << err;
+  EXPECT_EQ(format_register_set(*undeclared), "v0");
+}
+
+// The residual names exactly the argument the caller did not declare.
+TEST(ProbeLiveInTest, ReportsAnArgumentBeyondTheDeclaredCount) {
+  std::string err;
+  const auto set = live_ins({kVMovV2V0, kVMovV2V1, kSSetpcS30S31}, &err, /*num_arg_dwords=*/1);
+  ASSERT_TRUE(set.has_value()) << err;
+  EXPECT_EQ(format_register_set(*set), "v1");
+}
+
+// Acceptance is "nothing left over", not "the body reads exactly what was
+// declared": a probe that ignores an argument it was handed is not unsafe.
+TEST(ProbeLiveInTest, ADeclaredButUnreadArgumentIsAccepted) {
+  std::string err;
+  const auto set = live_ins({kSWaitcnt0, kSSetpcS30S31}, &err, /*num_arg_dwords=*/2);
+  ASSERT_TRUE(set.has_value()) << err;
+  EXPECT_TRUE(set->none()) << format_register_set(*set);
 }
 
 // GPR indexing adds m0 to an encoded operand index, so the decoded operands stop

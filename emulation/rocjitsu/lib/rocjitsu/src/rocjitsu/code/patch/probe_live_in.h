@@ -10,8 +10,15 @@
 ///
 /// Which of those inputs the framework supplies depends on the ABI in force, so
 /// the analysis subtracts `supplied_registers()` and never enumerates the
-/// conventions itself. Today that subtraction is the return-link pair, which
-/// every convention supplies by construction.
+/// conventions itself. That subtraction is the return-link pair, which every
+/// convention supplies by construction, plus the argument VGPRs the ABI's
+/// declared count covers.
+///
+/// Nothing in a body distinguishes "reads v0 as its first argument" from "reads
+/// v0 uninitialized", so the argument count is declared by the caller and
+/// checked here: a declared argument the body reads subtracts away, and one it
+/// reads but the caller did not declare stays in the result and fails the site.
+/// This needs no argument-specific code -- the widened supplied set does it.
 ///
 /// Scope: ordinary registers — SGPR, VGPR, AccVGPR — read before being defined.
 /// That is the shape of a value the kernel prologue supplies and an arbitrary

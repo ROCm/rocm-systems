@@ -113,19 +113,43 @@ template <typename T>
 
 } // namespace
 
+RegisterSet arg_registers(const ProbeAbi &abi) {
+  RegisterSet regs;
+  if (!is_valid_probe_abi(abi) || abi.num_arg_vgprs == 0)
+    return regs;
+  // Guarded above rather than left to expand(), which floors a zero width at one
+  // and would report v[arg_vgpr_base] for a probe passed no arguments at all.
+  regs.expand(RegisterRef{RegClass::VGPR, abi.arg_vgpr_base, abi.num_arg_vgprs});
+  return regs;
+}
+
 RegisterSet supplied_registers(const ProbeAbi &abi) {
   RegisterSet regs;
-  // Report nothing rather than guess: a live-in subtraction that excused a pair
-  // this ABI never committed to writing would excuse the probe reading it cold.
+  // Report nothing rather than guess: a live-in subtraction that excused a
+  // register this ABI never committed to writing would excuse the probe reading
+  // it cold.
   if (!is_valid_probe_abi(abi))
     return regs;
   regs.expand(probe_link_pair(abi));
+  regs |= arg_registers(abi);
   return regs;
 }
 
 std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_obj,
                                                   const ResolvedProbeSymbol &sym,
-                                                  rj_code_arch_t arch, std::string *error_out) {
+                                                  rj_code_arch_t arch, uint8_t num_arg_dwords,
+                                                  std::string *error_out) {
+  // Screened before the body is read so an unsupported count is reported as
+  // such, rather than as whatever the body scan trips over first.
+  const std::optional<ProbeAbi> abi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, num_arg_dwords);
+  if (!abi) {
+    report(error_out, ("probe cannot be passed " + std::to_string(num_arg_dwords) +
+                       " argument dwords; the limit is " + std::to_string(kMaxProbeArgVgprs))
+                          .c_str());
+    return std::nullopt;
+  }
+
   const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(probe_obj.image_data()),
                                        probe_obj.image_size());
 
@@ -241,13 +265,10 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
   callable.arch = arch;
   callable.target = target;
   callable.body_words.assign(words.begin(), words.begin() + num_words);
-  // The body was just verified to return through s[30:31], which is the whole
-  // of this convention, so the derivation cannot fail. static_assert rather
-  // than a runtime check, since derive_probe_abi is constexpr.
-  constexpr std::optional<ProbeAbi> kVerifiedAbi =
-      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31);
-  static_assert(kVerifiedAbi.has_value() && is_valid_probe_abi(*kVerifiedAbi));
-  callable.abi = *kVerifiedAbi;
+  // The body was just verified to return through s[30:31]; the argument count
+  // was screened on entry. Whether the body agrees with that count is
+  // analyze_probe_live_ins()'s to decide.
+  callable.abi = *abi;
   // output_text_offset stays 0 — assigned by the later layout step.
   return callable;
 }

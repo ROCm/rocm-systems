@@ -6,6 +6,7 @@
 #include "rocjitsu/code/analysis/free_registers.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/spill_builders.h"
+#include "rocjitsu/code/builders/vector_builders.h"
 #include "rocjitsu/code/patch/error_report.h"
 
 #include <algorithm>
@@ -193,6 +194,17 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   }
   const uint16_t kLinkPairBase = abi.link_pair_base;
 
+  // The orchestrator derives both sides from one request, so a mismatch means a
+  // direct caller built the two independently and they disagree about how many
+  // VGPRs the call writes.
+  if (plan.probe_args.size() != abi.num_arg_vgprs) {
+    report(error_out, ("probe-call resource planning: " + std::to_string(plan.probe_args.size()) +
+                       " argument values but the ABI declares " + std::to_string(abi.num_arg_vgprs))
+                          .c_str());
+    return false;
+  }
+  const RegisterSet arg_regs = arg_registers(abi);
+
   // Reject if either lane of the link pair is live at the anchor; saving a live
   // link pair is deferred.
   if (live_at_anchor.intersects(probe_link_pair(abi))) {
@@ -267,16 +279,29 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
     special_saves.push_back(SpecialStateSlot{operand, *temp, width});
     return true;
   };
-  // A spilled register is live at the anchor and clobbered by the probe (builder
-  // clobbers are dead, so never in the spill set). Spilling forces EXEC=-1 around
-  // the store/load, so EXEC must be saved even if the probe never touches it.
-  const bool will_spill = live_at_anchor.intersects(probe_body_clobbers);
+  // A spilled register is live at the anchor and clobbered by the probe or by
+  // the envelope's argument writes. The argument VGPRs are the one builder
+  // clobber that is not chosen dead -- the ABI fixes them at arg_vgpr_base --
+  // so unlike the SGPR temps they can be live and need spilling. Spilling forces
+  // EXEC=-1 around the store/load, so EXEC must be saved even if the probe never
+  // touches it.
+  const bool will_spill = live_at_anchor.intersects(probe_body_clobbers | arg_regs);
+
+  // The full-mask window the spill stores/loads run under. Argument writes join
+  // it: a v_mov_b32 under the anchor mask leaves the argument undefined in the
+  // inactive lanes, which an EXEC-independent read in the probe (v_readlane of a
+  // fixed lane, or anything the probe runs after widening EXEC itself) would then
+  // see. Writing under EXEC=-1 defines every lane. It costs nothing in guest
+  // state: a live argument VGPR is stored before the write and reloaded after the
+  // call, both under the same full mask.
+  const bool needs_full_mask = will_spill || !plan.probe_args.empty();
 
   // EXEC/VCC/M0 operand codes are resolved per-arch, but only when actually
   // reserving that register -- so a plan with no special-state saves (and no
-  // spill) stays arch-agnostic, as the resource-planning tests rely on. EXEC also
-  // rides this path when the site spills.
-  const bool save_exec = plan.preserve_exec || will_spill;
+  // full-mask window) stays arch-agnostic, as the resource-planning tests rely
+  // on. EXEC also rides this path whenever that window is needed, since the
+  // anchor mask has to be restored from somewhere.
+  const bool save_exec = plan.preserve_exec || needs_full_mask;
   if (!reserve_special(save_exec, save_exec ? scalar_operand_exec_lo(plan.arch) : 0, 2, "EXEC") ||
       !reserve_special(plan.preserve_vcc, plan.preserve_vcc ? scalar_operand_vcc_lo(plan.arch) : 0,
                        2, "VCC") ||
@@ -291,24 +316,30 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   before_words += 1;     // s_getpc_b64
   before_words += 2 + 2; // s_add_u32 + literal, s_addc_u32 + literal
   before_words += 1;     // s_swappc_b64
+  // Each argument is one v_mov_b32 plus its literal word.
+  before_words += static_cast<uint32_t>(plan.probe_args.size()) * 2;
   if (plan.preserve_scc)
     before_words += 2; // s_cselect_b32 (save) + s_cmp_lg_u32 (restore)
   // Each special-state register adds one s_mov save + one s_mov restore.
   before_words += static_cast<uint32_t>(special_saves.size()) * 2;
-  // Spilling adds three EXEC toggles: widen before the stores, restore the anchor
-  // mask before the call (probe runs under the anchor mask), re-widen before the loads.
-  if (will_spill)
+  // The full-mask window costs three EXEC toggles: widen before the stores and
+  // the argument writes, restore the anchor mask before the call (the probe runs
+  // under the anchor mask), re-widen before the loads. The third is emitted even
+  // when only arguments needed the window and the spill epilogue is empty, so the
+  // planner and the emitter count the same three unconditionally.
+  if (needs_full_mask)
     before_words += 3;
 
   plan.is_probe_call = true;
   plan.link_pair_base = kLinkPairBase;
+  plan.arg_vgpr_base = abi.arg_vgpr_base;
   plan.target_pair_base = *target_pair;
   if (scc_temp)
     plan.scc_temp = *scc_temp;
   plan.special_state_saves = std::move(special_saves);
   plan.before_word_count = before_words;
 
-  plan.builder_clobbers = link_pair | target_pair_set;
+  plan.builder_clobbers = link_pair | target_pair_set | arg_regs;
   if (scc_temp)
     plan.builder_clobbers.expand(RegisterRef{RegClass::SGPR, *scc_temp, 1});
   for (const SpecialStateSlot &s : plan.special_state_saves)
@@ -344,13 +375,17 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   std::vector<uint32_t> env;
   env.insert(env.end(), boundary_drain.begin(), boundary_drain.end());
 
-  // The site spills iff there is anything to spill; this drives the EXEC full-mask
-  // toggles only. EXEC save/restore is decided by special_state_saves membership.
-  const bool full_mask_exec =
-      !plan.vgpr_spills.empty() || !plan.sgpr_spills.empty() || !plan.acc_spills.empty();
+  // The full-mask window: needed to spill, and to define the argument VGPRs in
+  // every lane rather than only the ones active at the anchor. Mirrors
+  // plan_probe_call's needs_full_mask, which is what sized the envelope; this
+  // drives the EXEC toggles only, since EXEC save/restore is decided by
+  // special_state_saves membership.
+  const bool full_mask_exec = !plan.vgpr_spills.empty() || !plan.sgpr_spills.empty() ||
+                              !plan.acc_spills.empty() || !plan.probe_args.empty();
 
   // SGPR pair holding the saved anchor EXEC (populated by the save loop below).
-  // Reused to restore the anchor mask before the call; always present when spilling.
+  // Reused to restore the anchor mask before the call; always present when the
+  // full-mask window is open.
   uint16_t exec_temp = 0;
   bool exec_temp_found = false;
   for (const SpecialStateSlot &s : plan.special_state_saves)
@@ -358,12 +393,12 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
       exec_temp = s.temp_base;
       exec_temp_found = true;
     }
-  // full_mask_exec implies will_spill implies save_exec, so plan_probe_call must
-  // have reserved an EXEC temp for any spilling site. Verify rather than trust the
-  // default. Fail closed instead.
+  // full_mask_exec implies needs_full_mask implies save_exec, so plan_probe_call
+  // must have reserved an EXEC temp for any such site. Verify rather than trust
+  // the default. Fail closed instead.
   if (full_mask_exec && !exec_temp_found) {
-    report(error_out, "emit_probe_call: spilling site has no saved EXEC temp to restore the anchor "
-                      "mask; plan_probe_call must reserve one when spilling");
+    report(error_out, "emit_probe_call: site needs the full-mask window but has no saved EXEC temp "
+                      "to restore the anchor mask; plan_probe_call must reserve one");
     return std::nullopt;
   }
 
@@ -382,8 +417,23 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // Spill saves: store each live+clobbered register before the call.
   env.insert(env.end(), spill.prologue.begin(), spill.prologue.end());
 
+  // Argument materialization: consecutive VGPRs from the ABI's base, in order.
+  //
+  // Three things fix this position. It follows the spill prologue, so an argument
+  // VGPR that was live at the anchor is already stored -- and the prologue ends in
+  // a store-completion wait, so the store has finished reading the register before
+  // the v_mov overwrites it. It runs inside the full-mask window, so every lane's
+  // copy is defined rather than only the lanes active at the anchor. And
+  // v_mov_b32 writes no SCC, so it cannot disturb the save/restore pair below.
+  for (size_t i = 0; i < plan.probe_args.size(); ++i) {
+    const auto words = build_v_mov_b32_imm(static_cast<uint16_t>(plan.arg_vgpr_base + i),
+                                           plan.probe_args[i], plan.arch);
+    env.insert(env.end(), words.begin(), words.end());
+  }
+
   // Restore the anchor EXEC before the call so the probe runs under the anchor mask,
-  // not the full mask used to bracket the stores. The loads are re-widened after.
+  // not the full mask used to bracket the stores and argument writes. The loads are
+  // re-widened after.
   if (full_mask_exec)
     env.push_back(build_s_mov_b64(scalar_operand_exec_lo(plan.arch), exec_temp, plan.arch));
 

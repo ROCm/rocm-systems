@@ -326,6 +326,12 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                       "(a probe call) or both be empty (the inline nop)");
     return std::nullopt;
   }
+  // The inline nop has nowhere to put arguments. Rejected rather than ignored,
+  // so a caller that meant to request a probe call finds out.
+  if (pt.probe_obj == nullptr && !pt.probe_args.empty()) {
+    fail("InstrumentationPoint::probe_args requires a probe_obj / probe_symbol");
+    return std::nullopt;
+  }
   // TODO: consume force_full_exec when EXEC policy management is implemented
   if (pt.force_full_exec) {
     fail("InstrumentationPoint::force_full_exec must be false temporarily");
@@ -712,16 +718,32 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   };
   const rj_code_target_id_t destination_target = effective_target(obj_);
 
-  // Store probe objects and symbols together in probe_keys (object, symbol).
-  std::vector<std::pair<const AmdGpuCodeObject *, std::string>> probe_keys;
+  // Store probe objects, symbols, and declared argument counts together in
+  // probe_keys. The count is part of the convention the body was verified
+  // against, so two sites calling one probe with different counts get distinct
+  // ProbeCallables. The argument values stay per-site and are not in the key.
+  struct ProbeKey {
+    const AmdGpuCodeObject *obj;
+    std::string symbol;
+    size_t num_args;
+  };
+  std::vector<ProbeKey> probe_keys;
   // Helper function to get a probe index for a given InstrumentationPoint
   // If the probe is new, then resolve it and get probe info; add it to
   // probe_keys and out.probes.
   auto resolve_probe_index = [&](const InstrumentationPoint &pt,
                                  std::string &perr) -> std::optional<size_t> {
     for (size_t i = 0; i < probe_keys.size(); ++i) {
-      if (probe_keys[i].first == pt.probe_obj && probe_keys[i].second == pt.probe_symbol)
+      if (probe_keys[i].obj == pt.probe_obj && probe_keys[i].symbol == pt.probe_symbol &&
+          probe_keys[i].num_args == pt.probe_args.size())
         return i;
+    }
+    // Bounded before the narrowing cast below, which would wrap a large count
+    // into a small in-range one.
+    if (pt.probe_args.size() > kMaxProbeArgVgprs) {
+      perr = "probe '" + pt.probe_symbol + "' was given " + std::to_string(pt.probe_args.size()) +
+             " arguments; the limit is " + std::to_string(kMaxProbeArgVgprs);
+      return std::nullopt;
     }
     const rj_code_target_id_t probe_target = effective_target(*pt.probe_obj);
     if (destination_target != ROCJITSU_CODE_TARGET_INVALID &&
@@ -732,7 +754,8 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     auto sym = resolve_probe_symbol(*pt.probe_obj, pt.probe_symbol, &perr);
     if (!sym)
       return std::nullopt;
-    auto callable = build_probe_callable(*pt.probe_obj, *sym, arch_, &perr);
+    auto callable = build_probe_callable(*pt.probe_obj, *sym, arch_,
+                                         static_cast<uint8_t>(pt.probe_args.size()), &perr);
     if (!callable)
       return std::nullopt;
     // Inputs the probe reads that its convention does not supply. Typically a
@@ -745,11 +768,12 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       return std::nullopt;
     if (!live_ins->none()) {
       perr = "probe '" + pt.probe_symbol + "' reads " + format_register_set(*live_ins) +
-             " before defining it, and the calling convention does not supply it";
+             " before defining it, and its ABI (" + std::to_string(pt.probe_args.size()) +
+             " argument dwords) does not supply it";
       return std::nullopt;
     }
     out.probes.push_back(std::move(*callable));
-    probe_keys.emplace_back(pt.probe_obj, pt.probe_symbol);
+    probe_keys.push_back({pt.probe_obj, pt.probe_symbol, pt.probe_args.size()});
     return out.probes.size() - 1;
   };
 
@@ -793,6 +817,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
         continue;
       }
       site->probe_index = *index;
+      site->probe_args = pt.probe_args;
     }
 
     sites.push_back(std::move(*site));
@@ -940,6 +965,35 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         continue;
       }
 
+      // The kernel must likewise own the argument VGPRs. Only asked of a call
+      // that passes arguments, so a zero-argument probe call stays independent
+      // of the VGPR allocation entirely.
+      if (probe.abi.num_arg_vgprs != 0) {
+        // vgpr_bounds stays all-zero when no single kernel descriptor was
+        // discovered, so `kernels.size() != 1` is the guard, matching every other
+        // use. Same fail-closed case as the SGPR bound above: the allocation the
+        // argument VGPRs must fit inside is unknown. The zero state would reject
+        // any non-zero count anyway; asking here is what makes the diagnostic say
+        // which of the two things went wrong.
+        if (kernels.size() != 1) {
+          result.errors.push_back("probe call at anchor_offset " +
+                                  std::to_string(site.anchor_offset) +
+                                  " passes arguments, which requires a discovered kernel "
+                                  "descriptor to bound VGPR selection, but none was found");
+          continue;
+        }
+        if (!probe_args_fit_in_kernel(vgpr_bounds.ordinary_bound, probe.abi)) {
+          const uint16_t last =
+              static_cast<uint16_t>(probe.abi.arg_vgpr_base + probe.abi.num_arg_vgprs - 1);
+          result.errors.push_back("probe call at anchor_offset " +
+                                  std::to_string(site.anchor_offset) + " needs argument VGPRs v" +
+                                  std::to_string(probe.abi.arg_vgpr_base) + "..v" +
+                                  std::to_string(last) + " but the kernel allocates only " +
+                                  std::to_string(vgpr_bounds.ordinary_bound) + " ordinary VGPRs");
+          continue;
+        }
+      }
+
       // Callee clobbers (probe body) + liveness at the anchor feed envelope
       // resource selection and the no-spill policy gate.
       auto summary = build_probe_clobber_summary(probe, &err);
@@ -982,6 +1036,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // Cap envelope/temp SGPR selection at the kernel's own allocation so a temp
       // never lands past its .sgpr_count
       plan.kernel_sgpr_count = *kernel_sgpr_count;
+      plan.probe_args = site.probe_args;
       // Given liveness, clobbers, and calling convention, select registers
       // for trampoline and determine how big the trampoline will be
       if (!TrampolineBuilder::plan_probe_call(plan, probe.abi, live, summary->ordinary_clobbers,
@@ -1035,9 +1090,13 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         }
         // The SGPR bridge must be an ordinary VGPR: an index in the accumulator
         // window would alias an AGPR that is not part of acc_spills.
+        // Defensively exclude the argument VGPRs from bridge selection as well
+        // as the live set.
+        const RegisterSet bridge_unavailable = live | arg_registers(probe.abi);
         if (!sgpr_spill.none() &&
-            !plan_sgpr_spills(sgpr_spill, live, plan.vgpr_spills, vgpr_bounds.ordinary_bound,
-                              *spills, arch_, plan.sgpr_spills, plan.spill_bridge_vgpr, &err)) {
+            !plan_sgpr_spills(sgpr_spill, bridge_unavailable, plan.vgpr_spills,
+                              vgpr_bounds.ordinary_bound, *spills, arch_, plan.sgpr_spills,
+                              plan.spill_bridge_vgpr, &err)) {
           result.errors.push_back(std::move(err));
           continue;
         }

@@ -157,8 +157,8 @@ TEST(ProbeCallableTest, BuildsNopProbe) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  const auto callable =
-      build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err);
+  const auto callable = build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                             /*num_arg_dwords=*/0, &err);
   ASSERT_TRUE(callable.has_value()) << err;
   EXPECT_EQ(callable->symbol, "rj_probe");
   EXPECT_EQ(callable->arch, ROCJITSU_CODE_ARCH_CDNA2);
@@ -168,13 +168,43 @@ TEST(ProbeCallableTest, BuildsNopProbe) {
   EXPECT_EQ(callable->output_text_offset, 0u); // assigned by a later layout step.
 }
 
+TEST(ProbeCallableTest, CarriesTheDeclaredArgumentCountIntoTheAbi) {
+  const std::vector<uint32_t> body{kSWaitcnt0, kSSetpcS30S31};
+  const auto image = make_elf(body);
+  AmdGpuCodeObject obj(image.data(), image.size());
+
+  std::string err;
+  const auto callable = build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                             /*num_arg_dwords=*/2, &err);
+  ASSERT_TRUE(callable.has_value()) << err;
+  EXPECT_EQ(callable->abi, *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31,
+                                             /*num_arg_dwords=*/2));
+  EXPECT_EQ(callable->abi.num_arg_vgprs, 2);
+  // The body is the same one BuildsNopProbe accepts: the count is a property of
+  // the call, and nothing in the body has to change to carry it.
+  EXPECT_EQ(callable->body_words, body);
+}
+
+TEST(ProbeCallableTest, RejectsMoreArgumentsThanFitInRegisters) {
+  const std::vector<uint32_t> body{kSWaitcnt0, kSSetpcS30S31};
+  const auto image = make_elf(body);
+  AmdGpuCodeObject obj(image.data(), image.size());
+
+  std::string err;
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                    kMaxProbeArgVgprs + 1, &err)
+                   .has_value());
+  EXPECT_NE(err.find("argument dwords"), std::string::npos) << err;
+}
+
 TEST(ProbeCallableTest, ReportsRejectedEncodingAndWordOffset) {
   const std::vector<uint32_t> body{0xffffffffu, kSSetpcS30S31};
   const auto image = make_elf(body);
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err)
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                    /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("word 0"), std::string::npos) << err;
   EXPECT_NE(err.find("Invalid instruction opcode"), std::string::npos) << err;
@@ -186,7 +216,8 @@ TEST(ProbeCallableTest, RejectsBodyWithCall) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err)
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                    /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("call"), std::string::npos) << err;
 }
@@ -197,7 +228,8 @@ TEST(ProbeCallableTest, RejectsScratchAccess) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err)
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                    /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("scratch"), std::string::npos) << err;
 }
@@ -208,7 +240,8 @@ TEST(ProbeCallableTest, RejectsSmemScratchAccess) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err)
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                    /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("scratch"), std::string::npos) << err;
 }
@@ -219,7 +252,8 @@ TEST(ProbeCallableTest, RejectsMissingReturn) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err)
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                    /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("s_setpc_b64"), std::string::npos) << err;
 }
@@ -231,7 +265,8 @@ TEST(ProbeCallableTest, RejectsWrongReturnRegister) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err)
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                    /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("s_setpc_b64"), std::string::npos) << err;
 }
@@ -243,7 +278,8 @@ TEST(ProbeCallableTest, RejectsRelocationInBody) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err)
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                    /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("relocation"), std::string::npos) << err;
 }
@@ -255,8 +291,8 @@ TEST(ProbeCallableTest, AcceptsRelocationOutsideBody) {
   AmdGpuCodeObject obj(image.data(), image.size());
 
   std::string err;
-  const auto callable =
-      build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err);
+  const auto callable = build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+                                             /*num_arg_dwords=*/0, &err);
   ASSERT_TRUE(callable.has_value()) << err;
   EXPECT_EQ(callable->abi, *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31));
 }
@@ -270,7 +306,8 @@ TEST(ProbeCallableTest, RejectsNonDwordBodySize) {
   sym.body_size = 6; // not a multiple of 4.
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, sym, ROCJITSU_CODE_ARCH_CDNA2, &err).has_value());
+  EXPECT_FALSE(build_probe_callable(obj, sym, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/0, &err)
+                   .has_value());
   EXPECT_NE(err.find("multiple of 4"), std::string::npos) << err;
 }
 
@@ -284,7 +321,8 @@ TEST(ProbeCallableTest, RejectsBodyPastImage) {
   sym.body_size = 8;
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, sym, ROCJITSU_CODE_ARCH_CDNA2, &err).has_value());
+  EXPECT_FALSE(build_probe_callable(obj, sym, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/0, &err)
+                   .has_value());
   EXPECT_NE(err.find("past end of image"), std::string::npos) << err;
 }
 
@@ -299,7 +337,8 @@ TEST(ProbeCallableTest, RejectsStValueOverflow) {
   sym.st_value = UINT64_MAX; // st_value + body_size overflows.
 
   std::string err;
-  EXPECT_FALSE(build_probe_callable(obj, sym, ROCJITSU_CODE_ARCH_CDNA2, &err).has_value());
+  EXPECT_FALSE(build_probe_callable(obj, sym, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/0, &err)
+                   .has_value());
   EXPECT_NE(err.find("overflow"), std::string::npos) << err;
 }
 
@@ -371,6 +410,70 @@ TEST(ProbeAbiTest, AnInvalidAbiSuppliesNothing) {
   EXPECT_TRUE(supplied_registers(ProbeAbi{.cc = ProbeCallingConvention::AmdGpuFuncReturnS30S31,
                                           .link_pair_base = 31})
                   .none());
+}
+
+TEST(ProbeAbiTest, PlacesArgumentsInConsecutiveVgprsFromV0) {
+  const std::optional<ProbeAbi> abi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, /*num_arg_dwords=*/3);
+  ASSERT_TRUE(abi.has_value());
+  EXPECT_EQ(abi->arg_vgpr_base, 0);
+  EXPECT_EQ(abi->num_arg_vgprs, 3);
+
+  RegisterSet expected;
+  expected.expand(RegisterRef{RegClass::VGPR, 0, 3});
+  EXPECT_EQ(arg_registers(*abi), expected);
+}
+
+TEST(ProbeAbiTest, SuppliesTheLinkPairAndTheArgumentVgprs) {
+  const std::optional<ProbeAbi> abi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, /*num_arg_dwords=*/2);
+  ASSERT_TRUE(abi.has_value());
+
+  RegisterSet expected;
+  expected.expand(RegisterRef{RegClass::SGPR, 30, 2});
+  expected.expand(RegisterRef{RegClass::VGPR, 0, 2});
+  EXPECT_EQ(supplied_registers(*abi), expected);
+}
+
+// RegisterRef floors a zero width at one, so a set built without guarding the
+// count would claim v0 for a probe passed nothing.
+TEST(ProbeAbiTest, ZeroArgumentsClaimsNoVgpr) {
+  const std::optional<ProbeAbi> abi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, /*num_arg_dwords=*/0);
+  ASSERT_TRUE(abi.has_value());
+  EXPECT_TRUE(arg_registers(*abi).none());
+
+  RegisterSet link_pair_only;
+  link_pair_only.expand(RegisterRef{RegClass::SGPR, 30, 2});
+  EXPECT_EQ(supplied_registers(*abi), link_pair_only);
+}
+
+TEST(ProbeAbiTest, RejectsMoreArgumentsThanFitInRegisters) {
+  EXPECT_TRUE(derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, kMaxProbeArgVgprs)
+                  .has_value());
+  EXPECT_FALSE(
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, kMaxProbeArgVgprs + 1)
+          .has_value());
+}
+
+// is_valid_probe_abi re-derives from the ABI's own count. Keyed on the
+// convention alone it would accept any count at all, and a declared count would
+// stop being screened.
+TEST(ProbeAbiTest, ValidityIsKeyedOnTheDeclaredArgumentCount) {
+  const std::optional<ProbeAbi> two_args =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, /*num_arg_dwords=*/2);
+  ASSERT_TRUE(two_args.has_value());
+  EXPECT_TRUE(is_valid_probe_abi(*two_args));
+
+  ProbeAbi over_limit = *two_args;
+  over_limit.num_arg_vgprs = kMaxProbeArgVgprs + 1;
+  EXPECT_FALSE(is_valid_probe_abi(over_limit));
+
+  // A window the convention does not choose, at a legal count.
+  ProbeAbi rebased = *two_args;
+  rebased.arg_vgpr_base = 8;
+  EXPECT_FALSE(is_valid_probe_abi(rebased));
+  EXPECT_TRUE(arg_registers(rebased).none());
 }
 
 } // namespace
