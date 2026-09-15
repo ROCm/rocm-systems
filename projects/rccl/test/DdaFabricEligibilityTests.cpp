@@ -280,7 +280,7 @@ TEST_F(DdaFabricEligibilityTest, AllGather_MultiNodeStillEligible)
 TEST_F(DdaFabricEligibilityTest, AllGather_InvalidDatatypeDispatch)
 {
     EXPECT_EQ(ncclAllGatherDdaFabric(
-                  sendbuff_, recvbuff_, 4, ncclInt32, mockComm_.get(), nullptr),
+                  sendbuff_, recvbuff_, 4, ncclInt32, mockComm_.get(), nullptr, nullptr),
               ncclInvalidArgument);
 }
 
@@ -362,6 +362,7 @@ TEST_F(DdaFabricEligibilityTest, AllReduce_InvalidDatatypeDispatch)
                                      ncclInt32,
                                      ncclSum,
                                      mockComm_.get(),
+                                     nullptr,
                                      nullptr),
               ncclInvalidArgument);
 }
@@ -617,7 +618,7 @@ TEST_F(DdaFabricEligibilityTest, AllToAll_UnalignedCount)
 TEST_F(DdaFabricEligibilityTest, AllToAll_InvalidDatatypeDispatch)
 {
     EXPECT_EQ(ncclAllToAllDdaFabric(
-                  sendbuff_, recvbuff_, 4, ncclInt32, mockComm_.get(), nullptr),
+                  sendbuff_, recvbuff_, 4, ncclInt32, mockComm_.get(), nullptr, nullptr),
               ncclInvalidArgument);
 }
 
@@ -679,6 +680,7 @@ TEST_F(DdaFabricEligibilityTest, ReduceScatter_InvalidDatatypeDispatch)
                                          ncclInt32,
                                          ncclSum,
                                          mockComm_.get(),
+                                         nullptr,
                                          nullptr),
               ncclInvalidArgument);
 }
