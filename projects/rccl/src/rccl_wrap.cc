@@ -795,18 +795,12 @@ inline size_t rcclSymMaxR2CapTab(const rcclArchThresholds* table, ncclFunc_t fun
   const size_t* caps = graphMode ? table->symMaxR2Graph : table->symMaxR2;
   return funcThresholdFromTable(caps, func);
 }
-inline size_t rcclSymMaxR2Cap(const ncclComm* comm, ncclFunc_t func, bool graphMode) {
-  return rcclSymMaxR2CapTab(extAlgoArchTable(comm), func, graphMode);
-}
 
 // R2 symmetric-kernel lower-bound per collective.  Below this size DDA is
 // faster than symk; symk is suppressed so DDA can win.  0 = no suppression.
 inline size_t rcclSymMinR2CapTab(const rcclArchThresholds* table, ncclFunc_t func) {
   if (table == nullptr) return 0;
   return funcThresholdFromTable(table->symMinR2, func);
-}
-inline size_t rcclSymMinR2Cap(const ncclComm* comm, ncclFunc_t func) {
-  return rcclSymMinR2CapTab(extAlgoArchTable(comm), func);
 }
 } // namespace
 
@@ -816,17 +810,11 @@ inline size_t rcclCeRegMaxTab(const rcclArchThresholds* table, ncclFunc_t func) 
   if (table == nullptr) return kThreshUnlimited;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceRegMax[(size_t)func] : 0;
 }
-inline size_t rcclCeRegMax(const ncclComm* comm, ncclFunc_t func) {
-  return rcclCeRegMaxTab(extAlgoArchTable(comm), func);
-}
 
 inline size_t rcclCeNonRegMaxTab(const rcclArchThresholds* table, ncclFunc_t func) {
   if (table == nullptr)
     return func == ncclFuncAllReduce ? NCCL_CE_AR_TMPBUF_DEFAULT_BYTES : 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMax[(size_t)func] : 0;
-}
-inline size_t rcclCeNonRegMax(const ncclComm* comm, ncclFunc_t func) {
-  return rcclCeNonRegMaxTab(extAlgoArchTable(comm), func);
 }
 
 inline size_t rcclCeAr2ShotMaxTab(const rcclArchThresholds* table) {
@@ -868,9 +856,6 @@ bool rcclForceCeAllReduceEnabled(const ncclComm* comm) {
 inline size_t rcclCeNonRegMinTab(const rcclArchThresholds* table, ncclFunc_t func) {
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
-}
-inline size_t rcclCeNonRegMin(const ncclComm* comm, ncclFunc_t func) {
-  return rcclCeNonRegMinTab(extAlgoArchTable(comm), func);
 }
 
 // Returns true when the message is within the CE-registered (2-shot) AllGather
