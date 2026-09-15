@@ -31,6 +31,7 @@
 #include "nccl_device/gin_barrier.h"
 
 #include "fakes/dev_runtime_micro_fakes.h"
+#include "fakes/hip_fakes.h"  // shared HIP seams + InstallHipVmmEmulator()
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -451,359 +452,21 @@ extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, 
 }
 
 // ---------------------------------------------------------------------------
-// Fake HIP VMM driver API, backed by ordinary host memory.
-//
-// dev_runtime.cc drives the CUDA/HIP driver VMM API (hipMemAddressReserve /
-// hipMemMap / ...) which needs a real GPU. Here we replace just those calls
-// with host-memory equivalents so symMemoryObtain runs to completion on a plain
-// CPU.
-//
-// These are plain definitions, not interposers: the binary links neither
-// librccl nor the HIP runtime (MICRO_TEST_LINK_LIBS carries no HIP and the
-// target is linked -no-hip-rt), so they are the only definitions of these
-// symbols in the process and an unfaked one is a link error rather than a call
-// into a real driver.
-// ---------------------------------------------------------------------------
-#define HIP_FAKE /* sole definition: this binary links neither librccl nor HIP */
-
-// A reserved VA range: mirror the real cuMemAddressReserve semantics with an
-// uncommitted anonymous mapping (MAP_NORESERVE), so multi-GB flat-VA
-// reservations stay cheap and commit no physical memory until touched.
-//
-// PROT_READ | PROT_WRITE, not PROT_NONE. Nothing in this file's own tests
-// dereferences the range, but the mapping stands in for the flat VA that
-// windows are carved out of, and any test that writes through win->userPtr --
-// which the resource-window path does, via cudaMemsetAsync -- faults on a
-// PROT_NONE range. MAP_NORESERVE means the pages still cost nothing until
-// written.
-static hipError_t DefaultMemAddressReserve(void** ptr, size_t size, size_t alignment, void*, unsigned long long) {
-  // The real driver rejects a zero-size reservation; a zero here would be a bug
-  // in the code under test, so surface it rather than silently substituting one.
-  assert(size != 0);
-  // Honour the requested alignment rather than ignoring it: production asks for
-  // NCCL_MAX_PAGE_SIZE, and mmap only guarantees page alignment, so a returned
-  // base that happened to be page- but not NCCL_MAX_PAGE_SIZE-aligned would let
-  // an alignment regression through unseen. Over-map, trim to an aligned base,
-  // and give the slack back.
-  if (alignment <= 1) alignment = 1;
-  size_t over = size + alignment;
-  char* raw = static_cast<char*>(
-      mmap(nullptr, over, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0));
-  if (raw == MAP_FAILED) return hipErrorOutOfMemory;
-  uintptr_t base = (reinterpret_cast<uintptr_t>(raw) + alignment - 1) & ~(uintptr_t)(alignment - 1);
-  size_t head = base - reinterpret_cast<uintptr_t>(raw);
-  if (head != 0) munmap(raw, head);
-  size_t tail = over - head - size;
-  if (tail != 0) munmap(reinterpret_cast<void*>(base + size), tail);
-  *ptr = reinterpret_cast<void*>(base);
-  return hipSuccess;
-}
-std::function<hipError_t(void**, size_t, size_t, void*, unsigned long long)> g_devrHipMemAddressReserve =
-    DefaultMemAddressReserve;
-
-HIP_FAKE hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t align, void* addr,
-                                         unsigned long long flags) {
-  return g_devrHipMemAddressReserve(ptr, size, align, addr, flags);
-}
-static hipError_t DefaultMemAddressFree(void* devPtr, size_t size) {
-  // Not assert(): NDEBUG strips it, and this binary is built Release as well as
-  // Debug. There munmap(ptr, 0) fails with EINVAL, the result is discarded, and
-  // a zero-size free would report success instead of surfacing.
-  if (size == 0) return hipErrorInvalidValue;
-  munmap(devPtr, size);
-  return hipSuccess;
-}
-std::function<hipError_t(void*, size_t)> g_devrHipMemAddressFree = DefaultMemAddressFree;
-
-HIP_FAKE hipError_t hipMemAddressFree(void* devPtr, size_t size) {
-  return g_devrHipMemAddressFree(devPtr, size);
-}
-HIP_FAKE hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t, const hipMemAllocationProp*,
-                                 unsigned long long) {
-  if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
-  return hipSuccess;
-}
-static hipError_t DefaultMemGetAllocationGranularity(size_t* granularity, const hipMemAllocationProp*,
-                                                     hipMemAllocationGranularity_flags) {
-  if (granularity) *granularity = 4096;
-  return hipSuccess;
-}
-std::function<hipError_t(size_t*, const hipMemAllocationProp*, hipMemAllocationGranularity_flags)>
-    g_devrHipMemGetAllocationGranularity = DefaultMemGetAllocationGranularity;
-
-HIP_FAKE hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hipMemAllocationProp* prop,
-                                                   hipMemAllocationGranularity_flags flags) {
-  return g_devrHipMemGetAllocationGranularity(granularity, prop, flags);
-}
-// Seams, not plain stubs: these three sit on error paths a test needs to drive.
-// Each default lives in a named function so the hook's initialiser and
-// ResetDevRuntimeMicroFakes() share one definition instead of drifting copies.
-static hipError_t DefaultMemGetAllocationPropertiesFromHandle(hipMemAllocationProp* prop,
-                                                              hipMemGenericAllocationHandle_t) {
-  if (prop) {
-    *prop = hipMemAllocationProp{};
-    prop->location.type = hipMemLocationTypeDevice;
-  }
-  return hipSuccess;
-}
-std::function<hipError_t(hipMemAllocationProp*, hipMemGenericAllocationHandle_t)>
-    g_devrHipMemGetAllocationPropertiesFromHandle = DefaultMemGetAllocationPropertiesFromHandle;
-
-HIP_FAKE hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp* prop,
-                                                           hipMemGenericAllocationHandle_t handle) {
-  return g_devrHipMemGetAllocationPropertiesFromHandle(prop, handle);
-}
-
-static hipError_t DefaultMemExportToShareableHandle(void*, hipMemGenericAllocationHandle_t,
-                                                    hipMemAllocationHandleType, unsigned long long) {
-  return hipSuccess;
-}
-std::function<hipError_t(void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType, unsigned long long)>
-    g_devrHipMemExportToShareableHandle = DefaultMemExportToShareableHandle;
-
-HIP_FAKE hipError_t hipMemExportToShareableHandle(void* shareable, hipMemGenericAllocationHandle_t handle,
-                                                  hipMemAllocationHandleType type, unsigned long long flags) {
-  return g_devrHipMemExportToShareableHandle(shareable, handle, type, flags);
-}
-static hipError_t DefaultMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* handle, void*,
-                                                      hipMemAllocationHandleType) {
-  if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
-  return hipSuccess;
-}
-std::function<hipError_t(hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType)>
-    g_devrHipMemImportFromShareableHandle = DefaultMemImportFromShareableHandle;
-
-HIP_FAKE hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* handle, void* shareable,
-                                                    hipMemAllocationHandleType type) {
-  return g_devrHipMemImportFromShareableHandle(handle, shareable, type);
-}
-
-static hipError_t DefaultMemMap(void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
-  return hipSuccess;
-}
-std::function<hipError_t(void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long)> g_devrHipMemMap =
-    DefaultMemMap;
-
-HIP_FAKE hipError_t hipMemMap(void* ptr, size_t size, size_t offset, hipMemGenericAllocationHandle_t handle,
-                              unsigned long long flags) {
-  return g_devrHipMemMap(ptr, size, offset, handle, flags);
-}
-static hipError_t DefaultMemSetAccess(void*, size_t, const hipMemAccessDesc*, size_t) { return hipSuccess; }
-std::function<hipError_t(void*, size_t, const hipMemAccessDesc*, size_t)> g_devrHipMemSetAccess = DefaultMemSetAccess;
-
-HIP_FAKE hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc, size_t count) {
-  return g_devrHipMemSetAccess(ptr, size, desc, count);
-}
-
-static hipError_t DefaultMemUnmap(void*, size_t) { return hipSuccess; }
-std::function<hipError_t(void*, size_t)> g_devrHipMemUnmap = DefaultMemUnmap;
-
-HIP_FAKE hipError_t hipMemUnmap(void* ptr, size_t size) { return g_devrHipMemUnmap(ptr, size); }
-
-// Missed by the original audit because the target used to link the HIP runtime,
-// so an unfaked call bound to the real driver instead of failing the link. That
-// is no longer possible: the binary is linked -no-hip-rt, so anything unfaked
-// now fails at build time. The shadow-pool fake gives the same buffer for
-// device and host, so a self-copy is skipped.
-static hipError_t DefaultMemcpyAsync(void* dst, const void* src, size_t n, hipMemcpyKind, hipStream_t) {
-  if (dst != nullptr && src != nullptr && dst != src) memcpy(dst, src, n);
-  return hipSuccess;
-}
-std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)> g_devrHipMemcpyAsync =
-    DefaultMemcpyAsync;
-
-HIP_FAKE hipError_t hipMemcpyAsync(void* dst, const void* src, size_t n, hipMemcpyKind kind, hipStream_t stream) {
-  return g_devrHipMemcpyAsync(dst, src, n, kind, stream);
-}
-
-// Same reasoning as hipMemcpyAsync above: unfaked, this reaches the real driver
-// rather than failing to link.
-static hipError_t DefaultMemsetAsync(void* dst, int value, size_t n, hipStream_t) {
-  if (dst != nullptr) memset(dst, value, n);
-  return hipSuccess;
-}
-std::function<hipError_t(void*, int, size_t, hipStream_t)> g_devrHipMemsetAsync = DefaultMemsetAsync;
-
-HIP_FAKE hipError_t hipMemsetAsync(void* dst, int value, size_t n, hipStream_t stream) {
-  return g_devrHipMemsetAsync(dst, value, n, stream);
-}
-
-// IPC handles for the non-symmetric intra-node path. Unfaked these reach the
-// real driver, as hipMemcpyAsync did.
-static hipError_t DefaultIpcGetMemHandle(hipIpcMemHandle_t* handle, void*) {
-  if (handle) *handle = hipIpcMemHandle_t{};
-  return hipSuccess;
-}
-std::function<hipError_t(hipIpcMemHandle_t*, void*)> g_devrHipIpcGetMemHandle = DefaultIpcGetMemHandle;
-
-HIP_FAKE hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* ptr) {
-  return g_devrHipIpcGetMemHandle(handle, ptr);
-}
-
-static hipError_t DefaultIpcOpenMemHandle(void** ptr, hipIpcMemHandle_t, unsigned int) {
-  if (ptr) *ptr = reinterpret_cast<void*>(0x9000);
-  return hipSuccess;
-}
-std::function<hipError_t(void**, hipIpcMemHandle_t, unsigned int)> g_devrHipIpcOpenMemHandle =
-    DefaultIpcOpenMemHandle;
-
-HIP_FAKE hipError_t hipIpcOpenMemHandle(void** ptr, hipIpcMemHandle_t handle, unsigned int flags) {
-  return g_devrHipIpcOpenMemHandle(ptr, handle, flags);
-}
-
-static hipError_t DefaultIpcCloseMemHandle(void*) { return hipSuccess; }
-std::function<hipError_t(void*)> g_devrHipIpcCloseMemHandle = DefaultIpcCloseMemHandle;
-
-HIP_FAKE hipError_t hipIpcCloseMemHandle(void* ptr) { return g_devrHipIpcCloseMemHandle(ptr); }
-
-// Current-device get/set, used by the public window API to scope its work to
-// the comm's device. Unfaked they reach the real driver, as the memcpy/memset
-// pair did.
-static hipError_t DefaultGetDevice(int* dev) {
-  if (dev) *dev = 0;
-  return hipSuccess;
-}
-std::function<hipError_t(int*)> g_devrHipGetDevice = DefaultGetDevice;
-
-HIP_FAKE hipError_t hipGetDevice(int* dev) { return g_devrHipGetDevice(dev); }
-
-// alloc.h's rcclSkipCuMemFreeIfArch (added by the gfx1250 VMM teardown
-// hardening) queries device properties and skips parts of the cuMem free path
-// on gfx950/gfx1250. Defaulting gcnArchName to gfx900 makes both arch
-// predicates false, so this suite keeps exercising the ordinary free path; a
-// test that wants the skip arms can hook this and report another arch.
-//
-// The R0600 symbol, not the unversioned name: the HIP header either macro-maps
-// hipGetDeviceProperties onto it or forwards to it from an inline wrapper, so
-// R0600 is what call sites actually reference.
-static hipError_t DefaultGetDeviceProperties(hipDeviceProp_t* prop, int) {
-  if (prop == nullptr) return hipErrorInvalidValue;
-  *prop = hipDeviceProp_t{};
-  snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "%s", "gfx900");
-  return hipSuccess;
-}
-std::function<hipError_t(hipDeviceProp_t*, int)> g_devrHipGetDeviceProperties = DefaultGetDeviceProperties;
-
-HIP_FAKE hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_t* prop, int dev) {
-  return g_devrHipGetDeviceProperties(prop, dev);
-}
-
-static hipError_t DefaultSetDevice(int) { return hipSuccess; }
-std::function<hipError_t(int)> g_devrHipSetDevice = DefaultSetDevice;
-
-HIP_FAKE hipError_t hipSetDevice(int dev) { return g_devrHipSetDevice(dev); }
-
-// Synchronous copy, used by the devcomm dump helpers. Unfaked it reaches the
-// real driver; the default reports failure so a dump of a fake device handle
-// prints nothing rather than reading through it.
-static hipError_t DefaultMemcpy(void*, const void*, size_t, hipMemcpyKind) { return hipErrorInvalidValue; }
-std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind)> g_devrHipMemcpy = DefaultMemcpy;
-
-HIP_FAKE hipError_t hipMemcpy(void* dst, const void* src, size_t n, hipMemcpyKind kind) {
-  return g_devrHipMemcpy(dst, src, n, kind);
-}
-static hipError_t DefaultMemRelease(hipMemGenericAllocationHandle_t) { return hipSuccess; }
-std::function<hipError_t(hipMemGenericAllocationHandle_t)> g_devrHipMemRelease = DefaultMemRelease;
-
-HIP_FAKE hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle) { return g_devrHipMemRelease(handle); }
-static hipError_t DefaultMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle, void*) {
-  if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
-  return hipSuccess;
-}
-std::function<hipError_t(hipMemGenericAllocationHandle_t*, void*)> g_devrHipMemRetainAllocationHandle =
-    DefaultMemRetainAllocationHandle;
-
-HIP_FAKE hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle, void* ptr) {
-  return g_devrHipMemRetainAllocationHandle(handle, ptr);
-}
-static hipError_t DefaultMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
-  if (pbase) *pbase = dptr;
-  if (psize) *psize = 0;
-  return hipSuccess;
-}
-std::function<hipError_t(hipDeviceptr_t*, size_t*, hipDeviceptr_t)> g_devrHipMemGetAddressRange =
-    DefaultMemGetAddressRange;
-
-HIP_FAKE hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
-  return g_devrHipMemGetAddressRange(pbase, psize, dptr);
-}
-
-// ---------------------------------------------------------------------------
-// Fake HIP runtime stream API. ncclDevrFinalize creates/synchronizes/destroys
-// throwaway streams for its teardown bookkeeping; none carry real work on the
-// host, so a non-null opaque handle and success returns are sufficient.
-// ---------------------------------------------------------------------------
-// Seams: ncclDevrFinalize wraps each of these in CUDACHECKIGNORE/CUDASUCCESS,
-// so the failure arms are only reachable by driving them.
-static hipError_t DefaultStreamCreateWithFlags(hipStream_t* stream, unsigned int) {
-  if (stream) *stream = reinterpret_cast<hipStream_t>(0x1);
-  return hipSuccess;
-}
-std::function<hipError_t(hipStream_t*, unsigned int)> g_devrHipStreamCreateWithFlags =
-    DefaultStreamCreateWithFlags;
-
-HIP_FAKE hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags) {
-  return g_devrHipStreamCreateWithFlags(stream, flags);
-}
-
-static hipError_t DefaultStreamSynchronize(hipStream_t) { return hipSuccess; }
-std::function<hipError_t(hipStream_t)> g_devrHipStreamSynchronize = DefaultStreamSynchronize;
-
-HIP_FAKE hipError_t hipStreamSynchronize(hipStream_t stream) { return g_devrHipStreamSynchronize(stream); }
-
-static hipError_t DefaultStreamDestroy(hipStream_t) { return hipSuccess; }
-std::function<hipError_t(hipStream_t)> g_devrHipStreamDestroy = DefaultStreamDestroy;
-
-HIP_FAKE hipError_t hipStreamDestroy(hipStream_t stream) { return g_devrHipStreamDestroy(stream); }
-
-static hipError_t DefaultThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) {
-  if (mode) *mode = hipStreamCaptureModeRelaxed;
-  return hipSuccess;
-}
-std::function<hipError_t(hipStreamCaptureMode*)> g_devrHipThreadExchangeStreamCaptureMode =
-    DefaultThreadExchangeStreamCaptureMode;
-
-HIP_FAKE hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) {
-  return g_devrHipThreadExchangeStreamCaptureMode(mode);
-}
-
-// Not called from dev_runtime.cc's own text, which is why an audit of that file
-// misses them -- they come from the CHECK macro bodies that expand into this
-// same TU (rocmwrap.h:133,143,155 and checks.h:36,37,43). WARN is
-// unconditional, so hipGetErrorString's argument is evaluated on every checked
-// failure, which is most of the failure-path tests in this suite. Deliberately
-// not seams: no test asserts on the text of an error message, and a fixed
-// string keeps the WARN output readable.
-HIP_FAKE const char* hipGetErrorString(hipError_t err) {
-  return err == hipSuccess ? "hipSuccess" : "hipError (dev-runtime-test fake)";
-}
-
-HIP_FAKE hipError_t hipGetLastError(void) { return hipSuccess; }
-
-// ---------------------------------------------------------------------------
 // Params are not cached here (see fakes/dev_runtime_micro_fakes.h), so the default just
 // hands back the value the NCCL_PARAM declaration was written with.
 static int64_t DefaultLoadParam(const char*, int64_t deftVal) { return deftVal; }
 std::function<int64_t(const char*, int64_t)> g_loadParam = DefaultLoadParam;
 
 void ResetDevRuntimeMicroFakes() {
-  g_devrHipMemGetAllocationPropertiesFromHandle = DefaultMemGetAllocationPropertiesFromHandle;
-  g_devrHipMemExportToShareableHandle           = DefaultMemExportToShareableHandle;
-  g_devrHipMemSetAccess                         = DefaultMemSetAccess;
-  g_devrHipMemGetAllocationGranularity          = DefaultMemGetAllocationGranularity;
-  g_devrHipStreamCreateWithFlags                = DefaultStreamCreateWithFlags;
-  g_devrHipStreamSynchronize                    = DefaultStreamSynchronize;
-  g_devrHipStreamDestroy                        = DefaultStreamDestroy;
-  g_devrHipThreadExchangeStreamCaptureMode      = DefaultThreadExchangeStreamCaptureMode;
-  g_devrHipMemImportFromShareableHandle         = DefaultMemImportFromShareableHandle;
-  g_devrHipMemMap                               = DefaultMemMap;
-  g_devrHipMemRelease                           = DefaultMemRelease;
+  // The HIP surface now lives in fakes/hip_fakes.cc, shared with the other
+  // micro suites. Reset it to the fail-loud defaults, then install the working
+  // host-memory VMM this suite needs -- dev_runtime.cc's symmetric-memory paths
+  // cannot run at all against a reserve that returns hipErrorInvalidValue.
+  ResetHipFakes();
+  InstallHipVmmEmulator();
   g_devrProxyClientGetFdBlocking                = DefaultProxyClientGetFdBlocking;
-  g_devrHipMemAddressReserve                    = DefaultMemAddressReserve;
   g_devrBootstrapIntraNodeBarrier               = DefaultIntraNodeBarrier;
   g_devrBootstrapIntraNodeAllGather             = DefaultIntraNodeAllGather;
-  g_devrHipMemAddressFree                       = DefaultMemAddressFree;
-  g_devrHipMemUnmap                             = DefaultMemUnmap;
   g_devrBootstrapAllGather                      = DefaultAllGather;
   g_devrGinRegister                             = DefaultGinRegister;
   g_devrGinDeregister                           = DefaultGinDeregister;
@@ -816,24 +479,13 @@ void ResetDevRuntimeMicroFakes() {
   g_devrShadowPoolFree                          = DefaultShadowPoolFree;
   g_devrShadowPoolToHost                        = DefaultShadowPoolToHost;
   g_devrIntruAddressMapFind                     = DefaultIntruAddressMapFind;
-  g_devrHipGetDevice                            = DefaultGetDevice;
   g_devrBootstrapBarrier                        = DefaultBootstrapBarrier;
   g_devrSymkInitOnce                            = DefaultSymkInitOnce;
   g_devrIntruAddressMapInsert                   = DefaultIntruAddressMapInsert;
   g_devrCommEnsureReady                         = DefaultCommEnsureReady;
-  g_devrHipGetDeviceProperties                  = DefaultGetDeviceProperties;
-  g_devrHipSetDevice                            = DefaultSetDevice;
-  g_devrHipMemcpy                               = DefaultMemcpy;
   g_devrNcclCommWindowDeregister                = DefaultCommWindowDeregister;
-  g_devrHipMemcpyAsync                          = DefaultMemcpyAsync;
   g_devrTeamWorld                               = DefaultTeamWorld;
   g_devrTeamLsa                                 = DefaultTeamLsa;
-  g_devrHipMemsetAsync                          = DefaultMemsetAsync;
-  g_devrHipIpcGetMemHandle                      = DefaultIpcGetMemHandle;
-  g_devrHipIpcOpenMemHandle                     = DefaultIpcOpenMemHandle;
-  g_devrHipIpcCloseMemHandle                    = DefaultIpcCloseMemHandle;
-  g_devrHipMemGetAddressRange                   = DefaultMemGetAddressRange;
-  g_devrHipMemRetainAllocationHandle            = DefaultMemRetainAllocationHandle;
   g_devrNcclCommRegister                        = DefaultCommRegister;
   g_devrNcclCommDeregister                      = DefaultCommDeregister;
   g_devrRmaProxyDeregister                      = DefaultRmaProxyDeregister;

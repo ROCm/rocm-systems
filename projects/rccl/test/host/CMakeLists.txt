@@ -433,6 +433,7 @@ if(BUILD_TESTS)
     set(TEST_MICRO_DEVRUNTIME_SOURCE_FILES
       dev-runtime-test.cc
       fakes/dev_runtime_micro_fakes.cc
+      fakes/hip_fakes.cc
       ../common/main_altrsmi.cpp
     )
 
@@ -1011,6 +1012,7 @@ endforeach()
 add_test_executable(rccl-UnitTestsMicroDevRuntime
   dev-runtime-test.cc
   fakes/dev_runtime_micro_fakes.cc
+  fakes/hip_fakes.cc
   ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
 )
 

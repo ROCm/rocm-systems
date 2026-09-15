@@ -14,6 +14,7 @@
  *************************************************************************/
 
 #include "fakes/dev_runtime_micro_fakes.h"
+#include "fakes/hip_fakes.h"  // the shared g_hip* seams this suite drives
 
 // param.h's NCCL_PARAM caches its value in a function-local static, so a param
 // read once is frozen for the process. fakes/param_redirect.h -- shared with
@@ -377,7 +378,7 @@ TEST_F(DevrInitOnceTest, SymmetricExplicitStride_UsesConfiguredValue) {
 // fail_lsaRankList and the error propagates.
 TEST_F(DevrInitOnceTest, GranularityQueryFails_ReturnsError) {
   comm->symmetricSupport = 1;
-  ScopedHook granularity(g_devrHipMemGetAllocationGranularity,
+  ScopedHook granularity(g_hipMemGetAllocationGranularity,
                          [](size_t*, const hipMemAllocationProp*, hipMemAllocationGranularity_flags) {
                            return hipErrorInvalidValue;
                          });
@@ -500,11 +501,11 @@ TEST_F(DevrFinalizeTest, ProxyOnly_SkipsSymmetricTeardown) {
 // finding 16. Nothing here dereferences it because every stream call is hooked.
 TEST_F(DevrFinalizeTest, StreamCallsFail_StillCompletes) {
   ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
-  ScopedHook create(g_devrHipStreamCreateWithFlags,
+  ScopedHook create(g_hipStreamCreateWithFlags,
                     [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
-  ScopedHook sync(g_devrHipStreamSynchronize, [](hipStream_t) { return hipErrorInvalidValue; });
-  ScopedHook destroy(g_devrHipStreamDestroy, [](hipStream_t) { return hipErrorInvalidValue; });
-  ScopedHook capture(g_devrHipThreadExchangeStreamCaptureMode,
+  ScopedHook sync(g_hipStreamSynchronize, [](hipStream_t) { return hipErrorInvalidValue; });
+  ScopedHook destroy(g_hipStreamDestroy, [](hipStream_t) { return hipErrorInvalidValue; });
+  ScopedHook capture(g_hipThreadExchangeStreamCaptureMode,
                      [](hipStreamCaptureMode*) { return hipErrorInvalidValue; });
 
   EXPECT_EQ(ncclDevrFinalize(comm), ncclSuccess);
@@ -520,8 +521,8 @@ TEST_F(DevrFinalizeTest, StreamCallsFail_StillCompletes) {
 // CUDASUCCESS guards are entered and their inner ignores taken.
 TEST_F(DevrFinalizeTest, StreamTeardownFails_StillCompletes) {
   ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
-  ScopedHook sync(g_devrHipStreamSynchronize, [](hipStream_t) { return hipErrorInvalidValue; });
-  ScopedHook destroy(g_devrHipStreamDestroy, [](hipStream_t) { return hipErrorInvalidValue; });
+  ScopedHook sync(g_hipStreamSynchronize, [](hipStream_t) { return hipErrorInvalidValue; });
+  ScopedHook destroy(g_hipStreamDestroy, [](hipStream_t) { return hipErrorInvalidValue; });
 
   EXPECT_EQ(ncclDevrFinalize(comm), ncclSuccess);
   EXPECT_GT(sync.calls, 0);
@@ -643,7 +644,7 @@ protected:
 TEST_F(SymMemorySetAccessTest, Succeeds_RequestsReadWriteForOwnDevice) {
   hipMemAccessDesc seen{};
   size_t seenSize = 0;
-  ScopedHook setAccess(g_devrHipMemSetAccess,
+  ScopedHook setAccess(g_hipMemSetAccess,
                        [&](void*, size_t size, const hipMemAccessDesc* desc, size_t count) {
                          if (desc && count == 1) seen = *desc;
                          seenSize = size;
@@ -660,7 +661,7 @@ TEST_F(SymMemorySetAccessTest, Succeeds_RequestsReadWriteForOwnDevice) {
 
 // Branch: cuMemSetAccess fails, so CUCHECK returns instead of ncclSuccess.
 TEST_F(SymMemorySetAccessTest, SetAccessFails_ReturnsError) {
-  ScopedHook setAccess(g_devrHipMemSetAccess,
+  ScopedHook setAccess(g_hipMemSetAccess,
                        [](void*, size_t, const hipMemAccessDesc*, size_t) { return hipErrorInvalidValue; });
 
   EXPECT_NE(symMemorySetAccessForVASegment(comm, &msg, reinterpret_cast<hipDeviceptr_t>(0x1000)), ncclSuccess);
@@ -708,7 +709,7 @@ static constexpr hipMemAllocationHandleType kMemHandleTypeNonPosix = hipMemHandl
 // Branch: POSIX-FD handles need no export, so the handle is stored directly.
 TEST_F(SymMemoryExportSegmentHandleTest, PosixFd_StoresHandleWithoutExporting) {
   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
-  ScopedHook exportHandle(g_devrHipMemExportToShareableHandle,
+  ScopedHook exportHandle(g_hipMemExportToShareableHandle,
                           [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
                              unsigned long long) { return hipSuccess; });
   auto handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x42);
@@ -723,7 +724,7 @@ TEST_F(SymMemoryExportSegmentHandleTest, PosixFd_StoresHandleWithoutExporting) {
 // Branch: any other handle type takes the shareable-handle export path.
 TEST_F(SymMemoryExportSegmentHandleTest, NonPosixHandle_ExportsShareableHandle) {
   ncclCuMemHandleType = kMemHandleTypeNonPosix;
-  ScopedHook exportHandle(g_devrHipMemExportToShareableHandle,
+  ScopedHook exportHandle(g_hipMemExportToShareableHandle,
                           [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
                              unsigned long long) { return hipSuccess; });
 
@@ -735,7 +736,7 @@ TEST_F(SymMemoryExportSegmentHandleTest, NonPosixHandle_ExportsShareableHandle) 
 // Branch: the export fails, so the second CUCHECKGOTO propagates the error.
 TEST_F(SymMemoryExportSegmentHandleTest, ExportFails_ReturnsError) {
   ncclCuMemHandleType = kMemHandleTypeNonPosix;
-  ScopedHook exportHandle(g_devrHipMemExportToShareableHandle,
+  ScopedHook exportHandle(g_hipMemExportToShareableHandle,
                           [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
                              unsigned long long) { return hipErrorInvalidValue; });
 
@@ -746,7 +747,7 @@ TEST_F(SymMemoryExportSegmentHandleTest, ExportFails_ReturnsError) {
 // Branch: the properties fetch fails, so the first CUCHECKGOTO returns before
 // the message is touched.
 TEST_F(SymMemoryExportSegmentHandleTest, PropertiesFail_ReturnsErrorWithoutWritingMessage) {
-  ScopedHook props(g_devrHipMemGetAllocationPropertiesFromHandle,
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
                    [](hipMemAllocationProp*, hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
 
   EXPECT_NE(symMemoryExportSegmentHandle(comm, &msg, {}, 4096), ncclSuccess);
@@ -791,11 +792,11 @@ protected:
 // Branch: reuseLocal skips both the import and the matching release -- the
 // handle is the caller's, so releasing it would drop a reference it still owns.
 TEST_F(SymImportAndMapSegmentTest, ReuseLocal_MapsWithoutImportingOrReleasing) {
-  ScopedHook import(g_devrHipMemImportFromShareableHandle,
+  ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
-  ScopedHook release(g_devrHipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
   hipMemGenericAllocationHandle_t mapped{};
-  ScopedHook map(g_devrHipMemMap,
+  ScopedHook map(g_hipMemMap,
                  [&](void*, size_t, size_t, hipMemGenericAllocationHandle_t h, unsigned long long) {
                    mapped = h;
                    return hipSuccess;
@@ -816,7 +817,7 @@ TEST_F(SymImportAndMapSegmentTest, PosixFd_ImportsThenReleases) {
     *fd = open("/dev/null", O_RDONLY);
     return *fd < 0 ? ncclSystemError : ncclSuccess;
   });
-  ScopedHook release(g_devrHipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
 
   EXPECT_EQ(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, {}, /*reuseLocal=*/false), ncclSuccess);
   EXPECT_EQ(proxy.calls, 1);
@@ -829,7 +830,7 @@ TEST_F(SymImportAndMapSegmentTest, NonPosixHandle_ImportsWithoutProxy) {
   ncclCuMemHandleType = kMemHandleTypeNonPosix;
   ScopedHook proxy(g_devrProxyClientGetFdBlocking,
                    [](ncclComm*, int, void*, int*) { return ncclSuccess; });
-  ScopedHook import(g_devrHipMemImportFromShareableHandle,
+  ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t* h, void*, hipMemAllocationHandleType) {
                       if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
                       return hipSuccess;
@@ -845,7 +846,7 @@ TEST_F(SymImportAndMapSegmentTest, ProxyFdFails_ReturnsErrorWithoutImporting) {
   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
   ScopedHook proxy(g_devrProxyClientGetFdBlocking,
                    [](ncclComm*, int, void*, int*) { return ncclSystemError; });
-  ScopedHook import(g_devrHipMemImportFromShareableHandle,
+  ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
 
   EXPECT_NE(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, {}, /*reuseLocal=*/false), ncclSuccess);
@@ -855,11 +856,11 @@ TEST_F(SymImportAndMapSegmentTest, ProxyFdFails_ReturnsErrorWithoutImporting) {
 // Branch: the import itself fails.
 TEST_F(SymImportAndMapSegmentTest, ImportFails_ReturnsErrorWithoutMapping) {
   ncclCuMemHandleType = kMemHandleTypeNonPosix;
-  ScopedHook import(g_devrHipMemImportFromShareableHandle,
+  ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) {
                       return hipErrorInvalidValue;
                     });
-  ScopedHook map(g_devrHipMemMap,
+  ScopedHook map(g_hipMemMap,
                  [](void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) { return hipSuccess; });
 
   EXPECT_NE(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, {}, /*reuseLocal=*/false), ncclSuccess);
@@ -885,7 +886,7 @@ TEST_F(SymImportAndMapSegmentTest, PosixFdImportFails_ReturnsError) {
     if (fd) *fd = handedOut;
     return handedOut >= 0 ? ncclSuccess : ncclSystemError;
   });
-  ScopedHook import(g_devrHipMemImportFromShareableHandle,
+  ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) {
                       return hipErrorInvalidValue;
                     });
@@ -912,10 +913,10 @@ TEST_F(SymImportAndMapSegmentTest, CloseFdFails_ReturnsError) {
 
 // Branch: the mapping fails, so access is never granted.
 TEST_F(SymImportAndMapSegmentTest, MapFails_ReturnsErrorWithoutSettingAccess) {
-  ScopedHook map(g_devrHipMemMap, [](void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
+  ScopedHook map(g_hipMemMap, [](void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
     return hipErrorInvalidValue;
   });
-  ScopedHook setAccess(g_devrHipMemSetAccess,
+  ScopedHook setAccess(g_hipMemSetAccess,
                        [](void*, size_t, const hipMemAccessDesc*, size_t) { return hipSuccess; });
 
   EXPECT_NE(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, kLocal, /*reuseLocal=*/true), ncclSuccess);
@@ -924,7 +925,7 @@ TEST_F(SymImportAndMapSegmentTest, MapFails_ReturnsErrorWithoutSettingAccess) {
 
 // Branch: granting access fails, propagated through the NCCLCHECKGOTO.
 TEST_F(SymImportAndMapSegmentTest, SetAccessFails_ReturnsError) {
-  ScopedHook setAccess(g_devrHipMemSetAccess,
+  ScopedHook setAccess(g_hipMemSetAccess,
                        [](void*, size_t, const hipMemAccessDesc*, size_t) { return hipErrorInvalidValue; });
 
   EXPECT_NE(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, kLocal, /*reuseLocal=*/true), ncclSuccess);
@@ -934,7 +935,7 @@ TEST_F(SymImportAndMapSegmentTest, SetAccessFails_ReturnsError) {
 // Branch: the release of an imported handle fails.
 TEST_F(SymImportAndMapSegmentTest, ReleaseFails_ReturnsError) {
   ncclCuMemHandleType = kMemHandleTypeNonPosix;
-  ScopedHook release(g_devrHipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
 
   EXPECT_NE(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, {}, /*reuseLocal=*/false), ncclSuccess);
   EXPECT_EQ(release.calls, 1);
@@ -999,11 +1000,11 @@ protected:
 // is imported.
 TEST_F(SymImportAndMapForRankTest, LocalRank_ReusesCallerHandles) {
   std::vector<hipMemGenericAllocationHandle_t> mapped;
-  ScopedHook map(g_devrHipMemMap, [&](void*, size_t, size_t, hipMemGenericAllocationHandle_t h, unsigned long long) {
+  ScopedHook map(g_hipMemMap, [&](void*, size_t, size_t, hipMemGenericAllocationHandle_t h, unsigned long long) {
     mapped.push_back(h);
     return hipSuccess;
   });
-  ScopedHook import(g_devrHipMemImportFromShareableHandle,
+  ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
 
   EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 2, memHandles.data(), 0),
@@ -1016,7 +1017,7 @@ TEST_F(SymImportAndMapForRankTest, LocalRank_ReusesCallerHandles) {
 
 // Branch: remote rank with the reuse param off, so the segment is imported.
 TEST_F(SymImportAndMapForRankTest, RemoteRank_ImportsInsteadOfReusing) {
-  ScopedHook import(g_devrHipMemImportFromShareableHandle,
+  ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t* h, void*, hipMemAllocationHandleType) {
                       if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
                       return hipSuccess;
@@ -1032,7 +1033,7 @@ TEST_F(SymImportAndMapForRankTest, RemoteRank_ImportsInsteadOfReusing) {
 TEST_F(SymImportAndMapForRankTest, RemoteHostSegmentWithReuseParam_ReusesHandles) {
   messages[1 * kMaxSegments].type = kLocHostNuma;
   ScopedHook loadParam(g_loadParam, ReuseSysmemHandlesOn());
-  ScopedHook import(g_devrHipMemImportFromShareableHandle,
+  ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
 
   EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 1, messages.data(), kMaxSegments, 1, memHandles.data(), 0),
@@ -1043,7 +1044,7 @@ TEST_F(SymImportAndMapForRankTest, RemoteHostSegmentWithReuseParam_ReusesHandles
 // Branch: param on but the segment is device-backed, so reuse does not apply.
 TEST_F(SymImportAndMapForRankTest, RemoteDeviceSegmentWithReuseParam_StillImports) {
   ScopedHook loadParam(g_loadParam, ReuseSysmemHandlesOn());
-  ScopedHook import(g_devrHipMemImportFromShareableHandle,
+  ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t* h, void*, hipMemAllocationHandleType) {
                       if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
                       return hipSuccess;
@@ -1060,7 +1061,7 @@ TEST_F(SymImportAndMapForRankTest, MultipleSegments_AdvanceAddressBySegmentSize)
   messages[0].segmentSize = 4096;
   messages[1].segmentSize = 8192;
   std::vector<uintptr_t> addrs;
-  ScopedHook map(g_devrHipMemMap, [&](void* p, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
+  ScopedHook map(g_hipMemMap, [&](void* p, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
     addrs.push_back(reinterpret_cast<uintptr_t>(p));
     return hipSuccess;
   });
@@ -1076,7 +1077,7 @@ TEST_F(SymImportAndMapForRankTest, MultipleSegments_AdvanceAddressBySegmentSize)
 
 // Boundary: no segments means the loop body never runs.
 TEST_F(SymImportAndMapForRankTest, ZeroSegments_MapsNothing) {
-  ScopedHook map(g_devrHipMemMap,
+  ScopedHook map(g_hipMemMap,
                  [](void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) { return hipSuccess; });
 
   EXPECT_EQ(symMemoryImportAndMapSegmentsForRank(comm, 0, messages.data(), kMaxSegments, 0, memHandles.data(), 0),
@@ -1086,7 +1087,7 @@ TEST_F(SymImportAndMapForRankTest, ZeroSegments_MapsNothing) {
 
 // Branch: a segment fails, so the loop stops there rather than mapping the rest.
 TEST_F(SymImportAndMapForRankTest, SegmentFails_StopsWithoutMappingTheRest) {
-  ScopedHook map(g_devrHipMemMap,
+  ScopedHook map(g_hipMemMap,
                  [](void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
                    return hipErrorInvalidValue;
                  });
@@ -1146,7 +1147,7 @@ protected:
 // team -- lsaSize * bigSize, not one rank's worth.
 TEST_F(SymMemoryMapLsaTeamTest, FirstUse_ReservesFlatVaForWholeTeam) {
   size_t reserved = 0;
-  ScopedHook reserve(g_devrHipMemAddressReserve,
+  ScopedHook reserve(g_hipMemAddressReserve,
                      [&](void** ptr, size_t size, size_t, void*, unsigned long long) {
                        reserved = size;
                        *ptr = reinterpret_cast<void*>(0x200000);
@@ -1164,7 +1165,7 @@ TEST_F(SymMemoryMapLsaTeamTest, FirstUse_ReservesFlatVaForWholeTeam) {
 TEST_F(SymMemoryMapLsaTeamTest, AlreadyReserved_SkipsReservation) {
   void* existing = reinterpret_cast<void*>(0x300000);
   comm->devrState.lsaFlatBase = existing;
-  ScopedHook reserve(g_devrHipMemAddressReserve,
+  ScopedHook reserve(g_hipMemAddressReserve,
                      [](void**, size_t, size_t, void*, unsigned long long) { return hipSuccess; });
 
   EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
@@ -1201,7 +1202,7 @@ TEST_F(SymMemoryMapLsaTeamTest, MessageAllocFails_ReturnsError) {
 
 // Branch: exporting our own segment fails, so nothing is gathered.
 TEST_F(SymMemoryMapLsaTeamTest, ExportFails_ReturnsErrorWithoutGathering) {
-  ScopedHook props(g_devrHipMemGetAllocationPropertiesFromHandle,
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
                    [](hipMemAllocationProp*, hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
                     [](void*, int*, int, int, void*, int) { return ncclSuccess; });
@@ -1214,7 +1215,7 @@ TEST_F(SymMemoryMapLsaTeamTest, ExportFails_ReturnsErrorWithoutGathering) {
 TEST_F(SymMemoryMapLsaTeamTest, AllGatherFails_ReturnsErrorWithoutReserving) {
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
                     [](void*, int*, int, int, void*, int) { return ncclSystemError; });
-  ScopedHook reserve(g_devrHipMemAddressReserve,
+  ScopedHook reserve(g_hipMemAddressReserve,
                      [](void**, size_t, size_t, void*, unsigned long long) { return hipSuccess; });
 
   EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
@@ -1223,7 +1224,7 @@ TEST_F(SymMemoryMapLsaTeamTest, AllGatherFails_ReturnsErrorWithoutReserving) {
 
 // Branch: the VA reservation fails.
 TEST_F(SymMemoryMapLsaTeamTest, ReserveFails_ReturnsError) {
-  ScopedHook reserve(g_devrHipMemAddressReserve,
+  ScopedHook reserve(g_hipMemAddressReserve,
                      [](void**, size_t, size_t, void*, unsigned long long) { return hipErrorOutOfMemory; });
 
   EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
@@ -1233,12 +1234,12 @@ TEST_F(SymMemoryMapLsaTeamTest, ReserveFails_ReturnsError) {
 // Branch: mapping a rank's segments fails, so the closing barrier is skipped --
 // a rank that failed to map must not signal that it is ready.
 TEST_F(SymMemoryMapLsaTeamTest, MapFails_ReturnsErrorWithoutBarrier) {
-  ScopedHook reserve(g_devrHipMemAddressReserve,
+  ScopedHook reserve(g_hipMemAddressReserve,
                      [](void** ptr, size_t, size_t, void*, unsigned long long) {
                        *ptr = reinterpret_cast<void*>(0x200000);
                        return hipSuccess;
                      });
-  ScopedHook map(g_devrHipMemMap, [](void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
+  ScopedHook map(g_hipMemMap, [](void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long) {
     return hipErrorInvalidValue;
   });
   ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
@@ -1249,7 +1250,7 @@ TEST_F(SymMemoryMapLsaTeamTest, MapFails_ReturnsErrorWithoutBarrier) {
 
 // Branch: the closing barrier fails.
 TEST_F(SymMemoryMapLsaTeamTest, BarrierFails_ReturnsError) {
-  ScopedHook reserve(g_devrHipMemAddressReserve,
+  ScopedHook reserve(g_hipMemAddressReserve,
                      [](void** ptr, size_t, size_t, void*, unsigned long long) {
                        *ptr = reinterpret_cast<void*>(0x200000);
                        return hipSuccess;
@@ -1485,7 +1486,7 @@ protected:
 
 // Branch: an empty list, so the loop body never runs.
 TEST_F(SymTeamDestroyAllTest, EmptyList_DoesNothing) {
-  ScopedHook unmap(g_devrHipMemUnmap, [](void*, size_t) { return hipSuccess; });
+  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
 
   symTeamDestroyAll(comm);
   EXPECT_EQ(comm->devrState.teamHead, nullptr);
@@ -1497,9 +1498,9 @@ TEST_F(SymTeamDestroyAllTest, EmptyList_DoesNothing) {
 TEST_F(SymTeamDestroyAllTest, PlainTeams_FreedWithoutDriverCalls) {
   PushTeam(nullptr);
   PushTeam(nullptr);
-  ScopedHook unmap(g_devrHipMemUnmap, [](void*, size_t) { return hipSuccess; });
-  ScopedHook addrFree(g_devrHipMemAddressFree, [](void*, size_t) { return hipSuccess; });
-  ScopedHook release(g_devrHipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
+  ScopedHook addrFree(g_hipMemAddressFree, [](void*, size_t) { return hipSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
 
   symTeamDestroyAll(comm);
   EXPECT_EQ(comm->devrState.teamHead, nullptr);
@@ -1514,17 +1515,17 @@ TEST_F(SymTeamDestroyAllTest, MulticastTeam_UnmapsFreesAndReleases) {
   void* mcBase = reinterpret_cast<void*>(0x400000);
   PushTeam(mcBase);
   size_t unmapSize = 0, freeSize = 0;
-  ScopedHook unmap(g_devrHipMemUnmap, [&](void* p, size_t size) {
+  ScopedHook unmap(g_hipMemUnmap, [&](void* p, size_t size) {
     EXPECT_EQ(p, mcBase);
     unmapSize = size;
     return hipSuccess;
   });
-  ScopedHook addrFree(g_devrHipMemAddressFree, [&](void* p, size_t size) {
+  ScopedHook addrFree(g_hipMemAddressFree, [&](void* p, size_t size) {
     EXPECT_EQ(p, mcBase);
     freeSize = size;
     return hipSuccess;
   });
-  ScopedHook release(g_devrHipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
 
   symTeamDestroyAll(comm);
   EXPECT_EQ(comm->devrState.teamHead, nullptr);
@@ -1545,12 +1546,12 @@ TEST_F(SymTeamDestroyAllTest, MulticastTeam_UnbindsMemoriesWithoutFreeingThem) {
   comm->devrState.memHead = &first;
   comm->nvlsSupport = 1;
   PushTeam(reinterpret_cast<void*>(0x400000));
-  ScopedHook unmap(g_devrHipMemUnmap, [](void*, size_t) { return hipSuccess; });
+  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
   // Required, not optional: without it DefaultMemAddressFree munmap()s the
   // fabricated 0x400000 for real. Harmless only while the binary is PIE and
   // that address sits below the load base -- test/host links -no-pie, where
   // 0x400000 is the ELF text base.
-  ScopedHook addrFree(g_devrHipMemAddressFree, [](void*, size_t) { return hipSuccess; });
+  ScopedHook addrFree(g_hipMemAddressFree, [](void*, size_t) { return hipSuccess; });
 
   symTeamDestroyAll(comm);
   EXPECT_EQ(comm->devrState.teamHead, nullptr);
@@ -1562,8 +1563,8 @@ TEST_F(SymTeamDestroyAllTest, MulticastTeam_UnbindsMemoriesWithoutFreeingThem) {
 TEST_F(SymTeamDestroyAllTest, MixedList_TearsDownOnlyMulticastTeams) {
   PushTeam(nullptr);
   PushTeam(reinterpret_cast<void*>(0x400000));
-  ScopedHook unmap(g_devrHipMemUnmap, [](void*, size_t) { return hipSuccess; });
-  ScopedHook addrFree(g_devrHipMemAddressFree, [](void*, size_t) { return hipSuccess; });
+  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
+  ScopedHook addrFree(g_hipMemAddressFree, [](void*, size_t) { return hipSuccess; });
 
   symTeamDestroyAll(comm);
   EXPECT_EQ(comm->devrState.teamHead, nullptr);
@@ -1575,9 +1576,9 @@ TEST_F(SymTeamDestroyAllTest, MixedList_TearsDownOnlyMulticastTeams) {
 TEST_F(SymTeamDestroyAllTest, DriverCallsFail_StillEmptiesList) {
   PushTeam(reinterpret_cast<void*>(0x400000));
   PushTeam(reinterpret_cast<void*>(0x500000));
-  ScopedHook unmap(g_devrHipMemUnmap, [](void*, size_t) { return hipErrorInvalidValue; });
-  ScopedHook addrFree(g_devrHipMemAddressFree, [](void*, size_t) { return hipErrorInvalidValue; });
-  ScopedHook release(g_devrHipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
+  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipErrorInvalidValue; });
+  ScopedHook addrFree(g_hipMemAddressFree, [](void*, size_t) { return hipErrorInvalidValue; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
 
   symTeamDestroyAll(comm);
   EXPECT_EQ(comm->devrState.teamHead, nullptr);
@@ -1742,7 +1743,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, SegmentCountMismatch_ReturnsInvalidUsage
 // with the pointer type its location implies.
 TEST_F(SymMemoryRegisterGinElasticTest, AgreeingRanks_RegistersOneWindowPerSegment) {
   ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
-  ScopedHook props(g_devrHipMemGetAllocationPropertiesFromHandle,
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
                    [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
                      if (prop) {
                        *prop = hipMemAllocationProp{};
@@ -1811,7 +1812,7 @@ TEST_F(SymMemoryRegisterGinElasticTest, SizeMismatchAcrossRanks_ReturnsInvalidUs
 
 // Branch: reading a segment's allocation properties fails.
 TEST_F(SymMemoryRegisterGinElasticTest, PropertiesFail_ReturnsErrorWithoutGathering) {
-  ScopedHook props(g_devrHipMemGetAllocationPropertiesFromHandle,
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
                    [](hipMemAllocationProp*, hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
   ScopedHook gather(g_devrBootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
 
@@ -2543,7 +2544,7 @@ TEST_F(SymWindowCreateTest, PopulatesDeviceDescriptor) {
   // itself is pinned. The hook deliberately omits a dst != src guard, which
   // would stop it observing.
   std::vector<std::pair<void*, size_t>> published;
-  ScopedHook pub(g_devrHipMemcpyAsync,
+  ScopedHook pub(g_hipMemcpyAsync,
                  [&](void* dst, const void* src, size_t n, hipMemcpyKind, hipStream_t) {
                    published.emplace_back(dst, n);
                    if (dst != nullptr && src != nullptr && dst != src) memcpy(dst, src, n);
@@ -2660,7 +2661,7 @@ TEST_F(SymWindowCreateTest, DescriptorAllocFails_ReturnsError) {
 // function makes, so the window table is never reached and the sorted list
 // never grows.
 TEST_F(SymWindowCreateTest, DescriptorCopyFails_ReturnsErrorWithoutPublishing) {
-  ScopedHook copy(g_devrHipMemcpyAsync,
+  ScopedHook copy(g_hipMemcpyAsync,
                   [](void*, const void*, size_t, hipMemcpyKind, hipStream_t) { return hipErrorInvalidValue; });
 
   EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
@@ -2674,7 +2675,7 @@ TEST_F(SymWindowCreateTest, DescriptorCopyFails_ReturnsErrorWithoutPublishing) {
 // DescriptorCopyFails above.
 TEST_F(SymWindowCreateTest, TablePublishCopyFails_ReturnsErrorWithoutPublishing) {
   int n = 0;
-  ScopedHook copy(g_devrHipMemcpyAsync,
+  ScopedHook copy(g_hipMemcpyAsync,
                   [&n](void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
                     if (++n == 2) return hipErrorInvalidValue;
                     // Mirrors the fake's default: the earlier copies must still
@@ -2835,7 +2836,7 @@ TEST_F(SymWindowDestroyTest, TableClearFails_StillRemovesFromSortedList) {
   ncclWindow_vidmem* winDev = MakeWindow(reinterpret_cast<void*>(0x100000));
   ASSERT_EQ(comm->devrState.winSortedCount, 1);
 
-  ScopedHook clear(g_devrHipMemsetAsync,
+  ScopedHook clear(g_hipMemsetAsync,
                    [](void*, int, size_t, hipStream_t) { return hipErrorInvalidValue; });
   ScopedHook poolFree(g_devrShadowPoolFree,
                       [](ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; });
@@ -2875,7 +2876,7 @@ protected:
 // Branch: no peer table means IPC was never active for this window.
 TEST_F(WindowCloseIpcPeersTest, NoPeerTable_ClosesNothing) {
   win.ipcPeerPtrsAllocBase = nullptr;
-  ScopedHook close(g_devrHipIpcCloseMemHandle, [](void*) { return hipSuccess; });
+  ScopedHook close(g_hipIpcCloseMemHandle, [](void*) { return hipSuccess; });
 
   windowCloseIpcPeers(comm, &win);
   EXPECT_EQ(close.calls, 0);
@@ -2884,7 +2885,7 @@ TEST_F(WindowCloseIpcPeersTest, NoPeerTable_ClosesNothing) {
 // Branch: every peer is closed except our own slot, which was never opened.
 TEST_F(WindowCloseIpcPeersTest, ClosesPeersButNotSelf) {
   std::vector<void*> closed;
-  ScopedHook close(g_devrHipIpcCloseMemHandle, [&](void* p) {
+  ScopedHook close(g_hipIpcCloseMemHandle, [&](void* p) {
     closed.push_back(p);
     return hipSuccess;
   });
@@ -2899,7 +2900,7 @@ TEST_F(WindowCloseIpcPeersTest, ClosesPeersButNotSelf) {
 TEST_F(WindowCloseIpcPeersTest, NullPeerEntry_IsSkipped) {
   allocBase[0] = nullptr;
   std::vector<void*> closed;
-  ScopedHook close(g_devrHipIpcCloseMemHandle, [&](void* p) {
+  ScopedHook close(g_hipIpcCloseMemHandle, [&](void* p) {
     closed.push_back(p);
     return hipSuccess;
   });
@@ -2913,7 +2914,7 @@ TEST_F(WindowCloseIpcPeersTest, NullPeerEntry_IsSkipped) {
 // this runs during teardown, where stopping early would leak the remaining
 // mappings.
 TEST_F(WindowCloseIpcPeersTest, CloseFails_StillClosesRemainingPeers) {
-  ScopedHook close(g_devrHipIpcCloseMemHandle, [](void*) { return hipErrorInvalidValue; });
+  ScopedHook close(g_hipIpcCloseMemHandle, [](void*) { return hipErrorInvalidValue; });
 
   windowCloseIpcPeers(comm, &win);
   EXPECT_EQ(close.calls, 2);
@@ -2971,7 +2972,7 @@ protected:
 // The local case: a single-rank team with no host RMA skips both optional
 // stages and still produces a usable window.
 TEST_F(WindowRegisterNonSymTest, LocalOnly_RegistersWithoutIpcOrRma) {
-  ScopedHook ipcGet(g_devrHipIpcGetMemHandle, [](hipIpcMemHandle_t*, void*) { return hipSuccess; });
+  ScopedHook ipcGet(g_hipIpcGetMemHandle, [](hipIpcMemHandle_t*, void*) { return hipSuccess; });
   ScopedHook rma(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
 
   ncclWindow_t out = nullptr;
@@ -3030,7 +3031,7 @@ TEST_F(WindowRegisterNonSymTest, ShadowAllocFails_ClearsOutputAndPublishesNothin
 
 // Branch: the stream needed for stage 3 cannot be created.
 TEST_F(WindowRegisterNonSymTest, StreamCreateFails_ClearsOutput) {
-  ScopedHook create(g_devrHipStreamCreateWithFlags,
+  ScopedHook create(g_hipStreamCreateWithFlags,
                     [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
 
   ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
@@ -3043,7 +3044,7 @@ TEST_F(WindowRegisterNonSymTest, StreamCreateFails_ClearsOutput) {
 // check is hand-rolled rather than a CUDACHECK, so it is worth driving: it
 // warns and jumps to fail, leaving nothing in the sorted list.
 TEST_F(WindowRegisterNonSymTest, HeaderCopyFails_ClearsOutput) {
-  ScopedHook copy(g_devrHipMemcpyAsync,
+  ScopedHook copy(g_hipMemcpyAsync,
                   [](void*, const void*, size_t, hipMemcpyKind, hipStream_t) { return hipErrorInvalidValue; });
 
   ncclWindow_t out = reinterpret_cast<ncclWindow_t>(0xdead);
@@ -3105,7 +3106,7 @@ protected:
 // pointer rather than opening a handle against ourselves.
 TEST_F(WindowRegisterNonSymIpcTest, MapsPeersAndReusesSelf) {
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers());
-  ScopedHook open(g_devrHipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
     *ptr = reinterpret_cast<void*>(0x900000);
     return hipSuccess;
   });
@@ -3126,7 +3127,7 @@ TEST_F(WindowRegisterNonSymIpcTest, MapsPeersAndReusesSelf) {
 // against the same address space is not supported here.
 TEST_F(WindowRegisterNonSymIpcTest, SameProcessPeer_IsLeftUnmapped) {
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers(/*sameProcRank=*/1));
-  ScopedHook open(g_devrHipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
     *ptr = reinterpret_cast<void*>(0x900000);
     return hipSuccess;
   });
@@ -3142,7 +3143,7 @@ TEST_F(WindowRegisterNonSymIpcTest, SameProcessPeer_IsLeftUnmapped) {
 
 // Branch: the address-range lookup fails, so the exchange never happens.
 TEST_F(WindowRegisterNonSymIpcTest, AddressRangeFails_ReturnsErrorWithoutGathering) {
-  ScopedHook range(g_devrHipMemGetAddressRange,
+  ScopedHook range(g_hipMemGetAddressRange,
                    [](hipDeviceptr_t*, size_t*, hipDeviceptr_t) { return hipErrorInvalidValue; });
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers());
 
@@ -3154,7 +3155,7 @@ TEST_F(WindowRegisterNonSymIpcTest, AddressRangeFails_ReturnsErrorWithoutGatheri
 
 // Branch: our own handle cannot be exported.
 TEST_F(WindowRegisterNonSymIpcTest, IpcGetHandleFails_ReturnsError) {
-  ScopedHook ipcGet(g_devrHipIpcGetMemHandle,
+  ScopedHook ipcGet(g_hipIpcGetMemHandle,
                     [](hipIpcMemHandle_t*, void*) { return hipErrorInvalidValue; });
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers());
 
@@ -3169,12 +3170,12 @@ TEST_F(WindowRegisterNonSymIpcTest, IpcGetHandleFails_ReturnsError) {
 TEST_F(WindowRegisterNonSymIpcTest, PeerOpenFails_ClosesAlreadyOpenedPeers) {
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers());
   int opened = 0;
-  ScopedHook open(g_devrHipIpcOpenMemHandle, [&](void** ptr, hipIpcMemHandle_t, unsigned int) {
+  ScopedHook open(g_hipIpcOpenMemHandle, [&](void** ptr, hipIpcMemHandle_t, unsigned int) {
     if (++opened == 2) return hipErrorInvalidValue;  // rank 1 maps, rank 2 fails
     *ptr = reinterpret_cast<void*>(0x900000);
     return hipSuccess;
   });
-  ScopedHook close(g_devrHipIpcCloseMemHandle, [](void*) { return hipSuccess; });
+  ScopedHook close(g_hipIpcCloseMemHandle, [](void*) { return hipSuccess; });
 
   ncclWindow_t out = nullptr;
   EXPECT_NE(Register(&out), ncclSuccess);
@@ -3187,13 +3188,13 @@ TEST_F(WindowRegisterNonSymIpcTest, PeerOpenFails_ClosesAlreadyOpenedPeers) {
 // already in the sorted list -- so registration must take it back out.
 TEST_F(WindowRegisterNonSymIpcTest, BarrierFails_RevertsSortedInsert) {
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers());
-  ScopedHook open(g_devrHipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
     *ptr = reinterpret_cast<void*>(0x900000);
     return hipSuccess;
   });
   ScopedHook barrier(g_devrBootstrapIntraNodeBarrier,
                      [](void*, int*, int, int, int) { return ncclSystemError; });
-  ScopedHook close(g_devrHipIpcCloseMemHandle, [](void*) { return hipSuccess; });
+  ScopedHook close(g_hipIpcCloseMemHandle, [](void*) { return hipSuccess; });
 
   ncclWindow_t out = nullptr;
   EXPECT_NE(Register(&out), ncclSuccess);
@@ -3206,7 +3207,7 @@ TEST_F(WindowRegisterNonSymIpcTest, BarrierFails_RevertsSortedInsert) {
 TEST_F(WindowRegisterNonSymIpcTest, HostRmaWithRemoteRanks_RegistersMr) {
   comm->hostRmaSupport = true;  // lsaSize 3 < nRanks 4
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers());
-  ScopedHook open(g_devrHipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
     *ptr = reinterpret_cast<void*>(0x900000);
     return hipSuccess;
   });
@@ -3225,7 +3226,7 @@ TEST_F(WindowRegisterNonSymIpcTest, HostRmaButTeamSpansComm_SkipsMr) {
   comm->hostRmaSupport = true;
   comm->nRanks = 3;  // equal to lsaSize
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers());
-  ScopedHook open(g_devrHipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
     *ptr = reinterpret_cast<void*>(0x900000);
     return hipSuccess;
   });
@@ -3240,13 +3241,13 @@ TEST_F(WindowRegisterNonSymIpcTest, HostRmaButTeamSpansComm_SkipsMr) {
 TEST_F(WindowRegisterNonSymIpcTest, RmaRegisterFails_ReturnsError) {
   comm->hostRmaSupport = true;
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers());
-  ScopedHook open(g_devrHipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
     *ptr = reinterpret_cast<void*>(0x900000);
     return hipSuccess;
   });
   ScopedHook reg(g_devrRmaProxyRegister,
                  [](ncclComm*, void*, size_t, void*[]) { return ncclSystemError; });
-  ScopedHook close(g_devrHipIpcCloseMemHandle, [](void*) { return hipSuccess; });
+  ScopedHook close(g_hipIpcCloseMemHandle, [](void*) { return hipSuccess; });
 
   ncclWindow_t out = nullptr;
   EXPECT_NE(Register(&out), ncclSuccess);
@@ -3372,7 +3373,7 @@ protected:
 #if ROCM_VERSION < 70000
     // Below 7.0 alloc.h compiles ncclCuMemGetAddressRange as a WARN plus
     // `return ncclInternalError` (alloc.h:805-810) that never consults the
-    // g_devrHipMemGetAddressRange seam, so every test here would fail on the first
+    // g_hipMemGetAddressRange seam, so every test here would fail on the first
     // call rather than exercising anything. The binary's own floor is 6.4, so
     // skip rather than fail on a 6.4-6.9 build.
     GTEST_SKIP() << "ncclCuMemGetAddressRange is a stub below ROCm 7.0";
@@ -3408,7 +3409,7 @@ protected:
 
 // The happy path: one device-backed segment, registered end to end.
 TEST_F(DevrWindowRegisterInGroupSymTest, SingleDeviceSegment_RegistersWindow) {
-  ScopedHook range(g_devrHipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
 
   ncclWindow_t out = nullptr;
   ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
@@ -3420,7 +3421,7 @@ TEST_F(DevrWindowRegisterInGroupSymTest, SingleDeviceSegment_RegistersWindow) {
 // Branch: the symmetric-collective flag defers kernel init until a window that
 // needs it exists, so it is only paid for on request.
 TEST_F(DevrWindowRegisterInGroupSymTest, CollSymmetricFlag_InitialisesSymKernels) {
-  ScopedHook range(g_devrHipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
   // winFlags alone does not pin this: symWindowCreate stores it unconditionally,
   // so the whole symk block could be deleted and the flag assertion would still
   // hold. The init call is the behaviour the name claims.
@@ -3435,7 +3436,7 @@ TEST_F(DevrWindowRegisterInGroupSymTest, CollSymmetricFlag_InitialisesSymKernels
 // Branch: the symmetric-kernel init is deferred, so a window without the flag
 // must not pay for it. The counterpart to the case above.
 TEST_F(DevrWindowRegisterInGroupSymTest, WithoutCollSymmetricFlag_SkipsSymKernelInit) {
-  ScopedHook range(g_devrHipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
   ScopedHook symk(g_devrSymkInitOnce, [](ncclComm*) { return ncclSuccess; });
 
   ncclWindow_t out = nullptr;
@@ -3447,8 +3448,8 @@ TEST_F(DevrWindowRegisterInGroupSymTest, WithoutCollSymmetricFlag_SkipsSymKernel
 // that jumps to fail_locReg_memHandle_mem_stream_win, so failing it is what
 // drives symWindowDestroy and the labels below it.
 TEST_F(DevrWindowRegisterInGroupSymTest, StreamSyncFails_UnwindsTheCreatedWindow) {
-  ScopedHook range(g_devrHipMemGetAddressRange, AddressRangeOf(4096));
-  ScopedHook sync(g_devrHipStreamSynchronize, [](hipStream_t) { return hipErrorInvalidValue; });
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook sync(g_hipStreamSynchronize, [](hipStream_t) { return hipErrorInvalidValue; });
   ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
 
   ncclWindow_t out = nullptr;
@@ -3466,7 +3467,7 @@ TEST_F(DevrWindowRegisterInGroupSymTest, StreamSyncFails_UnwindsTheCreatedWindow
 // Branch: the closing barrier is NCCLCHECKGOTO'd at the same depth, so its
 // failure must unwind the same way.
 TEST_F(DevrWindowRegisterInGroupSymTest, ClosingBarrierFails_UnwindsTheCreatedWindow) {
-  ScopedHook range(g_devrHipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
   ScopedHook barrier(g_devrBootstrapBarrier, [](void*, int, int, int) { return ncclSystemError; });
   ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
 
@@ -3479,7 +3480,7 @@ TEST_F(DevrWindowRegisterInGroupSymTest, ClosingBarrierFails_UnwindsTheCreatedWi
 
 // Branch: the window-map insert is the last checked call before success.
 TEST_F(DevrWindowRegisterInGroupSymTest, MapInsertFails_UnwindsTheCreatedWindow) {
-  ScopedHook range(g_devrHipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
   ScopedHook insert(g_devrIntruAddressMapInsert,
                     [](ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void*) { return ncclSystemError; });
   ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
@@ -3493,7 +3494,7 @@ TEST_F(DevrWindowRegisterInGroupSymTest, MapInsertFails_UnwindsTheCreatedWindow)
 
 // Branch: resolving the allocation fails, so nothing is registered.
 TEST_F(DevrWindowRegisterInGroupSymTest, AddressRangeFails_ReleasesLocalRegistration) {
-  ScopedHook range(g_devrHipMemGetAddressRange,
+  ScopedHook range(g_hipMemGetAddressRange,
                    [](hipDeviceptr_t*, size_t*, hipDeviceptr_t) { return hipErrorInvalidValue; });
   ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
 
@@ -3515,7 +3516,7 @@ TEST_F(DevrWindowRegisterInGroupSymTest, AddressRangeFails_ReleasesLocalRegistra
 // belongs here and fails today; see AICOMRCCL-2180 finding 13. Asserting
 // the current count instead would pin the leak.
 TEST_F(DevrWindowRegisterInGroupSymTest, MisalignedWindow_ReturnsInvalidArgument) {
-  ScopedHook range(g_devrHipMemGetAddressRange, [](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
+  ScopedHook range(g_hipMemGetAddressRange, [](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
     if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(static_cast<char*>(dptr) - 1);
     if (psize) *psize = 8192;
     return hipSuccess;
@@ -3541,8 +3542,8 @@ TEST_F(DevrWindowRegisterInGroupSymTest, MisalignedWindow_ReturnsInvalidArgument
 // would not compile on the ROCm 7.0.2 backwards-compatibility build.
 #if ROCM_VERSION >= 71200
 TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithoutElasticParam_ReturnsInvalidArgument) {
-  ScopedHook range(g_devrHipMemGetAddressRange, AddressRangeOf(4096));
-  ScopedHook props(g_devrHipMemGetAllocationPropertiesFromHandle, SegmentsOfType(kLocHost));
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle, SegmentsOfType(kLocHost));
   ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "ELASTIC_BUFFER_REGISTER" ? 0 : deftVal;
   });
@@ -3558,8 +3559,8 @@ TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithoutElasticParam_Return
 // Same ROCM_VERSION dependency as the case above -- here it is load-bearing
 // rather than masked: below 7.12 the registration is rejected outright.
 TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithElasticParam_Registers) {
-  ScopedHook range(g_devrHipMemGetAddressRange, AddressRangeOf(4096));
-  ScopedHook props(g_devrHipMemGetAllocationPropertiesFromHandle, SegmentsOfType(kLocHost));
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle, SegmentsOfType(kLocHost));
 
   ncclWindow_t out = nullptr;
   ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
@@ -3570,8 +3571,8 @@ TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithElasticParam_Registers
 // Branch: a segment that is neither host nor device is rejected -- symmetric
 // memory has no mapping strategy for anything else.
 TEST_F(DevrWindowRegisterInGroupSymTest, UnsupportedSegmentType_ReturnsInvalidArgument) {
-  ScopedHook range(g_devrHipMemGetAddressRange, AddressRangeOf(4096));
-  ScopedHook props(g_devrHipMemGetAllocationPropertiesFromHandle, SegmentsOfType(hipMemLocationTypeInvalid));
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle, SegmentsOfType(hipMemLocationTypeInvalid));
   ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
 
   ncclWindow_t out = nullptr;
@@ -3601,14 +3602,14 @@ TEST_F(DevrWindowRegisterInGroupSymTest, UnsupportedSegmentType_ReturnsInvalidAr
 // is the part that does work: the error propagates and the local registration
 // is unwound.
 TEST_F(DevrWindowRegisterInGroupSymTest, RetainFails_PropagatesErrorAndUnwindsLocalRegistration) {
-  ScopedHook range(g_devrHipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
   int retained = 0;
-  ScopedHook retain(g_devrHipMemRetainAllocationHandle, [&](hipMemGenericAllocationHandle_t* h, void*) {
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [&](hipMemGenericAllocationHandle_t* h, void*) {
     if (++retained > 3) return hipErrorInvalidValue;
     if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x77);
     return hipSuccess;
   });
-  ScopedHook release(g_devrHipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
   ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
 
   ncclWindow_t out = nullptr;
@@ -4490,8 +4491,8 @@ TEST_F(CommWindowDeregisterImplSymTest, SymmetricWindow_RoutesToSymTeardown) {
   ncclWindow_vidmem* winDev = MakeWindow(reinterpret_cast<void*>(0x100000));
   ASSERT_EQ(comm->devrState.winSortedCount, 1);
 
-  ScopedHook mode(g_devrHipThreadExchangeStreamCaptureMode, [](hipStreamCaptureMode*) { return hipSuccess; });
-  ScopedHook setDev(g_devrHipSetDevice, [](int) { return hipSuccess; });
+  ScopedHook mode(g_hipThreadExchangeStreamCaptureMode, [](hipStreamCaptureMode*) { return hipSuccess; });
+  ScopedHook setDev(g_hipSetDevice, [](int) { return hipSuccess; });
 
   EXPECT_EQ(ncclCommWindowDeregister_impl(comm, winDev), ncclSuccess);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
@@ -4507,9 +4508,9 @@ TEST_F(CommWindowDeregisterImplSymTest, SymmetricStreamCreateFails_LeavesWindowA
   comm->symmetricSupport = 1;
   ncclWindow_vidmem* winDev = MakeWindow(reinterpret_cast<void*>(0x100000));
 
-  ScopedHook mode(g_devrHipThreadExchangeStreamCaptureMode, [](hipStreamCaptureMode*) { return hipSuccess; });
-  ScopedHook setDev(g_devrHipSetDevice, [](int) { return hipSuccess; });
-  ScopedHook create(g_devrHipStreamCreateWithFlags,
+  ScopedHook mode(g_hipThreadExchangeStreamCaptureMode, [](hipStreamCaptureMode*) { return hipSuccess; });
+  ScopedHook setDev(g_hipSetDevice, [](int) { return hipSuccess; });
+  ScopedHook create(g_hipStreamCreateWithFlags,
                     [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
 
   EXPECT_NE(ncclCommWindowDeregister_impl(comm, winDev), ncclSuccess);
@@ -4928,11 +4929,11 @@ TEST_F(DevCommDestroyTest, ResourceWindowDeregisterFails_PropagatesError) {
 // so a caller's current device survives the call.
 TEST_F(DevCommDestroyTest, ScopesToCommDeviceAndRestores) {
   std::vector<int> setTo;
-  ScopedHook getDev(g_devrHipGetDevice, [](int* d) {
+  ScopedHook getDev(g_hipGetDevice, [](int* d) {
     *d = 7;
     return hipSuccess;
   });
-  ScopedHook setDev(g_devrHipSetDevice, [&](int d) {
+  ScopedHook setDev(g_hipSetDevice, [&](int d) {
     setTo.push_back(d);
     return hipSuccess;
   });
@@ -5000,7 +5001,7 @@ TEST(DevCommDumpTest, DispatchesPerConnectionDumps) {
   // handle. The hook must not repeat production's dst != src guard, or it stops
   // observing.
   std::vector<std::pair<const void*, size_t>> readFrom;
-  ScopedHook copy(g_devrHipMemcpy, [&](void* dst, const void* src, size_t n, hipMemcpyKind) {
+  ScopedHook copy(g_hipMemcpy, [&](void* dst, const void* src, size_t n, hipMemcpyKind) {
     readFrom.emplace_back(src, n);
     if (dst) memset(dst, 0, n);  // the helpers print through the context they read
     return hipSuccess;

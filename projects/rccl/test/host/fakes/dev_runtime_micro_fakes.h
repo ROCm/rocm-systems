@@ -27,54 +27,23 @@
 #include <cstdint>
 #include <functional>
 
-extern std::function<hipError_t(hipMemAllocationProp*, hipMemGenericAllocationHandle_t)>
-    g_devrHipMemGetAllocationPropertiesFromHandle;
 
-extern std::function<hipError_t(void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
-                                unsigned long long)>
-    g_devrHipMemExportToShareableHandle;
 
-extern std::function<hipError_t(void*, size_t, const hipMemAccessDesc*, size_t)> g_devrHipMemSetAccess;
 
-extern std::function<hipError_t(size_t*, const hipMemAllocationProp*, hipMemAllocationGranularity_flags)>
-    g_devrHipMemGetAllocationGranularity;
 
-extern std::function<hipError_t(hipStream_t*, unsigned int)> g_devrHipStreamCreateWithFlags;
-extern std::function<hipError_t(hipStream_t)> g_devrHipStreamSynchronize;
-extern std::function<hipError_t(hipStream_t)> g_devrHipStreamDestroy;
-extern std::function<hipError_t(hipStreamCaptureMode*)> g_devrHipThreadExchangeStreamCaptureMode;
 
-extern std::function<hipError_t(hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType)>
-    g_devrHipMemImportFromShareableHandle;
-extern std::function<hipError_t(void*, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long)>
-    g_devrHipMemMap;
-extern std::function<hipError_t(hipMemGenericAllocationHandle_t)> g_devrHipMemRelease;
 
-extern std::function<hipError_t(void**, size_t, size_t, void*, unsigned long long)> g_devrHipMemAddressReserve;
-extern std::function<hipError_t(void*, size_t)> g_devrHipMemAddressFree;
-extern std::function<hipError_t(void*, size_t)> g_devrHipMemUnmap;
-extern std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)> g_devrHipMemcpyAsync;
-extern std::function<hipError_t(void*, int, size_t, hipStream_t)> g_devrHipMemsetAsync;
 
 // Team shape seen by ncclDevrWorldToLsaRank's symmetric arm. Default to the
 // comm's own contiguous stride-1 team; override for strided/offset layouts.
 extern std::function<ncclTeam_t(ncclComm_t)> g_devrTeamWorld;
 extern std::function<ncclTeam_t(ncclComm_t)> g_devrTeamLsa;
 
-extern std::function<hipError_t(hipIpcMemHandle_t*, void*)> g_devrHipIpcGetMemHandle;
-extern std::function<hipError_t(void**, hipIpcMemHandle_t, unsigned int)> g_devrHipIpcOpenMemHandle;
-extern std::function<hipError_t(void*)> g_devrHipIpcCloseMemHandle;
-extern std::function<hipError_t(int*)> g_devrHipGetDevice;
 extern std::function<ncclResult_t(void*, int, int, int)> g_devrBootstrapBarrier;
 extern std::function<ncclResult_t(struct ncclComm*)> g_devrSymkInitOnce;
 extern std::function<ncclResult_t(struct ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void*)>
     g_devrIntruAddressMapInsert;
 extern std::function<ncclResult_t(ncclComm_t)> g_devrCommEnsureReady;
-extern std::function<hipError_t(hipDeviceProp_t*, int)> g_devrHipGetDeviceProperties;
-extern std::function<hipError_t(int)> g_devrHipSetDevice;
-extern std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind)> g_devrHipMemcpy;
-extern std::function<hipError_t(hipDeviceptr_t*, size_t*, hipDeviceptr_t)> g_devrHipMemGetAddressRange;
-extern std::function<hipError_t(hipMemGenericAllocationHandle_t*, void*)> g_devrHipMemRetainAllocationHandle;
 
 extern std::function<ncclResult_t(const ncclComm_t, void*, size_t, void**)> g_devrNcclCommRegister;
 extern std::function<ncclResult_t(const ncclComm_t, void*)> g_devrNcclCommDeregister;
