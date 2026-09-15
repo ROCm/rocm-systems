@@ -171,7 +171,6 @@ checks:
         they are in the root config's `exclude:` block, so the command above
         checks *nothing* under them and exits 0:
 
-        `projects/amdsmi` · `projects/rccl` · `projects/rdc` ·
         `projects/amdsmi` · `projects/cuid` · `projects/rccl` ·
         `projects/rdc` · `projects/rocm-smi-lib` · `projects/rocprofiler-compute`
 
