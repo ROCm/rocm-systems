@@ -64,7 +64,12 @@ constexpr simdojo::PciId kTestId = {.vendor = 0x1002,
 /// @brief A served device plus the client attached to it.
 ///
 /// @details Serving happens on its own thread, as it does in the product, so
-/// the tests exercise the same threading the transport ships with.
+/// the tests exercise the same threading the transport ships with. Tests
+/// that hand callbacks to `ask_serving_thread` must declare every local the
+/// callback captures by reference BEFORE constructing this fixture, and must
+/// call `stop_serving()` before reading anything the callback wrote: the
+/// destructor joins the serving thread, so with the reverse order a still-
+/// pending callback can touch state that has already been destroyed.
 class ServedDevice {
 public:
   ServedDevice()
@@ -577,9 +582,9 @@ TEST(VfioServerSignals, MapsEachHandledSignalToItsAction) {
 // reported as work that ran and failed -- indistinguishable from work that
 // could not be done -- while the single slot is spent on nothing.
 TEST(VfioDeviceHost, RefusesEmptyWorkRatherThanThrowingOnTheServingThread) {
-  // Declared before the fixture so it outlives the join, and joined
-  // explicitly before returning: the serving thread may still hold the
-  // request when the assertions end, and std::atomic does not extend the
+  // Declared before the fixture so it outlives the join, and joined before
+  // the flag is read: the serving thread may still hold the request when
+  // the earlier assertions end, and std::atomic does not extend the
   // object's lifetime.
   std::atomic<bool> ran = false;
   ServedDevice served;
@@ -587,10 +592,12 @@ TEST(VfioDeviceHost, RefusesEmptyWorkRatherThanThrowingOnTheServingThread) {
 
   EXPECT_FALSE(served.host().ask_serving_thread({})) << "an empty target was accepted";
 
-  // And the slot is still free, so a real request is not lost behind it.
+  // And the slot is still free, so a real request is not lost behind it --
+  // and that request does run, once the thread has drained.
   EXPECT_TRUE(served.host().ask_serving_thread([&ran] { ran = true; }))
       << "the refused request consumed the one outstanding slot";
   served.stop_serving();
+  EXPECT_TRUE(ran) << "the request accepted after the refusal never ran";
 }
 
 TEST(VfioDeviceHost, RunsAskedWorkOnTheServingThread) {
