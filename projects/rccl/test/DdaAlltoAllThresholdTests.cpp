@@ -73,16 +73,19 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx950_AlltoAllIgnoresHighUserThreshold)
                                rcclDdaVmmThreshold(mockComm_.get(), ncclFuncAllReduce)));
 }
 
-TEST_F(DdaAlltoAllThresholdTest, Gfx1250_ExactlyAt4MbThreshold_Enabled)
+TEST_F(DdaAlltoAllThresholdTest, Gfx1250_ExactlyAtLL128Threshold_Enabled)
 {
+    // gfx1250 A2A: ddaVmmMax=0, ddaLL128Max=1MiB, ddaLLMax=64KiB.
+    // Entry threshold = max(0, 1MiB, 64KiB) = 1MiB -- not the 4MiB VMM cap used by gfx942/950.
     mockComm_.reset("gfx1250:sramecc+:xnack-");
-    const size_t totalBytes = rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll];
+    const size_t totalBytes = rcclDdaEntryThreshold(mockComm_.get(), ncclFuncAlltoAll);
     EXPECT_TRUE(rcclDdaEnabled(
         mockComm_.get(),
         totalBytes,
-        rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll]));
+        totalBytes));
+    // 32768 float32 per rank * 8 ranks * 4 bytes = 1 MiB = LL128 entry cap.
     EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
-        mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
+        mockComm_.get(), 32768, ncclFloat32));
 }
 
 TEST_F(DdaAlltoAllThresholdTest, Gfx1250_OneByteOverThreshold_Disabled)
@@ -229,14 +232,15 @@ TEST(DdaAlltoAllThreshold, Gfx950_FallbackToUserThreshold)
 
 TEST_F(DdaAlltoAllThresholdTest, Gfx1250_FourRanks_Enabled)
 {
+    // gfx1250 has no nRanks<8 gate, so DDA should be enabled at nRanks=4.
+    // Use the real entry threshold (1MiB = ddaLL128Max) rather than ddaVmmMax (0).
     mockComm_.reset("gfx1250:sramecc+:xnack-");
     mockComm_.comm.nRanks = 4;
-    const size_t totalBytes = rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll];
-    // gfx1250 has no nRanks<8 gate, so DDA should be enabled at nRanks=4.
+    const size_t totalBytes = rcclDdaEntryThreshold(mockComm_.get(), ncclFuncAlltoAll);
     EXPECT_TRUE(rcclDdaEnabled(
         mockComm_.get(),
         totalBytes,
-        rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll]));
+        totalBytes));
 }
 
 TEST_F(DdaAlltoAllThresholdTest, Gfx942_FourRanks_Disabled)
