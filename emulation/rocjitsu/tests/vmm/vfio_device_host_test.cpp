@@ -695,7 +695,6 @@ TEST(VfioDeviceHost, DiscardsAskedWorkWhenServingHasStopped) {
   EXPECT_FALSE(ran) << "work ran with no serving thread to run it";
 }
 
-// ---------------------------------------------------------------------------
 // Device-facing DMA data-path coverage.
 //
 // The tests above stop at protocol callbacks: a window is mapped, the device
@@ -705,7 +704,6 @@ TEST(VfioDeviceHost, DiscardsAskedWorkWhenServingHasStopped) {
 // the protocol client, drive the engine the way the device does, and verify
 // the data against the backing files independently, so a symmetric
 // addressing error cannot hide inside a write/read round trip.
-// ---------------------------------------------------------------------------
 
 namespace {
 
@@ -717,10 +715,10 @@ constexpr uint64_t kProtectionIova = 0x70000000;
 constexpr uint64_t kMultiSegmentIova = 0x80000000;
 constexpr uint64_t kReconnectIova = 0x90000000;
 constexpr std::size_t kBoundaryHalfBytes = 64;
-constexpr std::size_t kStreamingRegionCount = 300;
+constexpr std::size_t kStreamingRegionCount = rocjitsu::VfioDeviceHost::kMaxSgEntries + 1;
 
-/// @brief A zero-filled anonymous file of at least @p bytes bytes, rounded up
-///        to a host-page boundary.
+/// @brief A zero-filled anonymous file of at least @p bytes, rounded up to a
+///        host-page boundary.
 /// @details The @p bytes parameter is a byte count, not a page count: a
 ///          request of 3 * 0x1000 on a 64 KiB-page host yields one page, not
 ///          three, because the size rounds up from 12288 to 65536.
@@ -923,10 +921,10 @@ TEST(VfioDeviceHostDma, SplitsATransferAtRegistrationBoundaries) {
 // many scatter-gather entries it needs: above the initial capacity the vector
 // is resized and the request retried, and above the 256-entry ceiling the
 // transfer streams registration by registration instead. This test covers
-// both with 16 windows -- past the initial capacity of 8, under the ceiling
-// -- and 300 windows -- past it -- moving the whole range in both directions
+// both with more windows than the initial capacity but under the ceiling,
+// and more windows than the ceiling, moving the whole range in both directions
 // and comparing every byte of every page.
-void RunStreamingTransferTest(uint64_t iova_base, std::size_t window_count) {
+void run_streaming_transfer_test(uint64_t iova_base, std::size_t window_count) {
   ServedDevice served;
   ASSERT_TRUE(served.built());
   rocjitsu::test::VfioUserClient client;
@@ -965,11 +963,11 @@ void RunStreamingTransferTest(uint64_t iova_base, std::size_t window_count) {
 }
 
 TEST(VfioDeviceHostDma, ResizesTheScatterGatherListBetweenTheLimits) {
-  RunStreamingTransferTest(kStreamingIova, 16);
+  run_streaming_transfer_test(kStreamingIova, rocjitsu::VfioDeviceHost::kInitialSgEntries + 8);
 }
 
 TEST(VfioDeviceHostDma, StreamsAcrossMoreThanTheScatterGatherLimit) {
-  RunStreamingTransferTest(kStreamingIova + 0x10000000ULL, kStreamingRegionCount);
+  run_streaming_transfer_test(kStreamingIova + 0x10000000ULL, kStreamingRegionCount);
 }
 
 // A hole between registrations is not memory the device may touch, whichever
