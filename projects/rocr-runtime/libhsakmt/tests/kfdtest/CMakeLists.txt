@@ -265,6 +265,7 @@ set (SRC_FILES gtest-1.6.0/gtest-all.cpp
   src/KFDEventTest.cpp
   src/KFDQMTest.cpp
   src/KFDCWSRTest.cpp
+  src/test_queue_context.cpp
   src/KFDExceptionTest.cpp
   src/KFDGraphicsInterop.cpp
   src/KFDPerfCounters.cpp
