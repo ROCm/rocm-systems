@@ -7,6 +7,9 @@ exclude: |
     | _build/
     # external source of truth
     | shared/amdgpu-windows-interop
+    # vendored upstream SQLite3 amalgamation - must not be reformatted, and
+    # sqlite3.c is well over the check-added-large-files limit
+    | profilers/profiler-hub/external/
     # these projects have their own pre-commit-config.yaml
     | projects/amdsmi/
     | projects/cuid/
