@@ -202,6 +202,9 @@ class WaitForJobTimingTest(unittest.TestCase):
         # A poll_interval far longer than 1s must still be sliced into <=1s
         # sleeps so a cancel flag flipping mid-wait is noticed promptly,
         # instead of blocking for the whole interval in one sleep() call.
+        # cancel_after=2: the cancel flag flips true on the 3rd cancelled()
+        # call (1 at the top of the loop, 1 more inside the first sleep
+        # slice), so only the single "RUNNING" state ever gets consumed.
         cancel_after = 2
         seen = []
 
@@ -210,30 +213,9 @@ class WaitForJobTimingTest(unittest.TestCase):
             seen.append(1)
             return triggered
 
-        clock = [0.0]
-        sleeps = []
-        scancelled = []
-        remaining = ["RUNNING"]
-
-        def fake_monotonic():
-            return clock[0]
-
-        def fake_sleep(seconds):
-            sleeps.append(seconds)
-            clock[0] += seconds
-
-        def fake_query_job(job_id, retries, interval):
-            return JobResult(state=remaining[0], exit_code="")
-
-        with mock.patch.object(submit_slurm_job.time, "monotonic", fake_monotonic):
-            with mock.patch.object(submit_slurm_job.time, "sleep", fake_sleep):
-                with mock.patch.object(submit_slurm_job, "query_job", fake_query_job):
-                    with mock.patch.object(
-                        submit_slurm_job, "scancel_job", scancelled.append
-                    ):
-                        rc, result = wait_for_job(
-                            "19010", 5.0, cancelled, missing_row_timeout=9999.0
-                        )
+        rc, result, clock, sleeps, scancelled = self._patched(
+            ["RUNNING"], cancelled, 5.0, 9999.0
+        )
 
         self.assertEqual(rc, 1)
         self.assertIsNone(result)
@@ -335,9 +317,10 @@ class SubmitCommandTest(unittest.TestCase):
     def test_unexpected_exception_scancels_before_reraising(self) -> None:
         """An unexpected crash after a job id exists must not leak the node.
 
-        The `if: cancelled()` backup step only fires on an actual GitHub
-        cancellation, not on an ordinary exception, so submit_and_wait itself
-        is the last chance to release the allocation.
+        Both backup steps are `if: failure() || cancelled()` now, so they do
+        fire on an ordinary crash; submit_and_wait scancels anyway because it
+        does so immediately, and because a run with no `--chdir` leaves those
+        steps no slurm-job-id file to read.
         """
         scancelled = []
 
@@ -563,6 +546,38 @@ class MainRegressionTest(unittest.TestCase):
         # wait_for_job already saw the terminal COMPLETED row; main() must
         # trust it rather than re-querying sacct a second time.
         self.assertEqual(len(check_output_calls), 1)
+
+    def test_main_reports_failure_for_non_zero_wait_rc(self) -> None:
+        """Argus: nothing in the suite drove a non-zero wait rc end to end.
+
+        Deleting evaluate()'s `wait_rc != 0` arm, or changing
+        submit_and_wait's `cancel_requested` early-return to report success,
+        still left every other test green. Mocking wait_for_job to (1, None)
+        -- a scancelled or timed-out job -- pins that main() surfaces that as
+        a non-zero exit rather than falling through to the empty-job-id
+        "trusting rc=0" branch.
+        """
+
+        def fake_run(cmd, **kwargs):
+            return mock.Mock(returncode=0, stdout="19010\n", stderr="")
+
+        def fake_wait_for_job(*a, **k):
+            return (1, None)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = submit_slurm_job.Path(tmpdir)
+            script = tmp / "job.sbatch"
+            script.write_text("#!/bin/bash\necho hi\n")
+
+            with mock.patch.object(submit_slurm_job.subprocess, "run", fake_run):
+                with mock.patch.object(
+                    submit_slurm_job, "wait_for_job", fake_wait_for_job
+                ):
+                    rc = submit_slurm_job.main(
+                        ["--script", str(script), "--wait-poll-interval", "0"]
+                    )
+
+        self.assertNotEqual(rc, 0)
 
 
 if __name__ == "__main__":

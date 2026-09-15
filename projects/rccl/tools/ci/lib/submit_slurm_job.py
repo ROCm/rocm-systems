@@ -289,11 +289,11 @@ def wait_for_job(
             time.sleep(min(1.0, remaining))
 
 
-def evaluate(sbatch_rc: int, job_id: str, result: JobResult) -> int:
+def evaluate(wait_rc: int, job_id: str, result: JobResult) -> int:
     """Decide the overall exit code from the wait rc and sacct result."""
-    if sbatch_rc != 0:
-        log(f"ERROR: slurm job did not complete cleanly (rc={sbatch_rc})")
-        return sbatch_rc if sbatch_rc > 0 else 1
+    if wait_rc != 0:
+        log(f"ERROR: slurm job did not complete cleanly (rc={wait_rc})")
+        return wait_rc if wait_rc > 0 else 1
 
     if not job_id:
         log("WARNING: no job id from sbatch; trusting rc=0")
@@ -372,7 +372,7 @@ def main(argv: list[str]) -> int:
     if args.chdir:
         args.chdir.mkdir(parents=True, exist_ok=True)
 
-    sbatch_rc, job_id, wait_result = submit_and_wait(
+    wait_rc, job_id, wait_result = submit_and_wait(
         args.script,
         args.export,
         args.chdir,
@@ -380,19 +380,19 @@ def main(argv: list[str]) -> int:
         args.reservation,
         wait_poll_interval=args.wait_poll_interval,
     )
-    log(f"slurm wait rc={sbatch_rc}, job_id={job_id}")
+    log(f"slurm wait rc={wait_rc}, job_id={job_id}")
 
     # wait_for_job already saw a terminal sacct row -- trust it rather than
     # re-querying, since a second query right after the job ends can race
     # sacct's accounting-DB lag and read a real failure as "no data". It is
-    # only None when sbatch_rc != 0 (empty job id, a cancel before
+    # only None when wait_rc != 0 (empty job id, a cancel before
     # wait_for_job ran, or wait_for_job itself giving up), and evaluate()
-    # discards result whenever sbatch_rc != 0, so no fallback query is needed.
+    # discards result whenever wait_rc != 0, so no fallback query is needed.
     result = (
         wait_result if wait_result is not None else JobResult(state="", exit_code="")
     )
 
-    return evaluate(sbatch_rc, job_id, result)
+    return evaluate(wait_rc, job_id, result)
 
 
 if __name__ == "__main__":
