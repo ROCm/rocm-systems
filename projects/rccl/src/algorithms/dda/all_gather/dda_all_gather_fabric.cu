@@ -15,6 +15,7 @@
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -31,7 +32,7 @@ static inline std::pair<dim3, dim3> ddaAllGatherFabricGeom(ncclComm* comm, size_
 
 template <typename T>
 static ncclResult_t ncclAllGatherDdaFabricTyped(const void* sendbuff, void* recvbuff, size_t sendcount, ncclComm* comm,
-                                                cudaStream_t stream) {
+                                                cudaStream_t stream, hipEvent_t stopEvent) {
   if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaFabricBarrierState == nullptr) {
     return ncclInvalidUsage;
@@ -57,6 +58,10 @@ static ncclResult_t ncclAllGatherDdaFabricTyped(const void* sendbuff, void* recv
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
+  T* const* ipcbuffsArg = d_ipcbuffs;
+  T* recvArg = static_cast<T*>(recvbuff);
+  const T* sendArg = static_cast<const T*>(sendbuff);
+
   INFO(NCCL_COLL, "DDA fabric AllGather: launching kernel: nRanks=%d sendcount=%zu grid=%u block=%u%s", nRanks,
        sendcount, grid.x, block.x, (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
 
@@ -65,19 +70,19 @@ static ncclResult_t ncclAllGatherDdaFabricTyped(const void* sendbuff, void* recv
   // (NRANKS_CT == 0) for any other size.
   switch (nRanks) {
   case 4:
-    dda::common::ddaAllGatherFabric<T, 4><<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), sendcount,
-                                                                      static_cast<const T*>(sendbuff), comm->rank,
-                                                                      nRanks, barrierHost);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabric<T, 4>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, ipcbuffsArg, recvArg, sendcount, sendArg,
+                          comm->rank, nRanks, barrierHost);
     break;
   case 8:
-    dda::common::ddaAllGatherFabric<T, 8><<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), sendcount,
-                                                                      static_cast<const T*>(sendbuff), comm->rank,
-                                                                      nRanks, barrierHost);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabric<T, 8>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, ipcbuffsArg, recvArg, sendcount, sendArg,
+                          comm->rank, nRanks, barrierHost);
     break;
   default:
-    dda::common::ddaAllGatherFabric<T, 0><<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), sendcount,
-                                                                      static_cast<const T*>(sendbuff), comm->rank,
-                                                                      nRanks, barrierHost);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabric<T, 0>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, ipcbuffsArg, recvArg, sendcount, sendArg,
+                          comm->rank, nRanks, barrierHost);
     break;
   }
 
@@ -132,10 +137,10 @@ uint32_t ncclAllGatherDdaFabricBlocks(ncclComm* comm, size_t sendcount, ncclData
 }
 
 ncclResult_t ncclAllGatherDdaFabric(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
-                                    ncclComm* comm, cudaStream_t stream) {
+                                    ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
     return ncclInvalidArgument;
   }
   int typeSize = ncclTypeSize(datatype);
-  return ncclAllGatherDdaFabricTyped<int8_t>(sendbuff, recvbuff, sendcount * typeSize, comm, stream);
+  return ncclAllGatherDdaFabricTyped<int8_t>(sendbuff, recvbuff, sendcount * typeSize, comm, stream, stopEvent);
 }

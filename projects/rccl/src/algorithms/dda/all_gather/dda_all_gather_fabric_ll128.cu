@@ -15,6 +15,7 @@
 #include "param.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -82,7 +83,7 @@ template <typename T>
 static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   const void* sendbuff, void* recvbuff,
   size_t sendcount, // per-rank element count of T (== bytes when T == int8_t)
-  ncclComm* comm, cudaStream_t stream) {
+  ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
   const int nRanks = comm->nRanks;
   const size_t perRankBytes = sendcount * sizeof(T);
   const size_t slices = ddaLL128AGSlices(perRankBytes);
@@ -99,6 +100,10 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
+  T* const* peersArg = peers;
+  T* recvArg = static_cast<T*>(recvbuff);
+  const T* sendArg = static_cast<const T*>(sendbuff);
+
   INFO(NCCL_COLL,
        "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu slices=%zu grid=%ux%u block=%u "
        "(warp-per-slice, bpp=%u, slotWords=%zu)",
@@ -107,19 +112,19 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
   switch (nRanks) {
   case 4:
-    dda::common::ddaAllGatherFabricLL128<T, 4>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), perRankBytes,
-                                   comm->rank, nRanks, epochDev, epochLen, slices, slotWords);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 4>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, perRankBytes,
+                          comm->rank, nRanks, epochDev, epochLen, slices, slotWords);
     break;
   case 8:
-    dda::common::ddaAllGatherFabricLL128<T, 8>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), perRankBytes,
-                                   comm->rank, nRanks, epochDev, epochLen, slices, slotWords);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 8>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, perRankBytes,
+                          comm->rank, nRanks, epochDev, epochLen, slices, slotWords);
     break;
   default:
-    dda::common::ddaAllGatherFabricLL128<T, 0>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), perRankBytes,
-                                   comm->rank, nRanks, epochDev, epochLen, slices, slotWords);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 0>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, perRankBytes,
+                          comm->rank, nRanks, epochDev, epochLen, slices, slotWords);
     break;
   }
 
@@ -179,12 +184,13 @@ uint32_t ncclAllGatherDdaFabricLL128Blocks(ncclComm* comm, size_t sendcount, ncc
 }
 
 ncclResult_t ncclAllGatherDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t sendcount,
-                                         ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream) {
+                                         ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream,
+                                         hipEvent_t stopEvent) {
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
     return ncclInvalidArgument;
   }
   // AllGather is a pure copy, so the payload moves as raw bytes: instantiate the
   // kernel once for int8_t and scale the count, like ncclAllGatherDdaFabricLL.
   const int typeSize = ncclTypeSize(datatype);
-  return ncclAllGatherDdaFabricLL128Typed<int8_t>(sendbuff, recvbuff, sendcount * typeSize, comm, stream);
+  return ncclAllGatherDdaFabricLL128Typed<int8_t>(sendbuff, recvbuff, sendcount * typeSize, comm, stream, stopEvent);
 }
