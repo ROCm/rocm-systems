@@ -15,14 +15,14 @@ typedef int hipDevice_t;
 typedef struct hipDeviceProp_tR0000 hipDeviceProp_tR0000;
 typedef int hipError_t;
 
-hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* props, hipDevice_t device);
-hipError_t hipChooseDeviceR0000(int* device, const hipDeviceProp_tR0000* properties);
+__attribute__((visibility("default"))) hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* props, hipDevice_t device);
+__attribute__((visibility("default"))) hipError_t hipChooseDeviceR0000(int* device, const hipDeviceProp_tR0000* properties);
 
-hipError_t hipGetDeviceProperties(hipDeviceProp_tR0000* props, hipDevice_t device) {
+__attribute__((visibility("default"))) hipError_t hipGetDeviceProperties(hipDeviceProp_tR0000* props, hipDevice_t device) {
   return hipGetDevicePropertiesR0000(props, device);
 }
 
-hipError_t hipChooseDevice(int* device, const hipDeviceProp_tR0000* properties) {
+__attribute__((visibility("default"))) hipError_t hipChooseDevice(int* device, const hipDeviceProp_tR0000* properties) {
   return hipChooseDeviceR0000(device, properties);
 }
 

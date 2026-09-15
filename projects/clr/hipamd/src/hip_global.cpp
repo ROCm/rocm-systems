@@ -12,11 +12,11 @@
 #include "platform/program.hpp"
 #include <hip/hip_version.h>
 
-const char* amd_dbgapi_get_build_name(void) { return HIP_VERSION_BUILD_NAME; }
+HIP_PUBLIC_API const char* amd_dbgapi_get_build_name(void) { return HIP_VERSION_BUILD_NAME; }
 
-const char* amd_dbgapi_get_git_hash() { return HIP_VERSION_GITHASH; }
+HIP_PUBLIC_API const char* amd_dbgapi_get_git_hash() { return HIP_VERSION_GITHASH; }
 
-size_t amd_dbgapi_get_build_id() { return HIP_VERSION_BUILD_ID; }
+HIP_PUBLIC_API size_t amd_dbgapi_get_build_id() { return HIP_VERSION_BUILD_ID; }
 
 #ifdef __HIP_ENABLE_PCH
 extern const char __hip_pch_wave32[];

@@ -60,8 +60,8 @@ bool demangleName(const std::string& mangledName, std::string& demangledName);
 } }
 
 
-extern "C" void hipRegisterTracerCallback(int (*function)(activity_domain_t domain,
-                                                          uint32_t operation_id, void* data));
+HIP_PUBLIC_API void hipRegisterTracerCallback(int (*function)(activity_domain_t domain,
+                                                              uint32_t operation_id, void* data));
 
 // ================================================================================================
 // Internal state
@@ -2775,10 +2775,9 @@ uint64_t HipProfilerDisableExt() {
 // ============================================================
 // Public C extension API
 // ============================================================
-extern "C" {
 
 // ================================================================================================
-hipError_t hipProfilerEnableExt(uint64_t* start_record_id, uint64_t state) {
+HIP_PUBLIC_API hipError_t hipProfilerEnableExt(uint64_t* start_record_id, uint64_t state) {
   (void)state;  // reserved for future feature flags; ignored in this version
   uint64_t id = HipProfilerEnableExt();
   if (start_record_id) *start_record_id = id;
@@ -2786,14 +2785,14 @@ hipError_t hipProfilerEnableExt(uint64_t* start_record_id, uint64_t state) {
 }
 
 // ================================================================================================
-hipError_t hipProfilerDisableExt(uint64_t* end_record_id) {
+HIP_PUBLIC_API hipError_t hipProfilerDisableExt(uint64_t* end_record_id) {
   uint64_t id = HipProfilerDisableExt();
   if (end_record_id) *end_record_id = id;
   return hipSuccess;
 }
 
 // ================================================================================================
-hipError_t hipProfilerGetRecordsExt(const hipApiRecordExt* const** chunks,
+HIP_PUBLIC_API hipError_t hipProfilerGetRecordsExt(const hipApiRecordExt* const** chunks,
                                      size_t* chunk_count,
                                      size_t* chunk_size,
                                      size_t* total_count) {
@@ -2816,7 +2815,7 @@ hipError_t hipProfilerGetRecordsExt(const hipApiRecordExt* const** chunks,
 }
 
 // ================================================================================================
-hipError_t hipProfilerRegisterChunkCallbackExt(hipProfilerChunkCallback cb, void* user_data) {
+HIP_PUBLIC_API hipError_t hipProfilerRegisterChunkCallbackExt(hipProfilerChunkCallback cb, void* user_data) {
   if (!cb) return hipErrorInvalidValue;
   bool first;
   {
@@ -2832,5 +2831,3 @@ hipError_t hipProfilerRegisterChunkCallbackExt(hipProfilerChunkCallback cb, void
   }
   return hipSuccess;
 }
-
-}  // extern "C"
