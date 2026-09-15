@@ -285,6 +285,12 @@ CommandProcessor::CommandProcessor(std::string name, simdojo::ExecMode exec_mode
   // event must already have a handler when the queue becomes visible.
   doorbell_event_.set_handler(
       [this](simdojo::Tick ts, simdojo::Message *) { handle_doorbell(ts); });
+  polled_doorbell_event_.set_handler([this](simdojo::Tick ts, simdojo::Message *) {
+    // Clear before handling so a host submission during this pass can queue
+    // the next wake. Other doorbell sources cannot clear this event's latch.
+    polled_doorbell_queued_.store(false, std::memory_order_release);
+    handle_doorbell(ts);
+  });
   dispatch_continuation_event_.set_handler([this](simdojo::Tick ts, simdojo::Message *message) {
     if (!message || message->payload() != dispatch_continuation_generation_)
       return;
@@ -1211,6 +1217,13 @@ bool CommandProcessor::scan_doorbells() {
   return found;
 }
 
+void CommandProcessor::request_polled_doorbell() {
+  // A slow handler must not accumulate a fresh event every 100us. Otherwise
+  // millions of same-tick retries can sit ahead of the CU that resolves a wait.
+  if (!polled_doorbell_queued_.exchange(true, std::memory_order_acq_rel))
+    engine()->schedule_event_now(&polled_doorbell_event_);
+}
+
 void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
   using namespace std::chrono_literals;
   uint64_t poll_count = 0;
@@ -1235,10 +1248,10 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
     bool retry = !doorbell_changed && (invalid_pending_.load(std::memory_order_acquire) ||
                                        stall_pending_.load(std::memory_order_acquire));
     if (doorbell_changed)
-      engine()->schedule_event_now(&doorbell_event_);
+      request_polled_doorbell();
     else if (retry) {
       std::this_thread::sleep_for(100us);
-      engine()->schedule_event_now(&doorbell_event_);
+      request_polled_doorbell();
     } else
       std::this_thread::sleep_for(100us);
     ++poll_count;

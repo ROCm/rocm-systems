@@ -80,6 +80,11 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu::amdgpu {
 
+class CommandProcessorTestAccess {
+public:
+  static void request_polled_doorbell(CommandProcessor &cp) { cp.request_polled_doorbell(); }
+};
+
 class GpuMemoryTestAccess {
 public:
   static std::mutex *backing_atomic_mutex_for(const void *address) {
@@ -6813,6 +6818,19 @@ TEST(AqlDispatchTest, QueueMutationWaitsForDispatchWorkerWindow) {
   registration.get();
   removal.get();
   f.cp()->unregister_queue(added_queue.queue_id, added_queue.process_id);
+}
+
+TEST(DoorbellMonitorLifecycle, RepeatedPollRequestsAreCoalescedAndCanRearm) {
+  VmFixture f("cdna4", /*num_cus=*/1);
+  auto *cp = f.cp();
+  for (int pass = 0; pass < 2; ++pass) {
+    const auto before = cp->doorbell_handle_count_for_test();
+    // Model a host poller outrunning the engine while a dependency is pending.
+    for (int i = 0; i < 1000; ++i)
+      amdgpu::CommandProcessorTestAccess::request_polled_doorbell(*cp);
+    ASSERT_TRUE(f.engine->step());
+    EXPECT_EQ(cp->doorbell_handle_count_for_test(), before + 1);
+  }
 }
 
 TEST(DoorbellMonitorLifecycle, RetiresAfterLastQueueAndRestartsOnNewQueue) {

@@ -743,6 +743,9 @@ private:
   std::unordered_map<uint64_t, ClusterBarrierState> cluster_barriers_;
 
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
+  simdojo::Event polled_doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
+  std::atomic<bool> polled_doorbell_queued_{false};
+  void request_polled_doorbell();
   simdojo::Event dispatch_continuation_event_{this, simdojo::EventType::TIMER_CALLBACK};
   bool dispatch_continuation_pending_ = false;
   simdojo::Tick dispatch_continuation_tick_ = simdojo::TICK_MAX;
@@ -756,6 +759,7 @@ private:
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
 
   friend class ComputeUnitCore;
+  friend class CommandProcessorTestAccess;
 
   /// @brief Read a uint64 from GPU virtual address space via GpuMemory translation.
   uint64_t read_gpu_u64(uint64_t va, uint32_t vmid) const;
