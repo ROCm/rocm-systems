@@ -1,6 +1,15 @@
 # Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 ROCM_PATH ?= /opt/rocm
 HIPCC = $(ROCM_PATH)/bin/hipcc
+
+# Plain (non-HIP-driver) compiler used only for compile-time feature probes.
+# The probes below check host headers (amd_smi/amdsmi.h) and API surface, not
+# device code, so they must NOT go through hipcc's HIP driver mode: that pulls
+# in the cuda_wrappers/bits/c++config.h shim, which clashes with recent system
+# libstdc++ headers and makes an otherwise-valid probe fail. RCCL's CMake build
+# probes with the plain compiler (check_cxx_source_compiles) and gets the right
+# answer; use the same mechanism here so the two build systems agree.
+PROBE_CXX ?= $(ROCM_PATH)/bin/amdclang++
 HIPIFY_PL_EXE ?= $(ROCM_PATH)/bin/hipify-perl
 HIPIFY_PL_FLAGS = -inplace -quiet-warnings
 
@@ -29,11 +38,16 @@ NCCL_OS_DEFINE := -DNCCL_OS_WINDOWS
 endif
 
 # topo_expl bypasses RCCL's CMake configuration, so reproduce the two
-# compile-time feature probes needed by headers it imports.
+# compile-time feature probes needed by headers it imports. Probes compile a
+# real temp file (like CMake's check_cxx_source_compiles) with the plain
+# compiler PROBE_CXX rather than piping through hipcc's HIP driver.
+PROBE_TMP := $(shell mktemp --suffix=.cpp)
+
 HAVE_HIP_FABRIC_API := $(shell printf '%s\n' \
   '#include <hip/hip_runtime_api.h>' \
-  'int main() { hipMemFabricHandle_t h{}; (void)h; auto fn = &hipMemImportFromShareableHandle; (void)fn; }' | \
-  $(HIPCC) -x c++ -std=c++17 -fsyntax-only -D__HIP_PLATFORM_AMD__ -I$(ROCM_PATH)/include - \
+  'int main() { hipMemFabricHandle_t h{}; (void)h; auto fn = &hipMemImportFromShareableHandle; (void)fn; }' \
+  > $(PROBE_TMP); \
+  $(PROBE_CXX) -x c++ -std=c++17 -fsyntax-only -D__HIP_PLATFORM_AMD__ -I$(ROCM_PATH)/include $(PROBE_TMP) \
   >/dev/null 2>&1 && echo yes || echo no)
 ifeq ($(HAVE_HIP_FABRIC_API),yes)
 FEATURE_DEFINES += -DHIP_FABRIC_API
@@ -41,12 +55,15 @@ endif
 
 HAVE_AMDSMI_FABRIC_API := $(shell printf '%s\n' \
   '#include <amd_smi/amdsmi.h>' \
-  'int main() { amdsmi_fabric_info_t info{}; (void)info; }' | \
-  $(HIPCC) -x c++ -std=c++17 -fsyntax-only -I$(ROCM_PATH)/include - \
+  'int main() { amdsmi_fabric_info_t info{}; (void)info; }' \
+  > $(PROBE_TMP); \
+  $(PROBE_CXX) -x c++ -std=c++17 -fsyntax-only -I$(ROCM_PATH)/include $(PROBE_TMP) \
   >/dev/null 2>&1 && echo yes || echo no)
 ifeq ($(HAVE_AMDSMI_FABRIC_API),yes)
 FEATURE_DEFINES += -DAMDSMI_FABRIC_DIRECT
 endif
+
+$(shell rm -f $(PROBE_TMP))
 
 CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION) \
            -std=c++17 \
