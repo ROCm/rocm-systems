@@ -23,6 +23,7 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_IMPL_RSMIUTILS_H_
 #define INCLUDE_RDC_LIB_IMPL_RSMIUTILS_H_
 
+#include <map>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -32,6 +33,15 @@ namespace amd {
 namespace rdc {
 
 rdc_status_t Smi2RdcError(amdsmi_status_t rsmi);
+//!< Whether a fetch status means the platform cannot serve the field, as
+//!< opposed to a transient failure.
+bool is_capability_miss(rdc_status_t status);
+//!< Health fields with an alternate source when the primary cannot be read on
+//!< this platform (primary -> fallback). The primary is tried first.
+const std::map<rdc_field_t, rdc_field_t>& health_field_fallbacks();
+//!< Whether the field is used by health monitoring: the RDC_HEALTH_* range or
+//!< a fallback from health_field_fallbacks().
+bool is_health_field(rdc_field_t field_id);
 
 // Count how many of the retired/bad-page records are pending retirement.
 // Returns 0 when records is null or count is 0.
