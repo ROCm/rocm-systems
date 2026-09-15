@@ -22,6 +22,8 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
+#include <cassert>
+
 #include "gda/queue_pair.hpp"
 #include "gda/endian.hpp"
 #include "util.hpp"
@@ -327,13 +329,18 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t length,
 
   if (length) {
     if (opcode == IONIC_V2_OP_RDMA_WRITE && static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold)) {
+      assert(inline_threshold <= 8);
       wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_INL);
       wqe->base.num_sge_key = 0;
       if (!laddr) {
         // TODO why is this needed?
         wqe->common.pld.data[0] = 1;
       } else {
-        memcpy(wqe->common.pld.data, reinterpret_cast<const void*>(laddr), length);
+        // Always read/write 8B to emit a single load+store instruction;
+        // overread is safe (heap page), NIC uses wqe length for actual size.
+        uint64_t val;
+        __builtin_memcpy(&val, reinterpret_cast<const void*>(laddr), sizeof(val));
+        *reinterpret_cast<uint64_t*>(wqe->common.pld.data) = val;
       }
     } else {
       wqe->common.pld.sgl[0].va = byteswap<uint64_t>(laddr);
@@ -382,13 +389,18 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t length,
 
   if (length) {
     if (opcode == IONIC_V2_OP_RDMA_WRITE && static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold)) {
+      assert(inline_threshold <= 8);
       wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_INL);
       wqe->base.num_sge_key = 0;
       if (!laddr) {
         // TODO why is this needed?
         wqe->common.pld.data[0] = 1;
       } else {
-        memcpy(wqe->common.pld.data, reinterpret_cast<const void*>(laddr), length);
+        // Always read/write 8B to emit a single load+store instruction;
+        // overread is safe (heap page), NIC uses wqe length for actual size.
+        uint64_t val;
+        __builtin_memcpy(&val, reinterpret_cast<const void*>(laddr), sizeof(val));
+        *reinterpret_cast<uint64_t*>(wqe->common.pld.data) = val;
       }
     } else {
       wqe->common.pld.sgl[0].va = byteswap<uint64_t>(laddr);

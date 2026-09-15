@@ -2204,6 +2204,7 @@ void GDABackend::create_cqs(int cqe) {
 }
 
 void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
+  assert(inline_threshold >= 8);
   switch (gda_provider) {
   case GDAProvider::IONIC:
     ionic_initialize_gpu_qp(gpu_qp, conn_num);
