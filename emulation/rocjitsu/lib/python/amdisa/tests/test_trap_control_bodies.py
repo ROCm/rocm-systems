@@ -66,6 +66,17 @@ class TestSRfeBody:
             assert 'kPcAddressMask' in body, f'{name} has no trap-return body'
             assert 'wf.set_exec(wf.trap_saved_exec());' in body, name
 
+    def test_gfx12_restores_application_status_and_gfx1250_restores_the_full_pc(self):
+        body = _body('S_RFE_I64')
+        assert '0x01FFFFFFFFFFFFFFULL' in body
+        assert 'wf.trap_saved_status()' in body
+        assert 'restored_status | kStatusHalt' in body
+
+        older_body = _body('S_RFE_B64')
+        assert '0x0000FFFFFFFFFFFFULL' in older_body
+        assert 'wf.trap_saved_status()' in older_body
+        assert 'wf.uses_separate_trap_ctrl()' in older_body
+
 
 class TestSendmsgBody:
     def test_reports_msg_interrupt_from_inside_the_handler(self):

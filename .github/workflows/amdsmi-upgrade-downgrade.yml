@@ -42,6 +42,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Group by PR number so a new push supersedes the previous run. Pushes to
+  # develop fall back to the commit sha, which is unique, so post-merge runs
+  # never cancel each other.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   upgrade-downgrade:
     name: ${{matrix.name}}

@@ -188,7 +188,7 @@ fi
 # Detect wavefront size and grid-sync residency limits based on GPU architecture.
 # gfx1100/gfx1201/gfx1250 have wavefront size 32, most others have 64.
 # GRID_SYNC_MAX_THREADS applies only to functional tests whose kernels use the
-# software grid_barrier occupancy guard. A value of 0 disables driver-side adjustment. 
+# software grid_barrier occupancy guard. A value of 0 disables driver-side adjustment.
 # It can be overridden with ROCSHMEM_TEST_GRID_SYNC_MAX_THREADS.
 WAVE_SIZE=64
 GPU_ARCH=""
@@ -834,10 +834,10 @@ TestColl() {
   ExecTest  "fcollect"         3       1            64        32768
   ExecTest  "fcollect"         5       1            64        32768
 
-  # NOTE: teamreduction at rank counts > 2 currently fails a data validation
-  # check in the ring all-reduce path; this is a pre-existing bug unrelated to
-  # work/sync pool alignment, so it is only run at 2 ranks here.
   ExecTest  "teamreduction"    2       1            64        32768
+  ExecTest  "teamreduction"    3       1            64        32768
+  ExecTest  "teamreduction"    4       1            64        32768
+  ExecTest  "teamreduction"    8       1            64        32768
 
   ExecTest  "teamreducescatter" 2      1            64        32768
   ExecTest  "teamreducescatter" 4      1            64        32768
@@ -849,6 +849,8 @@ TestColl() {
     ExecTest  "alltoall_wave"       2       1            $WAVE_SIZE   512
     ExecTest  "fcollect_wave"       2       1            $WAVE_SIZE   32768
     ExecTest  "reduce_wave"         2       1            $WAVE_SIZE   32768
+    ExecTest  "reduce_wave"         4       1            $WAVE_SIZE   32768
+    ExecTest  "reduce_wave"         8       1            $WAVE_SIZE   32768
     ExecTest  "reducescatter_wave"  2       1            $WAVE_SIZE   32768
     ExecTest  "reducescatter_wave"  4       1            $WAVE_SIZE   32768
     ExecTest  "reducescatter_wave"  8       1            $WAVE_SIZE   32768
@@ -987,9 +989,9 @@ TestOther() {
   else echo "Skip:   hostteamsyncbarrier (host team sync/barrier hangs on RO)"; fi
   unset ROCSHMEM_MAX_NUM_CONTEXTS
   unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
-  
+
   ExecTest  "teamsplit2d"              4  1            1
-  
+
   ExecTest  "shmemptr"         2       1            1         8
   ExecTest  "shmemptr"         2       1            1024      8
   ExecTest  "shmemptr"         2       8            1         8
@@ -1250,8 +1252,8 @@ case $TEST in
     TestColl
     TestOther
     TestOnStream
-    # Tile tests are only supported on IPC backend
-    if [[ ! "$TEST" =~ ^(gda|ro) ]]; then
+    # Tile tests are only supported on IPC and GDA backend
+    if [[ ! "$TEST" =~ ^(ro) ]]; then
       TestTiles
     fi
     # Host non-MPI IPC tests are only supported on IPC backend

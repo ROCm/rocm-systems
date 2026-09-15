@@ -4,81 +4,44 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Init-specific fake layer for the host-only `rccl-UnitTestsMicroInit` binary
-// (AICOMRCCL-1685). This binary compiles the hipified src/init.cc directly
-// (via INIT_CC_PATH) and links NONE of librccl/HIP; every external symbol is
-// satisfied by the fake layers (hip_fakes / nccl_fakes / init_fakes) or by the
-// real host-only oracle TUs (argcheck.cc / archinfo.cc / utils.cc).
-//
-// This header is intentionally thin at bring-up: it re-exports the shared HIP
-// and NCCL fake seams and adds the init-only controllable seams. It grows as
-// the GPU decision inventory + per-test matrix are completed (see
-// init_coverage_plan.md).
+// Aggregating header for the `rccl-UnitTestsMicroInit` binary. Every seam is declared by the fakes file
+// named after the PRODUCTION TU that owns the symbol; this header pulls those in and adds the few things
+// that belong to src/init.cc itself. See test/host/MICROTEST_README.md.
 
 #ifndef RCCL_TEST_HOST_INIT_FAKES_H_
 #define RCCL_TEST_HOST_INIT_FAKES_H_
 
+#include "amdsmi_fakes.h"        // src/misc/amdsmi_wrap.cc
+#include "bootstrap_stubs.h"     // src/bootstrap.cc
+#include "env_fakes.h"           // src/misc/param.cc + getenv interposition
+#include "env_plugin_fakes.h"    // src/plugin/env.cc
+#include "gin_fakes.h"           // src/plugin/gin.cc + src/gin/gin_host.cc
+#include "group_fakes.h"         // src/group.cc
 #include "hip_fakes.h"
+#include "libc_interposers.h"    // gethostname / dladdr
+#include "mem_manager_fakes.h"   // src/mem_manager.cc
 #include "nccl_fakes.h"
+#include "nccl_stubs.h"          // core/lifecycle stubs + data symbols
+#include "os_fakes.h"            // src/os/linux.cc
+#include "rccl_wrap_fakes.h"     // src/rccl_wrap.cc
+#include "recorder_fakes.h"      // src/recorder.cc
+#include "rocmwrap_fakes.h"      // src/misc/rocmwrap.cc
+#include "strongstream_stubs.h"  // src/misc/strongstream.cc
+#include "topo_stubs.h"          // src/graph/*.cc
+#include "transport_stubs.h"     // src/transport/*.cc + src/plugin/net.cc
+#include "tuning_fakes.h"        // src/graph/tuning.cc
 
-// -------------------------------------------------------------------------
-// getenv seam. init.cc reads a couple of environment variables via
-// libc getenv() directly (HSA_NO_SCRATCH_RECLAIM, HSA_FORCE_FINE_GRAIN_PCIE),
-// which ncclGetEnv()/g_getEnv cannot control. init-test.cc activates a
-// `#define getenv(n) micro_getenv(n)` ONLY around `#include INIT_CC_PATH`;
-// micro_getenv lives here (macro inactive in this TU) and calls the real
-// getenv by default. Tests script values with SetMicroEnv().
-// -------------------------------------------------------------------------
-const char* micro_getenv(const char* name);
-void SetMicroEnv(const char* name, const char* value);  // scripts one var
-void ClearMicroEnv();                                    // back to real getenv
+struct ncclComm;
 
-// Controllable GIN error state: ncclGinQueryLastError() reports this. Tests set
-// it to drive the ncclRemoteError precedence branch in ncclCommGetAsyncError.
-extern bool g_ginHasError;
-
-// checkHsaEnvSetting seams: validHsaScratchEnvSetting()'s verdict (true = OK,
-// no WARN) and getFirmwareVersion()'s value.
-extern bool g_validHsaScratch;
-extern int g_firmwareVersion;
-
-// fillInfo GDR fallback seam: ncclGpuGdrSupport() writes g_gdrSupportValue and
-// bumps g_gdrSupportCalls, so tests can assert the fallback path was taken.
-extern int g_gdrSupportValue;
-extern int g_gdrSupportCalls;
-
-// ncclInit()-tree seams run real ncclInit() host-only. bootstrapNetInit
-// success is injectable so a (process-isolated) test can drive ncclInit failure.
-extern bool g_bootstrapNetInitFail;
-
-// -------------------------------------------------------------------------
-// commAlloc() deep seams. These were fail-loud stubs; they are now
-// controllable so commAlloc() runs host-only. Each returns its g_*Result
-// (default ncclSuccess) so a test can inject a failure at exactly one check to
-// cover that early-return arm. ncclNetInit installs a fake comm->ncclNet
-// (name "microfake") on success. (ncclCreateSideStream is a static-inline in
-// alloc.h and ncclCudaCompCap comes from the real utils.cc oracle -- both real,
-// driven via the HIP device model, not faked here.)
-// -------------------------------------------------------------------------
+// ncclNetInit/ncclNetInitFromParent live in init-test.cc: they need the full ncclComm/ncclNet_t layout.
 extern ncclResult_t g_ncclNetInitResult;
-extern ncclResult_t g_ncclGinInitResult;
-extern ncclResult_t g_ncclStrongStreamResult;
-extern ncclResult_t g_ncclMemManagerInitResult;
-extern ncclResult_t g_amdSmiInitResult;
 
-// Enable the full commAlloc() happy path in one call: flips the HIP deep-path
-// seams (attribute/PCIBusId/event/mempool/stream) to success and resets the
-// nccl seams above to their success defaults. Call at the top of a commAlloc
-// test, then inject a single failure to exercise a specific arm.
 void InstallCommAllocSuccess();
 
-// Enable the full devCommSetup() happy path: InstallCommAllocSuccess() plus the
-// HIP async stream ops (thread-exchange / memsetAsync / memcpyAsync) that its
-// alloc/copy templates drive. Call after building a comm via commAlloc().
 void InstallDevCommSetupSuccess();
 
-// Reset every init-layer fake to defaults. Cascades to ResetHipFakes() and
-// ResetNcclFakes(). Called from the fixture TearDown().
+// Chains every per-TU Reset*, then clears what init.cc's own seams hold. A seam whose reset stops being
+// called leaks state between tests, so anything added to a module here must be reset by that module.
 void ResetInitFakes();
 
 #endif  // RCCL_TEST_HOST_INIT_FAKES_H_

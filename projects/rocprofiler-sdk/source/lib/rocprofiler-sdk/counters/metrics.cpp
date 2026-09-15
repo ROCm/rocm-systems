@@ -49,6 +49,7 @@
 #include <dlfcn.h>  // for dladdr
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <system_error>

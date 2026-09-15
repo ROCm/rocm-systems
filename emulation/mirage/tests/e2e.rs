@@ -34,6 +34,41 @@ use nix::sys::signal::Signal;
 const BORROWER_WAIT: &str = "borrower(s) are still using session";
 
 #[test]
+fn version_identifies_the_source_revision() {
+    let version = Env::new().ok(&["--version"]);
+    let mut lines = version.lines();
+    assert_eq!(
+        lines.next(),
+        Some(concat!("mirage ", env!("CARGO_PKG_VERSION")))
+    );
+    let identity = lines
+        .next()
+        .expect("version output needs a RocJITsu identity");
+    if identity.starts_with("rocjitsu build identity unavailable:") {
+        assert_eq!(lines.next(), None, "unexpected output after: {version}");
+        return;
+    }
+
+    assert!(identity.starts_with("rocjitsu "), "{version}");
+    let revision = lines
+        .next()
+        .and_then(|line| line.strip_prefix("git revision: "))
+        .unwrap_or_else(|| panic!("missing revision in: {version}"));
+    assert!(
+        revision == "unknown"
+            || (revision.len() == 40 && revision.chars().all(|c| c.is_ascii_hexdigit())),
+        "{version}"
+    );
+    assert!(
+        lines
+            .next()
+            .is_some_and(|line| line.starts_with("git commit: ")),
+        "{version}"
+    );
+    assert_eq!(lines.next(), None, "unexpected output after: {version}");
+}
+
+#[test]
 fn paths_reports_the_overridden_directories() {
     let env = Env::new();
     let out = env.ok(&["paths"]);

@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import json
 import logging
@@ -1232,24 +1215,21 @@ class SetValueCommands:
                         str(json.dumps(accelerator_set_choices, indent=4)),
                     )
                     if args.compute_partition in accelerator_profiles["profile_types"]:
-                        compute_partition = amdsmi_interface.AmdSmiComputePartitionType[
-                            args.compute_partition
-                        ]
                         index = accelerator_profiles["profile_types"].index(args.compute_partition)
                         attempted_to_set = f"Attempted to set accelerator partition to {args.compute_partition} (profile #{accelerator_profiles['profile_indices'][int(index)]}) on {gpu_string}"
                         user_requested_partition_args = f"{args.compute_partition} (profile #{accelerator_profiles['profile_indices'][int(index)]})"
-                        amdsmi_interface.amdsmi_set_gpu_compute_partition(
-                            args.gpu, compute_partition
+                        amdsmi_interface.amdsmi_set_gpu_accelerator_partition_profile(
+                            args.gpu, int(accelerator_profiles["profile_indices"][index])
                         )
                     elif args.compute_partition in accelerator_profiles["profile_indices"]:
-                        compute_partition = int(args.compute_partition)
+                        accelerator_partition = int(args.compute_partition)
                         index = accelerator_profiles["profile_indices"].index(
                             args.compute_partition
                         )
                         attempted_to_set = f"Attempted to set accelerator partition to {accelerator_profiles['profile_types'][int(index)]} (profile #{args.compute_partition}) on {gpu_string}"
                         user_requested_partition_args = f"{accelerator_profiles['profile_types'][int(index)]} (profile #{args.compute_partition})"
                         amdsmi_interface.amdsmi_set_gpu_accelerator_partition_profile(
-                            args.gpu, compute_partition
+                            args.gpu, accelerator_partition
                         )
                     else:
                         raise ValueError(

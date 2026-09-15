@@ -281,6 +281,78 @@ HIP_TEST_CASE(Unit_hipMemcpyPeer_Negative_Parameters) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Checks cross-device ordering of hipMemcpyPeer.
+ *  - A producer kernel fills the source buffer on a user-created blocking stream and the peer
+ *    copy is issued immediately, with no host-side synchronization in between. hipMemcpyPeer
+ *    must serialize against all pending work on srcDevice, that waits on every active
+ *    blocking stream of the peer device. Without that serialization the copy races with the fill
+ *    and the destination is left with stale data.
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemcpyPeer.cc
+ * Test requirements
+ * ------------------------
+ *  - Peer access supported
+ *  - Multi-device
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_OrderingWithSrcBlockingStream) {
+  const auto device_count = HipTest::getDeviceCount();
+  if (device_count < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+
+  const int src_device = 0;
+  const int dst_device = 1;
+
+  int can_access_peer = 0;
+  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
+  if (!can_access_peer) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+  }
+
+  // Allocate a large buffer to increase the likelihood of a race
+  constexpr size_t element_count = 4 * 1024 * 1024;
+  constexpr size_t allocation_size = element_count * sizeof(int);
+  constexpr int stale_value = 0;
+  constexpr int expected_value = 42;
+
+  HIP_CHECK(hipSetDevice(src_device));
+  LinearAllocGuard<int> src_alloc(LinearAllocs::hipMalloc, allocation_size);
+  HIP_CHECK(hipMemset(src_alloc.ptr(), stale_value, allocation_size));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // Producer runs on a user-created blocking stream on srcDevice.
+  hipStream_t src_stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&src_stream));
+
+  HIP_CHECK(hipSetDevice(dst_device));
+  LinearAllocGuard<int> dst_alloc(LinearAllocs::hipMalloc, allocation_size);
+  LinearAllocGuard<int> result(LinearAllocs::hipHostMalloc, allocation_size);
+
+  HIP_CHECK(hipSetDevice(src_device));
+  constexpr auto thread_count = 256;
+  const auto block_count = element_count / thread_count;
+
+  VectorSet<<<block_count, thread_count, 0, src_stream>>>(src_alloc.ptr(), expected_value,
+                                                          element_count);
+  HIP_CHECK(hipGetLastError());
+
+  HIP_CHECK(hipSetDevice(dst_device));
+  HIP_CHECK(
+      hipMemcpyPeer(dst_alloc.ptr(), dst_device, src_alloc.ptr(), src_device, allocation_size));
+
+  HIP_CHECK(
+      hipMemcpy(result.host_ptr(), dst_alloc.ptr(), allocation_size, hipMemcpyDeviceToHost));
+  ArrayFindIfNot(result.host_ptr(), expected_value, element_count);
+
+  HIP_CHECK(hipStreamDestroy(src_stream));
+}
+
+/**
  * End doxygen group PeerToPeerTest.
  * @}
  */

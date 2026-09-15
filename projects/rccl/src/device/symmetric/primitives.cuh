@@ -292,6 +292,18 @@ struct ncclSymkAccumType<FuncSumPostDiv, __nv_fp8_e5m2, false> {
 // software type used on non-fp8 arches (e.g. gfx908) has no __half conversion, so
 // fp8 accumulates in float (which casts cleanly on every arch).
 template <>
+struct ncclSymkAccumType<FuncSum, hip_bfloat16, false> {
+  using Type = float;
+};
+template <>
+struct ncclSymkAccumType<FuncSum, rccl_float8, false> {
+  using Type = float;
+};
+template <>
+struct ncclSymkAccumType<FuncSum, rccl_bfloat8, false> {
+  using Type = float;
+};
+template <>
 struct ncclSymkAccumType<FuncSumPostDiv, hip_bfloat16, false> {
   using Type = float;
 };

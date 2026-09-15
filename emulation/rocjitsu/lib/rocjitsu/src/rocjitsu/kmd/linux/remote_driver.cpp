@@ -6,16 +6,23 @@
 
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
+#include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "util/log.h"
 #include "util/unique_handle.h"
 
 #include <algorithm>
 #include <cassert>
 #include <cerrno>
+#include <charconv>
 #include <chrono>
 #include <cstring>
 #include <fcntl.h>
+#include <format>
+#include <fstream>
 #include <linux/mman.h>
+#include <optional>
+#include <string_view>
 #ifndef MADV_POPULATE_WRITE
 #define MADV_POPULATE_WRITE 23
 #endif
@@ -23,6 +30,13 @@
 #include <poll.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
+#ifndef PR_SET_PTRACER
+// Yama's ptrace-scope exception list. Absent from some libc header sets even
+// where the running kernel implements it, so the call below is worth keeping
+// unconditional; the kernel answers EINVAL when it is genuinely unsupported.
+#define PR_SET_PTRACER 0x59616d61
+#endif
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -65,6 +79,130 @@ constexpr bool has_embedded_pointers(unsigned long request) {
 int transport_errno() {
   const int err = errno;
   return err > 0 ? -err : -EIO;
+}
+
+/// @brief Permit the daemon on @p socket to read and write this address space.
+///
+/// @details Host memory that never became a daemon mapping is reachable only by
+/// the daemon reaching into this process. Its memory bridge already assumes it
+/// can, through process_vm_readv/writev, and GPU access to such memory is
+/// serviced no other way -- pageable buffers the runtime pinned through the KFD
+/// SVM API, above all, since that registration produces no shared backing the
+/// way a USERPTR allocation does. Those calls are nonetheless refused by
+/// default: the daemon is forked as this process's child, and Yama's default
+/// ptrace_scope admits a ptracer only over its own descendants, never over its
+/// own ancestor. Naming the daemon a permitted ptracer restores the access the
+/// bridge was written to have; without it every such access fails EPERM and the
+/// SDMA copy that needed it never completes.
+///
+/// The peer PID comes from the kernel rather than from the daemon, so this
+/// names exactly the process on the other end of this socket. The grant widens
+/// nothing that was not already true: the daemon's own client library is this
+/// LD_PRELOAD, and is already executing inside this address space.
+///
+/// @brief The daemon PID this client's launcher forked, if it had one.
+/// @details Read from the environment rather than the socket on purpose: the
+/// socket answers who is connected, and this answers who was supposed to be.
+std::optional<pid_t> launched_daemon_pid() {
+  const char *raw = getenv(kRpcDaemonPidEnv);
+  if (raw == nullptr || *raw == '\0')
+    return std::nullopt;
+  pid_t parsed = 0;
+  const char *end = raw + std::strlen(raw);
+  const auto [stop, error] = std::from_chars(raw, end, parsed);
+  if (error != std::errc{} || stop != end || parsed <= 0)
+    return std::nullopt;
+  return parsed;
+}
+
+/// @brief Contents of Yama's ptrace_scope, or nullopt when it does not exist.
+std::optional<std::string> read_ptrace_scope() {
+  std::ifstream file("/proc/sys/kernel/yama/ptrace_scope");
+  if (!file)
+    return std::nullopt;
+  std::string contents;
+  std::getline(file, contents);
+  return contents;
+}
+
+/// @brief Why a peer was refused, for the log line that reports it.
+std::string_view describe(PtracerGrantVerdict verdict) {
+  switch (verdict) {
+  case PtracerGrantVerdict::Grant:
+    return "the peer is the daemon this client's launcher started";
+  case PtracerGrantVerdict::GrantUnverifiedPeer:
+    return "no launcher named a daemon, so the socket's owner is trusted";
+  case PtracerGrantVerdict::RefusedNoPeer:
+    return "the socket reports no usable peer credentials";
+  case PtracerGrantVerdict::RefusedForeignUser:
+    return "the peer belongs to another user";
+  case PtracerGrantVerdict::RefusedPeerMismatch:
+    return "the peer is not the daemon this client's launcher started";
+  }
+  return "unrecognized";
+}
+
+/// Called only once the handshake has succeeded. Before that this process has
+/// no evidence the peer speaks the protocol at all, and a grant is the one step
+/// here that outlives the connection.
+///
+/// @param[in] socket Connected daemon socket.
+/// @returns The trust decision, whether or not a syscall followed from it.
+PtracerGrantVerdict authorize_daemon_address_space_access(int socket) {
+  ucred peer{};
+  socklen_t peer_size = sizeof(peer);
+  const bool have_peer = getsockopt(socket, SOL_SOCKET, SO_PEERCRED, &peer, &peer_size) == 0 &&
+                         peer_size == sizeof(peer) && peer.pid > 0;
+
+  const PtracerGrantVerdict verdict =
+      have_peer ? ptracer_grant_verdict(launched_daemon_pid(), peer.pid, peer.uid, geteuid())
+                : PtracerGrantVerdict::RefusedNoPeer;
+  if (!grants(verdict)) {
+    // Reported rather than dropped. A refusal is not a failure in itself, but
+    // it decides whether pageable transfers above the pinning threshold can
+    // complete, and a caller left wondering why an SDMA copy never retires has
+    // no other way to find out.
+    util::Logger::warn(
+        std::format("daemon: not authorizing peer to read this address space ({}); transfers "
+                    "that rely on process_vm_readv/writev will fail",
+                    describe(verdict)));
+    return verdict;
+  }
+  if (verdict == PtracerGrantVerdict::GrantUnverifiedPeer) {
+    // Said out loud, every time. This is the grant that rests on nothing but the
+    // peer having answered this socket, so which process received it belongs in
+    // the log rather than only in the kernel's unreadable exception slot.
+    util::Logger::warn(
+        std::format("daemon: authorizing pid {} to read this address space; no launcher named a "
+                    "daemon for this client, so nothing here identifies it further",
+                    peer.pid));
+  }
+
+  const PtraceScopePolicy policy = ptrace_scope_policy_from_text(read_ptrace_scope());
+  if (policy == PtraceScopePolicy::Absent || policy == PtraceScopePolicy::Disabled)
+    return verdict; // Already permitted; the grant would be a no-op.
+  if (policy == PtraceScopePolicy::AdminOnly || policy == PtraceScopePolicy::NoAttach) {
+    util::Logger::warn(
+        "daemon: ptrace_scope forbids attaching regardless of a permitted-ptracer grant, so "
+        "transfers that rely on process_vm_readv/writev will fail");
+    return verdict;
+  }
+
+  // Process-wide, single-valued, and unreadable: PR_SET_PTRACER holds one PID
+  // with no PR_GET_PTRACER to inspect it, so this necessarily overwrites
+  // whatever was there. That is why it is narrowed as far as it is -- issued
+  // only for a handshaked peer that the launcher named, and only in the one
+  // scope where it changes anything. A reconnect re-issues it for the new
+  // daemon, which is correct: the previous one is the process this client is no
+  // longer being served by. A debugger or rocSHMEM grant taken beforehand is
+  // displaced, and cannot be restored afterwards because it cannot be read.
+  if (prctl(PR_SET_PTRACER, static_cast<unsigned long>(peer.pid), 0, 0, 0) != 0) {
+    util::Logger::warn(std::format(
+        "daemon: could not authorize pid {} to read this address space ({}); transfers that "
+        "rely on process_vm_readv/writev will fail",
+        peer.pid, std::strerror(errno)));
+  }
+  return verdict;
 }
 
 /// @brief Safe wrapper around syscall(SYS_mmap, ...) that avoids UB from
@@ -221,6 +359,61 @@ uint32_t clamp_snapshot_entries(uint32_t count, uint32_t entry_size, size_t arg_
 
 } // namespace
 
+PtraceScopePolicy ptrace_scope_policy_from_text(const std::optional<std::string> &contents) {
+  if (!contents)
+    return PtraceScopePolicy::Absent;
+  std::string_view text = *contents;
+  while (!text.empty() && (text.front() == ' ' || text.front() == '\t'))
+    text.remove_prefix(1);
+  while (!text.empty() &&
+         (text.back() == ' ' || text.back() == '\t' || text.back() == '\n' || text.back() == '\r'))
+    text.remove_suffix(1);
+  int value = 0;
+  const auto [stop, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+  if (error != std::errc{} || stop != text.data() + text.size())
+    return PtraceScopePolicy::Unknown;
+  switch (value) {
+  case 0:
+    return PtraceScopePolicy::Disabled;
+  case 1:
+    return PtraceScopePolicy::Relational;
+  case 2:
+    return PtraceScopePolicy::AdminOnly;
+  case 3:
+    return PtraceScopePolicy::NoAttach;
+  default:
+    // A scope this build does not know is assumed to restrict at least as much
+    // as the one it does, so the grant is still attempted rather than skipped.
+    return PtraceScopePolicy::Unknown;
+  }
+}
+
+PtracerGrantVerdict ptracer_grant_verdict(std::optional<pid_t> launched_daemon_pid, pid_t peer_pid,
+                                          uid_t peer_uid, uid_t self_uid) {
+  if (peer_pid <= 0)
+    return PtracerGrantVerdict::RefusedNoPeer;
+  // A cross-user peer could not attach even if named here, because PR_SET_PTRACER
+  // relaxes Yama alone and the ordinary ptrace credential check still stands
+  // behind it. Refused anyway, so the exception list never holds a process this
+  // client did not expect to be served by.
+  if (peer_uid != self_uid)
+    return PtracerGrantVerdict::RefusedForeignUser;
+  // SO_PEERCRED says who is connected, which is a weaker claim than it appears:
+  // the socket path is well known, so any process of this user can be listening
+  // on it, and same-user peers are exactly what Yama's relationship check exists
+  // to separate. Where a launcher named a process, that name decides.
+  if (launched_daemon_pid) {
+    return *launched_daemon_pid == peer_pid ? PtracerGrantVerdict::Grant
+                                            : PtracerGrantVerdict::RefusedPeerMismatch;
+  }
+  // No launcher named one: attach mode, or a bare LD_PRELOAD against a running
+  // daemon. Nothing here can identify the peer, and no check could be added that
+  // would: a secret shared with the daemon authenticates nothing against an
+  // attacker of this UID, who reads whatever this client can. The peer is
+  // trusted, and every such grant says so.
+  return PtracerGrantVerdict::GrantUnverifiedPeer;
+}
+
 RemoteDriver::MemfdLookup RemoteDriver::find_memfd_for_addr(void *addr, size_t length,
                                                             int *memfd_out, off_t *offset_out) {
   *memfd_out = -1;
@@ -284,6 +477,7 @@ int RemoteDriver::poison_stream() {
 
 int RemoteDriver::open() {
   assert(sock_ >= 0 && "open called on disconnected RemoteDriver");
+  ptracer_verdict_.reset();
   closing_.store(false, std::memory_order_release);
   has_gpu_info_ = false;
   gpu_info_ = {};
@@ -364,6 +558,11 @@ int RemoteDriver::open() {
       return -1;
     }
   }
+
+  // Only here, with the handshake complete. Everything above can fail on a peer
+  // that never proved it speaks this protocol, and the grant is the one step in
+  // open() whose effect outlives the connection that prompted it.
+  ptracer_verdict_ = authorize_daemon_address_space_access(sock_);
 
   return reissue_synthetic_kfd_fd();
 }
@@ -488,7 +687,7 @@ int RemoteDriver::ioctl(unsigned long request, void *arg) {
     // This avoids both the shutdown ordering deadlock (ROCR joins signal
     // threads before calling close) AND arbitrary time-based workarounds.
     auto deadline =
-        (original_timeout >= 0xFFFFFFFEu)
+        (original_timeout == kWaitEventsInfiniteMs)
             ? std::chrono::steady_clock::time_point::max()
             : std::chrono::steady_clock::now() + std::chrono::milliseconds(original_timeout);
 
@@ -765,6 +964,12 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // Owned only for the duration of the send: SCM_RIGHTS installs the daemon's
   // own copies, so ours are released on every path out of here, including the
   // early returns below.
+  //
+  // These remain util::UniqueHandle (closing via ::close, i.e. through the
+  // interposer's own close hook) because RemoteDriver descriptors are the daemon
+  // client's own and the interposer's close hook classifies them as untracked and
+  // passes them through. Driver-owned fds on the LOCAL path use UniqueDriverFd
+  // instead; see PassthroughFdTraits.
   util::UniqueHandle target_mem_fd;
   util::UniqueHandle target_proc_fd;
   if (request == AMDKFD_IOC_DBG_TRAP) {

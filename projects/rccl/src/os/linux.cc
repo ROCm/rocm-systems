@@ -666,6 +666,21 @@ ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* busId, char* deviceClass
   return ret;
 }
 
+ncclResult_t ncclOsGetPciDeviceComputePartitionByBusId(const char* busId, char* partition, size_t maxLen) {
+  if (partition == NULL || maxLen == 0) return ncclInvalidArgument;
+  char* path = NULL;
+  NOWARN(ncclOsGetPciPath(busId, &path), NCCL_GRAPH);
+  if (path == NULL) {
+    partition[0] = '\0';
+    return ncclSystemError;
+  }
+  // Absent on non-AMD devices and on kernels without the attribute; ncclOsTopoGetStrFromSys
+  // reports that as an empty string rather than an error.
+  ncclResult_t ret = ncclOsTopoGetStrFromSys(path, "current_compute_partition", partition, maxLen);
+  free(path);
+  return ret;
+}
+
 ncclResult_t ncclOsGetBcmLinks(const char* busId, int* nlinks, char** peers) {
   *nlinks = 0;
   *peers = NULL;

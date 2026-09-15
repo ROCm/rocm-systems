@@ -3,15 +3,13 @@
 
 #pragma once
 
-#include "common/units.hpp"
+#include "common/units/data_size.hpp"
 #include "core/perfetto.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/thread_info.hpp"
 
 #include <cstddef>
 #include <cstdint>
-#include <spdlog/fmt/fmt.h>
-
 #include <vector>
 
 namespace rocprofsys::pmc::collectors::gpu
@@ -446,12 +444,15 @@ private:
         if(effective_metrics.bits.memory_usage && memory_it != tracks.end() &&
            !memory_it->second.track_indexes.empty())
         {
-            const double usage =
-                metric_values.memory_usage / static_cast<double>(units::megabyte);
+            const auto usage = rocprofsys::common::units::data_size_cast<
+                                   rocprofsys::common::units::megabytes>(
+                                   rocprofsys::common::units::bytes{
+                                       static_cast<double>(metric_values.memory_usage) })
+                                   .count();
             TRACE_COUNTER(
                 "device_memory_usage",
                 counter_track::at(device_index, memory_it->second.track_indexes[0]), ts,
-                usage);
+                static_cast<double>(usage));
         }
 
         auto sdma_it = tracks.find(detail::SDMA_USAGE_VALUE);

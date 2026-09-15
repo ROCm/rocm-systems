@@ -13,7 +13,6 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/environment/types.hpp>
 #include <timemory/mpl/types.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/locking.hpp>
 
 #include <cassert>
@@ -30,62 +29,43 @@
 #include <vector>
 
 #define ROCPROFSYS_DECLARE_COMPONENT(NAME)                                               \
-    namespace rocprofsys                                                                 \
-    {                                                                                    \
-    namespace component                                                                  \
+    namespace rocprofsys::component                                                      \
     {                                                                                    \
     struct NAME;                                                                         \
     }                                                                                    \
-    }                                                                                    \
-    namespace tim                                                                        \
-    {                                                                                    \
-    namespace trait                                                                      \
+    namespace tim::trait                                                                 \
     {                                                                                    \
     template <>                                                                          \
     struct is_component<rocprofsys::component::NAME> : true_type                         \
     {};                                                                                  \
     }                                                                                    \
-    }                                                                                    \
-    namespace tim                                                                        \
-    {                                                                                    \
-    namespace component                                                                  \
+    namespace tim::component                                                             \
     {                                                                                    \
     using ::rocprofsys::component::NAME;                                                 \
-    }                                                                                    \
     }
 
 #define ROCPROFSYS_COMPONENT_ALIAS(NAME, ...)                                            \
-    namespace rocprofsys                                                                 \
-    {                                                                                    \
-    namespace component                                                                  \
+    namespace rocprofsys::component                                                      \
     {                                                                                    \
     using NAME = __VA_ARGS__;                                                            \
     }                                                                                    \
-    }                                                                                    \
-    namespace tim                                                                        \
-    {                                                                                    \
-    namespace component                                                                  \
+    namespace tim::component                                                             \
     {                                                                                    \
     using ::rocprofsys::component::NAME;                                                 \
-    }                                                                                    \
     }
 
-#define ROCPROFSYS_DEFINE_CONCRETE_TRAIT(TRAIT, TYPE, VALUE)                             \
-    namespace tim                                                                        \
-    {                                                                                    \
-    namespace trait                                                                      \
+#define ROCPROFSYS_DEFINE_CONCRETE_TRAIT(TRAIT, TYPE, ...)                               \
+    namespace tim::trait                                                                 \
     {                                                                                    \
     template <>                                                                          \
-    struct TRAIT<::rocprofsys::TYPE> : VALUE                                             \
+    struct TRAIT<::rocprofsys::TYPE> : __VA_ARGS__                                       \
     {};                                                                                  \
-    }                                                                                    \
     }
 
 namespace rocprofsys
 {
 namespace api       = ::tim::api;        // NOLINT
 namespace category  = ::tim::category;   // NOLINT
-namespace filepath  = ::tim::filepath;   // NOLINT
 namespace project   = ::tim::project;    // NOLINT
 namespace process   = ::tim::process;    // NOLINT
 namespace threading = ::tim::threading;  // NOLINT

@@ -8,8 +8,14 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <string>
 #include <utility>
+
+// Declared here rather than including debug.h, which drags in the whole RCCL
+// logging layer; the definitions are supplied by whatever the test links.
+extern int ncclDebugLevel;
+extern uint64_t ncclDebugMask;
 
 namespace RcclUnitTesting {
 
@@ -39,5 +45,42 @@ std::string CaptureLog(Fn&& body) {
   std::forward<Fn>(body)();
   return testing::internal::GetCapturedStderr();
 }
+
+/**
+ * @brief True if @p log contains @p needle.
+ *
+ * The microtest targets link GTest::GTest only, so ::testing::HasSubstr is
+ * unavailable; this is the substring check CaptureLog's callers need.
+ */
+inline bool LogHas(const std::string& log, const char* needle) {
+  return log.find(needle) != std::string::npos;
+}
+
+/**
+ * @brief Raise ncclDebugLevel/ncclDebugMask for a scope, then restore both.
+ *
+ * INFO is gated on ncclDebugLevel, which the fake logging layer pins to
+ * NCCL_LOG_NONE, so an INFO-emitting path writes nothing and CaptureLog returns
+ * an empty string. WARN and VERSION are ungated and need no guard. Construct
+ * this before CaptureLog. Values are passed in so the caller keeps the
+ * dependency on the NCCL_LOG_* / NCCL_ALL constants.
+ */
+class ScopedDebugLogging {
+ public:
+  ScopedDebugLogging(int level, uint64_t mask) : level_(ncclDebugLevel), mask_(ncclDebugMask) {
+    ncclDebugLevel = level;
+    ncclDebugMask = mask;
+  }
+  ~ScopedDebugLogging() {
+    ncclDebugLevel = level_;
+    ncclDebugMask = mask_;
+  }
+  ScopedDebugLogging(const ScopedDebugLogging&) = delete;
+  ScopedDebugLogging& operator=(const ScopedDebugLogging&) = delete;
+
+ private:
+  int level_;
+  uint64_t mask_;
+};
 
 }  // namespace RcclUnitTesting

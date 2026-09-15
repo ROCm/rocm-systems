@@ -20,7 +20,7 @@ OMPI_INSTALL_DIR = os.environ.get("OMPI_INSTALL_DIR", "path/to/ompi/install")
 RCCL_TESTS_DIR = os.environ.get("RCCL_TESTS_DIR", "path/to/rccl-tests")
 
 PLUGIN_DIR = f"{RCCL_INSTALL_DIR}/plugins/tuner/example"
-PLUGIN_SO = f"{PLUGIN_DIR}/libnccl-tuner-example.so"
+PLUGIN_SO = f"{PLUGIN_DIR}/librccl-tuner-example.so"
 
 PROFILER_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/example"
 PROFILER_SO = f"{PROFILER_DIR}/librccl-profiler-example.so"
@@ -37,8 +37,23 @@ UNSUPPORTED_ALGO_PROTO_CONFIG = os.path.join(WORKDIR, "assets/csv_confs/unsuppor
 SINGLENODE_CONFIG = os.path.join(WORKDIR, "assets/csv_confs/singlenode_config.conf")
 MULTINODE_CONFIG = os.path.join(WORKDIR, "assets/csv_confs/multinode_config.conf")
 
-LOGDIR = os.path.join(WORKDIR, "logs")
+# The tuner tests write the full rccl-tests stdout (RCCL debug logging included)
+# to LOGDIR. On the Ruby CI runner the repo lives on a shared NFS mount where
+# that write is the dominant cost of the suite: the same broadcast run takes 5.9s
+# with the log on node-local disk and 865s with it on NFS. RCCL_EXT_PLUGINS_LOGDIR
+# lets the runner point the logs at node-local scratch; it must not be tied to a
+# particular user, since the CI job and a developer run as different users.
+LOGDIR = os.environ.get("RCCL_EXT_PLUGINS_LOGDIR") or os.path.join(WORKDIR, "logs")
 os.makedirs(LOGDIR, exist_ok=True)
+
+# rccl-tests sweep shared by every CSV tuner test. Those tests assert on the
+# tuner plugin's log output, not on bandwidth, so the sweep only has to cross
+# each size band the CSV configs declare (8B-64K, 64K-16M, 16M-128M). Stepping
+# by 8 spans all three in 9 sizes, and a single measured iteration is enough for
+# RCCL to consult the tuner. The previous "-f 2" sweep with the default 20
+# iterations ran ~525 collectives per test, and since the plugin logs a line per
+# config per call that produced hundreds of MB of debug output per suite run.
+TUNER_PERF_ARGS = ["-b", "8", "-e", "128M", "-f", "8", "-g", "1", "-n", "1", "-w", "1"]
 
 PROFILER_DUMP_DIR = os.path.join(WORKDIR, "profiler_dumps")
 INSPECTOR_DUMP_DIR = os.path.join(WORKDIR, "inspector_dumps")
@@ -62,7 +77,16 @@ def check_node_interface(node: str, interface: str) -> bool:
 
 def find_common_interface(nodelist):
     """Find a common network interface across all nodes"""
-    interfaces_to_check = ["eth0", "eth1"]
+    configured_interfaces = os.environ.get("RCCL_TEST_INTERFACES", "")
+    if configured_interfaces:
+        # Cluster launchers may not permit peer SSH from compute nodes. An
+        # explicitly supplied interface comes from the scheduler/catalog and
+        # is authoritative, so do not require an SSH-based rediscovery.
+        return configured_interfaces.split(",", 1)[0].strip()
+
+    interfaces_to_check = (
+        ["eth0", "eth1"]
+    )
 
     for interface in interfaces_to_check:
         all_nodes_have_interface = True
@@ -184,6 +208,7 @@ def paths():
         SINGLENODE_CONFIG=SINGLENODE_CONFIG,
         MULTINODE_CONFIG=MULTINODE_CONFIG,
         LOGDIR=LOGDIR,
+        TUNER_PERF_ARGS=TUNER_PERF_ARGS,
         PROFILER_DUMP_DIR=PROFILER_DUMP_DIR,
         INSPECTOR_DUMP_DIR=INSPECTOR_DUMP_DIR,
         # Helper Functions for Ext-Tuner

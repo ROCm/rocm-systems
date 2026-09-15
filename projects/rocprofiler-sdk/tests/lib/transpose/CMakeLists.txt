@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 if(NOT CMAKE_HIP_COMPILER)
     find_program(
@@ -37,8 +37,7 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set_source_files_properties(transpose.cpp PROPERTIES LANGUAGE HIP)
 add_library(transpose-shared-library SHARED)
 target_sources(transpose-shared-library PRIVATE transpose.cpp)
-target_compile_options(transpose-shared-library PRIVATE -W -Wall -Wextra -Wpedantic
-                                                        -Wshadow -Werror)
+target_compile_options(transpose-shared-library PRIVATE -Wpedantic)
 target_include_directories(transpose-shared-library PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 set_target_properties(transpose-shared-library PROPERTIES OUTPUT_NAME transpose)
 
@@ -46,8 +45,9 @@ find_package(Threads REQUIRED)
 target_link_libraries(transpose-shared-library PRIVATE Threads::Threads)
 
 find_package(rocprofiler-sdk-roctx REQUIRED)
-target_link_libraries(transpose-shared-library
-                      PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+target_link_libraries(
+    transpose-shared-library PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
+                                     rocprofiler-sdk::tests-build-flags)
 
 if(TRANSPOSE_USE_MPI)
     find_package(MPI REQUIRED)
