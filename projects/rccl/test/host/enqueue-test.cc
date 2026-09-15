@@ -1989,6 +1989,102 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeOtherArch_IsDisabled) 
 }
 
 // ===========================================================================
+// rcclAddonLaunchBegin (enqueue.cc:2092) / rcclAddonLaunchEnd (:2125) -- the
+// bracket an addon collective wraps its own launch in.
+//
+// AICOMRCCL-2184: the epilogue records comm->doneEvent unless a kernel took it as
+// its stop event. The production launches that take nothing are the CE two-shot
+// AllReduce and the hierarchical ReduceScatter, which need CE-capable hardware or
+// eight nodes, so the arm is only assertable here.
+//
+// In the two cases that must not record, the hipEventRecord hook fails every
+// call: an unexpected call then shows up twice, in the hook's call count and in
+// the result the bracket returns.
+//
+// Each case installs the capture answer it relies on instead of inheriting it: a host binary has no
+// graph and can only answer "not capturing", and a case that took that answer without asking for it
+// would look covered while never reaching capture at all.
+// ===========================================================================
+
+namespace {
+// Opaque handles. Every HIP entry point this path reaches is faked, so nothing dereferences them.
+hipEvent_t const  kAddonDoneEvent = reinterpret_cast<hipEvent_t>(0xD0E);
+hipStream_t const kAddonStream    = reinterpret_cast<hipStream_t>(0x57A);
+
+// ncclComm is far too large for the stack (see CostComm). cudaDev matches the seam's current
+// device, which keeps the prologue's hipSetDevice and the epilogue's restore out of the way.
+struct AddonComm {
+  std::unique_ptr<ncclComm> comm{new ncclComm{}};
+  AddonComm() {
+    comm->cudaDev   = g_currentDevice;
+    comm->doneEvent = kAddonDoneEvent;
+  }
+  ncclComm* c() { return comm.get(); }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, AddonLaunch_NothingTookTheEvent_EpilogueRecordsIt) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  hipEvent_t recordedEvent = nullptr;
+  hipStream_t recordedStream = nullptr;
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t event, hipStream_t stream) {
+    recordedEvent = event;
+    recordedStream = stream;
+    return hipSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  ASSERT_EQ(1, record.calls);
+  EXPECT_EQ(kAddonDoneEvent, recordedEvent);
+  EXPECT_EQ(kAddonStream, recordedStream);
+  EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_KernelTookTheEvent_EpilogueSkipsTheRecord) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+
+  hipEvent_t stopEvent = nullptr;
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    stopEvent = rcclTakeAddonStopEvent(ac.c());
+    return ncclSuccess;
+  }));
+
+  EXPECT_EQ(kAddonDoneEvent, stopEvent);
+  EXPECT_EQ(0, record.calls);
+  // The tag advances however the event reached the stream, so the next collective on another
+  // stream still gets its edge.
+  EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+
+  EXPECT_EQ(ncclInternalError,
+            rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclInternalError; }));
+
+  EXPECT_EQ(0, record.calls);
+  EXPECT_EQ(0u, ac.c()->lastStreamTag);
+}
+
+// ===========================================================================
 // getImplicitOrder (enqueue.cc:2091)
 // Reads comm->config.launchOrderImplicit (env is applied at init). On AMD the
 // CUDA driver-version arm is #if'd out, so only two arms are reachable:
