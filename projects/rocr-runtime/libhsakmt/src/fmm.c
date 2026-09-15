@@ -25,7 +25,6 @@
 
 #define _GNU_SOURCE
 #include "libhsakmt.h"
-#include "drm_version.h"
 #include "fmm.h"
 #include "hsakmt/hsakmtmodel.h"
 #include "hsakmt/linux/kfd_ioctl.h"
@@ -58,6 +57,11 @@
 #endif
 
 #define NON_VALID_GPU_ID 0
+
+static bool hsakmt_drm_supports_vm_timeline(uint32_t major, uint32_t minor)
+{
+	return major > 3 || (major == 3 && minor >= 64);
+}
 
 #define INIT_MANAGEABLE_APERTURE(base_value, limit_value) {	\
 	.base = (void *) base_value,				\
@@ -2986,15 +2990,19 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 			gpu_mem[gpu_mem_count].drm_vm_timeline_syncobj = 0;
 			gpu_mem[gpu_mem_count].drm_vm_timeline_seqnum = 0;
 			drmVersionPtr version = drmGetVersion(fd);
-			if (version &&
-			    hsakmt_drm_supports_vm_timeline(version->version_major,
-							 version->version_minor) &&
-			    drmSyncobjCreate(fd, 0,
-				&gpu_mem[gpu_mem_count].drm_vm_timeline_syncobj))
-				pr_warn("Failed to create VM timeline syncobj for GPU 0x%x\n",
+			if (!version) {
+				pr_warn("Failed to get DRM version for GPU 0x%x\n",
 					props.KFDGpuID);
-			if (version)
+			} else {
+				if (hsakmt_drm_supports_vm_timeline(
+					    version->version_major,
+					    version->version_minor) &&
+				    drmSyncobjCreate(fd, 0,
+					    &gpu_mem[gpu_mem_count].drm_vm_timeline_syncobj))
+					pr_warn("Failed to create VM timeline syncobj for GPU 0x%x\n",
+						props.KFDGpuID);
 				drmFreeVersion(version);
+			}
 
 			gpu_mem_count++;
 		}
@@ -3265,13 +3273,16 @@ HSAKMT_STATUS hsakmt_fmm_advance_vm_timeline(HsaKFDContext *ctx,
 
 	if (drm_render_fd)
 		*drm_render_fd = fmm_ctx->gpu_mem[index].drm_render_fd;
+
+	uint32_t syncobj = fmm_ctx->gpu_mem[index].drm_vm_timeline_syncobj;
 	if (vm_timeline_syncobj)
-		*vm_timeline_syncobj = fmm_ctx->gpu_mem[index].drm_vm_timeline_syncobj;
-	
+		*vm_timeline_syncobj = syncobj;
+
 	if (vm_timeline_point)
-		*vm_timeline_point = __atomic_add_fetch(
-			&fmm_ctx->gpu_mem[index].drm_vm_timeline_seqnum, 1,
-			__ATOMIC_SEQ_CST);
+		*vm_timeline_point = syncobj ?
+			__atomic_add_fetch(
+				&fmm_ctx->gpu_mem[index].drm_vm_timeline_seqnum, 1,
+				__ATOMIC_SEQ_CST) : 0;
 
 	return HSAKMT_STATUS_SUCCESS;
 }
