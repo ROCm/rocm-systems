@@ -859,6 +859,12 @@ function(rj_add_consan_device_conformance_cases)
                 # This takes about 53 seconds by itself, but can exceed 120
                 # seconds under contention in the full simulator gate.
                 set(_workload_timeout 240)
+                if(RJ_ENABLE_ASAN)
+                    # ASan+UBSan completed both outcomes in 317--324 seconds
+                    # alongside the full simulator suite. Preserve the full
+                    # workload and diagnostic checks with sanitizer headroom.
+                    set(_workload_timeout 600)
+                endif()
             elseif(
                 _mode_value STREQUAL "inline-shadow"
                 AND _workload_name STREQUAL "Gfx1250LargeLdsPipeline"
