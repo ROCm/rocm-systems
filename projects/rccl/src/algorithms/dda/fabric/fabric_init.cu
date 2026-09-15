@@ -91,11 +91,14 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
 
   // Right-sized from the DDA thresholds and nRanks (env-overridable) instead of
   // a fixed 10 GiB. RCCL_DDA_FABRIC_BUFFER_SIZE=0 disables the fabric DDA path.
-  size_t bytes = ddaFabricScratchSizing(nRanks, fabricScratchOverride, rcclParamDdaEnable(), simpleThresh, llEnabled,
-                                        ll128Enabled, ll128Thresh);
-  if (bytes == 0) {
+  size_t ddaBytes = ddaFabricScratchSizing(nRanks, fabricScratchOverride, rcclParamDdaEnable(), simpleThresh, llEnabled,
+                                           ll128Enabled, ll128Thresh);
+  if (ddaBytes == 0) {
     return ncclSuccess;
   }
+  // Extra tail so GIN device-API LL does not share packet cells with host DDA.
+  const size_t ginBytes = gin::fabric::ginFabricLlA2AGinRegionBytes(nRanks, gin::fabric::resolveGinFabricLLThresholdAlltoAll());
+  const size_t bytes = ddaBytes + ginBytes;
 
   // Scratch (temp) buffer via VMM: the fabric path requires a fabric-capable
   // (cuMem) allocation so the handle can be exported across the clique. If VMM
@@ -206,7 +209,8 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   // Success: hand ownership of every resource to comm.
   comm->ddaFabricMemHandler = handler;
   comm->ddaScratch = scratch;
-  comm->ddaScratchBytes = bytes;
+  comm->ddaScratchAllocBytes = bytes;
+  comm->ddaScratchBytes = ddaBytes;
   comm->ddaScratchIsVmm = true;
   comm->ddaPeerPtrsDev = peerDev;
   comm->ddaPeerPtrsHost = peerHost;
@@ -215,10 +219,10 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   comm->ddaLLEpochDev = epochDev;
   comm->ddaLLEpochLen = (int)epochLen;
   INFO(NCCL_INIT,
-       "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm, gfx1250 fabric path; derived from RCCL DDA params; "
+       "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (dda head %zu gin tail %zu, vmm, gfx1250 fabric path; derived from RCCL DDA params; "
        "RCCL_DDA_FABRIC_BUFFER_SIZE=%lld), LL enabled=%lld threshold=%lld, "
        "LL128 enabled=%lld threshold=%lld, Simple threshold=%lld, FabricGpuBarrier nBlocks=%d, peer table on device",
-       nRanks, bytes, (long long)fabricScratchOverride, (long long)llEnabled, (long long)llThresh,
+       nRanks, bytes, ddaBytes, ginBytes, (long long)fabricScratchOverride, (long long)llEnabled, (long long)llThresh,
        (long long)ll128Enabled, (long long)ll128Thresh, (long long)simpleThresh, nBlocksMax);
   INFO(NCCL_INIT,
        "ncclDdaFabricCommInit: CU count=%d, local max blocks=%d, communicator max blocks=%d",
@@ -277,6 +281,7 @@ ncclResult_t ncclDdaFabricCommFini(ncclComm* comm) {
   }
   comm->ddaScratch = nullptr;
   comm->ddaScratchBytes = 0;
+  comm->ddaScratchAllocBytes = 0;
   comm->ddaScratchIsVmm = false;
   return ncclSuccess;
 }

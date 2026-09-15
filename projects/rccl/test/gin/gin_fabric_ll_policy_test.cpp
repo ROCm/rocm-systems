@@ -19,6 +19,7 @@ using gin::fabric::ginFabricLlA2ACarveOffset;
 using gin::fabric::ginFabricLlAlltoAllBlocksPerPeer;
 using gin::fabric::ginFabricLlAlltoAllEligible;
 using gin::fabric::ginFabricLlAlltoAllSizeOk;
+using gin::fabric::ginFabricLlA2AGinRegionBytes;
 using gin::fabric::ginFabricLlA2AScratchBytes;
 using gin::fabric::ginFabricLlLaneResourcesOk;
 using gin::fabric::kGinFabricLlAgMaxBlocksPerPeer;
@@ -136,11 +137,12 @@ TEST(GinFabricLLPolicy, LaneResourcesRejectZeroThreshold) {
 }
 
 TEST(GinFabricLLPolicy, LaneResourcesRejectUndersizedScratchAndRankBounds) {
-  const size_t scratch4 = ginFabricLlA2AScratchBytes(4);
-  EXPECT_TRUE(ginFabricLlLaneResourcesOk(4, scratch4, 64 * 1024));
-  EXPECT_FALSE(ginFabricLlLaneResourcesOk(4, scratch4 - 1, 64 * 1024));
-  EXPECT_FALSE(ginFabricLlLaneResourcesOk(1, scratch4, 64 * 1024));
-  EXPECT_FALSE(ginFabricLlLaneResourcesOk(kGinFabricLlMaxNranks + 1, scratch4, 64 * 1024));
+  const size_t gin4 = ginFabricLlA2AGinRegionBytes(4, 64 * 1024);
+  ASSERT_GT(gin4, 0u);
+  EXPECT_TRUE(ginFabricLlLaneResourcesOk(4, gin4, 64 * 1024));
+  EXPECT_FALSE(ginFabricLlLaneResourcesOk(4, gin4 - 1, 64 * 1024));
+  EXPECT_FALSE(ginFabricLlLaneResourcesOk(1, gin4, 64 * 1024));
+  EXPECT_FALSE(ginFabricLlLaneResourcesOk(kGinFabricLlMaxNranks + 1, gin4, 64 * 1024));
 }
 
 TEST(GinFabricLLPolicy, BlocksPerPeerCoversFastDivideAndClamp) {
@@ -152,30 +154,36 @@ TEST(GinFabricLLPolicy, BlocksPerPeerCoversFastDivideAndClamp) {
 }
 
 TEST(GinFabricLLPolicy, CarveOffsetPlacesGinRegionAtScratchTail) {
-  const size_t region = ginFabricLlA2AScratchBytes(4);
-  const size_t total = region * 2 + 4096;
-  EXPECT_EQ(ginFabricLlA2ACarveOffset(total, 4), region + 4096);
-  EXPECT_FALSE(ginFabricLlA2ACarveFits(4, region, 64 * 1024));
-  EXPECT_TRUE(ginFabricLlA2ACarveFits(4, 2 * region, 64 * 1024));
+  const size_t ddaHead = ginFabricLlA2AScratchBytes(4);
+  const size_t ginTail = ginFabricLlA2AGinRegionBytes(4, 64 * 1024);
+  ASSERT_GT(ginTail, 0u);
+  ASSERT_LT(ginTail, ddaHead);
+  const size_t alloc = ddaHead + ginTail;
+  EXPECT_EQ(ginFabricLlA2ACarveOffset(alloc, ginTail), ddaHead);
+  EXPECT_FALSE(ginFabricLlA2ACarveFits(4, ddaHead, ddaHead, 64 * 1024));
+  EXPECT_TRUE(ginFabricLlA2ACarveFits(4, alloc, ddaHead, 64 * 1024));
 }
 
 TEST(GinFabricLLPolicy, LaneBuildRequiresResourcesAndDdaLL) {
+  const size_t ddaHead = ginFabricLlA2AScratchBytes(4);
+  const size_t ginTail = ginFabricLlA2AGinRegionBytes(4, 64 * 1024);
   GinFabricA2ACommState comm{};
   comm.fabricMemHandler = reinterpret_cast<void*>(0x1);
   comm.peerPtrsDev = reinterpret_cast<void**>(0x2);
   comm.llEpochDev = reinterpret_cast<uint32_t*>(0x3);
   comm.scratch = reinterpret_cast<void*>(0x4);
-  comm.scratchBytes = ginFabricLlA2AScratchBytes(4) * 2;
+  comm.scratchBytes = ddaHead;
+  comm.scratchAllocBytes = ddaHead + ginTail;
   comm.llEpochLen = 4;
   comm.nRanks = 4;
   ncclGinFabricA2ALane lane{};
   EXPECT_TRUE(ginFabricA2ALaneTryBuild(comm, true, 64 * 1024, &lane));
   EXPECT_EQ(lane.enabled, 1);
   EXPECT_EQ(lane.llThreshold, 64u * 1024u);
-  EXPECT_EQ(lane.scratchBytes, ginFabricLlA2AScratchBytes(4));
+  EXPECT_EQ(lane.scratchBytes, ginTail);
   EXPECT_FALSE(ginFabricA2ALaneTryBuild(comm, false, 64 * 1024, &lane));
   EXPECT_FALSE(ginFabricA2ALaneTryBuild(comm, true, 0, &lane));
-  comm.scratchBytes = ginFabricLlA2AScratchBytes(4) * 2 - 1;
+  comm.scratchAllocBytes = ddaHead;
   EXPECT_FALSE(ginFabricA2ALaneTryBuild(comm, true, 64 * 1024, &lane));
 }
 

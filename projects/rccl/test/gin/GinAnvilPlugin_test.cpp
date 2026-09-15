@@ -120,7 +120,11 @@ class GinAnvilPluginTest : public ::testing::Test {
     mockComm_.comm.ddaPeerPtrsHost = peerHost;
     mockComm_.comm.ddaLLEpochDev = reinterpret_cast<uint32_t*>(0x3000);
     mockComm_.comm.ddaScratch = reinterpret_cast<void*>(0x4000);
-    mockComm_.comm.ddaScratchBytes = gin::fabric::ginFabricLlA2AScratchBytes(nRanks) * 2;
+    const size_t ddaHead = gin::fabric::ginFabricLlA2AScratchBytes(nRanks);
+    const size_t ginTail =
+        gin::fabric::ginFabricLlA2AGinRegionBytes(nRanks, gin::fabric::kGinFabricLlAlltoAllThresholdDefault);
+    mockComm_.comm.ddaScratchBytes = ddaHead;
+    mockComm_.comm.ddaScratchAllocBytes = ddaHead + ginTail;
     mockComm_.comm.ddaLLEpochLen = 32;
   }
 };
@@ -343,7 +347,8 @@ TEST_F(GinAnvilPluginTest, CreateContext_PublishesDeviceFabricA2ALane) {
   EXPECT_NE(hostCtx.fabricA2ALlEpoch, mockComm_.comm.ddaLLEpochDev);
   EXPECT_EQ(hostCtx.fabricA2ALlEpochLen, mockComm_.comm.ddaLLEpochLen);
   EXPECT_EQ(hostCtx.fabricA2ALlThreshold, 256u * 1024u);
-  EXPECT_EQ(hostCtx.fabricA2AScratchBytes, gin::fabric::ginFabricLlA2AScratchBytes(4));
+  EXPECT_EQ(hostCtx.fabricA2AScratchBytes,
+            gin::fabric::ginFabricLlA2AGinRegionBytes(4, gin::fabric::kGinFabricLlAlltoAllThresholdDefault));
 
   plugin_.destroyContext(ginCtx);
   plugin_.closeColl(coll);

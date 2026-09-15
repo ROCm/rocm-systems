@@ -49,17 +49,32 @@ GIN_FABRIC_LL_HD inline size_t ginFabricLlA2AScratchBytes(int nRanks) {
   return (size_t)2 * (size_t)nRanks * kGinFabricLlA2ASlotStridePkts * kGinFabricLlPacketBytes;
 }
 
-// Host DDA LL uses the scratch head; GIN device-API LL carves the same-sized
-// region from the tail so the two paths do not share LL packet cells.
-GIN_FABRIC_LL_HD inline size_t ginFabricLlA2ACarveOffset(size_t totalScratchBytes, int nRanks) {
-  const size_t region = ginFabricLlA2AScratchBytes(nRanks);
-  return totalScratchBytes >= region ? totalScratchBytes - region : 0;
+// GIN device-API LL region: 2 banks * nRanks * packets for the threshold's
+// per-peer cap (8 payload bytes per 16-byte LL packet). Host DDA keeps
+// ginFabricLlA2AScratchBytes() at the allocation head.
+GIN_FABRIC_LL_HD inline size_t ginFabricLlA2AGinRegionBytes(int nRanks, size_t llThreshold) {
+  if (llThreshold == 0 || nRanks < 2 || nRanks > kGinFabricLlMaxNranks) return 0;
+  size_t perPeer = llThreshold / (size_t)nRanks;
+  perPeer &= ~(size_t)15;
+  if (perPeer == 0) return 0;
+  if (perPeer * 2 > kGinFabricLlMaxBytes) perPeer = kGinFabricLlMaxBytes / 2;
+  const size_t nPk = perPeer >> 3;
+  const size_t region = (size_t)2 * (size_t)nRanks * nPk * kGinFabricLlPacketBytes;
+  const size_t cap = ginFabricLlA2AScratchBytes(nRanks);
+  return region < cap ? region : cap;
 }
 
-GIN_FABRIC_LL_HD inline bool ginFabricLlA2ACarveFits(int nRanks, size_t totalScratchBytes, size_t llThreshold) {
-  if (llThreshold == 0) return false;
-  const size_t region = ginFabricLlA2AScratchBytes(nRanks);
-  return totalScratchBytes >= 2 * region;
+// Host DDA uses [0, alloc - ginRegion); GIN LL uses the tail.
+GIN_FABRIC_LL_HD inline size_t ginFabricLlA2ACarveOffset(size_t allocBytes, size_t ginRegionBytes) {
+  return allocBytes >= ginRegionBytes ? allocBytes - ginRegionBytes : 0;
+}
+
+GIN_FABRIC_LL_HD inline bool ginFabricLlA2ACarveFits(int nRanks, size_t allocBytes, size_t ddaHeadBytes,
+                                                     size_t llThreshold) {
+  const size_t ginRegion = ginFabricLlA2AGinRegionBytes(nRanks, llThreshold);
+  if (ginRegion == 0) return false;
+  if (allocBytes < ddaHeadBytes + ginRegion) return false;
+  return ginFabricLlA2ACarveOffset(allocBytes, ginRegion) >= ddaHeadBytes;
 }
 
 GIN_FABRIC_LL_HD inline int ginFabricLlAlltoAllBlocksPerPeer(size_t perChunkBytes) {
@@ -73,7 +88,8 @@ GIN_FABRIC_LL_HD inline int ginFabricLlAlltoAllBlocksPerPeer(size_t perChunkByte
 GIN_FABRIC_LL_HD inline bool ginFabricLlLaneResourcesOk(int nRanks, size_t scratchBytes, size_t llThreshold) {
   if (llThreshold == 0) return false;
   if (nRanks < 2 || nRanks > kGinFabricLlMaxNranks) return false;
-  if (ginFabricLlA2AScratchBytes(nRanks) > scratchBytes) return false;
+  const size_t need = ginFabricLlA2AGinRegionBytes(nRanks, llThreshold);
+  if (need == 0 || need > scratchBytes) return false;
   return true;
 }
 
@@ -137,7 +153,8 @@ struct GinFabricA2ACommState {
   void** peerPtrsDev;
   uint32_t* llEpochDev;
   void* scratch;
-  size_t scratchBytes;
+  size_t scratchBytes;       // DDA-visible head
+  size_t scratchAllocBytes;  // full VMM allocation (0 => scratchBytes is the allocation)
   int llEpochLen;
   int nRanks;
 };
@@ -152,13 +169,16 @@ inline bool ginFabricA2ALaneTryBuild(GinFabricA2ACommState const& comm, bool dda
       comm.scratch == nullptr || !ddaLLEnabled) {
     return false;
   }
-  if (!ginFabricLlA2ACarveFits(comm.nRanks, comm.scratchBytes, llThreshold)) return false;
+  const size_t allocBytes = comm.scratchAllocBytes ? comm.scratchAllocBytes : comm.scratchBytes;
+  const size_t ginRegion = ginFabricLlA2AGinRegionBytes(comm.nRanks, llThreshold);
+  const size_t ddaHead = comm.scratchAllocBytes ? comm.scratchBytes : ginFabricLlA2ACarveOffset(allocBytes, ginRegion);
+  if (!ginFabricLlA2ACarveFits(comm.nRanks, allocBytes, ddaHead, llThreshold)) return false;
   out->enabled = 1;
   // Runtime publishes a carved peer table; comm.peerPtrsDev is only an eligibility probe.
   out->peerScratch = comm.peerPtrsDev;
   out->llEpoch = comm.llEpochDev;
   out->llEpochLen = comm.llEpochLen;
-  out->scratchBytes = ginFabricLlA2AScratchBytes(comm.nRanks);
+  out->scratchBytes = ginRegion;
   out->llThreshold = llThreshold;
   return true;
 }

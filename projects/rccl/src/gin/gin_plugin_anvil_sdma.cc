@@ -933,6 +933,7 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
         cctx->comm->ddaLLEpochDev,
         cctx->comm->ddaScratch,
         cctx->comm->ddaScratchBytes,
+        cctx->comm->ddaScratchAllocBytes,
         cctx->comm->ddaLLEpochLen,
         cctx->comm->nRanks};
     ncclGinFabricA2ALane lane{};

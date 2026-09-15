@@ -53,9 +53,11 @@ ncclResult_t ginFabricA2ALaneBuildPeerScratchDev(struct ncclComm* comm, void*** 
   *outRegionBytes = 0;
   if (comm == nullptr || comm->nRanks < 2 || comm->ddaPeerPtrsHost == nullptr) return ncclInvalidArgument;
 
-  const size_t regionBytes = gin::fabric::ginFabricLlA2AScratchBytes(comm->nRanks);
-  const size_t carveOff = gin::fabric::ginFabricLlA2ACarveOffset(comm->ddaScratchBytes, comm->nRanks);
-  if (carveOff == 0) return ncclInvalidArgument;
+  const size_t ginRegion = gin::fabric::ginFabricLlA2AGinRegionBytes(
+      comm->nRanks, gin::fabric::resolveGinFabricLLThresholdAlltoAll());
+  const size_t allocBytes = comm->ddaScratchAllocBytes ? comm->ddaScratchAllocBytes : comm->ddaScratchBytes;
+  const size_t carveOff = gin::fabric::ginFabricLlA2ACarveOffset(allocBytes, ginRegion);
+  if (ginRegion == 0 || carveOff == 0 || allocBytes < carveOff + ginRegion) return ncclInvalidArgument;
 
   void** hostPtrs = nullptr;
   NCCLCHECK(ncclCalloc(&hostPtrs, comm->nRanks));
@@ -69,7 +71,7 @@ ncclResult_t ginFabricA2ALaneBuildPeerScratchDev(struct ncclComm* comm, void*** 
   CUDACHECKGOTO(hipMemcpy(devPtrs, hostPtrs, comm->nRanks * sizeof(void*), hipMemcpyHostToDevice), ret, fail);
   free(hostPtrs);
   *outPeerDev = devPtrs;
-  *outRegionBytes = regionBytes;
+  *outRegionBytes = ginRegion;
   return ncclSuccess;
 
 fail:
