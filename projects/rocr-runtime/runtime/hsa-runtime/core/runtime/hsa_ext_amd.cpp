@@ -858,6 +858,10 @@ hsa_status_t hsa_amd_memory_async_batch_copy_rect(
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
+  // BlitSdma::SubmitCommand caches the dependent signal values in a fixed HSA_MAX_DEP_SIGNALS
+  // stack array, so a larger count has to be rejected here rather than truncated.
+  if (num_dep_signals > HSA_MAX_DEP_SIGNALS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
   if (dir == hsaHostToHost) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   // Unlike the single-op entry point, a degenerate range cannot be silently turned into a
