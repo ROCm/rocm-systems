@@ -4,7 +4,8 @@ The prototype removes whole-submission serialization while retaining one worker
 set per SoC. The measurements below compare it with the serialized pool after the
 latest cache rebase, using the same launch-only GEMMs and reserved CPU cores.
 
-At an exact 32-thread budget, the selected new allocation cuts dispatch time by
+In the original 4-32-thread campaign, the selected new 32-thread allocation cuts
+dispatch time by
 **21.1% on gfx950** and **19.8% on gfx1250** versus the previous heuristic on the
 serialized runtime. Process wall falls **3.9%** and **5.1%**, respectively. Times
 are medians of four fresh adjacent pairs with equal total thread budgets;
@@ -16,6 +17,37 @@ The E=1 controls show 0.3-2.9% higher dispatch medians. At E=8 and D=8, dispatch
 43.5%/35.7% without helpers and 22.7%/29.1% with eight helpers on gfx950/gfx1250.
 Those fixed-D/H controls isolate cross-XCD concurrency; their total thread budgets
 rise with E and should not be confused with the equal-budget comparison.
+
+## Scaling from one to 64 execution threads
+
+This fresh pass measures the concurrent runtime at every budget, including the
+one-thread baseline E/D/H = 1/1/0. The 4-32-thread allocations are the previous
+selections; the 48/64-thread allocations are the winners of the extended search
+described below. Each row is the median of four fresh processes, with all sixteen
+target/budget combinations shuffled within each round. Screening and confirmation
+samples are excluded from these medians.
+
+E/D/H denotes XCD engines / inclusive dispatch width / shared async helpers, with
+**B = E + D - 1 + H**. Each speedup is that target's one-thread median divided by
+the row's median. Both times and speedups are listed as **dispatch / process wall**.
+
+| Budget | gfx950 E/D/H | Dispatch / wall s | Speedup vs 1 thread (dispatch / wall) | gfx1250 E/D/H | Dispatch / wall s | Speedup vs 1 thread (dispatch / wall) |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1/1/0 | 4.2137 / 6.165 | 1.00x / 1.00x | 1/1/0 | 6.0565 / 8.240 | 1.00x / 1.00x |
+| 4 | 2/3/0 | 1.4863 / 3.445 | 2.83x / 1.79x | 1/4/0 | 2.1705 / 4.380 | 2.79x / 1.88x |
+| 8 | 2/7/0 | 0.8411 / 2.800 | 5.01x / 2.20x | 2/5/2 | 1.3092 / 3.510 | 4.63x / 2.35x |
+| 16 | 4/5/8 | 0.5141 / 2.475 | 8.20x / 2.49x | 4/11/2 | 0.8476 / 3.045 | 7.15x / 2.71x |
+| 24 | 8/9/8 | 0.4497 / 2.425 | 9.37x / 2.54x | 8/15/2 | 0.6781 / 2.890 | 8.93x / 2.85x |
+| 32 | 8/13/12 | 0.4099 / 2.380 | 10.28x / 2.59x | 8/21/4 | 0.6061 / 2.820 | 9.99x / 2.92x |
+| 48 | 8/16/25 | 0.3940 / 2.360 | 10.69x / 2.61x | 8/32/9 | 0.5411 / 2.750 | 11.19x / 3.00x |
+| 64 | 8/34/23 | 0.3774 / 2.355 | 11.17x / 2.62x | 8/32/25 | 0.5484 / 2.755 | 11.04x / 2.99x |
+
+The gain from 48 to 64 threads is small. gfx950 dispatch falls 4.2%, while process
+wall falls only 0.2%. gfx1250 dispatch rises 1.4% and wall rises 0.2%; its dispatch
+ranges overlap (48: 0.5311-0.5485 s, 64: 0.5175-0.5526 s), so these measurements
+do not establish an additional benefit at 64. For these workloads, 48 threads is
+a reasonable stopping point when total wall time matters. Full ranges for this
+fresh pass are in `scaling-summary.csv` in the extension evidence directory.
 
 ## Why concurrent submissions are feasible
 
@@ -91,6 +123,17 @@ controls at D=8. Pilot and screening samples are excluded from confirmation medi
 These are the best allocations in this search, not a global optimum for other
 workloads. Small differences with overlapping ranges should be treated as ties.
 
+The extension to budgets 48 and 64 screens 150 target/configuration combinations,
+then 31 nearby splits. The initial grid uses E in {1,2,4,8}, D in
+{1,8,16,24,28,32,target cap}, and additional D values derived from H in
+{8,16,24,32,40,48,56}, retaining valid exact-budget combinations. The dispatch cap
+is 36 on gfx950 and 32 on gfx1250; requests above these limits would be clamped
+and would not provide the claimed execution budget. Refinement tries E within one
+and D within two of each screening leader. Three finalists per target/budget
+receive four fresh balanced serialized/concurrent pairs. The 4-32-thread
+confirmation rows below are from the original campaign; the 48/64-thread rows
+are from this extension.
+
 CPU cycles per task-clock millisecond dropped between the early samples and the
 main campaign. Fourteen early screening measurements were therefore replaced
 with fresh measurements before selecting finalists; their originals remain in
@@ -132,11 +175,15 @@ The faster confirmed candidate is selected by median concurrent dispatch time.
 | gfx950 | 16 | 4/5/8 | 0.6795 | 0.5138 | -24.4% | 2.640 | 2.485 | -5.9% |
 | gfx950 | 24 | 8/9/8 | 0.5661 | 0.4427 | -21.8% | 2.550 | 2.415 | -5.3% |
 | gfx950 | 32 | 8/13/12 | 0.5311 | 0.3905 | -26.5% | 2.505 | 2.365 | -5.6% |
+| gfx950 | 48 | 8/16/25 | 0.5582 | 0.3694 | -33.8% | 2.530 | 2.340 | -7.5% |
+| gfx950 | 64 | 8/34/23 | 0.5473 | 0.3583 | -34.5% | 2.520 | 2.335 | -7.3% |
 | gfx1250 | 4 | 1/4/0 | 2.1335 | 2.1213 | -0.6% | 4.345 | 4.340 | -0.1% |
 | gfx1250 | 8 | 2/5/2 | 1.5441 | 1.3172 | -14.7% | 3.755 | 3.520 | -6.3% |
 | gfx1250 | 16 | 4/11/2 | 1.0928 | 0.8359 | -23.5% | 3.300 | 3.050 | -7.6% |
 | gfx1250 | 24 | 8/15/2 | 0.9658 | 0.6879 | -28.8% | 3.180 | 2.895 | -9.0% |
 | gfx1250 | 32 | 8/21/4 | 0.8066 | 0.6061 | -24.9% | 3.010 | 2.825 | -6.1% |
+| gfx1250 | 48 | 8/32/9 | 0.7821 | 0.5508 | -29.6% | 2.985 | 2.760 | -7.5% |
+| gfx1250 | 64 | 8/32/25 | 0.7503 | 0.5337 | -28.9% | 2.960 | 2.735 | -7.6% |
 
 ## Isolating the effect of concurrent XCD callers
 
@@ -157,8 +204,9 @@ while the preceding table constrains the total execution budget.
 
 ## Confirmation ranges
 
-Both finalists are shown. Ranges span four fresh processes; close overlapping
-ranges do not establish a stable ordering. CPU seconds include the whole process.
+All finalists are shown: two per target/budget at 4-32 threads and three at
+48/64 threads. Ranges span four fresh processes; close overlapping ranges do not
+establish a stable ordering. CPU seconds include the whole process.
 
 | Target | Budget | E/D/H | Concurrent dispatch median [min,max] s | Concurrent wall median [min,max] s | CPU seconds |
 |---|---:|---:|---:|---:|---:|
@@ -172,6 +220,12 @@ ranges do not establish a stable ordering. CPU seconds include the whole process
 | gfx1250 | 24 | 8/15/2 | 0.6879 [0.6780,0.6916] | 2.895 [2.880,2.910] | 16.23 |
 | gfx1250 | 32 | 8/17/8 | 0.6065 [0.6034,0.6133] | 2.815 [2.810,2.830] | 17.50 |
 | gfx1250 | 32 | 8/21/4 | 0.6061 [0.6040,0.6143] | 2.825 [2.810,2.830] | 18.29 |
+| gfx1250 | 48 | 8/24/17 | 0.5706 [0.5465,0.5767] | 2.780 [2.750,2.780] | 20.37 |
+| gfx1250 | 48 | 8/26/15 | 0.5573 [0.5409,0.5610] | 2.760 [2.760,2.780] | 20.57 |
+| gfx1250 | 48 | 8/32/9 | 0.5508 [0.5335,0.5532] | 2.760 [2.740,2.770] | 22.05 |
+| gfx1250 | 64 | 8/30/27 | 0.5490 [0.5409,0.5542] | 2.755 [2.750,2.770] | 22.22 |
+| gfx1250 | 64 | 8/31/26 | 0.5447 [0.5345,0.5504] | 2.755 [2.740,2.770] | 22.65 |
+| gfx1250 | 64 | 8/32/25 | 0.5337 [0.5200,0.5493] | 2.735 [2.720,2.760] | 22.79 |
 | gfx950 | 4 | 1/3/1 | 1.4931 [1.4224,1.5367] | 3.470 [3.400,3.520] | 8.92 |
 | gfx950 | 4 | 2/3/0 | 1.4819 [1.4724,1.4925] | 3.445 [3.430,3.460] | 8.82 |
 | gfx950 | 8 | 2/7/0 | 0.8515 [0.8249,0.8647] | 2.810 [2.800,2.840] | 8.62 |
@@ -182,6 +236,12 @@ ranges do not establish a stable ordering. CPU seconds include the whole process
 | gfx950 | 24 | 8/9/8 | 0.4427 [0.4324,0.4502] | 2.415 [2.390,2.420] | 10.53 |
 | gfx950 | 32 | 4/25/4 | 0.4217 [0.4187,0.4275] | 2.385 [2.380,2.390] | 12.45 |
 | gfx950 | 32 | 8/13/12 | 0.3905 [0.3810,0.4004] | 2.365 [2.350,2.380] | 11.32 |
+| gfx950 | 48 | 4/28/17 | 0.3786 [0.3663,0.3910] | 2.360 [2.350,2.380] | 13.66 |
+| gfx950 | 48 | 8/16/25 | 0.3694 [0.3663,0.3888] | 2.340 [2.340,2.360] | 12.85 |
+| gfx950 | 48 | 8/32/9 | 0.3834 [0.3624,0.3983] | 2.350 [2.330,2.380] | 15.29 |
+| gfx950 | 64 | 8/34/23 | 0.3583 [0.3457,0.3705] | 2.335 [2.310,2.350] | 16.31 |
+| gfx950 | 64 | 8/35/22 | 0.3728 [0.3690,0.3763] | 2.350 [2.330,2.360] | 16.76 |
+| gfx950 | 64 | 8/36/21 | 0.3756 [0.3712,0.3767] | 2.355 [2.350,2.370] | 17.25 |
 
 ## Previous heuristic at the same settings
 
@@ -239,7 +299,27 @@ Local evidence directory:
   analysis. The runners cache completed samples; use a new phase/directory for
   fresh measurements. `python3 summarize.py` regenerates the summary tables.
 
-The campaign retains 286 screening samples after replacing 14 early samples,
-136 repeated control samples, 160 finalist confirmation samples, and 80 final
-retuning-comparison samples. The 16 pilot samples and 14 replaced screens are
-retained as evidence and excluded from the reported comparison medians.
+The original campaign retains 286 screening samples after replacing 14 early
+samples, 136 repeated control samples, 160 finalist confirmation samples, and
+80 final retuning-comparison samples. The 16 pilot samples and 14 replaced screens
+are retained as evidence and excluded from the reported comparison medians.
+
+Extension evidence directory:
+`/home/jakub/rocjitsu/misc/async-dispatch-concurrent-large-budgets-20260915`.
+All 345 processes completed successfully: four warmups, 181 candidate screens,
+96 paired confirmation samples and 64 fresh scaling samples. Every instruction
+signature matched and every submitted async operation retired. Numerical checks
+remain disabled. This extension changes documentation only and uses the same
+previously reviewed runtime binaries, verified against their SHA-256 manifests.
+
+- `scaling-table.md` and `scaling-summary.csv`: the full 1-64-thread table,
+  per-target speedups, medians, ranges and CPU seconds.
+- `screening.csv`, `confirmation.csv`, `finalists.json` and `winners.json`:
+  the candidate search and repeated selection evidence.
+- `*-plan.json`, per-phase JSON results and `samples/`: complete ordered plans,
+  configurations, commands, environments, timings, perf counters and output.
+- `provenance.json`, `validation.json` and `clock-evidence.csv`: runtime and
+  input hashes, exact-budget and signature checks, and frequency-counter evidence.
+- `run.py`, `analyze.py` and `validate.py`: runners and analysis. Run
+  `python3 analyze.py summarize` and `python3 validate.py` in this directory
+  to regenerate and audit the results.
