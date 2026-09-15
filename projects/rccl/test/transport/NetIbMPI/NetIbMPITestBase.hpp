@@ -1903,10 +1903,25 @@ protected:
         };
         if (rank == 1) {
             int nqps = 0;
-            if (!WorkerCastLiveNqps(pair.sendComm, &nqps).ok || nqps <= 0) nqps = 1;
-            for (int qp = 0; qp < nqps; qp++) {
-                const ThreadResult driven = WorkerCastDriveQpToError(pair.sendComm, qp);
-                if (!driven.ok) note(qp, driven.msg);
+            const ThreadResult counted = WorkerCastLiveNqps(pair.sendComm, &nqps);
+            if (!counted.ok || nqps <= 0) {
+                // Falling back to nqps = 1 here used to make this call report success
+                // after driving only QP 0, while any higher queue pair a live-count
+                // failure hid kept its work outstanding -- the same defect
+                // WorkerCastFaultSend was fixed for above, just not carried over. Which
+                // queue pair still holds work is exactly what a failed count cannot say,
+                // so this reports the count failure itself rather than naming one.
+                result.ok = false;
+                result.msg = "could not learn how many queue pairs to drive to error ("
+                             + (counted.ok
+                                    ? "scheduler reports nqps=" + std::to_string(nqps)
+                                    : counted.msg)
+                             + "), so none of them are known retired";
+            } else {
+                for (int qp = 0; qp < nqps; qp++) {
+                    const ThreadResult driven = WorkerCastDriveQpToError(pair.sendComm, qp);
+                    if (!driven.ok) note(qp, driven.msg);
+                }
             }
         } else {
             for (int qp = 0; qp < kQpProbeLimit; qp++) {
