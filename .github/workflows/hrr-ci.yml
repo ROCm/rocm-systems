@@ -80,6 +80,26 @@ jobs:
       - name: Build
         run: cmake --build build -j
 
+      - name: Assert the expected unit cases are present
+        shell: bash
+        run: |
+          # A case behind an #if leaves the binary with no signal at all -- not
+          # failed, not skipped, absent -- so a fully green suite can hide it.
+          # Assert the compiled set before trusting the run below.
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            PATH="$(cygpath -u "${ROCM_SDK}")/bin:${PATH}"
+            export PATH
+          fi
+          shopt -s nullglob
+          bin=(build/tests/unit/hrr-unit-tests*)
+          if [ ${#bin[@]} -eq 0 ]; then
+            echo "::error::no unit binary under build/tests/unit"
+            exit 1
+          fi
+          python3 projects/hrr/tests/check_expected_cases.py \
+            --binary "${bin[0]}" \
+            --manifest projects/hrr/tests/expected_cases_unit.txt
+
       - name: Run unit suite
         shell: bash
         run: |
@@ -206,6 +226,16 @@ jobs:
             -DHRR_BUILD_TESTS=ON \
             -DHRR_BUILD_INTEGRATION_TESTS=ON
           cmake --build build/hrr -j
+
+      - name: Assert the expected integration cases are present
+        run: |
+          # Listing needs no GPU: Catch2 registers cases in static initialisers
+          # and --list-tests never calls into HIP. Checked here rather than in
+          # the integration jobs so a compiled-out case fails once, straight
+          # away, instead of nine times after the fan-out.
+          python3 projects/hrr/tests/check_expected_cases.py \
+            --binary build/hrr/tests/integration/hrr-integration-tests \
+            --manifest projects/hrr/tests/expected_cases_integration.txt
 
       - name: Confirm every architecture is embedded
         run: |
