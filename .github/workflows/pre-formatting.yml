@@ -23,8 +23,9 @@ on:
       - ".github/scripts/pr_detect_changed_subtrees.py"
       - ".github/repos-config.json"
       - ".pre-commit-config.yaml"
-      # The other half of TestExcludedProjectListsAgree; drift here must trigger the guard too.
+      # Both are compared by TestExcludedProjectListsAgree; drift here must trigger the guard too.
       - "tools/systems_pr_bot/policy.yml"
+      - "docs/SYSTEMS_PR_BOT_FAQ.md"
       # No '!**/*.md'-style negations: a paths: miss publishes no check-run at all, which the bot
       # waits 900s for. Skipping is not an option here, only not-running.
 
@@ -47,6 +48,7 @@ jobs:
           sparse-checkout: |
             .github
             tools/systems_pr_bot
+            docs
           sparse-checkout-cone-mode: true
           # Merge ref plus its first parent, which is the base it was computed against.
           fetch-depth: 2
@@ -89,7 +91,6 @@ jobs:
           submodules: false
 
       - name: Get list of changed files
-        id: changed-files
         shell: bash
         run: |
           set -euo pipefail

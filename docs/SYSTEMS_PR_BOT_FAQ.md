@@ -208,9 +208,10 @@ git add -u
 git commit -m "chore: apply pre-commit fixes"
 ```
 
-> **Some projects use their own config.** `projects/amdsmi`, `projects/rccl`,
-> `projects/rdc`, `projects/rocm-smi-lib` and `projects/rocprofiler-compute` are
-> listed in the repo-root `.pre-commit-config.yaml` `exclude:` block, so the
+> **Some projects use their own config.** `projects/amdsmi`, `projects/cuid`,
+> `projects/rccl`, `projects/rdc`, `projects/rocm-smi-lib` and
+> `projects/rocprofiler-compute` are listed in the repo-root
+> `.pre-commit-config.yaml` `exclude:` block, so the
 > commands above check **nothing** under those paths — they report
 > `(no files to check) Skipped` and exit 0. Pass that project's config instead:
 >
