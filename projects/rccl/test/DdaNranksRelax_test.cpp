@@ -130,9 +130,9 @@ TEST_F(DdaNranksRelaxTest, DispatchRejectsLowRankWhenRelaxOff)
 // NCCL_NO_CACHE is parsed once, so the relaxed value has to be set before any
 // param read: run in a fresh re-exec'd process with the env pre-set. This proves
 // the eligibility gate opens for every single-node count in [2, kDdaNranks] (and
-// still rejects counts outside that range) when the operator opts in; end-to-end
-// low-rank GPU engagement is covered by the rccl-tests AllReduce sweep with
-// RCCL_DDA_NRANKS_RELAX=1.
+// still rejects counts outside that range) when the operator opts in. No
+// test_runner config sets RCCL_DDA_NRANKS_RELAX as an environment variable yet,
+// so this in-process test is what actually covers the relaxed dispatch today.
 TEST(DdaNranksRelaxIsolatedTest, RelaxedPathAdmitsTwoThroughEightRanks)
 {
     RUN_ISOLATED_TEST_WITH_ENV(
