@@ -47,6 +47,13 @@ def pytest_addoption(parser):
         default=["SQ_WAVES", "SQ_INSTS_VALU"],
         help="counters shared by every --pmc group; must be constant across a kernel's passes",
     )
+    parser.addoption(
+        "--expected-dispatch-count",
+        action="store",
+        type=int,
+        default=None,
+        help="optional exact number of logical dispatches expected in the counter records",
+    )
 
 
 @pytest.fixture
@@ -60,6 +67,11 @@ def json_data(request):
 @pytest.fixture
 def expected_passes(request):
     return request.config.getoption("--passes")
+
+
+@pytest.fixture
+def expected_dispatch_count(request):
+    return request.config.getoption("--expected-dispatch-count")
 
 
 @pytest.fixture
