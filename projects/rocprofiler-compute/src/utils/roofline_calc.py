@@ -52,7 +52,7 @@ SUPPORTED_DATATYPES = {
         "I8",
         "I32",
         "I64",
-    ],  # Unsupported: F4, F6, F8
+    ],  # Unsupported: F4, F6, F8, MXFP8
     "gfx940": [
         "FP8",
         "FP16",
@@ -62,7 +62,7 @@ SUPPORTED_DATATYPES = {
         "I8",
         "I32",
         "I64",
-    ],  # Unsupported: F4, F6
+    ],  # Unsupported: F4, F6, MXFP8
     "gfx941": [
         "FP8",
         "FP16",
@@ -72,7 +72,7 @@ SUPPORTED_DATATYPES = {
         "I8",
         "I32",
         "I64",
-    ],  # Unsupported: F4, F6
+    ],  # Unsupported: F4, F6, MXFP8
     "gfx942": [
         "FP8",
         "FP16",
@@ -82,11 +82,12 @@ SUPPORTED_DATATYPES = {
         "I8",
         "I32",
         "I64",
-    ],  # Unsupported: F4, F6
+    ],  # Unsupported: F4, F6, MXFP8
     "gfx950": [
         "FP4",
         "FP6",
         "FP8",
+        "MXFP8",
         "FP16",
         "BF16",
         "FP32",
@@ -97,8 +98,8 @@ SUPPORTED_DATATYPES = {
     ],  # Unsupported:
 }
 
-PEAK_OPS_DATATYPES = ["FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"]
-MFMA_DATATYPES = ["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8"]
+PEAK_OPS_DATATYPES = ["FP16", "FP32", "FP64", "I8", "I32", "I64"]
+MFMA_DATATYPES = ["FP4", "FP6", "FP8", "MXFP8", "FP16", "BF16", "FP32", "FP64", "I8"]
 
 TOP_N = 10
 
@@ -115,6 +116,7 @@ class AI_Data:
     valu_flops: float
     mfma_flops_f6f4: float
     mfma_flops_f8: float
+    mfma_flops_mxf8: float
     mfma_flops_f16: float
     mfma_flops_bf16: float
     mfma_flops_f32: float
@@ -191,7 +193,12 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
             y1_mfma = peakOps
 
         if dtype in MFMA_DATATYPES:
-            target_precision = (dtype) if (dtype[:1] == "I") else ("F" + dtype[2:])
+            if dtype[:1] == "I":
+                target_precision = (dtype)
+            elif dtype[:1] == "F":
+                target_precision = "F" + dtype[2:]
+            else: # MX format
+                target_precision = "MXF" + dtype[4:]
 
             peakMFMA = float(
                 benchmark_data["MFMA{}{}".format(target_precision, ops_flops)][
@@ -259,7 +266,7 @@ def calc_ai(mspec, sort_type, ret_df):
     df = df.sort_values(by=["Kernel_Name"])
     df = df.reset_index(drop=True)
 
-    total_flops = valu_flops = mfma_flops_f6f4 = mfma_flops_f8 = mfma_flops_bf16 = (
+    total_flops = valu_flops = mfma_flops_f6f4 = mfma_flops_f8 = mfma_flops_mxf8 = mfma_flops_bf16 = (
         mfma_flops_f16
     ) = mfma_iops_i8 = mfma_flops_f32 = mfma_flops_f64 = lds_data = L1cache_data = (
         L2cache_data
@@ -362,6 +369,8 @@ def calc_ai(mspec, sort_type, ret_df):
         try:
             if "FP8" in supported_dt:
                 mfma_flops_f8 += df["SQ_INSTS_VALU_MFMA_MOPS_F8"][idx] * 512
+            if "MXFP8" in supported_dt:
+                mfma_flops_mxf8 += df["SQ_INSTS_VALU_MFMA_MOPS_F8"][idx] * 512
             if ("FP4" in supported_dt) or ("FP6" in supported_dt):
                 mfma_flops_f6f4 += df["SQ_INSTS_VALU_MFMA_MOPS_F6F4"][idx] * 512
             mfma_flops_f16 += df["SQ_INSTS_VALU_MFMA_MOPS_F16"][idx] * 512
@@ -466,6 +475,7 @@ def calc_ai(mspec, sort_type, ret_df):
                     valu_flops / calls,
                     mfma_flops_f6f4 / calls,
                     mfma_flops_f8 / calls,
+                    mfma_flops_mxf8 / calls,
                     mfma_flops_f16 / calls,
                     mfma_flops_bf16 / calls,
                     mfma_flops_f32 / calls,
@@ -484,6 +494,7 @@ def calc_ai(mspec, sort_type, ret_df):
                     kernelName, idx, calls
                 )
             )
+            # Do not add mfma_flops_mxf8, it is a duplicate count of mfma_flops_f8
             total_flops = valu_flops = mfma_flops_f6f4 = mfma_flops_f8 = (
                 mfma_flops_bf16
             ) = mfma_flops_f16 = mfma_iops_i8 = mfma_flops_f32 = mfma_flops_f64 = (
@@ -501,6 +512,7 @@ def calc_ai(mspec, sort_type, ret_df):
                     valu_flops,
                     mfma_flops_f6f4,
                     mfma_flops_f8,
+                    mfma_flops_mxf8,
                     mfma_flops_f16,
                     mfma_flops_bf16,
                     mfma_flops_f32,
@@ -514,6 +526,7 @@ def calc_ai(mspec, sort_type, ret_df):
                     avgDuration,
                 )
             )
+            # Do not add mfma_flops_mxf8, it is a duplicate count of mfma_flops_f8
             total_flops = valu_flops = mfma_flops_f6f4 = mfma_flops_f8 = (
                 mfma_flops_bf16
             ) = mfma_flops_f16 = mfma_iops_i8 = mfma_flops_f32 = mfma_flops_f64 = (
