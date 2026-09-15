@@ -51,6 +51,7 @@
   "test_configurations": {
     "perf_base": {
       "is_gtest": false,
+      "serial_only": true,
       "num_nodes": 1,
       "num_gpus": 4,
       "num_ranks": 4,

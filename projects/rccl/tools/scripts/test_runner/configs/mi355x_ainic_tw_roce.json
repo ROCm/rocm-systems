@@ -33,6 +33,7 @@
 
     "gtest_base": {
       "is_gtest": true,
+      "serial_only": true,
       "binary": "rccl-UnitTestsMPI",
       "test_binary_dir": "${GTEST_BIN_DIR:-${WORKDIR:-$PWD}/build/debug/test}",
       "num_ranks": 2,
@@ -264,6 +265,7 @@
 
     "rccl_tests_base": {
       "is_gtest": false,
+      "serial_only": true,
       "test_binary_dir": "${PERF_BIN_DIR:-/it-share/rccl-ci/rccl-tests-2.30.4/bin}",
       "num_ranks": 16,
       "num_nodes": 2,

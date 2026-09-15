@@ -228,6 +228,10 @@
         "requirements": {
           "type": "string",
           "description": "For pytest tests with setup_venv: requirements file to install (default: <test_dir>/requirements.txt)."
+        },
+        "serial_only": {
+          "type": "boolean",
+          "description": "When true, entries never co-tenant under --jobs>1 and always run serially. Set on contention-prone tests (NET/IB fabric, SMI monitoring, perf bandwidth). Inherited configuration -> suite -> test; a test may override its suite/config."
         }
       }
     },
@@ -260,6 +264,7 @@
         "setup_venv":   { "$ref": "#/$defs/test_defaults/properties/setup_venv" },
         "venv_dir":     { "$ref": "#/$defs/test_defaults/properties/venv_dir" },
         "requirements": { "$ref": "#/$defs/test_defaults/properties/requirements" },
+        "serial_only":  { "$ref": "#/$defs/test_defaults/properties/serial_only" },
         "env_variables": {
           "$ref": "#/$defs/env_variables_map",
           "description": "Environment variables applied to every test in this configuration (merged on top of global env_variables)"
@@ -331,6 +336,7 @@
         "setup_venv":   { "$ref": "#/$defs/test_defaults/properties/setup_venv" },
         "venv_dir":     { "$ref": "#/$defs/test_defaults/properties/venv_dir" },
         "requirements": { "$ref": "#/$defs/test_defaults/properties/requirements" },
+        "serial_only":  { "$ref": "#/$defs/test_defaults/properties/serial_only" },
         "env_variables": {
           "$ref": "#/$defs/env_variables_map",
           "description": "Test-specific environment variables (highest priority, merged on top of all other levels)"
@@ -388,6 +394,7 @@
         "setup_venv":   { "$ref": "#/$defs/test_defaults/properties/setup_venv" },
         "venv_dir":     { "$ref": "#/$defs/test_defaults/properties/venv_dir" },
         "requirements": { "$ref": "#/$defs/test_defaults/properties/requirements" },
+        "serial_only":  { "$ref": "#/$defs/test_defaults/properties/serial_only" },
         "env_variables": {
           "$ref": "#/$defs/env_variables_map",
           "description": "Suite-level environment variable overrides (between configuration-level and test-level in priority)"

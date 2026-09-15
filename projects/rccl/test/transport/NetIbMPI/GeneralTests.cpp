@@ -1168,14 +1168,27 @@ TEST_F(NetIbMPITest, RapidConnectDisconnect) {
         return out;
     };
 
-    auto countNonEmptyLines = [](const std::string& text) -> int {
+    // Match "<space>pid <ourpid><space>" in `rdma resource show` output so we can count
+    // only this process's RDMA objects and ignore a parallel co-tenant's QP/CQ/MR/PD churn.
+    const std::string rdmaPidFilter = " pid " + std::to_string(getpid()) + " ";
+    auto countRdmaLines = [&rdmaPidFilter](const std::string& text) -> int {
         std::istringstream iss(text);
         std::string line;
-        int count = 0;
+        int total = 0, owned = 0;
+        bool hasPidColumn = false;
         while (std::getline(iss, line)) {
-            if (!line.empty()) count++;
+            if (line.empty()) {
+                continue;
+            }
+            total++;
+            if (line.find(" pid ") != std::string::npos) {
+                hasPidColumn = true;
+            }
+            if (line.find(rdmaPidFilter) != std::string::npos) {
+                owned++;
+            }
         }
-        return count;
+        return hasPidColumn ? owned : total;
     };
 
     auto readRdmaResourceCounts = [&]() -> RdmaResourceCounts {
@@ -1195,10 +1208,10 @@ TEST_F(NetIbMPITest, RapidConnectDisconnect) {
 
         if (qpOut.empty() || cqOut.empty() || mrOut.empty() || pdOut.empty()) return counts;
 
-        counts.qp = countNonEmptyLines(qpOut);
-        counts.cq = countNonEmptyLines(cqOut);
-        counts.mr = countNonEmptyLines(mrOut);
-        counts.pd = countNonEmptyLines(pdOut);
+        counts.qp = countRdmaLines(qpOut);
+        counts.cq = countRdmaLines(cqOut);
+        counts.mr = countRdmaLines(mrOut);
+        counts.pd = countRdmaLines(pdOut);
 
         return counts;
     };
