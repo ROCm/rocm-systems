@@ -240,15 +240,6 @@ constexpr uint32_t CHAIN_SLOT_HEADER_BYTESIZE = 52;
 /// @brief Largest value ert_start_kernel_cmd::count can hold; it is an 11-bit field.
 constexpr uint32_t MAX_CMD_COUNT = (1u << 11) - 1;
 
-/// @brief Largest argument-dword count a command may declare, from MAX_NPU_ARGS_SIZE in
-/// xdna-driver (aie2_msg_priv.h): cmd_chain_slot_npu::args is 26 dwords.
-///
-/// The driver's dpu, preempt and elf fill paths all check a command against this. The CF path --
-/// the one an ERT_START_CU command takes -- does not: it checks only that the slot fits in what
-/// is left of the chain buffer, then memcpy()s the whole declared payload into the firmware's
-/// fixed-size structure. So nothing below this layer stops an over-long command.
-constexpr uint32_t MAX_CMD_ARG_DWORDS = 26;
-
 /// @brief Required alignment of a full-ELF control code's device address.
 ///
 /// Undocumented but established by sweeping the control code across offsets within its allocation
@@ -1647,19 +1638,6 @@ static hsa_status_t BuildPdiInstsCommand(const hsa_amd_aie_kernel_dispatch_packe
                                2 +  // txn opcode
                                3 +  // instruction sequence (address lo/hi + size)
                                2 * pkt->num_kernargs);  // arguments (address lo/hi)
-
-  // What the driver will hand the firmware as arg_cnt. Written in terms of the padding constant so
-  // the two cannot drift apart.
-  const uint32_t declared_arg_cnt = cmd_dwords + CMD_COUNT_SIZE_INCREASE - 1;
-  if (declared_arg_cnt > MAX_CMD_ARG_DWORDS) {
-    // Refused here rather than at the point of chaining, even though only a chained command is
-    // copied into a slot. Whether a packet ends up in a chain depends on how many others share
-    // its batch, so the alternative is a packet that works when dispatched alone and corrupts
-    // firmware state when it happens to be batched -- a far worse failure than a clear refusal.
-    // At the current padding this bites at num_kernargs >= 11.
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
   ert_start_kernel_cmd* cmd = nullptr;
   err = CreateCommand(kmq_metadata, cmd_dwords + CMD_COUNT_SIZE_INCREASE, ERT_START_CU,
                       1u << cached_pdi_index, cmd_bo, &cmd);
