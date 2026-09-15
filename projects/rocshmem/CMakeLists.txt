@@ -22,6 +22,7 @@
 # IN THE SOFTWARE.
 ###############################################################################
 
+# Temporary no-op change on rocshmem to exercise TheRock Multi-arch CI
 cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 
 # Set root directory for ROCm Systems shared files
