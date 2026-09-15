@@ -2,14 +2,23 @@
 ROCM_PATH ?= /opt/rocm
 HIPCC = $(ROCM_PATH)/bin/hipcc
 
-# Plain (non-HIP-driver) compiler used only for compile-time feature probes.
-# The probes below check host headers (amd_smi/amdsmi.h) and API surface, not
-# device code, so they must NOT go through hipcc's HIP driver mode: that pulls
-# in the cuda_wrappers/bits/c++config.h shim, which clashes with recent system
-# libstdc++ headers and makes an otherwise-valid probe fail. RCCL's CMake build
-# probes with the plain compiler (check_cxx_source_compiles) and gets the right
-# answer; use the same mechanism here so the two build systems agree.
-PROBE_CXX ?= $(ROCM_PATH)/bin/amdclang++
+# Probe compiler. Not hipcc: its HIP driver mode pulls cuda_wrappers/bits/c++config.h,
+# which clashes with recent libstdc++ and makes a valid probe fail.
+# Locate it the same way toolchain-linux.cmake does (bin/ then llvm/bin/); a
+# missing probe compiler must fail loudly, not silently degrade a probe to "no"
+# and recompile the colliding UALoE compat types this build set out to avoid.
+PROBE_CXX ?= $(shell \
+  for c in $(ROCM_PATH)/bin/amdclang++ $(ROCM_PATH)/llvm/bin/amdclang++ $(ROCM_PATH)/llvm/bin/clang++; do \
+    if [ -x "$$c" ]; then echo "$$c"; break; fi; \
+  done)
+ifeq ($(strip $(PROBE_CXX)),)
+$(error Cannot find amdclang++/clang++ under $(ROCM_PATH)/bin or $(ROCM_PATH)/llvm/bin. Set PROBE_CXX explicitly.)
+endif
+ifeq ($(wildcard $(PROBE_CXX)),)
+ifeq ($(shell command -v $(PROBE_CXX) >/dev/null 2>&1 && echo ok),)
+$(error PROBE_CXX ($(PROBE_CXX)) is not executable. Set PROBE_CXX to a valid C++ compiler.)
+endif
+endif
 HIPIFY_PL_EXE ?= $(ROCM_PATH)/bin/hipify-perl
 HIPIFY_PL_FLAGS = -inplace -quiet-warnings
 
@@ -46,7 +55,7 @@ PROBE_TMP := $(shell mktemp --suffix=.cpp)
 HAVE_HIP_FABRIC_API := $(shell printf '%s\n' \
   '#include <hip/hip_runtime_api.h>' \
   'int main() { hipMemFabricHandle_t h{}; (void)h; auto fn = &hipMemImportFromShareableHandle; (void)fn; }' \
-  > $(PROBE_TMP); \
+  > $(PROBE_TMP) && \
   $(PROBE_CXX) -x c++ -std=c++17 -fsyntax-only -D__HIP_PLATFORM_AMD__ -I$(ROCM_PATH)/include $(PROBE_TMP) \
   >/dev/null 2>&1 && echo yes || echo no)
 ifeq ($(HAVE_HIP_FABRIC_API),yes)
@@ -56,7 +65,7 @@ endif
 HAVE_AMDSMI_FABRIC_API := $(shell printf '%s\n' \
   '#include <amd_smi/amdsmi.h>' \
   'int main() { amdsmi_fabric_info_t info{}; (void)info; }' \
-  > $(PROBE_TMP); \
+  > $(PROBE_TMP) && \
   $(PROBE_CXX) -x c++ -std=c++17 -fsyntax-only -I$(ROCM_PATH)/include $(PROBE_TMP) \
   >/dev/null 2>&1 && echo yes || echo no)
 ifeq ($(HAVE_AMDSMI_FABRIC_API),yes)
@@ -69,14 +78,14 @@ endif
 HAVE_AMDSMI_FABRIC_TELEMETRY := $(shell printf '%s\n' \
   '#include <amd_smi/amdsmi.h>' \
   'int main() { amdsmi_fabric_telemetry_category_t cat = AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN; (void)cat; }' \
-  > $(PROBE_TMP); \
+  > $(PROBE_TMP) && \
   $(PROBE_CXX) -x c++ -std=c++17 -fsyntax-only -I$(ROCM_PATH)/include $(PROBE_TMP) \
   >/dev/null 2>&1 && echo yes || echo no)
 ifeq ($(HAVE_AMDSMI_FABRIC_TELEMETRY),yes)
 FEATURE_DEFINES += -DAMDSMI_HEADER_HAS_FABRIC_TELEMETRY -DAMDSMI_FABRIC_DIRECT
 endif
 
-$(shell rm -f $(PROBE_TMP))
+PROBE_CLEANUP := $(shell rm -f $(PROBE_TMP))
 
 CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION) \
            -std=c++17 \
