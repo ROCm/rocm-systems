@@ -6,7 +6,6 @@
 #include "common.hpp"
 
 #include <timemory/enum.h>
-#include <timemory/utility/macros.hpp>
 
 #include <utility>
 

@@ -1130,7 +1130,7 @@ TEST(Gfx1250ExecutionTest, SBarrierWaitIsNoOpForSingleWaveWorkgroup) {
   ASSERT_NE(wait_inst, nullptr);
   ASSERT_EQ(std::string_view(wait_inst->mnemonic()), "s_barrier_wait");
 
-  cu->execute_instruction(wait_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(wait_inst.get(), *wf).succeeded());
 
   EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
 }
@@ -1157,9 +1157,9 @@ TEST(Gfx1250ExecutionTest, SBarrierWaitReleasesOnlyAfterSignalQuorum) {
   ASSERT_NE(wait_inst, nullptr);
   ASSERT_EQ(std::string_view(wait_inst->mnemonic()), "s_barrier_wait");
 
-  cu->execute_instruction(wait_inst.get(), *wf0);
+  EXPECT_TRUE(cu->execute_instruction(wait_inst.get(), *wf0).succeeded());
   EXPECT_EQ(wf0->state(), amdgpu::WfState::BARRIER);
-  cu->execute_instruction(wait_inst.get(), *wf1);
+  EXPECT_TRUE(cu->execute_instruction(wait_inst.get(), *wf1).succeeded());
   ASSERT_EQ(wf1->state(), amdgpu::WfState::BARRIER);
 
   EXPECT_TRUE(wf0->barrier_signal(-1, 0));

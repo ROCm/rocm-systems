@@ -1248,14 +1248,12 @@ SIMD_VOP3P_PK_TERNARY_INT: dict[str, str] = {
 
 # VOP3P packed-16 f16 binary family. Each 32-bit lane holds 2 f16 values.
 # Glue widens halves to f32, applies neg/neg_hi (sign-bit toggle), runs the
-# per-half functor in f32, narrows back to f16, packs. No clamp on any
-# pk_*_f16 scalar body (verified line 15109, 15519). NaN-input lanes can
-# diverge in payload (same as the existing f16 ternary slice).
+# per-half functor in f32, narrows back to f16, packs. Directed rounding,
+# flushing and clamp use the scalar helper. MIN/MAX also use that helper
+# to preserve signed-zero selection independently of host SIMD min/max.
 SIMD_VOP3P_PK_BINARY_FP16: dict[str, str] = {
     'v_pk_add_f16_vop3p': '[](auto a, auto b) { return a + b; }',
     'v_pk_mul_f16_vop3p': '[](auto a, auto b) { return a * b; }',
-    'v_pk_max_f16_vop3p': '[](auto a, auto b) { return util::stdx::fmax(a, b); }',
-    'v_pk_min_f16_vop3p': '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
 }
 
 # Packed F16 FMA must round directly to F16. The available SIMD path computes
@@ -1735,10 +1733,12 @@ SIMD_VOPC_VOP3_F64: dict[str, str] = _build_simd_vopc_vop3_f64()
 #
 # 16-bit forms compute a 32-bit add/sub and mask the low 16 bits, matching the
 # scalar body's `uint32_t(uint16_t(int16_t(low16(a)+low16(b))))` (or the u16
-# variant) — both reduce to `(a + b) & 0xFFFFu` / `(a - b) & 0xFFFFu` because
+# variant) — both reduce to `(a + b) & 0xFFFFu` / `(a - b) & 0xFFFFu` when
+# CLAMP is clear because
 # unsigned 32-bit wrap-around at the low 16 bits is identical to signed/unsigned
 # 16-bit wrap. 32-bit forms use the wrap-around add/sub on uint32 lanes;
-# signed-vs-unsigned wraps the same way.
+# signed-vs-unsigned wraps the same way. The shared glue falls back to scalar
+# execution when CLAMP requests saturating arithmetic.
 SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
     # v_bcnt_u32_b32: VOP3-only (no VOP1 twin). D = CountOneBits(S0) + S1 -- the
     # second source is an accumulator, so this is binary, not unary. Keep the

@@ -164,11 +164,11 @@ CheckOptions:
   - key: readability-identifier-naming.UnionCase
     value: lower_case
   - key: readability-identifier-naming.EnumCase
-    value: CamelCase
+    value: lower_case
   - key: readability-identifier-naming.EnumConstantCase
-    value: CamelCase
+    value: lower_case
   - key: readability-identifier-naming.ScopedEnumConstantCase
-    value: CamelCase
+    value: lower_case
   - key: readability-identifier-naming.TypeAliasCase
     value: lower_case
   - key: readability-identifier-naming.TypedefCase
@@ -305,4 +305,4 @@ CheckOptions:
 
   # include ignore
   - key: misc-include-cleaner.IgnoreHeaders
-    value: "compare$;string_view$;concepts$"
+    value: "compare$;string_view$;concepts$;bits/.*"

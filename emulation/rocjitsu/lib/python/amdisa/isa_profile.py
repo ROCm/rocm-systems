@@ -426,6 +426,36 @@ class IsaProfile(ABC):
         ...
 
     @property
+    def ds_compare_store_compare_first(self) -> bool:
+        """Whether DS compare-store puts the comparison in DATA0."""
+        return False
+
+    @property
+    def atomic_legacy_minmax(self) -> bool:
+        """Older float-atomic rules preserve selected input bits and propagate SNaNs."""
+        return True
+
+    def scalar_atomic_denorm_modes(
+        self, operation: str, elem_size: int, *, ds: bool
+    ) -> tuple[str, str]:
+        """Return L2 and LDS denormal-mode expressions for scalar FP atomics.
+
+        Older L2 F32 ADD flushes inputs and preserves outputs; F64 ADD and min/max preserve.
+        Other L2 operations follow MODE. Indexed DS and FLAT-to-LDS follow
+        MODE, except F64 ADD which always preserves denormals.
+        """
+        is_f64 = elem_size == 8
+        mode = 'wf.fp_denorm_mode_f16_f64()' if is_f64 else 'wf.fp_denorm_mode_f32()'
+        lds_mode = '3' if operation == 'fadd' and is_f64 else mode
+        if operation == 'fadd':
+            memory_mode = '3' if is_f64 else '2'
+        elif is_f64 and operation != 'fcmpswap':
+            memory_mode = '3'
+        else:
+            memory_mode = mode
+        return memory_mode, lds_mode
+
+    @property
     def generated_arch_name(self) -> str | None:
         """Override for the logical architecture name used by code generation."""
         return None
@@ -579,6 +609,77 @@ class IsaProfile(ABC):
     def vop3p_source_modifier_omissions(self) -> frozenset[str]:
         """VOP3P instructions that do not use packed source modifier fields."""
         return frozenset()
+
+    @property
+    def integer_clamp_dtypes(self) -> dict[str, str]:
+        """Integer instructions that require saturation-aware lowering.
+
+        CLAMP is present in the shared VOP3 encoding, but it is not legal for
+        every opcode in that encoding. Keep the instruction-level policy here
+        instead of inferring support from the encoding field alone. ADD_MIN/MAX
+        always saturate their internal addition; the remaining instructions use
+        this policy to apply their encoded CLAMP modifier.
+        """
+        return {
+            'V_ADDC_CO_U32': 'u32',
+            'V_ADD_MAX_I32': 'i32',
+            'V_ADD_MAX_U32': 'u32',
+            'V_ADD_MIN_I32': 'i32',
+            'V_ADD_MIN_U32': 'u32',
+            'V_ADD_CO_CI_U32': 'u32',
+            'V_ADD_CO_U32': 'u32',
+            'V_ADD_I16': 'i16',
+            'V_ADD_I32': 'i32',
+            'V_ADD_NC_I16': 'i16',
+            'V_ADD_NC_I32': 'i32',
+            'V_ADD_NC_U16': 'u16',
+            'V_ADD_NC_U32': 'u32',
+            'V_ADD_NC_U64': 'u64',
+            'V_ADD_U16': 'u16',
+            'V_ADD_U32': 'u32',
+            'V_MAD_I16': 'i16',
+            'V_MAD_I32_I16': 'i32',
+            'V_MAD_I32_I24': 'i32',
+            'V_MAD_I64_I32': 'i64',
+            'V_MAD_CO_I64_I32': 'i64',
+            'V_MAD_CO_U64_U32': 'u64',
+            'V_MAD_NC_I64_I32': 'i64',
+            'V_MAD_NC_U64_U32': 'u64',
+            'V_MAD_U16': 'u16',
+            'V_MAD_U32_U16': 'u32',
+            'V_MAD_U32_U24': 'u32',
+            'V_MAD_U64_U32': 'u64',
+            'V_MQSAD_PK_U16_U8': 'u16',
+            'V_MQSAD_U32_U8': 'u32',
+            'V_MSAD_U8': 'u32',
+            'V_MUL_I32_I24': 'i32',
+            'V_MUL_U32_U24': 'u32',
+            'V_PK_MAD_I16': 'i16',
+            'V_PK_MAD_U16': 'u16',
+            'V_SAD_HI_U8': 'u32',
+            'V_SAD_U8': 'u32',
+            'V_SAD_U16': 'u32',
+            'V_SAD_U32': 'u32',
+            'V_QSAD_PK_U16_U8': 'u16',
+            'V_SUBBREV_CO_U32': 'u32',
+            'V_SUBB_CO_U32': 'u32',
+            'V_SUBREV_CO_CI_U32': 'u32',
+            'V_SUBREV_CO_U32': 'u32',
+            'V_SUBREV_NC_U32': 'u32',
+            'V_SUBREV_U16': 'u16',
+            'V_SUBREV_U32': 'u32',
+            'V_SUB_CO_CI_U32': 'u32',
+            'V_SUB_CO_U32': 'u32',
+            'V_SUB_I16': 'i16',
+            'V_SUB_I32': 'i32',
+            'V_SUB_NC_I16': 'i16',
+            'V_SUB_NC_I32': 'i32',
+            'V_SUB_NC_U16': 'u16',
+            'V_SUB_NC_U32': 'u32',
+            'V_SUB_NC_U64': 'u64',
+            'V_SUB_U16': 'u16',
+            'V_SUB_U32': 'u32',
+        }
 
     @property
     def dpp_ctrl_dialect(self) -> DppCtrlDialect:
@@ -945,14 +1046,26 @@ class IsaProfile(ABC):
         """
         ...
 
+    def unique_flat_segment(self, enc_name: str) -> int | None:
+        """Segment required by retained opcodes absent from the parent FLAT table.
+
+        GLOBAL may define standalone opcodes. SCRATCH-only opcode numbers can
+        collide with GLOBAL and are not candidates for parent-table retention.
+        """
+        return 2 if enc_name in ('ENC_FLAT_GLBL', 'ENC_FLAT_GLOBAL') else None
+
     @abstractmethod
-    def skip_inst_encoding(self, enc_name: str, enc_cond: str) -> bool:
+    def skip_inst_encoding(
+        self, enc_name: str, enc_cond: str, *, unique_segment_opcode: bool = False
+    ) -> bool:
         """True if instructions under this encoding/condition should be skipped.
 
         The base decoder only handles instructions under the ``default``
         encoding condition. Modifier variants (DPP, SDWA) and
         segment-specific FLAT encodings are skipped because they share
-        the parent's decode table and are distinguished at runtime.
+        the parent's decode table and are distinguished at runtime. A default
+        segment form with a unique opcode is retained only when
+        ``unique_flat_segment`` declares its required segment.
         """
         ...
 
@@ -1232,12 +1345,16 @@ class _AmdgpuProfileBase(IsaProfile):
                 return f'ENC_{parent_name}'
         return f'ENC_{parts[0]}'
 
-    def skip_inst_encoding(self, enc_name: str, enc_cond: str) -> bool:
+    def skip_inst_encoding(
+        self, enc_name: str, enc_cond: str, *, unique_segment_opcode: bool = False
+    ) -> bool:
         if enc_cond != 'default':
             return True
         if self._SKIP_DPP_SDWA:
             if '_VOP_DPP' in enc_name or '_VOP_SDWA' in enc_name:
                 return True
+        if unique_segment_opcode and self.unique_flat_segment(enc_name) is not None:
+            return False
         parts = enc_name.split('_')
         return (
             parts[0] == 'ENC'
@@ -1477,6 +1594,11 @@ class _AmdgpuProfileBase(IsaProfile):
         return None
 
     @property
+    def global_addtid_offset_expr(self) -> str:
+        """Signed displacement for GLOBAL ADDTID in the legacy 12-bit layout."""
+        return 'static_cast<int32_t>(inst_.offset << 20) >> 20'
+
+    @property
     def flat_store_src_field(self) -> str:
         """Field name in the flat/global/scratch machine inst for store source data.
 
@@ -1524,6 +1646,11 @@ class CdnaProfile(_AmdgpuProfileBase):
       encodings with ``bit_cnt >= 64``, since their ``OpEncoding``
       struct already spans the full instruction width.
     """
+
+    @property
+    def ds_compare_store_compare_first(self) -> bool:
+        # CDNA1-4 / RDNA1-2 DS CMPST reverses the BUFFER operand order.
+        return True
 
     @property
     def supports_gpr_idx(self) -> bool:
@@ -1871,6 +1998,11 @@ class Rdna1Profile(_AmdgpuProfileBase):
     _SKIP_DPP_SDWA = True
 
     @property
+    def ds_compare_store_compare_first(self) -> bool:
+        # CDNA1-4 / RDNA1-2 DS CMPST reverses the BUFFER operand order.
+        return True
+
+    @property
     def dpp_ctrl_dialect(self) -> DppCtrlDialect:
         return DppCtrlDialect.GFX10_PLUS
 
@@ -1995,10 +2127,23 @@ class Rdna3Profile(_AmdgpuProfileBase):
             return 'default'
         return super().normalize_encoding_condition(enc_name, cond_name)
 
-    def skip_inst_encoding(self, enc_name: str, enc_cond: str) -> bool:
+    def skip_inst_encoding(
+        self, enc_name: str, enc_cond: str, *, unique_segment_opcode: bool = False
+    ) -> bool:
         if enc_name.upper() == 'ENC_SOP1' and enc_cond == self._SOP1_BASE_COND:
             return False
-        return super().skip_inst_encoding(enc_name, enc_cond)
+        return super().skip_inst_encoding(
+            enc_name, enc_cond, unique_segment_opcode=unique_segment_opcode
+        )
+
+    @property
+    def global_addtid_offset_expr(self) -> str:
+        return 'static_cast<int32_t>(inst_.offset << 19) >> 19'
+
+    @property
+    def ds_compare_store_compare_first(self) -> bool:
+        # RDNA3 DS_CMPSTORE notes explicitly match BUFFER operand order.
+        return False
 
     @property
     def dpp_bound_ctrl_applies_to_inactive_sources(self) -> bool:
@@ -2266,10 +2411,35 @@ class Rdna4Profile(_AmdgpuProfileBase):
             return 'default'
         return super().normalize_encoding_condition(enc_name, cond_name)
 
-    def skip_inst_encoding(self, enc_name: str, enc_cond: str) -> bool:
+    def skip_inst_encoding(
+        self, enc_name: str, enc_cond: str, *, unique_segment_opcode: bool = False
+    ) -> bool:
         if enc_name.upper() == 'ENC_SOP1' and enc_cond == self._SOP1_BASE_COND:
             return False
-        return super().skip_inst_encoding(enc_name, enc_cond)
+        return super().skip_inst_encoding(
+            enc_name, enc_cond, unique_segment_opcode=unique_segment_opcode
+        )
+
+    @property
+    def global_addtid_offset_expr(self) -> str:
+        return 'static_cast<int32_t>(inst_.ioffset << 8) >> 8'
+
+    @property
+    def ds_compare_store_compare_first(self) -> bool:
+        return False
+
+    @property
+    def atomic_legacy_minmax(self) -> bool:
+        # RDNA4 chapter 13 / CDNA5 chapter 12 operate on flushed inputs.
+        return False
+
+    def scalar_atomic_denorm_modes(
+        self, operation: str, elem_size: int, *, ds: bool
+    ) -> tuple[str, str]:
+        # RDNA4 13.2 / CDNA5 12.2: FLAT LDS and L2 both preserve denormals.
+        # Indexed DS retains its independent MODE-controlled policy.
+        _, lds_mode = super().scalar_atomic_denorm_modes(operation, elem_size, ds=ds)
+        return '3', lds_mode if ds else '3'
 
     @property
     def dpp_bound_ctrl_applies_to_inactive_sources(self) -> bool:
@@ -2526,6 +2696,10 @@ class Cdna5Profile(Rdna4Profile):
     """
 
     @property
+    def global_addtid_offset_expr(self) -> str:
+        return 'signed_ioffset(inst_.ioffset)'
+
+    @property
     def generated_arch_name(self) -> str | None:
         return 'cdna5'
 
@@ -2655,10 +2829,14 @@ class Cdna5Profile(Rdna4Profile):
             return 'default'
         return super().normalize_encoding_condition(enc_name, cond_name)
 
-    def skip_inst_encoding(self, enc_name: str, enc_cond: str) -> bool:
+    def skip_inst_encoding(
+        self, enc_name: str, enc_cond: str, *, unique_segment_opcode: bool = False
+    ) -> bool:
         if enc_name.upper() == 'ENC_SOP1' and enc_cond == self._SOP1_BASE_COND:
             return False
-        return super().skip_inst_encoding(enc_name, enc_cond)
+        return super().skip_inst_encoding(
+            enc_name, enc_cond, unique_segment_opcode=unique_segment_opcode
+        )
 
     def dpp_opcode_rule(
         self,

@@ -39,6 +39,12 @@ typedef __hip_bfloat16 hip_bfloat16;
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
 #endif
+#if SQTT_ENABLED
+#include <rocprof-trace-decoder/rocprof_trace_decoder/cxx/markers.hpp>
+#else
+#define sqtt_marker_enter(name) do {} while(0)
+#define sqtt_marker_exit(name) do {} while(0)
+#endif
 
 extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4];
 
@@ -853,6 +859,12 @@ inline int ncclDevFuncLL128RegMode(bool regUsed, bool netRegUsed) {
 // NCCL_UNROLL_* enum. Generated in host_table.cpp by generate.py.
 extern bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS];
 
+// Arch each unroll factor's device functions were compiled for, or nullptr when
+// the unroll carries no arch restriction. Neither table implies the other, so both
+// have to be consulted: an entry names its arch even for an unroll this build left
+// out, and BUILD_ALL_UNROLLS clears every entry because it compiles them all.
+extern char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS];
+
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py
 // `reg` is the user-buffer registration mode (0=n/a, 1=registered, 2=non-registered)
 // and is only used to distinguish the LL128 reg-variant collectives.
@@ -898,7 +910,7 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
 }
 
 // Selects the SendRecv kernel variant: useLL128 -> the LL128 latency kernel (reg=1,
-// gfx942/gfx950 only), otherwise the legacy LL kernel (reg=0). Keep in sync with
+// activated on gfx942/gfx950 only), otherwise the legacy LL kernel (reg=0). Keep in sync with
 // reg_values_of("SendRecv") in the device codegen.
 inline int ncclDevFuncId_P2p(bool useLL128 = false) {
   static int ncclDevFuncIdP2pLL =

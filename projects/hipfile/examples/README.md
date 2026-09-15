@@ -152,11 +152,6 @@ deterministic pattern, issues a GPU-mediated read+write round trip on one or
 more HIP streams, synchronizes, and verifies the output by FNV-1a hash. They
 share the helpers in [`common`](common) and print `OK …` on success.
 
-> **Note:** The `O_DIRECT` fast path is not currently supported for
-> asynchronous I/O — async operations always run through the POSIX compat
-> (fallback) path, regardless of whether the file or filesystem is
-> `O_DIRECT`-capable. Fast-path async support is planned for the future.
-
 | Program | What it shows |
 | --- | --- |
 | `roundtrip-async` | Async read + write on the **default stream**, a single `hipStreamSynchronize`, then verify. |
