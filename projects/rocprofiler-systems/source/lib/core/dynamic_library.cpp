@@ -23,7 +23,10 @@ find_library_path(const std::string& _name, const std::vector<std::string>& _env
                   const std::vector<std::string>& _hints,
                   const std::vector<std::string>& _path_suffixes)
 {
-    if(_name.find('/') == 0) return _name;
+    if(_name.starts_with('/'))
+    {
+        return _name;
+    }
 
     for(const auto& itr : procfs::get_maps(process::get_id(), true))
     {

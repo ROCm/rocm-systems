@@ -14,6 +14,7 @@ add_library(
     test_synchronized.cpp
     test_to_bool.cpp
     test_update_env.cpp
+    test_string_utility.cpp
 )
 
 target_link_libraries(

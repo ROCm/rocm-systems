@@ -104,7 +104,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y python3-pip
-        python3 -m pip install gersemi==0.23.1
+        python3 -m pip install gersemi==0.25.1
     - name: gersemi
       working-directory: projects/rocprofiler-systems/
       run: |
@@ -166,6 +166,17 @@ jobs:
           echo -e "################"
           exit 1
         fi
+
+  banned-includes:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        sparse-checkout: projects/rocprofiler-systems
+    - name: check-banned-includes
+      working-directory: projects/rocprofiler-systems/
+      run: python3 scripts/check-banned-includes.py
 
   fixedwidth-types:
     runs-on: ubuntu-latest

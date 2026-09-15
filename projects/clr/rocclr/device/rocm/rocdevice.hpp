@@ -396,6 +396,9 @@ class Device : public NullDevice {
   }
 
   void setupCpuAgent();  // Setup the CPU agent which has the least NUMA distance to this GPU
+  //! Whether the agent shares physical memory with the CPU. Distinct from a FULL profile:
+  //! MI300A reports BASE while still being an APU.
+  static bool agentIsAPU(hsa_agent_t agent);
 
   void checkAtomicSupport();  //!< Check the support for pcie atomics
 
@@ -824,6 +827,7 @@ class Device : public NullDevice {
   uint32_t maxSdmaReadMask_;
   uint32_t maxSdmaWriteMask_;
   bool isXgmi_;  //!< Flag to indicate if there is XGMI between CPU<->GPU
+  bool isAPU_ = false;  //!< Flag to indicate the agent shares physical memory with the CPU
   bool pm4_emulation_ = false;  //!< Flag to indicate if PM4 emulation is enabled
   uint32_t numHwPipes_;  //!< Number of hardware pipes
 
@@ -831,6 +835,8 @@ class Device : public NullDevice {
   struct SdmaEngineAllocator {
     amd::Monitor lock_;  //!< Protects the allocation state
     std::unordered_map<VirtualGPU*, uint32_t> vgpu_to_engine_;  //!< VirtualGPU -> engine mask
+    //! Peer agent handle -> engines ROCr has reported as usable for P2P with that peer
+    std::unordered_map<uint64_t, uint32_t> peer_engine_mask_;
     std::atomic<uint32_t> next_rr_engine_{0};  //!< RR counter for sdma engine selection
     const Device& device_;  //!< Reference to parent device for accessing masks
 

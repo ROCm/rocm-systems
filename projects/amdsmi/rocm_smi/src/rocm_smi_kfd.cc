@@ -1274,8 +1274,10 @@ int KFDNode::get_total_memory(uint64_t* total) {
     while (std::getline(fs, line)) {
       if (line.substr(0, size_in_bytes_property.length()) == size_in_bytes_property) {
         auto bytes = line.substr(size_in_bytes_property.length());
+        // stoull() wraps a negative string to a huge value instead of throwing.
+        if (bytes.find('-') != std::string::npos) break;
         try {
-          *total += std::stol(bytes);
+          *total += std::stoull(bytes);
           break;
         } catch (...) {
           dentry = readdir(kfd_node_dir);
@@ -1452,11 +1454,11 @@ int KFDNode::get_cache_info(rsmi_gpu_cache_info_t* info) {
 
       if (info->num_cache_types >= RSMI_MAX_CACHE_TYPES) return 1;
 
-      info->cache[info->num_cache_types].cache_level = cache_level;
-      info->cache[info->num_cache_types].cache_size_kb = cache_size;
-      info->cache[info->num_cache_types].max_num_cu_shared = num_cu_shared;
+      info->cache[info->num_cache_types].cache_level = static_cast<uint32_t>(cache_level);
+      info->cache[info->num_cache_types].cache_size_kb = static_cast<uint32_t>(cache_size);
+      info->cache[info->num_cache_types].max_num_cu_shared = static_cast<uint32_t>(num_cu_shared);
       info->cache[info->num_cache_types].num_cache_instance = 1;
-      info->cache[info->num_cache_types].flags = cache_type;
+      info->cache[info->num_cache_types].flags = static_cast<uint32_t>(cache_type);
       info->num_cache_types++;
     } catch (...) {
       continue;

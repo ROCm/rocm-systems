@@ -171,6 +171,10 @@ TEST(MfmaSimdExact, Bf16Spec_AllShapes) {
   spec(amdgpu::exec_f32_mfma_bf16_spec<32, 32, 16>, "spec_bf16_32x32x16");
   spec(amdgpu::exec_f32_mfma_bf16_spec<32, 32, 8>, "spec_bf16_32x32x8");
   spec(amdgpu::exec_f32_mfma_bf16_spec<16, 16, 16>, "spec_bf16_16x16x16");
+  spec(amdgpu::exec_f32_mfma_bf16_spec<32, 32, 4>, "spec_bf16_32x32x4");
+  spec(amdgpu::exec_f32_mfma_bf16_spec<16, 16, 8>, "spec_bf16_16x16x8");
+  spec(amdgpu::exec_f32_mfma_bf16_spec<32, 32, 2, 2>, "spec_bf16_32x32x2x2");
+  spec(amdgpu::exec_f32_mfma_bf16_spec<16, 16, 2, 4>, "spec_bf16_16x16x2x4");
   spec(amdgpu::exec_f32_mfma_bf16_spec<32, 32, 4, 2>, "spec_bf16_32x32x4x2");
   spec(amdgpu::exec_f32_mfma_bf16_spec<16, 16, 4, 4>, "spec_bf16_16x16x4x4");
 }
@@ -239,8 +243,9 @@ TEST(MfmaSimdExact, F32SpecDestructiveSourceOverlap) {
 
 TEST(MfmaSimdExact, F16SpecDestructiveAccumulatorOverlap) {
   SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "test requires the 16-lane matrix fast path";
+  constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
+  if (!amdgpu::mma_f32_native_width_supported(32, width))
+    GTEST_SKIP() << "f16 MFMA shape is not divisible by the native SIMD width";
   constexpr uint32_t source_a = 0;
   constexpr uint32_t source_b = 16;
   constexpr uint32_t accumulator = 48;
@@ -266,8 +271,9 @@ TEST(MfmaSimdExact, F16SpecDestructiveAccumulatorOverlap) {
 
 TEST(MfmaSimdExact, Bf16SpecDestructiveAccumulatorOverlap) {
   SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "test requires the 16-lane matrix fast path";
+  constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
+  if (!amdgpu::mma_f32_native_width_supported(32, width))
+    GTEST_SKIP() << "bf16 MFMA shape is not divisible by the native SIMD width";
   constexpr uint32_t source_a = 0;
   constexpr uint32_t source_b = 16;
   constexpr uint32_t accumulator = 48;

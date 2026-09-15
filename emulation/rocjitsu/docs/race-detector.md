@@ -148,8 +148,10 @@ races. Some examples:
 - **VGPR races**: a vector register is read or overwritten by an instruction
   before a pending global or LDS load has completed (`s_waitcnt vmcnt` /
   `s_waitcnt lgkmcnt` insufficient).
-- **SGPR races**: a scalar register is read before a pending scalar load has
-  completed (`s_waitcnt lgkmcnt` insufficient).
+- **Scalar-register races**: an SGPR or TTMP is read or overwritten before a
+  pending scalar-memory load has completed. A later scalar load to the same
+  destination is also checked because scalar-memory results can complete out
+  of order.
 - **LDS races**: an LDS byte is read by one wave while another wave has an
   outstanding write to the same byte, or written by one wave while another
   wave has an outstanding read of the same byte, without an intervening
@@ -183,9 +185,15 @@ operations are in flight. When an instruction in the emulator accesses an LDS
 byte, there is a check to see what memory events are still in flight that
 read/write that byte, from the perspective of the accessing thread. In this way,
 RAW (read-after-write) and WAR (write-after-read) hazards can be detected.
-For VGPRs, the detector also flags WAW when an instruction write can be
-clobbered by a pending asynchronous load. Similar logic applies for VGPR and
-SGPR reads.
+For VGPRs and scalar registers, the detector also flags WAW when an instruction
+write can be clobbered by a pending asynchronous load. The detector also reports
+WAW between scalar loads targeting the same SGPR or TTMP.
+
+On architectures where scalar-memory and data-share operations use a combined
+`lgkmcnt`, a nonzero partial wait cannot identify which scalar destination has
+completed. Those scalar destinations remain pending until `lgkmcnt(0)`. The
+same partial wait can still retire older data-share operations that are provably
+complete from their in-order completion rule.
 
 **LDS race detection** uses coarse-grained counters (one per 16-byte chunk) for
 fast-path checks, with interval-based overlap scanning as a fallback. Live
@@ -298,8 +306,10 @@ ctest --test-dir $BUILD_DIR -R "RaceTest"
   races, races between dispatches, or host-device synchronization issues.
 
 - **Limited WAW detection**: VGPR WAW is limited to synchronous instruction
-  writes that overlap a pending asynchronous load. WAW between two asynchronous
-  VGPR writers and LDS WAW are not currently reported.
+  writes that overlap a pending asynchronous load. Scalar-register WAW covers
+  instruction writes and scalar loads that overlap pending scalar-memory
+  destinations. WAW between two asynchronous VGPR writers and LDS WAW are not
+  currently reported.
 
 - **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
   plugin's instruction-write lane and byte masks. DPP destinations can currently

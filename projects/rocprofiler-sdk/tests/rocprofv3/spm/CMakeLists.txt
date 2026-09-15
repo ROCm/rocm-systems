@@ -24,6 +24,7 @@ rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 if(${SANITIZER})
     set(IS_SPM_DISABLED True)
 endif()
+
 set(IS_DISABLED True)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
