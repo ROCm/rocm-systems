@@ -23,6 +23,15 @@ bool ncclDdaNranksRelaxEnabled();
 // otherwise comm init allocates IPC resources the eligibility gate then refuses.
 bool ncclDdaIpcNranksSupported(int nRanks);
 
+// True when nRanks sits in the range where ncclDdaIpcNranksSupported()'s answer
+// actually depends on RCCL_DDA_NRANKS_RELAX: 2..kDdaNranks-1. Outside that range
+// (exactly kDdaNranks, or too few/many ranks) the supported/unsupported answer
+// is the same whether or not the knob is set, so a per-rank mismatch in the env
+// var cannot cause ranks to disagree on whether to enter the DDA IPC path. Comm
+// init uses this to decide whether checking RCCL_DDA_NRANKS_RELAX agreement
+// across ranks is even relevant for a given communicator.
+bool ncclDdaNranksRelaxConsensusMatters(int nRanks);
+
 // IPC path (single node, kDdaNranks ranks by default; any 2..kDdaNranks when relax is set).
 bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op);

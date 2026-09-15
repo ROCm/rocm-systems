@@ -46,6 +46,10 @@ bool ncclDdaIpcNranksSupported(int nRanks) {
   return nRanks >= 2 && nRanks <= kDdaNranks;
 }
 
+bool ncclDdaNranksRelaxConsensusMatters(int nRanks) {
+  return nRanks >= 2 && nRanks < kDdaNranks;
+}
+
 #define HIP_CALL(cmd) \
   do { \
     hipError_t error = (cmd); \
