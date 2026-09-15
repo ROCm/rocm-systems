@@ -436,7 +436,12 @@ TEST_CASE("Unit_HRR_ApiMatrix_PayloadLoss_Direct", "[.][hrr-direct]") {
       hipIpcEventHandle_t event_handle{};
       if (hipIpcGetEventHandle(&event_handle, ipc_event) == hipSuccess) {
         hipEvent_t reopened = nullptr;
-        (void)hipIpcOpenEventHandle(&reopened, event_handle);
+        // A same-process open is rejected, so this usually does nothing. When
+        // it does succeed the event is ours, and it is released here for the
+        // same reason the IPC mem handle above is closed.
+        if (hipIpcOpenEventHandle(&reopened, event_handle) == hipSuccess &&
+            reopened != nullptr)
+          (void)hipEventDestroy(reopened);
       }
       (void)hipEventDestroy(ipc_event);
     }
@@ -2334,13 +2339,26 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
   {
     std::vector<char> code_object = compile_rtc();
 
+    // hipLinkAddFile and hipLibraryLoadFromFile are the two file-based
+    // loaders, so the code object is written once, up front, and both read
+    // it. It used to be created further down, after hipLinkAddFile had
+    // already been handed the path: capture records only successful calls,
+    // so hipLinkAddFile failed on a missing file and never reached the
+    // archive, leaving a T4 row the matrix expects to be captured.
+    const fs::path co_path = fs::temp_directory_path() / "hrr_matrix_rtc.co";
+    {
+      std::ofstream out(co_path, std::ios::binary);
+      out.write(code_object.data(),
+                static_cast<std::streamsize>(code_object.size()));
+    }
+
     hipLinkState_t link_state = nullptr;
     if (hipLinkCreate(0, nullptr, nullptr, &link_state) == hipSuccess) {
       (void)hipLinkAddData(link_state, hipJitInputLLVMBundledBitcode,
                            code_object.data(), code_object.size(), "mtx_rtc",
                            0, nullptr, nullptr);
       (void)hipLinkAddFile(link_state, hipJitInputLLVMBundledBitcode,
-                           "/tmp/hrr_matrix_rtc.co", 0, nullptr, nullptr);
+                           co_path.string().c_str(), 0, nullptr, nullptr);
       (void)hipLinkDestroy(link_state);
     }
 
@@ -2361,12 +2379,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
     // hipLibraryLoadFromFile needs a path, so give it one rather than leaving
     // the only file-based loader in the API untested.
     {
-      const fs::path co_path =
-          fs::temp_directory_path() / "hrr_matrix_rtc.co";
-      std::ofstream out(co_path, std::ios::binary);
-      out.write(code_object.data(),
-                static_cast<std::streamsize>(code_object.size()));
-      out.close();
       hipLibrary_t file_library = nullptr;
       if (hipLibraryLoadFromFile(&file_library, co_path.string().c_str(),
                                  nullptr, nullptr, 0, nullptr, nullptr, 0)
