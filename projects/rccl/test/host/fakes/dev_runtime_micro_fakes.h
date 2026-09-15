@@ -3,15 +3,19 @@
  *
  * See LICENSE.txt for license information
  *
- * Controllable seams exposed by fakes/dev_runtime_micro_fakes.cc.
+ * Controllable seams exposed by fakes/dev_runtime_micro_fakes.cc: the non-HIP
+ * externs dev_runtime.cc reaches -- shadow pool, VA space, address map, GIN,
+ * RMA proxy, bootstrap. The HIP surface it drives lives in fakes/hip_fakes.h,
+ * shared with the other micro suites, and the nccl-wide symbols in
+ * fakes/nccl_fakes.h.
  *
  * Distinct from fakes/dev_runtime_fakes.{h,cc}, which fakes two dev_runtime.cc
- * predicates for binaries that do NOT compile that file. This one is the full
- * fake environment for rccl-UnitTestsMicroDevRuntime, which compiles
- * dev_runtime.cc itself; the two must never be linked into the same binary.
+ * predicates for binaries that do NOT compile that file. This one belongs to
+ * rccl-UnitTestsMicro, which compiles dev_runtime.cc itself (dev-runtime-test.cc);
+ * the two must never be linked into the same binary.
  *
  * Each hook defaults to the success behaviour the rest of the suite relies on.
- * A test that needs a HIP VMM call to fail installs its own via ScopedHook
+ * A test that needs a call to fail installs its own via ScopedHook
  * (test/host/ScopedHook.h), which restores the previous one on scope exit.
  *************************************************************************/
 
