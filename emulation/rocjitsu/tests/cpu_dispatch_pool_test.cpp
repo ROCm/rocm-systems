@@ -5,6 +5,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "throwing_instruction_test_util.h"
 
 #include <gtest/gtest.h>
 
@@ -32,6 +33,7 @@ namespace {
 using namespace rocjitsu;
 
 constexpr uint32_t kSNop = 0xBF800000u;
+constexpr uint32_t kSMovB32 = 0xBE800000u; // s_mov_b32 s0, s0
 constexpr uint32_t kSSetvskip = 0xBF100000u;
 constexpr uint64_t kProgramBase = 0x100000;
 
@@ -130,14 +132,17 @@ TEST(CpuDispatchPoolTest, ZeroFunctionalQuantumRunsUntilWavefrontHalts) {
 TEST(CpuDispatchPoolTest, WorkerExceptionsRethrowAndPoolRemainsReusable) {
   DispatchPoolFixture fixture(/*cu_count=*/64);
   amdgpu::CpuDispatchPool pool(/*threads=*/8);
+  fixture.memory.write32(kProgramBase, kSMovB32);
 
-  fixture.memory.write32(kProgramBase, kSSetvskip);
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::make_unique<test::ThrowingInstructionPlugin>()));
+  for (auto &cu : fixture.cus)
+    cu->set_plugin_group(group);
   EXPECT_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/8),
                std::exception);
 
-  fixture.memory.write32(kProgramBase, kSNop);
   for (auto &cu : fixture.cus)
-    cu->instruction_cache().invalidate_all();
+    cu->set_plugin_group(nullptr);
   for (auto *wf : fixture.wfs)
     wf->pc = kProgramBase;
   EXPECT_NO_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/8));
@@ -146,16 +151,27 @@ TEST(CpuDispatchPoolTest, WorkerExceptionsRethrowAndPoolRemainsReusable) {
 }
 
 TEST(CpuDispatchPoolTest, OneThreadFinishesBatchBeforeRethrowing) {
-  constexpr uint64_t kBadProgramBase = kProgramBase + 0x2000;
   DispatchPoolFixture fixture(/*cu_count=*/4);
   amdgpu::CpuDispatchPool pool(/*threads=*/4);
-  fixture.memory.write32(kBadProgramBase, kSSetvskip);
-  fixture.wfs[0]->pc = kBadProgramBase;
+  fixture.memory.write32(kProgramBase, kSMovB32);
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::make_unique<test::ThrowingInstructionPlugin>()));
+  fixture.cus[0]->set_plugin_group(group);
 
   EXPECT_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/1),
                std::exception);
   for (size_t i = 1; i < fixture.wfs.size(); ++i)
     EXPECT_EQ(fixture.wfs[i]->pc, kProgramBase + sizeof(uint32_t));
+}
+
+TEST(CpuDispatchPoolTest, UnimplementedInstructionsHaltWithoutThrowing) {
+  DispatchPoolFixture fixture(/*cu_count=*/8);
+  amdgpu::CpuDispatchPool pool(/*threads=*/4);
+  fixture.memory.write32(kProgramBase, kSSetvskip);
+
+  EXPECT_NO_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/4));
+  for (const auto &cu : fixture.cus)
+    EXPECT_TRUE(cu->is_idle());
 }
 
 TEST(CpuDispatchPoolTest, DestroyJoinsParkedWorkers) {

@@ -463,6 +463,13 @@ TEST_F(DaemonPluginTest, LoggingPluginDispatchLogged) {
 // invalidation-vs-open serialization — which the CLI-launched (local) variant of
 // the same tests cannot reach.
 
+TEST_F(DaemonTest, ForkserverChildrenInitializeIndependentBackends) {
+  const ProcessResult result =
+      run_hip_test(interposer_dup_bin(),
+                   "InterposerFreshForkTest.ChildAndGrandchildInitializeIndependentBackends");
+  EXPECT_EQ(result.exit_code, 0) << result.output;
+}
+
 TEST_F(DaemonTest, InterposerDupReopenAfterPrimaryOverwriteRemote) {
   auto r = run_hip_test(interposer_dup_bin(),
                         "InterposerDupTest.ReopenAfterPrimaryOverwriteKeepsBackend");

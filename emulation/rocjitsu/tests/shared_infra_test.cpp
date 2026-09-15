@@ -275,7 +275,7 @@ public:
   }
 
   void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
-    execute_instruction(inst, wf);
+    EXPECT_TRUE(execute_instruction(inst, wf).succeeded());
     if (inst->is_memory_op())
       route_memory_inst(inst, wf);
     else
@@ -7657,7 +7657,7 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, kReadfirstlaneS24V1.data()));
     ASSERT_NE(inst, nullptr);
     cu->write_sgpr(sbase + 24, 0);
-    cu->execute_instruction(inst.get(), *wfs[i]);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wfs[i]).succeeded());
     EXPECT_EQ(cu->read_sgpr(sbase + 24), 0x100u + i);
   }
 
@@ -7667,7 +7667,7 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
     ASSERT_NE(inst, nullptr);
     cu->write_sgpr(sbase + 2, 0);
     cu->write_sgpr(sbase + 4, 0);
-    cu->execute_instruction(inst.get(), *wfs[i]);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wfs[i]).succeeded());
     EXPECT_EQ(cu->read_sgpr(sbase + 4), 0x200u + i);
   }
 
@@ -7677,7 +7677,7 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
     ASSERT_NE(inst, nullptr);
     cu->write_sgpr(sbase + 4, 0);
     cu->write_sgpr(sbase + 31, 0);
-    cu->execute_instruction(inst.get(), *wfs[i]);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wfs[i]).succeeded());
     EXPECT_EQ(cu->read_sgpr(sbase + 4), 0x300u + i);
   }
 
@@ -7687,7 +7687,7 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
     ASSERT_NE(inst, nullptr);
     cu->write_sgpr(sbase + 2, 31);
     cu->write_sgpr(sbase + 4, 0);
-    cu->execute_instruction(inst.get(), *wfs[i]);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wfs[i]).succeeded());
     EXPECT_EQ(cu->read_sgpr(sbase + 4), 0x400u + i);
   }
 
@@ -7698,7 +7698,7 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
     ASSERT_NE(inst, nullptr);
     cu->write_sgpr(sbase + 2, 31);
     cu->write_sgpr(sbase + 4, 0x500u + i);
-    cu->execute_instruction(inst.get(), *wfs[i]);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wfs[i]).succeeded());
     EXPECT_EQ(cu->read_vgpr(vbase + 159, 2), 0x200u + i);
     EXPECT_EQ(cu->read_vgpr(vbase + 159, 31), 0x500u + i);
   }
@@ -7716,13 +7716,13 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
     ASSERT_NE(read_inst, nullptr);
     cu->write_sgpr(sbase + 2, 43);
     cu->write_sgpr(sbase + 4, 0x700u + i);
-    cu->execute_instruction(write_inst.get(), *wfs[i]);
+    EXPECT_TRUE(cu->execute_instruction(write_inst.get(), *wfs[i]).succeeded());
     EXPECT_EQ(cu->read_vgpr(vbase + 159, 11), 0x700u + i);
     EXPECT_EQ(cu->read_vgpr(vbase + 159, 31), 0x500u + i);
     EXPECT_EQ(cu->read_vgpr(vbase + 160, 11), 0xdead6000u + i);
 
     cu->write_sgpr(sbase + 4, 0);
-    cu->execute_instruction(read_inst.get(), *wfs[i]);
+    EXPECT_TRUE(cu->execute_instruction(read_inst.get(), *wfs[i]).succeeded());
     EXPECT_EQ(cu->read_sgpr(sbase + 4), 0x700u + i);
   }
 }
@@ -7765,11 +7765,11 @@ TEST(RdnaVectorLaneReadTest, Wave64SelectorsShareOneArchitecturalRegisterContext
   cu->write_vgpr(vbase + 159, 43, 0x43434343u);
   cu->write_vgpr(vbase + 160, 11, 0xdeadbeefu);
   cu->write_sgpr(sbase + 2, 43);
-  cu->execute_instruction(read_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(read_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_sgpr(sbase + 4), 0x43434343u);
 
   cu->write_sgpr(sbase + 4, 0x84848484u);
-  cu->execute_instruction(write_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(write_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vbase + 159, 43), 0x84848484u);
   EXPECT_EQ(cu->read_vgpr(vbase + 159, 11), 0x11111111u);
   EXPECT_EQ(cu->read_vgpr(vbase + 160, 11), 0xdeadbeefu);

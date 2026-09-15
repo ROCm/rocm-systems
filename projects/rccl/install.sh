@@ -119,7 +119,7 @@ function display_help()
     echo "       --verbose               Show compile commands"
     echo ""
     echo "  Available RCCL-specific CMake options for --cmake-options:"
-    echo "    -DBUILD_PLUGIN_EXAMPLES=ON             Build plugin example libraries: net, tuner, profiler, env (default: OFF)"
+    echo "    -DBUILD_PLUGIN_EXAMPLES=ON             Build plugin example libraries: net, tuner, profiler, env, gin, mixed, proxytrace, accl (default: OFF)"
     echo "    -DDWORDX4_INTRINSICS=OFF              Disable dwordx4 intrinsics (default: ON)"
     echo "    -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)"
     echo "    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)"

@@ -220,7 +220,7 @@ def put_nbi_api(T, TNAME):
         f"    size_t nelems, int pe);\n"
         f"__host__ void rocshmem_{TNAME}_put_nbi(\n"
         f"    {T} *dest, const {T} *source, size_t nelems, int pe);\n\n"
-    )    
+    )
 
 
 def generate_put_nbi_api():

@@ -43,6 +43,7 @@ enum class WfState : uint8_t {
 enum class InstructionExecutionError : uint8_t {
   None,
   UnsupportedOperandValue,
+  UnimplementedInstruction,
 };
 
 /// @brief Allocation slice within a register file.

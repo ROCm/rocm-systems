@@ -165,7 +165,7 @@ struct Fixture {
                                       uint32_t rot2, uint64_t exec, uint64_t vcc) {
     seed_vgprs_f32(rot0, rot1, rot2, exec);
     wf->set_vcc(vcc);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -177,7 +177,7 @@ struct Fixture {
                                       uint32_t rot2, uint64_t exec, uint64_t vcc) {
     seed_vgprs_f64(rot0, rot1, rot2, exec);
     wf->set_vcc(vcc);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint64_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
@@ -262,7 +262,7 @@ std::array<uint32_t, WF_SIZE> run_div_fixup_f16_opsel(bool force_scalar, uint32_
   }
   fx.wf->set_exec(~0ULL);
   fx.wf->set_vcc(0);
-  fx.cu->execute_instruction(inst, *fx.wf);
+  EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
   delete inst;
 
   std::array<uint32_t, WF_SIZE> out{};
@@ -336,7 +336,7 @@ std::array<uint32_t, WF_SIZE> run_div_fixup_f32_nan_precedence(bool force_scalar
   }
   fx.wf->set_exec(~0ULL);
   fx.wf->set_vcc(0);
-  fx.cu->execute_instruction(inst, *fx.wf);
+  EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
   delete inst;
 
   std::array<uint32_t, WF_SIZE> out{};
@@ -372,7 +372,7 @@ std::array<uint64_t, WF_SIZE> run_div_fixup_f64_nan_precedence(bool force_scalar
   }
   fx.wf->set_exec(~0ULL);
   fx.wf->set_vcc(0);
-  fx.cu->execute_instruction(inst, *fx.wf);
+  EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
   delete inst;
 
   std::array<uint64_t, WF_SIZE> out{};

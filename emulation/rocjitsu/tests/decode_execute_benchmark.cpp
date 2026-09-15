@@ -192,7 +192,7 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const Encodi
       auto *inst = decode_valid(*decoder, entry->words.data());
       if (inst) {
         try {
-          cu->execute_instruction(inst, *wf);
+          (void)cu->execute_instruction(inst, *wf);
         } catch (...) {
         }
         delete inst;
@@ -244,5 +244,47 @@ TEST(DecodeExecuteBenchmark, Cdna4) { RUN_BENCHMARK(cdna4, ROCJITSU_CODE_ARCH_CD
 TEST(DecodeExecuteBenchmark, Rdna4) { RUN_BENCHMARK(rdna4, ROCJITSU_CODE_ARCH_RDNA4, "rdna4"); }
 
 TEST(DecodeExecuteBenchmark, Gfx1250) { RUN_BENCHMARK(cdna5, ROCJITSU_CODE_ARCH_CDNA5, "gfx1250"); }
+
+// Isolate dispatch overhead from decoding and wavefront setup. The rejection
+// instruction has no implementation and must fail before accessing memory.
+void run_execution_dispatch_benchmark(size_t failure_period) {
+  amdgpu::GpuMemory memory("dispatch_bench_mem");
+  amdgpu::L2Cache l2("dispatch_bench_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  auto cu = amdgpu::ComputeUnitCore::create("dispatch_bench", cfg, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  auto decoder = Decoder::create(cfg.arch);
+  ASSERT_NE(decoder, nullptr);
+  const std::array<uint32_t, 2> add_words{0x80000000u, 0}; // s_add_co_u32 s0, s0, s0
+  const std::array<uint32_t, 3> rejected_words{0xC4024000u, 0, 0};
+  std::unique_ptr<Instruction> add(decode_valid(*decoder, add_words.data()));
+  std::unique_ptr<Instruction> rejected(decode_valid(*decoder, rejected_words.data()));
+  ASSERT_NE(add, nullptr);
+  ASSERT_NE(rejected, nullptr);
+  ASSERT_EQ(add->mnemonic(), "s_add_co_u32");
+  ASSERT_EQ(rejected->mnemonic(), "buffer_load_d16_format_xy");
+
+  constexpr size_t iterations = 1000000;
+  size_t failures = 0;
+  const auto start = Clock::now();
+  for (size_t i = 0; i < iterations; ++i) {
+    Instruction *inst = failure_period != 0 && i % failure_period == 0 ? rejected.get() : add.get();
+    failures += cu->execute_instruction(inst, *wf).failed();
+  }
+  const auto elapsed = std::chrono::duration<double, std::nano>(Clock::now() - start).count();
+  EXPECT_EQ(failures, failure_period == 0 ? 0 : (iterations + failure_period - 1) / failure_period);
+  std::printf("  Dispatch: period=%zu failures=%zu ns/inst=%.3f\n", failure_period, failures,
+              elapsed / iterations);
+}
+
+TEST(ExecutionDispatchBenchmark, Success) { run_execution_dispatch_benchmark(0); }
+TEST(ExecutionDispatchBenchmark, Rejected) { run_execution_dispatch_benchmark(1); }
+TEST(ExecutionDispatchBenchmark, Mixed) { run_execution_dispatch_benchmark(10); }
 
 } // namespace
