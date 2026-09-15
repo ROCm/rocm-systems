@@ -5,12 +5,26 @@ include_guard(DIRECTORY)
 
 set(FMT_VERSION "11.1.3" CACHE STRING "Minimum fmt version")
 
-find_package(fmt ${FMT_VERSION} QUIET)
+find_package(fmt QUIET)
 
-if(fmt_FOUND)
+set(_fmt_reason "")
+if(NOT fmt_FOUND)
+    set(_fmt_reason "no package was found on CMAKE_PREFIX_PATH")
+elseif(fmt_VERSION VERSION_LESS FMT_VERSION)
+    set(_fmt_reason
+        "version ${fmt_VERSION} was found, but ${FMT_VERSION} or newer is required"
+    )
+endif()
+
+if(_fmt_reason STREQUAL "")
     message(STATUS "Using system fmt (version ${fmt_VERSION})")
+elseif(NOT PROFILER_HUB_FETCH_DEPENDENCIES)
+    message(
+        FATAL_ERROR
+        "profiler-hub requires fmt: ${_fmt_reason}. Provide it on CMAKE_PREFIX_PATH, or configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it."
+    )
 else()
-    message(STATUS "System fmt not found, fetching version ${FMT_VERSION}")
+    message(STATUS "Fetching fmt ${FMT_VERSION}: ${_fmt_reason}")
     include(FetchContent)
 
     FetchContent_Declare(
@@ -44,3 +58,5 @@ else()
         add_library(fmt::fmt ALIAS fmt)
     endif()
 endif()
+
+unset(_fmt_reason)

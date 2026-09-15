@@ -3,19 +3,33 @@
 
 include_guard(DIRECTORY)
 
-set(BENCHMARK_VERSION "1.8.3" CACHE STRING "Google Benchmark version")
+set(BENCHMARK_VERSION "1.8.3" CACHE STRING "Minimum Google Benchmark version")
 
 find_package(benchmark QUIET)
 
-if(benchmark_FOUND)
+set(_benchmark_reason "")
+if(NOT benchmark_FOUND)
+    set(_benchmark_reason "no package was found on CMAKE_PREFIX_PATH")
+elseif(benchmark_VERSION VERSION_LESS BENCHMARK_VERSION)
+    set(_benchmark_reason
+        "version ${benchmark_VERSION} was found, but ${BENCHMARK_VERSION} or newer is required"
+    )
+endif()
+
+if(_benchmark_reason STREQUAL "")
     message(
         STATUS
         "Using system Google Benchmark (version ${benchmark_VERSION})"
     )
+elseif(NOT PROFILER_HUB_FETCH_DEPENDENCIES)
+    message(
+        FATAL_ERROR
+        "profiler-hub requires Google Benchmark: ${_benchmark_reason}. Provide it on CMAKE_PREFIX_PATH, configure with -DPROFILER_HUB_BUILD_BENCHMARKS=OFF, or configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it."
+    )
 else()
     message(
         STATUS
-        "System Google Benchmark not found, fetching version ${BENCHMARK_VERSION}"
+        "Fetching Google Benchmark ${BENCHMARK_VERSION}: ${_benchmark_reason}"
     )
     include(FetchContent)
 
@@ -41,3 +55,5 @@ else()
         add_library(benchmark::benchmark_main ALIAS benchmark_main)
     endif()
 endif()
+
+unset(_benchmark_reason)
