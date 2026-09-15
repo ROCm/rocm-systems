@@ -110,8 +110,14 @@ protected:
         ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
         ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank_));
         ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks_));
-        if(getActiveCommunicator()->ddaFabricBarrierState == nullptr)
-            GTEST_SKIP() << "DDA fabric path did not initialize";
+
+        // Fabric init can fail on some ranks (VMM unavailable, OOM) while succeeding
+        // on others. Coordinate the skip across all ranks to avoid hangs in collectives.
+        bool localSkip = (getActiveCommunicator()->ddaFabricBarrierState == nullptr);
+        std::string skipReason =
+            mpiCoordinatedSkipReason(localSkip, "DDA fabric path did not initialize");
+        if(!skipReason.empty())
+            GTEST_SKIP() << skipReason;
     }
 
     void TearDown() override
@@ -352,10 +358,10 @@ protected:
 
 TEST_F(DdaFabricBlockCap, UsesCliqueWideMinimum)
 {
-    // Rank 0 advertises 32 while every other rank advertises 64. Observing 32
-    // in every rank's local init log proves the bootstrap exchange selected the
-    // communicator-wide minimum rather than retaining each local value.
-    expectLog("communicator max blocks=32");
+    // Rank 0 advertises 32 while every other rank advertises 64. The clique-wide
+    // minimum should be 32 on all ranks after the bootstrap exchange.
+    EXPECT_EQ(getActiveCommunicator()->ddaFabricMaxBlocks, 32)
+        << "Rank " << rank_ << " did not converge to clique-wide minimum";
 }
 
 TEST_F(DdaFabricSimple, AllReduceOutOfPlace)
