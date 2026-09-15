@@ -42,7 +42,8 @@ test_categories:
       - "HierarchicalShuffleTest.*"
       - "DeviceTestBase.Gfx1250EnablesSysScope"
       - "DeviceTestBase.FifoLineSysScopeRoundtrip"
-      - "LlFifoSysScope.SiblingBroadcastSlotReuse"
+      - "LlFifoSysScope.SiblingBroadcastSlotReuse_LL"
+      - "LlFifoSysScope.SiblingBroadcastSlotReuse_LL128"
     exclude_windows:
       - "*"
     labels:

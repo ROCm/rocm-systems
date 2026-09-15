@@ -31,7 +31,7 @@ namespace RcclUnitTesting
 namespace
 {
 
-union TestLLLine {
+union alignas(16) TestLLLine {
   struct {
     uint32_t data1;
     uint32_t flag1;
@@ -113,7 +113,7 @@ void runSiblingBroadcastSlotReuse(int devA, int devB)
   ASSERT_EQ(ncclCommInitAll(comms, 2, devs), ncclSuccess);
 
   constexpr int kCount = 256;  // 1 KiB float broadcast; one LL step per coll
-  constexpr int kIters = 9;    // first FIFO slot reuse (NCCL_STEPS == 8)
+  constexpr int kIters = 64;   // comfortably past FIFO slot reuse (NCCL_STEPS == 8)
   float* send[2] = {};
   float* recv[2] = {};
   hipStream_t streams[2] = {};
@@ -123,13 +123,18 @@ void runSiblingBroadcastSlotReuse(int devA, int devB)
     ASSERT_EQ(hipMalloc(&send[r], kCount * sizeof(float)), hipSuccess);
     ASSERT_EQ(hipMalloc(&recv[r], kCount * sizeof(float)), hipSuccess);
     ASSERT_EQ(hipStreamCreate(&streams[r]), hipSuccess);
-    std::vector<float> h(kCount, r == 0 ? 42.0f : -1.0f);
-    ASSERT_EQ(hipMemcpy(send[r], h.data(), kCount * sizeof(float), hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(hipMemset(recv[r], 0, kCount * sizeof(float)), hipSuccess);
   }
 
   for (int iter = 0; iter < kIters; ++iter) {
+    const float expected = 42.0f + iter;
+    for (int r = 0; r < 2; ++r) {
+      ASSERT_EQ(hipSetDevice(devs[r]), hipSuccess);
+      std::vector<float> h(kCount, r == 0 ? expected : -1.0f);
+      ASSERT_EQ(hipMemcpy(send[r], h.data(), kCount * sizeof(float), hipMemcpyHostToDevice),
+                hipSuccess);
+      ASSERT_EQ(hipMemset(recv[r], 0, kCount * sizeof(float)), hipSuccess);
+    }
+
     ASSERT_EQ(ncclGroupStart(), ncclSuccess);
     for (int r = 0; r < 2; ++r) {
       ASSERT_EQ(hipSetDevice(devs[r]), hipSuccess);
@@ -137,17 +142,21 @@ void runSiblingBroadcastSlotReuse(int devA, int devB)
                 ncclSuccess);
     }
     ASSERT_EQ(ncclGroupEnd(), ncclSuccess);
+
+    for (int r = 0; r < 2; ++r) {
+      ASSERT_EQ(hipSetDevice(devs[r]), hipSuccess);
+      ASSERT_EQ(hipStreamSynchronize(streams[r]), hipSuccess);
+      std::vector<float> h(kCount, 0);
+      ASSERT_EQ(hipMemcpy(h.data(), recv[r], kCount * sizeof(float), hipMemcpyDeviceToHost),
+                hipSuccess);
+      for (int i = 0; i < kCount; ++i) {
+        ASSERT_EQ(h[i], expected) << "iter " << iter << " rank " << r << " elem " << i;
+      }
+    }
   }
 
   for (int r = 0; r < 2; ++r) {
     ASSERT_EQ(hipSetDevice(devs[r]), hipSuccess);
-    ASSERT_EQ(hipStreamSynchronize(streams[r]), hipSuccess);
-    std::vector<float> h(kCount, 0);
-    ASSERT_EQ(hipMemcpy(h.data(), recv[r], kCount * sizeof(float), hipMemcpyDeviceToHost),
-              hipSuccess);
-    for (int i = 0; i < kCount; ++i) {
-      ASSERT_EQ(h[i], 42.0f) << "rank " << r << " elem " << i;
-    }
     ASSERT_EQ(hipStreamDestroy(streams[r]), hipSuccess);
     ASSERT_EQ(hipFree(send[r]), hipSuccess);
     ASSERT_EQ(hipFree(recv[r]), hipSuccess);
@@ -182,10 +191,10 @@ TEST_F(DeviceTestBase, FifoLineSysScopeRoundtrip)
   EXPECT_EQ(d_ok.download(), 1);
 }
 
-TEST(LlFifoSysScope, SiblingBroadcastSlotReuse)
+TEST(LlFifoSysScope, SiblingBroadcastSlotReuse_LL)
 {
   RUN_ISOLATED_TESTS(
-    ProcessIsolatedTestRunner::TestConfig("LlFifoSysScope.SiblingBroadcastSlotReuse",
+    ProcessIsolatedTestRunner::TestConfig("LlFifoSysScope.SiblingBroadcastSlotReuse_LL",
                                           []() {
                                             int a = 0, b = 1;
                                             if (!findSiblingPair(&a, &b)) {
@@ -197,11 +206,34 @@ TEST(LlFifoSysScope, SiblingBroadcastSlotReuse)
       .withEnvironment({
         {"NCCL_PROTO", "LL"},
         {"NCCL_ALGO", "Ring"},
-        {"RCCL_DDA_THRESHOLD", "0"},
+        {"RCCL_DDA_ENABLE", "0"},
         {"NCCL_IB_DISABLE", "1"},
         {"NCCL_SOCKET_IFNAME", "lo"},
       })
-      .withTimeout(std::chrono::seconds(60))
+      .withTimeout(std::chrono::seconds(180))
+      .withNumGpus(2));
+}
+
+TEST(LlFifoSysScope, SiblingBroadcastSlotReuse_LL128)
+{
+  RUN_ISOLATED_TESTS(
+    ProcessIsolatedTestRunner::TestConfig("LlFifoSysScope.SiblingBroadcastSlotReuse_LL128",
+                                          []() {
+                                            int a = 0, b = 1;
+                                            if (!findSiblingPair(&a, &b)) {
+                                              GTEST_SKIP()
+                                                << "needs visible gfx1250 DPX sibling devices";
+                                            }
+                                            runSiblingBroadcastSlotReuse(a, b);
+                                          })
+      .withEnvironment({
+        {"NCCL_PROTO", "LL128"},
+        {"NCCL_ALGO", "Ring"},
+        {"RCCL_DDA_ENABLE", "0"},
+        {"NCCL_IB_DISABLE", "1"},
+        {"NCCL_SOCKET_IFNAME", "lo"},
+      })
+      .withTimeout(std::chrono::seconds(180))
       .withNumGpus(2));
 }
 

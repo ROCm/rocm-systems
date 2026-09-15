@@ -16,11 +16,11 @@
 #endif
 #endif
 
-// FIFO 128-bit load. On gfx1250, sibling P2P into a cacheable comm FIFO is
-// not coherent under a nontemporal load; use system-scope b128 there.
-// See RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h (default hipMalloc / cuMem hung;
-// uncached did not).
-// Cache-bypassing load128 remains in use for registered user buffers.
+// 128-bit load for FIFO and non-registered user buffers. On gfx1250, sibling
+// P2P into a cacheable comm FIFO is not coherent under a nontemporal load; use
+// system-scope b128 there. See RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h (default
+// hipMalloc / cuMem hung; uncached did not). For registered user buffers, use
+// load128 which bypasses the cache.
 inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
 #if RCCL_LL_FIFO_SYS_SCOPE
   union {
@@ -55,16 +55,16 @@ inline __device__ void store128Plain(uint64_t* ptr, uint64_t v0, uint64_t v1) {
 // cacheable FIFO can retire in the writer's cache and never reach a sibling
 // partition's poll. See RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h.
 inline __device__ void store128Fifo(uint64_t* ptr, uint64_t v0, uint64_t v1) {
+#if RCCL_LL_FIFO_SYS_SCOPE
   union {
     v4u v;
     uint64_t u64[2];
   } u;
   u.u64[0] = v0;
   u.u64[1] = v1;
-#if RCCL_LL_FIFO_SYS_SCOPE
   __builtin_amdgcn_global_store_b128((v4u_gptr)ptr, u.v, RCCL_SYSTEM_SYNCSCOPE);
 #else
-  *((v4u_gptr)ptr) = u.v;
+  store128Plain(ptr, v0, v1);
 #endif
 }
 
