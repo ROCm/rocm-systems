@@ -18,8 +18,10 @@
 // this binary with RCCL_DDA_NRANKS_RELAX=1 pre-set (the value must be in the
 // environment before any param read) and asserts every count in
 // [2, kDdaNranks] becomes eligible while counts outside that range do not.
-// End-to-end engagement and numerics are additionally covered by the rccl-tests
-// AllReduce sweep with RCCL_DDA_NRANKS_RELAX=1.
+// No test_runner config currently sets RCCL_DDA_NRANKS_RELAX as an environment
+// variable, so end-to-end engagement via the rccl-tests AllReduce sweep is not
+// yet exercised in CI; the isolated-process test above is what actually covers
+// the relaxed dispatch today.
 
 #include "common/DdaIpcTestHelpers.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"

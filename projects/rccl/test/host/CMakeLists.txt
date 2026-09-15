@@ -654,6 +654,7 @@ add_test_executable(rccl-HostUnitTests
   ${RCCL_TEST_DIR}/VersionInfoTests.cpp
   ${RCCL_TEST_DIR}/DdaCollCommonTests.cpp
   ${RCCL_TEST_DIR}/RomeTopoConsensusTests.cpp
+  ${RCCL_TEST_DIR}/DdaNranksRelaxConsensusTests.cpp
   RomeTopoConsensusLogTests.cpp
   ${RCCL_TEST_DIR}/MiscTests.cpp
   ${RCCL_TEST_DIR}/VersionGateTests.cpp

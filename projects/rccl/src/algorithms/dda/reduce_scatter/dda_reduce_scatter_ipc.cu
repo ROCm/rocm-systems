@@ -13,7 +13,7 @@
 #include "debug.h"
 #include "algorithms/dda/ipc/ipc_gpu_barrier.h"
 #include "algorithms/dda/dda_init_detail.h"
-#include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/ipc/ipc_init.h"
 
 #include <cuda_runtime.h>
 

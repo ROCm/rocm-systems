@@ -10,7 +10,8 @@
 // with relax off only the full kDdaNranks clique is eligible; with relax on
 // any 2..kDdaNranks participant count is eligible. No CI config sets
 // RCCL_DDA_NRANKS_RELAX, so the low-rank runtime kernel these collectives
-// dispatch to (NRANKS == 0) does not execute anywhere in CI; DispatchEnters*
+// dispatch to (NRANKS == 0) does not execute anywhere in CI;
+// DdaCollectivesNranksRelaxIsolatedTest.RelaxedPathAdmitsTwoThroughEightRanks
 // below is what actually covers the dispatch, in-process.
 
 #include "common/DdaAlltoAllTestHelpers.hpp"
