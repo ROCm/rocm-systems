@@ -1,5 +1,8 @@
 # CPU dispatch, XCD and async-helper scaling
 
+For allocations constrained to exactly 4, 8, 16, 24 or 32 execution threads, see
+[fixed-budget scaling](async-fixed-budget-scaling.md).
+
 Measured 2026-09-15 with implementation `efc055a3e79`, rebased onto `origin/develop` at
 `cc17ebc55df`. The experiment uses **64 reserved physical CPU cores** (32-95) on a Threadripper
 PRO 9995WX, with SMT siblings unused.
