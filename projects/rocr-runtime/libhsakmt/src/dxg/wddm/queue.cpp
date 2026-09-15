@@ -248,7 +248,7 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
 ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
                            std::atomic<uint64_t>* _ring_wptr, std::atomic<uint64_t>* _ring_rptr,
                            volatile int64_t* error_addr, uint32_t cmdbuf_size, uint32_t engine,
-                           bool use_hws)
+                           bool use_hws, HSAuint32 event_id)
     : WDDMQueue(
           device, (use_hws && device->IsAqlSupported()) ? reinterpret_cast<uintptr_t>(ring) : 0,
           (use_hws && device->IsAqlSupported()) ? ring_size * 64 : cmdbuf_size, engine, use_hws),
@@ -271,6 +271,8 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
       scratch_base_(nullptr) {
   ring_wptr = _ring_wptr;
   ring_rptr = _ring_rptr;
+  error_reason_ = error_addr;
+  error_event_id_ = event_id;
   amd_queue_rocr_ = (amd_queue_v2_t*)((char*)ring_rptr - offsetof(amd_queue_t, read_dispatch_id));
   amd_queue_memory_ = GetGpuMemoryFromAddress(amd_queue_rocr_);
   native_aql_ = use_hws && device->IsAqlSupported();
@@ -1147,6 +1149,7 @@ SDMAQueue::SDMAQueue(WDDMDevice* device, void* ring, uint64_t cmdbuf_size, uint3
       thread_stop_(false),
       ib_size(0),
       ib_start_addr(0) {
+  needs_cwsr_ = false;
   bool ret = device->CreateQueue(this);
   assert(ret);
 

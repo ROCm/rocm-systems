@@ -89,8 +89,13 @@ NCCL_DEVICE_INLINE static void putImplMode(
       counter_laddr.key = loadConst(&gdaki->sink_buffer_lkey);
     }
 
-    // cuda::thread_scope_system has the lowest value
-    // DOCA guarantees SCOPE_GPU. Only add another release if SCOPE_SYSTEM is required.
+    // gdaki is CUDA-only (NCCL_GIN_GDAKI_ENABLE=0 on HIP). In libcu++,
+    // cuda::thread_scope_system is the LOWEST value -- the opposite of HIP's
+    // hip_compat.h, where it is the max. DOCA already guarantees GPU/device
+    // scope, so only add a system release when the caller required system scope
+    // but gave a weaker (numerically larger) scope: given > required. Do NOT
+    // "align" this with the HIP backends' given < required -- that would make
+    // this fence dead code here.
     if ((required == cuda::thread_scope_system) && (given > required)) {
       doca_gpu_dev_verbs_fence_release<DOCA_GPUNETIO_VERBS_SYNC_SCOPE_SYS>();
     }
@@ -181,8 +186,13 @@ NCCL_DEVICE_INLINE static void putValueImplMode(
       sig_laddr.key = loadConst(&gdaki->sink_buffer_lkey);
     }
 
-    // cuda::thread_scope_system has the lowest value
-    // DOCA guarantees SCOPE_GPU. Only add another release if SCOPE_SYSTEM is required.
+    // gdaki is CUDA-only (NCCL_GIN_GDAKI_ENABLE=0 on HIP). In libcu++,
+    // cuda::thread_scope_system is the LOWEST value -- the opposite of HIP's
+    // hip_compat.h, where it is the max. DOCA already guarantees GPU/device
+    // scope, so only add a system release when the caller required system scope
+    // but gave a weaker (numerically larger) scope: given > required. Do NOT
+    // "align" this with the HIP backends' given < required -- that would make
+    // this fence dead code here.
     if ((required == cuda::thread_scope_system) && (given > required)) {
       doca_gpu_dev_verbs_fence_release<DOCA_GPUNETIO_VERBS_SYNC_SCOPE_SYS>();
     }

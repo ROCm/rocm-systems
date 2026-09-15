@@ -4,8 +4,8 @@
 #include "rocjitsu/code/patch/spill_manager.h"
 
 #include "decode_test_util.h"
-#include "rocjitsu/analysis/exec_state.h"
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/exec_state.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/isa/decoder.h"
@@ -360,6 +360,36 @@ TEST(SpillManager, ReserveSet_HandlesEmpty) {
   const uint32_t before = m.total_private_bytes();
   EXPECT_TRUE(m.reserve(RegisterSet{}));
   EXPECT_EQ(m.total_private_bytes(), before);
+}
+
+// A set containing a special singleton (EXEC/VCC/...) has no scratch slot, so
+// reserve must fail cleanly and reserve NOTHING — not even its ordinary members,
+// and without tripping the post-capacity-check assert on the special reg.
+TEST(SpillManager, ReserveSet_FailsCleanlyOnSpecialRegisters) {
+  RegisterSet set;
+  set.expand(sgpr(0));
+  set.expand(RegisterRef{RegClass::EXEC, 0, 1});
+
+  SpillManager m(0, kBigLimit);
+  EXPECT_FALSE(m.reserve(set));
+  EXPECT_EQ(m.total_private_bytes(), 0u);
+  EXPECT_EQ(m.offset_for(sgpr(0)), std::nullopt);
+}
+
+// The ordinary_only() projection of a set with specials is reservable — the
+// ordinary members allocate normally once the special is projected out.
+TEST(SpillManager, ReserveSet_OrdinaryProjectionIsReservable) {
+  RegisterSet set;
+  set.expand(sgpr(0));
+  set.expand(vgpr(3));
+  set.expand(RegisterRef{RegClass::VCC, 0, 1});
+
+  SpillManager m(0, kBigLimit);
+  ASSERT_FALSE(m.reserve(set)); // specials present -> clean fail
+  EXPECT_TRUE(m.reserve(set.ordinary_only()));
+  EXPECT_EQ(m.total_private_bytes(), 8u);
+  EXPECT_TRUE(m.offset_for(sgpr(0)).has_value());
+  EXPECT_TRUE(m.offset_for(vgpr(3)).has_value());
 }
 
 TEST(SpillManager, AllocateSlotReturnsNulloptOnOverflow) {

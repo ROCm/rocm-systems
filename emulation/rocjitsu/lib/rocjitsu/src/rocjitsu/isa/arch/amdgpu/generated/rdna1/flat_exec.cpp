@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/flat.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx10_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -726,7 +727,10 @@ void FlatAtomicFcmpswapFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
-  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
+  d->atomic_op = amdgpu::AtomicOp::FCMPSWAP;
+  d->atomic_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_legacy_minmax = true;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
@@ -753,6 +757,9 @@ void FlatAtomicFminFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::FMIN;
+  d->atomic_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_legacy_minmax = true;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
@@ -777,6 +784,9 @@ void FlatAtomicFmaxFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::FMAX;
+  d->atomic_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_legacy_minmax = true;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
@@ -1142,7 +1152,10 @@ void FlatAtomicFcmpswapX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
-  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
+  d->atomic_op = amdgpu::AtomicOp::FCMPSWAP;
+  d->atomic_denorm_mode = wf.fp_denorm_mode_f16_f64();
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
+  d->atomic_legacy_minmax = true;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
@@ -1173,6 +1186,9 @@ void FlatAtomicFminX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::FMIN;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
+  d->atomic_legacy_minmax = true;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
@@ -1199,6 +1215,9 @@ void FlatAtomicFmaxX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::FMAX;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
+  d->atomic_legacy_minmax = true;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;

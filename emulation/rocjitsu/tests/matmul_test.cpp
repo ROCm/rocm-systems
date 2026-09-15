@@ -369,6 +369,9 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
+  // Single-threaded counterpart to the _MultiThreaded test below; pin one worker
+  // rather than taking the config's one-partition-per-XCD default.
+  loaded.engine_config.num_threads = 1;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());

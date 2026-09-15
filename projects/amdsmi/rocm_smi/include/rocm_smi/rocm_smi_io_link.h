@@ -40,6 +40,12 @@ typedef enum _LINK_DIRECTORY_TYPE {
   P2P_LINK_DIRECTORY = 1
 } LINK_DIRECTORY_TYPE;
 
+// KFD topology sysfs root shared by KFDNode and IOLink discovery.
+const char* KFDNodesPathRoot();
+
+// Test-only hook to point KFDNodesPathRoot() at a mock topology tree.
+void SetKFDNodesPathRootForTesting(const char* path);
+
 enum class IOLinkDirectionType_t {
   kNonDirectional = 0,
   kUniDirectional = 1,
@@ -53,7 +59,7 @@ class IOLink {
         link_indx_(link_indx),
         link_dir_type_(link_dir_type),
         link_cap_{UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX} {}
-  ~IOLink();
+  virtual ~IOLink();
 
   int Initialize();
   int ReadProperties(void);

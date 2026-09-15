@@ -672,7 +672,19 @@ static const std::map<const char*, dev_depends_t> kDevFuncDependsMap = {
   }
 
 Device::Device(std::string p, RocmSMI_env_vars const* e)
-    : monitor_(nullptr), path_(p), env_(e), evt_notif_anon_fd_(-1), m_gpu_metrics_header{0, 0, 0} {
+    : monitor_(nullptr),
+      path_(p),
+      card_indx_(0),
+      drm_render_minor_(0),
+      env_(e),
+      bdfid_(UINT64_MAX),
+      kfd_gpu_id_(0),
+      evt_notif_anon_fd_(-1),
+      evt_notif_anon_file_ptr_(nullptr),
+      m_gpu_metrics_header{0, 0, 0},
+      m_gpu_metrics_updated_timestamp(0),
+      m_device_id(0),
+      m_partition_id(0) {
 #ifndef DEBUG
   env_ = nullptr;
 #endif

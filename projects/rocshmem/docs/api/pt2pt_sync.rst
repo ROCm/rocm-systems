@@ -86,11 +86,11 @@ ROCSHMEM_TEST
 -------------
 
 .. cpp:function:: __device__ int rocshmem_TYPENAME_test(TYPE *ivars, int cmp, TYPE val)
- 
+
   :param ivars: Pointer to memory on the symmetric heap to wait for.
   :param cmp:   Operation for the comparison.
   :param val:   Value to compare the memory at ``ivars`` to.
- 
+
   :returns:     ``1`` if the evaluation is true. ``0`` otherwise.
 
 **Description:**

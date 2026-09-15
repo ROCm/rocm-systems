@@ -1,0 +1,192 @@
+name: RCCL coco PR smoke
+
+# PR smoke via `coco pr` on Ruby and OCI.
+#
+# Same-repo PRs auto-run on pull_request. Fork PRs are skipped (no secrets on
+# fork-triggered runs); a maintainer must run this workflow manually via
+# workflow_dispatch, supplying pr_number and pr_sha from the fork PR.
+#
+# Set COCO_PR_BLOCKING=true to fail the workflow on errors once gating is enabled.
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'projects/rccl/**'
+      - '.github/workflows/rccl-coco-pr.yml'
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Pull request number.'
+        type: number
+        required: true
+      pr_sha:
+        description: 'Full 40-hex PR head SHA.'
+        type: string
+        required: true
+      pr_repo:
+        description: 'Monorepo slug.'
+        type: string
+        required: false
+        default: 'ROCm/rocm-systems'
+      coco_ref:
+        description: 'ROCm/tRCCL harness ref.'
+        type: string
+        required: false
+        default: 'main'
+      dry_run:
+        description: 'Pass --dry-run to coco.'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  ruby-setup:
+    name: Ruby Setup
+    if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
+    runs-on: ruby-linux-slurm-scale-runner
+    outputs:
+      coco_ref: ${{ steps.resolve.outputs.coco_ref }}
+      coco_args: ${{ steps.resolve.outputs.coco_args }}
+      pr_number: ${{ steps.resolve.outputs.pr_number }}
+      pr_sha: ${{ steps.resolve.outputs.pr_sha }}
+      pr_repo: ${{ steps.resolve.outputs.pr_repo }}
+    steps:
+      - name: Checkout rocm-systems
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: .github/actions/checkout-coco-harness
+
+      - name: Checkout the coco harness
+        uses: ./.github/actions/checkout-coco-harness
+        with:
+          ref: ${{ inputs.coco_ref || 'main' }}
+          path: _coco
+          client-id: ${{ secrets.APP_ID }}
+          app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Resolve run parameters
+        id: resolve
+        working-directory: _coco
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+          PR_NUMBER: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || inputs.pr_number }}
+          PR_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.pr_sha }}
+          PR_REPO: ${{ github.event_name == 'pull_request' && github.repository || inputs.pr_repo }}
+        run: |
+          set -euo pipefail
+          args='-vv --prune-build --skip-failed-builds --skip-baselines'
+          [[ "${DRY_RUN}" == "true" ]] && args="${args} --dry-run"
+          {
+            echo "coco_ref=$(git rev-parse HEAD)"
+            echo "coco_args=${args}"
+            echo "pr_number=${PR_NUMBER}"
+            echo "pr_sha=${PR_SHA}"
+            echo "pr_repo=${PR_REPO}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Clean up harness checkout
+        if: always()
+        run: rm -rf _coco
+
+  oci-setup:
+    name: OCI Setup
+    if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
+    runs-on: oci-linux-slurm-scale-runner
+    outputs:
+      coco_ref: ${{ steps.resolve.outputs.coco_ref }}
+      coco_args: ${{ steps.resolve.outputs.coco_args }}
+      pr_number: ${{ steps.resolve.outputs.pr_number }}
+      pr_sha: ${{ steps.resolve.outputs.pr_sha }}
+      pr_repo: ${{ steps.resolve.outputs.pr_repo }}
+    steps:
+      - name: Checkout rocm-systems
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: .github/actions/checkout-coco-harness
+
+      - name: Checkout the coco harness
+        uses: ./.github/actions/checkout-coco-harness
+        with:
+          ref: ${{ inputs.coco_ref || 'main' }}
+          path: _coco
+          client-id: ${{ secrets.APP_ID }}
+          app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Resolve run parameters
+        id: resolve
+        working-directory: _coco
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+          PR_NUMBER: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || inputs.pr_number }}
+          PR_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.pr_sha }}
+          PR_REPO: ${{ github.event_name == 'pull_request' && github.repository || inputs.pr_repo }}
+        run: |
+          set -euo pipefail
+          args='-vv --prune-build --skip-failed-builds --skip-baselines'
+          [[ "${DRY_RUN}" == "true" ]] && args="${args} --dry-run"
+          {
+            echo "coco_ref=$(git rev-parse HEAD)"
+            echo "coco_args=${args}"
+            echo "pr_number=${PR_NUMBER}"
+            echo "pr_sha=${PR_SHA}"
+            echo "pr_repo=${PR_REPO}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Clean up harness checkout
+        if: always()
+        run: rm -rf _coco
+
+  ruby-smoke:
+    name: Ruby smoke (ruby64-rccl-pr-smoke)
+    needs: ruby-setup
+    if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
+    uses: ./.github/workflows/rccl-coco-run.yml
+    permissions:
+      contents: read
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+      RCCL_COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
+    with:
+      mode: pr
+      job: ruby64-rccl-pr-smoke
+      runs_on: ruby-linux-slurm-scale-runner
+      pr_number: ${{ needs.ruby-setup.outputs.pr_number }}
+      pr_sha: ${{ needs.ruby-setup.outputs.pr_sha }}
+      pr_repo: ${{ needs.ruby-setup.outputs.pr_repo }}
+      software: rccl
+      trigger_kind: ci
+      coco_ref: ${{ needs.ruby-setup.outputs.coco_ref }}
+      coco_args: ${{ needs.ruby-setup.outputs.coco_args }}
+      timeout_minutes: 360
+      concurrency_group: rccl-coco-pr-${{ needs.ruby-setup.outputs.pr_number }}-ruby
+      non_gating: ${{ vars.COCO_PR_BLOCKING != 'true' }}
+
+  oci-smoke:
+    name: OCI smoke (oci-rccl-pr-smoke)
+    needs: oci-setup
+    if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
+    uses: ./.github/workflows/rccl-coco-run.yml
+    permissions:
+      contents: read
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+      RCCL_COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
+    with:
+      mode: pr
+      job: oci-rccl-pr-smoke
+      runs_on: oci-linux-slurm-scale-runner
+      pr_number: ${{ needs.oci-setup.outputs.pr_number }}
+      pr_sha: ${{ needs.oci-setup.outputs.pr_sha }}
+      pr_repo: ${{ needs.oci-setup.outputs.pr_repo }}
+      software: rccl
+      trigger_kind: ci
+      coco_ref: ${{ needs.oci-setup.outputs.coco_ref }}
+      coco_args: ${{ needs.oci-setup.outputs.coco_args }}
+      timeout_minutes: 360
+      concurrency_group: rccl-coco-pr-${{ needs.oci-setup.outputs.pr_number }}-oci
+      non_gating: ${{ vars.COCO_PR_BLOCKING != 'true' }}
