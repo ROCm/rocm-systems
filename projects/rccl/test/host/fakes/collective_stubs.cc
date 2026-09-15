@@ -36,6 +36,8 @@ ncclResult_t ncclLaunchKernelBefore_NoUncapturedCuda(struct ncclComm*, struct nc
 ncclResult_t ncclLaunchKernel(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
 ncclResult_t ncclLaunchKernelAfter_NoCuda(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
 ncclResult_t ncclLaunchFinish(struct ncclComm*) { ::abort(); }
+ncclResult_t ncclTaskPrepare(struct ncclComm*, ncclSimInfo_t*) { ::abort(); }
+int64_t ncclParamEnqueueRearchEnable() { return 0; }
 
 // ce_coll.h
 ncclResult_t ncclCeInit(struct ncclComm*) { ::abort(); }
@@ -47,7 +49,7 @@ ncclResult_t ncclRmaCeInit(struct ncclComm*) { ::abort(); }
 
 // dev_runtime.h
 ncclResult_t ncclDevrCommCreateInternal(struct ncclComm*, struct ncclDevCommRequirements*,
-                                        struct ncclDevComm*, bool, struct ncclDevCommCompat*) { ::abort(); }
+                                        struct ncclDevComm*, bool, uint32_t) { ::abort(); }
 ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm*, void*, size_t, int,
                                            struct ncclWindow_vidmem**) { ::abort(); }
 void freeDevCommRequirements(struct ncclDevCommRequirements*) { ::abort(); }

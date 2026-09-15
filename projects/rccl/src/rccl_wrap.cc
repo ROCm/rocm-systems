@@ -42,6 +42,7 @@ THE SOFTWARE.
 #include "sym_kernels.h"
 #include "dev_runtime.h"
 #include "strongstream.h"
+#include "tuning.h"
 
 // Use this param to experiment pipelining new data types besides bfloat16
 // Make sure you generate the device code with the new data type (i.e. in generate.py)
@@ -89,6 +90,10 @@ static inline bool rcclCollSupportsRing(ncclFunc_t func) {
           func == ncclFuncBroadcast || func == ncclFuncReduce);
 }
 
+static inline bool rcclIsGfx120x(char const* arch) {
+  return IsArchMatch(arch, "gfx1200") || IsArchMatch(arch, "gfx1201");
+}
+
 int32_t rcclGetProtoForGfx120x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
   int returnVal = NCCL_PROTO_SIMPLE;
   int SingleNodeLLCutoffs[] = {/*ncclFuncBroadcast*/ 1536,
@@ -96,22 +101,6 @@ int32_t rcclGetProtoForGfx120x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
                                /*ncclFuncAllGather*/ 98304,
                                /*ncclFuncReduceScatter*/ 98304,
                                /*ncclFuncAllReduce*/ 16384,
-                               /*ncclFuncSendRecv*/ 0,
-                               /*ncclFuncSend*/ 0,
-                               /*ncclFuncRecv*/ 0};
-  if (collectiveFunc < sizeof(SingleNodeLLCutoffs) / sizeof(int)) {
-    returnVal = (sizePerRank <= SingleNodeLLCutoffs[collectiveFunc]) ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
-  }
-  return returnVal;
-}
-
-int32_t rcclGetProtoForGfx110x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
-  int returnVal = NCCL_PROTO_SIMPLE;
-  int SingleNodeLLCutoffs[] = {/*ncclFuncBroadcast*/ 1536,
-                               /*ncclFuncReduce*/ 1024,
-                               /*ncclFuncAllGather*/ 24756,
-                               /*ncclFuncReduceScatter*/ 24756,
-                               /*ncclFuncAllReduce*/ 65536,
                                /*ncclFuncSendRecv*/ 0,
                                /*ncclFuncSend*/ 0,
                                /*ncclFuncRecv*/ 0};
@@ -147,23 +136,16 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
              comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 352128) {
     // Change LL protocol threshold
     info->protocol = NCCL_PROTO_LL;
-  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120" /*match gfx120x*/)) {
+  } else if (!userProtocolInput && rcclIsGfx120x(comm->topo->nodes[GPU].nodes[0].gpu.gcn)) {
     if (comm->nNodes == 1) {
       info->protocol = rcclGetProtoForGfx120x(info->func, sizePerRank);
     }
-    /**
-     * We prefer simple protocol when p2p_disabled = 1,
-     * This is due to a fix in LL protocol implementation
-     * for gfx120x with __HIP_MEMORY_SCOPE_SYSTEM in prims_ll.h
-     * causing poor performance but keeps the LL protocol functional
-     */
-    bool p2p_disabled = ncclParamP2pDisable();
-    if (p2p_disabled) {
-      info->protocol = NCCL_PROTO_SIMPLE;
-    }
-  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110" /*match gfx110x*/)) {
-    if (comm->nNodes == 1) {
-      info->protocol = rcclGetProtoForGfx110x(info->func, sizePerRank);
+    const char* str = ncclGetEnv("NCCL_P2P_DISABLE");
+    if (str) {
+      int disable = strtol(str, NULL, 0);
+      if (disable == 1) {
+        info->protocol = NCCL_PROTO_SIMPLE;
+      }
     }
   } else if (!userProtocolInput && comm->nNodes >= 2 &&
              (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather ||
@@ -234,10 +216,7 @@ extern int64_t rcclParamForceCe();
 RCCL_PARAM(ChannelTuningEnable, "CHANNEL_TUNING_ENABLE", 1);
 
 ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t nBytes, int& nc) {
-  const bool isGfx_110x_120x = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110") ||
-                               IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120");
-  //Make an exception for gfx110x and gfx120x
-  if ((!isGfx_110x_120x && (comm->nNodes < 2)) || !rcclParamChannelTuningEnable()) {
+  if (comm->nNodes < 2 || !rcclParamChannelTuningEnable()) {
     INFO(NCCL_TUNING, "RCCL Channel Tuning not applied");
     return ncclSuccess;
   }
@@ -264,16 +243,14 @@ ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t
   int minNChannels = ncclParamMinNchannels();
   int maxNChannels = std::max(comm->nChannels / scalingFactor, static_cast<int>(ncclParamMaxNchannels()));
   size_t bytesPerRank = divUp(nBytes, comm->nRanks);
-  const int myRank = comm->rank;
+
   for (int channelCountIndex = 0; channelCountIndex < RCCL_CHANNELS_TUNABLE_ENTRIES; ++channelCountIndex) {
     size_t minByteThreshold = comm->minMaxChannelThresholds[tunableIndex][channelCountIndex][0];
     size_t maxByteThreshold = comm->minMaxChannelThresholds[tunableIndex][channelCountIndex][1];
-    if (myRank == 0) {
-      INFO(NCCL_TUNING,
-           "nBytes:%lu bytesPerRank:%lu minByteThreshold:%lu maxByteThreshold:%lu  NCCL_MIN_NCHANNELS:%i or "
-           "NCCL_MAX_NCHANNELS:%i minCTAs:%i maxCTAs:%i",
-           nBytes, bytesPerRank, minByteThreshold, maxByteThreshold, minNChannels, maxNChannels, minCTAs, maxCTAs);
-    }
+    INFO(NCCL_TUNING,
+         "nBytes:%lu bytesPerRank:%lu minByteThreshold:%lu maxByteThreshold:%lu  NCCL_MIN_NCHANNELS:%i or "
+         "NCCL_MAX_NCHANNELS:%i minCTAs:%i maxCTAs:%i",
+         nBytes, bytesPerRank, minByteThreshold, maxByteThreshold, minNChannels, maxNChannels, minCTAs, maxCTAs);
     if (minByteThreshold == CHAN_THRESHOLDS_UNDEFINED || maxByteThreshold == CHAN_THRESHOLDS_UNDEFINED) {
       INFO(NCCL_TUNING, "RCCL tuning model does not define threshold for coll:%i and nbytes:%lu", coll, nBytes);
       break; // Skip undefined thresholds
@@ -286,19 +263,15 @@ ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t
       if (channelCount >= minNChannels && channelCount <= maxNChannels && channelCount >= minCTAs &&
           channelCount <= maxCTAs) {
         nc = comm->minMaxChannelThresholds[tunableIndex][channelCountIndex][2];
-        if (myRank == 0) {
-          INFO(NCCL_TUNING,
-               "RCCL tuning model overrides nchannels to %i, channels may be decreased further due to "
-               "MinTrafficPerchannel thresholds",
-               channelCount);
-        }
+        INFO(NCCL_TUNING,
+             "RCCL tuning model overrides nchannels to %i, channels may be decreased further due to "
+             "MinTrafficPerchannel thresholds",
+             channelCount);
       } else {
-        if (myRank == 0) {
-          INFO(NCCL_TUNING,
-               "RCCL tuning model cannot override nchannels to %i due to conflicting NCCL_MIN_NCHANNELS:%i or "
-               "NCCL_MAX_NCHANNELS:%i minCTAs:%i maxCTAs:%i",
-               channelCount, minNChannels, maxNChannels, minCTAs, maxCTAs);
-        }
+        INFO(NCCL_TUNING,
+             "RCCL tuning model cannot override nchannels to %i due to conflicting NCCL_MIN_NCHANNELS:%i or "
+             "NCCL_MAX_NCHANNELS:%i minCTAs:%i maxCTAs:%i",
+             channelCount, minNChannels, maxNChannels, minCTAs, maxCTAs);
       }
 
       break;
@@ -586,14 +559,29 @@ static bool rcclSymkQuery(struct ncclComm* comm, ncclFunc_t coll, uint64_t count
   if (devOp < 0) return false;
   if (ncclSymkInitOnce(comm) != ncclSuccess) return false;
   if (!ncclSymkAvailable(comm, coll, devOp, dataType, (size_t)count)) return false;
-  float estTimeUs;
-  ncclSymkKernelId kernelId;
-  int nWarps;
-  bool forced = false;
-  if (ncclSymkPickKernel(comm, coll, devOp, dataType, (size_t)count, (size_t)count, 1, ncclSymSendRegRecvReg,
-                         &estTimeUs, &kernelId, maxChannels, &nWarps, &forced) != ncclSuccess)
-    return false;
+  // NCCL 2.31 replaced ncclSymkPickKernel() with the tuning cost model; restricting
+  // the tuning mask to the symmetric kernels reproduces the old query.
+  struct ncclTuningInput_t input = {};
+  input.comm = comm;
+  input.tuningMask = NCCL_TUNING_MASK_SYM_KERNELS;
+  input.func = coll;
+  input.redOp = op;
+  input.devRedOp = (ncclDevRedOp_t)devOp;
+  input.datatype = dataType;
+  input.nBytes = (size_t)count * ncclTypeSize(dataType);
+  input.count = (size_t)count;
+  input.countMax = (size_t)count;
+  input.nWorks = 1;
+  input.winRegType = ncclSymSendRegRecvReg;
+  input.minCTAs = comm->config.minCTAs;
+  input.maxCTAs = comm->config.maxCTAs;
+  input.CTAPolicy = comm->config.CTAPolicy;
+  input.nvlsSupport = comm->nvlsSupport && (ncclNvlsSupported(devOp, dataType) || coll == ncclFuncAllGather);
+  struct ncclTuningResult_t bestTuning = NCCL_TUNING_RESULT_INIT;
+  if (ncclTuningCompute(&input, &bestTuning) != ncclSuccess) return false;
+  ncclSymkKernelId kernelId = (ncclSymkKernelId)bestTuning.symKernelId;
   if (kernelId == ncclSymkKernelId_Count) return false;
+  *maxChannels = bestTuning.maxChannels;
   *algo = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC;
   *protocol = rcclSymkKernelIdIsLL((int)kernelId) ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
   return true;
@@ -681,7 +669,11 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
 
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default,
                     size_t gfx1250Default) {
-  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) {
+  // The environment parameter can be NCCL_CONFIG_UNDEF_INT when launch order
+  // is configured per communicator. Use the resolved communicator value:
+  // testing the raw sentinel as a boolean disables DDA by default, while
+  // testing only the environment would ignore an explicit config value.
+  if (!rcclParamDdaEnable() || comm->config.launchOrderImplicit == 1 || ncclGroupDepth != 0) {
     return false;
   }
   size_t threshold;
@@ -726,7 +718,10 @@ size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceSca
   size_t rsThreshold = 0;
   if (reduceScatter) {
     if (nNodes >= 16) {
-      rsThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE; // 128MB
+      // At 16 nodes the hierarchical path loses to RING/LL128 at 128 MiB.
+      // Keep the measured 64 MiB crossover as both the selection threshold
+      // and the temporary-buffer ceiling.
+      rsThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE / 2; // 64MB
     } else if (nNodes >= 8) {
       rsThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE / 2; // 64MB
     }
@@ -958,7 +953,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // ncclAllReduce_impl). force = RCCL_FORCE_CE_ALLREDUCE; symReg probes whether the
   // buffers are CE-registrable symmetric windows (uses ncclDevSum, matching develop).
   const bool force = rcclParamForceCeAllReduce() != 0;
-  const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType);
+  const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType, sendWin, recvWin);
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
   // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
   const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
@@ -1028,7 +1023,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // develop's taskAppend appends CE for AllReduce iff !hasSysmemSegment && ceAvailable
   // && ((CTAPolicy & ZERO) || force): ceAvailable starts from ncclCeAvailable(op) then
   // is cleared unless graph-allowed, op-supported, count-divisible and RCCL_CE_ALLREDUCE.
-  bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype, winRegType);
+  bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype, winRegType, sendWin, recvWin);
   const bool ceAllReduceOpSupported = (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
   if (!ceArGraphAllowed || !ceAllReduceOpSupported || (count % (size_t)comm->nRanks != 0) || !rcclParamCeAllReduce()) {
     ceAvailable = false;
@@ -1199,7 +1194,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     }
     // Branch #3: CE via registered symmetric windows.
     const bool ceAvailable =
-      !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
+      !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType, sendWin, recvWin);
     if (ceAvailable && !hasSysmemSegment && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
@@ -1469,33 +1464,6 @@ void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize) {
   comm->p2pNetChunkSize = p2pNetChunkSize;
   rcclP2pNetChunkSize = p2pNetChunkSize;
 }
-
-// An unroll factor is usable only if its device function table was generated in
-// this build AND compiled for the running arch. generate.py guards some unrolls
-// behind a single arch (see ncclDevFuncUnrollArch), and a multi-arch build marks
-// every unroll as generated, so checking ncclDevFuncUnrollGenerated alone lets a
-// gfx1250-only unroll through on other GPUs and traps on the device.
-//
-// The two failure modes are kept apart because only one of them is a build choice:
-// an unroll that was never generated can be enabled by rebuilding, while one that
-// generate.py restricts to another arch cannot run here no matter how it is built.
-enum ncclUnrollAvailability {
-  ncclUnrollUsable,
-  ncclUnrollNotGenerated,
-  ncclUnrollWrongArch,
-};
-
-// Test the arch restriction first. The two conditions overlap -- a local-arch build
-// narrows the generated set, so an unroll pinned to another arch is usually also
-// ungenerated -- and the arch is the more useful answer, because no build of any
-// matrix can make that unroll run on this GPU.
-static ncclUnrollAvailability unrollAvailability(int unroll, char const* archName) {
-  char const* requiredArch = ncclDevFuncUnrollArch[unroll];
-  if (requiredArch != nullptr && !IsArchMatch(archName, requiredArch)) return ncclUnrollWrongArch;
-  if (!ncclDevFuncUnrollGenerated[unroll]) return ncclUnrollNotGenerated;
-  return ncclUnrollUsable;
-}
-
 #ifdef ENABLE_WARP_SPEED
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels) {
   static int userChannelControlInput = RCCL_VALUE_UNSET;
@@ -1587,19 +1555,6 @@ ncclResult_t validChannelsForWarpSpeed(struct ncclComm* comm, struct ncclTaskCol
   return ncclSuccess;
 }
 
-// Apply a tuning preference for `unroll`, but only when this build can dispatch it
-// on the running GPU. Callers here are overriding a value commSetUnrollFactor()
-// already validated, so declining to change it leaves a working unroll in place;
-// assigning unconditionally would install an all-nullptr table and trap.
-static void rcclPreferUnrollFactor(struct ncclComm* comm, int unroll) {
-  if (unrollAvailability(unroll, comm->archName) != ncclUnrollUsable) {
-    INFO(NCCL_TUNING, "Keeping RCCL unroll factor %d: preferred %d is not usable on arch %s",
-         (int)(pow(2.0, (double)comm->unroll)), (int)(pow(2.0, (double)unroll)), comm->archName);
-    return;
-  }
-  comm->unroll = unroll;
-}
-
 ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
   info->useWarpSpeed = false;
   static bool unrollFactorSet = getenv("RCCL_UNROLL_FACTOR") != nullptr;
@@ -1614,7 +1569,7 @@ ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* in
       info->algorithm = NCCL_ALGO_RING; // Force Ring when WarpSpeed is enabled in manual mode as it only supports Ring
     }
     // TODO: Remove unroll update when all collectives are optimized
-    if (!unrollFactorSet) rcclPreferUnrollFactor(comm, NCCL_UNROLL_2);
+    if (!unrollFactorSet) comm->unroll = NCCL_UNROLL_2;
     info->useWarpSpeed = true;
   } else if (rcclCanUseWarpSpeedAuto(comm, comm->nNodes)) { // Auto performance mode
     // No early return based on the algorithm at the start of the function
@@ -1626,7 +1581,7 @@ ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* in
     if (info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter) {
       // allReduce now benefits from unroll factor of 2 in all modes due to changing its slicing strategy
       // TODO: Remove unroll update when all collectives are optimized
-      if (!unrollFactorSet) rcclPreferUnrollFactor(comm, NCCL_UNROLL_2);
+      if (!unrollFactorSet) comm->unroll = NCCL_UNROLL_2;
     }
     if (rcclIsAboveWarpSpeedThreshold(comm, info, nBytes)) {
       // Skip WarpSpeed when the comm exceeds its channel limit (e.g. RCCL_ENABLE_INTRANET=1 drives
@@ -1764,22 +1719,12 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
            comm->unroll, NCCL_NUM_UNROLLS - 1);
       return ncclInvalidArgument;
     }
-    switch (unrollAvailability(comm->unroll, comm->archName)) {
-    case ncclUnrollNotGenerated:
-      WARN("RCCL_UNROLL_FACTOR %d (unroll %d) was not generated by this build for arch %s; its device function "
-           "table is empty and dispatching to it would crash. "
-           "Rebuild with this unroll factor, or select one this build generated.",
+    if (!ncclDevFuncUnrollGenerated[comm->unroll]) {
+      WARN("RCCL_UNROLL_FACTOR %d (unroll %d) was not built for arch %s; its device function table is empty and "
+           "dispatching to it would crash. "
+           "Rebuild with this unroll factor, or select one that was generated for this build.",
            comm->unroll, (int)(pow(2.0, (double)comm->unroll)), comm->archName);
       return ncclInvalidArgument;
-    case ncclUnrollWrongArch:
-      WARN("RCCL_UNROLL_FACTOR %d (unroll %d) is compiled for %s only, so its device function table is empty on "
-           "arch %s and dispatching to it would crash. "
-           "This unroll factor is unavailable on this GPU regardless of the build; select a different one.",
-           comm->unroll, (int)(pow(2.0, (double)comm->unroll)), ncclDevFuncUnrollArch[comm->unroll],
-           comm->archName);
-      return ncclInvalidArgument;
-    case ncclUnrollUsable:
-      break;
     }
     INFO(NCCL_INIT, "RCCL Unroll Factor (user set): %d", (int)(pow(2.0, (double)comm->unroll)));
     return ncclSuccess;
@@ -1792,22 +1737,21 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
   else if (IsArchMatch(comm->archName, "gfx1250")) comm->unroll = NCCL_UNROLL_32;
   else comm->unroll = NCCL_UNROLL_4;
 
-  // Guard against a default that isn't usable here (e.g. the generation matrix was
-  // narrowed, or the heuristic picked an unroll restricted to another arch). Fall
-  // back to the highest usable unroll rather than segfault.
-  if (unrollAvailability(comm->unroll, comm->archName) != ncclUnrollUsable) {
+  // Guard against a default that wasn't built for this arch (e.g. the generation
+  // matrix was narrowed). Fall back to any generated unroll rather than segfault.
+  if (!ncclDevFuncUnrollGenerated[comm->unroll]) {
     int fallback = -1;
     for (int u = NCCL_NUM_UNROLLS - 1; u >= NCCL_UNROLL_1; u--) {
-      if (unrollAvailability(u, comm->archName) == ncclUnrollUsable) {
+      if (ncclDevFuncUnrollGenerated[u]) {
         fallback = u;
         break;
       }
     }
     if (fallback < 0) {
-      WARN("No unroll-factor device function tables are usable on arch %s.", comm->archName);
+      WARN("No unroll-factor device function tables were generated for arch %s.", comm->archName);
       return ncclInvalidUsage;
     }
-    WARN("Default RCCL unroll factor %d is not usable on arch %s; falling back to %d. Set RCCL_UNROLL_FACTOR to "
+    WARN("Default RCCL unroll factor %d was not built for arch %s; falling back to %d. Set RCCL_UNROLL_FACTOR to "
          "override.",
          (int)(pow(2.0, (double)comm->unroll)), comm->archName, (int)(pow(2.0, (double)fallback)));
     comm->unroll = fallback;

@@ -39,4 +39,8 @@ inline uint8_t ncclP2pChannelBaseForRound(struct ncclComm* comm, int p2pRound, i
   return base & 0xff;
 }
 
+inline bool rcclP2pBatchEligible(int enabled, ssize_t sendBytes, ssize_t recvBytes, ssize_t threshold) {
+  return enabled && sendBytes == recvBytes && sendBytes <= threshold && recvBytes <= threshold;
+}
+
 #endif

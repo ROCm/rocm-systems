@@ -13,12 +13,16 @@
 #include <cstdint>
 #include <cstring>
 
-// ncclParam* referenced by init.cc but not declared inside it, so the redirected NCCL_PARAM does not
-// cover them. Each stays here rather than moving to its owner's fakes file because that file is on a
-// link line whose unit under test already defines the symbol (enqueue.cc:1985 for LaunchOrderImplicit),
-// or has no fakes file at all. The trailing comment names the definition each copies.
-int64_t ncclParamLaunchOrderImplicit() { return g_loadParam("LAUNCH_ORDER_IMPLICIT", 0); }  // enqueue.cc:1985
-int64_t rcclParamIntraGraphGen() { return g_loadParam("INTRA_GRAPH_GEN", 0); }  // graph/rccl_graph_gen.cc:34
+#include "recorder.h"
+
+// micro_getenv / SetMicroEnv / ClearMicroEnv / the getenv interposer / ncclGetEnv
+// moved to env_fakes.cc so every microtest binary shares ONE env implementation:
+// a second, map-only copy cannot intercept production raw getenv() call sites.
+
+int64_t ncclParamEnqueueRearchEnable() { return g_loadParam("ENQUEUE_REARCH_ENABLE", 0); }
+int64_t ncclParamRasDiagnostics() { return g_loadParam("RUN_RAS_DIAGNOSTICS", 0); }
+int64_t ncclParamDiagnostics() { return g_loadParam("RUN_DIAGNOSTICS", 0); }
+int64_t rcclParamIntraGraphGen() { return g_loadParam("INTRA_GRAPH_GEN", 0); }
 
 // Dead seam: no src/*.cc defines ncclTopoGetStrFromSys and no unit under test calls it. Kept as-is
 // rather than deleted, since removing it is a behaviour question this move is not answering.

@@ -17,9 +17,8 @@ static constexpr int kConnectPollTimeoutSec = 30;
 // Virtual Device Tests
 
 TEST_F(NetIbMPITest, MakeVirtualDevice) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -47,9 +46,8 @@ TEST_F(NetIbMPITest, MakeVirtualDevice) {
 }
 
 TEST_F(NetIbMPITest, MakeVirtualDeviceInvalidProps) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -66,9 +64,8 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceInvalidProps) {
 TEST_F(NetIbMPITest, MakeVirtualDeviceNegativeNdevs) {
     // A negative count clears every per-device check, because the build loop never runs.
     // Without an explicit bound it registers a vNIC with no constituent device.
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -97,9 +94,8 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceMergeDisabled) {
         GTEST_SKIP() << "Set NCCL_IB_MERGE_NICS=0 to exercise the merge-disabled guard";
     }
 
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -138,9 +134,8 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceCrossNuma) {
     // still succeed. Picks a cross-NUMA pair by reading each device's numa_node
     // from sysfs (correct on any layout, no fixed indices); skips when no such
     // pair exists or merging is disabled.
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     const char* mergeEnv = getenv("NCCL_IB_MERGE_NICS");
     if (mergeEnv && atoi(mergeEnv) == 0) {
@@ -185,9 +180,8 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceOutOfRangeDev) {
     // physical index >= the physical device count. The reported device count
     // (merged) is always >= the physical count, so using it as the index is
     // guaranteed out of range regardless of how many vNICs already exist.
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -205,9 +199,8 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceOutOfRangeDev) {
 TEST_F(NetIbMPITest, MakeVirtualDeviceDuplicateDevs) {
     // Listing the same physical device twice must be deduped into a single-device
     // vNIC rather than rejected or double-counted.
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     // Dedup yields a 1-device vNIC, which requires merging to be enabled
     // (NCCL_IB_MERGE_NICS defaults to 1). Skip only when it is explicitly off,
@@ -245,9 +238,8 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceDuplicateDevs) {
 // NIC Fusion (vNIC) Tests
 
 TEST_F(NetIbMPITest, ConnectAndTransfer_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -309,9 +301,8 @@ TEST_F(NetIbMPITest, ConnectAndTransfer_VNic) {
 }
 
 TEST_F(NetIbMPITest, AsymmetricMerge_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     // Skip when resiliency is enabled: asymmetric makeVDevice leaves stale
     // entries in the global IbCastMergedDevs table (IbCastNMergedDevs is not
@@ -425,9 +416,8 @@ TEST_F(NetIbMPITest, DisjointMergeRailLocal_VNic) {
     // Exercises CheckVProps' rail-local mismatch + ndevs-swap arms on accept,
     // reached when the two ranks' vNICs share no physical devices. Requires
     // NCCL_IB_WARN_RAIL_LOCAL=1 (defaults off) and >=5 physical NICs.
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
@@ -514,9 +504,8 @@ TEST_F(NetIbMPITest, DisjointMergeRailLocal_VNic) {
 }
 
 TEST_F(NetIbMPITest, CloseWithoutTransfer_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -591,9 +580,8 @@ TEST_F(NetIbMPITest, CloseWithoutTransfer_VNic) {
 }
 
 TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -670,9 +658,8 @@ TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
 }
 
 TEST_F(NetIbMPITest, LargeTransfer_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -737,9 +724,8 @@ TEST_F(NetIbMPITest, LargeTransfer_VNic) {
 }
 
 TEST_F(NetIbMPITest, MixedSizes_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -815,9 +801,8 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
 }
 
 TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -892,9 +877,8 @@ TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
 }
 
 TEST_F(NetIbMPITest, Bidirectional_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -1028,9 +1012,8 @@ TEST_F(NetIbMPITest, Bidirectional_VNic) {
 }
 
 TEST_F(NetIbMPITest, FlushRepeated_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -1118,9 +1101,8 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
 }
 
 TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -1207,9 +1189,8 @@ TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
 //   - Flush semantics for GPU memory receives
 // =============================================================================
 TEST_F(NetIbMPITest, SendRecvDifferentMemoryTypes) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1336,9 +1317,8 @@ TEST_F(NetIbMPITest, SendRecvDifferentMemoryTypes) {
 }
 
 TEST_F(NetIbMPITest, SendRecvMultipleSizesFusion) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly kExactTwoProcesses processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1461,9 +1441,8 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizesFusion) {
 }
 
 TEST_F(NetIbMPITest, MultidirectionalTransfer) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1600,9 +1579,8 @@ TEST_F(NetIbMPITest, MultidirectionalTransfer) {
 }
 
 TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1818,9 +1796,8 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
 //
 // =============================================================================
 TEST_F(NetIbMPITest, MergeMultipleDevices) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     // With merging off, every ndevs > 1 request is refused and the over-limit case would
     // pass for the wrong reason.
@@ -1981,9 +1958,8 @@ TEST_F(NetIbMPITest, MergeMultipleDevices) {
 }
 
 TEST_F(NetIbMPITest, Reconnect_VNic) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -2071,9 +2047,8 @@ TEST_F(NetIbMPITest, Reconnect_VNic) {
 }
 
 TEST_F(NetIbMPITest, MultiRecvGPUShuffled) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;

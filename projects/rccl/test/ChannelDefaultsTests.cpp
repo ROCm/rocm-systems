@@ -22,6 +22,7 @@
 #include <memory>
 
 #include "comm.h"
+#include "channel.h"
 #include "common/MockComm.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "device.h"
@@ -73,6 +74,16 @@ ResolvedChannels ResolveP2pChannels(const char* arch, int nRanks, int collChanne
 
     CleanupMockComm(comm);
     return resolved;
+}
+
+TEST(P2pBatchEligibility, AppliesThresholdToExplicitEnable)
+{
+    constexpr ssize_t threshold = 64 * 1024;
+
+    EXPECT_TRUE(rcclP2pBatchEligible(/*enabled=*/1, threshold, threshold, threshold));
+    EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/1, threshold + 1, threshold + 1, threshold));
+    EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/1, threshold, threshold / 2, threshold));
+    EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/0, threshold, threshold, threshold));
 }
 
 // ncclP2pChannelToPart cannot recover part indices >= nP2pChannels, so a per-peer count
