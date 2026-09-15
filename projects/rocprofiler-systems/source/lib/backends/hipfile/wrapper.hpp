@@ -48,7 +48,7 @@ version_ordinal(unsigned major, unsigned minor, unsigned patch) noexcept
 }
 
 /// @brief First hipFile release exposing the per-GPU stats API this backend needs.
-inline constexpr unsigned long MIN_HIPFILE_VERSION = version_ordinal(
+inline constexpr unsigned long k_min_hipfile_version = version_ordinal(
     ROCPROFSYS_HIPFILE_MIN_VERSION_MAJOR, ROCPROFSYS_HIPFILE_MIN_VERSION_MINOR,
     ROCPROFSYS_HIPFILE_MIN_VERSION_PATCH);
 
@@ -56,7 +56,7 @@ inline constexpr unsigned long MIN_HIPFILE_VERSION = version_ordinal(
 // lands on the include path: a stale hipfile.h from another prefix would otherwise fail
 // much later with a confusing "hipFileGetStatsL3 was not declared".
 static_assert(version_ordinal(HIPFILE_VERSION_MAJOR, HIPFILE_VERSION_MINOR,
-                              HIPFILE_VERSION_PATCH) >= MIN_HIPFILE_VERSION,
+                              HIPFILE_VERSION_PATCH) >= k_min_hipfile_version,
               "hipfile.h predates the per-GPU stats API (hipFileGetStatsL3); reconfigure "
               "against a newer hipFile or build with ROCPROFSYS_USE_HIPFILE=OFF");
 
@@ -71,7 +71,7 @@ struct wrapper
 {
     using stats_l3_t = hipFileStatsLevel3_t;
 
-    static constexpr std::size_t MAX_GPU_SLOTS = HIPFILE_MAX_GPUS;
+    static constexpr std::size_t k_max_gpu_slots = HIPFILE_MAX_GPUS;
 
 private:
     /// @brief hipFile entry points, or nulls when libhipfile could not be loaded.
@@ -86,28 +86,28 @@ private:
      */
     static const api& get_api() noexcept
     {
-        static const api _api = []() noexcept {
-            auto _value = api{};
+        static const api k_api = []() noexcept {
+            auto resolved = api{};
 
             // SOVERSION is hipFile's major version, still 0 for every release (see
             // runtime_version_supported below, which re-checks the real version).
-            void* _handle = dlopen(ROCPROFSYS_HIPFILE_SONAME, RTLD_LAZY | RTLD_LOCAL);
-            if(_handle == nullptr)
+            void* handle = dlopen(ROCPROFSYS_HIPFILE_SONAME, RTLD_LAZY | RTLD_LOCAL);
+            if(handle == nullptr)
             {
                 LOG_WARNING("hipFile telemetry unavailable: {} could not be loaded. "
                             "Install the hipFile runtime package (apt install "
                             "amdrocm-hipfile, or dnf install amdrocm-hipfile) or add "
                             "its directory to LD_LIBRARY_PATH.",
                             ROCPROFSYS_HIPFILE_SONAME);
-                return _value;
+                return resolved;
             }
 
-            _value.get_version = reinterpret_cast<decltype(api::get_version)>(
-                dlsym(_handle, "hipFileGetVersion"));
-            _value.get_stats_l3 = reinterpret_cast<decltype(api::get_stats_l3)>(
-                dlsym(_handle, "hipFileGetStatsL3"));
+            resolved.get_version = reinterpret_cast<decltype(api::get_version)>(
+                dlsym(handle, "hipFileGetVersion"));
+            resolved.get_stats_l3 = reinterpret_cast<decltype(api::get_stats_l3)>(
+                dlsym(handle, "hipFileGetStatsL3"));
 
-            if(_value.get_version == nullptr || _value.get_stats_l3 == nullptr)
+            if(resolved.get_version == nullptr || resolved.get_stats_l3 == nullptr)
             {
                 LOG_WARNING("hipFile telemetry unavailable: {} does not export the "
                             "per-GPU stats API. Upgrade the hipFile runtime package "
@@ -120,9 +120,9 @@ private:
                 return api{};
             }
 
-            return _value;
+            return resolved;
         }();
-        return _api;
+        return k_api;
     }
 
 public:
@@ -131,9 +131,9 @@ public:
      */
     static bool runtime_version_supported() noexcept
     {
-        static const bool _supported = []() {
-            const auto& _api = get_api();
-            if(_api.get_version == nullptr)
+        static const bool k_supported = []() {
+            const auto& hipfile_api = get_api();
+            if(hipfile_api.get_version == nullptr)
             {
                 return false;
             }
@@ -145,14 +145,14 @@ public:
             unsigned patch = 0;
             // NOLINTEND(misc-const-correctness)
 
-            if(_api.get_version(&major, &minor, &patch).err != hipFileSuccess)
+            if(hipfile_api.get_version(&major, &minor, &patch).err != hipFileSuccess)
             {
                 LOG_WARNING("hipFile telemetry unavailable: the hipFile runtime version "
                             "could not be queried");
                 return false;
             }
 
-            if(version_ordinal(major, minor, patch) < MIN_HIPFILE_VERSION)
+            if(version_ordinal(major, minor, patch) < k_min_hipfile_version)
             {
                 LOG_WARNING(
                     "hipFile telemetry unavailable: the loaded hipFile runtime is "
@@ -165,7 +165,7 @@ public:
 
             return true;
         }();
-        return _supported;
+        return k_supported;
     }
 
     /**
@@ -179,17 +179,17 @@ public:
      */
     static bool get_stats_l3(stats_l3_t* out) noexcept
     {
-        const auto& _api = get_api();
-        if(_api.get_stats_l3 == nullptr)
+        const auto& hipfile_api = get_api();
+        if(hipfile_api.get_stats_l3 == nullptr)
         {
             return false;
         }
-        return _api.get_stats_l3(out).err == hipFileSuccess;
+        return hipfile_api.get_stats_l3(out).err == hipFileSuccess;
     }
 };
 
-static_assert(wrapper::MAX_GPU_SLOTS == MAX_GPUS,
-              "backends::hipfile::MAX_GPUS is out of sync with HIPFILE_MAX_GPUS; the "
+static_assert(wrapper::k_max_gpu_slots == k_max_gpus,
+              "backends::hipfile::k_max_gpus is out of sync with HIPFILE_MAX_GPUS; the "
               "snapshot would silently drop or over-read per-GPU slots");
 
 /// @brief Contract for a per-GPU counter: convertible to std::uint64_t without losing

@@ -23,13 +23,13 @@ namespace rocprofsys::pmc::collectors::hipfile
 namespace backend = ::rocprofsys::backends::hipfile;
 
 using backend::gpu_stats;
-using backend::MAX_GPUS;
+using backend::k_max_gpus;
 using backend::stats_snapshot;
 
 /**
  * @brief Bitfield for selecting which hipFile metrics to collect.
  *
- * Bit positions match the order of @c METRIC_TABLE below; @c metric_desc::bit is the
+ * Bit positions match the order of @c k_metric_table below; @c metric_desc::bit is the
  * single source of truth tying a metric to its bit.
  */
 union enabled_metrics
@@ -115,7 +115,7 @@ struct metric_desc
 // Units follow the established collectors: `bytes` as AMD SMI's PCIe bandwidth
 // accumulator and the NIC byte counters use, `bytes/s` as AMD SMI's instantaneous PCIe
 // bandwidth uses, `count` as the CPU collector's context switches and page faults use.
-inline constexpr std::array METRIC_TABLE{
+inline constexpr std::array k_metric_table{
     metric_desc{ .suffix = "Read Bytes",
                  .unit   = "bytes",
                  .key    = "bytes",
@@ -228,25 +228,25 @@ inline constexpr std::array METRIC_TABLE{
             [](const metrics& sample_metrics) { return sample_metrics.write_bandwidth; } }
 };
 
-/// @brief Mask with one bit set per entry in @c METRIC_TABLE.
-inline constexpr std::uint32_t ALL_HIPFILE_METRICS = (1U << METRIC_TABLE.size()) - 1U;
+/// @brief Mask with one bit set per entry in @c k_metric_table.
+inline constexpr std::uint32_t k_all_hipfile_metrics = (1U << k_metric_table.size()) - 1U;
 
 static_assert([]() constexpr {
-    return std::ranges::all_of(METRIC_TABLE, [](const auto& metric) constexpr {
+    return std::ranges::all_of(k_metric_table, [](const auto& metric) constexpr {
         return metric.unit != nullptr && metric.unit[0] != '\0';
     });
 }());
 
-static_assert(METRIC_TABLE.size() < 32,
-              "enabled_metrics addresses METRIC_TABLE through a 32-bit mask");
+static_assert(k_metric_table.size() < 32,
+              "enabled_metrics addresses k_metric_table through a 32-bit mask");
 
-// ALL_HIPFILE_METRICS assumes the bits run 0..size()-1 with no gaps, so a metric's bit
+// k_all_hipfile_metrics assumes the bits run 0..size()-1 with no gaps, so a metric's bit
 // is its index. Which metric sits at which index is arbitrary; only the correspondence
 // is load-bearing.
 static_assert([]() constexpr {
-    for(std::size_t index = 0; index < METRIC_TABLE.size(); ++index)
+    for(std::size_t index = 0; index < k_metric_table.size(); ++index)
     {
-        if(METRIC_TABLE[index].bit != index) return false;
+        if(k_metric_table[index].bit != index) return false;
     }
     return true;
 }());
@@ -263,7 +263,7 @@ static_assert([]() constexpr {
 metric_group_mask(std::string_view group) noexcept
 {
     std::uint32_t mask = 0;
-    for(const auto& metric : METRIC_TABLE)
+    for(const auto& metric : k_metric_table)
     {
         if(group == metric.key)
         {
@@ -282,7 +282,7 @@ metric_group_mask(std::string_view group) noexcept
 [[nodiscard]] constexpr std::uint32_t
 metric_bit_mask(std::string_view suffix) noexcept
 {
-    for(const auto& metric : METRIC_TABLE)
+    for(const auto& metric : k_metric_table)
     {
         if(suffix == metric.suffix)
         {

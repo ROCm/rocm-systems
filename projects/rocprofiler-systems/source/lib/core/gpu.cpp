@@ -44,6 +44,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace rocprofsys
@@ -202,7 +203,7 @@ mask_if_unreliable(const char* name, std::string_view value)
     {
         return std::nullopt;
     }
-    return visibility_env{ name, std::string{ value } };
+    return visibility_env{ .name = name, .value = std::string{ value } };
 }
 
 /// @brief First visibility mask that would put HIP ordinals in a different order
@@ -242,7 +243,7 @@ unreliable_hip_ordinal_mask()
 [[nodiscard]] bool
 hip_ordinal_mapping_is_reliable()
 {
-    static const bool reliable = [] {
+    static const bool k_reliable = [] {
         const auto unreliable = unreliable_hip_ordinal_mask();
         if(!unreliable)
         {
@@ -258,7 +259,7 @@ hip_ordinal_mapping_is_reliable()
                     unreliable->name, unreliable->value);
         return false;
     }();
-    return reliable;
+    return k_reliable;
 }
 }  // namespace
 
