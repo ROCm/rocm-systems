@@ -63,13 +63,67 @@ The following table shows the corresponding bits for device-specific data, which
 
        The vendor ID follows the PCIe vendor ID 16-bit value definition, such as 0x1022 or 0x1002 for AMD.
 
-   * - 112:117
+   * - 112:116
      - UnitID (part 2)
-     - Used only if the UnitID value is >= 256; otherwise, this value is considered 0.
+     - Used only if the UnitID value is >= 256; otherwise, this value is considered 0. UnitID is therefore 13 bits in total, split across bits 64:71 and 112:116.
+
+   * - 117
+     - Auxiliary Value Identifier
+     - Set to 1 when bits 0:63 hold a synthesized auxiliary identity rather than a genuine hardware serial number. This bit is not part of UnitID, which is why UnitID part 2 ends at bit 116. It is carried unchanged into the derived CUID.
 
    * - 118:121
-     - Device Type
-     - Present as ``amdcuid_device_type_t`` in ``amd_cuid.h``.
+     - Component Type
+     - Present as ``amdcuid_device_type_t`` in ``amd_cuid.h``, which uses the on-wire values directly.
+
+The Component Type field uses the following values:
+
+.. list-table:: Component Type values
+   :widths: 20 40
+   :header-rows: 1
+
+   * - Value
+     - Type
+
+   * - 0x0
+     - Platform
+
+   * - 0x1
+     - CPU
+
+   * - 0x2
+     - GPU
+
+   * - 0x3
+     - NIC
+
+   * - 0x4
+     - NPU
+
+   * - 0x5
+     - Storage
+
+   * - 0x6
+     - Memory
+
+   * - 0x7
+     - Generic PCIe device
+
+   * - 0x8
+     - Generic component
+
+   * - 0x9
+     - Rack tray
+
+   * - 0xA
+     - Rack
+
+   * - 0xB - 0xE
+     - Reserved
+
+   * - 0xF
+     - Other
+
+The field spans an octet boundary: its low two bits are the top two bits of payload octet 14, and its high two bits are the low two bits of payload octet 15. A producer that drops payload bits 120:121 renders the type modulo 4, which makes an NPU collide with a Platform.
 
 The values present in the corresponding bit positions (first column in the preceding table) are also used to fill out a UUIDv8 style format to generate the primary CUID as shown in the following table:
 
@@ -101,6 +155,10 @@ The values present in the corresponding bit positions (first column in the prece
     - ID value (part 3)
     - MSB of ID value.
 
+The version and variant bits are inserted rather than overwritten: they displace the payload after them instead of replacing payload content. The framing therefore preserves every one of payload bits 0 through 121 and discards exactly payload bits 122 through 127, which are always zero, so the payload can be recovered from the rendered UUID exactly.
+
+Because the bit positions above are numbered MSB-first over the rendered octets, the least significant payload octet appears at the front of the printed UUID string. For example, the payload ``d4abaad39b34c5060000a37302108000`` renders as ``d4abaad3-9b34-8c50-9800-028dcc084200``.
+
 Because the device serial number is protected information, the primary CUID generated from it is also protected at the same level. Users with the right privilege can consider the primary CUID as the direct link between the device and its derived CUID.
 
 Derived CUID
@@ -111,3 +169,38 @@ For typical day-to-day operations, the derived CUID is used. It is derived by ha
 To protect the serial number consisting sensitive information, the tool users must provide the 256-bit key required for the keyed hashing function, as described in FIPS 198-1, The Keyed-Hash Message Authentication Code (HMAC). This key must be unique, random, and protected from unauthorized use. The secure storage of the key might require additional management overhead.
 
 The key should be accessible only to privileged users or the privileged service, which can then use the key, along with the primary CUID, in the HMAC-SHA2-256 function to generate the derived CUID. Note that if the key changes due to key rotation, the derived CUID will also change. However, because the primary CUIDs always remain the same, these can always be used to trace the derived CUIDs back to their respective devices.
+
+The key is the HMAC key and the 16 packed primary payload octets are the HMAC message. The 256-bit digest is folded into the derived payload as follows:
+
+.. list-table:: Derived CUID payload
+   :widths: 20 60
+   :header-rows: 1
+
+   * - Bits
+     - Content
+
+   * - 0:63
+     - Digest bits 0:63.
+
+   * - 64:71
+     - Reserved, zero. The UnitID slot is left empty so that the derived CUID can mask the sub-unit distinction where it is not wanted.
+
+   * - 72:116
+     - Digest bits 64:108, that is 45 bits.
+
+   * - 117
+     - Auxiliary Value Identifier, copied from the primary.
+
+   * - 118:121
+     - Reserved, zero.
+
+The derived payload is then rendered as a UUIDv8 by the same rule as the primary. The digest slot is 45 bits rather than 46 because bit 117 is reserved for the Auxiliary Value Identifier in both layouts.
+
+Auxiliary CUIDs
+================
+
+Where no genuine hardware serial number is reachable, user-mode software can construct an auxiliary CUID from non-privileged information. An auxiliary CUID uses the same 122-bit payload layout, the same Component Type numbering, the same UUIDv8 framing and the same derivation as any other CUID. It is distinguished solely by payload bit 117 being set.
+
+The UUID version nibble is always ``8``, for auxiliary and canonical values alike. A consumer determines whether a value is auxiliary by testing bit 117, not by branching on the UUID version. Whether a serial number was reachable is a property of the environment rather than of the device, and it must not surface as a change of UUID type.
+
+An auxiliary CUID is ambiguous by construction: it is stable only while the operating system installation and the device topology are unchanged, and it is not guaranteed to be unique across nodes.

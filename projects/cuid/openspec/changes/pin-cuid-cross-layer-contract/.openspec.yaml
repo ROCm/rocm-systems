@@ -1,0 +1,10 @@
+schema: spec-driven
+created: 2026-08-20
+# implemented: the pinned values are in force in both the kernel tree and the
+# userspace library, and the conformance vectors are generated from them.
+#
+# This change is authoritative for any value the kernel, the library and its
+# consumers must agree on: key constants, the provisioned seed length, the
+# auxiliary input layout. Where another change in this directory states one of
+# those values, this one governs.
+status: implemented

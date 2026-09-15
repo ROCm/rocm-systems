@@ -1,0 +1,7 @@
+schema: spec-driven
+created: 2026-08-20
+# specified, not applied: every resolution here is already implemented by the
+# other three changes, but the published specification page itself has not been
+# edited, which needs Confluence write access. Until it is, a new
+# implementation still starts from the recorded contradictions.
+status: specified-not-applied
