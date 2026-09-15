@@ -15,6 +15,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - Collects thread trace data without packet insertion or HSA signal manipulation, removing the queue interception overhead required by the standard ATT path.
     - Individual kernels can be traced without serialization, and the path is independent of the ROCm runtime version.
     - Experimental: intended to validate the new collection path and to enable out-of-process thread trace and long-kernel tracing in future releases.
+  - `rocprofiler_thread_trace_decoder_set_analysis` to request optional analyses while decoding Advanced Thread Trace (ATT) data:
+    - Enabling `ROCPROFILER_THREAD_TRACE_DECODER_ANALYSIS_HIDDEN_LATENCY` makes the decoder emit `ROCPROFILER_THREAD_TRACE_DECODER_RECORD_HIDDEN_LATENCY` records alongside the usual wave and occupancy records.
+    - Analyses are off by default, because the decoder has to retain each shader engine's pipe activity across wave callbacks while one is active.
+    - Requires rocprof-trace-decoder 0.2.3 or newer and returns `ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI` against older libraries; decoding itself is unaffected by the decoder version.
 
   - HIP event tracing: GPU-side barrier tracing for `hipEventRecord` and `hipStreamWaitEvent`:
     - New tracing kinds `ROCPROFILER_CALLBACK_TRACING_HIP_EVENT` and `ROCPROFILER_BUFFER_TRACING_HIP_EVENT` with operation enum `rocprofiler_hip_event_operation_t` (RECORD, WAIT).
@@ -23,6 +27,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 **rocprof-trace-decoder:**
 
+  - Hidden latency estimation computed natively while decoding, rather than by a separate post-processing pass:
+    - Estimates how many of an instruction's idle, stall, and issue cycles overlapped concurrent work on another instruction pipe, reported per `(SIMD, program counter)`.
+    - Scoping is per `(shader engine, SIMD)`, so each parse must cover exactly one capture from one shader engine; a parse spanning more than one buffer reports `ANALYSIS_MULTIPLE_BUFFERS`.
+    - Available through the handle-based decoder API and from Python as `TraceRecords.hidden_latency`.
   - Python API for decoding Advanced Thread Trace (ATT) / SQTT data directly from Python, without writing a C++ consumer:
     - Wraps the decoder library and exposes thread trace decoding as a first-class Python interface, with samples demonstrating common workflows.
     - Useful for analysis scripts, Jupyter notebooks, and custom profiling tools that process ATT output programmatically.

@@ -7,6 +7,7 @@ from typing import Any
 __all__ = [
     "DecoderInfo",
     "DecoderStatus",
+    "AnalysisFlags",
     "Dispatch",
     "DispatchFlags",
     "Event",
@@ -15,6 +16,7 @@ __all__ = [
     "EventType",
     "InstCategory",
     "Instruction",
+    "HiddenLatency",
     "Occupancy",
     "OtherSimdInstruction",
     "Pc",
@@ -28,6 +30,11 @@ __all__ = [
     "WaveState",
     "WaveStateType",
 ]
+
+
+class AnalysisFlags(IntEnum):
+    NONE = 0
+    HIDDEN_LATENCY = 0x1
 
 
 class DecoderStatus(IntEnum):
@@ -45,7 +52,8 @@ class DecoderInfo(IntEnum):
     DATA_LOST = 1
     STITCH_INCOMPLETE = 2
     WAVE_INCOMPLETE = 3
-    LAST = 4
+    ANALYSIS_MULTIPLE_BUFFERS = 4
+    LAST = 5
 
 
 class WaveStateType(IntEnum):
@@ -130,7 +138,8 @@ class RecordType(IntEnum):
     RT_FREQUENCY = 8
     INST_OTHER_SIMD = 9
     DISPATCH = 10
-    LAST = 11
+    HIDDEN_LATENCY = 11
+    LAST = 12
 
 
 @dataclass(frozen=True, order=True)
@@ -226,6 +235,19 @@ class OtherSimdInstruction:
 
 
 @dataclass
+class HiddenLatency:
+    size: int
+    pc: Pc
+    idle: int
+    stall: int
+    issue: int
+    simd: int
+
+    def total(self) -> int:
+        return self.idle + self.stall + self.issue
+
+
+@dataclass
 class EventPayload:
     raw: int
     code_object_id: int
@@ -277,4 +299,5 @@ class TraceRecords:
     realtime_frequency: int | None = None
     other_simd: list[OtherSimdInstruction] = field(default_factory=list)
     dispatches: list[Dispatch] = field(default_factory=list)
+    hidden_latency: list[HiddenLatency] = field(default_factory=list)
     batches: list[tuple[RecordType, list[Any] | int]] = field(default_factory=list)

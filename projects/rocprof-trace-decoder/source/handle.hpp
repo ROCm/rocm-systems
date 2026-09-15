@@ -116,6 +116,9 @@ public:
     rocprof_trace_decoder_se_data_callback_t se_data_cb{nullptr};
     void* se_data_userdata{nullptr};
 
+    /// Bitmask of rocprof_trace_decoder_analysis_flags_t requested for parse().
+    uint64_t analysis_flags{0};
+
     mutable std::condition_variable_any cv;
     mutable std::atomic<int> gfxip = 0;
     uint64_t trace_header = 0;

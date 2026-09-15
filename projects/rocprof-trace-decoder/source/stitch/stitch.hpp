@@ -30,6 +30,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+#include "hidden_latency.hpp"
 #include "rocprof_trace_decoder/rocprof_trace_decoder.h"
 #include "trace_parser.hpp"
 #include "trie.h"
@@ -177,8 +178,14 @@ public:
         return gfxip;
     }
 
+    /// Routes waves and other-SIMD activity into an opt-in analysis pass. The pass is owned
+    /// by the caller and must outlive this Stitcher; pass nullptr to disable.
+    void set_hidden_latency_analysis(HiddenLatencyAnalysis* analysis) { hidden_latency = analysis; }
+
     void sendOtherSimd(std::vector<att_other_simd_t>& vec)
     {
+        // sendVec clears the batch, so the analysis has to see it first.
+        if (hidden_latency) hidden_latency->add_other_simd(vec);
         sendVec(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INST_OTHER_SIMD, vec);
     }
     void sendShaderdata(std::vector<att_shader_data_t>& vec)
@@ -235,6 +242,7 @@ private:
     std::shared_ptr<ICodeServicer> codeobj_service{};
     std::unordered_map<int, int> jumps{};
     std::unique_ptr<PCTranslator> pctranslator{nullptr};
+    HiddenLatencyAnalysis* hidden_latency{nullptr};
 
     std::once_flag stitch_flag{}, incomp_flag{}, gfx_flag{};
 
