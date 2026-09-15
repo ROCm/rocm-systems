@@ -33,6 +33,7 @@
 #include <fmt/ranges.h>
 
 #include <atomic>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -41,6 +42,7 @@
 #include <queue>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -51,8 +53,9 @@ namespace container
 template <typename Tp>
 struct pool
 {
-    using size_type       = size_t;
-    using pool_array_type = stable_vector<pool_object<Tp>, 32>;
+    using size_type          = size_t;
+    using pool_array_type    = stable_vector<pool_object<Tp>, 32>;
+    using retired_array_type = std::vector<pool_array_type>;
 
     template <typename FuncT, typename... Args>
     explicit pool(std::piecewise_construct_t, size_type count, FuncT&& ctor, Args&&... args);
@@ -82,6 +85,7 @@ private:
     mutable std::mutex     m_pool_mtx      = {};
     pool_array_type        m_pool          = {};
     std::atomic<size_type> m_pool_size     = 0;
+    retired_array_type     m_retired       = {};
     mutable std::mutex     m_available_mtx = {};
     std::queue<size_type>  m_available     = {};
     std::atomic<size_type> m_released      = 0;
@@ -107,8 +111,10 @@ pool<Tp>::pool(std::piecewise_construct_t, size_type count, FuncT&& ctor, Args&&
             _args_tuple);
         m_available.push(idx);
     }
-    // published last so that a reader of m_pool_size never sees an index whose object is not
-    // yet constructed. Invoked from the constructor and from acquire() under m_pool_mtx.
+    // mirrors m_pool.size() for release(), which cannot take m_pool_mtx. Invoked from the
+    // constructor and from acquire(), both holding that lock. The release ordering is not
+    // load-bearing: release() only compares against this value, and acquire() dereferences
+    // m_pool under m_pool_mtx, which already orders these writes against that read.
     m_pool_size.store(m_pool.size(), std::memory_order_release);
 }}
 {
@@ -135,11 +141,23 @@ pool<Tp>::acquire()
 
     if(_idx.has_value())
     {
-        auto  _read_lk = std::unique_lock<std::mutex>{m_pool_mtx};
-        auto& _obj     = m_pool.at(_idx.value());
-        ROCP_FATAL_IF(!_obj.acquire()) << fmt::format(
-            "Pool object at index {} was expected to be available but was not", _idx.value());
-        return _obj;
+        auto _read_lk = std::unique_lock<std::mutex>{m_pool_mtx};
+        // m_pool_size mirrors m_pool.size(); both are written only under this lock
+        assert(m_pool_size.load(std::memory_order_relaxed) == m_pool.size());
+        // the free list is unlocked between the pop above and this lock, so clear() can retire
+        // m_pool in between and strand the popped index. Drop it and take the growth path
+        // rather than indexing past the end of the repopulated pool. This narrows the window,
+        // it does not close it: an index stranded by a clear() that another thread has since
+        // regrown past is back in range here, so it passes and aliases the new generation's
+        // object while still sitting on the free list. release() has the same residual. A bounds
+        // check cannot tell the generations apart; that needs an epoch counter.
+        if(_idx.value() < m_pool.size())
+        {
+            auto& _obj = m_pool.at(_idx.value());
+            ROCP_FATAL_IF(!_obj.acquire()) << fmt::format(
+                "Pool object at index {} was expected to be available but was not", _idx.value());
+            return _obj;
+        }
     }
 
     // add a new batch
@@ -171,6 +189,11 @@ pool<Tp>::release(size_type idx)
     if(idx >= m_pool_size.load(std::memory_order_acquire)) return;
 
     auto _write_lk = std::unique_lock<std::mutex>{m_available_mtx};
+    // re-checked under the lock, which clear() holds while it drains the free list and zeroes
+    // m_pool_size: the check above can pass and then go stale while this thread waits here,
+    // which would leave a retired index in the free list for a later acquire() to pop.
+    if(idx >= m_pool_size.load(std::memory_order_acquire)) return;
+
     m_available.push(idx);
     m_released++;
 }
@@ -219,6 +242,21 @@ pool<Tp>::clear(FuncT&& func)
 
     while(!m_available.empty())
         m_available.pop();
+
+    // The storage is retired, not freed. A pool_object<Tp>* handed out before this call can
+    // outlive it -- the HSA async signal handler holds one per dispatch, and finalization
+    // reaches here without waiting for those handlers -- and pool_object::release() exchanges
+    // m_in_use on itself before it ever reaches this pool, so freeing here is a use-after-free
+    // on the object, which zeroing m_pool_size cannot prevent. The loop above already released
+    // every object, so that exchange fails and no retired index re-enters the free list.
+    // Moving a stable_vector moves only its chunk index, so the objects keep their addresses.
+    // Bounded: clear() is a teardown operation, and the storage is freed with the pool.
+    //
+    // Narrowed, not eliminated. The retired chunks go away when the pool itself is destroyed by
+    // destroy_static_objects(), which registration.cpp runs from the same atexit handler as
+    // finalize(); a signal handler already past its get_fini_status() > 0 early return can still
+    // be mid-body by then. The window shrinks from "after clear()" to "after set_fini_status(1)".
+    m_retired.emplace_back(std::move(m_pool));
     m_pool = pool_array_type{};
     m_pool_size.store(0, std::memory_order_release);
     m_released.store(0);

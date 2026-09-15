@@ -1,6 +1,8 @@
 #
 #   Tests for the common library
 #
+rocprofiler_deactivate_clang_tidy()
+
 project(rocprofiler-sdk-tests-common LANGUAGES C CXX)
 
 set(common_sources

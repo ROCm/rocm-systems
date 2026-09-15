@@ -29,6 +29,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -53,6 +54,7 @@ constexpr size_t burst_rounds  = 32;
 constexpr size_t burst_base    = 8;
 constexpr size_t burst_step    = 2;
 constexpr size_t min_churn_ops = 2000;
+constexpr size_t clear_rounds  = 256;
 
 constexpr uint64_t payload_sentinel = 0xc0ffee;
 
@@ -234,6 +236,113 @@ TEST(common, pool_clear_with_object_in_use)
     EXPECT_EQ(usage_field(_report, "batches"), 0) << _report;
 
     // a cleared pool must repopulate on the next acquire
+    auto& _obj = _pool.acquire();
+    EXPECT_LT(_obj.index(), batch_size);
+    EXPECT_TRUE(_obj.release());
+}
+
+// clear() retires the storage instead of freeing it, so a pool_object<Tp>* handed out before
+// the call stays addressable after it. Freeing instead makes every read below a use-after-free,
+// which a sanitizer build reports; without one, the surviving signal is that the repopulated
+// pool must not reuse the retired object's storage or its index.
+TEST(common, pool_release_after_clear)
+{
+    container::pool<payload> _pool{std::piecewise_construct, batch_size, init_payload};
+
+    auto* _held        = &_pool.acquire();
+    auto  _idx         = _held->index();
+    _held->get().value = payload_sentinel;
+
+    _pool.clear();
+
+    // retired, not freed: the object keeps its address, its index and its payload
+    EXPECT_EQ(_held->index(), _idx);
+    EXPECT_EQ(_held->get().value, payload_sentinel);
+
+    // clear() released every object it retired, so the late release finds m_in_use already
+    // false, fails its exchange and never reaches pool<Tp>::release()
+    EXPECT_FALSE(_held->in_use());
+    EXPECT_FALSE(_held->release());
+    EXPECT_EQ(_held->get().value, payload_sentinel);
+
+    auto _report = _pool.get_usage_report();
+    EXPECT_EQ(usage_field(_report, "size"), 0) << _report;
+    EXPECT_EQ(usage_field(_report, "available"), 0) << _report;
+
+    // and a retired index handed straight to release(), the route the failed exchange above
+    // skips, is dropped rather than queued
+    _pool.release(_idx);
+    _report = _pool.get_usage_report();
+    EXPECT_EQ(usage_field(_report, "size"), 0) << _report;
+    EXPECT_EQ(usage_field(_report, "available"), 0) << _report;
+
+    // the repopulated pool starts over at index zero: the same index as the retired object, and
+    // necessarily a different object, since the retired storage is still alive
+    auto& _fresh = _pool.acquire();
+    EXPECT_EQ(_fresh.index(), _idx);
+    EXPECT_NE(&_fresh, _held);
+    EXPECT_TRUE(_fresh.release());
+}
+
+// clear() can land between the free-list pop in acquire() and the m_pool_mtx acquisition that
+// follows it, and between release()'s two bounds checks. Both re-check under the second lock.
+// Drop the re-check in acquire() and the stranded index reaches stable_vector::at(), which
+// throws std::out_of_range.
+//
+// One churn thread, and a main thread that only clears, is deliberate. The re-checks are bounds
+// checks, so they cannot tell a stranded index apart from an in-range index belonging to a later
+// generation; reaching that residual takes a second thread to regrow the pool while the first is
+// blocked on m_pool_mtx. With a single grower the pool is always empty when the stranded index
+// is re-checked, so this test cannot trip it.
+TEST(common, pool_clear_races_acquire_release)
+{
+    container::pool<payload> _pool{std::piecewise_construct, batch_size, init_payload};
+
+    auto _clears_done   = std::atomic<bool>{false};
+    auto _ops           = std::atomic<size_t>{0};
+    auto _acquire_threw = std::atomic<size_t>{0};
+
+    // counted rather than EXPECT_*'d here: the pool is driven from a second thread, and the
+    // existing tests keep their assertions on the main thread for the same reason
+    auto _churn_worker = [&]() {
+        do
+        {
+            try
+            {
+                // a clear() landing here releases the object acquire() just handed out, so
+                // neither in_use() nor the release() result below is assertable from this
+                // thread; acquire()'s own exchange already succeeded before it returned
+                auto& _obj       = _pool.acquire();
+                _obj.get().value = _obj.index();
+                _obj.release();
+            } catch(const std::exception&)
+            {
+                _acquire_threw++;
+            }
+            _ops++;
+        } while(!_clears_done.load(std::memory_order_relaxed));
+    };
+
+    auto _churn = std::thread{_churn_worker};
+
+    for(size_t i = 0; i < clear_rounds; ++i)
+    {
+        _pool.clear();
+        std::this_thread::yield();
+    }
+
+    _clears_done.store(true, std::memory_order_relaxed);
+    _churn.join();
+
+    EXPECT_EQ(_acquire_threw.load(), 0) << "acquire() indexed the pool with a stranded index";
+    EXPECT_GT(_ops.load(), 0) << "the churn thread never ran";
+
+    // the pool is still usable after the races
+    _pool.clear();
+    auto _report = _pool.get_usage_report();
+    EXPECT_EQ(usage_field(_report, "size"), 0) << _report;
+    EXPECT_EQ(usage_field(_report, "available"), 0) << _report;
+
     auto& _obj = _pool.acquire();
     EXPECT_LT(_obj.index(), batch_size);
     EXPECT_TRUE(_obj.release());
