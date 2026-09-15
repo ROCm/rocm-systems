@@ -99,7 +99,6 @@ runs:
           echo "Warning: Compiler launcher ${{ inputs.compiler-launcher }} not found or not executable"
         fi
 
-    # Keep after the ccache setup: it prepends /usr/local/bin, whose cmake is too old, to $GITHUB_PATH
     - name: Setup environment variables
       shell: bash
       run: |
@@ -161,7 +160,6 @@ runs:
       shell: bash
       working-directory: projects/rocprofiler-register
       run: |
-        # /usr/local/bin last so its cmake cannot shadow the venv cmake
         export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:${PATH}:/usr/local/bin
         echo "Install ROCProfiler-Register"
         cmake -B build-rocprofiler-register \
@@ -184,7 +182,6 @@ runs:
         export ROCM_PATH=${{ inputs.rocm-path }}
         export HIP_PLATFORM=amd
         export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/lib/rocm_sysdeps/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
-        # /usr/local/bin last so its cmake cannot shadow the venv cmake
         export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:${PATH}:/usr/local/bin
         # Temporary workaround until hipFILE adds the ROCm sysdeps include path for libmount.
         if [ -f "${ROCM_PATH}/lib/rocm_sysdeps/include/libmount/libmount.h" ]; then

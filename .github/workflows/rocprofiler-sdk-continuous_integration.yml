@@ -249,7 +249,6 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          # cmake searches the ROCm LLVM prefix first, where clang-tidy is too new for the linter
           export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
           source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
@@ -446,7 +445,6 @@ jobs:
           source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
           python3 -m pip install --upgrade pip
           python3 -m pip install --upgrade -r requirements.txt
-          # RHEL/SLES ship a Python too old for the cmake 4.x wheels used by the Ubuntu jobs
           python3 -m pip install --upgrade cmake==3.28.4
 
       - name: Install Curl for RHEL 8.8
