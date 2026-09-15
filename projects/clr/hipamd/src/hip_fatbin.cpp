@@ -73,7 +73,8 @@ FatBinaryInfo::~FatBinaryInfo() {
 #if ROCM_KPACK_ENABLED
       kpack_free_code_object(const_cast<void*>(i));
 #else
-      guarantee(false, "Kpack code object but ROCM_KPACK_ENABLED=OFF");
+      LogPrintfError("Kpack code object but ROCM_KPACK_ENABLED=OFF");
+      // Cannot return from destructor, just log error
 #endif
     } else {
       delete[] reinterpret_cast<const char*>(i);
@@ -85,7 +86,8 @@ FatBinaryInfo::~FatBinaryInfo() {
 void FatBinaryInfo::ReleaseImageAndFile() {
   if (image_mapped_) {
     if (!amd::Os::MemoryUnmapFile(image_, image_size_)) {
-      guarantee(false, "Cannot unmap the file");
+      LogPrintfError("Cannot unmap the file");
+      // Cannot return from void function, just log error
     }
     image_ = nullptr;
     image_size_ = 0;
@@ -468,8 +470,10 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     image_bound = image_size_;
     image_mapped_ = true;
   }
-  guarantee(image_ != nullptr, "Image cannot be nullptr, file:%s did not map for some reason",
-            fname_.c_str());
+  if (image_ == nullptr) {
+    LogPrintfError("Image cannot be nullptr, file:%s did not map for some reason", fname_.c_str());
+    return hipErrorInvalidImage;
+  }
 
   bool is_compressed = IsCodeObjectCompressed(image_, image_bound),
        is_uncompressed = IsCodeObjectUncompressed(image_, image_bound);
