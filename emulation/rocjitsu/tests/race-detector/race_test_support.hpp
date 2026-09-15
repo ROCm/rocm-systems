@@ -17,7 +17,10 @@ class RaceTestBase : public ::testing::Test {
 protected:
   template <typename T> T *alloc(int count) {
     T *pointer = nullptr;
-    (void)hipMalloc(&pointer, count * sizeof(T));
+    const hipError_t error = hipMalloc(&pointer, count * sizeof(T));
+    EXPECT_EQ(error, hipSuccess);
+    if (error == hipSuccess)
+      allocations_.push_back(pointer);
     return pointer;
   }
 
@@ -28,6 +31,14 @@ protected:
       host[index] = static_cast<T>(index);
     (void)hipMemcpy(pointer, host.data(), count * sizeof(T), hipMemcpyHostToDevice);
     return pointer;
+  }
+
+  void TearDown() override {
+    // The fixture owns every alloc()/allocWithData() buffer, including those
+    // passed directly to a kernel. Release them even after a test assertion.
+    for (void *pointer : allocations_)
+      EXPECT_EQ(hipFree(pointer), hipSuccess);
+    allocations_.clear();
   }
 
   void sync() { (void)hipDeviceSynchronize(); }
@@ -52,6 +63,9 @@ protected:
     const RaceExpectationMatchResult matched = matchRaceExpectation(parsed.records, expected);
     EXPECT_TRUE(matched.ok()) << matched.message();
   }
+
+private:
+  std::vector<void *> allocations_;
 };
 
 } // namespace rocjitsu::test
