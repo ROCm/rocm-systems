@@ -494,6 +494,12 @@ Set it to either a suffix string or to a library name to choose among multiple N
 
 For example, setting ``NCCL_PROFILER_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``librccl-profiler-foo.so`` (provided that it exists on the system).
 
+The RCCL Inspector plugin (since RCCL 2.29) is loaded by pointing this variable
+at ``librccl-profiler-inspector.so`` and setting ``NCCL_INSPECTOR_ENABLE=1``.
+Prometheus textfile mode is ``NCCL_INSPECTOR_PROM_DUMP=1``. Metric names stay
+``nccl_*``; ``# HELP`` text and the ``gpu`` label are RCCL/HIP. See
+``docs/how-to/using-rccl-inspector-plugin.rst``.
+
 Values accepted
 ^^^^^^^^^^^^^^^
 

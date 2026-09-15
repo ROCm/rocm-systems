@@ -104,6 +104,32 @@ uint64_t inspectorGetTime() {
   return ts;
 }
 
+const char* inspectorGetJobId() {
+  static const char* keys[] = {
+    "SLURM_JOB_ID", "SLURM_JOBID", "PBS_JOBID", "LSB_JOBID"
+  };
+  for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+    const char* v = getenv(keys[i]);
+    if (v && v[0] != '\0') {
+      return v;
+    }
+  }
+  return nullptr;
+}
+
+const char* inspectorGetCluster() {
+  static const char* keys[] = {
+    "NCCL_INSPECTOR_CLUSTER", "SLURM_CLUSTER_NAME"
+  };
+  for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+    const char* v = getenv(keys[i]);
+    if (v && v[0] != '\0') {
+      return v;
+    }
+  }
+  return nullptr;
+}
+
 /*
  * Description:
  *
@@ -468,22 +494,15 @@ static void genDumpDir(char** workdir) {
     return;
   }
 
-  const char* jobid = getenv("SLURM_JOBID");
-  bool badJobId = true;
-  if (jobid != NULL) {
-    errno = 0;
-    const int intid = strtol(jobid, NULL, 10);
-    if (errno == 0) {
-      char tmp[2048];
-      snprintf(tmp, 2048, "nccl-inspector-%d", intid);
-      *workdir = strdup(tmp);
-      badJobId = false;
-    }
+  const char* jobid = inspectorGetJobId();
+  if (jobid != nullptr) {
+    char tmp[2048];
+    snprintf(tmp, sizeof(tmp), "nccl-inspector-%s", jobid);
+    *workdir = strdup(tmp);
+    return;
   }
 
-  if (badJobId) {
-    *workdir = strdup("nccl-inspector-unknown-jobid");
-  }
+  *workdir = strdup("nccl-inspector-unknown-jobid");
 }
 
 
@@ -1637,9 +1656,7 @@ static uint64_t calculateMaxKernelExecTimeUsecs(struct inspectorCollInfo *collIn
   uint64_t maxKernelExecTimeUsecs = 0;
   bool hasGpuTiming = false;
 
-  // Prefer GPU timing the same way P2P does: one channel's CPU delta must not
-  // outbid another channel's GPU duration, or requireKernelTiming (default
-  // true) drops the whole collective record.
+  // Prefer GPU timing the same way P2P does
   for (uint32_t i = 0; i < MAX_CHANNELS; i++) {
     struct inspectorKernelChInfo *kernelCh = &collInfo->kernelCh[i];
     if (kernelCh->type != ncclProfileKernelCh) continue;
