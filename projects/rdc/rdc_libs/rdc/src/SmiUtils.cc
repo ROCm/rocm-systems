@@ -24,6 +24,7 @@ THE SOFTWARE.
 
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <vector>
 
@@ -398,9 +399,14 @@ uint64_t count_pending_bad_pages(const amdsmi_retired_page_record_t* records, ui
 double derive_mem_activity_percent(double umc_activity_pct, bool have_prev,
                                    uint64_t prev_mem_activity_acc, uint64_t prev_firmware_ts,
                                    uint64_t cur_mem_activity_acc, uint64_t cur_firmware_ts) {
+  // In gpu_metrics the max value of the type means "not supported"; never treat the
+  // sentinel as real accumulator/timestamp data (a huge unsigned delta would otherwise
+  // clamp to 100%).
+  constexpr uint64_t kNotSupported = std::numeric_limits<uint64_t>::max();
   double activity_pct = umc_activity_pct;
-  if (have_prev && cur_firmware_ts > prev_firmware_ts &&
-      cur_mem_activity_acc >= prev_mem_activity_acc) {
+  if (have_prev && cur_mem_activity_acc != kNotSupported && cur_firmware_ts != kNotSupported &&
+      prev_mem_activity_acc != kNotSupported && prev_firmware_ts != kNotSupported &&
+      cur_firmware_ts > prev_firmware_ts && cur_mem_activity_acc >= prev_mem_activity_acc) {
     // Firmware timestamps are 10ns units; the accumulator advances by the
     // activity percentage every firmware millisecond (1ms == 100000 units).
     const double elapsed_ms = static_cast<double>(cur_firmware_ts - prev_firmware_ts) / 100000.0;

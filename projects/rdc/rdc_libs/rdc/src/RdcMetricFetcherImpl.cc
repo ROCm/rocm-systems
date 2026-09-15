@@ -792,8 +792,13 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       // instantaneous reading it also captures DMA/copy traffic. Track the
       // previous sample per GPU and derive a percentage from the accumulator
       // delta over firmware time (see derive_mem_activity_percent()).
+      // In gpu_metrics the max value means "not supported"; reject the sentinel before
+      // deriving or caching so a huge unsigned delta is never treated as real activity.
+      const uint64_t kMetricNotSupported = std::numeric_limits<uint64_t>::max();
       if (amdsmi_get_gpu_metrics_info(processor_handle, &gpu_metrics) == AMDSMI_STATUS_SUCCESS &&
-          gpu_metrics.firmware_timestamp != 0) {
+          gpu_metrics.firmware_timestamp != 0 &&
+          gpu_metrics.firmware_timestamp != kMetricNotSupported &&
+          gpu_metrics.mem_activity_acc != kMetricNotSupported) {
         std::lock_guard<std::mutex> lock(mem_activity_mutex_);
         auto prev = mem_activity_cache_.find(gpu_index);
         const bool have_prev = prev != mem_activity_cache_.end();

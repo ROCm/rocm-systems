@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <limits>
 
 #include "rdc_lib/impl/SmiUtils.h"
 
@@ -73,6 +74,22 @@ TEST(MemCurBandwidthTest, IgnoresStalledFirmwareClock) {
 TEST(MemCurBandwidthTest, IgnoresAccumulatorReset) {
   EXPECT_DOUBLE_EQ(3.0,
                    amd::rdc::derive_mem_activity_percent(3.0, true, 5000, 0, 100, 1000 * kMsUnits));
+}
+
+// The gpu_metrics "not supported" sentinel (max uint64) must never be treated as
+// real accumulator or timestamp data; the helper falls back to the instantaneous
+// reading instead of a bogus clamped-to-100% value.
+TEST(MemCurBandwidthTest, RejectsUnsupportedSentinel) {
+  constexpr uint64_t kNotSupported = std::numeric_limits<uint64_t>::max();
+  // Sentinel accumulator after a valid cached sample.
+  EXPECT_DOUBLE_EQ(5.0, amd::rdc::derive_mem_activity_percent(5.0, true, 100, 1 * kMsUnits,
+                                                              kNotSupported, 1000 * kMsUnits));
+  // Sentinel firmware timestamp.
+  EXPECT_DOUBLE_EQ(
+      5.0, amd::rdc::derive_mem_activity_percent(5.0, true, 100, 1 * kMsUnits, 200, kNotSupported));
+  // Sentinel in the cached (previous) sample.
+  EXPECT_DOUBLE_EQ(5.0, amd::rdc::derive_mem_activity_percent(5.0, true, kNotSupported, 0, 200,
+                                                              1000 * kMsUnits));
 }
 
 // The derived percentage is clamped to 100.
