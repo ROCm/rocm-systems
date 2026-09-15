@@ -10,6 +10,7 @@
 #include <deque>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace rocprofsys
 {
@@ -28,9 +29,9 @@ namespace detail
 [[nodiscard]] inline std::string_view
 intern(std::string value)
 {
-    static thread_local std::deque<std::string> pool;
-    pool.push_back(std::move(value));
-    return pool.back();
+    static thread_local std::deque<std::string> s_pool;
+    s_pool.push_back(std::move(value));
+    return s_pool.back();
 }
 }  // namespace detail
 

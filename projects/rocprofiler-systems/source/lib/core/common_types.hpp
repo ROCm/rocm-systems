@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cstddef>
 #include <cstdint>
 #include <sstream>
 #include <stdexcept>
@@ -127,16 +128,16 @@ process_arguments_string(std::string_view arg_str)
 {
     function_args_t args;
 
-    auto split = [](std::string_view str, std::string_view _delimiter) {
+    auto split = [](std::string_view str, std::string_view delimiter) {
         std::vector<std::string_view> tokens;
         size_t                        start = 0;
-        size_t                        end   = str.find(_delimiter);
+        size_t                        end   = str.find(delimiter);
 
         while(end != std::string_view::npos)
         {
             tokens.push_back(str.substr(start, end - start));
-            start = end + _delimiter.length();
-            end   = str.find(_delimiter, start);
+            start = end + delimiter.length();
+            end   = str.find(delimiter, start);
         }
 
         return tokens;

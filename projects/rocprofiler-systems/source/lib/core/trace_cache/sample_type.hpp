@@ -5,7 +5,9 @@
 #include "core/trace_cache/cacheable.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -371,20 +373,20 @@ struct region_sample : cacheable_t
     static constexpr type_identifier_t type_identifier = type_identifier_t::region;
 
     region_sample() = default;
-    region_sample(std::uint64_t _thread_id, std::string_view _name,
-                  std::uint64_t _correlation_id_internal,
-                  std::uint64_t _correlation_id_ancestor, std::uint64_t _start_timestamp,
-                  std::uint64_t _end_timestamp, std::string_view _call_stack,
-                  std::string_view _args_str, std::string_view _category)
-    : thread_id(_thread_id)
-    , name(_name)
-    , correlation_id_internal(_correlation_id_internal)
-    , correlation_id_ancestor(_correlation_id_ancestor)
-    , start_timestamp(_start_timestamp)
-    , end_timestamp(_end_timestamp)
-    , call_stack(_call_stack)
-    , args_str(_args_str)
-    , category(_category)
+    region_sample(  // NOLINT(readability-function-size)
+        std::uint64_t thread_id, std::string_view name,
+        std::uint64_t correlation_id_internal, std::uint64_t correlation_id_ancestor,
+        std::uint64_t start_timestamp, std::uint64_t end_timestamp,
+        std::string_view call_stack, std::string_view args_str, std::string_view category)
+    : thread_id(thread_id)
+    , name(name)
+    , correlation_id_internal(correlation_id_internal)
+    , correlation_id_ancestor(correlation_id_ancestor)
+    , start_timestamp(start_timestamp)
+    , end_timestamp(end_timestamp)
+    , call_stack(call_stack)
+    , args_str(args_str)
+    , category(category)
     {}
 
     std::uint64_t    thread_id;
@@ -436,19 +438,19 @@ struct in_time_sample : cacheable_t
         type_identifier_t::in_time_sample;
 
     in_time_sample() = default;
-    in_time_sample(size_t _category_enum_id, std::string_view _track_name,
-                   size_t _timestamp_ns, std::string_view _event_metadata,
-                   size_t _stack_id, size_t _parent_stack_id, size_t _correlation_id,
-                   std::string_view _call_stack, std::string_view _line_info)
-    : category_enum_id(_category_enum_id)
-    , track_name(_track_name)
-    , timestamp_ns(_timestamp_ns)
-    , event_metadata(_event_metadata)
-    , stack_id(_stack_id)
-    , parent_stack_id(_parent_stack_id)
-    , correlation_id(_correlation_id)
-    , call_stack(_call_stack)
-    , line_info(_line_info)
+    in_time_sample(  // NOLINT(readability-function-size)
+        size_t category_enum_id, std::string_view track_name, size_t timestamp_ns,
+        std::string_view event_metadata, size_t stack_id, size_t parent_stack_id,
+        size_t correlation_id, std::string_view call_stack, std::string_view line_info)
+    : category_enum_id(category_enum_id)
+    , track_name(track_name)
+    , timestamp_ns(timestamp_ns)
+    , event_metadata(event_metadata)
+    , stack_id(stack_id)
+    , parent_stack_id(parent_stack_id)
+    , correlation_id(correlation_id)
+    , call_stack(call_stack)
+    , line_info(line_info)
     {}
 
     size_t           category_enum_id;
@@ -510,21 +512,19 @@ struct pmc_event_with_sample : in_time_sample
         type_identifier_t::pmc_event_with_sample;
 
     pmc_event_with_sample() = default;
-    pmc_event_with_sample(size_t _category_enum_id, std::string_view _track_name,
-                          size_t _timestamp_ns, std::string_view _event_metadata,
-                          size_t _stack_id, size_t _parent_stack_id,
-                          size_t _correlation_id, std::string_view _call_stack,
-                          std::string_view _line_info, std::uint32_t _device_id,
-                          std::uint8_t _device_type, std::string_view _pmc_info_name,
-                          double _value, std::optional<std::int64_t> _system_tid)
-    : in_time_sample(_category_enum_id, _track_name, _timestamp_ns, _event_metadata,
-                     _stack_id, _parent_stack_id, _correlation_id, _call_stack,
-                     _line_info)
-    , device_id(_device_id)
-    , device_type(_device_type)
-    , pmc_info_name(_pmc_info_name)
-    , value(_value)
-    , system_tid(_system_tid)
+    pmc_event_with_sample(  // NOLINT(readability-function-size)
+        size_t category_enum_id, std::string_view track_name, size_t timestamp_ns,
+        std::string_view event_metadata, size_t stack_id, size_t parent_stack_id,
+        size_t correlation_id, std::string_view call_stack, std::string_view line_info,
+        std::uint32_t device_id, std::uint8_t device_type, std::string_view pmc_info_name,
+        double value, std::optional<std::int64_t> system_tid)
+    : in_time_sample(category_enum_id, track_name, timestamp_ns, event_metadata, stack_id,
+                     parent_stack_id, correlation_id, call_stack, line_info)
+    , device_id(device_id)
+    , device_type(device_type)
+    , pmc_info_name(pmc_info_name)
+    , value(value)
+    , system_tid(system_tid)
     {}
 
     std::uint32_t               device_id;
@@ -587,21 +587,21 @@ struct backtrace_region_sample : cacheable_t
         type_identifier_t::backtrace_region_sample;
 
     backtrace_region_sample() = default;
-    backtrace_region_sample(std::uint32_t _type, std::uint64_t _thread_id,
-                            std::string_view _track_name, std::string_view _name,
-                            std::uint64_t _start_timestamp, std::uint64_t _end_timestamp,
-                            std::string_view _category, std::string_view _call_stack,
-                            std::string_view _line_info, std::string_view _extdata)
-    : type(_type)
-    , thread_id(_thread_id)
-    , track_name(_track_name)
-    , name(_name)
-    , start_timestamp(_start_timestamp)
-    , end_timestamp(_end_timestamp)
-    , category(_category)
-    , call_stack(_call_stack)
-    , line_info(_line_info)
-    , extdata(_extdata)
+    backtrace_region_sample(  // NOLINT(readability-function-size)
+        std::uint32_t type, std::uint64_t thread_id, std::string_view track_name,
+        std::string_view name, std::uint64_t start_timestamp, std::uint64_t end_timestamp,
+        std::string_view category, std::string_view call_stack,
+        std::string_view line_info, std::string_view extdata)
+    : type(type)
+    , thread_id(thread_id)
+    , track_name(track_name)
+    , name(name)
+    , start_timestamp(start_timestamp)
+    , end_timestamp(end_timestamp)
+    , category(category)
+    , call_stack(call_stack)
+    , line_info(line_info)
+    , extdata(extdata)
     {}
 
     std::uint32_t    type;
@@ -650,26 +650,25 @@ struct kfd_sample : cacheable_t
     static constexpr type_identifier_t type_identifier = type_identifier_t::kfd_sample;
 
     kfd_sample() = default;
-    kfd_sample(std::uint64_t _thread_id, std::string_view _name,
-               std::uint64_t _start_timestamp, std::uint64_t _end_timestamp,
-               std::string_view _args_str, std::string_view _category,
-               std::string_view _track_name, std::string_view _event_metadata,
-               std::uint32_t _device_id, std::uint8_t _device_type,
-               std::string_view _pmc_info_name, double _value,
-               std::optional<std::int64_t> _system_tid)
-    : thread_id(_thread_id)
-    , name(_name)
-    , start_timestamp(_start_timestamp)
-    , end_timestamp(_end_timestamp)
-    , args_str(_args_str)
-    , category(_category)
-    , track_name(_track_name)
-    , event_metadata(_event_metadata)
-    , device_id(_device_id)
-    , device_type(_device_type)
-    , pmc_info_name(_pmc_info_name)
-    , value(_value)
-    , system_tid(_system_tid)
+    kfd_sample(  // NOLINT(readability-function-size)
+        std::uint64_t thread_id, std::string_view name, std::uint64_t start_timestamp,
+        std::uint64_t end_timestamp, std::string_view args_str, std::string_view category,
+        std::string_view track_name, std::string_view event_metadata,
+        std::uint32_t device_id, std::uint8_t device_type, std::string_view pmc_info_name,
+        double value, std::optional<std::int64_t> system_tid)
+    : thread_id(thread_id)
+    , name(name)
+    , start_timestamp(start_timestamp)
+    , end_timestamp(end_timestamp)
+    , args_str(args_str)
+    , category(category)
+    , track_name(track_name)
+    , event_metadata(event_metadata)
+    , device_id(device_id)
+    , device_type(device_type)
+    , pmc_info_name(pmc_info_name)
+    , value(value)
+    , system_tid(system_tid)
     {}
 
     std::uint64_t               thread_id;
