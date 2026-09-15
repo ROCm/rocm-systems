@@ -132,11 +132,6 @@ protected:
             << "Rank " << rank_ << " did not log expected DDA fabric marker: " << needle;
     }
 
-    void expectPath(const char* needle)
-    {
-        expectLog(needle);
-    }
-
     size_t allToAllCount(size_t desired) const
     {
         const size_t maxCount =
@@ -188,7 +183,7 @@ protected:
         const float expected = static_cast<float>(nRanks_ * (nRanks_ + 1) / 2);
         ASSERT_MPI_TRUE(verifyBufferData<float>(
             recvBuf, count, [expected](size_t) { return expected; }));
-        expectPath(kAllReduceNeedle);
+        expectLog(kAllReduceNeedle);
     }
 
     void runAllGather(bool inPlace)
@@ -241,7 +236,7 @@ protected:
                 const size_t idx = i % count;
                 return static_cast<float>(src * 100000 + idx);
             }));
-        expectPath(kAllGatherNeedle);
+        expectLog(kAllGatherNeedle);
     }
 
     void runReduceScatter(bool inPlace, int iterations = 1)
@@ -292,7 +287,7 @@ protected:
                 return rankSum
                      + static_cast<float>(nRanks_ * static_cast<int>(globalIdx % 17));
             }));
-        expectPath(kReduceScatterNeedle);
+        expectLog(kReduceScatterNeedle);
     }
 
     void runAllToAll(int iterations = 1)
@@ -339,7 +334,7 @@ protected:
                 return static_cast<float>(
                     static_cast<int>(src) * 10000 + rank_ * 100 + idx % 97);
             }));
-        expectPath(kAllToAllNeedle);
+        expectLog(kAllToAllNeedle);
     }
 };
 
@@ -522,7 +517,7 @@ protected:
                 << " iterations. This indicates a barrier synchronization bug.";
         }
 
-        expectPath(kAllReduceNeedle);
+        expectLog(kAllReduceNeedle);
     }
 
     void runBarrierStressReduceScatter()
@@ -593,7 +588,7 @@ protected:
                 << " data corruption errors.";
         }
 
-        expectPath(kReduceScatterNeedle);
+        expectLog(kReduceScatterNeedle);
     }
 
     void runBarrierStressAllToAll()
@@ -665,7 +660,7 @@ protected:
                 << " data corruption errors.";
         }
 
-        expectPath(kAllToAllNeedle);
+        expectLog(kAllToAllNeedle);
     }
 };
 
