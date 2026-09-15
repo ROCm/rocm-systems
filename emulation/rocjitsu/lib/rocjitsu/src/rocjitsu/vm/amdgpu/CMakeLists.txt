@@ -2,12 +2,17 @@
 # SPDX-License-Identifier: MIT
 
 rj_add_object_library(rocjitsu_vm_amdgpu
+    aql_packet_processor.cpp
     wavefront.cpp
     cluster_lds_multicast.cpp
     compute_unit.cpp
     hwreg.cpp
     memory_pipeline.cpp
+    circular_ring_reader.cpp
     command_processor.cpp
+    consumer_cursor_journal.cpp
+    pm4_ring_consumer.cpp
+    pm4_packet_processor.cpp
     gpu_vm.cpp
     gpu_queue_registry.cpp
     completion_tracker.cpp
