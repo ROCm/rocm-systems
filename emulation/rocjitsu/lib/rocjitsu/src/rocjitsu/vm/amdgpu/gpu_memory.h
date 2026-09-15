@@ -355,6 +355,7 @@ public:
   };
 
   void set_passthrough(bool v) { passthrough_ = v; }
+  [[nodiscard]] bool passthrough() const { return passthrough_; }
 
   /// @brief Route detected memory violations to @p reporter.
   /// @details Stored as a plain pointer load so the translation path pays
@@ -363,6 +364,13 @@ public:
   void set_memory_fault_reporter(MemoryFaultReporter *reporter) {
     fault_reporter_.store(reporter, std::memory_order_release);
   }
+
+  /// @brief Publish a terminal VM-layer fault through the legacy driver seam.
+  /// @details Used when the VM rejects a range before the compatibility
+  /// backing is entered. Delivery follows the same deferred lock-order-safe
+  /// path as faults detected by ordinary GpuMemory accesses.
+  void report_vm_fault(uint32_t vmid, uint64_t addr,
+                       MemoryFaultCause cause = MemoryFaultCause::NotPresent) const;
 
   /// @brief Return whether the page containing an address has a known mapping.
   /// @details Unlike resolve_host_ptr(), this deliberately ignores the current
@@ -629,6 +637,82 @@ public:
     return completed ? AccessOutcome::Complete : AccessOutcome::Faulted;
   }
 
+  /// @brief Read only from backing owned by this address space.
+  /// @details This is the typed compatibility-backend entry point for GpuVm.
+  /// Unlike read_block(), it never substitutes sparse storage for an address
+  /// that has no mapping yet. Existing mapped-page clipping remains the legacy
+  /// contract: the mapped prefix is copied, the remainder is zero-filled, and
+  /// the page-bounded operation completes.
+  [[nodiscard]] CopyOutcome read_block_strict(uint64_t addr, std::span<uint8_t> dst,
+                                              uint32_t vmid = 0) const {
+    const FaultDispatch fault_dispatch(*this);
+    const FaultScope faults;
+    if (!range_within_address_space(addr, dst.size())) {
+      note_rejected_identity_access(addr, vmid);
+      std::ranges::fill(dst, uint8_t{0});
+      return CopyOutcome::Faulted;
+    }
+
+    CopyOutcome outcome = CopyOutcome::Complete;
+    const bool completed =
+        for_each_page_chunk_until(addr, dst.size(), [&](uint64_t ea, size_t offset, size_t chunk) {
+          auto out = dst.subspan(offset, chunk);
+          if (read_mapped(ea, out.data(), chunk, vmid))
+            return true;
+          if (faults.observed()) {
+            outcome = CopyOutcome::Faulted;
+            return false;
+          }
+          if (vmid > 0 && has_client_backing(vmid)) {
+            if (read_client_memory(ea, out.data(), chunk, vmid))
+              return true;
+            std::ranges::fill(out, uint8_t{0});
+            note_rejected_identity_access(ea, vmid);
+            outcome = CopyOutcome::Faulted;
+            return false;
+          }
+          outcome = CopyOutcome::Unavailable;
+          return false;
+        });
+    return completed ? CopyOutcome::Complete : outcome;
+  }
+
+  /// @brief Write only to backing owned by this address space.
+  /// @details This is the write counterpart to read_block_strict(). It avoids
+  /// sparse fallback while preserving the legacy mapped-prefix behavior for a
+  /// page-table entry whose host extent is deliberately clipped.
+  [[nodiscard]] CopyOutcome write_block_strict(uint64_t addr, std::span<const uint8_t> src,
+                                               uint32_t vmid = 0) {
+    const FaultDispatch fault_dispatch(*this);
+    const FaultScope faults;
+    if (!range_within_address_space(addr, src.size())) {
+      note_rejected_identity_access(addr, vmid);
+      return CopyOutcome::Faulted;
+    }
+
+    CopyOutcome outcome = CopyOutcome::Complete;
+    const bool completed =
+        for_each_page_chunk_until(addr, src.size(), [&](uint64_t ea, size_t offset, size_t chunk) {
+          auto in = src.subspan(offset, chunk);
+          if (write_mapped(ea, in.data(), chunk, vmid))
+            return true;
+          if (faults.observed()) {
+            outcome = CopyOutcome::Faulted;
+            return false;
+          }
+          if (vmid > 0 && has_client_backing(vmid)) {
+            if (write_client_memory(ea, in.data(), chunk, vmid))
+              return true;
+            note_rejected_identity_access(ea, vmid, MemoryFaultCause::Indeterminate);
+            outcome = CopyOutcome::Faulted;
+            return false;
+          }
+          outcome = CopyOutcome::Unavailable;
+          return false;
+        });
+    return completed ? CopyOutcome::Complete : outcome;
+  }
+
   /// @brief Perform an atomic read-modify-write on resolved backing storage.
   /// @details Storage classification and the page-table shared lock remain
   /// stable through the callback. Mapped aliases rendezvous on a process-wide
@@ -762,6 +846,42 @@ public:
           else
             std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t *>(bytes))
                 .store(static_cast<uint32_t>(value), std::memory_order_release);
+        },
+        vmid);
+    return faults.observed() ? AccessOutcome::Faulted : AccessOutcome::Complete;
+  }
+
+  /// @brief Perform one strong compare/exchange on resolved backing storage.
+  /// @param[out] observed Value present when the operation linearized.
+  /// @param[out] exchanged Whether @p desired replaced @p expected.
+  [[nodiscard]] AccessOutcome atomic_compare_exchange(uint64_t addr, uint32_t size,
+                                                      uint64_t expected, uint64_t desired,
+                                                      uint64_t &observed, bool &exchanged,
+                                                      uint32_t vmid) {
+    assert((size == sizeof(uint32_t) || size == sizeof(uint64_t)) &&
+           "atomic compare/exchange accesses are 4 or 8 bytes");
+    assert((addr & (size - 1)) == 0 &&
+           "atomic compare/exchange accesses must be naturally aligned");
+    observed = 0;
+    exchanged = false;
+    const FaultScope faults;
+    atomic_rmw(
+        addr, size,
+        [&](uint8_t *bytes) {
+          if (size == sizeof(uint64_t)) {
+            uint64_t candidate = expected;
+            exchanged = std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(bytes))
+                            .compare_exchange_strong(candidate, desired, std::memory_order_acq_rel,
+                                                     std::memory_order_acquire);
+            observed = exchanged ? expected : candidate;
+          } else {
+            uint32_t candidate = static_cast<uint32_t>(expected);
+            exchanged =
+                std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t *>(bytes))
+                    .compare_exchange_strong(candidate, static_cast<uint32_t>(desired),
+                                             std::memory_order_acq_rel, std::memory_order_acquire);
+            observed = exchanged ? static_cast<uint32_t>(expected) : candidate;
+          }
         },
         vmid);
     return faults.observed() ? AccessOutcome::Faulted : AccessOutcome::Complete;
@@ -1452,12 +1572,11 @@ private:
   /// @brief A passthrough page, reachable only through a checked operation.
   ///
   /// @details The bare address of an identity page is the hazard this whole
-  /// path exists to contain, so it is not handed out. A copy goes through the
-  /// kernel, which validates and moves the bytes in the same call and therefore
-  /// cannot be overtaken by an unmap between the two. Only a caller that must
-  /// return a pointer to someone else asks for one, and pays a separate probe
-  /// to get it -- that window is unavoidable once a raw pointer escapes, which
-  /// is the reason to keep the set of callers that do so small and visible.
+  /// path exists to contain, so it is not handed out. A copy holds the mapping
+  /// lease through a guarded memcpy: interposed mapping changes cannot race it,
+  /// while a mapping change outside the interposer becomes a reported refusal
+  /// instead of a host fault. Only a caller that must return a pointer to
+  /// someone else asks for one and pays a separate probe to get it.
   class IdentityPage {
   public:
     explicit IdentityPage(uint8_t *page) : page_(page) {}
@@ -1502,11 +1621,16 @@ private:
         return false;
       if (addressable_prefix(page_ + offset, len) != len)
         return false; // Sanitized builds still veto poisoned bytes.
-      iovec local{local_bytes, len};
-      iovec remote{page_ + offset, len};
-      const ssize_t moved = to_page ? process_vm_writev(getpid(), &local, 1, &remote, 1, 0)
-                                    : process_vm_readv(getpid(), &local, 1, &remote, 1, 0);
-      return moved == static_cast<ssize_t>(len);
+      const auto mapping_lease = rocjitsu::host_mapping_lock().lock_shared();
+      const bool moved = rocjitsu::with_host_access_guard([&] {
+        if (to_page)
+          std::memcpy(page_ + offset, local_bytes, len);
+        else
+          std::memcpy(local_bytes, page_ + offset, len);
+      });
+      if (!moved && !to_page)
+        std::memset(local_bytes, 0, len);
+      return moved;
     }
 
     uint8_t *page_ = nullptr;
@@ -2485,6 +2609,11 @@ private:
 
   bool passthrough_ = false;
 };
+
+inline void GpuMemory::report_vm_fault(uint32_t vmid, uint64_t addr, MemoryFaultCause cause) const {
+  const FaultDispatch fault_dispatch(*this);
+  note_rejected_identity_access(addr, vmid, cause);
+}
 
 } // namespace amdgpu
 } // namespace rocjitsu
