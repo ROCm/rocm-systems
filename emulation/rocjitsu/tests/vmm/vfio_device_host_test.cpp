@@ -594,10 +594,14 @@ TEST(VfioDeviceHost, RefusesEmptyWorkRatherThanThrowingOnTheServingThread) {
 }
 
 TEST(VfioDeviceHost, RunsAskedWorkOnTheServingThread) {
+  // Declared before the fixture so the promise outlives the join in its
+  // destructor: if the wait below times out, the test returns with the
+  // request still pending, and the serving thread may call set_value()
+  // after the test body has ended.
+  std::promise<std::thread::id> ran_on;
   ServedDevice served;
   ASSERT_TRUE(served.built());
 
-  std::promise<std::thread::id> ran_on;
   std::future<std::thread::id> where = ran_on.get_future();
   ASSERT_TRUE(served.host().ask_serving_thread(
       [&ran_on] { ran_on.set_value(std::this_thread::get_id()); }));
@@ -647,10 +651,15 @@ TEST(VfioDeviceHost, RefusesASecondRequestWhileOneIsOutstanding) {
 // A request that throws must not take the process with it: it runs on the serving
 // thread, where an escaping exception would terminate rather than propagate.
 TEST(VfioDeviceHost, SurvivesAThrowingRequest) {
+  // Both promises are declared before the fixture so they outlive the join
+  // in its destructor: on a timed-out wait, or a rejected retry loop, the
+  // test returns with a request still pending, and the serving thread may
+  // call set_value() after the test body has ended.
+  std::promise<void> threw;
+  std::promise<void> ran_after;
   ServedDevice served;
   ASSERT_TRUE(served.built());
 
-  std::promise<void> threw;
   std::future<void> did_throw = threw.get_future();
   ASSERT_TRUE(served.host().ask_serving_thread([&threw] {
     threw.set_value();
@@ -662,7 +671,6 @@ TEST(VfioDeviceHost, SurvivesAThrowingRequest) {
   // did not. Retried because the throwing request signalled before it threw, so
   // it is legitimately still outstanding -- and therefore still refusing -- for
   // the moment it takes the serving thread to unwind and clear it.
-  std::promise<void> ran_after;
   std::future<void> after = ran_after.get_future();
   bool accepted = false;
   for (int attempt = 0; attempt < 200 && !accepted; ++attempt) {
