@@ -96,10 +96,7 @@ protected:
     /// Sample for the side effect alone. Several tests need a reading already on
     /// record - to seed the bandwidth delta or the counter baseline - and never
     /// inspect it.
-    void discard_sample(std::uint64_t timestamp)
-    {
-        static_cast<void>(sample(timestamp));
-    }
+    void discard_sample(std::uint64_t timestamp) { static_cast<void>(sample(timestamp)); }
 
     std::shared_ptr<mock_backend> m_backend;
     std::shared_ptr<device_t>     m_device;

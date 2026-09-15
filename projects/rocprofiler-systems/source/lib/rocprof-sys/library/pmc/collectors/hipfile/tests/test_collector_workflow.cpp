@@ -311,9 +311,8 @@ TEST_F(HipFileCollectorTest, selecting_a_group_emits_both_directions)
 
 // ── Metric groups ───────────────────────────────────────────────────────────
 
-constexpr std::array<const char*, 7> k_all_groups{ "bytes",    "ops",    "fastpath",
-                                                   "fallback", "errors", "unaligned",
-                                                   "bandwidth" };
+constexpr std::array k_all_groups{ "bytes",  "ops",       "fastpath", "fallback",
+                                   "errors", "unaligned", "bandwidth" };
 
 TEST(HipFileMetricGroups, each_group_covers_exactly_one_read_and_one_write)
 {
