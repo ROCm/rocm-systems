@@ -4,20 +4,35 @@
 #
 # SPDX-License-Identifier: MIT
 
-# usage: hipdemangleatp.sh ATP_FILE
+if [[ $# -ne 1 || ! -f $1 ]]; then
+    echo "Usage: $(basename "$0") ATP_FILE" >&2
+    exit 1
+fi
+
+atp_file=$1
+
+replace_literal() {
+    local search replacement
+    search=$(printf '%s' "$1" | sed 's/[][\\.^$*|]/\\&/g')
+    replacement=$(printf '%s' "$2" | sed 's/[\\&|]/\\&/g')
+    sed -i "s|${search}|${replacement}|g" -- "$3"
+}
 
 # HIP kernels
-kernels=$(grep grid_launch_parm $1 | cut -d" " -f1 | sort | uniq)
-for mangled_sym in $kernels; do
-    real_sym=$(c++filt -p $(c++filt _$mangled_sym | cut -d: -f3 | sed 's/_functor//g' | sed 's/ /\\\&nbsp/g'))
-    #echo "$mangled_sym => $real_sym" >> $1.log
-    sed -i "s/$mangled_sym/$real_sym/g" $1
+mapfile -t kernels < <(grep grid_launch_parm -- "$atp_file" | cut -d" " -f1 | sort -u)
+for mangled_sym in "${kernels[@]}"; do
+    [[ -z $mangled_sym ]] && continue
+    real_sym=$(c++filt -p -- "$(c++filt -- "_${mangled_sym}" | cut -d: -f3 |
+        sed 's/_functor//g; s/ /\&nbsp/g')")
+    replace_literal "$mangled_sym" "$real_sym" "$atp_file"
 done
 
 # HC kernels
-kernels=$(grep cxxamp_trampoline $1 | cut -d" " -f1 | sort | uniq)
-for mangled_sym in $kernels; do
-    real_sym=$(echo $mangled_sym |  sed "s/^/_/g; s/_EC_/$/g" | c++filt -p | cut -d\( -f1 | cut -d" " -f1 --complement | sed 's/ /\\\&nbsp/g')
-    #echo "$mangled_sym => $real_sym" >> $1.log
-    sed -i "s/$mangled_sym/$real_sym/g" $1
+mapfile -t kernels < <(grep cxxamp_trampoline -- "$atp_file" | cut -d" " -f1 | sort -u)
+for mangled_sym in "${kernels[@]}"; do
+    [[ -z $mangled_sym ]] && continue
+    real_sym=$(printf '%s\n' "$mangled_sym" | sed 's/^/_/; s/_EC_/$/g' |
+        c++filt -p | cut -d\( -f1 | cut -d" " -f1 --complement |
+        sed 's/ /\&nbsp/g')
+    replace_literal "$mangled_sym" "$real_sym" "$atp_file"
 done
