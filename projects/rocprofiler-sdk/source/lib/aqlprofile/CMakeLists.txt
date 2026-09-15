@@ -24,13 +24,13 @@ add_library(rocprofiler-sdk::rocprofiler-sdk-aqlprofile ALIAS rocprofiler-sdk-aq
 target_include_directories(rocprofiler-sdk-aqlprofile
                            INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source>)
 
-if(DEFINED ENV{CMAKE_DEBUG_TRACE})
-    if("$ENV{CMAKE_DEBUG_TRACE}" STREQUAL "1")
-        target_compile_definitions(rocprofiler-sdk-aqlprofile PRIVATE DEBUG_TRACE=1)
-    endif()
-    if("$ENV{CMAKE_DEBUG_TRACE}" STREQUAL "2")
-        target_compile_definitions(rocprofiler-sdk-aqlprofile PRIVATE DEBUG_TRACE=2)
-    endif()
+set(AQLPROFILE_DEBUG_TRACE "0" CACHE STRING "AQLProfile DEBUG_TRACE level (0, 1, or 2)")
+set_property(CACHE AQLPROFILE_DEBUG_TRACE PROPERTY STRINGS 0 1 2)
+
+if(AQLPROFILE_DEBUG_TRACE STREQUAL "1" OR AQLPROFILE_DEBUG_TRACE STREQUAL "2")
+    target_compile_definitions(rocprofiler-sdk-aqlprofile PRIVATE DEBUG_TRACE=${AQLPROFILE_DEBUG_TRACE})
+elseif(NOT AQLPROFILE_DEBUG_TRACE STREQUAL "0")
+    message(FATAL_ERROR "AQLPROFILE_DEBUG_TRACE must be one of: 0, 1, 2")
 endif()
 
 target_link_libraries(

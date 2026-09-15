@@ -50,6 +50,7 @@ struct TraceConfig
     // GC configurations used by both TT and SPM
     uint32_t se_number  = 0;
     uint32_t sa_number  = 0;
+    uint32_t wgp_per_sa = 1;
     uint32_t xcc_number = 0;
     // SPM mode
     bool     spm_has_core1        = false;

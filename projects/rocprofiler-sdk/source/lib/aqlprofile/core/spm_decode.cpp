@@ -124,6 +124,13 @@ aqlprofile_spm_decode_stream_v1(aqlprofile_spm_buffer_desc_t        desc_bin,
             index &= SPM_COUNTER_MAP_INDEX_MASK;
             uint32_t sa_count       = is_sa ? desc->num_sa : 1;
             uint32_t wgp_count      = is_wgp ? desc->num_wgp : 1;
+#if defined(DEBUG_TRACE)
+            if(is_wgp && wgp_count == 0)
+            {
+                std::fprintf(stderr,
+                             "Invalid SPM descriptor: WGP-flagged event has num_wgp == 0\n");
+            }
+#endif
             size_t   expanded_count = size_t(sa_count) * size_t(wgp_count) - 1;
 
             if(is_global)
