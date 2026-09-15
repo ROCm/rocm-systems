@@ -110,13 +110,15 @@ on_kfd_event_unmap_from_gpu(typename SdkBackend::kfd_event_unmap_record* record,
     auto track_name = fmt::format("KFD Unmap from GPU [{}]", agent_label(agent));
     Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
-    const auto pmc_value =
+    constexpr auto k_empty_args           = "";
+    constexpr auto k_empty_event_metadata = "{}";
+    const auto     pmc_value =
         static_cast<double>(record->end_address.value - record->start_address.value);
 
     Externals::buffer_storage_store(typename Externals::kfd_sample_t{
-        tid, name, record->timestamp, record->timestamp, "" /*empty args*/,
+        tid, name, record->timestamp, record->timestamp, k_empty_args,
         std::string{ Externals::k_kfd_event_unmap_from_gpu_category_name },
-        std::move(track_name), "{}",
+        std::move(track_name), k_empty_event_metadata,
         static_cast<std::uint32_t>(agent ? agent->device_type_index : 0),
         static_cast<std::uint8_t>(Externals::k_agent_type_gpu),
         std::string{ Externals::k_kfd_event_unmap_from_gpu_category_name }, pmc_value,

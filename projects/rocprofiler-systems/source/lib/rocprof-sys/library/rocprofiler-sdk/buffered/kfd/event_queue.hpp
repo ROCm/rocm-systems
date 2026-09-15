@@ -105,14 +105,17 @@ on_kfd_event_queue(typename SdkBackend::kfd_event_queue_record* record, void* da
         return fmt::format("{} {}", is_gpu ? "GPU" : "CPU", agent_ptr->device_type_index);
     };
 
-    auto track_name = fmt::format("KFD Event Queue [{}]", agent_label(agent));
+    constexpr auto k_empty_args           = "";
+    constexpr auto k_empty_event_metadata = "{}";
+    auto           track_name = fmt::format("KFD Event Queue [{}]", agent_label(agent));
     Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
     constexpr double k_pmc_value = 1.0;
     Externals::buffer_storage_store(typename Externals::kfd_sample_t{
-        tid, name, record->timestamp, record->timestamp, "" /*empty args*/,
+        tid, name, record->timestamp, record->timestamp, k_empty_args,
         std::string{ Externals::k_kfd_event_queue_category_name }, std::move(track_name),
-        "{}", static_cast<std::uint32_t>(agent ? agent->device_type_index : 0),
+        k_empty_event_metadata,
+        static_cast<std::uint32_t>(agent ? agent->device_type_index : 0),
         static_cast<std::uint8_t>(Externals::k_agent_type_gpu),
         std::string{ Externals::k_kfd_event_queue_category_name }, k_pmc_value,
         std::optional<std::int64_t>(record->pid) });

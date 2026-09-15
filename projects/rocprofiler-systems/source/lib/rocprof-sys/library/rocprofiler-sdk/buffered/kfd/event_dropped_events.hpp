@@ -90,11 +90,14 @@ on_kfd_event_dropped_events(typename SdkBackend::kfd_event_dropped_record* recor
     auto track_name = std::string{ "KFD Dropped Events" };
     Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
+    constexpr auto k_empty_args           = "";
+    constexpr auto k_empty_event_metadata = "{}";
+
     const auto pmc_value = static_cast<double>(record->count);
     Externals::buffer_storage_store(typename Externals::kfd_sample_t{
-        tid, name, record->timestamp, record->timestamp, "" /*empty args*/,
+        tid, name, record->timestamp, record->timestamp, k_empty_args,
         std::string{ Externals::k_kfd_event_dropped_events_category_name },
-        std::move(track_name), "{}", 0,
+        std::move(track_name), k_empty_event_metadata, 0,
         static_cast<std::uint8_t>(Externals::k_agent_type_gpu),
         std::string{ Externals::k_kfd_event_dropped_events_category_name }, pmc_value,
         std::optional<std::int64_t>(record->pid) });

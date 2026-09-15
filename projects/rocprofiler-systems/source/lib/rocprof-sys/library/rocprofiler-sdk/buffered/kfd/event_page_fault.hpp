@@ -110,10 +110,12 @@ on_kfd_event_page_fault(typename SdkBackend::kfd_event_page_fault_record* record
     auto track_name = fmt::format("KFD Event Page Fault [{}]", agent_label(agent));
     Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
+    constexpr auto k_empty_args = "";
+
     const auto pmc_value      = static_cast<double>(record->address.value);
     auto       event_metadata = fmt::format(R"({{"address":{}}})", record->address.value);
     Externals::buffer_storage_store(typename Externals::kfd_sample_t{
-        tid, name, record->timestamp, record->timestamp, "" /*empty args*/,
+        tid, name, record->timestamp, record->timestamp, k_empty_args,
         std::string{ Externals::k_kfd_event_page_fault_category_name },
         std::move(track_name), std::move(event_metadata),
         static_cast<std::uint32_t>(agent ? agent->device_type_index : 0),

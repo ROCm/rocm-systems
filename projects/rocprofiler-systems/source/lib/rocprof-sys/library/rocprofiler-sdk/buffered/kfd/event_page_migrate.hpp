@@ -148,6 +148,8 @@ on_kfd_event_page_migrate(typename SdkBackend::kfd_event_page_migrate_record* re
                                   agent_label(src_agent), agent_label(dst_agent));
     Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
+    constexpr auto k_empty_args = "";
+
     const auto pmc_value =
         static_cast<double>(record->end_address.value - record->start_address.value);
 
@@ -158,7 +160,7 @@ on_kfd_event_page_migrate(typename SdkBackend::kfd_event_page_migrate_record* re
         record->error_code);
 
     Externals::buffer_storage_store(typename Externals::kfd_sample_t{
-        tid, name, record->timestamp, record->timestamp, "" /*empty args*/,
+        tid, name, record->timestamp, record->timestamp, k_empty_args,
         std::string{ Externals::k_kfd_event_page_migrate_category_name },
         std::move(track_name), std::move(event_metadata),
         static_cast<std::uint32_t>(src_agent ? src_agent->device_type_index : 0),
