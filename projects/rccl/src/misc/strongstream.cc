@@ -108,6 +108,7 @@ ncclResult_t ncclStrongStreamConstruct(struct ncclStrongStream* ss) {
   CUDACHECK(cudaStreamCreateWithFlags(&ss->liveStream, cudaStreamNonBlocking));
 #if ROCM_VERSION >= 60100
   ss->everCaptured = false;
+  ss->graphOriginCaptured = false;
   ss->captureHead = nullptr;
   CUDACHECK(cudaEventCreateWithFlags(&ss->serialEvent, cudaEventDisableTiming));
 #endif
