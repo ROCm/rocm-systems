@@ -119,7 +119,6 @@ inline constexpr const char* AMD_SMI_DEVICES      = "ROCPROFSYS_AMD_SMI_DEVICES"
 // --- Domains: ROCm ---
 inline constexpr const char* ROCM_DOMAINS        = "ROCPROFSYS_ROCM_DOMAINS";
 inline constexpr const char* ROCM_GROUP_BY_QUEUE = "ROCPROFSYS_ROCM_GROUP_BY_QUEUE";
-inline constexpr const char* GPU_PERF_COUNTERS   = "ROCPROFSYS_GPU_PERF_COUNTERS";
 
 // --- Domains: CPU ---
 inline constexpr const char* CPU_FREQ         = "ROCPROFSYS_CPU_FREQ";
@@ -221,10 +220,17 @@ inline constexpr const char* CAUSAL_FILE       = "ROCPROFSYS_CAUSAL_FILE";
 inline constexpr const char* CAUSAL_FILE_RESET = "ROCPROFSYS_CAUSAL_FILE_RESET";
 
 // --- Hardware counters ---
+// Environment-variable identifiers intentionally mirror their external names.
+// NOLINTBEGIN(readability-identifier-naming)
+inline constexpr const char* ROCM_EVENTS       = "ROCPROFSYS_ROCM_EVENTS";
+inline constexpr const char* GPU_PERF_COUNTERS = "ROCPROFSYS_GPU_PERF_COUNTERS";
+inline constexpr const char* ROCM_SPM_EVENTS   = "ROCPROFSYS_ROCM_SPM_EVENTS";
+inline constexpr const char* ROCM_SPM_SAMPLE_INTERVAL =
+    "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL";
+// NOLINTEND(readability-identifier-naming)
 // Note: PAPI_MULTIPLEXING and PAPI_QUIET would collide with integer macros defined in
 // PAPI's C header (papi.h). The identifiers carry a trailing suffix to avoid
 // preprocessor substitution; the env-var strings retain the original names.
-inline constexpr const char* ROCM_EVENTS               = "ROCPROFSYS_ROCM_EVENTS";
 inline constexpr const char* PAPI_EVENTS               = "ROCPROFSYS_PAPI_EVENTS";
 inline constexpr const char* PAPI_MULTIPLEXING_ENABLED = "ROCPROFSYS_PAPI_MULTIPLEXING";
 inline constexpr const char* PAPI_FAIL_ON_ERROR        = "ROCPROFSYS_PAPI_FAIL_ON_ERROR";

@@ -10,6 +10,8 @@ set(rocprofiler_sdk_sources
     ${CMAKE_CURRENT_LIST_DIR}/marker_writer.cpp
     ${CMAKE_CURRENT_LIST_DIR}/trace_control.cpp
     ${CMAKE_CURRENT_LIST_DIR}/rccl.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/service_compatibility.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/spm.cpp
 )
 
 set(rocprofiler_sdk_headers
@@ -21,6 +23,11 @@ set(rocprofiler_sdk_headers
     ${CMAKE_CURRENT_LIST_DIR}/trace_control.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rccl.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rccl_internal.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/service_compatibility.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/spm.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/spm_internal.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/spm_record_batch.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/spm_sample.hpp
 )
 
 target_sources(

@@ -180,6 +180,42 @@ TEST_F(json_config_test, rasolves_hw_counters_section)
     EXPECT_EQ(result.at(env_vars::PAPI_EVENTS), "PAPI_TOT_CYC,PAPI_TOT_INS");
 }
 
+TEST_F(json_config_test, resolves_spm_hardware_counters_section)
+{
+    auto json = nlohmann::json::parse(R"({
+        "hardware_counters": {
+            "enabled": true,
+            "spm": {
+                "events": {"value": ["SQ_WAVES"]},
+                "sample_interval": {"value": 4200}
+            }
+        }
+    })");
+
+    auto result = resolve_config(json);
+
+    EXPECT_EQ(result.at(env_vars::ROCM_SPM_EVENTS), "SQ_WAVES");
+    EXPECT_EQ(result.at(env_vars::ROCM_SPM_SAMPLE_INTERVAL), "4200");
+}
+
+TEST_F(json_config_test, does_not_resolve_spm_when_hardware_counters_are_disabled)
+{
+    auto json = nlohmann::json::parse(R"({
+        "hardware_counters": {
+            "enabled": false,
+            "spm": {
+                "events": {"value": ["SQ_WAVES"]},
+                "sample_interval": {"value": 4200}
+            }
+        }
+    })");
+
+    auto result = resolve_config(json);
+
+    EXPECT_EQ(result.count(env_vars::ROCM_SPM_EVENTS), 0u);
+    EXPECT_EQ(result.count(env_vars::ROCM_SPM_SAMPLE_INTERVAL), 0u);
+}
+
 // Test new schema format - causal section
 TEST_F(json_config_test, resolves_causal_section)
 {
@@ -401,6 +437,53 @@ TEST_F(json_config_test, handling_round_trip_for_new_values_in_json_schema)
     EXPECT_EQ(j["hardware_counters"]["papi_multiplexing"]["enabled"], true);
 }
 
+TEST_F(json_config_test, exports_large_spm_sample_interval_as_integer)
+{
+    const std::map<std::string, std::string> env_vars = {
+        { "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL", "4294967296" },
+    };
+
+    auto json = env_vars_to_json_schema(env_vars);
+
+    EXPECT_EQ(json["hardware_counters"]["spm"]["sample_interval"]["value"],
+              4294967296ULL);
+}
+
+TEST_F(json_config_test, spm_env_export_round_trips_through_hw_counter_gate)
+{
+    const std::map<std::string, std::string> env_vars = {
+        { rocprofsys::env_vars::ROCM_SPM_EVENTS, "SQ_WAVES:device=0" },
+        { rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL, "8192" },
+    };
+
+    auto json = env_vars_to_json_schema(env_vars);
+
+    EXPECT_EQ(json["hardware_counters"]["enabled"], true);
+    EXPECT_EQ(json["hardware_counters"]["spm"]["events"]["value"], "SQ_WAVES:device=0");
+    EXPECT_EQ(json["hardware_counters"]["spm"]["sample_interval"]["value"], 8192);
+
+    auto result = resolve_config(json);
+
+    EXPECT_EQ(result.at(env_vars::ROCM_SPM_EVENTS), "SQ_WAVES:device=0");
+    EXPECT_EQ(result.at(env_vars::ROCM_SPM_SAMPLE_INTERVAL), "8192");
+}
+
+TEST_F(json_config_test, resolves_large_spm_sample_interval_from_json)
+{
+    auto json = nlohmann::json::parse(R"({
+        "hardware_counters": {
+            "enabled": true,
+            "spm": {
+                "sample_interval": {"value": 4294967296}
+            }
+        }
+    })");
+
+    auto result = resolve_config(json);
+
+    EXPECT_EQ(result.at(env_vars::ROCM_SPM_SAMPLE_INTERVAL), "4294967296");
+}
+
 // Test env_vars constants match expected string values
 TEST_F(json_config_test, validate_env_var_constants)
 {
@@ -409,6 +492,7 @@ TEST_F(json_config_test, validate_env_var_constants)
     EXPECT_STREQ(rocprofsys::env_vars::USE_SAMPLING, "ROCPROFSYS_USE_SAMPLING");
     EXPECT_STREQ(rocprofsys::env_vars::USE_AMD_SMI, "ROCPROFSYS_USE_AMD_SMI");
     EXPECT_STREQ(rocprofsys::env_vars::ROCM_DOMAINS, "ROCPROFSYS_ROCM_DOMAINS");
+    EXPECT_STREQ(rocprofsys::env_vars::ROCM_SPM_EVENTS, "ROCPROFSYS_ROCM_SPM_EVENTS");
     EXPECT_STREQ(rocprofsys::env_vars::USE_MPIP, "ROCPROFSYS_USE_MPIP");
     EXPECT_STREQ(rocprofsys::env_vars::OUTPUT_PATH, "ROCPROFSYS_OUTPUT_PATH");
     EXPECT_STREQ(rocprofsys::env_vars::USE_CAUSAL, "ROCPROFSYS_USE_CAUSAL");

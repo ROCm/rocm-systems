@@ -384,6 +384,21 @@
                 "rocm_events": {
                     "$ref": "#/$defs/stringOrArrayValueField",
                     "description": "ROCm/GPU hardware counters (use 'rocprof-sys-avail --hw-counters' to list)"
+                },
+                "spm": {
+                    "additionalProperties": false,
+                    "description": "Beta ROCprofiler-SDK Streaming Performance Monitor (SPM) counter collection",
+                    "properties": {
+                        "events": {
+                            "$ref": "#/$defs/stringOrArrayValueField",
+                            "description": "SPM-capable ROCm/GPU hardware counters. Setting this requests SPM collection; a positive sample interval is also required"
+                        },
+                        "sample_interval": {
+                            "$ref": "#/$defs/intValueField",
+                            "description": "SPM counter sampling interval in GPU shader-clock cycles. The interval is rounded to the nearest multiple of 32"
+                        }
+                    },
+                    "type": "object"
                 }
             },
             "type": "object"

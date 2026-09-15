@@ -7,6 +7,7 @@
 #include "core/output_file_registry.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
+#include "library/rocprofiler-sdk/spm_sample.hpp"
 
 #include "trace_cache/sample_type.hpp"
 
@@ -46,6 +47,9 @@ public:
     void handle(const ainic_pmc_sample& sample);
     void handle(const cpu_pmc_sample& sample);
     void handle(const gpu_perf_counter_sample& sample);
+    // processor_t intentionally forwards each sample overload through CRTP.
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
+    void handle(const spm_sample& sample);
     void handle(const kfd_sample& sample);
 
 private:
