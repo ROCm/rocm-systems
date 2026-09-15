@@ -33,7 +33,6 @@
 #include <fmt/ranges.h>
 
 #include <atomic>
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -84,7 +83,6 @@ private:
     std::function<void()>  m_function      = nullptr;
     mutable std::mutex     m_pool_mtx      = {};
     pool_array_type        m_pool          = {};
-    std::atomic<size_type> m_pool_size     = 0;
     retired_array_type     m_retired       = {};
     mutable std::mutex     m_available_mtx = {};
     std::queue<size_type>  m_available     = {};
@@ -111,11 +109,6 @@ pool<Tp>::pool(std::piecewise_construct_t, size_type count, FuncT&& ctor, Args&&
             _args_tuple);
         m_available.push(idx);
     }
-    // mirrors m_pool.size() for release(), which cannot take m_pool_mtx. Invoked from the
-    // constructor and from acquire(), both holding that lock. The release ordering is not
-    // load-bearing: release() only compares against this value, and acquire() dereferences
-    // m_pool under m_pool_mtx, which already orders these writes against that read.
-    m_pool_size.store(m_pool.size(), std::memory_order_release);
 }}
 {
     m_function();
@@ -142,15 +135,17 @@ pool<Tp>::acquire()
     if(_idx.has_value())
     {
         auto _read_lk = std::unique_lock<std::mutex>{m_pool_mtx};
-        // m_pool_size mirrors m_pool.size(); both are written only under this lock
-        assert(m_pool_size.load(std::memory_order_relaxed) == m_pool.size());
         // the free list is unlocked between the pop above and this lock, so clear() can retire
         // m_pool in between and strand the popped index. Drop it and take the growth path
-        // rather than indexing past the end of the repopulated pool. This narrows the window,
-        // it does not close it: an index stranded by a clear() that another thread has since
-        // regrown past is back in range here, so it passes and aliases the new generation's
-        // object while still sitting on the free list. release() has the same residual. A bounds
-        // check cannot tell the generations apart; that needs an epoch counter.
+        // rather than indexing past the end of the repopulated pool.
+        //
+        // TODO(#XXXX): the check below narrows that window, it does not close it, and what is
+        // left is a known, tracked gap rather than a caveat: a bounds check cannot tell a
+        // stale generation from a new one. An index stranded by a clear() that another thread
+        // has since regrown past is back in range here, so it passes the check and aliases
+        // the new generation's object while still sitting on the free list. release() carries
+        // the same residual. Closing it needs an epoch/generation counter stamped on the
+        // index and compared here, which is deliberately out of scope for this change.
         if(_idx.value() < m_pool.size())
         {
             auto& _obj = m_pool.at(_idx.value());
@@ -183,17 +178,14 @@ template <typename Tp>
 void
 pool<Tp>::release(size_type idx)
 {
-    // Runs on the HSA async signal handler threads while acquire() may be growing m_pool, whose
-    // chunk index reallocates; and clear() calls in here already holding m_pool_mtx, so that lock
-    // cannot be taken. Hence m_pool is not touched.
-    if(idx >= m_pool_size.load(std::memory_order_acquire)) return;
+    // m_pool_mtx is held across both the bounds check and the push: clear() holds it while it
+    // retires m_pool and drains the free list, so neither can interleave here and leave a
+    // retired index queued for a later acquire() to pop. Same residual as acquire(), see the
+    // TODO there.
+    auto _read_pool_lk = std::unique_lock<std::mutex>{m_pool_mtx};
+    if(idx >= m_pool.size()) return;
 
-    auto _write_lk = std::unique_lock<std::mutex>{m_available_mtx};
-    // re-checked under the lock, which clear() holds while it drains the free list and zeroes
-    // m_pool_size: the check above can pass and then go stale while this thread waits here,
-    // which would leave a retired index in the free list for a later acquire() to pop.
-    if(idx >= m_pool_size.load(std::memory_order_acquire)) return;
-
+    auto _write_avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
     m_available.push(idx);
     m_released++;
 }
@@ -221,7 +213,9 @@ pool<Tp>::clear(FuncT&& func)
     {
         ROCP_WARNING_IF(itr.in_use()) << fmt::format(
             "Pool object at index {} is still in use during pool clear", itr.index());
-        itr.release();
+        // not itr.release(): that re-enters pool<Tp>::release(), which takes m_pool_mtx. The
+        // free list is drained below, so the bookkeeping it would do is of no use here.
+        itr.clear_in_use();
         // run cleanup lambda
         if constexpr(std::is_invocable_v<FuncT, pool_object<Tp>&>)
         {
@@ -247,8 +241,9 @@ pool<Tp>::clear(FuncT&& func)
     // outlive it -- the HSA async signal handler holds one per dispatch, and finalization
     // reaches here without waiting for those handlers -- and pool_object::release() exchanges
     // m_in_use on itself before it ever reaches this pool, so freeing here is a use-after-free
-    // on the object, which zeroing m_pool_size cannot prevent. The loop above already released
-    // every object, so that exchange fails and no retired index re-enters the free list.
+    // on the object that no bounds check in release() can prevent. The loop above already
+    // cleared m_in_use on every object, so that exchange fails and no retired index re-enters
+    // the free list.
     // Moving a stable_vector moves only its chunk index, so the objects keep their addresses.
     // Bounded: clear() is a teardown operation, and the storage is freed with the pool.
     //
@@ -258,7 +253,6 @@ pool<Tp>::clear(FuncT&& func)
     // be mid-body by then. The window shrinks from "after clear()" to "after set_fini_status(1)".
     m_retired.emplace_back(std::move(m_pool));
     m_pool = pool_array_type{};
-    m_pool_size.store(0, std::memory_order_release);
     m_released.store(0);
     m_reused.store(0);
     m_new_batch.store(0);

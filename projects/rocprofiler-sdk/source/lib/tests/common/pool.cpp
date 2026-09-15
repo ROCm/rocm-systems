@@ -113,9 +113,9 @@ worker_count()
 }
 }  // namespace
 
-// Growth mutates m_pool under m_pool_mtx while release() runs unsynchronized with it, so
-// the two must be driven concurrently rather than in separate phases: the burst threads
-// keep raising peak demand to force batch growth while the churn threads keep releasing.
+// Growth mutates m_pool under m_pool_mtx while release() reads it under the same lock, so the
+// two must be driven concurrently rather than in separate phases: the burst threads keep
+// raising peak demand to force batch growth while the churn threads keep releasing.
 TEST(common, pool_concurrent_acquire_release)
 {
     container::pool<payload> _pool{std::piecewise_construct, batch_size, init_payload};
@@ -204,8 +204,9 @@ TEST(common, pool_concurrent_acquire_release)
     EXPECT_EQ(_released, _total_ops.load()) << _report;
 }
 
-// clear() releases every object while holding m_pool_mtx, so release() must reach the free
-// list without taking that lock. A regression here deadlocks rather than failing.
+// clear() holds m_pool_mtx across its loop and pool<Tp>::release() takes that lock, so clear()
+// must not re-enter it: it clears the in-use flag directly rather than calling
+// pool_object<Tp>::release(). A regression here deadlocks rather than failing.
 TEST(common, pool_clear_with_object_in_use)
 {
     container::pool<payload> _pool{std::piecewise_construct, batch_size, init_payload};
@@ -223,7 +224,7 @@ TEST(common, pool_clear_with_object_in_use)
     for(auto* itr : _held)
         EXPECT_TRUE(itr->release());
 
-    // deliberately left checked out so that clear() calls back into release()
+    // deliberately left checked out so that clear() has an in-use object to clear
     auto& _in_use = _pool.acquire();
     EXPECT_TRUE(_in_use.in_use());
 
@@ -259,8 +260,8 @@ TEST(common, pool_release_after_clear)
     EXPECT_EQ(_held->index(), _idx);
     EXPECT_EQ(_held->get().value, payload_sentinel);
 
-    // clear() released every object it retired, so the late release finds m_in_use already
-    // false, fails its exchange and never reaches pool<Tp>::release()
+    // clear() cleared the in-use flag on every object it retired, so the late release finds
+    // m_in_use already false, fails its exchange and never reaches pool<Tp>::release()
     EXPECT_FALSE(_held->in_use());
     EXPECT_FALSE(_held->release());
     EXPECT_EQ(_held->get().value, payload_sentinel);
@@ -285,12 +286,11 @@ TEST(common, pool_release_after_clear)
 }
 
 // clear() can land between the free-list pop in acquire() and the m_pool_mtx acquisition that
-// follows it, and between release()'s two bounds checks. Both re-check under the second lock.
-// Drop the re-check in acquire() and the stranded index reaches stable_vector::at(), which
-// throws std::out_of_range.
+// follows it, so acquire() re-checks the popped index under that lock. Drop the re-check and
+// the stranded index reaches stable_vector::at(), which throws std::out_of_range.
 //
-// One churn thread, and a main thread that only clears, is deliberate. The re-checks are bounds
-// checks, so they cannot tell a stranded index apart from an in-range index belonging to a later
+// One churn thread, and a main thread that only clears, is deliberate. The re-check is a bounds
+// check, so it cannot tell a stranded index apart from an in-range index belonging to a later
 // generation; reaching that residual takes a second thread to regrow the pool while the first is
 // blocked on m_pool_mtx. With a single grower the pool is always empty when the stranded index
 // is re-checked, so this test cannot trip it.
