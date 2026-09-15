@@ -4,10 +4,10 @@
 #pragma once
 
 #include "backends/hipfile/types.hpp"
-#include "common/string_utility.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <string>
