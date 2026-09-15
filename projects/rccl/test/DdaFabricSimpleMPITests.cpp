@@ -110,6 +110,8 @@ protected:
         ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
         ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank_));
         ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks_));
+        if(getActiveCommunicator()->ddaFabricBarrierState == nullptr)
+            GTEST_SKIP() << "DDA fabric path did not initialize";
     }
 
     void TearDown() override
@@ -191,7 +193,7 @@ protected:
 
     void runAllGather(bool inPlace)
     {
-        // AllGather's LL128 predicate uses total bytes and ignores RCCL_DDA_LL128.
+        // AllGather's LL128 predicate uses total bytes and RCCL_DDA_LL128 (default off).
         // Exceed the configured threshold while retaining 16-byte alignment.
         constexpr size_t countAlignment = 16 / sizeof(float);
         const size_t ll128ThresholdBytes =
@@ -307,12 +309,14 @@ protected:
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
         DeviceBufferAutoGuard recvGuard(recvBuf);
 
+        // Encoding must stay within float32 exact integer range (2^24 = 16.7M).
+        // With 144 ranks: rank*10000 + dest*100 + idx%97 gives max ~1.44M.
         ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<float>(
             sendBuf, totalCount, [this, countPerPeer](size_t i) {
                 const size_t dest = i / countPerPeer;
                 const size_t idx = i % countPerPeer;
                 return static_cast<float>(
-                    rank_ * 100000 + static_cast<int>(dest) * 10000 + idx % 997);
+                    rank_ * 10000 + static_cast<int>(dest) * 100 + idx % 97);
             }));
         ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, bytes));
 
@@ -333,16 +337,16 @@ protected:
                 const size_t src = i / countPerPeer;
                 const size_t idx = i % countPerPeer;
                 return static_cast<float>(
-                    static_cast<int>(src) * 100000 + rank_ * 10000 + idx % 997);
+                    static_cast<int>(src) * 10000 + rank_ * 100 + idx % 97);
             }));
         expectPath(kAllToAllNeedle);
     }
 };
 
-class DdaMPI_FabricSimple : public DdaFabricSimpleMPITest
+class DdaFabricSimple : public DdaFabricSimpleMPITest
 {};
 
-class DdaMPI_FabricBlockCap : public DdaFabricSimpleMPITest
+class DdaFabricBlockCap : public DdaFabricSimpleMPITest
 {
 protected:
     const char* maxBlocksOverride() const override
@@ -351,7 +355,7 @@ protected:
     }
 };
 
-TEST_F(DdaMPI_FabricBlockCap, UsesCliqueWideMinimum)
+TEST_F(DdaFabricBlockCap, UsesCliqueWideMinimum)
 {
     // Rank 0 advertises 32 while every other rank advertises 64. Observing 32
     // in every rank's local init log proves the bootstrap exchange selected the
@@ -359,57 +363,57 @@ TEST_F(DdaMPI_FabricBlockCap, UsesCliqueWideMinimum)
     expectLog("communicator max blocks=32");
 }
 
-TEST_F(DdaMPI_FabricSimple, AllReduceOutOfPlace)
+TEST_F(DdaFabricSimple, AllReduceOutOfPlace)
 {
     runAllReduce(false);
 }
 
-TEST_F(DdaMPI_FabricSimple, AllReduceInPlace)
+TEST_F(DdaFabricSimple, AllReduceInPlace)
 {
     runAllReduce(true);
 }
 
-TEST_F(DdaMPI_FabricSimple, AllGatherOutOfPlace)
+TEST_F(DdaFabricSimple, AllGatherOutOfPlace)
 {
     runAllGather(false);
 }
 
-TEST_F(DdaMPI_FabricSimple, AllGatherInPlace)
+TEST_F(DdaFabricSimple, AllGatherInPlace)
 {
     runAllGather(true);
 }
 
-TEST_F(DdaMPI_FabricSimple, ReduceScatterOutOfPlace)
+TEST_F(DdaFabricSimple, ReduceScatterOutOfPlace)
 {
     runReduceScatter(false);
 }
 
-TEST_F(DdaMPI_FabricSimple, ReduceScatterInPlace)
+TEST_F(DdaFabricSimple, ReduceScatterInPlace)
 {
     runReduceScatter(true);
 }
 
-TEST_F(DdaMPI_FabricSimple, AllToAllOutOfPlace)
+TEST_F(DdaFabricSimple, AllToAllOutOfPlace)
 {
     runAllToAll();
 }
 
-TEST_F(DdaMPI_FabricSimple, RepeatedAllReduce)
+TEST_F(DdaFabricSimple, RepeatedAllReduce)
 {
     runAllReduce(false, kRepeatedIterations);
 }
 
-TEST_F(DdaMPI_FabricSimple, RepeatedReduceScatter)
+TEST_F(DdaFabricSimple, RepeatedReduceScatter)
 {
     runReduceScatter(false, kRepeatedIterations);
 }
 
-TEST_F(DdaMPI_FabricSimple, RepeatedAllToAll)
+TEST_F(DdaFabricSimple, RepeatedAllToAll)
 {
     runAllToAll(kRepeatedIterations);
 }
 
-TEST_F(DdaMPI_FabricSimple, AlternatingCollectivesOnSameCommunicator)
+TEST_F(DdaFabricSimple, AlternatingCollectivesOnSameCommunicator)
 {
     runAllReduce(false);
     if(HasFatalFailure() || IsSkipped())
@@ -429,7 +433,7 @@ TEST_F(DdaMPI_FabricSimple, AlternatingCollectivesOnSameCommunicator)
 // ReduceScatter and AllToAll can use smaller 512 KiB shards/chunks.
 // ---------------------------------------------------------------------------
 
-class DdaMPI_FabricBarrierStress : public DdaFabricSimpleMPITest
+class DdaFabricBarrierStress : public DdaFabricSimpleMPITest
 {
 protected:
     void runBarrierStressAllReduce()
@@ -610,12 +614,14 @@ protected:
 
         for(int iter = 0; iter < kBarrierStressIterations; ++iter)
         {
+            // Encoding must stay within float32 exact integer range (2^24 = 16.7M).
+            // With 100 iters and 144 ranks: iter*100000 + rank*1000 + dest*7 + idx%7 gives max ~10M.
             ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<float>(
                 sendBuf, totalCount, [this, iter, countPerPeer](size_t i) {
                     const size_t dest = i / countPerPeer;
                     const size_t idx = i % countPerPeer;
                     return static_cast<float>(
-                        iter * 100000 + rank_ * 1000 + static_cast<int>(dest) * 100 + idx % 97);
+                        iter * 100000 + rank_ * 1000 + static_cast<int>(dest) * 7 + idx % 7);
                 }));
             ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, bytes));
 
@@ -638,7 +644,7 @@ protected:
                 const size_t src = i / countPerPeer;
                 const size_t idx = i % countPerPeer;
                 const float expected = static_cast<float>(
-                    iter * 100000 + static_cast<int>(src) * 1000 + rank_ * 100 + idx % 97);
+                    iter * 100000 + static_cast<int>(src) * 1000 + rank_ * 7 + idx % 7);
                 if(hostBuf[i] != expected)
                 {
                     ++iterMismatches;
@@ -663,17 +669,17 @@ protected:
     }
 };
 
-TEST_F(DdaMPI_FabricBarrierStress, AllReduceSmallBuffer)
+TEST_F(DdaFabricBarrierStress, AllReduceSmallBuffer)
 {
     runBarrierStressAllReduce();
 }
 
-TEST_F(DdaMPI_FabricBarrierStress, ReduceScatterSmallBuffer)
+TEST_F(DdaFabricBarrierStress, ReduceScatterSmallBuffer)
 {
     runBarrierStressReduceScatter();
 }
 
-TEST_F(DdaMPI_FabricBarrierStress, AllToAllSmallBuffer)
+TEST_F(DdaFabricBarrierStress, AllToAllSmallBuffer)
 {
     runBarrierStressAllToAll();
 }
