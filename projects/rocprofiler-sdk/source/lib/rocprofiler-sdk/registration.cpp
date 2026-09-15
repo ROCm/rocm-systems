@@ -959,6 +959,8 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 {
     ROCP_INFO << __FUNCTION__ << "(client_id=" << client_id.handle << ")";
 
+    if(get_init_status() < 1) return;
+
     auto _lk = scoped_lock_t{get_registration_mutex()};
 
     if(!get_clients()) return;
