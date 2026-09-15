@@ -102,7 +102,7 @@ release(bool, HSA_ENABLE_DTIF_FAST_COPY, false,                               \
         "Flag plain device allocations as HostMemoryDirectAccess")            \
 release(bool, GPU_MIPMAP, true,                                               \
         "Enables GPU mipmap extension")                                       \
-release(uint, GPU_ENABLE_PAL, 2,                                              \
+release(uint, GPU_ENABLE_PAL, 0,                                              \
         "Enables PAL backend. 0 - ROC, 1 - PAL, 2 - ROC or PAL")              \
 release(bool, DISABLE_DEFERRED_ALLOC, false,                                  \
         "Disables deferred memory allocation on device")                      \
