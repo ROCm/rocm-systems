@@ -3,6 +3,7 @@
 
 #include "aql_queue.h"
 #include "halt_snapshot_plugin.h"
+#include "throwing_instruction_test_util.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -6245,16 +6246,89 @@ private:
 };
 
 TEST(AqlDispatchTest, WorkerExceptionPropagatesThroughEngineStep) {
-  constexpr uint32_t kSSetvskip = 0xBF100000u;
+  constexpr uint32_t kSMovB32 = 0xBE800000u; // s_mov_b32 s0, s0
   VmFixture f("cdna4", /*num_cus=*/2);
   f.cp()->set_dispatch_threads(2);
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::make_unique<test::ThrowingInstructionPlugin>()));
+  f.soc_ptr->set_plugin_group(group);
 
-  uint64_t kernel = f.write_kernel(0x1000, &kSSetvskip, sizeof(kSSetvskip));
+  uint64_t kernel = f.write_kernel(0x1000, &kSMovB32, sizeof(kSMovB32));
   test::AqlQueue queue(f.mem(), f.cp());
   queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
 
   ASSERT_TRUE(f.engine->step()); // Doorbell dispatches work for tick 1.
   EXPECT_THROW((void)f.engine->step(), std::exception);
+}
+
+TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
+  constexpr uint32_t kSSetvskip = 0xBF100000u;
+  VmFixture f("cdna4", /*num_cus=*/2);
+  f.cp()->set_dispatch_threads(2);
+  uint64_t kernel = f.write_kernel(0x1000, &kSSetvskip, sizeof(kSSetvskip));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
+
+  ASSERT_TRUE(f.engine->step());
+  EXPECT_FALSE(f.engine->step());
+  const auto &exit = f.engine->last_exit();
+  EXPECT_EQ(exit.reason, simdojo::ExitReason::EXIT_REQUEST);
+  EXPECT_EQ(exit.code, 1);
+  EXPECT_NE(exit.message.find("s_setvskip"), std::string::npos);
+  EXPECT_NE(exit.message.find("pc=0x1040"), std::string::npos);
+  EXPECT_NE(exit.message.find("unimplemented instruction"), std::string::npos);
+  EXPECT_TRUE(f.cu(0)->is_idle());
+  EXPECT_TRUE(f.cu(1)->is_idle());
+}
+
+class ThrowingIssuePlugin final : public ExecutionPlugin {
+public:
+  enum Hook { Before, After, Halt };
+  explicit ThrowingIssuePlugin(Hook hook) : ExecutionPlugin("throwing_issue"), hook_(hook) {}
+
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
+                                        amdgpu::Wavefront &) override {
+    fail_at(Before);
+  }
+  void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &,
+                                       amdgpu::Wavefront &) override {
+    fail_at(After);
+  }
+  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &) override { fail_at(Halt); }
+
+private:
+  void fail_at(Hook hook) {
+    if (hook == hook_)
+      throw std::runtime_error("injected issue hook failure");
+  }
+  Hook hook_;
+};
+
+TEST(AqlDispatchTest, ThrowingIssueHooksReclaimDecodedInstruction) {
+  for (auto hook :
+       {ThrowingIssuePlugin::Before, ThrowingIssuePlugin::After, ThrowingIssuePlugin::Halt}) {
+    SCOPED_TRACE(hook);
+    VmFixture f("cdna4");
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::make_unique<ThrowingIssuePlugin>(hook)));
+    f.soc_ptr->set_plugin_group(group);
+    // Halt after rejection, so the hook runs outside execute_instruction().
+    const uint32_t code = hook == ThrowingIssuePlugin::Halt ? 0xBF100000u : 0xBE800000u;
+    f.write_kernel(0x1000, &code, sizeof(code));
+    ASSERT_NE(f.dispatch_scratch_wf(), nullptr);
+
+    // Count instruction frees on this thread, including non-sanitized builds.
+    // The guard restores the decoder's allocator hooks before fixture teardown.
+    Instruction::ScopedHeapAllocation heap_allocation;
+    uint32_t deallocations = 0;
+    Instruction::alloc_pool_ = &deallocations;
+    Instruction::dealloc_fn_ = [](void *counter, void *ptr) {
+      ++*static_cast<uint32_t *>(counter);
+      ::operator delete(ptr);
+    };
+    EXPECT_THROW((void)f.cu()->step(), std::runtime_error);
+    EXPECT_EQ(deallocations, 1u);
+  }
 }
 
 TEST(AqlDispatchTest, WorkerYieldReturnsToEventLoopBeforeResuming) {

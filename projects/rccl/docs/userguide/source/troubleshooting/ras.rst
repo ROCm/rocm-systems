@@ -29,14 +29,14 @@ RAS Queries
 -----------
 
 The RAS threads also listen for client connections on ``localhost``, port ``28028`` (these defaults can be changed using
-:ref:`env_NCCL_RAS_ADDR`).  The ``ncclras`` binary client can be used to connect to that socket and query the RAS
+:ref:`env_NCCL_RAS_ADDR`).  The ``rcclras`` binary client can be used to connect to that socket and query the RAS
 subsystem for the current job status, which is then printed to standard output.  The client accepts the ``-h`` and
 ``-p`` arguments to specify the host name and port, ``-v`` to produce a more verbose output in case of problems, and
 ``-t`` to specify a different timeout (``5`` seconds by default; `0` disables the timeout).
 
 As the client communication protocol is fully text-based, standard networking tools such as telnet or netcat can be used
-instead of the ``ncclras`` binary.  The relevant commands include ``STATUS``, ``VERBOSE STATUS`` (equivalent to the
-``ncclras`` client's ``-v`` argument), and ``TIMEOUT <seconds>`` (equivalent to ``-t``); e.g., ``echo verbose status |
+instead of the ``rcclras`` binary.  The relevant commands include ``STATUS``, ``VERBOSE STATUS`` (equivalent to the
+``rcclras`` client's ``-v`` argument), and ``TIMEOUT <seconds>`` (equivalent to ``-t``); e.g., ``echo verbose status |
 nc localhost 28028``.
 
 Irrespective of how the query is submitted, the receiving RAS thread sends back the job summary information as well as
@@ -214,7 +214,7 @@ JSON Output
 
 Starting with NCCL 2.28.7, RAS can generate output in JSON format to support machine-parsable metrics collection.
 
-The ``ncclras`` binary gains an additional option ``-f`` followed by an argument: ``text`` or ``json``, with ``text``
+The ``rcclras`` binary gains an additional option ``-f`` followed by an argument: ``text`` or ``json``, with ``text``
 being the default.  The equivalent wire-level protocol command is ``SET FORMAT <format>``.  Sample output can be found
 below:
 
@@ -299,7 +299,7 @@ Monitoring Mode
 
 Starting with NCCL 2.29, RAS adds a monitoring mode for real-time status updates.
 
-The ``ncclras`` binary gains an additional option ``-m`` that switches it to monitoring mode.  The equivalent wire-level
+The ``rcclras`` binary gains an additional option ``-m`` that switches it to monitoring mode.  The equivalent wire-level
 protocol command is ``MONITOR``.
 
 When in monitoring mode, the RAS client prints a welcome message and does not terminate until it is interrupted or the
