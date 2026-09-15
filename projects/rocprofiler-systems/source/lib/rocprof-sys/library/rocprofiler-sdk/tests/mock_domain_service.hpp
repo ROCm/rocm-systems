@@ -132,8 +132,11 @@ struct kfd_page_migrate_record
     std::int32_t  pid       = 0;
     agent_id_t    src_agent{};
     agent_id_t    dst_agent{};
+    agent_id_t    prefetch_agent{};
+    agent_id_t    preferred_agent{};
     address_t     start_address{};
     address_t     end_address{};
+    std::int32_t  error_code      = 0;
     std::uint64_t start_timestamp = 0;
     std::uint64_t end_timestamp   = 0;
 };

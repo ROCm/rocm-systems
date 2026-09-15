@@ -911,6 +911,17 @@ rocpd_processor_t::handle(const kfd_sample& kfd)
     region.end_timestamp   = kfd.end_timestamp;
     region.name            = kfd.name;
 
+    auto parsed_args = process_arguments_string(kfd.args_str);
+    for(const auto& arg : parsed_args)
+    {
+        profiler_hub::writer_types::arg_data_t arg_data;
+        arg_data.position = arg.arg_number;
+        arg_data.type     = arg.arg_type;
+        arg_data.name     = arg.arg_name;
+        arg_data.value    = arg.arg_value;
+        region.args.push_back(arg_data);
+    }
+
     auto env = make_trace_env(n_info.id, process_info.pid, kfd.thread_id);
     m_writer->insert_region_data(region, env);
 

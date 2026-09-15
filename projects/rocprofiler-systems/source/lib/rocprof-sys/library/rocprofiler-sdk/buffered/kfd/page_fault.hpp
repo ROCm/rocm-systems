@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/common_types.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 #include "logger/debug.hpp"
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
@@ -105,15 +106,21 @@ on_kfd_page_fault(typename SdkBackend::kfd_page_fault_record* record, void* data
         return fmt::format("{} {}", is_gpu ? "GPU" : "CPU", agent_ptr->device_type_index);
     };
 
-    constexpr auto k_empty_args           = "";
     constexpr auto k_empty_event_metadata = "{}";
 
     auto track_name = fmt::format("KFD Page Fault [{}]", agent_label(agent));
     Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
+    const auto agent_node_id =
+        agent ? std::to_string(agent->node_id) : std::string{ "null" };
+    const auto args_str = get_args_string(function_args_t{
+        { 0, "std::uint64_t", "address", fmt::format("{:#x}", record->address.value) },
+        { 1, "string", "agent", agent_node_id },
+    });
+
     const auto pmc_value = static_cast<double>(record->address.value);
     Externals::buffer_storage_store(typename Externals::kfd_sample_t{
-        tid, name, record->start_timestamp, record->end_timestamp, k_empty_args,
+        tid, name, record->start_timestamp, record->end_timestamp, args_str,
         std::string{ Externals::k_kfd_page_fault_category_name }, std::move(track_name),
         k_empty_event_metadata,
         static_cast<std::uint32_t>(agent ? agent->device_type_index : 0),

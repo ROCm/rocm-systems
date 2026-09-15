@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/common_types.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 #include "logger/debug.hpp"
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
@@ -131,6 +132,28 @@ on_kfd_page_migrate(typename SdkBackend::kfd_page_migrate_record* record, void* 
                   record->dst_agent.handle, e.what());
     }
 
+    const typename Externals::agent_t* prefetch_agent = nullptr;
+    try
+    {
+        prefetch_agent = &Externals::get_agent_manager().get_agent_by_handle(
+            record->prefetch_agent.handle);
+    } catch(const std::exception& e)
+    {
+        LOG_DEBUG("kfd_page_migrate: prefetch_agent lookup failed for handle {} ({})",
+                  record->prefetch_agent.handle, e.what());
+    }
+
+    const typename Externals::agent_t* preferred_agent = nullptr;
+    try
+    {
+        preferred_agent = &Externals::get_agent_manager().get_agent_by_handle(
+            record->preferred_agent.handle);
+    } catch(const std::exception& e)
+    {
+        LOG_DEBUG("kfd_page_migrate: preferred_agent lookup failed for handle {} ({})",
+                  record->preferred_agent.handle, e.what());
+    }
+
     Externals::add_thread_info(typename Externals::thread_info_t{
         Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
 
@@ -144,18 +167,32 @@ on_kfd_page_migrate(typename SdkBackend::kfd_page_migrate_record* record, void* 
         return fmt::format("{} {}", is_gpu ? "GPU" : "CPU", agent_ptr->device_type_index);
     };
 
-    constexpr auto k_empty_args           = "";
     constexpr auto k_empty_event_metadata = "{}";
 
     auto track_name = fmt::format("KFD Page Migrate [{}->{}]", agent_label(src_agent),
                                   agent_label(dst_agent));
     Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
+    auto agent_node_id = [](const auto* agent_ptr) {
+        return agent_ptr ? std::to_string(agent_ptr->node_id) : std::string{ "null" };
+    };
+    const auto args_str = get_args_string(function_args_t{
+        { 0, "std::uint64_t", "start_address",
+          fmt::format("{:#x}", record->start_address.value) },
+        { 1, "std::uint64_t", "end_address",
+          fmt::format("{:#x}", record->end_address.value) },
+        { 2, "string", "src_agent", agent_node_id(src_agent) },
+        { 3, "string", "dst_agent", agent_node_id(dst_agent) },
+        { 4, "string", "prefetch_agent", agent_node_id(prefetch_agent) },
+        { 5, "string", "preferred_agent", agent_node_id(preferred_agent) },
+        { 6, "int", "error_code", std::to_string(record->error_code) },
+    });
+
     const auto pmc_value =
         static_cast<double>(record->end_address.value - record->start_address.value);
 
     Externals::buffer_storage_store(typename Externals::kfd_sample_t{
-        tid, name, record->start_timestamp, record->end_timestamp, k_empty_args,
+        tid, name, record->start_timestamp, record->end_timestamp, args_str,
         std::string{ Externals::k_kfd_page_migrate_category_name }, std::move(track_name),
         k_empty_event_metadata,
         static_cast<std::uint32_t>(src_agent ? src_agent->device_type_index : 0),
