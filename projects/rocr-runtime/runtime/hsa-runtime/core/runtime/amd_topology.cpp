@@ -111,7 +111,11 @@ void DiscoverDrivers() {
 }
 
 bool InitializeDriver(std::unique_ptr<core::Driver>& driver) {
-  MAKE_NAMED_SCOPE_GUARD(driver_guard, [&]() { driver->Close(); });
+  // ShutDown() rather than Close(): Init() can fail partway through, after it
+  // has already enabled the KFD runtime, and closing the device without
+  // disabling first strands that. ShutDown() gives back whatever the driver
+  // actually took, which on this path is the open plus however far Init() got.
+  MAKE_NAMED_SCOPE_GUARD(driver_guard, [&]() { driver->ShutDown(); });
 
   if (driver->Init() != HSA_STATUS_SUCCESS) {
     return false;
@@ -543,6 +547,23 @@ bool BuildTopology() {
 }  // Anonymous namespace
 
 bool Load() {
+  // DiscoverDrivers() registers only drivers it opened and BuildTopology()
+  // publishes only agents it built, so from here on every way out of this
+  // function that is not success has to give both back. Nothing above does it
+  // for us: AMD::Load() failing takes Runtime::Load() straight to
+  // Runtime::Acquire(), which drops the runtime reference count and returns, so
+  // Unload() never runs. Before this guard existed, a topology that failed to
+  // build left the KFD open - and on WSL the DXCore session with it - for the
+  // rest of the process.
+  //
+  // Registrations as well as references. Acquire() keeps the runtime singleton
+  // after a failed load, and both lists are appended to rather than rebuilt, so
+  // a rollback that shut the drivers down but left them registered handed the
+  // next hsa_init() a driver list to append to - and InitializeDriver() then
+  // ran over the entries this unwind had already closed.
+  MAKE_NAMED_SCOPE_GUARD(driver_guard,
+                         []() { core::Runtime::runtime_singleton_->DestroyTopology(); });
+
   DiscoverDrivers();
 
   if (core::Runtime::runtime_singleton_->AgentDrivers().empty()) return false;
@@ -554,16 +575,23 @@ bool Load() {
     if (!InitializeDriver(d)) return false;
   }
 
-  return BuildTopology();
+  if (!BuildTopology()) return false;
+
+  driver_guard.Dismiss();
+  return true;
 }
 
 bool Unload() {
+  // Every driver gets its ShutDown() even if an earlier one fails: bailing out
+  // on the first error would leave the remaining drivers holding their opens
+  // and snapshots, which is the same leak as not unwinding at all.
+  bool ok = true;
+
   for (auto& driver : core::Runtime::runtime_singleton_->AgentDrivers()) {
-    hsa_status_t ret = driver->ShutDown();
-    if (ret != HSA_STATUS_SUCCESS) return false;
+    if (driver->ShutDown() != HSA_STATUS_SUCCESS) ok = false;
   }
 
-  return true;
+  return ok;
 }
 }  // namespace amd
 }  // namespace rocr

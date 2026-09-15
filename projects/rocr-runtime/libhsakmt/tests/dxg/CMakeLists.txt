@@ -1,5 +1,27 @@
-# Build-time checks for the DXG (WSL) thunk. No GPU, DXCore adapter or open
-# thunk is involved, so this runs on any machine that can build the library.
+# Pure-logic tests and build-time checks for the DXG (WSL) thunk. No GPU,
+# DXCore adapter or open thunk is involved, so these run on any machine that
+# can build the library.
+#
+# libhsakmt has no test framework; ../../../tests/unit_test_harness.h is the
+# whole harness. The test executable is a build-only artifact and is
+# deliberately not installed.
+
+add_executable(
+    kfd-lifecycle-test
+    kfd_lifecycle_test.cpp
+    ../../../runtime/hsa-runtime/core/driver/kfd/amd_kfd_lifecycle.cpp
+)
+target_include_directories(
+    kfd-lifecycle-test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../tests
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime
+)
+set_target_properties(
+    kfd-lifecycle-test
+    PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON
+)
+
+add_test(NAME kfd-lifecycle COMMAND kfd-lifecycle-test)
 
 # What the built artifact's dynamic symbol table actually offers. A symbol can
 # be lost to mangling or to local visibility while the header and the version

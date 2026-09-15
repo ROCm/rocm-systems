@@ -82,6 +82,10 @@ struct pool_object
 
     bool acquire();
     bool release();
+    // release() without the pool notification, for callers that have no use for the
+    // bookkeeping. pool<Tp>::clear() is one: it drains the free list itself, and it holds
+    // m_pool_mtx, which pool<Tp>::release() takes.
+    bool clear_in_use();
     bool in_use() const { return m_in_use.load(std::memory_order_relaxed); }
 
     Tp&       get() { return m_object; }
@@ -107,10 +111,17 @@ pool_object<Tp>::acquire()
 
 template <typename Tp>
 bool
-pool_object<Tp>::release()
+pool_object<Tp>::clear_in_use()
 {
     bool expected = true;
-    auto val      = m_in_use.compare_exchange_strong(expected, false);
+    return m_in_use.compare_exchange_strong(expected, false);
+}
+
+template <typename Tp>
+bool
+pool_object<Tp>::release()
+{
+    auto val = clear_in_use();
 
     if(val && m_pool) m_pool->release(m_index);
 
