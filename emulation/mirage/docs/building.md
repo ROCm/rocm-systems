@@ -285,6 +285,32 @@ test suite.
 - **`no mirage run is serving session <id>`** — the run that owned the
   session has exited. A session exists exactly as long as its `mirage
   run` does; start one in another terminal and `mirage exec` into that.
+- **The workload sees no GPU, and exits 0 anyway** — `rocminfo` reports
+  only the CPU agent, the session came up normally and nothing failed.
+  Almost always this is a ROCm that predates the GPU the profile
+  emulates: `libhsa-runtime64.so` enumerates agents by looking their ISA
+  up in the table it was compiled with, and one it does not recognise is
+  skipped without a word. Before each host workload starts, mirage
+  statically checks the command's unambiguous direct `DT_RUNPATH`
+  resolution and warns —
+
+  > `mirage: the ROCm runtime this workload will load does not support
+  > gfx1250, which is the GPU this profile emulates. …`
+
+  — naming the resolved runtime and the ROCm version beside it. Run the
+  workload under a newer ROCm (`mirage run --image <a newer ROCm image>`
+  is the usual way) or pick a profile whose target this ROCm supports.
+  The check is deliberately conservative. It warns only when a trusted
+  system executable directly links ROCr through a modern absolute or
+  `$ORIGIN`-based `RUNPATH`, with no loader override or hardware-capability
+  alternative. It stays silent for user-built executables, Python or
+  other programs that load ROCr later with `dlopen`, transitive
+  dependencies, legacy `RPATH`, cache-only resolution, preloads, and HSA
+  overrides, as well as set-ID or file-capability executables. Its
+  silence therefore does not rule the cause out. Broader coverage can be
+  added later with a bounded, loader-equivalent static resolver; the
+  preflight must never execute workload code or guess which runtime will
+  load.
 - **A backend reported as not installed** — run `mirage emulators -l`
   first. It prints every path that was searched for that backend's
   library and the environment variables that would resolve it, which is

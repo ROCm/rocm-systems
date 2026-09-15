@@ -180,6 +180,9 @@ impl EmulatorBackend for Rocjitsu {
     fn injection_def(&self, ctx: &SessionContext) -> Result<InjectionDef> {
         let def = ctx.emulator();
         let config = kmd_config(def, &ctx.runtime_dir)?;
+        let emulated_isa = std::fs::read(&config)
+            .ok()
+            .and_then(|config| isa_of_config(&config));
         // Refuse to run unemulated: if the KMD interposer can't be
         // located there is nothing to emulate the workload, so fail
         // loudly rather than silently running on real hardware.
@@ -281,6 +284,7 @@ impl EmulatorBackend for Rocjitsu {
             ld_preload: Some(ld_preload.display().to_string()),
             files: Default::default(),
             env,
+            emulated_isa,
             mounts: Default::default(),
             libraries,
             host_gpus: false,
@@ -802,6 +806,40 @@ pub fn kmd_config(def: &EmulatorDef, session_dir: &std::path::Path) -> Result<Pa
     }
 }
 
+/// The gfx name of the device `def` makes appear, as the workload's
+/// ROCm runtime will see it — `gfx1250` for the `mi450x` builtin.
+///
+/// Read out of the very `SimulationConfig` the KMD interposer will load,
+/// rather than out of the profile's agent, because those are not always
+/// the same document: a drop-in `--config` hands rocjitsu a file of the
+/// user's own and the profile's agent then describes nothing that will
+/// exist. Going through [`resolve_sim_config`] is what makes the answer
+/// the emulated device rather than a guess at it.
+///
+/// `None` when there is nothing to say: an unresolvable profile, a
+/// config that cannot be read or parsed, or a device with no
+/// `gfx_target_version`. Every caller is a diagnostic, and none of them
+/// is worth failing a run over — the errors here are the ones bring-up
+/// is about to report properly anyway.
+#[must_use]
+pub fn emulated_isa(def: &EmulatorDef) -> Option<String> {
+    let config = match resolve_sim_config(def).ok()? {
+        SimConfig::Supplied(path) => std::fs::read(path).ok()?,
+        SimConfig::Synthesised(bytes) => bytes,
+    };
+    isa_of_config(&config)
+}
+
+/// The gfx name of the device a rocjitsu `SimulationConfig` describes.
+fn isa_of_config(config: &[u8]) -> Option<String> {
+    let config: serde_json::Value = serde_json::from_slice(config).ok()?;
+    let version = config
+        .pointer("/vm/gpu/device/gfx_target_version")?
+        .as_u64()?;
+    let version = u32::try_from(version).ok().filter(|v| *v != 0)?;
+    Some(mirage_core::hardware::gfx_name(version))
+}
+
 /// Check that `def` describes a machine rocjitsu can stand up, without
 /// writing anything.
 ///
@@ -1006,6 +1044,21 @@ mod tests {
         }
     }
 
+    /// A single-GPU [`EmulatorDef`] whose owned agent emulates
+    /// `gfx_target_version`.
+    fn def_for_target(gfx_target_version: u32) -> EmulatorDef {
+        let mut agent = AgentDef::default();
+        agent.vm.gpu.device.gfx_target_version = gfx_target_version;
+        EmulatorDef {
+            topology: MaybeRef::Owned(TopologyDef {
+                num_nodes: 1,
+                gpus_per_node: 1,
+                agent: MaybeRef::Owned(agent),
+            }),
+            ..def_with_gpus(1)
+        }
+    }
+
     #[test]
     fn kmd_config_requires_resolvable_topology() {
         let _g = mirage_core::paths::test_env_lock();
@@ -1069,6 +1122,94 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&cfg).unwrap()).unwrap();
         assert_eq!(json["vm"]["gpu"]["num_gpus"], 2);
+    }
+
+    /// The ISA mirage checks the host's ROCm against is the one the
+    /// emulated device will actually present.
+    ///
+    /// This is the fact the whole of issue #11361 turns on: a ROCm that
+    /// does not know the target skips the emulated agent, so the
+    /// workload sees no GPU and exits 0 with nothing said. The check
+    /// mirage prints that warning from is only as good as this answer.
+    #[test]
+    fn the_emulated_isa_is_the_agents_gfx_target() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        // gfx1250 is the MI450X target, and the one a ROCm 7.0 host has
+        // never heard of; gfx942 is one the same host does support, so a
+        // passing test cannot be one that answers `gfx1250` to
+        // everything.
+        assert_eq!(
+            emulated_isa(&def_for_target(120500)).as_deref(),
+            Some("gfx1250")
+        );
+        assert_eq!(
+            emulated_isa(&def_for_target(90402)).as_deref(),
+            Some("gfx942")
+        );
+    }
+
+    /// A drop-in `--config` names a device of its own, and that is the
+    /// device the interposer will stand up — so it is the one the check
+    /// has to be about.
+    ///
+    /// Reading the profile's agent instead would be wrong in both
+    /// directions here: silent about a config whose target this ROCm
+    /// cannot see, and warning about a profile agent that is not going
+    /// to exist. Which is why this goes through `resolve_sim_config`
+    /// rather than the agent store.
+    #[test]
+    fn a_supplied_config_names_the_device_that_will_exist() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        let config = tmp.path().join("mine.json");
+        std::fs::write(
+            &config,
+            br#"{"vm": {"gpu": {"device": {"gfx_target_version": 90500}}}}"#,
+        )
+        .unwrap();
+
+        // The profile's own agent is a gfx1250 the `--config` overrides.
+        let mut def = def_for_target(120500);
+        def.options.insert(
+            "config".to_string(),
+            SimpleValue::String(config.display().to_string()),
+        );
+
+        assert_eq!(emulated_isa(&def).as_deref(), Some("gfx950"));
+    }
+
+    /// Nothing to say is said as nothing. Every caller is a diagnostic,
+    /// and a profile that cannot be resolved, a config that is not
+    /// there, or a device with no gfx target are all problems bring-up
+    /// reports properly a moment later — guessing at an ISA for them
+    /// would only add a wrong warning in front of the right error.
+    #[test]
+    fn an_unanswerable_profile_names_no_isa() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        // An unresolvable topology reference.
+        let mut def = def_with_gpus(1);
+        def.topology = MaybeRef::Ref("does-not-exist".to_string());
+        assert_eq!(emulated_isa(&def), None);
+
+        // A `--config` that is not there.
+        let mut def = def_with_gpus(1);
+        def.options.insert(
+            "config".to_string(),
+            SimpleValue::String("/no/such/config.json".to_string()),
+        );
+        assert_eq!(emulated_isa(&def), None);
+
+        // A default agent, whose `gfx_target_version` is 0: a device
+        // with no ISA is not a device to check a runtime against.
+        assert_eq!(emulated_isa(&def_with_gpus(1)), None);
     }
 
     /// A drop-in `--config` is used verbatim, but its runtime directory

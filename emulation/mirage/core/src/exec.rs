@@ -227,6 +227,17 @@ pub struct InjectionDef {
     pub files: BTreeMap<String, MaybeRef<Vec<u8>>>,
     pub env: BTreeMap<String, String>,
 
+    /// The ISA of the device this prepared injection will make visible
+    /// to ROCr, when the backend emulates one rather than using the
+    /// host's GPU.
+    ///
+    /// Captured while the backend materialises the injection so it stays
+    /// tied to the exact configuration written for this session. A later
+    /// edit to a by-name profile, topology or agent must not change what
+    /// an already-running session reports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emulated_isa: Option<String>,
+
     /// Host paths the emulator needs bind-mounted into each node's
     /// container so that the injected `LD_PRELOAD`/env paths resolve
     /// inside it. Empty for non-containerised sessions (where the
