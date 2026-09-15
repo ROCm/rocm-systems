@@ -3,25 +3,31 @@
 
 #include "rocm/sha2/sha256.h"
 
-// Updating after finalize is caller error. rocprofiler-sdk reports it through
-// its own logging, which ROCPROFILER_CI promotes to fatal; that check is why
-// the call exists. Other consumers, projects/cuid among them, must not take on
-// abseil and fmt to compute a digest, so there it degrades to a stderr line.
-#if defined(ROCM_SHA256_ROCPROFILER_LOGGING)
-#include "lib/common/logging.hpp"
-#else
-#include <iostream>
-#define ROCP_CI_LOG_IF(LEVEL, COND)                                            \
-  if (COND)                                                                    \
-  ::std::cerr
-#endif
+#include "rocm/sha2/log.h"
 
+#include <atomic>
 #include <cstring>
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 
 namespace rocm {
 namespace sha2 {
+
+namespace {
+
+void default_log_handler(const char *message) {
+  std::cerr << message << std::endl;
+}
+
+std::atomic<log_handler> g_log_handler{&default_log_handler};
+
+} // namespace
+
+void set_log_handler(log_handler handler) {
+  g_log_handler.store(handler != nullptr ? handler : &default_log_handler,
+                      std::memory_order_relaxed);
+}
 
 /// FIPS 180-4 section 5.3.3 initial hash value.
 constexpr std::array<uint32_t, 8> sha256_initial_state = {
@@ -43,10 +49,11 @@ sha256::sha256(const std::string &data) {
 }
 
 void sha256::update(const uint8_t *data, size_t len) {
-  ROCP_CI_LOG_IF(INFO, m_finalized)
-      << "attempt to update sha256 after finalized";
-  if (m_finalized)
+  if (m_finalized) {
+    g_log_handler.load(std::memory_order_relaxed)(
+        "attempt to update sha256 after finalized");
     return;
+  }
   for (size_t i = 0; i < len; ++i) {
     m_data[m_datalen++] = data[i];
     if (m_datalen == 64) {
@@ -58,10 +65,11 @@ void sha256::update(const uint8_t *data, size_t len) {
 }
 
 void sha256::update(const std::string &data) {
-  ROCP_CI_LOG_IF(INFO, m_finalized)
-      << "attempt to update sha256 after finalized";
-  if (m_finalized)
+  if (m_finalized) {
+    g_log_handler.load(std::memory_order_relaxed)(
+        "attempt to update sha256 after finalized");
     return;
+  }
   update(reinterpret_cast<const uint8_t *>(data.data()), data.size());
 }
 

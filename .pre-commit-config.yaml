@@ -13,7 +13,6 @@ exclude: |
     | projects/rdc/
     | projects/rocm-smi-lib/
     | projects/rocprofiler-compute/
-    | projects/rocprofiler-systems/
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
