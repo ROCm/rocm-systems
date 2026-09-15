@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_VM_SOC_H_
 #define ROCJITSU_VM_SOC_H_
 
+#include "rocjitsu/vm/amdgpu/cpu_dispatch_pool.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/iod.h"
@@ -24,6 +25,10 @@
 #include <vector>
 
 namespace rocjitsu {
+
+namespace test {
+class SoCTestAccess;
+}
 
 /// @brief System-on-Chip container with XCDs, I/O Dies, and shared GPU memory.
 ///
@@ -188,11 +193,27 @@ public:
   /// @brief Set the execution plugin group and distribute to CPs/CUs.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
 
+  /// @brief Set the requested shared host-thread budget for functional CU execution.
+  ///
+  /// @details This controls host acceleration rather than modeled GPU
+  /// resources or timing. The count includes the command-processor thread that
+  /// calls the pool. The effective width is clamped to the largest CU count of
+  /// any command processor in the SoC. One pool is shared across the SoC, and
+  /// its current single-submission implementation serializes batches from
+  /// different CPs.
+  void set_dispatch_threads(uint32_t threads);
+  /// @returns The effective functional dispatch width after mode and CU-capacity clamps.
+  uint32_t dispatch_threads() const { return dispatch_threads_; }
+
   const std::vector<amdgpu::ComputeUnitCore *> &all_cus();
 
   ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
 
 private:
+  friend class test::SoCTestAccess;
+
+  void apply_dispatch_threads();
+
   static inline std::atomic<uint32_t> next_gpu_id_{0};
   uint32_t gpu_id_ = next_gpu_id_++;
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
@@ -201,6 +222,9 @@ private:
   std::vector<amdgpu::Iod *> iods_;
   amdgpu::GpuMemory *memory_ = nullptr;
   std::unique_ptr<amdgpu::HbmController> hbm_standalone_; ///< Used when num_iods == 0.
+  std::unique_ptr<amdgpu::CpuDispatchPool> dispatch_pool_;
+  uint32_t requested_dispatch_threads_ = 1;
+  uint32_t dispatch_threads_ = 1;
   std::shared_ptr<ExecutionPluginGroup> plugin_group_;
   std::vector<amdgpu::ComputeUnitCore *> all_cus_cache_;
 };
