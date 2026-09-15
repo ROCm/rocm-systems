@@ -157,6 +157,8 @@ HSAKMT_STATUS hsakmt_fmm_advance_vm_timeline(HsaKFDContext *ctx,
 		HSAuint32 node_id, int *drm_render_fd,
 		uint32_t *vm_timeline_syncobj, uint64_t *vm_timeline_point);
 
+int hsakmt_fmm_get_drm_render_fd(HsaKFDContext *ctx, HSAuint32 node_id);
+
 int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor);
 void *hsakmt_mmap_allocate_aligned(int prot, int flags, uint64_t size, uint64_t align,
 			    uint64_t guard_size, void *aper_base, void *aper_limit, int fd);

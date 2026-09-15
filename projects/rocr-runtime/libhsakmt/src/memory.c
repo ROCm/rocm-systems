@@ -284,6 +284,44 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryCtx(HsaKFDContext *ctx,
 				   NULL, 0, flags);
 }
 
+
+
+// Configure the persisting GL2 (L2) cache size for a GPU node.
+//
+// The kernel implements this through the amdgpu render-node ioctl
+// DRM_IOCTL_AMDGPU_VM (amdgpu_vm_ioctl -> AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE),
+// not through a KFD ioctl. So the request must be issued on the per-node DRM
+// render fd, not on the KFD device fd.
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetPersistingCacheSizeCtx(HsaKFDContext *ctx,
+												HSAuint32 Node,
+												HSAuint64 CacheSize) {
+	union drm_amdgpu_vm args = {0};
+	int drm_fd;
+	int ret;
+
+	CHECK_KFD_OPEN();
+
+	pr_debug("[%s] node %d size %lu\n", __func__, Node, CacheSize);
+
+	/* Get the amdgpu render-node fd for this KFD node */
+	drm_fd = hsakmt_fmm_get_drm_render_fd(ctx, Node);
+	if (drm_fd < 0) {
+		pr_err("[%s] invalid node ID: %d\n", __func__, Node);
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+	}
+
+	args.in.op = AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE;
+	args.in.size = (uint32_t)CacheSize;
+
+	ret = drmIoctl(drm_fd, DRM_IOCTL_AMDGPU_VM, &args);
+	if (ret) {
+		pr_err("[%s] DRM_IOCTL_AMDGPU_VM GL2 persisting failed: %d\n", __func__, ret);
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryToNodesCtx(HsaKFDContext *ctx,
 						    void *MemoryAddress,
 						    HSAuint64 MemorySizeInBytes,
@@ -951,6 +989,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetAMDGPUDeviceHandle(HSAuint32 NodeId,
 	CHECK_KFD_OPEN();
 
 	return hsaKmtGetAMDGPUDeviceHandleCtx(&hsakmt_primary_kfd_ctx, NodeId, DeviceHandle);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetPersistingCacheSize(HSAuint32 Node,
+												HSAuint64 CacheSize)
+{
+	return hsaKmtSetPersistingCacheSizeCtx(&hsakmt_primary_kfd_ctx, Node, CacheSize);
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtHandleExport(const HsaHandleExportDesc* desc,
