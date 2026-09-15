@@ -17,6 +17,7 @@
 #include "param.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -52,7 +53,7 @@ static inline unsigned ddaLL128RsThreads(unsigned dflt) {
 
 template <typename T>
 static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, void* recvbuff, size_t recvcount,
-                                                         ncclComm* comm, cudaStream_t stream) {
+                                                         ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
   const int nRanks = comm->nRanks;
   const size_t bytes = recvcount * sizeof(T); // per-rank shard bytes
   const size_t nWords = bytes >> 3;
@@ -81,25 +82,29 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
+  T* const* peersArg = peers;
+  T* recvArg = static_cast<T*>(recvbuff);
+  const T* sendArg = static_cast<const T*>(sendbuff);
+
   INFO(NCCL_COLL, "DDA fabric ReduceScatter LL128: nRanks=%d shardBytes=%zu numLines=%zu grid=%u block=%u", nRanks,
        bytes, numLines, grid.x, block.x);
 
   // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback.
   switch (nRanks) {
   case 4:
-    dda::common::ddaReduceScatterFabricLL128<T, 4>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), recvcount,
-                                   comm->rank, nRanks, epochDev, epochLen);
+    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 4>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, recvcount,
+                          comm->rank, nRanks, epochDev, epochLen);
     break;
   case 8:
-    dda::common::ddaReduceScatterFabricLL128<T, 8>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), recvcount,
-                                   comm->rank, nRanks, epochDev, epochLen);
+    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 8>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, recvcount,
+                          comm->rank, nRanks, epochDev, epochLen);
     break;
   default:
-    dda::common::ddaReduceScatterFabricLL128<T, 0>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), recvcount,
-                                   comm->rank, nRanks, epochDev, epochLen);
+    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 0>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, recvcount,
+                          comm->rank, nRanks, epochDev, epochLen);
     break;
   }
 
@@ -151,15 +156,15 @@ bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuf
 
 ncclResult_t ncclReduceScatterDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t recvcount,
                                              ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
-                                             cudaStream_t stream) {
+                                             cudaStream_t stream, hipEvent_t stopEvent) {
   (void)op;
   switch (datatype) {
   case ncclFloat32:
-    return ncclReduceScatterDdaFabricLL128Typed<float>(sendbuff, recvbuff, recvcount, comm, stream);
+    return ncclReduceScatterDdaFabricLL128Typed<float>(sendbuff, recvbuff, recvcount, comm, stream, stopEvent);
   case ncclFloat16:
-    return ncclReduceScatterDdaFabricLL128Typed<half>(sendbuff, recvbuff, recvcount, comm, stream);
+    return ncclReduceScatterDdaFabricLL128Typed<half>(sendbuff, recvbuff, recvcount, comm, stream, stopEvent);
   case ncclBfloat16:
-    return ncclReduceScatterDdaFabricLL128Typed<bf16>(sendbuff, recvbuff, recvcount, comm, stream);
+    return ncclReduceScatterDdaFabricLL128Typed<bf16>(sendbuff, recvbuff, recvcount, comm, stream, stopEvent);
   default:
     return ncclInvalidArgument;
   }

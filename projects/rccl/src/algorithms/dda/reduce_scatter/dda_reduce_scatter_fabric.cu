@@ -15,6 +15,7 @@
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -25,7 +26,7 @@ using nccl_dda_detail::DdaFabricBarrierState;
 
 template <typename T>
 static ncclResult_t ncclReduceScatterDdaFabricTyped(const void* sendbuff, void* recvbuff, size_t recvcount,
-                                                    ncclComm* comm, cudaStream_t stream) {
+                                                    ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
   if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaFabricBarrierState == nullptr) {
     return ncclInvalidUsage;
@@ -53,6 +54,11 @@ static ncclResult_t ncclReduceScatterDdaFabricTyped(const void* sendbuff, void* 
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
+  T* const* ipcbuffsArg = d_ipcbuffs;
+  T* recvArg = static_cast<T*>(recvbuff);
+  const T* sendArg = static_cast<const T*>(sendbuff);
+  const T* accArg = nullptr;
+
   CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
 
   INFO(NCCL_COLL, "DDA fabric ReduceScatter: launching kernel: nRanks=%d recvcount=%zu grid=%u block=%u%s", nRanks,
@@ -60,19 +66,19 @@ static ncclResult_t ncclReduceScatterDdaFabricTyped(const void* sendbuff, void* 
 
   switch (nRanks) {
   case 4:
-    dda::common::ddaReduceScatterFabric<T, 4, false>
-      <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff),
-                                   comm->rank, nRanks, barrierHost, nullptr);
+    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabric<T, 4, false>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, ipcbuffsArg, recvArg, recvcount, sendArg,
+                          comm->rank, nRanks, barrierHost, accArg);
     break;
   case 8:
-    dda::common::ddaReduceScatterFabric<T, 8, false>
-      <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff),
-                                   comm->rank, nRanks, barrierHost, nullptr);
+    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabric<T, 8, false>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, ipcbuffsArg, recvArg, recvcount, sendArg,
+                          comm->rank, nRanks, barrierHost, accArg);
     break;
   default:
-    dda::common::ddaReduceScatterFabric<T, 0, false>
-      <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff),
-                                   comm->rank, nRanks, barrierHost, nullptr);
+    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabric<T, 0, false>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, ipcbuffsArg, recvArg, recvcount, sendArg,
+                          comm->rank, nRanks, barrierHost, accArg);
     break;
   }
 
@@ -131,15 +137,15 @@ bool ncclReduceScatterDdaFabricEligible(ncclComm* comm, const void* sendbuff, vo
 }
 
 ncclResult_t ncclReduceScatterDdaFabric(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
-                                        ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
+                                        ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
   (void)op;
   switch (datatype) {
   case ncclFloat32:
-    return ncclReduceScatterDdaFabricTyped<float>(sendbuff, recvbuff, recvcount, comm, stream);
+    return ncclReduceScatterDdaFabricTyped<float>(sendbuff, recvbuff, recvcount, comm, stream, stopEvent);
   case ncclFloat16:
-    return ncclReduceScatterDdaFabricTyped<half>(sendbuff, recvbuff, recvcount, comm, stream);
+    return ncclReduceScatterDdaFabricTyped<half>(sendbuff, recvbuff, recvcount, comm, stream, stopEvent);
   case ncclBfloat16:
-    return ncclReduceScatterDdaFabricTyped<bf16>(sendbuff, recvbuff, recvcount, comm, stream);
+    return ncclReduceScatterDdaFabricTyped<bf16>(sendbuff, recvbuff, recvcount, comm, stream, stopEvent);
   default:
     return ncclInvalidArgument;
   }

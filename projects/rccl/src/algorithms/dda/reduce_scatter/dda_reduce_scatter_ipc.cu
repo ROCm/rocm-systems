@@ -15,6 +15,7 @@
 #include "algorithms/dda/dda_init_detail.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <cstddef>
 #include <cstdlib>
@@ -29,7 +30,7 @@ using nccl_dda_detail::kDdaNranks;
 
 template <typename T>
 static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t recvcount, ncclComm* comm,
-                                                 cudaStream_t stream) {
+                                                 cudaStream_t stream, hipEvent_t stopEvent) {
   if (comm->ddaIpcMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaIpcBarrierState == nullptr) {
     return ncclInvalidUsage;
@@ -54,9 +55,14 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* rec
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
+  T* const* ipcbuffsArg = d_ipcbuffs;
+  T* recvArg = static_cast<T*>(recvbuff);
+  const T* sendArg = static_cast<const T*>(sendbuff);
+
   CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
-  dda::common::ddaReduceScatterIpc<T, kDdaNranks, false><<<grid, block, 0, stream>>>(
-    d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+  hipExtLaunchKernelGGL((dda::common::ddaReduceScatterIpc<T, kDdaNranks, false>), grid, block, 0, stream,
+                        /*startEvent=*/nullptr, stopEvent, /*flags=*/0, ipcbuffsArg, recvArg, recvcount, sendArg,
+                        comm->rank, barrierHost);
   CUDACHECK(cudaGetLastError());
 
   return ncclSuccess;
@@ -109,15 +115,15 @@ bool ncclReduceScatterDdaIpcEligible(ncclComm* comm, const void* sendbuff, void*
 }
 
 ncclResult_t ncclReduceScatterDdaIpc(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
-                                     ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
+                                     ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
   (void)op;
   switch (datatype) {
   case ncclFloat32:
-    return ncclReduceScatterDdaIpcTyped<float>(sendbuff, recvbuff, recvcount, comm, stream);
+    return ncclReduceScatterDdaIpcTyped<float>(sendbuff, recvbuff, recvcount, comm, stream, stopEvent);
   case ncclFloat16:
-    return ncclReduceScatterDdaIpcTyped<half>(sendbuff, recvbuff, recvcount, comm, stream);
+    return ncclReduceScatterDdaIpcTyped<half>(sendbuff, recvbuff, recvcount, comm, stream, stopEvent);
   case ncclBfloat16:
-    return ncclReduceScatterDdaIpcTyped<bf16>(sendbuff, recvbuff, recvcount, comm, stream);
+    return ncclReduceScatterDdaIpcTyped<bf16>(sendbuff, recvbuff, recvcount, comm, stream, stopEvent);
   default:
     return ncclInvalidArgument;
   }
