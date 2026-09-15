@@ -350,6 +350,7 @@ if(BUILD_TESTS)
       device/TestTdmCopy.cpp
       device/TestAsyncCopy.cpp
       device/TestLdsTransfer.cpp
+      device/NarrowFloatSum_test.cpp
       device/GinDeviceTests.cpp
       device/GinAnvilIpcDevice_test.cpp
       device/HierarchicalShuffleTests.cpp
