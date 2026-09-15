@@ -2273,7 +2273,7 @@ __global__ void barrierPoolCrossTalkKernel(
   sums->rail = sumBarrierSignals(gin, devComm.railGinBarrier.signal0, railRanks);
   sums->world = sumBarrierSignals(gin, devComm.worldGinBarrier.signal0, worldRanks);
   sums->hybridRail = sumBarrierSignals(gin, devComm.hybridRailGinBarrier.signal0, railRanks);
-  sums->hybridWorld = sumBarrierSignals(gin, devComm.hybridWorldGinBarrier.signal0, worldRanks);
+  sums->hybridWorld = sumBarrierSignals(gin, devComm.hybridDenseGinBarrier.signal0, worldRanks);
 }
 
 // Generic and specialized sessions sharing one index must not share cells.
@@ -2305,7 +2305,7 @@ TEST_F(GinMPIDeviceTests, BarrierPools_NoCrossTalk) {
   });
 
   // Railed contexts leave the generic session's world arm unreachable.
-  if (devComm.ginContextsRailed)
+  if (devComm.ginContextStride == ncclTeamRail(comm).stride)
     GTEST_SKIP() << "Requires fully connected GIN contexts";
 
   BarrierPoolSignalSums* dSums = nullptr;
