@@ -287,15 +287,6 @@ target_compile_options(dispatch
     -Wextra
     -Wpedantic
 )
-# Some tests are compiled out because the behaviour they check is not implemented
-# yet; they abort the test binary rather than fail. Flip this on once the runtime
-# reports asynchronous dispatch failures instead of aborting. See dispatch.cc.
-option(AIE_TEST_ASYNC_ERRORS
-  "Build the dispatch tests that require rejected dispatches to be observable" OFF)
-if(AIE_TEST_ASYNC_ERRORS)
-  target_compile_definitions(dispatch PRIVATE ROCRTST_AIE_ASYNC_ERROR_REPORTING)
-endif()
-
 target_compile_definitions(dispatch
   PRIVATE
     DEFAULT_PDI_PATH=${vsadd_DESIGN_PDI}

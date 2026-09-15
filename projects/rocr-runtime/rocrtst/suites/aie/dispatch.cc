@@ -5,6 +5,7 @@
  */
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -2081,35 +2082,63 @@ TEST_F(FullElfDispatchTest, ElfNoPdiCeiling) {
 }
 
 // ===========================================================================
-// Tests that need a rejected dispatch to be observable.
+// Tests that a rejected dispatch is refused rather than executed.
 //
-// A dispatch is rejected asynchronously: the doorbell store that triggered the
-// submission returns void, so it cannot report anything. Today any failure in
-// AieAqlQueue::SubmitPackets throws, and that exception reaches
-// handleExceptionT<void>(), which calls abort() -- so these tests would take the
-// whole binary down rather than fail. They are compiled out until the runtime
-// reports asynchronous dispatch failures instead of aborting.
+// A rejected dispatch is reported through the queue's error callback and nowhere
+// else. The doorbell store is void, so it cannot return a status; and the packet
+// never reached the device, so its completion signal is never released. A blocking
+// wait on that signal would therefore hang forever -- these tests must not wait on
+// it, and instead assert the signal still holds its initial value.
 //
-// Enable with -DROCRTST_AIE_ASYNC_ERROR_REPORTING (cmake: -DAIE_TEST_ASYNC_ERRORS=ON).
+// Submission is synchronous on the calling thread for KMQ queues, so the callback
+// has already fired by the time the doorbell store returns.
 //
-// As written they assume a rejected dispatch (a) does not abort, (b) releases its
-// completion signal so a waiter wakes, (c) leaves the output buffer untouched, and
-// (d) is retired from the ring, so it is not resubmitted with the next batch. All
-// four are what the planned ReportSubmitFailure path does; today SubmitCmdChain
-// returns before the loop that calls SubRelease, and AieAqlQueue::SubmitPackets
-// throws before storing read_dispatch_id.
-// If the runtime settles on different semantics -- an error callback, say -- these
-// assertions are the part to adjust; they pin down that a bad packet is refused
-// rather than executed.
+// A queue that takes a rejected packet is suspended and submits nothing further, by
+// design: the failed packets are deliberately left unconsumed rather than retired.
+// So "the refusal did not poison anything" is checked on a *fresh* queue, never by
+// reusing the suspended one.
 // ===========================================================================
-#ifdef ROCRTST_AIE_ASYNC_ERROR_REPORTING
+
+// Captures the arguments of a queue error callback.
+struct dispatch_error {
+  std::atomic<bool> invoked{false};
+  hsa_status_t status{HSA_STATUS_SUCCESS};
+  hsa_queue_t* source{nullptr};
+
+  static void callback(hsa_status_t status, hsa_queue_t* source, void* data) {
+    auto& self = *static_cast<dispatch_error*>(data);
+    self.status = status;
+    self.source = source;
+    self.invoked.store(true, std::memory_order_release);
+  }
+};
+
+// Creates a queue whose errors land in @p err.
+[[nodiscard]] hsa_status_t create_queue_with_error_callback(hsa_agent_t agent, std::uint32_t size,
+                                                            dispatch_error* err,
+                                                            hsa_queue_t** queue) {
+  return hsa_queue_create(agent, size, HSA_QUEUE_TYPE_SINGLE, dispatch_error::callback, err, 0, 0,
+                          queue);
+}
+
+// Asserts the dispatch was refused: reported once through the error callback, and its completion
+// signal left untouched because the packet never executed.
+void ExpectRejected(const dispatch_error& err, hsa_queue_t* queue, hsa_signal_t signal,
+                    hsa_signal_value_t initial) {
+  EXPECT_TRUE(err.invoked.load(std::memory_order_acquire))
+      << "a rejected dispatch did not report through the queue error callback";
+  EXPECT_NE(err.status, HSA_STATUS_SUCCESS);
+  EXPECT_EQ(err.source, queue);
+  EXPECT_EQ(hsa_signal_load_scacquire(signal), initial)
+      << "completion signal fired for a packet that never executed";
+}
 
 TEST_F(FullElfDispatchTest, ElfMisalignedControlCodeRejected) {
   // A control code that is not 16 KiB aligned is accepted by the hardware and then never
   // completes, so the runtime rejects it up front rather than letting the dispatch hang.
+  dispatch_error err;
   hsa_queue_t* queue = nullptr;
-  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
-                             nullptr, 0, 0, &queue),
+  ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
             HSA_STATUS_SUCCESS);
 
   pool_buffer input, output, kernargs, ctrl_alloc, pdi;
@@ -2142,7 +2171,7 @@ TEST_F(FullElfDispatchTest, ElfMisalignedControlCodeRejected) {
       kernargs.as<std::uint64_t>(), signal, queue);
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
 
-  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+  ExpectRejected(err, queue, signal, 1);
 
   for (std::size_t i = 0; i < aie_full_elf_kernel::element_count; ++i) {
     ASSERT_EQ(out[i], sentinel) << "rejected dispatch wrote output at index " << i;
@@ -2155,9 +2184,9 @@ TEST_F(FullElfDispatchTest, ElfMisalignedControlCodeRejected) {
 TEST_F(FullElfDispatchTest, ElfHostOnlyControlCodeRejected) {
   // The NPU fetches the control code directly, so it has to come from the device
   // pool. A host-only allocation has no device address and would not be reachable.
+  dispatch_error err;
   hsa_queue_t* queue = nullptr;
-  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
-                             nullptr, 0, 0, &queue),
+  ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
             HSA_STATUS_SUCCESS);
 
   pool_buffer input, output, kernargs, ctrl_code;
@@ -2184,7 +2213,7 @@ TEST_F(FullElfDispatchTest, ElfHostOnlyControlCodeRejected) {
       ctrl_code.get(), kernel.ctrl_code.size(), pdi.get(), kernel.pdi_patch_offset, in, out,
       kernargs.as<std::uint64_t>(), signal, queue);
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
-  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+  ExpectRejected(err, queue, signal, 1);
 
   for (std::size_t i = 0; i < aie_full_elf_kernel::element_count; ++i) {
     ASSERT_EQ(out[i], sentinel) << "rejected dispatch wrote output at index " << i;
@@ -2196,8 +2225,14 @@ TEST_F(FullElfDispatchTest, ElfHostOnlyControlCodeRejected) {
 
 TEST_F(FullElfDispatchTest, ElfMalformedPacketsRejected) {
   // Each case corrupts exactly one field of a packet that is otherwise known good, so a failure
-  // points at one validation rather than at "the packet was bad somehow". All of these are
-  // rejected before anything is submitted, so the output buffer must come back untouched.
+  // points at one validation rather than at "the packet was bad somehow". Either way the output
+  // buffer must come back untouched and the refusal must reach the error callback.
+  //
+  // Most cases are refused while the batch is being built, before anything is submitted. "PDI not
+  // in device memory" is the exception: the buffer is a registered BO, so it resolves, and the
+  // runtime builds a device address for it anyway -- the hardware cannot fetch it and the command
+  // is only caught by the driver's ~6 s watchdog. That is a missing validation, not an intended
+  // path; it is what makes this test slow.
   pool_buffer host_pdi;
   ASSERT_EQ(host_pdi.allocate(data_pool, kernel.pdi.size()), HSA_STATUS_SUCCESS);
 
@@ -2230,11 +2265,11 @@ TEST_F(FullElfDispatchTest, ElfMalformedPacketsRejected) {
   for (const auto& c : cases) {
     SCOPED_TRACE(c.name);
 
-    // A fresh queue per case: a rejected packet must not leave the previous queue unusable, and
-    // reusing one would let an earlier case mask a later one.
+    // A fresh queue per case: a rejected packet suspends its queue, and reusing one would let an
+    // earlier case mask a later one.
+    dispatch_error err;
     hsa_queue_t* queue = nullptr;
-    ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
-                               nullptr, 0, 0, &queue),
+    ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
               HSA_STATUS_SUCCESS);
 
     pool_buffer input, output, kernargs, ctrl_code;
@@ -2258,8 +2293,7 @@ TEST_F(FullElfDispatchTest, ElfMalformedPacketsRejected) {
         ctrl_code.get(), ctrl_code_size, pdi.get(), kernel.pdi_patch_offset, in, out,
         kernargs.as<std::uint64_t>(), signal, queue, c.mutate);
     hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
-    hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
-                              HSA_WAIT_STATE_BLOCKED);
+    ExpectRejected(err, queue, signal, 1);
 
     for (std::size_t i = 0; i < aie_full_elf_kernel::element_count; ++i) {
       ASSERT_EQ(out[i], sentinel) << "rejected dispatch wrote output at index " << i;
@@ -2275,10 +2309,10 @@ TEST_F(DispatchTest, PdiCacheRolledBackOnFailedBatch) {
   // reconfigured to match after the whole batch is built. A batch that fails in between must not
   // leave the cache claiming compute units the context never got -- otherwise the next submission
   // finds the PDI "cached", skips the reconfigure, and dispatches against a context that cannot
-  // run it. Submit a batch whose second packet is malformed, then check the queue still works.
+  // run it. Submit a batch whose second packet is malformed, then check a fresh queue still works.
+  dispatch_error err;
   hsa_queue_t* queue = nullptr;
-  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
-                             nullptr, 0, 0, &queue),
+  ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
             HSA_STATUS_SUCCESS);
 
   void* pdi_buf = nullptr;
@@ -2314,7 +2348,9 @@ TEST_F(DispatchTest, PdiCacheRolledBackOnFailedBatch) {
   auto* ring = static_cast<hsa_amd_aie_kernel_dispatch_packet_t*>(queue->base_address);
   ring[wr_idx % queue->size].num_kernargs = 2000;
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
-  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+  // The batch is refused while it is still being built, so neither packet runs and the signal
+  // keeps both of its counts.
+  ExpectRejected(err, queue, signal, 2);
   EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
 
   // A well-formed dispatch on a fresh queue must still work: if the cache kept the rejected
@@ -2350,9 +2386,9 @@ TEST_F(DispatchTest, PdiCacheRolledBackOnFailedBatch) {
 TEST_F(DispatchTest, PdiCacheRejectsThirtyThree) {
   constexpr std::uint32_t cache_capacity = 32;
 
+  dispatch_error err;
   hsa_queue_t* queue = nullptr;
-  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
-                             nullptr, 0, 0, &queue),
+  ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
             HSA_STATUS_SUCCESS);
 
   kernel_artifacts add;
@@ -2392,15 +2428,19 @@ TEST_F(DispatchTest, PdiCacheRejectsThirtyThree) {
   const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
       pdis[cache_capacity].get(), add.insts.get(), add.insts_size, in, out, args, signal, queue);
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
-  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+  ExpectRejected(err, queue, signal, 1);
   for (std::size_t e = 0; e < aie_vector_scalar_kernel::element_count; ++e) {
     ASSERT_EQ(out[e], sentinel) << "rejected dispatch wrote output at index " << e;
   }
   EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
 
-  // A PDI that is already cached still dispatches: hitting the ceiling refuses the one packet
-  // that could not be placed, it does not poison the queue. This leans on (d) above: an unretired
-  // 33rd packet would come back with this one and the batch could never drain.
+  // Hitting the ceiling refuses the packet that could not be placed; it does not take the device
+  // or the runtime with it. The refused queue is suspended by design, so this is checked on a
+  // fresh one -- which starts with an empty cache and so has room for the PDI again.
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
   ASSERT_NO_FATAL_FAILURE(DispatchAddAndVerify(queue, pdis[0].get(), add, in, out, args));
 
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
@@ -2414,9 +2454,9 @@ TEST_F(FullElfDispatchTest, MixedModeBatchRejected) {
   static_assert(aie_vector_scalar_kernel::element_count == aie_full_elf_kernel::element_count);
   constexpr std::size_t n = aie_vector_scalar_kernel::element_count;
 
+  dispatch_error err;
   hsa_queue_t* queue = nullptr;
-  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
-                             nullptr, 0, 0, &queue),
+  ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
             HSA_STATUS_SUCCESS);
   ASSERT_GE(queue->size, 2u);
 
@@ -2453,21 +2493,25 @@ TEST_F(FullElfDispatchTest, MixedModeBatchRejected) {
       ctrl_code.get(), kernel.ctrl_code.size(), pdi.get(), kernel.pdi_patch_offset, in + n, out + n,
       elf_kernargs.as<std::uint64_t>(), signal, queue);
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
-  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+  // Neither packet runs, so the signal keeps both of its counts.
+  ExpectRejected(err, queue, signal, 2);
 
   for (std::size_t i = 0; i < n * 2; ++i) {
     ASSERT_EQ(out[i], sentinel) << "rejected batch wrote output at index " << i;
   }
   EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
 
-  // The queue is not poisoned by the refusal: a well-formed batch still runs.
+  // The refusal does not take the device or the runtime with it: a well-formed batch still runs.
+  // The refused queue is suspended by design, so this runs on a fresh one.
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
   ASSERT_NO_FATAL_FAILURE(
       DispatchAddAndVerify(queue, add.pdi.get(), add, in, out, pdi_kernargs.as<std::uint64_t>()));
 
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
 }
-
-#endif  // ROCRTST_AIE_ASYNC_ERROR_REPORTING
 
 // The PDI + instruction sequence path packs a wider chain slot than full-ELF, so
 // its chains are shorter. The driver packs each command into a 4 KiB buffer, giving
