@@ -139,8 +139,8 @@ pool<Tp>::acquire()
         // m_pool in between and strand the popped index. Drop it and take the growth path
         // rather than indexing past the end of the repopulated pool.
         //
-        // TODO(#XXXX): the check below narrows that window, it does not close it, and what is
-        // left is a known, tracked gap rather than a caveat: a bounds check cannot tell a
+        // TODO(ihhuang): the check below narrows that window, it does not close it, and what
+        // is left is a known gap rather than a caveat: a bounds check cannot tell a
         // stale generation from a new one. An index stranded by a clear() that another thread
         // has since regrown past is back in range here, so it passes the check and aliases
         // the new generation's object while still sitting on the free list. release() carries
