@@ -2411,13 +2411,16 @@ int SimulatedKfd::set_cu_mask_ioctl(KfdProcess &proc, void *arg) {
     return -EFAULT;
 
   uint32_t gpu_id = 0;
+  bool is_sdma = false;
   {
     std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
     const auto queue = proc.queue_snapshot_map_.find(args->queue_id);
     if (queue == proc.queue_snapshot_map_.end())
       return -EFAULT;
     const uint32_t type = queue->second.queue_type;
-    if (type != KFD_IOC_QUEUE_TYPE_COMPUTE && type != KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)
+    is_sdma = type == KFD_IOC_QUEUE_TYPE_SDMA || type == KFD_IOC_QUEUE_TYPE_SDMA_XGMI ||
+              type == KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID;
+    if (!is_sdma && type != KFD_IOC_QUEUE_TYPE_COMPUTE && type != KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)
       return -EINVAL;
     gpu_id = queue->second.gpu_id;
   }
@@ -2434,6 +2437,10 @@ int SimulatedKfd::set_cu_mask_ioctl(KfdProcess &proc, void *arg) {
         return -EINVAL;
     }
   }
+  // KFD validates SDMA masks too, but its SDMA MQD update ignores them.
+  if (is_sdma)
+    return 0;
+
   const Sysfs::GpuInfo &info = gpu_infos_[gpu_ordinal(gpu_id)];
   const uint32_t arrays = std::max(1u, info.num_shader_arrays_per_engine);
   const uint32_t cu_per_array = info.num_cu_per_sh;

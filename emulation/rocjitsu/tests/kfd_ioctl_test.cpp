@@ -50,6 +50,7 @@ RJ_DIAGNOSTIC_POP
 #include <functional>
 #include <limits>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -290,6 +291,93 @@ TEST_F(KfdIoctlTest, CuMaskValidatesBitCountAndQueueIdentity) {
   destroy.queue_id = queue.queue_id;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
 }
+
+class KfdSdmaCuMaskTest : public KfdIoctlTest,
+                          public ::testing::WithParamInterface<std::tuple<bool, uint32_t>> {
+protected:
+  bool rdna() const { return std::get<0>(GetParam()); }
+
+  void SetUp() override {
+    SetUpWithConfig(rdna() ? std::string(CONFIG_DIR) + "/gfx1201_r9700.json" : CONFIG_PATH);
+    ASSERT_FALSE(HasFatalFailure());
+    kfd_ioctl_create_queue_args queue{};
+    queue.gpu_id = rdna() ? 8716u : kGpuId;
+    queue.queue_type = std::get<1>(GetParam());
+    queue.ring_base_address = reinterpret_cast<uint64_t>(ring_.data());
+    queue.ring_size = sizeof(ring_);
+    queue.read_pointer_address = reinterpret_cast<uint64_t>(&pointers_[0]);
+    queue.write_pointer_address = reinterpret_cast<uint64_t>(&pointers_[1]);
+    queue.queue_percentage = 100;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+    mask_args_.queue_id = queue.queue_id;
+    mask_args_.num_cu_mask = 32;
+    mask_args_.cu_mask_ptr = reinterpret_cast<uint64_t>(&mask_);
+    doorbell_ = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                              static_cast<off_t>(queue.doorbell_offset));
+    ASSERT_NE(doorbell_, MAP_FAILED);
+  }
+
+  alignas(4096) std::array<uint32_t, 1024> ring_{};
+  alignas(64) std::array<uint64_t, 8> pointers_{};
+  uint32_t mask_ = 0;
+  kfd_ioctl_set_cu_mask_args mask_args_{};
+  void *doorbell_ = nullptr;
+};
+
+TEST_P(KfdSdmaCuMaskTest, AcceptsValidMasksAndKeepsSdmaRunningWithEmptyMask) {
+  for (uint32_t mask : {UINT32_MAX, 3u, 0u}) {
+    mask_ = mask;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_SET_CU_MASK, &mask_args_), 0) << "mask=" << mask;
+  }
+
+  // The last mask disables every compute CU, but SDMA must still execute.
+  // A 32-bit fence writes a sentinel and advances the ring's read pointer.
+  alignas(4096) std::array<uint32_t, 1024> destination{};
+  const uint64_t address = reinterpret_cast<uint64_t>(destination.data());
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(address, destination.data(), sizeof(destination));
+  constexpr uint32_t kSentinel = 0x12345678;
+  ring_[0] = 5; // SDMA_OP_FENCE, 32-bit form.
+  ring_[1] = static_cast<uint32_t>(address);
+  ring_[2] = static_cast<uint32_t>(address >> 32);
+  ring_[3] = kSentinel;
+  constexpr uint64_t kPacketBytes = 4 * sizeof(uint32_t);
+  std::atomic_ref<uint64_t>(pointers_[1]).store(kPacketBytes, std::memory_order_release);
+  std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell_))
+      .store(kPacketBytes, std::memory_order_release);
+  engine_->schedule_event_now(soc_->xcd(0)->command_processor()->doorbell_event());
+  for (unsigned i = 0; i < 200; ++i)
+    (void)engine_->step();
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers_[0]).load(std::memory_order_acquire), kPacketBytes);
+  EXPECT_EQ(std::atomic_ref<uint32_t>(destination[0]).load(std::memory_order_acquire), kSentinel);
+  process->unmap_pages(address, sizeof(destination));
+}
+
+TEST_P(KfdSdmaCuMaskTest, ValidatesMaskArguments) {
+  mask_args_.num_cu_mask = 0;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_SET_CU_MASK, &mask_args_), -EINVAL);
+  mask_args_.num_cu_mask = 31;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_SET_CU_MASK, &mask_args_), -EINVAL);
+  mask_args_.num_cu_mask = 32;
+  mask_args_.cu_mask_ptr = 0;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_SET_CU_MASK, &mask_args_), -EFAULT);
+  mask_args_.cu_mask_ptr = 1;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_SET_CU_MASK, &mask_args_), -EFAULT);
+  mask_args_.cu_mask_ptr = reinterpret_cast<uint64_t>(&mask_);
+  for (uint32_t half : {1u, 2u}) {
+    mask_ = half;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_SET_CU_MASK, &mask_args_), rdna() ? -EINVAL : 0);
+  }
+  ++mask_args_.queue_id;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_SET_CU_MASK, &mask_args_), -EFAULT);
+}
+
+INSTANTIATE_TEST_SUITE_P(KfdMasks, KfdSdmaCuMaskTest,
+                         ::testing::Combine(::testing::Values(false, true),
+                                            ::testing::Values(KFD_IOC_QUEUE_TYPE_SDMA,
+                                                              KFD_IOC_QUEUE_TYPE_SDMA_XGMI,
+                                                              KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID)));
 
 struct CuMaskPlacementCase {
   const char *config;
