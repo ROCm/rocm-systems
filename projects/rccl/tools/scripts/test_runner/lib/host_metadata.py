@@ -257,7 +257,27 @@ def collect(rocm_version=None):
     }
 
     rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
-    hip = _read(os.path.join(rocm_path, ".info", "version"))
+    # Read the HIP runtime version from share/hip/version (key=value pairs)
+    # and reconstruct MAJOR.MINOR.PATCH-GITHASH, matching what the HIP SDK
+    # records at install time.
+    def _hip_version(rpath):
+        text = _read(os.path.join(rpath, "share", "hip", "version"))
+        if not text:
+            return None
+        kv = dict(
+            m.groups()
+            for line in text.splitlines()
+            for m in [re.match(r"^(HIP_VERSION_\w+)=(\S+)", line)]
+            if m
+        )
+        major = kv.get("HIP_VERSION_MAJOR")
+        minor = kv.get("HIP_VERSION_MINOR")
+        patch = kv.get("HIP_VERSION_PATCH")
+        githash = kv.get("HIP_VERSION_GITHASH")
+        if major and minor and patch:
+            return f"{major}.{minor}.{patch}" + (f"-{githash}" if githash else "")
+        return None
+    hip = _hip_version(rocm_path)
     ucx = _run(["ucx_info", "-v"], timeout=15)
     mpi = _run(["mpirun", "--version"], timeout=15)
     md["versions"] = {

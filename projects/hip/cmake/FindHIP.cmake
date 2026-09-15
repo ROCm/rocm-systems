@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 ###############################################################################
-# FindHIP.cmake — Compatibility shim for legacy find_package(HIP MODULE) callers.
+# FindHIP.cmake: Compatibility shim for legacy find_package(HIP MODULE) callers.
 #
 # New projects should use CMake's native HIP language support directly:
 #   project(myproject LANGUAGES CXX HIP)
@@ -50,8 +50,8 @@ find_package_handle_standard_args(HIP
 # Legacy macro compatibility stubs
 #
 # WHY THESE STILL EXIST: The original FindHIP.cmake provided HIP_ADD_LIBRARY,
-# HIP_ADD_EXECUTABLE, HIP_COMPILE, and HIP_INCLUDE_DIRECTORIES as macros that
-# drove hipcc-based compilation under the hood. Those macros have been removed
+# HIP_ADD_EXECUTABLE, and HIP_INCLUDE_DIRECTORIES as macros that drove
+# hipcc-based compilation under the hood. Those macros have been removed
 # as part of deprecating hipcc/hipconfig, but a number of downstream projects
 # (e.g. rocALUTION) still call them after find_package(HIP MODULE). Rather
 # than requiring all callers to migrate simultaneously, these stubs let existing
@@ -110,29 +110,13 @@ endmacro()
 
 macro(HIP_ADD_EXECUTABLE hip_target)
     _HIP_PARSE_ARGS(_hip_src _hip_cmake_opts _hip_cxx_opts ${ARGN})
-    add_executable(${hip_target} ${_hip_src})
+    add_executable(${hip_target} ${_hip_cmake_opts} ${_hip_src})
     if(_hip_cxx_opts)
         target_compile_options(${hip_target} PRIVATE ${_hip_cxx_opts})
     endif()
     if(hip_FOUND AND TARGET hip::device)
         target_link_libraries(${hip_target} PRIVATE hip::device)
     endif()
-    unset(_hip_src)
-    unset(_hip_cmake_opts)
-    unset(_hip_cxx_opts)
-endmacro()
-
-# HIP_COMPILE: compile HIP sources into an OBJECT library; caller receives the
-# generator expression $<TARGET_OBJECTS:...> for use in a later add_library/executable.
-macro(HIP_COMPILE _generated_files)
-    _HIP_PARSE_ARGS(_hip_src _hip_cmake_opts _hip_cxx_opts ${ARGN})
-    set(_hip_obj_tgt "_hip_compile_${CMAKE_CURRENT_BINARY_DIR}_${CMAKE_CURRENT_LIST_LINE}")
-    string(MAKE_C_IDENTIFIER "${_hip_obj_tgt}" _hip_obj_tgt)
-    add_library(${_hip_obj_tgt} OBJECT ${_hip_src})
-    if(_hip_cxx_opts)
-        target_compile_options(${_hip_obj_tgt} PRIVATE ${_hip_cxx_opts})
-    endif()
-    set(${_generated_files} $<TARGET_OBJECTS:${_hip_obj_tgt}>)
     unset(_hip_src)
     unset(_hip_cmake_opts)
     unset(_hip_cxx_opts)

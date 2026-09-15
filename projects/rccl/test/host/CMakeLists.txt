@@ -416,6 +416,20 @@ if(NOT DEFINED CMAKE_CXX_COMPILER)
   endif()
 endif()
 
+# amdclang++ uses the same GCC-toolchain detection as clang and needs
+# --gcc-install-dir on hosts where the active GCC is not in the default
+# search path (e.g. devtoolset, SCL, spack, conda). Derive it from
+# g++ -print-file-name=libstdc++.a, which returns the full path to the
+# library and thus identifies the GCC install tree in use.
+find_program(_system_gxx g++ REQUIRED)
+execute_process(
+  COMMAND ${_system_gxx} -print-file-name=libstdc++.a
+  OUTPUT_VARIABLE _gcc_libstdcpp
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+get_filename_component(_gcc_install_dir "${_gcc_libstdcpp}" DIRECTORY)
+set(CMAKE_CXX_FLAGS_INIT "--gcc-install-dir=${_gcc_install_dir} --offload-host-only")
+
 project(rccl-HostUnitTests LANGUAGES CXX)
 
 # Find HIP to obtain the hip::host and hip::device imported targets. These
@@ -438,6 +452,24 @@ add_compile_options(-Wno-tautological-constant-out-of-range-compare)
 macro(add_test_executable _name)
   list(APPEND HOST_TEST_BINARIES ${_name})
   add_executable(${_name} ${ARGN})
+endmacro()
+
+# Apply HIP interface properties (includes, defines, compile options) to a
+# target without linking the HIP runtime. Adds --offload-host-only so
+# amdclang++ treats sources as host-only despite the -x hip flag from
+# hip::device. Called once per target instead of repeating the foreach block.
+macro(rccl_apply_hip_requirements _tgt)
+  foreach(_hip_iface hip::host hip::device)
+    if(TARGET ${_hip_iface})
+      target_include_directories(${_tgt} PRIVATE
+        $<TARGET_PROPERTY:${_hip_iface},INTERFACE_INCLUDE_DIRECTORIES>)
+      target_compile_definitions(${_tgt} PRIVATE
+        $<TARGET_PROPERTY:${_hip_iface},INTERFACE_COMPILE_DEFINITIONS>)
+      target_compile_options(${_tgt} PRIVATE
+        $<TARGET_PROPERTY:${_hip_iface},INTERFACE_COMPILE_OPTIONS>)
+    endif()
+  endforeach()
+  target_compile_options(${_tgt} PRIVATE --offload-host-only)
 endmacro()
 
 find_package(Threads REQUIRED)
@@ -508,7 +540,7 @@ set(RCCL_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
 if(NOT EXISTS "${RCCL_HIPIFY_DIR}/src/graph/search.cc")
   message(FATAL_ERROR "Hipified sources not found at ${RCCL_HIPIFY_DIR}. Run the RCCL build first.")
 endif()
-message(STATUS "HIP compiler:     ${HIP_COMPILER}")
+message(STATUS "HIP compiler:     ${CMAKE_CXX_COMPILER}")
 message(STATUS "Hipified sources: ${RCCL_HIPIFY_DIR}")
 
 # --- Detect whether the system amdsmi.h exposes the UALoE fabric struct ---
@@ -612,21 +644,7 @@ target_compile_definitions(rccl-source-wrappers PRIVATE
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
-# Apply HIP compile requirements (includes / defines / options, e.g. -x hip
-# and __HIP_PLATFORM_AMD__) without linking the runtime -- same pattern as
-# the BUILD_TESTS path above (lines 47-56).
-foreach(_hip_tgt hip::host hip::device)
-  if(TARGET ${_hip_tgt})
-    target_include_directories(rccl-source-wrappers PRIVATE
-      $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
-    target_compile_definitions(rccl-source-wrappers PRIVATE
-      $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
-    target_compile_options(rccl-source-wrappers PRIVATE
-      $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
-  endif()
-endforeach()
-target_compile_options(rccl-source-wrappers PRIVATE --offload-host-only)
-target_link_options(rccl-source-wrappers PRIVATE -no-hip-rt)
+rccl_apply_hip_requirements(rccl-source-wrappers)
 target_link_libraries(rccl-source-wrappers PRIVATE
   GTest::GTest
   fmt::fmt-header-only
@@ -670,18 +688,7 @@ target_compile_definitions(rccl-HostUnitTests PRIVATE
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
-# Apply HIP compile requirements without linking the runtime.
-foreach(_hip_tgt hip::host hip::device)
-  if(TARGET ${_hip_tgt})
-    target_include_directories(rccl-HostUnitTests PRIVATE
-      $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
-    target_compile_definitions(rccl-HostUnitTests PRIVATE
-      $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
-    target_compile_options(rccl-HostUnitTests PRIVATE
-      $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
-  endif()
-endforeach()
-target_compile_options(rccl-HostUnitTests PRIVATE --offload-host-only)
+rccl_apply_hip_requirements(rccl-HostUnitTests)
 
 target_link_options(rccl-HostUnitTests PRIVATE -no-hip-rt -no-pie)
 
@@ -732,18 +739,7 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
-# Apply HIP compile requirements without linking the runtime.
-foreach(_hip_tgt hip::host hip::device)
-  if(TARGET ${_hip_tgt})
-    target_include_directories(rccl-UnitTestsMicro PRIVATE
-      $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
-    target_compile_definitions(rccl-UnitTestsMicro PRIVATE
-      $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
-    target_compile_options(rccl-UnitTestsMicro PRIVATE
-      $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
-  endif()
-endforeach()
-target_compile_options(rccl-UnitTestsMicro PRIVATE --offload-host-only)
+rccl_apply_hip_requirements(rccl-UnitTestsMicro)
 
 # -no-pie for the same reason as rccl-HostUnitTests: the RCCL-vendored
 # libgtest.a used by this standalone path is built without -fPIC, so a PIE
@@ -808,18 +804,7 @@ foreach(_variant "" "-uncached")
   if(_variant STREQUAL "-uncached")
     target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
   endif()
-  # Apply HIP compile requirements without linking the runtime.
-  foreach(_hip_tgt hip::host hip::device)
-    if(TARGET ${_hip_tgt})
-      target_include_directories(${_init_tgt} PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
-      target_compile_definitions(${_init_tgt} PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
-      target_compile_options(${_init_tgt} PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
-    endif()
-  endforeach()
-  target_compile_options(${_init_tgt} PRIVATE --offload-host-only)
+  rccl_apply_hip_requirements(${_init_tgt})
 
   target_link_options(${_init_tgt} PRIVATE -no-hip-rt -Wl,--gc-sections)
   target_link_libraries(${_init_tgt} PRIVATE
@@ -901,18 +886,7 @@ foreach(_enq_variant "" "-devlinker")
   if(_enq_variant STREQUAL "-devlinker")
     target_compile_definitions(${_enq_tgt} PRIVATE RCCL_DEVICE_LINKER)
   endif()
-  # Apply HIP compile requirements without linking the runtime.
-  foreach(_hip_tgt hip::host hip::device)
-    if(TARGET ${_hip_tgt})
-      target_include_directories(${_enq_tgt} PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
-      target_compile_definitions(${_enq_tgt} PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
-      target_compile_options(${_enq_tgt} PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
-    endif()
-  endforeach()
-  target_compile_options(${_enq_tgt} PRIVATE --offload-host-only)
+  rccl_apply_hip_requirements(${_enq_tgt})
 
   target_link_options(${_enq_tgt} PRIVATE -no-hip-rt -Wl,--gc-sections)
   target_link_libraries(${_enq_tgt} PRIVATE
