@@ -1194,10 +1194,15 @@ hipError_t hipStreamBeginCapture_common(hipStream_t stream, hipStreamCaptureMode
     return hipErrorInvalidValue;
   }
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
-  // It can be initiated if the stream is not already in capture mode
-  if (s->GetCaptureStatus() == hipStreamCaptureStatusActive) {
+  // A capture can only be started on a stream that is not already part of one. An
+  // invalidated capture still has to be ended on its origin before any of its streams can be
+  // reused, so an invalidated stream is not eligible either.
+  if (s->GetCaptureStatus() != hipStreamCaptureStatusNone) {
     return hipErrorIllegalState;
   }
+  // The origin owns its own capture, so GetCaptureOwner() resolves to the origin from any
+  // stream taking part, including the origin itself.
+  s->SetCaptureOwner(stream);
   if (graph == nullptr) {
     s->SetCaptureGraph(new hip::Graph(s->GetDevice()));
   } else {
@@ -1307,7 +1312,7 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
     // When capture is invalidated, graph should be deleted, otherwise it leaks
     s->ReleaseCaptureGraph();
     // Reset capture state to None so the stream is usable after a failed capture
-    (void)s->EndCapture();
+    s->EndCapture();
     return hipErrorStreamCaptureInvalidated;
   }
 
@@ -1354,7 +1359,8 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
 
   *pGraph = s->GetCaptureGraph();
   // end capture on all streams/events part of graph capture
-  return s->EndCapture();
+  s->EndCapture();
+  return hipSuccess;
 }
 
 hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {

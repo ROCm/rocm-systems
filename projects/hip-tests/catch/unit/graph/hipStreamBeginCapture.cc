@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <atomic>
+#include <thread>
+#include <vector>
+
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 
@@ -1411,6 +1415,10 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_SelfWaitOnCaptureStream) {
   constexpr size_t kExpectedEdges = 1;
   constexpr int kExpectedIncrements = 2;
 
+  // Running the whole binary in one process, an earlier test can leave a stale error in this
+  // thread's last-error slot. Consume it so the checks below only report this test's launches.
+  (void)hipGetLastError();
+
   LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
   StreamsGuard streams(1);
   EventsGuard events(1);
@@ -1536,6 +1544,676 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_SelfWaitOnForkedStream) {
 
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify the self-wait shape where work is enqueued between the record and the
+ *      wait. The two self-wait cases above record and wait back to back, which is the one
+ *      shape where the wait cancels exactly. With a kernel in between, the event's recorded
+ *      predecessor is re-added as a dependency of the next node, giving a fourth edge that
+ *      the same chain would not otherwise have. That edge is implied transitively, so
+ *      execution is unaffected, and it is what CUDA produces for this shape too.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_SelfWaitWithInterveningWork) {
+  // Four kernels chained would give three edges; the self-wait adds one more.
+  constexpr size_t kExpectedNodes = 4;
+  constexpr size_t kExpectedEdges = 4;
+  constexpr int kExpectedIncrements = 4;
+
+  (void)hipGetLastError();
+
+  LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
+  StreamsGuard streams(2);
+  EventsGuard events(3);
+
+  int* devMem = devMem_g.ptr();
+  hipStream_t captureStream = streams[0];
+  hipStream_t forkedStream = streams[1];
+  hipEvent_t forkEvent = events[0];
+  hipEvent_t selfEvent = events[1];
+  hipEvent_t joinEvent = events[2];
+
+  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeThreadLocal));
+
+  incrementKernel<<<1, 1, 0, captureStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  HIP_CHECK(hipEventRecord(forkEvent, captureStream));
+  HIP_CHECK(hipStreamWaitEvent(forkedStream, forkEvent, 0));
+
+  incrementKernel<<<1, 1, 0, forkedStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  // Record, then enqueue work, and only then wait. The intervening kernel is what moves this
+  // away from the exactly-cancelling case.
+  HIP_CHECK(hipEventRecord(selfEvent, forkedStream));
+
+  incrementKernel<<<1, 1, 0, forkedStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  HIP_CHECK(hipStreamWaitEvent(forkedStream, selfEvent, 0));
+
+  incrementKernel<<<1, 1, 0, forkedStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  HIP_CHECK(hipEventRecord(joinEvent, forkedStream));
+  HIP_CHECK(hipStreamWaitEvent(captureStream, joinEvent, 0));
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK(hipStreamEndCapture(captureStream, &graph));
+  REQUIRE(graph != nullptr);
+
+  size_t numNodes = 0;
+  size_t numEdges = 0;
+  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &numNodes));
+  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &numEdges));
+  REQUIRE(numNodes == kExpectedNodes);
+  REQUIRE(numEdges == kExpectedEdges);
+
+  hipGraphExec_t graphExec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(graphExec, captureStream));
+  HIP_CHECK(hipStreamSynchronize(captureStream));
+
+  int increments = 0;
+  HIP_CHECK(hipMemcpy(&increments, devMem, sizeof(int), hipMemcpyDeviceToHost));
+  REQUIRE(increments == kExpectedIncrements);
+
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify that a forked stream can be destroyed while the capture that pulled it
+ *      in is still open. Captured nodes do not reference the stream they were captured on, so
+ *      whether the capture can still be closed depends only on whether the forked stream's
+ *      work was joined back: joined, the capture closes and yields a valid graph; unjoined,
+ *      the graph has a dangling leaf and hipStreamEndCapture reports
+ *      hipErrorStreamCaptureUnjoined. CUDA behaves the same way in both cases.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_DestroyForkedStreamDuringCapture) {
+  const bool joinBeforeDestroy = GENERATE(true, false);
+
+  (void)hipGetLastError();
+
+  LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
+  StreamsGuard streams(1);
+  EventsGuard events(2);
+
+  int* devMem = devMem_g.ptr();
+  hipStream_t captureStream = streams[0];
+  hipEvent_t forkEvent = events[0];
+  hipEvent_t joinEvent = events[1];
+
+  // Created by hand rather than through StreamsGuard: this one is destroyed mid-test, and a
+  // guard would destroy it a second time.
+  hipStream_t forkedStream = nullptr;
+  HIP_CHECK(hipStreamCreate(&forkedStream));
+
+  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeThreadLocal));
+
+  incrementKernel<<<1, 1, 0, captureStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  HIP_CHECK(hipEventRecord(forkEvent, captureStream));
+  HIP_CHECK(hipStreamWaitEvent(forkedStream, forkEvent, 0));
+
+  incrementKernel<<<1, 1, 0, forkedStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  if (joinBeforeDestroy) {
+    HIP_CHECK(hipEventRecord(joinEvent, forkedStream));
+    HIP_CHECK(hipStreamWaitEvent(captureStream, joinEvent, 0));
+    incrementKernel<<<1, 1, 0, captureStream>>>(devMem);
+    HIP_CHECK(hipGetLastError());
+  }
+
+  HIP_CHECK(hipStreamDestroy(forkedStream));
+
+  // Destroying a participant does not end the capture on the origin.
+  hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone;
+  HIP_CHECK(hipStreamIsCapturing(captureStream, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusActive);
+
+  hipGraph_t graph = nullptr;
+  if (joinBeforeDestroy) {
+    HIP_CHECK(hipStreamEndCapture(captureStream, &graph));
+    REQUIRE(graph != nullptr);
+    HIP_CHECK(hipGraphDestroy(graph));
+  } else {
+    // Only the error code is asserted: on this path hipStreamEndCapture leaves the graph
+    // out-param untouched, so its value must not be relied on.
+    HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureUnjoined);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify that a stream whose capture has been invalidated refuses further
+ *      capture work. Querying an event recorded inside a capture is illegal and invalidates
+ *      the forked stream; a wait issued afterwards must report
+ *      hipErrorStreamCaptureInvalidated rather than being accepted and silently ignored,
+ *      which is what CUDA returns and what every operation routed through the
+ *      STREAM_CAPTURE macro already did.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_SelfWaitOnInvalidatedForkedStream) {
+  (void)hipGetLastError();
+
+  LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
+  StreamsGuard streams(2);
+  EventsGuard events(2);
+
+  int* devMem = devMem_g.ptr();
+  hipStream_t captureStream = streams[0];
+  hipStream_t forkedStream = streams[1];
+  hipEvent_t forkEvent = events[0];
+  hipEvent_t selfEvent = events[1];
+
+  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeThreadLocal));
+
+  incrementKernel<<<1, 1, 0, captureStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  HIP_CHECK(hipEventRecord(forkEvent, captureStream));
+  HIP_CHECK(hipStreamWaitEvent(forkedStream, forkEvent, 0));
+
+  incrementKernel<<<1, 1, 0, forkedStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  // Invalidate the forked stream's capture with an illegal query on a captured event.
+  HIP_CHECK(hipEventRecord(selfEvent, forkedStream));
+  REQUIRE(hipEventQuery(selfEvent) != hipSuccess);
+  (void)hipGetLastError();
+
+  hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone;
+  HIP_CHECK(hipStreamIsCapturing(forkedStream, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
+
+  // An invalidated stream takes no further part in the capture, so the wait is refused
+  // rather than accepted and silently ignored. Measured on CUDA, which returns the same
+  // error here.
+  HIP_CHECK_ERROR(hipStreamWaitEvent(forkedStream, selfEvent, 0), hipErrorStreamCaptureInvalidated);
+
+  // The refusal leaves the status alone; it does not resurrect the stream or escalate it.
+  HIP_CHECK(hipStreamIsCapturing(forkedStream, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
+
+  // Tear the capture down. Invalidating a participant does not invalidate the origin, which
+  // is still active, so ending the capture reports the forked stream's work as unjoined
+  // rather than reporting the invalidation. Only the error code is asserted: on a failure
+  // path hipStreamEndCapture leaves the graph out-param untouched.
+  hipGraph_t graph = nullptr;
+  HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureUnjoined);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify that a cycle among forked streams does not break the capture. A chain
+ *      of forked streams is built inside one capture and then the first of them waits on an
+ *      event recorded by the last, which closes a cycle in the runtime's membership
+ *      bookkeeping while leaving the node graph a legal chain. Parameterised over two lengths
+ *      because the shortest constructible cycle is three: length one is a self-wait and
+ *      length two is a join back to the immediate parent, both of which were already
+ *      rejected, so a single length would not show that the fix generalises.
+ *    - Before the flat membership rewrite this crashed with a stack overflow, because the
+ *      teardown walked the bookkeeping recursively with no cycle detection.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_CycleAmongForkedStreams) {
+  const int cycleLength = GENERATE(3, 4);
+
+  // One kernel on the origin, one per forked stream, one more on the first forked stream
+  // after the cycle closes, and a trailing one on the origin.
+  const size_t expectedNodes = static_cast<size_t>(cycleLength) + 3;
+  // The chain contributes one edge per forked stream, closing the cycle adds two into the
+  // node that follows it, and the join back to the origin adds two more. Measured on CUDA at
+  // 4/4, 5/6 and 8/9 for cycle lengths 1, 2 and 5. Lengths of 2 and above sit on this line;
+  // a length of 1 degenerates into an adjacent self-wait, which is a no-op, and so comes out
+  // one edge lower. Keep this test away from that case.
+  const size_t expectedEdges = static_cast<size_t>(cycleLength) + 4;
+
+  (void)hipGetLastError();
+
+  LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
+  StreamsGuard streams(cycleLength + 1);
+  EventsGuard events(cycleLength + 2);
+
+  int* devMem = devMem_g.ptr();
+  hipStream_t captureStream = streams[0];
+
+  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeThreadLocal));
+
+  incrementKernel<<<1, 1, 0, captureStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  // Fork the first stream off the origin.
+  HIP_CHECK(hipEventRecord(events[0], captureStream));
+  HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0));
+  incrementKernel<<<1, 1, 0, streams[1]>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  // Extend the chain: each forked stream is pulled in by the one before it.
+  for (int i = 2; i <= cycleLength; ++i) {
+    HIP_CHECK(hipEventRecord(events[i - 1], streams[i - 1]));
+    HIP_CHECK(hipStreamWaitEvent(streams[i], events[i - 1], 0));
+    incrementKernel<<<1, 1, 0, streams[i]>>>(devMem);
+    HIP_CHECK(hipGetLastError());
+  }
+
+  // Close the cycle: the first forked stream waits on the last one's event. Every existing
+  // guard passes here, because the two streams differ, neither is the origin, and the last
+  // stream's immediate predecessor is not the first one.
+  HIP_CHECK(hipEventRecord(events[cycleLength], streams[cycleLength]));
+  HIP_CHECK(hipStreamWaitEvent(streams[1], events[cycleLength], 0));
+  incrementKernel<<<1, 1, 0, streams[1]>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  // Join back and add a trailing node so the node graph has a single leaf and the capture is
+  // closeable. Without this the unjoined-work check would reject it before teardown runs.
+  HIP_CHECK(hipEventRecord(events[cycleLength + 1], streams[1]));
+  HIP_CHECK(hipStreamWaitEvent(captureStream, events[cycleLength + 1], 0));
+  incrementKernel<<<1, 1, 0, captureStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK(hipStreamEndCapture(captureStream, &graph));
+  REQUIRE(graph != nullptr);
+
+  size_t numNodes = 0;
+  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &numNodes));
+  REQUIRE(numNodes == expectedNodes);
+
+  size_t numEdges = 0;
+  HIP_CHECK(hipGraphGetEdges(graph, nullptr, nullptr, &numEdges));
+  REQUIRE(numEdges == expectedEdges);
+
+  hipGraphExec_t graphExec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(graphExec, captureStream));
+  HIP_CHECK(hipStreamSynchronize(captureStream));
+
+  int increments = 0;
+  HIP_CHECK(hipMemcpy(&increments, devMem, sizeof(int), hipMemcpyDeviceToHost));
+  REQUIRE(increments == static_cast<int>(expectedNodes));
+
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify that waiting on an event recorded in a different capture is rejected
+ *      rather than silently merging the two. A third stream is pulled into the first capture
+ *      and then waits on an event from the second, which asks the runtime to splice two
+ *      independent graphs together. That must return hipErrorStreamCaptureMerge and
+ *      invalidate both sequences, so ending either one reports the invalidation.
+ *    - Previously both waits succeeded, every stream stayed active, and one capture ended up
+ *      silently missing the forked stream's work while the other failed as unjoined.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_CrossCaptureWaitIsRejected) {
+  (void)hipGetLastError();
+
+  LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
+  StreamsGuard streams(3);
+  EventsGuard events(2);
+
+  int* devMem = devMem_g.ptr();
+  hipStream_t firstOrigin = streams[0];
+  hipStream_t secondOrigin = streams[1];
+  hipStream_t forkedStream = streams[2];
+  hipEvent_t firstEvent = events[0];
+  hipEvent_t secondEvent = events[1];
+
+  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // Two independent captures, thread-local so they do not restrict each other globally.
+  HIP_CHECK(hipStreamBeginCapture(firstOrigin, hipStreamCaptureModeThreadLocal));
+  HIP_CHECK(hipStreamBeginCapture(secondOrigin, hipStreamCaptureModeThreadLocal));
+
+  incrementKernel<<<1, 1, 0, firstOrigin>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+  incrementKernel<<<1, 1, 0, secondOrigin>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  HIP_CHECK(hipEventRecord(firstEvent, firstOrigin));
+  HIP_CHECK(hipEventRecord(secondEvent, secondOrigin));
+
+  // Legitimate: the forked stream joins the first capture.
+  HIP_CHECK(hipStreamWaitEvent(forkedStream, firstEvent, 0));
+  incrementKernel<<<1, 1, 0, forkedStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  // Illegal: it is already in the first capture, so waiting on the second capture's event
+  // would merge them.
+  HIP_CHECK_ERROR(hipStreamWaitEvent(forkedStream, secondEvent, 0), hipErrorStreamCaptureMerge);
+
+  // Both sequences are invalidated, the forked stream included.
+  hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone;
+  HIP_CHECK(hipStreamIsCapturing(firstOrigin, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
+  HIP_CHECK(hipStreamIsCapturing(secondOrigin, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
+  HIP_CHECK(hipStreamIsCapturing(forkedStream, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
+
+  // Only error codes are asserted: on these paths hipStreamEndCapture leaves the graph
+  // out-param untouched.
+  hipGraph_t graph = nullptr;
+  HIP_CHECK_ERROR(hipStreamEndCapture(firstOrigin, &graph), hipErrorStreamCaptureInvalidated);
+  HIP_CHECK_ERROR(hipStreamEndCapture(secondOrigin, &graph), hipErrorStreamCaptureInvalidated);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify that a stream whose capture has been invalidated cannot start a new
+ *      one. An invalidated sequence has to be ended on the stream that began it before any
+ *      of its streams can be reused, so hipStreamBeginCapture must reject both the origin
+ *      and a stream that was pulled into the capture.
+ *    - Previously both were accepted. On a participant that was the worse case: it became
+ *      the origin of a second capture while still enrolled in the first, whose teardown then
+ *      reported unjoined work.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_BeginCaptureOnInvalidatedStream) {
+  const bool targetParticipant = GENERATE(false, true);
+
+  (void)hipGetLastError();
+
+  LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
+  StreamsGuard streams(2);
+  EventsGuard events(2);
+
+  int* devMem = devMem_g.ptr();
+  hipStream_t captureStream = streams[0];
+  hipStream_t forkedStream = streams[1];
+  hipEvent_t forkEvent = events[0];
+  hipEvent_t probeEvent = events[1];
+
+  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeThreadLocal));
+
+  incrementKernel<<<1, 1, 0, captureStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  hipStream_t target = captureStream;
+  if (targetParticipant) {
+    HIP_CHECK(hipEventRecord(forkEvent, captureStream));
+    HIP_CHECK(hipStreamWaitEvent(forkedStream, forkEvent, 0));
+    incrementKernel<<<1, 1, 0, forkedStream>>>(devMem);
+    HIP_CHECK(hipGetLastError());
+    target = forkedStream;
+  }
+
+  // Invalidate the target's capture with an illegal query on a captured event, and confirm
+  // it took effect, or the assertion below would prove nothing.
+  HIP_CHECK(hipEventRecord(probeEvent, target));
+  REQUIRE(hipEventQuery(probeEvent) != hipSuccess);
+  (void)hipGetLastError();
+
+  hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone;
+  HIP_CHECK(hipStreamIsCapturing(target, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
+
+  HIP_CHECK_ERROR(hipStreamBeginCapture(target, hipStreamCaptureModeThreadLocal),
+                  hipErrorIllegalState);
+
+  // Unwind. The origin is still capturing in the participant case, and invalidated in the
+  // other, so accept either outcome without inspecting the graph out-param.
+  hipGraph_t graph = nullptr;
+  (void)hipStreamEndCapture(captureStream, &graph);
+  (void)hipGetLastError();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify that destroying a stream mid-capture does not eject the streams that
+ *      were forked from it. With nested forks, destroying the middle stream must leave the
+ *      one it pulled in still enrolled, so that stream can be joined back to the origin and
+ *      the capture closes normally.
+ *    - Previously the grandchild was dropped out of the capture and the origin's teardown
+ *      then failed with hipErrorStreamCaptureUnjoined. CUDA keeps it enrolled, which is what
+ *      a flat membership model gives.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_DestroyNestedForkDuringCapture) {
+  constexpr size_t kExpectedNodes = 4;
+  constexpr int kExpectedIncrements = 4;
+
+  (void)hipGetLastError();
+
+  LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
+  StreamsGuard streams(2);
+  EventsGuard events(3);
+
+  int* devMem = devMem_g.ptr();
+  hipStream_t captureStream = streams[0];
+  hipStream_t grandchildStream = streams[1];
+  hipEvent_t forkEvent = events[0];
+  hipEvent_t nestedForkEvent = events[1];
+  hipEvent_t joinEvent = events[2];
+
+  // Destroyed mid-test, so it is not held by a guard.
+  hipStream_t middleStream = nullptr;
+  HIP_CHECK(hipStreamCreate(&middleStream));
+
+  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeThreadLocal));
+
+  incrementKernel<<<1, 1, 0, captureStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  // origin -> middle
+  HIP_CHECK(hipEventRecord(forkEvent, captureStream));
+  HIP_CHECK(hipStreamWaitEvent(middleStream, forkEvent, 0));
+  incrementKernel<<<1, 1, 0, middleStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  // middle -> grandchild, so the grandchild was pulled in by the middle stream rather than
+  // by the origin.
+  HIP_CHECK(hipEventRecord(nestedForkEvent, middleStream));
+  HIP_CHECK(hipStreamWaitEvent(grandchildStream, nestedForkEvent, 0));
+  incrementKernel<<<1, 1, 0, grandchildStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  HIP_CHECK(hipStreamDestroy(middleStream));
+
+  // The grandchild must still be part of the capture.
+  hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone;
+  HIP_CHECK(hipStreamIsCapturing(grandchildStream, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusActive);
+
+  // So it can still be joined straight back to the origin.
+  HIP_CHECK(hipEventRecord(joinEvent, grandchildStream));
+  HIP_CHECK(hipStreamWaitEvent(captureStream, joinEvent, 0));
+  incrementKernel<<<1, 1, 0, captureStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK(hipStreamEndCapture(captureStream, &graph));
+  REQUIRE(graph != nullptr);
+
+  size_t numNodes = 0;
+  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &numNodes));
+  REQUIRE(numNodes == kExpectedNodes);
+
+  hipGraphExec_t graphExec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(graphExec, captureStream));
+  HIP_CHECK(hipStreamSynchronize(captureStream));
+
+  int increments = 0;
+  HIP_CHECK(hipMemcpy(&increments, devMem, sizeof(int), hipMemcpyDeviceToHost));
+  REQUIRE(increments == kExpectedIncrements);
+
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify that several threads can fork their own stream into one capture at the
+ *      same time. Enrolling a stream mutates a container on the origin, so concurrent
+ *      hipStreamWaitEvent calls against one capture all write to it together. The threads are
+ *      released from a spin barrier to land those calls as close together as possible, and
+ *      the sequence repeats because the window is narrow.
+ *    - Detection is indirect but precise: ending the capture resets every enrolled stream, so
+ *      a forked stream still reporting a capture status afterwards was dropped. Before the
+ *      origin's participant set was synchronised this lost roughly one enrollment in seventy
+ *      and went on to fault outright.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_ConcurrentForkIntoOneCapture) {
+  constexpr int kThreads = 8;
+  // Measured against a build with the origin's participant set left unsynchronised: 5
+  // iterations catch the loss in 8 runs out of 20 and 25 in 77 out of 80, while 50 and 100
+  // both catch it in 80 out of 80. The count sits a stride past the point where detection
+  // first saturates rather than on it, because the window tracks how many of the threads
+  // genuinely run at once and the figures above come from a 256-core host.
+  constexpr int kIterations = 100;
+
+  (void)hipGetLastError();
+
+  LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
+  int* devMem = devMem_g.ptr();
+  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  int lostEnrollments = 0;
+  int waitFailures = 0;
+
+  for (int iter = 0; iter < kIterations; ++iter) {
+    StreamsGuard streams(kThreads + 1);
+    EventsGuard events(kThreads + 1);
+
+    hipStream_t origin = streams[0];
+    hipEvent_t forkEvent = events[0];
+
+    // Relaxed, so the forking threads are not restricted by the capturing thread.
+    HIP_CHECK(hipStreamBeginCapture(origin, hipStreamCaptureModeRelaxed));
+    incrementKernel<<<1, 1, 0, origin>>>(devMem);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipEventRecord(forkEvent, origin));
+
+    std::atomic<bool> go{false};
+    std::atomic<int> ready{0};
+    std::atomic<int> failures{0};
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+    for (int t = 0; t < kThreads; ++t) {
+      threads.emplace_back([&, t]() {
+        ready.fetch_add(1, std::memory_order_release);
+        while (!go.load(std::memory_order_acquire)) {
+        }
+        if (hipStreamWaitEvent(streams[t + 1], forkEvent, 0) != hipSuccess) {
+          failures.fetch_add(1, std::memory_order_relaxed);
+        }
+      });
+    }
+    while (ready.load(std::memory_order_acquire) < kThreads) {
+    }
+    go.store(true, std::memory_order_release);
+    for (auto& thread : threads) {
+      thread.join();
+    }
+    waitFailures += failures.load(std::memory_order_relaxed);
+
+    // Join every fork back so the capture is closeable.
+    for (int t = 0; t < kThreads; ++t) {
+      incrementKernel<<<1, 1, 0, streams[t + 1]>>>(devMem);
+      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipEventRecord(events[t + 1], streams[t + 1]));
+      HIP_CHECK(hipStreamWaitEvent(origin, events[t + 1], 0));
+    }
+
+    hipGraph_t graph = nullptr;
+    HIP_CHECK(hipStreamEndCapture(origin, &graph));
+    REQUIRE(graph != nullptr);
+    HIP_CHECK(hipGraphDestroy(graph));
+
+    // Ending the capture resets every enrolled stream, so anything still carrying a capture
+    // status was never enrolled.
+    for (int t = 0; t < kThreads; ++t) {
+      hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone;
+      HIP_CHECK(hipStreamIsCapturing(streams[t + 1], &captureStatus));
+      if (captureStatus != hipStreamCaptureStatusNone) {
+        ++lostEnrollments;
+      }
+    }
+  }
+
+  REQUIRE(waitFailures == 0);
+  REQUIRE(lostEnrollments == 0);
 }
 
 /**
