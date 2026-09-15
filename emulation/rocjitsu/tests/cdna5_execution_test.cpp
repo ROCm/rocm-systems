@@ -2488,6 +2488,57 @@ TEST(Gfx1251PackedF64ExecutionTest, MinMaxNumberHandleNanInfinityAndSignedZero) 
   }
 }
 
+TEST(Gfx1251PackedF64ExecutionTest, ExecutesSgpr104CompositeInBothSourcesForEveryOperation) {
+  constexpr auto bits = [](double value) { return std::bit_cast<uint64_t>(value); };
+  struct Operation {
+    std::string_view name;
+    uint32_t first_word;
+    PackedU64Pair expected;
+  };
+  constexpr std::array kOperations{
+      Operation{"add", 0xCC4B4004u, {bits(5.0), bits(6.0)}},
+      Operation{"mul", 0xCC3C4004u, {bits(6.0), bits(8.0)}},
+      Operation{"max-num", 0xCC4E4004u, {bits(3.0), bits(4.0)}},
+      Operation{"min-num", 0xCC4F4004u, {bits(2.0), bits(2.0)}},
+  };
+  // Exact encodings produced by public LLVM MC for the SGPR104_128 composite
+  // ([s104,s105,vcc_lo,vcc_hi]) in both VSrc_v2f64 positions.
+  constexpr uint32_t kSgpr104Src0 = 0x1A021068u;
+  constexpr uint32_t kSgpr104Src1 = 0x1A00D108u;
+
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint64_t kVccPoison = 0xdeadbeefcafef00dULL;
+  write_wave_sgpr(*cu, *wf, 104, static_cast<uint32_t>(bits(2.0)));
+  write_wave_sgpr(*cu, *wf, 105, static_cast<uint32_t>(bits(2.0) >> 32));
+  wf->set_vcc_raw(kVccPoison);
+  write_vgpr_packed_u64(*cu, *wf, 8, 0, {bits(3.0), bits(4.0)});
+
+  for (const auto &operation : kOperations) {
+    for (const bool use_src1 : {false, true}) {
+      SCOPED_TRACE(operation.name);
+      SCOPED_TRACE(use_src1 ? "src1" : "src0");
+      const std::array<uint32_t, 2> words{
+          operation.first_word,
+          use_src1 ? kSgpr104Src1 : kSgpr104Src0,
+      };
+      std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+      ASSERT_NE(decoded, nullptr);
+      ASSERT_NE(decoded->execute, nullptr);
+      EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
+      EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), operation.expected);
+      EXPECT_EQ(wf->vcc(), kVccPoison);
+    }
+  }
+}
+
 TEST(Gfx1251PackedF64ExecutionTest, RejectsUndefinedLayoutsAndOutOfRangeRegisterTuples) {
   auto decoder =
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
@@ -2514,8 +2565,20 @@ TEST(Gfx1251PackedF64ExecutionTest, RejectsUndefinedLayoutsAndOutOfRangeRegister
           .vdst = 253, .opsel_hi_2 = 1, .src0 = 264, .src1 = 268, .src2 = 128, .opsel_hi = 3},
       cdna5::Vop3pBuilderFields{
           .vdst = 4, .opsel_hi_2 = 1, .src0 = 509, .src1 = 268, .src2 = 128, .opsel_hi = 3},
-      cdna5::Vop3pBuilderFields{
-          .vdst = 4, .opsel_hi_2 = 1, .src0 = 264, .src1 = 104, .src2 = 128, .opsel_hi = 3},
+      cdna5::Vop3pBuilderFields{.vdst = 4,
+                                .neg_hi = 4,
+                                .opsel_hi_2 = 1,
+                                .src0 = 264,
+                                .src1 = 268,
+                                .src2 = 128,
+                                .opsel_hi = 3},
+      cdna5::Vop3pBuilderFields{.vdst = 4,
+                                .opsel_hi_2 = 1,
+                                .src0 = 264,
+                                .src1 = 268,
+                                .src2 = 128,
+                                .opsel_hi = 3,
+                                .neg = 4},
       cdna5::Vop3pBuilderFields{
           .vdst = 3, .opsel_hi_2 = 1, .src0 = 264, .src1 = 268, .src2 = 128, .opsel_hi = 3},
       cdna5::Vop3pBuilderFields{
@@ -2554,8 +2617,8 @@ TEST(Gfx1251PackedF64ExecutionTest, RejectsUndefinedLayoutsAndOutOfRangeRegister
     }
   }
 
-  constexpr std::array<uint16_t, 6> kValidV2F64Selectors{
-      124, 128, 208, 240, 248, 255,
+  constexpr std::array<uint16_t, 7> kValidV2F64Selectors{
+      104, 124, 128, 208, 240, 248, 255,
   };
   for (const uint16_t opcode : kOpcodes) {
     SCOPED_TRACE(opcode);

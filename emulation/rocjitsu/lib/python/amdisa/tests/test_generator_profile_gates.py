@@ -5263,44 +5263,57 @@ def test_gfx1251_packed_u64_decode_rejects_undefined_layouts_and_register_tuples
 
 
 def test_gfx1251_packed_f64_decode_rejects_undefined_layouts_and_register_tuples(
-    gfx1250_generated_root: Path,
+    gfx1250_generated_root: Path, tmp_path: Path
 ):
-    source = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+    args = SimpleNamespace(
+        isafiles=[f'cdna5:{_mrisa_dir() / "amdgpu_isa_cdna5.xml"}'],
+        isa_additions=[f'cdna5:{_mrisa_dir() / "amdgpu_isa_cdna5_gfx1251_delta.xml"}'],
+        isa_variants=[f'cdna5:{_mrisa_dir() / "amdgpu_isa_cdna5_variants.json"}'],
+        gen_isas=True,
+        gen_dbt=False,
+        isa_output=str(tmp_path),
+        dbt_output=None,
+    )
+    _run(args)
 
-    for class_name in (
-        'VPkAddF64Vop3p',
-        'VPkMulF64Vop3p',
-        'VPkMaxNumF64Vop3p',
-        'VPkMinNumF64Vop3p',
-    ):
-        body = _generated_decode_body(source, class_name)
-        assert 'has an invalid packed F64 element layout' in body
-        assert 'has an invalid unused src2 encoding' in body
-        assert 'vdst register tuple that exceeds the selector range' in body
-        assert 'src0 register tuple that exceeds the selector range' in body
-        assert 'src1 register tuple that exceeds the selector range' in body
-        assert 'invalid vdst register tuple alignment' in body
-        assert 'invalid src0 register tuple alignment' in body
-        assert 'invalid src1 register tuple alignment' in body
-        assert 'invalid src0 packed F64 source selector' in body
-        assert 'invalid src1 packed F64 source selector' in body
-        for operand_name in ('src0', 'src1'):
-            assert f'{operand_name} != 104u' not in body
-            assert f'{operand_name} == 104u' not in body
-            assert f'{operand_name} <= 100u' in body
-            assert f'{operand_name} >= 108u' in body
-            assert f'{operand_name} <= 120u' in body
-            assert f'{operand_name} == 124u' in body
-            assert f'{operand_name} >= 128u' in body
-            assert f'{operand_name} <= 208u' in body
-            assert f'{operand_name} >= 240u' in body
-            assert f'{operand_name} <= 248u' in body
-            assert f'{operand_name} == 255u' in body
-            assert f'{operand_name} >= 256u' in body
-            assert f'{operand_name} <= 508u' in body
-            for invalid_selector in (230, 231, 235, 236, 253):
-                assert f'{operand_name} == {invalid_selector}u' not in body
-        assert 'does not support source modifiers or clamp' not in body
+    for generated_root in (gfx1250_generated_root, tmp_path / 'cdna5'):
+        source = (generated_root / 'vop3p.cpp').read_text()
+        for class_name in (
+            'VPkAddF64Vop3p',
+            'VPkMulF64Vop3p',
+            'VPkMaxNumF64Vop3p',
+            'VPkMinNumF64Vop3p',
+        ):
+            body = _generated_decode_body(source, class_name)
+            assert 'has an invalid packed F64 element layout' in body
+            assert 'has an invalid unused src2 encoding' in body
+            assert '->neg & 4u) != 0u' in body
+            assert '->neg_hi & 4u) != 0u' in body
+            assert 'vdst register tuple that exceeds the selector range' in body
+            assert 'src0 register tuple that exceeds the selector range' in body
+            assert 'src1 register tuple that exceeds the selector range' in body
+            assert 'invalid vdst register tuple alignment' in body
+            assert 'invalid src0 register tuple alignment' in body
+            assert 'invalid src1 register tuple alignment' in body
+            assert 'invalid src0 packed F64 source selector' in body
+            assert 'invalid src1 packed F64 source selector' in body
+            for operand_name in ('src0', 'src1'):
+                assert f'{operand_name} != 104u' in body
+                assert f'{operand_name} == 104u' in body
+                assert f'{operand_name} <= 100u' in body
+                assert f'{operand_name} >= 108u' in body
+                assert f'{operand_name} <= 120u' in body
+                assert f'{operand_name} == 124u' in body
+                assert f'{operand_name} >= 128u' in body
+                assert f'{operand_name} <= 208u' in body
+                assert f'{operand_name} >= 240u' in body
+                assert f'{operand_name} <= 248u' in body
+                assert f'{operand_name} == 255u' in body
+                assert f'{operand_name} >= 256u' in body
+                assert f'{operand_name} <= 508u' in body
+                for invalid_selector in (230, 231, 235, 236, 253):
+                    assert f'{operand_name} == {invalid_selector}u' not in body
+            assert 'does not support source modifiers or clamp' not in body
 
 
 def test_gfx1251_packed_f64_literals_use_f64_high_bits_widening(

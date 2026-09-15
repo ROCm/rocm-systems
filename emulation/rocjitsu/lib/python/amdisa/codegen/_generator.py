@@ -10416,10 +10416,6 @@ class CodeGenerator:
                             if inst_sem.semantic_class == 'pk_binop_f64'
                             else 'packed U64'
                         )
-                        allows_sgpr104_128 = inst_sem.semantic_class in {
-                            'pk_binop_u64',
-                            'pk_lshl_add_u64',
-                        }
                         factory_validation_parts.append(
                             f'if ({raw_inst}->opsel != 0u || '
                             f'{raw_inst}->opsel_hi != 3u || '
@@ -10461,9 +10457,9 @@ class CodeGenerator:
                                 max_sgpr = 106 - register_count
                                 max_vgpr = 512 - register_count
                                 invalid_sgpr_span = f'{raw_value} > {max_sgpr}u'
-                                if opnd.size == 128 and allows_sgpr104_128:
+                                if opnd.size == 128:
                                     # SGPR104_128 is a named VS_128 member:
-                                    # s104:s105 provide the scalar U64 value,
+                                    # s104:s105 provide the scalar 64-bit value,
                                     # while vcc_lo:vcc_hi complete the tuple.
                                     invalid_sgpr_span = (
                                         f'({invalid_sgpr_span} && {raw_value} != 104u)'
@@ -10493,14 +10489,9 @@ class CodeGenerator:
                             )
                             if opnd.operand_type == 'OPR_SRC':
                                 if opnd.size == 128:
-                                    sgpr104_selector = (
-                                        f'{raw_value} == 104u || '
-                                        if allows_sgpr104_128
-                                        else ''
-                                    )
                                     valid_width_specific = (
                                         f'({raw_value} <= 100u && ({raw_value} % 4u) == 0u) || '
-                                        f'{sgpr104_selector}'
+                                        f'{raw_value} == 104u || '
                                         f'({raw_value} >= 108u && {raw_value} <= 120u && '
                                         f'(({raw_value} - 108u) % 4u) == 0u) || '
                                         f'{raw_value} == 124u || '
