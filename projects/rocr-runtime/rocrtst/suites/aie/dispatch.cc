@@ -2584,6 +2584,114 @@ TEST_F(DispatchTest, PdiChainSplit) {
   EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
 }
 
+// A batch too large for one chain is split and submitted as several chains back to back. When a
+// later chain fails, the packets in the chains before it have already run on the device and
+// written their output, so their completion signals have to fire: the failure is reported once,
+// through the queue callback, and a waiter on an earlier packet has no other way to learn that its
+// own dispatch succeeded.
+//
+// The failure is induced with an instruction sequence in host memory. It resolves as a registered
+// BO, so the batch builds normally, and unlike the PDI it takes no part in configuring the
+// hardware context -- so the failure lands at the device, mid-batch, instead of before submission.
+// The device has no address it can fetch those instructions from, and only the driver's ~6 s
+// watchdog catches it, which is what makes this test slow.
+//
+// The last packet is the failing one, so the split point does not have to be hardcoded: whatever
+// it is, at least one whole chain ran. The check that every retired packet also produced correct
+// output is the load-bearing one -- it is what would catch the runtime crediting a packet that
+// never executed.
+TEST_F(DispatchTest, PartiallyFailedBatchRetiresCompletedPackets) {
+  constexpr std::uint32_t total_num_dispatches = 64;
+  constexpr std::uint32_t n = aie_vector_scalar_kernel::element_count;
+
+  dispatch_error err;
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
+            HSA_STATUS_SUCCESS);
+  ASSERT_GE(min_queue_size, total_num_dispatches);
+
+  void* pdi_buf = nullptr;
+  std::size_t pdi_size = 0;
+  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
+  void* insts_buf = nullptr;
+  std::size_t insts_size = 0;
+  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+  // A device-resident instruction sequence the NPU cannot execute: right size and right pool, so
+  // everything host-side accepts it, and the device faults on the contents.
+  void* bad_insts = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(dev_pool, insts_size, 0, &bad_insts), HSA_STATUS_SUCCESS);
+  std::memset(bad_insts, 0xFF, insts_size);
+
+  std::uint32_t* input = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(data_pool,
+                                         aie_vector_scalar_kernel::element_bytes *
+                                             total_num_dispatches,
+                                         0, reinterpret_cast<void**>(&input)),
+            HSA_STATUS_SUCCESS);
+  std::uint32_t* output = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(data_pool,
+                                         aie_vector_scalar_kernel::element_bytes *
+                                             total_num_dispatches,
+                                         0, reinterpret_cast<void**>(&output)),
+            HSA_STATUS_SUCCESS);
+  uint64_t* kernargs = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(
+                kernarg_pool, aie_vector_scalar_kernel::kernarg_bytes * total_num_dispatches, 0,
+                reinterpret_cast<void**>(&kernargs)),
+            HSA_STATUS_SUCCESS);
+
+  const std::size_t total_element_count = n * total_num_dispatches;
+  std::iota(input, input + total_element_count, 0);
+  constexpr std::uint32_t sentinel = 0xD0D0D0D0;
+  std::fill_n(output, total_element_count, sentinel);
+
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(total_num_dispatches, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+
+  // One doorbell for the whole batch, so the runtime splits it itself.
+  std::uint64_t wr_idx = 0;
+  for (std::uint32_t i = 0; i < total_num_dispatches; ++i) {
+    void* insts = (i == total_num_dispatches - 1) ? bad_insts : insts_buf;
+    wr_idx = aie_vector_scalar_kernel::dispatch_packet(
+        pdi_buf, insts, insts_size, input + i * n, output + i * n,
+        kernargs + i * aie_vector_scalar_kernel::num_kernargs_sizes, signal, queue);
+  }
+  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+
+  EXPECT_TRUE(err.invoked.load(std::memory_order_acquire))
+      << "a partially failed batch did not report through the queue error callback";
+  EXPECT_NE(err.status, HSA_STATUS_SUCCESS);
+
+  // Partial: the chains that ran are retired, the failing one is not.
+  const hsa_signal_value_t remaining = hsa_signal_load_scacquire(signal);
+  ASSERT_LT(remaining, total_num_dispatches)
+      << "no packet was retired, so a waiter on a dispatch that did run would block forever";
+  ASSERT_GT(remaining, 0) << "the failing packet was credited with a completion it never reached";
+
+  const std::uint32_t retired = total_num_dispatches - static_cast<std::uint32_t>(remaining);
+  for (std::uint32_t d = 0; d < retired; ++d) {
+    SCOPED_TRACE(d);
+    for (std::size_t e = 0; e < n; ++e) {
+      ASSERT_EQ(output[d * n + e], input[d * n + e] + 1)
+          << "retired a packet that did not run, at element " << e;
+    }
+  }
+  // The failing dispatch never ran, so it wrote nothing.
+  for (std::size_t e = 0; e < n; ++e) {
+    ASSERT_EQ(output[(total_num_dispatches - 1) * n + e], sentinel)
+        << "the failing dispatch wrote output at element " << e;
+  }
+
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(bad_insts), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
+}
+
 // The PDI + instruction sequence path gives every distinct PDI a compute-unit slot in the queue's
 // hardware context, and the CU mask driving it is 32 bits wide, so 32 distinct PDIs is the
 // ceiling. Each new PDI tears the context down and rebuilds it with one more CU configured, so

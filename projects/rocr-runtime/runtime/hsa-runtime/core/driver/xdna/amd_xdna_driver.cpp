@@ -443,6 +443,33 @@ static void FlushArguments(const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
   }
 }
 
+/// @brief Completes the first @p num_pkts packets of a batch: makes the kernels' writes visible
+/// and releases each packet's completion signal.
+///
+/// Only ever called for packets that actually executed. A packet that was refused, or that the
+/// device never reached, must not be passed here: its completion signal stays untouched, because
+/// firing it would tell a waiter that output exists when nothing wrote any.
+///
+/// @param[in] queue base of the packet ring
+/// @param[in] mask ring index mask (queue size - 1)
+/// @param[in] first_pkt_idx ring index of the batch's first packet
+/// @param[in] num_pkts how many packets from @p first_pkt_idx completed
+static void RetireCompletedPackets(hsa_amd_aie_kernel_dispatch_packet_t* queue, uint64_t mask,
+                                   uint64_t first_pkt_idx, uint64_t num_pkts) {
+  for (uint64_t i = 0; i < num_pkts; ++i) {
+    auto* pkt = queue + ((first_pkt_idx + i) & mask);
+
+    // Flush again after execution: the kernel's writes have to be visible before the signal that
+    // announces them.
+    FlushArguments(pkt);
+
+    if (pkt->completion_signal.handle != 0) {
+      core::Signal* sig = core::Signal::Convert(pkt->completion_signal);
+      sig->SubRelease(1);
+    }
+  }
+}
+
 /**
  * @brief Destroys the hardware context with the given handle.
  *
@@ -1797,15 +1824,12 @@ static const char* ErtStateName(uint32_t state) {
 ///
 /// @param[in] chain_cmd the chain command itself, read through volatile because the firmware
 /// writes it while the host is blocked
-/// @param[in] chain the chain's payload, carrying the device's submit and error indices
+/// @param[in] error_index the device's failing-command index, already read from the chain payload
+/// @param[in] submit_index the device's last-submitted-command index
 /// @param[in] cmd_bos the commands the chain named, indexed by the device's error index
 /// @param[in] num_commands number of commands in @p cmd_bos
-static void LogChainFailure(const volatile ert_start_kernel_cmd* chain_cmd,
-                            const volatile ert_cmd_chain_data* chain, const BOHandle* cmd_bos,
-                            size_t num_commands) {
-  const uint32_t error_index = chain->error_index;
-  const uint32_t submit_index = chain->submit_index;
-
+static void LogChainFailure(const volatile ert_start_kernel_cmd* chain_cmd, uint32_t error_index,
+                            uint32_t submit_index, const BOHandle* cmd_bos, size_t num_commands) {
   // error_index comes from the device, so it is only trustworthy as an index once it has been
   // checked against the chain this code built. Both indices stay zero if the firmware failed
   // before it got as far as recording them, so they are reported as its claim, not as fact.
@@ -1833,9 +1857,15 @@ static void LogChainFailure(const volatile ert_start_kernel_cmd* chain_cmd,
 /// @param[in] bo_handles BOs the commands reference, which the driver keeps resident
 /// @param[in,out] kmq_metadata KMQ metadata supplying the hardware context, syncobj and, for a
 /// chain, the command BO pool the wrapper is drawn from
+/// @param[out] num_completed how many of @p cmd_bos ran to completion. @p num_commands on success.
+/// On failure this is how far the device got: the caller owes those commands' packets their
+/// completion signals, and owes the rest nothing, because they never executed. Only a chain can
+/// report a partial count -- a lone command either completed or did not.
 static hsa_status_t SubmitAndWaitChain(int fd, const BOHandle* cmd_bos, size_t num_commands,
                                        const std::vector<uint32_t>& bo_handles,
-                                       KmqMetadata* kmq_metadata) {
+                                       KmqMetadata* kmq_metadata, size_t* num_completed) {
+  *num_completed = 0;
+
   // A lone command is submitted directly; several are wrapped in one ERT_CMD_CHAIN command that
   // names them all. Either way one BO is submitted and waited on, and chain_cmd records which of
   // the two shapes it is so a failure can be reported against the right layout.
@@ -1881,9 +1911,22 @@ static hsa_status_t SubmitAndWaitChain(int fd, const BOHandle* cmd_bos, size_t n
   if (status != HSA_STATUS_SUCCESS) {
     // Re-read through volatile: the firmware writes these while the wait above is blocked.
     if (chain_cmd != nullptr) {
-      LogChainFailure(static_cast<volatile ert_start_kernel_cmd*>(submit_bo->vaddr),
-                      reinterpret_cast<volatile ert_cmd_chain_data*>(chain_cmd->data), cmd_bos,
-                      num_commands);
+      auto* chain = reinterpret_cast<volatile ert_cmd_chain_data*>(chain_cmd->data);
+      // Read once: these are device-written, and the count below has to agree with what is logged.
+      const uint32_t error_index = chain->error_index;
+      const uint32_t submit_index = chain->submit_index;
+      LogChainFailure(static_cast<volatile ert_start_kernel_cmd*>(submit_bo->vaddr), error_index,
+                      submit_index, cmd_bos, num_commands);
+      // The firmware runs a chain in order and stops at error_index, so everything below that
+      // index completed. Treated as a count only when the device's own index is in range; zero
+      // means either the first command failed or the firmware never got as far as recording an
+      // index, and those are indistinguishable. Both resolve to "assume nothing completed",
+      // which is the safe direction: a signal withheld from a packet that did run is a hang the
+      // error callback still reports, while a signal fired for a packet that did not run hands
+      // the application uninitialised output as if it were a result.
+      if (error_index > 0 && error_index < num_commands) {
+        *num_completed = error_index;
+      }
     } else {
       log_warning_n(
           10, "AIE command failed: state '%s'.\n",
@@ -1893,6 +1936,7 @@ static hsa_status_t SubmitAndWaitChain(int fd, const BOHandle* cmd_bos, size_t n
     return status;
   }
 
+  *num_completed = num_commands;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -2050,28 +2094,22 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
       chunk_len = 1;
     }
 
-    const hsa_status_t status =
-        SubmitAndWaitChain(fd_, &cmd_bo_handles[chunk_start], chunk_len, bo_handles, kmq_metadata);
-    if (status != HSA_STATUS_SUCCESS) return status;
+    size_t chunk_completed = 0;
+    const hsa_status_t status = SubmitAndWaitChain(fd_, &cmd_bo_handles[chunk_start], chunk_len,
+                                                   bo_handles, kmq_metadata, &chunk_completed);
+    if (status != HSA_STATUS_SUCCESS) {
+      // Commands map one-to-one onto packets in submission order, so everything before this chunk
+      // ran, plus however far into it the device got. Those packets executed and wrote their
+      // output; retiring them here is what keeps a waiter on an earlier packet of a partially
+      // failed batch from blocking forever. The rest never ran and get nothing.
+      RetireCompletedPackets(queue, mask, first_pkt_idx, chunk_start + chunk_completed);
+      return status;
+    }
 
     chunk_start += chunk_len;
   }
 
-  // Flush cache for the arguments again to ensure visibility of any changes made by the AIE kernels
-  // and fire completion signal for each packet.
-  for (uint64_t i = 0; i < num_pkts; ++i) {
-    const auto pkt_idx = (first_pkt_idx + i) & mask;
-    auto* pkt = queue + pkt_idx;
-
-    // Flush cache.
-    FlushArguments(pkt);
-
-    // Fire completion signal.
-    if (pkt->completion_signal.handle != 0) {
-      core::Signal* sig = core::Signal::Convert(pkt->completion_signal);
-      sig->SubRelease(1);
-    }
-  }
+  RetireCompletedPackets(queue, mask, first_pkt_idx, num_pkts);
 
   return HSA_STATUS_SUCCESS;
 }
