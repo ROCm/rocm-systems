@@ -33,11 +33,6 @@ ncclResult_t ncclRegLocalIsValid(struct ncclReg* reg, bool* isValid) {
 ncclResult_t ncclRegister(struct ncclComm* comm, void* data, size_t size, bool isGraph, void** handle) {
   NCCLCHECK(CommCheck(comm, "ncclCommRegister", "comm"));
 
-  // Graph destruction only queues plan reclamation. Drain completed graph
-  // callbacks before looking up this virtual address, because a new VMM
-  // allocation may have reused it.
-  NCCLCHECK(ncclCommPollCallbacks(comm, /*waitSome=*/false));
-
   struct ncclRegCache* cache = &comm->regCache;
   uintptr_t pageSize = cache->pageSize;
   uintptr_t begAddr = (uintptr_t)data & -pageSize;
@@ -172,6 +167,11 @@ ncclResult_t ncclCommRegister_impl(const ncclComm_t comm, void* buff, size_t siz
   if (!ncclParamLocalRegister()) *handle = NULL;
   else {
     INFO(NCCL_INIT, "RCCL: ncclCommRegister");
+    // Explicit host registration must observe completed graph reclamation
+    // before looking up a virtual address that VMM may have reused. Internal
+    // graph registration intentionally relies on group.cc's throttled drain.
+    NCCLCHECKGOTO(CommCheck(comm, "ncclCommRegister", "comm"), ret, end);
+    NCCLCHECKGOTO(ncclCommPollCallbacks(comm, /*waitSome=*/false), ret, end);
     NCCLCHECKGOTO(ncclRegister(comm, buff, size, false, handle), ret, end);
   }
 end:
