@@ -1,0 +1,43 @@
+# Pre-commit formatting for projects/rccl/. rccl is in the root config's `exclude:`, so a bare
+# `pre-commit run` checks nothing here -- always pass -c:
+#
+#   pre-commit run -c projects/rccl/.pre-commit-config.yaml --all-files
+#
+# Regexes are monorepo-relative: pre-commit chdirs to the git toplevel, so `^projects/rccl/` is
+# required from any cwd.
+
+# Re-states .clang-format-ignore, which governs clang-format only -- without this the whitespace
+# hooks rewrite vendored sources and conflict on the next upstream sync.
+exclude: |
+  (?x)^projects/rccl/(
+    src/include/nvtx3/
+    | src/transport/net_ib/gdaki/doca-gpunetio/
+    | src/include/gdrwrap\.h$
+    | src/include/mlx5/mlx5dvcore\.h$
+    | src/include/ibvcore\.h$
+    | src/nccl\.h\.in$
+  )
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        # Preserve Markdown hard line breaks (trailing double space).
+        args: [--markdown-linebreak-ext=md]
+        files: ^projects/rccl/
+      - id: end-of-file-fixer
+        files: ^projects/rccl/
+      - id: check-yaml
+        files: ^projects/rccl/
+
+  # v22 is mandatory: .clang-format uses v22 keys that v18 rejects outright. Output matches
+  # maint/run-clang-format.sh byte-for-byte over projects/rccl/src.
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v22.1.0
+    hooks:
+      - id: clang-format
+        files: ^projects/rccl/src/.*\.(h|cc|cu|cuh)$
+
+# TODO(AITESTAUTO-6995): black, gersemi and check-added-large-files are not replaced here -- each
+# is a bulk reformat needing its own review.
