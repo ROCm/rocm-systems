@@ -12,6 +12,7 @@ add_library(
     test_pci_bdf.cpp
     test_remove_env.cpp
     test_synchronized.cpp
+    test_time.cpp
     test_to_bool.cpp
     test_update_env.cpp
     test_string_utility.cpp

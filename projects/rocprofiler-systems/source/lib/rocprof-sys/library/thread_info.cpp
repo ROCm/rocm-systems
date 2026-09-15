@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/thread_info.hpp"
+#include "common/time.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
@@ -13,7 +14,6 @@
 #include "library/thread_data_growth.hpp"
 
 #include <timemory/backends/threading.hpp>
-#include <timemory/components/timing/backends.hpp>
 #include <timemory/process/threading.hpp>
 
 #include "logger/debug.hpp"
@@ -196,7 +196,7 @@ thread_info::init(bool _offset)
         _info                 = thread_info{};
         _info->is_offset      = threading::offset_this_id();
         _info->index_data     = init_index_data(_tid, _info->is_offset);
-        _info->lifetime.first = tim::get_clock_real_now<std::uint64_t, std::nano>();
+        _info->lifetime.first = common::time::timeline_ns();
 
         const auto _sequent_tid = _info->index_data->sequent_value;
         _info->causal_count     = (!_info->is_offset && _sequent_tid < peak_num_threads)
