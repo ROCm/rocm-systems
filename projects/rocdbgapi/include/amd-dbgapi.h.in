@@ -665,6 +665,12 @@ typedef unsigned long amd_dbgapi_DWORD;
  */
 #define AMD_DBGAPI_VERSION_0_80
 
+/**
+ * The function was introduced in version 0.81 of the interface and has the
+ * symbol version string of ``"@AMD_DBGAPI_NAME@_0.81"``.
+ */
+#define AMD_DBGAPI_VERSION_0_81
+
 /** @} */
 
 /** \ingroup callbacks_group
@@ -6219,10 +6225,15 @@ typedef uint64_t amd_dbgapi_segment_address_t;
  * space may alias with an address in the \p global, \p private_swizzled, or \p
  * local address spaces.
  *
+ * \param[in] process_id The process that the \p source_segment_address
+ * belongs to.
+ *
  * \param[in] wave_id The wave that is using the address.  If the \p
- * address_space is ::AMD_DBGAPI_ADDRESS_SPACE_GLOBAL then \p wave_id may be
- * ::AMD_DBGAPI_WAVE_NONE, as the address space does not depend on the active
- * wave, in which case \p process_id is used.
+ * source_address_space_id is ::AMD_DBGAPI_ADDRESS_SPACE_GLOBAL or
+ * ::AMD_DBGAPI_ADDRESS_SPACE_GENERIC whereas \p destination_address_space_id
+ * is ::AMD_DBGAPI_ADDRESS_SPACE_GLOBAL, then \p wave_id may be
+ * ::AMD_DBGAPI_WAVE_NONE, as the address space does not depend on the
+ * active wave, in which case \p process_id is used.
  *
  * \param[in] lane_id The lane of the \p wave_id that is using the address.  If
  * the \p address_space does not depend on the active lane then this may be
@@ -6264,6 +6275,10 @@ typedef uint64_t amd_dbgapi_segment_address_t;
  * destination_segment_address and \p destination_contiguous_bytes are
  * unaltered.
  *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID \p process_id is
+ * invalid.  \p destination_segment_address and \p
+ * destination_contiguous_bytes are unaltered.
+ *
  * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_WAVE_ID \p wave_id is invalid, or
  * \p wave_id is ::AMD_DBGAPI_WAVE_NONE and \p source_address_space_id or \p
  * destination_address_space_id depends on the active wave.
@@ -6298,17 +6313,20 @@ typedef uint64_t amd_dbgapi_segment_address_t;
  * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY \p
  * source_address_space_id or \p destination_address_space_id address spaces
  * are not supported by the architecture of \p wave_id (if not
- * ::AMD_DBGAPI_WAVE_NONE).  \p destination_segment_address and \p
- * destination_contiguous_bytes are unaltered.
+ * ::AMD_DBGAPI_WAVE_NONE), or the wave denoted by \p wave_id does not
+ * belong to the process denoted by \p process_id.  \p
+ * destination_segment_address and \p destination_contiguous_bytes are
+ * unaltered.
  */
 amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_convert_address_space (
-    amd_dbgapi_wave_id_t wave_id, amd_dbgapi_lane_id_t lane_id,
+    amd_dbgapi_process_id_t process_id, amd_dbgapi_wave_id_t wave_id,
+    amd_dbgapi_lane_id_t lane_id,
     amd_dbgapi_address_space_id_t source_address_space_id,
     amd_dbgapi_segment_address_t source_segment_address,
     amd_dbgapi_address_space_id_t destination_address_space_id,
     amd_dbgapi_segment_address_t *destination_segment_address,
     amd_dbgapi_size_t *destination_contiguous_bytes)
-    AMD_DBGAPI_VERSION_0_62;
+    AMD_DBGAPI_VERSION_0_81;
 
 /**
  * The dependency when reading or writing a specific segment address of an
@@ -6398,7 +6416,9 @@ typedef enum
  * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY \p
  * address_space_id depends on the active wave but \p wave_id is
  * ::AMD_DBGAPI_WAVE_NONE, or \p address_space_id is not supported by the
- * architecture of \p wave_id.  \p segment_address_dependencies is unaltered.
+ * architecture of \p wave_id, or the wave denoted by \p wave_id does not
+ * belong to the process denoted by \p process_id.
+ * \p segment_address_dependencies is unaltered.
  */
 amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_address_dependency (
   amd_dbgapi_process_id_t process_id,
