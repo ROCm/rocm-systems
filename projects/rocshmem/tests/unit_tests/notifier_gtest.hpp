@@ -36,6 +36,8 @@
 
 namespace rocshmem {
 
+namespace atomic = detail::atomic;
+
 /**
  * @brief The bit pattern written to memory by each thread.
  */
@@ -123,8 +125,8 @@ class NotifierBase : public ::testing::Test {
 };
 
 class NotifierBlockTestFixture : public NotifierBase {
-    using NotifierT = Notifier<detail::atomic::memory_scope_workgroup>;
-    using NotifierProxyT = NotifierProxy<detail::atomic::memory_scope_workgroup>;
+    using NotifierT = Notifier<atomic::memory_scope::workgroup>;
+    using NotifierProxyT = NotifierProxy<atomic::memory_scope::workgroup>;
 
   public:
     void
@@ -144,9 +146,9 @@ class NotifierBlockTestFixture : public NotifierBase {
     NotifierProxyT notifier_ {};
 };
 
-class NotifierAgentTestFixture : public NotifierBase {
-    using NotifierT = Notifier<detail::atomic::memory_scope_agent>;
-    using NotifierProxyT = NotifierProxy<detail::atomic::memory_scope_agent>;
+class NotifierDeviceTestFixture : public NotifierBase {
+    using NotifierT = Notifier<atomic::memory_scope::device>;
+    using NotifierProxyT = NotifierProxy<atomic::memory_scope::device>;
 
   public:
     void

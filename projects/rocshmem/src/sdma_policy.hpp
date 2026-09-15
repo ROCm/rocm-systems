@@ -37,6 +37,8 @@
 
 namespace rocshmem {
 
+namespace atomic = detail::atomic;
+
 #if defined(USE_SDMA)
 class SdmaImpl {
  public:
@@ -93,7 +95,8 @@ class SdmaImpl {
       // is unnecessary and would only cause a redundant poll in a later fence.
       if constexpr (!is_blocking(Kind)) {
         uint64_t bit = 1ULL << (local_pe * numChannels + effective_channel);
-        __hip_atomic_fetch_or(&sdmaDirty, bit, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        atomic::fetch_or<atomic::memory_scope::device,
+                         atomic::memory_order::relaxed>(&sdmaDirty, bit);
       }
     }
     return handle;
@@ -107,9 +110,10 @@ class SdmaImpl {
   __device__ void sdmaQuiet(int local_pe) {
     // Build mask covering all channels for this PE.
     uint64_t pe_mask = ((1ULL << numChannels) - 1) << (local_pe * numChannels);
-    uint64_t was_dirty = __hip_atomic_fetch_and(&sdmaDirty, ~pe_mask,
-                                                __ATOMIC_RELAXED,
-                                                __HIP_MEMORY_SCOPE_AGENT) & pe_mask;
+    uint64_t was_dirty =
+      atomic::fetch_and<atomic::memory_scope::device,
+                        atomic::memory_order::relaxed>(
+                          &sdmaDirty, ~pe_mask) & pe_mask;
     if (!was_dirty) return;
     // Drain only the channels that were marked dirty.
     for (int ch = 0; ch < numChannels; ch++) {
@@ -124,8 +128,9 @@ class SdmaImpl {
   // Iterates the sdmaDirty bitmask where each set bit corresponds to a
   // (pe, channel) pair that has a pending SDMA op.
   __device__ void sdmaQuietAll() {
-    uint64_t dirty = __hip_atomic_exchange(&sdmaDirty, 0ULL, __ATOMIC_RELAXED,
-                                           __HIP_MEMORY_SCOPE_AGENT);
+    uint64_t dirty =
+      atomic::exchange<atomic::memory_scope::device,
+                       atomic::memory_order::relaxed>(&sdmaDirty, 0ULL);
     while (dirty) {
       int bit = __builtin_ffsll(dirty) - 1;  // bit = pe * numChannels + ch
       sdma_anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[bit];
