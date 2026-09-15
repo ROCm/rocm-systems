@@ -765,8 +765,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
   return result;
 dxcore_loader_failed:
 #if defined(__linux__)
-  close(fd);
+  if (dxg_runtime->dxg_fd >= 0) close(dxg_runtime->dxg_fd);
 #endif
+  dxg_runtime->dxg_fd = -1;
 open_failed:
 
   return result;

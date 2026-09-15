@@ -901,12 +901,26 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.WaveFrontSize = device->WavefrontSize();
   props.NumShaderBanks = device->NumShaderEngine();
   props.NumArrays = device->ShaderArrayPerShaderEngine();
-  if (props.NumArrays == 0) {
-    pr_warn("NumArrays is 0 for node %u, forcing NumCUPerArray to 0\n",
-            node_id);
-    props.NumCUPerArray = 0;
-  } else {
-    props.NumCUPerArray = device->ComputeUnitCount() / props.NumArrays;
+  /* NumArrays counts shader arrays per shader engine, so the number of arrays
+   * on the whole GPU is NumShaderBanks * NumArrays.
+   */
+  {
+    const uint32_t total_arrays = props.NumShaderBanks * props.NumArrays;
+    if (total_arrays == 0) {
+      pr_warn(
+          "NumShaderBanks(%u)*NumArrays(%u) is 0 for node %u, forcing "
+          "NumCUPerArray to 0\n",
+          props.NumShaderBanks, props.NumArrays, node_id);
+      props.NumCUPerArray = 0;
+    } else {
+      const uint32_t cu_count = device->ComputeUnitCount();
+      if (cu_count % total_arrays != 0)
+        pr_warn(
+            "ComputeUnitCount(%u) is not a multiple of the %u shader "
+            "arrays on node %u; NumCUPerArray is truncated\n",
+            cu_count, total_arrays, node_id);
+      props.NumCUPerArray = cu_count / total_arrays;
+    }
   }
   props.NumSIMDPerCU = simd_per_cu;
   props.MaxSlotsScratchCU = device->MaxScratchSlotsPerCu();
@@ -950,7 +964,16 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.Domain = device->Domain();
   props.UniqueID = device->Uuid();
   props.NumXcc = device->NumXcc();
-  props.KFDGpuID = device->DeviceId();  // TODO
+  /*
+   * KFDGpuID is a nonzero snapshot-local key: not the PCI device ID, and not a
+   * kernel gpu_id, which only the native sysfs path supplies. Uniqueness and
+   * nonzeroness are all the DXG consumers require: a "node is a GPU" predicate
+   * and the gpuid<->nodeid lookups in this file. It becomes externally visible
+   * only through amd_core_dump.cpp, which writes it as the core dump's gpu_id,
+   * so a debugger correlating that field against kernel state will not match
+   * on WSL.
+   */
+  props.KFDGpuID = node_id + 1;
   props.FamilyID = device->GfxFamily();
   props.LuidLowPart = device->GetLuid().LowPart;
   props.LuidHighPart = device->GetLuid().HighPart;
