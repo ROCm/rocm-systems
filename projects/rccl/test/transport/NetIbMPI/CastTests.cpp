@@ -1559,7 +1559,11 @@ TEST_F(NetIbMPITest, CastRegistrationRejectsBadArguments) {
     // are argument checks that run before the scheduler, so the WRR env vars are not
     // needed and the macro would only turn a pass into a skip.
     net_ = &netIbCast;
-    AssertInitAndGetDevices(nullptr);
+    // Wrapped for the same reason this branch wraps the setup helpers: the fatal
+    // assertions inside return from the helper, not from here, so a failed init would
+    // otherwise leave this body asserting on argument checks against an uninitialised
+    // plugin and report that instead of the real cause.
+    ASSERT_NO_FATAL_FAILURE(AssertInitAndGetDevices(nullptr));
 
     // Fixed, not allocated: a rank-local allocation failure would end this rank
     // before the barrier below while its peer waited there.
