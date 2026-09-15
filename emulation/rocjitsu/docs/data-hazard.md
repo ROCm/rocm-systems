@@ -1,9 +1,9 @@
 # Data Hazard Detector
 
 Detects hazards caused by missing or insufficient `s_wait_*` instructions in AMD
-GPU kernels. The plugin tracks every asynchronous operation a wavefront issues —
-vector and scalar loads, stores, LDS accesses, tensor DMA transfers — and reports
-the accesses that happen before the wait counter covering them has drained.
+GPU kernels. The plugin tracks vector loads and stores, scalar loads, LDS accesses,
+and tensor DMA transfers, and reports accesses that happen before the wait counter
+covering them has drained.
 
 Where the [race detector](race-detector.md) answers "can two waves see different
 values here", this plugin answers "did the wave wait long enough for its own and
