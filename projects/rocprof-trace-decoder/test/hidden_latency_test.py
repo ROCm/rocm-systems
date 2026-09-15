@@ -333,6 +333,50 @@ class HiddenLatencyAnalysisTest(unittest.TestCase):
         )
         self.assertEqual(result.by_pc[target.pc], HiddenLatency(idle=4))
 
+    def test_hidden_stall_and_issue_stay_within_the_instruction(self):
+        # Coalescing adds overlapping same-pipe durations, so a utilization interval can end
+        # past the last instruction that contributed to it. That still cannot report more
+        # hidden stall or issue cycles than the instruction spent there, which is what lets
+        # non-hidden cost subtract those two components without bounding them.
+        randomizer = random.Random(11451)
+        categories = (
+            InstCategory.VALU,
+            InstCategory.VMEM,
+            InstCategory.LDS,
+            InstCategory.SALU,
+            InstCategory.SMEM,
+            InstCategory.IMMED,
+        )
+        for trial in range(64):
+            waves = []
+            stall_by_pc: dict[Pc, int] = {}
+            issue_by_pc: dict[Pc, int] = {}
+            for _ in range(3):
+                instructions = []
+                clock = randomizer.randrange(0, 10)
+                for _ in range(6):
+                    duration = randomizer.randrange(1, 30)
+                    stall = randomizer.randrange(0, duration)
+                    inst = _instruction(
+                        randomizer.randrange(1, 4),
+                        randomizer.choice(categories),
+                        time=clock,
+                        duration=duration,
+                        stall=stall,
+                    )
+                    instructions.append(inst)
+                    stall_by_pc[inst.pc] = stall_by_pc.get(inst.pc, 0) + stall
+                    issue_by_pc[inst.pc] = issue_by_pc.get(inst.pc, 0) + duration - stall
+                    # Advance by less than the duration so same-pipe intervals overlap.
+                    clock += randomizer.randrange(0, 20)
+                waves.append(_wave(*instructions))
+
+            result = analyze_hidden_latency({0: TraceRecords(waves=waves)})
+            for pc, hidden in result.by_pc.items():
+                with self.subTest(trial=trial, pc=pc):
+                    self.assertLessEqual(hidden.stall, stall_by_pc[pc])
+                    self.assertLessEqual(hidden.issue, issue_by_pc[pc])
+
     def test_unresolved_pc_is_not_aggregated(self):
         unresolved = Instruction(
             category=int(InstCategory.IMMED),

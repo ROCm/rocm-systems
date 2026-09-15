@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import sys
 
 from common import add_common_args, decode_traces, load_inputs
 from rocprof_trace_decoder import HiddenLatency, Pc, analyze_hidden_latency
@@ -40,18 +39,15 @@ def main() -> int:
             code_index.accumulate_wave(wave)
 
     rows = []
-    overcount_count = 0
-    maximum_excess = 0
     for entry in code_index.entries.values():
         total = entry.latency + entry.idle
         if not total:
             continue
-        hidden = hidden_by_pc.get(entry.pc, HiddenLatency()).total()
-        if hidden > total:
-            overcount_count += 1
-            maximum_excess = max(maximum_excess, hidden - total)
-        non_hidden = max(total - hidden, 0)
-        rows.append((non_hidden, total, hidden, entry))
+        hidden = hidden_by_pc.get(entry.pc, HiddenLatency())
+        # Hidden idle is measured from the previous instruction's end, CodeEntry.idle from
+        # the furthest end reached, so that component is the only one needing a bound.
+        hidden_total = hidden.stall + hidden.issue + min(hidden.idle, entry.idle)
+        rows.append((total - hidden_total, total, hidden_total, entry))
     rows.sort(key=lambda row: (row[0], row[1], row[3].hitcount), reverse=True)
 
     print(
@@ -66,13 +62,6 @@ def main() -> int:
             f"{rank:4d} {non_hidden:12d} {total:12d} {hidden:12d} "
             f"{entry.hitcount:8d} {entry.pc.code_object_id:7d} "
             f"0x{entry.pc.address:010x}  {detail}"
-        )
-    if overcount_count:
-        print(
-            f"Warning: hidden latency exceeded total latency for {overcount_count} PCs "
-            f"(maximum excess: {maximum_excess} cycles); displayed non-hidden values "
-            "were clamped to zero.",
-            file=sys.stderr,
         )
     return 0
 
