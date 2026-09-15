@@ -226,7 +226,9 @@ def test_csv_data(csv_data):
             )  # Test allocates 1024 and 2048 bytes only
             memory_allocation_info["allocation_size"][int(row["Allocation_Size"])] += 1
         else:
-            row["Allocation_Size"] == 0  # Free ops record allocation size as 0
+            assert (
+                int(row["Allocation_Size"]) == 0
+            )  # Free ops record allocation size as 0
 
         # Confirm address is valid
         assert row["Address"][:2] == "0x"
