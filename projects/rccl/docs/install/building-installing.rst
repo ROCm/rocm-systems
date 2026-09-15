@@ -73,6 +73,7 @@ The RCCL build and installation helper script options are as follows:
    RCCL build & installation helper script
     Options:
           --address-sanitizer     Build with address sanitizer enabled
+          --all_unrolls           Build every unroll factor (1,2,4,8,16,32) for the targeted GPU arch(es) instead of the per-arch default set
           --amdgpu_targets        Only compile for specified GPU architecture(s). For multiple targets, separate by ';' (builds for all supported GPU architectures by default)
           --cmake-options         Pass additional CMake options (e.g. --cmake-options "-DFOO=BAR -DBAZ=ON")
           --debug                 Build debug library
