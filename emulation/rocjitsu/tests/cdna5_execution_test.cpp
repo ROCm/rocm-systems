@@ -1776,25 +1776,6 @@ void write_sgpr_packed_u64(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wf, u
   }
 }
 
-TEST(Gfx1251PackedF64ExecutionTest, BasicArithmeticHasExecutionCallbacks) {
-  // Exact public LLVM gfx1251_asm_vop3p.s encodings for the VGPR forms.
-  constexpr std::array<std::array<uint32_t, 2>, 4> kWords{{
-      {0xCC4B4004u, 0x1A021908u}, // v_pk_add_f64 v[4:7], v[8:11], v[12:15]
-      {0xCC3C4004u, 0x1A021908u}, // v_pk_mul_f64 v[4:7], v[8:11], v[12:15]
-      {0xCC4E4004u, 0x1A021908u}, // v_pk_max_num_f64 v[4:7], v[8:11], v[12:15]
-      {0xCC4F4004u, 0x1A021908u}, // v_pk_min_num_f64 v[4:7], v[8:11], v[12:15]
-  }};
-  auto decoder =
-      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
-  ASSERT_NE(decoder, nullptr);
-
-  for (const auto &words : kWords) {
-    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
-    ASSERT_NE(decoded, nullptr);
-    EXPECT_NE(decoded->execute, nullptr) << decoded->mnemonic();
-  }
-}
-
 TEST(Gfx1251PackedF64ExecutionTest, LaterExecutionSlicesRemainCallbackFree) {
   // Exact public LLVM encodings for the two instructions intentionally left
   // model-only by this slice: gfx1251_asm_vop3p.s and
@@ -1849,7 +1830,7 @@ TEST(Gfx1251PackedF64ExecutionTest, BasicArithmeticExecutesBothElementsAndHonors
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, operation.words.data()));
     ASSERT_NE(decoded, nullptr);
     ASSERT_NE(decoded->execute, nullptr);
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), operation.expected);
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 1), kInactive);
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 2), operation.expected);
@@ -1878,7 +1859,7 @@ TEST(Gfx1251PackedF64ExecutionTest, ExecutesWave32Lane31WithoutChangingVccOrInac
   std::unique_ptr<Instruction> decoded(decode_valid(*decoder, kAdd.data()));
   ASSERT_NE(decoded, nullptr);
   ASSERT_NE(decoded->execute, nullptr);
-  cu->execute_instruction(decoded.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
   EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 31), (PackedU64Pair{bits(7.0), bits(1.0)}));
   EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), kInactiveSeed);
   EXPECT_EQ(wf->vcc(), kVccSeed);
@@ -1905,7 +1886,7 @@ TEST(Gfx1251PackedF64ExecutionTest, ExecZeroPreservesDestinationAndStatus) {
   std::unique_ptr<Instruction> decoded(decode_valid(*decoder, kAdd.data()));
   ASSERT_NE(decoded, nullptr);
   ASSERT_NE(decoded->execute, nullptr);
-  cu->execute_instruction(decoded.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
   EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), kDestinationSeed);
   EXPECT_EQ(wf->vcc(), kVccSeed);
   EXPECT_TRUE(wf->read_scc());
@@ -1988,7 +1969,7 @@ TEST(Gfx1251PackedF64ExecutionTest, BasicArithmeticExecutesEveryPublicLlvmSource
       std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
       ASSERT_NE(decoded, nullptr);
       ASSERT_NE(decoded->execute, nullptr);
-      cu->execute_instruction(decoded.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
       const PackedU64Pair expected{
           std::bit_cast<uint64_t>(reference(operation.name, std::bit_cast<double>(form.lhs[0]),
                                             std::bit_cast<double>(form.rhs[0]))),
@@ -2048,7 +2029,7 @@ TEST(Gfx1251PackedF64ExecutionTest, ExecutesInlineScalarBoundarySources) {
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
     ASSERT_NE(decoded, nullptr);
     ASSERT_NE(decoded->execute, nullptr);
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0),
               (PackedU64Pair{test_case.expected, test_case.expected}));
   }
@@ -2072,7 +2053,7 @@ TEST(Gfx1251PackedF64ExecutionTest, ExecutesFinalRegisterTupleBoundaries) {
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
     ASSERT_NE(decoded, nullptr);
     ASSERT_NE(decoded->execute, nullptr);
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, fields.vdst, 0), expected);
   };
 
@@ -2151,7 +2132,7 @@ TEST(Gfx1251PackedF64ExecutionTest, PublicModifiersClampAndOverlappingDestinatio
       std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
       ASSERT_NE(decoded, nullptr);
       ASSERT_NE(decoded->execute, nullptr);
-      cu->execute_instruction(decoded.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
       EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), expected);
     }
 
@@ -2161,7 +2142,7 @@ TEST(Gfx1251PackedF64ExecutionTest, PublicModifiersClampAndOverlappingDestinatio
     std::unique_ptr<Instruction> clamp(decode_valid(*decoder, clamp_words.data()));
     ASSERT_NE(clamp, nullptr);
     ASSERT_NE(clamp->execute, nullptr);
-    cu->execute_instruction(clamp.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(clamp.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), operation.clamp_expected);
 
     const auto combined_words =
@@ -2179,7 +2160,7 @@ TEST(Gfx1251PackedF64ExecutionTest, PublicModifiersClampAndOverlappingDestinatio
     std::unique_ptr<Instruction> combined(decode_valid(*decoder, combined_words.data()));
     ASSERT_NE(combined, nullptr);
     ASSERT_NE(combined->execute, nullptr);
-    cu->execute_instruction(combined.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(combined.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), operation.combined_expected);
   }
 
@@ -2208,7 +2189,7 @@ TEST(Gfx1251PackedF64ExecutionTest, PublicModifiersClampAndOverlappingDestinatio
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
     ASSERT_NE(decoded, nullptr);
     ASSERT_NE(decoded->execute, nullptr);
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), expected);
   }
 
@@ -2227,7 +2208,7 @@ TEST(Gfx1251PackedF64ExecutionTest, PublicModifiersClampAndOverlappingDestinatio
     std::unique_ptr<Instruction> clamp_nan(decode_valid(*decoder, clamp_nan_words.data()));
     ASSERT_NE(clamp_nan, nullptr);
     ASSERT_NE(clamp_nan->execute, nullptr);
-    cu->execute_instruction(clamp_nan.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(clamp_nan.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), (PackedU64Pair{bits(0.0), bits(0.0)}));
   }
 
@@ -2253,7 +2234,7 @@ TEST(Gfx1251PackedF64ExecutionTest, PublicModifiersClampAndOverlappingDestinatio
     std::unique_ptr<Instruction> overlap(decode_valid(*decoder, overlap_words.data()));
     ASSERT_NE(overlap, nullptr);
     ASSERT_NE(overlap->execute, nullptr);
-    cu->execute_instruction(overlap.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(overlap.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, test_case.vdst, 0),
               (PackedU64Pair{bits(7.0), bits(1.0)}));
   }
@@ -2296,7 +2277,7 @@ TEST(Gfx1251PackedF64ExecutionTest, AddAndMultiplyHonorRoundingAndDenormModes) {
     wf->set_mode_raw((round << 2) | (3u << 6));
     write_vgpr_packed_u64(*cu, *wf, 8, 0, {kOne, kNegativeOne});
     write_vgpr_packed_u64(*cu, *wf, 12, 0, {kHalfUlpAtOne, kNegativeHalfUlpAtOne});
-    cu->execute_instruction(add.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(add.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), kAddExpected[round]) << round;
   }
 
@@ -2308,7 +2289,7 @@ TEST(Gfx1251PackedF64ExecutionTest, AddAndMultiplyHonorRoundingAndDenormModes) {
     wf->set_mode_raw((round << 2) | (3u << 6));
     write_vgpr_packed_u64(*cu, *wf, 8, 0, {kNextOne, kNextOne});
     write_vgpr_packed_u64(*cu, *wf, 12, 0, {kNextOne, kNextOne});
-    cu->execute_instruction(mul.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(mul.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0),
               (PackedU64Pair{kMulExpected[round], kMulExpected[round]}))
         << round;
@@ -2323,9 +2304,9 @@ TEST(Gfx1251PackedF64ExecutionTest, AddAndMultiplyHonorRoundingAndDenormModes) {
     wf->set_mode_raw(denorm << 6);
     write_vgpr_packed_u64(*cu, *wf, 8, 0, {kMinSubnormal, kMinNormal});
     write_vgpr_packed_u64(*cu, *wf, 12, 0, {0u, bits(0.5)});
-    cu->execute_instruction(add.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(add.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0)[0], kAddDenormExpected[denorm]) << denorm;
-    cu->execute_instruction(mul.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(mul.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0)[1], kMulDenormExpected[denorm]) << denorm;
   }
 }
@@ -2362,9 +2343,9 @@ TEST(Gfx1251PackedF64ExecutionTest, MinMaxNumberHonorEveryDenormMode) {
     wf->set_mode_raw(denorm << 6);
     write_vgpr_packed_u64(*cu, *wf, 8, 0, {kMinSubnormal, kNegativeMinSubnormal});
     write_vgpr_packed_u64(*cu, *wf, 12, 0, {kPositiveZero, kPositiveZero});
-    cu->execute_instruction(maximum.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(maximum.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0)[0], kMaxExpected[denorm]) << denorm;
-    cu->execute_instruction(minimum.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(minimum.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0)[1], kMinExpected[denorm]) << denorm;
   }
 }
@@ -2397,7 +2378,7 @@ TEST(Gfx1251PackedF64ExecutionTest, AddAndMultiplyHandleNanInfinityAndSignedZero
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
     ASSERT_NE(decoded, nullptr);
     ASSERT_NE(decoded->execute, nullptr);
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     const PackedU64Pair result = read_vgpr_packed_u64(*cu, *wf, 4, 0);
     EXPECT_TRUE(std::isnan(std::bit_cast<double>(result[0])));
     EXPECT_EQ(result[1], kNegativeZero);
@@ -2431,7 +2412,7 @@ TEST(Gfx1251PackedF64ExecutionTest, MinMaxNumberHandleNanInfinityAndSignedZero) 
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
     ASSERT_NE(decoded, nullptr);
     ASSERT_NE(decoded->execute, nullptr);
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), expected);
   }
 
@@ -2441,7 +2422,7 @@ TEST(Gfx1251PackedF64ExecutionTest, MinMaxNumberHandleNanInfinityAndSignedZero) 
                             std::array<uint32_t, 2>{0xCC4F4004u, 0x1A021908u}}) {
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
     ASSERT_NE(decoded, nullptr);
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), (PackedU64Pair{bits(2.0), bits(3.0)}));
   }
 
@@ -2469,7 +2450,7 @@ TEST(Gfx1251PackedF64ExecutionTest, MinMaxNumberHandleNanInfinityAndSignedZero) 
       SCOPED_TRACE(test_case.name);
       write_vgpr_packed_u64(*cu, *wf, 8, 0, {test_case.lhs, test_case.lhs});
       write_vgpr_packed_u64(*cu, *wf, 12, 0, {test_case.rhs, test_case.rhs});
-      cu->execute_instruction(decoded.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
       const PackedU64Pair result = read_vgpr_packed_u64(*cu, *wf, 4, 0);
       if (test_case.expect_nan) {
         EXPECT_TRUE(std::isnan(std::bit_cast<double>(result[0])));
@@ -2488,7 +2469,7 @@ TEST(Gfx1251PackedF64ExecutionTest, MinMaxNumberHandleNanInfinityAndSignedZero) 
                                                   PackedU64Pair{kNegativeZero, kNegativeZero}}}) {
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
     ASSERT_NE(decoded, nullptr);
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), expected);
   }
 
@@ -2498,7 +2479,7 @@ TEST(Gfx1251PackedF64ExecutionTest, MinMaxNumberHandleNanInfinityAndSignedZero) 
                             std::array<uint32_t, 2>{0xCC4F4004u, 0x1A021908u}}) {
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
     ASSERT_NE(decoded, nullptr);
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     const PackedU64Pair result = read_vgpr_packed_u64(*cu, *wf, 4, 0);
     EXPECT_EQ(result[0], decoded->mnemonic() == std::string_view("v_pk_max_num_f64")
                              ? kPositiveInfinity
