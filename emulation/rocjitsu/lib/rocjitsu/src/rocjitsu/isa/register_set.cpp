@@ -4,6 +4,7 @@
 #include "rocjitsu/isa/register_set.h"
 
 #include <algorithm>
+#include <bit>
 
 namespace rocjitsu {
 
@@ -55,7 +56,19 @@ void RegisterSet::expand(RegisterRef ref) {
   case RegClass::ACC_VGPR:
     set_range(acc_vgprs_, ref.index, width);
     break;
-  default:
+  case RegClass::TTMP:
+    // Trap temporaries are known to the ISA but not tracked by this set: no
+    // bitset and no mask bit, so index/width are dropped (as they are on the
+    // general def/use path). Explicit arm keeps the switch exhaustive.
+    break;
+  case RegClass::EXEC:
+  case RegClass::VCC:
+  case RegClass::SCC:
+  case RegClass::M0:
+  case RegClass::FLAT_SCRATCH:
+  case RegClass::PC:
+    // Special singleton: index/width are meaningless, so just set its bit.
+    special_regs_ |= special_bit(ref.cls);
     break;
   }
 }
@@ -72,7 +85,15 @@ void RegisterSet::erase(RegisterRef ref) {
   case RegClass::ACC_VGPR:
     reset_range(acc_vgprs_, ref.index, width);
     break;
-  default:
+  case RegClass::TTMP: // untracked: nothing to clear
+    break;
+  case RegClass::EXEC:
+  case RegClass::VCC:
+  case RegClass::SCC:
+  case RegClass::M0:
+  case RegClass::FLAT_SCRATCH:
+  case RegClass::PC:
+    special_regs_ &= static_cast<uint16_t>(~special_bit(ref.cls));
     break;
   }
 }
@@ -88,7 +109,15 @@ void RegisterSet::clear_class(RegClass cls) {
   case RegClass::ACC_VGPR:
     acc_vgprs_.reset();
     break;
-  default:
+  case RegClass::TTMP: // untracked: nothing to clear
+    break;
+  case RegClass::EXEC:
+  case RegClass::VCC:
+  case RegClass::SCC:
+  case RegClass::M0:
+  case RegClass::FLAT_SCRATCH:
+  case RegClass::PC:
+    special_regs_ &= static_cast<uint16_t>(~special_bit(cls));
     break;
   }
 }
@@ -102,14 +131,30 @@ bool RegisterSet::contains(RegisterRef ref) const {
     return contains_range(vgprs_, ref.index, width);
   case RegClass::ACC_VGPR:
     return contains_range(acc_vgprs_, ref.index, width);
-  default:
+  case RegClass::TTMP: // untracked: never present
     return false;
+  case RegClass::EXEC:
+  case RegClass::VCC:
+  case RegClass::SCC:
+  case RegClass::M0:
+  case RegClass::FLAT_SCRATCH:
+  case RegClass::PC:
+    return (special_regs_ & special_bit(ref.cls)) != 0;
   }
+  return false; // unreachable for a valid RegClass; a new class trips -Wswitch first
 }
 
-bool RegisterSet::none() const { return sgprs_.none() && vgprs_.none() && acc_vgprs_.none(); }
+bool RegisterSet::none() const {
+  return sgprs_.none() && vgprs_.none() && acc_vgprs_.none() && special_regs_ == 0;
+}
 
-size_t RegisterSet::size() const { return sgprs_.count() + vgprs_.count() + acc_vgprs_.count(); }
+size_t RegisterSet::size() const {
+  return ordinary_size() + static_cast<size_t>(std::popcount(special_regs_));
+}
+
+size_t RegisterSet::ordinary_size() const {
+  return sgprs_.count() + vgprs_.count() + acc_vgprs_.count();
+}
 
 bool RegisterSet::intersects(RegisterRef ref) const {
   const size_t width = std::max<size_t>(1, ref.width);
@@ -127,13 +172,14 @@ bool RegisterSet::intersects(RegisterRef ref) const {
 
 bool RegisterSet::intersects(const RegisterSet &rhs) const {
   return (sgprs_ & rhs.sgprs_).any() || (vgprs_ & rhs.vgprs_).any() ||
-         (acc_vgprs_ & rhs.acc_vgprs_).any();
+         (acc_vgprs_ & rhs.acc_vgprs_).any() || (special_regs_ & rhs.special_regs_) != 0;
 }
 
 RegisterSet &RegisterSet::operator|=(const RegisterSet &rhs) {
   sgprs_ |= rhs.sgprs_;
   vgprs_ |= rhs.vgprs_;
   acc_vgprs_ |= rhs.acc_vgprs_;
+  special_regs_ |= rhs.special_regs_;
   return *this;
 }
 
@@ -141,6 +187,7 @@ RegisterSet &RegisterSet::operator&=(const RegisterSet &rhs) {
   sgprs_ &= rhs.sgprs_;
   vgprs_ &= rhs.vgprs_;
   acc_vgprs_ &= rhs.acc_vgprs_;
+  special_regs_ &= rhs.special_regs_;
   return *this;
 }
 
@@ -148,6 +195,7 @@ RegisterSet &RegisterSet::operator-=(const RegisterSet &rhs) {
   subtract(sgprs_, rhs.sgprs_);
   subtract(vgprs_, rhs.vgprs_);
   subtract(acc_vgprs_, rhs.acc_vgprs_);
+  special_regs_ &= static_cast<uint16_t>(~rhs.special_regs_);
   return *this;
 }
 

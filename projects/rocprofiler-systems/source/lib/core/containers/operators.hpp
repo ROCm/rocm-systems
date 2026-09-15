@@ -8,59 +8,6 @@
 #include <iterator>
 #include <type_traits>
 
-#define ROCPROFSYS_IMPORT_TEMPLATE2(template_name)
-#define ROCPROFSYS_IMPORT_TEMPLATE1(template_name)
-
-// Import a 2-type-argument operator template into boost (if necessary) and
-// provide a specialization of 'is_chained_base<>' for it.
-#define ROCPROFSYS_OPERATOR_TEMPLATE2(template_name2)                                    \
-    ROCPROFSYS_IMPORT_TEMPLATE2(template_name2)                                          \
-    template <typename T, typename U, typename B>                                        \
-    struct is_chained_base<::rocprofsys::container::template_name2<T, U, B>>             \
-    {                                                                                    \
-        using value = ::rocprofsys::container::true_t;                                   \
-    };
-
-// Import a 1-type-argument operator template into boost (if necessary) and
-// provide a specialization of 'is_chained_base<>' for it.
-#define ROCPROFSYS_OPERATOR_TEMPLATE1(template_name1)                                    \
-    ROCPROFSYS_IMPORT_TEMPLATE1(template_name1)                                          \
-    template <typename T, typename B>                                                    \
-    struct is_chained_base<::rocprofsys::container::template_name1<T, B>>                \
-    {                                                                                    \
-        using value = ::rocprofsys::container::true_t;                                   \
-    };
-
-#define ROCPROFSYS_OPERATOR_TEMPLATE(template_name)                                      \
-    template <typename T, typename U = T, typename B = empty_base<T>,                    \
-              typename O = typename is_chained_base<U>::value>                           \
-    struct template_name;                                                                \
-                                                                                         \
-    template <typename T, typename U, typename B>                                        \
-        struct template_name<T, U, B, false_t> : template_name##2 < T                    \
-    , U                                                                                  \
-    , B >                                                                                \
-    {};                                                                                  \
-                                                                                         \
-    template <typename T, typename U>                                                    \
-        struct template_name<T, U, empty_base<T>, true_t> : template_name##1 < T         \
-    , U >                                                                                \
-    {};                                                                                  \
-                                                                                         \
-    template <typename T, typename B>                                                    \
-        struct template_name<T, T, B, false_t> : template_name##1 < T                    \
-    , B >                                                                                \
-    {};                                                                                  \
-                                                                                         \
-    template <typename T, typename U, typename B, typename O>                            \
-    struct is_chained_base<template_name<T, U, B, O>>                                    \
-    {                                                                                    \
-        using value = ::rocprofsys::container::true_t;                                   \
-    };                                                                                   \
-                                                                                         \
-    ROCPROFSYS_OPERATOR_TEMPLATE2(template_name##2)                                      \
-    ROCPROFSYS_OPERATOR_TEMPLATE1(template_name##1)
-
 #define ROCPROFSYS_BINARY_OPERATOR_COMMUTATIVE(NAME, OP)                                 \
     template <typename T, typename U, typename B = empty_base<T>>                        \
     struct NAME##2                                                                       \
@@ -89,26 +36,12 @@ namespace rocprofsys
 {
 namespace container
 {
-struct true_t
-{};
-
-struct false_t
-{};
-
 template <typename T>
 class empty_base
 {};
 
-template <typename T>
-struct is_chained_base
-{
-    using value = true_t;
-};
-
 ROCPROFSYS_BINARY_OPERATOR_COMMUTATIVE(addable, +)
 ROCPROFSYS_BINARY_OPERATOR_NON_COMMUTATIVE(subtractable, -)
-
-ROCPROFSYS_OPERATOR_TEMPLATE(addable)
 
 template <typename T, typename B = empty_base<T>>
 struct incrementable : B
