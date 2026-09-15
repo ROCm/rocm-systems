@@ -39,9 +39,14 @@ class FatBinaryInfo {
 
   // Device Id bounds check
   inline void DeviceIdCheck(const int device_id) const {
-    guarantee(device_id >= 0, "Invalid DeviceId less than 0");
-    guarantee(static_cast<size_t>(device_id) < dev_programs_.size(),
-              "Invalid DeviceId, greater than no of device programs!");
+    if (device_id < 0) {
+      LogPrintfError("Invalid DeviceId less than 0");
+      return;
+    }
+    if (static_cast<size_t>(device_id) >= dev_programs_.size()) {
+      LogPrintfError("Invalid DeviceId, greater than no of device programs!");
+      return;
+    }
   }
 
   // Getter Methods

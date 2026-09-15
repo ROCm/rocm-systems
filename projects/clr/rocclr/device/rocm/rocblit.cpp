@@ -1285,7 +1285,10 @@ bool KernelBlitManager::copyBufferToImage(device::Memory& srcMemory, device::Mem
                                           const amd::Coord3D& dstOrigin, const amd::Coord3D& size,
                                           bool entire, size_t rowPitch, size_t slicePitch,
                                           amd::CopyMetadata copyMetadata) const {
-  guarantee((dev().info().imageSupport_ != false), "Image not supported on this device");
+  if (!dev().info().imageSupport_) {
+    LogPrintfError("Image not supported on this device");
+    return false;
+  }
 
   std::scoped_lock k(lockXferOps_);
   bool result = false;
@@ -1355,7 +1358,10 @@ bool KernelBlitManager::copyBufferToImageKernel(
     device::Memory& srcMemory, device::Memory& dstMemory, const amd::Coord3D& srcOrigin,
     const amd::Coord3D& dstOrigin, const amd::Coord3D& size, bool entire, size_t rowPitch,
     size_t slicePitch, amd::CopyMetadata copyMetadata) const {
-  guarantee((dev().info().imageSupport_ != false), "Image not supported on this device");
+  if (!dev().info().imageSupport_) {
+    LogPrintfError("Image not supported on this device");
+    return false;
+  }
 
   bool rejected = false;
   Memory* dstView = &gpuMem(dstMemory);
@@ -1496,7 +1502,10 @@ bool KernelBlitManager::copyImageToBuffer(device::Memory& srcMemory, device::Mem
                                           const amd::Coord3D& dstOrigin, const amd::Coord3D& size,
                                           bool entire, size_t rowPitch, size_t slicePitch,
                                           amd::CopyMetadata copyMetadata) const {
-  guarantee((dev().info().imageSupport_ != false), "Image not supported on this device");
+  if (!dev().info().imageSupport_) {
+    LogPrintfError("Image not supported on this device");
+    return false;
+  }
 
   std::scoped_lock k(lockXferOps_);
   bool result = false;
@@ -1543,7 +1552,10 @@ bool KernelBlitManager::copyImageToBufferKernel(
     device::Memory& srcMemory, device::Memory& dstMemory, const amd::Coord3D& srcOrigin,
     const amd::Coord3D& dstOrigin, const amd::Coord3D& size, bool entire, size_t rowPitch,
     size_t slicePitch, amd::CopyMetadata copyMetadata) const {
-  guarantee((dev().info().imageSupport_ != false), "Image not supported on this device");
+  if (!dev().info().imageSupport_) {
+    LogPrintfError("Image not supported on this device");
+    return false;
+  }
 
   bool rejected = false;
   Memory* srcView = &gpuMem(srcMemory);
@@ -1688,7 +1700,10 @@ bool KernelBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dst
                                   const amd::Coord3D& srcOrigin, const amd::Coord3D& dstOrigin,
                                   const amd::Coord3D& size, bool entire,
                                   amd::CopyMetadata copyMetadata) const {
-  guarantee((dev().info().imageSupport_ != false), "Image not supported on this device");
+  if (!dev().info().imageSupport_) {
+    LogPrintfError("Image not supported on this device");
+    return false;
+  }
 
   std::scoped_lock k(lockXferOps_);
   bool result = false;
@@ -1874,7 +1889,10 @@ bool KernelBlitManager::readImage(device::Memory& srcMemory, void* dstHost,
                                   const amd::Coord3D& origin, const amd::Coord3D& size,
                                   size_t rowPitch, size_t slicePitch, bool entire,
                                   amd::CopyMetadata copyMetadata) const {
-  guarantee((dev().info().imageSupport_ != false), "Image not supported on this device");
+  if (!dev().info().imageSupport_) {
+    LogPrintfError("Image not supported on this device");
+    return false;
+  }
 
   std::scoped_lock k(lockXferOps_);
   bool result = false;
@@ -1927,7 +1945,10 @@ bool KernelBlitManager::writeImage(const void* srcHost, device::Memory& dstMemor
                                    const amd::Coord3D& origin, const amd::Coord3D& size,
                                    size_t rowPitch, size_t slicePitch, bool entire,
                                    amd::CopyMetadata copyMetadata) const {
-  guarantee((dev().info().imageSupport_ != false), "Image not supported on this device");
+  if (!dev().info().imageSupport_) {
+    LogPrintfError("Image not supported on this device");
+    return false;
+  }
 
   std::scoped_lock k(lockXferOps_);
   bool result = false;
@@ -2397,7 +2418,10 @@ bool KernelBlitManager::writeBufferRect(const void* srcHost, device::Memory& dst
 bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, size_t patternSize,
                                    const amd::Coord3D& surface, const amd::Coord3D& origin,
                                    const amd::Coord3D& size, bool entire, bool forceBlit) const {
-  guarantee(size[0] > 0 && size[1] > 0 && size[2] > 0, "Dimension cannot be 0");
+  if (!(size[0] > 0 && size[1] > 0 && size[2] > 0)) {
+    LogPrintfError("Dimension cannot be 0");
+    return false;
+  }
 
   if (size[1] == 1 && size[2] == 1) {
     return fillBuffer1D(memory, pattern, patternSize, surface, origin, size, entire, forceBlit);
@@ -3319,7 +3343,8 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
     if (requireSDMA) {
       LogError("SDMA copy failed and shader fallback is not permitted");
     } else if (DEBUG_CLR_DISABLE_FALLBACK) {
-      guarantee(false, "DMA copy failed and fallback path is disabled");
+      LogPrintfError("DMA copy failed and fallback path is disabled");
+      return false;
     } else {
       // Check CL_MEM_SVM_ATOMICS flag to see if we used system_coarse_segment_
       auto memFlags = srcMemory.owner()->getMemFlags();
@@ -3349,7 +3374,10 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
 bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
                                   const amd::Coord3D& origin, const amd::Coord3D& size,
                                   bool entire) const {
-  guarantee((dev().info().imageSupport_ != false), "Image not supported on this device");
+  if (!dev().info().imageSupport_) {
+    LogPrintfError("Image not supported on this device");
+    return false;
+  }
 
   std::scoped_lock k(lockXferOps_);
   bool result = false;

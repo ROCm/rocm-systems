@@ -176,7 +176,10 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
   }
   // Allocate managed memory for these symbols
   status = ihipMallocManaged(&pointer, mem->getSize(), 0, 0);
-  guarantee(status == hipSuccess, "Status %d, failed to allocate managed memory", status);
+  if (status != hipSuccess) {
+    LogPrintfError("Status %d, failed to allocate managed memory", status);
+    return status;
+  }
 
   // update as manager variable and set managed memory pointer and size
   auto it = vars_.find(managedVar);
