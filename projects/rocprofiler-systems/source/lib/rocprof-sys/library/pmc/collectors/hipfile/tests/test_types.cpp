@@ -29,20 +29,20 @@ TEST(HipFileMetricTable, units_match_amd_smi_conventions)
         { "Read Bandwidth", "bytes/s" }, { "Write Bandwidth", "bytes/s" },
     };
 
-    ASSERT_EQ(METRIC_TABLE.size(), expected.size());
+    ASSERT_EQ(k_metric_table.size(), expected.size());
 
-    for(const auto& metric : METRIC_TABLE)
+    for(const auto& metric : k_metric_table)
     {
         SCOPED_TRACE(metric.suffix);
-        const auto it = expected.find(metric.suffix);
-        ASSERT_NE(it, expected.end());
-        EXPECT_EQ(std::string_view{ metric.unit }, it->second);
+        const auto entry_it = expected.find(metric.suffix);
+        ASSERT_NE(entry_it, expected.end());
+        EXPECT_EQ(std::string_view{ metric.unit }, entry_it->second);
         EXPECT_FALSE(std::string_view{ metric.unit }.empty());
     }
 }
 TEST(HipFileMetricTable, named_bits_match_metric_table_positions)
 {
-    // enabled_metrics::bits names the same 14 flags that METRIC_TABLE numbers, but the
+    // enabled_metrics::bits names the same 14 flags that k_metric_table numbers, but the
     // two orderings are independent declarations: inserting a metric mid-table while
     // appending to the union would silently desynchronize them.
     using setter_t = void (*)(enabled_metrics&);
@@ -71,11 +71,11 @@ TEST(HipFileMetricTable, named_bits_match_metric_table_positions)
           [](enabled_metrics& flags) { flags.bits.write_bandwidth              = 1; } },
     };
 
-    ASSERT_EQ(METRIC_TABLE.size(), expected.size());
+    ASSERT_EQ(k_metric_table.size(), expected.size());
 
     std::uint32_t covered = 0;
 
-    for(const auto& metric : METRIC_TABLE)
+    for(const auto& metric : k_metric_table)
     {
         SCOPED_TRACE(metric.suffix);
         const auto entry = expected.find(metric.suffix);
@@ -91,7 +91,7 @@ TEST(HipFileMetricTable, named_bits_match_metric_table_positions)
     }
 
     // Every bit in the mask the collector advertises is claimed by exactly one name.
-    EXPECT_EQ(covered, ALL_HIPFILE_METRICS);
+    EXPECT_EQ(covered, k_all_hipfile_metrics);
 }
 }  // namespace
 }  // namespace rocprofsys::pmc::collectors::hipfile::testing

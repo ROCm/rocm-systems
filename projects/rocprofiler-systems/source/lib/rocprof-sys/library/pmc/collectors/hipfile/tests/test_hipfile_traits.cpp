@@ -60,7 +60,7 @@ struct stub_settings
         gpu_filter      = device_filter{};
         gpu_filter.mode = device_selection_mode::all;
         visible_type_indices.clear();
-        hipfile_metrics.value = ALL_HIPFILE_METRICS;
+        hipfile_metrics.value = k_all_hipfile_metrics;
     }
 
     static device_filter            get_gpu_device_filter() { return gpu_filter; }
@@ -113,7 +113,7 @@ TEST_F(HipFileTraitsTest, gpu_zero_is_enumerated_like_any_other)
     // are gone and GPU 0 is now ordinary.
     ASSERT_FALSE(entries.empty());
     EXPECT_EQ(entries.front().device->get_index(), 0U);
-    EXPECT_EQ(entries.front().supported_metrics.value, ALL_HIPFILE_METRICS);
+    EXPECT_EQ(entries.front().supported_metrics.value, k_all_hipfile_metrics);
 }
 
 TEST_F(HipFileTraitsTest, no_visible_gpus_enumerates_nothing)
@@ -166,13 +166,13 @@ TEST_F(HipFileTraitsTest, specific_filter_ignores_out_of_range_ordinals)
 
 TEST_F(HipFileTraitsTest, visible_gpus_clamped_to_snapshot_capacity)
 {
-    stub_settings::set_visible_identity(MAX_GPUS + test_values::k_extra_visible_gpus);
+    stub_settings::set_visible_identity(k_max_gpus + test_values::k_extra_visible_gpus);
 
     const auto entries = enumerate();
 
     // hipFile's snapshot has a fixed number of slots; enumerating past it would index
     // out of bounds rather than report more GPUs.
-    EXPECT_EQ(entries.size(), MAX_GPUS);
+    EXPECT_EQ(entries.size(), k_max_gpus);
 }
 
 TEST_F(HipFileTraitsTest, enabled_metrics_come_from_settings)
@@ -197,7 +197,7 @@ TEST_F(HipFileTraitsTest, get_metrics_delegates_to_device)
     ASSERT_EQ(entries.size(), 1U);
 
     enabled_metrics enabled;
-    enabled.value = ALL_HIPFILE_METRICS;
+    enabled.value = k_all_hipfile_metrics;
 
     EXPECT_EQ(traits_t::get_metrics(entries[0].device, enabled, 1'000'000'000).read_bytes,
               test_values::k_read_bytes_single);
@@ -218,7 +218,7 @@ TEST_F(HipFileTraitsTest, identity_mapping_is_unchanged_without_a_visibility_mas
     EXPECT_EQ(entries[1].device->get_hipfile_slot(), 1U);
 
     enabled_metrics enabled;
-    enabled.value = ALL_HIPFILE_METRICS;
+    enabled.value = k_all_hipfile_metrics;
     EXPECT_EQ(entries[0].device->get_metrics(enabled, 1'000'000'000).read_bytes,
               test_values::k_read_bytes_gpu0);
     EXPECT_EQ(entries[1].device->get_metrics(enabled, 1'000'000'000).read_bytes,
@@ -248,7 +248,7 @@ TEST_F(HipFileTraitsTest, subset_mask_maps_hipfile_slots_onto_profiler_indices)
               "GPU [5] Storage Read Bytes (S)");
 
     enabled_metrics enabled;
-    enabled.value = ALL_HIPFILE_METRICS;
+    enabled.value = k_all_hipfile_metrics;
     EXPECT_EQ(entries[0].device->get_metrics(enabled, 1'000'000'000).read_bytes,
               test_values::k_read_bytes_slot0);
     EXPECT_EQ(entries[1].device->get_metrics(enabled, 1'000'000'000).read_bytes,
@@ -271,7 +271,7 @@ TEST_F(HipFileTraitsTest, sampling_gpus_filter_uses_profiler_index_not_hipfile_s
     EXPECT_EQ(entries[0].device->get_hipfile_slot(), 0U);
 
     enabled_metrics enabled;
-    enabled.value = ALL_HIPFILE_METRICS;
+    enabled.value = k_all_hipfile_metrics;
     EXPECT_EQ(entries[0].device->get_metrics(enabled, 1'000'000'000).read_bytes,
               test_values::k_read_bytes_filtered);
 }
