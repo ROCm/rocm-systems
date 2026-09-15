@@ -18,7 +18,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
-- Fixed per-link XGMI and device-level JPEG AMD SMI metrics missing from rocpd output 
+- Fixed per-link XGMI and device-level JPEG AMD SMI metrics missing from rocpd output
   because PMC metadata names did not match the sample insertion path.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1
