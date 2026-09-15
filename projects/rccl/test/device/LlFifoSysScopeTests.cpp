@@ -138,8 +138,8 @@ void runSiblingBroadcastSlotReuse(int devA, int devB) {
   ncclComm_t comms[2] = {};
   ASSERT_EQ(ncclCommInitAll(comms, 2, devs), ncclSuccess);
 
-  constexpr int kCount = 256;  // 1 KiB float broadcast; one LL step per coll
-  constexpr int kIters = 64;   // comfortably past FIFO slot reuse (NCCL_STEPS == 8)
+  constexpr int kCount = 256; // 1 KiB float broadcast; one LL step per coll
+  constexpr int kIters = 64;  // comfortably past FIFO slot reuse (NCCL_STEPS == 8)
   float* send[2] = {};
   float* recv[2] = {};
   hipStream_t streams[2] = {};
