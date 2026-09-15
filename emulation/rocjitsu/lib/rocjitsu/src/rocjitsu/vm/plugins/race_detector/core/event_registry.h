@@ -5,9 +5,11 @@
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <vector>
 
@@ -36,11 +38,11 @@ class EventRegistry {
     WaveId waveId;
     uint64_t pc;
     MemoryEventType type;
-    amdgpu::WaitCounterType waitCounterType;
-    std::optional<amdgpu::WaitCounterType> additionalWaitCounterType;
+    std::array<amdgpu::MemoryCounterObligation, amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS>
+        counterObligations;
+    uint8_t numCounterObligations;
+    uint8_t satisfiedCounterMask;
     MemoryOrderClass memoryOrder;
-    bool waitCounterSatisfied;
-    bool additionalWaitCounterSatisfied;
     EventStatus status;
     uint8_t byteMask;
     uint64_t execMask;
@@ -49,16 +51,28 @@ class EventRegistry {
   };
 
 public:
-  /// Allocate a new event. Generic FLAT events carry an additional simultaneous
-  /// counter obligation; ordinary events leave it empty.
+  /// Allocate a new event with every simultaneous counter obligation.
   EventId add(WaveId waveId, uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
               uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
-              amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
-              std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt) {
+              std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+              MemoryOrderClass memoryOrder) {
     int id = base_offset_ + static_cast<int>(entries_.size());
-    entries_.push_back({waveId, pc, type, waitCounterType, additionalWaitCounterType, memoryOrder,
-                        false, false, EventStatus::ACTIVE, byteMask, execMask, std::move(registers),
-                        std::move(ldsIntervals)});
+    assert(!counterObligations.empty());
+    assert(counterObligations.size() <= amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS);
+    EventInfo event{waveId,
+                    pc,
+                    type,
+                    {},
+                    static_cast<uint8_t>(counterObligations.size()),
+                    0,
+                    memoryOrder,
+                    EventStatus::ACTIVE,
+                    byteMask,
+                    execMask,
+                    std::move(registers),
+                    std::move(ldsIntervals)};
+    std::ranges::copy(counterObligations, event.counterObligations.begin());
+    entries_.push_back(std::move(event));
 
     // To prevent the number of events recorded growing indefinitely, we try to
     // remove retired events from time to time.
@@ -81,34 +95,50 @@ public:
 
   MemoryEventType type(EventId id) const { return entries_[index(id)].type; }
   amdgpu::WaitCounterType waitCounterType(EventId id) const {
-    return entries_[index(id)].waitCounterType;
+    return entries_[index(id)].counterObligations[0].wait_counter_type();
   }
   std::optional<amdgpu::WaitCounterType> additionalWaitCounterType(EventId id) const {
-    return entries_[index(id)].additionalWaitCounterType;
+    const auto obligations = counterObligations(id);
+    if (obligations.size() < 2)
+      return std::nullopt;
+    return obligations[1].wait_counter_type();
+  }
+  std::span<const amdgpu::MemoryCounterObligation> counterObligations(EventId id) const {
+    const auto &event = entries_[index(id)];
+    return {event.counterObligations.data(), event.numCounterObligations};
   }
   bool hasPendingWaitCounter(EventId id, amdgpu::WaitCounterType waitType) const {
     const auto &event = entries_[index(id)];
-    const bool primaryPending =
-        !event.waitCounterSatisfied && amdgpu::wait_counter_covers(waitType, event.waitCounterType);
-    const bool additionalPending =
-        event.additionalWaitCounterType && !event.additionalWaitCounterSatisfied &&
-        amdgpu::wait_counter_covers(waitType, *event.additionalWaitCounterType);
-    return primaryPending || additionalPending;
+    for (uint8_t i = 0; i < event.numCounterObligations; ++i) {
+      if ((event.satisfiedCounterMask & (uint8_t{1} << i)) == 0 &&
+          amdgpu::wait_counter_covers(waitType, event.counterObligations[i].wait_counter_type()))
+        return true;
+    }
+    return false;
+  }
+  std::optional<MemoryOrderClass> pendingCompletionClass(EventId id,
+                                                         amdgpu::WaitCounterType waitType) const {
+    const auto &event = entries_[index(id)];
+    for (uint8_t i = 0; i < event.numCounterObligations; ++i) {
+      if ((event.satisfiedCounterMask & (uint8_t{1} << i)) == 0 &&
+          amdgpu::wait_counter_covers(waitType, event.counterObligations[i].wait_counter_type()))
+        return event.counterObligations[i].completion_class();
+    }
+    return std::nullopt;
   }
   bool satisfyWaitCounter(EventId id, amdgpu::WaitCounterType waitType) {
     auto &event = entries_[index(id)];
     assert(event.status == EventStatus::ACTIVE);
-    if (amdgpu::wait_counter_covers(waitType, event.waitCounterType))
-      event.waitCounterSatisfied = true;
-    if (event.additionalWaitCounterType &&
-        amdgpu::wait_counter_covers(waitType, *event.additionalWaitCounterType))
-      event.additionalWaitCounterSatisfied = true;
+    for (uint8_t i = 0; i < event.numCounterObligations; ++i) {
+      if (amdgpu::wait_counter_covers(waitType, event.counterObligations[i].wait_counter_type()))
+        event.satisfiedCounterMask |= uint8_t{1} << i;
+    }
     return allWaitCountersSatisfied(id);
   }
   bool allWaitCountersSatisfied(EventId id) const {
     const auto &event = entries_[index(id)];
-    return event.waitCounterSatisfied &&
-           (!event.additionalWaitCounterType || event.additionalWaitCounterSatisfied);
+    return event.satisfiedCounterMask ==
+           static_cast<uint8_t>((uint8_t{1} << event.numCounterObligations) - 1);
   }
   MemoryOrderClass memoryOrder(EventId id) const { return entries_[index(id)].memoryOrder; }
   EventStatus status(EventId id) const { return entries_[index(id)].status; }

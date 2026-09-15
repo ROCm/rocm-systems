@@ -183,20 +183,38 @@ constexpr uint64_t kPartialExecMask = 0xA5A5'F0F0'1234'8001ULL;
 
 class TestMemoryInstruction : public Instruction {
 public:
+  TestMemoryInstruction(std::unique_ptr<DynamicInstState> state,
+                        std::initializer_list<MemoryCounterObligation> counter_obligations,
+                        bool exec_masked = true)
+      : Instruction("test_mem", nullptr) {
+    set_memory_issue_info(counter_obligations, exec_masked);
+    set_data(std::move(state));
+  }
+
   explicit TestMemoryInstruction(
       std::unique_ptr<DynamicInstState> state, std::string_view mnemonic = "test_mem",
       std::optional<WaitCounterType> additional_wait_counter_type = std::nullopt)
       : Instruction(mnemonic, nullptr) {
     if (state->tag() == SCALAR_MEM) {
       const auto &memory = *static_cast<const ScalarMemState *>(state.get());
-      set_memory_issue_info(memory.wait_counter_type, MemoryCompletionClass::UNORDERED,
-                            additional_wait_counter_type, false);
+      if (additional_wait_counter_type) {
+        set_memory_issue_info({{memory.wait_counter_type, MemoryCompletionClass::UNORDERED},
+                               {*additional_wait_counter_type, MemoryCompletionClass::UNORDERED}},
+                              false);
+      } else {
+        set_memory_issue_info({{memory.wait_counter_type, MemoryCompletionClass::UNORDERED}},
+                              false);
+      }
     } else {
       const auto &memory = *static_cast<const VectorMemState *>(state.get());
       const auto completion_class =
           state->tag() == LOCAL_MEM ? MemoryCompletionClass::LDS : MemoryCompletionClass::VMEM;
-      set_memory_issue_info(memory.wait_counter_type, completion_class,
-                            additional_wait_counter_type);
+      if (additional_wait_counter_type) {
+        set_memory_issue_info({{memory.wait_counter_type, completion_class},
+                               {*additional_wait_counter_type, completion_class}});
+      } else {
+        set_memory_issue_info({{memory.wait_counter_type, completion_class}});
+      }
     }
     set_data(std::move(state));
   }
@@ -3365,6 +3383,29 @@ TEST(ExecutionPluginTest, MemoryPipelineHoldsBothGenericFlatCountersUntilComplet
   EXPECT_EQ(wf->wait_counters().lgkmcnt, 0);
 }
 
+TEST(ExecutionPluginTest, MemoryPipelineHoldsAllGenericFlatStoreCountersUntilCompletion) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *wf = f.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->wait_counter_type = WaitCounterType::VMCNT;
+  CounterObservingPipeline pipeline;
+  pipeline.issue(
+      new TestMemoryInstruction(std::move(state),
+                                {{WaitCounterType::VMCNT, MemoryCompletionClass::VMEM},
+                                 {WaitCounterType::LGKMCNT, MemoryCompletionClass::LDS},
+                                 {WaitCounterType::EXPCNT, MemoryCompletionClass::UNORDERED}}),
+      *wf);
+
+  EXPECT_EQ(pipeline.counters_at_access.vmcnt, 1);
+  EXPECT_EQ(pipeline.counters_at_access.lgkmcnt, 1);
+  EXPECT_EQ(pipeline.counters_at_access.expcnt, 1);
+  EXPECT_EQ(wf->wait_counters().vmcnt, 0);
+  EXPECT_EQ(wf->wait_counters().lgkmcnt, 0);
+  EXPECT_EQ(wf->wait_counters().expcnt, 0);
+}
+
 TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotCrossWaveVgprBlock) {
   constexpr uint32_t kVgprsPerWave = 16;
   PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"rdna4", /*wavefront_size=*/32,
@@ -3844,6 +3885,54 @@ TEST(RaceDetectorPluginTest, DualOffsetLoadTracksBothDestinationRanges) {
   EXPECT_NE(sink.str().find("RACE "), std::string::npos);
 }
 
+TEST(RaceDetectorPluginTest, DualOffsetStoreTracksSecondLdsRange) {
+  PluginFixture f(/*num_wf_slots=*/2);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *writer = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  auto *reader = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(writer, nullptr);
+  ASSERT_NE(reader, nullptr);
+  writer->set_exec(1u);
+  reader->set_exec(1u);
+  std::array<amdgpu::Wavefront *, 2> waves{writer, reader};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(
+      /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/512,
+      /*physical_sgpr_count=*/208, waves);
+
+  auto store_state = std::make_unique<VectorMemState>(LOCAL_MEM);
+  store_state->elem_size = sizeof(uint32_t);
+  store_state->num_elems = 1;
+  store_state->is_load = false;
+  store_state->wf_size = writer->wf_size();
+  store_state->exec_mask = 1;
+  store_state->lane_mask = 1;
+  store_state->per_lane_addr[0] = 0;
+  store_state->ds2_active = true;
+  store_state->ds2_per_lane_addr[0] = 16;
+  TestMemoryInstruction store(std::move(store_state));
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(store, *writer);
+
+  auto load_state = std::make_unique<VectorMemState>(LOCAL_MEM);
+  load_state->elem_size = sizeof(uint32_t);
+  load_state->num_elems = 1;
+  load_state->is_load = true;
+  load_state->wf_size = reader->wf_size();
+  load_state->exec_mask = 1;
+  load_state->lane_mask = 1;
+  load_state->dst_reg_base = reader->vgpr_alloc().base;
+  load_state->per_lane_addr[0] = 16;
+  TestMemoryInstruction load(std::move(load_state));
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(load, *reader);
+
+  EXPECT_NE(sink.str().find("RACE "), std::string::npos);
+}
+
 TEST(RaceDetectorPluginTest, LdsRoutedFlatStoreDwordx2TracksTrailingDword) {
   auto trailing_access_reports_race = [](bool flat_store_first) {
     PluginFixture f(/*num_wf_slots=*/2);
@@ -3889,7 +3978,7 @@ TEST(RaceDetectorPluginTest, LdsRoutedFlatStoreDwordx2TracksTrailingDword) {
       EXPECT_NE(store, nullptr);
       if (!store)
         return false;
-      cu->execute_instruction(store.get(), *writer);
+      EXPECT_TRUE(cu->execute_instruction(store.get(), *writer).succeeded());
       EXPECT_NE(store->data(), nullptr);
       if (!store->data())
         return false;
@@ -3959,7 +4048,7 @@ TEST(RaceDetectorPluginTest, Rdna4PartialLoadWaitRetiresOnlyOldestOrderedEvent) 
                                                             .vaddr = kAddressVgpr});
     std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
     ASSERT_NE(load, nullptr);
-    cu->execute_instruction(load.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
     f.plugin_group_->onAmdgpuRouteMemoryInstruction(*load, *wf);
   }
 
@@ -4010,12 +4099,14 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatStoreRequiresBothCounterWaits) {
     ASSERT_NE(store, nullptr);
     const auto *issue = store->amdgpu_memory_issue_info();
     ASSERT_NE(issue, nullptr);
-    EXPECT_EQ(issue->wait_counter_type, WaitCounterType::STORECNT);
-    EXPECT_EQ(issue->completion_class, MemoryCompletionClass::UNORDERED);
-    ASSERT_TRUE(issue->additional_wait_counter_type);
-    EXPECT_EQ(*issue->additional_wait_counter_type, WaitCounterType::DSCNT);
+    const auto obligations = issue->counter_obligations();
+    ASSERT_EQ(obligations.size(), 2u);
+    EXPECT_EQ(obligations[0].wait_counter_type(), WaitCounterType::STORECNT);
+    EXPECT_EQ(obligations[0].completion_class(), MemoryCompletionClass::UNORDERED);
+    EXPECT_EQ(obligations[1].wait_counter_type(), WaitCounterType::DSCNT);
+    EXPECT_EQ(obligations[1].completion_class(), MemoryCompletionClass::LDS);
 
-    cu->execute_instruction(store.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(store.get(), *wf).succeeded());
     f.plugin_group_->onAmdgpuRouteMemoryInstruction(*store, *wf);
 
     auto *plugin_state =

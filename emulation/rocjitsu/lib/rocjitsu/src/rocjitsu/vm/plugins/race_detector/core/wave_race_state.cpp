@@ -45,22 +45,47 @@ void WaveRaceState::registerEvent(
     uint64_t pc, MemoryEventType type, std::vector<uint32_t> regIds, uint64_t execMask,
     uint8_t byteMask, amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
     std::optional<amdgpu::WaitCounterType> additionalWaitCounterType) {
-  registerEventWithIntervals(pc, type, std::move(regIds), execMask, byteMask, {}, waitCounterType,
-                             memoryOrder, additionalWaitCounterType);
+  std::array<amdgpu::MemoryCounterObligation, 2> obligations{
+      amdgpu::MemoryCounterObligation{waitCounterType, memoryOrder}, {}};
+  size_t count = 1;
+  if (additionalWaitCounterType)
+    obligations[count++] = {*additionalWaitCounterType, memoryOrder};
+  registerEvent(pc, type, std::move(regIds), execMask, byteMask,
+                std::span(obligations.data(), count), memoryOrder);
+}
+
+void WaveRaceState::registerEvent(
+    uint64_t pc, MemoryEventType type, std::vector<uint32_t> regIds, uint64_t execMask,
+    uint8_t byteMask, std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+    MemoryOrderClass memoryOrder) {
+  registerEventWithIntervals(pc, type, std::move(regIds), execMask, byteMask, {},
+                             counterObligations, memoryOrder);
 }
 
 void WaveRaceState::registerScalarLoad(
     uint64_t pc, RegisterRef destination, uint64_t execMask,
     amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
     std::optional<amdgpu::WaitCounterType> additionalWaitCounterType) {
+  std::array<amdgpu::MemoryCounterObligation, 2> obligations{
+      amdgpu::MemoryCounterObligation{waitCounterType, memoryOrder}, {}};
+  size_t count = 1;
+  if (additionalWaitCounterType)
+    obligations[count++] = {*additionalWaitCounterType, memoryOrder};
+  registerScalarLoad(pc, destination, execMask, std::span(obligations.data(), count), memoryOrder);
+}
+
+void WaveRaceState::registerScalarLoad(
+    uint64_t pc, RegisterRef destination, uint64_t execMask,
+    std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+    MemoryOrderClass memoryOrder) {
   const size_t limit = destination.cls == RegClass::SGPR   ? sgprMemoryEvents.size()
                        : destination.cls == RegClass::TTMP ? ttmpMemoryEvents.size()
                                                            : 0;
   if (destination.width == 0)
     return;
   if (limit == 0) {
-    registerEvent(pc, MemoryEventType::GLOBAL_TO_SGPR, {}, execMask, 0xF, waitCounterType,
-                  memoryOrder, additionalWaitCounterType);
+    registerEvent(pc, MemoryEventType::GLOBAL_TO_SGPR, {}, execMask, 0xF, counterObligations,
+                  memoryOrder);
     return;
   }
   if (destination.index >= limit || destination.width > limit - destination.index)
@@ -74,15 +99,14 @@ void WaveRaceState::registerScalarLoad(
   registerEvent(pc,
                 destination.cls == RegClass::SGPR ? MemoryEventType::GLOBAL_TO_SGPR
                                                   : MemoryEventType::GLOBAL_TO_TTMP,
-                std::move(registers), execMask, 0xF, waitCounterType, memoryOrder,
-                additionalWaitCounterType);
+                std::move(registers), execMask, 0xF, counterObligations, memoryOrder);
 }
 
 void WaveRaceState::registerEventWithIntervals(
     uint64_t pc, MemoryEventType type, std::vector<uint32_t> regIds, uint64_t execMask,
-    uint8_t byteMask, IntervalSet ldsIntervals, amdgpu::WaitCounterType waitCounterType,
-    MemoryOrderClass memoryOrder,
-    std::optional<amdgpu::WaitCounterType> additionalWaitCounterType) {
+    uint8_t byteMask, IntervalSet ldsIntervals,
+    std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+    MemoryOrderClass memoryOrder) {
   ProfileScope ps(*profiler_, "registerEvent");
   bool toSgpr = isToSgpr(type);
   bool toTtmp = isToTtmp(type);
@@ -98,9 +122,9 @@ void WaveRaceState::registerEventWithIntervals(
     }
   }
 
-  auto eventId = detector->allocateEventId(waveId, pc, type, std::move(regIds), execMask, byteMask,
-                                           std::move(ldsIntervals), waitCounterType, memoryOrder,
-                                           additionalWaitCounterType);
+  auto eventId =
+      detector->allocateEventId(waveId, pc, type, std::move(regIds), execMask, byteMask,
+                                std::move(ldsIntervals), counterObligations, memoryOrder);
   for (uint32_t reg : detector->events().registers(eventId)) {
     if (toSgpr) {
       sgprMemoryEvents[reg].push_back(eventId);
@@ -128,6 +152,20 @@ void WaveRaceState::registerLdsEvent(
     int waveSize, std::span<const uint32_t> laneBaseAddresses, int bytesPerLane, uint8_t byteMask,
     amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
     std::optional<amdgpu::WaitCounterType> additionalWaitCounterType) {
+  std::array<amdgpu::MemoryCounterObligation, 2> obligations{
+      amdgpu::MemoryCounterObligation{waitCounterType, memoryOrder}, {}};
+  size_t count = 1;
+  if (additionalWaitCounterType)
+    obligations[count++] = {*additionalWaitCounterType, memoryOrder};
+  registerLdsEvent(pc, type, std::move(registers), execMask, waveSize, laneBaseAddresses,
+                   bytesPerLane, byteMask, std::span(obligations.data(), count), memoryOrder);
+}
+
+void WaveRaceState::registerLdsEvent(
+    uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers, uint64_t execMask,
+    int waveSize, std::span<const uint32_t> laneBaseAddresses, int bytesPerLane, uint8_t byteMask,
+    std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+    MemoryOrderClass memoryOrder) {
   IntervalSet intervals;
   forEachActiveLane(execMask, waveSize, [&](int lane) {
     int addr = static_cast<int>(laneBaseAddresses[lane]);
@@ -135,8 +173,25 @@ void WaveRaceState::registerLdsEvent(
   });
   intervals.finalize();
   registerEventWithIntervals(pc, type, std::move(registers), execMask, byteMask,
-                             std::move(intervals), waitCounterType, memoryOrder,
-                             additionalWaitCounterType);
+                             std::move(intervals), counterObligations, memoryOrder);
+}
+
+void WaveRaceState::registerLdsEvent(
+    uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers, uint64_t execMask,
+    int waveSize, std::span<const uint32_t> firstLaneBaseAddresses,
+    std::span<const uint32_t> secondLaneBaseAddresses, int bytesPerLane, uint8_t byteMask,
+    std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+    MemoryOrderClass memoryOrder) {
+  IntervalSet intervals;
+  forEachActiveLane(execMask, waveSize, [&](int lane) {
+    for (const auto addresses : {firstLaneBaseAddresses, secondLaneBaseAddresses}) {
+      const int addr = static_cast<int>(addresses[lane]);
+      intervals.append(addr, addr + bytesPerLane);
+    }
+  });
+  intervals.finalize();
+  registerEventWithIntervals(pc, type, std::move(registers), execMask, byteMask,
+                             std::move(intervals), counterObligations, memoryOrder);
 }
 
 void WaveRaceState::registerDualOffsetLdsEvent(uint64_t pc, MemoryEventType type,
@@ -154,6 +209,20 @@ void WaveRaceState::registerDualOffsetLdsEvent(
     int waveSize, std::span<const uint32_t> laneBaseAddresses, int32_t offset0, int32_t offset1,
     amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
     std::optional<amdgpu::WaitCounterType> additionalWaitCounterType) {
+  std::array<amdgpu::MemoryCounterObligation, 2> obligations{
+      amdgpu::MemoryCounterObligation{waitCounterType, memoryOrder}, {}};
+  size_t count = 1;
+  if (additionalWaitCounterType)
+    obligations[count++] = {*additionalWaitCounterType, memoryOrder};
+  registerDualOffsetLdsEvent(pc, type, std::move(registers), execMask, waveSize, laneBaseAddresses,
+                             offset0, offset1, std::span(obligations.data(), count), memoryOrder);
+}
+
+void WaveRaceState::registerDualOffsetLdsEvent(
+    uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers, uint64_t execMask,
+    int waveSize, std::span<const uint32_t> laneBaseAddresses, int32_t offset0, int32_t offset1,
+    std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+    MemoryOrderClass memoryOrder) {
   IntervalSet intervals;
   forEachActiveLane(execMask, waveSize, [&](int lane) {
     uint32_t vAddr = laneBaseAddresses[lane];
@@ -164,7 +233,7 @@ void WaveRaceState::registerDualOffsetLdsEvent(
   });
   intervals.finalize();
   registerEventWithIntervals(pc, type, std::move(registers), execMask, 0xF, std::move(intervals),
-                             waitCounterType, memoryOrder, additionalWaitCounterType);
+                             counterObligations, memoryOrder);
 }
 
 void WaveRaceState::retireEventRegisters(EventId eventId) {
@@ -231,9 +300,11 @@ void WaveRaceState::applyCounterConstraint(amdgpu::WaitCounterType type, int max
   // A nonzero bound cannot select an unordered event. For each independently
   // ordered class, however, at most `maximumRemaining` members of that class
   // can still be pending after the counter constraint is satisfied.
-  for (MemoryOrderClass order : {MemoryOrderClass::VMEM, MemoryOrderClass::LDS}) {
+  for (MemoryOrderClass order :
+       {MemoryOrderClass::VMEM, MemoryOrderClass::LDS, MemoryOrderClass::GDS,
+        MemoryOrderClass::ASYNC_LOAD, MemoryOrderClass::ASYNC_STORE}) {
     auto belongsToOrder = [&](EventId eventId) {
-      return targetsCounter(eventId) && detector->events().memoryOrder(eventId) == order;
+      return detector->events().pendingCompletionClass(eventId, type) == order;
     };
     const int pending = static_cast<int>(std::ranges::count_if(waveMemoryEvents, belongsToOrder));
     satisfyOldestCounterObligations(pending - maximumRemaining, type, belongsToOrder);

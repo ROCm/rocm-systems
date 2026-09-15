@@ -149,17 +149,17 @@ TEST(RaceDetector, FlatLoadCombinedZeroWaitClearsBothCounters) {
   EXPECT_FALSE(b.hasRace());
 }
 
-TEST(RaceDetector, FlatLoadRemainsConservativeAfterPartialCounterWaits) {
+TEST(RaceDetector, FlatLoadCombinedPartialWaitRetiresOldest) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
   b.flatGlobalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1);
   b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
   b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/3);
 
-  // Pre-GFX12 documentation requires zero-valued waits for generic FLAT.
-  // Partial waits cannot identify the whole FLAT operation as complete.
+  // Each counter domain decrements in issue order. Once both domains prove the
+  // oldest FLAT obligation complete, the combined event is complete too.
   b.waitcnt(/*wave=*/0, /*vmcnt=*/1, /*lgkmcnt=*/1);
   b.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
-  EXPECT_TRUE(b.hasVgprRace(1));
+  EXPECT_FALSE(b.hasRace());
 }
 
 // ---- SGPR races (lgkmcnt) ----
