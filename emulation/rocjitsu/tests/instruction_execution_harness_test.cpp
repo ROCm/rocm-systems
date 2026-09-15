@@ -1299,7 +1299,7 @@ void run_scalar_cvt_preserves_scc(rj_code_arch_t arch, std::string_view arch_nam
     wf->halt();
 }
 
-TEST(ScalarSccTest, ScalarCvtPreservesScc) {
+TEST(ScalarSccTest, ScalarCvtRawEncodingPreservesScc) {
   const uint32_t one_f32 = std::bit_cast<uint32_t>(1.0f);
   const uint32_t one_f16 = util::f32_to_f16(1.0f);
   const uint32_t qnan_f32 = 0x7FC00000u;
