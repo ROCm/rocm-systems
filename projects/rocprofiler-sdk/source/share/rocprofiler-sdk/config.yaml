@@ -13332,6 +13332,9 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
           expression: ((TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)*32+TCC_EA0_WRREQ_64B_sum*64)/1024
+        - architectures:
+            - gfx1250
+          expression: GL2C_WRITE_SECTORS_sum*32/1024
     - name: WaveDepWait
       description: 'Unit: percent'
       properties: []
@@ -14559,6 +14562,13 @@ rocprofiler-sdk:
             - gfx1250
           block: GL2C
           event: 191
+    - name: GL2C_WRITE_SECTORS_sum
+      description: Total number of 32B data sectors in write requests. Sum over GL2C instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: reduce(GL2C_WRITE_SECTORS,sum)
     - name: GL2C_ATOMIC
       description: ''
       properties: []
