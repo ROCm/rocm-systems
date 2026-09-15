@@ -103,6 +103,9 @@ def _install_fake_amdsmi():
     interface.amdsmi_get_clock_info = _get_clock_info
     interface.amdsmi_get_gpu_metrics_info = lambda _handle: {}
     interface._NA_amdsmi_get_gpu_metrics_info = lambda: {}
+    # An unmapped version, so unsupported-field filtering suppresses nothing and
+    # these tests see the partition behavior alone.
+    interface.amdsmi_get_gpu_metrics_header_info = lambda _handle: {}
     # Set per-test; default keeps the partition path inert.
     interface.amdsmi_get_gpu_partition_metrics_info = lambda _handle: None
 
@@ -118,6 +121,10 @@ def _install_fake_amdsmi():
 
 
 def _load_metric_module():
+    # metric.py imports its CLI-level siblings by bare name.
+    cli_dir = os.path.dirname(os.path.dirname(METRIC_PATH))
+    if cli_dir not in sys.path:
+        sys.path.insert(0, cli_dir)
     spec = importlib.util.spec_from_file_location("metric_under_test", METRIC_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

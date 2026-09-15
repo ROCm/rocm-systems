@@ -1783,6 +1783,12 @@ class AMDSMIParser(argparse.ArgumentParser):
             "    (XCP/AID/MID) data sources; combine with those flags to scope it;"
             "\n    Only available for MI300 or newer ASICs"
         )
+        show_unsupported_help = (
+            "Print every field, including the ones the GPU's gpu_metrics\n"
+            "    table version cannot carry and which are omitted by default;\n"
+            "    affects human-readable output only, since --json and --csv\n"
+            "    always print every field"
+        )
 
         # Help text for Arguments only on Hypervisors
         schedule_help = "All scheduling information"
@@ -2182,7 +2188,10 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Add Universal Arguments & watch Args
         self._add_watch_arguments(metric_parser)
         self._add_device_arguments(metric_parser, required=False)
-        self._add_command_modifiers(metric_parser)
+        command_modifier_group = self._add_command_modifiers(metric_parser)
+        command_modifier_group.add_argument(
+            "--show-unsupported", action="store_true", required=False, help=show_unsupported_help
+        )
 
     def _add_process_parser(self, subparsers: argparse._SubParsersAction, func):
         if self.helpers.is_hypervisor():
