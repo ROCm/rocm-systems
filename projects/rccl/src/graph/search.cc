@@ -1180,6 +1180,17 @@ ncclResult_t ncclTopoCompute(ncclTopoSystem* system, struct ncclTopoGraph* graph
   // Ampere relies on BALANCED_TREE which sometimes needs to come back through SYS or PHB.
   if (ccMin < 90) maxTypeInter = PATH_SYS;
 
+  // RCCL: cap how far the search may widen typeInter, the GPU-to-NIC path type it accepts. The cap
+  // makes a ring pick the closest NIC of each GPU, or a PXN relay. Farther NICs have no GDR, and a
+  // ring can use the crossNic step below instead of them; a tree cannot. The steps below hold
+  // typeIntra at typeInter, so the cap limits the GPU-to-GPU type as well.
+  int maxTypeInterUnbounded = maxTypeInter;
+  if (system->inter && crossNic == 2 && graph->pattern == NCCL_TOPO_PATTERN_RING) {
+    int localNetPath;
+    NCCLCHECK(ncclTopoGetGpuMaxLocalNetPath(system, &localNetPath));
+    maxTypeInter = std::min(maxTypeInter, localNetPath);
+  }
+
   graph->typeIntra = minTypeIntra;
   graph->typeInter = minTypeInter;
   graph->nChannels = 0;
@@ -1369,6 +1380,15 @@ search:
       goto search;
     }
     tmpGraph.crossNic = crossNic == 1 ? 1 : 0;
+
+    // RCCL: with no solution inside the cap on typeInter, give the cap up and search once more,
+    // here rather than later because the search relaxes path types before bandwidth. The budget
+    // goes back too, or the guard above freezes the first solution the retry finds.
+    if (graph->nChannels == 0 && maxTypeInter < maxTypeInterUnbounded) {
+      maxTypeInter = maxTypeInterUnbounded;
+      globalTimeout = NCCL_SEARCH_GLOBAL_TIMEOUT;
+      goto search;
+    }
 
     // Decrease bw until we find a solution
     if ((speedIndex < nspeeds - 1) && (graph->nChannels == 0 || (speedArray[speedIndex + 1] / graph->bwInter > .49))) {
