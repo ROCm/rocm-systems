@@ -62,12 +62,14 @@ public:
   /// finishes all writeback work. A timing backend may return Deferred and
   /// release the counters later through finish_completed_access().
   void issue(Instruction *inst, Wavefront &wf) {
-    std::array<WaitCounterType, MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS> issue_counters{};
+    std::array<WaitCounterType, MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS * 2> issue_counters{};
     uint8_t num_issue_counters = 0;
     const auto *issue = inst->amdgpu_memory_issue_info();
     if (issue) {
-      for (const auto obligation : issue->counter_obligations())
-        issue_counters[num_issue_counters++] = obligation.wait_counter_type();
+      for (const auto obligation : issue->counter_obligations()) {
+        for (uint8_t token = 0; token < obligation.counter_increment(); ++token)
+          issue_counters[num_issue_counters++] = obligation.wait_counter_type();
+      }
     }
     if (!issue) {
       WaitCounterType issue_counter = counter_type_;
@@ -117,7 +119,7 @@ protected:
 
   void finish_completed_access(
       Instruction *inst, Wavefront &wf,
-      const std::array<WaitCounterType, MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS> &counters,
+      const std::array<WaitCounterType, MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS * 2> &counters,
       uint8_t num_counters) {
     for (uint8_t i = 0; i < num_counters; ++i)
       wf.release_wait_counter(counters[i]);

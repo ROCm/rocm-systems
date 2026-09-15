@@ -2896,6 +2896,23 @@ TEST(ExecutionPluginTest, MemoryPipelineHoldsAllGenericFlatStoreCountersUntilCom
   EXPECT_EQ(wf->wait_counters().expcnt, 0);
 }
 
+TEST(ExecutionPluginTest, MemoryPipelineHonorsWideScalarCounterIncrement) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *wf = f.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+
+  auto state = std::make_unique<ScalarMemState>();
+  state->wait_counter_type = WaitCounterType::LGKMCNT;
+  CounterObservingPipeline pipeline;
+  pipeline.issue(new TestMemoryInstruction(
+                     std::move(state),
+                     {{WaitCounterType::LGKMCNT, MemoryCompletionClass::UNORDERED, 2}}, false),
+                 *wf);
+
+  EXPECT_EQ(pipeline.counters_at_access.lgkmcnt, 2);
+  EXPECT_EQ(wf->wait_counters().lgkmcnt, 0);
+}
+
 TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotCrossWaveVgprBlock) {
   constexpr uint32_t kVgprsPerWave = 16;
   PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"rdna4", /*wavefront_size=*/32,

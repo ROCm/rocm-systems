@@ -192,9 +192,12 @@ TEST(RaceDetector, CounterCapacity_StorecntDoesNotAdvanceVmcnt) {
 }
 
 TEST(RaceDetector, CounterCapacity_GenericFlatAdvancesBothCounterDomains) {
-  const amdgpu::MemoryIssueInfo flatIssue{amdgpu::WaitCounterType::LOADCNT,
-                                          amdgpu::MemoryCompletionClass::UNORDERED,
-                                          amdgpu::WaitCounterType::DSCNT, true};
+  amdgpu::MemoryIssueInfo flatIssue;
+  flatIssue.counter_obligations_[0] = {amdgpu::WaitCounterType::LOADCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM};
+  flatIssue.counter_obligations_[1] = {amdgpu::WaitCounterType::DSCNT,
+                                       amdgpu::MemoryCompletionClass::LDS};
+  flatIssue.num_counter_obligations_ = 2;
 
   auto vmemBuilder = makeVmcntTest();
   issueOrderedVmemLoads(vmemBuilder, kVmcntCapacity);
@@ -226,12 +229,12 @@ TEST(RaceDetector, CounterCapacity_ScalarIssueAdvancesFullOrderedLgkmcntClass) {
   expectVgprReady(builder, /*vgpr=*/0);
 }
 
-TEST(RaceDetector, CounterCapacity_WideScalarIssueContributesOneLgkmcntToken) {
+TEST(RaceDetector, CounterCapacity_WideScalarIssueContributesTwoLgkmcntTokens) {
   auto builder = makeLgkmcntTest();
   issueOrderedLdsReads(builder, kLgkmcntCapacity - 1);
 
   builder.scalarLoad(kWave, /*sgprBase=*/0, /*numRegs=*/2);
-  expectVgprPending(builder, /*vgpr=*/0);
+  expectVgprReady(builder, /*vgpr=*/0);
 }
 
 TEST(RaceDetector, CounterCapacity_MixedLgkmcntDoesNotGuessWhichEventCompleted) {

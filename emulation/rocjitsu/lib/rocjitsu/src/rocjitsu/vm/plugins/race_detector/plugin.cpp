@@ -60,8 +60,7 @@ bool supports_counter_capacity(rj_code_arch_t arch) {
   }
 }
 
-MemoryOrderClass memory_order_for(const Instruction &inst,
-                                  amdgpu::WaitCounterType routed_counter) {
+MemoryOrderClass memory_order_for(const Instruction &inst, amdgpu::WaitCounterType routed_counter) {
   const auto *info = inst.amdgpu_memory_issue_info();
   assert(info && "memory instruction reached the race detector without completion metadata");
   if (info) {
