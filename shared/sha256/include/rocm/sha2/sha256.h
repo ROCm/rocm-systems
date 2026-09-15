@@ -5,8 +5,7 @@
 //
 // Not constant-time. For identifier derivation, not bulk secret processing.
 
-#ifndef ROCM_SHA2_SHA256_H
-#define ROCM_SHA2_SHA256_H
+#pragma once
 
 #include <array>
 #include <cstddef>
@@ -85,5 +84,3 @@ void hmac_sha256(const uint8_t *key, size_t key_len, const uint8_t *msg,
 
 } // namespace sha2
 } // namespace rocm
-
-#endif // ROCM_SHA2_SHA256_H
