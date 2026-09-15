@@ -26,16 +26,16 @@ protected:
     void*             recvbuff_{reinterpret_cast<void*>(0x2000)};
 };
 
-// LL128 eligibility tests: skip when RCCL_DDA_LL128 is disabled (the default).
-// When LL128 is enabled by default, these tests automatically run.
+// LL128 eligibility tests: skip when RCCL_DDA_LL is disabled.
+// LL128 paths are gated by rcclParamDdaLL() (not rcclParamDdaLL128()).
 class DdaFabricLL128EligibilityTest : public DdaFabricEligibilityTest
 {
 protected:
     void SetUp() override
     {
         DdaFabricEligibilityTest::SetUp();
-        if (!rcclParamDdaLL128())
-            GTEST_SKIP() << "LL128 disabled (RCCL_DDA_LL128=0); set RCCL_DDA_LL128=1 to run";
+        if (!rcclParamDdaLL())
+            GTEST_SKIP() << "LL disabled (RCCL_DDA_LL=0); set RCCL_DDA_LL=1 to run";
     }
 };
 

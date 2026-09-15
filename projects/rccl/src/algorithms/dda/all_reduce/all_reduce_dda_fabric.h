@@ -56,6 +56,9 @@ __launch_bounds__(512)
   __global__ void ddaAllReduceTreeFabric(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                                          const T* __restrict__ sendbuff, int selfRank, int nRanks,
                                          FabricGpuBarrier barrier, const T* __restrict__ acc) {
+  // Release-acquire barrier ensures the stream-ordered scratch write is visible to peers.
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+
   // Use the compile-time rank count as the divisor when specialized.
   const int nRanksEff = (NRANKS_CT > 0) ? NRANKS_CT : nRanks;
   const size_t countPerRank = count / nRanksEff;
@@ -65,10 +68,6 @@ __launch_bounds__(512)
   const auto idxStart = gtIdx * countPerThread;
   const auto idxEnd = countPerRank;
   const size_t idxStride = gridDim.x * blockDim.x * countPerThread;
-
-  // Publish the stream-ordered scratch copy before any rank consumes peer
-  // scratch. Keeping this in the collective avoids an extra graph node.
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   // Two-shot: reduce-scatter this rank's shard, then all-gather. The unified
   // helpers fold nRanks to NRANKS_CT (full unroll) when specialized, else use

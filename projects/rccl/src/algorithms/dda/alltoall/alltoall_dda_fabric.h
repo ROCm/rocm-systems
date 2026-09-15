@@ -26,6 +26,9 @@ __launch_bounds__(512)
 #endif
   __global__ void ddaAllToAllFabric(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                                     int selfRank, int nRanks, FabricGpuBarrier barrier) {
+  // Release-acquire barrier ensures the stream-ordered scratch write is visible to peers.
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+
   // use uint4 to do 16-byte loads to maximize memory efficiency. We assume
   // that count % countPerThread == 0, enforced before kernel launch.
   const int nRanksEff = (NRANKS_CT > 0) ? NRANKS_CT : nRanks;
@@ -39,10 +42,6 @@ __launch_bounds__(512)
   const auto idxStart = gtIdx * countPerThread;
   const auto idxEnd = countPerRank;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
-
-  // Publish the stream-ordered scratch copy before any rank consumes peer
-  // scratch. Keeping this in the collective avoids an extra graph node.
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   for (size_t idx = idxStart; idx < idxEnd; idx += idxStride) {
 #pragma unroll kUnroll

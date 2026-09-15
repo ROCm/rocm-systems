@@ -134,7 +134,7 @@ bool ncclAllGatherDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
                                          ncclDataType_t datatype) {
   (void)sendbuff;
   (void)recvbuff;
-  if (!rcclParamDdaLL128()) {
+  if (!rcclParamDdaLL()) {
     return false;
   }
   if (comm == nullptr || comm->bootstrap == nullptr) {
