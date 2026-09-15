@@ -656,7 +656,7 @@ rocpd_processor_t::handle(const hipfile_pmc_sample& hipfile_sample)
 
     const auto enabled = hipfile_sample.enabled_metric.value;
 
-    for(const auto& metric : collector::METRIC_TABLE)
+    for(const auto& metric : collector::k_metric_table)
     {
         if((enabled & (1U << metric.bit)) == 0U)
         {

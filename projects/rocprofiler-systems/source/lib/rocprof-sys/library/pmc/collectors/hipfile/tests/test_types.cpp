@@ -28,14 +28,14 @@ TEST(HipFileMetricTable, units_match_amd_smi_conventions)
         { "Read Bandwidth", "bytes/s" }, { "Write Bandwidth", "bytes/s" },
     };
 
-    ASSERT_EQ(METRIC_TABLE.size(), expected.size());
+    ASSERT_EQ(k_metric_table.size(), expected.size());
 
-    for(const auto& metric : METRIC_TABLE)
+    for(const auto& metric : k_metric_table)
     {
         SCOPED_TRACE(metric.suffix);
-        const auto it = expected.find(metric.suffix);
-        ASSERT_NE(it, expected.end());
-        EXPECT_EQ(std::string_view{ metric.unit }, it->second);
+        const auto entry_it = expected.find(metric.suffix);
+        ASSERT_NE(entry_it, expected.end());
+        EXPECT_EQ(std::string_view{ metric.unit }, entry_it->second);
         EXPECT_FALSE(std::string_view{ metric.unit }.empty());
     }
 }
