@@ -23,6 +23,10 @@ file(REAL_PATH "${_hipfile_script_dir}/.." _hipfile_test_dir)
 # lib/rocm_sysdeps/lib in TheRock-style installs; harmless if absent elsewhere.
 set(_hipfile_libdir "${_hipfile_test_dir}/../../../lib")
 set(_hipfile_ld "${_hipfile_libdir}:${_hipfile_libdir}/rocm_sysdeps/lib")
+# Preserve caller-provided toolchain runtimes, such as Clang's shared ASAN.
+if(DEFINED ENV{LD_LIBRARY_PATH} AND NOT "$ENV{LD_LIBRARY_PATH}" STREQUAL "")
+    string(APPEND _hipfile_ld ":$ENV{LD_LIBRARY_PATH}")
+endif()
 
 # Enumerate one binary's GoogleTest cases and register each as an isolated test.
 macro(_hipfile_discover_binary _bin_name _label_suffix)
