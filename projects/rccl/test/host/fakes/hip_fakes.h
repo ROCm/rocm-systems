@@ -27,6 +27,8 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_runtime.h>
 
+#include "nccl.h"
+
 // hipMemGetAddressRange / hipIpcGetMemHandle
 extern std::function<hipError_t(hipDeviceptr_t* /*pbase*/, std::size_t* /*psize*/,
                                 hipDeviceptr_t /*dptr*/)>
@@ -116,6 +118,14 @@ extern std::function<hipError_t(hipEvent_t /*event*/, hipStream_t /*stream*/)>
 extern std::function<hipError_t(hipStream_t /*stream*/, hipEvent_t /*event*/,
                                 unsigned int /*flags*/)>
     g_hipStreamWaitEvent;
+
+// src/misc/cudawrap.cc's batch-memory-op wrapper. Not a hip* symbol, but it is a
+// thin shim over the driver's stream batch-memop API and no other fakes file owns
+// it. It is how the RMA copy-engine path submits its wait/write operations, so a
+// test asserting what a unit enqueued drives this. Default succeeds, records nothing.
+extern std::function<ncclResult_t(hipStream_t /*stream*/, unsigned int /*numOps*/,
+                                  hipStreamBatchMemOpParams* /*batchParams*/)>
+    g_cuStreamBatchMemOp;
 
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.

@@ -24,6 +24,7 @@ test_categories:
       - "RmaLaunchTest.*"
       - "RmaScheduleTest.*"
       - "RmaDebugLoggingTest.*"
+      - "RmaCeLaunchTest.*"
       - "GroupEndInternalTest.*"
       - "Devcomm*"
     exclude_windows:
