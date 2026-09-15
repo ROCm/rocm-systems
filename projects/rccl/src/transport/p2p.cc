@@ -194,6 +194,21 @@ ncclResult_t p2pCanConnect(int* ret, struct ncclComm* comm, struct ncclTopoGraph
   }
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  if (p2p != 0 && cudaDev1 != cudaDev2) {
+    // Both endpoints must select the same transport. Require peer access in both directions before using P2P.
+    int reverseP2p;
+    if (!CUDASUCCESS(cudaDeviceCanAccessPeer(&reverseP2p, cudaDev2, cudaDev1))) {
+      INFO(NCCL_INIT | NCCL_P2P, "reverse peer query failed between dev %d(=%lx) and dev %d(=%lx)", cudaDev2,
+           info2->busId, cudaDev1, info1->busId);
+      *ret = 0;
+      return ncclSuccess;
+    }
+    if (reverseP2p == 0) {
+      TRACE(NCCL_P2P, "asymmetric peer access between dev %d(=%lx) and dev %d(=%lx): %d/%d", cudaDev1, info1->busId,
+            cudaDev2, info2->busId, p2p, reverseP2p);
+    }
+    p2p = p2p && reverseP2p;
+  }
 #else
   // This will always fail when using NCCL_CUMEM_ENABLE=1
   if (p2p != 0 && !ncclCuMemEnable()) {
