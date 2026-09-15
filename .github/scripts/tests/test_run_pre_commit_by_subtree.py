@@ -8,7 +8,6 @@ files reports "no files to check" and exits 0. A silent pass on a merge-gating
 check is worse than a failure, so a missing subtree config must be fatal.
 """
 
-import os
 from unittest.mock import patch
 
 import pytest
@@ -241,6 +240,23 @@ class TestCheckSubtreesMaterialised:
             == []
         )
 
+    def test_config_missing_is_not_a_materialisation_failure(
+        self, tmp_path, monkeypatch
+    ):
+        # Distinct from an absent subtree: the directory IS on disk, only its
+        # config is missing. That must reach run_group's own error, not this one's.
+        from run_pre_commit_by_subtree import check_subtrees_materialised
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "projects" / "rccl").mkdir(parents=True)
+
+        assert (
+            check_subtrees_materialised(
+                ["projects/rccl/src/init.cc"], ["projects/rccl"]
+            )
+            == []
+        )
+
     def test_deleting_files_is_not_mistaken_for_a_missing_checkout(
         self, tmp_path, monkeypatch
     ):
@@ -323,6 +339,32 @@ class TestMain:
         assert exc.value.code == 1
         run.assert_not_called()
 
+    def test_checked_out_but_unconfigured_subtree_reaches_run_groups_error(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        # The directory IS on disk, only its config is missing. Must fail via
+        # run_group's own message, not be misreported as "never checked out".
+        import logging
+
+        from run_pre_commit_by_subtree import main
+
+        monkeypatch.chdir(tmp_path)
+        src = tmp_path / "projects" / "rccl" / "src"
+        src.mkdir(parents=True)
+        (src / "init.cc").write_text("int main(){}\n", encoding="utf-8")
+        listing = tmp_path / "files.txt"
+        listing.write_text("projects/rccl/src/init.cc\n", encoding="utf-8")
+
+        with caplog.at_level(logging.ERROR):
+            with patch("run_pre_commit_by_subtree.subprocess.run") as run:
+                with pytest.raises(SystemExit) as exc:
+                    main(["--files-from", str(listing)])
+
+        assert exc.value.code == 1
+        run.assert_not_called()
+        assert "refusing to fall back" in caplog.text
+        assert "never checked out" not in caplog.text
+
     def test_failing_group_exits_one(self, tmp_path, monkeypatch):
         import pytest
 
@@ -347,10 +389,11 @@ class TestMain:
 
 
 class TestExcludedProjectListsAgree:
-    """The three places that list root-excluded projects must not drift apart.
+    """The places that list root-excluded projects must not drift apart.
 
-    A project in the root `exclude:` is invisible to the root config, so the bot's failure comment
-    must name it or its developers get sent to a command that checks nothing and exits 0.
+    A project in the root `exclude:` is invisible to the root config, so anything telling
+    developers to run it (the bot's failure comment, the FAQ) must name every such project or
+    send them to a command that checks nothing and exits 0.
     """
 
     @staticmethod
@@ -367,7 +410,8 @@ class TestExcludedProjectListsAgree:
         cfg = yaml.safe_load(
             (self._repo_root() / ".pre-commit-config.yaml").read_text()
         )
-        return set(re.findall(r"(projects/[A-Za-z0-9._-]+)/", cfg["exclude"]))
+        # /? : some root-excluded entries have no trailing slash (see "shared/amdgpu-...").
+        return set(re.findall(r"(projects/[A-Za-z0-9._-]+)/?", cfg["exclude"]))
 
     def _projects_named_in_failure_comment(self):
         import re
@@ -380,6 +424,12 @@ class TestExcludedProjectListsAgree:
         body = policy["checks"]["failure_comments"]["pre-commit"]["body"]
         return set(re.findall(r"`(projects/[A-Za-z0-9._-]+)`", body))
 
+    def _projects_named_in_faq(self):
+        import re
+
+        text = (self._repo_root() / "docs/SYSTEMS_PR_BOT_FAQ.md").read_text()
+        return set(re.findall(r"`(projects/[A-Za-z0-9._-]+)`", text))
+
     def test_failure_comment_names_every_root_excluded_project(self):
         excluded = self._root_excluded_projects()
         named = self._projects_named_in_failure_comment()
@@ -387,6 +437,17 @@ class TestExcludedProjectListsAgree:
         assert named == excluded, (
             "tools/systems_pr_bot/policy.yml's pre-commit failure comment is out of step with "
             "the root .pre-commit-config.yaml `exclude:` block.\n"
+            f"  excluded but not named: {sorted(excluded - named)}\n"
+            f"  named but not excluded: {sorted(named - excluded)}"
+        )
+
+    def test_faq_names_every_root_excluded_project(self):
+        excluded = self._root_excluded_projects()
+        named = self._projects_named_in_faq()
+        assert excluded, "parsed no projects out of the root exclude block"
+        assert named == excluded, (
+            "docs/SYSTEMS_PR_BOT_FAQ.md's own-config callout is out of step with the root "
+            ".pre-commit-config.yaml `exclude:` block.\n"
             f"  excluded but not named: {sorted(excluded - named)}\n"
             f"  named but not excluded: {sorted(named - excluded)}"
         )
@@ -399,3 +460,91 @@ class TestExcludedProjectListsAgree:
             f"{sorted(missing)} are checked by this script but not excluded from the root config, "
             "so both configs claim their files (onboarding step 4)."
         )
+
+
+class TestRcclConfigRegexes:
+    """Pin projects/rccl/.pre-commit-config.yaml's clang-format files:/exclude: regexes.
+
+    Nothing else asserts on them, so a typo could narrow the hook to matching zero files: a
+    green clang-format run that silently checked nothing.
+    """
+
+    @staticmethod
+    def _read_repo_file(relative_path):
+        # projects/rccl/ is outside this gate's own sparse-checkout cone, so fall back to the
+        # git object store: the blob is still fetched, just not materialised in the working tree.
+        import subprocess
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parents[3]
+        on_disk = repo_root / relative_path
+        if on_disk.is_file():
+            return on_disk.read_text()
+        return subprocess.run(
+            ["git", "show", f"HEAD:{relative_path}"],
+            cwd=repo_root,
+            capture_output=True,
+            check=True,
+            text=True,
+        ).stdout
+
+    @classmethod
+    def _rccl_config(cls):
+        import re
+
+        import yaml
+
+        cfg = yaml.safe_load(
+            cls._read_repo_file("projects/rccl/.pre-commit-config.yaml")
+        )
+        clang_format = next(
+            hook
+            for repo in cfg["repos"]
+            for hook in repo["hooks"]
+            if hook["id"] == "clang-format"
+        )
+        return re.compile(clang_format["files"]), re.compile(cfg["exclude"], re.VERBOSE)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "projects/rccl/src/init.cc",
+            "projects/rccl/src/include/comm.h",
+            "projects/rccl/src/graph/paths.cu",
+            "projects/rccl/src/device/prims_simple.cuh",
+        ],
+    )
+    def test_files_regex_matches_rccl_source(self, path):
+        files_re, _ = self._rccl_config()
+        assert files_re.search(path)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "projects/rccl/test/common.cc",  # not under src/
+            "projects/rccl/src/tools/foo.py",  # wrong extension
+            "docs/readme.md",  # wrong project entirely
+        ],
+    )
+    def test_files_regex_excludes_non_source(self, path):
+        files_re, _ = self._rccl_config()
+        assert not files_re.search(path)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "projects/rccl/src/include/nvtx3/nvtx3.hpp",
+            "projects/rccl/src/transport/net_ib/gdaki/doca-gpunetio/x.h",
+            "projects/rccl/src/include/gdrwrap.h",
+            "projects/rccl/src/include/mlx5/mlx5dvcore.h",
+            "projects/rccl/src/include/ibvcore.h",
+            "projects/rccl/src/nccl.h.in",
+        ],
+    )
+    def test_vendored_paths_are_excluded(self, path):
+        _, exclude_re = self._rccl_config()
+        assert exclude_re.search(path)
+
+    def test_regular_source_is_not_excluded(self):
+        _, exclude_re = self._rccl_config()
+        assert not exclude_re.search("projects/rccl/src/init.cc")
