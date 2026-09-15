@@ -39,10 +39,10 @@ be on the include path.
 | `data_hazard_engine.h` | `DataHazardEngine` — the entry point |
 | `simulator_api.h` | `DataHazardSimulatorApi` (the event interface the engine implements) and `SimulatorInstructionFormatter` |
 | `hazard_events.h` | Event and finding types: `InstructionEvent`, `ResourceAccessEvent`, `BarrierEvent`, `WaitAction`, `HazardFinding` |
-| `types.h` | `WaitCntType`, `ExecutionKey`, and the per-wave state types |
+| `types.h` | `WaitCntType` and the per-wave state types |
 | `data_hazard_state.h` | `EngineWarning`, `HazardWarningSink`, and the engine's state structures |
 | `wait_suggestion.h` | `make_wait_suggestion` and the wording of the advice attached to a hazard |
-| `hash_utils.h`, `spin_lock.h` | Small utilities the state types expose in their interfaces |
+| `hash_utils.h`, `spin_lock.h` | `ExecutionKey`, its hash utility, and the lock type exposed by state interfaces |
 
 Everything under `detail/` is an implementation header. It is not installed, and
 its contents can change without notice.
