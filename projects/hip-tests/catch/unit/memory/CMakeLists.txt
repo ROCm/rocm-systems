@@ -42,6 +42,7 @@ set(TEST_SRC
     hipMemcpyAllApiNegative.cc
     hipMemcpy_MultiThread.cc
     hipMemcpyDynamicQueueChurn.cc
+    hipMemcpyPageableFileBacked_test.cc
     hipHostRegister.cc
     hipHostUnregister.cc
     hipHostGetFlags.cc
