@@ -27,6 +27,7 @@
 #include "param.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 NCCL_PARAM(GinAllReduceEnable, "GIN_ALLREDUCE_ENABLE", 1);
 // When 0 (default), GIN AllReduce is eligible only for messages >= 256 MiB.
@@ -106,7 +107,7 @@ template <typename T>
 static ncclResult_t ncclAllReduceGinSdmaOneShotTyped(const void* sendbuff, void* recvbuff, size_t count,
                                                      ncclComm* comm, cudaStream_t stream,
                                                      struct ncclDevrWindow* sendWin,
-                                                     struct ncclDevrWindow* recvWin) {
+                                                     struct ncclDevrWindow* recvWin, hipEvent_t stopEvent) {
   NCCLCHECK(ncclGinAllReduceInitOnce(comm));
 
   const size_t sendOff =
@@ -114,8 +115,9 @@ static ncclResult_t ncclAllReduceGinSdmaOneShotTyped(const void* sendbuff, void*
   const size_t recvOff =
     static_cast<size_t>(static_cast<char*>(recvbuff) - static_cast<const char*>(recvWin->userPtr));
 
-  gin::sdma::allReduceLsaOneShotKernel<T><<<kGinAllReduceLsaCtas, kGinAllReduceLsaThreadsPerCta, 0, stream>>>(
-    sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, count, comm->ginAllReduceState.devComm);
+  hipExtLaunchKernelGGL((gin::sdma::allReduceLsaOneShotKernel<T>), kGinAllReduceLsaCtas,
+                        kGinAllReduceLsaThreadsPerCta, 0, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0,
+                        sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, count, comm->ginAllReduceState.devComm);
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;
 }
@@ -136,16 +138,17 @@ static int ginAllReduceLsaTwoShotCtas(int nRanks) {
 template <typename T, int NRANKS_CT>
 static void ginAllReduceLaunchLsaTwoShot(ncclComm* comm, cudaStream_t stream, struct ncclDevrWindow* sendWin,
                                          size_t sendOff, struct ncclDevrWindow* recvWin, size_t recvOff,
-                                         size_t countPerRank, int gridCtas) {
-  gin::sdma::lsaAllReduceTwoShotKernel<T, NRANKS_CT><<<gridCtas, kGinAllReduceLsaThreadsPerCta, 0, stream>>>(
-      comm->ginAllReduceState.devComm, sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, countPerRank, comm->nRanks);
+                                         size_t countPerRank, int gridCtas, hipEvent_t stopEvent) {
+  hipExtLaunchKernelGGL((gin::sdma::lsaAllReduceTwoShotKernel<T, NRANKS_CT>), gridCtas, kGinAllReduceLsaThreadsPerCta,
+                        0, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, comm->ginAllReduceState.devComm,
+                        sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, countPerRank, comm->nRanks);
 }
 
 template <typename T>
 static ncclResult_t ncclAllReduceGinSdmaLsaTwoShotTyped(const void* sendbuff, void* recvbuff, size_t count,
                                                         ncclComm* comm, cudaStream_t stream,
                                                         struct ncclDevrWindow* sendWin,
-                                                        struct ncclDevrWindow* recvWin) {
+                                                        struct ncclDevrWindow* recvWin, hipEvent_t stopEvent) {
   NCCLCHECK(ncclGinAllReduceInitOnce(comm));
 
   const size_t sendOff =
@@ -157,16 +160,20 @@ static ncclResult_t ncclAllReduceGinSdmaLsaTwoShotTyped(const void* sendbuff, vo
 
   switch (comm->nRanks) {
   case 2:
-    ginAllReduceLaunchLsaTwoShot<T, 2>(comm, stream, sendWin, sendOff, recvWin, recvOff, countPerRank, gridCtas);
+    ginAllReduceLaunchLsaTwoShot<T, 2>(comm, stream, sendWin, sendOff, recvWin, recvOff, countPerRank, gridCtas,
+                                       stopEvent);
     break;
   case 4:
-    ginAllReduceLaunchLsaTwoShot<T, 4>(comm, stream, sendWin, sendOff, recvWin, recvOff, countPerRank, gridCtas);
+    ginAllReduceLaunchLsaTwoShot<T, 4>(comm, stream, sendWin, sendOff, recvWin, recvOff, countPerRank, gridCtas,
+                                       stopEvent);
     break;
   case 8:
-    ginAllReduceLaunchLsaTwoShot<T, 8>(comm, stream, sendWin, sendOff, recvWin, recvOff, countPerRank, gridCtas);
+    ginAllReduceLaunchLsaTwoShot<T, 8>(comm, stream, sendWin, sendOff, recvWin, recvOff, countPerRank, gridCtas,
+                                       stopEvent);
     break;
   default:
-    ginAllReduceLaunchLsaTwoShot<T, 0>(comm, stream, sendWin, sendOff, recvWin, recvOff, countPerRank, gridCtas);
+    ginAllReduceLaunchLsaTwoShot<T, 0>(comm, stream, sendWin, sendOff, recvWin, recvOff, countPerRank, gridCtas,
+                                       stopEvent);
     break;
   }
   CUDACHECK(cudaGetLastError());
@@ -177,7 +184,7 @@ template <typename T>
 static ncclResult_t ncclAllReduceGinSdmaGinTwoShotTyped(const void* sendbuff, void* recvbuff, size_t count,
                                                         ncclComm* comm, cudaStream_t stream,
                                                         struct ncclDevrWindow* sendWin,
-                                                        struct ncclDevrWindow* recvWin) {
+                                                        struct ncclDevrWindow* recvWin, hipEvent_t stopEvent) {
   NCCLCHECK(ncclGinAllReduceInitOnce(comm));
 
   const size_t sendOff =
@@ -186,9 +193,10 @@ static ncclResult_t ncclAllReduceGinSdmaGinTwoShotTyped(const void* sendbuff, vo
     static_cast<size_t>(static_cast<char*>(recvbuff) - static_cast<const char*>(recvWin->userPtr));
   const size_t countPerRank = count / static_cast<size_t>(comm->nRanks);
 
-  gin::sdma::ginAllReduceTwoShotKernel<T><<<kGinAllReduceLsaCtas, kGinAllReduceLsaThreadsPerCta, 0, stream>>>(
-    comm->ginAllReduceState.devComm, sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, countPerRank, comm->nRanks,
-    comm->ginAllReduceState.intraGpuCtaBar);
+  hipExtLaunchKernelGGL((gin::sdma::ginAllReduceTwoShotKernel<T>), kGinAllReduceLsaCtas,
+                        kGinAllReduceLsaThreadsPerCta, 0, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0,
+                        comm->ginAllReduceState.devComm, sendWin->vidmem, sendOff, recvWin->vidmem, recvOff,
+                        countPerRank, comm->nRanks, comm->ginAllReduceState.intraGpuCtaBar);
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;
 }
@@ -196,17 +204,17 @@ static ncclResult_t ncclAllReduceGinSdmaGinTwoShotTyped(const void* sendbuff, vo
 template <typename T>
 static ncclResult_t ncclAllReduceGinSdmaTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
                                               cudaStream_t stream, struct ncclDevrWindow* sendWin,
-                                              struct ncclDevrWindow* recvWin) {
+                                              struct ncclDevrWindow* recvWin, hipEvent_t stopEvent) {
   const size_t bytes = count * sizeof(T);
   // Inclusive of 4 MiB so dispatch matches ginAllReduceSizePolicyEligible() and the
   // documented LSA one-shot band. Two-shot starts strictly above this threshold.
   if (bytes <= kGinAllReduceLsaOneShotMaxBytes) {
-    return ncclAllReduceGinSdmaOneShotTyped<T>(sendbuff, recvbuff, count, comm, stream, sendWin, recvWin);
+    return ncclAllReduceGinSdmaOneShotTyped<T>(sendbuff, recvbuff, count, comm, stream, sendWin, recvWin, stopEvent);
   }
   if (bytes >= kGinAllReduceGinTwoShotMinBytes) {
-    return ncclAllReduceGinSdmaGinTwoShotTyped<T>(sendbuff, recvbuff, count, comm, stream, sendWin, recvWin);
+    return ncclAllReduceGinSdmaGinTwoShotTyped<T>(sendbuff, recvbuff, count, comm, stream, sendWin, recvWin, stopEvent);
   }
-  return ncclAllReduceGinSdmaLsaTwoShotTyped<T>(sendbuff, recvbuff, count, comm, stream, sendWin, recvWin);
+  return ncclAllReduceGinSdmaLsaTwoShotTyped<T>(sendbuff, recvbuff, count, comm, stream, sendWin, recvWin, stopEvent);
 }
 
 // Comm / buffer / datatype gates shared by eligibility and the DDA fallback.
@@ -254,7 +262,7 @@ bool ncclAllReduceGinSdmaYieldToDda(ncclComm* comm, const void* sendbuff, void* 
 }
 
 ncclResult_t ncclAllReduceGinSdma(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                  ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
+                                  ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
   struct ncclDevrWindow* sendWin = nullptr;
   struct ncclDevrWindow* recvWin = nullptr;
   NCCLCHECK(ncclDevrFindWindow(comm, sendbuff, &sendWin));
@@ -263,11 +271,11 @@ ncclResult_t ncclAllReduceGinSdma(const void* sendbuff, void* recvbuff, size_t c
 
   switch (datatype) {
   case ncclFloat32:
-    return ncclAllReduceGinSdmaTyped<float>(sendbuff, recvbuff, count, comm, stream, sendWin, recvWin);
+    return ncclAllReduceGinSdmaTyped<float>(sendbuff, recvbuff, count, comm, stream, sendWin, recvWin, stopEvent);
   case ncclFloat16:
-    return ncclAllReduceGinSdmaTyped<half>(sendbuff, recvbuff, count, comm, stream, sendWin, recvWin);
+    return ncclAllReduceGinSdmaTyped<half>(sendbuff, recvbuff, count, comm, stream, sendWin, recvWin, stopEvent);
   case ncclBfloat16:
-    return ncclAllReduceGinSdmaTyped<bf16>(sendbuff, recvbuff, count, comm, stream, sendWin, recvWin);
+    return ncclAllReduceGinSdmaTyped<bf16>(sendbuff, recvbuff, count, comm, stream, sendWin, recvWin, stopEvent);
   default:
     return ncclInvalidArgument;
   }
