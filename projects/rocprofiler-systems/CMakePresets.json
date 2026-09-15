@@ -113,6 +113,26 @@
             "displayName": "Code coverage build",
             "inherits": "default",
             "name": "coverage"
+        },
+        {
+            "binaryDir": "${sourceDir}/build/release-mpi",
+            "cacheVariables": {
+                "ROCPROFSYS_USE_MPI": "ON"
+            },
+            "description": "Release build with full MPI support",
+            "displayName": "Release MPI build",
+            "inherits": "release",
+            "name": "release-mpi"
+        },
+        {
+            "binaryDir": "${sourceDir}/build/debug-mpi",
+            "cacheVariables": {
+                "ROCPROFSYS_USE_MPI": "ON"
+            },
+            "description": "Debug build with full MPI support, examples, and tests",
+            "displayName": "Debug MPI build",
+            "inherits": "debug",
+            "name": "debug-mpi"
         }
     ],
     "version": 3
