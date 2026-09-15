@@ -175,8 +175,9 @@ jobs:
               echo "ERROR: sbatch succeeded (rc=0) but printed no parsable job id: '${JOB_ID}'"
               exit 1
             fi
-            # Persist for the `if: cancelled()` backup step below: GitHub
-            # SIGKILLs the step ~2.5s after SIGTERM, which can beat the trap.
+            # Persist for the `if: failure() || cancelled()` backup step
+            # below: GitHub SIGKILLs the step ~2.5s after SIGTERM, which can
+            # beat the trap.
             printf '%s\n' "${JOB_ID}" > "${RUNNER_TEMP}/sp_build-slurm-job-id"
             echo "Submitted sp_build job ${JOB_ID}"
             # Bound a *continuously* empty sacct answer the same way

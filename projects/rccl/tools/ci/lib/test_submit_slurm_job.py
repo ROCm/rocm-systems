@@ -142,7 +142,12 @@ class WaitForJobTest(unittest.TestCase):
 
 class SubmitCommandTest(unittest.TestCase):
     def test_submit_does_not_use_sbatch_wait(self) -> None:
-        """`sbatch --wait` is what leaked nodes on cancel; pin its absence."""
+        """`sbatch --wait` is what leaked nodes on cancel; pin its absence.
+
+        Also pins that partition/reservation actually reach sbatch's argv:
+        nothing else in the suite passes a non-empty value for either, so
+        those two append branches had zero executions.
+        """
         seen = {}
 
         def fake_run(cmd, **kwargs):
@@ -154,12 +159,18 @@ class SubmitCommandTest(unittest.TestCase):
                 submit_slurm_job, "wait_for_job", lambda *a, **k: (0, None)
             ):
                 rc, job_id, result = submit_slurm_job.submit_and_wait(
-                    submit_slurm_job.Path("job.sbatch"), "ALL", None, None
+                    submit_slurm_job.Path("job.sbatch"),
+                    "ALL",
+                    None,
+                    "amd-tw",
+                    "rccl_ci",
                 )
 
         self.assertEqual((rc, job_id, result), (0, "19010", None))
         self.assertNotIn("--wait", seen["cmd"])
         self.assertIn("--parsable", seen["cmd"])
+        self.assertIn("--partition=amd-tw", seen["cmd"])
+        self.assertIn("--reservation=rccl_ci", seen["cmd"])
 
     def test_submit_writes_job_id_file_when_chdir_given(self) -> None:
         """Argus flagged that no test ever exercised the slurm-job-id write.
@@ -292,6 +303,17 @@ class SubmitCommandTest(unittest.TestCase):
         # the post-sbatch cancel_requested check now that it is known.
         self.assertEqual(scancelled, ["", "19010"])
         self.assertEqual(wait_for_job_calls, [])
+        # Only SIGTERM is fired above; this pins that SIGINT/SIGHUP are also
+        # registered, since narrowing submit_and_wait's signal tuple to just
+        # SIGTERM would otherwise still pass every test in this file.
+        self.assertEqual(
+            set(handlers),
+            {
+                submit_slurm_job.signal.SIGINT,
+                submit_slurm_job.signal.SIGTERM,
+                submit_slurm_job.signal.SIGHUP,
+            },
+        )
 
     def test_submit_returns_wait_for_jobs_terminal_result(self) -> None:
         """submit_and_wait must hand back the JobResult wait_for_job saw.
@@ -418,8 +440,6 @@ class MainRegressionTest(unittest.TestCase):
                             str(script),
                             "--chdir",
                             str(chdir),
-                            "--poll-interval",
-                            "0",
                             "--wait-poll-interval",
                             "0",
                         ]

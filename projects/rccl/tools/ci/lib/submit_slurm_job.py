@@ -95,7 +95,7 @@ def scancel_job(job_id: str) -> None:
     # RuntimeError ("reentrant call") out of the handler -- which would abort it
     # before the one thing it exists to do.
     try:
-        subprocess.run(
+        proc = subprocess.run(
             ["scancel", job_id],
             check=False,
             stdout=subprocess.DEVNULL,
@@ -103,6 +103,9 @@ def scancel_job(job_id: str) -> None:
         )
     except FileNotFoundError:
         log(f"WARNING: scancel not found; job {job_id} may keep running")
+        return
+    if proc.returncode != 0:
+        log(f"WARNING: scancel {job_id} exited {proc.returncode}; job may keep running")
         return
     log(f"==> scancel {job_id}")
 
@@ -163,8 +166,9 @@ def submit_and_wait(
         if proc.returncode != 0:
             return proc.returncode, job_id, None
         if job_id and chdir is not None:
-            # So a later `if: cancelled()` step can scancel if this process is
-            # SIGKILL'd before the handler runs (GHA signals the step PID).
+            # So a later `if: failure() || cancelled()` step can scancel if
+            # this process is SIGKILL'd before the handler runs (GHA signals
+            # the step PID).
             (chdir / "slurm-job-id").write_text(f"{job_id}\n")
             log(f"==> wrote {chdir / 'slurm-job-id'}")
         if not job_id:
@@ -188,9 +192,10 @@ def submit_and_wait(
         return 130, job_id, None
     except Exception:
         # An unexpected failure here (e.g. sacct/scancel vanishing from PATH
-        # mid-run) must not leave the allocation running: the `if: cancelled()`
-        # backup step only fires on an actual GitHub cancellation, not on an
-        # ordinary crash, so this is the last chance to release the node.
+        # mid-run) must not leave the allocation running: this fires
+        # immediately rather than waiting for step teardown, and it also
+        # covers a run with no --chdir, where there is no slurm-job-id file
+        # for the `if: failure() || cancelled()` backup step to read.
         scancel_job(job_id)
         raise
     finally:
@@ -355,18 +360,6 @@ def main(argv: list[str]) -> int:
         "to dedicated nodes (per-cluster). Empty = no reservation.",
     )
     parser.add_argument(
-        "--poll-retries",
-        type=int,
-        default=10,
-        help="How many times to poll sacct for a terminal state (default: 10)",
-    )
-    parser.add_argument(
-        "--poll-interval",
-        type=float,
-        default=3.0,
-        help="Seconds between sacct polls (default: 3)",
-    )
-    parser.add_argument(
         "--wait-poll-interval",
         type=float,
         default=15.0,
@@ -391,17 +384,13 @@ def main(argv: list[str]) -> int:
 
     # wait_for_job already saw a terminal sacct row -- trust it rather than
     # re-querying, since a second query right after the job ends can race
-    # sacct's accounting-DB lag and read a real failure as "no data".
-    result = wait_result
-    if result is None:
-        result = JobResult(state="", exit_code="")
-        # wait_result is only None when sbatch_rc != 0 (empty job id, a
-        # cancel before wait_for_job ran, or wait_for_job itself giving up);
-        # evaluate() discards result in all of those cases, so querying sacct
-        # here would just be wasted time -- up to 30s on top of the 600s
-        # wait_for_job already spent if this is the missing-row-timeout path.
-        if sbatch_rc == 0 and job_id:
-            result = query_job(job_id, args.poll_retries, args.poll_interval)
+    # sacct's accounting-DB lag and read a real failure as "no data". It is
+    # only None when sbatch_rc != 0 (empty job id, a cancel before
+    # wait_for_job ran, or wait_for_job itself giving up), and evaluate()
+    # discards result whenever sbatch_rc != 0, so no fallback query is needed.
+    result = (
+        wait_result if wait_result is not None else JobResult(state="", exit_code="")
+    )
 
     return evaluate(sbatch_rc, job_id, result)
 
