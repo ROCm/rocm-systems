@@ -31,9 +31,9 @@ Panel Config:
       metric:
         # Utilization: TX_VCA_VCA_BUSY_sum is summed across all TXA units (one per WGP).
         Utilization:
-          avg: 100 * SUM(TX_VCA_VCA_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
-          min: 100 * MIN(TX_VCA_VCA_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
-          max: 100 * MAX(TX_VCA_VCA_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
+          avg: 100 * SUM(TX_VCA_VCA_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(TX_VCA_VCA_BUSY_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 100 * MAX(TX_VCA_VCA_BUSY_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         TXA Stall Rate:
           avg: 100 * SUM(TX_VCA_ADDRESSER_STALLED_CYCLES_sum) / SUM(TX_VMW_GATE_EN1_sum)
@@ -231,17 +231,18 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        # Shader-TXA bus util: cycle counters are summed across WGPs; normalize against
-        # 2 * GRBM_GUI_ACTIVE * cu_per_gpu (bidirectional bus slots per GPU-active cycle).
+        # Shader-TXA bus util: cycle counters are summed across WGPs; normalize
+        # against 2 * per-XCD GRBM_GUI_ACTIVE * cu_per_gpu (bidirectional bus
+        # slots per GPU-active cycle).
         Request Bus Utilization:
-          avg: 100 * SUM(TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
-          min: 100 * MIN((TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
-          max: 100 * MAX((TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
+          avg: 100 * SUM(TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / SUM(2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN((TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / (2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 100 * MAX((TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / (2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         Request Bus Utilization - Atomic Data:
-          avg: 100 * SUM(TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
-          min: 100 * MIN(TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
-          max: 100 * MAX(TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
+          avg: 100 * SUM(TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum) / SUM(2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum / (2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 100 * MAX(TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum / (2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
 
   - metric_table:
@@ -255,9 +256,9 @@ Panel Config:
         unit: Unit
       metric:
         Command Bus Util:
-          avg: 100 * SUM(TX_VCA_VMEMCMD_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
-          min: 100 * MIN(TX_VCA_VMEMCMD_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
-          max: 100 * MAX(TX_VCA_VMEMCMD_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
+          avg: 100 * SUM(TX_VCA_VMEMCMD_CYCLES_sum) / SUM(2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(TX_VCA_VMEMCMD_CYCLES_sum / (2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 100 * MAX(TX_VCA_VMEMCMD_CYCLES_sum / (2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         Command Bus Stall Rate:
           avg: 100 * SUM(TX_VMW_VMW_VCA_REQ_STALL_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
@@ -265,9 +266,9 @@ Panel Config:
           max: 100 * MAX(TX_VMW_VMW_VCA_REQ_STALL_sum / (2 * TX_VMW_GATE_EN1_sum))
           unit: Percent
         Request Bus Util:
-          avg: 100 * SUM(TX_VCA_VMEMREQ_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
-          min: 100 * MIN(TX_VCA_VMEMREQ_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
-          max: 100 * MAX(TX_VCA_VMEMREQ_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
+          avg: 100 * SUM(TX_VCA_VMEMREQ_CYCLES_sum) / SUM(2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN(TX_VCA_VMEMREQ_CYCLES_sum / (2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: 100 * MAX(TX_VCA_VMEMREQ_CYCLES_sum / (2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         Request Bus Stall Rate:
           avg: 100 * SUM(TX_VMW_DATA_FIFO_STALL_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))

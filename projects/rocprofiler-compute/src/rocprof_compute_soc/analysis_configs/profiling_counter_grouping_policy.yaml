@@ -103,6 +103,18 @@ architectures:
       # 8.1.0 = panel 800, table 801 (TXA), metric index 0.
       "8.1.0":
         name: "TXA Utilization"
+      # 8.7.0 = panel 800, table 807 (Shader-TXA Interface), metric index 0.
+      "8.7.0":
+        name: "Request Bus Utilization"
+      # 8.7.1 = panel 800, table 807 (Shader-TXA Interface), metric index 1.
+      "8.7.1":
+        name: "Request Bus Utilization - Atomic Data"
+      # 8.8.0 = panel 800, table 808 (TXA-VMW Interface), metric index 0.
+      "8.8.0":
+        name: "Command Bus Util"
+      # 8.8.2 = panel 800, table 808 (TXA-VMW Interface), metric index 2.
+      "8.8.2":
+        name: "Request Bus Util"
       # 9.1.0 = panel 900, table 901 (GL0), metric index 0.
       "9.1.0":
         name: "GL0 Cache Utilization"
