@@ -1,5 +1,8 @@
 # Best allocations at fixed execution-thread budgets
 
+For paired measurements after instruction-fetch caching landed upstream, see the
+[cache rebase comparison](async-cache-rebase-scaling.md).
+
 Measured 2026-09-15 on async-scoreboard implementation `efc055a3e79`, rebased onto
 `origin/develop` at `cc17ebc55df`. These are the best measured allocations for two
 1024 x 1024 x 1024 FP8 GEMMs in functional simulation, ranked by median dispatch time.
