@@ -335,7 +335,7 @@ bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes, nc
 // 2-shot, which uses ceARTmpBuf). Env DDA_*_THRESHOLD, when set, is also
 // folded in. With no table, the same pre-table DDA defaults the selectors
 // use are folded in so scratch is not smaller than the VMM/LL/LL128 window.
-// ReduceScatter table values are per-rank and scaled by nRanks.
+// All table values are total message bytes; no per-rank scaling is applied.
 //
 // Graph VMM (ddaVmmMaxGraph) is part of that max even for comms that never
 // capture: scratch is allocated once at init so a later capture can still
