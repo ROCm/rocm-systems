@@ -51,6 +51,11 @@ static std::vector<size_t> g_rmaStackCounts;
 // memPermanent, and the fixture constructs and destructs both the same way, so
 // swapping them would leave every count identical.
 static std::vector<const void*> g_rmaStackArenas;
+// Pool cells come from a backing stack too, but ncclMemoryPoolAlloc reaches it
+// through ncclMemoryStack::allocate (utils.h) rather than the macro above, so
+// the arena it is handed needs its own record. The two split tasks outlive the
+// per-plan scoped arena, so which one they come from is load-bearing.
+static std::vector<const void*> g_rmaPoolArenas;
 template <typename T>
 static ncclResult_t RmaMicroCalloc(const char* file, int line, const char* fn, T** ptr,
                                    size_t nelem) {
@@ -69,6 +74,13 @@ static T* RmaMicroStackAlloc(struct ncclMemoryStack* me, size_t n = 1) {
 }
 #define ncclMemoryStackAlloc RmaMicroStackAlloc
 
+template <typename T>
+static T* RmaMicroPoolAlloc(struct ncclMemoryPool* me, struct ncclMemoryStack* backing) {
+  g_rmaPoolArenas.push_back(backing);
+  return ncclMemoryPoolAlloc<T>(me, backing);
+}
+#define ncclMemoryPoolAlloc RmaMicroPoolAlloc
+
 // The split's "proxy side unused" arm frees the two arrays it just allocated.
 // Dropping that free is a pure leak: no return value or queue state changes, so
 // only a counter can see it. Same textual-substitution caveats as above.
@@ -86,6 +98,7 @@ static void RmaMicroFree(void* p) {
 #undef free
 #undef ncclCalloc
 #undef ncclMemoryStackAlloc
+#undef ncclMemoryPoolAlloc
 
 namespace {
 
@@ -197,6 +210,7 @@ protected:
     g_rmaCallocCounts.clear();
     g_rmaStackCounts.clear();
     g_rmaStackArenas.clear();
+    g_rmaPoolArenas.clear();
     g_rmaFreeCalls = 0;
     ResetRmaFakes();
     ResetHipFakes();
@@ -211,6 +225,13 @@ static std::function<hipError_t(Args...)> FailsOnCall(int nth) {
   return [calls, nth](Args...) {
     return ++*calls == nth ? hipErrorInvalidValue : hipSuccess;
   };
+}
+
+// A launcher that always reports `result`. The 25 call sites below differ only
+// in that value, which MICROTEST_README asks to be a named factory.
+static std::function<ncclResult_t(ncclComm*, ncclKernelPlan*, hipStream_t)>
+LaunchReturns(ncclResult_t result) {
+  return [result](ncclComm*, ncclKernelPlan*, hipStream_t) { return result; };
 }
 
 // Success hooks on every launcher and HIP ordering seam, recording into `log`.
@@ -336,7 +357,7 @@ TEST_F(RmaWaitSignalTest, BothProxyAndCe_ProxyLaunchFails_CeNeverLaunches) {
   SetCounts(1, 1);
   AllHooks hooks(log_);
   ScopedHook proxy(g_rmaProxyWaitLaunch,
-                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInternalError; });
+                   LaunchReturns(ncclInternalError));
 
   EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclInternalError);
   EXPECT_EQ(proxy.calls, 1);
@@ -353,7 +374,7 @@ TEST_F(RmaWaitSignalTest, BothProxyAndCe_CeLaunchFails_SkipsClosingFence) {
   SetCounts(1, 1);
   AllHooks hooks(log_);
   ScopedHook ce(g_rmaCeWaitLaunch,
-                [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInternalError; });
+                LaunchReturns(ncclInternalError));
 
   EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclInternalError);
   EXPECT_EQ(ce.calls, 1);
@@ -394,7 +415,7 @@ TEST_F(RmaWaitSignalTest, BothProxyAndCe_ProxyLaunchInProgress_ContinuesAndRepor
   SetCounts(1, 1);
   AllHooks hooks(log_);
   ScopedHook proxy(g_rmaProxyWaitLaunch,
-                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInProgress; });
+                   LaunchReturns(ncclInProgress));
 
   EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclSuccess);
   EXPECT_EQ(log_.CountOf(LaunchLog::kCeWait), 1);
@@ -407,7 +428,7 @@ TEST_F(RmaWaitSignalTest, BothProxyAndCe_CeLaunchInProgress_ReturnsInProgress) {
   SetCounts(1, 1);
   AllHooks hooks(log_);
   ScopedHook ce(g_rmaCeWaitLaunch,
-                [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInProgress; });
+                LaunchReturns(ncclInProgress));
 
   EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclInProgress);
   EXPECT_EQ(log_.CountOf(LaunchLog::kEventRecord), 2);
@@ -418,7 +439,7 @@ TEST_F(RmaWaitSignalTest, ProxyOnly_LaunchInProgress_ReturnsInProgress) {
   SetCounts(2, 0);
   AllHooks hooks(log_);
   ScopedHook proxy(g_rmaProxyWaitLaunch,
-                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInProgress; });
+                   LaunchReturns(ncclInProgress));
 
   EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclInProgress);
 }
@@ -428,7 +449,7 @@ TEST_F(RmaWaitSignalTest, CeOnly_LaunchInProgress_ReturnsInProgress) {
   SetCounts(0, 3);
   AllHooks hooks(log_);
   ScopedHook ce(g_rmaCeWaitLaunch,
-                [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInProgress; });
+                LaunchReturns(ncclInProgress));
 
   EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclInProgress);
 }
@@ -449,7 +470,7 @@ TEST_F(RmaWaitSignalTest, ProxyOnly_LaunchFails_Propagates) {
   SetCounts(2, 0);
   AllHooks hooks(log_);
   ScopedHook proxy(g_rmaProxyWaitLaunch,
-                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclSystemError; });
+                   LaunchReturns(ncclSystemError));
 
   EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclSystemError);
   EXPECT_EQ(proxy.calls, 1);
@@ -471,7 +492,7 @@ TEST_F(RmaWaitSignalTest, CeOnly_LaunchFails_Propagates) {
   SetCounts(0, 3);
   AllHooks hooks(log_);
   ScopedHook ce(g_rmaCeWaitLaunch,
-                [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclSystemError; });
+                LaunchReturns(ncclSystemError));
 
   EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclSystemError);
   EXPECT_EQ(ce.calls, 1);
@@ -574,7 +595,7 @@ TEST_F(RmaPutTest, BothProxyAndCe_ProxyLaunchFails_CeNeverLaunches) {
   SetCounts(1, 1);
   AllHooks hooks(log_);
   ScopedHook proxy(g_rmaProxyPutLaunch,
-                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInternalError; });
+                   LaunchReturns(ncclInternalError));
 
   EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclInternalError);
   EXPECT_EQ(proxy.calls, 1);
@@ -591,7 +612,7 @@ TEST_F(RmaPutTest, BothProxyAndCe_CeLaunchFails_SkipsClosingFence) {
   SetCounts(1, 1);
   AllHooks hooks(log_);
   ScopedHook ce(g_rmaCePutLaunch,
-                [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInternalError; });
+                LaunchReturns(ncclInternalError));
 
   EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclInternalError);
   EXPECT_EQ(ce.calls, 1);
@@ -631,7 +652,7 @@ TEST_F(RmaPutTest, BothProxyAndCe_ProxyLaunchInProgress_ContinuesAndReportsSucce
   SetCounts(1, 1);
   AllHooks hooks(log_);
   ScopedHook proxy(g_rmaProxyPutLaunch,
-                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInProgress; });
+                   LaunchReturns(ncclInProgress));
 
   EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclSuccess);
   EXPECT_EQ(log_.CountOf(LaunchLog::kCePut), 1);
@@ -644,7 +665,7 @@ TEST_F(RmaPutTest, BothProxyAndCe_CeLaunchInProgress_ReturnsInProgress) {
   SetCounts(1, 1);
   AllHooks hooks(log_);
   ScopedHook ce(g_rmaCePutLaunch,
-                [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInProgress; });
+                LaunchReturns(ncclInProgress));
 
   EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclInProgress);
   EXPECT_EQ(log_.CountOf(LaunchLog::kEventRecord), 2);
@@ -666,7 +687,7 @@ TEST_F(RmaPutTest, ProxyOnly_LaunchFails_Propagates) {
   SetCounts(4, 0);
   AllHooks hooks(log_);
   ScopedHook proxy(g_rmaProxyPutLaunch,
-                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclSystemError; });
+                   LaunchReturns(ncclSystemError));
 
   EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclSystemError);
   EXPECT_EQ(proxy.calls, 1);
@@ -677,7 +698,7 @@ TEST_F(RmaPutTest, ProxyOnly_LaunchInProgress_ReturnsInProgress) {
   SetCounts(4, 0);
   AllHooks hooks(log_);
   ScopedHook proxy(g_rmaProxyPutLaunch,
-                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInProgress; });
+                   LaunchReturns(ncclInProgress));
 
   EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclInProgress);
 }
@@ -698,7 +719,7 @@ TEST_F(RmaPutTest, CeOnly_LaunchFails_Propagates) {
   SetCounts(0, 4);
   AllHooks hooks(log_);
   ScopedHook ce(g_rmaCePutLaunch,
-                [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclSystemError; });
+                LaunchReturns(ncclSystemError));
 
   EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclSystemError);
   EXPECT_EQ(ce.calls, 1);
@@ -709,7 +730,7 @@ TEST_F(RmaPutTest, CeOnly_LaunchInProgress_ReturnsInProgress) {
   SetCounts(0, 4);
   AllHooks hooks(log_);
   ScopedHook ce(g_rmaCePutLaunch,
-                [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInProgress; });
+                LaunchReturns(ncclInProgress));
 
   EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclInProgress);
 }
@@ -811,7 +832,7 @@ TEST_F(RmaLaunchTest, DispatchFailure_Propagates) {
   args_.func = ncclFuncPutSignal;
   AllHooks hooks(log_);
   ScopedHook proxy(g_rmaProxyPutLaunch,
-                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInternalError; });
+                   LaunchReturns(ncclInternalError));
 
   EXPECT_EQ(ncclLaunchRma(comm_.get(), plan_.get()), ncclInternalError);
 }
@@ -821,7 +842,7 @@ TEST_F(RmaLaunchTest, PutDispatchInProgress_Propagates) {
   args_.func = ncclFuncPutSignal;
   AllHooks hooks(log_);
   ScopedHook proxy(g_rmaProxyPutLaunch,
-                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInProgress; });
+                   LaunchReturns(ncclInProgress));
 
   EXPECT_EQ(ncclLaunchRma(comm_.get(), plan_.get()), ncclInProgress);
 }
@@ -831,7 +852,7 @@ TEST_F(RmaLaunchTest, WaitSignalDispatchInProgress_Propagates) {
   args_.func = ncclFuncWaitSignal;
   AllHooks hooks(log_);
   ScopedHook proxy(g_rmaProxyWaitLaunch,
-                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInProgress; });
+                   LaunchReturns(ncclInProgress));
 
   EXPECT_EQ(ncclLaunchRma(comm_.get(), plan_.get()), ncclInProgress);
 }
@@ -1091,6 +1112,11 @@ TEST_F(RmaScheduleTest, WaitSignal_MixedPeers_SplitsPreservingSignalPairing) {
   EXPECT_EQ(g_rmaCallocCounts, (std::vector<size_t>{4, 4}));
   EXPECT_EQ(g_rmaStackCounts, (std::vector<size_t>{1, 4, 4}));
   EXPECT_EQ(g_rmaFreeCalls, 0);  // both sides in use, so neither array is released
+  // Both synthesised tasks are enqueued onto the plan and consumed by the
+  // launchers later, so they must come from the permanent arena -- the scoped
+  // one is released per plan.
+  EXPECT_EQ(g_rmaPoolArenas, (std::vector<const void*>{&comm_->memPermanent,
+                                                      &comm_->memPermanent}));
   // The split consumes one queued task even though it emits two.
   EXPECT_EQ(comm_->planner.nTasksRma, 0);
 
@@ -1416,8 +1442,8 @@ protected:
     ScopedHook wt(g_hipStreamWaitEvent,
                   FailsOnCall<hipStream_t, hipEvent_t, unsigned int>(f.streamWait));
     using LaunchFn = std::function<ncclResult_t(ncclComm*, ncclKernelPlan*, hipStream_t)>;
-    LaunchFn fail = [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInternalError; };
-    LaunchFn ok = [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclSuccess; };
+    LaunchFn fail = LaunchReturns(ncclInternalError);
+    LaunchFn ok = LaunchReturns(ncclSuccess);
     ScopedHook pp(g_rmaProxyPutLaunch, f.proxyLaunch ? fail : ok);
     ScopedHook cp(g_rmaCePutLaunch, f.ceLaunch ? fail : ok);
     ScopedHook pw(g_rmaProxyWaitLaunch, f.proxyLaunch ? fail : ok);
@@ -1470,7 +1496,7 @@ TEST_F(RmaDebugLoggingTest, LaunchFailureLogsBacktraceAndStillReturnsError) {
   args.nRmaTasksProxy = 1;
   plan_->rmaArgs = &args;
   ScopedHook proxy(g_rmaProxyPutLaunch,
-                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInternalError; });
+                   LaunchReturns(ncclInternalError));
 
   EXPECT_EQ(ncclLaunchRma(comm_.get(), plan_.get()), ncclInternalError);
   EXPECT_EQ(proxy.calls, 1);
@@ -1484,14 +1510,17 @@ TEST_F(RmaDebugLoggingTest, LaunchFailureWithNoWarnSuppressesLogButKeepsError) {
   args.nRmaTasksProxy = 1;
   plan_->rmaArgs = &args;
   ScopedHook proxy(g_rmaProxyPutLaunch,
-                   [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInternalError; });
+                   LaunchReturns(ncclInternalError));
 
   EXPECT_EQ(ncclLaunchRma(comm_.get(), plan_.get()), ncclInternalError);
 }
 
 // Every check site in the two mixed paths, driven to failure under each debug
-// state, so the log predicates inside CUDACHECKGOTO and NCCLCHECKGOTO are taken
-// both ways at every site rather than only where a dedicated test happens to fail.
+// state. Only NCCLCHECKGOTO reads the debug state -- its backtrace sits behind
+// `ncclDebugNoWarn == 0` and an INFO predicate -- so the launcher rows are what
+// the sweep varies. CUDACHECKGOTO logs through ERROR, an unconditional
+// ncclDebugLog, so the fence rows run the same code in all four states; they are
+// swept anyway to keep the table one shape.
 TEST_F(RmaDebugLoggingTest, EveryMixedPathCheckSiteUnwindsUnderEveryDebugState) {
   const FailAt sites[] = {
     {1, 0, false, false}, {2, 0, false, false},
@@ -1516,7 +1545,7 @@ TEST_F(RmaDebugLoggingTest, EveryLauncherInProgressIsNonFatalUnderEveryDebugStat
       for (bool proxy : {false, true}) {
         LaunchLog log;
         AllHooks hooks(log);
-        auto inProgress = [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInProgress; };
+        auto inProgress = LaunchReturns(ncclInProgress);
         ncclRmaArgs args{};
         args.func = put ? ncclFuncPutSignal : ncclFuncWaitSignal;
         args.nRmaTasksProxy = 1;
@@ -1543,7 +1572,7 @@ TEST_F(RmaDebugLoggingTest, EveryLauncherInProgressIsNonFatalUnderEveryDebugStat
 // The single-transport arms, which the mixed-path matrix above never reaches.
 TEST_F(RmaDebugLoggingTest, SingleTransportArmsUnwindUnderEveryDebugState) {
   using LaunchFn = std::function<ncclResult_t(ncclComm*, ncclKernelPlan*, hipStream_t)>;
-  LaunchFn fail = [](ncclComm*, ncclKernelPlan*, hipStream_t) { return ncclInternalError; };
+  LaunchFn fail = LaunchReturns(ncclInternalError);
   for (const DebugState& d : kDebugStates) {
     for (bool put : {false, true}) {
       for (bool proxyOnly : {false, true}) {
@@ -1572,8 +1601,6 @@ TEST_F(RmaDebugLoggingTest, EveryDispatchArmUnwindsUnderEveryDebugState) {
     for (ncclFunc_t fn : funcs) {
       for (ncclResult_t r : {ncclInternalError, ncclInProgress}) {
         SetDebug(d);
-        LaunchLog log;
-        AllHooks hooks(log);
         ncclRmaArgs args{};
         args.func = fn;
         args.nRmaTasksProxy = 1;
