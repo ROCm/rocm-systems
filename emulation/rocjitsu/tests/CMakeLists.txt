@@ -4118,6 +4118,7 @@ if(
         TIMEOUT 300
         ENVIRONMENT
             "MIRAGE_BIN=${_rocgdb_rocm_home}/bin/mirage"
+            "ROCGDB_DEMO_SANITIZER_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}"
             "ROCM_HOME=${_rocgdb_rocm_home}"
             "MIRAGE_PROFILE=mi350x"
             "OFFLOAD_ARCH=gfx950"
@@ -4132,6 +4133,7 @@ if(
         TIMEOUT 300
         ENVIRONMENT
             "MIRAGE_BIN=${_rocgdb_rocm_home}/bin/mirage"
+            "ROCGDB_DEMO_SANITIZER_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}"
             "ROCM_HOME=${_rocgdb_rocm_home}"
             "MIRAGE_PROFILE=mi450x"
             "OFFLOAD_ARCH=gfx1250"

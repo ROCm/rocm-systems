@@ -574,12 +574,40 @@ fn process_env(
     // than one clobbering the other.
     if let Some(preload) = &desc.ld_preload {
         let combined = match args.env.get("LD_PRELOAD") {
-            Some(user) if !user.is_empty() => format!("{preload}:{user}"),
+            Some(user) if !user.is_empty() => merge_preloads(preload, user),
             _ => preload.clone(),
         };
         env.insert("LD_PRELOAD".to_string(), combined);
     }
     env
+}
+
+// Sanitizer runtimes must precede an instrumented interposer in the loader's
+// initial library list. Keep the ordinary emulator-before-user precedence.
+fn merge_preloads(emulator: &str, user: &str) -> String {
+    let is_sanitizer = |path: &&str| {
+        let name = path.rsplit('/').next().unwrap_or(path);
+        [
+            "libasan.so",
+            "libtsan.so",
+            "liblsan.so",
+            "libclang_rt.asan",
+            "libclang_rt.tsan",
+            "libclang_rt.lsan",
+        ]
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+    };
+    let (sanitizers, libraries): (Vec<_>, Vec<_>) = user
+        .split(|c: char| c == ':' || c.is_ascii_whitespace())
+        .filter(|part| !part.is_empty())
+        .partition(is_sanitizer);
+    sanitizers
+        .into_iter()
+        .chain(std::iter::once(emulator))
+        .chain(libraries)
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 /// The in-container path of a rank's pid file.
@@ -830,6 +858,26 @@ mod tests {
             specs[0].env.get("LD_PRELOAD").map(String::as_str),
             Some("/lib/interpose.so:/user/mine.so")
         );
+    }
+
+    #[test]
+    fn sanitizer_runtimes_precede_the_emulator_interposer() {
+        for runtime in [
+            "/sdk/libclang_rt.asan-x86_64.so",
+            "/lib/libasan.so.8",
+            "/lib/libtsan.so.2",
+        ] {
+            let mut def = exec_def(1, None);
+            def.exec.env.insert(
+                "LD_PRELOAD".to_string(),
+                format!("/user/first.so:{runtime} /user/last.so"),
+            );
+            let specs = build_specs(&desc(1), &def, &id(), CAPTURED).unwrap();
+            assert_eq!(
+                specs[0].env["LD_PRELOAD"],
+                format!("{runtime}:/lib/interpose.so:/user/first.so:/user/last.so")
+            );
+        }
     }
 
     #[test]

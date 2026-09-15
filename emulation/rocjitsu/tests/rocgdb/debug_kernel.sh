@@ -99,6 +99,19 @@ mirage_runtime_args=()
 if [[ -n "$runtime_library_path" ]]; then
   mirage_runtime_args+=(--env "LD_LIBRARY_PATH=$runtime_library_path")
 fi
+# Mirage loads the simulator DSO itself and then injects it into ROCgdb and
+# the inferior. Start both loader paths with the sanitizer runtime first.
+# LeakSanitizer cannot inspect an inferior already traced by ROCgdb; keep
+# ASan/UBSan error checking active, with leak checks covered by non-debugger tests.
+mirage_command=("$mirage_bin")
+if [[ -n "${ROCGDB_DEMO_SANITIZER_PRELOAD:-}" ]]; then
+  sanitizer_preload="${ROCGDB_DEMO_SANITIZER_PRELOAD%:}"
+  debugger_asan_options="${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0"
+  mirage_command=(env "LD_PRELOAD=$sanitizer_preload${LD_PRELOAD:+:$LD_PRELOAD}"
+                  "ASAN_OPTIONS=$debugger_asan_options" "$mirage_bin")
+  mirage_runtime_args+=(--env "LD_PRELOAD=$sanitizer_preload"
+                       --env "ASAN_OPTIONS=$debugger_asan_options")
+fi
 # The nightly gfx1250 HIP/ROCr stack enables its code-object rewrite path by
 # default. A debugger qualification must observe the code object that hipcc
 # emitted, not a replacement held in anonymous memory, so disable that path in
@@ -134,7 +147,7 @@ echo "running rocgdb under: $mirage_bin run --profile $profile"
 # from /dev/null so the PTY setup does not block when run non-interactively
 # (e.g. under CI); rocgdb --batch needs no input.
 outfile="$workdir/rocgdb.out"
-timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
+timeout 180 "${mirage_command[@]}" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
   rocgdb --batch \
     -ex 'show environment HSA_HOTSWAP_DISABLE' \
     -ex 'set breakpoint pending on' \
@@ -252,7 +265,7 @@ store_line="$(grep -nE 'data\[i\] \+= 1' "$here/add_one.hip" | head -1 | cut -d:
 # is missing").
 echo "running rocgdb (interior breakpoint + continue) ..."
 outfile2="$workdir/rocgdb2.out"
-timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
+timeout 180 "${mirage_command[@]}" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
   rocgdb --batch \
     -ex 'set breakpoint pending on' \
     -ex "break add_one.hip:${store_line}" \
@@ -299,7 +312,7 @@ launch_line="$(grep -nE 'add_one<<<' "$here/add_one.hip" | head -1 | cut -d: -f1
 [[ -z "$launch_line" ]] && launch_line=30
 echo "running rocgdb (GPU address watchpoint, launch line $launch_line) ..."
 outfile3="$workdir/rocgdb3.out"
-timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
+timeout 180 "${mirage_command[@]}" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
   rocgdb --batch \
     -ex 'set breakpoint pending on' \
     -ex "break add_one.hip:${launch_line}" \
@@ -341,7 +354,7 @@ check3 "add_one .*at .*:${store_line}" 'stopped at the store that wrote the watc
 # INSTRUCTION + TRAPSTS.illegal_inst.
 echo "running rocgdb (illegal instruction) ..."
 outfile4="$workdir/rocgdb4.out"
-timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
+timeout 180 "${mirage_command[@]}" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
   rocgdb --batch \
     -ex 'set breakpoint pending on' \
     -ex 'break add_one' \
@@ -382,7 +395,7 @@ badapp="$workdir/bad_access"
 if hipcc --offload-arch="$arch" -g -O0 -o "$badapp" "$here/bad_access.hip" 2>"$workdir/badbuild.log"; then
   echo "running rocgdb (memory violation) ..."
   outfile5="$workdir/rocgdb5.out"
-  timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
+  timeout 180 "${mirage_command[@]}" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
     rocgdb --batch \
       -ex 'set breakpoint pending on' \
       -ex 'break bad_access' \
@@ -424,7 +437,7 @@ fi
 # warning "flat_scratch may be corrupted, private memory access is disabled".
 echo "running rocgdb (private/scratch variable reads) ..."
 outfile6="$workdir/rocgdb6.out"
-timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
+timeout 180 "${mirage_command[@]}" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
   rocgdb --batch \
     -ex 'set breakpoint pending on' \
     -ex 'break add_one' \
@@ -486,7 +499,7 @@ if hipcc --offload-arch="$arch" -g -O0 -o "$mwapp" "$here/multi_wave.hip" 2>"$wo
   mw_line="$(grep -nE 'data\[i\] = local' "$here/multi_wave.hip" | head -1 | cut -d: -f1)"
   [[ -z "$mw_line" ]] && mw_line=19
   outfile7="$workdir/rocgdb7.out"
-  timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
+  timeout 180 "${mirage_command[@]}" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
     rocgdb --batch \
       -ex 'set breakpoint pending on' \
       -ex "break multi_wave.hip:${mw_line}" \
