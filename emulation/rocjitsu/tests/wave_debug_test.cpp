@@ -1313,6 +1313,44 @@ TEST(WaveDebugTest, Gfx1250CwsrMatchesDbgapiWave32LayoutAndRoundTrips) {
       EXPECT_EQ(restored.vgprs[r * 64 + lane], wave.vgprs[r * 64 + lane]);
 }
 
+TEST(WaveDebugTest, CdnaCwsrSeparatesOrdinaryAndAccumulatorRegisters) {
+  constexpr uint64_t base = 0x100000;
+  constexpr uint32_t area_size = 0x100000;
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (const uint32_t ordinary : {4u, 8u, 252u, 256u}) {
+      kmd::CwsrWaveState wave;
+      wave.num_vgprs = ordinary;
+      wave.num_accvgprs = 8;
+      wave.vgprs.assign(ordinary * 64, 0x12345678);
+      wave.accvgprs.assign(8 * 64, 0xabcdef01);
+      std::map<uint64_t, uint32_t> mem;
+      auto write32 = [&](uint64_t address, uint32_t value) { mem[address] = value; };
+      auto read32 = [&](uint64_t address) { return mem.at(address); };
+      const auto layout = kmd::serialize_queue_cwsr(base, area_size, {wave}, write32, arch);
+      ASSERT_TRUE(layout.ok);
+      const uint32_t state = read32(base + layout.control_stack_offset + 8);
+      const uint32_t saved_ordinary = (((state >> 24) & 0x3f) + 1) * 4;
+      const uint32_t saved_acc = ((state & 0x3f) + 1) * 8 - saved_ordinary;
+      EXPECT_EQ(saved_ordinary, ordinary);
+      EXPECT_GE(saved_acc, wave.num_accvgprs);
+      // Match rocdbgapi's high-to-low SGPR, accumulator, ordinary layout.
+      const uint64_t acc_base = base + layout.wave_state_offset - 64 - 32 * 4 -
+                                kmd::kCwsrSavedSgprSlots * 4 - saved_acc * 256;
+      EXPECT_EQ(read32(acc_base), 0xabcdef01u);
+      EXPECT_EQ(read32(acc_base + 7 * 256 + 63 * 4), 0xabcdef01u);
+      EXPECT_EQ(read32(acc_base - ordinary * 256), 0x12345678u);
+      write32(acc_base + 7 * 256 + 63 * 4, 0xfeedabcd);
+      std::vector<kmd::CwsrWaveState> output{wave};
+      output[0].vgprs.clear();
+      output[0].accvgprs.clear();
+      ASSERT_TRUE(kmd::deserialize_queue_cwsr(base, area_size, output, read32, arch));
+      EXPECT_EQ(output[0].vgprs, wave.vgprs);
+      wave.accvgprs.back() = 0xfeedabcd;
+      EXPECT_EQ(output[0].accvgprs, wave.accvgprs);
+    }
+  }
+}
+
 TEST(WaveDebugTest, Gfx1250CwsrAcceptsTheFullAddressableVgprFile) {
   constexpr uint64_t kCtxBase = 0x400000000ULL;
   constexpr uint32_t kAreaSize = 0x40000;

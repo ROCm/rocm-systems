@@ -1451,7 +1451,8 @@ TEST_F(KfdIoctlTest, DbgTrapDisableResumesStoppedQueue) {
     if (wave != nullptr || cp->compute_units().empty())
       return;
     wave = cp->compute_units().front()->dispatch_wf(/*wg_id=*/0, /*pc=*/0x600000000ULL,
-                                                    /*sgprs=*/16, /*vgprs=*/4);
+                                                    /*sgprs=*/16,
+                                                    rocjitsu::amdgpu::WaveVgprAllocation{4, 4, 0});
   });
   ASSERT_NE(wave, nullptr);
   wave->set_process_id(driver_->local_process_id());
@@ -1960,8 +1961,8 @@ TEST_F(DbgTrapDaemonTest, EnableRejectsAMemFdForADifferentProcess) {
 
   const std::string other_mem = std::format("/proc/{}/mem", other);
   // Confirm the premise: procfs gives it a different inode from our own.
-  struct stat ours {};
-  struct stat theirs {};
+  struct stat ours{};
+  struct stat theirs{};
   const util::UniqueHandle self_mem{::open("/proc/self/mem", O_RDWR | O_CLOEXEC)};
   ASSERT_GE(self_mem.get(), 0);
   const util::UniqueHandle their_mem{::open(other_mem.c_str(), O_RDWR | O_CLOEXEC)};
@@ -4163,9 +4164,11 @@ TEST_F(KfdIoctlCdna5Test, ScratchScoreboardSlotsRestartOnEachShaderEngine) {
   auto *se0_last_cu = se0->compute_unit(15);
   auto *se1_first_cu = se1->compute_unit(0);
   auto *se0_last_wave = se0_last_cu->dispatch_wf_at(
-      /*wf_id=*/63, /*wg_id=*/0, /*pc=*/0x600000000ULL, /*sgprs=*/16, /*vgprs=*/4);
+      /*wf_id=*/63, /*wg_id=*/0, /*pc=*/0x600000000ULL, /*sgprs=*/16,
+      rocjitsu::amdgpu::WaveVgprAllocation{4, 4, 0});
   auto *se1_first_wave = se1_first_cu->dispatch_wf_at(
-      /*wf_id=*/0, /*wg_id=*/1, /*pc=*/0x600001000ULL, /*sgprs=*/16, /*vgprs=*/4);
+      /*wf_id=*/0, /*wg_id=*/1, /*pc=*/0x600001000ULL, /*sgprs=*/16,
+      rocjitsu::amdgpu::WaveVgprAllocation{4, 4, 0});
   ASSERT_NE(se0_last_wave, nullptr);
   ASSERT_NE(se1_first_wave, nullptr);
 
@@ -4238,7 +4241,8 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapPublishesAndRestoresSecondQueueAcrossActiveXccA
     ASSERT_NE(cp, nullptr);
     ASSERT_FALSE(cp->compute_units().empty());
     waves[xcc_id] = cp->compute_units().front()->dispatch_wf(
-        /*wg_id=*/xcc_id, /*pc=*/0x600000000ULL + xcc_id * 0x1000, /*sgprs=*/16, /*vgprs=*/4);
+        /*wg_id=*/xcc_id, /*pc=*/0x600000000ULL + xcc_id * 0x1000, /*sgprs=*/16,
+        rocjitsu::amdgpu::WaveVgprAllocation{4, 4, 0});
     ASSERT_NE(waves[xcc_id], nullptr);
     waves[xcc_id]->set_process_id(driver_->local_process_id());
     waves[xcc_id]->set_queue_id(queues[1].queue_id);
@@ -4431,8 +4435,9 @@ TEST_F(KfdIoctlTest, DbgTrapQueueSnapshotEnumeratesQueues) {
   soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
     if (halted_wave != nullptr || cp->compute_units().empty())
       return;
-    halted_wave = cp->compute_units().front()->dispatch_wf(/*wg_id=*/0, /*pc=*/0x600000000ULL,
-                                                           /*sgprs=*/16, /*vgprs=*/4);
+    halted_wave = cp->compute_units().front()->dispatch_wf(
+        /*wg_id=*/0, /*pc=*/0x600000000ULL,
+        /*sgprs=*/16, rocjitsu::amdgpu::WaveVgprAllocation{4, 4, 0});
   });
   ASSERT_NE(halted_wave, nullptr);
   halted_wave->set_process_id(driver_->local_process_id());
@@ -4533,8 +4538,10 @@ TEST_F(KfdIoctlTest, DbgTrapRealWaveTrapReportsWhilePeerRunsBeforeExplicitCwsrSu
   };
   for (uint32_t i = 0; i < std::size(trap_handler); ++i)
     memory->write32(kTrapHandlerAddress + i * 4, trap_handler[i], driver_->local_process_id());
-  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kKernelAddress, /*sgprs=*/16, /*vgprs=*/4);
-  auto *peer = cu->dispatch_wf(/*wg_id=*/1, kPeerAddress, /*sgprs=*/16, /*vgprs=*/4);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kKernelAddress, /*sgprs=*/16,
+                               rocjitsu::amdgpu::WaveVgprAllocation{4, 4, 0});
+  auto *peer = cu->dispatch_wf(/*wg_id=*/1, kPeerAddress, /*sgprs=*/16,
+                               rocjitsu::amdgpu::WaveVgprAllocation{4, 4, 0});
   ASSERT_NE(wave, nullptr);
   ASSERT_NE(peer, nullptr);
   for (auto *resident : {wave, peer}) {
@@ -4625,7 +4632,8 @@ rocjitsu::amdgpu::Wavefront *fault_a_wave_on_an_unmapped_pc(rocjitsu::SoC *soc,
   });
   if (cu == nullptr)
     return nullptr;
-  auto *wave = cu->dispatch_wf(/*wg_id=*/0, unmapped_pc, /*sgprs=*/16, /*vgprs=*/4);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, unmapped_pc, /*sgprs=*/16,
+                               rocjitsu::amdgpu::WaveVgprAllocation{4, 4, 0});
   if (wave == nullptr)
     return nullptr;
   wave->set_process_id(driver->local_process_id());
@@ -4658,7 +4666,8 @@ rocjitsu::amdgpu::Wavefront *fault_a_wave_on_a_scalar_load(rocjitsu::SoC *soc,
   });
   if (cu == nullptr)
     return nullptr;
-  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kernel_pc, /*sgprs=*/16, /*vgprs=*/4);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kernel_pc, /*sgprs=*/16,
+                               rocjitsu::amdgpu::WaveVgprAllocation{4, 4, 0});
   if (wave == nullptr)
     return nullptr;
   wave->set_process_id(pid);
@@ -4820,7 +4829,8 @@ TEST_F(KfdIoctlRdna3Test, DbgTrapSuspendQueuesOnUnmodelledArchErrsWithoutStrandi
       cu = cp->compute_units().front();
   });
   ASSERT_NE(cu, nullptr);
-  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kUnmappedAddress, /*sgprs=*/16, /*vgprs=*/4);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kUnmappedAddress, /*sgprs=*/16,
+                               rocjitsu::amdgpu::WaveVgprAllocation{4, 4, 0});
   ASSERT_NE(wave, nullptr);
   wave->set_process_id(driver_->local_process_id());
   wave->set_queue_id(create.queue_id);
@@ -5078,8 +5088,11 @@ TEST_F(KfdIoctlTest, DbgTrapCwsrShadowsTrapHandlerRegistersAndRoutesDebuggerEdit
   for (uint32_t i = 0; i < std::size(trap_handler); ++i)
     memory->write32(kTrapHandlerAddress + i * 4, trap_handler[i], driver_->local_process_id());
 
-  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kKernelAddress, /*sgprs=*/16, /*vgprs=*/4);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kKernelAddress, /*sgprs=*/16,
+                               rocjitsu::amdgpu::WaveVgprAllocation{16, 8, 8});
   ASSERT_NE(wave, nullptr);
+  wave->debug_write_vgpr(7, 63, 0x12345678);
+  wave->debug_write_vgpr(rocjitsu::amdgpu::ACC_VGPR_OFFSET + 7, 63, 0xabcdef01);
   wave->set_process_id(driver_->local_process_id());
   wave->set_queue_id(create.queue_id);
   wave->set_dispatch_id(7);
@@ -5118,7 +5131,8 @@ TEST_F(KfdIoctlTest, DbgTrapCwsrShadowsTrapHandlerRegistersAndRoutesDebuggerEdit
 
   std::vector<rocjitsu::kmd::CwsrWaveState> states(1);
   states[0].num_sgprs = 16;
-  states[0].num_vgprs = 4;
+  states[0].num_vgprs = 8;
+  states[0].num_accvgprs = 8;
   ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
       kCwsrAddress, kCwsrSize, states,
       [&](uint64_t address) { return memory->read32(address, driver_->local_process_id()); },
@@ -5128,6 +5142,10 @@ TEST_F(KfdIoctlTest, DbgTrapCwsrShadowsTrapHandlerRegistersAndRoutesDebuggerEdit
   EXPECT_EQ(states[0].exec, kInterruptedExec);
   EXPECT_EQ(wave->exec(), kHandlerExec);
 
+  ASSERT_EQ(states[0].vgprs.back(), 0x12345678u);
+  ASSERT_EQ(states[0].accvgprs.back(), 0xabcdef01u);
+  EXPECT_EQ(cu->register_allocation_violation_count(), 0u);
+  states[0].accvgprs.back() = 0xfeedabcd;
   states[0].exec = kDebuggerExec;
   ASSERT_TRUE(rocjitsu::kmd::serialize_queue_cwsr(
                   kCwsrAddress, kCwsrSize, states,
@@ -5140,6 +5158,9 @@ TEST_F(KfdIoctlTest, DbgTrapCwsrShadowsTrapHandlerRegistersAndRoutesDebuggerEdit
   control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
   control.resume_queues.num_queues = 1;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
+
+  EXPECT_EQ(wave->debug_read_vgpr(rocjitsu::amdgpu::ACC_VGPR_OFFSET + 7, 63), 0xfeedabcdu);
+  EXPECT_EQ(cu->register_allocation_violation_count(), 0u);
 
   // The edit went to the shadow, so the handler is still running under its own
   // mask and only installs the debugger's on s_rfe.
@@ -5260,8 +5281,10 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
     memory->write32(kPeerAddress + step * sizeof(uint32_t), kSNop, driver_->local_process_id());
   }
 
-  auto *stepping = cu->dispatch_wf(/*wg_id=*/0, kSteppingAddress, /*sgprs=*/16, /*vgprs=*/4);
-  auto *peer = cu->dispatch_wf(/*wg_id=*/1, kPeerAddress, /*sgprs=*/16, /*vgprs=*/4);
+  auto *stepping = cu->dispatch_wf(/*wg_id=*/0, kSteppingAddress, /*sgprs=*/16,
+                                   rocjitsu::amdgpu::WaveVgprAllocation{4, 4, 0});
+  auto *peer = cu->dispatch_wf(/*wg_id=*/1, kPeerAddress, /*sgprs=*/16,
+                               rocjitsu::amdgpu::WaveVgprAllocation{4, 4, 0});
   ASSERT_NE(stepping, nullptr);
   ASSERT_NE(peer, nullptr);
   for (auto *wave : {stepping, peer}) {
@@ -5823,7 +5846,7 @@ TEST_F(KfdIoctlTest, DbgTrapDebuggerExitReapsSessionAndAllowsReenable) {
     wave_cp = cp;
     wave_cu = cp->compute_units().front();
     wave = wave_cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x600000000ULL,
-                                /*sgprs=*/16, /*vgprs=*/4);
+                                /*sgprs=*/16, rocjitsu::amdgpu::WaveVgprAllocation{4, 4, 0});
   });
   ASSERT_NE(wave, nullptr);
   ASSERT_NE(wave_cp, nullptr);

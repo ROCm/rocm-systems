@@ -3091,7 +3091,8 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf, rj_code_arch_t a
   state.shader_engine_id = wf.shader_engine_id();
   state.spi_ttmps_setup = true;
   state.num_sgprs = wf.num_sgprs();
-  state.num_vgprs = wf.num_vgprs();
+  state.num_vgprs = wf.num_ordinary_vgprs();
+  state.num_accvgprs = wf.num_accvgprs();
 
   state.sgprs.resize(state.num_sgprs);
   for (uint32_t s = 0; s < state.num_sgprs; ++s)
@@ -3107,6 +3108,11 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf, rj_code_arch_t a
   for (uint32_t r = 0; r < state.num_vgprs; ++r)
     for (uint32_t lane = 0; lane < live_lanes; ++lane)
       state.vgprs[static_cast<size_t>(r) * 64 + lane] = wf.debug_read_vgpr(r, lane);
+  state.accvgprs.resize(static_cast<size_t>(state.num_accvgprs) * 64);
+  for (uint32_t r = 0; r < state.num_accvgprs; ++r)
+    for (uint32_t lane = 0; lane < live_lanes; ++lane)
+      state.accvgprs[static_cast<size_t>(r) * 64 + lane] =
+          wf.debug_read_vgpr(amdgpu::ACC_VGPR_OFFSET + r, lane);
   state.lds.resize(wf.lds_size());
   if (!state.lds.empty())
     static_cast<const amdgpu::Lds &>(wf.lds()).read(wf.lds_base(), state.lds.data(),
@@ -3490,8 +3496,8 @@ bool SimulatedKfd::on_wave_watchpoint(amdgpu::Wavefront &wave, uint64_t address,
     // the KFD ABI.
     const uint32_t matching_modes =
         (uint32_t{1} << KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ALL) |
-        (is_atomic ? (uint32_t{1} << KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ATOMIC) |
-                         (uint32_t{1} << KFD_DBG_TRAP_ADDRESS_WATCH_MODE_NONREAD)
+        (is_atomic  ? (uint32_t{1} << KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ATOMIC) |
+                          (uint32_t{1} << KFD_DBG_TRAP_ADDRESS_WATCH_MODE_NONREAD)
          : is_write ? (uint32_t{1} << KFD_DBG_TRAP_ADDRESS_WATCH_MODE_NONREAD)
                     : (uint32_t{1} << KFD_DBG_TRAP_ADDRESS_WATCH_MODE_READ));
     matched_slots = session->second.matching_address_watch_slots(address, bytes, matching_modes);
@@ -3830,6 +3836,13 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
         const size_t index = static_cast<size_t>(r) * 64 + lane;
         if (index < state.vgprs.size())
           wave.debug_write_vgpr(r, lane, state.vgprs[index]);
+      }
+  if (!state.accvgprs.empty())
+    for (uint32_t r = 0; r < state.num_accvgprs; ++r)
+      for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+        const size_t index = static_cast<size_t>(r) * 64 + lane;
+        if (index < state.accvgprs.size())
+          wave.debug_write_vgpr(amdgpu::ACC_VGPR_OFFSET + r, lane, state.accvgprs[index]);
       }
   // FLAT_SCRATCH travels in its own field because it aliases two SGPR slots the
   // loop above skips. This used to save and re-install wave.scratch_base()

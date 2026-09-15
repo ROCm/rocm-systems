@@ -203,10 +203,14 @@ struct CwsrWaveState {
   uint32_t num_sgprs = 0;
   /// Meaningful vector registers: at most 256 for gfx9.4 or 1024 for gfx12.5.
   uint32_t num_vgprs = 0;
+  /// CDNA accumulator registers, stored separately from ordinary VGPRs.
+  uint32_t num_accvgprs = 0;
   /// Scalar register values, index = sgpr number.
   std::vector<uint32_t> sgprs;
   /// Vector register values, index = vgpr_number * 64 + lane.
   std::vector<uint32_t> vgprs;
+  /// Accumulator values, index = accumulator number * 64 + lane.
+  std::vector<uint32_t> accvgprs;
   /// Workgroup LDS bytes. Present only on the first wave in each workgroup.
   std::vector<uint8_t> lds;
 };

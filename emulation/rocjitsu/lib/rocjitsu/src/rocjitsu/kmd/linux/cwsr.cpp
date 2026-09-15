@@ -38,13 +38,14 @@ constexpr uint32_t kRelaunchStateBit = 1u << 31;
 constexpr uint32_t round_up(uint32_t v, uint32_t m) { return (v / m + (v % m != 0)) * m; }
 
 // Encode the COMPUTE_RELAUNCH "state" word so rocm-dbgapi decodes exactly
-// @vgpr_count / @sgpr_count with zero accumulation (ACC) VGPRs:
+// ordinary/accumulator VGPR counts and SGPR count:
 //   vgpr_count      = (accum_offset[24:29] + 1) * 4
-//   acc_vgpr_count  = (vgprs[0:5]      + 1) * 8 - vgpr_count   (== 0 here)
+//   acc_vgpr_count  = (vgprs[0:5]      + 1) * 8 - vgpr_count
 //   sgpr_count      = (sgprs[6:8]      + 1) * 16 - 16
 //   lds_size        = lds[9:16] * 1280 bytes on gfx950
-uint32_t encode_state_word(uint32_t vgpr_count, uint32_t sgpr_count, uint32_t lds_size) {
-  uint32_t vgprs_field = (vgpr_count / 8) - 1;  // acc == 0  =>  vgpr_count = (vgprs+1)*8
+uint32_t encode_state_word(uint32_t vgpr_count, uint32_t accvgpr_count, uint32_t sgpr_count,
+                           uint32_t lds_size) {
+  uint32_t vgprs_field = ((vgpr_count + accvgpr_count) / 8) - 1;
   uint32_t accum_offset = (vgpr_count / 4) - 1; // vgpr_count = (accum_offset+1)*4
   uint32_t sgprs_field = sgpr_count / 16;       // sgpr_count = sgprs_field*16
   uint32_t w = 0;
@@ -129,6 +130,7 @@ uint32_t encode_gfx1250_ttmp8(const CwsrWaveState &w) {
 struct CwsrGeometry {
   CwsrLayout layout{};
   uint32_t vgpr_count = 0;
+  uint32_t accvgpr_count = 0;
   uint32_t sgpr_count = kCwsrSavedSgprSlots;
   uint32_t vcc_lo_slot = kCwsrVccLoSlot;
   uint32_t flat_scratch_lo_slot = kCwsrFlatScratchLoSlot;
@@ -160,15 +162,17 @@ CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveStat
   geometry.state_words = gfx12_5 ? 2 : 1;
 
   uint32_t max_vgprs = 0;
+  uint32_t max_accvgprs = 0;
   uint32_t max_lds = 0;
   for (const auto &wave : waves) {
     const uint32_t max_saved_vgprs = properties.max_addressable_vgprs_per_wf;
-    if (wave.num_vgprs > max_saved_vgprs || wave.num_sgprs > geometry.sgpr_count ||
-        wave.trap_id > 0xFu || wave.wave_in_group > (gfx12_5 ? 0x1Fu : 0x3Fu) ||
-        wave.queue_packet_id > 0x1FFFFFFu ||
+    if (wave.num_vgprs > max_saved_vgprs || wave.num_accvgprs > (gfx12_5 ? 0u : 256u) ||
+        wave.num_sgprs > geometry.sgpr_count || wave.trap_id > 0xFu ||
+        wave.wave_in_group > (gfx12_5 ? 0x1Fu : 0x3Fu) || wave.queue_packet_id > 0x1FFFFFFu ||
         (gfx12_5 && (wave.group_ids[1] > 0xFFFFu || wave.group_ids[2] > 0xFFFFu)))
       return geometry;
     max_vgprs = std::max(max_vgprs, wave.num_vgprs);
+    max_accvgprs = std::max(max_accvgprs, wave.num_accvgprs);
     if (wave.lds.size() > std::numeric_limits<uint32_t>::max())
       return geometry;
     max_lds = std::max(max_lds, static_cast<uint32_t>(wave.lds.size()));
@@ -179,13 +183,18 @@ CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveStat
   if (geometry.lds_bytes / lds_granule > (gfx12_5 ? 0x1FFu : 0xFFu))
     return geometry;
 
-  const uint32_t vgpr_granule = gfx12_5 ? 16 : 8;
+  const uint32_t vgpr_granule = gfx12_5 ? 16 : (max_accvgprs ? 4 : 8);
   geometry.vgpr_count = std::max<uint32_t>(round_up(max_vgprs, vgpr_granule), vgpr_granule);
+  if (max_accvgprs) {
+    geometry.accvgpr_count = round_up(geometry.vgpr_count + max_accvgprs, 8) - geometry.vgpr_count;
+    if (geometry.accvgpr_count > 256)
+      return CwsrGeometry{};
+  }
   // Alias slots come from cwsr.h so the codec, the wave writeback and the tests
   // share one definition. FLAT_SCRATCH being written but read back from a
   // separately open-coded offset is exactly how it came to be dropped.
   geometry.sgpr_bytes = geometry.sgpr_count * sizeof(uint32_t);
-  geometry.vgpr_bytes = geometry.vgpr_count * geometry.vgpr_lane_bytes;
+  geometry.vgpr_bytes = (geometry.vgpr_count + geometry.accvgpr_count) * geometry.vgpr_lane_bytes;
   geometry.per_wave = geometry.record_prefix_bytes + geometry.hwreg_bytes + geometry.sgpr_bytes +
                       geometry.vgpr_bytes;
 
@@ -240,7 +249,7 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
       (ctx_base & (alignof(uint32_t) - 1)) != 0)
     return layout;
 
-  // Uniform per-dispatch register geometry. ACC-VGPRs are not modeled. gfx950
+  // Uniform ordinary/accumulator register geometry. gfx950
   // saves one uniformly-sized LDS block before each workgroup leader.
   const CwsrGeometry geometry = compute_geometry(area_size, waves, arch);
   if (!geometry.layout.ok)
@@ -266,8 +275,9 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   const uint64_t cs_base = ctx_base + layout.control_stack_offset;
   write32(cs_base + 0, 0); // PM4 (skipped)
   write32(cs_base + 4, 0); // PM4 (skipped)
-  write32(cs_base + 8, gfx12_5 ? encode_gfx1250_state_word(vgpr_count, lds_bytes)
-                               : encode_state_word(vgpr_count, sgpr_count, lds_bytes));
+  write32(cs_base + 8,
+          gfx12_5 ? encode_gfx1250_state_word(vgpr_count, lds_bytes)
+                  : encode_state_word(vgpr_count, geometry.accvgpr_count, sgpr_count, lds_bytes));
   if (gfx12_5)
     write32(cs_base + 12, 0); // COMPUTE_RELAUNCH2 state
   const uint32_t wave_words_offset = (2 + geometry.state_words) * sizeof(uint32_t);
@@ -395,6 +405,15 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
         write32(vgprs_addr + r * vgpr_lane_bytes + lane * 4, val);
       }
     }
+
+    const uint64_t accvgprs_addr = vgprs_addr + vgpr_count * vgpr_lane_bytes;
+    for (uint32_t r = 0; r < geometry.accvgpr_count; ++r)
+      for (uint32_t lane = 0; lane < lane_count; ++lane) {
+        const size_t index = static_cast<size_t>(r) * 64 + lane;
+        const uint32_t value =
+            (r < w.num_accvgprs && index < w.accvgprs.size()) ? w.accvgprs[index] : 0u;
+        write32(accvgprs_addr + r * vgpr_lane_bytes + lane * 4, value);
+      }
 
     last_wave_area = vgprs_addr; // == register_address(v0_64)
   }
@@ -564,6 +583,12 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
     for (uint32_t r = 0; r < w.num_vgprs; ++r)
       for (uint32_t lane = 0; lane < lane_count; ++lane)
         w.vgprs[r * 64 + lane] = read32(vgprs_addr + r * vgpr_lane_bytes + lane * 4);
+
+    const uint64_t accvgprs_addr = vgprs_addr + geometry.vgpr_count * vgpr_lane_bytes;
+    w.accvgprs.resize(static_cast<size_t>(w.num_accvgprs) * 64);
+    for (uint32_t r = 0; r < w.num_accvgprs; ++r)
+      for (uint32_t lane = 0; lane < lane_count; ++lane)
+        w.accvgprs[r * 64 + lane] = read32(accvgprs_addr + r * vgpr_lane_bytes + lane * 4);
 
     last_wave_area = vgprs_addr;
   }
