@@ -13,6 +13,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Added `RCCL_DDA_NRANKS_RELAX` (default `0`, off). When set to `1`, the low-latency DDA IPC AllReduce path accepts any single-node communicator of 2 to 8 ranks on gfx942/gfx950, instead of only the full 8-rank clique. Largest gains are at odd and non-power-of-two rank counts, where the ring is least efficient; 8 ranks is unchanged. The variable is read per process; communicator initialization checks agreement across ranks and fails cleanly, naming the disagreeing ranks, if it is not set identically everywhere, rather than letting ranks diverge into and out of the DDA IPC path and hang. With it enabled below 8 ranks, results are not bit-identical to the ring path because the DDA kernels reduce in strict rank order, and every participating communicator allocates the full DDA IPC scratch buffer.
 * Added an experimental gfx1250 (MI450) Tensor Data Mover path for copy-shaped SIMPLE-protocol transfers. All collectives can reach it, but reduction collectives only qualify on slices that carry no reduction operation. Excluded from the default build: it requires `--enable-tdm-simple` at build time and `RCCL_TDM_SIMPLE_ENABLE=1` at runtime. Reduction into LDS staging buffers and double buffering are not yet implemented.
 * Added the strict `--enable-full-coverage` install flag for unified host + device LLVM source-based code coverage. It requires `--debug`, the device linker, and ROCm 7.15 or newer. The test runner uses the CMake-level `ENABLE_FULL_COVERAGE=AUTO` mode, which falls back to host-only coverage when device instrumentation is unavailable.
+* Enabled the Copy-Engine profiler path (`ncclProfiler_v6`): Copy-Engine events are emitted for CE collectives, and the example profiler plugin reports them.
 
 ### Changed
 * Narrowed unroll-factor kernel generation: gfx1250 (MI450/MI455) local builds now generate only unroll 32, its runtime default, instead of 8/16/32, and a multi-arch build generates 1/2/4/32 instead of all six factors. This cuts the multi-arch kernel count by roughly a third; use `--all_unrolls` to build 8 and 16.
@@ -31,6 +32,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Known issues
 * The improved AllGatherV support breaks the NCCL profiler support for ncclBroadcast operations, limiting visibility to API events. `NCCL_ALLGATHERV_ENABLE=0` can be used as a workaround until it is fixed in a future release.
 * Multi-node multi-segment and Elastic Buffer symmetric-window registration is not yet enabled; NET and LSA+GIN multi-segment paths depend on runtime support for exporting contiguous DMA-BUF handles across all physical segments.
+* Collectives that select the RCCL DDA path are not traced by the profiler plugins. `RCCL_DDA_ENABLE=0` can be used to route the collectives through the instrumented path while profiling.
 
 ## RCCL 2.30.4 for ROCm 7.14.0
 

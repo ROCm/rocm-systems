@@ -33,7 +33,6 @@
 #include "lib/rocprofiler-sdk/hsa/utils.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
@@ -571,10 +570,6 @@ hsa_shut_down_refcnt_impl()
         --hsa_reference_count_value;
         if(hsa_reference_count_value == 0)
         {
-            // Last HSA reference is about to drop.  Stop and join any running
-            // thread-trace producer/consumer threads *before* ROCR tears down
-            // SDMA engines and signal pools in Runtime::Unload().
-            thread_trace::flush_and_stop();
             // F24 terminal fail-closed fence: after real hsa_shut_down the runtime
             // frees SDMA/signal state, so no callback-capable signal-less completion
             // may survive. On timeout abandon+disable process-wide. No-op with the

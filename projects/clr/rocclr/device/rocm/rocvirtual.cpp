@@ -2621,6 +2621,12 @@ bool VirtualGPU::ManagedBuffer::Create(Device::MemorySegment mem_segment) {
   hsa_agent_t agent = gpu_.dev().getBackendDevice();
   for (auto& it : pool_signal_) {
     if (HSA_STATUS_SUCCESS != Hsa::signal_create(0, 1, &agent, HSA_AMD_SIGNAL_AMD_GPU_ONLY, &it)) {
+      for (auto& sig : pool_signal_) {
+        if (sig.handle != 0) {
+          Hsa::signal_destroy(sig);
+          sig.handle = 0;
+        }
+      }
       return false;
     }
   }

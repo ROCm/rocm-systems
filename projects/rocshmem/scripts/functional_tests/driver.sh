@@ -188,7 +188,7 @@ fi
 # Detect wavefront size and grid-sync residency limits based on GPU architecture.
 # gfx1100/gfx1201/gfx1250 have wavefront size 32, most others have 64.
 # GRID_SYNC_MAX_THREADS applies only to functional tests whose kernels use the
-# software grid_barrier occupancy guard. A value of 0 disables driver-side adjustment. 
+# software grid_barrier occupancy guard. A value of 0 disables driver-side adjustment.
 # It can be overridden with ROCSHMEM_TEST_GRID_SYNC_MAX_THREADS.
 WAVE_SIZE=64
 GPU_ARCH=""
@@ -989,9 +989,9 @@ TestOther() {
   else echo "Skip:   hostteamsyncbarrier (host team sync/barrier hangs on RO)"; fi
   unset ROCSHMEM_MAX_NUM_CONTEXTS
   unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
-  
+
   ExecTest  "teamsplit2d"              4  1            1
-  
+
   ExecTest  "shmemptr"         2       1            1         8
   ExecTest  "shmemptr"         2       1            1024      8
   ExecTest  "shmemptr"         2       8            1         8
