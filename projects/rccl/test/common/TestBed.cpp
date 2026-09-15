@@ -49,6 +49,12 @@
 
 namespace RcclUnitTesting
 {
+  namespace
+  {
+    // Matched by suite, not by test: the observed failures are one sweep's sample, so naming exact tests leaves sibling variants exposed.
+    char const* const kGfx95NoPoolSuites[] = {"AlltoAll", "ReduceScatter", "AllGather"};
+  }
+
   TestBed::TestBed() :
     numDevicesAvailable(0),
     numActiveChildren(0),
@@ -66,18 +72,25 @@ namespace RcclUnitTesting
     // Parsed/registered centrally in EnvVars (shown in the config banner) like every UT_* var.
     this->poolMode = ev.commPool;
 
-    // gfx950 AlltoAll is unstable when workers/comms are reused across configs (AICOMRCCL-2275, AICOMRCCL-1900).
-    // Unconditional on gfx950, so UT_COMM_POOL=1 cannot defeat it; exact suite match deliberately excludes AlltoAllv.
+    // The kGfx95NoPoolSuites suites are unstable on gfx950 when workers/comms are reused across configs (AICOMRCCL-2275).
+    // Unconditional on gfx950, so UT_COMM_POOL=1 cannot defeat it; exact match still excludes AlltoAllv, whose hang is AICOMRCCL-1900.
     if (this->poolMode && ev.isGfx95)
     {
       // TestBed is a local in each TEST body, so current_test_info() names the running test; null only if used outside one.
       ::testing::TestInfo const* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
-      if (testInfo != nullptr && testInfo->test_suite_name() != nullptr &&
-          strcmp(testInfo->test_suite_name(), "AlltoAll") == 0)
+      if (testInfo != nullptr && testInfo->test_suite_name() != nullptr)
       {
-        this->poolMode = false;
-        TEST_INFO("Comm pool (UT_COMM_POOL) forced off for %s.%s: pool reuse is unstable for AlltoAll on gfx950",
-                  testInfo->test_suite_name(), testInfo->name());
+        for (char const* const suiteName : kGfx95NoPoolSuites)
+        {
+          if (strcmp(testInfo->test_suite_name(), suiteName) != 0)
+          {
+            continue;
+          }
+          this->poolMode = false;
+          TEST_INFO("Comm pool (UT_COMM_POOL) forced off for %s.%s: pool reuse is unstable for this suite on gfx950",
+                    testInfo->test_suite_name(), testInfo->name());
+          break;
+        }
       }
     }
     this->configUsedPool = false;
