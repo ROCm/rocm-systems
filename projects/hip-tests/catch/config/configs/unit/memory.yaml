@@ -843,6 +843,15 @@ memory:
   Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps:
     <<: *level_2
     tags: [image]
+  Unit_hipMemcpy3DBatchAsync_SameDirPtrBatchOps:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_D2DOperandBatchOps:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_UnalignedPitchBatchOps:
+    <<: *level_2
+    tags: [transfer]
   Unit_hipMemcpy3DBatchAsync_NegativeTests:
     <<: *level_2
     tags: [transfer]
