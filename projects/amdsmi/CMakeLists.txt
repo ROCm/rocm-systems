@@ -4,6 +4,7 @@
 #
 # Minimum version of cmake required
 #
+# Temporary no-op change on amdsmi to exercise TheRock Multi-Arch CI.
 cmake_minimum_required(VERSION 3.20)
 
 set(AMD_SMI "amd_smi")
