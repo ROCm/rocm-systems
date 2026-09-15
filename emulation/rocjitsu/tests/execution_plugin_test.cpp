@@ -3988,6 +3988,19 @@ TEST(InstructionMetadataTest, Cdna5AsyncOperationsExposeDistinctCompletionDomain
   expect(barrier_words, MemoryCompletionClass::ASYNC_LOAD);
 }
 
+TEST(InstructionMetadataTest, WideScalarLoadContributesTwoCounterTokens) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  const auto words =
+      cdna4::build_smem(cdna4::kSLoadDwordx2Smem, {.sbase = 0, .sdata = 4, .imm = 1, .offset = 0});
+  std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
+  ASSERT_NE(load, nullptr);
+  const auto obligations = load->amdgpu_memory_issue_info()->counter_obligations();
+  ASSERT_EQ(obligations.size(), 1u);
+  EXPECT_EQ(obligations[0].wait_counter_type(), WaitCounterType::LGKMCNT);
+  EXPECT_EQ(obligations[0].counter_increment(), 2u);
+}
+
 // The immediate-halt branch frees a wave's registers the instant s_endpgm
 // executes, so instruction hooks must not read the slot afterward. Concretely:
 // the terminator must fire BEFORE_INSTRUCTION (it is fetched and decoded) but NOT

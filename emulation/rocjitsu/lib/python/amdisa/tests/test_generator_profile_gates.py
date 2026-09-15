@@ -7222,6 +7222,21 @@ def test_cdna5_async_completion_domains_are_explicit():
         assert f'amdgpu::MemoryCompletionClass::{completion}' in issue
 
 
+def test_wide_scalar_load_contributes_two_counter_tokens():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna4', profile=Cdna4Profile())
+    narrow = InstructionSemantics('S_LOAD_DWORD', 'smem_load', num_elems=1)
+    wide = InstructionSemantics('S_LOAD_DWORDX2', 'smem_load', num_elems=2)
+
+    assert (
+        'MemoryCompletionClass::UNORDERED, 2}'
+        not in codegen._memory_issue_initializer(narrow, set())
+    )
+    assert 'MemoryCompletionClass::UNORDERED, 2}' in codegen._memory_issue_initializer(
+        wide, set()
+    )
+
+
 @pytest.mark.parametrize(
     'arch',
     ['cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2', 'rdna3', 'rdna3_5'],

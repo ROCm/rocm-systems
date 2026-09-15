@@ -7834,8 +7834,21 @@ class CodeGenerator:
         return 'amdgpu::WaitCounterType::LGKMCNT'
 
     @staticmethod
-    def _memory_counter_obligation(counter: str, completion: str) -> str:
-        return f'amdgpu::MemoryCounterObligation{{{counter}, {completion}}}'
+    def _memory_counter_obligation(
+        counter: str, completion: str, counter_increment: int = 1
+    ) -> str:
+        fields = [counter, completion]
+        if counter_increment != 1:
+            fields.append(str(counter_increment))
+        return f'amdgpu::MemoryCounterObligation{{{", ".join(fields)}}}'
+
+    def _memory_issue_counter_increment(
+        self, sem: InstructionSemantics, sem_class: str
+    ) -> int:
+        """Return the number of counter tokens contributed by one issue."""
+        if sem_class == 'smem_load' and (getattr(sem, 'num_elems', None) or 1) > 1:
+            return 2
+        return 1
 
     def _additional_memory_obligation(
         self, sem: InstructionSemantics, sem_class: str, inst_fields: set[str]
@@ -7905,7 +7918,13 @@ class CodeGenerator:
         completion = self._memory_completion_class(
             sem, inst_fields, sem_class, is_load_expr=is_load_expr
         )
-        obligations = [self._memory_counter_obligation(counter, completion)]
+        obligations = [
+            self._memory_counter_obligation(
+                counter,
+                completion,
+                self._memory_issue_counter_increment(sem, sem_class),
+            )
+        ]
         additional = self._additional_memory_obligation(sem, sem_class, inst_fields)
         if additional is not None:
             obligations.append(additional)
