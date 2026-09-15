@@ -389,6 +389,7 @@ enum class os_wave_launch_trap_mask_t : uint32_t
   wave_start = 1 << 30,
   wave_end = 1u << 31
 };
+
 template <> struct is_flag<os_wave_launch_trap_mask_t> : std::true_type
 {
 };

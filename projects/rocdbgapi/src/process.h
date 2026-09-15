@@ -116,6 +116,9 @@ private:
 
   bool m_supports_precise_alu_exceptions{ false };
 
+  os_wave_launch_trap_mask_t m_supported_wave_trap_mask{};
+  os_wave_launch_trap_mask_t m_requested_wave_trap_mask{};
+
   os_process_flags_t m_process_flags{};
 
   bool m_forward_progress_needed{ true };
@@ -286,6 +289,9 @@ public:
   void set_precise_memory (bool enabled);
 
   void set_precise_alu_exceptions (bool enabled);
+
+  void set_user_trap_override (amd_dbgapi_wave_enable_trap_t enabled_traps,
+                               amd_dbgapi_wave_enable_trap_t mask);
 
   /* Suspend/resume a list of queues.  Queues may become invalid as a result of
      suspension/resumption, but not destroyed.  Queues made invalid will

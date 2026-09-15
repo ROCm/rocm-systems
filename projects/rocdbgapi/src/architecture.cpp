@@ -1506,8 +1506,11 @@ amdgcn_architecture_t::wave_get_state (wave_t &wave) const
   uint32_t ttmp6;
   wave.read_register (amdgpu_regnum_t::ttmp6, &ttmp6);
   const bool is_stopped = (ttmp6 & ttmp6_wave_stopped_mask) != 0;
+  const bool is_halted = wave_get_halt (wave);
 
-  if (!is_stopped)
+  /* The wave may be halted but not stopped.  In that case, still report
+     exceptions.  */
+  if (!is_stopped && !is_halted)
     /* The wave is still running, nothing to do.  */
     return { wave.state (), AMD_DBGAPI_WAVE_STOP_REASON_NONE };
 
@@ -1520,7 +1523,8 @@ amdgcn_architecture_t::wave_get_state (wave_t &wave) const
      fill the stop_reason with the exceptions that have caused the wave to
      enter the trap handler.  */
 
-  if (park_stopped_waves (wave.process ().runtime_rdebug_version ()))
+  if (is_stopped
+      && park_stopped_waves (wave.process ().runtime_rdebug_version ()))
     wave.write_register (amdgpu_regnum_t::pc, saved_parked_pc (wave));
 
   amd_dbgapi_wave_stop_reasons_t stop_reason
@@ -1584,7 +1588,8 @@ amdgcn_architecture_t::wave_get_state (wave_t &wave) const
      raising a bit in the trapsts register, some don't, and in the absence of
      any other stop reason, a single-step is assumed.  */
 
-  return { AMD_DBGAPI_WAVE_STATE_STOP, stop_reason };
+  return { is_stopped ? AMD_DBGAPI_WAVE_STATE_STOP : AMD_DBGAPI_WAVE_STATE_RUN,
+           stop_reason };
 }
 
 void
