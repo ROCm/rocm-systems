@@ -202,6 +202,8 @@ pub struct KfdDeviceInfo {
     #[serde(default)]
     pub num_sdma_xgmi_engines: u32,
     #[serde(default)]
+    pub num_sdma_queues_per_engine: u32,
+    #[serde(default)]
     pub num_cp_queues: u32,
     #[serde(default)]
     pub max_engine_clk_fcompute: u32,

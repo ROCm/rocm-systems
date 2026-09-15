@@ -86,6 +86,7 @@ pub fn mi300x() -> AgentDef {
                     mem_clk_max: 1300,
                     l2_size_kb: 4096,
                     num_sdma_engines: 4,
+                    num_sdma_queues_per_engine: 8,
                     num_sdma_xgmi_engines: 6,
                     num_cp_queues: 128,
                     max_engine_clk_fcompute: 2100,
@@ -136,6 +137,7 @@ pub fn mi350x() -> AgentDef {
                     mem_clk_max: 1600,
                     l2_size_kb: 4096,
                     num_sdma_engines: 5,
+                    num_sdma_queues_per_engine: 8,
                     num_sdma_xgmi_engines: 12,
                     num_cp_queues: 128,
                     max_engine_clk_fcompute: 2700,
@@ -185,6 +187,7 @@ pub fn mi450x() -> AgentDef {
                     mem_clk_max: 1600,
                     l2_size_kb: 4096,
                     num_sdma_engines: 5,
+                    num_sdma_queues_per_engine: 2,
                     num_sdma_xgmi_engines: 12,
                     num_cp_queues: 128,
                     max_engine_clk_fcompute: 2700,
@@ -333,6 +336,18 @@ mod tests {
         assert_eq!(a[0].0, "mi300x");
         assert_eq!(a[1].0, "mi350x");
         assert_eq!(a[2].0, "mi450x");
+    }
+
+    #[test]
+    fn agents_export_sdma_queue_capacity() {
+        for ((name, agent), expected) in agents().into_iter().zip([8, 8, 2]) {
+            let json = serde_json::to_value(agent).unwrap();
+            assert_eq!(
+                json["vm"]["gpu"]["device"]["num_sdma_queues_per_engine"],
+                expected,
+                "{name} must advertise its SDMA queue capacity to rocjitsu"
+            );
+        }
     }
 
     /// The number of CUs a builtin emulates is mirage's, not the
