@@ -416,6 +416,9 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
 HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  checkVMMSupported(device);
   int fd[2], fdSig[2], fdpid[2];
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
@@ -499,9 +502,6 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
     int pid_grChld = 0;
     REQUIRE(read(fdpid[0], &pid_grChld, sizeof(pid_grChld)) >= 0);
     CTX_CREATE();
-    hipDevice_t device;
-    HIP_CHECK(hipDeviceGet(&device, 0));
-    checkVMMSupported(device);
     // Set property
     hipMemAllocationProp prop = {};
     prop.type = hipMemAllocationTypePinned;
