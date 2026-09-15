@@ -70,6 +70,7 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/static_object.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/string_utility.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/synchronized.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/time.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/traits.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/version.hpp
 )

@@ -5,6 +5,7 @@
 // and ROCPROFSYS_USE_AINIC before any header gates code on that macro.
 #include "backends/amd_smi/ainic_feature.hpp"
 
+#include "common/time.hpp"
 #include "library/pmc/collectors/common/collector_slice.hpp"
 #include "library/pmc/collectors/common/settings.hpp"
 #include "library/pmc/collectors/gpu/cache_policy.hpp"
@@ -242,8 +243,7 @@ sample()
         return;
     }
 
-    auto timestamp =
-        static_cast<std::int64_t>(tim::get_clock_real_now<size_t, std::nano>());
+    auto timestamp = common::time::timeline_ns<std::int64_t>();
 
     for(auto& slice : g_collector_slices)
     {
@@ -337,8 +337,7 @@ pause()
         return;
     }
 
-    auto timestamp =
-        static_cast<std::int64_t>(tim::get_clock_real_now<size_t, std::nano>());
+    auto timestamp = common::time::timeline_ns<std::int64_t>();
 
     for(auto& slice : g_collector_slices)
     {

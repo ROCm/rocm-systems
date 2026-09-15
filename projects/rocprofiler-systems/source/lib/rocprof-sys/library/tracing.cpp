@@ -3,6 +3,7 @@
 
 #include "library/tracing.hpp"
 #include "common/env_vars.hpp"
+#include "common/time.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/perfetto/emitter.hpp"
@@ -150,7 +151,7 @@ record_thread_start_time()
 {
     static thread_local std::once_flag _once{};
     std::call_once(_once, []() {
-        thread_info::set_start(comp::wall_clock::record(),
+        thread_info::set_start(common::time::timeline_ns(),
                                get_mode() != state::process::Mode::sampling);
     });
 }

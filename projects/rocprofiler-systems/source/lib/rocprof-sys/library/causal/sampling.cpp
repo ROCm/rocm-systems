@@ -281,7 +281,7 @@ configure(bool _setup, std::int64_t _tid)
             backtrace_enabled::set(scope::thread_scope{}, true);
             overflow_enabled::set(false);
             overflow_enabled::set(scope::thread_scope{}, false);
-            _causal->configure(timer{ get_sampling_realtime_signal(), CLOCK_REALTIME,
+            _causal->configure(timer{ get_sampling_realtime_signal(), CLOCK_BOOTTIME,
                                       SIGEV_THREAD_ID, 1000.0, 1.0e-6, _tid,
                                       threading::get_sys_tid() });
             if(_tid == 0) LOG_DEBUG("Causal profiling backend: timer");
