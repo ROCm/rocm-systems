@@ -5014,13 +5014,17 @@ hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr);
  * typically one of the writes will "win" and overwrite data from the other registered memory
  * region.
  *
- * @warning Registering very large host memory regions with hipHostRegister can incur
- * substantial registration and deregistration overhead. Large registrations may increase
- * the time required by hipHostUnregister and process teardown, and can adversely affect
- * overall system performance.
+ *  @warning Avoid registering very large host memory allocations (for example,
+ * multi-gigabyte buffers such as LLM KV caches) with hipHostRegister.
  *
- * For large shared memory workloads, consider using hipMallocManaged or other SVM/HMM-based
- * memory management mechanisms instead of registering large user-allocated host buffers.
+ * Unregistering large pinned allocations through hipHostUnregister, or
+ * during process termination, requires synchronous kernel-level page-table
+ * cleanup and unmapping. This operation can incur significant delays and
+ * may trigger kernel CPU soft-lockup warnings.
+ *
+ * For large shared-memory workloads, use Shared Virtual Memory (SVM) via
+ * hipMallocManaged or Heterogeneous Memory Management (HMM)-based memory
+ * management instead.
  *
  *  @returns #hipSuccess, #hipErrorOutOfMemory
  *
