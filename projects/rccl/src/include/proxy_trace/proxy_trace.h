@@ -10,12 +10,9 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
-#ifndef FMT_HEADER_ONLY
-#define FMT_HEADER_ONLY 1
-#endif
-#include <fmt/format.h>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <unordered_map>
 
 #ifndef NCCL_STEPS
@@ -82,7 +79,9 @@ struct ProxyTraceExtraInfo {
   uint32_t totalBytes{0};
   uint32_t chunkSize{0};
   inline std::string str() const {
-    return fmt::format("[fu,pr,pa,tb,ck]:{},{},{},{},{}", funcIdx, protocol, pattern, totalBytes, chunkSize);
+    std::ostringstream oss;
+    oss << "[fu,pr,pa,tb,ck]:" << funcIdx << "," << protocol << "," << pattern << "," << totalBytes << "," << chunkSize;
+    return oss.str();
   }
 };
 

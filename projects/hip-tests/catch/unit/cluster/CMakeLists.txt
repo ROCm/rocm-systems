@@ -26,6 +26,7 @@ set(TEST_SRC
     hipClusterCompilerDirective.cc
     hipClusterLaunch.cc
     cluster_class.cc
+    cluster_split_barrier.cc
 )
 
 # Append it to the list

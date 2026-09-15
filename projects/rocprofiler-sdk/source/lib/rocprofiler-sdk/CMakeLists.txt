@@ -127,6 +127,44 @@ install(
 
 # ----------------------------------------------------------------------------------------#
 #
+# unversioned shared library used to test loading two instances of rocprofiler-sdk
+#
+# ----------------------------------------------------------------------------------------#
+
+if(ROCPROFILER_BUILD_TESTS)
+    add_library(rocprofiler-sdk-test-duplicate-shared-library SHARED)
+
+    target_sources(
+        rocprofiler-sdk-test-duplicate-shared-library
+        PRIVATE $<TARGET_OBJECTS:rocprofiler-sdk::rocprofiler-sdk-object-library>
+                shared_library.cpp)
+    target_link_libraries(
+        rocprofiler-sdk-test-duplicate-shared-library
+        PUBLIC rocprofiler-sdk::rocprofiler-sdk-headers
+        PRIVATE rocprofiler-sdk::rocprofiler-sdk-build-flags
+                rocprofiler-sdk::rocprofiler-sdk-memcheck
+                rocprofiler-sdk::rocprofiler-sdk-common-library
+                rocprofiler-sdk::rocprofiler-sdk-cxx-filesystem
+                rocprofiler-sdk::rocprofiler-sdk-dl
+                rocprofiler-sdk::rocprofiler-sdk-amd-comgr
+                rocprofiler-sdk::rocprofiler-sdk-object-library)
+
+    set_target_properties(
+        rocprofiler-sdk-test-duplicate-shared-library
+        PROPERTIES OUTPUT_NAME rocprofiler-sdk
+                   LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/duplicate-sdk"
+                   BUILD_RPATH "\$ORIGIN"
+                   DEFINE_SYMBOL rocprofiler_EXPORTS)
+
+    install(
+        TARGETS rocprofiler-sdk-test-duplicate-shared-library
+        LIBRARY
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/duplicate-sdk
+            COMPONENT tests)
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
 # static library (only built if another target links to it)
 #
 # ----------------------------------------------------------------------------------------#

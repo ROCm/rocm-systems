@@ -54,10 +54,10 @@ __host__ __device__ __forceinline__ size_t ddaLL128NumLines(size_t nWords) {
 // comes from gfx1250 preserving per-thread program order of system-scope stores,
 // not from an atomic fence. Matches the validated microbenchmark primitives.
 __device__ __forceinline__ void ddaLL128StoreWord(uint64_t* p, uint64_t v) {
-  __hip_atomic_store((u64_gptr)p, v, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  __scoped_atomic_store_n((u64_gptr)p, v, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
 }
 __device__ __forceinline__ uint64_t ddaLL128LoadWord(const uint64_t* p) {
-  return __hip_atomic_load((u64_gptr) const_cast<uint64_t*>(p), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  return __scoped_atomic_load_n((u64_gptr) const_cast<uint64_t*>(p), __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
 }
 
 // Element-wise add of the T-elements packed into two 8B payload words. An 8B
