@@ -1,0 +1,76 @@
+# Enforce the ROCm documentation style guide on HIP docs.
+# --------------------------------------------------------
+# Adapted from ROCm/rocm-docs-style's gh-workflows/consumer-example.yml.
+#
+# What it does:
+#   1. Check out this repo's PR content (sparse: projects/hip/docs only).
+#   2. Check out the rocm-docs-style repo (the rules).
+#   3. Download the latest Vale.
+#   4. Sync the Google + Microsoft style packages.
+#   5. Run the Vale check on the PR's changed files under projects/hip/docs.
+
+name: "HIP: docs style check"
+
+on:
+  pull_request:
+    paths:
+      - 'projects/hip/docs/**'
+      - '.github/workflows/hip-docs-style-check.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  vale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out this repo's PR content
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0                       # needed to diff against base
+          sparse-checkout: |
+            projects/hip/docs
+            .github/workflows
+          path: docs-repo
+
+      - name: Check out the rocm-docs-style guide
+        uses: actions/checkout@v7
+        with:
+          repository: ROCm/rocm-docs-style      # the public style-guide repo
+          path: rocm-docs-style                 # keep alongside docs-repo, not at workspace root
+
+      - name: Install Vale (latest)
+        run: |
+          curl -sS -H "Authorization: Bearer ${{ github.token }}" \
+            https://api.github.com/repos/vale-cli/vale/releases/latest \
+            | jq -r '.assets[] | select(.name | contains("Linux_64-bit.tar.gz")) | .browser_download_url' \
+            | xargs wget -c
+          sudo tar -xzf vale_*.tar.gz -C /usr/local/bin
+          vale --version
+
+      - name: Sync Google + Microsoft style packages
+        run: |
+          cd rocm-docs-style/vale
+          vale sync            # downloads the Google/Microsoft packages referenced by .vale.ini
+
+      - name: Vale-check the PR's changed HIP docs
+        run: |
+          # This matches the `path: docs-repo` set on the first checkout step above.
+          # If you change that `path:`, update this `cd` to match.
+          cd docs-repo
+          BASE="${{ github.event.pull_request.base.sha }}"
+          FILES=$(git diff --name-only --diff-filter=ACM "$BASE" -- \
+            'projects/hip/docs/**/*.md' 'projects/hip/docs/**/*.rst' || true)
+          if [ -z "$FILES" ]; then
+            echo "No changed HIP docs to lint."
+            exit 0
+          fi
+          echo "Linting changed files:"; echo "$FILES"
+          # Use the style guide's config; lint files in THIS repo's checkout.
+          vale --config="../rocm-docs-style/vale/.vale.ini" $FILES
