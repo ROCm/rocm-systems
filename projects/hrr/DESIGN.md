@@ -131,7 +131,7 @@ precisely the ones left without a trailer and absent from the root index, while
 the parent that exited cleanly needs no repair. Sub-archives that already carry
 a clean trailer are skipped without being read.
 
-### Archive Format (v3)
+### Archive Format (v4)
 ```
 capture.hrr/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
@@ -303,20 +303,20 @@ The generator classifies each API:
 
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
 
-## Archive Format (v3)
+## Archive Format (v4)
 
 Single-authority definition in `hrr_api_args.h` (auto-generated):
 
 ```
 HRR_MAGIC   = 0x52524845  ("HRRE")
-HRR_VERSION = 3
+HRR_VERSION = 4
 ```
 
 ```
 <output_dir>/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
                      (version here is the manifest schema = 1, distinct from the
-                      events.bin HRR_VERSION = 3)
+                      events.bin HRR_VERSION = 4)
   pid-<pid>/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     writer_state.json  checkpoint cursor (next_seq, event/blob counts, events file
