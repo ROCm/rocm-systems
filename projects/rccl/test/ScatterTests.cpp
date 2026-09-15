@@ -145,16 +145,15 @@ namespace RcclUnitTesting
 
   TEST(Scatter, SingleProcMemReg)
   {
-    int hipRuntimeVer = 0;
-    HIPCALL(hipRuntimeGetVersion(&hipRuntimeVer));
-    if (hipRuntimeVer < 71260540) {
-      GTEST_SKIP() << "Skipping SingleProcMemReg: HIP runtime version ("
-                   << hipRuntimeVer << ") is lower than 71260540";
-    }
     ScopedEnvVar pool("UT_COMM_POOL", "0");
     ScopedEnvVar singleProcMemReg("NCCL_SINGLE_PROC_MEM_REG_ENABLE", "1");
     ScopedEnvVar cuMem("NCCL_CUMEM_ENABLE", "1");
     TestBed testBed;
+    int const hipRuntimeVer = testBed.ev.GetHipRuntimeVersion();
+    if (hipRuntimeVer < 71260540) {
+      GTEST_SKIP() << "Skipping SingleProcMemReg: HIP runtime version ("
+                   << hipRuntimeVer << ") is lower than 71260540";
+    }
 
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollScatter};
@@ -174,16 +173,15 @@ namespace RcclUnitTesting
 
   TEST(Scatter, SingleProcMemRegGraph)
   {
-    int hipRuntimeVer = 0;
-    HIPCALL(hipRuntimeGetVersion(&hipRuntimeVer));
-    if (hipRuntimeVer < 71260540) {
-      GTEST_SKIP() << "Skipping SingleProcMemRegGraph: HIP runtime version ("
-                   << hipRuntimeVer << ") is lower than 71260540";
-    }
     ScopedEnvVar pool("UT_COMM_POOL", "0");
     ScopedEnvVar singleProcMemReg("NCCL_SINGLE_PROC_MEM_REG_ENABLE", "1");
     ScopedEnvVar cuMem("NCCL_CUMEM_ENABLE", "1");
     TestBed testBed;
+    int const hipRuntimeVer = testBed.ev.GetHipRuntimeVersion();
+    if (hipRuntimeVer < 71260540) {
+      GTEST_SKIP() << "Skipping SingleProcMemRegGraph: HIP runtime version ("
+                   << hipRuntimeVer << ") is lower than 71260540";
+    }
 
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollScatter};
