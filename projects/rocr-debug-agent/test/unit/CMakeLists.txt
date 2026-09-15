@@ -104,6 +104,18 @@ target_compile_definitions(
 include(GoogleTest)
 gtest_discover_tests(rocm-debug-agent-unit-tests)
 
+# Set INSTALL_RPATH for installed binary.
+# Unit tests are installed at tests/rocm-debug-agent/unit, so to reach lib/
+# we need $ORIGIN/../../../lib (three levels up).
+# Set THEROCK_NO_INSTALL_RPATH to disable TheRock's automatic RPATH processing,
+# then manually set INSTALL_RPATH.
+set_target_properties(
+    rocm-debug-agent-unit-tests
+    PROPERTIES
+        THEROCK_NO_INSTALL_RPATH ON
+        INSTALL_RPATH "$ORIGIN/../../../lib"
+)
+
 # Install (match integration test pattern).
 install(
     TARGETS rocm-debug-agent-unit-tests
