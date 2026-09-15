@@ -110,6 +110,13 @@ void ReportActivity(const amd::Command& command) {
       record.bytes = total;
       break;
     }
+    case ROCCLR_COMMAND_BATCH_COPY_BUFFER_RECT: {
+      const auto& ops = static_cast<const amd::BatchCopyRectMemoryCommand&>(command).copyOps();
+      size_t total = 0;
+      for (const auto& op : ops) total += linearSize(op.size);
+      record.bytes = total;
+      break;
+    }
     case ROCCLR_COMMAND_BATCH_WRITE_BUFFER: {
       const std::vector<amd::BatchWriteMemoryOp>& ops =
           static_cast<const amd::BatchWriteMemoryCommand&>(command).WriteOps();
@@ -198,6 +205,7 @@ const char* getOclCommandKindString(cl_command_type commandType) {
     CASE_STRING(ROCCLR_COMMAND_STREAM_WRITE_VALUE, StreamWrite);
     CASE_STRING(ROCCLR_COMMAND_BATCH_STREAM, BatchStreamOp);
     CASE_STRING(ROCCLR_COMMAND_BATCH_COPY_BUFFER, BatchCopyBuffer);
+    CASE_STRING(ROCCLR_COMMAND_BATCH_COPY_BUFFER_RECT, BatchCopyBufferRect);
     CASE_STRING(ROCCLR_COMMAND_BATCH_WRITE_BUFFER, BatchWriteBuffer);
     CASE_STRING(ROCCLR_COMMAND_BATCH_READ_BUFFER, BatchReadBuffer);
     default:
