@@ -30,7 +30,7 @@ inline bool isCeRuntimeDriverSupported()
 
 // Default ceARTmpBuf capacity. Matches NCCL_CE_AR_TMPBUF_DEFAULT_BYTES.
 // Per-rank chunk capacity is that size / nRanks, same as ncclCeInit.
-constexpr size_t kCeArMaxMsgBytesDefault = 256ull * 1024 * 1024;
+constexpr size_t kCeArMaxMsgBytesDefault = NCCL_CE_AR_TMPBUF_DEFAULT_BYTES;
 
 inline size_t ceAllReduceMaxChunkBytes(int nRanks,
                                        size_t ceArMaxBytes = kCeArMaxMsgBytesDefault)
