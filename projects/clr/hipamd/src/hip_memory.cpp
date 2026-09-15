@@ -6,6 +6,7 @@
 
 #include <cstring>
 #include <type_traits>
+#include <unistd.h>
 
 #include <hip/hip_runtime.h>
 #include "device.hpp"
@@ -1161,6 +1162,21 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
     if (mip_levels < numMipLevels) {
       LogPrintfError("Invalid Mip Levels: %d", numMipLevels);
       status = hipErrorInvalidValue;
+      return nullptr;
+    }
+  }
+
+  // Check allocations that exceed available system memory.
+  // to prevent soft-hang while the OS tries to mmap / ioctl hundreds of GBs of system memory.
+  if (buffer == nullptr) {
+    const size_t w = imageWidth  ? imageWidth  : 1;
+    const size_t h = imageHeight ? imageHeight : 1;
+    const size_t d = imageDepth  ? imageDepth  : 1;
+    const size_t linearSize = w * h * d * imageFormat.getElementSize();
+    const size_t availMem = static_cast<size_t>(sysconf(_SC_AVPHYS_PAGES))
+                            * static_cast<size_t>(sysconf(_SC_PAGESIZE));
+    if (linearSize > availMem) {
+      status = hipErrorOutOfMemory;
       return nullptr;
     }
   }
