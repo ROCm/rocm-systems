@@ -11,7 +11,6 @@ from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
-from unittest import mock
 from unittest.mock import MagicMock, patch
 
 import common
