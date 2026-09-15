@@ -4,6 +4,7 @@
 #pragma once
 
 #include "core/common_types.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd/kfd_common.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 #include "logger/debug.hpp"
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
@@ -13,7 +14,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <exception>
 #include <optional>
 #include <string>
 
@@ -81,38 +81,18 @@ on_kfd_queue(typename SdkBackend::kfd_queue_record* record, void* data)
         SdkBackend::BUFFER_TRACING_KFD_QUEUE, record->operation) };
     const auto tid  = static_cast<std::uint64_t>(record->pid);
 
-    const typename Externals::agent_t* agent = nullptr;
-    try
-    {
-        agent =
-            &Externals::get_agent_manager().get_agent_by_handle(record->agent_id.handle);
-    } catch(const std::exception& e)
-    {
-        LOG_DEBUG("kfd_queue: agent lookup failed for handle {} ({})",
-                  record->agent_id.handle, e.what());
-    }
+    const auto* agent =
+        try_get_agent<Externals>(record->agent_id.handle, "kfd_queue", "agent");
 
-    Externals::add_thread_info(typename Externals::thread_info_t{
-        Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
-
-    auto agent_label = [](const auto* agent_ptr) {
-        if(!agent_ptr)
-        {
-            return std::string{ "?" };
-        }
-
-        const bool is_gpu = (agent_ptr->type == Externals::k_agent_type_gpu);
-        return fmt::format("{} {}", is_gpu ? "GPU" : "CPU", agent_ptr->device_type_index);
-    };
+    record_thread<Externals>(tid);
 
     constexpr auto k_empty_event_metadata = "{}";
-    auto           track_name = fmt::format("KFD Queue [{}]", agent_label(agent));
+    auto track_name = fmt::format("KFD Queue [{}]", agent_label<Externals>(agent));
     Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
-    const auto agent_node_id =
-        agent ? std::to_string(agent->node_id) : std::string{ "null" };
-    const auto args_str = get_args_string(function_args_t{
-        { 0, "string", "agent", agent_node_id },
+    const auto agent_node_id = agent_node_id_string<Externals>(agent);
+    const auto args_str      = get_args_string(function_args_t{
+             { 0, "string", "agent", agent_node_id },
     });
 
     constexpr double k_pmc_value = 1.0;

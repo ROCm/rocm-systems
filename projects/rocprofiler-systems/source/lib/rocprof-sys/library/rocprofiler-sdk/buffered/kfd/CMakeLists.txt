@@ -11,6 +11,7 @@ set(kfd_domains_headers
     ${CMAKE_CURRENT_LIST_DIR}/event_page_migrate.hpp
     ${CMAKE_CURRENT_LIST_DIR}/event_queue.hpp
     ${CMAKE_CURRENT_LIST_DIR}/event_unmap_from_gpu.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/kfd_common.hpp
     ${CMAKE_CURRENT_LIST_DIR}/page_fault.hpp
     ${CMAKE_CURRENT_LIST_DIR}/page_migrate.hpp
     ${CMAKE_CURRENT_LIST_DIR}/queue.hpp

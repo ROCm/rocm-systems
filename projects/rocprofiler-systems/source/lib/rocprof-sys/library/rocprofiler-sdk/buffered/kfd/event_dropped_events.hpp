@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "library/rocprofiler-sdk/buffered/kfd/kfd_common.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 #include "logger/debug.hpp"
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
@@ -84,8 +85,7 @@ on_kfd_event_dropped_events(typename SdkBackend::kfd_event_dropped_record* recor
         SdkBackend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS, record->operation) };
     const auto tid  = static_cast<std::uint64_t>(record->pid);
 
-    Externals::add_thread_info(typename Externals::thread_info_t{
-        Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
+    record_thread<Externals>(tid);
 
     auto track_name = std::string{ "KFD Dropped Events" };
     Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });

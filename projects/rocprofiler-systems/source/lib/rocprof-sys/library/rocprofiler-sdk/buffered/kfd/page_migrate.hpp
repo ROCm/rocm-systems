@@ -4,6 +4,7 @@
 #pragma once
 
 #include "core/common_types.hpp"
+#include "library/rocprofiler-sdk/buffered/kfd/kfd_common.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 #include "logger/debug.hpp"
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
@@ -13,7 +14,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <exception>
 #include <optional>
 #include <string>
 
@@ -110,81 +110,35 @@ on_kfd_page_migrate(typename SdkBackend::kfd_page_migrate_record* record, void* 
         SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE, record->operation) };
     const auto tid  = static_cast<std::uint64_t>(record->pid);
 
-    const typename Externals::agent_t* src_agent = nullptr;
-    try
-    {
-        src_agent =
-            &Externals::get_agent_manager().get_agent_by_handle(record->src_agent.handle);
-    } catch(const std::exception& e)
-    {
-        LOG_DEBUG("kfd_page_migrate: src_agent lookup failed for handle {} ({})",
-                  record->src_agent.handle, e.what());
-    }
+    const auto* src_agent      = try_get_agent<Externals>(record->src_agent.handle,
+                                                          "kfd_page_migrate", "src_agent");
+    const auto* dst_agent      = try_get_agent<Externals>(record->dst_agent.handle,
+                                                          "kfd_page_migrate", "dst_agent");
+    const auto* prefetch_agent = try_get_agent<Externals>(
+        record->prefetch_agent.handle, "kfd_page_migrate", "prefetch_agent");
+    const auto* preferred_agent = try_get_agent<Externals>(
+        record->preferred_agent.handle, "kfd_page_migrate", "preferred_agent");
 
-    const typename Externals::agent_t* dst_agent = nullptr;
-    try
-    {
-        dst_agent =
-            &Externals::get_agent_manager().get_agent_by_handle(record->dst_agent.handle);
-    } catch(const std::exception& e)
-    {
-        LOG_DEBUG("kfd_page_migrate: dst_agent lookup failed for handle {} ({})",
-                  record->dst_agent.handle, e.what());
-    }
-
-    const typename Externals::agent_t* prefetch_agent = nullptr;
-    try
-    {
-        prefetch_agent = &Externals::get_agent_manager().get_agent_by_handle(
-            record->prefetch_agent.handle);
-    } catch(const std::exception& e)
-    {
-        LOG_DEBUG("kfd_page_migrate: prefetch_agent lookup failed for handle {} ({})",
-                  record->prefetch_agent.handle, e.what());
-    }
-
-    const typename Externals::agent_t* preferred_agent = nullptr;
-    try
-    {
-        preferred_agent = &Externals::get_agent_manager().get_agent_by_handle(
-            record->preferred_agent.handle);
-    } catch(const std::exception& e)
-    {
-        LOG_DEBUG("kfd_page_migrate: preferred_agent lookup failed for handle {} ({})",
-                  record->preferred_agent.handle, e.what());
-    }
-
-    Externals::add_thread_info(typename Externals::thread_info_t{
-        Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
-
-    auto agent_label = [](const auto* agent_ptr) {
-        if(!agent_ptr)
-        {
-            return std::string{ "?" };
-        }
-
-        const bool is_gpu = (agent_ptr->type == Externals::k_agent_type_gpu);
-        return fmt::format("{} {}", is_gpu ? "GPU" : "CPU", agent_ptr->device_type_index);
-    };
+    record_thread<Externals>(tid);
 
     constexpr auto k_empty_event_metadata = "{}";
 
-    auto track_name = fmt::format("KFD Page Migrate [{}->{}]", agent_label(src_agent),
-                                  agent_label(dst_agent));
+    auto track_name =
+        fmt::format("KFD Page Migrate [{}->{}]", agent_label<Externals>(src_agent),
+                    agent_label<Externals>(dst_agent));
     Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
-    auto agent_node_id = [](const auto* agent_ptr) {
-        return agent_ptr ? std::to_string(agent_ptr->node_id) : std::string{ "null" };
-    };
     const auto args_str = get_args_string(function_args_t{
         { 0, "std::uint64_t", "start_address",
           fmt::format("{:#x}", record->start_address.value) },
         { 1, "std::uint64_t", "end_address",
           fmt::format("{:#x}", record->end_address.value) },
-        { 2, "string", "src_agent", agent_node_id(src_agent) },
-        { 3, "string", "dst_agent", agent_node_id(dst_agent) },
-        { 4, "string", "prefetch_agent", agent_node_id(prefetch_agent) },
-        { 5, "string", "preferred_agent", agent_node_id(preferred_agent) },
+        { 2, "string", "src_agent", agent_node_id_string<Externals>(src_agent) },
+        { 3, "string", "dst_agent", agent_node_id_string<Externals>(dst_agent) },
+        { 4, "string", "prefetch_agent",
+          agent_node_id_string<Externals>(prefetch_agent) },
+        { 5, "string", "preferred_agent",
+          agent_node_id_string<Externals>(preferred_agent) },
         { 6, "int", "error_code", std::to_string(record->error_code) },
     });
 

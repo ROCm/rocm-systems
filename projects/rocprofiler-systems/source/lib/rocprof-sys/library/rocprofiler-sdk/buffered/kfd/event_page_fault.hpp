@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "library/rocprofiler-sdk/buffered/kfd/kfd_common.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 #include "logger/debug.hpp"
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
@@ -12,7 +13,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <exception>
 #include <optional>
 #include <string>
 
@@ -83,31 +83,13 @@ on_kfd_event_page_fault(typename SdkBackend::kfd_event_page_fault_record* record
         SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT, record->operation) };
     const auto tid  = static_cast<std::uint64_t>(record->pid);
 
-    const typename Externals::agent_t* agent = nullptr;
-    try
-    {
-        agent =
-            &Externals::get_agent_manager().get_agent_by_handle(record->agent_id.handle);
-    } catch(const std::exception& e)
-    {
-        LOG_DEBUG("kfd_event_page_fault: agent lookup failed for handle {} ({})",
-                  record->agent_id.handle, e.what());
-    }
+    const auto* agent = try_get_agent<Externals>(record->agent_id.handle,
+                                                 "kfd_event_page_fault", "agent");
 
-    Externals::add_thread_info(typename Externals::thread_info_t{
-        Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
+    record_thread<Externals>(tid);
 
-    auto agent_label = [](const auto* agent_ptr) {
-        if(!agent_ptr)
-        {
-            return std::string{ "?" };
-        }
-
-        const bool is_gpu = (agent_ptr->type == Externals::k_agent_type_gpu);
-        return fmt::format("{} {}", is_gpu ? "GPU" : "CPU", agent_ptr->device_type_index);
-    };
-
-    auto track_name = fmt::format("KFD Event Page Fault [{}]", agent_label(agent));
+    auto track_name =
+        fmt::format("KFD Event Page Fault [{}]", agent_label<Externals>(agent));
     Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
     constexpr auto k_empty_args = "";
