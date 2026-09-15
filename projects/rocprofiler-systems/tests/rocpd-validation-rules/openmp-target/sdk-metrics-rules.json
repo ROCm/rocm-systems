@@ -15,7 +15,31 @@
                     "description": "Verify that 'rocm_ompt_api' appears in category at least 100 times in table regions",
                     "error_message": "'rocm_ompt_api' category entries are fewer than expected in regions",
                     "expected_result": 100,
+                    "gpu_category_to_skip": [
+                        "apu"
+                    ],
                     "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_ompt_api';"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify rocm_ompt_api count for APU / shared-memory paths (fewer data-op callbacks)",
+                    "error_message": "'rocm_ompt_api' category entries are fewer than expected in regions (APU threshold)",
+                    "expected_result": 30,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_ompt_api';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Expect 12 omp_target_submit_emi events (2 threads x 2 iterations x 3 vmul types)",
+                    "error_message": "Unexpected omp_target_submit_emi count in regions",
+                    "expected_result": 12,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_ompt_api' AND name = 'omp_target_submit_emi';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Expect 12 omp_target_emi events (one per target region launch)",
+                    "error_message": "Unexpected omp_target_emi count in regions",
+                    "expected_result": 12,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_ompt_api' AND name = 'omp_target_emi';"
                 },
                 {
                     "comparison": "equals",
