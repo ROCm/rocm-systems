@@ -47,6 +47,7 @@
 #include "yaml-cpp/parser.h"
 
 #include <dlfcn.h>  // for dladdr
+#include <algorithm>
 #include <charconv>
 #include <cstdint>
 #include <cstdlib>
@@ -71,10 +72,10 @@ getCustomCounterDefinition()
 
 struct yaml_counter_definition
 {
-    std::string description = {};
-    std::string block       = {};
-    std::string event       = {};
-    std::string expression  = {};
+    std::string             description = {};
+    std::string             block       = {};
+    std::optional<uint64_t> event       = std::nullopt;
+    std::string             expression  = {};
 };
 
 bool
@@ -87,24 +88,39 @@ operator==(const yaml_counter_definition& lhs, const yaml_counter_definition& rh
 std::string
 format_yaml_counter_definition(const yaml_counter_definition& definition)
 {
+    auto event = definition.event ? fmt::format("{}", *definition.event) : std::string{};
     return fmt::format("description='{}', block='{}', event='{}', expression='{}'",
                        definition.description,
                        definition.block,
-                       definition.event,
+                       event,
                        definition.expression);
+}
+
+std::optional<uint64_t>
+parse_unsigned_integer(std::string_view value)
+{
+    auto parsed_value = uint64_t{};
+    auto result       = std::from_chars(value.data(), value.data() + value.size(), parsed_value);
+    if(value.empty() || result.ec != std::errc{} || result.ptr != value.data() + value.size())
+        return std::nullopt;
+    return parsed_value;
 }
 
 std::optional<uint64_t>
 parse_unsigned_integer(const YAML::Node& node)
 {
     if(!node || !node.IsScalar()) return std::nullopt;
+    return parse_unsigned_integer(node.as<std::string>());
+}
 
-    auto value        = node.as<std::string>();
-    auto parsed_value = uint64_t{};
-    auto result       = std::from_chars(value.data(), value.data() + value.size(), parsed_value);
-    if(value.empty() || result.ec != std::errc{} || result.ptr != value.data() + value.size())
-        return std::nullopt;
-    return parsed_value;
+yaml_counter_definition
+make_yaml_counter_definition(const Metric& metric)
+{
+    auto normalized_event =
+        metric.event().empty() ? std::nullopt : parse_unsigned_integer(metric.event());
+    ROCP_FATAL_IF(!metric.event().empty() && !normalized_event) << fmt::format(
+        "Counter '{}' has invalid existing event '{}'", metric.name(), metric.event());
+    return {metric.description(), metric.block(), normalized_event, metric.expression()};
 }
 
 /**
@@ -211,8 +227,6 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
         }
     }
 
-    using definitions_by_name_t     = std::unordered_map<std::string, yaml_counter_definition>;
-    auto loaded_counter_definitions = std::unordered_map<std::string, definitions_by_name_t>{};
     for(const auto& counter : header)
     {
         auto counter_name = counter["name"].as<std::string>();
@@ -221,18 +235,35 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
         {
             for(const auto& arch : definition["architectures"])
             {
-                auto arch_name = arch.as<std::string>();
-                auto block     = definition["block"] ? definition["block"].as<std::string>() : "";
-                auto event     = definition["event"] ? definition["event"].as<std::string>() : "";
+                auto arch_name  = arch.as<std::string>();
+                auto block      = definition["block"] ? definition["block"].as<std::string>() : "";
+                auto event_node = definition["event"];
+                auto event      = event_node ? event_node.as<std::string>() : "";
+                auto normalized_event =
+                    event_node ? parse_unsigned_integer(event_node) : std::nullopt;
                 auto expression =
                     definition["expression"] ? definition["expression"].as<std::string>() : "";
+                ROCP_FATAL_IF(event_node && !normalized_event)
+                    << fmt::format("Counter '{}' has invalid event '{}'", counter_name, event);
                 auto definition_data =
-                    yaml_counter_definition{description, block, event, expression};
-                auto [existing_definition, inserted] =
-                    loaded_counter_definitions[arch_name].emplace(counter_name, definition_data);
-                if(!inserted)
+                    yaml_counter_definition{description, block, normalized_event, expression};
+
+                auto& metricVec = ret.emplace(arch_name, std::vector<Metric>()).first->second;
+                if(metricVec.empty())
                 {
-                    if(existing_definition->second == definition_data)
+                    const auto constants = get_constants(current_id);
+                    metricVec.insert(metricVec.end(), constants.begin(), constants.end());
+                    current_id += constants.size();
+                }
+
+                auto existing_metric =
+                    std::find_if(metricVec.begin(), metricVec.end(), [&](const auto& metric) {
+                        return metric.name() == counter_name;
+                    });
+                if(existing_metric != metricVec.end())
+                {
+                    auto existing_definition = make_yaml_counter_definition(*existing_metric);
+                    if(existing_definition == definition_data)
                     {
                         ROCP_WARNING << "Counter '" << counter_name << "' for architecture '"
                                      << arch_name
@@ -246,7 +277,7 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
                             "resolve to one definition per architecture{}",
                             counter_name,
                             arch_name,
-                            format_yaml_counter_definition(existing_definition->second),
+                            format_yaml_counter_definition(existing_definition),
                             format_yaml_counter_definition(definition_data),
                             override.append ? "; append mode cannot override an existing counter"
                                             : "");
@@ -254,13 +285,6 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
                     continue;
                 }
 
-                auto& metricVec = ret.emplace(arch_name, std::vector<Metric>()).first->second;
-                if(metricVec.empty())
-                {
-                    const auto constants = get_constants(current_id);
-                    metricVec.insert(metricVec.end(), constants.begin(), constants.end());
-                    current_id += constants.size();
-                }
                 metricVec.emplace_back(
                     arch_name, counter_name, block, event, description, expression, "", current_id);
                 current_id++;
