@@ -72,7 +72,6 @@ namespace RcclUnitTesting
     // Parsed/registered centrally in EnvVars (shown in the config banner) like every UT_* var.
     this->poolMode = ev.commPool;
 
-    // The kGfx95NoPoolSuites suites are unstable on gfx950 when workers/comms are reused across configs (AICOMRCCL-2275).
     // Unstable on gfx95 when comms/workers are reused across configs (AICOMRCCL-2275); unconditional,
     // so UT_COMM_POOL=1 cannot defeat it. Exact match excludes AlltoAllv, whose hang is AICOMRCCL-1900.
     if (this->poolMode && ev.isGfx95)
@@ -88,7 +87,7 @@ namespace RcclUnitTesting
             continue;
           }
           this->poolMode = false;
-          TEST_INFO("Comm pool (UT_COMM_POOL) forced off for %s.%s: pool reuse is unstable for this suite on gfx950",
+          TEST_INFO("Comm pool (UT_COMM_POOL) forced off for %s.%s: pool reuse is unstable for this suite on gfx95",
                     testInfo->test_suite_name(), testInfo->name());
           break;
         }
