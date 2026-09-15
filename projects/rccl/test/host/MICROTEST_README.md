@@ -393,8 +393,13 @@ triage it into the right bucket:
 
 - **It's a global variable (`extern int foo;`)** → add a definition
   to the relevant module's fakes file, or, if only one test TU
-  references it, directly in that test (e.g. the arch/topo/busId link
-  stubs in `p2p-test.cc`). Use a sensible default (usually zero).
+  references it, directly in that test (e.g. the `allocTracker` array
+  in `p2p-test.cc`). Use a sensible default (usually zero).
+- **It's a plain function the module references but doesn't define**
+  (e.g. the arch/topo/busId helpers `IsArchMatch`, `busIdToInt64`,
+  `getBusId` in `p2p-test.cc`) → add a definition returning a sensible
+  default, either to the relevant fakes file or, if only one test TU
+  references it, directly in that test.
 - **It's a logging or env-param helper** → already covered by the
   no-op `ncclDebugLog` / `ncclLoadParam`. If a new logging primitive
   appears, follow the same pattern.

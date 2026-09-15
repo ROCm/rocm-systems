@@ -116,7 +116,7 @@ static void ResetP2pFakes();
 
 // allocTracker is an array of per-device counters in alloc.h; size it to the
 // same MAX_ALLOC_TRACK_NGPU the header uses. Zero-initialised.
-struct allocationTracker allocTracker[32 /* MAX_ALLOC_TRACK_NGPU */] = {};
+struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 
 // Arch / topology / busId helpers p2p.cc references but doesn't define here.
 bool IsArchMatch(char const* /*arch*/, char const* /*target*/)
@@ -1755,13 +1755,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_MultiPeerMixedReuseAndFreshUpdatesDevTabl
             if (h) std::memset(h, 0x5A, sizeof(*h));
             return hipSuccess;
         });
-    ScopedHook proxy(g_proxyCallBlocking,
-        [&](struct ncclComm*, struct ncclProxyConnector*, int,
-            void*, int, void* resp, int respSize) -> ncclResult_t {
-            EXPECT_GE(static_cast<size_t>(respSize), sizeof(void*));
-            if (resp) std::memcpy(resp, &kRmt1Fresh, sizeof(void*));
-            return ncclSuccess;
-        });
+    ScopedHook proxy(g_proxyCallBlocking, CannedRmtRegAddr(kRmt1Fresh));
 
     int peerRanks[] = {kPeer0Rank, kPeer1Rank};
     IpcRegOutputs out;
@@ -2597,13 +2591,7 @@ TEST_F(FreshRegistrationMicrotest, LegacyIpcNullIsLegacyIpcPointerIsSkipped)
     InstallLegacyCudaRegisterHook();
     auto memGet = MakeDefaultMemGetHook();
     auto ipcGet = MakeDefaultIpcGetHook();
-    ScopedHook proxy(g_proxyCallBlocking,
-        [&](struct ncclComm*, struct ncclProxyConnector*, int,
-            void*, int, void* resp, int respSize) -> ncclResult_t {
-            if (resp && static_cast<size_t>(respSize) >= sizeof(void*))
-                std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
-            return ncclSuccess;
-        });
+    ScopedHook proxy(g_proxyCallBlocking, CannedRmtRegAddr(kRmtRegAddr));
 
     int peerRanks[] = {kPeerRank};
     IpcRegOutputs out;
@@ -2637,15 +2625,8 @@ TEST_F(FreshRegistrationMicrotest, CuMemNullIsLegacyIpcPointerSuccessSkipped)
     ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
     auto memGet = MakeDefaultMemGetHook();
     ScopedHook retain(g_hipMemRetainAllocationHandle, RetainSentinelHandle());
-    ScopedHook release(g_hipMemRelease,
-        [](hipMemGenericAllocationHandle_t) -> hipError_t { return hipSuccess; });
-    ScopedHook proxy(g_proxyCallBlocking,
-        [&](struct ncclComm*, struct ncclProxyConnector*, int,
-            void*, int, void* resp, int respSize) -> ncclResult_t {
-            if (resp && static_cast<size_t>(respSize) >= sizeof(void*))
-                std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
-            return ncclSuccess;
-        });
+    ScopedHook release(g_hipMemRelease, ExpectReleaseSentinelHandle());
+    ScopedHook proxy(g_proxyCallBlocking, CannedRmtRegAddr(kRmtRegAddr));
 
     int peerRanks[] = {kPeerRank};
     IpcRegOutputs out;
@@ -2685,13 +2666,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemNullIsLegacyIpcPointerRetryArmSkipped)
             if (h) std::memset(h, 0x5A, sizeof(*h));
             return hipSuccess;
         });
-    ScopedHook proxy(g_proxyCallBlocking,
-        [&](struct ncclComm*, struct ncclProxyConnector*, int,
-            void*, int, void* resp, int respSize) -> ncclResult_t {
-            if (resp && static_cast<size_t>(respSize) >= sizeof(void*))
-                std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
-            return ncclSuccess;
-        });
+    ScopedHook proxy(g_proxyCallBlocking, CannedRmtRegAddr(kRmtRegAddr));
 
     int peerRanks[] = {kPeerRank};
     IpcRegOutputs out;
@@ -2747,13 +2722,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemFabricExportSucceeds)
             return hipSuccess;
         });
     ScopedHook release(g_hipMemRelease, ExpectReleaseSentinelHandle());
-    ScopedHook proxy(g_proxyCallBlocking,
-        [&](struct ncclComm*, struct ncclProxyConnector*, int,
-            void*, int, void* resp, int respSize) -> ncclResult_t {
-            if (resp && static_cast<size_t>(respSize) >= sizeof(void*))
-                std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
-            return ncclSuccess;
-        });
+    ScopedHook proxy(g_proxyCallBlocking, CannedRmtRegAddr(kRmtRegAddr));
 
     int peerRanks[] = {kPeerRank};
     IpcRegOutputs out;
