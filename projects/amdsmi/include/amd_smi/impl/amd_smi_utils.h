@@ -10,6 +10,7 @@
 #include <cctype>
 #include <charconv>
 #include <cstdint>
+#include <cstring>
 #include <iosfwd>
 #include <limits>
 #include <optional>
@@ -58,6 +59,22 @@ uint32_t smi_brcm_get_value_u32(const std::string& folder, const std::string& fi
 std::string smi_brcm_get_value_string(const std::string& folder, const std::string& file_name);
 amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::string* data);
 
+namespace amd::smi {
+
+// Copy `src` into `out` (capacity `out_cap`), always NUL-terminating.
+// Returns the number of bytes written, not counting the NUL.
+inline size_t CopyBounded(char* out, size_t out_cap, const std::string& src) {
+  if (out_cap == 0) return 0;
+  const size_t len = std::min<size_t>(out_cap - 1, src.length());
+  std::memcpy(out, src.data(), len);
+  out[len] = '\0';
+  return len;
+}
+
+}  // namespace amd::smi
+
+// Zero-fills `buffer` then copies `newString` into it, bounded and
+// NUL-terminated. Returns AMDSMI_STATUS_INVAL for a zero-length buffer.
 amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len, std::string newString);
 
 /**

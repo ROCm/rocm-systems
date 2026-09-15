@@ -99,16 +99,12 @@ std::string removeString(const std::string origStr, const std::string& removeMe)
 
 amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len,
                                                 std::string newString) {
-  char* begin = &buffer[0];
-  char* end = &buffer[len];
-  std::fill(begin, end, 0);
+  // len == 0 would underflow the copy length inside CopyBounded's caller
+  // contract, and there is no room even for the NUL.
+  if (len == 0) return AMDSMI_STATUS_INVAL;
 
-  // Safer approach - copy directly with length limit
-  size_t copy_len = std::min(static_cast<size_t>(len - 1), newString.length());
-  if (copy_len > 0) {
-    std::memcpy(buffer, newString.c_str(), copy_len);
-  }
-  buffer[copy_len] = '\0';
+  std::fill(buffer, buffer + len, '\0');
+  amd::smi::CopyBounded(buffer, len, newString);
   return AMDSMI_STATUS_SUCCESS;
 }
 
