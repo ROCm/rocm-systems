@@ -47,3 +47,17 @@ target_compile_options(attachment-test PRIVATE -Wpedantic)
 target_link_libraries(
     attachment-test PRIVATE Threads::Threads rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
                             rocprofiler-sdk::tests-build-flags)
+
+# Framework libraries can export a dormant rocprofiler_configure symbol even when no
+# profiling tool was requested. This variant models that process layout for attachment
+# tests.
+add_executable(attachment-test-implicit-configure)
+target_sources(attachment-test-implicit-configure PRIVATE attachment_test.cpp
+                                                          implicit_configure.cpp)
+target_compile_options(attachment-test-implicit-configure PRIVATE -Wpedantic)
+set_target_properties(attachment-test-implicit-configure PROPERTIES ENABLE_EXPORTS ON)
+
+target_link_libraries(
+    attachment-test-implicit-configure
+    PRIVATE Threads::Threads rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
+            rocprofiler-sdk::rocprofiler-sdk-headers rocprofiler-sdk::tests-build-flags)
