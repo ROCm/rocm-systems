@@ -61,9 +61,10 @@ SLoadB64Smem::SLoadB64Smem(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
-                        false);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
 }
 
 namespace detail {
@@ -90,9 +91,10 @@ SLoadB128Smem::SLoadB128Smem(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
-                        false);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
 }
 
 namespace detail {
@@ -119,9 +121,10 @@ SLoadB256Smem::SLoadB256Smem(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
-                        false);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
 }
 
 namespace detail {
@@ -148,9 +151,10 @@ SLoadB512Smem::SLoadB512Smem(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
-                        false);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
 }
 
 namespace detail {
@@ -207,9 +211,10 @@ SBufferLoadB64Smem::SBufferLoadB64Smem(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
-                        false);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
 }
 
 namespace detail {
@@ -237,9 +242,10 @@ SBufferLoadB128Smem::SBufferLoadB128Smem(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
-                        false);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
 }
 
 namespace detail {
@@ -267,9 +273,10 @@ SBufferLoadB256Smem::SBufferLoadB256Smem(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
-                        false);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
 }
 
 namespace detail {
@@ -297,9 +304,10 @@ SBufferLoadB512Smem::SBufferLoadB512Smem(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
-                        false);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::KMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
 }
 
 namespace detail {
