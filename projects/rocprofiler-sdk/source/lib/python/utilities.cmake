@@ -42,6 +42,38 @@ endif()
 macro(rocprofiler_find_python3 _VERSION)
     rocprofiler_reset_python3_cache()
 
+    # If an explicit executable list was provided (e.g. from TheRock via
+    # -DROCPROFILER_PYTHON_EXECUTABLES), pre-seed Python3_EXECUTABLE for this version
+    # before calling find_package. This is necessary for Python versions that CMake's
+    # FindPython3 does not auto-discover (e.g. Python 3.14+ on manylinux where an older
+    # CMake has no knowledge of the new install path).
+    if(DEFINED ROCPROFILER_PYTHON_EXECUTABLES)
+        string(REGEX MATCH "^[0-9]+\\.[0-9]+" _rocprofiler_requested_major_minor
+                     "${_VERSION}")
+        foreach(_rocprofiler_candidate_exe IN LISTS ROCPROFILER_PYTHON_EXECUTABLES)
+            execute_process(
+                COMMAND
+                    "${_rocprofiler_candidate_exe}" -c
+                    "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+                OUTPUT_VARIABLE _rocprofiler_candidate_ver
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                RESULT_VARIABLE _rocprofiler_candidate_result
+                ERROR_QUIET)
+            if(_rocprofiler_candidate_result EQUAL 0
+               AND "${_rocprofiler_candidate_ver}" STREQUAL
+                   "${_rocprofiler_requested_major_minor}")
+                set(Python3_EXECUTABLE
+                    "${_rocprofiler_candidate_exe}"
+                    CACHE FILEPATH "" FORCE)
+                break()
+            endif()
+        endforeach()
+        unset(_rocprofiler_candidate_exe)
+        unset(_rocprofiler_candidate_ver)
+        unset(_rocprofiler_candidate_result)
+        unset(_rocprofiler_requested_major_minor)
+    endif()
+
     if("${_VERSION}" MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
         find_package(Python3 ${_VERSION} EXACT ${ARGN} REQUIRED MODULE
                      COMPONENTS ${ROCPROFILER_BUILD_Find_Python3_COMPONENTS})
@@ -197,6 +229,11 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
                 $<TARGET_OBJECTS:rocprofiler-sdk::rocprofiler-sdk-object-library>)
     target_include_directories(rocprofiler-sdk-rocpd-python-bindings-${_VERSION} SYSTEM
                                PRIVATE ${Python3_INCLUDE_DIRS})
+    target_include_directories(
+        rocprofiler-sdk-rocpd-python-bindings-${_VERSION} SYSTEM
+        PRIVATE
+            $<TARGET_PROPERTY:rocprofiler-sdk::rocprofiler-sdk-sqlite3,INTERFACE_INCLUDE_DIRECTORIES>
+        )
 
     # do not link to sqlite3 library here. Python will import the _sqlite3 extension
     # module which links to sqlite3, and we want to avoid mixed-lib symbol collisions by
