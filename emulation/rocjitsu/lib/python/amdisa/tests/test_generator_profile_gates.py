@@ -7199,11 +7199,9 @@ def test_generic_flat_issue_names_both_counter_obligations():
 
     assert 'amdgpu::WaitCounterType::LOADCNT' in flat_info
     assert 'inst_.seg == 0' in flat_info
-    assert (
-        'std::optional<amdgpu::WaitCounterType>{amdgpu::WaitCounterType::DSCNT}'
-        in flat_info
-    )
-    assert 'inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED' in flat_info
+    assert 'amdgpu::WaitCounterType::DSCNT' in flat_info
+    assert 'amdgpu::MemoryCompletionClass::VMEM' in flat_info
+    assert 'amdgpu::MemoryCompletionClass::LDS' in flat_info
 
     codegen.isa_spec = SimpleNamespace(arch_name='rdna4', profile=Rdna4Profile())
     global_load = InstructionSemantics(
@@ -7211,7 +7209,7 @@ def test_generic_flat_issue_names_both_counter_obligations():
     )
     global_info = codegen._memory_issue_initializer(global_load, set())
 
-    assert 'std::nullopt' not in global_info
+    assert 'amdgpu::WaitCounterType::DSCNT' not in global_info
     assert 'amdgpu::MemoryCompletionClass::VMEM' in global_info
 
 
@@ -7220,7 +7218,7 @@ def test_decoded_issue_metadata_handles_exec_and_returning_atomics():
     codegen.isa_spec = SimpleNamespace(arch_name='rdna3_5', profile=Rdna3_5Profile())
 
     scalar = InstructionSemantics('S_LOAD_DWORD', 'smem_load')
-    assert codegen._memory_issue_initializer(scalar, set()).endswith('false);')
+    assert codegen._memory_issue_initializer(scalar, set()).endswith('}, false);')
 
     atomic = InstructionSemantics(
         'BUFFER_ATOMIC_ADD_U32', 'buffer_atomic', operation='add'
@@ -7228,12 +7226,12 @@ def test_decoded_issue_metadata_handles_exec_and_returning_atomics():
     atomic_info = codegen._memory_issue_initializer(atomic, set())
     assert '(inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT' in atomic_info
     assert '(inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM' in atomic_info
-    assert 'std::nullopt' not in atomic_info
+    assert 'MemoryCounterObligation' in atomic_info
     assert not atomic_info.endswith('false);')
 
     codegen.isa_spec = SimpleNamespace(arch_name='cdna5', profile=Cdna5Profile())
     transpose = InstructionSemantics('DS_READ_TR_B16', 'ds_read_tr_b16')
-    assert codegen._memory_issue_initializer(transpose, set()).endswith('false);')
+    assert codegen._memory_issue_initializer(transpose, set()).endswith('}, false);')
 
 
 @pytest.mark.parametrize(
@@ -7257,6 +7255,12 @@ def test_decoded_issue_metadata_handles_exec_and_returning_atomics():
             'amdgpu::WaitCounterType::STORECNT',
             'amdgpu::MemoryCompletionClass::UNORDERED',
         ),
+        (
+            'cdna5',
+            Cdna5Profile(),
+            'amdgpu::WaitCounterType::STORECNT',
+            'amdgpu::MemoryCompletionClass::VMEM',
+        ),
     ],
 )
 def test_vmem_store_issue_metadata_follows_arch_profile(
@@ -7274,6 +7278,50 @@ def test_vmem_store_issue_metadata_follows_arch_profile(
     assert completion in issue
 
 
+def test_pre_gfx12_stores_and_gds_preserve_expcnt_obligations():
+    codegen = object.__new__(CodeGenerator)
+    store = InstructionSemantics(
+        'BUFFER_STORE_DWORD', 'buffer_store', elem_size=4, num_elems=1
+    )
+    ds = InstructionSemantics('DS_READ_B32', 'ds_read', elem_size=4, num_elems=1)
+
+    for arch_name, profile in (
+        ('cdna2', Cdna2Profile()),
+        ('rdna2', Rdna2Profile()),
+    ):
+        codegen.isa_spec = SimpleNamespace(arch_name=arch_name, profile=profile)
+        store_info = codegen._memory_issue_initializer(store, set())
+        assert 'amdgpu::WaitCounterType::EXPCNT' in store_info
+
+        ds_info = codegen._memory_issue_initializer(ds, {'gds'})
+        assert 'inst_.gds != 0' in ds_info
+        assert 'amdgpu::MemoryCompletionClass::GDS' in ds_info
+        assert 'amdgpu::WaitCounterType::EXPCNT' in ds_info
+
+
+def test_cdna5_async_completion_domains_are_explicit():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna5', profile=Cdna5Profile())
+
+    cases = (
+        ('GLOBAL_LOAD_ASYNC_TO_LDS_B32', 'global_load_async_to_lds', 'ASYNC_LOAD'),
+        (
+            'GLOBAL_STORE_ASYNC_FROM_LDS_B32',
+            'global_store_async_from_lds',
+            'ASYNC_STORE',
+        ),
+        ('DS_ATOMIC_ASYNC_BARRIER_ARRIVE_B64', 'ds_barrier_arrive', 'ASYNC_LOAD'),
+    )
+    for name, semantic_class, completion in cases:
+        operation = (
+            'async_barrier_arrive' if semantic_class == 'ds_barrier_arrive' else None
+        )
+        sem = InstructionSemantics(name, semantic_class, operation=operation)
+        issue = codegen._memory_issue_initializer(sem, set())
+        assert 'amdgpu::WaitCounterType::ASYNCCNT' in issue
+        assert f'amdgpu::MemoryCompletionClass::{completion}' in issue
+
+
 @pytest.mark.parametrize(
     'arch',
     ['cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2', 'rdna3', 'rdna3_5'],
@@ -7288,7 +7336,7 @@ def test_generated_segmented_flat_metadata_uses_current_encoding_fields(
     assert descriptors
     assert segmented_descriptors
     assert all(
-        'inst_.seg == 0 ? std::optional<amdgpu::WaitCounterType>' in descriptor
+        'inst_.seg == 0 ? amdgpu::MemoryCounterObligation' in descriptor
         for descriptor in segmented_descriptors
     )
 
@@ -7302,14 +7350,14 @@ def test_generated_vflat_metadata_has_two_counter_obligations(
     assert flat_descriptors > 0
     assert (
         flat_source.count(
-            'std::optional<amdgpu::WaitCounterType>{amdgpu::WaitCounterType::DSCNT}'
+            'amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT'
         )
         == flat_descriptors
     )
 
     for known_segment in ('vglobal.cpp', 'vscratch.cpp'):
         source = (amdgpu_generated_root / arch / known_segment).read_text()
-        assert 'std::optional<amdgpu::WaitCounterType>' not in source
+        assert 'amdgpu::WaitCounterType::DSCNT' not in source
 
 
 def test_generated_memory_paths_use_decoded_issue_metadata(

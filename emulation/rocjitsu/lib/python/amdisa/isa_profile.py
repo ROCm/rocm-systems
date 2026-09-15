@@ -2705,6 +2705,10 @@ class Cdna5Profile(Rdna4Profile):
     """
 
     @property
+    def vmem_stores_complete_in_order(self) -> bool:
+        return True
+
+    @property
     def global_addtid_offset_expr(self) -> str:
         return 'signed_ioffset(inst_.ioffset)'
 

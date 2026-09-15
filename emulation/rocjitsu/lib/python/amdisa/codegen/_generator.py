@@ -7795,17 +7795,25 @@ class CodeGenerator:
 
         ordered_vmem = 'amdgpu::MemoryCompletionClass::VMEM'
         ordered_local = 'amdgpu::MemoryCompletionClass::LDS'
+        ordered_gds = 'amdgpu::MemoryCompletionClass::GDS'
+        ordered_async_load = 'amdgpu::MemoryCompletionClass::ASYNC_LOAD'
+        ordered_async_store = 'amdgpu::MemoryCompletionClass::ASYNC_STORE'
         unordered = 'amdgpu::MemoryCompletionClass::UNORDERED'
 
-        is_flat = kind.startswith('flat_')
-        if is_flat:
+        if kind.startswith('flat_'):
             kind = kind.replace('flat_', 'vmem_', 1)
 
         if kind == 'local':
-            completion = ordered_local
-        elif kind == 'scalar' or kind in ('async_store', 'async_local'):
+            if 'gds' in inst_fields:
+                return f'(inst_.gds != 0 ? {ordered_gds} : {ordered_local})'
+            return ordered_local
+        if kind == 'scalar':
             completion = unordered
-        elif kind == 'vmem_load' or kind == 'async_load':
+        elif kind == 'async_load' or kind == 'async_local':
+            completion = ordered_async_load
+        elif kind == 'async_store':
+            completion = ordered_async_store
+        elif kind == 'vmem_load':
             completion = ordered_vmem
         elif kind == 'vmem_store':
             completion = (
@@ -7820,12 +7828,7 @@ class CodeGenerator:
                 completion = f'({is_load_expr} ? {ordered_vmem} : {unordered})'
         else:
             raise AssertionError(f'unhandled memory issue kind: {kind}')
-
-        if not is_flat or completion == unordered:
-            return completion
-        if 'seg' in inst_fields:
-            return f'(inst_.seg == 0 ? {unordered} : {completion})'
-        return unordered if sem.name.startswith('FLAT_') else completion
+        return completion
 
     def _additional_wait_counter_type(
         self, sem: InstructionSemantics, sem_class: str, inst_fields: set[str]
@@ -7839,6 +7842,46 @@ class CodeGenerator:
         if self.isa_spec.profile.waitcnt_family in ('gfx11', 'gfx12'):
             return 'amdgpu::WaitCounterType::DSCNT'
         return 'amdgpu::WaitCounterType::LGKMCNT'
+
+    @staticmethod
+    def _memory_counter_obligation(counter: str, completion: str) -> str:
+        return f'amdgpu::MemoryCounterObligation{{{counter}, {completion}}}'
+
+    def _additional_memory_obligation(
+        self, sem: InstructionSemantics, sem_class: str, inst_fields: set[str]
+    ) -> str | None:
+        counter = self._additional_wait_counter_type(sem, sem_class, inst_fields)
+        if counter is None:
+            return None
+        obligation = self._memory_counter_obligation(
+            counter, 'amdgpu::MemoryCompletionClass::LDS'
+        )
+        if 'seg' in inst_fields:
+            return (
+                f'(inst_.seg == 0 ? {obligation} : '
+                'amdgpu::MemoryCounterObligation{})'
+            )
+        return obligation
+
+    def _expcnt_memory_obligation(
+        self, sem_class: str, inst_fields: set[str]
+    ) -> str | None:
+        """Return the pre-GFX12 write-data/GDS EXPCNT obligation."""
+        if self.isa_spec.profile.waitcnt_family not in ('gfx9', 'gfx10'):
+            return None
+        kind = self._MEMORY_ISSUE_KINDS[sem_class]
+        obligation = self._memory_counter_obligation(
+            'amdgpu::WaitCounterType::EXPCNT',
+            'amdgpu::MemoryCompletionClass::UNORDERED',
+        )
+        if kind in ('flat_store', 'vmem_store', 'flat_atomic', 'vmem_atomic'):
+            return obligation
+        if kind == 'local' and 'gds' in inst_fields:
+            return (
+                f'(inst_.gds != 0 ? {obligation} : '
+                'amdgpu::MemoryCounterObligation{})'
+            )
+        return None
 
     def _memory_issue_semantic_class(self, sem: InstructionSemantics) -> str:
         """Return the issue-metadata variant for one decoded instruction."""
@@ -7872,17 +7915,13 @@ class CodeGenerator:
         completion = self._memory_completion_class(
             sem, inst_fields, sem_class, is_load_expr=is_load_expr
         )
-        additional = self._additional_wait_counter_type(sem, sem_class, inst_fields)
-        if additional is None:
-            additional_expr = 'std::nullopt'
-        elif 'seg' in inst_fields:
-            additional_expr = (
-                '(inst_.seg == 0 ? '
-                f'std::optional<amdgpu::WaitCounterType>{{{additional}}} : '
-                'std::optional<amdgpu::WaitCounterType>{})'
-            )
-        else:
-            additional_expr = f'std::optional<amdgpu::WaitCounterType>{{{additional}}}'
+        obligations = [self._memory_counter_obligation(counter, completion)]
+        additional = self._additional_memory_obligation(sem, sem_class, inst_fields)
+        if additional is not None:
+            obligations.append(additional)
+        expcnt = self._expcnt_memory_obligation(sem_class, inst_fields)
+        if expcnt is not None:
+            obligations.append(expcnt)
         exec_masked = not (
             self._MEMORY_ISSUE_KINDS[sem_class] == 'scalar'
             or (
@@ -7890,14 +7929,10 @@ class CodeGenerator:
                 and self.isa_spec.profile.ds_transpose_ignores_exec
             )
         )
-        fields = [counter, completion]
-        if additional is not None:
-            fields.append(additional_expr)
-            if not exec_masked:
-                fields.append('false')
-        elif not exec_masked:
-            fields.append('false')
-        return f'set_memory_issue_info({", ".join(fields)});'
+        args = '{' + ', '.join(obligations) + '}'
+        if not exec_masked:
+            args += ', false'
+        return f'set_memory_issue_info({args});'
 
     def _append_wait_counter_type(
         self,
