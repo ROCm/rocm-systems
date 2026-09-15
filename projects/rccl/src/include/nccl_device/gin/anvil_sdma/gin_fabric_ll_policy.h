@@ -169,9 +169,12 @@ inline bool ginFabricA2ALaneTryBuild(GinFabricA2ACommState const& comm, bool dda
       comm.scratch == nullptr || !ddaLLEnabled) {
     return false;
   }
-  const size_t allocBytes = comm.scratchAllocBytes ? comm.scratchAllocBytes : comm.scratchBytes;
+  // Refuse to arm unless fabric init published a reserved GIN tail
+  // (scratchAllocBytes). Do not carve out of the DDA-visible head.
+  if (comm.scratchAllocBytes == 0) return false;
+  const size_t allocBytes = comm.scratchAllocBytes;
   const size_t ginRegion = ginFabricLlA2AGinRegionBytes(comm.nRanks, llThreshold);
-  const size_t ddaHead = comm.scratchAllocBytes ? comm.scratchBytes : ginFabricLlA2ACarveOffset(allocBytes, ginRegion);
+  const size_t ddaHead = comm.scratchBytes;
   if (!ginFabricLlA2ACarveFits(comm.nRanks, allocBytes, ddaHead, llThreshold)) return false;
   out->enabled = 1;
   // Runtime publishes a carved peer table; comm.peerPtrsDev is only an eligibility probe.

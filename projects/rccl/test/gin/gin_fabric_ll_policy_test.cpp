@@ -185,6 +185,9 @@ TEST(GinFabricLLPolicy, LaneBuildRequiresResourcesAndDdaLL) {
   EXPECT_FALSE(ginFabricA2ALaneTryBuild(comm, true, 0, &lane));
   comm.scratchAllocBytes = ddaHead;
   EXPECT_FALSE(ginFabricA2ALaneTryBuild(comm, true, 64 * 1024, &lane));
+  comm.scratchAllocBytes = 0;
+  comm.scratchBytes = ddaHead + ginTail;
+  EXPECT_FALSE(ginFabricA2ALaneTryBuild(comm, true, 64 * 1024, &lane));
 }
 
 TEST(GinFabricLLPolicy, FabricMemPredicate) {

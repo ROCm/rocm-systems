@@ -53,11 +53,13 @@ ncclResult_t ginFabricA2ALaneBuildPeerScratchDev(struct ncclComm* comm, void*** 
   *outRegionBytes = 0;
   if (comm == nullptr || comm->nRanks < 2 || comm->ddaPeerPtrsHost == nullptr) return ncclInvalidArgument;
 
-  const size_t ginRegion = gin::fabric::ginFabricLlA2AGinRegionBytes(
-      comm->nRanks, gin::fabric::resolveGinFabricLLThresholdAlltoAll());
-  const size_t allocBytes = comm->ddaScratchAllocBytes ? comm->ddaScratchAllocBytes : comm->ddaScratchBytes;
+  const size_t llThreshold = gin::fabric::resolveGinFabricLLThresholdAlltoAll();
+  const size_t ginRegion = gin::fabric::ginFabricLlA2AGinRegionBytes(comm->nRanks, llThreshold);
+  const size_t allocBytes = comm->ddaScratchAllocBytes;
+  if (!gin::fabric::ginFabricLlA2ACarveFits(comm->nRanks, allocBytes, comm->ddaScratchBytes, llThreshold)) {
+    return ncclInvalidArgument;
+  }
   const size_t carveOff = gin::fabric::ginFabricLlA2ACarveOffset(allocBytes, ginRegion);
-  if (ginRegion == 0 || carveOff == 0 || allocBytes < carveOff + ginRegion) return ncclInvalidArgument;
 
   void** hostPtrs = nullptr;
   NCCLCHECK(ncclCalloc(&hostPtrs, comm->nRanks));
