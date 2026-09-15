@@ -241,11 +241,16 @@ HRR_TEST_CASE(Unit_HRR_TranslatePtr_SubAlloc_ReturnsOffset) {
   void* fake_live = reinterpret_cast<void*>(static_cast<uintptr_t>(0xDEAD0000u));
   ctx.record_alloc(0xBEEF0000ULL, fake_live, 1024);
   void* result = ctx.translate_ptr(0xBEEF0100ULL);  // +256 bytes into alloc
-  // Compare as void*, not char*: these are synthetic, non-dereferenceable
-  // addresses, and Catch2's char* stringifier calls strlen() on failure/
-  // --success reporting, which would segfault reading a fake pointer as a
-  // C string. void* has no such special-cased stringifier.
-  void* expected = static_cast<char*>(fake_live) + 256;
+  // Build the expected address with uintptr_t arithmetic, not char* pointer
+  // arithmetic, and compare as void*. Two separate reasons:
+  //   * These are synthetic, fabricated addresses that point into no real
+  //     object, so char* arithmetic on them is undefined behaviour.
+  //   * Catch2's char* stringifier calls strlen() on a char* operand when it
+  //     formats an assertion (on failure, and on every assertion under
+  //     --success), which segfaults reading a fake pointer as a C string.
+  //     void* has no such special-cased stringifier.
+  void* expected =
+      reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(fake_live) + 256);
   CHECK(result == expected);
 }
 
@@ -297,16 +302,18 @@ HRR_TEST_CASE(Unit_HRR_TranslatePtr_TightestEnclosing) {
   // 0x11000 is inside BOTH ranges; the tightest enclosing entry is the inner
   // one (largest base <= rec == 0x10800).  Expected = liveInner + (0x11000 -
   // 0x10800) = liveInner + 0x800.
-  // Compare as void*, not char*: see the comment in
-  // Unit_HRR_TranslatePtr_SubAlloc_ReturnsOffset above (Catch2's char*
-  // stringifier calls strlen() on a fake, non-dereferenceable pointer).
+  // uintptr_t arithmetic compared as void*: see the comment in
+  // Unit_HRR_TranslatePtr_SubAlloc_ReturnsOffset above (UB-free on fabricated
+  // addresses, and avoids Catch2's strlen()-based char* stringifier).
   void* result = ctx.translate_ptr(0x11000ULL);
-  void* expectedInner = static_cast<char*>(liveInner) + 0x800;
+  void* expectedInner =
+      reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(liveInner) + 0x800);
   CHECK(result == expectedInner);
 
   // An address inside only the outer entry still resolves to the outer entry.
   void* outer_only = ctx.translate_ptr(0x10100ULL);
-  void* expectedOuter = static_cast<char*>(liveOuter) + 0x100;
+  void* expectedOuter =
+      reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(liveOuter) + 0x100);
   CHECK(outer_only == expectedOuter);
 }
 
