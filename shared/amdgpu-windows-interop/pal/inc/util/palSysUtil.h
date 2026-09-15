@@ -280,8 +280,12 @@ inline Result ConvertErrno(
             result = Result::ErrorOutOfMemory;
             break;
         default:
-            PAL_ALERT_ALWAYS_MSG("Unknown result generated from errno %d (%s)", errnoIn, strerror(errnoIn));
+        {
+            char errStr[64] = {};
+            StrError(errStr, sizeof(errStr), errnoIn);
+            PAL_ALERT_ALWAYS_MSG("Unknown result generated from errno %d (%s)", errnoIn, errStr);
             break;
+        }
     }
     return result;
 }
