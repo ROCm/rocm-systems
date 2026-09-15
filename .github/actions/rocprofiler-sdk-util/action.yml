@@ -89,6 +89,32 @@ runs:
         echo "LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib64:${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
         echo "PATH=${PYTHON_VENV_BIN:+${PYTHON_VENV_BIN}:}${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:$HOME/.local/bin:${PATH}" >> $GITHUB_ENV
 
+    # TEMPORARY: remove before merge. Diagnoses which cmake/python the dependency builds resolve.
+    - name: DEBUG environment
+      shell: bash
+      run: |
+        VENV="${GITHUB_WORKSPACE}/${{ inputs.python-venv-path }}"
+        echo "--- effective PATH"
+        echo "${PATH}"
+        echo "--- PKG_CONFIG_PATH (written to GITHUB_ENV by the previous step)"
+        echo "${PKG_CONFIG_PATH}"
+        echo "--- resolution"
+        echo "cmake:   $(command -v cmake || echo none)"
+        cmake --version | head -n 1 || true
+        echo "python3: $(command -v python3 || echo none)"
+        python3 -V || true
+        echo "--- ${VENV}/bin"
+        ls -l "${VENV}/bin" || true
+        echo "--- venv cmake/python direct"
+        "${VENV}/bin/cmake" --version | head -n 1 || true
+        "${VENV}/bin/python3" -V || true
+        echo "--- CppHeaderParser"
+        /usr/bin/python3 -c 'import CppHeaderParser; print(CppHeaderParser.__file__)' || true
+        "${VENV}/bin/python3" -c 'import CppHeaderParser; print(CppHeaderParser.__file__)' || true
+        echo "--- workspace mount flags / user"
+        awk '$2 ~ /^\/__w/ || $2 == "/" {print $2, $4}' /proc/mounts || true
+        id || true
+
     - name: Setup ccache
       if: ${{ inputs.enable-ccache == 'true' }}
       uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
