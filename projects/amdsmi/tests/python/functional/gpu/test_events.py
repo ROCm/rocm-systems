@@ -103,7 +103,12 @@ class TestGpuEvents(unittest.TestCase):
             return None
 
         if supported:
-            start_accept = amdsmi.AmdSmiStatus.SUCCESS
+            # Group-level support does not guarantee every counter in the group:
+            # e.g. gfx906 (MI50) reports the xGMI group supported but only wires up
+            # the lower XGMI_DATA_OUT links, so the higher-index links refuse START
+            # with NOT_SUPPORTED. Accept that; the not-started teardown path below
+            # then drives read/stop/destroy for the links that never opened.
+            start_accept = [amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
         else:
             # No perf event source to open, so the sysfs read behind it returns
             # ENOENT, which the library maps to NOT_SUPPORTED.
