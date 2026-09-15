@@ -1,5 +1,9 @@
 # RFC: asynchronous MMA execution in RocJITsu
 
+For measurements across CPU dispatch widths, XCD engine threads and shared
+helper budgets on 64 reserved physical CPU cores, see
+[CPU thread scaling](async-thread-scaling.md).
+
 **Proposal:** offload expensive MMA handlers to persistent CPU helpers. Keep
 async opt-in: large gfx1250 WMMA, plus K32 and selected CDNA4 MFMA with
 cached admission. Exclude memory offload. This accelerates functional simulation; it does not model GPU timing.
