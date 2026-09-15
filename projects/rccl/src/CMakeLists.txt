@@ -474,7 +474,6 @@ set(SRC_FILES
   transport/net_ib/gin.cc
   transport/net_ib/gin.h
   transport/net_ib/init.cc
-  transport/net_ib/net_ib_flush_fault_inject.h
   transport/net_ib/p2p.cc
   transport/net_ib/p2p.h
   transport/net_ib/p2p_resiliency.cc

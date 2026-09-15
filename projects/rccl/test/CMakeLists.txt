@@ -126,7 +126,7 @@ if(BUILD_TESTS)
     ${PROJECT_BINARY_DIR}/hipify/src # for graph/topo.h
     ${PROJECT_BINARY_DIR}/hipify/src/include/plugin # for recorder tests, nccl_tuner.h
     ${PROJECT_BINARY_DIR}/hipify/src/transport/net_ib_cast # for net_ib_fault_inject.h, net_ib_cast_inspect.h
-    ${PROJECT_BINARY_DIR}/hipify/src/transport             # for net_ib_limits.h, net_ib/net_ib_flush_fault_inject.h
+    ${PROJECT_BINARY_DIR}/hipify/src/transport             # for net_ib_limits.h
     ${ROCM_PATH}/include
     ${ROCM_PATH}
   )

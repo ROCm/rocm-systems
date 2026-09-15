@@ -724,11 +724,34 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
   // We don't know which devIndex the recv was on, so we flush on all devices
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
     struct ibv_send_wr wr;
+    // RCCL: fence the RO=1 bulk data through an RO=0 scratchpad - RDMA_WRITE a
+    // dummy payload into it, then RDMA_READ it back. The WRITE needs REMOTE_WRITE
+    // on the flush QP.
+    bool useGpuFlushMem = rcclParamIbCastGdrFlushGpuMemNoRelaxedOrdering() &&
+                          comm->devs[i].gpuFlush.gpuFlushGpuMem != nullptr && comm->devs[i].gpuFlush.gpuMr != nullptr;
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = (req - comm->base.reqs) + NCCL_IB_FLUSH_REQ_WR_ID_OFFSET;
 
-    wr.wr.rdma.remote_addr = (uint64_t)data[last];
-    wr.wr.rdma.rkey = mhandle->mrs[i]->rkey;
+    if (useGpuFlushMem) {
+      struct ibv_send_wr writeWr;
+      memset(&writeWr, 0, sizeof(writeWr));
+      writeWr.wr_id = wr.wr_id;
+      writeWr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
+      writeWr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
+      writeWr.sg_list = &comm->devs[i].gpuFlush.sge;
+      writeWr.num_sge = 1;
+      writeWr.opcode = IBV_WR_RDMA_WRITE;
+      writeWr.send_flags = 0;
+      struct ibv_send_wr* badWriteWr;
+      NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr));
+    }
+    if (useGpuFlushMem) {
+      wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
+      wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
+    } else {
+      wr.wr.rdma.remote_addr = (uint64_t)data[last];
+      wr.wr.rdma.rkey = mhandle->mrs[i]->rkey;
+    }
     wr.sg_list = &comm->devs[i].gpuFlush.sge;
     wr.num_sge = 1;
     wr.opcode = IBV_WR_RDMA_READ;
