@@ -51,7 +51,8 @@ int requestedGinType() {
 // if the type numbering ever changes.
 std::string ginTypeUsage() {
   return "required NCCL_GIN_TYPE=" +
-         std::to_string(NCCL_NET_DEVICE_GIN_PROXY) + " [proxy] or " +
+         std::to_string(NCCL_NET_DEVICE_GIN_PROXY) + " [proxy], " +
+         std::to_string(NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) + " [rocshmem-gda] or " +
          std::to_string(NCCL_NET_DEVICE_GIN_ANVIL_SDMA) + " [anvil-sdma]";
 }
 
@@ -60,9 +61,8 @@ std::string ginTypeReason() {
   if (!ginType)
     return "GIN type not set (" + ginTypeUsage() + ")";
   int t = requestedGinType();
-  // TYPE=5 (rocSHMEM GDA) remains intentionally gated until this suite can be
-  // validated on a machine with that backend available.
-  if (t != NCCL_NET_DEVICE_GIN_PROXY && t != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+  if (t != NCCL_NET_DEVICE_GIN_PROXY && t != NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA &&
+      t != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
     return std::string("Invalid GIN type: ") + ginType + " (" + ginTypeUsage() + ")";
   return "";
 }
@@ -163,6 +163,15 @@ std::string vaSignalTestSkipReason() {
     return "VA signals not supported by SDMA (NCCL_GIN_TYPE=" +
            std::to_string(NCCL_NET_DEVICE_GIN_ANVIL_SDMA) + ")";
   return "";
+}
+
+// BarrierFence_* exercises Anvil SDMA queue ordering and proxy per-context state.
+// TYPE=5 (rocSHMEM GDA) runs the rest of this file but skips these cases.
+std::string barrierFenceBackendSkipReason() {
+  int t = requestedGinType();
+  if (t == NCCL_NET_DEVICE_GIN_PROXY || t == NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return "";
+  return "BarrierFence tests target proxy/Anvil SDMA backends (NCCL_GIN_TYPE=" +
+         std::to_string(t) + ")";
 }
 
 // The GIN-SDMA alltoall exists only on the SDMA backend.
@@ -1606,6 +1615,8 @@ __global__ void barrierFenceVisibilityKernel(
 void GinMPIDeviceTests::runBarrierFenceVisibility(
     BarrierFenceOperation operation, bool allContexts, bool defaultFence) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = barrierFenceBackendSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
   if (auto reason = sdmaBarrierFenceEnvSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
