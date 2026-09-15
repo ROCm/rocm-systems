@@ -82,7 +82,8 @@ def check_subtrees_materialised(raw_files: List[str], subtrees: List[str]) -> Li
     """Return onboarded subtrees that own changed files but were never checked out -- otherwise
     every path is dropped as absent and the job exits 0 having checked nothing.
 
-    Keyed off the subtree's config, not its changed files, so a delete-only PR is not a false red.
+    Keyed off the subtree's directory, not its config file, so a missing config still reaches
+    run_group's own error instead of being misreported as "never checked out".
     """
     missing: List[str] = []
     for subtree in sorted(group_files_by_subtree(raw_files, subtrees)):
