@@ -5159,13 +5159,22 @@ hsa_status_t GpuAgent::PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& sessi
   std::lock_guard<std::mutex> delivery_lock(pcs_data->delivery_mutex);
 
   // First, flush device buffers to host buffers for all XCCs
+  auto drain_active_buffer = [&](uint32_t xcc_index) {
+    return pcs_data->use_pm4_fallback
+        ? PcSamplingFlushDeviceBuffersPerXCC_PM4(pcs_data, session, xcc_index)
+        : PcSamplingFlushDeviceBuffersPerXCC(pcs_data, session, xcc_index);
+  };
+
   for (uint32_t xcc_id = 0; xcc_id < pcs_data->num_xcc; xcc_id++) {
     per_xcc_pcs_data_t& xcc = pcs_data->xcc_data[xcc_id];
     std::lock_guard<std::mutex> lock(xcc.host_buffer_mutex);
 
-    hsa_status_t flush_status = pcs_data->use_pm4_fallback
-        ? PcSamplingFlushDeviceBuffersPerXCC_PM4(pcs_data, session, xcc_id)
-        : PcSamplingFlushDeviceBuffersPerXCC(pcs_data, session, xcc_id);
+    // Each drain copies one half and flips the selector. The per-XCC worker is blocked on
+    // done_sig[which_buffer] and cannot rebind, so drain both halves unconditionally to
+    // leave the selector where it was found.
+    hsa_status_t flush_status = drain_active_buffer(xcc_id);
+    hsa_status_t other_half_status = drain_active_buffer(xcc_id);
+    if (flush_status == HSA_STATUS_SUCCESS) flush_status = other_half_status;
 
     if (flush_status != HSA_STATUS_SUCCESS) {
       if (first_error == HSA_STATUS_SUCCESS) first_error = flush_status;
