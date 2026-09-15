@@ -30,7 +30,9 @@ ROCm-prefix path being present on `sys.path`.
 | `rocprof_trace_decoder.bindings` | `ctypes` wrapper around `librocprof-trace-decoder` | Public for `Decoder`, internal for C mirrors |
 | `rocprof_trace_decoder.code_index` | ISA lookup and instruction-stat accumulation | Public utility |
 | `rocprof_trace_decoder.codegen` | Builds in-memory code metadata from explicit code object inputs | Public utility |
-| `rocprof_trace_decoder.rcv` | ROCprof Compute Viewer JSON writer | Internal utility |
+| `rocprof_trace_decoder.analysis` | Derived analyses over decoded records | Public utility |
+| `rocprof_trace_decoder.analysis.hidden_latency` | Instruction-pipe overlap and hidden-latency analysis | Public utility |
+| `rocprof_trace_decoder.analysis.rcv` | ROCprof Compute Viewer JSON writer | Internal utility |
 | `rocprof_trace_decoder.att` | High-level ATT decode orchestration with explicit trace metadata | Public utility |
 | `generate_code.py` | Generates `code.json`, snapshots, and source copies from code objects | Tool module |
 | `att_tool.py` | CLI script for ATT output generation | Tool script |
@@ -159,7 +161,7 @@ trace records. It has two related responsibilities.
 First, it provides ISA text to the decoder. A `CodeIndex` is normally produced
 by `generate_code_artifacts()` from explicit code objects, or loaded from an
 existing RCV `code.json` with `CodeIndex.from_code_json(path)`. It maps
-`Pc(code_object_id, address)` to instruction text, source text, line number,
+`Pc(address, code_object_id)` to instruction text, source text, line number,
 and estimated instruction size. Because `CodeIndex` implements `isa_for_pc`, it
 can be passed directly to `Decoder.parse_file(..., isa=code_index)`.
 
@@ -199,7 +201,68 @@ No caller needs to run `generate_code.py` before using this API. Scripts that
 want `code.json` can call `generate_code_artifacts(...)` and then explicitly
 write the returned `CodeIndex`.
 
-## `rocprof_trace_decoder.rcv`
+## `rocprof_trace_decoder.analysis`
+
+`analysis` holds the modules that consume decoded records. None of them decode
+anything new: every submodule works from the same `TraceRecords` the decoder
+already produced. It contains `hidden_latency`, which estimates instruction-pipe
+overlap, and `rcv`, which serializes records into ROCprof Compute Viewer files.
+
+## `rocprof_trace_decoder.analysis.hidden_latency`
+
+`hidden_latency.py` estimates how many instruction cycles overlap concurrent
+instruction-pipe activity. It is an estimator intended to match ROCprof Compute
+Viewer's `src/analysis/hidden_latency.cpp`. `analyze_hidden_latency()` takes
+decoded records keyed by shader engine and an optional `CodeIndex`:
+
+```python
+from rocprof_trace_decoder import analyze_hidden_latency
+
+result = analyze_hidden_latency(
+    {shader_engine: records},
+    code_index=code_index,
+)
+hidden_for_pc = result.by_pc[pc]
+```
+
+`HiddenLatency` reports hidden `idle`, `stall`, and `issue` cycles.
+`HiddenLatencyResult.by_scope` retains independent `(shader engine, SIMD)`
+results, keyed by whatever the caller passed for shader engine; `by_pc` is the
+sum over those scopes. Estimate non-hidden cost as
+`max(CodeEntry.latency + CodeEntry.idle - HiddenLatency.total(), 0)`: to
+preserve viewer parity, overlapping or touching intervals within one pipe are
+coalesced by adding their durations rather than only extending to the latest
+endpoint, so hidden latency can exceed the aggregate total.
+
+Busy intervals are built per `(shader engine, SIMD)` for four pipe groups,
+highest priority first:
+
+| Priority | Pipe group | Instruction categories |
+| --- | --- | --- |
+| 1 | MATRIX | matrix ops, matched by ISA text (see below) |
+| 2 | VALU | `VALU` |
+| 3 | VMEM/LDS/FLAT | `VMEM`, `LDS`, `FLAT` |
+| 4 | SMEM/SALU | `SMEM`, `SALU` |
+| — | no pipe | `NONE`, `JUMP`, `NEXT`, `IMMED`, `CONTEXT`, `MESSAGE`, `BVH` |
+
+Each instruction is scored against its own pipe and against the union of every
+higher-priority pipe; the larger total wins. Categories with no pipe are scored
+once, against the union of all four.
+
+The own-pipe score zeroes its issue component: an instruction's contribution to
+its own pipe is exactly its issue window, so counting it would let every
+instruction hide behind itself. Idle and stall precede issue, so same-pipe work
+there comes from other waves and does count. Matrix instructions feed both
+MATRIX and VALU, so both of their scores are zeroed.
+
+MATRIX is not a decoder category. Pass a `CodeIndex` so `v_mfma*`, `v_smfma*`,
+`v_wmma*`, and `v_swmma*` instructions are treated as MATRIX instead of the
+`VALU` the decoder reports. Each then contributes its full interval to MATRIX
+and a truncated `3 * cycles / 4` to VALU, matching `buildUtil` in the viewer's
+`hidden_latency.cpp`. Without a `CodeIndex` they stay `VALU`, measurably
+changing results on traces that mix matrix and non-matrix work.
+
+## `rocprof_trace_decoder.analysis.rcv`
 
 `rcv.py` writes ROCprof Compute Viewer sidecar JSON. Its main class,
 `RcvOutputWriter`, receives decoded records grouped by shader engine and writes
