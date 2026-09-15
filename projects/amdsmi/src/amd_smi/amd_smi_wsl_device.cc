@@ -266,6 +266,7 @@ amdsmi_status_t WSLGPUBackend::shutdown() {
 
 amdsmi_status_t WSLGPUBackend::load_device_info() const {
   std::call_once(device_info_once_, [this]() {
+    device_info_.struct_size = sizeof(device_info_);
     HSAKMT_STATUS hstatus = g_wsl_syms.rocdxg_smi_get_device_info(node_id_, &device_info_);
     device_info_status_ = hsakmt_to_amdsmi(hstatus);
   });
