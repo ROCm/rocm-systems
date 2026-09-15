@@ -863,8 +863,11 @@ class Device : public NullDevice {
   std::atomic<uint> numOfVgpus_;  //!< Virtual gpu unique index
 
   //! Returns the valid SDMA engine bitmask for the given operation type.
+  //! Peer copies share the read mask, since they may not use H2D-only engines either.
   uint32_t GetSdmaValidMask(HwQueueEngine engine_type) const {
-    return (engine_type == HwQueueEngine::SdmaD2H) ? maxSdmaReadMask_ : maxSdmaWriteMask_;
+    return (engine_type == HwQueueEngine::SdmaD2H || engine_type == HwQueueEngine::SdmaP2P)
+        ? maxSdmaReadMask_
+        : maxSdmaWriteMask_;
   }
 
 #if defined(__clang__)
