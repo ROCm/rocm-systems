@@ -907,14 +907,6 @@ size_t rcclDdaScratchPayloadCap(const ncclComm* comm) {
   auto bump = [&](size_t v) {
     if (v > cap) cap = v;
   };
-  auto scaleRs = [&](size_t v, int func) -> size_t {
-    if (v == 0) return 0;
-    if (func != (int)ncclFuncReduceScatter) return v;
-    const size_t nRanks = (comm != nullptr && comm->nRanks > 0) ? (size_t)comm->nRanks : 1;
-    if (nRanks > 1 && v > SIZE_MAX / nRanks) return SIZE_MAX;
-    return v * nRanks;
-  };
-
   size_t env = 0;
   if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &env)) bump(env);
   if (ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &env)) bump(env);
@@ -933,17 +925,19 @@ size_t rcclDdaScratchPayloadCap(const ncclComm* comm) {
     return cap;
   }
 
+  // All table entries are total message bytes; the selector compares totalBytes
+  // directly (rccl_wrap.cc rcclSelectReduceScatter), so no per-rank scaling here.
   for (int i = 0; i < RCCL_DDA_FUNC_COUNT; ++i) {
-    bump(scaleRs(table->ddaLLMax[i], i));
-    bump(scaleRs(table->ddaLL128Max[i], i));
-    bump(scaleRs(table->ddaVmmMax[i], i));
-    bump(scaleRs(table->ddaVmmMaxR2[i], i));
+    bump(table->ddaLLMax[i]);
+    bump(table->ddaLL128Max[i]);
+    bump(table->ddaVmmMax[i]);
+    bump(table->ddaVmmMaxR2[i]);
     // Graph VMM is included even for eager-only processes: one buffer must
     // fit a later capture (gfx1250 AR graph cap is 256 MiB).
-    bump(scaleRs(table->ddaVmmMaxGraph[i], i));
+    bump(table->ddaVmmMaxGraph[i]);
     // AG CE-Scratch (and any other non-AR CE-scratch) copies the receive into
     // ddaScratch, so that window must fit. AR 2-shot uses ceARTmpBuf.
-    if (i != (int)ncclFuncAllReduce) bump(scaleRs(table->ceNonRegMax[i], i));
+    if (i != (int)ncclFuncAllReduce) bump(table->ceNonRegMax[i]);
   }
   return cap;
 }
