@@ -137,8 +137,8 @@ void SBfeU64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfe_u6
 void SBfeI64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfe_i64_sop2(*this, wf); }
 
 void SCbranchGForkSop2::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void SAbsdiffI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -146,8 +146,8 @@ void SAbsdiffI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SRfeRestoreB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void SMulHiU32Sop2::execute_impl(amdgpu::Wavefront &wf) {

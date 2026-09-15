@@ -726,7 +726,7 @@ TEST_F(NetIbMPITest, LargeTransfer_VNic) {
 
     // Extended timeout for 16MB transfer across doubled QPs.
     int sizes[1] = {0};
-    ASSERT_EQ(WaitForCompletion(request, sizes, kLargeTransferTimeout), ncclSuccess);
+    ASSERT_EQ(WaitForCompletion(request, sizes, kLargeTransferTimeoutMs), ncclSuccess);
 
     // Full 64MB byte-by-byte verification
     // ncclIbMultiSend would corrupt data at QP split points.
@@ -801,7 +801,7 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
         MPI_Barrier(MPI_COMM_WORLD);
 
         int sizes[1] = {0};
-        int timeout = (size > 1024 * 1024) ? kLargeTransferTimeout : kDefaultTimeoutMs;
+        int timeout = (size > 1024 * 1024) ? kLargeTransferTimeoutMs : kDefaultTimeoutMs;
         ASSERT_EQ(WaitForCompletion(request, sizes, timeout), ncclSuccess);
 
         // Prevent request reuse race between iterations.
