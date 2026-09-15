@@ -91,6 +91,49 @@ to_string (amd_dbgapi_architecture_id_t architecture_id)
   return str;
 }
 
+#define CASE(x)                                                               \
+  case AMD_DBGAPI_##x:                                                        \
+    return #x
+
+namespace
+{
+
+inline std::string
+one_process_attach_flag_to_string (amd_dbgapi_process_attach_flags flag)
+{
+  switch (flag)
+    {
+      CASE (PROCESS_ATTACH_FLAGS_NONE);
+      CASE (PROCESS_ATTACH_FLAGS_NO_FORWARD_PROGRESS);
+    }
+  return to_string (make_hex (flag));
+}
+
+} /* (anonymous) namespace.  */
+
+template <>
+std::string
+to_string (amd_dbgapi_process_attach_flags flags)
+{
+  std::string str;
+
+  if (!flags)
+    return one_process_attach_flag_to_string (flags);
+
+  while (flags != AMD_DBGAPI_PROCESS_ATTACH_FLAGS_NONE)
+    {
+      amd_dbgapi_process_attach_flags one_flag = flags ^ (flags & (flags - 1));
+
+      if (!str.empty ())
+        str += " | ";
+
+      str += one_process_attach_flag_to_string (one_flag);
+      flags ^= one_flag;
+    }
+
+  return str;
+}
+
 template <>
 std::string
 to_string (amd_dbgapi_process_id_t process_id)
@@ -271,10 +314,6 @@ to_string (amd_dbgapi_breakpoint_id_t breakpoint_id)
 
   return string_printf ("breakpoint_%" PRId64, breakpoint_id.handle);
 }
-
-#define CASE(x)                                                               \
-  case AMD_DBGAPI_##x:                                                        \
-    return #x
 
 template <>
 std::string
