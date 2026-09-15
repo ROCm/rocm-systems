@@ -221,6 +221,7 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         ncclDataType_t                               datatype;
         bool                                         expected;
         std::unordered_map<std::string, std::string> extraEnv;
+        std::string                                  archName;
     };
 
     const std::unordered_map<std::string, std::string> baseEnv = {
@@ -228,6 +229,10 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
     };
 
     const std::vector<UseCeArCase> cases = {
+        // Per-arch default: gfx1250 is on, everything else is off. No env override.
+        {"DefaultOn_Gfx1250_Isolated",  4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, true,  {}, "gfx1250"},
+        {"DefaultOff_Gfx950_Isolated",  4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, {}, "gfx950"},
+        // Null archName (zero-initialised mock) also falls through to off.
         {"DisabledByDefault_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, {}},
         {"EligibleFloat32Sum_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, true, baseEnv},
         {"MultiNodeRejected_Isolated", 4, 2, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, baseEnv},
@@ -258,6 +263,8 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
                     mock.comm.nNodes           = tc.nNodes;
                     mock.comm.symmetricSupport = tc.symmetricSupport;
                     mock.comm.config.CTAPolicy = tc.ctaPolicy;
+                    if (!tc.archName.empty())
+                        strncpy(mock.comm.archName, tc.archName.c_str(), sizeof(mock.comm.archName) - 1);
 
                     const bool result =
                         rcclUseCeAr2Shot(mock.get(), tc.count, tc.datatype, tc.op, /*acc=*/nullptr);
