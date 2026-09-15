@@ -1,0 +1,111 @@
+{
+    "required_tables": [
+        {
+            "min_rows": 1,
+            "name": "regions",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "name",
+                "start",
+                "end"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than_or_equal",
+                    "description": "HIP API regions collected (transpose 2x100: setup + launch calls)",
+                    "error_message": "--rocm=hip,kernel produced fewer than 100 rocm_hip_api regions",
+                    "expected_result": 100,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_hip_api';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "No HIP API regions with a null name",
+                    "error_message": "Found rocm_hip_api regions with null names",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_hip_api' AND name IS NULL;"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "No HIP API regions with zero duration",
+                    "error_message": "Found rocm_hip_api regions with zero duration",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_hip_api' AND duration = 0;"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "marker_api excluded by the domain filter",
+                    "error_message": "OVER-COLLECTION: rocm_marker_api regions present though --rocm=hip,kernel did not request them",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "hsa_api excluded by the domain filter",
+                    "error_message": "OVER-COLLECTION: rocm_hsa_api regions present though --rocm=hip,kernel did not request them",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_hsa_api';"
+                },
+                {
+                    "comparison": "greater_than_or_equal",
+                    "description": "Kernel launch APIs present to correlate against (~1 per kernel)",
+                    "error_message": "Fewer than 100 hipLaunchKernel-family regions for a 2x100x50 run",
+                    "expected_result": 100,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_hip_api' AND name LIKE '%LaunchKernel%';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "All HIP API regions have well formed timings",
+                    "error_message": "Found rocm_hip_api regions whose end timestamp precedes their start",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_hip_api' AND end < start;"
+                }
+            ]
+        },
+        {
+            "min_rows": 1,
+            "name": "kernels",
+            "required_columns": [
+                "id",
+                "category",
+                "name",
+                "start",
+                "end",
+                "queue",
+                "stream"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "between_inclusive",
+                    "description": "transpose kernel dispatches captured (2 threads x 100 iterations)",
+                    "error_message": "transpose kernel count outside expected range for a 2x100x50 run",
+                    "expected_result": 100,
+                    "expected_result_max": 2000,
+                    "query": "SELECT COUNT(*) FROM kernels WHERE name LIKE 'transpose%';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "No kernels with a null name",
+                    "error_message": "Found kernels with null names",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM kernels WHERE name IS NULL;"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "All kernel timings are well formed",
+                    "error_message": "Found kernels whose end timestamp is not after their start",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM kernels WHERE end <= start;"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "No duplicate kernel record identifiers",
+                    "error_message": "Found duplicate ids in the kernels table",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM (SELECT id, guid, COUNT(*) c FROM kernels GROUP BY id, guid HAVING c > 1);"
+                }
+            ]
+        }
+    ]
+}
