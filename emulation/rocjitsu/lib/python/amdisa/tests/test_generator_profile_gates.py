@@ -7282,13 +7282,15 @@ def test_generated_segmented_flat_metadata_uses_current_encoding_fields(
     amdgpu_generated_root: Path, arch: str
 ):
     source = (amdgpu_generated_root / arch / 'flat.cpp').read_text()
-    descriptors = source.count('set_memory_issue_info(')
-    conditional_additional_counters = source.count(
-        'inst_.seg == 0 ? std::optional<amdgpu::WaitCounterType>'
-    )
+    descriptors = re.findall(r'set_memory_issue_info\(.*?\);', source, flags=re.DOTALL)
+    segmented_descriptors = [d for d in descriptors if 'inst_.seg' in d]
 
-    assert descriptors > 0
-    assert conditional_additional_counters == descriptors
+    assert descriptors
+    assert segmented_descriptors
+    assert all(
+        'inst_.seg == 0 ? std::optional<amdgpu::WaitCounterType>' in descriptor
+        for descriptor in segmented_descriptors
+    )
 
 
 @pytest.mark.parametrize('arch', ['rdna4', 'cdna5'])
