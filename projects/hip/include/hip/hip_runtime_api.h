@@ -5014,6 +5014,14 @@ hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr);
  * typically one of the writes will "win" and overwrite data from the other registered memory
  * region.
  *
+ * @warning Registering very large host memory regions with hipHostRegister can incur
+ * substantial registration and deregistration overhead. Large registrations may increase
+ * the time required by hipHostUnregister and process teardown, and can adversely affect
+ * overall system performance.
+ *
+ * For large shared memory workloads, consider using hipMallocManaged or other SVM/HMM-based
+ * memory management mechanisms instead of registering large user-allocated host buffers.
+ *
  *  @returns #hipSuccess, #hipErrorOutOfMemory
  *
  *  @see hipHostUnregister, hipHostGetFlags, hipHostGetDevicePointer
