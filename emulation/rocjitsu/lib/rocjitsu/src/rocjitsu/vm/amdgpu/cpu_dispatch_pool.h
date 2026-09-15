@@ -42,6 +42,8 @@ class CpuDispatchPoolTestAccess;
 /// command processors to use otherwise-idle pool capacity without sharing
 /// result, completion, or exception state. The pool still bounds execution to N
 /// host threads: N-1 persistent workers plus at most one participating caller.
+/// A caller executes only work from its own submission. Persistent workers can
+/// execute work from any submission.
 class CpuDispatchPool {
   struct Submission;
 
@@ -54,7 +56,7 @@ class CpuDispatchPool {
     Submission(std::span<ComputeUnitCore *> submitted_tasks,
                std::span<FunctionalQuantumResult> submitted_results, uint32_t lane_count)
         : tasks(submitted_tasks), results(submitted_results), lanes(lane_count),
-          remaining_lanes(lane_count) {
+          queued_lanes(lane_count), remaining_lanes(lane_count) {
       for (auto &lane : lanes)
         lane.submission = this;
     }
@@ -65,6 +67,7 @@ class CpuDispatchPool {
     std::atomic<size_t> next_task = 0;
     // Protected by CpuDispatchPool::mutex_. Completion of the final lane makes
     // all task results and the exception visible to the submitting thread.
+    size_t queued_lanes;
     size_t remaining_lanes;
     std::exception_ptr first_exception;
   };
@@ -172,12 +175,13 @@ private:
       {
         std::unique_lock<std::mutex> lock(mutex_);
         work_cv_.wait(lock, [this, &own_submission]() {
-          return own_submission.remaining_lanes == 0 || (!caller_active_ && ready_head_ != nullptr);
+          return own_submission.remaining_lanes == 0 ||
+                 (!caller_active_ && own_submission.queued_lanes != 0);
         });
         if (own_submission.remaining_lanes == 0)
           return;
         caller_active_ = true;
-        lane = dequeue_lane();
+        lane = dequeue_lane(&own_submission);
       }
 
       drain_submission(*lane->submission);
@@ -213,13 +217,23 @@ private:
     ready_tail_ = lane;
   }
 
-  // Requires mutex_.
-  WorkLane *dequeue_lane() {
+  // Requires mutex_. If submission is not null, remove its first queued lane.
+  WorkLane *dequeue_lane(Submission *submission = nullptr) {
+    WorkLane *previous = nullptr;
     WorkLane *lane = ready_head_;
-    ready_head_ = lane->next;
-    if (!ready_head_)
-      ready_tail_ = nullptr;
+    while (submission && lane->submission != submission) {
+      previous = lane;
+      lane = lane->next;
+    }
+
+    if (previous)
+      previous->next = lane->next;
+    else
+      ready_head_ = lane->next;
+    if (ready_tail_ == lane)
+      ready_tail_ = previous;
     lane->next = nullptr;
+    --lane->submission->queued_lanes;
     return lane;
   }
 

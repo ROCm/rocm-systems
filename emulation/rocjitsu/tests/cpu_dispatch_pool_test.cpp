@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <exception>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -32,6 +33,27 @@ class CpuDispatchPoolTestAccess {
 public:
   static void construct_with_failure(uint32_t threads, uint32_t fail_after) {
     CpuDispatchPool pool(threads, fail_after);
+  }
+
+  static void run_with_foreign_lane_ahead(CpuDispatchPool &pool,
+                                          std::span<ComputeUnitCore *> foreign_tasks,
+                                          std::span<ComputeUnitCore *> own_tasks,
+                                          const std::function<void()> &after_own) {
+    std::vector<FunctionalQuantumResult> foreign_results(foreign_tasks.size());
+    std::vector<FunctionalQuantumResult> own_results(own_tasks.size());
+    CpuDispatchPool::Submission foreign_submission(foreign_tasks, foreign_results, 1);
+    CpuDispatchPool::Submission own_submission(own_tasks, own_results, 1);
+
+    {
+      std::lock_guard<std::mutex> lock(pool.mutex_);
+      pool.enqueue_lane(&foreign_submission.lanes.front());
+      pool.enqueue_lane(&own_submission.lanes.front());
+    }
+    pool.work_cv_.notify_all();
+
+    pool.help_until_done(own_submission);
+    after_own();
+    pool.help_until_done(foreign_submission);
   }
 };
 
@@ -85,6 +107,37 @@ private:
   uint32_t active_callbacks_ = 0;
   uint32_t max_active_callbacks_ = 0;
   bool overlap_reached_ = false;
+  bool timed_out_ = false;
+};
+
+class ReleaseGatePlugin final : public ExecutionPlugin {
+public:
+  ReleaseGatePlugin() : ExecutionPlugin("release_gate") {}
+
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
+                                        amdgpu::Wavefront &) override {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (!cv_.wait_for(lock, std::chrono::seconds(2), [this]() { return released_; }))
+      timed_out_ = true;
+  }
+
+  void release() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      released_ = true;
+    }
+    cv_.notify_all();
+  }
+
+  bool timed_out() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return timed_out_;
+  }
+
+private:
+  mutable std::mutex mutex_;
+  std::condition_variable cv_;
+  bool released_ = false;
   bool timed_out_ = false;
 };
 
@@ -309,6 +362,27 @@ TEST(CpuDispatchPoolTest, ConcurrentSubmissionsKeepExceptionsIndependent) {
   EXPECT_FALSE(results[0].ran);
   EXPECT_TRUE(results[1].ran);
   EXPECT_EQ(fixture.wfs[1]->pc, kProgramBase + sizeof(uint32_t));
+}
+
+TEST(CpuDispatchPoolTest, SubmittingThreadRunsOnlyItsOwnSubmission) {
+  DispatchPoolFixture fixture(/*cu_count=*/2);
+  amdgpu::CpuDispatchPool pool(/*threads=*/1);
+
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto gate_plugin = std::make_unique<ReleaseGatePlugin>();
+  auto *gate = gate_plugin.get();
+  ASSERT_TRUE(group->add(std::move(gate_plugin)));
+  fixture.cus[0]->set_plugin_group(group);
+
+  // Queue the blocking foreign lane first. The submitting thread must skip it,
+  // finish its own short submission, and then release the foreign lane.
+  amdgpu::CpuDispatchPoolTestAccess::run_with_foreign_lane_ahead(
+      pool, std::span<amdgpu::ComputeUnitCore *>(&fixture.tasks[0], 1),
+      std::span<amdgpu::ComputeUnitCore *>(&fixture.tasks[1], 1), [&]() { gate->release(); });
+
+  EXPECT_FALSE(gate->timed_out());
+  for (const auto *wf : fixture.wfs)
+    EXPECT_EQ(wf->trace_inst_count_, 1u);
 }
 
 // Measures the sparse-XCD shape that motivated concurrent submissions: eight
