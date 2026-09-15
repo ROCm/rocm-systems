@@ -134,8 +134,8 @@ jobs:
           # rather than shipping a wheel that can silently load a system .so.
           ${{matrix.target.python-bin}} -c "import amdsmi.amdsmi_wrapper as w; assert not w._AMDSMI_ALLOW_SYSTEM_FALLBACK, 'wheel shipped with system fallback enabled'; print('fallback disabled OK')"
 
-      # Not consumed by any downstream job; kept so a reviewer can download the
-      # built wheel from a run. Named by commit SHA for traceability.
+      # Now consumed by test-wheel-no-gpu below, and kept so a reviewer can
+      # download the built wheel from a run. Named by commit SHA for traceability.
       - name: Upload wheels
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -143,3 +143,69 @@ jobs:
           path: ${{github.workspace}}/wheels/*.whl
           if-no-files-found: error
           retention-days: 30
+
+  # The smoke test above runs inside the build container, which necessarily has
+  # a modern pip and every build dependency already present. This job is the
+  # opposite case, and the one users actually hit: stock distro images with no
+  # GPU, no ROCm, and no netlink libraries installed. It guards the property
+  # that makes the wheel worth shipping -- that it carries everything it needs.
+  #
+  # Only the repaired manylinux wheel is portable, so only that artifact is
+  # exercised here; the Debian leg's linux_x86_64 wheel is tied to its build host.
+  test-wheel-no-gpu:
+    name: No-GPU install (${{matrix.os.name}})
+    needs: build-amdsmi-wheels
+    runs-on: ubuntu-22.04
+    container: ${{matrix.os.image}}
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          # Oldest supported deb. Stock pip 20.0.2 predates PEP 600.
+          - { name: 'Ubuntu 20.04', image: 'ubuntu:20.04' }
+          - { name: 'Ubuntu 22.04', image: 'ubuntu:22.04' }
+          # PEP 668 marks the interpreter externally managed; the harness
+          # falls back to --break-system-packages on its own.
+          - { name: 'Ubuntu 24.04', image: 'ubuntu:24.04' }
+          # glibc 2.28 is the manylinux_2_28 floor and Python 3.6.8 is the
+          # oldest interpreter AMD SMI supports, so this leg is what catches a
+          # manylinux baseline bump that would strand RHEL 8 users.
+          - { name: 'AlmaLinux 8', image: 'almalinux:8' }
+          - { name: 'RHEL 9 (UBI)', image: 'registry.access.redhat.com/ubi9/ubi:latest' }
+
+    steps:
+      # Runs before checkout because the stock images ship no git.
+      - name: Install prerequisites
+        run: |
+          set -eu
+          if command -v apt-get >/dev/null 2>&1; then
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y -qq git python3 python3-pip
+          else
+            yum install -y -q git python3 python3-pip
+          fi
+          # Ubuntu 20.04 (pip 20.0.2) and AlmaLinux 8 (pip 9.0.3) ship a pip
+          # that predates PEP 600 and rejects manylinux_2_28 outright. Newer
+          # pips need nothing, and PEP 668 images refuse the upgrade, so this
+          # is best-effort: the harness reports an unusable pip by name.
+          python3 -m pip install --quiet --upgrade pip || true
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/amdsmi
+            .github/workflows
+
+      - name: Download manylinux wheel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: amdsmi-rpm-wheels-${{github.sha}}
+          path: wheels
+
+      - name: Install and exercise the wheel without a GPU
+        run: |
+          python3 projects/amdsmi/tests/run_amdsmi_wheel_nogpu_test.py \
+            --wheel wheels --expect-no-gpu
