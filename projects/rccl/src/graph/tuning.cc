@@ -1231,7 +1231,6 @@ static struct tuningModel tuning_model_11{
       {/*LL  (min/max/factor/thread_threshold)*/ {0, 1048576,   1, 16},
        /*LL128 (min/max/factor/thread_threshold)*/ {1048576, 16777216, 1, 64}},
       /*AllReduce*/
-      // LL  wins 0 – 128KB/rank (=512KB total); LL128 wins 128KB – 32MB/rank (=128MB total); Simple above.
       {/*LL  (min/max/factor/thread_threshold)*/ {0, 131072,    1, 0},
        /*LL128 (min/max/factor/thread_threshold)*/ {131072, 16777216, 3145728, 0}},
       /*Reduce*/
