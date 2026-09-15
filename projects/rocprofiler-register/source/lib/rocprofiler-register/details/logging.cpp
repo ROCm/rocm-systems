@@ -72,7 +72,8 @@ update_logging(const logging_config& cfg)
     FLAGS_stderrthreshold           = cfg.loglevel;
     FLAGS_alsologtostderr           = cfg.alsologtostderr;
 
-    // if(!cfg.logdir.empty()) FLAGS_log_dir = cfg.logdir.c_str();
+    if(!cfg.logdir.empty()) FLAGS_log_dir = cfg.logdir;
+    if(!cfg.vlog_modules.empty()) FLAGS_vmodule = cfg.vlog_modules;
 
     if(!cfg.logdir.empty() && !fs::exists(cfg.logdir))
     {
