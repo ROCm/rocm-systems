@@ -41,6 +41,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include <libdrm/drm.h>
 RJ_DIAGNOSTIC_POP
 
+#include "util/diagnostic.h"
 #include "util/dynamic_loader.h"
 #include "util/log.h"
 
@@ -2200,7 +2201,15 @@ public:
       }
 
       try {
-        auto dbt_guest = rocjitsu::config::load_dbt_guest_config_from_handoff(*handoff);
+        util::StringDiagnostic config_error;
+        rocjitsu::config::DbtGuestConfigResult dbt_guest_result =
+            rocjitsu::config::load_dbt_guest_config_from_handoff(*handoff, config_error.emitter());
+        if (dbt_guest_result.failed()) {
+          util::Logger::warn("rocjitsu: failed to load child config: ", config_error.message());
+          destroy_local_vm();
+          return nullptr;
+        }
+        rocjitsu::config::DbtGuestConfig dbt_guest = std::move(dbt_guest_result).value();
         if (dbt_guest.enabled) {
           LinuxKfd *execution_driver = nullptr;
           const bool simulator_backend =
@@ -2212,8 +2221,13 @@ public:
               return nullptr;
             }
             execution_driver = local_vm_->vm->driver();
-            rocjitsu::config::validate_dbt_simulator_device_limits(dbt_guest,
-                                                                   local_vm_->loaded.device);
+            if (rocjitsu::config::validate_dbt_simulator_device_limits(
+                    dbt_guest, local_vm_->loaded.device, config_error.emitter())
+                    .failed()) {
+              util::Logger::warn("rocjitsu: failed to load child config: ", config_error.message());
+              destroy_local_vm();
+              return nullptr;
+            }
           }
 
           // The deleter captures local_vm_, so the guest is destroyed BEFORE the VM
@@ -2248,10 +2262,9 @@ public:
           return nullptr;
         }
       } catch (const std::exception &e) {
-        // This is where a broken runtime handoff lands, including an enabled DBT config
-        // with no resolved host gpu_id. Failing closed leaves the process with a null
-        // driver and an opaque downstream failure, so the reason must be audible in a
-        // default build the way the hook layer's equivalent refusal already is.
+        // Downstream VM construction still uses exceptions. Failing closed leaves
+        // the process with a null driver and an opaque downstream failure, so the
+        // reason must be audible in a default build.
         util::Logger::warn("rocjitsu: failed to load child config: ", e.what());
         destroy_local_vm();
         return nullptr;

@@ -5,6 +5,7 @@
 
 #include "rocjitsu/config/config_common.h"
 #include "rocjitsu/isa/target_registry.h"
+#include "rocjitsu/result.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
 #include "rocjitsu/vm/amdgpu/command_processor.h"
@@ -23,6 +24,7 @@
 #include "simdojo/sim/exec_mode.h"
 #include "simdojo/sim/topology.h"
 #include "simulation_config_generated.h"
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <cassert>
@@ -770,8 +772,14 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
 
   // Extract KFD device identity before topology construction so target/version
   // mismatches fail before any simulator components are exposed.
-  if (fb_config->vm()->gpu() && fb_config->vm()->gpu()->device())
-    result.device = kfd_device_from_fb(fb_config->vm()->gpu()->device(), "vm.gpu.device");
+  if (fb_config->vm()->gpu() && fb_config->vm()->gpu()->device()) {
+    util::StringDiagnostic device_error;
+    FailureOr<KfdDeviceConfig> device = kfd_device_from_fb(fb_config->vm()->gpu()->device(),
+                                                           "vm.gpu.device", device_error.emitter());
+    if (device.failed())
+      throw std::runtime_error(device_error.message());
+    result.device = std::move(device).value();
+  }
   if (target != nullptr && target->gfx_target_version != 0 && result.device.present &&
       result.device.gfx_target_version != 0 &&
       result.device.gfx_target_version != target->gfx_target_version)
@@ -793,7 +801,12 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
     result.pci = pci_device_from_fb(fb_config->vm()->gpu()->pci());
   }
 
-  result.dbt_guest = dbt_guest_from_fb(fb_config->dbt_guest());
+  util::StringDiagnostic dbt_guest_error;
+  DbtGuestConfigResult dbt_guest =
+      dbt_guest_from_fb(fb_config->dbt_guest(), dbt_guest_error.emitter());
+  if (dbt_guest.failed())
+    throw std::runtime_error(dbt_guest_error.message());
+  result.dbt_guest = std::move(dbt_guest).value();
 
   if (fb_config->vm() && fb_config->vm()->gpu())
     result.num_gpus = std::max(1u, fb_config->vm()->gpu()->num_gpus());
@@ -906,7 +919,12 @@ DeviceIdentityConfig load_device_identity(const std::string &json_path,
         if (config->vm() == nullptr || config->vm()->gpu() == nullptr) {
           return identity;
         }
-        identity.device = kfd_device_from_fb(config->vm()->gpu()->device(), "vm.gpu.device");
+        util::StringDiagnostic device_error;
+        FailureOr<KfdDeviceConfig> device = kfd_device_from_fb(
+            config->vm()->gpu()->device(), "vm.gpu.device", device_error.emitter());
+        if (device.failed())
+          throw std::runtime_error(device_error.message());
+        identity.device = std::move(device).value();
         identity.pci = pci_device_from_fb(config->vm()->gpu()->pci());
         return identity;
       });
