@@ -22,6 +22,11 @@
 
 get_property(HSA_RUNTIME_INCLUDE_DIRECTORIES TARGET hsa-runtime64::hsa-runtime64 PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
 
+# Disable automatic GPU architecture detection: this project compiles for
+# whatever arch the parent build targets; letting CMake probe for GPUs at
+# configure time would fail in environments without a GPU and produce an
+# unexpected target list.
+set(CMAKE_HIP_ARCHITECTURES OFF)
 enable_language(HIP)
 
 find_package(Clang REQUIRED CONFIG

@@ -411,12 +411,8 @@ def probe_host_replay_env_linux() -> ReplayEnvironment:
             env.gpu_names = names
 
     rocm_path = os.environ.get("HIP_PATH") or os.environ.get("ROCM_PATH", "/opt/rocm")
-    version_file = os.path.join(rocm_path, ".info", "version")
-    try:
-        with open(version_file, encoding="utf-8") as _vf:
-            env.hip_runtime_version = _parse_hip_version(_vf.read())
-    except OSError:
-        pass
+    clr_lib_dir = Path(rocm_path) / "lib"
+    env.hip_runtime_version = hip_version_from_clr_lib(clr_lib_dir)
 
     env.comgr_version = probe_comgr_version()
     return env
@@ -636,7 +632,7 @@ def probe_docker_replay_env(
     probe_shell = (
         f"export LD_LIBRARY_PATH={ld_inside}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}; "
         "rocm-smi --showid --showproductname 2>/dev/null || true; "
-        "cat ${ROCM_PATH:-/opt/rocm}/.info/version 2>/dev/null || true"
+        "ls ${ROCM_PATH:-/opt/rocm}/lib/libamdhip64.so.*.*.* 2>/dev/null || true"
     )
     docker_args = [
         "run", "--rm",
