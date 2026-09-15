@@ -45,8 +45,8 @@ namespace dda::common {
 // same reason as the one-shot: an unrounded stride can come out an odd number of
 // 8B words and misalign every slot but rank 0's.
 constexpr size_t ddaLL128ArTwoShotSlotWords(size_t bankSize, int nRanks) {
-  size_t slotWords = (bankSize / sizeof(uint64_t)) / ((size_t)nRanks * 2);
-  return slotWords / (size_t)kDdaLL128WireWordsPerSlice * (size_t)kDdaLL128WireWordsPerSlice;
+  return ddaLLSlotPkts(bankSize, sizeof(uint64_t) * (size_t)nRanks * 2,
+                       (size_t)kDdaLL128WireWordsPerSlice);
 }
 
 // Fixed-width peer staging for phase 1: unlike the one-shot, each peer receives a

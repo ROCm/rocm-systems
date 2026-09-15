@@ -31,13 +31,13 @@ namespace dda::common {
 
 // Packets one per-rank slot holds, derived from the scratch bank the host picked
 // rather than a fixed constant, so the tier's reach follows the allocation. A
-// packet is 16B and ddaBankSize floors the bank to 16B, so the slot base stays
-// aligned for any nRanks without further rounding.
+// packet is 16B and the slot is floored to a whole 16 of them, so the slot base
+// stays aligned for any nRanks.
 //
 // Both the kernel and the eligibility check call this, so the size the host
 // admits is exactly the geometry the kernel addresses.
 constexpr size_t ddaLLArSlotPkts(size_t bankSize, int nRanks) {
-  return (bankSize / sizeof(LLPacket16)) / (size_t)nRanks;
+  return ddaLLSlotPkts(bankSize, sizeof(LLPacket16) * (size_t)nRanks, 16);
 }
 
 // LL flat all-reduce kernel. 1D grid over packets (8B payload each).

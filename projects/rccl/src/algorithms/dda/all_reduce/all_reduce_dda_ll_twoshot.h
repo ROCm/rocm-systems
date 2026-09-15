@@ -39,9 +39,10 @@ namespace dda::common {
 // Packets one per-rank slot holds. A bank has to carry two staging areas here
 // (publish + write-back), so a slot is half the one-shot's and the bank stride
 // is unchanged -- which is what keeps bank 1 at the same byte offset for both
-// tiers, since they share one scratch and one epoch counter.
+// tiers, since they share one scratch and one epoch counter. Floored to the same
+// 16-packet granule as the one-shot so both tiers land slots identically.
 constexpr size_t ddaLLArTwoShotSlotPkts(size_t bankSize, int nRanks) {
-  return (bankSize / sizeof(LLPacket16)) / ((size_t)nRanks * 2);
+  return ddaLLSlotPkts(bankSize, sizeof(LLPacket16) * (size_t)nRanks * 2, 16);
 }
 
 // Fixed-width peer staging for phase 1: a runtime-sized array, or a runtime index

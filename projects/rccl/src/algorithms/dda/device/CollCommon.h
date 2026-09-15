@@ -230,6 +230,20 @@ constexpr size_t ddaBankSize(size_t bytes) {
   return (bytes / 2) / 16 * 16;
 }
 
+// Per-rank slot carved out of a bank, counted in whatever unit the protocol
+// addresses the wire with -- 16B packets for LL, 8B words for LL128. `div` folds
+// the unit size, the rank count, and the number of staging areas the tier puts
+// in one bank (two for the two-shot tiers, which publish and then write back).
+// `align` is the granule the slot has to be a whole number of, so a slot always
+// begins on a boundary the protocol's accesses require.
+//
+// Kernel and eligibility both call this, so the size the host admits is exactly
+// the geometry the kernel addresses.
+constexpr size_t ddaLLSlotPkts(size_t bankSize, size_t div, size_t align) {
+  const size_t slotUnits = bankSize / div;
+  return (slotUnits / align) * align;
+}
+
 // 16-byte LL line: two (4B data, 4B flag) pairs carrying 8B of payload.
 union LLPacket16 {
   struct {
