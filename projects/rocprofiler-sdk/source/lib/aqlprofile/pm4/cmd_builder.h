@@ -315,6 +315,12 @@ public:
                                      const Register& reg,
                                      uint32_t        header){};
 
+    /// @brief Snapshots the low 32 bits of GPU_CLOCK_COUNT into the named userdata register.
+    /// Used to embed periodic timestamps into the thread trace stream (gfx9 only).
+    /// @param cmdBuf  command buffer to be appended with launch command
+    /// @param reg  userdata register address (typically SQ_THREAD_TRACE_USERDATA_3)
+    virtual void BuildClockLo32IntoUserdata(CmdBuffer* cmdBuf, const Register& reg){};
+
     /// @brief Release resources used by CmdBuilder
     virtual ~CmdBuilder(){};
 

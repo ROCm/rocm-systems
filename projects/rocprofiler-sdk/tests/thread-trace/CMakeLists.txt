@@ -131,3 +131,20 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
     ENVIRONMENT "TRIPLEBUFFER=1;STARTSTOP=1;ATT_NODETAIL=1"
     DISABLED ${TRIPLE_BUFFER_DISABLED})
+
+# Check gfx9 periodic realtime markers from query_status packets.
+list(GET rocprofiler-sdk-tests-gfx-info 0 _RT_LO32_GPU0)
+if(NOT "${_RT_LO32_GPU0}" MATCHES "^gfx9[0-9a-f]+$")
+    set(RT_LO32_DISABLED True)
+else()
+    set(RT_LO32_DISABLED ${TRIPLE_BUFFER_DISABLED})
+endif()
+
+rocprofiler_add_integration_execute_test(
+    thread-trace-api-triple-buffer-realtime-periodic-test
+    TARGET thread-trace-test-app
+    TIMEOUT 240
+    PRELOAD "$<TARGET_FILE:thread-trace-triple-buffer-tool>"
+    ENVIRONMENT "TRIPLEBUFFER=1;EXPECT_PERIODIC_REALTIME=1"
+    DISABLED_CODECOV
+    DISABLED ${RT_LO32_DISABLED})
