@@ -422,17 +422,32 @@ class TestExcludedProjectListsAgree:
             (self._repo_root() / "tools/systems_pr_bot/policy.yml").read_text()
         )
         body = policy["checks"]["failure_comments"]["pre-commit"]["body"]
-        return set(re.findall(r"`(projects/[A-Za-z0-9._-]+)`", body))
+        return re.findall(r"`(projects/[A-Za-z0-9._-]+)`", body)
+
+    def _faq_callout_text(self):
+        # Scoped to the "own config" blockquote, not the whole FAQ: an unrelated
+        # `projects/x` mention elsewhere in the file must not affect this guard.
+        lines = (
+            (self._repo_root() / "docs/SYSTEMS_PR_BOT_FAQ.md").read_text().splitlines()
+        )
+        start = next(i for i, line in enumerate(lines) if "own config" in line)
+        end = next(i for i in range(start, len(lines)) if not lines[i].startswith(">"))
+        return "\n".join(lines[start:end])
 
     def _projects_named_in_faq(self):
         import re
 
-        text = (self._repo_root() / "docs/SYSTEMS_PR_BOT_FAQ.md").read_text()
-        return set(re.findall(r"`(projects/[A-Za-z0-9._-]+)`", text))
+        return re.findall(r"`(projects/[A-Za-z0-9._-]+)`", self._faq_callout_text())
+
+    @staticmethod
+    def _assert_no_repeats(named_list, where):
+        dupes = sorted({p for p in named_list if named_list.count(p) > 1})
+        assert not dupes, f"{where} names a project more than once: {dupes}"
 
     def test_failure_comment_names_every_root_excluded_project(self):
         excluded = self._root_excluded_projects()
-        named = self._projects_named_in_failure_comment()
+        named_list = self._projects_named_in_failure_comment()
+        named = set(named_list)
         assert excluded, "parsed no projects out of the root exclude block"
         assert named == excluded, (
             "tools/systems_pr_bot/policy.yml's pre-commit failure comment is out of step with "
@@ -440,16 +455,23 @@ class TestExcludedProjectListsAgree:
             f"  excluded but not named: {sorted(excluded - named)}\n"
             f"  named but not excluded: {sorted(named - excluded)}"
         )
+        self._assert_no_repeats(
+            named_list, "tools/systems_pr_bot/policy.yml's failure comment"
+        )
 
     def test_faq_names_every_root_excluded_project(self):
         excluded = self._root_excluded_projects()
-        named = self._projects_named_in_faq()
+        named_list = self._projects_named_in_faq()
+        named = set(named_list)
         assert excluded, "parsed no projects out of the root exclude block"
         assert named == excluded, (
             "docs/SYSTEMS_PR_BOT_FAQ.md's own-config callout is out of step with the root "
             ".pre-commit-config.yaml `exclude:` block.\n"
             f"  excluded but not named: {sorted(excluded - named)}\n"
             f"  named but not excluded: {sorted(named - excluded)}"
+        )
+        self._assert_no_repeats(
+            named_list, "docs/SYSTEMS_PR_BOT_FAQ.md's own-config callout"
         )
 
     def test_every_onboarded_subtree_is_root_excluded(self):
@@ -459,6 +481,41 @@ class TestExcludedProjectListsAgree:
         assert not missing, (
             f"{sorted(missing)} are checked by this script but not excluded from the root config, "
             "so both configs claim their files (onboarding step 4)."
+        )
+
+    def test_every_onboarded_subtree_is_in_the_workflow_paths_filter(self):
+        # Onboarding step 2: without a `{subtree}/**` entry, the gate never
+        # triggers on that subtree's own PRs.
+        import yaml
+
+        from run_pre_commit_by_subtree import ONBOARDED_SUBTREES
+
+        workflow = yaml.safe_load(
+            (self._repo_root() / ".github/workflows/pre-formatting.yml").read_text()
+        )
+        on = workflow.get(True) or workflow.get("on")
+        paths = on["pull_request"]["paths"]
+        missing = [s for s in ONBOARDED_SUBTREES if f"{s}/**" not in paths]
+        assert not missing, (
+            f"{missing} are onboarded but pre-formatting.yml's paths: has no '{{subtree}}/**' "
+            "entry for them (onboarding step 2), so the gate never runs on their PRs."
+        )
+
+    def test_every_onboarded_subtree_is_in_repos_config(self):
+        # Onboarding step 3: pr_detect_changed_subtrees.py can only ever emit what
+        # is in repos-config.json, and that is what materialises the subtree.
+        import json
+
+        from run_pre_commit_by_subtree import ONBOARDED_SUBTREES
+
+        repos = json.loads(
+            (self._repo_root() / ".github/repos-config.json").read_text()
+        )
+        known = {f"{r['category']}/{r['name']}" for r in repos["repositories"]}
+        missing = set(ONBOARDED_SUBTREES) - known
+        assert not missing, (
+            f"{sorted(missing)} are onboarded but not a category/name entry in "
+            ".github/repos-config.json (onboarding step 3), so their files are never checked out."
         )
 
 
@@ -471,8 +528,10 @@ class TestRcclConfigRegexes:
 
     @staticmethod
     def _read_repo_file(relative_path):
-        # projects/rccl/ is outside this gate's own sparse-checkout cone, so fall back to the
-        # git object store: the blob is still fetched, just not materialised in the working tree.
+        # projects/rccl/ is outside this gate's own sparse-checkout cone, so in CI this step
+        # runs before the widening checkout and the working-tree branch below never fires; the
+        # git object store is the actual path taken, not a rare fallback (blobs are still fetched
+        # in full since neither checkout step sets a partial-clone `filter:`).
         import subprocess
         from pathlib import Path
 
@@ -503,7 +562,10 @@ class TestRcclConfigRegexes:
             for hook in repo["hooks"]
             if hook["id"] == "clang-format"
         )
-        return re.compile(clang_format["files"]), re.compile(cfg["exclude"], re.VERBOSE)
+        # No external re.VERBOSE: pre-commit compiles `exclude` with no flags too, relying
+        # entirely on the pattern's own inline (?x). Forcing VERBOSE here would hide a typo
+        # that drops (?x) from the real config, since pre-commit would then compile it differently.
+        return re.compile(clang_format["files"]), re.compile(cfg["exclude"])
 
     @pytest.mark.parametrize(
         "path",
