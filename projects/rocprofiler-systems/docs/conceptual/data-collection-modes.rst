@@ -188,6 +188,8 @@ Additional configuration options to control the tracing behavior include:
 - ``ROCPROFSYS_TRACE_PERIODS`` (``--trace-periods``): Specifies multiple delay/duration periods in the format ``<DELAY>:<DURATION>``, ``<DELAY>:<DURATION>:<REPEAT>``, or ``<DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>``.
 - ``ROCPROFSYS_TRACE_PERIOD_CLOCK_ID`` (``--trace-clock-id``): Clock type for timing, such as ``realtime``, ``monotonic``, ``cputime``.
 
+The trace-period clock controls only when collection starts and stops. All CPU and GPU events stored on the trace timeline use ``CLOCK_BOOTTIME``.
+
 Profile mode
 ^^^^^^^^^^^^^^^^^^^^^^^^
 

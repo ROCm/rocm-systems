@@ -13,6 +13,7 @@
 #include "core/agent_manager.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
+#include "core/control/clocks/posix.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
 #include "core/trace_cache/cache_manager.hpp"
@@ -652,7 +653,7 @@ extern "C"
         if(rocprofsys::kokkosp::is_paused()) return;
         if(violates_name_rules(label)) return;
 
-        auto timestamp = tim::get_clock_real_now<std::uint64_t, std::nano>();
+        auto timestamp = rocprofsys::control::clocks::timeline_ns();
 
         auto _thread_state_guard =
             rocprofsys::state::thread::scoped(rocprofsys::state::thread::Internal);
@@ -681,7 +682,7 @@ extern "C"
         if(rocprofsys::kokkosp::is_paused()) return;
         if(violates_name_rules(label)) return;
 
-        auto timestamp = tim::get_clock_real_now<std::uint64_t, std::nano>();
+        auto timestamp = rocprofsys::control::clocks::timeline_ns();
         auto _thread_state_guard =
             rocprofsys::state::thread::scoped(rocprofsys::state::thread::Internal);
         if(rocprofsys::config::get_use_perfetto())
