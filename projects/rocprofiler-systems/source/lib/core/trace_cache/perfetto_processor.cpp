@@ -147,7 +147,7 @@ resolve_kfd_migration_gpu_bucket(
 
 template <typename CategoryT>
 ::perfetto::Track
-get_track(CategoryT, std::string name, std::uint64_t hash_arg)
+get_track(CategoryT, const std::string& name, std::uint64_t hash_arg)
 {
     auto _uuid = core::perfetto::get_perfetto_category_uuid<CategoryT>(hash_arg);
 
@@ -346,11 +346,10 @@ void
 write_sampling_track_data(const struct backtrace_region_sample& _sample,
                           bool                                  use_annotations)
 {
-    auto _track_name = std::string(_sample.track_name);
-    auto _thread_id  = _sample.thread_id;
-    auto _main_name  = std::string(_sample.name);
+    auto thread_id = _sample.thread_id;
+    auto main_name = _sample.name;
 
-    auto _track = get_track(Category{}, _track_name, _thread_id);
+    auto track = get_track(Category{}, std::string{ _sample.track_name }, thread_id);
 
     auto add_annotations = [&](::perfetto::EventContext& ctx) {
         if(!use_annotations) return;
@@ -378,9 +377,9 @@ write_sampling_track_data(const struct backtrace_region_sample& _sample,
         annotate_perfetto(ctx, annotations);
     };
 
-    core::perfetto::push_perfetto_track(Category{}, _main_name.c_str(), _track,
+    core::perfetto::push_perfetto_track(Category{}, main_name.data(), track,
                                         _sample.start_timestamp, add_annotations);
-    core::perfetto::pop_perfetto_track(Category{}, _main_name.c_str(), _track,
+    core::perfetto::pop_perfetto_track(Category{}, main_name.data(), track,
                                        _sample.end_timestamp);
 }
 
@@ -811,7 +810,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
     const auto _beg_ts   = _rs.start_timestamp;
     const auto _end_ts   = _rs.end_timestamp;
     const auto _category = _rs.category;
-    const auto _name     = std::string(_rs.name);
+    const auto _name     = _rs.name;
 
     auto args = process_arguments_string(_rs.args_str);
 
@@ -854,16 +853,16 @@ perfetto_processor_t::handle(const region_sample& _rs)
         if(_corr_id != 0)
         {
             core::perfetto::push_perfetto_track(
-                CategoryT{}, _name.c_str(), _thread_track, _beg_ts,
+                CategoryT{}, _name.data(), _thread_track, _beg_ts,
                 ::perfetto::Flow::ProcessScoped(_corr_id), add_annotations);
         }
         else
         {
-            core::perfetto::push_perfetto_track(CategoryT{}, _name.c_str(), _thread_track,
+            core::perfetto::push_perfetto_track(CategoryT{}, _name.data(), _thread_track,
                                                 _beg_ts, add_annotations);
         }
 
-        core::perfetto::pop_perfetto_track(CategoryT{}, _name.c_str(), _thread_track,
+        core::perfetto::pop_perfetto_track(CategoryT{}, _name.data(), _thread_track,
                                            _end_ts);
     };
 
@@ -1456,7 +1455,7 @@ void
 perfetto_processor_t::emit_kfd_event(const kfd_sample& sample)
 {
     const auto _track_name = std::string(sample.track_name);
-    const auto _name       = std::string(sample.name);
+    const auto _name       = sample.name;
     const auto _track_hash = std::hash<std::string>{}(_track_name);
     auto       _track      = get_track(CategoryT{}, _track_name, _track_hash);
 
@@ -1479,15 +1478,15 @@ perfetto_processor_t::emit_kfd_event(const kfd_sample& sample)
 
     if(sample.start_timestamp == sample.end_timestamp)
     {
-        TRACE_EVENT_INSTANT(trait::name<CategoryT>::value,
-                            ::perfetto::DynamicString{ _name }, _track,
+        const ::perfetto::DynamicString _dynamic_name{ _name.data(), _name.size() };
+        TRACE_EVENT_INSTANT(trait::name<CategoryT>::value, _dynamic_name, _track,
                             sample.start_timestamp, add_annotations);
     }
     else
     {
-        core::perfetto::push_perfetto_track(CategoryT{}, _name.c_str(), _track,
+        core::perfetto::push_perfetto_track(CategoryT{}, _name.data(), _track,
                                             sample.start_timestamp, add_annotations);
-        core::perfetto::pop_perfetto_track(CategoryT{}, _name.c_str(), _track,
+        core::perfetto::pop_perfetto_track(CategoryT{}, _name.data(), _track,
                                            sample.end_timestamp);
     }
 }

@@ -152,9 +152,9 @@ process_arguments_string(std::string_view arg_str)
 
     for(auto it = tokens.begin(); it != tokens.end(); it += fields_per_record)
     {
-        const std::string_view number_token = *it;
-        std::uint32_t          arg_number   = 0;
-        auto [ptr, ec]                      = std::from_chars(
+        const auto    number_token = *it;
+        std::uint32_t arg_number   = 0;
+        auto [ptr, ec]             = std::from_chars(
             number_token.data(), number_token.data() + number_token.size(), arg_number);
         if(ec != std::errc{} || ptr != number_token.data() + number_token.size())
         {
