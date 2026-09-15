@@ -33,6 +33,8 @@ concurrency:
 env:
   ROCM_PATH: "/opt/rocm"
   PYTHON_VENV_PATH: ".venv-rocprofiler-sdk"
+  CMAKE_VERSION_DEB: "4.4.3"
+  CMAKE_VERSION_RPM: "3.28.4"
   GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
 
   mi325_EXCLUDE_TESTS_REGEX: ""
@@ -221,7 +223,7 @@ jobs:
           source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
           python3 -m pip install --upgrade pip
           python3 -m pip install --upgrade -r requirements.txt
-          python3 -m pip install --upgrade cmake==3.28.4
+          python3 -m pip install --upgrade cmake==${{ env.CMAKE_VERSION_RPM }}
 
       - name: Build ROCProfiler SDK Dependencies (installs trace-decoder under test)
         uses: ./.github/actions/rocprofiler-sdk-util
