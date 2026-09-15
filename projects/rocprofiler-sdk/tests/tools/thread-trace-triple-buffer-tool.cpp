@@ -280,11 +280,15 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             size_t current_byte = 0;
             for(auto& end_byte : output_buffer.end_chunks)
             {
+                if(current_byte >= output_size) break;
+
                 uint32_t current_sdata = 0;
                 char*    ptr           = buffer.data() + current_byte;
                 size_t   cur_size      = std::min(end_byte, output_size) - current_byte;
 
-                rocprofiler_trace_decode(decoder, parse, ptr, cur_size, &current_sdata);
+                ROCPROFILER_CALL(
+                    rocprofiler_trace_decode(decoder, parse, ptr, cur_size, &current_sdata),
+                    "thread trace decode");
                 current_byte = end_byte;
             }
             total_size += output_size;
