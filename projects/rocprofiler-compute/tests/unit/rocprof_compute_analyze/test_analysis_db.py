@@ -73,6 +73,18 @@ def make_dual_issue_arch_config(metric_name: str, peak_col: str = "Peak"):
     return arch_config
 
 
+def make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df, max_stat_num):
+    """Build a SimpleNamespace analyzer for calc_roofline_data tests."""
+    sys_info_df = pd.DataFrame([{"gpu_arch": "gfx90a"}])
+    arch_config = SimpleNamespace(dfs={402: roofline_df})
+    return SimpleNamespace(
+        _runs={workload_path: SimpleNamespace(sys_info=sys_info_df)},
+        _pmc_df_per_workload={workload_path: pmc_df},
+        _arch_configs={"gfx90a": arch_config},
+        get_args=lambda: SimpleNamespace(max_stat_num=max_stat_num),
+    )
+
+
 def store_instruction_lines(code_object_store):
     """Every instruction line a code object owns, across all its symbols."""
     return [
@@ -3342,37 +3354,18 @@ def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
     or filtered out, the function logs a warning and skips that workload
     without adding it to the result dictionary.
     """
-    from rocprof_compute_analyze.analysis_db import db_analysis
-
-    # Create mock db_analysis instance
-    analyzer = mock.MagicMock(spec=db_analysis)
-
-    # Mock workload data
     workload_path = "/mock/workload/path"
-    mock_runs = {
-        workload_path: mock.MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx90a"}]))
-    }
-
-    # Mock PMC dataframe with kernel data
-    mock_pmc_df = pd.DataFrame({
+    pmc_df = pd.DataFrame({
         "Kernel_Name": ["kernel1", "kernel2"],
         "Start_Timestamp": [100, 200],
         "End_Timestamp": [150, 300],
     })
+    roofline_df = pd.DataFrame()  # Empty roofline dataframe triggers early exit
 
-    # Mock architecture config with EMPTY roofline dataframe (ID 402)
-    mock_arch_config = mock.MagicMock()
-    mock_arch_config.dfs = {
-        402: pd.DataFrame()  # Empty roofline dataframe triggers early exit
-    }
+    analyzer = make_roofline_calc_analyzer(
+        workload_path, pmc_df, roofline_df, max_stat_num=10
+    )
 
-    # Setup instance variables
-    analyzer._runs = mock_runs
-    analyzer._pmc_df_per_workload = {workload_path: mock_pmc_df}
-    analyzer._arch_configs = {"gfx90a": mock_arch_config}
-    analyzer.get_args = mock.MagicMock(return_value=mock.MagicMock(max_stat_num=10))
-
-    # Mock console_warning to verify it's called
     warning_messages = []
 
     def mock_warning(msg):
@@ -3479,3 +3472,65 @@ def test_both_instruction_line_paths_share_one_instruction_type(db_session):
     }
     # The two VALU lines share one lookup row.
     assert db_session.query(orm.InstructionTypeLookup).count() == 2
+
+
+def test_calc_roofline_data_includes_all_kernels(monkeypatch):
+    """calc_roofline_data computes roofline for all kernels, not just top N.
+    """
+    kernel_names = ["kernel_a", "kernel_b", "kernel_c", "kernel_d", "kernel_e"]
+
+    # Two dispatches per kernel, staggered timestamps
+    pmc_df = pd.DataFrame({
+        "Kernel_Name": [name for name in kernel_names for _ in range(2)],
+        "Start_Timestamp": list(range(100, 1100, 100)),
+        "End_Timestamp": list(range(200, 1200, 100)),
+    })
+
+    roofline_metrics = [
+        "Performance (GFLOPs)",
+        "AI HBM",
+        "AI L2",
+        "AI L1",
+        "AI L0",
+        "AI LDS",
+    ]
+    roofline_df = pd.DataFrame({
+        "Metric": roofline_metrics,
+        "Value": ["expr_" + m.lower().replace(" ", "_") for m in roofline_metrics],
+    })
+
+    workload_path = "/mock/workload/path"
+    analyzer = make_roofline_calc_analyzer(
+        workload_path, pmc_df, roofline_df, max_stat_num=2
+    )
+
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.db_analysis.evaluate",
+        lambda name, value, pmc_df, sys_info: 42.0,
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.console_warning", lambda msg: None
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.console_debug", lambda msg: None
+    )
+
+    kernel_data, workload_data = db_analysis.calc_roofline_data(analyzer)
+
+    assert len(kernel_data) == 1
+    df = kernel_data[workload_path]
+    assert len(df) == 5, f"Expected 5 kernels, got {len(df)}"
+    assert list(df["kernel_name"]) == kernel_names
+
+    expected_columns = [
+        "total_flops", "l0_cache_data", "l1_cache_data",
+        "l2_cache_data", "hbm_cache_data", "lds_cache_data",
+    ]
+    for col in expected_columns:
+        assert col in df.columns
+        assert (df[col] == 42.0).all()
+
+    assert len(workload_data) == 1
+    workload_metrics = workload_data[workload_path]
+    assert len(workload_metrics) == len(roofline_metrics)
+    assert all(v == 42.0 for v in workload_metrics.values())
