@@ -86,6 +86,10 @@ target_link_libraries(
 )
 target_link_libraries(
     rocprofiler-systems-core-library
+    PUBLIC rocprofiler-systems::rocprofiler-systems-containers
+)
+target_link_libraries(
+    rocprofiler-systems-core-library
     PRIVATE
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-headers>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-threading>
