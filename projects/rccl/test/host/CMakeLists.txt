@@ -11,7 +11,6 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
   fakes/libc_fakes.cc                  # libc seams (sockets/stdio/exit) for libc-only units
   fakes/rma_fakes.cc                   # rma_proxy_progress externals (circular-buf / destroy)
-  fakes/socket_fakes.cc                # src/misc/socket.cc progress seam
   fakes/comm_fakes.cc                  # comm-lifecycle seams (real in init.cc; faked here)
   fakes/recorder_fakes.cc              # src/recorder.cc
   fakes/utils_fakes.cc                 # src/misc/utils.cc (targets without the real utils.cc)
