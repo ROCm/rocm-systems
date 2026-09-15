@@ -146,7 +146,7 @@ jobs:
       contents: read
       packages: read
     container:
-      image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-compute-ci-multiarch
+      image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-compute-ci-base
       # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
       options:
         --privileged
@@ -202,6 +202,7 @@ jobs:
         run: |
           set -e
           python3 -m venv "${ROCM_VENV}"
+          "${ROCM_VENV}/bin/pip" install --upgrade pip
 
           # rocprof-compute is tested against PyTorch 2.14. The torch wheel pins
           # the ROCm build it was made against, which pins ROCm here too.
@@ -239,8 +240,7 @@ jobs:
         run: |
           set -e
           pip --version
-          pip install -r requirements.txt --timeout 600
-          pip install -r requirements-test.txt --timeout 600
+          pip install -r requirements.txt -r requirements-test.txt --timeout 300
           echo "✅ pip requirements installed!"
 
       - name: Configure, Build, and Test

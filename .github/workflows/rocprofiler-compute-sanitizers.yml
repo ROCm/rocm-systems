@@ -94,7 +94,7 @@ jobs:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
     container:
-      image: ghcr.io/rocm/rocprofiler-ubuntu:24.04-compute-ci-multiarch
+      image: ghcr.io/rocm/rocprofiler-ubuntu:24.04-compute-ci-base
       options: >-
         --privileged
         --ipc host
@@ -125,6 +125,7 @@ jobs:
         run: |
           set -e
           python3 -m venv "${ROCM_VENV}"
+          "${ROCM_VENV}/bin/pip" install --upgrade pip
 
           # No torch here. Sanitizing a stock libtorch build is out of scope, so
           # the trace collector stays unbuilt in these jobs.
@@ -172,8 +173,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          pip install -r requirements.txt --timeout 600
-          pip install -r requirements-test.txt --timeout 600
+          pip install -r requirements.txt -r requirements-test.txt --timeout 300
           echo "✅ pip requirements installed!"
 
       - name: Configure, build, and test
