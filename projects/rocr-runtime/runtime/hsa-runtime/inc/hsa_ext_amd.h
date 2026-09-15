@@ -2525,10 +2525,11 @@ only one completion signal is produced, after the last operand retires.  The rec
 different operands must not overlap.
 
 @p completion_signal is decremented once, after all @p num_ops copies have completed.
-Dependent signals are waited on once, before the first copy.
+Dependent signals are waited on once, before the first copy.  @p num_dep_signals must not
+exceed 5.
 
-Returns HSA_STATUS_ERROR_INVALID_ARGUMENT if any operand fails validation, in which case
-no copy is submitted.
+Returns HSA_STATUS_ERROR_INVALID_ARGUMENT if any operand fails validation or if
+@p num_dep_signals exceeds the limit, in which case no copy is submitted.
 */
 hsa_status_t HSA_API hsa_amd_memory_async_batch_copy_rect(
     const hsa_amd_memory_copy_rect_op_t* ops, size_t num_ops, hsa_agent_t copy_agent,
