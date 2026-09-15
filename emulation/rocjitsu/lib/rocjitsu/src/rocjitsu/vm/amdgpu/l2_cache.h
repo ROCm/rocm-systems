@@ -110,7 +110,12 @@ public:
   /// @param dst Destination buffer.
   /// @param size Number of bytes to read.
   /// @param mtype Memory type for caching policy.
-  void read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype = Mtype::RW, uint32_t vmid = 0);
+  void read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype = Mtype::RW,
+             uint32_t vmid = 0, bool cache_fill = false);
+
+  bool validate_cache_access(uint64_t addr, uint32_t size, uint32_t vmid) const {
+    return !backing_memory_ || backing_memory_->validate_cache_access(addr, size, vmid);
+  }
 
   /// @brief Write data to L2 (and possibly through to HBM).
   ///
@@ -297,7 +302,7 @@ private:
   void invalidate_range_locked(uint64_t addr, uint32_t size, uint32_t vmid, uint64_t line_start,
                                uint64_t line_count);
   void send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo::MessageOp op,
-                    uint32_t vmid = 0);
+                    uint32_t vmid = 0, bool cache_fill = false);
 
   CacheStore cache_;
   mutable std::shared_mutex maintenance_mutex_;

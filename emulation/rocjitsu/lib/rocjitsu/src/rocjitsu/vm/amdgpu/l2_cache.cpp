@@ -117,7 +117,7 @@ void L2Cache::clear_all_dirty_bytes() {
 }
 
 void L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo::MessageOp op,
-                           uint32_t vmid) {
+                           uint32_t vmid, bool cache_fill) {
   if (op == simdojo::MessageOp::WRITE)
     backing_write_transactions_.fetch_add(1, std::memory_order_relaxed);
   else
@@ -130,7 +130,7 @@ void L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo:
                          " size=", std::dec, size);
       backing_memory_->write_block(addr, std::span<const uint8_t>(data, size), vmid);
     } else {
-      backing_memory_->read_block(addr, std::span<uint8_t>(data, size), vmid);
+      backing_memory_->read_block(addr, std::span<uint8_t>(data, size), vmid, cache_fill);
     }
     return;
   }
@@ -171,11 +171,16 @@ void L2Cache::ensure_line(uint64_t addr, uint32_t vmid) {
   }
 
   uint8_t line_buf[LINE_SIZE];
-  send_backing(line_addr, line_buf, LINE_SIZE, simdojo::MessageOp::READ, vmid);
+  send_backing(line_addr, line_buf, LINE_SIZE, simdojo::MessageOp::READ, vmid, true);
   cache_.fill_line(addr, line_buf, vmid);
 }
 
-void L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, uint32_t vmid) {
+void L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, uint32_t vmid,
+                   bool cache_fill) {
+  if (!cache_fill && !validate_cache_access(addr, size, vmid)) {
+    std::memset(dst, 0, size);
+    return;
+  }
   auto maintenance_lock = acquire_cache_access();
   uint32_t copied = 0;
   if (mtype == Mtype::UC) {
@@ -213,6 +218,8 @@ void L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, uint
 }
 
 void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype, uint32_t vmid) {
+  if (!validate_cache_access(addr, size, vmid))
+    return;
   auto maintenance_lock = acquire_cache_access();
   uint32_t copied = 0;
   if (mtype == Mtype::UC) {
@@ -277,7 +284,7 @@ void L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid) {
       publish_dirty_bytes(evicted_addr, evicted_data, evicted.vmid);
     }
 
-    send_backing(line_addr, allocated.data, LINE_SIZE, simdojo::MessageOp::READ, vmid);
+    send_backing(line_addr, allocated.data, LINE_SIZE, simdojo::MessageOp::READ, vmid, true);
     line = allocated.data;
   }
   std::memcpy(line_buf, line, LINE_SIZE);

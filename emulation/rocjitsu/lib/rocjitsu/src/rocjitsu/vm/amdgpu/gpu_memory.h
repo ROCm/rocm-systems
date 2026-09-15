@@ -538,7 +538,10 @@ public:
   /// for the I$ to fill a line through. A mapped access clipped by a host
   /// extent remains zero-filled and emits a VM diagnostic so a future
   /// strict-fault mode can reuse the same boundary detection.
-  AccessOutcome read_block(uint64_t addr, std::span<uint8_t> dst, uint32_t vmid = 0) const {
+  /// Cache fills may skip poisoned padding; cache consumers must separately
+  /// validate the demanded bytes with validate_cache_access().
+  AccessOutcome read_block(uint64_t addr, std::span<uint8_t> dst, uint32_t vmid = 0,
+                           bool cache_fill = false) const {
     const FaultDispatch fault_dispatch(*this);
     if (!range_within_address_space(addr, dst.size())) {
       note_rejected_identity_access(addr, vmid);
@@ -550,7 +553,7 @@ public:
         for_each_page_chunk_until(addr, dst.size(), [&](uint64_t ea, size_t offset, size_t chunk) {
           const FaultScope chunk_faults;
           auto out = dst.subspan(offset, chunk);
-          if (read_mapped(ea, out.data(), chunk, vmid))
+          if (read_mapped(ea, out.data(), chunk, vmid, cache_fill))
             return true;
           // A refused read has already zero-filled its own chunk. Substituting
           // sparse storage for it would hand back invented bytes as if they
@@ -582,6 +585,45 @@ public:
     // be the documented zero rather than whatever it handed in.
     std::ranges::fill(dst.subspan(stopped_at), uint8_t{0});
     return AccessOutcome::Faulted;
+  }
+
+  /// Check demanded bytes separately from speculative cache-line padding.
+  /// Sanitizer shadow is checked even on a cache hit; ordinary builds retain
+  /// their existing cache behavior and incur no additional memory access.
+  bool validate_cache_access(uint64_t addr, size_t size, uint32_t vmid) const {
+#if defined(RJ_GPU_MEMORY_WITH_ASAN)
+    const FaultDispatch fault_dispatch(*this);
+    if (!range_within_address_space(addr, size)) {
+      note_rejected_identity_access(addr, vmid);
+      return false;
+    }
+    return for_each_page_chunk_until(addr, size, [&](uint64_t ea, size_t, size_t chunk) {
+      auto validate = [&](const KfdProcess::PageTableEntry *pte) {
+        if (pte) {
+          // A fully poisoned mapping has no host extents. It still needs to
+          // veto a cache hit, so inspect the PTE even in that case.
+          return for_each_mapped_span(*pte, ea & PAGE_MASK, chunk,
+                                     [](size_t, uint8_t *, size_t,
+                                        const KfdProcess::HostExtent &) {}) == chunk;
+        }
+        if (!passthrough_ || ea >= kUserSpaceLimit)
+          return true; // Sparse or remote backing has no local host shadow.
+        return addressable_prefix(reinterpret_cast<const uint8_t *>(ea), chunk) == chunk;
+      };
+      static thread_local PteCache cache;
+      const bool valid = vmid == 0 ? validate(nullptr) : cached_walk(ea, vmid, cache, validate);
+      if (!valid) {
+        note_rejected_identity_access(ea, vmid);
+        return false;
+      }
+      return true;
+    });
+#else
+    (void)addr;
+    (void)size;
+    (void)vmid;
+    return true;
+#endif
   }
 
   /// @brief Read a span, refusing to return anything less than all of it.
@@ -1483,6 +1525,17 @@ private:
       return transfer(offset, dst, len, /*to_page=*/false);
     }
 
+    [[nodiscard]] bool read_cache_fill(size_t offset, void *dst, size_t len) const {
+      if (!page_)
+        return false;
+      bool success = true;
+      for_each_bounded_addressable_span(page_ + offset, len, [&](size_t begin, size_t count) {
+        if (success)
+          success = read(offset + begin, static_cast<uint8_t *>(dst) + begin, count);
+      });
+      return success;
+    }
+
     [[nodiscard]] bool write(size_t offset, const void *src, size_t len) const {
       return transfer(offset, const_cast<void *>(src), len, /*to_page=*/true);
     }
@@ -2218,7 +2271,8 @@ private:
     });
   }
 
-  bool read_mapped(uint64_t addr, void *dst, size_t len, uint32_t vmid) const {
+  bool read_mapped(uint64_t addr, void *dst, size_t len, uint32_t vmid,
+                   bool cache_fill = false) const {
     const FaultDispatch fault_dispatch(*this);
     if ((addr & PAGE_MASK) + len > PAGE_SIZE)
       return false;
@@ -2257,7 +2311,8 @@ private:
               note_clipped_mapped_access("read", addr, len, vmid);
             return true;
           }
-          if (page.read(access_begin, dst, len))
+          if (cache_fill ? page.read_cache_fill(access_begin, dst, len)
+                         : page.read(access_begin, dst, len))
             return true;
           note_rejected_identity_access(addr, vmid);
           return false;

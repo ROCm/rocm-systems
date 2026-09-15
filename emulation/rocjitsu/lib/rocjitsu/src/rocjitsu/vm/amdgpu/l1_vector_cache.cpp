@@ -100,6 +100,10 @@ void L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid) {
 void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, bool non_temporal,
                                bool request_l1_bypass, uint32_t vmid,
                                RequestMtypeResolver &mtypes) {
+  if (!l2_->validate_cache_access(addr, size, vmid)) {
+    std::memset(dst, 0, size);
+    return;
+  }
   const Mtype effective = mtypes.at(addr);
 
   util::Logger::cp([&](auto &os) {
@@ -145,6 +149,8 @@ void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, bool 
 
 void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, bool non_temporal,
                                 uint32_t vmid, RequestMtypeResolver &mtypes) {
+  if (!l2_->validate_cache_access(addr, size, vmid))
+    return;
   const Mtype effective = mtypes.at(addr);
 
   util::Logger::vm([&](auto &os) {

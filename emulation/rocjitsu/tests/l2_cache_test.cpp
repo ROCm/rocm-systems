@@ -35,6 +35,17 @@
 #include <unistd.h>
 #include <vector>
 
+#if defined(__SANITIZE_ADDRESS__)
+#define RJ_CACHE_TEST_WITH_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define RJ_CACHE_TEST_WITH_ASAN 1
+#endif
+#endif
+#if defined(RJ_CACHE_TEST_WITH_ASAN)
+#include <sanitizer/asan_interface.h>
+#endif
+
 namespace {
 
 using rocjitsu::amdgpu::GpuMemory;
@@ -45,6 +56,57 @@ using rocjitsu::amdgpu::L2Cache;
 using rocjitsu::amdgpu::MemorySideCache;
 using rocjitsu::amdgpu::Mtype;
 using rocjitsu::amdgpu::RequestMtypeResolver;
+
+TEST(L2CacheTest, CacheFillPreservesAllocationTailAndRwCaching) {
+  for (int level = 0; level != 3; ++level) {
+    SCOPED_TRACE(level);
+    GpuMemory memory("memory");
+    memory.set_passthrough(true);
+    L2Cache l2("l2");
+    l2.set_backing_memory(&memory);
+    L1ScalarCache scalar(&l2);
+    L1VectorCache vector(&l2);
+    auto allocation = std::make_unique<uint32_t[]>(33);
+    auto *tail = allocation.get() + 32;
+    const uint64_t address = reinterpret_cast<uintptr_t>(tail);
+    auto read = [&] {
+      uint32_t result = 0;
+      if (level == 0)
+        l2.read(address, reinterpret_cast<uint8_t *>(&result), sizeof(result));
+      else if (level == 1)
+        scalar.load(address, 1, &result);
+      else
+        vector.load(&address, 1, sizeof(result), 1, reinterpret_cast<uint8_t *>(&result),
+                    Mtype::RW, false, false, 1);
+      return result;
+    };
+    *tail = 0x12345678;
+    const GpuMemory::FaultScope faults;
+    EXPECT_EQ(read(), 0x12345678u);
+    *tail = 0x87654321;
+    EXPECT_EQ(read(), 0x12345678u) << "partial lines must retain RW cache semantics";
+    const uint32_t replacement = 0xaabbccdd;
+    if (level == 0)
+      l2.write(address, reinterpret_cast<const uint8_t *>(&replacement), sizeof(replacement));
+    else if (level == 1)
+      scalar.store(address, 1, &replacement);
+    else
+      vector.store(&address, 1, sizeof(replacement), 1,
+                   reinterpret_cast<const uint8_t *>(&replacement), Mtype::RW, false, 1);
+    EXPECT_EQ(*tail, replacement);
+    EXPECT_EQ(read(), replacement);
+    EXPECT_FALSE(faults.observed());
+#if defined(RJ_CACHE_TEST_WITH_ASAN)
+    __asan_poison_memory_region(tail, sizeof(*tail));
+    {
+      const GpuMemory::FaultScope poisoned_access;
+      EXPECT_EQ(read(), 0u);
+      EXPECT_TRUE(poisoned_access.observed()) << "a cache hit must still reject poisoned demand";
+    }
+    __asan_unpoison_memory_region(tail, sizeof(*tail));
+#endif
+  }
+}
 
 void increment_u32(uint8_t *line, uint32_t offset) {
   uint32_t value = 0;

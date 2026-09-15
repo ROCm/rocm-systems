@@ -41,11 +41,13 @@ void L1ScalarCache::ensure_line(uint64_t addr, uint32_t vmid) {
   assert(!evicted.dirty && "L1 K$ is write-through; lines should never be dirty");
 
   uint8_t line_buf[CacheStore::LINE_SIZE];
-  l2_->read(line_addr, line_buf, CacheStore::LINE_SIZE, Mtype::RW, vmid);
+  l2_->read(line_addr, line_buf, CacheStore::LINE_SIZE, Mtype::RW, vmid, true);
   cache_.fill_line(addr, line_buf, vmid);
 }
 
 void L1ScalarCache::store(uint64_t addr, uint32_t num_dwords, const uint32_t *src, uint32_t vmid) {
+  if (!l2_->validate_cache_access(addr, num_dwords * sizeof(uint32_t), vmid))
+    return;
   synchronize_epoch();
   RequestMtypeResolver mtypes(memory_, vmid);
   for (uint32_t i = 0; i < num_dwords; ++i) {
@@ -120,6 +122,10 @@ void L1ScalarCache::flush_line(uint64_t addr, uint32_t vmid) {
 }
 
 void L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint32_t vmid) {
+  if (!l2_->validate_cache_access(addr, num_dwords * sizeof(uint32_t), vmid)) {
+    std::memset(dst, 0, num_dwords * sizeof(uint32_t));
+    return;
+  }
   synchronize_epoch();
   RequestMtypeResolver mtypes(memory_, vmid);
   for (uint32_t i = 0; i < num_dwords; ++i) {
@@ -151,6 +157,10 @@ void L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint
 }
 
 void L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst, uint32_t vmid) {
+  if (!l2_->validate_cache_access(addr, num_bytes, vmid)) {
+    std::memset(dst, 0, num_bytes);
+    return;
+  }
   synchronize_epoch();
   RequestMtypeResolver mtypes(memory_, vmid);
   uint32_t copied = 0;
