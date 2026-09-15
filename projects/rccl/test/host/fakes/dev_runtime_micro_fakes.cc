@@ -31,7 +31,8 @@
 #include "nccl_device/gin_barrier.h"
 
 #include "fakes/dev_runtime_micro_fakes.h"
-#include "fakes/hip_fakes.h"  // shared HIP seams + InstallHipVmmEmulator()
+#include "fakes/hip_fakes.h"   // shared HIP seams + InstallHipVmmEmulator()
+#include "fakes/nccl_fakes.h"  // g_ncclProxyClientGetFdBlocking, ResetNcclFakes()
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -47,28 +48,17 @@
 // ---------------------------------------------------------------------------
 // Globals the translation unit references.
 // ---------------------------------------------------------------------------
-int                          ncclDebugLevel = 0;
-uint64_t                     ncclDebugMask  = 0;
-thread_local int             ncclDebugNoWarn = 0;
 // Use POSIX-FD handles so the single-rank success path takes the no-export /
 // reuse-local branch in symMemory{Export,ImportAndMap}SegmentHandle (no real
 // shareable-handle export/import needed).
-hipMemAllocationHandleType   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
 
-thread_local int             ncclGroupDepth = 0;
-thread_local ncclResult_t    ncclGroupError = ncclSuccess;
-thread_local struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum] = {};
-thread_local int             ncclGroupBlocking = 0;
 
 // devcomm compat tables (defined in devcomm/devcomm_v*.cc in the real build).
-struct ncclDevCommCompat ncclDevCommCompat_v22902 = {};
-struct ncclDevCommCompat ncclDevCommCompat_v22907 = {};
 struct ncclDevCommCompat ncclDevCommCompat_v23000 = {};
 
 // ---------------------------------------------------------------------------
 // Debug / error.
 // ---------------------------------------------------------------------------
-void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int, const char*, ...) {}
 const char* ncclGetErrorString(ncclResult_t) { return "ncclSuccess"; }
 
 // ---------------------------------------------------------------------------
@@ -111,10 +101,7 @@ ncclResult_t PtrCheck(const void*, const char*, const char*) { return ncclSucces
 ncclResult_t CommCheck(struct ncclComm*, const char*, const char*) { return ncclSuccess; }
 // Seam: NCCLCHECK'd on entry to ncclCommWindowRegister_impl, so the
 // not-ready rejection is only reachable by driving it.
-static ncclResult_t DefaultCommEnsureReady(ncclComm_t) { return ncclSuccess; }
-std::function<ncclResult_t(ncclComm_t)> g_devrCommEnsureReady = DefaultCommEnsureReady;
 
-ncclResult_t ncclCommEnsureReady(ncclComm_t c) { return g_devrCommEnsureReady(c); }
 
 // ---------------------------------------------------------------------------
 // Public registration API.
@@ -149,8 +136,6 @@ ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
 // ---------------------------------------------------------------------------
 // Group state machine.
 // ---------------------------------------------------------------------------
-ncclResult_t ncclGroupStartInternal() { return ncclSuccess; }
-ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
 
 // ---------------------------------------------------------------------------
 // Param loader.
@@ -167,19 +152,7 @@ int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int
 // The real proxy hands back an fd the caller owns and closes. Returning -1
 // would make the SYSCHECK on close() in symMemoryImportAndMapSegmentHandle fail
 // and read like an import bug, so hand out a real descriptor the code can close.
-static ncclResult_t DefaultProxyClientGetFdBlocking(struct ncclComm*, int, void*, int* fd) {
-  if (fd) {
-    *fd = open("/dev/null", O_RDONLY);
-    if (*fd < 0) return ncclSystemError;
-  }
-  return ncclSuccess;
-}
-std::function<ncclResult_t(struct ncclComm*, int, void*, int*)> g_devrProxyClientGetFdBlocking =
-    DefaultProxyClientGetFdBlocking;
 
-ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* comm, int rank, void* handle, int* fd) {
-  return g_devrProxyClientGetFdBlocking(comm, rank, handle, fd);
-}
 
 // ---------------------------------------------------------------------------
 // Symmetric kernels.
@@ -429,14 +402,8 @@ static ncclTeam_t DefaultTeamWorld(ncclComm_t comm) {
   if (comm == nullptr) return ncclTeam_t{0, 0, 1};
   return ncclTeam_t{comm->nRanks, comm->rank, 1};
 }
-static ncclTeam_t DefaultTeamLsa(ncclComm_t comm) {
-  if (comm == nullptr) return ncclTeam_t{0, 0, 1};
-  return ncclTeam_t{comm->devrState.lsaSize, comm->devrState.lsaSelf, 1};
-}
 std::function<ncclTeam_t(ncclComm_t)> g_devrTeamWorld = DefaultTeamWorld;
-std::function<ncclTeam_t(ncclComm_t)> g_devrTeamLsa   = DefaultTeamLsa;
 extern "C" ncclTeam_t ncclTeamWorld(ncclComm_t comm) { return g_devrTeamWorld(comm); }
-extern "C" ncclTeam_t ncclTeamLsa(ncclComm_t comm) { return g_devrTeamLsa(comm); }
 extern "C" ncclTeam_t ncclTeamRail(ncclComm_t) { return ncclTeam_t{}; }
 
 // ---------------------------------------------------------------------------
@@ -454,8 +421,6 @@ extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, 
 // ---------------------------------------------------------------------------
 // Params are not cached here (see fakes/dev_runtime_micro_fakes.h), so the default just
 // hands back the value the NCCL_PARAM declaration was written with.
-static int64_t DefaultLoadParam(const char*, int64_t deftVal) { return deftVal; }
-std::function<int64_t(const char*, int64_t)> g_loadParam = DefaultLoadParam;
 
 void ResetDevRuntimeMicroFakes() {
   // The HIP surface now lives in fakes/hip_fakes.cc, shared with the other
@@ -464,7 +429,13 @@ void ResetDevRuntimeMicroFakes() {
   // cannot run at all against a reserve that returns hipErrorInvalidValue.
   ResetHipFakes();
   InstallHipVmmEmulator();
-  g_devrProxyClientGetFdBlocking                = DefaultProxyClientGetFdBlocking;
+  ResetNcclFakes();
+  // symMemoryExportSegmentHandle hands the fd on to a real close(), so it must
+  // be a genuine descriptor; the shared default reports failure instead.
+  g_ncclProxyClientGetFdBlocking = [](struct ncclComm*, int, void*, int* fd) {
+    if (fd) *fd = open("/dev/null", O_RDONLY);
+    return ncclSuccess;
+  };
   g_devrBootstrapIntraNodeBarrier               = DefaultIntraNodeBarrier;
   g_devrBootstrapIntraNodeAllGather             = DefaultIntraNodeAllGather;
   g_devrBootstrapAllGather                      = DefaultAllGather;
@@ -482,21 +453,17 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapBarrier                        = DefaultBootstrapBarrier;
   g_devrSymkInitOnce                            = DefaultSymkInitOnce;
   g_devrIntruAddressMapInsert                   = DefaultIntruAddressMapInsert;
-  g_devrCommEnsureReady                         = DefaultCommEnsureReady;
   g_devrNcclCommWindowDeregister                = DefaultCommWindowDeregister;
   g_devrTeamWorld                               = DefaultTeamWorld;
-  g_devrTeamLsa                                 = DefaultTeamLsa;
   g_devrNcclCommRegister                        = DefaultCommRegister;
   g_devrNcclCommDeregister                      = DefaultCommDeregister;
   g_devrRmaProxyDeregister                      = DefaultRmaProxyDeregister;
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
-  g_loadParam                               = DefaultLoadParam;
 
   // Not a hook either, but 12 tests assign it directly to steer the
   // POSIX-FD-vs-shareable-handle split in symMemory{Export,ImportAndMap}
   // SegmentHandle, and nothing put it back. Restore the value declared at the
   // top of this file.
-  ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
 
   // The liveness set is state, not a hook, but it is just as capable of
   // outliving a test: anything that installs a non-freeing g_devrShadowPoolFree

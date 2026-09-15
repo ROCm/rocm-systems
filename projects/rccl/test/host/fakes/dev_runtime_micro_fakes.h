@@ -37,13 +37,11 @@
 // Team shape seen by ncclDevrWorldToLsaRank's symmetric arm. Default to the
 // comm's own contiguous stride-1 team; override for strided/offset layouts.
 extern std::function<ncclTeam_t(ncclComm_t)> g_devrTeamWorld;
-extern std::function<ncclTeam_t(ncclComm_t)> g_devrTeamLsa;
 
 extern std::function<ncclResult_t(void*, int, int, int)> g_devrBootstrapBarrier;
 extern std::function<ncclResult_t(struct ncclComm*)> g_devrSymkInitOnce;
 extern std::function<ncclResult_t(struct ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void*)>
     g_devrIntruAddressMapInsert;
-extern std::function<ncclResult_t(ncclComm_t)> g_devrCommEnsureReady;
 
 extern std::function<ncclResult_t(const ncclComm_t, void*, size_t, void**)> g_devrNcclCommRegister;
 extern std::function<ncclResult_t(const ncclComm_t, void*)> g_devrNcclCommDeregister;
@@ -78,14 +76,11 @@ extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GI
     g_devrRmaProxyRegister;
 extern std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIONS])> g_devrRmaProxyDeregister;
 
-// Hands back an fd the caller must close; the default opens /dev/null.
-extern std::function<ncclResult_t(struct ncclComm*, int, void*, int*)> g_devrProxyClientGetFdBlocking;
 
 // Backs every NCCL_PARAM in the unit under test. dev-runtime-test.cc redefines
 // the macro to call this instead of param.h's caching body, so a param's value
 // can differ between tests; the default returns the param's own default.
 // Takes the bare env name (no "NCCL_" prefix) and that default.
-extern std::function<int64_t(const char*, int64_t)> g_loadParam;
 
 // Restore every seam above to its default. Call from a fixture TearDown so a
 // test cannot leak behaviour into the next one.

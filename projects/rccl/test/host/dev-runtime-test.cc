@@ -14,7 +14,9 @@
  *************************************************************************/
 
 #include "fakes/dev_runtime_micro_fakes.h"
-#include "fakes/hip_fakes.h"  // the shared g_hip* seams this suite drives
+#include "fakes/hip_fakes.h"      // the shared g_hip* seams this suite drives
+#include "fakes/nccl_fakes.h"     // g_ncclProxyClientGetFdBlocking
+#include "fakes/devcomm_fakes.h"  // g_ncclTeamLsa
 
 // param.h's NCCL_PARAM caches its value in a function-local static, so a param
 // read once is frozen for the process. fakes/param_redirect.h -- shared with
@@ -184,13 +186,46 @@ TEST(SymIsHostSegment, Invalid_ReturnsFalse) {
 // File-static, so callable only because this TU #includes dev_runtime.cc. The
 // param stub returns defaults, so ncclParamLsaTeamSize() is 0 and gcd(0, n) == n.
 
-class ComputeLsaSizeTest : public ::testing::Test {
+// Base fixture for every suite in this file.
+//
+// The shared HIP fakes default to fail-loud (hipErrorInvalidValue) so that an
+// unstubbed call surfaces. dev_runtime.cc cannot run a single symmetric-memory
+// path against that, so the working emulator has to be installed per test
+// rather than relied on as a process-wide default -- these tests share a binary
+// with p2p/devcomm/group, and any of those suites' TearDown restores the
+// fail-loud defaults between two of ours.
+//
+// SetUp, not just TearDown: a TearDown-only reset leaves whichever test runs
+// first after another suite with no emulator at all.
+class DevRuntimeMicroTest : public ::testing::Test {
+protected:
+  void SetUp() override { ResetDevRuntimeMicroFakes(); }
+  void TearDown() override { ResetDevRuntimeMicroFakes(); }
+
+  // Hand the shared fakes back in their pristine state, so the p2p/devcomm
+  // suites that share this binary do not inherit working HIP memory from
+  // whichever of our tests ran before them -- the fail-loud defaults are
+  // precisely what those suites rely on being in place.
+  //
+  // The destructor rather than TearDown: most fixtures here override TearDown
+  // without chaining to the base, and their cleanup still needs the emulator
+  // (symMemoryDestroy walks real allocations). gtest destroys the fixture after
+  // TearDown returns, so this is the one hook guaranteed to run last in every
+  // suite without editing each of them.
+  ~DevRuntimeMicroTest() override {
+    ResetHipFakes();
+    ResetNcclFakes();
+  }
+};
+
+class ComputeLsaSizeTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
   std::vector<int> rankToNode;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
   }
@@ -268,12 +303,13 @@ TEST_F(ComputeLsaSizeTest, SingleRank_ReturnsOne) {
 // its own, and computeLsaSize is covered above, so these pin only the compare.
 // The fixture uses the cached path to hand it a chosen lsaSize.
 
-class DevrIsOneLsaTeamTest : public ::testing::Test {
+class DevrIsOneLsaTeamTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->nRanks = 8;
@@ -304,7 +340,7 @@ TEST_F(DevrIsOneLsaTeamTest, LsaSizeBelowNRanks_ReturnsFalse) {
 // bigSize doubles as the "already initialised" marker, so it must stay 0 for
 // the body to run at all.
 
-class DevrInitOnceTest : public ::testing::Test {
+class DevrInitOnceTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -313,6 +349,7 @@ protected:
   std::vector<int> localRankToRank;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->nRanks = 2;
@@ -412,13 +449,14 @@ TEST_F(DevrInitOnceTest, ProxyOnly_RebuildsTeamFromLocalRanks) {
 //
 // These tests drive the real init/finalize lifecycle so the state stays
 // self-consistent, rather than hand-building a half-initialised devrState.
-class DevrFinalizeTest : public ::testing::Test {
+class DevrFinalizeTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   std::unique_ptr<ncclPeerInfo> peerStorage;
   ncclComm* comm = nullptr;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();
     comm = commStorage.get();
 
@@ -624,13 +662,14 @@ TEST_F(DevrFinalizeTest, DrainsLeftoverMemory) {
 // symMemorySetAccessForVASegment fills a device access descriptor and hands it
 // to cuMemSetAccess. The only branch is the CUCHECK on that call.
 
-class SymMemorySetAccessTest : public ::testing::Test {
+class SymMemorySetAccessTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
   symLsaMessage msg{};
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->cudaDev = 3;
@@ -678,7 +717,7 @@ TEST_F(SymMemorySetAccessTest, SetAccessFails_ReturnsError) {
 // ncclCuMemHandleType is a stub global fixed to POSIX-FD; the fixture saves and
 // restores it so the export branch can be reached without leaking the change.
 
-class SymMemoryExportSegmentHandleTest : public ::testing::Test {
+class SymMemoryExportSegmentHandleTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -686,6 +725,7 @@ protected:
   hipMemAllocationHandleType savedHandleType = ncclCuMemHandleType;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
   }
@@ -763,7 +803,7 @@ TEST_F(SymMemoryExportSegmentHandleTest, PropertiesFail_ReturnsErrorWithoutWriti
 // releases the imported handle. Everything after the pick is shared, so the
 // reuseLocal flag decides both the first branch and the last.
 
-class SymImportAndMapSegmentTest : public ::testing::Test {
+class SymImportAndMapSegmentTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -776,6 +816,7 @@ protected:
   const hipMemGenericAllocationHandle_t kLocal = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x77);
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     lsaRankList.assign({0, 1});
@@ -813,7 +854,7 @@ TEST_F(SymImportAndMapSegmentTest, ReuseLocal_MapsWithoutImportingOrReleasing) {
 // import, so the descriptor must be real for the SYSCHECK on close() to pass.
 TEST_F(SymImportAndMapSegmentTest, PosixFd_ImportsThenReleases) {
   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
-  ScopedHook proxy(g_devrProxyClientGetFdBlocking, [](ncclComm*, int, void*, int* fd) {
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [](ncclComm*, int, void*, int* fd) {
     *fd = open("/dev/null", O_RDONLY);
     return *fd < 0 ? ncclSystemError : ncclSuccess;
   });
@@ -828,7 +869,7 @@ TEST_F(SymImportAndMapSegmentTest, PosixFd_ImportsThenReleases) {
 // proxy round trip.
 TEST_F(SymImportAndMapSegmentTest, NonPosixHandle_ImportsWithoutProxy) {
   ncclCuMemHandleType = kMemHandleTypeNonPosix;
-  ScopedHook proxy(g_devrProxyClientGetFdBlocking,
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
                    [](ncclComm*, int, void*, int*) { return ncclSuccess; });
   ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t* h, void*, hipMemAllocationHandleType) {
@@ -844,7 +885,7 @@ TEST_F(SymImportAndMapSegmentTest, NonPosixHandle_ImportsWithoutProxy) {
 // Branch: the proxy cannot supply an fd, so the import never runs.
 TEST_F(SymImportAndMapSegmentTest, ProxyFdFails_ReturnsErrorWithoutImporting) {
   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
-  ScopedHook proxy(g_devrProxyClientGetFdBlocking,
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
                    [](ncclComm*, int, void*, int*) { return ncclSystemError; });
   ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
@@ -881,7 +922,7 @@ TEST_F(SymImportAndMapSegmentTest, ImportFails_ReturnsErrorWithoutMapping) {
 TEST_F(SymImportAndMapSegmentTest, PosixFdImportFails_ReturnsError) {
   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
   int handedOut = -1;
-  ScopedHook proxy(g_devrProxyClientGetFdBlocking, [&](ncclComm*, int, void*, int* fd) {
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [&](ncclComm*, int, void*, int* fd) {
     handedOut = open("/dev/null", O_RDONLY);
     if (fd) *fd = handedOut;
     return handedOut >= 0 ? ncclSuccess : ncclSystemError;
@@ -902,7 +943,7 @@ TEST_F(SymImportAndMapSegmentTest, PosixFdImportFails_ReturnsError) {
 // EBADF, which the import path treats as fatal rather than ignoring.
 TEST_F(SymImportAndMapSegmentTest, CloseFdFails_ReturnsError) {
   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
-  ScopedHook proxy(g_devrProxyClientGetFdBlocking, [](ncclComm*, int, void*, int* fd) {
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [](ncclComm*, int, void*, int* fd) {
     if (fd) *fd = 999999;  // never a live descriptor in this process
     return ncclSuccess;
   });
@@ -948,7 +989,7 @@ TEST_F(SymImportAndMapSegmentTest, ReleaseFails_ReturnsError) {
 // handle: always for the local rank, and for a remote rank only when
 // SYM_REUSE_SYSMEM_HANDLES is on and that segment is CPU-backed.
 
-class SymImportAndMapForRankTest : public ::testing::Test {
+class SymImportAndMapForRankTest : public DevRuntimeMicroTest {
 protected:
   static const int kMaxSegments = 2;
 
@@ -964,6 +1005,7 @@ protected:
       reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55);
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
 
@@ -1104,7 +1146,7 @@ TEST_F(SymImportAndMapForRankTest, SegmentFails_StopsWithoutMappingTheRest) {
 // export our own segments into it, all-gather, reserve the flat VA on first
 // use, map each rank's segments, then barrier so nobody unmaps early.
 
-class SymMemoryMapLsaTeamTest : public ::testing::Test {
+class SymMemoryMapLsaTeamTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -1115,6 +1157,7 @@ protected:
   std::vector<hipMemGenericAllocationHandle_t> memHandles;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->bootstrap = reinterpret_cast<void*>(0x1);  // opaque; bootstrap* are seams
@@ -1270,7 +1313,7 @@ TEST_F(SymMemoryMapLsaTeamTest, BarrierFails_ReturnsError) {
 // leaves the two && arms as the only reachable branches.
 
 // Shared by the bind and unbind suites, which take the same arguments.
-class SymTeamMemoryTest : public ::testing::Test {
+class SymTeamMemoryTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -1281,6 +1324,7 @@ protected:
   struct ncclDevrMemory mem{};
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     teamStorage.assign(sizeof(ncclDevrTeam), 0);
@@ -1341,12 +1385,13 @@ TEST_F(SymUnbindTeamMemoryTest, IsANoOpOnThisBuild) {
 // writing *outTeam, so a test asserting that would lock the bug in as expected
 // behaviour. Written up against AICOMRCCL-2180.
 
-class SymTeamObtainTest : public ::testing::Test {
+class SymTeamObtainTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->rank = 4;
@@ -1460,12 +1505,13 @@ TEST_F(SymTeamObtainTest, SingleRankTeam_ListsSelfOnly) {
 // multicast mapping first if it has one. It returns void, so the assertions are
 // on the resulting state and on which driver calls were made.
 
-class SymTeamDestroyAllTest : public ::testing::Test {
+class SymTeamDestroyAllTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->devrState.bigSize = 1u << 20;
@@ -1595,7 +1641,7 @@ TEST_F(SymTeamDestroyAllTest, DriverCallsFail_StillEmptiesList) {
 //
 // This suite covers the single-window path; the elastic path follows below.
 
-class SymMemoryRegisterGinTest : public ::testing::Test {
+class SymMemoryRegisterGinTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -1604,6 +1650,7 @@ protected:
   std::vector<hipMemGenericAllocationHandle_t> memHandles;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->rank = 0;
@@ -1704,6 +1751,7 @@ protected:
   std::vector<size_t> gathered;  // what the all-gather hook publishes back
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     SymMemoryRegisterGinTest::SetUp();
     comm->nRanks = 2;
     mem.globalHasSysmemSegment = true;
@@ -1853,13 +1901,14 @@ TEST_F(SymMemoryRegisterGinElasticTest, SecondSegmentFails_DeregistersTheFirst) 
 // registers the memory with it. Both steps are NCCLCHECK'd, so the only
 // branches are their two failure arms.
 
-class SymMemoryRegisterRmaTest : public ::testing::Test {
+class SymMemoryRegisterRmaTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
   ncclDevrMemory mem{};
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     mem.primaryAddr = reinterpret_cast<void*>(0x100000);
@@ -1924,7 +1973,7 @@ TEST_F(SymMemoryRegisterRmaTest, RegisterFails_ReturnsError) {
 // per-rank info, and the failure arms before anything is mapped. The
 // register-and-bind half and the rollback paths follow below.
 
-class SymMemoryObtainSetupTest : public ::testing::Test {
+class SymMemoryObtainSetupTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -1941,6 +1990,7 @@ protected:
   };
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->rank = 0;
@@ -2078,6 +2128,7 @@ TEST_F(SymMemoryObtainSetupTest, MemoryAllocFails_ReturnsErrorWithoutLinking) {
 class SymMemoryObtainRegisterTest : public SymMemoryObtainSetupTest {
 protected:
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     SymMemoryObtainSetupTest::SetUp();
     // Every rank agrees on one 4096-byte segment unless a test says otherwise.
     agreeing = GatherReporting({{1, false, 4096}, {1, false, 4096}, {1, false, 4096}, {1, false, 4096}});
@@ -2221,6 +2272,7 @@ protected:
   std::vector<unsigned char> teamStorage;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     SymMemoryObtainSetupTest::SetUp();
     // A peer larger than us, so lsaMaxSize differs from our own size and the
     // space accounting has to use the right one.
@@ -2326,13 +2378,14 @@ TEST_F(SymMemoryObtainRollbackTest, EarlyFailure_DoesNotFreeUnreservedSpace) {
 //
 // Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:
 // a single-rank, single-LSA-team comm with GIN and RMA proxy disabled.
-class SymMemoryObtainTest : public ::testing::Test {
+class SymMemoryObtainTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
   int lsaRank0 = 0;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
 
@@ -2380,12 +2433,13 @@ TEST_F(SymMemoryObtainTest, DestroyFreesMemory) {
 // symWindowTableInitOnce allocates the device-side window table the first time
 // it is needed and caches it on devrState.
 
-class SymWindowTableInitOnceTest : public ::testing::Test {
+class SymWindowTableInitOnceTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
   }
@@ -2428,7 +2482,7 @@ TEST_F(SymWindowTableInitOnceTest, AllocFails_LeavesTableUnset) {
 // the shadow pool, and when GIN is on fills the host copy from the memory's
 // per-segment info and pushes it to the device.
 
-class AllocAndPopulateSegmentWindowsTest : public ::testing::Test {
+class AllocAndPopulateSegmentWindowsTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -2438,6 +2492,7 @@ protected:
   ncclSegmentWindow* host = nullptr;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
 
@@ -2497,13 +2552,14 @@ TEST_F(AllocAndPopulateSegmentWindowsTest, AllocFails_ReturnsErrorWithoutOutputs
 // The shadow-pool fake returns one buffer for both device and host and makes
 // ToHost the identity, so the table walk operates on real memory here.
 
-class SymWindowCreateTest : public ::testing::Test {
+class SymWindowCreateTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
   ncclDevrMemory mem{};
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->rank = 7;
@@ -2699,7 +2755,7 @@ TEST_F(SymWindowCreateTest, TablePublishCopyFails_ReturnsErrorWithoutPublishing)
 // rather than hand-building state, because symMemoryDestroy walks memHead to
 // unlink and faults if its argument is not on the list.
 
-class SymWindowDestroyTest : public ::testing::Test {
+class SymWindowDestroyTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -2707,6 +2763,7 @@ protected:
   std::vector<hipMemGenericAllocationHandle_t> memHandles;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->rank = 0;
@@ -2853,7 +2910,7 @@ TEST_F(SymWindowDestroyTest, TableClearFails_StillRemovesFromSortedList) {
 // onto its node-local peers. Our own slot was never opened, and a peer that
 // failed to map has a null entry, so both are skipped.
 
-class WindowCloseIpcPeersTest : public ::testing::Test {
+class WindowCloseIpcPeersTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -2861,6 +2918,7 @@ protected:
   std::vector<void*> allocBase;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->devrState.lsaSelf = 1;  // differs from 0 so "skip self" is observable
@@ -2932,7 +2990,7 @@ TEST_F(WindowCloseIpcPeersTest, CloseFails_StillClosesRemainingPeers) {
 // This suite covers stage 3 and the local case where neither stage 1 nor 2
 // applies; the IPC and RMA stages follow below.
 
-class WindowRegisterNonSymTest : public ::testing::Test {
+class WindowRegisterNonSymTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -2941,6 +2999,7 @@ protected:
   void* const kUserPtr = reinterpret_cast<void*>(0x100000);
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->rank = 0;
@@ -3073,6 +3132,7 @@ protected:
   };
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     WindowRegisterNonSymTest::SetUp();
     comm->nRanks = 4;
     comm->devrState.lsaSize = 3;
@@ -3263,7 +3323,7 @@ TEST_F(WindowRegisterNonSymIpcTest, RmaRegisterFails_ReturnsError) {
 // This suite covers the dispatch and the failures reachable before the
 // symmetric walk begins.
 
-class DevrWindowRegisterInGroupTest : public ::testing::Test {
+class DevrWindowRegisterInGroupTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -3272,6 +3332,7 @@ protected:
   void* const kUserPtr = reinterpret_cast<void*>(0x100000);
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->rank = 0;
@@ -3365,6 +3426,7 @@ TEST_F(DevrWindowRegisterInGroupTest, NonSymHelperFails_ReleasesLocalRegistratio
 class DevrWindowRegisterInGroupSymTest : public DevrWindowRegisterInGroupTest {
 protected:
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     // Base SetUp first, before any skip: gtest still runs TearDown for a test
     // skipped from SetUp, and the inherited TearDown dereferences comm. Skipping
     // ahead of this line leaves comm null and segfaults the binary instead of
@@ -3706,7 +3768,7 @@ TEST_F(WindowDeregisterNonSymTest, ShadowFreeFails_LeavesWindowRegistered) {
 // the address-sorted list. The least upper bound is one past ours, so the
 // candidate is the entry before it -- and only if the address falls inside it.
 
-class DevrFindWindowTest : public ::testing::Test {
+class DevrFindWindowTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -3714,6 +3776,7 @@ protected:
   ncclDevrWindow winA{}, winB{};
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     // Two windows with a gap between them, so an address can fall outside both.
@@ -3808,13 +3871,14 @@ TEST(DevrGetRmaWin, SymmetricWindow_ReadsFromMemory) {
 // space: addresses already in that range pass through, others are looked up
 // against the registered memories.
 
-class DevrGetLsaSelfAddrTest : public ::testing::Test {
+class DevrGetLsaSelfAddrTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclDevrState* devr = nullptr;
   ncclDevrMemory mem{};
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     devr = &commStorage->devrState;
     devr->lsaSelf = 1;
@@ -3867,13 +3931,14 @@ TEST_F(DevrGetLsaSelfAddrTest, AddressJustPastMemory_ReturnsNull) {
 // ncclDevrWorldToLsaRank maps a world rank to its index within the LSA team.
 // Without symmetric support the team is the explicit lsaRankList.
 
-class DevrWorldToLsaRankTest : public ::testing::Test {
+class DevrWorldToLsaRankTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
   std::vector<int> lsaRankList;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->symmetricSupport = 0;
@@ -3910,6 +3975,7 @@ TEST_F(DevrWorldToLsaRankTest, NonMemberRank_ReturnsError) {
 class DevrWorldToLsaRankSymTest : public DevrWorldToLsaRankTest {
 protected:
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     DevrWorldToLsaRankTest::SetUp();
     comm->symmetricSupport = 1;
     comm->nRanks = 8;
@@ -3919,7 +3985,7 @@ protected:
     // relative to it -- so world rank 4 is lsa rank 0, and a returned index is
     // plainly distinguishable from the world rank it came from.
     g_devrTeamWorld = [](ncclComm_t) { return ncclTeam_t{8, 4, 1}; };
-    g_devrTeamLsa   = [](ncclComm_t) { return ncclTeam_t{4, 0, 1}; };
+    g_ncclTeamLsa   = [](ncclComm_t) { return ncclTeam_t{4, 0, 1}; };
   }
   void TearDown() override {
     ResetDevRuntimeMicroFakes();
@@ -3945,7 +4011,7 @@ TEST_F(DevrWorldToLsaRankSymTest, NonMemberRank_ReturnsError) {
 // ncclTeamRankIsMember earns its keep: an odd rank lands mid-stride and is not
 // a member even though it falls inside the team's span.
 TEST_F(DevrWorldToLsaRankSymTest, StridedTeam_RejectsMidStrideRank) {
-  g_devrTeamLsa = [](ncclComm_t) { return ncclTeam_t{4, 0, 2}; };
+  g_ncclTeamLsa = [](ncclComm_t) { return ncclTeam_t{4, 0, 2}; };
 
   int lsaRank = -1;
   ASSERT_EQ(ncclDevrWorldToLsaRank(comm, 6, &lsaRank), ncclSuccess);
@@ -3958,7 +4024,7 @@ TEST_F(DevrWorldToLsaRankSymTest, StridedTeam_RejectsMidStrideRank) {
 // ncclWinGetUserPtr recovers the user pointer a window was registered with,
 // decoding the host record from the device handle.
 
-class WinGetUserPtrTest : public ::testing::Test {
+class WinGetUserPtrTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -3966,6 +4032,7 @@ protected:
   ncclDevrWindow win{};
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->symmetricSupport = 1;
@@ -4020,7 +4087,7 @@ TEST_F(WinGetUserPtrTest, ShadowDecodeFails_ReturnsError) {
 // window, an IPC-backed window's per-peer table, and otherwise flat-VA
 // arithmetic over the symmetric space.
 
-class DevrGetLsaRankPtrTest : public ::testing::Test {
+class DevrGetLsaRankPtrTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -4028,6 +4095,7 @@ protected:
   std::vector<void*> peerPtrs;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->symmetricSupport = 1;
@@ -4119,7 +4187,7 @@ TEST_F(DevrGetLsaRankPtrTest, IpcWindowRankPastTable_ReturnsInvalidArgument) {
 // its host record through the global window map first, so a window the map does
 // not know is rejected before anything else is read.
 
-class DevicePointerAccessorTest : public ::testing::Test {
+class DevicePointerAccessorTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -4127,6 +4195,7 @@ protected:
   ncclWindow_vidmem vidmem{};
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->nRanks = 4;
@@ -4221,7 +4290,7 @@ TEST_F(DevicePointerAccessorTest, MultimemWithNvls_OffsetsFromMulticastBase) {
 // ncclGinResourcesRequested answers whether a requirements set asks for any GIN
 // resource, either at the top level or in the per-resource list.
 
-class GinResourcesRequestedTest : public ::testing::Test {
+class GinResourcesRequestedTest : public DevRuntimeMicroTest {
 protected:
   ncclDevCommRequirements reqs{};
   ncclDevResourceRequirements node{}, node2{};
@@ -4271,7 +4340,7 @@ TEST_F(GinResourcesRequestedTest, EmptyResourceList_ReturnsFalse) {
 // memory an address belongs to, accepting either the user address or its
 // mapping in our own slot.
 
-class DevrGetGinAnvilMemLayoutTest : public ::testing::Test {
+class DevrGetGinAnvilMemLayoutTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclDevrState* devr = nullptr;
@@ -4280,6 +4349,7 @@ protected:
   uint32_t stride = 0;
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     devr = &commStorage->devrState;
     devr->lsaSelf = 1;
@@ -4335,7 +4405,7 @@ TEST_F(DevrGetGinAnvilMemLayoutTest, UnknownAddress_ReturnsInvalidArgument) {
 // anything itself -- it validates, then queues a task for the group machinery
 // to run at ncclGroupEnd.
 
-class CommWindowRegisterImplTest : public ::testing::Test {
+class CommWindowRegisterImplTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -4345,6 +4415,7 @@ protected:
   void* const kUserPtr = reinterpret_cast<void*>(0x100000);
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->rank = 0;
@@ -4525,7 +4596,7 @@ TEST_F(CommWindowDeregisterImplSymTest, SymmetricStreamCreateFails_LeavesWindowA
 // including both linked lists, so the caller's structures can go away. Its
 // counterpart freeDevCommRequirements releases the whole thing.
 
-class DeepCopyDevCommRequirementsTest : public ::testing::Test {
+class DeepCopyDevCommRequirementsTest : public DevRuntimeMicroTest {
 protected:
   ncclDevCommRequirements src = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
   ncclDevCommRequirements* dst = nullptr;
@@ -4624,21 +4695,36 @@ TEST_F(DeepCopyDevCommRequirementsTest, FreeNull_IsSafe) {
 // getNcclVersionCompat picks the compatibility record covering the version the
 // caller compiled against, refusing a caller newer than the library.
 //
-// The compat table is three globals defined in fakes/dev_runtime_micro_fakes.cc, zeroed
-// there, so each test sets the version window it needs.
+// The compat table is three globals owned by the devcomm shim sources, which
+// this binary now compiles for real (devcomm-test.cc). Each test needs its own
+// version window, so the fixture zeroes them -- but it has to hand the real
+// tables back afterwards, because devcomm-test.cc's CompatTables_* cases assert
+// on the callbacks static initialisation put there. They were throwaway stubs
+// when this suite had a binary to itself; they are production state now.
 
-class NcclVersionCompatTest : public ::testing::Test {
+class NcclVersionCompatTest : public DevRuntimeMicroTest {
 protected:
-  void SetUp() override { Reset(); }
-  void TearDown() override {
+  void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
+    saved22902_ = ncclDevCommCompat_v22902;
+    saved22907_ = ncclDevCommCompat_v22907;
+    saved23000_ = ncclDevCommCompat_v23000;
     Reset();
-    ResetDevRuntimeMicroFakes();
+  }
+  void TearDown() override {
+    ncclDevCommCompat_v22902 = saved22902_;
+    ncclDevCommCompat_v22907 = saved22907_;
+    ncclDevCommCompat_v23000 = saved23000_;
+    DevRuntimeMicroTest::TearDown();
   }
   static void Reset() {
     ncclDevCommCompat_v22902 = ncclDevCommCompat{};
     ncclDevCommCompat_v22907 = ncclDevCommCompat{};
     ncclDevCommCompat_v23000 = ncclDevCommCompat{};
   }
+
+private:
+  ncclDevCommCompat saved22902_{}, saved22907_{}, saved23000_{};
 };
 
 // A version inside a record's window selects it.
@@ -4712,6 +4798,7 @@ protected:
   ncclCommProperties_t props{};
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     NcclVersionCompatTest::SetUp();
     ncclDevCommCompat_v22902.minVersion = 0;
     ncclDevCommCompat_v22902.maxVersion = NCCL_VERSION_CODE;
@@ -4792,7 +4879,7 @@ TEST_F(CommQueryPropertiesTest, UninitialisedProps_ReturnsInvalidUsage) {
 // out-parameter, so the caller here dereferences an uninitialised pointer. A
 // test driving it would crash rather than assert.
 
-class DevrGetLsaTeamPtrMCTest : public ::testing::Test {
+class DevrGetLsaTeamPtrMCTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -4801,6 +4888,7 @@ protected:
   void* const kMcBase = reinterpret_cast<void*>(0x800000);
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->nvlsSupport = 1;
@@ -4880,6 +4968,7 @@ protected:
   ncclWindow_vidmem window{};
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     NcclVersionCompatTest::SetUp();
     ncclDevCommCompat_v22902.minVersion = 0;
     ncclDevCommCompat_v22902.maxVersion = NCCL_VERSION_CODE;
@@ -5035,6 +5124,7 @@ protected:
   ncclDevComm outDevComm{};
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     NcclVersionCompatTest::SetUp();
     ncclDevCommCompat_v22902.minVersion = 0;
     ncclDevCommCompat_v22902.maxVersion = NCCL_VERSION_CODE;
@@ -5137,7 +5227,7 @@ TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
 // The body past that gate builds the whole devcomm -- GIN activation, resource
 // windows, barriers -- and is not covered here.
 
-class DevrCommCreateInternalTest : public ::testing::Test {
+class DevrCommCreateInternalTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -5146,6 +5236,7 @@ protected:
   ncclDevCommCompat compat{};
 
   void SetUp() override {
+    DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->nRanks = 1;
