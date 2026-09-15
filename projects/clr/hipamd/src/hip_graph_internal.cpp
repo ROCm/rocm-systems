@@ -900,7 +900,19 @@ hipError_t Graph::CreateSegmentsFromPaths(
   segments_.clear();
   node_to_segment_id_.clear();
 
-  // Create a segment for each execution path at this level
+  // Process child graphs first so their segment priorities are cached before
+  // parent segments read them.
+  for (size_t i = 0; i < exec_paths.child_graph_paths.size(); ++i) {
+    const auto& child_paths = exec_paths.child_graph_paths[i];
+    if (child_paths.graph_ptr != nullptr) {
+      hipError_t status = child_paths.graph_ptr->CreateSegmentsFromPaths(child_paths);
+      if (status != hipSuccess) {
+        return status;
+      }
+    }
+  }
+
+  // Create a segment for each execution path at this level.
   int segment_id = 0;
   for (size_t i = 0; i < exec_paths.paths.size(); ++i) {
     const auto& h_path = exec_paths.paths[i];
@@ -913,16 +925,41 @@ hipError_t Graph::CreateSegmentsFromPaths(
     segment.first_node = h_path.nodes.front();
     segment.last_node = h_path.nodes.back();
 
-    // Preserve child graph information from hierarchical path
+    // Preserve child graph information from hierarchical path.
     if (h_path.child_graph_node != nullptr && h_path.child_graph_paths_index >= 0) {
-      // Get direct pointer to child graph from the node
       auto childGraphNode = reinterpret_cast<hip::ChildGraphNode*>(h_path.child_graph_node);
       segment.child_graph_ptr = childGraphNode->GetChildGraph();
     }
 
+    // Cache the segment's declared priority from its nodes. For child graph
+    // nodes, read the most urgent priority across the child's already-created
+    // segments rather than re-walking the child graph's nodes.
+    for (const auto& node : segment.nodes) {
+      if (node == nullptr) continue;
+      int node_priority = hip::Stream::Priority::Normal;
+      if (node->GetType() == hipGraphNodeTypeKernel) {
+        const auto* kn = static_cast<const GraphKernelNode*>(node);
+        if (!kn->HasDeclaredPriority()) continue;
+        node_priority = kn->GetDeclaredPriority();
+      } else if (node->GetType() == hipGraphNodeTypeGraph) {
+        Graph* child = node->GetChildGraph();
+        if (child == nullptr) continue;
+        for (const auto& child_seg : child->segments_) {
+          if (child_seg.priority_set)
+            node_priority = std::min(node_priority, child_seg.declared_priority);
+        }
+        if (node_priority == hip::Stream::Priority::Normal) continue;
+      } else {
+        continue;
+      }
+      segment.declared_priority = segment.priority_set
+          ? std::min(segment.declared_priority, node_priority) : node_priority;
+      segment.priority_set = true;
+    }
+
     segments_.push_back(segment);
 
-    // Map each node in this segment to the segment ID (local to this graph)
+    // Map each node in this segment to the segment ID (local to this graph).
     for (const auto& node : segment.nodes) {
       node_to_segment_id_[node] = segment_id;
       node->segment_id_ = segment_id;
@@ -931,18 +968,6 @@ hipError_t Graph::CreateSegmentsFromPaths(
     segment_id++;
   }
 
-  // Recursively process child graphs
-  for (size_t i = 0; i < exec_paths.child_graph_paths.size(); ++i) {
-    const auto& child_paths = exec_paths.child_graph_paths[i];
-
-    if (child_paths.graph_ptr != nullptr) {
-      // Let the child graph create its own segments
-      hipError_t status = child_paths.graph_ptr->CreateSegmentsFromPaths(child_paths);
-      if (status != hipSuccess) {
-        return status;
-      }
-    }
-  }
   return hipSuccess;
 }
 
@@ -1280,131 +1305,7 @@ hipError_t GraphExecSegmented::FindStreamsReqPerDevForSegments() {
   return hipSuccess;
 }
 
-// ================================================================================================
-// Most urgent priority declared by any kernel node inside graph, following
-// nested child graph nodes.
-//
-// A child graph node is a scheduling leaf: its whole graph runs inside the one
-// segment that holds the node, on that segment's stream (EnqueueSegment() calls
-// the child's EnqueueSegmentedGraph() with an empty stream vector, so every
-// child segment resolves to the parent's stream). The priority a caller
-// declares inside a child graph therefore has to be attributed to the segment
-// that carries it, which is what this walk collects.
-//
-// depth and visited bound the walk. Child graphs are deep-cloned by
-// ChildGraphNode's constructor so the hierarchy is a tree and cannot cycle, but
-// this runs once per instantiate on a structure the application controls, so it
-// is kept explicitly finite rather than relying on that.
-int GraphExecSegmented::CollectDeclaredPriorityInGraph(Graph* graph, int depth,
-                                                       std::unordered_set<const Graph*>& visited) {
-  int priority = hip::Stream::Priority::Normal;
-  bool declared = false;
-  if (graph == nullptr) {
-    return priority;
-  }
-  if (depth >= kMaxChildGraphPriorityDepth) {
-    ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
-            "[hipGraph] Child graph priority walk exceeded max depth %d; treating deeper "
-            "graphs as Normal",
-            kMaxChildGraphPriorityDepth);
-    return priority;
-  }
-  if (!visited.insert(graph).second) {
-    return priority;
-  }
 
-  for (const auto& node : graph->GetNodes()) {
-    if (node == nullptr) {
-      continue;
-    }
-    int node_priority = hip::Stream::Priority::Normal;
-    if (node->GetType() == hipGraphNodeTypeKernel) {
-      const auto* kernel_node = static_cast<const GraphKernelNode*>(node);
-      if (!kernel_node->HasDeclaredPriority()) {
-        continue;
-      }
-      node_priority = kernel_node->GetDeclaredPriority();
-    } else if (node->GetType() == hipGraphNodeTypeGraph) {
-      node_priority = CollectDeclaredPriorityInGraph(node->GetChildGraph(), depth + 1, visited);
-      if (node_priority == hip::Stream::Priority::Normal) {
-        continue;
-      }
-    } else {
-      continue;
-    }
-    priority = declared ? std::min(priority, node_priority) : node_priority;
-    declared = true;
-  }
-  return priority;
-}
-
-// ================================================================================================
-// Priority declared per segment, for the stream-slot ordering below.
-//
-// A segment scores the most urgent priority declared by any of its kernel nodes,
-// or by any kernel node of a child graph it carries. Priority::High is -1 and
-// Priority::Low is 1, so ascending order is most-urgent-first. A segment that
-// declares nothing scores Priority::Normal.
-//
-// Returns an empty vector when the ordering should be left exactly as it was,
-// which is the case when every segment scores Priority::Normal and the
-// application did not ask for node priority at instantiate. That is the signal
-// for the caller to skip the reordering entirely, so a graph that never involves
-// a non-default priority executes the same code it did before this existed.
-std::vector<int> GraphExecSegmented::CollectDeclaredSegmentPriorities() const {
-  std::vector<int> priorities(segments_.size(), hip::Stream::Priority::Normal);
-  bool any_declared = false;
-
-  for (size_t i = 0; i < segments_.size(); ++i) {
-    bool segment_declared = false;
-    for (const auto& node : segments_[i].nodes) {
-      if (node == nullptr) {
-        continue;
-      }
-      int node_priority = hip::Stream::Priority::Normal;
-      if (node->GetType() == hipGraphNodeTypeKernel) {
-        const auto* kernel_node = static_cast<const GraphKernelNode*>(node);
-        if (!kernel_node->HasDeclaredPriority()) {
-          continue;
-        }
-        node_priority = kernel_node->GetDeclaredPriority();
-      } else if (node->GetType() == hipGraphNodeTypeGraph) {
-        // The child graph runs entirely inside this segment, so a priority
-        // declared anywhere inside it is a statement about this segment.
-        std::unordered_set<const Graph*> visited;
-        node_priority = CollectDeclaredPriorityInGraph(node->GetChildGraph(), 0, visited);
-        if (node_priority == hip::Stream::Priority::Normal) {
-          continue;
-        }
-      } else {
-        continue;
-      }
-      // First declaration in the segment wins the slot outright, later ones only
-      // if they are more urgent. Undeclared nodes never dilute a declaration.
-      priorities[i] = segment_declared ? std::min(priorities[i], node_priority) : node_priority;
-      segment_declared = true;
-    }
-    if (priorities[i] != hip::Stream::Priority::Normal) {
-      any_declared = true;
-    }
-  }
-
-  // hipGraphInstantiateFlagUseNodePriority is CUDA's gate on this feature, so
-  // passing it is honoured: the ordering runs, and the decisions are logged, even
-  // if every node turns out to score Normal and the order is therefore unchanged.
-  // It is deliberately not *required*. On this stack it has nothing to select
-  // between -- CUDA's alternative is "the priority of the stream the graph is
-  // launched into", and GraphExecBase::CreateStreams() builds every graph stream
-  // at Priority::Normal while DEBUG_HIP_IGNORE_STREAM_PRIORITY forces
-  // HSA_AMD_QUEUE_PRIORITY_NORMAL at queue creation anyway -- and requiring it
-  // would put the feature out of reach of the framework that asks for it:
-  // PyTorch hard-codes the flag off for ROCm builds (aten/src/ATen/cuda/
-  // CUDAGraph.cpp, #if !defined(USE_ROCM)) and exposes no way to pass one.
-  if (!any_declared && (flags_ & hipGraphInstantiateFlagUseNodePriority) == 0) {
-    return {};
-  }
-  return priorities;
-}
 
 // ================================================================================================
 void GraphExecSegmented::RoundRobinStreamAssignment() {
@@ -1431,12 +1332,14 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
   //
   // This is empty, and nothing below reorders anything, unless a non-Normal
   // priority is actually present or the flag was passed.
-  const std::vector<int> segment_priority = CollectDeclaredSegmentPriorities();
-  const bool priority_declared = !segment_priority.empty();
+  const bool priority_declared =
+      (flags_ & hipGraphInstantiateFlagUseNodePriority) != 0 ||
+      std::any_of(segments_.begin(), segments_.end(),
+                  [](const Segment& s) { return s.priority_set; });
   auto priority_of = [&](int seg_id) -> int {
-    return (seg_id >= 0 && seg_id < static_cast<int>(segment_priority.size()))
-        ? segment_priority[seg_id]
-        : static_cast<int>(hip::Stream::Priority::Normal);
+    if (seg_id >= 0 && seg_id < static_cast<int>(segments_.size()))
+      return segments_[seg_id].declared_priority;
+    return static_cast<int>(hip::Stream::Priority::Normal);
   };
 
   for (int level = 0; level <= max_dependency_level_; ++level) {

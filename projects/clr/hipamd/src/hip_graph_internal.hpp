@@ -1027,6 +1027,11 @@ class Graph {
     Graph* child_graph_ptr = nullptr;           // Direct pointer to child graph for quick access
 
     bool needs_completion_signal = false;        // True if any downstream segment is on a different stream/device, or this is a leaf
+
+    // Most urgent priority declared by any kernel node (or child graph) in this segment.
+    // Set at CreateSegmentsFromPaths() time; Priority::Normal when nothing declares one.
+    int declared_priority = hip::Stream::Priority::Normal;
+    bool priority_set = false;
   };
 
   //! Segment information for batch scheduling
@@ -1274,20 +1279,6 @@ class GraphExecSegmented : public GraphExecBase {
   //! Find the number of streams required per device for packet engine mode
   //! This method analyzes segments to determine per-device stream requirements
   hipError_t FindStreamsReqPerDevForSegments();
-  //! Depth cap for the child-graph priority walk below. Child graphs are
-  //! deep-cloned, so the hierarchy is a tree, but the walk runs once per
-  //! instantiate on application-controlled structure and stays explicitly finite.
-  static constexpr int kMaxChildGraphPriorityDepth = 16;
-  //! Most urgent priority declared by any kernel node in graph, following nested
-  //! child graph nodes. Priority::Normal when nothing inside declares one.
-  static int CollectDeclaredPriorityInGraph(Graph* graph, int depth,
-                                            std::unordered_set<const Graph*>& visited);
-  //! Priority declared per segment, indexed by segment id, for the stream-slot
-  //! ordering in RoundRobinStreamAssignment(). Empty when the ordering should be
-  //! left exactly as it was: no node carries a priority other than
-  //! Priority::Normal and the graph was not instantiated with
-  //! hipGraphInstantiateFlagUseNodePriority.
-  std::vector<int> CollectDeclaredSegmentPriorities() const;
   //! Round-robin stream assignment: spreads parallel segments evenly per dependency level
   void RoundRobinStreamAssignment();
   //! DFS stream assignment: preserves chain continuity across segment DAG branches
@@ -2004,7 +1995,7 @@ class GraphKernelNode : public GraphNode {
   // capture copying the capturing stream's priority in.
   //
   // This is still a distinct question from "what is the priority", and the
-  // difference is load-bearing for CollectDeclaredSegmentPriorities(): a segment
+  // difference is load-bearing for segment priority tracking: a segment
   // takes the most urgent priority any of its nodes declares, so a node that
   // declares nothing must not be allowed to pull a sibling's Priority::Low back
   // up to Normal. It is no longer a guard against union aliasing -- priority_ and
