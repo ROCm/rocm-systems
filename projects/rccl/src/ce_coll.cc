@@ -38,6 +38,10 @@ RCCL_PARAM(CeMultiStreams, "CE_MULTI_STREAMS", 0);
 RCCL_PARAM(CeBatchAsyncEnable, "CE_BATCH_ASYNC_ENABLE", -2);
 RCCL_PARAM(CeCoopLaunch, "CE_COOP_LAUNCH", 0);
 RCCL_PARAM_DECLARE(CeAllReduce);
+// Debug: skip inter-node RMA scaleout; run intra-node CE scale-up only (wrong AllGather result).
+RCCL_PARAM(HierCeAllGatherScaleupOnly, "HIER_CE_ALLGATHER_SCALEUP_ONLY", 0);
+// Debug: log per-phase GPU timings for hierarchical CE AllGather (adds stream sync overhead).
+RCCL_PARAM(HierCeAllGatherPhaseTiming, "HIER_CE_ALLGATHER_PHASE_TIMING", 0);
 
 #ifdef CE_BATCH_ASYNC_SUPPORTED
 // Runtime detection: does the running driver actually implement hipMemcpyBatchAsync?
@@ -558,7 +562,10 @@ ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream, struct nc
   // wait for the wait ops, so a reset can clobber a peer's flag mid-barrier
   // and hang graph replay. Issuing them as a separate, stream-ordered batch
   // forces reset-after-wait.
-  CUCHECKGOTO(hipStreamBatchMemOp(stream, opIdx, batchParams, 0), ret, fail);
+  // 1ppn (lsaSize==1): no intra-node peers to signal/wait; skip zero-op batch.
+  if (opIdx > 0) {
+    CUCHECKGOTO(hipStreamBatchMemOp(stream, opIdx, batchParams, 0), ret, fail);
+  }
 
   // For graph capture, reset our flag array to 0 in a separate batch so the
   // fixed-value barrier can be replayed.
@@ -1236,6 +1243,88 @@ static void ncclHierCollFreeChunkPlan(struct ncclHierChunkPlan* plan) {
   plan->nPeers = 0;
 }
 
+static void ncclHierCollLogChunkPlan(const char* collName, struct ncclComm* comm, size_t perRankBytes, int nPeers,
+                                     size_t maxChunk, struct ncclHierChunkPlan* plan) {
+  int totalOps = plan->chunkStart[plan->nPeers];
+  int chunksPerPeer = (plan->nPeers > 0) ? (plan->chunkStart[1] - plan->chunkStart[0]) : 0;
+  INFO(NCCL_COLL,
+       "Hier CE %s RMA chunk plan: rank %d perRankBytes=%zu nPeers=%d maxChunk=%zu totalOps=%d chunksPerPeer=%d",
+       collName, comm->rank, perRankBytes, nPeers, maxChunk, totalOps, chunksPerPeer);
+  for (int c = 0; c < chunksPerPeer; c++) {
+    INFO(NCCL_COLL, "Hier CE %s RMA chunk plan: rank %d chunk %d off=%zu bytes=%zu", collName, comm->rank, c,
+         plan->chunkOff[c], plan->chunkBytes[c]);
+  }
+}
+
+static constexpr int HIER_CE_ALLGATHER_NUM_PHASES = 8;
+
+static void ncclHierCeAllGatherFreePhaseEvents(cudaEvent_t* phaseEvents, bool phaseEventsValid) {
+  if (!phaseEventsValid) return;
+  for (int i = 0; i <= HIER_CE_ALLGATHER_NUM_PHASES; i++) {
+    CUDACHECKIGNORE(cudaEventDestroy(phaseEvents[i]));
+  }
+}
+
+// Sum GPU time for one stream segment (used to split P5 wait vs scatter inside the peer loop).
+static ncclResult_t ncclHierCeAllGatherAccumSegmentUs(cudaStream_t stream, cudaEvent_t segStart, cudaEvent_t segEnd,
+                                                    float* accUs) {
+  float ms = 0.f;
+  CUDACHECK(cudaEventRecord(segEnd, stream));
+  CUDACHECK(cudaStreamSynchronize(stream));
+  CUDACHECK(cudaEventElapsedTime(&ms, segStart, segEnd));
+  *accUs += ms * 1000.f;
+  return ncclSuccess;
+}
+
+static ncclResult_t ncclHierCeAllGatherLogPhaseTimings(struct ncclComm* comm, size_t perRankBytes, int nNodes,
+                                                       int lsaSize, cudaEvent_t* phaseEvents, float waitScatterWaitUs,
+                                                       float waitScatterScatterUs, cudaStream_t stream) {
+  static const char* phaseNames[HIER_CE_ALLGATHER_NUM_PHASES] = {
+      "RailSync(scaleout)",
+      "PutGroupSubmit(scaleout)",
+      "IntraBarrier1",
+      "SelfBcast(scaleup)",
+      "WaitRemote(scaleout)",
+      "ScatterIntra(scaleup)",
+      "PutGroupDone(scaleout)",
+      "IntraBarrier2",
+  };
+
+  CUDACHECK(cudaStreamSynchronize(stream));
+  if (comm->rank == 0) {
+    INFO(NCCL_COLL, "Hier CE AllGather phase timing: perRankBytes=%zu nNodes=%d nRanks=%d lsaSize=%d", perRankBytes,
+         nNodes, comm->nRanks, lsaSize);
+    float totalUs = 0.f;
+    for (int i = 0; i < HIER_CE_ALLGATHER_NUM_PHASES; i++) {
+      float us = 0.f;
+      if (i == 4) {
+        us = waitScatterWaitUs;
+      } else if (i == 5) {
+        us = waitScatterScatterUs;
+      } else if (i < 4) {
+        float ms = 0.f;
+        CUDACHECK(cudaEventElapsedTime(&ms, phaseEvents[i], phaseEvents[i + 1]));
+        us = ms * 1000.f;
+      } else if (i == 6) {
+        float ms = 0.f;
+        CUDACHECK(cudaEventElapsedTime(&ms, phaseEvents[5], phaseEvents[6]));
+        us = ms * 1000.f;
+      } else {
+        float ms = 0.f;
+        CUDACHECK(cudaEventElapsedTime(&ms, phaseEvents[6], phaseEvents[7]));
+        us = ms * 1000.f;
+      }
+      totalUs += us;
+      INFO(NCCL_COLL, "  P%d %s: %.1f us", i + 1, phaseNames[i], us);
+    }
+    float msCombined = 0.f;
+    CUDACHECK(cudaEventElapsedTime(&msCombined, phaseEvents[4], phaseEvents[5]));
+    INFO(NCCL_COLL, "  (P5+P6 stream span: %.1f us)", msCombined * 1000.f);
+    INFO(NCCL_COLL, "  total: %.1f us", totalUs);
+  }
+  return ncclSuccess;
+}
+
 // Cross-node rail-sync entry barrier for the hierarchical CE collectives.
 static ncclResult_t ncclRailSync(struct ncclComm* comm, struct ncclRmaProxyCtx* rmaProxyCtx,
                                  struct ncclKernelPlan* plan, int ctx, cudaStream_t stream) {
@@ -1376,7 +1465,7 @@ fail:
 //   IntraNodeBarrier            // gates LSA peers' recvbuf writes; runs while proxy is in flight
 //   SelfBcast                   // CE scatter of own slice to LSA peers
 //   for (peer, chunk) in shift order:
-//     wait for chunk's signal; CE-scatter it to local peers via LSA
+//     wait for chunk's signal (P5); CE-scatter to local peers via LSA (P6)
 //   PutGroupDone                // one memop blocks until all network puts complete
 //   IntraNodeBarrier            // gates user code reading recvbuf
 
@@ -1413,10 +1502,30 @@ ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* p
   // Batch-ops scratch for per-chunk intra-node CE scatter.
   struct ncclCeBatchOpsParams ceScatterOps = {};
 
+  bool phaseTiming = rcclParamHierCeAllGatherPhaseTiming() != 0;
+  cudaEvent_t phaseEvents[HIER_CE_ALLGATHER_NUM_PHASES + 1];
+  bool phaseEventsValid = false;
+  float waitScatterWaitUs = 0.f;
+  float waitScatterScatterUs = 0.f;
+  cudaEvent_t segStart;
+  cudaEvent_t segEnd;
+  bool segEventsValid = false;
+  if (phaseTiming) {
+    for (int i = 0; i <= HIER_CE_ALLGATHER_NUM_PHASES; i++) {
+      CUDACHECKGOTO(cudaEventCreate(&phaseEvents[i]), ret, fail);
+    }
+    phaseEventsValid = true;
+    CUDACHECKGOTO(cudaEventCreate(&segStart), ret, fail);
+    CUDACHECKGOTO(cudaEventCreate(&segEnd), ret, fail);
+    segEventsValid = true;
+    CUDACHECKGOTO(cudaEventRecord(phaseEvents[0], stream), ret, fail);
+  }
+
   // ====================================================================
   // Phase 1: Rail sync (cross-node entry barrier)
   // ====================================================================
   NCCLCHECKGOTO(ncclRailSync(comm, rmaProxyCtx, plan, ctx, stream), ret, fail);
+  if (phaseTiming) CUDACHECKGOTO(cudaEventRecord(phaseEvents[1], stream), ret, fail);
 
   // ====================================================================
   // Phase 2: Start all inter-node puts (one group descriptor, chunked)
@@ -1424,6 +1533,7 @@ ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* p
   {
     NCCLCHECKGOTO(ncclHierCollBuildChunk(perRankBytes, nRemoteNodes, HIER_COLL_MAX_CHUNK_SIZE, &chunkPlan), ret, fail);
     int totalOps = chunkPlan.chunkStart[chunkPlan.nPeers];
+    ncclHierCollLogChunkPlan("AllGather", comm, perRankBytes, nRemoteNodes, HIER_COLL_MAX_CHUNK_SIZE, &chunkPlan);
 
     int startOps = ncclRmaProxyPutGroupStartNumOps(persistent);
     int doneOps = ncclRmaProxyPutGroupDoneNumOps(persistent);
@@ -1464,11 +1574,13 @@ ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* p
 
     NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, startOps, groupStartParam), ret, fail);
   }
+  if (phaseTiming) CUDACHECKGOTO(cudaEventRecord(phaseEvents[2], stream), ret, fail);
 
   // ====================================================================
   // Phase 3: Initial intra-node barrier
   // ====================================================================
   NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
+  if (phaseTiming) CUDACHECKGOTO(cudaEventRecord(phaseEvents[3], stream), ret, fail);
 
   // ====================================================================
   // Phase 4: Self-broadcast (intra-node CE Broadcast of own chunk)
@@ -1486,22 +1598,27 @@ ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* p
       ceBcastOps.numOps++;
     }
 
-    // Broadcast to all other LSA peers
-    for (int r = 1; r < lsaSize; r++) {
-      int targetLsaRank = (myLsaRank + r) % lsaSize;
-      void* peerBuf;
-      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, recvWin, offset, targetLsaRank, &peerBuf), ret, fail);
-      ceBcastOps.srcs[ceBcastOps.numOps] = (void*)sendbuff;
-      ceBcastOps.dsts[ceBcastOps.numOps] = peerBuf;
-      ceBcastOps.sizes[ceBcastOps.numOps] = perRankBytes;
-      ceBcastOps.numOps++;
+    // Broadcast to all other LSA peers (scale-up only)
+    if (lsaSize > 1) {
+      for (int r = 1; r < lsaSize; r++) {
+        int targetLsaRank = (myLsaRank + r) % lsaSize;
+        void* peerBuf;
+        NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, recvWin, offset, targetLsaRank, &peerBuf), ret, fail);
+        ceBcastOps.srcs[ceBcastOps.numOps] = (void*)sendbuff;
+        ceBcastOps.dsts[ceBcastOps.numOps] = peerBuf;
+        ceBcastOps.sizes[ceBcastOps.numOps] = perRankBytes;
+        ceBcastOps.numOps++;
+      }
     }
 
-    NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &ceBcastOps, stream, args), ret, fail);
+    if (ceBcastOps.numOps > 0) {
+      NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &ceBcastOps, stream, args), ret, fail);
+    }
   }
+  if (phaseTiming) CUDACHECKGOTO(cudaEventRecord(phaseEvents[4], stream), ret, fail);
 
   // ====================================================================
-  // Phase 5: Wait for each (peer, chunk) + intra-node CE scatter (pipelined)
+  // Phase 5–6: Wait for each (peer, chunk) + intra-node CE scatter (pipelined)
   // ====================================================================
   {
     for (int s = 1; s < nNodes; s++) {
@@ -1517,41 +1634,66 @@ ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* p
         uint8_t* chunkSlot = (uint8_t*)recvbuff + peerSliceOffset + off;
         size_t winOffset = chunkSlot - (uint8_t*)recvWin->userPtr;
 
-        // ----- Wait for this sub-chunk's signal from railPeer -----
+        // ----- Wait for this sub-chunk's signal from railPeer (P5) -----
+        if (phaseTiming) CUDACHECKGOTO(cudaEventRecord(segStart, stream), ret, fail);
         NCCLCHECKGOTO(ncclProxyWaitOnePeer(comm, rmaProxyCtx, plan, ctx, stream, railPeer, /*nsignals=*/1), ret, fail);
-
-        // ----- CE scatter this sub-chunk to all other LSA peers -----
-        NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&ceScatterOps, lsaSize), ret, fail);
-        for (int r = 1; r < lsaSize; r++) {
-          int targetLsaRank = (myLsaRank + r) % lsaSize;
-          void* peerBuf;
-          NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, recvWin, winOffset, targetLsaRank, &peerBuf), ret, fail);
-          ceScatterOps.srcs[ceScatterOps.numOps] = chunkSlot;
-          ceScatterOps.dsts[ceScatterOps.numOps] = peerBuf;
-          ceScatterOps.sizes[ceScatterOps.numOps] = subBytes;
-          ceScatterOps.numOps++;
+        if (phaseTiming) {
+          NCCLCHECKGOTO(ncclHierCeAllGatherAccumSegmentUs(stream, segStart, segEnd, &waitScatterWaitUs), ret, fail);
         }
 
-        NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &ceScatterOps, stream, args), ret, fail);
-        ncclCeFreeBatchOpsParams(&ceScatterOps);
+        // ----- CE scatter this sub-chunk to all other LSA peers (P6, scale-up only) -----
+        if (lsaSize > 1) {
+          NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&ceScatterOps, lsaSize), ret, fail);
+          for (int r = 1; r < lsaSize; r++) {
+            int targetLsaRank = (myLsaRank + r) % lsaSize;
+            void* peerBuf;
+            NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, recvWin, winOffset, targetLsaRank, &peerBuf), ret, fail);
+            ceScatterOps.srcs[ceScatterOps.numOps] = chunkSlot;
+            ceScatterOps.dsts[ceScatterOps.numOps] = peerBuf;
+            ceScatterOps.sizes[ceScatterOps.numOps] = subBytes;
+            ceScatterOps.numOps++;
+          }
+
+          if (phaseTiming) CUDACHECKGOTO(cudaEventRecord(segStart, stream), ret, fail);
+          NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &ceScatterOps, stream, args), ret, fail);
+          if (phaseTiming) {
+            NCCLCHECKGOTO(ncclHierCeAllGatherAccumSegmentUs(stream, segStart, segEnd, &waitScatterScatterUs), ret,
+                          fail);
+          }
+          ncclCeFreeBatchOpsParams(&ceScatterOps);
+        }
       }
     }
   }
+  if (phaseTiming) CUDACHECKGOTO(cudaEventRecord(phaseEvents[5], stream), ret, fail);
 
   // ====================================================================
-  // Phase 6: Wait for all outgoing data puts to complete
+  // Phase 7: Wait for all outgoing data puts to complete
   // ====================================================================
   {
     int doneOps = ncclRmaProxyPutGroupDoneNumOps(persistent);
     NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, doneOps, groupDoneParam), ret, fail);
   }
+  if (phaseTiming) CUDACHECKGOTO(cudaEventRecord(phaseEvents[6], stream), ret, fail);
 
   // ====================================================================
-  // Phase 7: Final intra-node barrier
+  // Phase 8: Final intra-node barrier
   // ====================================================================
   NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
+  if (phaseTiming) CUDACHECKGOTO(cudaEventRecord(phaseEvents[7], stream), ret, fail);
+
+  if (phaseTiming) {
+    NCCLCHECKGOTO(ncclHierCeAllGatherLogPhaseTimings(comm, perRankBytes, nNodes, lsaSize, phaseEvents,
+                                                    waitScatterWaitUs, waitScatterScatterUs, stream),
+                  ret, fail);
+  }
 
 exit:
+  if (segEventsValid) {
+    CUDACHECKIGNORE(cudaEventDestroy(segStart));
+    CUDACHECKIGNORE(cudaEventDestroy(segEnd));
+  }
+  ncclHierCeAllGatherFreePhaseEvents(phaseEvents, phaseEventsValid);
   ncclCeFreeBatchOpsParams(&ceBcastOps);
   ncclCeFreeBatchOpsParams(&ceScatterOps);
   free(groupStartParam);
@@ -1679,22 +1821,38 @@ ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* pl
   {
     size_t myRecvOffset = ((const uint8_t*)recvbuff + (size_t)myRank * perPeerBytes) - (const uint8_t*)recvWin->userPtr;
 
-    for (int k = 0; k < lsaSize; k++) {
-      int targetLsa = (myLsaRank + k) % lsaSize;
-      int targetWorldRank = comm->nodeRanks[myNode].localRankToRank[targetLsa];
-
-      if (inPlace && targetLsa == myLsaRank) continue;
-
+    // Out-of-place: copy own send column to own recv column (needed even at 1ppn)
+    if (!inPlace) {
       void* peerRecvSlot;
-      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, recvWin, myRecvOffset, targetLsa, &peerRecvSlot), ret, fail);
-
-      ceLocalA2A.srcs[ceLocalA2A.numOps] = (void*)((const uint8_t*)sendbuff + (size_t)targetWorldRank * perPeerBytes);
+      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, recvWin, myRecvOffset, myLsaRank, &peerRecvSlot), ret, fail);
+      ceLocalA2A.srcs[ceLocalA2A.numOps] = (void*)((const uint8_t*)sendbuff + (size_t)myRank * perPeerBytes);
       ceLocalA2A.dsts[ceLocalA2A.numOps] = peerRecvSlot;
       ceLocalA2A.sizes[ceLocalA2A.numOps] = perPeerBytes;
       ceLocalA2A.numOps++;
     }
 
-    NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &ceLocalA2A, stream, args), ret, fail);
+    // Intra-node alltoall over LSA peers (scale-up only)
+    if (lsaSize > 1) {
+      for (int k = 0; k < lsaSize; k++) {
+        int targetLsa = (myLsaRank + k) % lsaSize;
+        int targetWorldRank = comm->nodeRanks[myNode].localRankToRank[targetLsa];
+
+        if (targetLsa == myLsaRank) continue;
+
+        void* peerRecvSlot;
+        NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, recvWin, myRecvOffset, targetLsa, &peerRecvSlot), ret, fail);
+
+        ceLocalA2A.srcs[ceLocalA2A.numOps] =
+          (void*)((const uint8_t*)sendbuff + (size_t)targetWorldRank * perPeerBytes);
+        ceLocalA2A.dsts[ceLocalA2A.numOps] = peerRecvSlot;
+        ceLocalA2A.sizes[ceLocalA2A.numOps] = perPeerBytes;
+        ceLocalA2A.numOps++;
+      }
+    }
+
+    if (ceLocalA2A.numOps > 0) {
+      NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &ceLocalA2A, stream, args), ret, fail);
+    }
   }
 
   // ====================================================================

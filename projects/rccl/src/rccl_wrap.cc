@@ -757,10 +757,11 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   comm->enableCustColl = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
                          IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
 
-  int rankMultiple = comm->nRanks % 8;
+  // Allow 1ppn (one rank per node) or the existing 8-rank-multiple layout.
+  const bool rankEligible = (comm->nRanks == comm->nNodes) || (comm->nRanks % 8 == 0);
+  INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER rank eligible: %s", rankEligible ? "true" : "false");
 
-  // return (comm->enableCustColl && (comm->nNodes > 1) && (msgSize <= threshold) && (threshold != -1))
-  return (comm->enableCustColl && (msgSize <= threshold) && (threshold != -1) && !rankMultiple);
+  return (comm->enableCustColl && (msgSize <= threshold) && (threshold != -1) && rankEligible);
 }
 
 bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op, const void* acc) {
