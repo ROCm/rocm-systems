@@ -82,6 +82,8 @@ struct RocrEntryPoints {
   decltype(hsa_amd_profiling_async_copy_enable)* hsa_amd_profiling_async_copy_enable_;
   decltype(hsa_amd_profiling_get_dispatch_time)* hsa_amd_profiling_get_dispatch_time_;
   decltype(hsa_amd_profiling_get_async_copy_time)* hsa_amd_profiling_get_async_copy_time_;
+  decltype(hsa_amd_profiling_convert_tick_to_system_domain)*
+      hsa_amd_profiling_convert_tick_to_system_domain_;
   decltype(hsa_amd_signal_async_handler)* hsa_amd_signal_async_handler_;
   decltype(hsa_amd_queue_cu_set_mask)* hsa_amd_queue_cu_set_mask_;
   decltype(hsa_amd_memory_pool_get_info)* hsa_amd_memory_pool_get_info_;
@@ -333,6 +335,12 @@ class Hsa : public amd::AllStatic {
   static hsa_status_t profiling_get_async_copy_time(hsa_signal_t signal,
                                                     hsa_amd_profiling_async_copy_time_t* time) {
     return ROCR_DYN(hsa_amd_profiling_get_async_copy_time)(signal, time);
+  }
+  static hsa_status_t profiling_convert_tick_to_system_domain(hsa_agent_t agent,
+                                                              uint64_t agent_tick,
+                                                              uint64_t* system_tick) {
+    return ROCR_DYN(hsa_amd_profiling_convert_tick_to_system_domain)(agent, agent_tick,
+                                                                     system_tick);
   }
   static hsa_status_t signal_async_handler(hsa_signal_t signal, hsa_signal_condition_t cond,
                                            hsa_signal_value_t value, hsa_amd_signal_handler handler,
