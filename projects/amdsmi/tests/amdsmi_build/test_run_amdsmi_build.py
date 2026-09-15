@@ -191,7 +191,7 @@ class SummarizeTests(unittest.TestCase):
             (results / "build_result.txt").write_text("BUILD FAILED: cmake exited 1\n")
             (results / "amdsmi_tests.log").write_text("[  FAILED  ] one\n[  FAILED  ] two\n")
             (results / "amd-smi_version.log").write_text("Traceback (most recent call last):\n")
-            (results / "integration_test_output.txt").write_text("FAIL: test_a\n")
+            (results / "python_test_output.txt").write_text("FAIL: test_a\n")
             summary = results / "summary.md"
             n = rab.summarize_results(results, "TestOS", summary)
             self.assertGreater(n, 0)

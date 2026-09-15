@@ -26,7 +26,7 @@ import sys
 import types
 import unittest
 
-from common.common import amdsmi_path
+from common.common import ModuleIsolationMixin, amdsmi_path
 
 _ROCM_ROOT = os.path.dirname(os.path.dirname(amdsmi_path))
 METRIC_PATH = os.path.join(_ROCM_ROOT, "libexec", "amdsmi_cli", "subcommands", "metric.py")
@@ -104,6 +104,10 @@ def _install_fake_amdsmi():
     sys.modules["amdsmi.amdsmi_interface"] = interface
     sys.modules["amdsmi.amdsmi_exception"] = exception
     return interface
+
+
+# Everything ``metric.py`` imports at load time.
+_STUBBED_MODULES = ("amdsmi", "amdsmi.amdsmi_interface", "amdsmi.amdsmi_exception")
 
 
 def _load_metric_module():
@@ -232,13 +236,16 @@ def _run_usage(metric_module, interface, helpers=None, args=None):
     return commands.logger.captured_values
 
 
-class TestVcnBusyNaviFallback(unittest.TestCase):
+class TestVcnBusyNaviFallback(ModuleIsolationMixin, unittest.TestCase):
     """The new sysfs fallback for vcn_busy on non-XCP devices."""
+
+    ISOLATED_MODULES = _STUBBED_MODULES
 
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(METRIC_PATH):
             raise unittest.SkipTest(f"amd-smi CLI metric.py not found at {METRIC_PATH}")
+        super().setUpClass()
         cls.interface = _install_fake_amdsmi()
         cls.metric_module = _load_metric_module()
 
