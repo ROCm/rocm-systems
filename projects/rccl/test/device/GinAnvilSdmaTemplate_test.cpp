@@ -385,6 +385,113 @@ TEST_F(GinAnvilSdmaTemplateTest, CounterSignal_GetReset) {
   EXPECT_EQ(d_outSig.download(), 0ULL);
 }
 
+// AICOMRCCL-2339: the Anvil device dispatch must select the GPU context
+// indexed by ncclGinCtx::contextId instead of always using array element zero.
+__global__ void kernelSignalContextSelection(ncclGinAnvilSdmaGPUContext* contexts, uint64_t* counters) {
+  if (threadIdx.x != 0) return;
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = contexts;
+
+  ginCtx.contextId = 0;
+  ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0).ptr[0] = 11;
+  ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
+      ginCtx, ncclGinSignalDescriptor{NCCL_GIN_SIGNAL_TYPE_INDEXED, {.indexedSignal = {.signalId = 0}}});
+  ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0).ptr[0] = 101;
+
+  ginCtx.contextId = 1;
+  ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0).ptr[0] = 22;
+  ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0);
+  ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0).ptr[0] = 202;
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, SignalApis_SelectLogicalContext) {
+  DeviceBuffer<uint64_t> d_signals(2);
+  DeviceBuffer<uint64_t> d_counters(2);
+  d_signals.zero();
+  d_counters.zero();
+  ncclGinAnvilSdmaGPUContext hostCtx[2]{};
+  for (int i = 0; i < 2; i++) {
+    hostCtx[i].layoutMagic = NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
+    hostCtx[i].signals = d_signals.ptr + i;
+    hostCtx[i].counters = d_counters.ptr + i;
+    hostCtx[i].nSignals = 1;
+    hostCtx[i].nCounters = 1;
+  }
+  DeviceBuffer<ncclGinAnvilSdmaGPUContext> d_contexts(2);
+  d_contexts.copyFrom(hostCtx, 2);
+
+  kernelSignalContextSelection<<<1, 1>>>(d_contexts.ptr, d_counters.ptr);
+  syncAndCheck();
+  auto signals = d_signals.copyTo();
+  auto counters = d_counters.copyTo();
+  EXPECT_EQ(signals[0], 0ULL);
+  EXPECT_EQ(signals[1], 22ULL);
+  EXPECT_EQ(counters[0], 101ULL);
+  EXPECT_EQ(counters[1], 202ULL);
+}
+
+// AICOMRCCL-2339: PutValue must honor ncclGinCtx::contextId when resolving signals.
+__global__ void kernelPutValueContextSelection(ncclGinAnvilSdmaGPUContext* contexts, ncclGinAnvilSdmaMemHandle* dstMh) {
+  if (threadIdx.x != 0) return;
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = contexts;
+  ginCtx.nRanks = 2;
+  ginCtx.rank = 0;
+  ginCtx.contextId = 1;
+
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
+  sig.indexedSignal.signalId = 0;
+  ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
+      ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(dstMh), 0, static_cast<uint8_t>(0x11), sig,
+      ncclGinSignalInc, 1, false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, PutValue_SelectLogicalContext) {
+  DeviceBuffer<uint64_t> d_signals(2);
+  DeviceBuffer<uint8_t> d_dst(8);
+  DeviceBuffer<uintptr_t> d_remoteAddrs(2);
+  d_signals.zero();
+  d_dst.zero();
+
+  uintptr_t remoteAddrs[2] = {0, reinterpret_cast<uintptr_t>(d_signals.ptr + 1)};
+  d_remoteAddrs.copyFrom(remoteAddrs, 2);
+
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
+  ncclGinAnvilIpcBufEntry ipcEntry{};
+  ipcEntry.local_base = reinterpret_cast<uintptr_t>(d_dst.ptr);
+  ipcEntry.length = 4096;
+  ipcEntry.remote_bases[1] = reinterpret_cast<uintptr_t>(d_dst.ptr);
+  d_entry.upload(ipcEntry);
+
+  ncclGinAnvilSdmaMemHandle dstMh{};
+  dstMh.baseAddr = reinterpret_cast<uintptr_t>(d_dst.ptr);
+  DeviceBuffer<ncclGinAnvilSdmaMemHandle> d_dstMh(1);
+  d_dstMh.upload(dstMh);
+
+  ncclGinAnvilSdmaGPUContext hostCtx[2]{};
+  for (int i = 0; i < 2; i++) {
+    hostCtx[i].layoutMagic = NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
+    hostCtx[i].signals = d_signals.ptr + i;
+    hostCtx[i].signal_remote_addrs = d_remoteAddrs.ptr;
+    hostCtx[i].ipcTable = d_entry.ptr;
+    hostCtx[i].ipcTableCount = 1;
+    hostCtx[i].nRanks = 2;
+    hostCtx[i].rank = 0;
+    hostCtx[i].sdmaThreshold = 4096;
+    hostCtx[i].fusedSdmaSignal = 0;
+  }
+
+  DeviceBuffer<ncclGinAnvilSdmaGPUContext> d_contexts(2);
+  d_contexts.copyFrom(hostCtx, 2);
+
+  kernelPutValueContextSelection<<<1, 1>>>(d_contexts.ptr, d_dstMh.ptr);
+  syncAndCheck();
+  auto signals = d_signals.copyTo();
+  EXPECT_EQ(signals[0], 0ULL) << "context 0 signal stripe must stay untouched";
+  EXPECT_EQ(signals[1], 1ULL) << "PutValue on contextId=1 must increment context 1 signal cell";
+}
+
 // H10: invalid ctx on getters returns nullptr / no-op.
 __global__ void kernelInvalidCtxApis(bool* ok) {
   ncclGinCtx ginCtx{};
