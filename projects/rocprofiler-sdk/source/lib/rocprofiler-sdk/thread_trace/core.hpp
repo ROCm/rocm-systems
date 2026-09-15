@@ -129,11 +129,14 @@ private:
     std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart = false);
 
     att_queue_ptr_t queue{};
+    signal_ptr_t    stop_signal{};
 
     std::atomic<int> active_traces{0};
     std::mutex       trace_resources_mut{};
+    std::mutex       codeobj_mut{};
 
     std::unique_ptr<hsa::TraceControlAQLPacket>           control_packet{nullptr};
+    std::shared_ptr<hsa::SQTTBufferingPackets>            buffering_packets{};
     std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
 
     std::vector<std::thread>          consumers{};

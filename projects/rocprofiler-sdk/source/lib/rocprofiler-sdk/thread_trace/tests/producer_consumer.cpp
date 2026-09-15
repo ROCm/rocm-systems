@@ -72,14 +72,17 @@ test_init()
 constexpr size_t MOCK_BUFFER_SIZE = 1u << 20;
 constexpr size_t MOCK_NUM_BUFFERS = 3;
 
-void
+bool
 mock_submit(const att_queue_t&, hsa_ext_amd_aql_pm4_packet_t*, att_signal_t*)
-{}
+{
+    return true;
+}
 
-void
+bool
 copy_data_mock(att_queue_t&, void* dst, const void* src, size_t size)
 {
     std::memcpy(dst, src, size);
+    return true;
 }
 
 att_queue_ptr_t
@@ -91,6 +94,7 @@ make_mock_queue(rocprofiler_agent_id_t agent_id)
 }
 
 using query_status_t = std::function<std::optional<hsa::sqtt_buffer_status_t>(void)>;
+using drain_t        = std::function<hsa_status_t(aqlprofile_att_data_callback_t, void*)>;
 
 class MockPackets : public hsa::SQTTBufferingPackets
 {
@@ -101,6 +105,12 @@ public:
 
     std::optional<hsa::sqtt_buffer_status_t> query_buffer_status() override { return query_fn(); };
     query_status_t                           query_fn;
+    drain_t                                  drain_fn{};
+    hsa_status_t iterate_data(aqlprofile_att_data_callback_t callback, void* data) override
+    {
+        return drain_fn ? drain_fn(callback, data)
+                        : SQTTBufferingPackets::iterate_data(callback, data);
+    }
 };
 
 struct consumer_producer_t
@@ -122,7 +132,8 @@ consumer_producer_t
 start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
               const query_status_t&                           query_fn,
               rocprofiler_user_data_t                         userdata,
-              decltype(att_queue_t::submit_fn)                submit_fn = mock_submit)
+              decltype(att_queue_t::submit_fn)                submit_fn = mock_submit,
+              drain_t                                         drain_fn  = {})
 {
     // Build a synthetic queue + packet stack that mimics the runtime so we can
     // exercise the producer/consumer pairing without a real GPU.
@@ -163,6 +174,7 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     control_packet->populate_after();
     auto buffer_packet    = std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn);
     buffer_packet->header = 1;
+    buffer_packet->drain_fn = std::move(drain_fn);
 
     auto mock_queue          = make_mock_queue(agent_id);
     mock_queue->submit_fn    = submit_fn;
@@ -182,6 +194,9 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     producer_data.copy_data_fn     = copy_data_mock;
     producer_data.shared           = worker_data;
     producer_data.buffer_packet    = std::move(buffer_packet);
+    producer_data.restart_trace    = [queue = mock_queue.get()](auto& packet) {
+        return att_queue_submit_packets(*queue, packet->before_krn_pkt);
+    };
 
     consumer_producer_t ret{};
     ret.mock_queue = std::move(mock_queue);
@@ -241,6 +256,54 @@ TEST(thread_trace, status_query)
 
     threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
     threads.join_all();
+}
+
+TEST(thread_trace, final_drain_preserves_data_and_end)
+{
+    using namespace rocprofiler::thread_trace;
+    test_init();
+    struct callback_state
+    {
+        size_t end_count{0};
+        size_t tail_size{0};
+        int    flags{0};
+    };
+    auto callback = [](rocprofiler_thread_trace_shader_data_t data,
+                       rocprofiler_user_data_t                userdata) {
+        if(data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END)
+        {
+            auto& state = *static_cast<callback_state*>(userdata.ptr);
+            ++state.end_count;
+            state.tail_size = data.data_size;
+            state.flags     = data.flags;
+            for(size_t i = 0; i < data.data_size; ++i)
+                EXPECT_EQ(static_cast<const unsigned char*>(data.data)[i], 0x5A);
+        }
+    };
+    for(auto status : {HSA_STATUS_SUCCESS, HSA_STATUS_ERROR_OUT_OF_RESOURCES, HSA_STATUS_ERROR})
+    {
+        for(size_t size : {0u, 256u})
+        {
+            SCOPED_TRACE(::testing::Message() << status << ", bytes=" << size);
+            auto state = callback_state{};
+            auto bytes = std::vector<unsigned char>(size, 0x5A);
+            auto drain = [&](aqlprofile_att_data_callback_t cb, void* data) {
+                cb(0, size ? bytes.data() : nullptr, size, data);
+                return status;
+            };
+            auto threads = start_threads(
+                callback, [] { return std::nullopt; }, {.ptr = &state}, mock_submit, drain);
+            threads.flag->store(WORKER_FLAG_STOP);
+            threads.join_all();
+            EXPECT_EQ(state.end_count, 1);
+            EXPECT_EQ(state.tail_size, status == HSA_STATUS_SUCCESS ? size : 0);
+            EXPECT_EQ(state.flags,
+                      ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END |
+                          (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES
+                               ? ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL
+                               : 0));
+        }
+    }
 }
 
 TEST(thread_trace, multiple_calls)
@@ -416,15 +479,33 @@ TEST(thread_trace, slow_cpu)
     rocprofiler::thread_trace::test_init();
     const size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
 
-    auto interrupt_received = std::atomic<bool>{false};
+    struct callback_state
+    {
+        std::atomic<bool> cpu_full{false};
+        std::atomic<bool> gpu_full{false};
+    };
+    static std::atomic<size_t> restart_submissions{0};
+    auto                       submit = [](const rocprofiler::thread_trace::att_queue_t&,
+                     hsa_ext_amd_aql_pm4_packet_t*,
+                     rocprofiler::thread_trace::att_signal_t* completion) {
+        if(!completion) ++restart_submissions;
+        return true;
+    };
 
     // Simulate a user callback that cannot keep up; the producer should flag a
     // CPU buffer stall so the consumer can drain and exit.
     auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
                        rocprofiler_user_data_t                userdata) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        auto& state = *static_cast<callback_state*>(userdata.ptr);
         if(shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_CPU_BUFFER_FULL)
-            static_cast<std::atomic<bool>*>(userdata.ptr)->store(true);
+            state.cpu_full.store(true);
+        if(shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL)
+        {
+            EXPECT_TRUE(shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END);
+            EXPECT_EQ(shader_data.data_size, 0);
+            state.gpu_full.store(true);
+        }
     };
 
     auto input_buffer = std::vector<size_t>();
@@ -440,16 +521,29 @@ TEST(thread_trace, slow_cpu)
         return status;
     };
 
-    auto userdata = rocprofiler_user_data_t{.ptr = &interrupt_received};
-    auto threads  = rocprofiler::thread_trace::start_threads(fetch_cb, return_synced, userdata);
+    for(auto drain_status : {HSA_STATUS_SUCCESS, HSA_STATUS_ERROR_OUT_OF_RESOURCES})
+    {
+        SCOPED_TRACE(drain_status);
+        auto state          = callback_state{};
+        restart_submissions = 0;
+        auto drain          = [&](aqlprofile_att_data_callback_t cb, void* data) {
+            cb(0, input_buffer.data(), 256, data);
+            return drain_status;
+        };
+        auto threads = rocprofiler::thread_trace::start_threads(
+            fetch_cb, return_synced, {.ptr = &state}, submit, drain);
 
-    while(!interrupt_received)
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        while(!state.cpu_full.load())
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
-    threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
-    threads.join_all();
+        threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
+        threads.join_all();
 
-    EXPECT_EQ(interrupt_received.load(), true);
+        EXPECT_TRUE(state.cpu_full.load());
+        EXPECT_EQ(state.gpu_full.load(), drain_status == HSA_STATUS_ERROR_OUT_OF_RESOURCES);
+        EXPECT_GT(restart_submissions.load(), 0);
+        EXPECT_TRUE(rocprofiler::thread_trace::att_queue_enabled(*threads.mock_queue));
+    }
 }
 
 TEST(thread_trace, gpu_full_disables_queue)
@@ -461,12 +555,14 @@ TEST(thread_trace, gpu_full_disables_queue)
     // CPU memory. Pending CPU data must still be delivered.
     auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
                        rocprofiler_user_data_t                userdata) {
+        EXPECT_FALSE(shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END);
         static_cast<std::atomic<size_t>*>(userdata.ptr)->fetch_add(shader_data.data_size);
     };
 
     static std::atomic<int> submissions{0};
     auto count_submit = [](const att_queue_t&, hsa_ext_amd_aql_pm4_packet_t*, att_signal_t*) {
         ++submissions;
+        return true;
     };
 
     for(int copied_buffers : {0, 1})

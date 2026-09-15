@@ -31,11 +31,17 @@
 
 namespace rocprofiler
 {
-namespace thread_trace
+namespace kfd
 {
 class kfd_copy_queue_t;
 class kfd_memory_pool_t;
 class kfd_signal_t;
+}  // namespace kfd
+namespace thread_trace
+{
+using kfd::kfd_copy_queue_t;
+using kfd::kfd_memory_pool_t;
+using kfd::kfd_signal_t;
 
 class att_signal_t
 {
@@ -47,7 +53,7 @@ public:
     att_signal_t& operator=(const att_signal_t&) = delete;
 
     hsa_signal_t handle() const;
-    void         reset();
+    void         reset(int64_t value = 1);
     void         wait() const;
 
 private:
@@ -72,7 +78,7 @@ struct att_queue_t
     // Serializes submissions with terminal disable after GPU overflow. Heap-owned
     // so the queue remains movable; a null submit_fn means it cannot be restarted.
     std::unique_ptr<std::mutex> submit_mutex{std::make_unique<std::mutex>()};
-    void (*submit_fn)(const att_queue_t&            self,
+    bool (*submit_fn)(const att_queue_t&            self,
                       hsa_ext_amd_aql_pm4_packet_t* packet,
                       att_signal_t*                 completion){nullptr};
 };
@@ -82,12 +88,6 @@ signal_wait(const att_signal_t& signal);
 
 signal_ptr_t
 make_signal(const att_queue_t& queue);
-
-att_queue_t
-att_queue_create(rocprofiler_agent_id_t             agent_id,
-                 size_t                             buffer_size,
-                 size_t                             num_buffers = 0,
-                 std::shared_ptr<kfd_memory_pool_t> kfd_memory  = {});
 
 void
 att_queue_destroy(att_queue_t& queue);
@@ -103,19 +103,29 @@ att_queue_submit(const att_queue_t&            queue,
                  hsa_ext_amd_aql_pm4_packet_t* packet,
                  att_signal_t*                 completion);
 
-void
+bool
 att_queue_copy(att_queue_t& queue, void* dst, const void* src, size_t size);
+
+template <typename VecType>
+bool
+att_queue_submit_packets(const att_queue_t& queue, VecType& packets, att_signal_t* signal = nullptr)
+{
+    for(size_t i = 0; i < packets.size(); ++i)
+    {
+        if(!att_queue_submit(queue, &packets.at(i), i + 1 == packets.size() ? signal : nullptr))
+            return false;
+    }
+    return true;
+}
 
 template <typename VecType>
 signal_ptr_t
 att_queue_submit_signal_last(const att_queue_t& queue, VecType& packets)
 {
-    for(size_t i = 0; i < packets.size(); ++i)
-    {
-        auto signal = att_queue_submit(queue, &packets.at(i), i + 1 == packets.size());
-        if(signal) return signal;
-    }
-    return nullptr;
+    if(packets.empty()) return nullptr;
+    auto signal = make_signal(queue);
+    if(!signal || !att_queue_submit_packets(queue, packets, signal.get())) return nullptr;
+    return signal;
 }
 
 struct att_queue_deleter_t

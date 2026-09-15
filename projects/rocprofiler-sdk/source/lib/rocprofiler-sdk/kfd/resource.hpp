@@ -33,7 +33,7 @@
 
 namespace rocprofiler
 {
-namespace thread_trace
+namespace kfd
 {
 enum class kfd_memory_kind_t
 {
@@ -47,7 +47,7 @@ enum class kfd_memory_kind_t
 class kfd_memory_pool_t
 {
 public:
-    explicit kfd_memory_pool_t(const rocprofiler_agent_t& agent);
+    static std::shared_ptr<kfd_memory_pool_t> create(const rocprofiler_agent_t& agent);
     ~kfd_memory_pool_t();
 
     kfd_memory_pool_t(const kfd_memory_pool_t&) = delete;
@@ -71,6 +71,7 @@ public:
 
 private:
     struct impl;
+    explicit kfd_memory_pool_t(std::unique_ptr<impl> state);
     std::unique_ptr<impl> _impl;
 };
 
@@ -79,7 +80,7 @@ private:
 class kfd_signal_t
 {
 public:
-    explicit kfd_signal_t(std::shared_ptr<kfd_memory_pool_t> memory);
+    static std::unique_ptr<kfd_signal_t> create(std::shared_ptr<kfd_memory_pool_t> memory);
     ~kfd_signal_t();
 
     kfd_signal_t(const kfd_signal_t&) = delete;
@@ -90,48 +91,56 @@ public:
     hsa_signal_t  handle() const;
     amd_signal_t* abi() const { return _signal; }
 
-    void reset();
+    void reset(int64_t value = 1);
     void wait() const;
 
 private:
+    kfd_signal_t(std::shared_ptr<kfd_memory_pool_t> memory, amd_signal_t* signal);
     std::shared_ptr<kfd_memory_pool_t> _memory{};
     amd_signal_t*                      _signal{nullptr};
 };
 
-/// Direct KFD AQL compute queue for aqlprofile packets.
+/// Direct KFD AQL compute queue for vendor PM4 packets.
 class kfd_aql_queue_t
 {
 public:
-    explicit kfd_aql_queue_t(std::shared_ptr<kfd_memory_pool_t> memory);
+    static std::shared_ptr<kfd_aql_queue_t> create(std::shared_ptr<kfd_memory_pool_t> memory);
     ~kfd_aql_queue_t();
 
     kfd_aql_queue_t(const kfd_aql_queue_t&) = delete;
     kfd_aql_queue_t& operator=(const kfd_aql_queue_t&) = delete;
 
-    void submit(const hsa_ext_amd_aql_pm4_packet_t& packet, hsa_signal_t completion);
+    bool submit(const hsa_ext_amd_aql_pm4_packet_t& packet, hsa_signal_t completion);
+    bool close();
 
 private:
     struct impl;
+    explicit kfd_aql_queue_t(std::unique_ptr<impl> state);
     std::unique_ptr<impl> _impl;
 };
 
-/// Direct KFD queue bundle for aqlprofile control packets and SDMA copies.
+/// Direct KFD queue bundle for AQL PM4 submissions and SDMA copies.
 class kfd_copy_queue_t
 {
 public:
-    kfd_copy_queue_t(const std::shared_ptr<kfd_memory_pool_t>& memory, size_t max_copy_size);
+    static bool is_supported(uint32_t gfx_target_version);
+    static std::shared_ptr<kfd_copy_queue_t> create(
+        const std::shared_ptr<kfd_memory_pool_t>& memory,
+        size_t                                    max_copy_size);
     ~kfd_copy_queue_t();
 
     kfd_copy_queue_t(const kfd_copy_queue_t&) = delete;
     kfd_copy_queue_t& operator=(const kfd_copy_queue_t&) = delete;
 
-    void submit(const hsa_ext_amd_aql_pm4_packet_t& packet, hsa_signal_t completion);
-    void copy(void* dst, const void* src, size_t size);
+    bool submit(const hsa_ext_amd_aql_pm4_packet_t& packet, hsa_signal_t completion);
+    bool copy(void* dst, const void* src, size_t size);
+    bool close();
 
 private:
     struct impl;
+    explicit kfd_copy_queue_t(std::unique_ptr<impl> state);
     std::unique_ptr<impl> _impl;
 };
 
-}  // namespace thread_trace
+}  // namespace kfd
 }  // namespace rocprofiler
