@@ -22,6 +22,7 @@ struct ncclMemManager;
 namespace dda::common {
 
 // Upper bound on the number of ranks the fabric DDA path supports (DPX).
+// Note: LL scratch scales as 2 * nRanks * 16 MiB; at 144 ranks this is ~4.5 GiB per GPU.
 constexpr int kDdaMaxNranks = 144;
 
 class FabricGpuBarrier;
