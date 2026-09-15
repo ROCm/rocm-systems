@@ -3209,6 +3209,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_gpu_is_apu = _libraries['libamd_smi.so'].amdsmi_get_gpu_is_apu
+    amdsmi_get_gpu_is_apu.restype = amdsmi_status_t
+    amdsmi_get_gpu_is_apu.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_bool)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_processor_info = _libraries['libamd_smi.so'].amdsmi_get_processor_info
     amdsmi_get_processor_info.restype = amdsmi_status_t
     amdsmi_get_processor_info.argtypes = [amdsmi_processor_handle, size_t, ctypes.POINTER(ctypes.c_char)]
@@ -5426,7 +5432,8 @@ __all__ = \
     'amdsmi_get_gpu_event_notification', 'amdsmi_get_gpu_fabric_info',
     'amdsmi_get_gpu_fan_rpms', 'amdsmi_get_gpu_fan_speed',
     'amdsmi_get_gpu_fan_speed_max', 'amdsmi_get_gpu_id',
-    'amdsmi_get_gpu_kfd_info', 'amdsmi_get_gpu_mem_overdrive_level',
+    'amdsmi_get_gpu_is_apu', 'amdsmi_get_gpu_kfd_info',
+    'amdsmi_get_gpu_mem_overdrive_level',
     'amdsmi_get_gpu_memory_partition',
     'amdsmi_get_gpu_memory_partition_config',
     'amdsmi_get_gpu_memory_reserved_pages',

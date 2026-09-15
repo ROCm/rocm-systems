@@ -591,8 +591,7 @@ amdsmi_status_t amdsmi_get_nic_processor_handles(amdsmi_socket_handle socket_han
       amd::smi::AMDSmiSystem::getInstance().handle_to_socket(socket_handle, &socket);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
-  std::vector<amd::smi::AMDSmiProcessor*>& processors =
-      socket->get_processors(AMDSMI_PROCESSOR_TYPE_BRCM_NIC);
+  const auto& processors = socket->get_processors(AMDSMI_PROCESSOR_TYPE_BRCM_NIC);
   uint32_t processor_size = static_cast<uint32_t>(processors.size());
   // Get the processor count only
   if (processor_handles == nullptr) {
@@ -628,7 +627,7 @@ amdsmi_status_t amdsmi_get_switch_processor_handles(amdsmi_socket_handle socket_
 
   amdsmi_processor_type_t processor_type =
       static_cast<amdsmi_processor_type_t>(AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH);
-  std::vector<amd::smi::AMDSmiProcessor*>& processors = socket->get_processors(processor_type);
+  const auto& processors = socket->get_processors(processor_type);
   uint32_t processor_size = static_cast<uint32_t>(processors.size());
   // Get the processor count only
   if (processor_handles == nullptr) {
@@ -766,8 +765,10 @@ amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket
   amdsmi_status_t r =
       amd::smi::AMDSmiSystem::getInstance().handle_to_socket(socket_handle, &socket);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
-  std::vector<amd::smi::AMDSmiProcessor*>& processors = socket->get_processors(processor_type);
-  uint32_t processor_size = static_cast<uint32_t>(processors.size());
+  uint32_t processor_size = 0;
+  r = socket->get_processor_count(processor_type, &processor_size);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  const auto& processors = socket->get_processors(processor_type);
   // Get the processor count only
   if (processor_handles == nullptr) {
     *processor_count = processor_size;
@@ -797,6 +798,23 @@ amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_hand
   *processor_type = processor->get_processor_type();
 
   return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_gpu_is_apu(amdsmi_processor_handle processor_handle, bool* is_apu) {
+  AMDSMI_CHECK_INIT();
+  if (is_apu == nullptr) return AMDSMI_STATUS_INVAL;
+
+  amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+  amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &gpu_device);
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+  // Non-DRM backends do not expose the kernel's fusion flag. In particular,
+  // legacy WSL ASIC flags can contain a family ID, not AMDGPU ids_flags.
+  if (gpu_device->backend() != nullptr) return AMDSMI_STATUS_NOT_SUPPORTED;
+
+  amdsmi_asic_info_t info = {};
+  status = amdsmi_get_gpu_asic_info(processor_handle, &info);
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+  return smi_amdgpu_get_apu_status(info.flags, is_apu);
 }
 
 amdsmi_status_t amdsmi_get_gpu_device_bdf(amdsmi_processor_handle processor_handle,

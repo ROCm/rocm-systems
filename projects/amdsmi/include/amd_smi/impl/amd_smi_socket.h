@@ -44,7 +44,7 @@ class AMDSmiSocket {
     }
   }
   std::vector<AMDSmiProcessor*>& get_processors() { return processors_; }
-  std::vector<AMDSmiProcessor*>& get_processors(amdsmi_processor_type_t type) {
+  const std::vector<AMDSmiProcessor*>& get_processors(amdsmi_processor_type_t type) const {
     switch (type) {
       case AMDSMI_PROCESSOR_TYPE_AMD_GPU:
         return processors_;
@@ -58,8 +58,10 @@ class AMDSmiSocket {
         return nic_processors_;
       case AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH:
         return switch_processors_;
-      default:
-        return processors_;
+      default: {
+        static const std::vector<AMDSmiProcessor*> empty;
+        return empty;
+      }
     }
   }
   amdsmi_status_t get_processor_count(uint32_t* processor_count) const;

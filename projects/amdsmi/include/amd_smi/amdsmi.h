@@ -1138,7 +1138,9 @@ typedef struct {
   uint32_t num_of_compute_units;     //!< 0xFFFFFFFF if not supported
   uint64_t target_graphics_version;  //!< 0xFFFFFFFFFFFFFFFF if not supported
   uint32_t subsystem_id;             //!> The subsystem ID
-  uint64_t flags;                    //!< Chip flags
+  uint64_t flags;                    //!< Native Linux DRM ids_flags; bit 0 indicates an APU.
+                                     //!< Other backends may use different encodings; use
+                                     //!< amdsmi_get_gpu_is_apu() for portable identification.
   uint32_t physical_acc_id;          //!< Physical accelerator ID, 0xFFFFFFFF if not supported
   uint32_t chip_rev_id;              /**< amdgpu chip_rev: internal chip revision (stepping)
                                           as the driver reports it, not decoded.
@@ -3364,6 +3366,8 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
  *
  *  @details This function retrieves the processor type. A processor_handle must be provided
  *  for that processor.
+ *  On Linux, the GPU component of an APU remains ::AMDSMI_PROCESSOR_TYPE_AMD_GPU
+ *  so it is usable with GPU APIs. Use ::amdsmi_get_gpu_is_apu to identify it.
  *
  *  @param[in] processor_handle a processor handle
  *
@@ -3375,6 +3379,32 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
  */
 amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_handle,
                                           amdsmi_processor_type_t* processor_type);
+
+/**
+ *  @brief Determine whether a GPU is integrated in an APU.
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Uses the amdgpu driver's fusion flag, not memory sizes, processor
+ *  counts, or a device-ID list. No HIP context is created. This identifies the
+ *  GPU component of an APU; its processor type remains ::AMDSMI_PROCESSOR_TYPE_AMD_GPU.
+ *  An APU can still have a BIOS VRAM carveout. This query does not determine the
+ *  size or current availability of its shared memory pool.
+ *
+ *  @param[in] processor_handle GPU processor handle.
+ *  @param[out] is_apu True for an APU GPU, false for a discrete GPU. Written only
+ *  on success; unavailable identification returns an error, not false.
+ *
+ *  @retval AMDSMI_STATUS_SUCCESS The driver supplied the identification.
+ *  @retval AMDSMI_STATUS_INVAL The output pointer or processor handle is null.
+ *  @retval AMDSMI_STATUS_NOT_FOUND The non-null processor handle is not registered.
+ *  @retval AMDSMI_STATUS_NOT_SUPPORTED The backend cannot provide identification
+ *  (including WSL), or the handle does not refer to a GPU.
+ *  @return Other ::amdsmi_status_t errors from querying ASIC information.
+ */
+amdsmi_status_t amdsmi_get_gpu_is_apu(amdsmi_processor_handle processor_handle, bool* is_apu);
 
 /**
  *  @brief Get a string identifier for the given processor.
@@ -3439,6 +3469,10 @@ amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle*
  *  @details This function retrieves processor list as per the processor type
  *  from the total processor handles list.
  *  The @p list of processor_handles and processor type must be provided.
+ *  On Linux, declared types with no matching processors return an empty list.
+ *  UNKNOWN is not a wildcard, and out-of-range types return ::AMDSMI_STATUS_INVAL.
+ *  Separate AMD_APU handles are not enumerated; query AMD_GPU and use
+ *  ::amdsmi_get_gpu_is_apu on each GPU handle instead.
  *
  *  @note This function fills the user-provided buffer with processor handles of the given type
  *  (e.g., GPU, NIC). The processor handles returned are used to instantiate the rest of processor

@@ -56,6 +56,12 @@ amdsmi_status_t AMDSmiSocket::get_processor_count(amdsmi_processor_type_t type,
     case AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH:
       *processor_count = static_cast<uint32_t>(switch_processors_.size());
       break;
+    case AMDSMI_PROCESSOR_TYPE_UNKNOWN:
+    case AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU:
+    case AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU:
+    case AMDSMI_PROCESSOR_TYPE_AMD_APU:
+      *processor_count = 0;
+      break;
     default:
       *processor_count = 0;
       ret = AMDSMI_STATUS_INVAL;
