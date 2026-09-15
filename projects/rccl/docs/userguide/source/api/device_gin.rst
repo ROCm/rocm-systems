@@ -269,6 +269,9 @@ ncclGinBarrierSession
       Same as the single-context constructors, but arrival signaling and fencing iterate every GIN context on the comm.
       Signaling on each context preserves ordering when puts and signals use different network queue pairs. Use this when
       puts or gets were sharded across ``ginContextCount`` contexts and a ``Put`` or ``Get`` fence must drain all of them.
+      On the Anvil SDMA backend those contexts currently share one signal array, so a second AllContexts barrier in the
+      same kernel can observe the first barrier's counts (AICOMRCCL-2339). That is a plugin follow-up; the constructors
+      here still iterate every context.
 
    .. cpp:function:: void sync(Coop coop, cuda::memory_order order, ncclGinFenceLevel fence = ncclGinFenceLevel::Put | ncclGinFenceLevel::Get)
 
