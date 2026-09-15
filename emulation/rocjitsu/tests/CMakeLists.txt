@@ -797,10 +797,6 @@ rj_configure_target(waitcheck_c_header_test PRIVATE_INCLUDES WARNINGS)
 rj_add_test(NAME RjWaitcheck.CHeader COMMAND waitcheck_c_header_test LABELS waitcheck)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    # The SDK can ship its own librocjitsu.so. Exercise the C API from this
-    # build even when the caller's LD_LIBRARY_PATH selects that SDK first.
-    set_property(TEST RjWaitcheck.CHeader APPEND PROPERTY ENVIRONMENT_MODIFICATION
-        "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:rocjitsu_shared>")
     add_executable(waitcheck_dlopen_test analysis/waitcheck_dlopen_test.cpp)
     target_link_libraries(
         waitcheck_dlopen_test
