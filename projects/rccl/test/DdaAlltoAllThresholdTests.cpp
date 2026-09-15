@@ -97,14 +97,29 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx1250_OneByteOverThreshold_Disabled)
         mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold + 1, ncclFloat32));
 }
 
-TEST_F(DdaAlltoAllThresholdTest, Gfx1250_AlltoAllIgnoresHighUserThreshold)
+// RCCL_DDA_THRESHOLD raises the AlltoAll entry gate above the arch table's LL128 cap
+// (1 MiB on gfx1250). Verify the env threshold is what rcclDdaEnabled checks, and
+// that bytes above the env threshold are rejected.
+TEST(DdaAlltoAllThreshold, Gfx1250_A2A_UserThresholdRaisesEntryGate)
 {
-    mockComm_.reset("gfx1250:sramecc+:xnack-");
-    const size_t overCap = rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll] + 1;
-    EXPECT_FALSE(rcclDdaEnabled(
-        mockComm_.get(),
-        overCap,
-        rcclGetArchThresholds("gfx1250")->ddaVmmMax[ncclFuncAlltoAll]));
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "Gfx1250_A2A_UserThresholdRaisesEntryGate",
+        []()
+        {
+            DdaAlltoAllMockComm mockComm;
+            mockComm.reset("gfx1250:sramecc+:xnack-");
+            // Arch table caps: ddaLLMax=64KiB, ddaLL128Max=1MiB, ddaVmmMax=0.
+            // Entry threshold without env: max(0, 64KiB, 1MiB) = 1MiB.
+            // With RCCL_DDA_THRESHOLD=4MiB the env wins: entry gate = 4MiB.
+            const size_t twoMb = 2 * 1024 * 1024;
+            const size_t sixMb = 6 * 1024 * 1024;
+            const size_t entryThreshold = rcclDdaEntryThreshold(mockComm.get(), ncclFuncAlltoAll);
+            // 2 MiB is inside the env threshold -- entry gate passes.
+            EXPECT_TRUE(rcclDdaEnabled(mockComm.get(), twoMb, entryThreshold));
+            // 6 MiB is above the env threshold -- rejected.
+            EXPECT_FALSE(rcclDdaEnabled(mockComm.get(), sixMb, entryThreshold));
+        },
+        {{"RCCL_DDA_THRESHOLD", "4194304"}});  // 4 MiB
 }
 
 TEST_F(DdaAlltoAllThresholdTest, UnsupportedArch_Disabled)
