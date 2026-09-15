@@ -401,7 +401,7 @@ triage it into the right bucket:
 - **It's a global variable (`extern int foo;`)** → add a definition
   to its owning TU's fakes file. If it has no owning TU (e.g. a data
   symbol declared in a header-only file) and only one test TU
-  references it, define it in that test (the fifth exception below —
+  references it, define it in that test (the fifth exception above —
   e.g. the `allocTracker` array in `p2p-test.cc`). Use a sensible
   default (usually zero).
 - **It's a plain function the module references but doesn't define**
@@ -409,7 +409,7 @@ triage it into the right bucket:
   fakes file (e.g. `busIdToInt64` / `getBusId` go in
   `fakes/utils_fakes.cc`, since `src/misc/utils.cc` owns them). Only
   when the symbol has no owning TU does it belong in the test itself
-  (the fifth exception below — e.g. `IsArchMatch`, owned by the
+  (the fifth exception above — e.g. `IsArchMatch`, owned by the
   header-only `archinfo.h`, in `p2p-test.cc`).
 - **It's a logging or env-param helper** → already covered by the
   no-op `ncclDebugLog` / `ncclLoadParam`. If a new logging primitive
