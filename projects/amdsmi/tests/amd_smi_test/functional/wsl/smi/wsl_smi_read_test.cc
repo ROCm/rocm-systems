@@ -38,7 +38,7 @@ class WslFunctionalReadOnly : public ::testing::Test {
     if (r != HSAKMT_STATUS_SUCCESS && r != HSAKMT_STATUS_KERNEL_ALREADY_OPENED) return;
     kfd_opened_ = true;
 
-    // Enumerate GPU nodes using the same path as WSLGPUBackend::TryPopulate.
+    // Enumerate GPU nodes using the same path as WSLGPUBackend::try_populate.
     // rocdxg_smi_get_device_count requires the full topology snapshot which
     // hsaKmtAcquireSystemProperties sets up.
     HsaSystemProperties sys_props = {};
