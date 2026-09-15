@@ -65,7 +65,7 @@ library, which is a separate layer with a separate ABI._
   updated: they are generated from the header and will pick the new entry points
   up when next regenerated, so until then a Rust or Go consumer has the
   single-string call and nothing else.
-- **`projects/cuid`**: one new entry point, `amdcuid_get_key_info()`, so the seed
+- **`shared/cuid`**: one new entry point, `amdcuid_get_key_info()`, so the seed
   fingerprint is computed inside the library and the seed never crosses an ABI
   boundary. The library also gains a packaging obligation: it must export a CMake
   package rather than leaving `amd-smi` to locate a `.a` and a header

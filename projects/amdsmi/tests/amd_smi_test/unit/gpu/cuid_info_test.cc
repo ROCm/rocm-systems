@@ -51,7 +51,7 @@ bool LooksLikeUuid(const char* value) {
 // lands in bit 7 of the last rendered octet.
 //
 // Checked against all thirteen vectors in
-// projects/cuid/tests/vectors/cuid_vectors.txt.
+// shared/cuid/tests/vectors/cuid_vectors.txt.
 bool AuxiliaryBitFromUuidString(const std::string& uuid, bool* aux) {
   std::string hex;
   for (char c : uuid) {
@@ -520,7 +520,7 @@ TEST(GpuUnit, CuidSeedInfoCarriesNoSeedMaterial) {
 //
 // Payload octet 14 of each vector, mask 0x20, is the Auxiliary Value
 // Identifier; the expectation below is that bit taken from
-// projects/cuid/tests/vectors/cuid_vectors.txt.
+// shared/cuid/tests/vectors/cuid_vectors.txt.
 TEST(GpuUnit, CuidAuxiliaryBitDecoderMatchesConformanceVectors) {
   const struct {
     const char* name;
