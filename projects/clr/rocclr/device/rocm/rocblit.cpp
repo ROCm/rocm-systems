@@ -2846,14 +2846,14 @@ bool KernelBlitManager::ShaderCopyBufferBatchRaw(
   }
   const size_t max_operations_per_dispatch =
       (kernarg_pool_chunk_size - kernarg_reservation) / sizeof(CopyBufferBatchDescriptor);
-  const size_t descriptor_buffer_bytes =
-      max_operations_per_dispatch * sizeof(CopyBufferBatchDescriptor);
   bool attach_signal = false;
 
   for (size_t operation_offset = 0; operation_offset < copy_operations.size();
        operation_offset += max_operations_per_dispatch) {
     const size_t operation_count =
         std::min(max_operations_per_dispatch, copy_operations.size() - operation_offset);
+    // Reserve only the size this dispatch requires.
+    const size_t descriptor_buffer_bytes = operation_count * sizeof(CopyBufferBatchDescriptor);
     void* descriptor_buffer = gpu().allocKernArg(descriptor_buffer_bytes, kCBAlignment);
     CopyBufferBatchDescriptor* descriptors =
         static_cast<CopyBufferBatchDescriptor*>(descriptor_buffer);
