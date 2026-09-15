@@ -91,3 +91,8 @@ ncclResult_t ncclTransportTreeConnect(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTransportCheckP2pType(struct ncclComm*, bool*, bool*, bool*) { ::abort(); }
 ncclResult_t ncclTransportP2pConnect(struct ncclComm*, int, int, int*, int, int*, int) { ::abort(); }
 ncclResult_t ncclTransportP2pSetup(struct ncclComm*, struct ncclTopoGraph*, int, bool*) { ::abort(); }
+
+// ppc64le TOC references survive --gc-sections, so netTransport must have
+// a definition even though the code path that uses it is dead.
+#include "transport.h"
+struct ncclTransport netTransport = {};
