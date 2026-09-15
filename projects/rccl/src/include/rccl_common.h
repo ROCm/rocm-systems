@@ -92,6 +92,14 @@ typedef enum {
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 
+// Tag written by rcclSelect* into ncclTaskColl::symkExtract so the extractor
+// (ncclMakeSymmetricTaskList) knows whether the selector already vetoed symk.
+enum rcclSymkExtract : int8_t {
+  RCCL_SYMK_EXTRACT_DENY  = -1,  // selector chose non-symk backend; do not extract
+  RCCL_SYMK_EXTRACT_NONE  =  0,  // no opinion; extractor uses windows + ncclSymkAvailable
+  RCCL_SYMK_EXTRACT_ALLOW =  1,  // rcclSelect* chose RCCL_SYMMETRIC; may extract
+};
+
 #ifdef RCCL_EXPOSE_STATIC
 #define RCCL_STATIC_EXPOSE_CHECK()
 #else
