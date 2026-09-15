@@ -1097,7 +1097,6 @@ void GpuAgent::PreloadBlits() {
 
 void GpuAgent::ReleaseResources() {
   if (this->Enabled()) {
-
     this->Disable();
 
     // Remove all shared hardware queues from pool

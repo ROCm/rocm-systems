@@ -113,7 +113,9 @@ void PcsRuntime::StopActiveSessions() {
     if (!session.isActive()) continue;
 
     AMD::GpuAgentInt* gpu_agent = static_cast<AMD::GpuAgentInt*>(session.agent);
-    gpu_agent->PcSamplingStop(session);
+    if (gpu_agent->PcSamplingStop(session) != HSA_STATUS_SUCCESS) {
+      debug_warning(false && "PcSamplingStop failed during teardown");
+    }
   }
 }
 
