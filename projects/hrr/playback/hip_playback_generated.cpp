@@ -2649,7 +2649,14 @@ extern hipError_t playback_hipMemAddressReserve(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipMemAdvise(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipMemAdvise*>(payload);
+#if HIP_FORCE_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)
+  hipMemLocation _loc_device{};
+  _loc_device.type = hipMemLocationTypeDevice;
+  _loc_device.id   = (int)a->device;
+  hipError_t _r = (hipError_t)hipMemAdvise(ctx.translate_ptr(a->dev_ptr), (size_t)a->count, (hipMemoryAdvise)a->advice, _loc_device);
+#else
   hipError_t _r = (hipError_t)hipMemAdvise(ctx.translate_ptr(a->dev_ptr), (size_t)a->count, (hipMemoryAdvise)a->advice, (int)a->device);
+#endif
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemAdvise", a->ret);
     return hipSuccess;
