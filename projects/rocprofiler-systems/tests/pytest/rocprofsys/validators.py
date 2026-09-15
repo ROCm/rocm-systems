@@ -254,6 +254,7 @@ def validate_perfetto_trace(
     depths: Optional[list[int]] = None,
     label_substrings: Optional[list[str]] = None,
     counter_names: Optional[list[str]] = None,
+    counter_names_presence_only: bool = False,
     key_names: Optional[list[str]] = None,
     key_counts: Optional[list[int]] = None,
     trace_processor_path: Optional[Path] = None,
@@ -277,6 +278,8 @@ def validate_perfetto_trace(
         depths: Expected depths (-d flag); omit for aggregate-by-name validation
         label_substrings: Expected label substrings (-s flag)
         counter_names: Counter names to validate (--counter-names flag)
+        counter_names_presence_only: If True, only verify that counter tracks with
+            the given names exist in the trace; do not require non-zero values.
         key_names: Debug key names to check (--key-names flag)
         key_counts: Expected counts for debug keys (--key-counts flag)
         trace_processor_path: Path to trace_processor_shell (-t flag). When omitted,
@@ -310,6 +313,8 @@ def validate_perfetto_trace(
 
     if counter_names:
         args.extend(["--counter-names"] + counter_names)
+    if counter_names_presence_only:
+        args.append("--counter-names-presence-only")
 
     if check_counter_pairing:
         args.append("--check-counter-pairing")
