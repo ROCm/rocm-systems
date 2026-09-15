@@ -19,6 +19,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <optional>
 #include <regex>
 #include <set>
@@ -135,16 +136,16 @@ struct settings_policy
      */
     static hipfile::enabled_metrics get_hipfile_enabled_metrics() noexcept
     {
-        static auto _enabled_metrics = []() noexcept {
+        static auto s_enabled_metrics = []() noexcept {
             try
             {
                 auto setting = get_setting_value<std::string>(
                     std::string{ env_vars::HIPFILE_METRICS });
                 return parse_hipfile_enabled_metrics(setting.value_or("all"));
-            } catch(const std::exception& ex)
+            } catch(const std::exception& err)
             {
                 LOG_ERROR("Failed to apply {}: {}. Collecting all hipFile metrics.",
-                          env_vars::HIPFILE_METRICS, ex.what());
+                          env_vars::HIPFILE_METRICS, err.what());
             } catch(...)
             {
                 LOG_ERROR("Failed to apply {}: unknown exception. Collecting all hipFile "
@@ -152,10 +153,10 @@ struct settings_policy
                           env_vars::HIPFILE_METRICS);
             }
             hipfile::enabled_metrics fallback;
-            fallback.value = hipfile::ALL_HIPFILE_METRICS;
+            fallback.value = hipfile::k_all_hipfile_metrics;
             return fallback;
         }();
-        return _enabled_metrics;
+        return s_enabled_metrics;
     }
 
     static hipfile::enabled_metrics parse_hipfile_enabled_metrics(
@@ -179,7 +180,7 @@ struct settings_policy
 
         if(normalized.empty() || normalized == "all" || normalized == "on")
         {
-            metrics.value = hipfile::ALL_HIPFILE_METRICS;
+            metrics.value = hipfile::k_all_hipfile_metrics;
             return metrics;
         }
         if(normalized == "none" || normalized == "off")
@@ -204,18 +205,18 @@ struct settings_policy
 
     static gpu::enabled_metrics get_enabled_metrics() noexcept
     {
-        static auto _enabled_metrics = []() noexcept {
+        static auto s_enabled_metrics = []() noexcept {
             try
             {
                 auto setting = get_setting_value<std::string>(
                     std::string{ env_vars::AMD_SMI_METRICS });
                 auto value_str = setting.has_value() ? setting.value() : "all";
                 return parse_enabled_metrics(value_str);
-            } catch(const std::exception& ex)
+            } catch(const std::exception& err)
             {
                 LOG_ERROR("Failed to apply {}: {}. Using default AMD SMI metrics "
                           "(busy, temp, power, mem_usage).",
-                          env_vars::AMD_SMI_METRICS, ex.what());
+                          env_vars::AMD_SMI_METRICS, err.what());
             } catch(...)
             {
                 LOG_ERROR("Failed to apply {}: unknown exception. Using default AMD SMI "
@@ -224,7 +225,7 @@ struct settings_policy
             }
             return parse_enabled_metrics("busy, temp, power, mem_usage");
         }();
-        return _enabled_metrics;
+        return s_enabled_metrics;
     }
 
     static bool get_use_perfetto_legacy_metrics() { return get_use_perfetto(); }
@@ -237,7 +238,7 @@ struct settings_policy
      */
     static nic::nic_device_filter get_nic_device_filter() noexcept
     {
-        static auto _filter = []() noexcept {
+        static auto s_filter = []() noexcept {
             try
             {
                 auto filter = get_setting_value<std::string>(
@@ -269,10 +270,10 @@ struct settings_policy
                 result.mode  = nic::device_selection_mode::specific;
                 result.names = parse_name_list(filter_str);
                 return result;
-            } catch(const std::exception& ex)
+            } catch(const std::exception& err)
             {
                 LOG_ERROR("Failed to apply {}: {}. Disabling NIC sampling only.",
-                          env_vars::SAMPLING_AINICS, ex.what());
+                          env_vars::SAMPLING_AINICS, err.what());
             } catch(...)
             {
                 LOG_ERROR("Failed to apply {}: unknown exception. Disabling NIC sampling "
@@ -283,7 +284,7 @@ struct settings_policy
             result.mode = nic::device_selection_mode::none;
             return result;
         }();
-        return _filter;
+        return s_filter;
     }
 
     /**

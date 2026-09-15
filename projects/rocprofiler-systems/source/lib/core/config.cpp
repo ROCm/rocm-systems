@@ -88,15 +88,15 @@ namespace
 int&
 verbose_value()
 {
-    static int value = rocprofsys::get_env<int>(env_vars::VERBOSE, 0);
-    return value;
+    static int s_value = rocprofsys::get_env<int>(env_vars::VERBOSE, 0);
+    return s_value;
 }
 
 bool&
 debug_value()
 {
-    static bool value = rocprofsys::get_env<bool>(env_vars::DEBUG_MODE, false);
-    return value;
+    static bool s_value = rocprofsys::get_env<bool>(env_vars::DEBUG_MODE, false);
+    return s_value;
 }
 
 auto configure_once = std::once_flag{};
@@ -3778,8 +3778,6 @@ get_causal_mode()
         {
             auto mode = static_cast<tim::tsettings<std::string>&>(*value->second).get();
             throw std::runtime_error(
-                // NOLINTNEXTLINE(misc-include-cleaner) -- fmt::format comes from
-                // spdlog/fmt/ranges.h
                 fmt::format("[{}] invalid causal mode {}. Choices: {}", function_name,
                             mode, fmt::join(value->second->get_choices(), ", ")));
         }

@@ -47,15 +47,15 @@ struct cache_policy
      */
     static void initialize_pmc_metadata(std::size_t gpu_id)
     {
-        constexpr std::size_t EVENT_CODE       = 0;
-        constexpr std::size_t INSTANCE_ID      = 0;
-        constexpr const char* LONG_DESCRIPTION = "";
-        constexpr const char* COMPONENT        = "";
-        constexpr const char* BLOCK            = "";
-        constexpr const char* EXPRESSION       = "";
-        constexpr const char* TARGET_ARCH      = "GPU";
+        constexpr std::size_t k_event_code       = 0;
+        constexpr std::size_t k_instance_id      = 0;
+        constexpr const char* k_long_description = "";
+        constexpr const char* k_component        = "";
+        constexpr const char* k_block            = "";
+        constexpr const char* k_expression       = "";
+        constexpr const char* k_target_arch      = "GPU";
 
-        for(const auto& metric : METRIC_TABLE)
+        for(const auto& metric : k_metric_table)
         {
             const auto name = track_name(gpu_id, metric.suffix);
 
@@ -64,11 +64,11 @@ struct cache_policy
             // ABSOLUTE is accurate for both shapes here: the counters are cumulative
             // totals and the bandwidths are instantaneous rates. Neither is a delta.
             trace_cache::get_metadata_registry().add_pmc_info(
-                { agent_type::gpu, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+                { agent_type::gpu, gpu_id, k_target_arch, k_event_code, k_instance_id,
                   pmc_name(metric.suffix), metric.suffix,
-                  trait::name<category::hipfile>::description, LONG_DESCRIPTION,
-                  COMPONENT, metric.unit, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
-                  EXPRESSION, 0, 0, "{}" });
+                  trait::name<category::hipfile>::description, k_long_description,
+                  k_component, metric.unit, rocprofsys::trace_cache::ABSOLUTE, k_block,
+                  k_expression, 0, 0, "{}" });
         }
     }
 
@@ -81,8 +81,8 @@ struct cache_policy
      * @param metric_values Collected values.
      * @param timestamp Sample timestamp in nanoseconds.
      */
-    // NOLINTNEXTLINE(readability-function-size) -- needs a refactor of every collector's
-    // store_sample
+    // needs a refactor of every collector's store_sample
+    // NOLINTNEXTLINE(readability-function-size)
     static void store_sample(std::size_t                         device_id,
                              [[maybe_unused]] const std::string& device_name,
                              const enabled_metrics&              enabled_metrics_cfg,
@@ -101,7 +101,7 @@ struct cache_policy
         active.value = enabled_metrics_cfg.value & supported_metrics.value;
 
         // The whole per-GPU snapshot goes out as one record. Track names and PMC
-        // identifiers are derived from METRIC_TABLE during post-processing, so this
+        // identifiers are derived from k_metric_table during post-processing, so this
         // path - which runs on the sampling thread shared with every other collector -
         // builds no strings and allocates nothing.
         trace_cache::get_buffer_storage().store(sample{

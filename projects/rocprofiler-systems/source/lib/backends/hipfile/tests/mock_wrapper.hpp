@@ -42,8 +42,8 @@ struct mock_per_gpu_stats_t
 
 struct mock_stats_l3_t
 {
-    std::uint32_t                              num_gpus = 0;
-    std::array<mock_per_gpu_stats_t, MAX_GPUS> per_gpu_stats{};
+    std::uint32_t                                num_gpus = 0;
+    std::array<mock_per_gpu_stats_t, k_max_gpus> per_gpu_stats{};
 };
 
 // NOLINTEND(readability-identifier-naming)
@@ -60,7 +60,7 @@ struct mock_wrapper
 {
     using stats_l3_t = mock_stats_l3_t;
 
-    static constexpr std::size_t MAX_GPU_SLOTS = MAX_GPUS;
+    static constexpr std::size_t k_max_gpu_slots = k_max_gpus;
 
     inline static stats_l3_t  next_stats{};
     inline static bool        query_succeeds    = true;
