@@ -2046,10 +2046,20 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // ncclDdaIpcCommInit(): that function is only entered on the branch it
   // itself gates, so a mismatch there would mean only some ranks reach its
   // bootstrap allgather -- exactly the hang this check exists to prevent.
-  NCCLCHECKGOTO(ncclCheckDdaNranksRelaxConsensus(
-                  nranks, [&](int r) { return allGather3Data[r].ddaNranksRelax; },
-                  [&](int r) { return allGather3Data[r].hostname; }),
-                ret, fail);
+  //
+  // Gated to communicators the knob can actually affect: multi-node comms
+  // never take the DDA IPC path regardless of the env var (nNodes == 1 is
+  // required everywhere it is consulted), and a comm of exactly kDdaNranks
+  // ranks gets the same eligible answer whether or not relax is set. Outside
+  // that range, ranks cannot disagree on the decision no matter what the env
+  // var says, so failing communicator init over a mismatch there would only
+  // ever be a false positive.
+  if (nNodes == 1 && ncclDdaNranksRelaxConsensusMatters(nranks)) {
+    NCCLCHECKGOTO(ncclCheckDdaNranksRelaxConsensus(
+                    nranks, [&](int r) { return allGather3Data[r].ddaNranksRelax; },
+                    [&](int r) { return allGather3Data[r].hostname; }),
+                  ret, fail);
+  }
 
   // Determine nNodes, firstRanks, ...
   NCCLCHECKGOTO(ncclCalloc(&nodesFirstRank, nranks), ret, fail);

@@ -9256,6 +9256,60 @@ TEST_F(InitMicrotest, InitTransportsRank_RomeConsensusFails_PropagatesThatCode) 
   EXPECT_EQ(0, g_ncclTopoPostsetCalls);
 }
 
+// RCCL_DDA_NRANKS_RELAX per-rank agreement check, right after the Rome one above
+// in init.cc. Unlike Rome's, it is gated: only communicators the knob can
+// actually affect (nNodes == 1, and nRanks in [2, kDdaNranks)) run it at all,
+// since outside that range ncclDdaIpcNranksSupported()'s answer does not
+// depend on the env var and a per-rank mismatch there cannot cause ranks to
+// disagree on whether to enter the DDA IPC path.
+TEST_F(InitMicrotest, InitTransportsRank_DdaNranksRelaxConsensusCheck_SeesThisRanksValue) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_ncclCheckDdaNranksRelaxConsensusCalls);
+  EXPECT_EQ(4, g_ncclDdaNranksRelaxConsensusNranks);
+  // ncclDdaNranksRelaxEnabled() is stubbed off in this binary (nccl_stubs.cc), so
+  // rank 0's real reading is false; this pins that the check saw the real value
+  // rather than some default.
+  EXPECT_FALSE(g_ncclDdaNranksRelaxConsensusValue0);
+  EXPECT_FALSE(g_ncclDdaNranksRelaxConsensusHost0.empty());
+}
+
+// nRanks == kDdaNranks (8): ncclDdaIpcNranksSupported() returns true regardless
+// of RCCL_DDA_NRANKS_RELAX, so a mismatched env var here cannot cause ranks to
+// disagree on the DDA IPC decision -- the gate this test pins exists so
+// comm init is not failed over a variable that could not have mattered.
+TEST_F(InitMicrotest, InitTransportsRank_FullClique_SkipsTheDdaConsensusCheck) {
+  TransportsRankComm c(/*nRanks=*/8, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, g_ncclCheckDdaNranksRelaxConsensusCalls);
+}
+
+// Multi-node: DDA IPC never activates when nNodes != 1 (checked again wherever
+// it is consulted), so RCCL_DDA_NRANKS_RELAX agreement is likewise irrelevant
+// here regardless of nRanks.
+TEST_F(InitMicrotest, InitTransportsRank_MultiNode_SkipsTheDdaConsensusCheck) {
+  TransportsRankComm c(/*nRanks=*/3, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  std::vector<PeerSpec> specs(3);
+  specs[2].node = 1;  // two ranks on one host, one on another
+  const auto gathers = Tr_InstallGathers(c, specs);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, g_ncclCheckDdaNranksRelaxConsensusCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_DdaNranksRelaxConsensusFails_PropagatesThatCode) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  g_ncclCheckDdaNranksRelaxConsensusResult = ncclInvalidArgument;
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, g_ncclTopoPostsetCalls);
+}
+
 TEST_F(InitMicrotest, InitTransportsRank_TopoPresetFails_PropagatesBeforeTheSecondAllGather) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
