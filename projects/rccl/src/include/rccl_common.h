@@ -227,7 +227,7 @@ bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t dataty
 // Invoke once per collective (any type) at each CE AR decision point.
 void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);
 // Pure query: is CE AllReduce currently allowed on this comm?
-bool rcclCeAllReduceAllowed(struct ncclComm* comm);
+bool rcclCeArGraphSafe(struct ncclComm* comm);
 // CE AllReduce knobs (defined in rccl_wrap.cc). Both default to -1 (unset), which
 // resolves to the per-arch default; use the resolvers below rather than the raw
 // params so an unset env var does not read as "disabled".

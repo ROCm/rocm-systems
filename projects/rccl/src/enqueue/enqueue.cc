@@ -4373,7 +4373,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, info->stream, comm->config.graphUsageMode));
         ceCapturing = ncclCudaGraphValid(ceGraph);
         rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
-        ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
+        ceArGraphAllowed = rcclCeArGraphSafe(comm);
       }
 
       // Trigger CE initialization on the first CE-capable collective.

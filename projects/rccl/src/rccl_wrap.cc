@@ -1255,7 +1255,7 @@ void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing) {
   }
 }
 
-bool rcclCeAllReduceAllowed(struct ncclComm* comm) {
+bool rcclCeArGraphSafe(struct ncclComm* comm) {
   return !comm->ceColl.graphModeSeen;
 }
 
@@ -1290,7 +1290,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     ceCapturing = ncclCudaGraphValid(ceGraph);
     rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
   }
-  bool ceArGraphAllowed = rcclCeAllReduceAllowed(comm);
+  bool ceArGraphAllowed = rcclCeArGraphSafe(comm);
   if (query && ceCapturing) ceArGraphAllowed = false;
   decision->ceCapturing = ceCapturing;
   decision->ceArGraphAllowed = ceArGraphAllowed;
@@ -1345,35 +1345,37 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
   ncclSymRegType_t winRegType;
   NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
-  const rcclArchThresholds* const archTable = extAlgoArchTable(comm);
-  const bool ceArArchDefault = rcclCeAllReduceArchDefault(comm);
 
+  const rcclArchThresholds* const archTable = extAlgoArchTable(comm);
 
   // (1) Symmetric-window kernel eligibility takes priority over CE / DDA.
   // symkRequested is the raw "symk would run for these operands" signal and keeps
   // gating the CE 2-shot and DDA branches below, so registered buffers still reach
   // CE-registered at (5) rather than being claimed by a staging-buffer or fabric path.
   // symMaxR2 / symMaxR2Graph from the arch table only withdraws symk as the final
-  // choice once recv is registered and the message exceeds the CE/symk crossover
-  // size, letting CE-registered win instead.  kThreshUnlimited means no suppression.
-  const bool recvRegistered = (winRegType == ncclSymSendRegRecvReg ||
-                                winRegType == ncclSymSendNonregRecvReg);
+  // choice once the message exceeds the CE/symk crossover size, letting
+  // CE-registered win instead.  kThreshUnlimited means no suppression.
+  // recvRegistered is not needed here: isSymmetricKernelRequestedWin requires
+  // both windows to carry NCCL_WIN_COLL_SYMMETRIC, so symkRequested=true already
+  // implies recv is registered; when symkRequested=false suppression is moot.
   const size_t symMaxR2 = rcclSymMaxR2CapTab(archTable, ncclFuncAllReduce, ceCapturing);
-  const bool symSuppressedBySize = recvRegistered && msgBytes > symMaxR2;
+  const size_t symMinR2 = rcclSymMinR2CapTab(archTable, ncclFuncAllReduce);
+  const bool symSuppressedByMax = msgBytes > symMaxR2;
+  const bool symSuppressedByMin = symMinR2 > 0 && msgBytes < symMinR2;
   const bool symkRequested =
     (op == ncclSum) &&
     isSymmetricKernelRequestedWin(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, count, sendWin, recvWin);
-  const size_t arSymMinR2 = rcclSymMinR2CapTab(archTable, ncclFuncAllReduce);
   // symSuppressedByMin: DDA wins below symMinR2[AR]; do not block it with symkRequested.
-  const bool symSuppressedByMin = symkRequested && arSymMinR2 > 0 && msgBytes < arSymMinR2;
-  const bool symEligible = symkRequested && !symSuppressedByMin && !symSuppressedBySize;
+  const bool symEligible = symkRequested && !symSuppressedByMin && !symSuppressedByMax;
   INFO(NCCL_COLL,
-       "rcclSelectAllReduce: graph=%d symkRequested=%d symSuppressedBySize=%d symEligible=%d symMaxR2=%zu",
-       (int)ceCapturing, (int)symkRequested, (int)symSuppressedBySize, (int)symEligible, symMaxR2);
+       "rcclSelectAllReduce: graph=%d symkRequested=%d symSuppressedByMax=%d symEligible=%d symMaxR2=%zu",
+       (int)ceCapturing, (int)symkRequested, (int)symSuppressedByMax, (int)symEligible, symMaxR2);
+
 
   // develop's single "will CE AllReduce service this call" gate (collectives.cc
   // ncclAllReduce_impl). force = RCCL_FORCE_CE_ALLREDUCE; symReg probes whether the
   // buffers are CE-registrable symmetric windows (uses ncclDevSum, matching develop).
+  const bool ceArArchDefault = rcclCeAllReduceArchDefault(comm);
   const bool force = rcclForceCeAllReduceEnabledDef(ceArArchDefault);
   const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType, sendWin, recvWin);
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
@@ -1577,7 +1579,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   }
 
 
-  // Window registration type is needed for both symSuppressedBySize and CE
+  // Window registration type is needed for both symSuppressedByMax and CE
   // branch gates below; hoist the lookup here so it is computed once.
   struct ncclDevrWindow* sendWin = nullptr;
   struct ncclDevrWindow* recvWin = nullptr;
@@ -1586,22 +1588,20 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   ncclSymRegType_t winRegType;
   NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
   const rcclArchThresholds* const archTable = extAlgoArchTable(comm);
-  const bool agRecvRegistered = (winRegType == ncclSymSendRegRecvReg ||
-                                  winRegType == ncclSymSendNonregRecvReg);
-
   // (1) DDA fast paths. Symmetric-registered buffers defer to the symmetric
   // kernel (extracted downstream), so DDA is gated on !symEligible, as before.
   const bool agSymkRequested =
     isSymmetricKernelRequestedWin(comm, ncclFuncAllGather, (int)ncclDevSum, datatype, sendcount, sendWin, recvWin);
   // symMaxR2[AG] withdraws symk above a size threshold so CE-registered can win
-  // (mirrors the AllReduce symSuppressedBySize pattern).
+  // (mirrors the AllReduce symSuppressedByMax pattern).
   // symMinR2[AG] withdraws symk below a size threshold so DDA wins small messages
   // for R2 buffers, mirroring the AllReduce and ReduceScatter treatment.
+  // agRecvRegistered dropped: isSymmetricKernelRequestedWin requires both windows
+  // to carry NCCL_WIN_COLL_SYMMETRIC, so agSymkRequested=true implies recv registered.
   const size_t agSymMaxR2  = rcclSymMaxR2CapTab(archTable, ncclFuncAllGather, ceCapturing);
   const size_t agSymMinR2  = rcclSymMinR2CapTab(archTable, ncclFuncAllGather);
   const bool agSymSuppressedByMin  = agSymkRequested && agSymMinR2 > 0 && totalBytes < agSymMinR2;
-  const bool agSymSuppressedBySize = agSymkRequested && agRecvRegistered &&
-                                     totalBytes > agSymMaxR2;
+  const bool agSymSuppressedBySize = agSymkRequested && totalBytes > agSymMaxR2;
   const bool symEligible = agSymkRequested && !agSymSuppressedByMin && !agSymSuppressedBySize;
   // symEligible gates DDA below; the symk report itself is deferred until after
   // the CE-registered check so it loses to CE exactly as dispatch does
@@ -1837,12 +1837,11 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
                                   datatype, recvcount, rsSendWin, rsRecvWin);
   const size_t rsSymMinR2 = rcclSymMinR2CapTab(archTable, ncclFuncReduceScatter);
   const bool symSuppressedByMin = symkRequested && rsSymMinR2 > 0 && totalBytes < rsSymMinR2;
-  const bool rsRecvRegistered = (rsWinRegType == ncclSymSendRegRecvReg ||
-                                  rsWinRegType == ncclSymSendNonregRecvReg);
+  // rsRecvRegistered dropped: isSymmetricKernelRequestedWin requires both windows
+  // to carry NCCL_WIN_COLL_SYMMETRIC, so symkRequested=true implies recv registered.
   const size_t rsSymMaxR2 = rcclSymMaxR2CapTab(archTable, ncclFuncReduceScatter, /*graphMode=*/false);
-  const bool symSuppressedBySize = symkRequested && rsRecvRegistered &&
-                                   totalBytes > rsSymMaxR2;
-  const bool symEligible = symkRequested && !symSuppressedByMin && !symSuppressedBySize;
+  const bool symSuppressedByMax = symkRequested && totalBytes > rsSymMaxR2;
+  const bool symEligible = symkRequested && !symSuppressedByMin && !symSuppressedByMax;
 
   // (2) DDA fast paths. Symmetric wins when buffers are registered (-R 2); DDA
   // enters only when symk is unavailable. No Blocks helpers -> nMaxChannels 0.
@@ -2012,7 +2011,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   }
 #endif
 
-  // Hoist window lookup for symSuppressedBySize (needed before DDA and CE gates).
+  // Hoist window lookup for symSuppressedByMax (needed before DDA and CE gates).
   struct ncclDevrWindow* a2aSendWin = nullptr;
   struct ncclDevrWindow* a2aRecvWin = nullptr;
   ncclDevrFindWindow(comm, sendbuff, &a2aSendWin);
@@ -2020,14 +2019,13 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   ncclSymRegType_t a2aWinRegType;
   NCCLCHECK(ncclGetSymRegType(a2aSendWin, a2aRecvWin, &a2aWinRegType));
   const rcclArchThresholds* const archTable = extAlgoArchTable(comm);
-  const bool a2aRecvRegistered = (a2aWinRegType == ncclSymSendRegRecvReg ||
-                                   a2aWinRegType == ncclSymSendNonregRecvReg);
   // symMaxR2[A2A] withdraws symk above threshold so CE-registered can win.
+  // a2aRecvRegistered dropped: isSymmetricKernelRequestedWin requires both windows
+  // to carry NCCL_WIN_COLL_SYMMETRIC, so a2aSymkRequested=true implies recv registered.
   const bool a2aSymkRequested =
     isSymmetricKernelRequestedWin(comm, ncclFuncAlltoAll, (int)ncclDevSum, datatype, count, a2aSendWin, a2aRecvWin);
   const size_t a2aSymMaxR2 = rcclSymMaxR2CapTab(archTable, ncclFuncAlltoAll, /*graphMode=*/false);
-  const bool a2aSymSuppressedBySize = a2aSymkRequested && a2aRecvRegistered &&
-                                      totalBytes > a2aSymMaxR2;
+  const bool a2aSymSuppressedBySize = a2aSymkRequested && totalBytes > a2aSymMaxR2;
   const bool a2aSymEligible = a2aSymkRequested && !a2aSymSuppressedBySize;
 
   // (3) DDA fast paths. gfx1250 uses fabric tiers; other archs use IPC.
