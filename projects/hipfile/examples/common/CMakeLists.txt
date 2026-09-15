@@ -2,8 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Shared helpers (open/close/hash/etc.) used by the basics/ and async/
-# examples. Pulled out of the per-example sources to remove verbatim
+# Shared helpers (open/close/hash/etc.) used by the basics/, batch/, and
+# async/ examples. Pulled out of the per-example sources to remove verbatim
 # duplication; each example still drives the hipFile API directly in main()
 # so the example flow stays readable.
 add_library(examples_common STATIC examples_common.cpp)
