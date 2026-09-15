@@ -1701,8 +1701,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
                                    totalBytes >= agCeNonRegMin &&
                                    totalBytes <= agCeNonRegMax;
     if ((rcclParamForceCe() || agCeNonRegWindow) && ceScratch &&
-        winRegType != ncclSymSendRegRecvReg &&
-        winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment &&
+        !hasSysmemSegment &&
         comm->ddaScratch != nullptr && totalBytes <= (size_t)comm->ddaScratchBytes) {
       decision->algo = RCCL_CE_SCRATCH;
       return ncclSuccess;
@@ -2113,8 +2112,12 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     }
 
     // (6) CE scratch: unregistered buffers, RCCL_FORCE_CE, recv fits in DDA scratch.
-    if (rcclParamForceCe() && comm->ddaScratch != nullptr && totalBytes <= comm->ddaScratchBytes &&
-        ncclCeScratchAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, ncclSymSendNonregRecvNonreg)) {
+    // Guard a2aWinRegType to reject registered recv windows (they must not be routed through
+    // ddaScratch; that would clobber the user recv buffer).  Mirrors AllGather Branch #2 at
+    // line ~1643 and the taskAppend funnel guard at enqueue.cc:3978.
+    if (rcclParamForceCe() && !a2aHasSysmem &&
+        comm->ddaScratch != nullptr && totalBytes <= comm->ddaScratchBytes &&
+        ncclCeScratchAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType)) {
       decision->algo = RCCL_CE_SCRATCH;
       return ncclSuccess;
     }
