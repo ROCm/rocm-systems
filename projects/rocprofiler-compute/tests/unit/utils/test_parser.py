@@ -517,6 +517,19 @@ class TestApplyFilters:
         workload.filter_dispatch_ids = [">4"]
         assert apply_filters(workload, "/tmp", False, False).empty
 
+    def test_dispatch_greater_than_threshold_keeps_sparse_ids(self) -> None:
+        """'> n' where n is any integer greater than the number of
+        available dispatches, dispatch ids above n are kept."""
+        workload = _filter_workload()
+        workload.raw_pmc = pd.DataFrame({
+            "GPU_ID": [0, 0],
+            "Kernel_Name": ["vecCopy", "vecAdd"],
+            "Dispatch_ID": [1, 6],
+        })
+        workload.filter_dispatch_ids = [">4"]
+        filtered = apply_filters(workload, "/tmp", False, False)
+        assert list(filtered["Dispatch_ID"]) == [6]
+
     def test_gpu_integer_list_filter(self) -> None:
         """A GPU filter given as a list of integers keeps all matching rows."""
         workload = _filter_workload()
