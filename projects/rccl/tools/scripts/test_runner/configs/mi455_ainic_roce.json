@@ -1251,7 +1251,7 @@
         {
           "name": "DdaFabricEligibilityTest",
           "description": "DDA fabric eligibility tests (gfx1250)",
-          "test_filter": "DdaFabricEligibilityTest.*"
+          "test_filter": "DdaFabricEligibilityTest.*:DdaFabricLL128EligibilityTest.*"
         },
         {
           "name": "DdaFabricMaxBlocksTest",
