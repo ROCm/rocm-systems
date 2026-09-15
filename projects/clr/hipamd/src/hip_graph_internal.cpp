@@ -400,6 +400,19 @@ void Graph::ResolveSegmentDependencies() {
 }
 
 // ================================================================================================
+// True when node i is an uncaptured memcpy that will run on the SDMA engine, so it sits outside
+// the packet batch on an engine the compute queue does not order. Memcpy node types that don't
+// derive from GraphMemcpyNode (e.g. GraphDrvMemcpyNode) fall back to the conservative
+// "assume SDMA" behavior.
+static bool IsUncapturedSdmaMemcpy(const std::vector<bool>& capture_status,
+                                   const std::vector<Node>& nodes, size_t i) {
+  if (i >= nodes.size() || i >= capture_status.size() || capture_status[i]) return false;
+  if (nodes[i]->GetType() != hipGraphNodeTypeMemcpy) return false;
+  auto* memcpy_node = dynamic_cast<GraphMemcpyNode*>(nodes[i]);
+  return (memcpy_node == nullptr) || !memcpy_node->WillBypassSdmaEngine();
+}
+
+// ================================================================================================
 void GraphExecSegmented::BuildSyncPlan() {
   // Clean up any prior barrier packets
   for (auto* p : sync_plan_.barrier_packets) { delete[] p; }
@@ -507,12 +520,21 @@ void GraphExecSegmented::BuildSyncPlan() {
 
   // PASS 3: Materialize barrier packets and patch entries using the compact
   // hw_event slot indices computed in PASS 1.
-  for (const auto& segment : segments_) {
+  for (auto& segment : segments_) {
     // Minimal cross-stream/device dependency set computed in PASS 2 (redundant
     // same-stream barriers already removed).
     const std::vector<int>& barrier_dep_indices = effective_barrier_deps[segment.id];
 
     auto segBatchIt = segmentBatches_.find(segment.id);
+
+    // A segment that begins with an uncaptured SDMA memcpy has nothing ahead of the copy in
+    // its own batch, so the copy would take its wait from whatever the queue's signal pool
+    // cursor holds. Recorded here and consumed again at dispatch. Set before the early-out
+    // so a rebuild cannot leave a stale flag behind.
+    segment.leads_with_uncaptured_sdma =
+        segBatchIt != segmentBatches_.end() &&
+        IsUncapturedSdmaMemcpy(segBatchIt->second.node_capture_status, segment.nodes, 0);
+
     if (segBatchIt == segmentBatches_.end()) {
       continue;
     }
@@ -581,6 +603,21 @@ void GraphExecSegmented::BuildSyncPlan() {
         for (auto& nodeRange : firstBatch.nodeRanges) {
           nodeRange.startIndex += static_cast<size_t>(barrier_count);
         }
+      }
+    } else if (segment.leads_with_uncaptured_sdma) {
+      // No cross-stream dependency barrier, so the leading batch would be empty and the
+      // following SDMA copy would take its wait from a stale pool slot. Give it a lone
+      // barrier; EnqueueSegment dispatches it with a signal the copy picks up on the
+      // Compute->SDMA engine switch.
+      uint8_t* barrier_pkt = device->CreateBarrierPacket();
+      sync_plan_.barrier_packets.push_back(barrier_pkt);
+      firstBatch.dispatchPackets.insert(firstBatch.dispatchPackets.begin(), barrier_pkt);
+      firstBatch.dispatchKernelNames.insert(firstBatch.dispatchKernelNames.begin(),
+                                            kBarrierKernelNamePtr);
+      firstBatch.dispatchMetadataPackets.insert(firstBatch.dispatchMetadataPackets.begin(),
+                                                nullptr);
+      for (auto& nodeRange : firstBatch.nodeRanges) {
+        nodeRange.startIndex += 1;
       }
     }
 
@@ -2757,7 +2794,13 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
   if (segBatch && !segBatch->node_capture_status.empty() &&
       !segBatch->node_capture_status[0] &&
       batchIndex < segBatch->packet_batches.size()) {
-    status = dispatchCurrentBatch();
+    // A barrier packet carries no fence of its own, so the release scope has to be
+    // raised for the copy engine to observe the producer's writes. Same pairing as
+    // the mid-segment handoff below.
+    if (segment.leads_with_uncaptured_sdma) {
+      stream->vdev()->addSystemScope();
+    }
+    status = dispatchCurrentBatch(segment.leads_with_uncaptured_sdma);
     if (status != hipSuccess) return status;
   }
 
@@ -2778,21 +2821,10 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
         }
         // Skip all consecutive captured nodes that belong to this batch
         i += packetBatch.nodeRanges.size() - 1;
-        // Check if the next uncaptured node is an SDMA memcpy that needs handoff.
-        // Only set sdma_follows if that's the case and the node will use SDMA.
-        // Otherwise, staging-blit or other paths do not need the signal.
-        bool sdma_follows = false;
-        size_t next = i + 1;
-        if (next < segment.nodes.size() &&
-            next < segBatch->node_capture_status.size() &&
-            !segBatch->node_capture_status[next] &&
-            segment.nodes[next]->GetType() == hipGraphNodeTypeMemcpy) {
-          auto* memcpyNode = dynamic_cast<GraphMemcpyNode*>(segment.nodes[next]);
-          // Memcpy node types that don't derive from GraphMemcpyNode
-          // (e.g. GraphDrvMemcpyNode) fall back to the conservative
-          // "assume SDMA" behavior.
-          sdma_follows = (memcpyNode == nullptr) || !memcpyNode->WillBypassSdmaEngine();
-        }
+        // Hand the next node a signal only when it is an uncaptured SDMA memcpy.
+        // Staging-blit and other paths do not need one.
+        const bool sdma_follows =
+            IsUncapturedSdmaMemcpy(segBatch->node_capture_status, segment.nodes, i + 1);
         if (sdma_follows && !packetBatch.dispatchPackets.empty()) {
           stream->vdev()->addSystemScope();
         }
