@@ -1164,7 +1164,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         while True:
             poll_runs = get_check_runs(owner=owner, repo=repo, sha=sha, token=token)  # type: ignore[arg-type]
             by_name = effective_run_by_name(poll_runs)
-            # Worst-wins, so a still-running duplicate keeps us polling.
+            # Worst-wins: a failed duplicate short-circuits the wait, a pending one keeps us polling.
             all_concluded = all(
                 by_name.get(n) is not None and by_name[n].get("conclusion") is not None
                 for n in policy.required_checks

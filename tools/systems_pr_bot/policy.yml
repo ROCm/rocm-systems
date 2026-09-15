@@ -172,7 +172,8 @@ checks:
         checks *nothing* under them and exits 0:
 
         `projects/amdsmi` · `projects/rccl` · `projects/rdc` ·
-        `projects/rocm-smi-lib` · `projects/rocprofiler-compute`
+        `projects/amdsmi` · `projects/cuid` · `projects/rccl` ·
+        `projects/rdc` · `projects/rocm-smi-lib` · `projects/rocprofiler-compute`
 
         ```bash
         pre-commit run -c projects/<name>/.pre-commit-config.yaml \

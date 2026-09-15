@@ -86,7 +86,7 @@ def check_subtrees_materialised(raw_files: List[str], subtrees: List[str]) -> Li
     """
     missing: List[str] = []
     for subtree in sorted(group_files_by_subtree(raw_files, subtrees)):
-        if not os.path.isfile(config_for(subtree)):
+        if not os.path.isdir(subtree):
             missing.append(subtree)
     return missing
 

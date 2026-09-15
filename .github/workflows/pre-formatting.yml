@@ -23,6 +23,8 @@ on:
       - ".github/scripts/pr_detect_changed_subtrees.py"
       - ".github/repos-config.json"
       - ".pre-commit-config.yaml"
+      # The other half of TestExcludedProjectListsAgree; drift here must trigger the guard too.
+      - "tools/systems_pr_bot/policy.yml"
       # No '!**/*.md'-style negations: a paths: miss publishes no check-run at all, which the bot
       # waits 900s for. Skipping is not an option here, only not-running.
 
@@ -42,7 +44,9 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
-          sparse-checkout: .github
+          sparse-checkout: |
+            .github
+            tools/systems_pr_bot
           sparse-checkout-cone-mode: true
           # Merge ref plus its first parent, which is the base it was computed against.
           fetch-depth: 2
@@ -55,7 +59,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pydantic pytest requests pre-commit
+          pip install pydantic pytest pyyaml requests pre-commit
 
       - name: Unit-test the subtree runner
         # This verdict is only as good as the script that picks the files.
