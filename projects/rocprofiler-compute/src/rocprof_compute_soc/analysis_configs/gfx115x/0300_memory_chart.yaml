@@ -248,10 +248,10 @@ Panel Config:
           value: SUM(GL1C_GL2_REQ_WRITE_sum) / SUM($denom)
           unit: (Requests + $normUnit)
         GL1-GL2 Read Bandwidth:
-          value: SUM(GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          value: SUM(GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
         GL1-GL2 Write Bandwidth:
-          value: SUM(GL1C_GL2_REQ_WRITE_32B_sum*32 + GL1C_GL2_REQ_WRITE_64B_sum*64) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          value: SUM(GL1C_GL2_REQ_WRITE_32B_sum * 32 + GL1C_GL2_REQ_WRITE_64B_sum * 64) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
         GL1-GL2 Read Latency:
           value: SUM(GL1C_GL2_REQ_READ_LATENCY_sum) / SUM(GL1C_GL2_REQ_READ_sum)
@@ -294,7 +294,7 @@ Panel Config:
           unit: Percent
         GL2 Cache Read BW:
           # 32/64/128 B read bins plus 96 B compressed reads; EA 96 B (GL2C_EA_RDREQ_96B) is fabric-side (see Speed-of-Light).
-          value: SUM(GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          value: SUM(GL2C_READ_32_REQ_sum * 32 + GL2C_READ_64_REQ_sum * 64 + GL2C_READ_128_REQ_sum * 128 + GL2C_COMPRESSED_READ_96_REQ_sum * 96) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
         GL2 Cache Write BW:
           # Note: GL2C write requests can be 32B or 64B (no 128B writes documented).

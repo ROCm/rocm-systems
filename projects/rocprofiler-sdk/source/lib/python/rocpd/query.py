@@ -69,10 +69,14 @@ def export_sqlite_query(
     dashboard_template_path (a Jinja2 template file). If omitted,
     a built-in default template is used.
     """
-
     try:
         import pandas as pd
+    except ImportError as e:
+        raise ImportError(
+            "pandas module not found. Please install it using 'pip install pandas' to export to other formats"
+        ) from e
 
+    try:
         conn = conn.connection if isinstance(conn, RocpdImportData) else conn
 
         # 1) Run the query via pandas

@@ -66,6 +66,7 @@ if(NOT TARGET rocprofiler-sdk::rocprofiler-sdk-cereal)
             cereal
             GIT_REPOSITORY https://github.com/jrmadsen/cereal.git
             GIT_TAG rocprofiler
+            GIT_SHALLOW TRUE
             SOURCE_DIR ${PROJECT_BINARY_DIR}/external/cereal BINARY_DIR
             ${PROJECT_BINARY_DIR}/external/build/cereal-build SUBBUILD_DIR
             ${PROJECT_BINARY_DIR}/external/build/cereal-subdir)
@@ -88,6 +89,7 @@ if(NOT TARGET rocprofiler-sdk::rocprofiler-sdk-perfetto)
         perfetto
         GIT_REPOSITORY https://github.com/google/perfetto
         GIT_TAG v44.0
+        GIT_SHALLOW TRUE
         SOURCE_DIR ${PROJECT_BINARY_DIR}/external/perfetto BINARY_DIR
         ${PROJECT_BINARY_DIR}/external/build/perfetto-build SUBBUILD_DIR
         ${PROJECT_BINARY_DIR}/external/build/perfetto-subdir)
@@ -196,7 +198,7 @@ function(rocprofiler_add_integration_execute_test NAME)
         "UNSTABLE" # disable when ROCPROFILER_DISABLE_UNSTABLE_CTESTS=ON
         "DISABLED_CODECOV" # disable when ROCPROFILER_BUILD_CODECOV=ON
         )
-    set(_SINGLE_OPTS "TARGET" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "LABELS" "DISABLED"
+    set(_SINGLE_OPTS "TARGET" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "DISABLED"
                      "DISABLED_MEMCHECKS")
     set(_MULTI_OPTS
         "ARGS"
@@ -204,6 +206,7 @@ function(rocprofiler_add_integration_execute_test NAME)
         "ATTACHED_FILES"
         "ATTACHED_FILES_ON_FAIL"
         "ENVIRONMENT"
+        "LABELS"
         "PRELOAD"
         "FIXTURES_SETUP"
         "FIXTURES_REQUIRED"
@@ -371,13 +374,14 @@ function(rocprofiler_add_integration_validate_test NAME)
         "STRIP_PARAM_BRACKETS"
         "INCLUDE_FILE_PATH"
         "BUNDLE_TESTS")
-    set(_SINGLE_OPTS "TARGET_DEPENDS" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "LABELS"
-                     "DISABLED" "DISABLED_MEMCHECKS" "PYTHON_EXECUTABLE")
+    set(_SINGLE_OPTS "TARGET_DEPENDS" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "DISABLED"
+                     "DISABLED_MEMCHECKS" "PYTHON_EXECUTABLE")
     set(_MULTI_OPTS
         "TEST_PATHS"
         "CONFIG"
         "COPY"
         "ARGS"
+        "LABELS"
         "DISCOVERY_ARGS"
         "ATTACHED_FILES"
         "ATTACHED_FILES_ON_FAIL"
@@ -515,4 +519,45 @@ function(rocprofiler_add_integration_validate_test NAME)
         DISCOVERY_EXTRA_ARGS ${arg_DISCOVERY_ARGS}
         PROPERTIES ${_props})
 
+endfunction()
+
+# Registers a ctest that removes the given DIRECTORIES and/or FILES via `cmake -E rm -rf`.
+# Intended to be used as a fixture setup step so that stale output from a prior run is
+# cleared before an execute test writes fresh artifacts, e.g.:
+#
+# rocprofiler_add_integration_cleanup_test(foo DIRECTORIES ${out} FIXTURES_SETUP
+# foo-clean) rocprofiler_add_integration_execute_test(foo ... FIXTURES_REQUIRED foo-clean)
+#
+# TODO: `rm -rf` is intentionally blunt for now; replace with a more targeted cleanup once
+# the set of artifacts each test produces is nailed down.
+function(rocprofiler_add_integration_cleanup_test NAME)
+    cmake_parse_arguments(arg "" "" "DIRECTORIES;FILES;LABELS;FIXTURES_SETUP" ${ARGN})
+
+    rocprofiler_set_integration_test_name(arg_NAME "${NAME}" "cleanup")
+
+    if(NOT arg_DIRECTORIES AND NOT arg_FILES)
+        message(
+            SEND_ERROR
+                "rocprofiler_add_integration_cleanup_test(${NAME}): one of DIRECTORIES or FILES must be specified"
+            )
+        return()
+    endif()
+
+    if(NOT arg_FIXTURES_SETUP)
+        set(arg_FIXTURES_SETUP ${NAME})
+    endif()
+
+    if(NOT "integration-tests" IN_LIST arg_LABELS)
+        list(APPEND arg_LABELS "integration-tests")
+    endif()
+
+    if(NOT "cleanup" IN_LIST arg_LABELS)
+        list(APPEND arg_LABELS "cleanup")
+    endif()
+
+    add_test(NAME "${arg_NAME}" COMMAND ${CMAKE_COMMAND} -E rm -rf ${arg_DIRECTORIES}
+                                        ${arg_FILES})
+
+    set_tests_properties(${arg_NAME} PROPERTIES LABELS "${arg_LABELS}" FIXTURES_SETUP
+                                                "${arg_FIXTURES_SETUP}")
 endfunction()

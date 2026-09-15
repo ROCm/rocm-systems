@@ -93,7 +93,7 @@ target_link_libraries(hiprtc PUBLIC ${CMAKE_DL_LIBS})
 # This is required for static libraries
 if(NOT BUILD_SHARED_LIBS)
   find_package(hsa-runtime64)
-  find_package(amd_comgr)
+  find_package(amd_comgr 3.2 REQUIRED)
   target_link_libraries(hiprtc PRIVATE
     pthread numa rt c amd_comgr hsa-runtime64::hsa-runtime64)
 endif()
@@ -176,6 +176,9 @@ ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_bf16.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_ocp_types.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_mx_common.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_fp8.h
+${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_ocp_host.hpp
+${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_fp6.h
+${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_fp4.h
 )
 
 # Generate required HIPRTC files.

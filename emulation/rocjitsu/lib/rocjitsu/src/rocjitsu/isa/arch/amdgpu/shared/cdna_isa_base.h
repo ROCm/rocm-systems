@@ -19,13 +19,14 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_CDNA_ISA_BASE_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_CDNA_ISA_BASE_H_
 
-#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/bitfield.h"
 
 #include <cstdint>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+class Wavefront;
 
 /// @brief Shared STATUS register layout for all CDNA ISAs (GFX9 family).
 ///
@@ -90,13 +91,17 @@ public:
 /// `Isa` struct adds `Decoder`, `MachineInst`, `OperandType`, and `StatusReg`
 /// type aliases.
 struct CdnaIsaBase {
-  static constexpr uint32_t WF_SIZE = 64;               ///< Lanes per wavefront (Wave64).
-  static constexpr uint32_t WF_SIZE_MAX = 64;           ///< CDNA is Wave64-only.
-  static constexpr uint32_t MAX_SGPRS_PER_WF = 102;     ///< SGPRs per wavefront.
-  static constexpr uint32_t MAX_VGPRS_PER_WF = 256;     ///< VGPRs per wavefront.
+  static constexpr uint32_t WF_SIZE = 64;           ///< Lanes per wavefront (Wave64).
+  static constexpr uint32_t WF_SIZE_MAX = 64;       ///< CDNA is Wave64-only.
+  static constexpr uint32_t MAX_WF_SLOTS = 32;      ///< Maximum simulated CU wave slots.
+  static constexpr uint32_t MAX_SGPRS_PER_WF = 102; ///< SGPRs per wavefront.
+  static constexpr uint32_t MAX_VGPRS_PER_WF = 256; ///< VGPRs per wavefront.
+  static constexpr uint32_t MAX_ADDRESSABLE_VGPRS_PER_WF =
+      MAX_VGPRS_PER_WF;                                 ///< Maximum ordinary VGPR address span.
   static constexpr uint32_t MAX_ACC_VGPRS_PER_WF = 0;   ///< AccVGPRs (0 = absent; CDNA1 default).
   static constexpr uint8_t WAITCNT_LGKMCNT_MASK = 0x0F; ///< lgkmcnt mask in S_WAITCNT [11:8].
   static constexpr bool SRAM_ECC = false;               ///< CDNA1 default: no SRAM ECC.
+  static constexpr bool MODE_HAS_GPR_IDX_EN = true;     ///< MODE[27] is GPR_IDX_EN on CDNA.
 
   using Context = amdgpu::Wavefront;
 };

@@ -34,6 +34,52 @@ architectures:
   gfx950:
     same_bucket_priority_metric_ids: {}
 
+  # gfx1250: 17 perfmon passes at full counter set. Priority metrics steer
+  # metric-aware coalescing without increasing pass count (verified via
+  # soc_base._allocate_perfmon_counter_files simulation).
+  gfx1250:
+    same_bucket_priority_metric_ids:
+      # 2.1.x = panel 200, table 201 (SOL): SP_VALU_* on SQ block must not
+      # share a pass with SQ_VMEM_* (hardware returns zero for SP FLOP events).
+      "2.1.0":
+        name: "VALU FLOPs (FP16)"
+      "2.1.1":
+        name: "VALU FLOPs (FP32)"
+      "2.1.2":
+        name: "VALU FLOPs (FP64)"
+      "2.1.3":
+        name: "VALU IOPs"
+      "2.1.4":
+        name: "VALU Trans FLOPs (FP16)"
+      "2.1.5":
+        name: "VALU Trans FLOPs (FP32)"
+      "2.1.6":
+        name: "VALU Trans FLOPs (FP64)"
+      # 6.1.0 = panel 600, table 601 (SPI), metric index 0.
+      "6.1.0":
+        name: "SPI Utilization"
+      # 8.1.0 = panel 800, table 801 (TXA), metric index 0.
+      "8.1.0":
+        name: "TXA Utilization"
+      # 9.1.0 = panel 900, table 901 (GL0), metric index 0.
+      "9.1.0":
+        name: "GL0 Cache Utilization"
+      # 9.3.6 = panel 900, table 903 (GL0 Cache Stall), metric index 6.
+      "9.3.6":
+        name: "Return Queue Pending Stall Rate"
+      # 9.4.1 = panel 900, table 904 (LDS Accesses), metric index 1.
+      "9.4.1":
+        name: "LDS Utilization - Load"
+      # 9.4.2 = panel 900, table 904 (LDS Accesses), metric index 2.
+      "9.4.2":
+        name: "LDS Utilization - Store"
+      # 9.4.3 = panel 900, table 904 (LDS Accesses), metric index 3.
+      "9.4.3":
+        name: "LDS Utilization - Atomics"
+      # 17.1.1 = panel 1700, table 1701 (GRBM), metric index 1.
+      "17.1.1":
+        name: "CP Utilization"
+
   # RDNA3.5 (gfx115x): throughput + cache hit-rate + GRBM utilization metrics
   # that benefit from single-pass PMC grouping for stable formulas.
   gfx115x:

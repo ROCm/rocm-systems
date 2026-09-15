@@ -85,6 +85,7 @@ class RdcMetricFetcherImpl final : public RdcMetricFetcher {
 
   uint64_t now();
   void get_ecc(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
+  void get_afid(uint32_t gpu_index, rdc_field_value* value);
   void get_ecc_total(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
   void get_ecc_deferred(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
   void get_ecc_deferred_total(uint32_t gpu_index, rdc_field_value* value);
@@ -97,7 +98,9 @@ class RdcMetricFetcherImpl final : public RdcMetricFetcher {
                                 amdsmi_processor_handle& processor_handle);
   rdc_status_t fetch_gpu_partition_field_(uint32_t gpu_index, rdc_field_t field_id,
                                           rdc_field_value* value);
+#ifdef ENABLE_ESMI_LIB
   rdc_status_t fetch_cpu_field_(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
+#endif
 
   bool async_fetching = false;
 

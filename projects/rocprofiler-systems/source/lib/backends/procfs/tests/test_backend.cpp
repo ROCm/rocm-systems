@@ -40,7 +40,7 @@ TEST_F(procfs_backend_test, reads_rusage)
 
 TEST_F(procfs_backend_test, socket_topology_nonempty)
 {
-    backend drv(cpu_count);
+    const backend drv(cpu_count);
 
     const auto& topology = drv.get_socket_topology();
 

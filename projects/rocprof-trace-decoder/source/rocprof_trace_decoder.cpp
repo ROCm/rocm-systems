@@ -345,7 +345,17 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     if (!se_data_callback || !trace_callback || !isa_callback)
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    return parse_data_impl(se_data_callback, trace_callback, isa_callback, userdata);
+    // Same guard as the handle-based rocprof_trace_decoder_parse(): this is a C ABI, so an
+    // escaping exception is undefined behaviour for the caller. The decode paths throw bare
+    // std::exception() on malformed input (e.g. gfx9token.h wave-id checks).
+    try
+    {
+        return parse_data_impl(se_data_callback, trace_callback, isa_callback, userdata);
+    }
+    catch (...)
+    {
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA;
+    }
 }
 
 // V2 API: handle-based with built-in code object management
@@ -568,6 +578,18 @@ ROCPROF_TRACE_DECODER_API const char* rocprof_trace_decoder_get_status_string(
     {
         return "STATUS_UNKNOWN";
     }
+}
+
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_get_version(rocprof_trace_decoder_version_t* version)
+{
+    if (version == nullptr) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    version->size = sizeof(rocprof_trace_decoder_version_t);
+    version->major = ROCPROF_TRACE_DECODER_VERSION_MAJOR;
+    version->minor = ROCPROF_TRACE_DECODER_VERSION_MINOR;
+    version->patch = ROCPROF_TRACE_DECODER_VERSION_PATCH;
+    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
 
 } // extern "C"

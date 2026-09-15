@@ -4,6 +4,7 @@
  */
 
 #include "async.h"
+#include "backend.h"
 #include "context.h"
 #include "hipfile.h"
 #include "stream.h"
@@ -62,7 +63,6 @@ AsyncMonitor::completeOp(AsyncOp *op)
         }
         op->file.reset();
         op->buffer.reset();
-        op->stream.reset();
         completed_ops.push_back(op);
     }
     cv.notify_one();
@@ -96,13 +96,13 @@ AsyncOp::AsyncOp(IoType _io_type, std::shared_ptr<IFile> _file, std::shared_ptr<
                  hoff_t *_buffer_offset, ssize_t *_bytes_transferred)
     : io_type{_io_type}, file{std::move(_file)}, buffer{std::move(_buffer)}, stream{std::move(_stream)},
 
-      size{stream->fixedIOSize() ? std::variant<size_t, size_t *>{*_size}
+      size{stream->fixedIOSize() ? std::variant<size_t, size_t *>{std::min(*_size, hipFile::getMaxRwCount())}
                                  : std::variant<size_t, size_t *>{_size}},
       file_offset{stream->fixedFileOffset() ? std::variant<const hoff_t, hoff_t *>{*_file_offset}
                                             : std::variant<const hoff_t, hoff_t *>{_file_offset}},
       buffer_offset{stream->fixedBufferOffset() ? std::variant<const hoff_t, hoff_t *>{*_buffer_offset}
                                                 : std::variant<const hoff_t, hoff_t *>{_buffer_offset}},
-      bytes_transferred{_bytes_transferred}
+      bytes_transferred{_bytes_transferred}, bytes_transferred_internal{0}
 {
 }
 
@@ -110,4 +110,23 @@ AsyncOp::~AsyncOp()
 {
 }
 
+}
+
+extern "C" {
+void
+async_io_cleanup(void *userargs)
+{
+    using namespace hipFile;
+    auto     op                         = static_cast<AsyncOp *>(userargs);
+    ssize_t *bytes_transferred          = op->bytes_transferred;
+    ssize_t  bytes_transferred_internal = op->bytes_transferred_internal;
+    try {
+        Context<AsyncMonitor>::get()->completeOp(op);
+    }
+    catch (const std::invalid_argument &) {
+        *bytes_transferred = -hipFileInternalError;
+        return;
+    }
+    *bytes_transferred = bytes_transferred_internal;
+}
 }

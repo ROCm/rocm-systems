@@ -44,7 +44,7 @@ class IPCContext : public Context {
   __device__ void putmem_nbi(void *dest, const void *source, size_t nelems,
                              int pe);
 
-  __device__ void getmem_nbi(void *dest, const void *source, size_t size,
+  __device__ void getmem_nbi(void *dest, const void *source, size_t nelems,
                              int pe);
 
   __device__ void fence();
@@ -147,19 +147,23 @@ class IPCContext : public Context {
   template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce_wave(rocshmem_team_t team, T *dest, const T *source, int nreduce);
 
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int reduce_scatter_wave(rocshmem_team_t team, T *dest, const T *source,
+                                     int nreduce);
+
   template <typename T>
   __device__ void broadcast_wg(rocshmem_team_t team, T *dest, const T *source,
                             int nelems, int pe_root);
 
   __device__ void broadcastmem_wg(rocshmem_team_t team,
-                                void *dest, const void *source, int nelement, int PE_root);
+                                void *dest, const void *source, int nelems, int PE_root);
 
   template <typename T>
   __device__ int broadcast_wave(rocshmem_team_t team,
-                                T *dest, const T *source, int nelement, int PE_root);
+                                T *dest, const T *source, int nelems, int PE_root);
 
   __device__ int broadcastmem_wave(rocshmem_team_t team,
-                                void *dest, const void *source, int nelement, int PE_root);
+                                void *dest, const void *source, int nelems, int PE_root);
 
   template <typename T>
   __device__ void alltoall_wg(rocshmem_team_t team, T *dest, const T *source,
@@ -176,10 +180,10 @@ class IPCContext : public Context {
                             const size_t source_displs[]);
 
   template <typename T>
-  __device__ int alltoall_wave(rocshmem_team_t team, T* dest, 
+  __device__ int alltoall_wave(rocshmem_team_t team, T* dest,
                                   const T* source, int nelems);
 
-  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest, 
+  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest,
                                   const void* source, int nelems);
 
   template <typename T>
@@ -206,7 +210,7 @@ class IPCContext : public Context {
   __device__ void putmem_nbi_wg(void *dest, const void *source, size_t nelems,
                                 int pe);
 
-  __device__ void getmem_nbi_wg(void *dest, const void *source, size_t size,
+  __device__ void getmem_nbi_wg(void *dest, const void *source, size_t nelems,
                                 int pe);
 
   __device__ void putmem_wave(void *dest, const void *source, size_t nelems,
@@ -218,7 +222,7 @@ class IPCContext : public Context {
   __device__ void putmem_nbi_wave(void *dest, const void *source, size_t nelems,
                                   int pe);
 
-  __device__ void getmem_nbi_wave(void *dest, const void *source, size_t size,
+  __device__ void getmem_nbi_wave(void *dest, const void *source, size_t nelems,
                                   int pe);
 
   template <typename T>
@@ -385,6 +389,43 @@ class IPCContext : public Context {
                                     const size_t* start_coord, const size_t* boundary,
                                     int ndim, size_t element_size, int root, uint64_t flags);
 
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int tile_reduce_typed_impl(rocshmem_team_t team,
+                                        const void* src_data,
+                                        const size_t* src_strides,
+                                        const size_t* start_coord,
+                                        const size_t* boundary, int ndim,
+                                        int root, size_t segment_start,
+                                        size_t segment_elems,
+                                        size_t segment_capacity,
+                                        int worker_id, int worker_count);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int tile_reduce_typed(rocshmem_team_t team, void* dst_data,
+                                   const void* src_data,
+                                   const size_t* dst_strides,
+                                   const size_t* src_strides,
+                                   const size_t* start_coord,
+                                   const size_t* boundary, int ndim, int root);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int tile_reduce_typed_wave(rocshmem_team_t team, void* dst_data,
+                                        const void* src_data,
+                                        const size_t* dst_strides,
+                                        const size_t* src_strides,
+                                        const size_t* start_coord,
+                                        const size_t* boundary, int ndim,
+                                        int root);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int tile_reduce_typed_wg(rocshmem_team_t team, void* dst_data,
+                                      const void* src_data,
+                                      const size_t* dst_strides,
+                                      const size_t* src_strides,
+                                      const size_t* start_coord,
+                                      const size_t* boundary, int ndim,
+                                      int root);
+
  private:
 
   //context class has IpcImpl object (ipcImpl_)
@@ -407,7 +448,7 @@ class IPCContext : public Context {
                                       int stride, int pe_size,
                                       long *p_sync);
 
-  __device__ void internal_put_broadcastmem_wave(void *dst, const void *src, int nelems, 
+  __device__ void internal_put_broadcastmem_wave(void *dst, const void *src, int nelems,
                                                  int pe_root, int pe_start, int stride, int pe_size);
 
   __device__ void internal_get_broadcastmem_wave(void *dst, const void *src, int nelems, int pe_root);
@@ -417,9 +458,9 @@ class IPCContext : public Context {
                                       int pe_root, int pe_start,
                                       int stride, int pe_size,
                                       long *p_sync);
-  
+
   template <typename T>
-  __device__ void internal_put_broadcast_wave(T *dst, const T *src, int nelems, 
+  __device__ void internal_put_broadcast_wave(T *dst, const T *src, int nelems,
                                                  int pe_root, int pe_start, int stride, int pe_size);
 
   template <typename T>
@@ -428,9 +469,16 @@ class IPCContext : public Context {
   template <typename T>
   __device__ void fcollect_linear_wg(rocshmem_team_t team, T *dest,
                                   const T *source, int nelems);
-                                  
+
   __device__ void fcollectmem_linear_wg(rocshmem_team_t team, void *dest,
                                   const void *source, int nelems);
+
+ template <typename T>
+  __device__ void alltoall_linear_wg(rocshmem_team_t team, T *dest,
+                                  const T *source, int nelems);
+  template <typename T>
+  __device__ void alltoall_linear_thread_puts_wg(rocshmem_team_t team, T *dest,
+                                  const T *source, int nelems);
 
   __device__ void internal_alltoallmem_wg(rocshmem_team_t team, void *dst,
                                           const void *src, int nelems);

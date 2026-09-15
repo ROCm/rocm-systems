@@ -1,6 +1,7 @@
 .. meta::
    :description:  Quickstart guide for ROCm Compute Profiler (rocprofiler-compute)
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, AMD, Profile, Analyze, CLI, performance counters, quickstart, guide
+   :keywords: Omniperf, ROCm, ROCm Optiq, profiler, tool, Instinct, AMD,
+              Profile, Analyze, CLI, performance counters, quickstart, guide
 
 **********
 Quickstart
@@ -216,24 +217,25 @@ Use multiple blocks (5 and 7) for detailed metric collection
 Analysis
 =========
 
-Analysis phase refers to the process of examining profiling data to understand GPU kernel performance, identify bottlenecks, and determine optimization opportunities. ROCm Compute Profiler provides multiple analysis modes to accommodate different workflows.
+Analysis phase refers to the process of examining profiling data to understand GPU kernel
+performance, identify bottlenecks, and determine optimization opportunities. Multiple
+analysis options are available to accommodate different workflows.
 
 .. list-table::
   :header-rows: 1
-  :widths: 25 25 25
+  :widths: 25 25
 
-  * - Mode
+  * - Analysis option
     - When to Use
-    - Links to docs
   * - :doc:`CLI (Command Line Interface) </how-to/analyze/cli>`
     - Fast, scriptable insights; great for automation and quick checks.
-    - `CLI analysis <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/docs/how-to/analyze/cli.rst>`_
   * - :doc:`GUI (Standalone Graphical Interface) </how-to/analyze/standalone-gui>`
     - Interactive exploration, visual drill-down, and detailed charts.
-    - `Standalone GUI analysis <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/docs/how-to/analyze/standalone-gui.rst>`_
   * - :doc:`TUI (Textual User Interface) </how-to/analyze/tui>`
     - Lightweight, keyboard-driven experience for terminals.
-    - `Text-based User Interface (TUI) analysis <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/docs/how-to/analyze/tui.rst>`_
+  * - :doc:`ROCm Optiq </how-to/analyze/optiq>`
+    - Interactive graphical exploration of generated ROCm Compute Profiler
+      analysis databases.
 
 **Analysis Command:**
 

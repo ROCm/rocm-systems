@@ -56,9 +56,8 @@ class ROHostContext;
  * the host (which is an inversion of the normal behavior).
  */
 class ROBackend : public Backend {
-  using RetBufferProxyT = DeviceProxy<HIPAllocator, uint64_t>;
-  using StatusProxyT =
-          DeviceProxy<HIPDefaultFinegrainedAllocator, char>;
+  using RetBufferProxyT = DeviceProxy<uint64_t>;
+  using StatusProxyT = DeviceProxy<char>;
 
  public:
   /**
@@ -169,12 +168,12 @@ class ROBackend : public Backend {
   /**
    * @brief Handle to block resources
    */
-  BlockHandleProxyT block_handle_proxy_;
+  BlockHandleProxy block_handle_proxy_;
 
   /**
    * @brief Handle to block resources
    */
-  DefaultBlockHandleProxyT default_block_handle_proxy_;
+  DefaultBlockHandleProxy default_block_handle_proxy_;
 
  protected:
   /**
@@ -268,7 +267,7 @@ class ROBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  HdpProxy<HIPHostAllocator> hdp_proxy_{};
+  HdpProxy hdp_proxy_{};
 
   /**
    * @brief Handle to device profiler memory
@@ -347,6 +346,7 @@ class ROBackend : public Backend {
   /**
    * @brief Return buffer for rocshmem_g API
    */
+  HIPAllocator ret_buffer_alloc_{};
   RetBufferProxyT g_ret_buffer_;
   RetBufferProxyT g_ret_buffer_default_ctx_;
 
@@ -363,6 +363,7 @@ class ROBackend : public Backend {
    * operation completes. The GPU then resets status back to zero. There is
    * a separate status variable for each work-item in a RO Context
    */
+  HIPAllocatorFinegrained status_alloc_{};
   StatusProxyT status_;
   StatusProxyT status_default_ctx_;
 };

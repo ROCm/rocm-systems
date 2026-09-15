@@ -32,8 +32,14 @@
 extern "C" {
 #endif
 
-/* Forward declaration for debug trap ioctl arguments */
+/* Forward declarations for the KFD ioctl arguments the entry points below take
+ * by pointer. linux/kfd_ioctl.h defines them and the dev package excludes it,
+ * so without these a consumer's C compiler invents a type scoped to the
+ * prototype and the pointer it passes is a different one.
+ */
 struct kfd_ioctl_dbg_trap_args;
+struct kfd_runtime_info;
+struct kfd_dbg_device_info_entry;
 
 /**
   "Opens" the HSA kernel driver for user-kernel mode communication.
@@ -523,6 +529,18 @@ hsaKmtAvailableMemory(
     );
 
 /**
+  Returns the KFD topology-first GPU used as the default host/GTT anchor
+  (libhsakmt gpu_mem[0] / first_gpu_mem).
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetDefaultHostGpu(
+    HSAuint32 *NodeId,  // OUT
+    HSAuint32 *GpuId    // OUT
+    );
+
+/**
   Registers with KFD a memory buffer that may be accessed by the GPU
 */
 
@@ -784,7 +802,7 @@ hsaKmtMapMemoryToGPUNodes(
     void*           MemoryAddress,         //IN (page-aligned)
     HSAuint64       MemorySizeInBytes,     //IN (page-aligned)
     HSAuint64*      AlternateVAGPU,        //OUT (page-aligned)
-    HsaMemMapFlags  MemMapFlags,           //IN
+    HsaMemFlags     MemFlags,              //IN
     HSAuint64       NumberOfNodes,         //IN
     HSAuint32*      NodeArray              //IN
     );

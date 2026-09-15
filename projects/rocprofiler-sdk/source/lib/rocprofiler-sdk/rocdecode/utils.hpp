@@ -25,7 +25,7 @@
 #include "lib/common/stringize_arg.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/details/format.hpp"
 
-#include "fmt/core.h"
+#include "fmt/format.h"
 #include "fmt/ranges.h"
 
 #include <sstream>

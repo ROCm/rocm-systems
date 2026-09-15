@@ -70,10 +70,22 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   NTSTATUS ret = ParseDeviceInfo();
   pr_rocr_info("kmd_version:%" PRIu32 "\n", device_info_.kmd_version);
   device_info_.hwsInfo.hwsMask.aql_queue &= !dxg_runtime->use_pm4_;
-  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d use_pm4_override=%" PRIu64 "\n",
+  // The KMD only accepts PM4 packets on COMPUTE0, but wkmi defaults compute_schedid
+  // to COMPUTE1 whenever AQL-on-compute1 is supported. Override to COMPUTE0 for the
+  // PM4 path.
+  if (dxg_runtime->use_pm4_) {
+     if (EngineOrdinal(kSchedulerIdCompute0, &device_info_) >= 0) {
+       device_info_.compute_schedid = kSchedulerIdCompute0;
+     } else {
+       pr_err("PM4 path requires COMPUTE0 schedId=%" PRIu32 " but it is not present; keeping compute_schedid=%" PRIu32 "\n",
+              kSchedulerIdCompute0, device_info_.compute_schedid);
+     }
+  }
+  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d use_pm4_override=%" PRIu64
+           " compute_schedid=%" PRIu32 "\n",
            device_info_.hwsInfo.hwsMask.aql_queue,
            device_info_.hwsInfo.hwsMask.computeHwsEnabled,
-           (uint64_t)dxg_runtime->use_pm4_);
+           (uint64_t)dxg_runtime->use_pm4_, device_info_.compute_schedid);
 
   if (ret == STATUS_OBJECT_NAME_NOT_FOUND || ret == STATUS_REVISION_MISMATCH) {
     // Skip adapter
@@ -86,6 +98,15 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
     init_status_ = kDeviceFailed;
     return;
   }
+
+  if (device_info_.max_scratch_slots_per_cu == 0)
+    device_info_.max_scratch_slots_per_cu = 32;
+
+  unsigned ver = static_cast<unsigned>(dxg_runtime->wddm_version);
+  if (ver)
+    pr_rocr_info("WDDM version %u.%u\n", ver / 1000, (ver % 1000) / 100);
+  else
+    pr_rocr_info("WDDM version: unknown\n");
 
   CreateDevice();
   SetPowerOptimization(false);
@@ -181,16 +202,145 @@ bool WDDMDevice::FindSegmentId(SegmentKind segment_kind, uint32_t* segment_id)
   return false;
 }
 
+hsa_status_t WDDMDevice::QuerySegmentBytesResident(
+    uint32_t segment_id, uint64_t* bytes_resident) const {
+  D3DKMT_QUERYSTATISTICS stats = {};
+  stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+  stats.AdapterLuid = adapter_luid_;
+  stats.QuerySegment.SegmentId = segment_id;
+
+  NTSTATUS ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
+  if (ret != STATUS_SUCCESS) {
+    *bytes_resident = 0;
+    return HSA_STATUS_ERROR;
+  }
+
+  *bytes_resident = stats.QueryResult.SegmentInformation.BytesResident;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t WDDMDevice::QuerySegmentGroupUsage(
+    uint32_t segment_group, uint64_t* bytes_allocated) const {
+  *bytes_allocated = 0;
+
+  if (dxg_runtime->wddm_version < KMT_DRIVERVERSION_WDDM_3_1)
+    return HSA_STATUS_ERROR;
+
+  D3DKMT_QUERYSTATISTICS stats = {};
+  stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT_GROUP_USAGE;
+  stats.AdapterLuid = adapter_luid_;
+  stats.QuerySegmentGroupUsage.PhysicalAdapterIndex = 0;
+  stats.QuerySegmentGroupUsage.SegmentGroup =
+      static_cast<UINT16>(segment_group);
+
+  NTSTATUS ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
+  if (ret != STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  *bytes_allocated =
+      stats.QueryResult.SegmentGroupUsageInformation.AllocatedBytes;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t WDDMDevice::QueryLocalVramUsage(uint64_t* usage_bytes) {
+  *usage_bytes = 0;
+
+  if (dxg_runtime->wddm_version >= KMT_DRIVERVERSION_WDDM_3_1 &&
+      QuerySegmentGroupUsage(D3DKMT_MEMORY_SEGMENT_GROUP_LOCAL,
+                             usage_bytes) == HSA_STATUS_SUCCESS)
+    return HSA_STATUS_SUCCESS;
+
+  uint32_t visible_segment_id = 0;
+  if (!FindSegmentId(SegmentKind::kLocalMemory, &visible_segment_id))
+    return HSA_STATUS_ERROR;
+
+  hsa_status_t ret =
+      QuerySegmentBytesResident(visible_segment_id, usage_bytes);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
+
+  if (!LocalInvisibleHeapSize())
+    return HSA_STATUS_SUCCESS;
+
+  uint32_t invisible_segment_id = 0;
+  bool found_invisible = false;
+  for (const auto& seg_info : segment_infos_) {
+    if (seg_info.kind == SegmentKind::kLocalMemory &&
+        seg_info.segment_id > visible_segment_id) {
+      invisible_segment_id = seg_info.segment_id;
+      found_invisible = true;
+      break;
+    }
+  }
+
+  if (!found_invisible)
+    return HSA_STATUS_ERROR;
+
+  uint64_t invisible_usage = 0;
+  ret = QuerySegmentBytesResident(invisible_segment_id, &invisible_usage);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
+
+  *usage_bytes += invisible_usage;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t WDDMDevice::QueryNonLocalVramUsage(
+    uint64_t* usage_bytes) const {
+  *usage_bytes = 0;
+
+  if (dxg_runtime->wddm_version >= KMT_DRIVERVERSION_WDDM_3_1 &&
+      QuerySegmentGroupUsage(D3DKMT_MEMORY_SEGMENT_GROUP_NON_LOCAL,
+                             usage_bytes) == HSA_STATUS_SUCCESS)
+    return HSA_STATUS_SUCCESS;
+
+  bool found_segment = false;
+  for (const auto& seg_info : segment_infos_) {
+    if (!seg_info.is_aperture || !seg_info.is_system_memory)
+      continue;
+
+    found_segment = true;
+    uint64_t segment_usage = 0;
+    hsa_status_t ret =
+        QuerySegmentBytesResident(seg_info.segment_id, &segment_usage);
+    if (ret != HSA_STATUS_SUCCESS)
+      return ret;
+    *usage_bytes += segment_usage;
+  }
+
+  return found_segment ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+}
+
+uint64_t WDDMDevice::VramTotal() {
+  uint64_t total = LocalHeapSize();
+  if (!IsDgpu())
+    total += NonLocalHeapSize();
+  return total;
+}
+
+hsa_status_t WDDMDevice::QueryVramUsage(uint64_t* usage_bytes) {
+  hsa_status_t ret = QueryLocalVramUsage(usage_bytes);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
+
+  if (IsDgpu())
+    return HSA_STATUS_SUCCESS;
+
+  uint64_t used_non_local = 0;
+  ret = QueryNonLocalVramUsage(&used_non_local);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
+
+  *usage_bytes += used_non_local;
+  return HSA_STATUS_SUCCESS;
+}
+
 /*Local heap(dedicated GPU memory) includes visible heap and invisible heap.
  *Non local heap refers to shared GPU memory and it is system memory.
  */
 hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
-  D3DKMT_QUERYSTATISTICS stats;
-  NTSTATUS ret;
-  uint64_t usedVis = 0;
-  uint64_t usedInv = 0;
-  uint64_t usedNonLocal = 0;
-  uint32_t segmentId = 0;
+  if (!available_bytes)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   *available_bytes = 0;
 
@@ -199,87 +349,13 @@ hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
   if (!CpuWait(&page_syncobj_, &value, 1, false))
     return HSA_STATUS_ERROR;
 
-  if (IsDgpu()) {
-    // local cpu-visible memory
-    if (!FindSegmentId(SegmentKind::kLocalMemory, &segmentId))
-      return HSA_STATUS_ERROR;
+  uint64_t used = 0;
+  hsa_status_t ret = QueryVramUsage(&used);
+  if (ret != HSA_STATUS_SUCCESS)
+    return ret;
 
-    memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-    stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-    stats.AdapterLuid = adapter_luid_;
-    stats.QuerySegment.SegmentId = segmentId;
-    ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-    if (ret == 0)
-      usedVis = stats.QueryResult.SegmentInformation.BytesResident;
-
-    // local invisible memory
-    if (device_info_.local_invisible_heap_size) {
-      uint32_t invisibleSegmentId = 0;
-      bool foundInvisible = false;
-      // Use the next local-memory segment after visible FB as invisible FB.
-      for (const auto& seg_info : segment_infos_) {
-        if (seg_info.kind == SegmentKind::kLocalMemory &&
-            seg_info.segment_id > segmentId) {
-          invisibleSegmentId = seg_info.segment_id;
-          foundInvisible = true;
-          break;
-        }
-      }
-
-      if (!foundInvisible) {
-        return HSA_STATUS_ERROR;
-      }
-      memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-      stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-      stats.AdapterLuid = adapter_luid_;
-      stats.QuerySegment.SegmentId = invisibleSegmentId;
-
-      ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-      if (ret == 0)
-        usedInv = stats.QueryResult.SegmentInformation.BytesResident;
-    }
-
-    *available_bytes = LocalHeapSize() - usedVis - usedInv;
-  } else {
-    // APU: the shared-system-memory budget is exposed as aperture segments
-    // with the SystemMemory bit set (collapsed to kAperture above), so
-    // FindSegmentId(kSystemMemory) always missed. Sum BytesResident across
-    // every aperture+system_memory segment for the residency footprint.
-    const uint64_t budget = NonLocalHeapSize();
-    if (budget == 0) {
-      // No budget from WKMI — bail rather than underflow VramAvail.
-      return HSA_STATUS_ERROR;
-    }
-
-    bool found_any = false;
-    bool queried_any = false;
-    for (const auto& seg_info : segment_infos_) {
-      if (!seg_info.is_aperture || !seg_info.is_system_memory) {
-        continue;
-      }
-      found_any = true;
-
-      memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-      stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-      stats.AdapterLuid = adapter_luid_;
-      stats.QuerySegment.SegmentId = seg_info.segment_id;
-      ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-      if (ret != 0) {
-        continue;
-      }
-      queried_any = true;
-      usedNonLocal += stats.QueryResult.SegmentInformation.BytesResident;
-    }
-
-    if (!found_any || !queried_any) {
-      return HSA_STATUS_ERROR;
-    }
-
-    // Virtual apertures can double-count residency — saturate at zero
-    // instead of underflowing.
-    *available_bytes = (usedNonLocal >= budget) ? 0 : (budget - usedNonLocal);
-  }
-
+  const uint64_t total = VramTotal();
+  *available_bytes = used >= total ? 0 : total - used;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -616,6 +692,14 @@ uint32_t WDDMDevice::LdsBlocks(const hsa_kernel_dispatch_packet_t *pkt) {
   return blk_num;
 }
 
+static void QueryWddmVersion(D3DKMT_HANDLE adapter) {
+  D3DKMT_DRIVERVERSION version = static_cast<D3DKMT_DRIVERVERSION>(0);
+
+  if (WDDMQueryAdapter(adapter, KMTQAITYPE_DRIVERVERSION, &version,
+                       sizeof(version)) == STATUS_SUCCESS)
+    dxg_runtime->wddm_version = version;
+}
+
 NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
 {
   bool supported = false;
@@ -638,6 +722,9 @@ NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
   ret = DXCORE_CALL(D3DKMTEnumAdapters3(&args));
   if (ret != STATUS_SUCCESS)
     goto err_out0;
+
+  if (args.NumAdapters > 0)
+    QueryWddmVersion(info[0].hAdapter);
 
   for (int i = 0; i < args.NumAdapters; i++) {
     D3DKMT_QUERY_DEVICE_IDS query = {0};
@@ -799,9 +886,179 @@ bool WDDMDevice::SubmitToSwQueue(WDDMQueue *queue, uint64_t command_addr,
   return true;
 }
 
+// Compute the CWSR (Context Wave Save/Restore) region size for this device.
+//
+// Mirrors the Linux KFD calculation in update_ctx_save_restore_size() (queues.c).
+// The region must hold, per XCC:
+//   - HsaUserContextSaveAreaHeader  (save-area header)
+//   - Control stack (wave_num * bytes_per_wave + 8), page-aligned
+//   - WG data (VGPR + SGPR + LDS + HW-regs per CU), page-aligned
+// multiplied by num_xcc for multi-XCC devices.
+//
+// Constants ported from queues.c / dxg/queues.cpp:
+//   CNTL_STACK_BYTES_PER_WAVE : gfx10+ = 12, older = 8
+//   WG_CONTEXT_DATA_SIZE_PER_CU : vgpr_size + SGPR_SIZE_PER_CU + LDS + HWREG_SIZE_PER_CU
+//   SGPR_SIZE_PER_CU: gfx10+ = 0x5000 (20 KB), older = 0x4000 (16 KB)  [matches KMD CalCwsrSaveAreaSize]
+//   HWREG_SIZE_PER_CU: gfx10+ = 0x1400 (5 KB), older = 0x1000 (4 KB)  [matches KMD CalCwsrSaveAreaSize]
+//   vgpr_size: all gfx10/gfx11/gfx12 = 256KB/CU (0x40000)             [matches KMD CalCwsrSaveAreaSize]
+//   DEBUGGER_BYTES_PER_WAVE = 32, DEBUGGER_BYTES_ALIGN = 64
+uint64_t WDDMDevice::AllocateCwsrSize(uint64_t* out_ctx_size, uint64_t* out_debug_size) const {
+  const uint32_t page_size = 4096;
+  const uint32_t debugger_bytes_per_wave = 32;
+  const uint32_t debugger_bytes_align    = 64;
+
+  const int major = device_info_.major;
+  const uint32_t num_xcc         = device_info_.num_xcc ? device_info_.num_xcc : 1;
+  // compute_unit_count in device_info_ is the total CU count across all XCCs.
+  const uint32_t cu_num          = device_info_.compute_unit_count / num_xcc;
+  // wave_per_cu from device_info_ is per-CU (40 for Navi10/12/14, 32 for Navi2x+).
+  // KMD CalCwsrSaveAreaSize() split: gfx10+ (FAMILY_NV) vs pre-gfx10
+  const bool is_gfx10_plus = (major >= 10);
+
+  const uint32_t wave_per_cu     = device_info_.wave_per_cu ? device_info_.wave_per_cu : 32;
+  uint32_t wave_num              = cu_num * wave_per_cu;
+  // Pre-Navi (gfx9): Linux queues.c caps wave_num at NumShaderBanks/NumArrays*512.
+  // Matches get_num_waves() in queues.c for gfxv < GFX_VERSION_NAVI10.
+  // num_shader_engine is total across all XCCs (wkmi.cpp scales it by num_xcc for gfx9.4),
+  // so divide by num_xcc to get per-XCC SE count, matching cu_num which is also per-XCC.
+  if (!is_gfx10_plus) {
+    const uint32_t num_se  = device_info_.num_shader_engine / num_xcc;
+    const uint32_t num_sa  = device_info_.shader_array_per_shader_engine;
+    if (num_se > 0 && num_sa > 0)
+      wave_num = std::min(wave_num, (num_se / num_sa) * 512u);
+  }
+
+  // Control stack: gfx10+ = 12 bytes/wave, older = 8 bytes/wave
+  const uint32_t bytes_per_wave  = is_gfx10_plus ? 12 : 8;
+  uint32_t ctl_stack_size        = wave_num * bytes_per_wave + 8;
+  // gfx10.x (Navi) HW control stack RAM is physically limited to 0x7000 bytes.
+  // Matches Linux queues.c: if ((gfxv & 0x3f0000) == 0xA0000) ctl_stack_size = MIN(..., 0x7000)
+  // major == 10 covers the full gfx10.x family (Navi10/12/14, Navi21/22/23/24).
+  if (major == 10)
+    ctl_stack_size = std::min(ctl_stack_size, 0x7000u);
+
+  // Sizes from KMD kdx/src/RunListMgr.cpp CalCwsrSaveAreaSize():
+  //   gfx10+: sgpr=0x5000, hwreg=0x1400, vgpr=0x40000
+  //   pre-gfx10: sgpr=0x4000, hwreg=0x1000, vgpr=0x40000
+  const uint32_t vgpr_size_per_cu  = 0x40000;
+  const uint32_t sgpr_size_per_cu  = is_gfx10_plus ? 0x5000 : 0x4000;
+  const uint32_t hwreg_size_per_cu = is_gfx10_plus ? 0x1400 : 0x1000;
+  // LDS size stored in device_info_.lds_size (bytes)
+  const uint32_t lds_size_bytes  = device_info_.lds_size;
+  const uint32_t wg_size_per_cu  = vgpr_size_per_cu + sgpr_size_per_cu + lds_size_bytes + hwreg_size_per_cu;
+  const uint32_t wg_data_size    = cu_num * wg_size_per_cu;
+
+  // Align sizes to page boundary
+  auto page_align_up = [&](uint64_t x) -> uint64_t {
+    return (x + page_size - 1) & ~(uint64_t)(page_size - 1);
+  };
+  auto align_up = [&](uint64_t x, uint32_t align) -> uint64_t {
+    return (x + align - 1) & ~(uint64_t)(align - 1);
+  };
+
+  // ctx_save_restore_size per XCC (header + ctl_stack + wg_data)
+  uint64_t ctx_size = page_align_up(sizeof(HsaUserContextSaveAreaHeader) + ctl_stack_size)
+                      + page_align_up(wg_data_size);
+
+  // debug_memory_size per XCC
+  uint64_t debug_size = align_up(wave_num * debugger_bytes_per_wave, debugger_bytes_align);
+
+  if (out_ctx_size)   *out_ctx_size   = ctx_size;
+  if (out_debug_size) *out_debug_size = debug_size;
+
+  uint64_t total = page_align_up((ctx_size + debug_size) * num_xcc);
+
+  return total;
+}
+
+// Initialize HsaUserContextSaveAreaHeader for each XCC in the CWSR region.
+//
+// Mirrors Linux's fill_cwsr_header() in queues.c.  The CWSR allocation is
+// divided into equal-sized per-XCC slots of ctx_save_restore_size bytes, each
+// beginning with an HsaUserContextSaveAreaHeader.  This must be called after
+// the CPU-accessible system memory is allocated so the runtime and debugger can
+// locate the control stack, wave state, and debug areas on context save.
+//
+// Layout per XCC slot (offsets relative to slot base):
+//   [0]                 HsaUserContextSaveAreaHeader
+//   [ctl_stack_offset]  Control stack  (ctl_stack_size bytes, page-aligned)
+//   [wg_data_offset]    Wave/WG state  (wg_data_size bytes,  page-aligned)
+//   [debug_offset]      Debugger area  (debug_memory_size bytes, 64-byte aligned)
+//
+// DebugOffset in each slot's header is relative to that slot's own base address,
+// not the start of the allocation.  It points forward to the debug area at the end
+// of the last XCC slot: (NumXcc - i) * ctx_save_restore_size from slot i's base.
+void WDDMDevice::FillCwsrHeader(void* cpu_addr, uint64_t ctx_save_restore_size,
+                                 uint64_t debug_memory_size, uint32_t num_xcc,
+                                 volatile HSAint64* error_reason, HSAuint32 error_event_id) {
+  for (uint32_t i = 0; i < num_xcc; i++) {
+    auto* header = reinterpret_cast<HsaUserContextSaveAreaHeader*>(
+        static_cast<uint8_t*>(cpu_addr) + i * ctx_save_restore_size);
+
+    // ErrorEventId: the EventId of the HsaEvent passed at queue creation by the
+    // runtime (HSA_EVENTTYPE_SIGNAL, shared across all queues on the agent).
+    // Mirrors Linux fill_cwsr_header(): Event ? Event->EventId : 0.
+    header->ErrorEventId = error_event_id;
+
+    // ErrorReason mirrors Linux fill_cwsr_header(): pointer to the HSA signal
+    // payload used by the runtime to report the error reason bitmask on
+    // queue exception.  Sourced from QueueResource->ErrorReason, stored on the
+    // queue as error_reason_ and passed through here.
+    header->ErrorReason = error_reason;
+
+    // DebugOffset is from this XCC's slot base to the debug area of the *last*
+    // XCC slot, matching fill_cwsr_header():
+    //   header->DebugOffset = (NumXcc - i) * ctx_save_restore_size
+    header->DebugOffset = static_cast<HSAuint32>((num_xcc - i) * ctx_save_restore_size);
+    header->DebugSize   = static_cast<HSAuint32>(debug_memory_size * num_xcc);
+
+    // ControlStackOffset/Size and WaveStateOffset/Size describe where the
+    // saved control stack and wave state ended up inside this XCC's slot.
+    // They are written by the kernel (KFD/KMD) during AMDKFD_IOC_GET_QUEUE_WAVE_STATE
+    // after preemption; see struct kfd_context_save_area_header::wave_state.
+    // Zero is the correct initial value — no context has been saved yet.
+    // rocdbgapi reads these fields (queue.cpp) only after a context save has
+    // occurred, so zeroing here is safe and matches Linux fill_cwsr_header().
+    header->ControlStackOffset = 0;
+    header->ControlStackSize   = 0;
+    header->WaveStateOffset    = 0;
+    header->WaveStateSize      = 0;
+    header->Reserved1          = 0;
+  }
+}
+
 bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   void *priv_data;
   int priv_size;
+
+  // Allocate CWSR (Context Wave Save/Restore) region in system (GTT) memory.
+  // Matches Linux: anonymous mmap + register_svm_range(alwaysMapped=true).
+  // locked keeps pages pinned (HSA_SVM_FLAG_GPU_ALWAYS_MAPPED equivalent).
+  // The allocation handle is passed to KMD via UMDKMDIF_CREATEHWQUEUE_PRIVATE_DATA::CwsrMemHandle.
+  // SDMA queues skip CWSR — mirrors Linux handle_concrete_asic() which returns
+  // early for KFD_IOC_QUEUE_TYPE_SDMA/SDMA_XGMI before allocating ctx_save_restore.
+  if (queue->cwsr_mem_ == nullptr && queue->needs_cwsr_) {
+    uint64_t ctx_save_restore_size = 0;
+    uint64_t debug_memory_size = 0;
+    GpuMemoryCreateInfo cwsr_create_info{};
+    cwsr_create_info.domain = Wkmi::kSystem;
+    cwsr_create_info.size = AllocateCwsrSize(&ctx_save_restore_size, &debug_memory_size);
+
+    GpuMemory *cwsr_gpu_mem = nullptr;
+    ErrorCode cwsr_code = CreateGpuMemory(cwsr_create_info, &cwsr_gpu_mem);
+    if (cwsr_code != ErrorCode::Success) {
+      pr_err("CWSR memory allocation failed\n");
+      return false;
+    }
+    queue->cwsr_mem_ = cwsr_gpu_mem->GetGpuMemoryHandle();
+    queue->cwsr_mem_handle_ = cwsr_gpu_mem->KmtHandle();
+
+    // Initialise the per-XCC HsaUserContextSaveAreaHeader in the CPU-visible
+    // system memory, mirroring fill_cwsr_header() in Linux queues.c.
+    const uint32_t num_xcc = device_info_.num_xcc ? device_info_.num_xcc : 1;
+    FillCwsrHeader(cwsr_gpu_mem->CpuAddress(), ctx_save_restore_size,
+                   debug_memory_size, num_xcc, queue->error_reason_, queue->error_event_id_);
+  }
 
   priv_size = Wkmi::GetHwQueuePrivDataSize();
   priv_data = malloc(priv_size);
@@ -809,20 +1066,19 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   memset(priv_data, 0, priv_size);
   bool FwManagedGfxState = SupportStateShadowingByCpFw();
   uint32_t* doorbell_loc = nullptr;
-  // amd_queue_memory_ / KmtHandle and AQL parameters only apply when the queue
-  // is an AQL ComputeQueue. SDMAQueue (and SwsCompute non-AQL queues) must not
-  // be down-cast to ComputeQueue here -- doing so reads garbage and crashes.
-  ComputeQueue* compute_queue = dynamic_cast<ComputeQueue*>(queue);
+  // ComputeQueue (AQL or PM4) has amd_queue_t memory -> pass its user-queue handle; SDMAQueue
+  // returns nullptr -> resource=0. resource must NOT be gated on is_aql (that zeroed it -> KMD c0000001).
+  GpuMemory* queue_memory = queue->GetAmdQueueMemory();
   D3DKMT_HANDLE resource = 0;
   bool is_aql = false;
-  if (compute_queue != nullptr && IsAqlSupported()) {
-    auto queue_memory = compute_queue->GetAmdQueueMemory();
+  if (queue_memory != nullptr) {
     resource = queue_memory->KmtHandle();
-    is_aql = true;
+    is_aql = IsAqlSupported();
   }
   Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, is_aql,
       queue->cmdbuf_addr, queue->cmdbuf_size, reinterpret_cast<uintptr_t>(queue->ring_wptr),
-      reinterpret_cast<uintptr_t>(queue->ring_rptr), resource, &doorbell_loc);
+      reinterpret_cast<uintptr_t>(queue->ring_rptr), resource, &doorbell_loc,
+      queue->cwsr_mem_handle_);
 
   D3DKMT_CREATEHWQUEUE createHwQueue = {0};
   createHwQueue.hHwContext = queue->context;
@@ -834,6 +1090,11 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   if (ret != STATUS_SUCCESS) {
     pr_err("fail %x\n", ret);
     free(priv_data);
+    if (queue->cwsr_mem_ != nullptr) {
+      delete GpuMemory::Convert(queue->cwsr_mem_);
+      queue->cwsr_mem_ = nullptr;
+      queue->cwsr_mem_handle_ = 0;
+    }
     return false;
   }
   if (doorbell_loc != nullptr) {
@@ -858,6 +1119,13 @@ bool WDDMDevice::DestroyHwQueue(WDDMQueue *queue) {
   if (ret != STATUS_SUCCESS) {
     pr_err("fail %x\n", ret);
     return false;
+  }
+
+  if (queue->cwsr_mem_ != nullptr) {
+    auto cwsr_gpu_mem = GpuMemory::Convert(queue->cwsr_mem_);
+    delete cwsr_gpu_mem;
+    queue->cwsr_mem_ = nullptr;
+    queue->cwsr_mem_handle_ = 0;
   }
 
   return true;

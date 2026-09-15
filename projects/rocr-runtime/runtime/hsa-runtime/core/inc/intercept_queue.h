@@ -224,15 +224,20 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
   // Post interception packet overflow buffer
   std::vector<AqlPacket> overflow_;
 
-  // Index at which async intercept processing was scheduled.
-  uint64_t retry_index_;
+  // Authoritative "a retry barrier is outstanding" flag: set when one is inserted, cleared
+  // by its dedicated retry_doorbell_ completion handler. The wrapped queue read index is not
+  // used for this, since it can race a delayed completion handler.
+  std::atomic<bool> retry_outstanding_{false};
 
-  // Given the current value of the wrapped queue read index, determine if
-  // there is a retry barrier packet already in the wrapped queue.
-  bool IsPendingRetryPoint(uint64_t wrapped_current_read_index) const;
+  // Whether a retry barrier is still outstanding (i.e. retry_outstanding_ is set).
+  bool IsPendingRetryPoint() const;
 
   // Event signal to use for async packet processing and control flag.
   Signal* async_doorbell_;
+
+  // Dedicated retry-barrier completion signal, distinct from async_doorbell_ (which fires on
+  // every doorbell ring) so completion is unambiguous. HandleRetryDoorbell() is its handler.
+  Signal* retry_doorbell_;
   std::atomic<bool> quit_;
 
   // Indicates queue active/inactive state.
@@ -250,6 +255,9 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
   static const hsa_signal_value_t DOORBELL_MAX = 0xFFFFFFFFFFFFFFFFull;
 
   static bool HandleAsyncDoorbell(hsa_signal_value_t value, void* arg);
+  // Async handler for retry_doorbell_: fired when a retry barrier completes. Clears
+  // retry_outstanding_ and drives the overflow drain.
+  static bool HandleRetryDoorbell(hsa_signal_value_t value, void* arg);
   static void PacketWriter(const void* pkts, uint64_t pkt_count);
 
   // Submit packets to the wrapped queue and return number of packets that were

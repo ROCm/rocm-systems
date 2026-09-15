@@ -205,7 +205,7 @@ handle_event(scan_context_t& context, const rocprofiler_thread_trace_decoder_eve
     {
         ROCP_INFO << "End cut trace at byte: " << event.byte_offset;
         trace.offset_end = event.byte_offset;
-        context.completed->emplace_back(std::move(trace));
+        context.completed->emplace_back(trace);
         trace = {};
     }
 }
@@ -362,10 +362,11 @@ backend_code_object_load(agent_state_t&                                         
 {
     if(data.storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY)
     {
-        record_code_object_symbols(state,
-                                   data.code_object_id,
-                                   reinterpret_cast<const void*>(data.memory_base),
-                                   data.memory_size);
+        record_code_object_symbols(
+            state,
+            data.code_object_id,
+            reinterpret_cast<const void*>(data.memory_base),  // NOLINT(performance-no-int-to-ptr)
+            data.memory_size);
         return;
     }
 
@@ -418,7 +419,7 @@ send_overlapping_requests(scan_context_t&             context,
     if(requested)
     {
         state.pending_requests--;
-        offset = context.first_valid_offset ? context.first_valid_offset : scan_size;
+        offset = context.first_valid_offset != 0u ? context.first_valid_offset : scan_size;
         for(auto& range : ranges)
             if(range.offset_begin < offset) offset = std::max(offset, range.offset_end);
 
@@ -480,8 +481,8 @@ backend_shader_data(agent_state_t&                         state,
         return;
     }
 
-    auto* scan_data = static_cast<const uint8_t*>(shader_data.data) + shader_data.read_offset;
-    auto  scan_size = shader_data.data_size - shader_data.read_offset;
+    const auto* scan_data = static_cast<const uint8_t*>(shader_data.data) + shader_data.read_offset;
+    auto        scan_size = shader_data.data_size - shader_data.read_offset;
 
     // Thread local to prevent repeated allocations in critical section
     thread_local std::vector<trace_range_t> completed{};

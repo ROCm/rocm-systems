@@ -21,6 +21,32 @@
 #include <cstddef>
 #include <cstdint>
 
+/// @brief Minimal packet-writer callback type for AMD queue intercept creation.
+typedef void (*hsa_amd_queue_intercept_packet_writer_t)(const void *pkts, uint64_t pkt_count);
+
+/// @brief Minimal packet-intercept callback type for AMD queue intercept creation.
+typedef void (*hsa_amd_queue_intercept_handler_t)(const void *pkts, uint64_t pkt_count,
+                                                  uint64_t user_pkt_index, void *data,
+                                                  hsa_amd_queue_intercept_packet_writer_t writer);
+
+/// @brief Minimal AMD queue-intercept creation function type.
+typedef hsa_status_t (*hsa_amd_queue_intercept_create_fn_t)(
+    hsa_agent_t agent_handle, uint32_t size, hsa_queue_type32_t type,
+    void (*callback)(hsa_status_t status, hsa_queue_t *source, void *data), void *data,
+    uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t **queue);
+
+/// @brief Minimal AMD queue-intercept registration function type.
+typedef hsa_status_t (*hsa_amd_queue_intercept_register_fn_t)(
+    hsa_queue_t *queue, hsa_amd_queue_intercept_handler_t callback, void *user_data);
+
+/// @brief Minimal internal runtime-queue notification callback type.
+typedef void (*hsa_amd_runtime_queue_notifier_t)(const hsa_queue_t *queue, hsa_agent_t agent,
+                                                 void *data);
+
+/// @brief Minimal internal runtime-queue notification registration function type.
+typedef hsa_status_t (*hsa_amd_runtime_queue_create_register_fn_t)(
+    hsa_amd_runtime_queue_notifier_t callback, void *user_data);
+
 /// @brief Version header present at the start of every ROCR API table.
 ///
 /// @details ROCR stores the table size in `minor_id` for the HSA tools ABI. The
@@ -77,11 +103,11 @@ struct AmdExtTable {
   void *hsa_amd_ipc_signal_create_fn;
   void *hsa_amd_ipc_signal_attach_fn;
   void *hsa_amd_register_system_event_handler_fn;
-  void *hsa_amd_queue_intercept_create_fn;
-  void *hsa_amd_queue_intercept_register_fn;
+  hsa_amd_queue_intercept_create_fn_t hsa_amd_queue_intercept_create_fn;
+  hsa_amd_queue_intercept_register_fn_t hsa_amd_queue_intercept_register_fn;
   void *hsa_amd_queue_set_priority_fn;
   hsa_amd_memory_async_copy_rect_fn_t hsa_amd_memory_async_copy_rect_fn;
-  void *hsa_amd_runtime_queue_create_register_fn;
+  hsa_amd_runtime_queue_create_register_fn_t hsa_amd_runtime_queue_create_register_fn;
   hsa_amd_memory_lock_to_pool_fn_t hsa_amd_memory_lock_to_pool_fn;
   void *hsa_amd_register_deallocation_callback_fn;
   void *hsa_amd_deregister_deallocation_callback_fn;

@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import csv
 import json
@@ -348,7 +331,10 @@ class AMDSMILogger:
         for key, value in tabbed_dictionary.items():
             del capitalized_json[key]
 
-        capitalized_json["AMDSMI_SPACING_REMOVAL"] = tabbed_dictionary
+        # Only set when non-empty: an empty dict now renders "KEY: N/A", which the
+        # literal strip below would miss, leaking the marker into the output.
+        if tabbed_dictionary:
+            capitalized_json["AMDSMI_SPACING_REMOVAL"] = tabbed_dictionary
 
         # Convert the capitalized JSON to a YAML-like string
         yaml_output = self.custom_dump(capitalized_json)
@@ -381,7 +367,10 @@ class AMDSMILogger:
         yaml_string = ""
         for key, value in data.items():
             if isinstance(value, dict):
-                yaml_string += "  " * indent + f"{key}:\n" + self.custom_dump(value, indent + 1)
+                if not value:
+                    yaml_string += "  " * indent + f"{key}: N/A\n"
+                else:
+                    yaml_string += "  " * indent + f"{key}:\n" + self.custom_dump(value, indent + 1)
             elif isinstance(value, list):
                 if not value:
                     yaml_string += "  " * indent + f"{key}: N/A\n"
@@ -704,6 +693,7 @@ class AMDSMILogger:
         tabular=False,
         dual_csv_output=False,
         dynamic=False,
+        emit_empty=False,
     ):
         """Print current output according to format and then destination
         params:
@@ -712,12 +702,17 @@ class AMDSMILogger:
             watching_output (bool) - True if printing watch output
             dynamic (bool) - Defaults to False. True turns on dynamic resizing for
                 left justified table output
+            emit_empty (bool) - JSON stdout only. If True, emit `[]` even when
+                there are no records, so consumers parsing stdout as JSON always
+                get a valid document instead of empty output
         return:
             Nothing
         """
         if self.is_json_format():
             self._print_json_output(
-                multiple_device_enabled=multiple_device_enabled, watching_output=watching_output
+                multiple_device_enabled=multiple_device_enabled,
+                watching_output=watching_output,
+                emit_empty=emit_empty,
             )
         elif self.is_csv_format():
             if dual_csv_output:
@@ -741,14 +736,18 @@ class AMDSMILogger:
                     multiple_device_enabled=multiple_device_enabled, watching_output=watching_output
                 )
 
-    def _print_json_output(self, multiple_device_enabled=False, watching_output=False):
+    def _print_json_output(
+        self, multiple_device_enabled=False, watching_output=False, emit_empty=False
+    ):
         if multiple_device_enabled:
             json_output = self.multiple_device_output
         else:
             json_output = [self.output]
 
         if self.destination == "stdout":
-            if json_output:
+            # Callers parsing stdout as JSON need a valid document even with no
+            # records; emit_empty renders that as `[]` instead of nothing.
+            if json_output or emit_empty:
                 json_std_output = json.dumps(json_output, indent=4)
                 print(json_std_output)
         else:  # Write output to file

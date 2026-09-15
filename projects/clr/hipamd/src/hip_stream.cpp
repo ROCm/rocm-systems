@@ -413,8 +413,9 @@ hipError_t hipStreamSynchronize_common(hipStream_t stream) {
   if (stream == nullptr) {
     // Sync blocking streams only on the null stream
     constexpr bool kBlockingOnly = true;
-    getCurrentDevice()->SyncAllStreams(false, kBlockingOnly);
-    return hipSuccess;
+    auto* device = getCurrentDevice();
+    device->SyncAllStreams(false, kBlockingOnly);
+    return device->GetAndClearBlockingStreamsAsyncError();
   }
 
   CHECK_STREAM_DETACHED(stream);
@@ -427,7 +428,7 @@ hipError_t hipStreamSynchronize_common(hipStream_t stream) {
   auto hip_stream = hip::getStream(stream, wait);
   hip_stream->finish();
   hip_stream->GetDevice()->ReleaseFreedMemory();
-  return hipSuccess;
+  return hip_stream->GetAndClearAsyncError();
 }
 
 // ================================================================================================
@@ -526,8 +527,9 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
     if (waitStream == nullptr) {
       return hipErrorInvalidHandle;
     }
-    // Don't set when forked stream joins back to the parent.
-    if (!waitStream->IsOriginStream() &&
+    // Don't set when a stream waits on its own event, or when a forked stream joins back to
+    // the parent.
+    if (waitStream != eventStream && !waitStream->IsOriginStream() &&
         waitStream != reinterpret_cast<hip::Stream*>(eventStream->GetParentStream())) {
       waitStream->SetCaptureGraph(eventStream->GetCaptureGraph());
       waitStream->SetCaptureID(eventStream->GetCaptureID());
@@ -589,7 +591,7 @@ hipError_t hipStreamQuery_common(hipStream_t stream) {
   amd::Command* command = hip_stream->getLastQueuedCommand(true);
   if (command == nullptr) {
     // Nothing was submitted to the queue.
-    return hipSuccess;
+    return hip_stream->GetAndClearAsyncError();
   }
 
   amd::Event& event = command->event();
@@ -610,7 +612,7 @@ hipError_t hipStreamQuery_common(hipStream_t stream) {
 
   // Stream is complete — opportunistically release its HW queue if idle.
   hip_stream->vdev()->ReleaseHwQueue();
-  return hipSuccess;
+  return hip_stream->GetAndClearAsyncError();
 }
 
 // ================================================================================================

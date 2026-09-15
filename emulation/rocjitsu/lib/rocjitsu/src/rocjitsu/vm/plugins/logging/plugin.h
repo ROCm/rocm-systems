@@ -15,8 +15,12 @@ namespace amdgpu {
 /// @brief Proof-of-concept plugin: logs kernel dispatches and detects MFMA usage.
 class KernelLoggingPlugin : public ExecutionPlugin {
 public:
-  KernelLoggingPlugin();
+  /// @param config_json Plugin configuration object as a JSON string (unused;
+  ///        this plugin takes no configuration). May be null.
+  explicit KernelLoggingPlugin(const char *config_json = nullptr);
   ~KernelLoggingPlugin() override;
+
+  bool observes_sgpr_reads() const override { return false; }
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
   void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,

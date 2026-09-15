@@ -1,0 +1,48 @@
+{
+    "required_tables": [
+        {
+            "commit": "Validation rules for rocm_hipfile_api",
+            "name": "regions",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that 'rocm_hipfile_api' appears in category at least once in table regions",
+                    "error_message": "'rocm_hipfile_api' category entries are fewer than expected in regions",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_hipfile_api';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Ensure there are no hipFILE API calls that last 0 seconds",
+                    "error_message": "Found hipFILE API captures where duration is 0",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_hipfile_api' AND duration = 0;"
+                }
+            ]
+        },
+        {
+            "commit": "Validation rules for rocm_hipfile_api",
+            "name": "rocpd_string",
+            "required_columns": [
+                "id",
+                "guid",
+                "string"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that 'rocm_hipfile_api' string is present in the table",
+                    "error_message": "'rocm_hipfile_api' string not found in the table rocpd_string",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM rocpd_string WHERE string LIKE '%rocm_hipfile_api%';"
+                }
+            ]
+        }
+    ]
+}

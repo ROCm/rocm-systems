@@ -22,6 +22,7 @@
 #include "devkernel.hpp"
 #include "amdocl/cl_profile_amd.h"
 #include "devsignal.hpp"
+#include "utils/nontemporal.hpp"
 
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
@@ -112,6 +113,11 @@ enum MemRangeAttribute : uint32_t {
                              ///< set for specified device
   LastPrefetchLocation = 4,  ///< The last location to which the range was prefetched
   CoherencyMode = 100,       ///< Current coherency mode for the specified range
+};
+
+// DMA-BUF mapping-type flags for GetHandleForAddressRange
+enum MemRangeDmaBufMappingType : uint64_t {
+  MemRangeDmaBufMappingTypePcie = 0x1,  ///< Maps dmabuf via pcie, requires large bar support
 };
 
 //! Maps hipFuncCache_t to group memory carveout percentage.
@@ -654,6 +660,9 @@ struct Info : public amd::EmbeddedObject {
   //! large bar support.
   bool largeBar_;
 
+  //! CPU supports MOVDIR64B (atomic 64-byte write with WC buffer close).
+  bool movdir64b_;
+
   uint32_t hmmSupported_;            //!< ROCr supports HMM interfaces
   uint32_t hmmCpuMemoryAccessible_;  //!< CPU memory is accessible by GPU without pinning/register
   uint32_t hmmDirectHostAccess_;     //!< HMM memory is accessible from the host without migration
@@ -672,6 +681,10 @@ struct Info : public amd::EmbeddedObject {
   uint32_t driverNodeId_;
   //! Number of Physical SGPRs per SIMD
   uint32_t sgprsPerSimd_;
+  //! SGPR allocation granularity. Zero if the backend does not report it.
+  uint32_t sgprAllocGranularity_;
+  //! Per-wave SGPRs reserved by the trap handler. Zero if absent or unreported.
+  uint32_t sgprTrapHandlerReserve_;
 
   uint32_t numSDMAengines_;  //!< Number of available SDMA engines
 
@@ -688,6 +701,7 @@ struct Info : public amd::EmbeddedObject {
   bool hasExpertSchedMode_;  //! Device supports expert scheduling mode
 
   bool dmabufSupported_;  //!< DMABuf support flag
+  bool hostAllocDmabufSupported_;  //!< Host-alloc DMABuf support flag
   bool gpuDirectRdmaWithHipVmmSupported_;  //!< GPU Direct RDMA with HIP VMM (DMA-Buf + HIP VMM)
 
   uint32_t maxDynDataPrefetchRegions_;  //!< Max L2 prefetch regions (0 if unsupported)
@@ -700,10 +714,8 @@ class Settings {
     HostKernelArgs = 0,        //!< Kernel Arguments are put into host memory
     DeviceKernelArgs,          //!< Device memory kernel arguments with no memory
                                //!< ordering workaround (e.g. XGMI)
-    DeviceKernelArgsReadback,  //!< Device memory kernel arguments with kernel
+    DeviceKernelArgsReadback   //!< Device memory kernel arguments with kernel
                                //!< argument readback workaround
-    DeviceKernelArgsHDP        //!< Device memory kernel arguments with kernel
-                               //!< argument readback plus HDP flush workaround.
   };
 
   uint64_t extensions_;  //!< Supported OCL extensions
@@ -730,7 +742,8 @@ class Settings {
       uint sdma_swap_supported_ : 1;         //!< SDMA linear swap copy (gfx94x/gfx95x)
       uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
       uint sdma_indirect_supported_ : 1;     //!< SDMA linear indirect copy (gfx1250+)
-      uint reserved_ : 9;
+      uint aql_device_ring_buf_ : 1;          //!< Place the AQL queue ring buffer in device memory
+      uint reserved_ : 8;
     };
     uint value_;
   };
@@ -980,7 +993,8 @@ class Memory {
   MemAccess GetAccess() const { return memAccess_; }
 
   //! Retrieves shareable handle for hipMalloc'ed address range.
-  virtual bool GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle) {
+  virtual bool GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle,
+                                 unsigned long long flags) {
     return false;
   }
 
@@ -1375,7 +1389,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void HiddenHeapInit() = 0;
 
   //! Fast-path dispatch using a pre-built contiguous flat packet buffer.
-  virtual bool dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPacketData,
+  virtual bool dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>& flatPacketData,
                                           const std::vector<uint32_t>& validFullHeaders,
                                           amd::AccumulateCommand* vcmd = nullptr,
                                           bool attach_signal = false,
@@ -1762,7 +1776,7 @@ class Device : public RuntimeObject {
   static constexpr size_t kP2PStagingSize = 4 * Mi;
   static constexpr size_t kMGSyncDataSize = sizeof(MGSyncData);
   static constexpr size_t kMGInfoSizePerDevice = kMGSyncDataSize + sizeof(MGSyncInfo);
-  static constexpr size_t kSGInfoSize = kMGSyncDataSize;
+  static constexpr size_t kSGInfoSize = sizeof(MGSyncInfo);
 
   // Max Scratch size is based on ISA and thus per device.
   // Def value is as per GFX9 being the least among supported devices.
@@ -2253,12 +2267,6 @@ class Device : public RuntimeObject {
     uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
     int hw_event_index;
     int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
-    // Segment that owns this patch (set at BuildSyncPlan time). At launch the
-    // graph layer resolves it to the actual stream's vGPU index into queue_index.
-    int segment_id = -1;
-    // vGPU (queue) index resolved at launch from segment_id. Read by
-    // ApplyHwEventPatches to attribute the signal to its execution stream.
-    uint32_t queue_index = std::numeric_limits<uint32_t>::max();
   };
 
   virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
@@ -2436,7 +2444,8 @@ class Device : public RuntimeObject {
   static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_relaxed) != CL_SUCCESS); }
   static cl_int GetGPUError() { return gpu_error_.load(std::memory_order_relaxed); }
 
-  bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle);
+  bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
+                                unsigned long long flags);
 
   // Registers a memory object allocated via hostcall for later cleanup.
   void TrackHostcallMemory(amd::Memory* memory);

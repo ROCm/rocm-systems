@@ -10,8 +10,12 @@
 #include "primitives.h"
 
 namespace {
+// NOTE: the build-time transformer cmake/scripts/add_unroll.sh appends
+// ", int USE_ACC, int COLL_UNROLL, int Pipeline, int UserRegMode = 0" to this
+// template header. UserRegMode selects the LL128 user-buffer access path at
+// compile time (see prims_ll128.h): 0=runtime, 1=registered, 2=non-registered.
 template <typename T, typename RedOp, typename Proto, int RCCLMetadata>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
+#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && !defined(__gfx1250__)
 __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #else
 __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
@@ -43,9 +47,9 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
     // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
     // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
     // coverity[callee_ptr_arith:FALSE]
-  Primitives<T, RedOp, FanSymmetric<1>, /*Direct=*/1, Proto, 0, false, RCCLMetadata, Pipeline, USE_ACC> prims(
-    tid, nthreads, &ring->prev, &ring->next, work->sendbuff, work->recvbuff, work->redOpArg, 0, work->connIndex,
-    work->connIndex, work);
+  Primitives<T, RedOp, FanSymmetric<1>, /*Direct=*/1, Proto, 0, false, RCCLMetadata, Pipeline, USE_ACC, UserRegMode>
+    prims(tid, nthreads, &ring->prev, &ring->next, work->sendbuff, work->recvbuff, work->redOpArg, 0, work->connIndex,
+          work->connIndex, work);
 
   for (ssize_t elemOffset = 0; elemOffset < channelCount; elemOffset += loopCount) {
     ssize_t remCount = channelCount - elemOffset;
@@ -56,15 +60,18 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
     auto modRanks = [&] __device__(int r) -> int { return r - (r >= nranks ? nranks : 0); };
 
       // step 0: push data to next GPU
+    sqtt_marker_enter("ALL_REDUCE_RING_SEND");
     chunk = modRanks(ringIx + nranks - 1);
     chunkOffset = chunk * chunkCount;
     offset = gridOffset + elemOffset + chunkOffset;
     nelem = (int)min(chunkCount, remCount - chunkOffset);
 
     prims.directSend(offset, offset, nelem);
+    sqtt_marker_exit("ALL_REDUCE_RING_SEND");
 
       // k-2 steps: reduce and copy to next GPU
 
+    sqtt_marker_enter("ALL_REDUCE_RING_RECV_REDUCE_SEND");
     for (int j = 2; j < nranks; ++j) {
       chunk = modRanks(ringIx + nranks - j);
       chunkOffset = chunk * chunkCount;
@@ -72,17 +79,21 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
       nelem = (int)min(chunkCount, remCount - chunkOffset);
       prims.directRecvReduceDirectSend(offset, offset, nelem);
     }
+    sqtt_marker_exit("ALL_REDUCE_RING_RECV_REDUCE_SEND");
 
       // step k-1: reduce this buffer and data, which will produce the final
       // result that we store in this data and push to the next GPU
+    sqtt_marker_enter("ALL_REDUCE_RING_DIRECT_RECV_REDUCE_COPY_SEND");
     chunk = ringIx + 0;
     chunkOffset = chunk * chunkCount;
     offset = gridOffset + elemOffset + chunkOffset;
     nelem = (int)min(chunkCount, remCount - chunkOffset);
 
     prims.directRecvReduceCopyDirectSend(offset, offset, nelem, /*postOp=*/true);
+    sqtt_marker_exit("ALL_REDUCE_RING_DIRECT_RECV_REDUCE_COPY_SEND");
 
       // k-2 steps: copy to next GPU
+    sqtt_marker_enter("ALL_REDUCE_RING_DIRECT_RECV_COPY_SEND");
     for (int j = 1; j < nranks - 1; ++j) {
       chunk = modRanks(ringIx + nranks - j);
       chunkOffset = chunk * chunkCount;
@@ -90,19 +101,22 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
       nelem = (int)min(chunkCount, remCount - chunkOffset);
       prims.directRecvCopyDirectSend(offset, offset, nelem);
     }
+    sqtt_marker_exit("ALL_REDUCE_RING_DIRECT_RECV_COPY_SEND");
 
       // Make final copy from buffer to dest.
+    sqtt_marker_enter("ALL_REDUCE_RING_DIRECT_RECV");
     chunk = modRanks(ringIx + 1);
     chunkOffset = chunk * chunkCount;
     offset = gridOffset + elemOffset + chunkOffset;
     nelem = (int)min(chunkCount, remCount - chunkOffset);
 
     prims.directRecv(offset, nelem);
+    sqtt_marker_exit("ALL_REDUCE_RING_DIRECT_RECV");
   }
 }
 
 template <typename T, typename RedOp, typename Proto>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
+#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && !defined(__gfx1250__)
 __device__ void runTreeUpDown(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #else
 __device__ __attribute__((noinline)) void runTreeUpDown(int tid, int nthreads, struct ncclDevWorkColl* work) {
@@ -117,6 +131,7 @@ __device__ __attribute__((noinline)) void runTreeUpDown(int tid, int nthreads, s
   int nelem;
 
   { // Reduce : max number of recv is 3, max number of send is 1 (binary tree + local)
+    sqtt_marker_enter("ALL_REDUCE_TREE_UPDOWN_REDUCE");
     Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DEV_ARITY, 1>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC>
       prims(tid, nthreads, tree->down, &tree->up, work->sendbuff, work->recvbuff, work->redOpArg, 0, 0, 0, work);
 
@@ -139,9 +154,11 @@ __device__ __attribute__((noinline)) void runTreeUpDown(int tid, int nthreads, s
         prims.directRecvReduceDirectSend(offset, offset, nelem);
       }
     }
+    sqtt_marker_exit("ALL_REDUCE_TREE_UPDOWN_REDUCE");
   }
 
   { // Broadcast : max number of recv is 1, max number of send is 3 (binary tree + local)
+    sqtt_marker_enter("ALL_REDUCE_TREE_UPDOWN_BROADCAST");
     Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_DEV_ARITY>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC>
       prims(tid, nthreads, &tree->up, tree->down, work->sendbuff, work->recvbuff, work->redOpArg, 0, 0, 0, work);
 
@@ -164,11 +181,12 @@ __device__ __attribute__((noinline)) void runTreeUpDown(int tid, int nthreads, s
         prims.directRecvCopyDirectSend(offset, offset, nelem);
       }
     }
+    sqtt_marker_exit("ALL_REDUCE_TREE_UPDOWN_BROADCAST");
   }
 }
 
 template <typename T, typename RedOp, typename Proto>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
+#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && !defined(__gfx1250__)
 __device__ void runTreeSplit(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #else
 __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, struct ncclDevWorkColl* work) {
@@ -193,14 +211,17 @@ __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, st
 
   if (tree->up == -1) {
       // Reduce and broadcast. Max number of recv is 2, max number of send is 2
-    Primitives<T, RedOp, FanSymmetric<NCCL_MAX_DEV_ARITY>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC> prims(
-      tid, nthreads, tree->down, tree->down, work->sendbuff, work->recvbuff, work->redOpArg, 0, 0, 0, work);
+    sqtt_marker_enter("ALL_REDUCE_TREE_SPLIT_REDUCE_BROADCAST");
+    Primitives<T, RedOp, FanSymmetric<NCCL_MAX_DEV_ARITY>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC,
+               UserRegMode>
+      prims(tid, nthreads, tree->down, tree->down, work->sendbuff, work->recvbuff, work->redOpArg, 0, 0, 0, work);
 
     for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
       offset = gridOffset + elemOffset;
       nelem = min(chunkCount, channelCount - elemOffset);
       prims.directRecvReduceCopyDirectSend(offset, offset, nelem, /*doPost=*/true);
     }
+    sqtt_marker_exit("ALL_REDUCE_TREE_SPLIT_REDUCE_BROADCAST");
 
   } else if (tid < nthreadsSplit) {
       /* Reduce up. Max number of recv is 3, max number of send is 1 (binary tree + local).
@@ -214,7 +235,9 @@ __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, st
       // Coverity reports that the callee treats &tree->up as an array.  However, due to the use of
       // FanAsymmetric<n, 1>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
-    Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DEV_ARITY, 1>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC>
+    sqtt_marker_enter("ALL_REDUCE_TREE_SPLIT_REDUCE");
+    Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DEV_ARITY, 1>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC,
+               UserRegMode>
       prims(tid, nthreadsSplit, tree->down, &tree->up, work->sendbuff, work->recvbuff, work->redOpArg,
             0 * Proto::MaxGroupWidth, 0, 0, work);
 
@@ -231,13 +254,16 @@ __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, st
         prims.directRecvReduceDirectSend(offset, offset, nelem);
       }
     }
+    sqtt_marker_exit("ALL_REDUCE_TREE_SPLIT_REDUCE");
 
   } else {
       // Broadcast down. Max number of recv is 1, max number of send is 3 (binary tree + local)
       // Coverity reports that the callee treats &tree->up as an array.  However, due to the use of
       // FanAsymmetric<1, n>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
-    Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_DEV_ARITY>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC>
+    sqtt_marker_enter("ALL_REDUCE_TREE_SPLIT_BROADCAST");
+    Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_DEV_ARITY>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC,
+               UserRegMode>
       prims(tid - nthreadsSplit, nthreads - nthreadsSplit, &tree->up, tree->down, work->sendbuff, work->recvbuff,
             work->redOpArg, 1 * Proto::MaxGroupWidth, 0, 0, work);
 
@@ -254,6 +280,7 @@ __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, st
         prims.directRecvCopyDirectSend(offset, offset, nelem);
       }
     }
+    sqtt_marker_exit("ALL_REDUCE_TREE_SPLIT_BROADCAST");
   }
 }
 } // namespace
@@ -841,13 +868,17 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_TREE, NCCL_PROTO_LL> {
 template <typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL128> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    runRing<T, RedOp, ProtoLL128, RCCL_METADATA_EMPTY>(tid, nthreads, work);
+    // LL128 is generated as separate registered/non-registered kernels; the
+    // compile-time UserRegMode is forwarded by cmake/scripts/add_unroll.sh into
+    // runRing<..., USE_ACC, COLL_UNROLL, /*Pipeline=*/0, UserRegMode>.
+    runARRingLL128<T, RedOp>(tid, nthreads, work);
   }
 };
 
 template <typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_TREE, NCCL_PROTO_LL128> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    runTreeSplit<T, RedOp, ProtoLL128>(tid, nthreads, work);
+    // See the LL128 ring note above; add_unroll.sh forwards UserRegMode.
+    runARTreeLL128<T, RedOp>(tid, nthreads, work);
   }
 };

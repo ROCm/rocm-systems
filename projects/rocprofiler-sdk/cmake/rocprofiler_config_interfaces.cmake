@@ -136,6 +136,40 @@ rocprofiler_config_nolink_target(rocprofiler-sdk-hip-nolink hip::host)
 
 # ----------------------------------------------------------------------------------------#
 #
+# Advanced thread trace decoder
+#
+# ----------------------------------------------------------------------------------------#
+
+find_package(rocprof-trace-decoder 0.2.1 CONFIG)
+
+# The decoder is a runtime dlopen dependency and ships no version.h, so forward its SONAME
+# version from the CMake package to consumers that dlopen it (thread_trace/dl.cpp).
+if(rocprof-trace-decoder_FOUND AND DEFINED rocprof-trace-decoder_VERSION_MAJOR)
+    # Some packages publish only MAJOR.MINOR.
+    set(_rocprof_trace_decoder_patch 0)
+    if(DEFINED rocprof-trace-decoder_VERSION_PATCH)
+        set(_rocprof_trace_decoder_patch ${rocprof-trace-decoder_VERSION_PATCH})
+    endif()
+    target_compile_definitions(
+        rocprofiler-sdk-rocprof-trace-decoder
+        INTERFACE
+            ROCPROFILER_ATT_DECODER_SOVERSION_MAJOR=${rocprof-trace-decoder_VERSION_MAJOR}
+            ROCPROFILER_ATT_DECODER_SOVERSION_MINOR=${rocprof-trace-decoder_VERSION_MINOR}
+            ROCPROFILER_ATT_DECODER_SOVERSION_PATCH=${_rocprof_trace_decoder_patch})
+    unset(_rocprof_trace_decoder_patch)
+else()
+    message(
+        WARNING
+            "rocprof-trace-decoder package/version not found: "
+            "ROCPROFILER_ATT_DECODER_SOVERSION_MAJOR/MINOR/PATCH will not be defined. The "
+            "ATT decoder loader will only try the unversioned "
+            "'librocprof-trace-decoder.so' and will fail to "
+            "load the versioned decoder on runtime-only ROCm installs. Ensure the "
+            "rocprof-trace-decoder CMake config is on CMAKE_PREFIX_PATH.")
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
 # HSA runtime
 #
 # ----------------------------------------------------------------------------------------#
@@ -393,5 +427,60 @@ if(rocjpeg_FOUND
 else()
     target_compile_definitions(rocprofiler-sdk-rocjpeg-nolink
                                INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCJPEG=0)
+
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# rocSHMEM
+#
+# ----------------------------------------------------------------------------------------#
+
+# rocSHMEM's installed config references MPI::MPI_CXX and
+# rocprofiler-register::rocprofiler-register in roc::rocshmem's link interface, so both
+# must be located first or find_package(rocshmem) will fail to define the imported target.
+find_package(MPI COMPONENTS CXX)
+find_package(rocprofiler-register CONFIG HINTS ${rocm_version_DIR} ${ROCM_PATH} PATHS
+             ${rocm_version_DIR} ${ROCM_PATH})
+
+if(MPI_CXX_FOUND AND rocprofiler-register_FOUND)
+    find_package(rocshmem CONFIG HINTS ${rocm_version_DIR} ${ROCM_PATH} PATHS
+                 ${rocm_version_DIR} ${ROCM_PATH})
+endif()
+
+if(rocshmem_FOUND
+   AND TARGET roc::rocshmem
+   AND rocshmem_INCLUDE_DIR
+   AND EXISTS "${rocshmem_INCLUDE_DIR}/rocshmem/api_trace.h")
+    target_include_directories(rocprofiler-sdk-rocshmem-nolink SYSTEM
+                               INTERFACE ${rocshmem_INCLUDE_DIR})
+
+    target_compile_definitions(rocprofiler-sdk-rocshmem-nolink
+                               INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCSHMEM=1)
+else()
+    target_compile_definitions(rocprofiler-sdk-rocshmem-nolink
+                               INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCSHMEM=0)
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# hipFILE
+#
+# ----------------------------------------------------------------------------------------#
+
+find_package(hipfile QUIET CONFIG HINTS ${ROCM_PATH} PATHS ${ROCM_PATH}
+             ${ROCPROFILER_DEFAULT_ROCM_PATH})
+
+if(TARGET hip::hipfile)
+    rocprofiler_config_nolink_target(rocprofiler-sdk-hipfile-nolink hip::hipfile)
+    # hipFILE currently exports cxx_std_20, but rocprofiler-sdk is built as C++17. Keep
+    # the header/include propagation without raising SDK targets to C++20.
+    set_property(TARGET rocprofiler-sdk-hipfile-nolink
+                 PROPERTY INTERFACE_COMPILE_FEATURES)
+    target_compile_definitions(rocprofiler-sdk-hipfile-nolink
+                               INTERFACE ROCPROFILER_SDK_USE_SYSTEM_HIPFILE=1)
+else()
+    target_compile_definitions(rocprofiler-sdk-hipfile-nolink
+                               INTERFACE ROCPROFILER_SDK_USE_SYSTEM_HIPFILE=0)
 
 endif()

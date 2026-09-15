@@ -532,6 +532,60 @@ FROM
     AND T.guid = M.guid;
 
 --
+-- HIP event barrier records
+CREATE VIEW IF NOT EXISTS
+    `hip_events` AS
+SELECT
+    H.id,
+    H.guid,
+    (
+        SELECT
+            string
+        FROM
+            `rocpd_string` RS
+        WHERE
+            RS.id = E.category_id
+            AND RS.guid = E.guid
+    ) AS category,
+    H.nid,
+    P.pid,
+    T.tid,
+    H.start,
+    H.end,
+    (H.end - H.start) AS duration,
+    S.string AS name,
+    H.stream_id,
+    H.queue_id,
+    ST.name AS stream_name,
+    Q.name AS queue_name,
+    agent.name AS device,
+    agent.absolute_index AS agent_abs_index,
+    agent.logical_index AS agent_log_index,
+    agent.type_index AS agent_type_index,
+    agent.type AS agent_type,
+    H.hip_event_handle,
+    H.source_queue_id,
+    E.stack_id,
+    E.parent_stack_id,
+    E.correlation_id AS corr_id
+FROM
+    `rocpd_hip_event` H
+    INNER JOIN `rocpd_string` S ON S.id = H.name_id
+    AND S.guid = H.guid
+    LEFT JOIN `rocpd_info_agent` agent ON agent.id = H.agent_id
+    AND agent.guid = H.guid
+    LEFT JOIN `rocpd_info_queue` Q ON Q.id = H.queue_id
+    AND Q.guid = H.guid
+    LEFT JOIN `rocpd_info_stream` ST ON ST.id = H.stream_id
+    AND ST.guid = H.guid
+    INNER JOIN `rocpd_event` E ON E.id = H.event_id
+    AND E.guid = H.guid
+    INNER JOIN `rocpd_info_process` P ON P.id = H.pid
+    AND P.guid = H.guid
+    INNER JOIN `rocpd_info_thread` T ON T.id = H.tid
+    AND T.guid = H.guid;
+
+--
 -- HIP graph launch summary records
 CREATE VIEW IF NOT EXISTS
     `graph_launches` AS
@@ -699,11 +753,11 @@ SELECT
     A.type_index AS agent_type_index,
     A.type AS agent_type,
     K.queue_id,
-    k.grid_size_x AS grid_size_x,
-    k.grid_size_y AS grid_size_y,
-    k.grid_size_z AS grid_size_z,
+    K.grid_size_x AS grid_size_x,
+    K.grid_size_y AS grid_size_y,
+    K.grid_size_z AS grid_size_z,
     (K.grid_size_x * K.grid_size_y * K.grid_size_z) AS grid_size,
-    S.display_name AS kernel_name,
+    KS.display_name AS kernel_name,
     (
         SELECT
             string
@@ -719,9 +773,9 @@ SELECT
     (K.workgroup_size_x * K.workgroup_size_y * K.workgroup_size_z) AS workgroup_size,
     K.group_segment_size AS lds_block_size,
     K.private_segment_size AS scratch_size,
-    S.arch_vgpr_count AS vgpr_count,
-    S.accum_vgpr_count,
-    S.sgpr_count,
+    KS.arch_vgpr_count AS vgpr_count,
+    KS.accum_vgpr_count,
+    KS.sgpr_count,
     PMC_I.name AS counter_name,
     PMC_I.symbol AS counter_symbol,
     PMC_I.component,
@@ -747,7 +801,7 @@ SELECT
     ) AS category,
     K.nid,
     E.extdata,
-    S.code_object_id
+    KS.code_object_id
 FROM
     `rocpd_pmc_event` PMC_E
     INNER JOIN `rocpd_info_pmc` PMC_I ON PMC_I.id = PMC_E.pmc_id
@@ -758,14 +812,107 @@ FROM
     AND K.guid = PMC_E.guid
     INNER JOIN `rocpd_info_agent` A ON A.id = K.agent_id
     AND A.guid = K.guid
-    INNER JOIN `rocpd_info_kernel_symbol` S ON S.id = K.kernel_id
-    AND S.guid = K.guid
+    INNER JOIN `rocpd_info_kernel_symbol` KS ON KS.id = K.kernel_id
+    AND KS.guid = K.guid
     INNER JOIN `rocpd_info_process` P ON P.id = K.pid
     AND P.guid = K.guid
     INNER JOIN `rocpd_info_thread` T ON T.id = K.tid
     AND T.guid = K.guid
+WHERE
+    PMC_E.sample_id IS NULL
 GROUP BY
     PMC_E.guid,
     K.dispatch_id,
     PMC_I.name,
     K.agent_id;
+
+--
+-- SPM counters view: no aggregation, preserves per-SE records
+--
+CREATE VIEW IF NOT EXISTS
+    `spm_counters` AS
+SELECT
+    PMC_E.id,
+    PMC_E.guid,
+    K.dispatch_id,
+    K.kernel_id,
+    E.id AS event_id,
+    E.correlation_id,
+    E.stack_id,
+    E.parent_stack_id,
+    P.pid,
+    T.tid,
+    K.agent_id,
+    A.absolute_index AS agent_abs_index,
+    A.logical_index AS agent_log_index,
+    A.type_index AS agent_type_index,
+    A.type AS agent_type,
+    K.queue_id,
+    K.grid_size_x AS grid_size_x,
+    K.grid_size_y AS grid_size_y,
+    K.grid_size_z AS grid_size_z,
+    (K.grid_size_x * K.grid_size_y * K.grid_size_z) AS grid_size,
+    KS.display_name AS kernel_name,
+    (
+        SELECT
+            string
+        FROM
+            `rocpd_string` RS
+        WHERE
+            RS.id = K.region_name_id
+            AND RS.guid = K.guid
+    ) AS kernel_region,
+    K.workgroup_size_x AS workgroup_size_x,
+    K.workgroup_size_y AS workgroup_size_y,
+    K.workgroup_size_z AS workgroup_size_z,
+    (K.workgroup_size_x * K.workgroup_size_y * K.workgroup_size_z) AS workgroup_size,
+    K.group_segment_size AS lds_block_size,
+    K.private_segment_size AS scratch_size,
+    KS.arch_vgpr_count AS vgpr_count,
+    KS.accum_vgpr_count,
+    KS.sgpr_count,
+    PMC_I.name AS counter_name,
+    PMC_I.symbol AS counter_symbol,
+    PMC_I.component,
+    PMC_I.description,
+    PMC_I.block,
+    PMC_I.expression,
+    PMC_I.value_type,
+    PMC_I.id AS counter_id,
+    PMC_E.xcc,
+    PMC_E.shader_engine,
+    PMC_E.instance,
+    PMC_E.value,
+    S.timestamp,
+    PMC_I.is_constant,
+    PMC_I.is_derived,
+    (
+        SELECT
+            string
+        FROM
+            `rocpd_string` RS
+        WHERE
+            RS.id = E.category_id
+            AND RS.guid = E.guid
+    ) AS category,
+    K.nid,
+    E.extdata,
+    KS.code_object_id
+FROM
+    `rocpd_pmc_event` PMC_E
+    INNER JOIN `rocpd_sample` S ON S.id = PMC_E.sample_id
+    AND S.guid = PMC_E.guid
+    INNER JOIN `rocpd_info_pmc` PMC_I ON PMC_I.id = PMC_E.pmc_id
+    AND PMC_I.guid = PMC_E.guid
+    INNER JOIN `rocpd_event` E ON E.id = PMC_E.event_id
+    AND E.guid = PMC_E.guid
+    INNER JOIN `rocpd_kernel_dispatch` K ON K.event_id = PMC_E.event_id
+    AND K.guid = PMC_E.guid
+    INNER JOIN `rocpd_info_agent` A ON A.id = K.agent_id
+    AND A.guid = K.guid
+    INNER JOIN `rocpd_info_kernel_symbol` KS ON KS.id = K.kernel_id
+    AND KS.guid = K.guid
+    INNER JOIN `rocpd_info_process` P ON P.id = K.pid
+    AND P.guid = K.guid
+    INNER JOIN `rocpd_info_thread` T ON T.id = K.tid
+    AND T.guid = K.guid;

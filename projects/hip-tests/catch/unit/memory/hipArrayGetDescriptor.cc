@@ -150,7 +150,7 @@ static hipArray_t arrayCreate2D_Thread() {
 // Thread function for 1D Array
 void thread_funct1D(hipArray_t array) {
   HIP_ARRAY_DESCRIPTOR desc;
-  HIP_CHECK(hipArrayGetDescriptor(&desc, array));
+  HIP_CHECK_THREAD(hipArrayGetDescriptor(&desc, array));
   // Verify array parameters
   if ((desc.NumChannels == 2) && (desc.Width == 16) && (desc.Height == 0) &&
       (desc.Format == HIP_AD_FORMAT_HALF)) {
@@ -162,7 +162,7 @@ void thread_funct1D(hipArray_t array) {
 // Thread function for 2D Array
 void thread_funct2D(hipArray_t array) {
   HIP_ARRAY_DESCRIPTOR desc;
-  HIP_CHECK(hipArrayGetDescriptor(&desc, array));
+  HIP_CHECK_THREAD(hipArrayGetDescriptor(&desc, array));
   // Verify array parameters
   if ((desc.NumChannels == 1) && (desc.Width == 4) && (desc.Height == 4) &&
       (desc.Format == HIP_AD_FORMAT_FLOAT)) {
@@ -332,6 +332,7 @@ HIP_TEST_CASE(Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array) {
     for (auto& t : ThreadVector2D) {
       t.join();
     }
+    HIP_CHECK_THREAD_FINALIZE();
     // Validation
     REQUIRE(testPassed1D);
     REQUIRE(testPassed2D);

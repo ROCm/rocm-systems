@@ -6,6 +6,7 @@
 #include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
+#include "common/string_utility.hpp"
 #include "component_categories.hpp"
 #include "defines.hpp"
 #include "enumerated_list.hpp"
@@ -13,14 +14,13 @@
 #include "get_availability.hpp"
 #include "info_type.hpp"
 #include <cstdint>
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include "hw_counter_query.hpp"
 
 #include "core/amd_smi.hpp"
 #include "core/config.hpp"
 #include "core/gpu.hpp"
-#include "core/rocprofiler-sdk.hpp"
 #include "core/state.hpp"
 
 #include <timemory/components.hpp>
@@ -51,13 +51,6 @@
 #include <tuple>
 #include <utility>
 #include <vector>
-
-#if defined(TIMEMORY_UNIX)
-#    include <sys/ioctl.h>  // ioctl() and TIOCGWINSZ
-#    include <unistd.h>     // for STDOUT_FILENO
-#elif defined(TIMEMORY_WINDOWS)
-#    include <windows.h>
-#endif
 
 using namespace tim;
 
@@ -128,7 +121,7 @@ main(int argc, char** argv)
     (void) timemory_hash_aliases;  //
 
     tim::unwind::set_bfd_verbose(3);
-    rocprofsys::set_state(rocprofsys::State::Init);
+    rocprofsys::state::process::set(rocprofsys::state::process::Init);
     rocprofsys::config::configure_settings(false);
 
     std::set<std::string> _category_options = component_categories{}();
@@ -164,7 +157,7 @@ main(int argc, char** argv)
 
     std::string cols_via{};
     std::tie(fmt_opts.num_cols, cols_via) = tim::utility::console::get_columns();
-    std::string col_msg =
+    const std::string col_msg =
         ". default: " + std::to_string(fmt_opts.num_cols) + " [via " + cols_via + "]";
 
     fields[VAL]      = "VALUE_TYPE";
@@ -233,6 +226,22 @@ main(int argc, char** argv)
         .add_argument({ "-H", "--hw-counters", "--print-hw-counters" },
                       "Write the available hardware counters")
         .max_count(1);
+
+    parser
+        .add_argument({ "--max-threads" },
+                      "Print the compile-time limit on the total number of threads that "
+                      "can be profiled in a single process over its lifetime and exit. "
+                      "Thread slots are counted cumulatively and are not reused when a "
+                      "thread exits")
+        .count(0)
+        .action([](parser_t&) {
+            // NOTE: capabilities.py max_threads method depends on the wording here to
+            // capture the compile-time value. Any wording change must be reflected in
+            // that file.
+            std::cout << "Compile-time limit on the total number of threads "
+                         "(ROCPROFSYS_MAX_THREADS): "
+                      << ROCPROFSYS_MAX_THREADS << "\n";
+        });
 
     parser.add_argument({ "-a", "--all" }, "Print all available info")
         .max_count(1)
@@ -303,34 +312,35 @@ main(int argc, char** argv)
                 return;
             }
 
-            auto _domain = p.get<std::string>("list-operations");
-            std::transform(_domain.begin(), _domain.end(), _domain.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
+            auto domain = rocprofsys::utility::string::to_lower(
+                p.get<std::string>("list-operations"));
 
-            auto _settings     = tim::settings::shared_instance();
-            auto _setting_name = rocm_setting_name_for_domain(_domain);
-            auto _sitr         = _settings->find(_setting_name);
+            auto settings_ptr = tim::settings::shared_instance();
+            auto setting_name = rocm_setting_name_for_domain(domain);
+            auto sitr         = settings_ptr->find(setting_name);
 
-            if(_sitr == _settings->end())
+            if(sitr == settings_ptr->end())
             {
-                std::cerr << "Error: Domain '" << _domain << "' not found.\n"
+                std::cerr << "Error: Domain '" << domain << "' not found.\n"
                           << "Use 'rocprof-sys-avail --list-domains' "
                              "to see available domains.\n";
                 return;
             }
 
-            auto _choices = _sitr->second->get_choices();
-            filter_operations(_setting_name, _choices);
+            auto choices = sitr->second->get_choices();
+            filter_operations(setting_name, choices);
 
-            if(_choices.empty())
+            if(choices.empty())
             {
-                std::cerr << "Domain '" << _domain << "' has no operations.\n";
+                std::cerr << "Domain '" << domain << "' has no operations.\n";
                 return;
             }
 
-            std::cout << "Operations for " << _domain << ":\n";
-            for(const auto& itr : _choices)
+            std::cout << "Operations for " << domain << ":\n";
+            for(const auto& itr : choices)
+            {
                 std::cout << "    " << itr << "\n";
+            }
         });
     parser.add_argument({ "--list-keys" }, "List the output keys")
         .max_count(1)
@@ -522,7 +532,8 @@ main(int argc, char** argv)
             else
             {
                 _config_file = _p.get<std::string>("generate-config");
-                if(rocprofsys::to_bool(_config_file, false) && !_out.empty())
+                if(rocprofsys::utility::string::to_bool(_config_file, false) &&
+                   !_out.empty())
                 {
                     _config_file = _out;
                 }
@@ -676,7 +687,8 @@ main(int argc, char** argv)
     }
 
     if(parser.exists("list-categories") || parser.exists("list-keys") ||
-       parser.exists("list-operations") || parser.exists("list-domains"))
+       parser.exists("list-operations") || parser.exists("list-domains") ||
+       parser.exists("max-threads"))
         return EXIT_SUCCESS;
 
     std::string _pos_regex{};
@@ -804,10 +816,10 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
     using width_type = std::vector<std::int64_t>;
     using width_bool = std::array<bool, N + 2>;
 
-    auto         _available_column = !fmt_opts.force_brief && !fmt_opts.available_only;
-    width_type   _widths           = width_type{ 30, 12, 20, 20, 20, 40, 20, 40, 10 };
-    width_bool   _wusing           = width_bool{ true, _available_column };
-    std::int64_t pad               = fmt_opts.padding;
+    auto       _available_column = !fmt_opts.force_brief && !fmt_opts.available_only;
+    width_type _widths           = width_type{ 30, 12, 20, 20, 20, 40, 20, 40, 10 };
+    width_bool _wusing           = width_bool{ true, _available_column };
+    const std::int64_t pad       = fmt_opts.padding;
     for(size_t i = 0; i < options.size(); ++i)
         _wusing[i + 2] = options[i];
 
@@ -862,7 +874,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
             for(size_t i = 0; i < std::get<2>(itr).size(); ++i)
             {
                 if(!options[i]) continue;
-                bool center = (i > 0) ? false : true;
+                const bool center = (i > 0) ? false : true;
                 _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
                 write_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
                             _mark.at(i), fmt_opts);
@@ -935,7 +947,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
         for(size_t i = 0; i < std::get<2>(itr).size(); ++i)
         {
             if(!options[i]) continue;
-            bool center = (i > 0) ? false : true;
+            const bool center = (i > 0) ? false : true;
             _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
             if(fields.at(i) == "DESCRIPTION")
                 write_wrap_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
@@ -1258,8 +1270,8 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
         for(const auto& itr : fitr.second)
         {
             if(fmt_opts.available_only && !itr.available()) continue;
-            std::stringstream ss;
-            int               _selected = 0;
+            const std::stringstream ss;
+            int                     _selected = 0;
             if(options[0])
             {
                 _selected += (is_selected(itr.symbol())) ? 1 : 0;
@@ -1433,9 +1445,9 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
         if(_midx < _widths.size()) _widths.at(_midx) -= 1;
     };
 
-    std::int32_t _max_width = fmt_opts.num_cols;
-    size_t       _n         = 0;
-    size_t       _nmax      = std::numeric_limits<std::uint16_t>::max();
+    const std::int32_t _max_width = fmt_opts.num_cols;
+    size_t             _n         = 0;
+    const size_t       _nmax      = std::numeric_limits<std::uint16_t>::max();
     while(_n++ < _nmax)
     {
         if(debug_msg)
@@ -1452,7 +1464,7 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
         _decrement_max();
     }
 
-    std::int32_t _maxw = _get_max().second;
+    const std::int32_t _maxw = _get_max().second;
     if(fmt_opts.max_width == 0 || _maxw < fmt_opts.max_width) fmt_opts.max_width = _maxw;
 
     if(debug_msg)

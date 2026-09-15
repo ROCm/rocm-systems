@@ -15,11 +15,15 @@ from utils import schema, utils_analysis
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
+    console_error,
     console_log,
     console_warning,
     demarcate,
 )
-from utils.utils_common import canonical_config_arch, normalize_filter_to_str_list
+from utils.utils_common import (
+    canonical_config_arch,
+    normalize_filter_to_str_list,
+)
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -107,6 +111,8 @@ def create_df_kernel_top_stats(
 
     # First, create a dispatches file used to populate global vars
     dispatch_columns = ["Kernel_Name", "GPU_ID"]
+    if "PID" in df.columns:
+        dispatch_columns.insert(0, "PID")
     if "Dispatch_ID" in df.columns:
         dispatch_columns.insert(0, "Dispatch_ID")
 
@@ -202,8 +208,8 @@ def build_agent_to_gpu_map_from_json(
     Map agent ``id.handle`` values to 0-indexed GPU IDs.
 
     GPU agents are identified by the rocprofiler-sdk agent ``type`` enum
-    value 2 in the ``agents`` array of ``ps_file_results.json``.  They are
-    sorted by ``node_id`` so that the first GPU agent maps to GPU 0,
+    value 2 in the ``agents`` array of ``<pid>_ps_file_results.json``.  They
+    are sorted by ``node_id`` so that the first GPU agent maps to GPU 0,
     the second to GPU 1, etc.
     """
     rocprofiler_agent_type_gpu = 2
@@ -215,24 +221,40 @@ def build_agent_to_gpu_map_from_json(
 
 
 @demarcate
-def load_pc_sampling_results(workload_path: str) -> Optional[dict[str, Any]]:
-    """
-    Parse ``ps_file_results.json`` and return its ``rocprofiler-sdk-tool[0]``
-    record. Returns ``None`` if the file is absent or fails to parse (a
-    warning is logged in the latter case).
+def load_pc_sampling_results(workload_path: str) -> list[dict[str, Any]]:
+    """Load valid PC sampling tool records for a workload.
 
-    The json can be multiple GB: parse once here and pass the dict to every
-    PC sampling consumer instead of re-reading the file.
+    ``<pid>_ps_file_results.json`` records are returned in numeric PID order.
+    Malformed files are skipped with a warning.
+
+    Result files can be multiple GB, so parse each once here and share the records
+    with every PC sampling consumer instead of re-reading the files.
     """
-    json_path = Path(workload_path) / "ps_file_results.json"
-    if not json_path.exists():
-        return None
-    try:
-        with json_path.open(encoding="utf-8") as json_file:
-            return json.load(json_file)["rocprofiler-sdk-tool"][0]
-    except (json.JSONDecodeError, KeyError, IndexError) as error:
-        console_warning(f"PC sampling: failed to parse {json_path}: {error}")
-        return None
+    tool_records = []
+    for result_file in _find_pid_prefixed_pc_sampling_result_files(Path(workload_path)):
+        tool_record = _parse_pc_sampling_result_file(result_file)
+        if tool_record is None:
+            continue
+        tool_records.append(tool_record)
+    _validate_pc_sampling_process_ids(tool_records)
+    return tool_records
+
+
+def process_pc_sampling_kernel_traces(
+    tool_data_records: list[dict[str, Any]],
+) -> pd.DataFrame:
+    """Build one dispatch trace containing every PC-sampling tool record."""
+    if not tool_data_records:
+        return process_pc_sampling_kernel_trace(None)
+
+    combined_trace = pd.concat(
+        [
+            process_pc_sampling_kernel_trace(tool_data)
+            for tool_data in tool_data_records
+        ],
+        ignore_index=True,
+    )
+    return _renumber_dispatch_ids_across_processes(combined_trace)
 
 
 def process_pc_sampling_kernel_trace(
@@ -250,6 +272,7 @@ def process_pc_sampling_kernel_trace(
     """
     columns = [
         "Dispatch_Id",
+        "PID",
         "Kernel_Name",
         "Start_Timestamp",
         "End_Timestamp",
@@ -259,6 +282,7 @@ def process_pc_sampling_kernel_trace(
         console_warning("PC sampling results not found. Cannot build dispatch data.")
         return pd.DataFrame(columns=columns)
 
+    process_id = int(tool_data["metadata"]["pid"])
     dispatches = tool_data["buffer_records"]["kernel_dispatch"]
     kernel_id_to_name = {
         symbol["kernel_id"]: symbol["formatted_kernel_name"]
@@ -269,6 +293,7 @@ def process_pc_sampling_kernel_trace(
     rows = [
         {
             "Dispatch_Id": dispatch["dispatch_info"]["dispatch_id"],
+            "PID": process_id,
             "Kernel_Name": kernel_id_to_name.get(
                 dispatch["dispatch_info"]["kernel_id"]
             ),
@@ -289,7 +314,6 @@ def create_df_pmc(
     raw_data_dir: str,
     kernel_verbose: int,
     verbose: int,
-    config_dict: dict[str, Any],
 ) -> pd.DataFrame:
     """
     Load all raw pmc counters and join into one df.
@@ -300,8 +324,15 @@ def create_df_pmc(
 
     df = pd.read_csv(pmc_perf_path)
 
-    if config_dict.get("format_rocprof_output") == "rocpd":
-        df = utils_analysis.process_rocpd_csv(df)
+    # rocpd pmc_perf.csv is long: one row per counter per dispatch. Anything
+    # else was written by a removed backend and is no longer supported.
+    if not {"Counter_Name", "Counter_Value"}.issubset(df.columns):
+        console_error(
+            "analysis",
+            f"{pmc_perf_path} is not in the supported rocpd format. "
+            "Please re-profile this workload with a current release.",
+        )
+    df = utils_analysis.process_rocpd_csv(df)
 
     # Demangle original KernelNames
     # Skip for Standalone Roofline with -1 to keep full kernel names
@@ -376,3 +407,94 @@ def is_single_panel_config(
         console_warning(
             "Found multiple panel config sets but incomplete for all archs."
         )
+
+
+def _renumber_dispatch_ids_across_processes(
+    combined_trace: pd.DataFrame,
+) -> pd.DataFrame:
+    """Replace process-local dispatch ids with ids unique across processes.
+
+    ``dispatch_info.dispatch_id`` restarts in every process, so a multi-process
+    workload repeats the same id once per process. Counter profiling already
+    folds ``PID`` into ``Dispatch_ID`` via ``utils_profile``'s
+    ``GroupIdAssigner``, so both analyze paths agree on what a dispatch id means.
+    """
+    if combined_trace.empty:
+        return combined_trace
+
+    renumbered_trace = combined_trace.copy()
+    renumbered_trace["Dispatch_Id"] = range(len(renumbered_trace))
+    return renumbered_trace
+
+
+def _find_pid_prefixed_pc_sampling_result_files(
+    workload_path: Path,
+) -> tuple[Path, ...]:
+    """Return the workload's ``<pid>_ps_file_results.json`` in numeric PID order."""
+    if not workload_path.is_dir():
+        return ()
+
+    results_filename_suffix = "_ps_file_results.json"
+    pid_result_candidates: list[Path] = []
+
+    for candidate_path in workload_path.iterdir():
+        if not candidate_path.is_file():
+            continue
+        if not candidate_path.name.endswith(results_filename_suffix):
+            continue
+
+        process_identifier_prefix = candidate_path.name[: -len(results_filename_suffix)]
+        if re.fullmatch(r"[0-9]+", process_identifier_prefix) is None:
+            continue
+
+        pid_result_candidates.append(candidate_path)
+
+    # The PID prefix alone orders the files: it is unique among siblings.
+    return tuple(
+        sorted(
+            pid_result_candidates,
+            key=lambda candidate_path: int(
+                candidate_path.name[: -len(results_filename_suffix)]
+            ),
+        )
+    )
+
+
+def _validate_pc_sampling_process_ids(
+    tool_data_records: list[dict[str, Any]],
+) -> None:
+    """Require a concrete, unique process ID for every tool record.
+
+    This is the precondition that lets every downstream consumer index
+    ``tool_data["metadata"]["pid"]`` without a guard. ``console_error`` exits by
+    default, so a record that reaches those consumers is known to have a pid.
+    """
+    if not tool_data_records:
+        return
+
+    process_ids = [
+        tool_data.get("metadata", {}).get("pid") for tool_data in tool_data_records
+    ]
+    if any(process_id is None for process_id in process_ids):
+        console_error("PC sampling: every result record requires metadata.pid.")
+
+    if len(set(process_ids)) != len(process_ids):
+        console_error(
+            "PC sampling: multiple result records require unique metadata.pid values."
+        )
+
+
+def _parse_pc_sampling_result_file(json_path: Path) -> Optional[dict[str, Any]]:
+    """Extract the sole ``rocprofiler-sdk-tool`` record at index 0.
+
+    Each ``<pid>_ps_file_results.json`` output contains exactly one tool record,
+    so index 0 is the complete record for that process.
+
+    Log a warning and return ``None`` when the result file is malformed.
+    """
+    try:
+        with json_path.open(encoding="utf-8") as json_file:
+            return json.load(json_file)["rocprofiler-sdk-tool"][0]
+    except (json.JSONDecodeError, KeyError, IndexError) as error:
+        console_warning(f"PC sampling: failed to parse {json_path}: {error}")
+        return None

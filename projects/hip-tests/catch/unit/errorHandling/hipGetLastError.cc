@@ -562,9 +562,9 @@ HIP_TEST_CASE(Unit_hipGetLastError_with_MemCpyAsync) {
 
 // Inside thread, both hipGetLastError() api call should not return error
 static void thread_wait_func(int sleep_time) {
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK_THREAD(hipGetLastError());
   std::this_thread::sleep_for(std::chrono::milliseconds(sleep_time * 1000));
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK_THREAD(hipGetLastError());
 }
 
 HIP_TEST_CASE(Unit_hipGetLastError_with_MemCpyAsync_thread) {
@@ -596,6 +596,8 @@ HIP_TEST_CASE(Unit_hipGetLastError_with_MemCpyAsync_thread) {
                   hipErrorInvalidValue);
 
   t.join();
+
+  HIP_CHECK_THREAD_FINALIZE();
 
   HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidValue);
   HIP_CHECK(hipGetLastError());
@@ -995,10 +997,10 @@ HIP_TEST_CASE(Unit_hipGetLastError_Error_Combinations) {
 }
 
 static void thread_func() {
-  HIP_CHECK_ERROR(hipGetLastError(), hipSuccess);
-  HIP_CHECK_ERROR(hipMalloc(nullptr, 1), hipErrorInvalidValue);
-  HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidValue);
-  HIP_CHECK_ERROR(hipGetLastError(), hipSuccess);
+  REQUIRE_THREAD(hipGetLastError() == hipSuccess);
+  REQUIRE_THREAD(hipMalloc(nullptr, 1) == hipErrorInvalidValue);
+  REQUIRE_THREAD(hipGetLastError() == hipErrorInvalidValue);
+  REQUIRE_THREAD(hipGetLastError() == hipSuccess);
 }
 /**
  * Test Description
@@ -1019,6 +1021,7 @@ HIP_TEST_CASE(Unit_hipGetLastError_With_Thread) {
     HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
     std::thread t(thread_func);
     t.join();
+    HIP_CHECK_THREAD_FINALIZE();
     HIP_CHECK(hipFree(A_d));
     HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipGetLastError(), hipSuccess);

@@ -23,8 +23,10 @@ struct ncclRmaCeInitTask {
 struct ncclRmaCeCtx {
   struct ncclComm* comm;
 
-  // Per-rank sequence number for non-graph signal operations
+  // Host per-rank sequence numbers for non-graph signal operations.
   uint64_t* signalOpSeqs;
+  // Device staging slots for non-graph signal values. Indexed by signal op
+  // within the current CE batch chunk, with capacity comm->nRanks.
   uint64_t* signalOpSeqsDev;
   // Host buffer to track the expected values of the non-graph signals
   uint64_t* signalsHost;

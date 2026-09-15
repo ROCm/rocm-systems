@@ -60,6 +60,15 @@ if(ENABLE_YAML_TAGS)
     )
 endif()
 
+# Compile-time switch: register disabled tests as enabled in ctest.
+# OFF (default): disabled tests carry [disabled] tag and are DISABLED TRUE in ctest.
+# ON: ctest registers them as normal enabled tests; binary tags are unchanged.
+option(HIP_TESTS_RUN_DISABLED
+    "Register disabled tests as enabled in ctest so plain ctest runs them." OFF)
+if(HIP_TESTS_RUN_DISABLED)
+    message(STATUS "HIP_TESTS_RUN_DISABLED=ON: disabled tests will run in plain ctest")
+endif()
+
 # Generate both test definitions and parameter headers from YAML
 # - hip_test_config.hh: TEST_CASE macros with tags
 # - hip_test_parameters.hh: Compile-time constants for level parameters

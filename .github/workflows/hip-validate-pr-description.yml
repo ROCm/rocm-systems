@@ -9,6 +9,9 @@ on:
       - "projects/hipother/**"
       - "projects/hip-tests/**"
 
+permissions:
+  contents: read
+
 jobs:
   validate-pr-description:
     runs-on: ubuntu-latest

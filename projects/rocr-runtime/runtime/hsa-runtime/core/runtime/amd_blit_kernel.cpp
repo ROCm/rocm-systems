@@ -46,6 +46,7 @@
 #include <cstring>
 #include <sstream>
 #include <string>
+#include <atomic>
 
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/hsa_internal.h"

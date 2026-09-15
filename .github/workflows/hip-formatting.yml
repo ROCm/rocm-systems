@@ -8,6 +8,9 @@ on:
       - 'projects/hipother/**'
       - 'projects/hip-tests/**'
 
+permissions:
+  contents: read
+
 jobs:
   format:
     runs-on: ubuntu-latest

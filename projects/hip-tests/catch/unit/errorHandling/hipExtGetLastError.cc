@@ -559,9 +559,9 @@ HIP_TEST_CASE(Unit_hipExtGetLastError_with_MemCpyAsync) {
 
 // Inside thread, both hipExtGetLastError() api call should not return error
 static void thread_wait_func(int sleep_time) {
-  HIP_CHECK(hipExtGetLastError());
+  HIP_CHECK_THREAD(hipExtGetLastError());
   std::this_thread::sleep_for(std::chrono::milliseconds(sleep_time * 1000));
-  HIP_CHECK(hipExtGetLastError());
+  HIP_CHECK_THREAD(hipExtGetLastError());
 }
 
 HIP_TEST_CASE(Unit_hipExtGetLastError_with_MemCpyAsync_thread) {
@@ -593,6 +593,8 @@ HIP_TEST_CASE(Unit_hipExtGetLastError_with_MemCpyAsync_thread) {
                   hipErrorInvalidValue);
 
   t.join();
+
+  HIP_CHECK_THREAD_FINALIZE();
 
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
   HIP_CHECK(hipExtGetLastError());

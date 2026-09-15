@@ -41,6 +41,7 @@
 
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
+#include "rocjitsu/code/patch/spill_manager.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/register_set.h"
@@ -51,6 +52,7 @@
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocjitsu {
@@ -172,6 +174,9 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 ///     program terminator, and branch_offset_bytes() is nullopt.
 ///   - anchor.mnemonic() is not in the small PC-relative denylist
 ///     (s_getpc_b64, s_call_b64, s_setpc_b64, s_swappc_b64, s_rfe_*).
+///   - anchor is not s_clause. Because this predicate has no surrounding
+///     instruction-stream context, Instrumentor additionally rejects anchors
+///     among the following instructions covered by an s_clause.
 ///
 /// @p arch is accepted now so a future denylist can grow ISA-specific entries
 /// without an API change; today's checks are uniform across all AMDGPU ISAs.
@@ -241,18 +246,6 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 // than in the callee-only probe_clobber unit.
 //==============================================================================
 
-/// @brief What the builder will do about registers that are simultaneously live
-///        at the anchor and clobbered by instrumentation.
-///
-/// Currently implements only the no-spill path: a non-empty spill set is a hard
-/// failure rather than something the builder saves and restores. The enum exists
-/// now so the contract has a name and a later spill-capable slice can add a
-/// value without a rename.
-enum class SpillPolicy {
-  NoSpillsSupported, ///< Any non-empty spill set is a hard failure.
-  // TODO: SpillsSupported once a bootstrap save/restore sequence exists.
-};
-
 /// @brief instrument_clobbers = probe body clobbers | builder envelope clobbers.
 [[nodiscard]] RegisterSet compute_instrumentation_clobbers(const ProbeClobberSummary &probe_summary,
                                                            const RegisterSet &builder_clobbers);
@@ -261,13 +254,43 @@ enum class SpillPolicy {
 [[nodiscard]] RegisterSet compute_spill_set(const RegisterSet &live_at_anchor,
                                             const RegisterSet &instrumentation_clobbers);
 
-/// @brief Enforce the current spill policy, NoSpillsSupported.
+/// @brief Reserve a scratch slot per VGPR in @p spill_set and fill @p out.
 ///
-/// Under @ref SpillPolicy::NoSpillsSupported a non-empty @p spill_set fails
-/// closed: returns false and writes a diagnostic naming the live, clobbered
-/// registers. An empty spill set always succeeds.
-[[nodiscard]] bool check_spill_policy(const RegisterSet &spill_set, SpillPolicy policy,
-                                      std::string *error_out = nullptr);
+/// Fails closed (returns false, @p out empty) on a non-VGPR register, an arch
+/// with no scratch emitter, a slot past the scratch limit, or an offset that
+/// does not fit the scratch offset field.
+[[nodiscard]] bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills,
+                                    rj_code_arch_t arch, std::vector<SpillSlot> &out,
+                                    std::string *error_out = nullptr);
+
+/// @brief Reserve a scratch slot per SGPR in @p spill_set, pick a bridge VGPR
+///        (lowest of the @p kernel_vgpr_count allocated VGPRs that is neither
+///        live at the anchor nor in @p vgpr_spills), and fill @p out and
+///        @p out_bridge.
+///
+/// Fails closed (returns false, @p out empty) on a non-SGPR register, no free
+/// bridge VGPR within the kernel's allocation, an arch with no scratch emitter, a
+/// slot past the scratch limit, or an offset that does not fit the offset field.
+[[nodiscard]] bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &live_at_anchor,
+                                    const std::vector<SpillSlot> &vgpr_spills,
+                                    uint32_t kernel_vgpr_count, SpillManager &spills,
+                                    rj_code_arch_t arch, std::vector<SpillSlot> &out,
+                                    uint16_t &out_bridge, std::string *error_out = nullptr);
+
+/// @brief Reserve a scratch slot per AccVGPR in @p spill_set and fill @p out.
+///
+/// AccVGPRs store/load directly out of the accumulator file via the CDNA scratch
+/// `acc` bit -- no bridge VGPR needed. @p acc_count is the kernel's allocated
+/// AccVGPR count (unified VGPR budget minus the ACCUM_OFFSET window base); an index
+/// at or past it is rejected so we never spill an AGPR the kernel did not allocate.
+///
+/// Fails closed (returns false, @p out empty) on a non-AccVGPR register, a target
+/// with no AccVGPR file (non-CDNA), an AGPR index past @p acc_count, an arch with no
+/// scratch emitter, a slot past the scratch limit, or an offset that does not fit the
+/// scratch offset field.
+[[nodiscard]] bool plan_acc_spills(const RegisterSet &spill_set, uint32_t acc_count,
+                                   SpillManager &spills, rj_code_arch_t arch,
+                                   std::vector<SpillSlot> &out, std::string *error_out = nullptr);
 
 /// @brief Does a kernel that allocates @p kernel_sgpr_count SGPRs own the fixed
 ///        return-link pair s[link_base : link_base+1]?
@@ -368,6 +391,10 @@ private:
   // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).
   std::unordered_map<uint64_t, const Instruction *> offset_to_inst_;
+  // .text-relative byte offsets that cannot be trampoline anchors because they
+  // are among the following instructions covered by an s_clause. The s_clause
+  // instruction itself is rejected by is_relocatable_anchor().
+  std::unordered_set<uint64_t> clause_blocked_offsets_;
   bool blocks_built_ = false;
 
   // Returns false if no decoder exists for arch_ (RV32I/RV64I/INVALID/etc.);

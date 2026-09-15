@@ -22,7 +22,9 @@
 
 #pragma once
 
+#include <cstddef>
 #include <memory>
+#include <new>
 #include <utility>
 
 template <typename T> class CowPtr
@@ -50,8 +52,9 @@ public:
 private:
     static const T& empty()
     {
-        static const T value{};
-        return value;
+        alignas(T) static std::byte storage[sizeof(T)];
+        static const T* value = ::new (static_cast<void*>(storage)) T{};
+        return *value;
     }
 
     std::shared_ptr<const T> ptr_{};

@@ -6,13 +6,76 @@ Unit tests for GPU-specific test counter selection.
 """
 
 from __future__ import annotations
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from conftest import RocprofsysTest, _validate_rocpd_candidates
 from rocprofsys import GPUInfo, TestResult as RocprofsysTestResult, ValidationResult
+from rocprofsys import cache
 
 pytestmark = [pytest.mark.pytest_impl]
+
+
+# ---------------------------------------------------------------------------
+# Helpers / fixtures for the persistent-cache tests
+# ---------------------------------------------------------------------------
+@dataclass
+class _Sample:
+    """A non-JSON-native return type, used to exercise to_cache/from_cache."""
+
+    name: str
+    tags: set
+
+
+def _sample_to_cache(sample: _Sample) -> dict:
+    return {"name": sample.name, "tags": sorted(sample.tags)}
+
+
+def _sample_from_cache(data: dict) -> _Sample:
+    return _Sample(name=data["name"], tags=set(data["tags"]))
+
+
+@dataclass
+class _DataclassSample:
+    """A plain dataclass: the codec round-trips it automatically, no converters."""
+
+    name: str
+    tags: set
+    path: Path = Path(".")
+
+
+def _cache_concurrent_writer(
+    cache_path: str, proc_idx: int, n_keys: int, barrier
+) -> None:
+    """Worker: hammer a shared ``PersistentCache`` with a distinct key range.
+
+    Module-level so forked worker processes can reference it. The barrier releases
+    all writers together so their read-modify-write cycles overlap and actually
+    exercise the file lock.
+    """
+    store = cache.PersistentCache(Path(cache_path))
+    barrier.wait()
+    for k in range(n_keys):
+        store.set(f"p{proc_idx}.key{k}", proc_idx * 1000 + k)
+
+
+@pytest.fixture
+def cache_store(tmp_path, monkeypatch):
+    """An isolated ``PersistentCache`` wired in as the process-wide shared cache.
+
+    Backed by a file under pytest's ``tmp_path`` and injected by monkeypatching
+    ``cache.get_shared_cache``, so the decorator/property tests never touch the
+    real cache file that a live test session uses.
+    """
+    store = cache.PersistentCache(tmp_path / "syscache.json")
+    monkeypatch.setattr(cache, "get_shared_cache", lambda: store)
+    return store
+
+
+# ---------------------------------------------------------------------------
+# Test classes
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.class_name("gpu-info")
@@ -201,3 +264,237 @@ class TestTestResult(RocprofsysTest):
         assert global_failure is not None
         assert "Fail regex found: FORBIDDEN" in global_failure
         assert f"validate {invalid_db.name}" in global_failure
+
+
+@pytest.mark.class_name("cache")
+class TestCache(RocprofsysTest):
+    """Unit tests for the persistent cross-process cache (``rocprofsys.cache``).
+
+    One test per component to keep the count small; each walks that component's
+    behaviours in a single flow. The decorator/property tests use the
+    ``cache_store`` fixture so they never touch the real shared cache file.
+    """
+
+    def test_codec_round_trips_supported_types_and_rejects_others(self) -> None:
+        """The tagged JSON codec preserves every supported type and rejects the rest."""
+        payload = {
+            "none": None,
+            "bools": [True, False],
+            "ints": [0, 42, -7],
+            "float": 3.14,
+            "strings": ["", "hello"],
+            "path": Path("/opt/rocm"),
+            "tuples": [(), (7, 1, 1)],
+            "sets": [set(), {"instinct", "apu"}],
+            "mixed_list": [1, "a", Path("/x")],
+            1: "non-string keys survive the tagged encoding",
+            "nested": {"paths": [Path("/a")], "categories": {"instinct"}},
+        }
+        assert cache.decode(cache.encode(payload)) == payload
+
+        with pytest.raises(cache.SerializationError):  # unsupported type
+            cache.encode(object())
+        with pytest.raises(cache.DeserializationError):  # unknown tag on decode
+            cache.decode({"__type__": "bogus", "value": 1})
+
+    def test_persistent_cache_store(self, tmp_path) -> None:
+        """get/set/miss, cross-instance persistence, clear, typed values, resilience."""
+        path = tmp_path / "c.json"
+        store = cache.PersistentCache(path)
+
+        assert store.get("missing") == (False, None)  # miss
+        store.set("k", {"a": 1})
+        store.set("path", Path("/opt/rocm"))  # non-JSON-native types
+        store.set("tuple", (7, 1, 1))
+        store.set("set", {"instinct", "apu"})
+        # An unserializable value is a programming error: set() raises instead of
+        # silently skipping, and nothing is stored under the key.
+        with pytest.raises(cache.SerializationError):
+            store.set("bad", object())
+        assert store.get("bad") == (False, None)
+
+        # A second instance (i.e. another process) reads what the first wrote.
+        reader = cache.PersistentCache(path)
+        assert reader.get("k") == (True, {"a": 1})
+        assert reader.get("path") == (True, Path("/opt/rocm"))
+        assert reader.get("tuple") == (True, (7, 1, 1))
+        assert reader.get("set") == (True, {"instinct", "apu"})
+
+        store.clear()  # wipes memory + disk
+        assert cache.PersistentCache(path).get("k") == (False, None)
+
+        # A corrupt file loads as empty but stays usable.
+        path.write_text("{ not valid json")
+        corrupt = cache.PersistentCache(path)
+        assert corrupt.get("k") == (False, None)
+        corrupt.set("k", 1)
+        assert corrupt.get("k") == (True, 1)
+
+    def test_persistent_cache_decorator(self, cache_store, monkeypatch) -> None:
+        """@persistent_cache: compute-once, arg keying, converters, method=True, unserializable-raises, fail-open."""
+        fn_calls: list[int] = []
+
+        @cache.persistent_cache("test.fn")
+        def fn(x: int) -> int:
+            fn_calls.append(x)
+            return x * 2
+
+        assert fn(21) == 42  # miss -> compute + store
+        assert fn(21) == 42  # hit -> served from cache
+        fn(3)  # distinct arg -> recompute (keyed on args)
+        assert fn_calls == [21, 3]
+
+        # to_cache/from_cache round-trip a non-JSON-native return type.
+        make_calls: list[str] = []
+
+        @cache.persistent_cache(
+            "test.sample", to_cache=_sample_to_cache, from_cache=_sample_from_cache
+        )
+        def make(name: str) -> _Sample:
+            make_calls.append(name)
+            return _Sample(name=name, tags={"a", "b"})
+
+        first, second = make("v"), make("v")  # second is rebuilt via from_cache
+        assert make_calls == ["v"]
+        assert isinstance(second, _Sample) and second == first
+
+        # method=True drops self from the key, so distinct instances share.
+        meth_calls: list[tuple[str, str]] = []
+
+        class Probe:
+            def __init__(self, tag: str) -> None:
+                self.tag = tag
+
+            @cache.persistent_cache("test.meth", method=True)
+            def check(self, target: str) -> str:
+                meth_calls.append((self.tag, target))
+                return f"result:{target}"
+
+        assert Probe("A").check("x") == "result:x"  # computed by A
+        assert Probe("B").check("x") == "result:x"  # different self -> still a hit
+        assert meth_calls == [("A", "x")]
+
+        # A non-serializable *result* is a bug: it propagates out of the wrapped
+        # call (loud) rather than being silently left uncached.
+        @cache.persistent_cache("test.unserializable")
+        def bad() -> object:
+            return object()
+
+        with pytest.raises(cache.SerializationError):
+            bad()
+
+        # Fail-open: with no shared cache the wrapper still computes, never raises.
+        monkeypatch.setattr(cache, "get_shared_cache", lambda: None)
+        disabled_calls: list[int] = []
+
+        @cache.persistent_cache("test.disabled")
+        def disabled(x: int) -> int:
+            disabled_calls.append(x)
+            return x + 1
+
+        assert disabled(1) == 2
+        assert disabled(1) == 2
+        assert disabled_calls == [1, 1]  # recomputed each time, no store
+
+    def test_persistent_cached_property(self, cache_store) -> None:
+        """Cross-instance sharing, per-class key namespacing, and loud on unserializable."""
+        calls: list[int] = []
+
+        class Caps:
+            def __init__(self, n: int) -> None:
+                self._n = n
+
+            @cache.persistent_cached_property
+            def value(self) -> int:
+                calls.append(self._n)
+                return 100
+
+        assert Caps(1).value == 100  # miss -> compute + store
+        assert Caps(2).value == 100  # fresh instance -> served from shared file
+        assert calls == [1]
+
+        # Same attribute name on a different class must not collide in the store.
+        class Other:
+            @cache.persistent_cached_property
+            def value(self) -> str:
+                return "other"
+
+        assert Other().value == "other"
+
+        # A property whose computed value can't be serialized raises on access
+        # (loud), instead of silently caching nothing.
+        class BadProp:
+            @cache.persistent_cached_property
+            def value(self) -> object:
+                return object()
+
+        with pytest.raises(cache.SerializationError):
+            BadProp().value
+
+    def test_dataclass_round_trips(self, cache_store) -> None:
+        """Dataclasses (de)serialize automatically, with no to_cache/from_cache.
+
+        Covers a direct codec round-trip (nested set + Path fields), reuse through
+        @persistent_cache, and rejection of a field of an unsupported type.
+        """
+        sample = _DataclassSample(
+            name="mi300", tags={"instinct", "apu"}, path=Path("/opt/rocm")
+        )
+        assert cache.decode(cache.encode(sample)) == sample  # direct round-trip
+
+        calls: list[str] = []
+
+        @cache.persistent_cache("test.dataclass")
+        def make(name: str) -> _DataclassSample:
+            calls.append(name)
+            return _DataclassSample(name=name, tags={"x"})
+
+        first, second = make("a"), make("a")  # second served from cache
+        assert calls == ["a"]
+        assert isinstance(second, _DataclassSample) and second == first
+
+        # A dataclass carrying a field of an unsupported type cannot be encoded.
+        @dataclass
+        class _BadField:
+            x: object
+
+        with pytest.raises(cache.SerializationError):
+            cache.encode(_BadField(object()))
+
+    def test_concurrent_writers_preserve_all_entries(self, tmp_path) -> None:
+        """Parallel writers to distinct keys must not clobber each other.
+
+        Regression guard for the file-lock design: the exclusive lock is held on a
+        stable sidecar file, so overlapping writers each preserve the others'
+        entries across the atomic tmp+replace. Locking the data file itself would
+        drop most writes, since ``os.replace`` swaps the locked inode.
+        """
+        import multiprocessing as mp
+
+        cache_path = tmp_path / "syscache.tmp"
+        cache.PersistentCache(cache_path).set("seed", 1)  # create the file first
+
+        n_proc, n_keys = 6, 40
+        ctx = mp.get_context("fork")  # the test suite is Linux-only
+        barrier = ctx.Barrier(n_proc)
+        procs = [
+            ctx.Process(
+                target=_cache_concurrent_writer,
+                args=(str(cache_path), i, n_keys, barrier),
+            )
+            for i in range(n_proc)
+        ]
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join(timeout=60)
+            assert p.exitcode == 0
+
+        final = cache.PersistentCache(cache_path)
+        lost = [
+            f"p{i}.key{k}"
+            for i in range(n_proc)
+            for k in range(n_keys)
+            if not final.get(f"p{i}.key{k}")[0]
+        ]
+        assert not lost, f"{len(lost)} of {n_proc * n_keys} concurrent writes were lost"

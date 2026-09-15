@@ -1056,10 +1056,14 @@ uint32_t hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* hsa_signal
   // Treat NULL and invalid signals as already satisfied their condition and skip them
   std::vector<hsa_signal_t> valid_signals;
   std::vector<uint32_t> valid_signal_ids;
+  std::vector<hsa_signal_condition_t> valid_conds;
+  std::vector<hsa_signal_value_t> valid_values;
   for (uint32_t i = 0; i < signal_count; i++){
     if (hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid()){
       valid_signals.emplace_back(hsa_signals[i]);
       valid_signal_ids.emplace_back(i);
+      valid_conds.emplace_back(conds[i]);
+      valid_values.emplace_back(values[i]);
     }
   }
 
@@ -1075,10 +1079,16 @@ uint32_t hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* hsa_signal
   uint32_t valid_signal_count = valid_signals.size();
 
   std::vector<hsa_signal_value_t> satisfying_values_vec(valid_signal_count);
-  uint32_t first_satysifying_signal_idx =
-      core::Signal::WaitMultiple(valid_signal_count, valid_signals.data(), conds, values, timeout_hint, wait_hint,
-                                 satisfying_values_vec, true);
+  uint32_t first_satisfying_signal_idx =
+      core::Signal::WaitMultiple(valid_signal_count, valid_signals.data(), valid_conds.data(),
+                                 valid_values.data(), timeout_hint, wait_hint, satisfying_values_vec, true);
 
+  // Note: on timeout (or if a signal became invalid mid-wait), WaitMultiple() returns
+  // uint32_t(-1) and satisfying_values_vec is only partially filled -- entries for
+  // signals whose condition was never met remain at their zero-initialized value and do
+  // not represent a real satisfying value. satisfying_values is still populated below in
+  // that case; callers must check the return value before treating its contents as
+  // meaningful.
   if (satisfying_values) {
     // Set 0 as satisfying value for NULL and invalid signals
     std::vector<hsa_signal_value_t> satisfying_values_vec_result(signal_count, 0);
@@ -1088,7 +1098,7 @@ uint32_t hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* hsa_signal
     std::copy(satisfying_values_vec_result.begin(), satisfying_values_vec_result.end(), satisfying_values);
   }
 
-  return first_satysifying_signal_idx;
+  return first_satisfying_signal_idx;
   CATCHRET(uint32_t);
 }
 
@@ -1104,10 +1114,14 @@ uint32_t hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* hsa_signal
   // Ignore NULL and invalid signals
   std::vector<hsa_signal_t> valid_signals;
   std::vector<uint32_t> valid_signal_ids;
+  std::vector<hsa_signal_condition_t> valid_conds;
+  std::vector<hsa_signal_value_t> valid_values;
   for (uint32_t i = 0; i < signal_count; i++){
     if (hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid()){
       valid_signals.emplace_back(hsa_signals[i]);
       valid_signal_ids.emplace_back(i);
+      valid_conds.emplace_back(conds[i]);
+      valid_values.emplace_back(values[i]);
     }
   }
 
@@ -1117,14 +1131,24 @@ uint32_t hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* hsa_signal
     return std::numeric_limits<uint32_t>::max();
   }
 
+  // For wait-any, WaitMultiple() only ever writes the satisfying value to slot 0.
   std::vector<hsa_signal_value_t> satisfying_value_vec(1);
-  uint32_t satisfying_signal_idx =
-      core::Signal::WaitMultiple(valid_signals.size(), valid_signals.data(), conds, values, timeout_hint, wait_hint,
-                                 satisfying_value_vec, false);
-  //  Map back the index
-  satisfying_signal_idx = valid_signal_ids[satisfying_signal_idx];
+  uint32_t local_satisfying_signal_idx =
+      core::Signal::WaitMultiple(valid_signals.size(), valid_signals.data(), valid_conds.data(),
+                                 valid_values.data(), timeout_hint, wait_hint, satisfying_value_vec, false);
+
+  // WaitMultiple() returns uint32_t(-1) on timeout (or if a signal became invalid mid-wait);
+  // there is no local index to read a satisfying value from or map back to the caller's
+  // original signal array position in that case.
+  if (local_satisfying_signal_idx == uint32_t(-1)) {
+    return local_satisfying_signal_idx;
+  }
 
   if (satisfying_value) *satisfying_value = satisfying_value_vec.at(0);
+
+  //  Map back the index: the INDEX returned to the caller is in the caller's ORIGINAL
+  //  signal array position, via valid_signal_ids.
+  uint32_t satisfying_signal_idx = valid_signal_ids[local_satisfying_signal_idx];
 
   return satisfying_signal_idx;
   CATCHRET(uint32_t);
@@ -1610,9 +1634,11 @@ hsa_status_t hsa_amd_queue_intercept_create(
   IS_OPEN();
   IS_BAD_PTR(queue);
 
-  // A wrapped queue for the intercept queue must have at least 3 slots so
-  // there is space for a packet, a new retry barrier packet, and an existing
-  // retry packet that is in the process of being processed.
+  // The intercept queue needs at least 3 wrapped-queue slots to guarantee forward
+  // progress when draining overflow: one for a data packet, one for a new retry barrier
+  // to drain the remainder, and one for a previously inserted retry barrier that has
+  // completed but whose slot has not yet been reclaimed (invalidated by StoreRelaxed).
+  // See PlanSubmit() in intercept_queue_logic.h for the slot accounting this enables.
   if (size < 3) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   hsa_queue_t* lower_queue;
@@ -1929,6 +1955,9 @@ hsa_status_t hsa_amd_vmem_handle_create(hsa_amd_memory_pool_t memory_pool, size_
   MemoryRegion::AllocateFlags alloc_flag = core::MemoryRegion::AllocateMemoryOnly;
   if (type == MEMORY_TYPE_PINNED) alloc_flag |= core::MemoryRegion::AllocatePinned;
 
+  if (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG)
+    alloc_flag |= core::MemoryRegion::AllocateUncached;
+
   if (mem_region->owner()->device_type() == core::Agent::kAmdCpuDevice)
     alloc_flag |= core::MemoryRegion::AllocateNonPaged;
 
@@ -2196,6 +2225,35 @@ hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes,
                                                 num_dep_signals, dep_signals,
                                                 completion_signal);
 
+  CATCH;
+}
+
+hsa_status_t HSA_API hsa_amd_svm_discard_and_prefetch_batch_async(
+    void** ptrs, size_t* sizes, uint32_t count,
+    const hsa_agent_t* dst_agents, uint32_t num_dst_agents,
+    uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+    hsa_signal_t completion_signal) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(ptrs);
+  IS_BAD_PTR(sizes);
+  IS_ZERO(count);
+  IS_BAD_PTR(dst_agents);
+  IS_ZERO(num_dst_agents);
+
+  if (!core::Runtime::runtime_singleton_->XnackEnabled())
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_XNACK_DISABLED);
+
+  // every memory range passed must have a prefetch dest agent
+  if (count != num_dst_agents) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  if ((num_dep_signals == 0 && dep_signals != nullptr) ||
+      (num_dep_signals > 0 && dep_signals == nullptr))
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  return core::Runtime::runtime_singleton_->SvmDiscardAndPrefetchBatch(
+      ptrs, sizes, count, dst_agents, num_dst_agents,
+      num_dep_signals, dep_signals, completion_signal);
   CATCH;
 }
 

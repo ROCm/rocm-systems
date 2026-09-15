@@ -44,9 +44,11 @@ public:
         Init(agent_info);
     }
     bool IsGFX12() const override { return true; }
+    bool IsGFX1250() const override { return true; }
 
     virtual int GetAccumLowID() const override { return 1; };
     virtual int GetAccumHiID() const override { return 1; };
+    virtual int GetSQGAccumID() const override { return 13; };
 
 protected:
     void ConstructBuilders(const AgentInfo* agent_info);
@@ -123,6 +125,7 @@ Mi450Factory::ConstructTable(const AgentInfo* agent_info)
     block_table_[__BLOCK_ID_HSA(GL1C)] = &Gl1cCounterBlockInfo;
     block_table_[__BLOCK_ID(GRBMH)]    = &GrbmhCounterBlockInfo;
     block_table_[__BLOCK_ID_HSA(SPI)]  = &SpiCounterBlockInfo;
+    block_table_[__BLOCK_ID(SP)]       = &SpCounterBlockInfo;
     block_table_[__BLOCK_ID(SQG)]      = &SqgCounterBlockInfo;
     block_table_[__BLOCK_ID(GC_UTCL1)] = &GcUtcl1CounterBlockInfo;
     // SA blocks

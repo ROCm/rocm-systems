@@ -3,11 +3,12 @@
 
 #pragma once
 
-#include <cstddef>
-#include <functional>
+#include "policies/thread_state_policy.hpp"
+
 #include <mutex>
 #include <shared_mutex>
 #include <type_traits>
+#include <utility>
 
 namespace rocprofsys
 {
@@ -23,9 +24,16 @@ inline namespace common
  * error prone to access shared data and more obvious when a lock
  * is being held.
  *
+ * @tparam LockedType       The protected data type.
+ * @tparam ThreadStatePolicy Policy invoked around rlock/wlock/ulock to record the
+ *                          calling thread's lock-tracing state (e.g. state::thread).
+ * @tparam IsMappedTypeV    True when this instance is the mapped value of a
+ *                          synchronized map, enabling the const wlock() overload.
+ *                          Defaults to false; most call sites omit it.
+ *
  * Example usage:
  *
- * synchronized<int> x(9);
+ * synchronized<int, state::thread> x(9);
  * x.rlock([](const auto& data){
  *  // data = 9
  * });
@@ -34,12 +42,13 @@ inline namespace common
  *  // set data to new value
  * });
  */
-template <typename LockedType, bool IsMappedTypeV = false>
+template <typename LockedType, policies::thread_state_policy ThreadStatePolicy,
+          bool IsMappedTypeV = false>
 class synchronized
 {
 public:
     using value_type = LockedType;
-    using this_type  = synchronized<value_type, IsMappedTypeV>;
+    using this_type  = synchronized<value_type, ThreadStatePolicy, IsMappedTypeV>;
 
     synchronized()  = default;
     ~synchronized() = default;
@@ -83,33 +92,41 @@ private:
 //
 //      member definitions
 //
-template <typename LockedType, bool IsMappedTypeV>
+template <typename LockedType, policies::thread_state_policy ThreadStatePolicy,
+          bool IsMappedTypeV>
 template <typename FuncT, typename... Args>
     requires std::is_invocable_v<FuncT, const LockedType&, Args...>
 decltype(auto)
-synchronized<LockedType, IsMappedTypeV>::rlock(FuncT&& lambda, Args&&... args) const
+synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::rlock(FuncT&& lambda,
+                                                                  Args&&... args) const
 {
-    auto lock = std::shared_lock{ m_mutex };
+    auto guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
+    auto lock  = std::shared_lock{ m_mutex };
     return std::forward<FuncT>(lambda)(m_data, std::forward<Args>(args)...);
 }
 
-template <typename LockedType, bool IsMappedTypeV>
+template <typename LockedType, policies::thread_state_policy ThreadStatePolicy,
+          bool IsMappedTypeV>
 template <typename FuncT, typename... Args>
     requires std::is_invocable_v<FuncT, LockedType&, Args...>
 decltype(auto)
-synchronized<LockedType, IsMappedTypeV>::wlock(FuncT&& lambda, Args&&... args)
+synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::wlock(FuncT&& lambda,
+                                                                  Args&&... args)
 {
-    auto lock = std::unique_lock{ m_mutex };
+    auto guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
+    auto lock  = std::unique_lock{ m_mutex };
     return std::forward<FuncT>(lambda)(m_data, std::forward<Args>(args)...);
 }
 
 // This overload to wlock allows a synchronized map whose keys map to synchronized data to
 // use a read lock on the key data and then a write lock on the mapped data.
-template <typename LockedType, bool IsMappedTypeV>
+template <typename LockedType, policies::thread_state_policy ThreadStatePolicy,
+          bool IsMappedTypeV>
 template <typename FuncT, typename... Args>
     requires(IsMappedTypeV)
 decltype(auto)
-synchronized<LockedType, IsMappedTypeV>::wlock(FuncT&& lambda, Args&&... args) const
+synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::wlock(FuncT&& lambda,
+                                                                  Args&&... args) const
 {
     return const_cast<this_type*>(this)->wlock(std::forward<FuncT>(lambda),
                                                std::forward<Args>(args)...);
@@ -117,13 +134,15 @@ synchronized<LockedType, IsMappedTypeV>::wlock(FuncT&& lambda, Args&&... args) c
 
 // Upgradable lock. If read returns false, write will be called with a unique_lock.
 // Essentially a helper function that does .rlock() followed by .wlock().
-template <typename LockedType, bool IsMappedTypeV>
+template <typename LockedType, policies::thread_state_policy ThreadStatePolicy,
+          bool IsMappedTypeV>
 template <typename ReadFuncT, typename WriteFuncT, typename... Args>
     requires(std::is_invocable_v<ReadFuncT, const LockedType&, Args...> &&
              std::is_invocable_v<WriteFuncT, LockedType&, Args...>)
 bool
-synchronized<LockedType, IsMappedTypeV>::ulock(ReadFuncT&& read, WriteFuncT&& write,
-                                               Args&&... args)
+synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::ulock(ReadFuncT&&  read,
+                                                                  WriteFuncT&& write,
+                                                                  Args&&... args)
 {
     using read_return_type  = std::invoke_result_t<ReadFuncT, const value_type&, Args...>;
     using write_return_type = std::invoke_result_t<WriteFuncT, value_type&, Args...>;
@@ -132,6 +151,8 @@ synchronized<LockedType, IsMappedTypeV>::ulock(ReadFuncT&& read, WriteFuncT&& wr
                   "read and write functions must return same type");
     static_assert(std::is_same<read_return_type, bool>::value,
                   "read/write functions must return bool");
+
+    auto guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
 
     {
         auto lock = std::shared_lock{ m_mutex };

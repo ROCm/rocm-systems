@@ -497,6 +497,16 @@ void Os::cpuid(int regs[4], int info) { return __cpuid(regs, info); }
 
 uint64_t Os::xgetbv(uint32_t ecx) { return (uint64_t)_xgetbv(ecx); }
 
+bool Os::hasMovdir64b() {
+  // CPUID leaf 7, sub-leaf 0: ECX bit 28 = MOVDIR64B.
+  static const bool supported = [] {
+    int regs[4];
+    __cpuidex(regs, 7, 0);
+    return static_cast<bool>((regs[2] >> 28) & 1);
+  }();
+  return supported;
+}
+
 uint64_t Os::offsetToEpochNanos() {
   static uint64_t offset = 0;
 

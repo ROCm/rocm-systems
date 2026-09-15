@@ -99,6 +99,7 @@ ncclResult_t ncclStrongStreamAcquiredWorkStream(struct ncclCudaGraph graph, stru
 // Release of the strong stream.
 // `concurrent` indicates if other threads may be using the strong stream.
 ncclResult_t ncclStrongStreamRelease(struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent);
+ncclResult_t ncclCudaGraphRecordEvent(struct ncclCudaGraph graph, cudaEvent_t event, cudaStream_t stream);
 
 ncclResult_t ncclStreamWaitStream(cudaStream_t a, cudaStream_t b, cudaEvent_t scratchEvent);
 
@@ -119,6 +120,10 @@ struct ncclStrongStream {
 #if ROCM_VERSION >= 60100
   // This stream ever appeared in a graph capture.
   bool everCaptured;
+  // serialEvent has been recorded at least once for the graph-origin path used when
+  // graphStreamOrdering=0. Separate from everCaptured, which is also set by captures that never
+  // record serialEvent (graphUsageMode != 2) and is shared with splitShare children.
+  bool graphOriginCaptured;
   std::mutex mutex;
   struct ncclStrongStreamCapture* captureHead;
   // The event used to establish order between graphs and streams. During acquire

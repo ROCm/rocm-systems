@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/perfetto_processor.hpp"
-#include "common/units.hpp"
+#include "common/units/data_size.hpp"
 #include "core/agent_manager.hpp"
 #include "core/categories.hpp"
 #include "core/common.hpp"
@@ -23,6 +23,7 @@
 
 #include "logger/debug.hpp"
 #include <charconv>
+#include <chrono>
 #include <cstdint>
 #include <nlohmann/json.hpp>
 
@@ -36,6 +37,12 @@
 #include <utility>
 
 #include <rocprofiler-sdk/context.h>
+
+using rocprofsys::common::units::bytes;
+using rocprofsys::common::units::data_size_cast;
+using rocprofsys::common::units::gigabytes;
+using rocprofsys::common::units::kilobytes;
+using rocprofsys::common::units::megabytes;
 
 namespace rocprofsys::trace_cache
 {
@@ -121,10 +128,19 @@ resolve_kfd_migration_gpu_bucket(
 
     const auto src_type = find_type(src_node_id);
     const auto dst_type = find_type(dst_node_id);
-    if(!src_type.has_value() || !dst_type.has_value()) return std::nullopt;
+    if(!src_type.has_value() || !dst_type.has_value())
+    {
+        return std::nullopt;
+    }
 
-    if(*src_type == agent_type::CPU && *dst_type == agent_type::GPU) return dst_node_id;
-    if(*src_type == agent_type::GPU) return src_node_id;
+    if(*src_type == agent_type::cpu && *dst_type == agent_type::gpu)
+    {
+        return dst_node_id;
+    }
+    if(*src_type == agent_type::gpu)
+    {
+        return src_node_id;
+    }
 
     return std::nullopt;
 }
@@ -135,8 +151,10 @@ get_track(CategoryT, std::string name, std::uint64_t hash_arg)
 {
     auto _uuid = core::perfetto::get_perfetto_category_uuid<CategoryT>(hash_arg);
 
-    std::lock_guard<std::mutex> _lk{ core::perfetto::get_perfetto_track_uuids_mutex() };
-    auto&                       _track_uuids = core::perfetto::get_perfetto_track_uuids();
+    const std::lock_guard<std::mutex> _lk{
+        core::perfetto::get_perfetto_track_uuids_mutex()
+    };
+    auto& _track_uuids = core::perfetto::get_perfetto_track_uuids();
 
     const auto _parent = core::perfetto::get_active_process_track();
     if(_track_uuids.find(_uuid) == _track_uuids.end())
@@ -468,9 +486,11 @@ perfetto_processor_t::perfetto_processor_t(
     {
         if(!agent_ptr) continue;
         m_kfd_node_type_cache[agent_ptr->node_id] = agent_ptr->type;
-        if(agent_ptr->type == agent_type::GPU)
+        if(agent_ptr->type == agent_type::gpu)
+        {
             m_kfd_node_to_gpu_index_cache[agent_ptr->node_id] =
                 static_cast<std::uint32_t>(agent_ptr->device_type_index);
+        }
     }
 }
 
@@ -513,17 +533,35 @@ perfetto_processor_t::get_thread_track(std::uint64_t thread_id)
     auto _track = ::perfetto::ThreadTrack::ForThread(
         static_cast<::perfetto::base::PlatformThreadId>(thread_id));
 
-    // - Worker threads (sequent_value > 0) get a "Thread N" descriptor.
-    // - The main thread (sequent_value == 0) is intentionally left with its
-    //   default descriptor.
+    auto _desc = _track.Serialize();
+
+    // ThreadTrack::ForThread anchors the descriptor's pid to the post-processor's
+    // own OS pid (ProcessTrack::Current().pid). Re-anchor it to the cached process
+    // so the thread is grouped under the correct (synthetic) ProcessTrack that the
+    // parallel cached-Perfetto path emits, rather than the post-processor process.
+    _desc.mutable_thread()->set_pid(static_cast<std::int32_t>(m_process_id));
+
     const auto& _info = thread_info::get(static_cast<std::int64_t>(thread_id), SystemTID);
-    if(_info && _info->index_data && _info->index_data->sequent_value > 0)
+    if(_info && _info->index_data)
     {
-        auto _desc = _track.Serialize();
-        _desc.mutable_thread()->set_thread_name(
-            fmt::format("Thread {}", _info->index_data->sequent_value));
-        ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
+        if(_info->index_data->sequent_value > 0)
+        {
+            // Worker threads (sequent_value > 0) get a "Thread N" descriptor.
+            _desc.mutable_thread()->set_thread_name(
+                fmt::format("Thread {}", _info->index_data->sequent_value));
+        }
+        else
+        {
+            // Main thread (sequent_value == 0): Perfetto labels a thread as the
+            // process "main thread" (and sorts it to the top) when its descriptor
+            // has thread.tid == thread.pid. Force that relationship so the
+            // application's main thread is identified correctly under the cached
+            // process.
+            _desc.mutable_thread()->set_tid(static_cast<std::int32_t>(m_process_id));
+        }
     }
+
+    ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
 
     m_thread_track_cache.emplace(thread_id, _track);
     return _track;
@@ -839,7 +877,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
         return false;
     };
 
-    bool dispatched =
+    const bool dispatched =
         (try_category(category::host{}) || try_category(category::user{}) ||
          try_category(category::python{}) || try_category(category::mpi{}) ||
          try_category(category::pthread{}) || try_category(category::kokkos{}) ||
@@ -848,7 +886,9 @@ perfetto_processor_t::handle(const region_sample& _rs)
          try_category(category::rocm_marker_api{}) ||
          try_category(category::rocm_ompt_api{}) || try_category(category::rocm_rccl{}) ||
          try_category(category::rocm_rocdecode_api{}) ||
-         try_category(category::rocm_rocjpeg_api{}) || try_category(category::ucx{}) ||
+         try_category(category::rocm_rocjpeg_api{}) ||
+         try_category(category::rocm_rocshmem_api{}) ||
+         try_category(category::rocm_hipfile_api{}) || try_category(category::ucx{}) ||
          try_category(category::shmem{}) || try_category(category::vaapi{}));
 
     if(!dispatched)
@@ -941,21 +981,32 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
     if(_is_process_owner)
     {
         if(_em.bits.page_rss)
+        {
+            const auto page_rss_b =
+                bytes{ static_cast<double>(_cpu_sample.process_data.page_rss) };
+
             TRACE_COUNTER(trait::name<category::process_page>::value,
                           process_page_track::at(0, 0), _ts,
-                          static_cast<double>(_cpu_sample.process_data.page_rss) /
-                              units::megabyte);
+                          data_size_cast<megabytes>(page_rss_b).count());
+        }
 
         if(_em.bits.virt_mem)
+        {
+            const auto virt_mem_b =
+                bytes{ static_cast<double>(_cpu_sample.process_data.virt_mem) };
+
             TRACE_COUNTER(trait::name<category::process_virt>::value,
                           process_virt_track::at(0, 0), _ts,
-                          static_cast<double>(_cpu_sample.process_data.virt_mem) /
-                              units::megabyte);
+                          data_size_cast<megabytes>(virt_mem_b).count());
+        }
         if(_em.bits.peak_rss)
+        {
+            const auto peak_rss_b =
+                bytes{ static_cast<double>(_cpu_sample.process_data.peak_rss) };
             TRACE_COUNTER(trait::name<category::process_peak>::value,
                           process_peak_track::at(0, 0), _ts,
-                          static_cast<double>(_cpu_sample.process_data.peak_rss) /
-                              units::megabyte);
+                          data_size_cast<megabytes>(peak_rss_b).count());
+        }
 
         if(_em.bits.ctx_switches)
             TRACE_COUNTER(trait::name<category::process_context_switch>::value,
@@ -968,16 +1019,26 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
                           static_cast<double>(_cpu_sample.process_data.page_faults));
 
         if(_em.bits.user_time)
+        {
+            const auto user_mode_time_us =
+                std::chrono::microseconds{ _cpu_sample.process_data.user_mode_time };
+            const auto user_mode_time_s =
+                std::chrono::duration<double>{ user_mode_time_us };
+
             TRACE_COUNTER(trait::name<category::process_user_mode_time>::value,
-                          process_user_track::at(0, 0), _ts,
-                          static_cast<double>(_cpu_sample.process_data.user_mode_time) /
-                              units::sec);
+                          process_user_track::at(0, 0), _ts, user_mode_time_s.count());
+        }
 
         if(_em.bits.kernel_time)
+        {
+            const auto kernel_mode_time_us =
+                std::chrono::microseconds{ _cpu_sample.process_data.kernel_mode_time };
+            const auto kernel_mode_time_s =
+                std::chrono::duration<double>{ kernel_mode_time_us };
+
             TRACE_COUNTER(trait::name<category::process_kernel_mode_time>::value,
-                          process_kern_track::at(0, 0), _ts,
-                          static_cast<double>(_cpu_sample.process_data.kernel_mode_time) /
-                              units::sec);
+                          process_kern_track::at(0, 0), _ts, kernel_mode_time_s.count());
+        }
     }
 
     if(_em.bits.frequency)
@@ -1201,7 +1262,7 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
 
     emit_gpu_scalar<amd_smi_mem_track>(
         _device_id, _ts, _em.bits.memory_usage, "Memory Usage", "megabytes",
-        _m.memory_usage / static_cast<double>(units::megabyte));
+        data_size_cast<megabytes>(bytes{ static_cast<double>(_m.memory_usage) }).count());
 
     emit_gpu_scalar<amd_smi_sdma_track>(_device_id, _ts, _em.bits.sdma_usage,
                                         "SDMA Usage", "%", _m.sdma_usage);

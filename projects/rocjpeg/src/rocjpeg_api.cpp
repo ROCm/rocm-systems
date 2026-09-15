@@ -305,4 +305,91 @@ extern const char* ROCJPEGAPI rocJpegGetErrorName(RocJpegStatus rocjpeg_status) 
             return "UNKNOWN_ERROR";
     }
 }
+
+/**
+ * @brief Submits a JPEG decode operation without waiting for output completion.
+ */
+RocJpegStatus ROCJPEGAPI rocJpegDecodeAsync(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params,
+    RocJpegImage *destination) {
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(handle) + ", " + RocJpegFmtPtr(jpeg_stream_handle) + ", " +
+                             RocJpegFmtPtr(decode_params) + ", " + RocJpegFmtPtr(destination));
+    if (handle == nullptr || jpeg_stream_handle == nullptr || decode_params == nullptr || destination == nullptr) {
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
+    RocJpegStatus rocjpeg_status = ROCJPEG_STATUS_SUCCESS;
+    auto rocjpeg_handle = static_cast<RocJpegDecoderHandle*>(handle);
+    try {
+        rocjpeg_status = rocjpeg_handle->rocjpeg_decoder->DecodeAsync(jpeg_stream_handle, decode_params, destination);
+    } catch (const std::exception& e) {
+        rocjpeg_handle->CaptureError(e.what());
+        ErrorLog(g_rocjpeg_logger, e.what());
+        return ROCJPEG_STATUS_RUNTIME_ERROR;
+    }
+
+    return rocjpeg_status;
+}
+
+/**
+ * @brief Synchronizes a pending asynchronous JPEG decode associated with the specified RocJpegImage* and writes the decoded output.
+ */
+RocJpegStatus ROCJPEGAPI rocJpegDecodeSync(RocJpegHandle handle, RocJpegImage *destination) {
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(handle) + ", " + RocJpegFmtPtr(destination));
+    if (handle == nullptr || destination == nullptr) {
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
+    RocJpegStatus rocjpeg_status = ROCJPEG_STATUS_SUCCESS;
+    auto rocjpeg_handle = static_cast<RocJpegDecoderHandle*>(handle);
+    try {
+        rocjpeg_status = rocjpeg_handle->rocjpeg_decoder->DecodeSync(destination);
+    } catch (const std::exception& e) {
+        rocjpeg_handle->CaptureError(e.what());
+        ErrorLog(g_rocjpeg_logger, e.what());
+        return ROCJPEG_STATUS_RUNTIME_ERROR;
+    }
+
+    return rocjpeg_status;
+}
+
+/**
+ * @brief Submits a batch of JPEG decode operations without waiting for output completion.
+ */
+RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedAsync(RocJpegHandle handle, RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations) {
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(handle) + ", " + RocJpegFmtPtr(jpeg_stream_handles) + ", " +
+                             ROCJPEG_TOSTR(batch_size) + ", " + RocJpegFmtPtr(decode_params) + ", " + RocJpegFmtPtr(destinations));
+    if (handle == nullptr || jpeg_stream_handles == nullptr || decode_params == nullptr || destinations == nullptr) {
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
+    RocJpegStatus rocjpeg_status = ROCJPEG_STATUS_SUCCESS;
+    auto rocjpeg_handle = static_cast<RocJpegDecoderHandle*>(handle);
+    try {
+        rocjpeg_status = rocjpeg_handle->rocjpeg_decoder->DecodeBatchedAsync(jpeg_stream_handles, batch_size, decode_params, destinations);
+    } catch (const std::exception& e) {
+        rocjpeg_handle->CaptureError(e.what());
+        ErrorLog(g_rocjpeg_logger, e.what());
+        return ROCJPEG_STATUS_RUNTIME_ERROR;
+    }
+
+    return rocjpeg_status;
+}
+
+/**
+ * @brief Synchronizes all pending asynchronous batched JPEG decodes and writes the decoded output.
+ */
+RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedSync(RocJpegHandle handle, RocJpegImage *destinations, int batch_size) {
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(handle) + ", " + RocJpegFmtPtr(destinations) + ", " + ROCJPEG_TOSTR(batch_size));
+    if (handle == nullptr || destinations == nullptr) {
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
+    RocJpegStatus rocjpeg_status = ROCJPEG_STATUS_SUCCESS;
+    auto rocjpeg_handle = static_cast<RocJpegDecoderHandle*>(handle);
+    try {
+        rocjpeg_status = rocjpeg_handle->rocjpeg_decoder->DecodeBatchedSync(destinations, batch_size);
+    } catch (const std::exception& e) {
+        rocjpeg_handle->CaptureError(e.what());
+        ErrorLog(g_rocjpeg_logger, e.what());
+        return ROCJPEG_STATUS_RUNTIME_ERROR;
+    }
+
+    return rocjpeg_status;
+}
 } //namespace rocjpeg

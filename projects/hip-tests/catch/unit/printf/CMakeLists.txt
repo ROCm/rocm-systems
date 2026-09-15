@@ -19,6 +19,7 @@ endif()
 
 if(UNIX)
   set(AMD_TEST_SRC
+    hostcallStackSize.cc
     printfNonHost.cc
     hipPrintfManyDevices.cc
     hipPrintfStar.cc
@@ -82,4 +83,12 @@ add_dependencies(build_tests printfLength_exe)
 add_dependencies(build_tests printfSpecifiers_exe)
 add_dependencies(build_tests printfFlagsNonHost_exe)
 add_dependencies(build_tests printfSpecifiersNonHost_exe)
+
+# Needs the static TLS block in a process of its own, so it cannot join the shared test binary.
+if(UNIX AND HIP_PLATFORM MATCHES "amd")
+  add_executable(hostcallStackSize_exe EXCLUDE_FROM_ALL hostcallStackSize_exe.cc)
+  set_source_files_properties(hostcallStackSize_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hostcallStackSize_exe)
+  add_dependencies(build_tests hostcallStackSize_exe)
+endif()
 

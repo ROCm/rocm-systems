@@ -51,6 +51,7 @@
 #include "core/inc/runtime.h"
 #include "inc/hsa_ext_amd.h"
 #include "core/inc/hsa_internal.h"
+#include "hsakmt/hsakmt.h"
 #include "core/util/utils.h"
 #include "addrlib/src/core/addrlib.h"
 #include "image_runtime.h"
@@ -291,6 +292,36 @@ hsa_status_t ImageManagerGfx12::PopulateImageSrd(Image& image,
         reinterpret_cast<uintptr_t>(image.data) - local_memory_base_address_);
   }
 
+  // Vulkan image interop (Windows): the AMD driver exposes no SRD, so clr delivers only swizzle +
+  // compression metadata in the descriptor's fallback slots (empty SRD words 0-7). For a compressed
+  // LINEAR single-level surface (swizzle 0), reconstruct the SRD natively (correct dims / pitch /
+  // LINEAR SW_MODE via addrlib) and stamp the gfx12 WORD6 compression bits — the copy-from-desc path
+  // below assumes GL/D3D already filled the SRD words and would leave dims = 0 for an empty desc.
+  // (Tiled surfaces are handled by the swizzle-forced mipmap path, PopulateMipmapSrd/BuildMipmapSrd.)
+  {
+    // clr wrote the surface-metadata blob at the start of the data[] region (metadata_amd_t::words).
+    const auto* meta = reinterpret_cast<const HsaWddmSurfaceMetadata*>(descriptor->words);
+    const uint32_t forced_sw_mode = meta->swizzle_mode;
+    const uint32_t max_comp_blk = meta->max_comp_blk;
+    const uint32_t max_uncomp_blk = meta->max_uncomp_blk;
+    // Reconstruct only when the descriptor carries a WDDM surface-metadata blob (version sentinel)
+    // AND the surface is LINEAR (swizzle 0). Tiled surfaces take the mipmap/BuildMipmapSrd path.
+    if (ClassifyInteropDescriptor(descriptor) == InteropDescriptorContent::kReconstructFromMetadata &&
+        forced_sw_mode == 0) {
+      image.tile_mode = Image::TileMode::LINEAR;
+      hsa_status_t st = PopulateImageSrd(image);  // native LINEAR build: dims / pitch / SW_MODE
+      if (st != HSA_STATUS_SUCCESS) return st;
+      SQ_IMG_RSRC_WORD6 w6;
+      w6.val = image.srd[6];
+      w6.f.COMPRESSION_ENABLE = 1;
+      w6.f.WRITE_COMPRESS_ENABLE = 1;
+      w6.f.MAX_COMP_BLK_SZ = max_comp_blk;
+      w6.f.MAX_UNCOMP_BLK_SZ = max_uncomp_blk;
+      image.srd[6] = w6.val;
+      return HSA_STATUS_SUCCESS;
+    }
+  }
+
   image.srd[0] = desc->word0.u32All;
   image.srd[1] = desc->word1.u32All;
   image.srd[2] = desc->word2.u32All;
@@ -499,8 +530,8 @@ hsa_status_t ImageManagerGfx12::PopulateImageSrd(Image& image) const {
     SQ_IMG_RSRC_WORD3 word3;
     SQ_IMG_RSRC_WORD4 word4;
     SQ_IMG_RSRC_WORD5 word5;
-    SQ_IMG_RSRC_WORD5 word6;
-    SQ_IMG_RSRC_WORD5 word7;
+    SQ_IMG_RSRC_WORD6 word6;
+    SQ_IMG_RSRC_WORD7 word7;
 
     ADDR3_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
 
@@ -688,7 +719,8 @@ uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
     Image::TileMode tileMode,
     size_t image_data_row_pitch,
     size_t image_data_slice_pitch,
-    ADDR3_COMPUTE_SURFACE_INFO_OUTPUT& out) const {
+    ADDR3_COMPUTE_SURFACE_INFO_OUTPUT& out,
+    std::optional<uint32_t> forced_sw_mode) const {
   const ImageProperty image_prop =
       GetImageProperty(component, desc.format, desc.geometry);
 
@@ -758,7 +790,14 @@ uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
 
   in.flags.texture = 1;
 
-  if (tileMode == Image::TileMode::LINEAR)
+  if (forced_sw_mode.has_value())
+  {
+    // Imported surface (e.g. Vulkan image interop): use the driver-supplied ADDR3 swizzle mode
+    // instead of addrlib's best-fit one. addrlib's choice depends on per-caller heuristics and
+    // would not match the exact tiling the allocating driver chose, so the layout (pitch / mip
+    // offsets) must be computed for the imported swizzle.
+    in.swizzleMode = static_cast<Addr3SwizzleMode>(*forced_sw_mode);
+  } else if (tileMode == Image::TileMode::LINEAR)
   {
     in.swizzleMode = ADDR3_LINEAR;
   } else {
@@ -956,6 +995,22 @@ hsa_status_t ImageManagerGfx12::FillImage(const Image& image, const void* patter
 }
 
 hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap) const {
+  return BuildMipmapSrd(mipmap, nullptr);
+}
+
+hsa_status_t ImageManagerGfx12::BuildMipmapSrd(MipmappedArray& mipmap,
+                                               const HsaWddmSurfaceMetadata* meta) const {
+  // Imported surface (Vulkan image interop): force the driver-supplied ADDR3 swizzle and inject its
+  // pipe-bank-XOR, instead of letting addrlib pick its best-fit tiling. meta==nullptr is the original
+  // (non-interop) path.
+  const std::optional<uint32_t> forced_sw_mode =
+      meta ? std::optional<uint32_t>(meta->swizzle_mode) : std::nullopt;
+  const uint32_t tile_swizzle = meta ? meta->tile_swizzle : 0u;
+  const uint32_t compression_mode = meta ? meta->compression_mode : 0u;
+  const uint32_t max_comp_blk = meta ? meta->max_comp_blk : 0u;
+  const uint32_t max_uncomp_blk = meta ? meta->max_uncomp_blk : 0u;
+  const bool imported = forced_sw_mode.has_value();
+
   // Map format/geometry to hardware encoding
   ImageProperty mipmap_prop = ImageLut().MapFormat(mipmap.desc.format, mipmap.desc.geometry);
   assert(mipmap_prop.cap != HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED);
@@ -1028,12 +1083,15 @@ hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap) const 
     // Get ADDR3 surface information
     ADDR3_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
 
-    // pMipInfo not needed - set to nullptr and AddrLib will ignore it
+    // pMipInfo not needed - set to nullptr and AddrLib will ignore it. PopulateMipLevelSrd derives
+    // per-level views from BASE_LEVEL/LAST_LEVEL, so per-level offsets are never read back.
     out.pMipInfo = nullptr;
 
+    // Imported surfaces must be tiled with the forced swizzle; native surfaces keep tile_mode.
+    const Image::TileMode tileMode = imported ? Image::TileMode::TILED : mipmap.tile_mode;
     unsigned int swizzleMode = GetAddrlibSurfaceInfoNv(mipmap.component,
-                            mipmap.desc, mipmap.num_levels, mipmap.tile_mode,
-                            mipmap.row_pitch, mipmap.slice_pitch, out);
+                            mipmap.desc, mipmap.num_levels, tileMode,
+                            mipmap.row_pitch, mipmap.slice_pitch, out, forced_sw_mode);
     if (swizzleMode == (uint32_t)(-1)) {
       return HSA_STATUS_ERROR;
     }
@@ -1046,6 +1104,12 @@ hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap) const 
 
     word0.val = 0;
     word0.f.BASE_ADDRESS = PtrLow40Shift8(mipmap_data_addr);
+    if (imported) {
+      // Inject the pipe-bank-XOR into the low bits of the (>>8) tile-aligned base, matching PAL's
+      // addr | (pipeBankXor << 8). kGfx12PbxExtraShift is to be confirmed on gfx12 hardware (0 vs 2).
+      static constexpr uint32_t kGfx12PbxExtraShift = 0;
+      word0.f.BASE_ADDRESS |= (tile_swizzle << kGfx12PbxExtraShift);
+    }
 
     word1.val = 0;
     word1.f.BASE_ADDRESS_HI = PtrHigh64Shift40(mipmap_data_addr);
@@ -1096,6 +1160,26 @@ hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap) const 
     word6.val = 0;
     word7.val = 0;
 
+    if (imported) {
+      // GFX12 hardware compression: the AMD driver allocates interop surfaces (Vulkan images) with
+      // compression enabled, so the shader must be told to use the compression path via WORD6. If it
+      // is left disabled, image LOADS read the compressed bytes as raw and return garbage — while
+      // STORES still work (HIP writes uncompressed and updates the compression state), which is why
+      // only the read direction fails. Values are queried from the driver's VCAM_SURFACE_DESC
+      // (plumbed via HsaWddmSurfaceMetadata -> clr data[] -> here). The AMD driver leaves
+      // ulCompressionMode == 0 but reports the max compressed/uncompressed block sizes; a non-zero
+      // block size is the signal that the surface is compressed (matches the WORD6 the driver stamps
+      // for GL/D3D interop: max_comp=2, max_uncomp=1 -> 0x00348000).
+      const bool compressed =
+          (compression_mode != 0 || max_comp_blk != 0 || max_uncomp_blk != 0);
+      if (compressed) {
+        word6.f.COMPRESSION_ENABLE = 1;
+        word6.f.WRITE_COMPRESS_ENABLE = 1;
+        word6.f.MAX_COMP_BLK_SZ = max_comp_blk;
+        word6.f.MAX_UNCOMP_BLK_SZ = max_uncomp_blk;
+      }
+    }
+
     mipmap.srd[0] = word0.val;
     mipmap.srd[1] = word1.val;
     mipmap.srd[2] = word2.val;
@@ -1121,6 +1205,25 @@ hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap) const 
 
 hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap_array, const metadata_amd_t* desc) const {
   const metadata_amd_gfx12_t* desc_gfx12 = reinterpret_cast<const metadata_amd_gfx12_t*>(desc);
+
+  // Vulkan image interop (Windows): the AMD Vulkan driver exposes no extension to query an
+  // imported image's SRD, so clr delivers only the surface's swizzle mode + pipe-bank-XOR in the
+  // descriptor's fallback slots (see HSA_WDDM_*_DATA_OFFSET in hsakmt/hsakmttypes.h). The +2
+  // skips the {version, deviceID} header preceding the data[] region. When present, reconstruct
+  // the SRD from that metadata instead of copying the (empty) SRD words below. On gfx12 the
+  // delivered swizzle mode is an ADDR3 mode (0 == ADDR3_LINEAR, up to ADDR3_MAX_TYPE-1).
+  //
+  // GUARD: only reconstruct when the descriptor carries NO valid SRD (all SRD words 0-7 are zero).
+  // GL/D3D interop fill a real SRD via wglResourceAttachAMD/CLQueryResource and may also carry
+  // swizzle metadata; those must keep their exact driver-supplied SRD and never be reconstructed
+  // here.
+  if (ClassifyInteropDescriptor(desc) == InteropDescriptorContent::kReconstructFromMetadata) {
+    // clr wrote the surface-metadata blob at the start of the data[] region (metadata_amd_t::words);
+    // reconstruct the SRD (swizzle, pipe-bank-XOR, gfx12 compression) from it.
+    const auto* meta = reinterpret_cast<const HsaWddmSurfaceMetadata*>(desc->words);
+    return BuildMipmapSrd(mipmap_array, meta);
+  }
+
   const void* mipmap_data_addr = mipmap_array.data;
   
   ImageProperty mipmap_prop = ImageLut().MapFormat(mipmap_array.desc.format, mipmap_array.desc.geometry);
@@ -1229,7 +1332,6 @@ hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap_array, 
                              mip_info_storage[last_level].depth * 
                              mipmap_prop.element_size;
   mipmap_array.size = mip_info_storage[last_level].offset + last_level_size;
-  
   return HSA_STATUS_SUCCESS;
 }
 

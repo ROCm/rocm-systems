@@ -108,6 +108,12 @@ std::vector<LibHandle> GetLoadedToolsLib();
 /// @return: Path name of library
 std::string GetLibraryName(LibHandle lib);
 
+/// @brief: Returns a path in the directory of the library containing an address.
+/// @param: address(Input), address within the library
+/// @param: filename(Input), file name to append to the library directory
+/// @return: Path name adjacent to the library
+std::string GetAdjacentLibraryPath(const void* address, const std::string& filename);
+
 /// @brief: Creates a Semaphore, will return NULL if failed.
 /// @param: void.
 /// @return: Semaphore.

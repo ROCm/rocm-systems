@@ -258,7 +258,7 @@ HELP_CASES = [
             r"--use-rcclp",
             r"--use-rocpd",
             r"--use-sampling",
-            r"--use-shmem",
+            r"--use-openshmem",
             r"--use-ucx",
             r"--trace-thread-barriers",
             r"--trace-thread-join",

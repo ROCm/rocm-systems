@@ -117,7 +117,7 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_Negative) {
 }
 
 static void thread_func(hipStream_t stream, hipGraph_t graph) {
-  HIP_ASSERT(hipErrorStreamCaptureWrongThread == hipStreamEndCapture(stream, &graph));
+  REQUIRE_THREAD(hipErrorStreamCaptureWrongThread == hipStreamEndCapture(stream, &graph));
 }
 static void StreamEndCaptureThreadNegative(float* A_d, float* A_h, float* C_d, float* C_h,
                                            hipStreamCaptureMode mode) {
@@ -140,6 +140,7 @@ static void StreamEndCaptureThreadNegative(float* A_d, float* A_h, float* C_d, f
 
   std::thread t(thread_func, stream, graph);
   t.join();
+  HIP_CHECK_THREAD_FINALIZE();
 
 #if HT_AMD
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
@@ -182,8 +183,8 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_Thread_Negative) {
 // Thread function
 static void thread_func1(hipStream_t stream, hipGraph_t* graph, size_t Nbytes, float* A_d,
                          float* B_h) {
-  HIP_CHECK(hipMemcpyAsync(B_h, A_d, Nbytes, hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipStreamEndCapture(stream, graph));
+  HIP_CHECK_THREAD(hipMemcpyAsync(B_h, A_d, Nbytes, hipMemcpyDeviceToHost, stream));
+  HIP_CHECK_THREAD(hipStreamEndCapture(stream, graph));
 }
 /*
  * Start stream capture on stream1 using mode hipStreamCaptureModeRelaxed.
@@ -233,6 +234,7 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_mode_hipStreamCaptureModeRelaxed) {
   // Thread Launch
   std::thread t(thread_func1, stream, &graph, Nbytes, A_d, B_h);
   t.join();
+  HIP_CHECK_THREAD_FINALIZE();
 
   // Launch the graph
   hipGraphExec_t graphExec;
@@ -310,9 +312,9 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_chkError_on_wrongStream) {
 }
 static void thread_func4(hipStream_t stream1, hipStream_t stream2, hipEvent_t event, size_t Nbytes,
                          int* B_d, int* B_h) {
-  HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream2));
-  HIP_CHECK(hipEventRecord(event, stream2));
-  HIP_CHECK(hipStreamWaitEvent(stream1, event, 0));
+  HIP_CHECK_THREAD(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream2));
+  HIP_CHECK_THREAD(hipEventRecord(event, stream2));
+  HIP_CHECK_THREAD(hipStreamWaitEvent(stream1, event, 0));
 }
 /*
  * Create 2 streams s1 and s2. Begin stream capture in s1 and spawn a captured
@@ -377,6 +379,7 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_streamMerge_in_thread) {
   // Thread Launch
   std::thread t(thread_func4, stream1, stream2, event, Nbytes, B_d, B_h);
   t.join();
+  HIP_CHECK_THREAD_FINALIZE();
   // Launch kernal
   hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream1, A_d, B_d,
                      C_d, N);

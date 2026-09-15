@@ -110,9 +110,9 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_Positive_Functional) {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 
-static void thread_func_pos(hipStream_t* stream, hipHostFn_t fn, float** data){
-
-    HIP_CHECK(hipLaunchHostFunc(*stream, fn, static_cast<void*>(data)))}
+static void thread_func_pos(hipStream_t* stream, hipHostFn_t fn, float** data) {
+  HIP_CHECK_THREAD(hipLaunchHostFunc(*stream, fn, static_cast<void*>(data)));
+}
 
 /**
  * Test Description
@@ -145,6 +145,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_Positive_Thread) {
   float* data[2] = {A_h.host_ptr(), B_h.host_ptr()};
   std::thread t(thread_func_pos, &stream, fn, data);
   t.join();
+  HIP_CHECK_THREAD_FINALIZE();
 
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   // Validate end capture is successful

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,12 +25,14 @@
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip.h>
+#include <rocprofiler-sdk/hipfile.h>
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/marker.h>
 #include <rocprofiler-sdk/ompt.h>
 #include <rocprofiler-sdk/rccl.h>
 #include <rocprofiler-sdk/rocdecode.h>
 #include <rocprofiler-sdk/rocjpeg.h>
+#include <rocprofiler-sdk/rocshmem.h>
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_amd_tool.h>
@@ -134,6 +136,26 @@ typedef struct rocprofiler_callback_tracing_rocjpeg_api_data_t
     rocprofiler_rocjpeg_api_args_t   args;
     rocprofiler_rocjpeg_api_retval_t retval;
 } rocprofiler_callback_tracing_rocjpeg_api_data_t;
+
+/**
+ * @brief ROCProfiler rocSHMEM API Callback Data.
+ */
+typedef struct rocprofiler_callback_tracing_rocshmem_api_data_t
+{
+    uint64_t                          size;  ///< size of this struct
+    rocprofiler_rocshmem_api_args_t   args;
+    rocprofiler_rocshmem_api_retval_t retval;
+} rocprofiler_callback_tracing_rocshmem_api_data_t;
+
+/**
+ * @brief ROCProfiler hipFILE API Callback Data.
+ */
+typedef struct rocprofiler_callback_tracing_hipfile_api_data_t
+{
+    uint64_t                         size;  ///< size of this struct
+    rocprofiler_hipfile_api_args_t   args;
+    rocprofiler_hipfile_api_retval_t retval;
+} rocprofiler_callback_tracing_hipfile_api_data_t;
 
 /**
  * @brief ROCProfiler Code Object Load Tracer Callback Record.
@@ -276,6 +298,24 @@ typedef struct rocprofiler_callback_tracing_kernel_dispatch_data_t
     rocprofiler_timestamp_t            end_timestamp;    ///< end time in nanoseconds
     rocprofiler_kernel_dispatch_info_t dispatch_info;    ///< Dispatch info
 } rocprofiler_callback_tracing_kernel_dispatch_data_t;
+
+/**
+ * @brief ROCProfiler HIP Event Callback Tracer Record.
+ *
+ * Timestamps are only non-zero in the ::ROCPROFILER_CALLBACK_PHASE_NONE callback (barrier
+ * completion). For WAIT operations, @p source_queue_id identifies where the event was originally
+ * recorded; for RECORD operations it equals @p queue_id.
+ */
+typedef struct rocprofiler_callback_tracing_hip_event_data_t
+{
+    uint64_t                size;              ///< size of this struct
+    rocprofiler_timestamp_t start_timestamp;   ///< start time in nanoseconds
+    rocprofiler_timestamp_t end_timestamp;     ///< end time in nanoseconds
+    rocprofiler_agent_id_t  agent_id;          ///< agent where barrier executed
+    rocprofiler_queue_id_t  queue_id;          ///< queue where barrier was dispatched
+    uint64_t                hip_event_handle;  ///< hipEvent_t pointer value
+    rocprofiler_queue_id_t  source_queue_id;   ///< queue where event was recorded
+} rocprofiler_callback_tracing_hip_event_data_t;
 
 /**
  * @brief ROCProfiler Memory Copy Callback Tracer Record.

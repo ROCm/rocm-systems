@@ -1,6 +1,33 @@
 name: TheRock Test Packages
 
 on:
+  workflow_dispatch:
+    inputs:
+      projects_to_test:
+        type: string
+        description: "Comma-separated list of projects to test"
+      test_type:
+        type: string
+        default: "standard"
+        description: "Test type (quick, standard, comprehensive, full)"
+      amdgpu_families:
+        type: string
+        description: "GPU family to test (e.g., gfx94X-dcgpu, gfx125X-dcgpu)"
+      test_runs_on:
+        type: string
+        description: "Runner label to use for tests"
+      platform:
+        type: string
+        default: "linux"
+        description: "Platform (linux or windows)"
+      artifact_run_id:
+        type: string
+        default: ""
+        description: "Run ID to fetch artifacts from (leave empty for current run)"
+      sanity_check_only_for_family:
+        type: boolean
+        default: false
+        description: "Run only sanity check for this family"
   workflow_call:
     inputs:
       projects_to_test:
@@ -41,6 +68,7 @@ jobs:
           sparse-checkout: build_tools
           path: "prejob"
           repository: "ROCm/TheRock"
+          ref: ec26b5e6128bcef52e1d36199f16042bee19cf36 # 2026-09-09 commit
 
       # Checkout failure is possible on Windows, as it's the first job on a GPU test runner.
       # Post-job cleanup isn't necessary since no executables are launched in this job.
@@ -53,7 +81,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
+          ref: ec26b5e6128bcef52e1d36199f16042bee19cf36 # 2026-09-09 commit
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -120,7 +148,7 @@ jobs:
           (matrix.components.multi_gpu_runner != '' &&
             matrix.components.multi_gpu_runner) ||
           (matrix.components.linux_cpu_runner == true &&
-            'azure-linux-scale-rocm') ||
+            'aws-linux-scale-rocm-prod') ||
           matrix.components.test_runner
         }}
       platform: ${{ needs.configure_test_matrix.outputs.platform }}

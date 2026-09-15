@@ -6,10 +6,16 @@ add_library(
     STATIC
     pc_sampling_collector.h
     pc_sampling_collector.cpp
+    sdk_wrapper.h
+    sdk_wrapper.cpp
+    filesystem_wrapper.h
+    filesystem_wrapper.cpp
     code_object_translator.h
     code_object_translator.cpp
     code_object_writer.h
     code_object_writer.cpp
+    source_snapshotter.h
+    source_snapshotter.cpp
 )
 
 target_include_directories(${target} PUBLIC .)

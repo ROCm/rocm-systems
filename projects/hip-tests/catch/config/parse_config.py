@@ -66,8 +66,20 @@ def create_test_definition(
         or arch in disabled
         or (asan and "asan" in disabled)
     ):
-        # skip case
-        tags_str = "[.]"
+        # Disabled on this platform (e.g. amd_linux) or arch (e.g. gfx1260).
+        # Use the [disabled] tag (no leading dot) so it is visible in --list-tests
+        # and included in a bare ./exe run.
+        # CTest registers these as DISABLED TRUE (skipped by default).
+        tags_str += f"[disabled][{arch}]"
+    else:
+        tags_str += f"[{arch}]"
+
+    # Promote every disable reason to a distinct tag so a runner can query which
+    # specific labels a test is disabled for (incl. OS labels dropped above).
+    # Prefix is "exclude_" (not "disabled_") so it does not substring-match a
+    # ctest -LE disabled filter; consumers should match anchored ^exclude_<entry>$.
+    for entry in disabled:
+        tags_str += f"[exclude_{entry}]"
 
     return f'#define {case_name} "{case_name}", "{tags_str}"'
 

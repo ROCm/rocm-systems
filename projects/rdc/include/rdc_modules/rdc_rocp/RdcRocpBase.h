@@ -81,13 +81,15 @@ class RdcRocpBase {
  private:
   typedef std::pair<uint32_t, rdc_field_t> rdc_field_pair_t;
   /**
-   * @brief Tweak this to change for how long each metric is collected
+   * @brief Tweak this to change for how long each metric is collected.
+   * Widened from 10ms to 100ms: eval fields are counter rates divided by this fixed
+   * window, and the wider window averages out per-XCC dispatch jitter for a stable reading.
    */
-  static const uint32_t collection_duration_us_k = 10000;
+  static const uint32_t collection_duration_us_k = 100000;
 
   /**
    * @brief SIMD_UTILIZATION is a derived metric (SQ_BUSY_CU_CYCLES/GRBM_COUNT/CU_NUM).
-   * The 10ms default window is too short for workloads with multi-second compute/idle
+   * Even the 100ms default window is too short for workloads with multi-second compute/idle
    * cycles and produces oscillating 0/0.2/0.4 readings. 500ms averages across those
    * cycles and matches the stable value reported by direct rocprofiler kernel tracing.
    */
@@ -114,7 +116,7 @@ class RdcRocpBase {
 
   bool m_is_initialized = false;
 
-  // these fields must be divided by time passed
+  // Rate fields: divided by the sample time (the fixed collection window, not wall clock).
   std::unordered_set<rdc_field_t> eval_fields = {
       RDC_FI_PROF_EVAL_MEM_R_BW,         RDC_FI_PROF_EVAL_MEM_W_BW,
       RDC_FI_PROF_EVAL_FLOPS_16,         RDC_FI_PROF_EVAL_FLOPS_32,
@@ -128,7 +130,7 @@ class RdcRocpBase {
    * @param[in] field Field ID to transform
    * @param[in] agent_index Index of the agent/GPU
    * @param[in] raw_value Raw value from profiler
-   * @param[in] elapsed_time_ms Elapsed time in milliseconds (for eval fields)
+   * @param[in] sample_time_ms Counter collection duration in milliseconds (for eval fields)
    * @param[in] sampled_values Map of all sampled values (for fields needing multiple metrics)
    * @param[out] output Transformed output value
    * @param[out] type Output type
@@ -136,7 +138,7 @@ class RdcRocpBase {
    * @retval ::RDC_ST_OK Transformation successful
    */
   rdc_status_t apply_field_transformation(rdc_field_t field, uint32_t agent_index, double raw_value,
-                                          double elapsed_time_ms,
+                                          double sample_time_ms,
                                           const std::map<std::string, double>& sampled_values,
                                           rdc_field_value_data* output, rdc_field_type_t* type);
 

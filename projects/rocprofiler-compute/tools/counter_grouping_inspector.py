@@ -168,6 +168,8 @@ def run_soc_detect_and_coalesce(
         rocminfo_lines=None,
         num_xcd=1,
         l2_banks=4,
+        gpu_arch=arch,
+        gpu_series=mi_gpu_specs.get_gpu_series(arch),
     )
 
     filter_block_list = list(filter_blocks) if filter_blocks else []
@@ -230,7 +232,7 @@ def _bucket_plan_sections(
     sections: list[tuple[str, list[str]]] = []
     total_assignments = 0
     for counter_file in output_files:
-        bucket_label = counter_file.file_name_txt.replace(".txt", "")
+        bucket_label = counter_file.name.replace(".txt", "")
         flat_counters = flat_counters_in_perfmon_file(counter_file)
         total_assignments += len(flat_counters)
         sections.append((bucket_label, flat_counters))
@@ -307,7 +309,7 @@ def _counter_to_bucket_map(
     """Map each PMC counter string to its perfmon bucket label."""
     result: dict[str, str] = {}
     for counter_file in output_files:
-        label = counter_file.file_name_txt.replace(".txt", "")
+        label = counter_file.name.replace(".txt", "")
         for ctr in flat_counters_in_perfmon_file(counter_file):
             result[ctr] = label
     return result

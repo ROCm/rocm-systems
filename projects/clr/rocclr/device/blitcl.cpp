@@ -192,8 +192,67 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       __amd_copyBufferRectAligned(src, dst, srcRect, dstRect, size);
     }
 
+    // TODO: Once the sequential for-loop fix lands in llvm-project/amd/device-libs/opencl/src/misc/amdblit.cl
+    // (replacing get_global_id(0) with a for loop), revert this back to:
+    //   __amd_batchMemOp(params, count);
+    //
+    // Local definitions mirroring BatchMemOpType and BatchMemOpParams from
+    // amd/device-libs/opencl/src/misc/amdblit.cl. Defined here because blitcl.cpp
+    // kernels are JIT-compiled by COMGR in OpenCL C 1.x mode, which does not have
+    // access to amdblit.cl's types. Values match hipStreamBatchMemOpType in hip_runtime_api.h.
+    typedef enum {
+      ROCCLR_STREAM_WAIT_VALUE_32  = 0x1,
+      ROCCLR_STREAM_WRITE_VALUE_32 = 0x2,
+      ROCCLR_STREAM_WAIT_VALUE_64  = 0x4,
+      ROCCLR_STREAM_WRITE_VALUE_64 = 0x5,
+    } RocclrBatchMemOpType;
+
+    // Mirrors BatchMemOpParams in amdblit.cl — uses __global ulong* instead of
+    // atomic_ulong* since atomic_ulong requires OpenCL C 2.0 unavailable here.
+    typedef union {
+      RocclrBatchMemOpType operation;
+      struct {
+        RocclrBatchMemOpType  operation;
+        __global ulong*       address;
+        union { uint value; ulong value64; };
+        uint                  flags;
+        __global ulong*       alias;
+      } waitValue;
+      struct {
+        RocclrBatchMemOpType  operation;
+        __global ulong*       address;
+        union { uint value; ulong value64; };
+        uint                  flags;
+        __global ulong*       alias;
+      } writeValue;
+      ulong pad[6];
+    } RocclrBatchMemOpParams;
     __kernel void __amd_rocclr_batchMemOp(__global void* params, uint count) {
-      __amd_batchMemOp(params, count);
+      __global RocclrBatchMemOpParams* param = (__global RocclrBatchMemOpParams*)params;
+      for (uint i = 0; i < count; i++) {
+        switch (param[i].operation) {
+          case ROCCLR_STREAM_WAIT_VALUE_32:
+            __amd_streamOpsWait((__global uint*)param[i].waitValue.address, NULL,
+                                (uint)param[i].waitValue.value, (uint)param[i].waitValue.flags,
+                                (ulong)~0UL);
+            break;
+          case ROCCLR_STREAM_WRITE_VALUE_32:
+            __amd_streamOpsWrite((__global uint*)param[i].writeValue.address, NULL,
+                                 (uint)param[i].writeValue.value);
+            break;
+          case ROCCLR_STREAM_WAIT_VALUE_64:
+            __amd_streamOpsWait(NULL, (__global ulong*)param[i].waitValue.address,
+                                param[i].waitValue.value64,
+                                (uint)param[i].waitValue.flags, (ulong)~0UL);
+            break;
+          case ROCCLR_STREAM_WRITE_VALUE_64:
+            __amd_streamOpsWrite(NULL, (__global ulong*)param[i].writeValue.address,
+                                 param[i].writeValue.value64);
+            break;
+          default:
+            break;
+        }
+      }
     });
 
 const char* HipExtraSourceCode = BLIT_KERNELS(
