@@ -12,6 +12,7 @@
 
 ### Changed
 
+* `ais-check` now reports LVM logical volumes as fastpath-capable when their underlying physical volumes are all local NVMe. It walks the device-mapper stack and still marks LVM on any other backing (multipath, dm-crypt, MD RAID, ...) as unsupported.
 * The synchronous fallback I/O path now sets the active HIP device to the buffer's GPU before `hipMemcpy` and restores the caller's device afterward, fixing copies that could run against the wrong device context.
 * Asynchronous fallback I/O now reuses a single per-stream bounce buffer, splitting large transfers into chunks that fit the buffer, to reduce the memory footprint of asynchronous workloads.
 
