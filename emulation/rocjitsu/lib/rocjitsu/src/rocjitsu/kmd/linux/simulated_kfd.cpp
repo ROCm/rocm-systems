@@ -790,7 +790,8 @@ int SimulatedKfd::open() {
   for (auto &g : gpus_) {
     if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
       mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_,
-                            proc->page_table_generation(), proc->page_table_request_mutex());
+                            proc->page_table_generation(), proc->page_table_request_mutex(),
+                            proc->page_table_fetchability_epoch());
       mem->set_memory_fault_reporter(fault_reporter_for(g));
       if (!daemon_mode_)
         mem->set_passthrough(true);
@@ -890,7 +891,8 @@ uint32_t SimulatedKfd::open_process(pid_t client_pid) {
     for (auto &g : gpus_) {
       if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
         mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_,
-                              proc->page_table_generation(), proc->page_table_request_mutex());
+                              proc->page_table_generation(), proc->page_table_request_mutex(),
+                              proc->page_table_fetchability_epoch());
         mem->set_memory_fault_reporter(fault_reporter_for(g));
         if (client_pid > 0)
           mem->set_process_client_pid(pid, client_pid);

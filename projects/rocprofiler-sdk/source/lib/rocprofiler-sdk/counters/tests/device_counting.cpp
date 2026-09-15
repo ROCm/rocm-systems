@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
 
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -48,10 +49,14 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <set>
 #include <sstream>
 #include <tuple>
+#include <unordered_map>
 
 using namespace rocprofiler::counters::test_constants;
 using namespace rocprofiler::counters::testing;
@@ -119,6 +124,26 @@ global_recs()
     return recs;
 }
 
+struct captured_sync_sample
+{
+    rocprofiler_agent_id_t                    expected_agent_id;
+    std::vector<rocprofiler_counter_record_t> records;
+};
+
+common::Synchronized<std::vector<captured_sync_sample>>&
+global_sync_samples()
+{
+    static common::Synchronized<std::vector<captured_sync_sample>> samples;
+    return samples;
+}
+
+std::atomic<size_t>&
+global_dispatch_header_count()
+{
+    static std::atomic<size_t> count{0};
+    return count;
+}
+
 void
 check_output_created(rocprofiler_context_id_t,
                      rocprofiler_buffer_id_t,
@@ -137,18 +162,15 @@ check_output_created(rocprofiler_context_id_t,
         auto* header = headers[i];
         if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
            header->kind == ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER)
-        {}
+        {
+            global_dispatch_header_count().fetch_add(1, std::memory_order_relaxed);
+        }
         else if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
                 header->kind == ROCPROFILER_COUNTER_RECORD_VALUE)
         {
             // Print the returned counter data.
             auto* record = static_cast<rocprofiler_record_counter_t*>(header->payload);
-            if(found_value != 0 && found_value != record->user_data.value)
-            {
-                ROCP_FATAL << "Have records with different user data values we didn't expect";
-                break;
-            }
-            found_value = record->user_data.value;
+            found_value  = std::max(found_value, record->user_data.value);
             // ROCP_INFO << fmt::format("Found counter value: {}", record->counter_value);
             global_recs().wlock([&](auto& data) { data.push_back(*record); });
         }
@@ -172,6 +194,14 @@ sort_counter_records(std::vector<rocprofiler_record_counter_t>& records)
                                                                       rhs.agent_id.handle,
                                                                       rhs.user_data.value);
     });
+}
+
+// Distinct user_data per (metric, sample) so records belonging to one metric cannot be
+// mistaken for a sample of the next metric.
+uint64_t
+sample_user_data(size_t metric_index, size_t sample_index, size_t sample_count)
+{
+    return ((metric_index - 1) * sample_count) + sample_index;
 }
 
 struct test_kernels
@@ -259,6 +289,102 @@ submitPacket(hsa_queue_t* queue, const void* packet)
     return write_idx;
 }
 
+// Registration and HSA state required to drive the device counting service directly
+// from a test body.
+struct device_counting_registration_scope
+{
+    device_counting_registration_scope()
+    : m_cleanup{[]() {
+        registration::set_init_status(1);
+        context::pop_client(1);
+    }}
+    {
+        hsa_init();
+        registration::init_logging();
+        registration::set_init_status(-1);
+        context::push_client(1);
+        test_init();
+        counters::device_counting_service_hsa_registration();
+    }
+
+    device_counting_registration_scope(const device_counting_registration_scope&) = delete;
+    device_counting_registration_scope& operator=(const device_counting_registration_scope&) =
+        delete;
+
+private:
+    common::scope_destructor m_cleanup;
+};
+
+struct argument_test_context
+{
+    rocprofiler_agent_id_t          agent          = {};
+    rocprofiler_counter_id_t        counter        = {.handle = 0};
+    rocprofiler_context_id_t        context        = {.handle = 0};
+    rocprofiler_counter_config_id_t profile        = {};
+    rocprofiler_status_t            profile_status = ROCPROFILER_STATUS_ERROR;
+};
+
+void
+set_argument_test_profile(rocprofiler_context_id_t context_id,
+                          rocprofiler_agent_id_t,
+                          rocprofiler_device_counting_agent_cb_t set_config,
+                          void*                                  user_data)
+{
+    auto* state           = static_cast<argument_test_context*>(user_data);
+    state->profile_status = set_config(context_id, state->profile);
+}
+
+// Configures device counting for `counter` on the first agent that supports it, without a
+// buffer and without a profiling queue. The argument validation tests only need a context
+// they can sample, so they avoid the kernel loading and dispatch performed by test_run().
+// `configured` stays false when no supported agent provides the counter; a failure of the
+// setup itself is reported through ROCPROFILER_CALL rather than as a skip.
+void
+configure_argument_test_context(argument_test_context& state,
+                                const std::string&     counter,
+                                bool&                  configured)
+{
+    configured = false;
+    for(const auto& [_, agent] : hsa::get_queue_controller()->get_supported_agents())
+    {
+        auto metrics = findDeviceMetrics(agent, {counter});
+        if(metrics.empty() || !agent.get_rocp_agent()) continue;
+
+        state.agent   = agent.get_rocp_agent()->id;
+        state.counter = rocprofiler_counter_id_t{.handle = metrics.front().id()};
+        ROCPROFILER_CALL(rocprofiler_create_context(&state.context), "context creation failed");
+        ROCPROFILER_CALL(
+            rocprofiler_create_counter_config(state.agent, &state.counter, 1, &state.profile),
+            "profile creation failed");
+        ROCPROFILER_CALL(
+            rocprofiler_configure_device_counting_service(state.context,
+                                                          rocprofiler_buffer_id_t{.handle = 0},
+                                                          state.agent,
+                                                          set_argument_test_profile,
+                                                          &state),
+            "device service configuration failed");
+
+        agent::get_agent_cache(agent.get_rocp_agent())
+            ->init_device_counting_service_queue(get_api_table(), get_ext_table());
+        configured = true;
+        return;
+    }
+}
+
+struct device_counting_run_options
+{
+    rocprofiler_counter_flag_t      flags = ROCPROFILER_COUNTER_FLAG_NONE;
+    std::unordered_set<std::string> test_metrics;
+    size_t                          delay                  = 1;
+    bool                            non_intercept          = false;
+    size_t                          sample_count           = 1;
+    size_t                          kernel_dispatch_count  = 5;
+    bool                            sample_before_work     = false;
+    bool                            capture_sync_samples   = false;
+    bool                            require_positive_value = false;
+    std::string                     required_expression;
+};
+
 }  // namespace
 
 class device_counting_service_test : public ::testing::Test
@@ -266,15 +392,22 @@ class device_counting_service_test : public ::testing::Test
 protected:
     device_counting_service_test() {}
 
-    static void test_run(rocprofiler_counter_flag_t flags = ROCPROFILER_COUNTER_FLAG_NONE,
-                         const std::unordered_set<std::string>& test_metrics  = {},
-                         size_t                                 delay         = 1,
-                         bool                                   non_intercept = false)
+    static void test_run(const device_counting_run_options& options)
     {
+        global_sync_samples().wlock([](auto& data) { data.clear(); });
+        global_dispatch_header_count().store(0, std::memory_order_relaxed);
+
+        size_t expression_metrics_tested = 0;
+        bool   abort_focused_test        = false;
+
         hsa_init();
         registration::init_logging();
         registration::set_init_status(-1);
         context::push_client(1);
+        auto registration_cleanup = common::scope_destructor{[]() {
+            registration::set_init_status(1);
+            context::pop_client(1);
+        }};
         test_init();
         // rocprofiler_debugger_block();
         counters::device_counting_service_hsa_registration();
@@ -285,9 +418,26 @@ protected:
         ASSERT_GT(hsa::get_queue_controller()->get_supported_agents().size(), 0);
         for(const auto& [_, agent] : hsa::get_queue_controller()->get_supported_agents())
         {
-            auto metrics = findDeviceMetrics(agent, test_metrics);
+            auto metrics = findDeviceMetrics(agent, options.test_metrics);
+            if(!options.required_expression.empty())
+            {
+                metrics.erase(std::remove_if(metrics.begin(),
+                                             metrics.end(),
+                                             [&](const auto& metric) {
+                                                 return metric.expression().find(
+                                                            options.required_expression) ==
+                                                        std::string::npos;
+                                             }),
+                              metrics.end());
+            }
+            if(metrics.empty() && !options.required_expression.empty())
+            {
+                continue;
+            }
             ASSERT_FALSE(metrics.empty());
+            if(!options.required_expression.empty()) expression_metrics_tested += metrics.size();
             ASSERT_TRUE(agent.get_rocp_agent());
+            const auto   configured_agent_id = agent.get_rocp_agent()->id;
             test_kernels kernel_loader(agent);
             auto         kernel_handle = kernel_loader.load_kernel(agent, kernel_name);
             auto         kernel_pkt    = gen_kernel_pkt(kernel_handle);
@@ -303,14 +453,14 @@ protected:
                                       &queue),
                      HSA_STATUS_SUCCESS);
 
-            hsa_signal_t completion_signal;
-            hsa_signal_create(1, 0, nullptr, &completion_signal);
+            hsa_signal_t profiler_signal{};
+            CHECK_EQ(hsa_signal_create(1, 0, nullptr, &profiler_signal), HSA_STATUS_SUCCESS);
 
             CHECK(agent.cpu_pool().handle != 0);
             CHECK(agent.get_hsa_agent().handle != 0);
             // Set state of the queue to allow profiling (may not be needed since AQL
             // may do this in the future).
-            if(!non_intercept)
+            if(!options.non_intercept)
             {
                 // This simulates the presence of us intercepting queues on queue creation.
                 // This is identical to the standard device counting use case where only a single
@@ -318,18 +468,18 @@ protected:
                 hsa_amd_profiling_set_profiler_enabled(queue, 1);
                 aql::set_profiler_active_on_queue(
                     agent.cpu_pool(), agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
-                        pkt.ext_amd_aql_pm4.completion_signal = completion_signal;
+                        pkt.ext_amd_aql_pm4.completion_signal = profiler_signal;
                         submitPacket(queue, (const void*) &pkt);
 
-                        if(hsa_signal_wait_relaxed(completion_signal,
+                        if(hsa_signal_wait_relaxed(profiler_signal,
                                                    HSA_SIGNAL_CONDITION_EQ,
                                                    0,
-                                                   20000000,
+                                                   UINT64_MAX,
                                                    HSA_WAIT_STATE_BLOCKED) != 0)
                         {
                             ROCP_FATAL << "Failed to set profiling mode on queue";
                         }
-                        hsa_signal_store_relaxed(completion_signal, 1);
+                        hsa_signal_store_relaxed(profiler_signal, 1);
                     });
             }
             else
@@ -342,19 +492,21 @@ protected:
 
             rocprofiler::hsa::rocprofiler_packet barrier{};
 
-            hsa_signal_create(1, 0, nullptr, &completion_signal);
-            barrier.barrier_and.header            = packet_header(HSA_PACKET_TYPE_BARRIER_AND);
-            barrier.barrier_and.completion_signal = completion_signal;
+            hsa_signal_t barrier_signal{};
+            CHECK_EQ(hsa_signal_create(1, 0, nullptr, &barrier_signal), HSA_STATUS_SUCCESS);
+            barrier.barrier_and.header = packet_header(HSA_PACKET_TYPE_BARRIER_AND);
+            barrier.barrier_and.header |= 1 << HSA_PACKET_HEADER_BARRIER;
+            barrier.barrier_and.completion_signal = barrier_signal;
 
-            hsa_signal_t found_data;
-            hsa_signal_create(0, 0, nullptr, &found_data);
+            hsa_signal_t found_data{};
+            CHECK_EQ(hsa_signal_create(0, 0, nullptr, &found_data), HSA_STATUS_SUCCESS);
             size_t track_metric = 0;
             for(auto& metric : metrics)
             {
-                std::vector<rocprofiler_record_counter_t> output_records(10000);
-                // global_recs().clear();
+                std::vector<rocprofiler_counter_record_t> buffered_sync_records;
                 track_metric++;
                 ROCP_INFO << "Testing metric " << metric.name();
+                rocprofiler_counter_id_t id  = {.handle = metric.id()};
                 rocprofiler_context_id_t ctx = {.handle = 0};
                 ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
                 rocprofiler_buffer_id_t opt_buff_id = {.handle = 0};
@@ -370,16 +522,15 @@ protected:
                  * Check profile construction
                  */
                 rocprofiler_counter_config_id_t cfg_id = {.handle = 0};
-                rocprofiler_counter_id_t        id     = {.handle = metric.id()};
                 ROCPROFILER_CALL(
-                    rocprofiler_create_counter_config(agent.get_rocp_agent()->id, &id, 1, &cfg_id),
+                    rocprofiler_create_counter_config(configured_agent_id, &id, 1, &cfg_id),
                     "Unable to create profile");
 
                 ROCPROFILER_CALL(
                     rocprofiler_configure_device_counting_service(
                         ctx,
                         opt_buff_id,
-                        agent.get_rocp_agent()->id,
+                        configured_agent_id,
                         [](rocprofiler_context_id_t context_id,
                            rocprofiler_agent_id_t,
                            rocprofiler_device_counting_agent_cb_t set_config,
@@ -402,8 +553,9 @@ protected:
                 agent::get_agent_cache(agent.get_rocp_agent())
                     ->init_device_counting_service_queue(get_api_table(), get_ext_table());
 
-                hsa_signal_store_screlease(completion_signal, 1);
+                hsa_signal_store_screlease(barrier_signal, 1);
                 hsa_signal_store_screlease(found_data, 0);
+                global_recs().wlock([](auto& data) { data.clear(); });
                 auto status = rocprofiler_start_context(ctx);
                 if(status == ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS)
                 {
@@ -419,65 +571,128 @@ protected:
 
                 ROCPROFILER_CALL(status, "Could not start context");
 
-                // Execute kernel
-                submitPacket(queue, &kernel_pkt);
-                submitPacket(queue, &kernel_pkt);
-                submitPacket(queue, &kernel_pkt);
-                submitPacket(queue, &kernel_pkt);
-                submitPacket(queue, &kernel_pkt);
-                submitPacket(queue, &barrier);
-                usleep(delay);
-                // Wait for completion
-                hsa_signal_wait_relaxed(completion_signal,
-                                        HSA_SIGNAL_CONDITION_EQ,
-                                        0,
-                                        UINT64_MAX,
-                                        HSA_WAIT_STATE_BLOCKED);
+                auto submit_work = [&]() {
+                    hsa_signal_store_screlease(barrier_signal, 1);
+                    for(size_t i = 0; i < options.kernel_dispatch_count; ++i)
+                        submitPacket(queue, &kernel_pkt);
+                    submitPacket(queue, &barrier);
+                    usleep(options.delay);
+                    hsa_signal_wait_relaxed(barrier_signal,
+                                            HSA_SIGNAL_CONDITION_EQ,
+                                            0,
+                                            UINT64_MAX,
+                                            HSA_WAIT_STATE_BLOCKED);
+                };
 
-                // Sample the counting service.
+                uint64_t last_sample_user_data = 0;
+                auto     sample_once           = [&](size_t sample_idx) {
+                    last_sample_user_data =
+                        sample_user_data(track_metric, sample_idx, options.sample_count);
+                    if(options.flags == ROCPROFILER_COUNTER_FLAG_ASYNC)
+                    {
+                        ROCPROFILER_CALL(rocprofiler_sample_device_counting_service(
+                                             ctx,
+                                             {.value = last_sample_user_data},
+                                             options.flags,
+                                             nullptr,
+                                             nullptr),
+                                         "Could not sample");
+                    }
+                    else
+                    {
+                        std::vector<rocprofiler_counter_record_t> output_records(10000);
+                        size_t                                    out_count = output_records.size();
+                        ROCPROFILER_CALL(rocprofiler_sample_device_counting_service(
+                                             ctx,
+                                             {.value = last_sample_user_data},
+                                             options.flags,
+                                             output_records.data(),
+                                             &out_count),
+                                         "Could not sample");
+                        output_records.resize(out_count);
+                        for(const auto& record : output_records)
+                            EXPECT_EQ(record.agent_id.handle, configured_agent_id.handle);
+                        if(options.capture_sync_samples)
+                        {
+                            global_sync_samples().wlock([&](auto& data) {
+                                data.emplace_back(
+                                    captured_sync_sample{configured_agent_id, output_records});
+                            });
+                        }
+                        buffered_sync_records.insert(buffered_sync_records.end(),
+                                                     output_records.begin(),
+                                                     output_records.end());
+                    }
+                };
 
-                if(flags == ROCPROFILER_COUNTER_FLAG_ASYNC)
+                size_t sample_idx = 0;
+                if(options.sample_before_work && options.sample_count > 0)
                 {
-                    ROCPROFILER_CALL(rocprofiler_sample_device_counting_service(
-                                         ctx, {.value = track_metric}, flags, nullptr, nullptr),
-                                     "Could not sample");
+                    sample_once(++sample_idx);
                 }
-                else
+                while(sample_idx < options.sample_count)
                 {
-                    global_recs().wlock([&](auto& _data) { _data.clear(); });
-                    size_t out_count = output_records.size();
-                    ROCPROFILER_CALL(
-                        rocprofiler_sample_device_counting_service(
-                            ctx, {.value = track_metric}, flags, output_records.data(), &out_count),
-                        "Could not sample");
-                    output_records.resize(out_count);
+                    submit_work();
+                    sample_once(++sample_idx);
                 }
+
                 ROCPROFILER_CALL(rocprofiler_stop_context(ctx), "Could not stop context");
-                rocprofiler_flush_buffer(opt_buff_id);
+                ROCPROFILER_CALL(rocprofiler_flush_buffer(opt_buff_id), "Could not flush buffer");
 
-                if(hsa_signal_wait_relaxed(found_data,
+                if(options.sample_count > 0 &&
+                   hsa_signal_wait_relaxed(found_data,
                                            HSA_SIGNAL_CONDITION_EQ,
-                                           static_cast<int64_t>(track_metric),
-                                           20000000,
+                                           static_cast<int64_t>(last_sample_user_data),
+                                           UINT64_MAX,
                                            HSA_WAIT_STATE_BLOCKED) !=
-                   static_cast<int64_t>(track_metric))
+                       static_cast<int64_t>(last_sample_user_data))
                 {
                     ROCP_FATAL << "Failed to get data for " << metric.name();
                 }
-                else if(flags != ROCPROFILER_COUNTER_FLAG_ASYNC)
-                {
-                    auto recs_local = global_recs().rlock([](const auto& data) { return data; });
 
-                    if(recs_local.size() != output_records.size())
+                auto recs_local = global_recs().rlock([](const auto& data) { return data; });
+                for(const auto& record : recs_local)
+                    EXPECT_EQ(record.agent_id.handle, configured_agent_id.handle);
+                if(options.sample_count > 0)
+                {
+                    // Each record must be stamped with the user_data of the sample that
+                    // produced it, so the values seen must be exactly the values passed in.
+                    auto observed_user_data = std::set<uint64_t>{};
+                    auto expected_user_data = std::set<uint64_t>{};
+                    for(const auto& record : recs_local)
+                        observed_user_data.insert(record.user_data.value);
+                    for(size_t idx = 1; idx <= options.sample_count; ++idx)
+                        expected_user_data.insert(
+                            sample_user_data(track_metric, idx, options.sample_count));
+                    EXPECT_EQ(observed_user_data, expected_user_data) << metric.name();
+                }
+                if(options.require_positive_value)
+                {
+                    if(recs_local.empty())
+                    {
+                        ADD_FAILURE() << "No counter records collected for " << metric.name();
+                        abort_focused_test = true;
+                        break;
+                    }
+                    EXPECT_TRUE(
+                        std::any_of(recs_local.begin(),
+                                    recs_local.end(),
+                                    [](const auto& record) { return record.counter_value > 0.0; }))
+                        << metric.name();
+                }
+
+                if(options.flags != ROCPROFILER_COUNTER_FLAG_ASYNC)
+                {
+                    if(recs_local.size() != buffered_sync_records.size())
                     {
                         ROCP_FATAL << "Output size does not match: " << recs_local.size() << " "
-                                   << output_records.size();
+                                   << buffered_sync_records.size();
                     }
                     sort_counter_records(recs_local);
-                    sort_counter_records(output_records);
+                    sort_counter_records(buffered_sync_records);
                     if(!std::equal(recs_local.begin(),
                                    recs_local.end(),
-                                   output_records.begin(),
+                                   buffered_sync_records.begin(),
                                    [](const auto& a, const auto& b) {
                                        return a.id == b.id && a.counter_value == b.counter_value &&
                                               a.dispatch_id == b.dispatch_id &&
@@ -489,12 +704,30 @@ protected:
                     }
                 }
             }
-            hsa_signal_destroy(completion_signal);
+            hsa_signal_destroy(profiler_signal);
+            hsa_signal_destroy(barrier_signal);
             hsa_signal_destroy(found_data);
             hsa_queue_destroy(queue);
+            if(abort_focused_test) break;
         }
-        registration::set_init_status(1);
-        context::pop_client(1);
+        if(abort_focused_test) return;
+        if(!options.required_expression.empty() && expression_metrics_tested == 0)
+        {
+            GTEST_SKIP() << "No supported metric matches the required expression";
+        }
+    }
+
+    static void test_run(rocprofiler_counter_flag_t flags = ROCPROFILER_COUNTER_FLAG_NONE,
+                         const std::unordered_set<std::string>& test_metrics  = {},
+                         size_t                                 delay         = 1,
+                         bool                                   non_intercept = false)
+    {
+        device_counting_run_options options{};
+        options.flags         = flags;
+        options.test_metrics  = test_metrics;
+        options.delay         = delay;
+        options.non_intercept = non_intercept;
+        test_run(options);
     }
 
     // Inject AQL Packets directly into a userspace queue. This tests that the packets
@@ -703,6 +936,328 @@ TEST_F(device_counting_service_test, sync_grbm_verify)
     }
 }
 
+TEST_F(device_counting_service_test, sync_without_application_dispatches_is_device_scoped)
+{
+    device_counting_run_options options{};
+    options.test_metrics          = {"GRBM_COUNT"};
+    options.delay                 = 50000;
+    options.sample_count          = 2;
+    options.kernel_dispatch_count = 0;
+    options.sample_before_work    = true;
+    options.capture_sync_samples  = true;
+    test_run(options);
+
+    auto samples = global_sync_samples().rlock([](const auto& data) { return data; });
+    ASSERT_FALSE(samples.empty());
+    for(const auto& sample : samples)
+    {
+        ASSERT_FALSE(sample.records.empty());
+        for(const auto& record : sample.records)
+        {
+            EXPECT_EQ(record.agent_id.handle, sample.expected_agent_id.handle);
+            EXPECT_EQ(record.dispatch_id, 0);
+            EXPECT_GT(record.counter_value, 0.0);
+        }
+    }
+    ASSERT_EQ(samples.size() % 2, 0);
+    for(size_t index = 0; index < samples.size(); index += 2)
+    {
+        std::unordered_map<rocprofiler_counter_instance_id_t, double> before;
+        for(const auto& record : samples.at(index).records)
+            ASSERT_TRUE(before.emplace(record.id, record.counter_value).second);
+
+        bool increased = false;
+        for(const auto& record : samples.at(index + 1).records)
+        {
+            auto position = before.find(record.id);
+            ASSERT_NE(position, before.end());
+            EXPECT_GE(record.counter_value, position->second);
+            increased = increased || record.counter_value > position->second;
+            before.erase(position);
+        }
+        EXPECT_TRUE(before.empty());
+        EXPECT_TRUE(increased);
+    }
+    EXPECT_EQ(global_dispatch_header_count().load(std::memory_order_relaxed), 0);
+}
+
+TEST_F(device_counting_service_test, invalid_context_is_rejected)
+{
+    EXPECT_EQ(rocprofiler_sample_device_counting_service(ROCPROFILER_CONTEXT_NONE,
+                                                         {.value = 1},
+                                                         ROCPROFILER_COUNTER_FLAG_NONE,
+                                                         nullptr,
+                                                         nullptr),
+              ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND);
+}
+
+TEST_F(device_counting_service_test, sampling_before_context_start_is_rejected)
+{
+    auto registration_scope = device_counting_registration_scope{};
+    auto context            = rocprofiler_context_id_t{};
+    ASSERT_EQ(rocprofiler_create_context(&context), ROCPROFILER_STATUS_SUCCESS);
+
+    EXPECT_EQ(rocprofiler_sample_device_counting_service(
+                  context, {.value = 1}, ROCPROFILER_COUNTER_FLAG_NONE, nullptr, nullptr),
+              ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED);
+}
+
+TEST_F(device_counting_service_test, async_with_immediate_output_is_invalid)
+{
+    auto                  registration_scope = device_counting_registration_scope{};
+    argument_test_context state{};
+    bool                  configured = false;
+    configure_argument_test_context(state, "GRBM_COUNT", configured);
+    if(!configured) GTEST_SKIP() << "GRBM_COUNT is not available on any supported agent";
+    ASSERT_EQ(rocprofiler_start_context(state.context), ROCPROFILER_STATUS_SUCCESS);
+
+    std::array<rocprofiler_counter_record_t, 1> output{};
+    output.front().counter_value = -1.0;
+    size_t output_count          = output.size();
+    EXPECT_EQ(rocprofiler_sample_device_counting_service(state.context,
+                                                         {.value = 1},
+                                                         ROCPROFILER_COUNTER_FLAG_ASYNC,
+                                                         output.data(),
+                                                         &output_count),
+              ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
+    EXPECT_EQ(output.front().counter_value, -1.0);
+
+    EXPECT_EQ(rocprofiler_stop_context(state.context), ROCPROFILER_STATUS_SUCCESS);
+}
+
+TEST_F(device_counting_service_test, immediate_output_requires_record_count)
+{
+    auto                  registration_scope = device_counting_registration_scope{};
+    argument_test_context state{};
+    bool                  configured = false;
+    configure_argument_test_context(state, "GRBM_COUNT", configured);
+    if(!configured) GTEST_SKIP() << "GRBM_COUNT is not available on any supported agent";
+    ASSERT_EQ(rocprofiler_start_context(state.context), ROCPROFILER_STATUS_SUCCESS);
+
+    std::array<rocprofiler_counter_record_t, 1> output{};
+    output.front().counter_value = -1.0;
+    EXPECT_EQ(
+        rocprofiler_sample_device_counting_service(
+            state.context, {.value = 1}, ROCPROFILER_COUNTER_FLAG_NONE, output.data(), nullptr),
+        ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
+    EXPECT_EQ(output.front().counter_value, -1.0);
+
+    EXPECT_EQ(rocprofiler_stop_context(state.context), ROCPROFILER_STATUS_SUCCESS);
+}
+
+TEST_F(device_counting_service_test, zero_immediate_output_capacity_reports_out_of_resources)
+{
+    auto                  registration_scope = device_counting_registration_scope{};
+    argument_test_context state{};
+    bool                  configured = false;
+    configure_argument_test_context(state, "GRBM_COUNT", configured);
+    if(!configured) GTEST_SKIP() << "GRBM_COUNT is not available on any supported agent";
+    ASSERT_EQ(rocprofiler_start_context(state.context), ROCPROFILER_STATUS_SUCCESS);
+
+    std::array<rocprofiler_counter_record_t, 1> output{};
+    output.front().counter_value = -1.0;
+    size_t output_count          = 0;
+    EXPECT_EQ(rocprofiler_sample_device_counting_service(state.context,
+                                                         {.value = 1},
+                                                         ROCPROFILER_COUNTER_FLAG_NONE,
+                                                         output.data(),
+                                                         &output_count),
+              ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES);
+    EXPECT_EQ(output.front().counter_value, -1.0);
+
+    EXPECT_EQ(rocprofiler_stop_context(state.context), ROCPROFILER_STATUS_SUCCESS);
+}
+
+TEST_F(device_counting_service_test, undersized_immediate_output_reports_required_count)
+{
+    auto                  registration_scope = device_counting_registration_scope{};
+    argument_test_context state{};
+    bool                  configured = false;
+    configure_argument_test_context(state, "SQ_WAVES", configured);
+    if(!configured) GTEST_SKIP() << "SQ_WAVES is not available on any supported agent";
+
+    auto info = rocprofiler_counter_info_v1_t{};
+    ASSERT_EQ(
+        rocprofiler_query_counter_info(state.counter, ROCPROFILER_COUNTER_INFO_VERSION_1, &info),
+        ROCPROFILER_STATUS_SUCCESS);
+
+    const size_t expected_record_count = info.dimensions_instances_count;
+    if(expected_record_count < 2)
+        GTEST_SKIP() << "SQ_WAVES produces " << expected_record_count
+                     << " records; at least 2 are required";
+    ASSERT_EQ(rocprofiler_start_context(state.context), ROCPROFILER_STATUS_SUCCESS);
+
+    std::vector<rocprofiler_counter_record_t> short_output(expected_record_count - 1);
+    for(auto& record : short_output)
+        record.counter_value = -1.0;
+    size_t required_count = short_output.size();
+    ASSERT_EQ(rocprofiler_sample_device_counting_service(state.context,
+                                                         {.value = 1},
+                                                         ROCPROFILER_COUNTER_FLAG_NONE,
+                                                         short_output.data(),
+                                                         &required_count),
+              ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES);
+    ASSERT_EQ(required_count, expected_record_count);
+    EXPECT_TRUE(std::all_of(short_output.begin(), short_output.end(), [](const auto& record) {
+        return record.counter_value == -1.0;
+    }));
+
+    std::vector<rocprofiler_counter_record_t> output(required_count);
+    size_t                                    output_count = output.size();
+    ASSERT_EQ(rocprofiler_sample_device_counting_service(state.context,
+                                                         {.value = 2},
+                                                         ROCPROFILER_COUNTER_FLAG_NONE,
+                                                         output.data(),
+                                                         &output_count),
+              ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(output_count, required_count);
+    for(size_t i = 0; i < output_count; ++i)
+    {
+        EXPECT_EQ(output.at(i).agent_id.handle, state.agent.handle);
+        EXPECT_EQ(output.at(i).dispatch_id, 0);
+    }
+
+    EXPECT_EQ(rocprofiler_stop_context(state.context), ROCPROFILER_STATUS_SUCCESS);
+}
+
+TEST_F(device_counting_service_test, duplicate_agent_configuration_is_invalid)
+{
+    auto                  registration_scope = device_counting_registration_scope{};
+    argument_test_context state{};
+    bool                  configured = false;
+    configure_argument_test_context(state, "GRBM_COUNT", configured);
+    if(!configured) GTEST_SKIP() << "GRBM_COUNT is not available on any supported agent";
+
+    EXPECT_EQ(rocprofiler_configure_device_counting_service(state.context,
+                                                            rocprofiler_buffer_id_t{.handle = 0},
+                                                            state.agent,
+                                                            set_argument_test_profile,
+                                                            &state),
+              ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
+}
+
+TEST_F(device_counting_service_test, sampling_while_finalizing_is_rejected)
+{
+    auto                  registration_scope = device_counting_registration_scope{};
+    argument_test_context state{};
+    bool                  configured = false;
+    configure_argument_test_context(state, "GRBM_COUNT", configured);
+    if(!configured) GTEST_SKIP() << "GRBM_COUNT is not available on any supported agent";
+    ASSERT_EQ(rocprofiler_start_context(state.context), ROCPROFILER_STATUS_SUCCESS);
+
+    registration::set_fini_status(-1);
+    auto status = rocprofiler_sample_device_counting_service(
+        state.context, {.value = 1}, ROCPROFILER_COUNTER_FLAG_NONE, nullptr, nullptr);
+    registration::set_fini_status(0);
+    EXPECT_EQ(status, ROCPROFILER_STATUS_ERROR_FINALIZED);
+
+    EXPECT_EQ(rocprofiler_stop_context(state.context), ROCPROFILER_STATUS_SUCCESS);
+}
+
+TEST_F(device_counting_service_test, multiple_agents_are_isolated_and_foreign_profile_is_rejected)
+{
+    hsa_init();
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    auto registration_cleanup = common::scope_destructor{[]() {
+        registration::set_init_status(1);
+        context::pop_client(1);
+    }};
+    test_init();
+    counters::device_counting_service_hsa_registration();
+
+    std::vector<const hsa::AgentCache*> agents;
+    for(const auto& [_, agent] : hsa::get_queue_controller()->get_supported_agents())
+        agents.emplace_back(&agent);
+    if(agents.size() < 2)
+    {
+        GTEST_SKIP() << "Two GPU agents are required";
+    }
+    agents.resize(2);
+
+    struct agent_state
+    {
+        rocprofiler_agent_id_t          agent          = {};
+        rocprofiler_context_id_t        context        = {};
+        rocprofiler_counter_config_id_t profile        = {};
+        rocprofiler_status_t            profile_status = ROCPROFILER_STATUS_ERROR;
+    };
+    auto set_profile = [](rocprofiler_context_id_t context_id,
+                          rocprofiler_agent_id_t,
+                          rocprofiler_device_counting_agent_cb_t set_config,
+                          void*                                  user_data) {
+        auto* state           = static_cast<agent_state*>(user_data);
+        state->profile_status = set_config(context_id, state->profile);
+    };
+
+    std::array<agent_state, 2> states{};
+    for(size_t index = 0; index < states.size(); ++index)
+    {
+        const auto& agent   = *agents.at(index);
+        auto        metrics = findDeviceMetrics(agent, {"GRBM_COUNT"});
+        ASSERT_EQ(metrics.size(), 1);
+        ASSERT_TRUE(agent.get_rocp_agent());
+
+        auto& state     = states.at(index);
+        state.agent     = agent.get_rocp_agent()->id;
+        auto counter_id = rocprofiler_counter_id_t{.handle = metrics.front().id()};
+        ROCPROFILER_CALL(rocprofiler_create_context(&state.context), "context creation failed");
+        ROCPROFILER_CALL(
+            rocprofiler_create_counter_config(state.agent, &counter_id, 1, &state.profile),
+            "profile creation failed");
+        ROCPROFILER_CALL(
+            rocprofiler_configure_device_counting_service(state.context,
+                                                          rocprofiler_buffer_id_t{.handle = 0},
+                                                          state.agent,
+                                                          set_profile,
+                                                          &state),
+            "device service configuration failed");
+        agent::get_agent_cache(agent.get_rocp_agent())
+            ->init_device_counting_service_queue(get_api_table(), get_ext_table());
+    }
+
+    for(auto& state : states)
+    {
+        ASSERT_EQ(rocprofiler_start_context(state.context), ROCPROFILER_STATUS_SUCCESS);
+        EXPECT_EQ(state.profile_status, ROCPROFILER_STATUS_SUCCESS);
+    }
+    for(auto& state : states)
+    {
+        std::vector<rocprofiler_counter_record_t> records(10000);
+        size_t                                    record_count = records.size();
+        ASSERT_EQ(rocprofiler_sample_device_counting_service(state.context,
+                                                             {.value = state.agent.handle},
+                                                             ROCPROFILER_COUNTER_FLAG_NONE,
+                                                             records.data(),
+                                                             &record_count),
+                  ROCPROFILER_STATUS_SUCCESS);
+        ASSERT_GT(record_count, 0);
+        for(size_t index = 0; index < record_count; ++index)
+            EXPECT_EQ(records.at(index).agent_id.handle, state.agent.handle);
+    }
+    for(auto& state : states)
+        EXPECT_EQ(rocprofiler_stop_context(state.context), ROCPROFILER_STATUS_SUCCESS);
+
+    agent_state mismatch{};
+    mismatch.agent   = states.front().agent;
+    mismatch.profile = states.back().profile;
+    ROCPROFILER_CALL(rocprofiler_create_context(&mismatch.context), "context creation failed");
+    ROCPROFILER_CALL(
+        rocprofiler_configure_device_counting_service(mismatch.context,
+                                                      rocprofiler_buffer_id_t{.handle = 0},
+                                                      mismatch.agent,
+                                                      set_profile,
+                                                      &mismatch),
+        "mismatch service configuration failed");
+    // The mismatched agent is skipped rather than rejected, so the start still
+    // succeeds and the context has to be stopped again.
+    auto mismatch_start = rocprofiler_start_context(mismatch.context);
+    EXPECT_EQ(mismatch.profile_status, ROCPROFILER_STATUS_ERROR_AGENT_MISMATCH);
+    ASSERT_EQ(mismatch_start, ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(rocprofiler_stop_context(mismatch.context), ROCPROFILER_STATUS_SUCCESS);
+}
+
 TEST_F(device_counting_service_test, sync_gpu_util_verify)
 {
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"GPU_UTIL"}, 50000);
@@ -720,11 +1275,28 @@ TEST_F(device_counting_service_test, sync_gpu_util_verify)
     }
 }
 
+TEST_F(device_counting_service_test, sync_accumulate_and_reduce_metrics)
+{
+    device_counting_run_options options{};
+    options.test_metrics           = {"MeanOccupancyPerActiveCU", "MeanOccupancyPerCU"};
+    options.delay                  = 50000;
+    options.kernel_dispatch_count  = 32;
+    options.require_positive_value = true;
+    options.required_expression    = "accumulate(";
+    test_run(options);
+}
+
 TEST_F(device_counting_service_test, sync_sq_waves_verify)
 {
-    test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"SQ_WAVES_sum"}, 50000);
+    device_counting_run_options options{};
+    options.test_metrics          = {"SQ_WAVES_sum"};
+    options.delay                 = 50000;
+    options.kernel_dispatch_count = 5;
+    test_run(options);
+
     auto local_recs = global_recs().rlock([](const auto& data) { return data; });
     ROCP_INFO << local_recs.size();
+    ASSERT_FALSE(local_recs.empty());
 
     for(const auto& val : local_recs)
     {
@@ -734,6 +1306,7 @@ TEST_F(device_counting_service_test, sync_sq_waves_verify)
         rocprofiler_query_counter_info(id, ROCPROFILER_COUNTER_INFO_VERSION_0, &info);
         ROCP_INFO << fmt::format("Name: {} Counter value: {}", info.name, val.counter_value);
         EXPECT_GT(val.counter_value, 0.0);
+        EXPECT_EQ(val.dispatch_id, 0);
     }
 }
 

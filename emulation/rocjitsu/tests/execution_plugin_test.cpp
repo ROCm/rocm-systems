@@ -2740,6 +2740,98 @@ TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite
   EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst, 0), kLoadedValue);
 }
 
+TEST(ExecutionPluginTest, MemoryPipelineWideDwordCompletionWritesSparseLanesDirectly) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint64_t kLaneMask = (uint64_t{1} << 1) | (uint64_t{1} << 5);
+  constexpr uint64_t kLane1Address = 0x9000;
+  constexpr uint64_t kLane5Address = 0xA000;
+  constexpr uint32_t kDst = 7;
+  constexpr uint32_t kSentinel = 0xA5A5A5A5u;
+  constexpr uint32_t kInactiveLane = 2;
+  constexpr std::array<uint32_t, 4> kLane1Values = {0x11111111u, 0x22222222u, 0x33333333u,
+                                                    0x44444444u};
+  constexpr std::array<uint32_t, 4> kLane5Values = {0x55555555u, 0x66666666u, 0x77777777u,
+                                                    0x88888888u};
+  f.mem->load_image(reinterpret_cast<const uint8_t *>(kLane1Values.data()), sizeof(kLane1Values),
+                    kLane1Address);
+  f.mem->load_image(reinterpret_cast<const uint8_t *>(kLane5Values.data()), sizeof(kLane5Values),
+                    kLane5Address);
+  for (uint32_t reg = 0; reg < 4; ++reg) {
+    cu->write_vgpr(wf->vgpr_alloc().base + kDst + reg, 0, kSentinel);
+    cu->write_vgpr(wf->vgpr_alloc().base + kDst + reg, kInactiveLane, kSentinel);
+  }
+
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->elem_size = sizeof(uint32_t);
+  state->num_elems = 4;
+  state->is_load = true;
+  state->wf_size = wf->wf_size();
+  state->exec_mask = kLaneMask;
+  state->lane_mask = kLaneMask;
+  state->dst_reg_base = wf->vgpr_alloc().base + kDst;
+  state->per_lane_addr[1] = kLane1Address;
+  state->per_lane_addr[5] = kLane5Address;
+
+  plugin->events.clear();
+  GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+  pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
+
+  EXPECT_TRUE(vgpr_write_events(*plugin).empty());
+  for (uint32_t reg = 0; reg < 4; ++reg) {
+    EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst + reg, 0), kSentinel);
+    EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst + reg, 1), kLane1Values[reg]);
+    EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst + reg, kInactiveLane), kSentinel);
+    EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst + reg, 5), kLane5Values[reg]);
+  }
+}
+
+TEST(ExecutionPluginTest, FlatStoreDwordx4ReportsEverySourceRegisterAndActiveLane) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint64_t kLaneMask = (uint64_t{1} << 1) | (uint64_t{1} << 5);
+  constexpr uint32_t kAddress = 0;
+  constexpr uint32_t kData = 4;
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  wf->set_exec(kLaneMask);
+  for (uint32_t lane : {1u, 5u}) {
+    cu->write_vgpr(vgpr_base + kAddress, lane, 0x1000u + lane * 16);
+    cu->write_vgpr(vgpr_base + kAddress + 1, lane, 0);
+    for (uint32_t reg = 0; reg < 4; ++reg)
+      cu->write_vgpr(vgpr_base + kData + reg, lane, lane * 0x100u + reg);
+  }
+
+  const auto words =
+      cdna4::build_flat(cdna4::kFlatStoreDwordx4Flat, {.addr = kAddress, .data = kData});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
+  ASSERT_NE(store, nullptr);
+
+  plugin->events.clear();
+  EXPECT_TRUE(cu->execute_instruction(store.get(), *wf).succeeded());
+
+  expect_vgpr_read_set(vgpr_read_events(*plugin), vgpr_base, {0, 1, 4, 5, 6, 7}, kLaneMask);
+  const auto *state = store->data_as<VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  for (uint32_t lane : {1u, 5u}) {
+    for (uint32_t reg = 0; reg < 4; ++reg) {
+      uint32_t stored = 0;
+      std::memcpy(&stored, state->store_data.data() + (lane * 4 + reg) * sizeof(uint32_t),
+                  sizeof(stored));
+      EXPECT_EQ(stored, lane * 0x100u + reg);
+    }
+  }
+}
+
 TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotCrossWaveVgprBlock) {
   constexpr uint32_t kVgprsPerWave = 16;
   PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"rdna4", /*wavefront_size=*/32,

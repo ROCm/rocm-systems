@@ -712,9 +712,12 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   // Deliberately not gated on debug_active_, unlike the data-side probe below.
   // An unfetchable PC reads back as zeros, and zeros decode to a valid
   // instruction, so an undebugged wave that branches into unmapped memory would
-  // otherwise execute zeros forever. Stopping it matters more than the one
-  // extra page-table lookup, which is a fraction of the per-issue decode cost.
-  if (vmid != 0 && !memory_->is_fetchable(active->pc, vmid)) {
+  // otherwise execute zeros forever. Positive registered mappings are cached
+  // with mutation/VMID epoch validation; debugger and fallback probes stay fresh.
+  const bool fetchable =
+      vmid == 0 || (debug_active() ? memory_->is_fetchable(active->pc, vmid)
+                                   : memory_->is_fetchable(active->pc, vmid, fetchability_cache_));
+  if (!fetchable) {
     if (memory_violation_handler_ && memory_violation_handler_(*active, active->pc, false))
       return;
     // Wavefront::halt() is silent, so say why this wave stopped. Without this
