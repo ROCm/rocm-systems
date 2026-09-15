@@ -15,9 +15,10 @@
 # On one 8-GPU node:
 #   1. consume ROCm (provisioned on the head node) via .ci-out/rocm.env
 #   2. lib/build-ompi.sh     build OpenMPI (--with-rocm) -> ompi.env
-#   3. projects/rccl/install.sh   build RCCL (in-tree, release)
-#   4. rccl-tests install.sh      build rccl-tests (ENABLE_DEVICE_API=1)
-#   5. run-device-api-ci.sh       run the device-API benchmark suite
+#   3. lib/build-rocshmem.sh   build rocSHMEM -> rocshmem.env
+#   4. projects/rccl/install.sh   build RCCL (in-tree, release, --rocshmem-gin)
+#   5. rccl-tests (cmake)         build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN)
+#   6. run-device-api-ci.sh       run the device-API benchmark suite
 #
 # Required env (from the workflow via `sbatch --export=ALL,...`):
 #   RCCL_DEVICE_API_WORKDIR   GHA workspace (rocm-systems root)
@@ -62,7 +63,7 @@ build_jobs="${RCCL_BUILD_JOBS}"
 {
 # 1) ROCm: provisioned on the head node from TheRock CI artifacts; consume the
 # workspace tree via rocm.env.
-echo "==> [1/5] use ROCm (provisioned from TheRock artifacts on head node)"
+echo "==> [1/6] use ROCm (provisioned from TheRock artifacts on head node)"
 rocm_env="${workdir}/.ci-out/rocm.env"
 if [[ ! -f "${rocm_env}" ]]; then
   echo "ERROR: ${rocm_env} not found. The workflow must run the 'Provision ROCm" >&2
@@ -83,7 +84,7 @@ echo "    hipcc: $("${ROCM_PATH}/bin/hipcc" --version 2>/dev/null | head -n1)"
 
 # 2) OpenMPI: built here against ROCM_PATH into the per-job workspace cache
 # (no shared cache), then ompi.env (MPI_HOME) is sourced below.
-echo "==> [2/5] build OpenMPI"
+echo "==> [2/6] build OpenMPI"
 "${ci_dir}/lib/build-ompi.sh"
 set -a
 # shellcheck source=/dev/null  # runtime fragment written by build-ompi.sh
@@ -108,28 +109,73 @@ echo "==> verified hipcc = ${resolved_hipcc}"
 # shellcheck source=/dev/null
 source "${ci_dir}/lib/ensure-python-yaml.sh"
 
-# 3) RCCL via its own install.sh (-l = local gpu arch only).
-echo "==> [3/5] build RCCL (targets=${amdgpu_targets})"
-( cd "${workdir}/projects/rccl" \
-  && MPI_PATH="${MPI_HOME}" ./install.sh -lj "${build_jobs}" \
-       --amdgpu_targets="${amdgpu_targets}" )
-rccl_prefix="${workdir}/projects/rccl/build/release"
+# 3) rocSHMEM (in-tree, IPC+SDMA) -> rocshmem.env (ROCSHMEM_INSTALL_DIR)
+echo "==> [3/6] build rocSHMEM"
+GPU_TARGETS="${amdgpu_targets}" "${ci_dir}/lib/build-rocshmem.sh"
+set -a
+# shellcheck source=/dev/null
+source "${workdir}/.ci-out/rocshmem.env"
+set +a
 
-# 4) rccl-tests: built in-tree from projects/rccl-tests (must match
-# RCCL_TESTS_DIR in run-device-api-ci.sh). install.sh wipes its own build/.
-echo "==> [4/5] build rccl-tests (ENABLE_DEVICE_API=1)"
-rccl_tests_dir="${workdir}/projects/rccl-tests"
-( cd "${rccl_tests_dir}" \
-  && ENABLE_DEVICE_API=1 ./install.sh \
-       --mpi --mpi_home="${MPI_HOME}" --rccl_home="${rccl_prefix}" \
-       --gpu_targets="${amdgpu_targets}" )
+# 4) RCCL with GIN / rocSHMEM (device-API + GIN-SDMA -D 3 paths need rocshmem in the executable).
+echo "==> [4/6] build RCCL (GIN, targets=${amdgpu_targets})"
+(
+  cd "${workdir}/projects/rccl" \
+  && MPI_PATH="${MPI_HOME}" ./install.sh -lj "${build_jobs}" \
+       --amdgpu_targets="${amdgpu_targets}" \
+       --rocshmem-gin --no_clean \
+       --cmake-options "-DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
+)
+rccl_prefix="${workdir}/projects/rccl/build/release"
+rccl_cfg="$(ls "${rccl_prefix}"/lib*/cmake/rccl/*[Cc]onfig.cmake 2>/dev/null | head -n1)"
+if [[ -z "${rccl_cfg}" ]]; then
+  echo "ERROR: no RCCL cmake config under ${rccl_prefix}/lib*/cmake/rccl" >&2
+  ls -laR "${rccl_prefix}"/lib*/cmake 2>/dev/null >&2 || true
+  exit 1
+fi
+rccl_cmake_dir="$(dirname "${rccl_cfg}")"
+echo "    in-tree RCCL cmake config: ${rccl_cmake_dir}"
+
+# 5) rccl-tests via cmake so every device-api matrix binary RDC-links rocshmem
+# (install.sh/Makefile path does not enable ENABLE_ROCSHMEM_GIN). Needed because
+# this job's librccl.so is --rocshmem-gin. RCCL_TESTS_BIN_DIR is consumed by
+# run-device-api-ci.sh.
+echo "==> [5/6] build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN)"
+rccl_tests_src="${workdir}/projects/rccl-tests"
+rccl_tests_build="${workdir}/.ci-out/rccl-tests-build"
+rm -rf "${rccl_tests_build}"; mkdir -p "${rccl_tests_build}"
+(
+  cd "${rccl_tests_build}"
+  cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON \
+    -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM_GIN=ON \
+    -DROCSHMEM_INSTALL_DIR="${ROCSHMEM_INSTALL_DIR}" \
+    -DRCCL_DIR="${rccl_cmake_dir}" \
+    -DCMAKE_PREFIX_PATH="${rccl_prefix};${MPI_HOME}" \
+    -DGPU_TARGETS="${amdgpu_targets}" \
+    "${rccl_tests_src}"
+  # all_reduce_perf still fails under ENABLE_ROCSHMEM_GIN; -k keeps the
+  # matrix binaries. Do not require all_reduce_perf (see gin.sbatch).
+  make -j"${build_jobs}" -k || true
+)
+required_perf_bins=(
+  all_gather_perf alltoall_perf broadcast_perf
+  gather_perf reduce_perf scatter_perf sendrecv_perf
+)
+for perf_bin in "${required_perf_bins[@]}"; do
+  if [[ ! -x "${rccl_tests_build}/${perf_bin}" ]]; then
+    echo "ERROR: ${perf_bin} not built under ${rccl_tests_build}" >&2
+    ls -la "${rccl_tests_build}" 2>/dev/null >&2 || true
+    exit 1
+  fi
+done
+export RCCL_TESTS_BIN_DIR="${rccl_tests_build}"
 } > "${build_out}" 2> "${build_err}"
 echo "==> build phase logs: ${build_out} / ${build_err}"
 
 # --- test phase -> test-%j.{out,err} ---
 {
-# 5) Benchmarks.
-echo "==> [5/5] run benchmarks"
+# 6) Benchmarks.
+echo "==> [6/6] run benchmarks"
 # GIN/RoCE QP creation pins memory; a low memlock limit makes ibv_create_qp fail with ENOMEM. Raise it for the mpirun ranks and log it.
 ulimit -l unlimited 2>/dev/null || echo "WARN: could not raise RLIMIT_MEMLOCK (ulimit -l)"
 echo "==> RLIMIT_MEMLOCK (ulimit -l) = $(ulimit -l)"

@@ -843,6 +843,23 @@ if(ENABLE_DEVICE_LINKER)
   message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp, dda_all_reduce_fabric.cu.cpp, dda_all_reduce_fabric_ll.cu.cpp, dda_reduce_scatter_fabric.cu.cpp, dda_all_gather_fabric.cu.cpp, dda_all_gather_fabric_ll.cu.cpp, dda_alltoall_fabric.cu.cpp)")
 endif()
 
+# Keep the backend selection in one list for both compilation pipelines.
+# DeviceLinker.cmake converts this list to -D flags because the sources are
+# filtered out of the rccl target there; a normal build consumes the source
+# properties directly.
+if(ENABLE_ROCSHMEM_GIN)
+  set(RCCL_GIN_SDMA_COMPILE_DEFINITIONS
+    NCCL_GIN_ANVIL_SDMA_ENABLE=1
+    NCCL_GIN_PROXY_ENABLE=0
+    NCCL_GIN_ROCSHMEM_GDA_ENABLE=0)
+  foreach(_gin_sdma_source IN ITEMS
+      "${HIPIFY_DIR}/src/algorithms/gin/sdma/gin_alltoall_sdma.cu.cpp"
+      "${HIPIFY_DIR}/src/algorithms/gin/sdma/gin_all_reduce_sdma.cu.cpp")
+    set_source_files_properties("${_gin_sdma_source}" PROPERTIES
+      COMPILE_DEFINITIONS "${RCCL_GIN_SDMA_COMPILE_DEFINITIONS}")
+  endforeach()
+endif()
+
 # Create an initial git_version.cpp file (that will be updated with latest git version)
 #==================================================================================================
 # Create initial empty file at configure time

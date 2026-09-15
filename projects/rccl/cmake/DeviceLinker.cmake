@@ -853,10 +853,16 @@ add_custom_command(
 # ===========================================================================
 # gin_alltoall_sdma.cu.cpp: GIN-SDMA alltoall kernel.
 #
-# The defines go here because this file is filtered out of the rccl target, so
-# per-source properties never apply. Leaving only SDMA on keeps ncclGinCallImpl
-# on its single backend branch. GDA must stay off, as this object gets no QP bitcode.
+# The files are filtered out of the rccl target, so convert their shared
+# per-source definitions from src/CMakeLists.txt to flags for these custom
+# commands. Leaving only SDMA on keeps ncclGinCallImpl on its single backend
+# branch. GDA must stay off, as these objects get no QP bitcode.
 # ===========================================================================
+set(_gin_sdma_def_flags "")
+foreach(_def IN LISTS RCCL_GIN_SDMA_COMPILE_DEFINITIONS)
+  list(APPEND _gin_sdma_def_flags "-D${_def}")
+endforeach()
+
 set(GIN_ALLTOALL_SDMA_FAT_OBJ "")
 if(ENABLE_ROCSHMEM_GIN)
   set(GIN_ALLTOALL_SDMA_FAT_OBJ "${DEVICE_BUILD_DIR}/gin_alltoall_sdma.o")
@@ -866,9 +872,7 @@ if(ENABLE_ROCSHMEM_GIN)
       -x hip ${DL_OFFLOAD_ARCH_FLAGS}
       ${DL_HIP_COMPILER_FLAGS}
       -DRCCL_DEVICE_LINKER
-      -DNCCL_GIN_ANVIL_SDMA_ENABLE=1
-      -DNCCL_GIN_PROXY_ENABLE=0
-      -DNCCL_GIN_ROCSHMEM_GDA_ENABLE=0
+      ${_gin_sdma_def_flags}
       ${_link_def_flags}
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
@@ -887,9 +891,7 @@ endif()
 # ===========================================================================
 # gin_all_reduce_sdma.cu.cpp: GIN-SDMA allreduce kernel.
 #
-# The defines go here because this file is filtered out of the rccl target, so
-# per-source properties never apply. Leaving only SDMA on keeps ncclGinCallImpl
-# on its single backend branch. GDA must stay off, as this object gets no QP bitcode.
+# Uses the same `_gin_sdma_def_flags` as alltoall above.
 # ===========================================================================
 set(GIN_ALLREDUCE_SDMA_FAT_OBJ "")
 if(ENABLE_ROCSHMEM_GIN)
@@ -900,9 +902,7 @@ if(ENABLE_ROCSHMEM_GIN)
       -x hip ${DL_OFFLOAD_ARCH_FLAGS}
       ${DL_HIP_COMPILER_FLAGS}
       -DRCCL_DEVICE_LINKER
-      -DNCCL_GIN_ANVIL_SDMA_ENABLE=1
-      -DNCCL_GIN_PROXY_ENABLE=0
-      -DNCCL_GIN_ROCSHMEM_GDA_ENABLE=0
+      ${_gin_sdma_def_flags}
       ${_link_def_flags}
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}

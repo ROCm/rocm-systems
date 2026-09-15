@@ -129,7 +129,7 @@ def _probe_src(call):
         """)
 
 
-def _compile(src, *, poison, offload):
+def _compile(src, *, poison, offload, extra_args=()):
     """Return (returncode, combined stdout+stderr)."""
     cmd = [CXX, "-x", "hip", "-nogpulib", "-fsyntax-only"]
     if offload == "host":
@@ -138,6 +138,7 @@ def _compile(src, *, poison, offload):
         cmd += ["--offload-device-only", "--offload-arch=gfx942"]
     else:
         raise ValueError(offload)
+    cmd += list(extra_args)
     if poison:
         cmd += [f"--include={POISON_H}"]
     with tempfile.NamedTemporaryFile("w", suffix=".cpp", delete=False) as f:
@@ -197,6 +198,54 @@ class ToolchainTest(unittest.TestCase):
 
 @unittest.skipUnless(CXX, "amdclang++/hipcc not found (set ROCM_PATH or HIPCXX)")
 class PoisonHipAtomicsTest(unittest.TestCase):
+    def _compile_with_external_anvil_stub(self, src):
+        """Compile with a stand-in for rocSHMEM's guarded Anvil header."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sdma_dir = os.path.join(tmp, "sdma")
+            os.makedirs(sdma_dir)
+            with open(os.path.join(sdma_dir, "anvil_device.hpp"), "w") as f:
+                f.write(textwrap.dedent("""\
+                    #ifndef TEST_ANVIL_DEVICE_HPP_
+                    #define TEST_ANVIL_DEVICE_HPP_
+                    __device__ __forceinline__ unsigned int external_load(unsigned int* p) {
+                      return __hip_atomic_load(
+                          p, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+                    }
+                    #endif
+                    """))
+            return _compile(
+                src,
+                poison=True,
+                offload="device",
+                extra_args=(
+                    "-DNCCL_GIN_ANVIL_SDMA_ENABLE=1",
+                    f"-I{tmp}",
+                ),
+            )
+
+    def test_external_anvil_header_parsed_before_poison(self):
+        src = textwrap.dedent("""\
+            #include "sdma/anvil_device.hpp"
+            __global__ void k(unsigned int *p, unsigned int *out) {
+              *out = external_load(p);
+            }
+            """)
+        rc, out = self._compile_with_external_anvil_stub(src)
+        self.assertEqual(rc, 0, msg=out)
+
+    def test_poison_still_rejects_rccl_code_after_external_anvil_header(self):
+        src = textwrap.dedent("""\
+            #include "sdma/anvil_device.hpp"
+            __global__ void k(unsigned int *p, unsigned int *out) {
+              *out = __hip_atomic_load(
+                  p, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+            }
+            """)
+        rc, out = self._compile_with_external_anvil_stub(src)
+        self.assertNotEqual(rc, 0, msg=out)
+        self.assertIn("poisoned identifier", out, msg=out)
+        self.assertIn("__hip_atomic_load", out, msg=out)
+
     def test_hip_atomic_load_rejected_on_device(self):
         rc, out = _compile(
             _probe_src(_call_expr("__hip_atomic_load")),

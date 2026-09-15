@@ -20,30 +20,33 @@
 ################################################################################
 
 import os
-import re
-import glob
 import shlex
-import shutil
-import signal
 import subprocess
 import itertools
 import math
-import tempfile
-import time
 
 import pytest
 
-ngpus = 0
-if os.environ.get("ROCR_VISIBLE_DEVICES") is not None:
-    ngpus = len(os.environ["ROCR_VISIBLE_DEVICES"].split(","))
-elif os.environ.get("HIP_VISIBLE_DEVICES") is not None:
-    ngpus = len(os.environ["HIP_VISIBLE_DEVICES"].split(","))
-else:
-    ngpus = int(
-        subprocess.check_output(
-            'rocminfo | grep "Device Type:.\\s*.GPU" | wc -l', shell=True
-        )
-    )
+from .gin_sdma_harness import (
+    GiB,
+    MiB,
+    assert_bcast_ok,
+    bcast_data_failed,
+    bcast_rows,
+    bcast_tiers,
+    detect_ngpus,
+    env_int,
+    gin_perf_argv,
+    launch_bcast_gin_sdma,
+    run_bcast_with_conn_gate_retry,
+    run_with_conn_gate_retry,
+)
+
+try:
+    _detected_ngpus = detect_ngpus()
+except RuntimeError:
+    _detected_ngpus = 0
+ngpus = max(1, _detected_ngpus)
 log_ngpus = int(math.log2(ngpus))
 
 nthreads = ["1"]
@@ -132,9 +135,6 @@ def test_BroadcastSingleProcess(
 #     is 6 on develop but 5 on the NCCL 2.30.7 line, so this must be settable
 #     rather than baked in -- a wrong value silently loads no GIN plugin.
 
-MiB = 1024 * 1024
-GiB = 1024 * MiB
-
 _bcast_enabled = os.environ.get("RCCL_TESTS_GIN_SDMA_BCAST", "") not in (
     "",
     "0",
@@ -142,28 +142,14 @@ _bcast_enabled = os.environ.get("RCCL_TESTS_GIN_SDMA_BCAST", "") not in (
     "False",
 )
 
-
-def _env_int(name, default):
-    """Parse an integer env var; bad values fall back so collection stays usable."""
-    raw = os.environ.get(name)
-    if raw is None or raw == "":
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
-
-
-BCAST_NP = _env_int("RCCL_TESTS_BCAST_NP", 0) or ngpus
+BCAST_NP = env_int("RCCL_TESTS_BCAST_NP", 0) or (
+    detect_ngpus() if _bcast_enabled else _detected_ngpus
+)
 BCAST_LAUNCHER = os.environ.get("RCCL_TESTS_MPI_LAUNCHER", "mpirun")
 BCAST_CTAS = os.environ.get("RCCL_TESTS_BCAST_CTAS", "8")
 BCAST_GIN_TYPE = os.environ.get("RCCL_TESTS_BCAST_GIN_TYPE", "6")
-# Manual / SUT defaults. GIN CI (run-gin-ci.sh) overrides both so
-# HW_CASES * retries * TIMEOUT_S stays under GIN_PYTEST_TIMEOUT; otherwise
-# GNU timeout kills pytest and leaves the mpirun session (start_new_session)
-# orphaned because killpg only runs in this TimeoutExpired handler.
-BCAST_TIMEOUT_S = _env_int("RCCL_TESTS_BCAST_TIMEOUT_S", 900)
-BCAST_CONN_RETRIES = _env_int("RCCL_TESTS_BCAST_CONN_RETRIES", 5)
+BCAST_TIMEOUT_S = env_int("RCCL_TESTS_BCAST_TIMEOUT_S", 900)
+BCAST_CONN_RETRIES = env_int("RCCL_TESTS_BCAST_CONN_RETRIES", 5)
 BCAST_MPI_OPTS = shlex.split(os.environ.get("RCCL_TESTS_MPI_OPTS", ""))
 BCAST_XENV = shlex.split(os.environ.get("RCCL_TESTS_BCAST_XENV", ""))
 BCAST_EXE = os.environ.get(
@@ -176,267 +162,18 @@ _bcast_skip = pytest.mark.skipif(
     "a GIN-SDMA-capable (e.g. 8x MI355X) node to enable.",
 )
 
-_CONN_GATE_RE = re.compile(
-    r"LSA signal connectivity gate failed|unhandled system error", re.I
-)
 
-# The GIN Anvil-SDMA backend has to actually bind for any of this to mean
-# something: a run that falls back to another transport still exits 0 and still
-# prints a full results table. NCCL_DEBUG_SUBSYS=INIT,NET below is what puts the
-# bind line in the captured output.
-_PLUGIN_RE = re.compile(r"gin-anvil-sdma", re.I)
-
-# One measured rccl-tests results row:
-#   size count type redop root | time algbw busbw #wrong | time algbw busbw #wrong
-# out-of-place columns first, then in-place. Timings come from getFloatStr, which
-# falls back to scientific notation when a value will not fit its width, so the
-# numeric fields have to admit exponents. The row is not end-anchored: an algo /
-# proto / nchannels group and a timestamp may follow the in-place columns, and
-# concurrent rank output can splice itself onto the end of the line.
-_NUM = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
-_WRONG = r"(?:{}|N/A)".format(_NUM)
-_ROW_RE = re.compile(
-    r"^\s*(\d+)\s+(\d+)\s+\S+\s+\S+\s+(\d+)"
-    r"\s+{n}\s+{n}\s+{n}\s+({w})"
-    r"\s+{n}\s+{n}\s+{n}\s+({w})".format(n=_NUM, w=_WRONG)
-)
-_OOB_RE = re.compile(r"Out of bounds values\s*:\s*(\d+)")
-
-# "#[bcast-tier] <name>", emitted once per distinct tier by BroadcastRunColl when
-# RCCL_TESTS_BCAST_TIER_LOG is set. Named tiers are the contract between the -D 3
-# dispatch and the tier assertions below; see bcastReportTier in broadcast.cu.
-_TIER_RE = re.compile(r"^#\[bcast-tier\]\s+(\S+)", re.M)
-
-
-def _bcast_tiers(out):
-    """Set of -D 3 tier names the run reported."""
-    return set(_TIER_RE.findall(out or ""))
-
-
-def _bcast_rows(out):
-    """Measured rows as (size, root, wrong_out_of_place, wrong_in_place)."""
-    rows = []
-    for line in (out or "").splitlines():
-        m = _ROW_RE.match(line)
-        if m:
-            rows.append((int(m.group(1)), int(m.group(3)), m.group(4), m.group(5)))
-    return rows
-
-
-def _wrong_count(field):
-    """Numeric #wrong, or None when the column is N/A because checks were off."""
-    try:
-        return float(field)
-    except ValueError:
-        return None
-
-
-def _data_failed(out):
-    """True when the run produced demonstrably wrong results.
-
-    Deliberately not a text match on "Wrong": rccl-tests prints a "#wrong" column
-    header on every run that reaches the results table, so a bare pattern matched
-    every healthy run and made the connectivity retry below unreachable. N/A is
-    not a failure here -- it means checking was off, which _assert_bcast_ok
-    rejects separately rather than burning retries on.
-    """
-    for _, _, oop, ip in _bcast_rows(out):
-        if any(_wrong_count(f) not in (None, 0.0) for f in (oop, ip)):
-            return True
-    m = _OOB_RE.search(out or "")
-    return bool(m and m.group(1) != "0")
-
-
-def _read_debug_logs(debug_dir):
-    """Merged per-rank NCCL debug output written under debug_dir."""
-    chunks = []
-    for log_path in sorted(glob.glob(os.path.join(debug_dir, "nccl-debug.*"))):
-        try:
-            with open(log_path, errors="replace") as fh:
-                chunks.append(fh.read())
-        except OSError:
-            pass
-    return "\n".join(chunks)
-
-
-def _assert_bcast_ok(rc, out, debug, ctx, expect_tier=None):
-    """Assert the run bound GIN-SDMA, measured something, and checked clean.
-
-    Exit status alone is not enough: it stays 0 for a run that binds a different
-    backend, and for one that produces no measured rows at all.
-
-    Nor is the data check enough to say which tier ran. Every -D 3 tier produces
-    a correct broadcast, so #wrong stays 0 when a tier is deleted and its
-    messages fall through to the next one -- the test keeps passing while the
-    kernel it named is no longer reached. expect_tier pins the tier that has to
-    have run, so removing it fails here instead of silently going uncovered.
-    """
-    tail = (out or "")[-2000:]
-    assert rc == 0, "Broadcast {} failed (exit {}). Output tail:\n{}".format(
-        ctx, rc, tail
-    )
-    assert _PLUGIN_RE.search(debug or "") or _PLUGIN_RE.search(out or ""), (
-        "Broadcast {} never bound the GIN Anvil-SDMA backend, so the run proves "
-        "nothing about the GIN path. Output tail:\n{}".format(ctx, tail)
-    )
-    rows = _bcast_rows(out)
-    assert rows, "Broadcast {} produced no measured rows. Output tail:\n{}".format(
-        ctx, tail
-    )
-    unchecked = [
-        (s, r)
-        for s, r, oop, ip in rows
-        if _wrong_count(oop) is None or _wrong_count(ip) is None
-    ]
-    assert not unchecked, (
-        "Broadcast {} reported #wrong as N/A at (size, root) {}, so the data check "
-        "never ran and the result is unverified.".format(ctx, unchecked)
-    )
-    bad = [
-        (s, r, oop, ip)
-        for s, r, oop, ip in rows
-        if _wrong_count(oop) != 0.0 or _wrong_count(ip) != 0.0
-    ]
-    assert (
-        not bad
-    ), "Broadcast {} reported nonzero #wrong (size, root, oop, ip): {}".format(ctx, bad)
-    m = _OOB_RE.search(out or "")
-    assert m and m.group(1) == "0", "Broadcast {} out-of-bounds count is {}".format(
-        ctx, m.group(1) if m else "absent"
-    )
-    if expect_tier is not None:
-        # A string pins one tier; a collection allows a set of equivalent ones.
-        # The ring tier needs the latter: it reports ring-table where an
-        # edge-disjoint decomposition exists and ring-multi where none does
-        # (N=4 and N=6), and BCAST_NP follows whatever GPUs the host has.
-        #
-        # The ring also requires the LSA team to cover the world, so a multi-node
-        # launch takes scatter+allgather instead and fails here. That is the
-        # intent: such a run is not exercising the ring the caller asked for.
-        allowed = (
-            {expect_tier} if isinstance(expect_tier, str) else set(expect_tier)
-        )
-        tiers = _bcast_tiers(out)
-        assert tiers, (
-            "Broadcast {} reported no #[bcast-tier] line, so which tier ran is "
-            "unverified. Is RCCL_TESTS_BCAST_TIER_LOG set for this launch, and is "
-            "the binary new enough to emit it? Output tail:\n{}".format(ctx, tail)
-        )
-        # Exactly one tier, and an allowed one. These launches pin a single size,
-        # so a second tier means some roots took a different kernel; merely
-        # intersecting `allowed` would let that through.
-        assert len(tiers) == 1 and tiers <= allowed, (
-            "Broadcast {} ran tier(s) {} but expected exactly one of {}. The tier "
-            "gate moved, or the tier under test fell through to another "
-            "kernel.".format(ctx, sorted(tiers), sorted(allowed))
-        )
-
-
-def _launch_bcast_gin_sdma(
-    request, msg_bytes, dtype, *, force_flat_gin=False, force_sag_gin=False
-):
-    """Launch broadcast_perf -D 3 at a fixed message size. When force_flat_gin,
-    disable the SAG/ring large tiers so the root flat gin.put() path is used.
-    When force_sag_gin, disable only the ring tier so scatter+allgather runs.
-
-    Returns (returncode, stdout, debug_text); debug_text is the merged per-rank
-    NCCL debug log, kept off stdout so the results table stays parseable."""
-    size = str(int(msg_bytes))
-    debug_dir = tempfile.mkdtemp(prefix="bcast-gin-dbg-")
-    gin_env = [
-        "NCCL_GIN_ENABLE=1",
-        "NCCL_GIN_TYPE={}".format(BCAST_GIN_TYPE),
-        "NCCL_GIN_ANVIL_SDMA_THRESHOLD=0",
-        "NCCL_GIN_ANVIL_SDMA_THRESHOLD_BROADCAST=0",
-        # Debug output is what lets _PLUGIN_RE confirm which backend actually
-        # bound. It goes to per-rank files rather than stdout because ranks
-        # interleave: on stdout an INFO line splices itself into the middle of a
-        # results row, which corrupts the very table we need to parse.
-        "NCCL_DEBUG=INFO",
-        "NCCL_DEBUG_SUBSYS=INIT,NET",
-        "NCCL_DEBUG_FILE={}/nccl-debug.%h.%p.log".format(debug_dir),
-        # Makes BroadcastRunColl name the tier it launched, which is what lets
-        # _assert_bcast_ok tell the -D 3 tiers apart. One line from the main
-        # proc, so the results table stays parseable.
-        "RCCL_TESTS_BCAST_TIER_LOG=1",
-    ]
-    if force_flat_gin:
-        gin_env += [
-            "NCCL_GIN_ANVIL_BCAST_SCATTER_AG_MIN_BYTES=0",
-            "NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES=0",
-        ]
-    elif force_sag_gin:
-        # Ring is checked before SAG; disable ring only so SAG is exercised.
-        gin_env += ["NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES=0"]
-    gin_env += BCAST_XENV
-    gin_env = sum([["-x", kv] for kv in gin_env], [])
-
-    hostfile = request.config.getoption("--hostfile")
-    launch = [BCAST_LAUNCHER, "-np", str(BCAST_NP)] + BCAST_MPI_OPTS
-    if hostfile:
-        launch += ["-host", hostfile]
-
-    args = (
-        launch
-        + gin_env
-        + [
-            BCAST_EXE,
-            "-b",
-            size,
-            "-e",
-            size,
-            "-f",
-            "2",
-            "-g",
-            "1",
-            "-R",
-            "2",
-            "-D",
-            "3",  # GinHybridBroadcastKernel
-            "-A",
-            "1",
-            "-V",
-            BCAST_CTAS,
-            "-d",
-            dtype,
-            "-c",
-            "1",
-            "-w",
-            "1",
-            "-n",
-            "3",
-        ]
-    )
-    cmd = " ".join(shlex.quote(a) for a in args)
-    print(cmd)
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            shell=True,
-            universal_newlines=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-        try:
-            out, _ = proc.communicate(timeout=BCAST_TIMEOUT_S)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            out, _ = proc.communicate()
-            pytest.fail(
-                "Broadcast GIN-SDMA HANG: no completion within {}s at msg={} bytes "
-                "({} MiB), dtype={}. Output tail:\n{}".format(
-                    BCAST_TIMEOUT_S, size, msg_bytes // MiB, dtype, (out or "")[-2000:]
-                )
-            )
-        debug = _read_debug_logs(debug_dir)
-    finally:
-        shutil.rmtree(debug_dir, ignore_errors=True)
-    print(out)
-    return proc.returncode, out, debug
+def _bcast_launch_kwargs():
+    return {
+        "exe": BCAST_EXE,
+        "np": BCAST_NP,
+        "launcher": BCAST_LAUNCHER,
+        "mpi_opts": BCAST_MPI_OPTS,
+        "xenv": BCAST_XENV,
+        "ctas": BCAST_CTAS,
+        "gin_type": BCAST_GIN_TYPE,
+        "timeout_s": BCAST_TIMEOUT_S,
+    }
 
 
 def _run_bcast_gin_sdma(
@@ -444,30 +181,17 @@ def _run_bcast_gin_sdma(
 ):
     if BCAST_NP < 2:
         pytest.skip("need >= 2 ranks/GPUs for GIN-SDMA Broadcast")
-
-    rc, out, debug = 1, "", ""
-    for attempt in range(1, max(1, BCAST_CONN_RETRIES) + 1):
-        rc, out, debug = _launch_bcast_gin_sdma(
+    return run_bcast_with_conn_gate_retry(
+        lambda: launch_bcast_gin_sdma(
             request,
             msg_bytes,
             dtype,
             force_flat_gin=force_flat_gin,
             force_sag_gin=force_sag_gin,
-        )
-        if rc == 0:
-            return rc, out, debug
-        if _data_failed(out):
-            return rc, out, debug
-        if _CONN_GATE_RE.search(out or "") and attempt < BCAST_CONN_RETRIES:
-            print(
-                "=== connectivity-gate abort (attempt {}/{}); re-launching after settle ===".format(
-                    attempt, BCAST_CONN_RETRIES
-                )
-            )
-            time.sleep(3)
-            continue
-        return rc, out, debug
-    return rc, out, debug
+            **_bcast_launch_kwargs(),
+        ),
+        BCAST_CONN_RETRIES,
+    )
 
 
 @_bcast_skip
@@ -478,7 +202,7 @@ def test_BroadcastGinSdmaLargeSegmented(request, msg_mib, dtype):
     rc, out, debug = _run_bcast_gin_sdma(
         request, msg_mib * MiB, dtype, force_flat_gin=True
     )
-    _assert_bcast_ok(
+    assert_bcast_ok(
         rc,
         out,
         debug,
@@ -493,7 +217,7 @@ def test_BroadcastGinSdmaScatterAllgather(request):
     rc, out, debug = _run_bcast_gin_sdma(
         request, 256 * MiB, "int32", force_sag_gin=True
     )
-    _assert_bcast_ok(
+    assert_bcast_ok(
         rc, out, debug, "SAG 256 MiB", expect_tier="scatter-allgather"
     )
 
@@ -504,7 +228,7 @@ def test_BroadcastGinSdma2GiBHangGuard(request):
     rc, out, debug = _run_bcast_gin_sdma(
         request, 2 * GiB, "int32", force_flat_gin=False
     )
-    _assert_bcast_ok(
+    assert_bcast_ok(
         rc,
         out,
         debug,
@@ -519,7 +243,7 @@ def test_BroadcastGinSdma4GiBHangGuard(request):
     rc, out, debug = _run_bcast_gin_sdma(
         request, 4 * GiB, "int32", force_flat_gin=False
     )
-    _assert_bcast_ok(
+    assert_bcast_ok(
         rc,
         out,
         debug,
@@ -539,7 +263,7 @@ def test_BroadcastGinSdmaRowRegexAcceptsScientificNotation():
         "  1.23e+02  1.00e+02  1.00e+02  0"
         "  1.23e+02  1.00e+02  1.00e+02  0"
     )
-    rows = _bcast_rows(line)
+    rows = bcast_rows(line)
     assert rows == [(134217728, 0, "0", "0")]
 
 
@@ -548,7 +272,7 @@ def test_BroadcastGinSdmaDataFailedIgnoresColumnHeader():
         "#       size         count      type   redop    root"
         "     time   algbw   busbw  #wrong"
     )
-    assert not _data_failed(header)
+    assert not bcast_data_failed(header)
 
 
 def test_BroadcastGinSdmaDataFailedDetectsNonzeroWrong():
@@ -557,7 +281,7 @@ def test_BroadcastGinSdmaDataFailedDetectsNonzeroWrong():
         "  12.34  1.00  1.00  1"
         "  12.34  1.00  1.00  0"
     )
-    assert _data_failed(line)
+    assert bcast_data_failed(line)
 
 
 def test_BroadcastGinSdmaDataFailedTreatsNaAsUncheckedNotFailed():
@@ -566,7 +290,74 @@ def test_BroadcastGinSdmaDataFailedTreatsNaAsUncheckedNotFailed():
         "  12.34  1.00  1.00  N/A"
         "  12.34  1.00  1.00  0"
     )
-    assert not _data_failed(line)
+    assert not bcast_data_failed(line)
+
+
+def test_BroadcastGinSdmaConnRetryReturnsCleanPassWithoutRetry():
+    calls = []
+
+    def launch():
+        calls.append(None)
+        return 0, "clean"
+
+    assert run_with_conn_gate_retry(launch, 5, settle_s=0) == (0, "clean")
+    assert len(calls) == 1
+
+
+def test_BroadcastGinSdmaConnRetryExhaustsConnectivityAborts():
+    calls = []
+
+    def launch():
+        calls.append(None)
+        return 1, "LSA signal connectivity gate failed"
+
+    assert run_with_conn_gate_retry(launch, 3, settle_s=0) == (
+        1,
+        "LSA signal connectivity gate failed",
+    )
+    assert len(calls) == 3
+
+
+def test_BroadcastGinSdmaConnRetryNeverRetriesDataFailure():
+    calls = []
+
+    def launch():
+        calls.append(None)
+        return 1, "#wrong = 1"
+
+    assert run_with_conn_gate_retry(launch, 5, settle_s=0) == (1, "#wrong = 1")
+    assert len(calls) == 1
+
+
+def test_BroadcastGinSdmaConnRetryDoesNotRetryNonGateError():
+    calls = []
+
+    def launch():
+        calls.append(None)
+        return 1, "some other error"
+
+    assert run_with_conn_gate_retry(launch, 5, settle_s=0) == (
+        1,
+        "some other error",
+    )
+    assert len(calls) == 1
+
+
+def test_BroadcastGinSdmaDetectNgpusRequiresRocminfo(monkeypatch):
+    monkeypatch.delenv("ROCR_VISIBLE_DEVICES", raising=False)
+    monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
+    from . import gin_sdma_harness as harness
+
+    monkeypatch.setattr(harness.shutil, "which", lambda _cmd: None)
+    with pytest.raises(RuntimeError, match="rocminfo"):
+        harness.detect_ngpus()
+
+
+def test_BroadcastGinSdmaPerfArgvMakesAverageCountGapExplicit():
+    ag = gin_perf_argv("all_gather_perf", 8, "int32", "8", extra=["-A", "1"])
+    a2a = gin_perf_argv("alltoall_perf", 8, "int32", "16")
+    assert ag[ag.index("-D") + 2 : ag.index("-V")] == ["-A", "1"]
+    assert a2a[a2a.index("-D") + 2 : a2a.index("-V")] == []
 
 
 def _clean_bcast_output(tier):
@@ -587,16 +378,16 @@ def _clean_bcast_output(tier):
 # expands its args unquoted, so a filter with a space in it is not available.
 def test_BroadcastGinSdmaTierGuardLineIsNotAResultsRow():
     """The tier line shares stdout with the table it must not corrupt."""
-    assert _bcast_rows("#[bcast-tier] scatter-allgather") == []
-    assert _bcast_tiers(_clean_bcast_output("ring-table")) == {"ring-table"}
-    assert _bcast_rows(_clean_bcast_output("ring-table"))
+    assert bcast_rows("#[bcast-tier] scatter-allgather") == []
+    assert bcast_tiers(_clean_bcast_output("ring-table")) == {"ring-table"}
+    assert bcast_rows(_clean_bcast_output("ring-table"))
 
 
 def test_BroadcastGinSdmaTierGuardAcceptsExpectedTier():
     out = _clean_bcast_output("scatter-allgather")
-    _assert_bcast_ok(0, out, "gin-anvil-sdma", "guard", expect_tier="scatter-allgather")
+    assert_bcast_ok(0, out, "gin-anvil-sdma", "guard", expect_tier="scatter-allgather")
     # Ring passes against either decomposition outcome.
-    _assert_bcast_ok(
+    assert_bcast_ok(
         0,
         _clean_bcast_output("ring-multi"),
         "gin-anvil-sdma",
@@ -614,9 +405,9 @@ def test_BroadcastGinSdmaTierGuardRejectsFallThrough():
     would go green while covering nothing.
     """
     fell_through = _clean_bcast_output("flat-gin")
-    _assert_bcast_ok(0, fell_through, "gin-anvil-sdma", "guard", expect_tier="flat-gin")
+    assert_bcast_ok(0, fell_through, "gin-anvil-sdma", "guard", expect_tier="flat-gin")
     with pytest.raises(AssertionError, match="expected exactly one of"):
-        _assert_bcast_ok(
+        assert_bcast_ok(
             0, fell_through, "gin-anvil-sdma", "guard", expect_tier="scatter-allgather"
         )
 
@@ -625,7 +416,7 @@ def test_BroadcastGinSdmaTierGuardRejectsMissingTierLine():
     """A binary predating the tier log must fail loudly, not pass vacuously."""
     no_tier = "\n".join(_clean_bcast_output("flat-gin").splitlines()[1:])
     with pytest.raises(AssertionError, match="no .*bcast-tier.* line"):
-        _assert_bcast_ok(
+        assert_bcast_ok(
             0, no_tier, "gin-anvil-sdma", "guard", expect_tier="flat-gin"
         )
 
