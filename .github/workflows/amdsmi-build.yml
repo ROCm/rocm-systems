@@ -56,7 +56,7 @@ jobs:
     steps:
       # rocm-systems is a large monorepo; the wheel gate only needs the amdsmi
       # project and this workflow, so sparse-checkout keeps the fetch cheap.
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             projects/amdsmi
@@ -163,7 +163,7 @@ jobs:
     steps:
       # rocm-systems is a large monorepo; only the amdsmi project and this
       # workflow are needed, so sparse-checkout keeps the fetch cheap.
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             projects/amdsmi
@@ -218,7 +218,7 @@ jobs:
         # Not consumed by any downstream job; kept so a reviewer can download
         # the built .deb/.rpm from a PR run for manual testing.
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: amd-smi-lib-${{ matrix.package_format }}-${{ matrix.os }}-${{ env.PR_NUMBER }}-${{ env.BUILD_DATE }}
           # 99999 is the local (non-release) package version CPack stamps when
@@ -266,7 +266,7 @@ jobs:
 
       - name: Upload AMDSMI Command Test Results
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: amdsmi-command-tests-${{ matrix.os }}
           path: /tmp/test-results-${{ matrix.os }}
