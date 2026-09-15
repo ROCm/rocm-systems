@@ -439,6 +439,12 @@ intended for debugging and development purposes.
           remains bit-identical to prior behavior. Benefits latency-bound
           low-rank collectives (largest gains at odd/non-power-of-two rank
           counts, where the ring is least efficient) and is neutral at 8 ranks.
+        | Enabling this at 2 to 7 ranks also has a side effect beyond the four
+          collectives above: the DDA IPC scratch buffer it allocates is reused
+          by ``RCCL_FORCE_CE``'s generic CE-collective fast path (default on)
+          for Scatter and Gather too, which previously never engaged below the
+          full 8-rank clique because that buffer did not exist yet at those
+          counts.
         | Must be set to the same value on every rank of a communicator. The
           variable is read per process; communicator initialization checks
           agreement across ranks and fails cleanly, naming the disagreeing

@@ -37,6 +37,17 @@ static inline std::pair<dim3, dim3> ddaAllGatherIpcGeom(size_t bytes) {
 template <typename T, int NRANKS>
 static ncclResult_t ncclAllGatherDdaIpcLaunch(const void* sendbuff, void* recvbuff, size_t sendcount, ncclComm* comm,
                                               cudaStream_t stream) {
+  // Defends the dispatcher's invariant: NRANKS is either 0 (use comm->nRanks at
+  // runtime) or exactly comm->nRanks (the compile-time kDdaNranks
+  // specialisation). A dispatch bug that picked the wrong instantiation for
+  // the live rank count would otherwise silently read peer slots the comm was
+  // never told about -- ipc_init.cu pre-zeroes the unused tail of the peer
+  // table rather than leaving it as garbage, so this would produce a wrong
+  // numeric result on hardware, not a crash.
+  if (NRANKS != 0 && NRANKS != comm->nRanks) {
+    WARN("DDA IPC allgather: dispatch bug, instantiated for %d ranks but comm has %d", NRANKS, comm->nRanks);
+    return ncclInternalError;
+  }
   if (comm->ddaIpcMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaIpcBarrierState == nullptr) {
     return ncclInvalidUsage;
