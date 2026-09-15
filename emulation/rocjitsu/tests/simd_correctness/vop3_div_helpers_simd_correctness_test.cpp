@@ -11,17 +11,11 @@
 /// comparison — NaN-ness is deterministic from the inputs, so both runs skip the
 /// same lanes. In-process inactive lanes must keep the sentinel. The helpers
 /// covered:
-///   - v_div_fixup_f32 / v_div_fixup_f64: NaN/Inf/zero `else if` cascade
-///     ((p, b, c) -> selected float per AMD spec), routed through the
-///     existing fp ternary VOP3 glue with a `div_fixup_*_simd` functor that
-///     reproduces the cascade via lowest-priority-first `where` blends.
-///   - v_div_fmas_f32 / v_div_fmas_f64: `fma(s0, s1, s2)` then a VCC-bit-
-///     gated `ldexp(result, 32)` (f32) or `ldexp(result, 64)` (f64); no
-///     omod/clamp; routed through a dedicated glue that reads VCC as an
-///     input side-channel (similar to v_cndmask_b32 VCC select).
-/// NaN-input lanes are skipped per-lane in the comparison (the gcc-13 packed
-/// FMA quiets a different NaN operand vs scalar std::fma — accepted
-/// divergence shared with the rest of the ternary fp suite).
+///   - v_div_fixup_f32 / v_div_fixup_f64: shared bit-level quotient fixup.
+///   - v_div_fmas_f32 / v_div_fmas_f64: integer-significand FMA with fused
+///     VCC-controlled scaling and explicit guest rounding/denormal modes.
+/// Independent numerical expectations live in division_test.cpp and
+/// division_macro_test.cpp; this suite checks the execution-path integration.
 
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"

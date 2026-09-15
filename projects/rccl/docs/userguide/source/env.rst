@@ -1494,12 +1494,14 @@ CUDA graph capture.
 .. warning::
 
    ``NCCL_GRAPH_STREAM_ORDERING=0`` together with **graph mixing** (communicator
-   ``graphUsageMode=2``; see :ref:`ncclconfig`) is **not supported**. If stream
-   ordering is disabled for a communicator, **graph mixing must be off**—use
-   ``graphUsageMode`` ``0`` or ``1`` (and note that :ref:`NCCL_GRAPH_MIXING_SUPPORT`
-   ``1`` forces ``graphUsageMode=2`` at init, overriding an explicit lower mode).
-   Workloads that require mixing must keep the default ``1``. The same rule applies
-   to per-communicator :c:macro:`graphStreamOrdering` ``0``.
+   ``graphUsageMode=2``; see :ref:`ncclconfig`) is **not supported**. NCCL emits
+   a warning, forces ``graphStreamOrdering`` to ``1``, and continues communicator
+   creation successfully. If stream ordering is disabled for a communicator,
+   **graph mixing must be off**—use ``graphUsageMode`` ``0`` or ``1`` (and note
+   that :ref:`NCCL_GRAPH_MIXING_SUPPORT` ``1`` forces ``graphUsageMode=2`` at init,
+   overriding an explicit lower mode). Workloads that require mixing must keep the
+   default ``1``. The same rule applies to per-communicator
+   :c:macro:`graphStreamOrdering` ``0``.
 
 When set to 1 (default), NCCL guarantees that communication kernels are executed
 in a serialized and deterministic order across graphs and communicators that share
@@ -1511,12 +1513,20 @@ The application is responsible for ensuring correct ordering of communication
 kernels.
 
 The same bypass can be selected per communicator with the
-:c:macro:`graphStreamOrdering` field in :ref:`ncclconfig`. When that
-field is ``0`` or ``1``, it overrides ``NCCL_GRAPH_STREAM_ORDERING`` for that
-communicator. Communicators on the same GPU may still set this option
+:c:macro:`graphStreamOrdering` field in :ref:`ncclconfig`. That field takes
+effect unless ``NCCL_GRAPH_STREAM_ORDERING`` is set to ``0`` or ``1``, which
+overrides the field on every communicator; any other value of the environment
+variable is ignored and leaves the field in
+effect. Communicators on the same GPU may still set this option
 differently; NCCL does not order them with respect to each other in that case,
 so the application's obligations below apply whenever the bypass is in effect
 for a communicator—see :c:macro:`graphStreamOrdering` for details.
+
+Communicators created by ``ncclCommSplit`` with ``splitShare`` share one
+internal serialization event with their parent. Ordering ``0`` on one such
+communicator must not be combined with ``graphUsageMode=2`` on another that
+shares those resources: the mixing guarantee depends on that shared event, and
+NCCL does not detect the conflict across communicators.
 
 .. admonition:: Application responsibilities
 

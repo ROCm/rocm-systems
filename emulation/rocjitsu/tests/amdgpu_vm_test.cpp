@@ -6281,6 +6281,56 @@ TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
   EXPECT_TRUE(f.cu(1)->is_idle());
 }
 
+class ThrowingIssuePlugin final : public ExecutionPlugin {
+public:
+  enum Hook { Before, After, Halt };
+  explicit ThrowingIssuePlugin(Hook hook) : ExecutionPlugin("throwing_issue"), hook_(hook) {}
+
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
+                                        amdgpu::Wavefront &) override {
+    fail_at(Before);
+  }
+  void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &,
+                                       amdgpu::Wavefront &) override {
+    fail_at(After);
+  }
+  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &) override { fail_at(Halt); }
+
+private:
+  void fail_at(Hook hook) {
+    if (hook == hook_)
+      throw std::runtime_error("injected issue hook failure");
+  }
+  Hook hook_;
+};
+
+TEST(AqlDispatchTest, ThrowingIssueHooksReclaimDecodedInstruction) {
+  for (auto hook :
+       {ThrowingIssuePlugin::Before, ThrowingIssuePlugin::After, ThrowingIssuePlugin::Halt}) {
+    SCOPED_TRACE(hook);
+    VmFixture f("cdna4");
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::make_unique<ThrowingIssuePlugin>(hook)));
+    f.soc_ptr->set_plugin_group(group);
+    // Halt after rejection, so the hook runs outside execute_instruction().
+    const uint32_t code = hook == ThrowingIssuePlugin::Halt ? 0xBF100000u : 0xBE800000u;
+    f.write_kernel(0x1000, &code, sizeof(code));
+    ASSERT_NE(f.dispatch_scratch_wf(), nullptr);
+
+    // Count instruction frees on this thread, including non-sanitized builds.
+    // The guard restores the decoder's allocator hooks before fixture teardown.
+    Instruction::ScopedHeapAllocation heap_allocation;
+    uint32_t deallocations = 0;
+    Instruction::alloc_pool_ = &deallocations;
+    Instruction::dealloc_fn_ = [](void *counter, void *ptr) {
+      ++*static_cast<uint32_t *>(counter);
+      ::operator delete(ptr);
+    };
+    EXPECT_THROW((void)f.cu()->step(), std::runtime_error);
+    EXPECT_EQ(deallocations, 1u);
+  }
+}
+
 TEST(AqlDispatchTest, WorkerYieldReturnsToEventLoopBeforeResuming) {
   constexpr uint32_t kSSleep = 0xBF8E0001u;
   VmFixture f("cdna4", /*num_cus=*/2);

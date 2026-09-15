@@ -593,7 +593,7 @@ get_agents()
     pointers.reserve(agents.size());
     for(auto& agent : agents)
     {
-        pointers.emplace_back(agent.get());
+        pointers.emplace_back(&agent->public_info);
     }
     return pointers;
 }
@@ -605,6 +605,14 @@ get_agent(rocprofiler_agent_id_t id)
     {
         if(itr && itr->id.handle == id.handle) return itr;
     }
+    return nullptr;
+}
+
+const platform::agent_info*
+get_agent_info(rocprofiler_agent_id_t id)
+{
+    for(const auto& itr : get_agent_topology())
+        if(itr && itr->public_info.id.handle == id.handle) return itr.get();
     return nullptr;
 }
 
