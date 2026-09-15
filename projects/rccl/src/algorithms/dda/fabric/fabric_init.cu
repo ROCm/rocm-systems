@@ -89,13 +89,13 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     ddaFabricMaxNBlocksForScratch(comm->cuCount, fabricMaxBlocksOverride, &parsedOverride);
 
   if (parsedOverride.specified && !parsedOverride.valid) {
-    WARN("Ignoring invalid RCCL_DDA_FABRIC_MAXBLOCKS='%s'; using CU-derived cap %d.",
+    WARN("ncclDdaFabricCommInit: Ignoring invalid RCCL_DDA_FABRIC_MAXBLOCKS='%s'; using CU-derived cap %d.",
          fabricMaxBlocksOverride, localBlocksMax);
   } else if (parsedOverride.valid && parsedOverride.requested < 1) {
-    WARN("RCCL_DDA_FABRIC_MAXBLOCKS=%ld is below the minimum; using 1.",
+    WARN("ncclDdaFabricCommInit: RCCL_DDA_FABRIC_MAXBLOCKS=%ld is below the minimum; using 1.",
          parsedOverride.requested);
   } else if (parsedOverride.valid && parsedOverride.requested > localBlocksMax) {
-    WARN("RCCL_DDA_FABRIC_MAXBLOCKS=%ld exceeds CU-derived cap (%d); using %d. "
+    WARN("ncclDdaFabricCommInit: RCCL_DDA_FABRIC_MAXBLOCKS=%ld exceeds CU-derived cap (%d); using %d. "
          "The override can only lower the block count, not raise it.",
          parsedOverride.requested, localBlocksMax, localBlocksMax);
   }

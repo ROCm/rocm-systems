@@ -31,6 +31,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed the AMD SMI fabric ABI guard rejecting the layout amd_smi 27.x introduced, which broke the RCCL build outright. The fabric payload union gained a second member, enlarging `amdsmi_fabric_info_t` without moving the v1 fields RCCL reads. RCCL now recognizes that layout, identifies the loaded runtime by how much of the probe buffer it writes, and falls back to the sysfs fabric backend on a 27.x runtime rather than reading a payload it does not model. Fabric topology on such a runtime therefore comes from sysfs, and RCCL warns once per process when it makes that switch.
 * Fixed gfx1250 LL and LL128 comm-FIFO hangs on sibling DPX partitions. The FIFO store now uses system-scope b128 (`RCCL_LL_FIFO_SYS_SCOPE`) alongside the existing system-scope load, preventing hangs at slot reuse starting from the 9th collective operation.
 * Fixed DDA fabric AllToAll validation race by staging send data into scratch with a host-launched `cudaMemcpyAsync` before the peer exchange kernel.
+* Fixed DDA fabric barrier publication race causing sporadic validation errors by using release-acquire semantics on the prologue barrier.
 
 ### Known issues
 * On gfx90a (MI210/MI250/MI250X) with ROCm 7.13 or later, per-launch scratch-memory reclaim in the runtime degrades RCCL performance. Set `HSA_NO_SCRATCH_RECLAIM=1` to restore performance.

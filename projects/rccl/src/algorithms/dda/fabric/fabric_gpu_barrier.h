@@ -21,8 +21,8 @@ struct ncclMemManager;
 
 namespace dda::common {
 
-// Upper bound on the number of ranks the fabric DDA path supports.
-constexpr int kDdaMaxNranks = 72;
+// Upper bound on the number of ranks the fabric DDA path supports (DPX).
+constexpr int kDdaMaxNranks = 144;
 
 class FabricGpuBarrier;
 
