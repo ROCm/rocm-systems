@@ -62,6 +62,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <functional>
 #include <mutex>
@@ -99,6 +100,7 @@ std::atomic<bool> g_async_handler_constructed{false};
 auto s_intercept_installed = std::atomic<bool>{false};  // installed (may not be active)
 auto s_intercept_active    = std::atomic<bool>{false};  // actively intercepting
 auto s_intercept_dynamic   = std::atomic<bool>{false};  // dynamically add queue states
+auto s_consumer_transition_in_progress = std::atomic<bool>{false};
 
 bool
 has_active_queue_interposition_consumers()
@@ -113,7 +115,9 @@ should_bypass_inline_intercept()
             !s_intercept_active.load(std::memory_order_acquire) ||
             registration::get_fini_status() != 0 ||
             // TODO: debug and enable queue interposition for attachment
-            registration::supports_attachment() || !has_active_queue_interposition_consumers());
+            registration::supports_attachment() ||
+            s_consumer_transition_in_progress.load(std::memory_order_acquire) ||
+            !has_active_queue_interposition_consumers());
 }
 
 auto*&
@@ -462,6 +466,9 @@ async_signal_handler(hsa_signal_t                            completion_signal,
 
         if(signal_value < starting_value) break;         // kernel completed
         if(registration::get_fini_status() != 0) break;  // tearing down: run cleanup path
+        // Last consumer stopped without joining us; do not spin forever on a
+        // completion that may never arrive (ROCM-29631 stop-path deadlock).
+        if(!has_active_queue_interposition_consumers()) break;
         ++niterations;
 
         // Surface long-running waits for diagnostics without giving up the wait.
@@ -476,6 +483,13 @@ async_signal_handler(hsa_signal_t                            completion_signal,
                 starting_value);
     }
 
+    // Consumer stop may race kernel completion; re-read once before deciding abandon.
+    if(signal_value >= starting_value && !has_active_queue_interposition_consumers() &&
+       registration::get_fini_status() == 0)
+    {
+        signal_value = get_core_table()->hsa_signal_load_scacquire_fn(completion_signal);
+    }
+
     ROCP_INFO << fmt::format("Async signal handler invoked for signal {{.handle={}}} with "
                              "value {} (original value={}, iterations={})",
                              completion_signal.handle,
@@ -488,10 +502,20 @@ async_signal_handler(hsa_signal_t                            completion_signal,
         std::this_thread::sleep_for(std::chrono::microseconds{delay_us});
     }
 
+    const bool completed = (signal_value < starting_value);
+    // Abandoned waits must not emit completion records or touch app-owned signals;
+    // the kernel may still be live or the dispatch may never have reached the GPU.
+    const bool abandoned =
+        !completed && !has_active_queue_interposition_consumers() &&
+        registration::get_fini_status() == 0;
+
     for(auto& packet : session->packet_data)
     {
-        auto dispatch_time = kernel_dispatch::get_dispatch_time(*session, packet);
-        kernel_dispatch::dispatch_complete(*session, packet, dispatch_time);
+        if(completed || !abandoned)
+        {
+            auto dispatch_time = kernel_dispatch::get_dispatch_time(*session, packet);
+            kernel_dispatch::dispatch_complete(*session, packet, dispatch_time);
+        }
 
         // if the completion signal was from the pool, we just release it back to the pool for
         // reuse.
@@ -499,7 +523,7 @@ async_signal_handler(hsa_signal_t                            completion_signal,
         {
             Queue::release_signal(packet.pooled_signal);
         }
-        else
+        else if(completed || !abandoned)
         {
             // if the signal was not from the pool, we need to decrement the signal value to clean
             // up the signal for the application
@@ -1578,11 +1602,28 @@ supports_queue_interposition()
 
 namespace
 {
+// Serializes the 0->1 transition so resync completes before intercept re-engages.
+std::mutex s_consumer_transition_mutex;
+
+void
+drain_intercept_work(bool sync_async_handlers)
+{
+    // Match signal-less teardown order: wait for in-flight doorbell workers
+    // first, then join async completion handlers they may have queued.
+    fence_all_queue_gates();
+
+    if(sync_async_handlers)
+        interposition_sync();
+}
+
 void
 resync_queue_shadow_state(QueueState* state)
 {
     if(!state || !state->real_wdid) return;
 
+    // Hold gate_lock so resync never races with process_doorbell_impl, which
+    // reads and updates next_scan_pos / next_submit_pos under the same lock.
+    auto           lk   = std::lock_guard<std::mutex>{state->gate_lock};
     const uint64_t wdid = __atomic_load_n(state->real_wdid, __ATOMIC_ACQUIRE);
     state->virtual_wptr.store(wdid, std::memory_order_release);
     state->next_scan_pos   = wdid;
@@ -1605,24 +1646,69 @@ notify_queue_interposition_consumer_context_started(const context::context* ctx)
     if(!context_needs_queue_interposition_tracing(ctx)) return;
 
     const auto prev = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
-    if(prev == 0 && s_intercept_installed.load(std::memory_order_acquire))
-        resync_all_queue_shadow_states();
 
-    s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_release);
+    // Resync while the consumer count is still zero (bypass active), then
+    // increment.  Increment-before-resync closes the old bypass window but
+    // enables intercept on stale shadow state; resync-then-increment without
+    // a lock recreates the bypass window Ian reported (ROCM-29631).
+    if(prev == 0 && s_intercept_installed.load(std::memory_order_acquire))
+    {
+        auto lk = std::lock_guard<std::mutex>{s_consumer_transition_mutex};
+        if(s_active_queue_interposition_consumers.load(std::memory_order_acquire) == 0)
+        {
+            s_consumer_transition_in_progress.store(true, std::memory_order_release);
+            drain_intercept_work(true);
+            resync_all_queue_shadow_states();
+            s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_acq_rel);
+            // Second resync while transition_in_progress still forces bypass, so no
+            // intercept doorbell can interleave with shadow updates.  Re-enable
+            // intercept only after shadow matches hardware.
+            resync_all_queue_shadow_states();
+            s_consumer_transition_in_progress.store(false, std::memory_order_release);
+            // Third resync after intercept re-enables: catches any bypass doorbell
+            // that slipped between the pre-unlock resync and transition unlock.
+            resync_all_queue_shadow_states();
+            return;
+        }
+    }
+
+    s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_acq_rel);
 }
 
 void
 notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
 {
     if(!context_needs_queue_interposition_tracing(ctx)) return;
-    auto cur = s_active_queue_interposition_consumers.load(std::memory_order_relaxed);
+    auto cur = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
     while(cur > 0)
     {
-        if(s_active_queue_interposition_consumers.compare_exchange_weak(
-               cur, cur - 1, std::memory_order_release, std::memory_order_relaxed))
+        // Last consumer: fence doorbell workers, drop the count so async handlers
+        // abandon their waits, then join them before bypass re-enables.
+        if(cur == 1 && s_intercept_installed.load(std::memory_order_acquire))
         {
-            return;
+            auto lk = std::lock_guard<std::mutex>{s_consumer_transition_mutex};
+            cur = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
+            if(cur == 0) return;
+            if(cur == 1)
+            {
+                s_consumer_transition_in_progress.store(true, std::memory_order_release);
+                drain_intercept_work(false);
+                if(s_active_queue_interposition_consumers.compare_exchange_weak(
+                       cur, cur - 1, std::memory_order_acq_rel, std::memory_order_acquire))
+                {
+                    interposition_sync();
+                    s_consumer_transition_in_progress.store(false, std::memory_order_release);
+                    return;
+                }
+                s_consumer_transition_in_progress.store(false, std::memory_order_release);
+                cur = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
+                continue;
+            }
         }
+
+        if(s_active_queue_interposition_consumers.compare_exchange_weak(
+               cur, cur - 1, std::memory_order_acq_rel, std::memory_order_acquire))
+            return;
     }
 }
 
