@@ -15,6 +15,7 @@ test_categories:
     # ("Devcomm*" matches all five Devcomm suites).
     test_patterns:
       - "P2pMicrotest.*"
+      - "P2pMicrotestIsolated.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
       - "RasMicrotest.*"

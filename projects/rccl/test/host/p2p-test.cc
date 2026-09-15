@@ -22,6 +22,7 @@
 #include "ScopedHook.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/hip_fakes.h"
+#include "../common/ProcessIsolatedTestRunner.hpp"  // fork+execv process isolation
 
 // Pull in alloc.h NOW so its macros (ncclCudaCallocAsync etc.) are visible
 // to be #undef'd. p2p.cc's transitive includes would otherwise be the first
@@ -2793,3 +2794,81 @@ TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureParamOffShortCircuits)
 }
 
 #endif  // ROCM_VERSION >= 70000
+
+// ===========================================================================
+// useMemcpy priming / vtable-slot patching (initCeOperation).
+//
+// initCeOperation() is the lazy one-shot that reads NCCL_P2P_USE_CUDA_MEMCPY
+// into the file-static `useMemcpy` and, when enabled, patches the CE
+// proxyConnect / proxyProgress slots onto the global p2pTransport.send vtable.
+// Only ncclP2pUsesMemcpy() and p2pCanConnect() reach it; every other
+// setup/connect/free/proxy function merely *reads* the already-primed state.
+//
+// Two properties make this behaviour resist an ordinary in-process test:
+//   1. initCeOperation() latches a `static int init` -- it runs its body
+//      exactly once per process, so a second test can never observe the
+//      "before priming" state or a different NCCL_P2P_USE_CUDA_MEMCPY value.
+//   2. It mutates the *global* p2pTransport struct in place; that mutation
+//      would leak into any later test in the same process.
+// So each scenario runs in its own forked process (RUN_ISOLATED_TEST), where
+// the latch and the vtable slots start fresh and the env var can be set
+// independently. The param redirector routes ncclParamP2pUseCudaMemcpy()
+// through g_loadParam, so the child sets the value via a g_loadParam hook
+// rather than the real environment.
+// ===========================================================================
+
+class P2pMicrotestIsolated : public P2pMicrotest {};
+
+TEST_F(P2pMicrotestIsolated, UsesMemcpy_ParamEnabled_ReportsTrue)
+{
+    RUN_ISOLATED_TEST("P2p_UsesMemcpy_ParamEnabled_ReportsTrue", []() {
+        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
+            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
+            return deft;
+        });
+        ASSERT_TRUE(ncclP2pUsesMemcpy());
+    });
+}
+
+TEST_F(P2pMicrotestIsolated, UsesMemcpy_ParamDisabled_ReportsFalse)
+{
+    RUN_ISOLATED_TEST("P2p_UsesMemcpy_ParamDisabled_ReportsFalse", []() {
+        // No hook: ncclParamP2pUseCudaMemcpy() sits at its default (0).
+        ASSERT_FALSE(ncclP2pUsesMemcpy());
+    });
+}
+
+TEST_F(P2pMicrotestIsolated, Prime_MemcpyEnabled_PatchesSendProxySlots)
+{
+    RUN_ISOLATED_TEST("P2p_Prime_MemcpyEnabled_PatchesSendProxySlots", []() {
+        // Guard: before any priming call, the CE slots are unset on the
+        // freshly-loaded p2pTransport (documents the ordering precondition).
+        ASSERT_EQ(p2pTransport.send.proxyConnect, nullptr);
+        ASSERT_EQ(p2pTransport.send.proxyProgress, nullptr);
+
+        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
+            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
+            return deft;
+        });
+
+        // Priming through the public surface patches the send-side CE slots.
+        ncclP2pUsesMemcpy();
+
+        EXPECT_NE(p2pTransport.send.proxyConnect, nullptr);
+        EXPECT_NE(p2pTransport.send.proxyProgress, nullptr);
+    });
+}
+
+TEST_F(P2pMicrotestIsolated, Prime_MemcpyDisabled_LeavesSendProxySlotsUnset)
+{
+    RUN_ISOLATED_TEST("P2p_Prime_MemcpyDisabled_LeavesSendProxySlotsUnset", []() {
+        ASSERT_EQ(p2pTransport.send.proxyConnect, nullptr);
+        ASSERT_EQ(p2pTransport.send.proxyProgress, nullptr);
+
+        // No hook -> memcpy disabled -> priming must NOT patch the CE slots.
+        ncclP2pUsesMemcpy();
+
+        EXPECT_EQ(p2pTransport.send.proxyConnect, nullptr);
+        EXPECT_EQ(p2pTransport.send.proxyProgress, nullptr);
+    });
+}
