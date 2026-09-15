@@ -3048,7 +3048,7 @@ if(RJ_ENABLE_HIP_TESTS)
             "HipMemcpyTest.RoundTripInt"
             CONFIG ${RJ_HIP_TEST_CONFIG}
         )
-        # The only case that reaches ROCr's pinned SDMA blit, and both sanitizers
+        # These cases reach ROCr's pinned SDMA blit, and both sanitizers
         # report that library rather than rocjitsu. TSan sees the blit's memcpy
         # into the ring but not the release store on the doorbell that follows
         # it, because libhsa-runtime64 is not instrumented; the pair it forms
@@ -3056,10 +3056,15 @@ if(RJ_ENABLE_HIP_TESTS)
         # the fetch looks unordered. LSan reports ~5.7 KB allocated entirely
         # within that library, in frames with no rocjitsu caller. Neither is
         # actionable from here, and suppressing them by file would hide the same
-        # classes of defect on the paths rocjitsu does own. The case still runs
-        # in regular builds, in both local and daemon mode, which is where it
-        # regression-tests the transfer.
+        # classes of defect on the paths rocjitsu does own. The cases still run
+        # in regular builds, in both local and daemon mode, to cover transfers
+        # and LDS reuse.
         if(NOT RJ_ENABLE_ASAN AND NOT RJ_ENABLE_TSAN)
+            rj_add_hip_test_case(
+                hip_memcpy_test
+                "HipMemcpyTest.MaskedStreamLdsReuse"
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+            )
             rj_add_hip_test_case(
                 hip_memcpy_test
                 "HipMemcpyTest.RoundTripPageableAbovePinThreshold"
@@ -3173,6 +3178,11 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.InterposerDup2OverPrimaryInvalidatesRemote
             DaemonTest.InterposerProcMapsNamesRemoteKfdMarker
         )
+        # ROCr leaks also affect masked LDS reuse in daemon mode. Its TSan
+        # case passes, so keep that coverage as well as regular builds.
+        if(NOT RJ_ENABLE_ASAN)
+            list(APPEND RJ_DAEMON_TESTS DaemonTest.HipMaskedStreamLdsReuse)
+        endif()
         # Excluded under sanitizers for the reason given at its local-mode
         # registration above: the pinned SDMA path this case exists to cover
         # runs inside an uninstrumented libhsa-runtime64, and both the race TSan
