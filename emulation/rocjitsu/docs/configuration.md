@@ -74,7 +74,7 @@ The example above is intentionally minimal.
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
 | `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned). Omit for the default. |
-| `cpu_dispatch_threads` | int | Requested functional CU-dispatch width (`1` = serial and the default when omitted; `0` = explicit automatic host-wide budget capped at 32 and split across SoCs; other values = per-SoC width). Each effective SoC width is capped at its largest per-CP CU count. |
+| `cpu_dispatch_threads` | int | Requested functional CU-dispatch width (`1` = one CU at a time per CP batch and the default when omitted; `0` = explicit automatic host-wide budget capped at 32 and split across SoCs; other values = per-SoC width). Each effective SoC width is capped at its largest per-CP CU count. |
 | `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
 
@@ -148,15 +148,15 @@ that owns the queue -- so in the two-GPU example above, one dispatch occupies at
 most the partitions covering its own GPU.
 
 `cpu_dispatch_threads` controls how much accepted CU work can execute in
-parallel on host threads. The default value, 1, keeps dispatch serial. A
+parallel on host threads. The default value, 1, keeps each CP batch serial. A
 nonzero value is applied to every SoC and shared by all command processors
 within that SoC. Setting the field explicitly to 0 selects one host-wide
 automatic budget based on the available hardware threads, capped at 32, and
 divides it as evenly as possible across the SoCs. If there are fewer available
-threads than SoCs, each SoC remains serial. After either selection, each SoC's
-effective width is capped at the largest number of CUs owned by any one of its
-command processors, so the pool does not create workers that cannot run
-additional CU tasks. This setting does not change queue ownership, XCD fan-out,
+threads than SoCs, each SoC receives a width of one. After either selection,
+each SoC's effective width is capped at the largest number of CUs owned by any
+one of its command processors, so the pool does not create workers that cannot
+run additional CU tasks. This setting does not change queue ownership, XCD fan-out,
 or which SPI or CU accepts the next workgroup. In clocked mode the effective
 value is always 1.
 
@@ -170,9 +170,10 @@ XCD, so `K` is also its CUs per XCD. `N` is `num_threads`, `D` is
 `cpu_dispatch_threads`, `H` is the host value reported by
 `hardware_concurrency()`, and `A` is the automatic-mode cap.
 The no-argument runtime helper uses `A = 32`; embedding callers can supply a
-different cap, but `A` is not a JSON setting. The conservative default of 32
-bounds persistent worker allocation on large hosts while retaining substantial
-CU parallelism. It is a policy limit, not a hardware limit.
+different cap, but `A` is not a JSON setting. The conservative automatic cap of
+32 bounds persistent worker allocation on large hosts while retaining
+substantial CU parallelism. It is a policy limit, not a hardware limit; the
+omitted-field default remains `D = 1`.
 
 | Case | Shipped topology | S | X | CPs/SoC | CUs/CP (`K`) | Mode | N | D | H | A |
 |---|---|---:|---:|---:|---:|---|---:|---:|---:|---:|
@@ -188,16 +189,17 @@ CU parallelism. It is a policy limit, not a hardware limit.
 `E` below is the effective Simdojo engine-thread count after clamping `N` to
 the total XCD count. The dispatch policy first produces a per-SoC budget `B`,
 then computes `W = min(B, K)`. At runtime, one CP batch uses at most
-`min(W, runnable CUs owned by that CP)` threads. Total CUs across the SoC do not
-increase `W` because its CPs share one serializing pool. `P` is the total number
-of retained pool workers, `sum(W - 1)`. `T = E + P` counts execution-thread
-slots, including the caller in single-threaded engine mode but excluding
-doorbell monitors, daemon threads, and other runtime threads. `R` is the
-maximum of those slots that can be runnable on useful simulation work at once.
-`Q` counts only threads advancing CU quanta. All maxima assume enough runnable
-work and favorable partition placement.
+`min(W, runnable CUs owned by that CP)` threads. Concurrent batches from CPs in
+the same SoC collectively use at most `W`; this lets sparse batches fill idle
+pool lanes without multiplying the pool width by the XCD count. `P` is the
+total number of retained pool workers, `sum(W - 1)`. `T = E + P` counts
+execution-thread slots, including the caller in single-threaded engine mode but
+excluding doorbell monitors, daemon threads, and other runtime threads. `R` is
+the maximum of those slots that can be runnable on useful simulation work at
+once. `Q` counts only threads advancing CU quanta. All maxima assume enough
+runnable work and favorable partition placement.
 
-| Case | E: engine threads | W: CU threads per active CP | P: retained pool workers | T: execution threads | R: max runnable execution threads | Q: max concurrent CU quanta | Physical ceiling `min(H, R)` |
+| Case | E: engine threads | W: shared CU-pool width per SoC | P: retained pool workers | T: execution threads | R: max runnable execution threads | Q: max concurrent CU quanta | Physical ceiling `min(H, R)` |
 |---|---:|---|---:|---:|---:|---:|---:|
 | A | 8 | `[1]` | 0 | 8 | 8 | 8 | 8 |
 | B | 8 | `[32]` | 31 | 39 | 39 | 32 | 39 |
@@ -210,14 +212,14 @@ work and favorable partition placement.
 
 Width `1` uses no pool, so independent XCD partitions can each advance one CU
 on their engine thread. A width greater than one creates one pool per SoC; the
-width includes the engine thread submitting the batch, and the pool retains
-`W - 1` additional workers. Complete submissions from command processors in
-the same SoC currently serialize through that pool, while different SoCs can
-use their pools concurrently. This is why case D creates 31 execution-thread
-slots but can use only 16 at once, and why multiplying `num_threads` by
-`cpu_dispatch_threads` is not a valid concurrency formula. Cases C and G also
-show that an explicit `D` bypasses the automatic cap and can oversubscribe the
-host.
+width includes at most one engine thread helping the pool at a time, and the
+pool retains `W - 1` additional workers. Command processors in the same SoC can
+submit concurrently, but they all draw from those `W` lanes and wait for their
+own batches independently. Different SoCs use independent pools. This is why
+case D creates 31 execution-thread slots but can use only 16 at once, and why
+multiplying `num_threads` by `cpu_dispatch_threads` is not a valid concurrency
+formula. Cases C and G also show that an explicit `D` bypasses the automatic cap
+and can oversubscribe the host.
 
 A checkpoint retains `D`, not `W`. Restoring `D = 0` therefore recomputes the
 automatic budget from the new host's `H` and `A`; explicit requests retain
