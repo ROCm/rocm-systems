@@ -6,6 +6,7 @@
 
 #include "nccl.h"
 #include "comm.h"        // NCCL_GIN_MAX_CONNECTIONS (via transitive gin headers)
+#include "rma/rma_ce.h"
 #include "rma/rma_proxy.h"
 
 #include "rma_fakes.h"
@@ -32,8 +33,25 @@ static ncclResult_t DefaultRmaDestroyDesc(struct ncclComm* /*comm*/,
 std::function<bool(struct ncclRmaProxyCtx* ctx, int peer)>
     g_rmaCircularBufEmpty = DefaultRmaCircularBufEmpty;
 
+static ncclResult_t DefaultRmaLaunch(struct ncclComm* /*comm*/, struct ncclKernelPlan* /*plan*/,
+                                     hipStream_t /*stream*/) {
+  return ncclSuccess;
+}
+
 std::function<ncclResult_t(struct ncclComm* comm, struct ncclRmaProxyDesc** desc)>
     g_rmaDestroyDesc = DefaultRmaDestroyDesc;
+
+std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, hipStream_t)>
+    g_rmaProxyPutLaunch = DefaultRmaLaunch;
+
+std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, hipStream_t)>
+    g_rmaCePutLaunch = DefaultRmaLaunch;
+
+std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, hipStream_t)>
+    g_rmaProxyWaitLaunch = DefaultRmaLaunch;
+
+std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, hipStream_t)>
+    g_rmaCeWaitLaunch = DefaultRmaLaunch;
 
 // ---------------------------------------------------------------------------
 // Externals the compiled TU links against
@@ -47,6 +65,26 @@ ncclResult_t ncclRmaProxyDestroyDesc(struct ncclComm* comm, struct ncclRmaProxyD
   return g_rmaDestroyDesc(comm, desc);
 }
 
+ncclResult_t ncclRmaProxyWaitLaunch(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                                    hipStream_t stream) {
+  return g_rmaProxyWaitLaunch(comm, plan, stream);
+}
+
+ncclResult_t ncclRmaCeWaitLaunch(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                                 hipStream_t stream) {
+  return g_rmaCeWaitLaunch(comm, plan, stream);
+}
+
+ncclResult_t ncclRmaProxyPutLaunch(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                                   hipStream_t stream) {
+  return g_rmaProxyPutLaunch(comm, plan, stream);
+}
+
+ncclResult_t ncclRmaCePutLaunch(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                                hipStream_t stream) {
+  return g_rmaCePutLaunch(comm, plan, stream);
+}
+
 // ---------------------------------------------------------------------------
 // Reset
 // ---------------------------------------------------------------------------
@@ -54,4 +92,8 @@ ncclResult_t ncclRmaProxyDestroyDesc(struct ncclComm* comm, struct ncclRmaProxyD
 void ResetRmaFakes() {
   g_rmaCircularBufEmpty = DefaultRmaCircularBufEmpty;
   g_rmaDestroyDesc      = DefaultRmaDestroyDesc;
+  g_rmaProxyPutLaunch   = DefaultRmaLaunch;
+  g_rmaCePutLaunch      = DefaultRmaLaunch;
+  g_rmaProxyWaitLaunch  = DefaultRmaLaunch;
+  g_rmaCeWaitLaunch     = DefaultRmaLaunch;
 }

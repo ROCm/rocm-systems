@@ -108,6 +108,15 @@ struct HipMemcpyAsyncRecord {
 };
 extern std::vector<HipMemcpyAsyncRecord> g_hipMemcpyAsyncArgs;
 
+// Cross-stream ordering seams, defaulting to hipErrorInvalidValue as the stubs
+// they replaced did. std::function, not a result global: rma.cc calls each twice
+// around its launch pair, so the arms need per-call control.
+extern std::function<hipError_t(hipEvent_t /*event*/, hipStream_t /*stream*/)>
+    g_hipEventRecord;
+extern std::function<hipError_t(hipStream_t /*stream*/, hipEvent_t /*event*/,
+                                unsigned int /*flags*/)>
+    g_hipStreamWaitEvent;
+
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.
 void ResetHipFakes();
