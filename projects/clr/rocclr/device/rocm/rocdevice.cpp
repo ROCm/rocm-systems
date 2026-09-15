@@ -1159,6 +1159,11 @@ bool Device::populateOCLDeviceConstants() {
     info_.globalMemCacheLineSize_ = 256;
   }
 
+  // KFD incorrectly reports zero on gfx11. The correct L2 cache line size is 128 bytes.
+  if (info_.globalMemCacheLineSize_ < 128 && isa().versionMajor() == 11) {
+    info_.globalMemCacheLineSize_ = 128;
+  }
+
   {
     uint32_t maxPrefetchRegions = 0;
     if (HSA_STATUS_SUCCESS ==
