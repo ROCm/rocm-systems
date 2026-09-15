@@ -39,6 +39,7 @@ THE SOFTWARE.
 #include <sstream>
 #include <iomanip>
 #include <sys/syscall.h>
+#include <vector>
 
 #define MSG(X) std::clog << X << std::endl;
 #define MSG_NO_NEWLINE(X) std::clog << X;
@@ -247,5 +248,30 @@ class RocJpegException : public std::exception {
 };
 
 #define THROW(X) throw RocJpegException(" { "+std::string(__func__)+" } " + X);
+
+// Parse a comma-separated list of device indices, e.g. the value of
+// ROCR_VISIBLE_DEVICES or HIP_VISIBLE_DEVICES. The argument is typically the
+// result of std::getenv(); that pointer aliases the process environment and
+// must not be written through (undefined behaviour, C11 6.22.4.6 / C++
+// [c.strings]). The input is copied into a stream before tokenising so the
+// caller's buffer is never modified. Comma-delimited tokens are converted with
+// std::atoi; empty tokens (leading/trailing/consecutive commas) are skipped.
+// The result is not sorted; callers apply their own ordering.
+inline std::vector<int> ParseVisibleDevicesCsv(const char* env) {
+    std::vector<int> devices;
+    if (env == nullptr) {
+        return devices;
+    }
+    // Copy into a stream: never write through the caller's pointer. The loop
+    // exits when std::getline can no longer extract a field (stream exhausted).
+    std::istringstream csv{std::string(env)};
+    std::string token;
+    while (std::getline(csv, token, ',')) {
+        if (!token.empty()) {  // skip empty tokens
+            devices.push_back(std::atoi(token.c_str()));
+        }
+    }
+    return devices;
+}
 
 #endif //ROC_JPEG_COMMON_H_
