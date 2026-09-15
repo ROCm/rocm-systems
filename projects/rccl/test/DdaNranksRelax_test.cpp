@@ -159,10 +159,15 @@ TEST(DdaNranksRelaxIsolatedTest, RelaxedPathAdmitsTwoThroughEightRanks)
                     << "nRanks=" << nRanks << " should be eligible with relax on";
             }
 
-            // This PR relaxes only the AllReduce IPC floor: AllGather,
-            // ReduceScatter and AllToAll must stay 8-rank-only even with the
-            // knob on, so the scope split holds without relying on inspecting
-            // rcclDdaEnabled()'s minRanks argument at each call site.
+            // This PR relaxes only the AllReduce DDA IPC floor: the
+            // AllGather/ReduceScatter/AllToAll DDA IPC *eligibility* functions
+            // below must stay 8-rank-only even with the knob on, without
+            // relying on inspecting rcclDdaEnabled()'s minRanks argument at
+            // each call site. This does not mean those collectives are
+            // unaffected by the knob at low rank counts: RCCL_FORCE_CE's
+            // separate CE-scratch fast path (enqueue.cc) also keys off
+            // comm->ddaScratch, which this knob now populates below 8 ranks
+            // too -- see RCCL_DDA_NRANKS_RELAX in env-variables.rst.
             mockComm.comm.nRanks = 4;
             EXPECT_FALSE(ncclAllGatherDdaIpcEligible(mockComm.get(), sendbuff, recvbuff, count, ncclFloat32))
                 << "AllGather must stay 8-rank-only even with relax on";
