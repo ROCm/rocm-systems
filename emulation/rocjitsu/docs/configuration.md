@@ -189,33 +189,36 @@ CU parallelism. It is a policy limit, not a hardware limit.
 the total XCD count. The dispatch policy first produces a per-SoC budget `B`,
 then computes `W = min(B, K)`. At runtime, one CP batch uses at most
 `min(W, runnable CUs owned by that CP)` threads. Total CUs across the SoC do not
-increase `W` because its CPs share one serializing pool. `P` is the total number
+increase this per-submission width; concurrent CP submissions share the retained
+worker set and each also executes on its own engine thread. `P` is the total number
 of retained pool workers, `sum(W - 1)`. `T = E + P` counts execution-thread
 slots, including the caller in single-threaded engine mode but excluding
 doorbell monitors, daemon threads, and other runtime threads. `R` is the
 maximum of those slots that can be runnable on useful simulation work at once.
-`Q` counts only threads advancing CU quanta. All maxima assume enough runnable
-work and favorable partition placement.
+`Q` counts only threads advancing CU quanta. On one SoC with `E` active engine
+callers, its upper bound is `E + W - 1`. All maxima assume enough runnable work
+and favorable partition placement.
 
 | Case | E: engine threads | W: CU threads per active CP | P: retained pool workers | T: execution threads | R: max runnable execution threads | Q: max concurrent CU quanta | Physical ceiling `min(H, R)` |
 |---|---:|---|---:|---:|---:|---:|---:|
 | A | 8 | `[1]` | 0 | 8 | 8 | 8 | 8 |
-| B | 8 | `[32]` | 31 | 39 | 39 | 32 | 39 |
-| C | 8 | `[36]` | 35 | 43 | 43 | 36 | 16 |
+| B | 8 | `[32]` | 31 | 39 | 39 | 39 | 39 |
+| C | 8 | `[36]` | 35 | 43 | 43 | 43 | 16 |
 | D | 1 | `[16, 16]` | 30 | 31 | 16 | 16 | 16 |
-| E | 16 | `[16, 16]` | 30 | 46 | 46 | 32 | 46 |
-| F | 16 | `[8, 8, 8, 8]` | 28 | 44 | 44 | 32 | 44 |
+| E | 16 | `[16, 16]` | 30 | 46 | 46 | 46 | 46 |
+| F | 16 | `[8, 8, 8, 8]` | 28 | 44 | 44 | 44 | 44 |
 | G | 4 | `[20, 20, 20, 20]` | 76 | 80 | 80 | 80 | 8 |
 | H | 8 | `[1]` | 0 | 8 | 8 | 8 | 8 |
 
 Width `1` uses no pool, so independent XCD partitions can each advance one CU
 on their engine thread. A width greater than one creates one pool per SoC; the
 width includes the engine thread submitting the batch, and the pool retains
-`W - 1` additional workers. Complete submissions from command processors in
-the same SoC currently serialize through that pool, while different SoCs can
-use their pools concurrently. This is why case D creates 31 execution-thread
-slots but can use only 16 at once, and why multiplying `num_threads` by
-`cpu_dispatch_threads` is not a valid concurrency formula. Cases C and G also
+`W - 1` additional workers. Command processors in the same SoC can submit
+concurrently and join only their own work; different SoCs own separate pools.
+Case D still creates 31 execution-thread slots but can use only 16 at once:
+its single engine caller drives one SoC's batch at a time. Multiplying
+`num_threads` by `cpu_dispatch_threads` is not a valid concurrency formula,
+because concurrent same-SoC callers share the worker set. Cases C and G also
 show that an explicit `D` bypasses the automatic cap and can oversubscribe the
 host.
 
