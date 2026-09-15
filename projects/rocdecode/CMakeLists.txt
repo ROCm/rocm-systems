@@ -183,6 +183,11 @@ if(_deps_met)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBDRM_AMDGPU_LIBRARY})
   else()
     # vaon12: va_win32.lib instead of va-drm; d3d12/dxgi for CreateSharedHandle interop
+    # FindLibva locates va/va_win32.h separately from va/va.h, so a staging
+    # layout that splits them would satisfy Libva_FOUND above and then fail on
+    # the include. Normally both resolve to the same directory and this is a
+    # no-op. Windows-only, for the same stale-cache reason as va-drm above.
+    include_directories(${LIBVA_WIN32_INCLUDE_DIR})
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_WIN32_LIBRARY} d3d12 dxgi)
   endif()
 

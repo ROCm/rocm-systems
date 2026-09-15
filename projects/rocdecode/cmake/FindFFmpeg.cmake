@@ -77,6 +77,17 @@ else()
   # cache NOTFOUND component paths into FFMPEG_LIBRARIES.
   set(FFMPEG_FOUND FALSE)
 
+  # Reaching this branch means the previous configure did not produce a usable
+  # result, so everything here is about to be re-derived -- including the version,
+  # which is cached and otherwise only dropped when FFMPEG_ROOT changes. Without
+  # this, an FFmpeg upgraded in place under an unchanged root would keep failing
+  # the gate below against the version it had when it was first rejected.
+  # Windows-only: on Linux pkg_check_modules re-populates this each time, and
+  # the header parser below must not override the value pkg-config reports.
+  if(WIN32)
+    unset(_FFMPEG_AVCODEC_VERSION CACHE)
+  endif()
+
   # use pkg-config to get the directories and then use these values
   # in the FIND_PATH() and FIND_LIBRARY() calls
   if(NOT WIN32)
