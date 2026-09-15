@@ -1,3 +1,7 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 cmake_minimum_required(VERSION 3.20)
 
 project(aie_tests)
@@ -40,6 +44,30 @@ target_link_libraries(memory
 
 include(GoogleTest)
 gtest_discover_tests(memory)
+
+# error_callback_test: validates the per-queue error callback for AIE queues. Self-contained;
+# it does not require any AIE kernel artifacts (no aiecc / NPU toolchain needed).
+add_executable(error_callback_test error_callback_test.cc)
+set_target_properties(error_callback_test
+  PROPERTIES
+    CXX_STANDARD                17
+    CXX_EXTENSIONS              OFF
+    CXX_VISIBILITY_PRESET       hidden
+    VISIBILITY_INLINES_HIDDEN   ON
+    POSITION_INDEPENDENT_CODE   ON
+)
+target_compile_options(error_callback_test
+  PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+)
+target_link_libraries(error_callback_test
+  PRIVATE
+    hsa-runtime64::hsa-runtime64
+    GTest::gtest_main
+)
+gtest_discover_tests(error_callback_test)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 

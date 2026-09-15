@@ -27,9 +27,15 @@
 #include <timemory/backends/mpi.hpp>
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
+#include <timemory/components/papi/papi_common.hpp>
+#include <timemory/components/papi/papi_config.hpp>
+#include <timemory/components/papi/papi_vector.hpp>
+#include <timemory/components/papi/types.hpp>
+#include <timemory/components/roofline/types.hpp>
 #include <timemory/log/color.hpp>
 #include <timemory/log/logger.hpp>
 #include <timemory/manager.hpp>
+#include <timemory/mpl/types.hpp>
 #include <timemory/process/process.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/settings.hpp>
@@ -82,7 +88,7 @@ int  verbose_value  = rocprofsys::get_env<int>(env_vars::VERBOSE, 0);
 bool debug_value    = rocprofsys::get_env<bool>(env_vars::DEBUG_MODE, false);
 auto configure_once = std::once_flag{};
 
-TIMEMORY_NOINLINE bool&
+bool&
 _settings_are_configured()
 {
     static bool _v = false;
@@ -1435,23 +1441,42 @@ configure_settings(bool _init)
     const bool _has_perf_cap = ((_cap_effective >> _cap_sys_admin_bit) & 1ULL) != 0 ||
                                ((_cap_effective >> _cap_perfmon_bit) & 1ULL) != 0;
 
+    // The PAPI net component reads /proc/net/dev and does not use perf_event.
+    // Bypass the perf_event_paranoid gate when all PAPI events use the net:::
+    // prefix so NIC profiling works without requiring perf_event_paranoid <= 2.
     if(_paranoid > 2 && !_has_perf_cap)
     {
-        LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
-                    "Disabling PAPI (requires a value <= 2, CAP_PERFMON, or "
-                    "CAP_SYS_ADMIN)",
-                    _paranoid);
-        LOG_WARNING("In order to enable PAPI support, run 'echo N | sudo tee "
-                    "/proc/sys/kernel/perf_event_paranoid' where N is <= 2, or "
-                    "grant the process CAP_PERFMON (or CAP_SYS_ADMIN)");
-        trait::runtime_enabled<comp::papi_config>::set(false);
-        trait::runtime_enabled<comp::papi_common<void>>::set(false);
-        trait::runtime_enabled<comp::papi_array_t>::set(false);
-        trait::runtime_enabled<comp::papi_vector>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_flops>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
-        _config->get_papi_events() = std::string{};
+        constexpr std::string_view k_papi_net_component_prefix = "net:::";
+        const auto papi_events = rocprofsys::delimit(_config->get_papi_events(), " ,\t;");
+        const bool all_events_network_related = std::ranges::all_of(
+            papi_events, [k_papi_net_component_prefix](const std::string& event) {
+                return event.starts_with(k_papi_net_component_prefix);
+            });
+        if(!all_events_network_related)
+        {
+            LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
+                        "Disabling PAPI (requires a value <= 2, CAP_PERFMON, or "
+                        "CAP_SYS_ADMIN)",
+                        _paranoid);
+            LOG_WARNING("In order to enable PAPI support, run 'echo N | sudo tee "
+                        "/proc/sys/kernel/perf_event_paranoid' where N is <= 2, or "
+                        "grant the process CAP_PERFMON (or CAP_SYS_ADMIN)");
+            trait::runtime_enabled<comp::papi_config>::set(false);
+            trait::runtime_enabled<comp::papi_common<void>>::set(false);
+            trait::runtime_enabled<comp::papi_array_t>::set(false);
+            trait::runtime_enabled<comp::papi_vector>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_flops>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
+            _config->get_papi_events() = std::string{};
+        }
+        else if(!papi_events.empty())
+        {
+            LOG_DEBUG("perf_event_paranoid={} but all PAPI events use the net component "
+                      "(reads /proc/net/dev, no perf_event required). "
+                      "Proceeding with NIC profiling.",
+                      _paranoid);
+        }
     }
     else
     {
@@ -1673,7 +1698,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
     auto _use_causal = get_setting_value<bool>(std::string{ env_vars::USE_CAUSAL });
     if(_use_causal && *_use_causal) set_env(env_vars::MODE, "causal", 1);
 
-    if(get_mode() == state::process::Mode::Coverage)
+    if(get_mode() == state::process::Mode::coverage)
     {
         set_default_setting_value(std::string{ env_vars::USE_CODE_COVERAGE }, true);
         _set(env_vars::TRACE, false);
@@ -1687,7 +1712,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set(env_vars::USE_SAMPLING, false);
         _set(env_vars::USE_PROCESS_SAMPLING, false);
     }
-    else if(get_mode() == state::process::Mode::Causal)
+    else if(get_mode() == state::process::Mode::causal)
     {
         _set(env_vars::USE_CAUSAL, true);
         _set(env_vars::TRACE, false);
@@ -1696,7 +1721,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set(env_vars::USE_SAMPLING, false);
         _set(env_vars::USE_PROCESS_SAMPLING, false);
     }
-    else if(get_mode() == state::process::Mode::Sampling)
+    else if(get_mode() == state::process::Mode::sampling)
     {
         set_default_setting_value(std::string{ env_vars::USE_SAMPLING }, true);
         set_default_setting_value(std::string{ env_vars::USE_PROCESS_SAMPLING }, true);
@@ -2283,18 +2308,18 @@ get_mode()
         auto _mode = rocprofsys::get_env_choice<std::string>(
             env_vars::MODE, "trace", { "trace", "sampling", "causal", "coverage" });
         if(_mode == "sampling")
-            return state::process::Mode::Sampling;
+            return state::process::Mode::sampling;
         else if(_mode == "causal")
-            return state::process::Mode::Causal;
+            return state::process::Mode::causal;
         else if(_mode == "coverage")
-            return state::process::Mode::Coverage;
-        return state::process::Mode::Trace;
+            return state::process::Mode::coverage;
+        return state::process::Mode::trace;
     }
     static auto _m = std::unordered_map<std::string_view, state::process::Mode>{
-        { "trace", state::process::Mode::Trace },
-        { "causal", state::process::Mode::Causal },
-        { "sampling", state::process::Mode::Sampling },
-        { "coverage", state::process::Mode::Coverage }
+        { "trace", state::process::Mode::trace },
+        { "causal", state::process::Mode::causal },
+        { "sampling", state::process::Mode::sampling },
+        { "coverage", state::process::Mode::coverage }
     };
     static auto _v = get_config()->find(std::string{ env_vars::MODE });
     try
@@ -2310,7 +2335,7 @@ get_mode()
         throw std::runtime_error(
             fmt::format("[{}] invalid mode {}. Choices: {}", __FUNCTION__, _mode, _msg));
     }
-    return state::process::Mode::Trace;
+    return state::process::Mode::trace;
 }
 
 bool&
@@ -3639,9 +3664,9 @@ state::process::CausalBackend
 get_causal_backend()
 {
     static auto _m = std::unordered_map<std::string_view, state::process::CausalBackend>{
-        { "auto", state::process::CausalBackend::Auto },
-        { "perf", state::process::CausalBackend::Perf },
-        { "timer", state::process::CausalBackend::Timer },
+        { "auto", state::process::CausalBackend::automatic },
+        { "perf", state::process::CausalBackend::perf },
+        { "timer", state::process::CausalBackend::timer },
     };
 
     auto _v = get_config()->find(std::string{ env_vars::CAUSAL_BACKEND });
@@ -3655,7 +3680,7 @@ get_causal_backend()
             fmt::format("[{}] invalid causal backend {}. Choices: {}", __FUNCTION__,
                         _mode, fmt::join(_v->second->get_choices(), ", ")));
     }
-    return state::process::CausalBackend::Auto;
+    return state::process::CausalBackend::automatic;
 }
 
 state::process::CausalMode
@@ -3663,31 +3688,35 @@ get_causal_mode()
 {
     if(!settings_are_configured())
     {
-        auto _mode = rocprofsys::get_env_choice<std::string>(
+        auto mode = rocprofsys::get_env_choice<std::string>(
             env_vars::CAUSAL_MODE, "function", { "line", "function" });
-        if(_mode == "line") return state::process::CausalMode::Line;
-        return state::process::CausalMode::Function;
+        if(mode == "line")
+        {
+            return state::process::CausalMode::line;
+        }
+        return state::process::CausalMode::function;
     }
-    static auto _causal_mode = []() {
-        auto _m = std::unordered_map<std::string_view, state::process::CausalMode>{
-            { "line", state::process::CausalMode::Line },
-            { "func", state::process::CausalMode::Function },
-            { "function", state::process::CausalMode::Function }
+    static auto s_causal_mode = [function_name = __FUNCTION__]() {
+        auto map = std::unordered_map<std::string_view, state::process::CausalMode>{
+            { "line", state::process::CausalMode::line },
+            { "func", state::process::CausalMode::function },
+            { "function", state::process::CausalMode::function }
         };
-        auto _v = get_config()->find(std::string{ env_vars::CAUSAL_MODE });
+        auto value = get_config()->find(std::string{ env_vars::CAUSAL_MODE });
         try
         {
-            return _m.at(static_cast<tim::tsettings<std::string>&>(*_v->second).get());
-        } catch(std::runtime_error& _e)
+            return map.at(
+                static_cast<tim::tsettings<std::string>&>(*value->second).get());
+        } catch(std::runtime_error& error)
         {
-            auto _mode = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+            auto mode = static_cast<tim::tsettings<std::string>&>(*value->second).get();
             throw std::runtime_error(
-                fmt::format("[{}] invalid causal mode {}. Choices: {}", __FUNCTION__,
-                            _mode, fmt::join(_v->second->get_choices(), ", ")));
+                fmt::format("[{}] invalid causal mode {}. Choices: {}", function_name,
+                            mode, fmt::join(value->second->get_choices(), ", ")));
         }
-        return state::process::CausalMode::Function;
+        return state::process::CausalMode::function;
     }();
-    return _causal_mode;
+    return s_causal_mode;
 }
 
 bool

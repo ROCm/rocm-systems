@@ -117,6 +117,8 @@ int hipMemGetAddressRange(void**, size_t*, void*) { return 0; }
 int hipDeviceSynchronize() { return 0; }
 int hipMemcpy(void*, const void*, size_t, int) { return 0; }
 int hipGetDevice(int* d) { if (d) *d = 0; return 0; }
+// hipGetDevicePropertiesR0600 lives in hip_prop_r0600_stub.cpp so this TU can
+// keep int-returning HIP stubs without including hip_runtime.h.
 int hipSetDevice(int) { return 0; }
 int hipMalloc(void**, size_t) { return 0; }
 int hipFree(void*) { return 0; }
