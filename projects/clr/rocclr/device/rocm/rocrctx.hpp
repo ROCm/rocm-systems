@@ -487,9 +487,11 @@ class Hsa : public amd::AllStatic {
                                                     copy_agent, dir, num_dep_signals, dep_signals,
                                                     completion_signal);
   }
-  //! Provisional ROCR entry point, loaded optionally so that a CLR built against a newer
-  //! ROCR still runs on an older libhsa-runtime64. Callers must check availability and
-  //! fall back to per-operand rect copies when it is missing.
+  //! Provisional ROCR entry point. Under ROCR_DYN_DLL it is loaded optionally, so CLR keeps
+  //! working against an older libhsa-runtime64 and simply stops fusing. Otherwise the symbol
+  //! is bound at link time, as it is for every other ROCR symbol CLR uses, so a missing one
+  //! prevents the library loading at all and this can only ever return true.
+  //! Callers must check and fall back to per-operand rect copies when it is false.
   static bool memory_async_batch_copy_rect_available() {
 #ifdef ROCR_DYN_DLL
     return ROCR_DYN(hsa_amd_memory_async_batch_copy_rect) != nullptr;
