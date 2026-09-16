@@ -33,7 +33,7 @@
 #define FAMILY_RPL     0x95 //# 149 / Raphael
 #define FAMILY_MDN     0x97 //# 151 / Mendocino
 #define FAMILY_GFX12   0x98
-#define FAMILY_MDS     0x9A //# 154 / Medusa (gfx1170, gfx1171)
+#define FAMILY_GFX117X 0x9A //# 154 / gfx1170, gfx1171
 
 // AMDGPU_FAMILY_IS(familyId, familyName)
 #define FAMILY_IS(f, fn)     (f == FAMILY_##fn)
@@ -50,6 +50,7 @@
 #define FAMILY_IS_NV3(f)     FAMILY_IS(f, NV3)
 #define FAMILY_IS_RMB(f)     FAMILY_IS(f, RMB)
 #define FAMILY_IS_GFX12(f)   FAMILY_IS(f, GFX12)
+#define FAMILY_IS_GFX117X(f) FAMILY_IS(f, GFX117X)
 
 #define AMDGPU_UNKNOWN          0xFF
 

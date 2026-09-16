@@ -152,12 +152,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     // Fall through for Navi2x ...
     case Pal::AsicRevision::StrixHalo:
     case Pal::AsicRevision::Strix1:
-#if defined(PAL_BUILD_MEDUSA) || defined(PAL_BUILD_MEDUSA1)
-    case Pal::AsicRevision::Medusa1:
-#endif
-#if defined(PAL_BUILD_MEDUSA) || defined(PAL_BUILD_MEDUSA2)
-    case Pal::AsicRevision::Medusa2:
-#endif
+    case Pal::AsicRevision::Gfx1170:
+    case Pal::AsicRevision::Gfx1171:
     case Pal::AsicRevision::Krackan1:
     case Pal::AsicRevision::Krackan2:
     case Pal::AsicRevision::Phoenix1:
