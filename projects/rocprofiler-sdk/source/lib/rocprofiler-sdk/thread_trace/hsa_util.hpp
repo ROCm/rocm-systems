@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -63,11 +64,12 @@ struct att_queue_t
     std::shared_ptr<kfd_copy_queue_t>  kfd_copy_queue{};
     signal_ptr_t                       copy_signal{};
     hsa_queue_t*                       hsa_queue{nullptr};
-    std::vector<void*>                 cpu_buffers{};
-    rocprofiler_agent_id_t             agent_id{};
-    size_t                             buffer_size{0};
-    hsa_agent_t                        hsa_agent{};
-    hsa_agent_t                        near_cpu{};
+    /// CPU staging buffers, one per slot requested at creation. Slots are sized
+    /// independently because contexts sharing the agent may request different sizes.
+    std::vector<void*>     cpu_buffers{};
+    rocprofiler_agent_id_t agent_id{};
+    hsa_agent_t            hsa_agent{};
+    hsa_agent_t            near_cpu{};
 
     // Serializes submissions with terminal disable after GPU overflow. Heap-owned
     // so the queue remains movable; a null submit_fn means it cannot be restarted.
@@ -83,11 +85,13 @@ signal_wait(const att_signal_t& signal);
 signal_ptr_t
 make_signal(const att_queue_t& queue);
 
+/// @param max_copy_size Largest single GPU-to-CPU copy the queue has to service.
+/// @param staging_sizes Bytes for each CPU staging slot. Empty disables staging.
 att_queue_t
 att_queue_create(rocprofiler_agent_id_t             agent_id,
-                 size_t                             buffer_size,
-                 size_t                             num_buffers = 0,
-                 std::shared_ptr<kfd_memory_pool_t> kfd_memory  = {});
+                 size_t                             max_copy_size,
+                 const std::vector<uint64_t>&       staging_sizes = {},
+                 std::shared_ptr<kfd_memory_pool_t> kfd_memory    = {});
 
 void
 att_queue_destroy(att_queue_t& queue);
@@ -117,19 +121,6 @@ att_queue_submit_signal_last(const att_queue_t& queue, VecType& packets)
     }
     return nullptr;
 }
-
-struct att_queue_deleter_t
-{
-    void operator()(att_queue_t* queue) const;
-};
-
-using att_queue_ptr_t = std::unique_ptr<att_queue_t, att_queue_deleter_t>;
-
-att_queue_ptr_t
-make_att_queue(rocprofiler_agent_id_t             agent_id,
-               size_t                             buffer_size,
-               size_t                             num_buffers = 0,
-               std::shared_ptr<kfd_memory_pool_t> kfd_memory  = {});
 
 }  // namespace thread_trace
 }  // namespace rocprofiler

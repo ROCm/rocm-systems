@@ -139,22 +139,24 @@ make_signal(const att_queue_t& queue)
 
 att_queue_t
 att_queue_create(rocprofiler_agent_id_t             agent_id,
-                 size_t                             buffer_size,
-                 size_t                             num_buffers,
+                 size_t                             max_copy_size,
+                 const std::vector<uint64_t>&       staging_sizes,
                  std::shared_ptr<kfd_memory_pool_t> kfd_memory)
 {
-    auto queue        = att_queue_t{};
-    queue.agent_id    = agent_id;
-    queue.buffer_size = buffer_size;
-    queue.kfd_memory  = std::move(kfd_memory);
+    const size_t num_buffers = staging_sizes.size();
+
+    auto queue       = att_queue_t{};
+    queue.agent_id   = agent_id;
+    queue.kfd_memory = std::move(kfd_memory);
 
     if(queue.kfd_memory)
     {
-        queue.kfd_copy_queue = std::make_shared<kfd_copy_queue_t>(queue.kfd_memory, buffer_size);
+        queue.kfd_copy_queue = std::make_shared<kfd_copy_queue_t>(queue.kfd_memory, max_copy_size);
         queue.submit_fn      = kfd_submit;
         queue.cpu_buffers.resize(num_buffers, nullptr);
-        for(auto& memory : queue.cpu_buffers)
-            memory = queue.kfd_memory->allocate(buffer_size, kfd_memory_kind_t::host);
+        for(size_t i = 0; i < num_buffers; ++i)
+            queue.cpu_buffers.at(i) =
+                queue.kfd_memory->allocate(staging_sizes.at(i), kfd_memory_kind_t::host);
         return queue;
     }
 
@@ -177,9 +179,11 @@ att_queue_create(rocprofiler_agent_id_t             agent_id,
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to create thread trace async queue";
 
     queue.cpu_buffers.resize(num_buffers, nullptr);
-    for(auto& memory : queue.cpu_buffers)
+    for(size_t i = 0; i < num_buffers; ++i)
     {
-        status = ext->hsa_amd_memory_pool_allocate_fn(cache->cpu_pool(), buffer_size, 0, &memory);
+        auto& memory = queue.cpu_buffers.at(i);
+        status       = ext->hsa_amd_memory_pool_allocate_fn(
+            cache->cpu_pool(), staging_sizes.at(i), 0, &memory);
         ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to allocate thread trace memory";
         status = ext->hsa_amd_agents_allow_access_fn(1, &queue.near_cpu, nullptr, memory);
         ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to allow CPU access";
@@ -266,27 +270,6 @@ att_queue_copy(att_queue_t& queue, void* dst, const void* src, size_t size)
                 dst, queue.near_cpu, src, queue.hsa_agent, size, 0, nullptr, completion.handle());
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to copy thread trace memory";
     completion.wait();
-}
-
-void
-att_queue_deleter_t::operator()(att_queue_t* queue) const
-{
-    if(queue)
-    {
-        att_queue_destroy(*queue);
-        delete queue;
-    }
-}
-
-att_queue_ptr_t
-make_att_queue(rocprofiler_agent_id_t             agent_id,
-               size_t                             buffer_size,
-               size_t                             num_buffers,
-               std::shared_ptr<kfd_memory_pool_t> kfd_memory)
-{
-    auto* queue = new att_queue_t{
-        att_queue_create(agent_id, buffer_size, num_buffers, std::move(kfd_memory))};
-    return att_queue_ptr_t{queue};
 }
 
 }  // namespace thread_trace

@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/code_object.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/hsa_util.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_resources.hpp"
 
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 #include <rocprofiler-sdk/intercept_table.h>
@@ -97,7 +98,7 @@ class ThreadTracerAgent
     using code_object_id_t = uint64_t;
 
 public:
-    /// Owns the lifetime of an ATT queue for a single GPU agent.
+    /// Owns context-specific ATT packets and retains the agent's shared resources.
     ThreadTracerAgent(thread_trace_parameter_pack _params, rocprofiler_agent_id_t);
     virtual ~ThreadTracerAgent();
 
@@ -128,7 +129,8 @@ private:
     /// Acquire a copy of the control packet, with optional increment to active_traces
     std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart = false);
 
-    att_queue_ptr_t queue{};
+    // Retained by every packet/worker that uses the shared queue or output slots.
+    agent_trace_resources_ptr_t resources = {};
 
     std::atomic<int> active_traces{0};
     std::mutex       trace_resources_mut{};
@@ -156,6 +158,9 @@ public:
     void stop_context();
     void resource_init();
     void resource_deinit();
+
+    /// Report this context's per-agent output and staging requirements before build.
+    void register_shared_sizes();
 
     void add_agent(rocprofiler_agent_id_t agent, thread_trace_parameter_pack pack)
     {
@@ -194,6 +199,9 @@ public:
     void stop_context();
     void resource_init();
     void resource_deinit();
+
+    /// Report this context's per-agent output and staging requirements before build.
+    void register_shared_sizes();
 
     void add_agent(rocprofiler_agent_id_t id, thread_trace_parameter_pack _params)
     {
