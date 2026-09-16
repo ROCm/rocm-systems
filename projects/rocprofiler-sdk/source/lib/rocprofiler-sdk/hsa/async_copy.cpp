@@ -171,13 +171,13 @@ struct async_copy_data
 {
     using pooled_signal_t = common::container::pool_object<signal_t>;
 
-    hsa_signal_t             orig_signal        = {};
-    hsa_signal_t             rocp_signal        = {};
-    pooled_signal_t*         rocp_pooled_signal = nullptr;
-    rocprofiler_thread_id_t  tid                = common::get_tid();
-    uint64_t                 start_ts           = 0;
-    context::correlation_id* correlation_id     = nullptr;
-    traced_copy_data_vec_t   traced_copies      = {};
+    hsa_signal_t             orig_signal = {};
+    hsa_signal_t             rocp_signal = {};
+    pooled_signal_ptr_t      rocp_pooled_signal{};
+    rocprofiler_thread_id_t  tid            = common::get_tid();
+    uint64_t                 start_ts       = 0;
+    context::correlation_id* correlation_id = nullptr;
+    traced_copy_data_vec_t   traced_copies  = {};
 
     auto get_lock() { return std::make_unique<std::unique_lock<std::mutex>>(m_mtx); }
 
@@ -501,28 +501,13 @@ bool
 create_async_copy_signal(async_copy_data* _data)
 {
     constexpr auto _completion_signal_val = hsa_signal_value_t{1};
-    auto*          _signal_pool           = get_signal_pool();
-
-    if(!_signal_pool)
+    _data->rocp_pooled_signal             = acquire_pooled_signal(_completion_signal_val);
+    if(!_data->rocp_pooled_signal)
     {
         ROCP_ERROR << "failed to get the HSA signal pool";
         return false;
     }
-
-    auto& _pooled_signal = _signal_pool->acquire();
-
-    // A released pool entry retains its HSA handle. Only construct empty entries and reset the
-    // signal value explicitly before installing this submission's handler.
-    if(_pooled_signal.get().value.handle == 0)
-        construct_hsa_signal(_pooled_signal.get(), 0, 0, nullptr, 0);
-
-    ROCP_FATAL_IF(!_pooled_signal.in_use() || _pooled_signal.get().value.handle == 0)
-        << "acquired an invalid pooled async-copy signal";
-
-    _data->rocp_pooled_signal = &_pooled_signal;
-    _data->rocp_signal        = _pooled_signal.get().value;
-
-    get_core_table()->hsa_signal_store_screlease_fn(_data->rocp_signal, _completion_signal_val);
+    _data->rocp_signal = _data->rocp_pooled_signal->get().value;
 
     auto _status = get_amd_ext_table()->hsa_amd_signal_async_handler_fn(_data->rocp_signal,
                                                                         HSA_SIGNAL_CONDITION_LT,
@@ -624,6 +609,7 @@ async_copy_handler(hsa_signal_value_t, void* arg)
     if(registration::get_fini_status() > 0)
     {
         auto* _data = static_cast<async_copy_data*>(arg);
+        if(_data->rocp_pooled_signal) _data->rocp_pooled_signal->release();
         delete _data;
         return false;
     }

@@ -22,9 +22,8 @@
 
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/common/static_object.hpp"
-#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/cxx/operators.hpp>
@@ -35,10 +34,43 @@ namespace hsa
 {
 namespace
 {
-bool
-signal_pool_exists()
+struct signal_pool_state
 {
-    return (common::static_object<common::container::pool<signal_t>>::get() != nullptr);
+    std::mutex                     mutex{};
+    std::shared_ptr<signal_pool_t> current{};
+    bool                           retired = false;
+};
+
+signal_pool_state&
+get_pool_state()
+{
+    static auto* state = common::static_object<signal_pool_state>::construct();
+    return *state;
+}
+
+std::shared_ptr<signal_pool_t>
+make_signal_pool()
+{
+    constexpr size_t default_signal_pool_size = 1 << 12;
+    auto             destroy_signal           = get_core_table()->hsa_signal_destroy_fn;
+    return std::shared_ptr<signal_pool_t>{
+        new signal_pool_t{std::piecewise_construct,
+                          default_signal_pool_size,
+                          [](signal_t& signal) { construct_hsa_signal(signal); }},
+        [destroy_signal](signal_pool_t* pool) {
+            if(internal_threading::fork_stale()) return;
+            pool->for_each([destroy_signal](auto& object) {
+                if(object.in_use())
+                {
+                    ROCP_WARNING << "Retaining HSA signal for unfinished GPU work: "
+                                 << object.get().value.handle;
+                    return;
+                }
+                if(object.get().value.handle != 0 && destroy_signal)
+                    destroy_signal(object.get().value);
+            });
+            delete pool;
+        }};
 }
 
 signal_t&
@@ -78,43 +110,50 @@ construct_hsa_signal(signal_t&          signal,
     return signal;
 }
 
-common::container::pool<signal_t>*
+std::shared_ptr<signal_pool_t>
 get_signal_pool()
 {
-    constexpr size_t default_signal_pool_size = (1 << 12);  // 4096 signals per pool batch
+    if(internal_threading::fork_stale() || registration::get_fini_status() != 0) return {};
+    auto& state = get_pool_state();
+    auto  lock  = std::lock_guard{state.mutex};
+    if(!state.current && !state.retired) state.current = make_signal_pool();
+    return state.current;
+}
 
-    static auto*& pool = common::static_object<common::container::pool<signal_t>>::construct(
-        std::piecewise_construct, default_signal_pool_size, [](signal_t& signal) {
-            if(registration::get_fini_status() == 0) construct_hsa_signal(signal, 0, 0, nullptr, 0);
-        });
-
-    return pool;
+pooled_signal_ptr_t
+acquire_pooled_signal(hsa_signal_value_t initial_value)
+{
+    auto pool = get_signal_pool();
+    if(!pool) return {};
+    auto& signal = pool->acquire(construct_hsa_signal, initial_value, 0, nullptr, 0);
+    return pooled_signal_ptr_t{pool, &signal};
 }
 
 void
 signal_pool_init()
 {
-    common::consume_args(get_signal_pool());
+    if(internal_threading::fork_stale() || registration::get_fini_status() != 0) return;
+    auto& state   = get_pool_state();
+    auto  lock    = std::lock_guard{state.mutex};
+    state.retired = false;
+    if(!state.current) state.current = make_signal_pool();
 }
 
-/**
- * @brief Finalize the signal pool, destroying any remaining signals and printing a usage report.
- *
- */
 void
 signal_pool_fini()
 {
-    // checks if pool exists without constructing it if it doesn't exist
-    if(!signal_pool_exists()) return;
-
-    if(auto* pool = get_signal_pool(); pool != nullptr)
+    if(internal_threading::fork_stale() || registration::get_fini_status() > 0) return;
+    auto& state   = get_pool_state();
+    auto  retired = std::shared_ptr<signal_pool_t>{};
     {
-        // only report once
-        static auto _once = std::once_flag{};
-        std::call_once(_once, [&]() { ROCP_INFO << pool->get_usage_report(); });
-
-        // always try to clear
-        pool->clear([](auto& signal) { Queue::destroy_signal(&signal); });
+        auto lock     = std::lock_guard{state.mutex};
+        retired       = std::move(state.current);
+        state.retired = true;
+    }
+    if(retired)
+    {
+        static auto once = std::once_flag{};
+        std::call_once(once, [&]() { ROCP_INFO << retired->get_usage_report(); });
     }
 }
 

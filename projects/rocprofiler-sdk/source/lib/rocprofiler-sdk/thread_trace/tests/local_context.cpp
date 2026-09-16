@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_resources.hpp"
 
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -185,6 +186,7 @@ TEST(thread_trace, local_context_override_skips_pre_kernel_call)
     if(!baseline_reaches_dispatch_cb(tracer, fq, hits, &user_data))
     {
         tracer.resource_deinit();
+        thread_trace::free_shared_trace_resources();
         GTEST_SKIP() << "no dispatch reaches the ATT callback through a fake queue on this agent, "
                         "so a forced-off skip cannot be told apart from no dispatch at all";
     }
@@ -207,6 +209,7 @@ TEST(thread_trace, local_context_override_skips_pre_kernel_call)
     EXPECT_EQ(hits.load(), 1) << "the local stop must not outlive the replay loop";
 
     tracer.resource_deinit();
+    thread_trace::free_shared_trace_resources();
 }
 
 TEST(thread_trace, local_context_override_forced_on_still_invokes_dispatch_cb)
@@ -246,6 +249,7 @@ TEST(thread_trace, local_context_override_forced_on_still_invokes_dispatch_cb)
     if(!baseline_reaches_dispatch_cb(tracer, fq, hits, &user_data))
     {
         tracer.resource_deinit();
+        thread_trace::free_shared_trace_resources();
         GTEST_SKIP() << "no dispatch reaches the ATT callback through a fake queue on this agent, "
                         "so a forced-on dispatch would prove nothing";
     }
@@ -264,6 +268,7 @@ TEST(thread_trace, local_context_override_forced_on_still_invokes_dispatch_cb)
     }
 
     tracer.resource_deinit();
+    thread_trace::free_shared_trace_resources();
 }
 
 TEST(thread_trace, resource_deinit_does_not_release_foreign_serialization_owner)
