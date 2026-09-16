@@ -24,6 +24,15 @@
 
 namespace dda::common {
 
+// Slot geometry, derived from the scratch bank the host picked. The bank splits
+// evenly across ranks and the per-rank stride is floored to a whole number of
+// slices, so a slot always begins on a slice boundary and the 16B wire accesses
+// stay aligned however nRanks divides the bank.
+constexpr size_t ddaLL128AgSlotWords(size_t bankSize, int nRanks) {
+  return ddaLLSlotPkts(bankSize, sizeof(uint64_t) * (size_t)nRanks,
+                       (size_t)kDdaLL128WireWordsPerSlice);
+}
+
 // LL128 all-gather. 2D grid: grid.x == nRanks - 1 places one column per remote
 // peer; grid.y splits that peer's slices across blocks, one
 // warp per slice. Each column packs this rank's payload into its peer's slot,
@@ -40,7 +49,7 @@ __launch_bounds__(1024)
                                           uint32_t* __restrict__ epochDev, // per-block LL epoch cells
                                           int epochLen, // number of cells in epochDev
                                           size_t slicesTotal, // slices this call uses
-                                          size_t slotWords) { // per-rank slot stride, in 8B words
+                                          size_t bankSize) { // scratch bank size (from host)
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
@@ -58,7 +67,10 @@ __launch_bounds__(1024)
   const int total = (int)(gridDim.x * gridDim.y);
   const uint32_t flag32 = ddaGetLLEpochInc(epochDev, flatBlockId, 1);
   const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
-  const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)nRanks * (uint64_t)slotWords;
+  const size_t slotWords = ddaLL128AgSlotWords(bankSize, nRanks);
+  // Bank 1 sits at bankSize rather than right after the slots, so every DDA LL
+  // tier sharing this scratch and epoch counter banks at the same byte offsets.
+  const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
 
   // Slices stride by warp within this peer's column only.
   const size_t gwarp = (size_t)blockIdx.y * (size_t)nwarps + (size_t)warp;
