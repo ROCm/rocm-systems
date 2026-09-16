@@ -76,6 +76,12 @@ void OCLPinnedMemory::open(unsigned int test, char* units, double& conversion,
     _openTest = -1;
     return;
   }
+  // 0.4 * min(RAM, max alloc). ratio_ is host headroom; apply it after
+  // clamping RAM to CL_DEVICE_MAX_MEM_ALLOC_SIZE (CLR waives that query for
+  // USE_HOST_PTR). Pin size is then row_size_^2 after the sqrt below.
+  if (max_alloc > 0 && row_size_ > static_cast<size_t>(max_alloc)) {
+    row_size_ = static_cast<size_t>(max_alloc);
+  }
   row_size_ *= ratio_;
 #if EMU_ENV
   if (row_size_ > 5000) {
@@ -84,18 +90,10 @@ void OCLPinnedMemory::open(unsigned int test, char* units, double& conversion,
 #endif
   row_size_ = floor(sqrt(row_size_));
   row_size_ = (row_size_ + row_data_size_ - 1) & ~(row_data_size_ - 1);
-
-  // Cap lock size (row_size_^2) at max alloc; CLR waives that for USE_HOST_PTR.
-  uint64_t square = static_cast<uint64_t>(row_size_) * static_cast<uint64_t>(row_size_);
-  if (max_alloc > 0 && square > max_alloc) {
-    size_t max_row = static_cast<size_t>(floor(sqrt(static_cast<double>(max_alloc))));
-    max_row &= ~(row_data_size_ - 1);
-    if (max_row == 0) {
-      printf("CL_DEVICE_MAX_MEM_ALLOC_SIZE too small, skipping...\n");
-      _openTest = -1;
-      return;
-    }
-    row_size_ = max_row;
+  if (row_size_ == 0) {
+    printf("CL_DEVICE_MAX_MEM_ALLOC_SIZE too small, skipping...\n");
+    _openTest = -1;
+    return;
   }
 
   pin_size_ = row_size_ * row_size_ / row_data_size_;
