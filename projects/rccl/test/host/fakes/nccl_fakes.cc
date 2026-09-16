@@ -377,17 +377,35 @@ ncclResult_t ncclMemTrack(struct ncclMemManager* /*manager*/,
     return ncclSuccess;
 }
 
-ncclResult_t ncclMemTrackImportFromPeer(struct ncclMemManager* /*manager*/,
-                                        void*                           /*ptr*/,
-                                        size_t                          /*size*/,
-                                        hipMemGenericAllocationHandle_t /*handle*/,
-                                        hipMemAllocationHandleType      /*handleType*/,
-                                        ncclMemType_t                   /*memType*/,
-                                        int                             /*ownerRank*/,
-                                        int                             /*ownerDev*/,
-                                        void*                           /*ownerPtr*/)
+// --- Controllable seam: ncclMemTrackImportFromPeer ----------------------
+// ncclP2pImportShareableBuffer's cuMem arm records the mapped remote buffer
+// through this before returning success. Default succeeds; the import test
+// installs a hook to observe that the cuMem arm reached the tracking call
+// (mock-style: no public state carries the record).
+static ncclResult_t DefaultMemTrackImportFromPeer(
+    struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,
+    hipMemAllocationHandleType, ncclMemType_t, int, int, void*)
 {
     return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclMemManager*, void*, size_t,
+                           hipMemGenericAllocationHandle_t,
+                           hipMemAllocationHandleType, ncclMemType_t, int, int,
+                           void*)>
+    g_memTrackImportFromPeer = DefaultMemTrackImportFromPeer;
+
+ncclResult_t ncclMemTrackImportFromPeer(struct ncclMemManager* manager,
+                                        void*                           ptr,
+                                        size_t                          size,
+                                        hipMemGenericAllocationHandle_t handle,
+                                        hipMemAllocationHandleType      handleType,
+                                        ncclMemType_t                   memType,
+                                        int                             ownerRank,
+                                        int                             ownerDev,
+                                        void*                           ownerPtr)
+{
+    return g_memTrackImportFromPeer(manager, ptr, size, handle, handleType,
+                                    memType, ownerRank, ownerDev, ownerPtr);
 }
 
 ncclResult_t ncclMemUntrack(struct ncclMemManager* /*manager*/,
@@ -416,11 +434,24 @@ ncclResult_t ncclMemUntrackPersist(struct ncclMemManager* /*manager*/,
     return ncclSuccess;
 }
 
-ncclResult_t ncclDynMemMarkExportToPeer(struct ncclMemManager* /*manager*/,
-                                        void*                  /*ptr*/,
-                                        int                    /*peerRank*/)
+// --- Controllable seam: ncclDynMemMarkExportToPeer ----------------------
+// ncclP2pAllocateShareableBuffer's cuMem arm marks a freshly-allocated
+// buffer for export only when it has a manager, a real peer, and a
+// non-persistent memtype. Default succeeds; the alloc tests install a hook
+// to observe whether that gating decision fired (mock-style).
+static ncclResult_t DefaultDynMemMarkExportToPeer(struct ncclMemManager*,
+                                                  void*, int)
 {
     return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclMemManager*, void*, int)>
+    g_dynMemMarkExportToPeer = DefaultDynMemMarkExportToPeer;
+
+ncclResult_t ncclDynMemMarkExportToPeer(struct ncclMemManager* manager,
+                                        void*                  ptr,
+                                        int                    peerRank)
+{
+    return g_dynMemMarkExportToPeer(manager, ptr, peerRank);
 }
 
 // Batch fd-query variant added upstream for multi-segment registration.
@@ -453,6 +484,9 @@ void ResetNcclFakes()
     g_loadParam                    = DefaultLoadParam;
     g_cuMemEnable                  = DefaultCuMemEnable;
     g_proxyClientQueryFdBlocking   = DefaultProxyClientQueryFdBlocking;
+    g_proxyClientGetFdBlocking     = DefaultProxyClientGetFdBlocking;
+    g_memTrackImportFromPeer       = DefaultMemTrackImportFromPeer;
+    g_dynMemMarkExportToPeer       = DefaultDynMemMarkExportToPeer;
     g_ncclTopoGetLinkType          = DefaultTopoGetLinkType;
     g_ncclTopoGetLinkTypeCalls     = 0;
     g_ncclTopoCheckP2p             = DefaultTopoCheckP2p;

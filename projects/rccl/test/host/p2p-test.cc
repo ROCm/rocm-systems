@@ -44,6 +44,17 @@ extern std::function<ncclResult_t(void** ptr, std::size_t nbytes, hipStream_t)>
 extern std::function<ncclResult_t(void* dst, void* src, std::size_t nbytes, hipStream_t)>
     g_fakeCudaMemcpyAsync;
 
+// Controllable seam for the header-only ncclCuMemAlloc template, which the
+// cuMem arm of ncclP2pAllocateShareableBuffer calls. The real template drives
+// a long chain of HIP driver primitives (cuMemCreate / reserve / map /
+// setAccess / zeroing side stream) that has no GPU here; the macro shim below
+// routes the call site to this seam instead. Type-erased to (void** ptr,
+// handle*, size). Default hands back a heap buffer and a sentinel handle.
+extern std::function<ncclResult_t(void** ptr,
+                                  hipMemGenericAllocationHandle_t* handlep,
+                                  std::size_t size)>
+    g_fakeCuMemAlloc;
+
 // Restore every hook this file drives (plus, transitively, the nccl* and HIP
 // hooks) to its default. Called from the file-wide fixture's TearDown().
 // Defined below, after P2P_CC_PATH.
@@ -68,6 +79,21 @@ static void ResetP2pFakes();
 #define ncclCudaCallocAsync(ptr, nelem, stream, ...) \
     g_fakeCudaCallocAsync(reinterpret_cast<void**>(ptr), \
                           (nelem) * sizeof(**(ptr)), (stream))
+// ncclCudaCalloc (non-async): the legacy-IPC arm of
+// ncclP2pAllocateShareableBuffer allocates the buffer through this before
+// hipIpcGetMemHandle. Route it through the same honest emulator (a NULL
+// stream stands in for the synchronous call). The variadic tail swallows the
+// trailing manager/memType/flags arguments.
+#undef ncclCudaCalloc
+#define ncclCudaCalloc(ptr, nelem, ...) \
+    g_fakeCudaCallocAsync(reinterpret_cast<void**>(ptr), \
+                          (nelem) * sizeof(**(ptr)), nullptr)
+// ncclCuMemAlloc: the cuMem arm of ncclP2pAllocateShareableBuffer allocates
+// through this. Route it to the file-local g_fakeCuMemAlloc seam so the call
+// site never reaches the real VMM primitives. The variadic tail swallows the
+// trailing manager/memType arguments.
+#define ncclCuMemAlloc(ptr, handlep, type, size, ...) \
+    g_fakeCuMemAlloc(reinterpret_cast<void**>(ptr), (handlep), (size))
 #define ncclCudaMemcpyAsync(dst, src, nelem, stream) \
     g_fakeCudaMemcpyAsync(reinterpret_cast<void*>(dst), \
                           reinterpret_cast<void*>(src), \
@@ -154,17 +180,40 @@ ncclResult_t DefaultFakeCudaMemcpyAsync(void* dst, void* src,
     if (nbytes > 0) std::memcpy(dst, src, nbytes);
     return ncclSuccess;
 }
+
+// Sentinel handle the default ncclCuMemAlloc emulator hands back, so tests
+// can assert the allocated handle is threaded through export/retain.
+constexpr std::uintptr_t kFakeCuMemAllocHandleBits = 0xA110C0DE0000ull;
+
+ncclResult_t DefaultFakeCuMemAlloc(void** ptr,
+                                   hipMemGenericAllocationHandle_t* handlep,
+                                   std::size_t nbytes)
+{
+    if (ptr == nullptr) return ncclInvalidArgument;
+    void* p = std::calloc(1, nbytes ? nbytes : 1);
+    if (p == nullptr) return ncclSystemError;
+    g_fakeAllocations.push_back(p);
+    *ptr = p;
+    if (handlep) {
+        std::memset(handlep, 0, sizeof(*handlep));
+        std::memcpy(handlep, &kFakeCuMemAllocHandleBits, sizeof(std::uintptr_t));
+    }
+    return ncclSuccess;
+}
 }  // namespace
 
 std::function<ncclResult_t(void**, std::size_t, hipStream_t)>
     g_fakeCudaCallocAsync = DefaultFakeCudaCallocAsync;
 std::function<ncclResult_t(void*, void*, std::size_t, hipStream_t)>
     g_fakeCudaMemcpyAsync = DefaultFakeCudaMemcpyAsync;
+std::function<ncclResult_t(void**, hipMemGenericAllocationHandle_t*, std::size_t)>
+    g_fakeCuMemAlloc = DefaultFakeCuMemAlloc;
 
 static void ResetP2pFakes()
 {
     g_fakeCudaCallocAsync = DefaultFakeCudaCallocAsync;
     g_fakeCudaMemcpyAsync = DefaultFakeCudaMemcpyAsync;
+    g_fakeCuMemAlloc      = DefaultFakeCuMemAlloc;
     ResetNcclFakes();  // restore the nccl* hooks owned by nccl_fakes.cc
     ResetHipFakes();   // restore the HIP hooks owned by hip_fakes.cc
     for (void* p : g_fakeAllocations) std::free(p);
@@ -3841,3 +3890,448 @@ TEST_F(P2pFreeMicrotest, RecvFree_LegacyIpcResources_ClosesEachRetainedHandle)
     EXPECT_EQ(p2pTransport.recv.free(nullptr, &recv), ncclSuccess);
     EXPECT_EQ(closes, 2);
 }
+
+// ===========================================================================
+// Shareable-buffer alloc/import: ncclP2pAllocateShareableBuffer and
+// ncclP2pImportShareableBuffer. These two free functions pick between the
+// cuMem* driver arm and the legacy CUDA-IPC arm off ncclCuMemEnable(), then
+// populate the export descriptor / import the remote buffer. Neither leaves
+// much observable public state, so the tests assert the descriptor / output
+// pointer the caller relies on where possible and fall back to mock-style
+// "the arm drove this seam" assertions for the manager-tracking bookkeeping.
+//
+// The cuMem arms need ROCM_VERSION >= 7 (the #else compiles to
+// `return ncclInternalError`); the legacy arms are always present.
+// ===========================================================================
+
+class P2pShareableBufferMicrotest : public P2pMicrotest {
+protected:
+    ncclIpcDesc ipcDesc{};
+    void*       ptr = nullptr;
+};
+
+// Legacy-IPC arm (ncclCuMemEnable() == 0): the buffer is allocated through
+// ncclCudaCalloc and its IPC handle captured via hipIpcGetMemHandle into
+// ipcDesc.devIpc. Contract: *ptr is set to the allocation and the caller's
+// descriptor carries the exported IPC handle.
+TEST_F(P2pShareableBufferMicrotest,
+       Allocate_CuMemDisabled_ExportsLegacyIpcHandle)
+{
+    // cuMemEnable stays 0 (default) -> legacy arm.
+    int getCalls = 0;
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [&getCalls](hipIpcMemHandle_t* h, void* devPtr) -> hipError_t {
+            ++getCalls;
+            EXPECT_NE(devPtr, nullptr);   // the freshly-allocated buffer
+            if (h) std::memset(h, 0x5A, sizeof(*h));
+            return hipSuccess;
+        });
+
+    auto r = ncclP2pAllocateShareableBuffer(/*size=*/256, /*refcount=*/0,
+                                            &ipcDesc, &ptr);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(getCalls, 1);
+    EXPECT_NE(ptr, nullptr);
+    // Handle bytes were written into the legacy-IPC descriptor member.
+    unsigned char* bytes = reinterpret_cast<unsigned char*>(&ipcDesc.devIpc);
+    EXPECT_EQ(bytes[0], 0x5A);
+}
+
+// Legacy-IPC arm, hipIpcGetMemHandle fails: the HIP error is propagated
+// (CUDACHECK) rather than the caller seeing success with a half-populated
+// descriptor. (Releasing the buffer is ncclCudaFree's contract, covered
+// elsewhere; this test pins only the propagation the unit owns.)
+TEST_F(P2pShareableBufferMicrotest,
+       Allocate_LegacyIpcGetMemHandleFails_Propagates)
+{
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [](hipIpcMemHandle_t*, void*) -> hipError_t {
+            return hipErrorInvalidValue;
+        });
+
+    auto r = ncclP2pAllocateShareableBuffer(/*size=*/256, /*refcount=*/0,
+                                            &ipcDesc, &ptr);
+
+    EXPECT_NE(r, ncclSuccess);       // the HIP error propagated
+}
+
+#if ROCM_VERSION >= 70000
+
+// cuMem arm, non-POSIX handle type: the allocation's handle is exported via
+// hipMemExportToShareableHandle into ipcDesc.cuDesc (the UDS/POSIX_FD memcpy
+// branch is skipped). With refcount > 0 the handle is also stashed in
+// ipcDesc.memHandle and retained refcount times.
+TEST_F(P2pShareableBufferMicrotest,
+       Allocate_CuMemEnabledNonPosix_ExportsHandleAndRetains)
+{
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypeFabric;  // anything != POSIX_FD
+
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+
+    int exportCalls = 0;
+    ScopedHook xport(g_hipMemExportToShareableHandle,
+        [&exportCalls](void* shareableHandle, hipMemGenericAllocationHandle_t h,
+                       hipMemAllocationHandleType type,
+                       unsigned long long) -> hipError_t {
+            ++exportCalls;
+            EXPECT_NE(type, hipMemHandleTypePosixFileDescriptor);
+            // Write a recognisable exported descriptor.
+            if (shareableHandle) std::memset(shareableHandle, 0x3C, 8);
+            (void)h;
+            return hipSuccess;
+        });
+    int retainCalls = 0;
+    ScopedHook retain(g_hipMemRetainAllocationHandle,
+        [&retainCalls](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
+            ++retainCalls;
+            return hipSuccess;
+        });
+
+    auto r = ncclP2pAllocateShareableBuffer(/*size=*/256, /*refcount=*/2,
+                                            &ipcDesc, &ptr);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(exportCalls, 1);          // the non-POSIX export arm fired
+    EXPECT_EQ(retainCalls, 2);          // one retain per refcount
+    EXPECT_NE(ptr, nullptr);
+    unsigned char* bytes = reinterpret_cast<unsigned char*>(&ipcDesc.cuDesc);
+    EXPECT_EQ(bytes[0], 0x3C);          // exported descriptor landed in cuDesc
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+// cuMem arm, POSIX_FD handle type: the native handle is memcpy'd straight
+// into ipcDesc.cuDesc.data for later UDS conversion; hipMemExportToShareable-
+// Handle is NOT called. refcount 0 => no retain.
+TEST_F(P2pShareableBufferMicrotest,
+       Allocate_CuMemEnabledPosixFd_StoresNativeHandleWithoutExport)
+{
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook xport(g_hipMemExportToShareableHandle,
+        [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+           unsigned long long) -> hipError_t {
+            ADD_FAILURE() << "POSIX_FD arm must not export a shareable handle";
+            return hipErrorInvalidValue;
+        });
+
+    auto r = ncclP2pAllocateShareableBuffer(/*size=*/256, /*refcount=*/0,
+                                            &ipcDesc, &ptr);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_NE(ptr, nullptr);
+    // The emulator's sentinel handle bits were copied into cuDesc.data.
+    std::uintptr_t stored = 0;
+    std::memcpy(&stored, &ipcDesc.cuDesc.data, sizeof(stored));
+    EXPECT_EQ(stored, kFakeCuMemAllocHandleBits);
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+// cuMem arm, export-to-peer gating: when the caller supplies a manager, a
+// real peer rank, and a non-persistent memtype, the freshly-allocated buffer
+// is marked for export via ncclDynMemMarkExportToPeer.
+TEST_F(P2pShareableBufferMicrotest,
+       Allocate_CuMemEnabledWithPeerAndManager_MarksExportToPeer)
+{
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;  // skip export
+
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    int markCalls = 0;
+    int seenPeer  = -99;
+    ScopedHook mark(g_dynMemMarkExportToPeer,
+        [&](struct ncclMemManager*, void*, int peerRank) -> ncclResult_t {
+            ++markCalls;
+            seenPeer = peerRank;
+            return ncclSuccess;
+        });
+
+    ncclMemManager* fakeManager = reinterpret_cast<ncclMemManager*>(0x1234);
+    auto r = ncclP2pAllocateShareableBuffer(/*size=*/256, /*refcount=*/0,
+                                            &ipcDesc, &ptr, /*peerRank=*/3,
+                                            fakeManager, ncclMemScratch);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(markCalls, 1);
+    EXPECT_EQ(seenPeer, 3);
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+// cuMem arm, export-to-peer gating skipped: each operand of the
+// `manager != nullptr && peerRank >= 0 && memtype != ncclMemPersist` guard
+// short-circuits the mark-for-export call in turn. Parameterised over the
+// three ways to miss the guard so all three operand False arms are driven.
+struct SkipMarkExportCase {
+    ncclMemManager* manager;
+    int             peerRank;
+    ncclMemType_t   memtype;
+};
+class P2pAllocateSkipMarkExport
+    : public P2pShareableBufferMicrotest,
+      public ::testing::WithParamInterface<SkipMarkExportCase> {};
+
+TEST_P(P2pAllocateSkipMarkExport, CuMemEnabled_GuardMisses_SkipsMarkExportToPeer)
+{
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook mark(g_dynMemMarkExportToPeer,
+        [](struct ncclMemManager*, void*, int) -> ncclResult_t {
+            ADD_FAILURE() << "mark-for-export must not fire when the guard misses";
+            return ncclSuccess;
+        });
+
+    const auto& p = GetParam();
+    auto r = ncclP2pAllocateShareableBuffer(/*size=*/256, /*refcount=*/0,
+                                            &ipcDesc, &ptr, p.peerRank,
+                                            p.manager, p.memtype);
+
+    EXPECT_EQ(r, ncclSuccess);
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    GuardOperands, P2pAllocateSkipMarkExport,
+    ::testing::Values(
+        // No manager -> first operand False (short-circuits before the rest).
+        SkipMarkExportCase{nullptr, 3, ncclMemScratch},
+        // Manager but no real peer -> second operand False.
+        SkipMarkExportCase{reinterpret_cast<ncclMemManager*>(0x1234), -1,
+                           ncclMemScratch},
+        // Manager + real peer but persistent memtype -> third operand False.
+        SkipMarkExportCase{reinterpret_cast<ncclMemManager*>(0x1234), 3,
+                           ncclMemPersist}));
+
+// cuMem arm, allocation itself fails: ncclCuMemAlloc's error is propagated
+// before any export/retain bookkeeping.
+TEST_F(P2pShareableBufferMicrotest,
+       Allocate_CuMemAllocFails_Propagates)
+{
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook alloc(g_fakeCuMemAlloc,
+        [](void**, hipMemGenericAllocationHandle_t*, std::size_t) -> ncclResult_t {
+            return ncclSystemError;
+        });
+    ScopedHook xport(g_hipMemExportToShareableHandle,
+        [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+           unsigned long long) -> hipError_t {
+            ADD_FAILURE() << "export must not fire after alloc failure";
+            return hipErrorInvalidValue;
+        });
+
+    auto r = ncclP2pAllocateShareableBuffer(/*size=*/256, /*refcount=*/0,
+                                            &ipcDesc, &ptr);
+
+    EXPECT_EQ(r, ncclSystemError);
+}
+
+#endif  // ROCM_VERSION >= 70000
+
+// ---------------------------------------------------------------------------
+// ncclP2pImportShareableBuffer
+// ---------------------------------------------------------------------------
+
+// Legacy-IPC arm (ncclCuMemEnable() == 0): the remote handle is opened with
+// hipIpcOpenMemHandle and the mapped device pointer handed back through
+// *devMemPtr.
+TEST_F(P2pShareableBufferMicrotest,
+       Import_CuMemDisabled_OpensLegacyIpcHandle)
+{
+    void* const kMapped = reinterpret_cast<void*>(0xB0000);
+    int openCalls = 0;
+    ScopedHook open(g_hipIpcOpenMemHandle,
+        [&](void** devPtr, hipIpcMemHandle_t, unsigned int flags) -> hipError_t {
+            ++openCalls;
+            EXPECT_EQ(flags, static_cast<unsigned>(hipIpcMemLazyEnablePeerAccess));
+            if (devPtr) *devPtr = kMapped;
+            return hipSuccess;
+        });
+
+    ncclComm comm{};
+    void* devMem = nullptr;
+    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
+                                          &ipcDesc, &devMem);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(openCalls, 1);
+    EXPECT_EQ(devMem, kMapped);   // caller receives the mapped pointer
+}
+
+// Legacy-IPC arm, hipIpcOpenMemHandle fails: the error is propagated.
+TEST_F(P2pShareableBufferMicrotest,
+       Import_LegacyIpcOpenFails_Propagates)
+{
+    ScopedHook open(g_hipIpcOpenMemHandle,
+        [](void**, hipIpcMemHandle_t, unsigned int) -> hipError_t {
+            return hipErrorInvalidValue;
+        });
+
+    ncclComm comm{};
+    void* devMem = nullptr;
+    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
+                                          &ipcDesc, &devMem);
+
+    EXPECT_NE(r, ncclSuccess);
+}
+
+#if ROCM_VERSION >= 70000
+
+// cuMem arm, non-POSIX handle type: import -> address-reserve -> map ->
+// set-access -> track. The reserved virtual address is handed back through
+// *devMemPtr and the mapped buffer is recorded via ncclMemTrackImportFromPeer.
+TEST_F(P2pShareableBufferMicrotest,
+       Import_CuMemEnabledNonPosix_MapsAndTracksRemoteBuffer)
+{
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypeFabric;  // != POSIX_FD
+
+    void* const kReserved = reinterpret_cast<void*>(0xC0000);
+
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    int importCalls = 0, mapCalls = 0, accessCalls = 0, trackCalls = 0;
+    ScopedHook import(g_hipMemImportFromShareableHandle,
+        [&](hipMemGenericAllocationHandle_t* h, void*,
+            hipMemAllocationHandleType) -> hipError_t {
+            ++importCalls;
+            if (h) *h = nullptr;
+            return hipSuccess;
+        });
+    ScopedHook reserve(g_hipMemAddressReserve,
+        [&](void** p, std::size_t, std::size_t, void*,
+            unsigned long long) -> hipError_t {
+            if (p) *p = kReserved;
+            return hipSuccess;
+        });
+    ScopedHook map(g_hipMemMap,
+        [&](void*, std::size_t, std::size_t, hipMemGenericAllocationHandle_t,
+            unsigned long long) -> hipError_t { ++mapCalls; return hipSuccess; });
+    ScopedHook access(g_hipMemSetAccess,
+        [&](void*, std::size_t, const hipMemAccessDesc*,
+            std::size_t) -> hipError_t { ++accessCalls; return hipSuccess; });
+    ScopedHook track(g_memTrackImportFromPeer,
+        [&](struct ncclMemManager*, void* p, size_t, hipMemGenericAllocationHandle_t,
+            hipMemAllocationHandleType, ncclMemType_t, int, int,
+            void*) -> ncclResult_t {
+            ++trackCalls;
+            EXPECT_EQ(p, kReserved);   // the mapped address is what's tracked
+            return ncclSuccess;
+        });
+
+    ncclComm comm{};
+    // peerInfo[peer].cudaDev is read for the tracking call.
+    std::array<ncclPeerInfo, 4> peerInfo{};
+    comm.peerInfo = peerInfo.data();
+    void* devMem = nullptr;
+
+    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
+                                          &ipcDesc, &devMem);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(importCalls, 1);
+    EXPECT_EQ(mapCalls, 1);
+    EXPECT_EQ(accessCalls, 1);
+    EXPECT_EQ(trackCalls, 1);
+    EXPECT_EQ(devMem, kReserved);
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+// cuMem arm, POSIX_FD handle type: the remote handle is converted to a local
+// fd via ncclProxyClientGetFdBlocking, then imported from that fd (the plain
+// hipMemImportFromShareableHandle(cuDesc) branch is skipped).
+TEST_F(P2pShareableBufferMicrotest,
+       Import_CuMemEnabledPosixFd_ConvertsHandleToFdBeforeImport)
+{
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+
+    void* const kReserved = reinterpret_cast<void*>(0xD0000);
+
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    int getFdCalls = 0;
+    ScopedHook getFd(g_proxyClientGetFdBlocking,
+        [&](struct ncclComm*, int, void*, int* fd) -> ncclResult_t {
+            ++getFdCalls;
+            // Hand back a real, closable fd so the SYSCHECK(close(fd)) succeeds.
+            if (fd) *fd = dup(STDERR_FILENO);
+            return ncclSuccess;
+        });
+    int importCalls = 0;
+    ScopedHook import(g_hipMemImportFromShareableHandle,
+        [&](hipMemGenericAllocationHandle_t* h, void*,
+            hipMemAllocationHandleType) -> hipError_t {
+            ++importCalls;
+            if (h) *h = nullptr;
+            return hipSuccess;
+        });
+    ScopedHook reserve(g_hipMemAddressReserve,
+        [&](void** p, std::size_t, std::size_t, void*,
+            unsigned long long) -> hipError_t {
+            if (p) *p = kReserved;
+            return hipSuccess;
+        });
+    ScopedHook map(g_hipMemMap,
+        [](void*, std::size_t, std::size_t, hipMemGenericAllocationHandle_t,
+           unsigned long long) -> hipError_t { return hipSuccess; });
+    ScopedHook access(g_hipMemSetAccess,
+        [](void*, std::size_t, const hipMemAccessDesc*, std::size_t) -> hipError_t {
+            return hipSuccess;
+        });
+    ScopedHook track(g_memTrackImportFromPeer,
+        [](struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,
+           hipMemAllocationHandleType, ncclMemType_t, int, int, void*) -> ncclResult_t {
+            return ncclSuccess;
+        });
+
+    ncclComm comm{};
+    std::array<ncclPeerInfo, 4> peerInfo{};
+    comm.peerInfo = peerInfo.data();
+    void* devMem = nullptr;
+
+    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
+                                          &ipcDesc, &devMem);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(getFdCalls, 1);     // the POSIX_FD conversion fired
+    EXPECT_EQ(importCalls, 1);
+    EXPECT_EQ(devMem, kReserved);
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+// cuMem arm, import failure: hipMemImportFromShareableHandle's error is
+// propagated before any reserve/map/track work.
+TEST_F(P2pShareableBufferMicrotest,
+       Import_CuMemImportFails_Propagates)
+{
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypeFabric;
+
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook import(g_hipMemImportFromShareableHandle,
+        [](hipMemGenericAllocationHandle_t*, void*,
+           hipMemAllocationHandleType) -> hipError_t {
+            return hipErrorInvalidValue;
+        });
+    ScopedHook map(g_hipMemMap,
+        [](void*, std::size_t, std::size_t, hipMemGenericAllocationHandle_t,
+           unsigned long long) -> hipError_t {
+            ADD_FAILURE() << "map must not run after import failure";
+            return hipErrorInvalidValue;
+        });
+
+    ncclComm comm{};
+    std::array<ncclPeerInfo, 4> peerInfo{};
+    comm.peerInfo = peerInfo.data();
+    void* devMem = nullptr;
+
+    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
+                                          &ipcDesc, &devMem);
+
+    EXPECT_NE(r, ncclSuccess);
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+#endif  // ROCM_VERSION >= 70000
