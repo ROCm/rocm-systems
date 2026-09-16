@@ -99,7 +99,7 @@
 namespace rocr {
 
 namespace AMD {
-const uint64_t CP_DMA_DATA_TRANSFER_CNT_MAX = (1 << 26);
+const uint64_t CP_DMA_DATA_TRANSFER_CNT_MAX = (1 << 26) - 1;
 
 GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xnack_mode,
                    uint32_t index, core::DriverType driver_type)
@@ -3803,7 +3803,7 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
     pcs_data->xcc_data[i].done_sig0.handle = 0;
     pcs_data->xcc_data[i].done_sig1.handle = 0;
     pcs_data->xcc_data[i].host_buffer_begin = nullptr;  // Set after host_buffer allocation
-    // PM4 fallback resources (per-XCC to avoid races on multi-XCC systems)
+    // PM4 drain resources (per-XCC to avoid races on multi-XCC systems)
     pcs_data->xcc_data[i].old_val = nullptr;
     pcs_data->xcc_data[i].cmd_data = nullptr;
     pcs_data->xcc_data[i].cmd_data_sz = 0;
@@ -3819,7 +3819,7 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
           HSA::hsa_signal_destroy(pcs_data->xcc_data[i].done_sig0);
         if (pcs_data->xcc_data[i].done_sig1.handle)
           HSA::hsa_signal_destroy(pcs_data->xcc_data[i].done_sig1);
-        // Clean up per-XCC PM4 fallback resources
+        // Clean up per-XCC PM4 drain resources
         if (pcs_data->xcc_data[i].old_val) {
           system_deallocator()(pcs_data->xcc_data[i].old_val);
           pcs_data->xcc_data[i].old_val = nullptr;
@@ -4260,7 +4260,7 @@ hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& ses
         HSA::hsa_signal_destroy(pcs_data->xcc_data[xcc_id].done_sig0);
       if (pcs_data->xcc_data[xcc_id].done_sig1.handle)
         HSA::hsa_signal_destroy(pcs_data->xcc_data[xcc_id].done_sig1);
-      // Clean up per-XCC PM4 fallback resources
+      // Clean up per-XCC PM4 drain resources
       if (pcs_data->xcc_data[xcc_id].old_val) {
         system_deallocator()(pcs_data->xcc_data[xcc_id].old_val);
         pcs_data->xcc_data[xcc_id].old_val = nullptr;
@@ -4326,31 +4326,15 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
   // done signals as an exit sentinel to wake worker threads, so restore the
   // expected initial values before creating new monitoring threads.
   //
-  // Also reset device-side counters (buf_write_val, buf_written_val0/1) to ensure
-  // host and device agree on buffer parity. Without this, a previous session could
-  // leave buf_write_val with bit 63 set to 1 (buffer 1), while host resets which_buffer
-  // to 0, causing a parity mismatch where trap handlers increment buf_written_val1
-  // but host waits on buf_written_val0.
+  // which_buffer is deliberately left alone: it shadows bit 63 of the device's buf_write_val,
+  // which survives a stop/start pair. Forcing it back to 0 here would make the host drain
+  // buf_written_val0 while the trap handler keeps filling buffer 1, and the WAIT_REG_MEM in
+  // the PM4 flush path would then poll for a count that never arrives.
   for (uint32_t xcc_id = 0; xcc_id < pcs_data->num_xcc; xcc_id++) {
     pcs_data->xcc_data[xcc_id].host_write_offset = 0;
     pcs_data->xcc_data[xcc_id].host_read_offset = 0;
     HSA::hsa_signal_store_screlease(pcs_data->xcc_data[xcc_id].done_sig0, 1);
     HSA::hsa_signal_store_screlease(pcs_data->xcc_data[xcc_id].done_sig1, 1);
-    pcs_data->xcc_data[xcc_id].which_buffer = 0;
-
-    // Reset device-side counters to ensure buffer parity agreement.
-    // Use DmaFill (shader blit) which works for both large-BAR and non-large-BAR systems,
-    // consistent with how PcSamplingCreateFromId initializes device memory.
-    if (pcs_data->xcc_data[xcc_id].device_data) {
-      if (DmaFill(&pcs_data->xcc_data[xcc_id].device_data->buf_write_val, 0, 2) !=
-              HSA_STATUS_SUCCESS ||
-          DmaFill(&pcs_data->xcc_data[xcc_id].device_data->buf_written_val0, 0, 1) !=
-              HSA_STATUS_SUCCESS ||
-          DmaFill(&pcs_data->xcc_data[xcc_id].device_data->buf_written_val1, 0, 1) !=
-              HSA_STATUS_SUCCESS) {
-        return HSA_STATUS_ERROR;
-      }
-    }
   }
   pcs_data->consumer_exit.store(false, std::memory_order_relaxed);
   pcs_data->pending_flush_count = 0;
@@ -4675,12 +4659,18 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
 
 hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
     pcs_data_t* pcs_data, pcs::PcsRuntime::PcSamplingSession& session, uint32_t xcc_id) {
-  // PM4 fallback for non-large-BAR systems where CPU cannot directly access VRAM.
+  // Drain the trap buffers entirely on the command processor so the copy stays in the same
+  // coherent domain as the trap handler's payload writes.
   // Uses ATOMIC_MEM for buffer swap, WAIT_REG_MEM + DMA_DATA for copy, WRITE_DATA for reset.
 
   if (!pcs_data->xcc_data[xcc_id].device_data) {
     return HSA_STATUS_SUCCESS;
   }
+
+  // ExecutePM4 stages the command stream in the queue's single indirect buffer and returns as
+  // soon as the doorbell is rung, so a concurrent submission would overwrite commands the
+  // command processor has not fetched yet. Hold the lock across both submit-and-wait pairs.
+  std::lock_guard<std::mutex> pm4_lock(pcs_pm4_mutex_);
 
   uint32_t next_buffer;
   uint64_t reset_write_val;
@@ -4701,7 +4691,9 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   uint8_t* host_buffer_begin = pcs_data->xcc_data[xcc_id].host_buffer_begin;
   const size_t samples_per_trap_buffer = pcs_data->samples_per_trap_buffer;
 
-  // Per-XCC PM4 resources (avoids races on multi-XCC non-large-BAR systems)
+  // Per-XCC scratch (cmd_data / old_val / exec_pm4_signal): each thread builds its
+  // command stream and owns its completion signal independently. The shared-queue
+  // submit-and-wait itself is serialized by pcs_pm4_mutex_ (see lock above).
   uint32_t* cmd_data = pcs_data->xcc_data[xcc_id].cmd_data;
   const size_t cmd_data_sz = pcs_data->xcc_data[xcc_id].cmd_data_sz;
   uint64_t* old_val = pcs_data->xcc_data[xcc_id].old_val;
@@ -4721,7 +4713,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   device_buffer[1] = device_buffer[0] + samples_per_trap_buffer * session.sample_size();
 
   /*
-   * Double-buffer atomic swap mechanism (PM4 path for non-large-BAR systems):
+   * Double-buffer atomic swap mechanism (PM4 drain path):
    * We use a double-buffer mechanism so that trap handler calls are writing to one buffer while
    * ROCr is copying data from the other buffer.
    *
@@ -4764,8 +4756,10 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   // memory addresses, not execution units. We route all PM4 commands through XCC 0's command
   // processor to avoid multi-XCC scheduling complexity. This is acceptable because:
   // 1. PM4 operations are I/O bound (memory transfers), not compute bound
-  // 2. Each XCC thread submits to the shared queue independently (no lock contention)
-  // 3. The per-XCC threading model still provides parallelism at the thread level
+  // 2. Each XCC thread builds its command stream independently; the submit-and-wait
+  //    on the shared queue is serialized by pcs_pm4_mutex_
+  // 3. Parallelism remains at the sampling and command-construction level; only the
+  //    PM4 submit-and-wait on the shared queue is serialized
   if (properties_.NumXcc > 1) {
     cmd_data[0] = PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, supported_isas()[0]->GetMajorVersion());
     cmd_data[1] = PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) |
@@ -4854,7 +4848,12 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   cmd_data[i++] = PM4_WAIT_REG_MEM_DW6(PM4_WAIT_REG_MEM_POLL_INTERVAL(4) |
                                        PM4_WAIT_REG_MEM_OPTIMIZE_ACE_OFFLOAD_MODE);
 
-  // ACQUIRE_MEM: Flush L2 cache for GFX12 before DMA copy
+  // ACQUIRE_MEM: writeback GL2 before the DMA on GFX12 only. Its trap handler writes the
+  // sample payload with vector global_store scope:SCOPE_SYS and the CP DMA reads relative to
+  // GL2, so a GL2_WB is needed on the CP side. GFX9 deliberately omits this: its trap handler
+  // writes the payload with scalar stores and already flushes them to the TCC/L2 domain the
+  // DMA reads through (s_dcache_wb + s_waitcnt lgkmcnt(0) in trap_handler.s) before it
+  // increments the counter this path's WAIT_REG_MEM polls, so the payload is already visible.
   if (supported_isas()[0]->GetMajorVersion() == 12 &&
       (supported_isas()[0]->GetMinorVersion() == 0 || supported_isas()[0]->GetMinorVersion() == 5)) {
     cmd_data[i++] =

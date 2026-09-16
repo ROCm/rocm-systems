@@ -11,17 +11,11 @@
 /// comparison — NaN-ness is deterministic from the inputs, so both runs skip the
 /// same lanes. In-process inactive lanes must keep the sentinel. The helpers
 /// covered:
-///   - v_div_fixup_f32 / v_div_fixup_f64: NaN/Inf/zero `else if` cascade
-///     ((p, b, c) -> selected float per AMD spec), routed through the
-///     existing fp ternary VOP3 glue with a `div_fixup_*_simd` functor that
-///     reproduces the cascade via lowest-priority-first `where` blends.
-///   - v_div_fmas_f32 / v_div_fmas_f64: `fma(s0, s1, s2)` then a VCC-bit-
-///     gated `ldexp(result, 32)` (f32) or `ldexp(result, 64)` (f64); no
-///     omod/clamp; routed through a dedicated glue that reads VCC as an
-///     input side-channel (similar to v_cndmask_b32 VCC select).
-/// NaN-input lanes are skipped per-lane in the comparison (the gcc-13 packed
-/// FMA quiets a different NaN operand vs scalar std::fma — accepted
-/// divergence shared with the rest of the ternary fp suite).
+///   - v_div_fixup_f32 / v_div_fixup_f64: shared bit-level quotient fixup.
+///   - v_div_fmas_f32 / v_div_fmas_f64: integer-significand FMA with fused
+///     VCC-controlled scaling and explicit guest rounding/denormal modes.
+/// Independent numerical expectations live in division_test.cpp and
+/// division_macro_test.cpp; this suite checks the execution-path integration.
 
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
@@ -165,7 +159,7 @@ struct Fixture {
                                       uint32_t rot2, uint64_t exec, uint64_t vcc) {
     seed_vgprs_f32(rot0, rot1, rot2, exec);
     wf->set_vcc(vcc);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -177,7 +171,7 @@ struct Fixture {
                                       uint32_t rot2, uint64_t exec, uint64_t vcc) {
     seed_vgprs_f64(rot0, rot1, rot2, exec);
     wf->set_vcc(vcc);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint64_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
@@ -262,7 +256,7 @@ std::array<uint32_t, WF_SIZE> run_div_fixup_f16_opsel(bool force_scalar, uint32_
   }
   fx.wf->set_exec(~0ULL);
   fx.wf->set_vcc(0);
-  fx.cu->execute_instruction(inst, *fx.wf);
+  EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
   delete inst;
 
   std::array<uint32_t, WF_SIZE> out{};
@@ -336,7 +330,7 @@ std::array<uint32_t, WF_SIZE> run_div_fixup_f32_nan_precedence(bool force_scalar
   }
   fx.wf->set_exec(~0ULL);
   fx.wf->set_vcc(0);
-  fx.cu->execute_instruction(inst, *fx.wf);
+  EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
   delete inst;
 
   std::array<uint32_t, WF_SIZE> out{};
@@ -372,7 +366,7 @@ std::array<uint64_t, WF_SIZE> run_div_fixup_f64_nan_precedence(bool force_scalar
   }
   fx.wf->set_exec(~0ULL);
   fx.wf->set_vcc(0);
-  fx.cu->execute_instruction(inst, *fx.wf);
+  EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
   delete inst;
 
   std::array<uint64_t, WF_SIZE> out{};

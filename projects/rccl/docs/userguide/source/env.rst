@@ -454,11 +454,11 @@ NCCL_NET_PLUGIN
 
 Set it to either a suffix string or to a library name to choose among multiple NCCL net plugins. This setting will cause NCCL to look for the net plugin library using the following strategy:
  - If NCCL_NET_PLUGIN is set, attempt loading the library with name specified by NCCL_NET_PLUGIN;
- - If NCCL_NET_PLUGIN is set and previous failed, attempt loading libnccl-net-<NCCL_NET_PLUGIN>.so;
- - If NCCL_NET_PLUGIN is not set, attempt loading libnccl-net.so;
+ - If NCCL_NET_PLUGIN is set and previous failed, attempt loading librccl-net-<NCCL_NET_PLUGIN>.so;
+ - If NCCL_NET_PLUGIN is not set, attempt loading librccl-net.so;
  - If no plugin was found (neither user defined nor default), use internal network plugin.
 
-For example, setting ``NCCL_NET_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``libnccl-net-foo.so`` (provided that it exists on the system).
+For example, setting ``NCCL_NET_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``librccl-net-foo.so`` (provided that it exists on the system).
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -470,12 +470,12 @@ NCCL_TUNER_PLUGIN
 
 Set it to either a suffix string or to a library name to choose among multiple NCCL tuner plugins. This setting will cause NCCL to look for the tuner plugin library using the following strategy:
  - If NCCL_TUNER_PLUGIN is set, attempt loading the library with name specified by NCCL_TUNER_PLUGIN;
- - If NCCL_TUNER_PLUGIN is set and previous failed, attempt loading libnccl-net-<NCCL_TUNER_PLUGIN>.so;
- - If NCCL_TUNER_PLUGIN is not set, attempt loading libnccl-tuner.so;
+ - If NCCL_TUNER_PLUGIN is set and previous failed, attempt loading librccl-tuner-<NCCL_TUNER_PLUGIN>.so;
+ - If NCCL_TUNER_PLUGIN is not set, attempt loading librccl-tuner.so;
  - If no plugin was found look for the tuner symbols in the net plugin (refer to ``NCCL_NET_PLUGIN``);
  - If no plugin was found (neither through NCCL_TUNER_PLUGIN nor NCCL_NET_PLUGIN), use internal tuner plugin.
 
-For example, setting ``NCCL_TUNER_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``libnccl-tuner-foo.so`` (provided that it exists on the system).
+For example, setting ``NCCL_TUNER_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``librccl-tuner-foo.so`` (provided that it exists on the system).
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -487,12 +487,18 @@ NCCL_PROFILER_PLUGIN
 
 Set it to either a suffix string or to a library name to choose among multiple NCCL profiler plugins. This setting will cause NCCL to look for the profiler plugin library using the following strategy:
  - If NCCL_PROFILER_PLUGIN is set, attempt loading the library with name specified by NCCL_PROFILER_PLUGIN;
- - If NCCL_PROFILER_PLUGIN is set and previous failed, attempt loading libnccl-profiler-<NCCL_PROFILER_PLUGIN>.so;
- - If NCCL_PROFILER_PLUGIN is not set, attempt loading libnccl-profiler.so;
+ - If NCCL_PROFILER_PLUGIN is set and previous failed, attempt loading librccl-profiler-<NCCL_PROFILER_PLUGIN>.so;
+ - If NCCL_PROFILER_PLUGIN is not set, attempt loading librccl-profiler.so;
  - If no plugin was found (neither user defined nor default), do not enable profiling.
  - If NCCL_PROFILER_PLUGIN is set to ``STATIC_PLUGIN``, the plugin symbols are searched in the program binary.
 
-For example, setting ``NCCL_PROFILER_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``libnccl-profiler-foo.so`` (provided that it exists on the system).
+For example, setting ``NCCL_PROFILER_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``librccl-profiler-foo.so`` (provided that it exists on the system).
+
+The RCCL Inspector plugin (since RCCL 2.29) is loaded by pointing this variable
+at ``librccl-profiler-inspector.so`` and setting ``NCCL_INSPECTOR_ENABLE=1``.
+Prometheus textfile mode is ``NCCL_INSPECTOR_PROM_DUMP=1``. Metric names stay
+``nccl_*``; ``# HELP`` text and the ``gpu`` label are RCCL/HIP. See
+``docs/how-to/using-rccl-inspector-plugin.rst``.
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -506,9 +512,9 @@ NCCL_ENV_PLUGIN
 The ``NCCL_ENV_PLUGIN`` variable can be used to let NCCL load an external environment plugin. Set it to either a library name or a suffix string to choose among multiple NCCL environment plugins. This setting will cause NCCL to look for the environment plugin library using the following strategy:
  - If ``NCCL_ENV_PLUGIN`` is set to a library name, attempt loading that library (e.g.
    ``NCCL_ENV_PLUGIN=/path/to/library/libfoo.so`` will cause NCCL to try to load ``/path/to/library/libfoo.so``);
- - If ``NCCL_ENV_PLUGIN`` is set to a suffix string, attempt loading ``libnccl-env-<NCCL_ENV_PLUGIN>.so`` (e.g.
-   ``NCCL_ENV_PLUGIN=foo`` will cause NCCL to try to load ``libnccl-env-foo.so`` from the system library path);
- - If ``NCCL_ENV_PLUGIN`` is not set, attempt loading the default ``libnccl-env.so`` library from the system library path;
+ - If ``NCCL_ENV_PLUGIN`` is set to a suffix string, attempt loading ``librccl-env-<NCCL_ENV_PLUGIN>.so`` (e.g.
+   ``NCCL_ENV_PLUGIN=foo`` will cause NCCL to try to load ``librccl-env-foo.so`` from the system library path);
+ - If ``NCCL_ENV_PLUGIN`` is not set, attempt loading the default ``librccl-env.so`` library from the system library path;
  - If ``NCCL_ENV_PLUGIN`` is set to "none", explicitly disable the external plugin and use the internal one;
  - If no plugin was found (neither user defined nor default) or the variable is set to "none", use the internal environment
    plugin.
@@ -1494,12 +1500,14 @@ CUDA graph capture.
 .. warning::
 
    ``NCCL_GRAPH_STREAM_ORDERING=0`` together with **graph mixing** (communicator
-   ``graphUsageMode=2``; see :ref:`ncclconfig`) is **not supported**. If stream
-   ordering is disabled for a communicator, **graph mixing must be off**—use
-   ``graphUsageMode`` ``0`` or ``1`` (and note that :ref:`NCCL_GRAPH_MIXING_SUPPORT`
-   ``1`` forces ``graphUsageMode=2`` at init, overriding an explicit lower mode).
-   Workloads that require mixing must keep the default ``1``. The same rule applies
-   to per-communicator :c:macro:`graphStreamOrdering` ``0``.
+   ``graphUsageMode=2``; see :ref:`ncclconfig`) is **not supported**. NCCL emits
+   a warning, forces ``graphStreamOrdering`` to ``1``, and continues communicator
+   creation successfully. If stream ordering is disabled for a communicator,
+   **graph mixing must be off**—use ``graphUsageMode`` ``0`` or ``1`` (and note
+   that :ref:`NCCL_GRAPH_MIXING_SUPPORT` ``1`` forces ``graphUsageMode=2`` at init,
+   overriding an explicit lower mode). Workloads that require mixing must keep the
+   default ``1``. The same rule applies to per-communicator
+   :c:macro:`graphStreamOrdering` ``0``.
 
 When set to 1 (default), NCCL guarantees that communication kernels are executed
 in a serialized and deterministic order across graphs and communicators that share
@@ -1511,12 +1519,20 @@ The application is responsible for ensuring correct ordering of communication
 kernels.
 
 The same bypass can be selected per communicator with the
-:c:macro:`graphStreamOrdering` field in :ref:`ncclconfig`. When that
-field is ``0`` or ``1``, it overrides ``NCCL_GRAPH_STREAM_ORDERING`` for that
-communicator. Communicators on the same GPU may still set this option
+:c:macro:`graphStreamOrdering` field in :ref:`ncclconfig`. That field takes
+effect unless ``NCCL_GRAPH_STREAM_ORDERING`` is set to ``0`` or ``1``, which
+overrides the field on every communicator; any other value of the environment
+variable is ignored and leaves the field in
+effect. Communicators on the same GPU may still set this option
 differently; NCCL does not order them with respect to each other in that case,
 so the application's obligations below apply whenever the bypass is in effect
 for a communicator—see :c:macro:`graphStreamOrdering` for details.
+
+Communicators created by ``ncclCommSplit`` with ``splitShare`` share one
+internal serialization event with their parent. Ordering ``0`` on one such
+communicator must not be combined with ``graphUsageMode=2`` on another that
+shares those resources: the mixing guarantee depends on that shared event, and
+NCCL does not detect the conflict across communicators.
 
 .. admonition:: Application responsibilities
 
@@ -1764,8 +1780,10 @@ NCCL_RAS_ENABLE
 ---------------
 (since 2.24)
 
-Enable NCCL's reliability, availability, and serviceability (RAS) subsystem, which can be used to query the health of
-NCCL jobs during execution (see :doc:`troubleshooting/ras`).
+Enable RCCL's reliability, availability, and serviceability (RAS) subsystem, which can be used to query the health of
+RCCL jobs during execution (see :doc:`troubleshooting/ras`).  The client binary is ``rcclras``.  Use ``rcclras -f json``
+for machine-parsable output; JSON key names follow the NCCL schema (``cuda_*``) but the values are HIP/amd-smi (see
+the mapping table in that page).
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -1778,9 +1796,10 @@ NCCL_RAS_ADDR
 (since 2.24)
 
 Specify the IP address and port number of a socket that the RAS subsystem will listen on for client connections. RAS
-can share this socket between multiple processes but that would not be desirable if multiple independent NCCL jobs share
+can share this socket between multiple processes but that would not be desirable if multiple independent RCCL jobs share
 a single node (and if those jobs belong to different users, the OS will not allow the socket to be shared). In such
-cases, each job should be started with a different value (e.g., ``localhost:12345``, ``localhost:12346``, etc.). Since
+cases, each job should be started with a different value (e.g., ``localhost:12345``, ``localhost:12346``, etc.) and
+queried with ``rcclras -p <port>``. The default ``28028`` is often already in use on shared cluster nodes. Since
 ``localhost`` is normally used, only those with access to the nodes where the job is running can connect to the socket.
 If desired, the address of an externally accessible network interface can be specified instead, which will make RAS
 accessible from other nodes (such as a cluster's head node), but that has security implications that should be
@@ -1799,9 +1818,9 @@ NCCL_RAS_TIMEOUT_FACTOR
 Specify the multiplier factor to apply to all the timeouts of the RAS subsystem. RAS relies on multiple timeouts,
 ranging from 5 to 60 seconds, to determine the state of the application and to maintain its internal communication, with
 complex interdependencies between different timeouts. This variable can be used to scale up all these timeouts in a
-safe, consistent manner, should any of the defaults turn out to be too small; e.g., if the NCCL application is subject
+safe, consistent manner, should any of the defaults turn out to be too small; e.g., if the RCCL application is subject
 to high-overhead debugging/tracing/etc., which makes its execution less predictable. If one wants to use the
-``ncclras`` client in such circumstances, its timeout may need to be increased as well (or disabled).
+``rcclras`` client in such circumstances, its timeout may need to be increased as well (or disabled) with ``-t``.
 
 Values accepted
 ^^^^^^^^^^^^^^^

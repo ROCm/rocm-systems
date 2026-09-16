@@ -1155,14 +1155,22 @@ class StaticCommands:
 
                 if self.logger.is_json_format():
                     # JSON: show all options with current index
+                    num_options = uma_info.get("num_options", 0)
+                    current_index = uma_info.get("current_index", -1)
                     carveout_dict = {
                         "options": uma_info.get("options", []),
-                        "current_index": uma_info.get("current_index", -1),
+                        # current_index == num_options means the current value
+                        # is unknown (e.g. redacted for an unprivileged caller).
+                        "current_index": None if current_index == num_options else current_index,
                     }
                     static_dict["mem_carveout"] = carveout_dict
                 elif self.logger.is_csv_format():
                     # CSV: show only current index
-                    static_dict["mem_carveout_index"] = uma_info.get("current_index", -1)
+                    num_options = uma_info.get("num_options", 0)
+                    current_index = uma_info.get("current_index", -1)
+                    static_dict["mem_carveout_index"] = (
+                        "N/A" if current_index == num_options else current_index
+                    )
                 else:
                     # Human readable: show all options with current marked
                     options = uma_info.get("options", [])
