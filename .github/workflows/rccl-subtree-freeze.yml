@@ -1,13 +1,15 @@
 name: Block RCCL subtree PRs
 
-# Fails when a pull request changes projects/rccl or projects/rccl-tests.
-# The job always runs (no path filter) so it can be a required status check
-# without blocking unrelated PRs as "expected checks were not posted".
-# After this lands on the default branch, add `rccl-subtree-freeze` as a
-# required check on develop (and any other protected landing branches).
+# Fails when a pull request targeting develop changes projects/rccl or
+# projects/rccl-tests. The job always runs on develop-bound PRs (no path
+# filter) so it can be a required status check without blocking unrelated
+# PRs as "expected checks were not posted".
+# After this lands, add `rccl-subtree-freeze` as a required check on develop.
 
 on:
   pull_request:
+    branches:
+      - develop
 
 permissions:
   contents: read
