@@ -232,10 +232,12 @@ jobs:
             "HipMemcpyTest\.RoundTripFloat"
             "HipMemcpyTest\.RoundTripInt"
             "HipMemcpyTest\.DeviceToDevice"
+            "HipMemcpyTest\.MaskedStreamLdsReuse"
             "HipVectorAddTest\.CorrectResult"
             "DaemonTest\.HipMemcpyRoundTripFloat"
             "DaemonTest\.HipMemcpyRoundTripInt"
             "DaemonTest\.HipMemcpyDeviceToDevice"
+            "DaemonTest\.HipMaskedStreamLdsReuse"
             "DaemonTest\.TwoIndependentClients"
           )
           TSAN_EXCLUDED_TESTS=(
@@ -251,6 +253,9 @@ jobs:
             "HipMemcpyTest\.RoundTripFloat"
             "HipMemcpyTest\.RoundTripInt"
             "HipMemcpyTest\.DeviceToDevice"
+            # SDMA ring publication also crosses the client's doorbell mapping
+            # and the simulator's private alias, which TSan cannot correlate.
+            "HipMemcpyTest\.MaskedStreamLdsReuse"
             "HipVectorAddTest\.CorrectResult"
             "DaemonTest\.HipMemcpyRoundTripFloat"
             "DaemonTest\.HipMemcpyRoundTripInt"
@@ -263,13 +268,18 @@ jobs:
             # client's own AQL ring and buffers, so they hit the MAP_SHARED alias
             # limitation described below: every race is GpuMemory::read_mapped
             # reading a host buffer the test thread wrote. Their gtest assertions
-            # pass. The non-dispatching HsaDbiNop*Sim cases stay covered.
+            # pass.
             # The .* spans the per-target infix, so every target's dispatching
             # Sim case is excluded -- they all share the limitation.
             "HsaDbiNopAsm.*Sim\.PatchedKernelDispatchMatchesOriginal"
             "HsaDbiNopAsm.*Sim\.TrampolineIsActuallyExecutedByGpu"
             "HsaDbiNopProbe.*Sim\.PatchedKernelDispatchMatchesOriginal"
             "HsaDbiNopProbe.*Sim\.ProbeBodyIsActuallyCalledByGpu"
+            # Executable loading alone initializes ROCr's async-event thread.
+            # These cases pass their assertions, then report the same external
+            # ConcurrentAsyncEvents teardown race as the HIP clients above.
+            "HsaDbiNopAsm.*Sim\.PatchedElfLoadsAndValidatesInHsaExecutable"
+            "HsaDbiNopProbe.*Sim\.PatchedElfLoadsAndValidatesInHsaExecutable"
           )
 
           TEST_REGEX="${{ matrix.test_regex }}"

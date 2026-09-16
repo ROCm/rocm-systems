@@ -245,8 +245,21 @@ add_test(
 )
 set_test_env(rocDecode_Negative_API_Tests)
 
+# 7 - videoDecodeCaps
+add_test(
+  NAME
+    video_decodeCaps
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeCaps"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeCaps"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecodecaps"
+)
+set_test_env(video_decodeCaps)
+
 if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
-  # 7 - videoDecode HEVC
+  # 8 - videoDecode HEVC
   add_test(
     NAME
       video_decode-HEVC
@@ -260,7 +273,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
   )
   set_test_env(video_decode-HEVC)
 
-  # 8 - videoDecode AVC
+  # 9 - videoDecode AVC
   add_test(
     NAME
       video_decode-AVC
@@ -274,7 +287,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
   )
   set_test_env(video_decode-AVC)
 
-  # 9 - videoDecode AV1
+  # 10 - videoDecode AV1
   add_test(
     NAME
       video_decode-AV1
@@ -288,7 +301,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
   )
   set_test_env(video_decode-AV1)
 
-  # 10 - videoDecode VP9
+  # 11 - videoDecode VP9
   add_test(
     NAME
       video_decode-VP9
@@ -302,7 +315,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
   )
   set_test_env(video_decode-VP9)
 
-  # 11 - videoDecodePerf
+  # 12 - videoDecodePerf
   add_test(
     NAME
       video_decodePerf-HEVC
@@ -316,7 +329,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
   )
   set_test_env(video_decodePerf-HEVC)
 
-  # 12 - videoDecodeBatch
+  # 13 - videoDecodeBatch
   add_test(
     NAME
       video_decodeBatch
@@ -330,7 +343,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
   )
   set_test_env(video_decodeBatch)
 
-  # 13 - videoDecodeRGB
+  # 14 - videoDecodeRGB
   add_test(
     NAME
       video_decodeRGB-HEVC
@@ -344,7 +357,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
   )
   set_test_env(video_decodeRGB-HEVC)
 
-  # 14 - videoDecodeMem
+  # 15 - videoDecodeMem
   add_test(
     NAME
       video_decodeMem-HEVC
@@ -358,7 +371,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
   )
   set_test_env(video_decodeMem-HEVC)
 
-  # 15 - videoDecodeRGBResize
+  # 16 - videoDecodeRGBResize
   add_test(
     NAME
       video_decodeRGB-Resize
@@ -373,7 +386,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
   set_test_env(video_decodeRGB-Resize)
 
   if(rocdecode-host_FOUND AND NOT USING_THE_ROCK)
-    # 16 - videoDecode Host backend
+    # 17 - videoDecode Host backend
     add_test(
       NAME
         video_decode-Host-Backend

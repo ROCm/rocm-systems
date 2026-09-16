@@ -20,13 +20,29 @@ OMPI_INSTALL_DIR = os.environ.get("OMPI_INSTALL_DIR", "path/to/ompi/install")
 RCCL_TESTS_DIR = os.environ.get("RCCL_TESTS_DIR", "path/to/rccl-tests")
 
 PLUGIN_DIR = f"{RCCL_INSTALL_DIR}/plugins/tuner/example"
-PLUGIN_SO = f"{PLUGIN_DIR}/libnccl-tuner-example.so"
+PLUGIN_SO = f"{PLUGIN_DIR}/librccl-tuner-example.so"
 
 PROFILER_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/example"
 PROFILER_SO = f"{PROFILER_DIR}/librccl-profiler-example.so"
 
 INSPECTOR_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/inspector"
 INSPECTOR_SO = f"{INSPECTOR_DIR}/librccl-profiler-inspector.so"
+
+def _first_existing(*candidates):
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return candidates[0] if candidates else ""
+
+_PROXYTRACE_SRC = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "plugins", "profiler", "proxytrace")
+)
+PROXYTRACE_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/proxytrace"
+PROXYTRACE_SO = _first_existing(
+    os.path.join(PROXYTRACE_DIR, "librccl-profiler-proxytrace.so"),
+    os.path.join(RCCL_INSTALL_DIR, "librccl-profiler-proxytrace.so"),
+    os.path.join(_PROXYTRACE_SRC, "librccl-profiler-proxytrace.so"),
+)
 
 # CSV Configs 
 VALID_CONFIG_WITH_WILDCARDS = os.path.join(WORKDIR, "assets/csv_confs/valid_config_with_wildcards.conf")
@@ -77,7 +93,16 @@ def check_node_interface(node: str, interface: str) -> bool:
 
 def find_common_interface(nodelist):
     """Find a common network interface across all nodes"""
-    interfaces_to_check = ["eth0", "eth1"]
+    configured_interfaces = os.environ.get("RCCL_TEST_INTERFACES", "")
+    if configured_interfaces:
+        # Cluster launchers may not permit peer SSH from compute nodes. An
+        # explicitly supplied interface comes from the scheduler/catalog and
+        # is authoritative, so do not require an SSH-based rediscovery.
+        return configured_interfaces.split(",", 1)[0].strip()
+
+    interfaces_to_check = (
+        ["eth0", "eth1"]
+    )
 
     for interface in interfaces_to_check:
         all_nodes_have_interface = True
@@ -190,6 +215,8 @@ def paths():
         PROFILER_SO=PROFILER_SO,
         INSPECTOR_DIR=INSPECTOR_DIR,
         INSPECTOR_SO=INSPECTOR_SO,
+        PROXYTRACE_DIR=PROXYTRACE_DIR,
+        PROXYTRACE_SO=PROXYTRACE_SO,
         # CSV Configs
         VALID_CONFIG_WITH_WILDCARDS=VALID_CONFIG_WITH_WILDCARDS,
         VALID_CONFIG_WITHOUT_WILDCARDS=VALID_CONFIG_WITHOUT_WILDCARDS,
@@ -217,10 +244,11 @@ def pytest_runtest_setup(item):
     """Check plugin availability before running each test"""
     # Check for ext_tuner marker
     if item.get_closest_marker("ext_tuner"):
-        # The native thread-safety regression builds its own binary from source
-        # and does not use the prebuilt plugin .so, so don't skip it on its absence.
+        # Two tests do not read the example plugin: the native thread-safety regression
+        # builds its own binary from source, and the model_demo test loads that plugin's
+        # own library. Don't skip either on the example .so being absent.
         test_name = getattr(item, "originalname", item.name)
-        needs_plugin_so = test_name != "test_config_parser_thread_safety"
+        needs_plugin_so = test_name not in ("test_config_parser_thread_safety", "test_model_demo_tuner_runs")
         if needs_plugin_so and not os.path.exists(PLUGIN_SO):
             pytest.skip(f"Tuner plugin library not found at: {PLUGIN_SO}")
     

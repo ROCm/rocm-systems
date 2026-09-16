@@ -126,6 +126,8 @@ set(SRC_FILES
   algorithms/dda/all_reduce/all_reduce_dda.h
   algorithms/dda/all_reduce/all_reduce_dda_ll.h
   algorithms/dda/all_reduce/all_reduce_dda_ll_twoshot.h
+  algorithms/dda/all_reduce/all_reduce_dda_ll128.h
+  algorithms/dda/all_reduce/all_reduce_dda_ll128_twoshot.h
   algorithms/dda/all_reduce/all_reduce_dda_fabric_ll128.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda.h
   algorithms/dda/all_gather/all_gather_dda.h
@@ -483,7 +485,6 @@ set(SRC_FILES
   transport/net_ib/gin.cc
   transport/net_ib/gin.h
   transport/net_ib/init.cc
-  transport/net_ib/net_ib_flush_fault_inject.h
   transport/net_ib/p2p.cc
   transport/net_ib/p2p.h
   transport/net_ib/p2p_resiliency.cc
@@ -1258,14 +1259,19 @@ endif()
 # compiles inherit it too. See src/include/poison_hip_atomics.h for the coverage
 # this does and does not give.
 if(RCCL_POISON_HIP_ATOMICS)
-  # Joined --include=<file> rather than separate-argument -include <file>: as a
-  # single token it needs no cooperation from anything that forwards flags one
-  # at a time, so it survives rccl-device-compile's catch-all for unrecognized
-  # `-*` tokens as-is. That script also parses the separate-argument spelling
-  # (see the -include/-imacros branch in parse_compiler_flags), so either form
-  # works today; the joined one is used because it does not depend on that.
-  target_compile_options(rccl PRIVATE --include=${RCCL_SOURCE_DIR}/src/include/poison_hip_atomics.h)
-  message(STATUS "RCCL_POISON_HIP_ATOMICS enabled - __hip_atomic_* builtins rejected in RCCL sources")
+  if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
+    message(STATUS "RCCL_POISON_HIP_ATOMICS is not supported with ENABLE_ROCSHMEM or ENABLE_ROCSHMEM_GIN - disabling RCCL_POISON_HIP_ATOMICS")
+    set(RCCL_POISON_HIP_ATOMICS OFF)
+  else()
+    # Joined --include=<file> rather than separate-argument -include <file>: as a
+    # single token it needs no cooperation from anything that forwards flags one
+    # at a time, so it survives rccl-device-compile's catch-all for unrecognized
+    # `-*` tokens as-is. That script also parses the separate-argument spelling
+    # (see the -include/-imacros branch in parse_compiler_flags), so either form
+    # works today; the joined one is used because it does not depend on that.
+    target_compile_options(rccl PRIVATE --include=${RCCL_SOURCE_DIR}/src/include/poison_hip_atomics.h)
+    message(STATUS "RCCL_POISON_HIP_ATOMICS enabled - __hip_atomic_* builtins rejected in RCCL sources")
+  endif()
 endif()
 
 # Device Linker: include pipeline and wire up dependencies

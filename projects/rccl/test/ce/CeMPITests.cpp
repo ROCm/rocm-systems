@@ -328,6 +328,11 @@ protected:
         ncclCommUserRank(getActiveCommunicator(), &rank);
         ncclCommCount(getActiveCommunicator(), &nRanks);
 
+        // DDA IPC claims AlltoAll on gfx942/950 only once nRanks >= 8. Smaller
+        // communicators still take the CE path even when RCCL_DDA_ENABLE is left on.
+        if(isCeDispatchConfigured() && nRanks >= 8 && !isCeAlltoAllDispatchConfigured())
+            GTEST_SKIP() << "CE AlltoAll needs RCCL_DDA_ENABLE=0; DDA IPC claims AlltoAll first";
+
         const size_t totalElem = count * static_cast<size_t>(nRanks);
 
         SymBuf sendSym, recvSym;
