@@ -16,6 +16,7 @@ endif()
 foreach(
     _required
     "rocjitsu::analyze_waitcheck_stream("
+    "rocjitsu::analyze_waitcheck_cfg("
     "WaitcheckTarget::classify_events("
 )
     string(FIND "${_archive_symbols}" "${_required}" _match)

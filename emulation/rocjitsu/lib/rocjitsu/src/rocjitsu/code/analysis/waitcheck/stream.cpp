@@ -3,7 +3,7 @@
 
 #include "rocjitsu/code/analysis/waitcheck/stream.h"
 
-#include "rocjitsu/code/analysis/waitcheck/state.h"
+#include "rocjitsu/code/analysis/waitcheck/transfer.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -203,10 +203,10 @@ bool ordered_waw(const PendingEvent &event, std::span<const ClassifiedEvent> cur
 
 class StreamAnalyzer {
 public:
-  StreamAnalyzer(rj_code_arch_t arch, WaitcheckStreamOptions options, WaitcheckStreamReport &report)
-      : arch_(arch), options_(options), report_(report) {
-    state_.expert_scheduling.enabled = options.expert_scheduling;
-  }
+  StreamAnalyzer(rj_code_arch_t arch, WaitcheckStreamOptions options, MemoryTransferState &state,
+                 WaitcheckStreamReport *report)
+      : arch_(arch), options_(options), state_(state.pending), local_ready_(state.local_ready),
+        report_(report) {}
 
   // Branch operands are fully modeled even though this driver does not follow
   // their edges. Check them without issuing events or transferring state.
@@ -238,12 +238,14 @@ public:
 private:
   rj_code_arch_t arch_;
   WaitcheckStreamOptions options_;
-  PendingState state_;
-  RegisterSet local_ready_;
-  WaitcheckStreamReport &report_;
+  PendingState &state_;
+  RegisterSet &local_ready_;
+  WaitcheckStreamReport *report_;
 
   util::Result check_dependencies(const Instruction &inst, const RegisterEffects &effects,
                                   std::span<const ClassifiedEvent> current, uint64_t offset) {
+    if (!report_)
+      return util::Result::success();
     const bool allow_committed_waw = has_committed_generations(arch_) && !inst.is_memory_op() &&
                                      std::ranges::none_of(current, [](const auto &event) {
                                        return event.registers == TrackedRegisterSource::Defs;
@@ -274,9 +276,9 @@ private:
         auto wait = wait_expression(event.counter, count.value(), arch_);
         if (wait.failed())
           return util::Result::failure();
-        report_.diagnostics.push_back({event.section_offset, offset, event.counter, *reg, access,
-                                       count.value(), event.instruction, inst.disassemble(),
-                                       std::move(wait).value()});
+        report_->diagnostics.push_back({event.section_offset, offset, event.counter, *reg, access,
+                                        count.value(), event.instruction, inst.disassemble(),
+                                        std::move(wait).value()});
       }
     }
     return util::Result::success();
@@ -317,8 +319,18 @@ private:
     }
     // Counter-only operations must age older requests without accumulating a
     // dependency record of their own (notably long sequences of stores).
-    if (!event.regs.none() || event.check_exec_defs || event.special_reg)
-      state_.pending[idx].push_back(std::move(event));
+    if (!event.regs.none() || event.check_exec_defs || event.special_reg) {
+      auto &pending = state_.pending[idx];
+      auto position = std::ranges::lower_bound(pending, event, Ops::event_identity_less);
+      if (position != pending.end() && Ops::same_event_identity(*position, event)) {
+        // One identity can represent several loop iterations. A usable older
+        // value must be available to both the outstanding and newly issued one.
+        event.old_value_regs &= position->old_value_regs;
+        *position = std::move(event);
+      } else {
+        pending.insert(position, std::move(event));
+      }
+    }
     return util::Result::success();
   }
 
@@ -371,22 +383,64 @@ private:
 };
 } // namespace
 
-util::FailureOr<WaitcheckStreamReport>
-analyze_waitcheck_stream(std::span<const uint32_t> words, rj_code_arch_t arch,
-                         WaitcheckStreamOptions options,
-                         const util::DiagnosticEmitter &emit_error) {
-  if (waitcheck_detail::waitcnt_model(arch).failed())
+namespace waitcheck_detail {
+util::Result validate_memory_options(rj_code_arch_t arch, WaitcheckStreamOptions options,
+                                     const util::DiagnosticEmitter &emit_error) {
+  if (waitcnt_model(arch).failed())
     return emit_error.emit() << "unsupported waitcheck architecture";
   if ((options.wave_size != 32 && options.wave_size != 64) ||
       (has_committed_generations(arch) && options.wave_size != 64))
     return emit_error.emit() << "invalid waitcheck wave size";
-  if (options.expert_scheduling && !waitcheck_detail::supports_expert_scheduling(arch))
+  if (options.expert_scheduling && !supports_expert_scheduling(arch))
     return emit_error.emit() << "expert scheduling is unavailable on this architecture";
+  return util::Result::success();
+}
+
+util::FailureOr<std::optional<WaitcheckStreamStop>>
+transfer_memory_instruction(MemoryTransferState &state, const Instruction &inst,
+                            rj_code_arch_t arch, WaitcheckStreamOptions options,
+                            bool allow_direct_branches, WaitcheckStreamReport *report) {
+  const uint64_t offset = inst.src_loc();
+  auto events = WaitcheckTarget::classify_events(inst, arch);
+  if (events.failed())
+    return util::Result::failure();
+  StreamAnalyzer analyzer{arch, options, state, report};
+  const bool direct_branch = allow_direct_branches && (inst.flags() & (BRANCH | COND_BRANCH)) &&
+                             !(inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) &&
+                             inst.mnemonic() != "s_call_b64";
+  if (auto reason = deferred_reason(inst, events.value()); reason && !direct_branch) {
+    if (is_control_flow(inst) && analyzer.check_control_flow_operands(inst, offset).failed())
+      return util::Result::failure();
+    if (allow_direct_branches && is_control_flow(inst))
+      reason = "calls and indirect control flow are not followed";
+    return std::optional{WaitcheckStreamStop{offset, inst.disassemble(), std::string(*reason)}};
+  }
+  if (!options.expert_scheduling) {
+    std::erase_if(events.value(), [](const auto &event) {
+      return event.counter == WaitCounterKind::VmVsrc || event.counter == WaitCounterKind::VaVdst;
+    });
+  }
+  if (analyzer.analyze(inst, events.value(), offset).failed())
+    return util::Result::failure();
+  if (report)
+    ++report->instructions_analyzed;
+  return std::optional<WaitcheckStreamStop>{};
+}
+} // namespace waitcheck_detail
+
+util::FailureOr<WaitcheckStreamReport>
+analyze_waitcheck_stream(std::span<const uint32_t> words, rj_code_arch_t arch,
+                         WaitcheckStreamOptions options,
+                         const util::DiagnosticEmitter &emit_error) {
+  using namespace waitcheck_detail;
+  if (validate_memory_options(arch, options, emit_error).failed())
+    return util::Result::failure();
   auto decoder = Decoder::create(arch);
   if (!decoder)
     return emit_error.emit() << "missing waitcheck ISA decoder";
   WaitcheckStreamReport report;
-  StreamAnalyzer analyzer{arch, options, report};
+  MemoryTransferState state;
+  state.pending.expert_scheduling.enabled = options.expert_scheduling;
   size_t index = 0;
   while (index < words.size()) {
     const uint64_t offset = index * sizeof(uint32_t);
@@ -394,24 +448,13 @@ analyze_waitcheck_stream(std::span<const uint32_t> words, rj_code_arch_t arch,
     if (decoded.failed())
       return util::Result::failure();
     const auto &inst = *decoded.value();
-    auto events = waitcheck_detail::WaitcheckTarget::classify_events(inst, arch);
-    if (events.failed())
-      return util::Result::failure();
-    if (auto reason = deferred_reason(inst, events.value())) {
-      if (is_control_flow(inst) && analyzer.check_control_flow_operands(inst, offset).failed())
-        return emit_error.emit() << "waitcheck dependency check failed at byte " << offset;
-      report.incomplete = WaitcheckStreamStop{offset, inst.disassemble(), std::string(*reason)};
+    auto stop = transfer_memory_instruction(state, inst, arch, options, false, &report);
+    if (stop.failed())
+      return emit_error.emit() << "waitcheck transfer failed at byte " << offset;
+    if (stop.value()) {
+      report.incomplete = std::move(stop).value();
       break;
     }
-    // Classification describes target capability; the driver applies the entry mode.
-    if (!options.expert_scheduling) {
-      std::erase_if(events.value(), [](const auto &event) {
-        return event.counter == WaitCounterKind::VmVsrc || event.counter == WaitCounterKind::VaVdst;
-      });
-    }
-    if (analyzer.analyze(inst, events.value(), offset).failed())
-      return emit_error.emit() << "waitcheck transfer failed at byte " << offset;
-    ++report.instructions_analyzed;
     index += static_cast<size_t>(inst.size()) / sizeof(uint32_t);
     if (inst.flags() & PROGRAM_TERMINATOR)
       break;

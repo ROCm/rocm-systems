@@ -75,14 +75,15 @@ set_target_properties(
     PROPERTIES POSITION_INDEPENDENT_CODE ON
 )
 
-# The checker archive owns target policies and stream analysis, and leaves ISA
-# registry selection to its final consumer just like the analysis archive.
+# The checker archive owns target/state policies, instruction transfer and CFG
+# analysis. ISA registry selection belongs to its final consumer.
 add_library(
     rocjitsu_waitcheck_internal
     STATIC
     $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
     $<TARGET_OBJECTS:rocjitsu_waitcheck_state>
     $<TARGET_OBJECTS:rocjitsu_waitcheck_stream>
+    $<TARGET_OBJECTS:rocjitsu_waitcheck_cfg>
 )
 target_link_libraries(
     rocjitsu_waitcheck_internal
