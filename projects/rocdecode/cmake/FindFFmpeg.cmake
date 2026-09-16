@@ -47,13 +47,14 @@ find_package_handle_standard_args(
   VERSION_VAR FFMPEG_VERSION
 )
 
-# FFMPEG_ROOT is only consulted on Windows, and every result below is cached,
-# so a later configure pointing at a different root would keep the first root's
-# headers and libraries: the shortcut immediately below skips discovery outright
-# once FFMPEG_LIBRARIES is set. Drop the cached results when the root changes so
-# the new one is actually picked up. An unset root is a state like any other --
-# comparing the value rather than testing DEFINED means clearing the root also
-# invalidates, instead of leaving the deleted root's libraries cached.
+# Every result below is cached, so the shortcut at line 70 skips discovery
+# outright once FFMPEG_LIBRARIES is set. Drop the cached results when the
+# CMake variable FFMPEG_ROOT changes so the new root is actually picked up.
+# $ENV{FFMPEG_ROOT} and the PATH-based auto-discovery are re-evaluated on
+# each configure invocation inside the discovery branch, so they do not need
+# a cache marker -- only the CMake variable persists across reconfigures.
+# An unset root is a state like any other: comparing the value rather than
+# testing DEFINED means clearing the root also invalidates.
 if(WIN32 AND NOT "${FFMPEG_ROOT}" STREQUAL "${_FFMPEG_CACHED_ROOT}")
   unset(AVCODEC_INCLUDE_DIR CACHE)
   unset(AVCODEC_LIBRARY CACHE)
@@ -99,78 +100,104 @@ else()
     endif()
   endif()
 
+  # Collect hints from FFMPEG_ROOT (CMake var or env var).
+  set(_FFMPEG_ROOT_HINTS ${FFMPEG_ROOT} $ENV{FFMPEG_ROOT})
+  list(FILTER _FFMPEG_ROOT_HINTS EXCLUDE REGEX "^$")
+
+  # On Windows, if no root was explicitly given, try to locate an FFmpeg
+  # installation automatically. Probe PATH for the runtime DLLs and derive
+  # the install prefix from their directory (bin/../), then try well-known
+  # package-manager and manual install locations.
+  if(WIN32 AND "${_FFMPEG_ROOT_HINTS}" STREQUAL "")
+    foreach(_dir $ENV{PATH})
+      file(GLOB _avcodec_dll "${_dir}/avcodec*.dll")
+      file(GLOB _avformat_dll "${_dir}/avformat*.dll")
+      file(GLOB _avutil_dll "${_dir}/avutil*.dll")
+      if(_avcodec_dll AND _avformat_dll AND _avutil_dll)
+        get_filename_component(_FFMPEG_ROOT_FROM_PATH "${_dir}" DIRECTORY)
+        list(APPEND _FFMPEG_ROOT_HINTS "${_FFMPEG_ROOT_FROM_PATH}")
+      endif()
+    endforeach()
+    file(GLOB _chocolatey_ffmpeg_roots
+      "C:/ProgramData/chocolatey/lib/ffmpeg/tools/ffmpeg"
+      "C:/ProgramData/chocolatey/lib/ffmpeg/tools/ffmpeg-*")
+    list(APPEND _FFMPEG_ROOT_HINTS ${_chocolatey_ffmpeg_roots}
+      "$ENV{USERPROFILE}/scoop/apps/ffmpeg/current"
+      "$ENV{ProgramFiles}/ffmpeg"
+      "C:/ffmpeg"
+    )
+  endif()
+
   if(NOT WIN32)
-    set(_FFMPEG_SYSTEM_INCLUDE /usr/local/include /usr/include /opt/local/include /sw/include)
-    set(_FFMPEG_SYSTEM_LIB /usr/local/lib /usr/lib /opt/local/lib /sw/lib)
-    # avformat/avutil may live under a different prefix than avcodec, so each
-    # component falls back to the others' pkg-config directories -- but its own
-    # come first, so a match within its own prefix always wins and headers and
-    # libraries cannot be combined across two installations.
-    set(_AVCODEC_SEARCH_INCLUDE  ${_FFMPEG_AVCODEC_INCLUDE_DIRS}  ${_FFMPEG_AVFORMAT_INCLUDE_DIRS} ${_FFMPEG_AVUTIL_INCLUDE_DIRS}   ${_FFMPEG_SYSTEM_INCLUDE})
-    set(_AVFORMAT_SEARCH_INCLUDE ${_FFMPEG_AVFORMAT_INCLUDE_DIRS} ${_FFMPEG_AVCODEC_INCLUDE_DIRS}  ${_FFMPEG_AVUTIL_INCLUDE_DIRS}   ${_FFMPEG_SYSTEM_INCLUDE})
-    set(_AVUTIL_SEARCH_INCLUDE   ${_FFMPEG_AVUTIL_INCLUDE_DIRS}   ${_FFMPEG_AVCODEC_INCLUDE_DIRS}  ${_FFMPEG_AVFORMAT_INCLUDE_DIRS} ${_FFMPEG_SYSTEM_INCLUDE})
-    set(_AVCODEC_SEARCH_LIB  ${_FFMPEG_AVCODEC_LIBRARY_DIRS}  ${_FFMPEG_AVFORMAT_LIBRARY_DIRS} ${_FFMPEG_AVUTIL_LIBRARY_DIRS}   ${_FFMPEG_SYSTEM_LIB})
-    set(_AVFORMAT_SEARCH_LIB ${_FFMPEG_AVFORMAT_LIBRARY_DIRS} ${_FFMPEG_AVCODEC_LIBRARY_DIRS}  ${_FFMPEG_AVUTIL_LIBRARY_DIRS}   ${_FFMPEG_SYSTEM_LIB})
-    set(_AVUTIL_SEARCH_LIB   ${_FFMPEG_AVUTIL_LIBRARY_DIRS}   ${_FFMPEG_AVCODEC_LIBRARY_DIRS}  ${_FFMPEG_AVFORMAT_LIBRARY_DIRS} ${_FFMPEG_SYSTEM_LIB})
+    # Union of all three components' pkg-config dirs plus standard system paths.
+    set(_FFMPEG_SEARCH_INCLUDE
+      ${_FFMPEG_AVCODEC_INCLUDE_DIRS}
+      ${_FFMPEG_AVFORMAT_INCLUDE_DIRS}
+      ${_FFMPEG_AVUTIL_INCLUDE_DIRS}
+      /usr/local/include
+      /usr/include
+      /opt/local/include
+      /sw/include)
+    set(_FFMPEG_SEARCH_LIB
+      ${_FFMPEG_AVCODEC_LIBRARY_DIRS}
+      ${_FFMPEG_AVFORMAT_LIBRARY_DIRS}
+      ${_FFMPEG_AVUTIL_LIBRARY_DIRS}
+      /usr/local/lib
+      /usr/lib
+      /opt/local/lib
+      /sw/lib)
   else()
-    # On Windows, allow FFMPEG_ROOT to point to a pre-built FFmpeg installation
-    # (e.g. -DFFMPEG_ROOT=C:/ffmpeg). All three components come from one prefix.
-    if(FFMPEG_ROOT)
-      foreach(_comp AVCODEC AVFORMAT AVUTIL)
-        set(_${_comp}_SEARCH_INCLUDE ${FFMPEG_ROOT}/include)
-        set(_${_comp}_SEARCH_LIB ${FFMPEG_ROOT}/lib)
-      endforeach()
-      # An explicit root means that installation and no other. Without this, a
-      # component missing from the root would be satisfied from CMAKE_PREFIX_PATH
-      # or the system paths, silently combining two FFmpeg installations -- and
-      # the version gate below only parses the selected avcodec headers, so the
-      # ABI mismatch would not surface until link or run time.
-      set(_FFMPEG_FIND_OPTS NO_DEFAULT_PATH)
-    endif()
+    # Windows resolves headers/libs through _FFMPEG_ROOT_HINTS (FFMPEG_ROOT,
+    # $ENV{FFMPEG_ROOT}, or the PATH/common-location probing above).
+    set(_FFMPEG_SEARCH_INCLUDE)
+    set(_FFMPEG_SEARCH_LIB)
   endif()
 
   # AVCODEC
   find_path(AVCODEC_INCLUDE_DIR
     NAMES libavcodec/avcodec.h
-    PATHS ${_AVCODEC_SEARCH_INCLUDE}
-    PATH_SUFFIXES ffmpeg libav
-    ${_FFMPEG_FIND_OPTS}
+    HINTS ${_FFMPEG_ROOT_HINTS}
+    PATH_SUFFIXES include include/ffmpeg include/libav ffmpeg libav
+    PATHS ${_FFMPEG_SEARCH_INCLUDE}
   )
   mark_as_advanced(AVCODEC_INCLUDE_DIR)
   find_library(AVCODEC_LIBRARY
     NAMES avcodec
-    PATHS ${_AVCODEC_SEARCH_LIB}
-    ${_FFMPEG_FIND_OPTS}
+    HINTS ${_FFMPEG_ROOT_HINTS}
+    PATH_SUFFIXES lib
+    PATHS ${_FFMPEG_SEARCH_LIB}
   )
   mark_as_advanced(AVCODEC_LIBRARY)
 
   # AVFORMAT
   find_path(AVFORMAT_INCLUDE_DIR
     NAMES libavformat/avformat.h
-    PATHS ${_AVFORMAT_SEARCH_INCLUDE}
-    PATH_SUFFIXES ffmpeg libav
-    ${_FFMPEG_FIND_OPTS}
+    HINTS ${_FFMPEG_ROOT_HINTS}
+    PATH_SUFFIXES include include/ffmpeg include/libav ffmpeg libav
+    PATHS ${_FFMPEG_SEARCH_INCLUDE}
   )
   mark_as_advanced(AVFORMAT_INCLUDE_DIR)
   find_library(AVFORMAT_LIBRARY
     NAMES avformat
-    PATHS ${_AVFORMAT_SEARCH_LIB}
-    ${_FFMPEG_FIND_OPTS}
+    HINTS ${_FFMPEG_ROOT_HINTS}
+    PATH_SUFFIXES lib
+    PATHS ${_FFMPEG_SEARCH_LIB}
   )
   mark_as_advanced(AVFORMAT_LIBRARY)
 
   # AVUTIL
   find_path(AVUTIL_INCLUDE_DIR
     NAMES libavutil/avutil.h
-    PATHS ${_AVUTIL_SEARCH_INCLUDE}
-    PATH_SUFFIXES ffmpeg libav
-    ${_FFMPEG_FIND_OPTS}
+    HINTS ${_FFMPEG_ROOT_HINTS}
+    PATH_SUFFIXES include include/ffmpeg include/libav ffmpeg libav
+    PATHS ${_FFMPEG_SEARCH_INCLUDE}
   )
   mark_as_advanced(AVUTIL_INCLUDE_DIR)
   find_library(AVUTIL_LIBRARY
     NAMES avutil
-    PATHS ${_AVUTIL_SEARCH_LIB}
-    ${_FFMPEG_FIND_OPTS}
+    HINTS ${_FFMPEG_ROOT_HINTS}
+    PATH_SUFFIXES lib
+    PATHS ${_FFMPEG_SEARCH_LIB}
   )
   mark_as_advanced(AVUTIL_LIBRARY)
 
@@ -261,6 +288,11 @@ else()
 
   if(FFMPEG_FOUND)
     message("-- ${White}Using FFMPEG -- \n\tLibraries:${FFMPEG_LIBRARIES} \n\tIncludes:${FFMPEG_INCLUDE_DIR}${ColourReset}")
+    if(WIN32)
+      get_filename_component(_FFMPEG_LIB_DIR "${AVCODEC_LIBRARY}" DIRECTORY)
+      get_filename_component(_FFMPEG_BIN_DIR "${_FFMPEG_LIB_DIR}/../bin" ABSOLUTE)
+      message("-- ${Yellow}NOTE: at run time the FFmpeg DLLs must be on PATH, e.g. add \"${_FFMPEG_BIN_DIR}\" to PATH${ColourReset}")
+    endif()
   else()
     if(FFmpeg_FIND_REQUIRED)
       message(FATAL_ERROR "{Red}FindFFmpeg -- libavcodec or libavformat or libavutil NOT FOUND${ColourReset}")
