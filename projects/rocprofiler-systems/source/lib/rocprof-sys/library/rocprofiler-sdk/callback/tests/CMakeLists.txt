@@ -1,7 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-add_library(callback-domains-unit-tests OBJECT test_code_object.cpp)
+add_library(
+    callback-domains-unit-tests
+    OBJECT
+    test_code_object.cpp
+    ${callback_domains_hsa_test_sources}
+    ${callback_domains_hip_test_sources}
+)
 
 target_link_libraries(
     callback-domains-unit-tests

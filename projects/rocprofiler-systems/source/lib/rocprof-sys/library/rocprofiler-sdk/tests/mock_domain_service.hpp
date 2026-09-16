@@ -252,6 +252,12 @@ struct mock_sdk
     static constexpr std::size_t     BUFFER_TRACING_KFD_PAGE_MIGRATE         = 26;
     static constexpr std::size_t     BUFFER_TRACING_KFD_QUEUE                = 27;
     static constexpr std::size_t     CALLBACK_TRACING_CODE_OBJECT            = 1;
+    static constexpr std::size_t     CALLBACK_TRACING_HSA_CORE_API           = 2;
+    static constexpr std::size_t     CALLBACK_TRACING_HSA_AMD_EXT_API        = 3;
+    static constexpr std::size_t     CALLBACK_TRACING_HSA_IMAGE_EXT_API      = 4;
+    static constexpr std::size_t     CALLBACK_TRACING_HSA_FINALIZE_EXT_API   = 5;
+    static constexpr std::size_t     CALLBACK_TRACING_HIP_RUNTIME_API        = 6;
+    static constexpr std::size_t     CALLBACK_TRACING_HIP_COMPILER_API       = 7;
     // NOLINTEND(readability-identifier-naming)
 
     using kfd_event_dropped_record      = test_support::kfd_event_dropped_record;
