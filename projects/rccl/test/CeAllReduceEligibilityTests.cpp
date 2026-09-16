@@ -259,12 +259,11 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
                 [tc]()
                 {
                     CeAllReduceMockComm mock;
+                    mock.reset(tc.archName.c_str());
                     mock.comm.nRanks           = tc.nRanks;
                     mock.comm.nNodes           = tc.nNodes;
                     mock.comm.symmetricSupport = tc.symmetricSupport;
                     mock.comm.config.CTAPolicy = tc.ctaPolicy;
-                    if (!tc.archName.empty())
-                        strncpy(mock.comm.archName, tc.archName.c_str(), sizeof(mock.comm.archName) - 1);
 
                     const bool result =
                         rcclUseCeAr2Shot(mock.get(), tc.count, tc.datatype, tc.op, /*acc=*/nullptr);

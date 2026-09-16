@@ -42,12 +42,16 @@ inline size_t ceAllReduceMaxChunkBytes(int nRanks,
 struct CeAllReduceMockComm
 {
     ncclComm comm{};
+    char archNameBuf[64]{};
 
     CeAllReduceMockComm() { reset(); }
 
-    void reset()
+    void reset(const char* archName = "")
     {
         std::memset(&comm, 0, sizeof(comm));
+        std::strncpy(archNameBuf, archName, sizeof(archNameBuf) - 1);
+        archNameBuf[sizeof(archNameBuf) - 1] = '\0';
+        comm.archName             = archNameBuf;
         comm.nNodes               = 1;
         comm.nRanks               = 4;
         comm.rank                 = 0;
