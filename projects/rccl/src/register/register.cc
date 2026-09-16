@@ -192,11 +192,7 @@ ncclResult_t ncclCommGraphRegister(const ncclComm_t comm, void* buff, size_t siz
 }
 
 static ncclResult_t commDeregister(struct ncclComm* comm, bool isGraph, struct ncclReg* reg) {
-  NCCLCHECK(CommCheck(comm, "ncclCommRegister", "comm"));
-
-  // Validate comm before polling its callback queue. This also protects the
-  // graph deregistration path, which shares this helper.
-  NCCLCHECK(ncclCommPollCallbacks(comm, /*waitSome=*/false));
+  NCCLCHECK(CommCheck(comm, "ncclCommDeregister", "comm"));
 
   struct ncclRegCache* cache = &comm->regCache;
   int slot;
@@ -224,6 +220,11 @@ exit:
 NCCL_API(ncclResult_t, ncclCommDeregister, const ncclComm_t comm, void* handle);
 ncclResult_t ncclCommDeregister_impl(const ncclComm_t comm, void* handle) {
   NCCLCHECK(Recorder::instance().record(rrCommDeregister, comm, handle));
+  // Explicit host deregistration observes completed graph reclamation before
+  // touching the cache. Internal graph deregistration relies on group.cc's
+  // throttled drain and can itself run from a reclamation callback.
+  NCCLCHECK(CommCheck(comm, "ncclCommDeregister", "comm"));
+  NCCLCHECK(ncclCommPollCallbacks(comm, /*waitSome=*/false));
   NCCLCHECK(commDeregister(comm, false, (struct ncclReg*)handle));
   return ncclSuccess;
 }
