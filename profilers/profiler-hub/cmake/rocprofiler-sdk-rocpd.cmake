@@ -150,6 +150,17 @@ else()
         endif()
     endif()
 
+    # A sparse-checkout of a path the branch does not carry succeeds and produces
+    # nothing, so the clone result above cannot catch it. Reported here because the
+    # per-file check in rocpd_configure_rocpd_schema_files names the missing file
+    # but neither the version nor the branch that caused it to be missing.
+    if(NOT EXISTS "${_ROCPD_SCHEMA_DIR}")
+        message(
+            FATAL_ERROR
+            "[profiler-hub] rocprofiler-sdk-rocpd schema version ${ROCPD_SCHEMA_VERSION} is not on branch ${ROCPD_SCHEMA_GIT_BRANCH} of ${ROCPD_SCHEMA_GIT_URL}: the sparse checkout of ${_ROCPD_SCHEMA_SUBDIR} produced no such directory. Set ROCPD_SCHEMA_VERSION to a version that branch carries, or point ROCPD_SCHEMA_GIT_BRANCH at a branch that has this one."
+        )
+    endif()
+
     message(
         STATUS
         "[profiler-hub] Using cloned rocprofiler-sdk-rocpd schema at ${_ROCPD_SCHEMA_DIR}"
