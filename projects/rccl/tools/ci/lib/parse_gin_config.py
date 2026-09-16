@@ -14,7 +14,8 @@ Column layout:
       rocshmem/rccl-tests: mpirun benchmark; bin is the executable name
       fixtures: single-process gtest; bin is the executable name
       pytest: rccl-tests opt-in pytest; bin is a file under test/ (e.g.
-        test_Broadcast.py); args are forwarded to pytest (e.g. -k gin_sdma -v)
+        test_Broadcast.py or test_ReduceScatterGinSdma.py); args are forwarded
+        to pytest (e.g. -k GinSdma -v)
 """
 
 # ASCII unit separator: distinct from whitespace and unlikely in flags/args.
