@@ -135,6 +135,7 @@ class webui_analysis(OmniAnalyze_Base):
                 run_workload.raw_pmc = file_io.create_df_pmc(
                     self.dest_dir,
                     args.verbose,
+                    getattr(args, "gen_pmc", False),
                 )
 
                 if self._profiling_config.get("iteration_multiplexing") is not None:
@@ -407,6 +408,7 @@ class webui_analysis(OmniAnalyze_Base):
         workload.raw_pmc = file_io.create_df_pmc(
             self.dest_dir,
             args.verbose,
+            getattr(args, "gen_pmc", False),
         )
 
         if self._profiling_config.get("iteration_multiplexing") is not None:
