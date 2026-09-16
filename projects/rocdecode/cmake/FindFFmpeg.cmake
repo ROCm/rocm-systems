@@ -47,15 +47,15 @@ find_package_handle_standard_args(
   VERSION_VAR FFMPEG_VERSION
 )
 
-# Every result below is cached, so the shortcut at line 70 skips discovery
-# outright once FFMPEG_LIBRARIES is set. Drop the cached results when the
-# CMake variable FFMPEG_ROOT changes so the new root is actually picked up.
-# $ENV{FFMPEG_ROOT} and the PATH-based auto-discovery are re-evaluated on
-# each configure invocation inside the discovery branch, so they do not need
-# a cache marker -- only the CMake variable persists across reconfigures.
-# An unset root is a state like any other: comparing the value rather than
-# testing DEFINED means clearing the root also invalidates.
-if(WIN32 AND NOT "${FFMPEG_ROOT}" STREQUAL "${_FFMPEG_CACHED_ROOT}")
+# Every result below is cached, so the shortcut below skips discovery outright
+# once FFMPEG_LIBRARIES is set. Drop the cached results when the effective root
+# changes so the new one is actually picked up. Both the CMake variable and the
+# environment variable are tracked: either is a deliberate, FFmpeg-specific knob
+# whose change should trigger re-discovery. PATH-based auto-discovery is not
+# tracked -- PATH changes constantly for unrelated reasons, and re-scanning it
+# on every reconfigure would be too aggressive for a convenience fallback.
+set(_FFMPEG_EFFECTIVE_ROOT "${FFMPEG_ROOT};$ENV{FFMPEG_ROOT}")
+if(WIN32 AND NOT "${_FFMPEG_EFFECTIVE_ROOT}" STREQUAL "${_FFMPEG_CACHED_ROOT}")
   unset(AVCODEC_INCLUDE_DIR CACHE)
   unset(AVCODEC_LIBRARY CACHE)
   unset(AVFORMAT_INCLUDE_DIR CACHE)
@@ -65,7 +65,7 @@ if(WIN32 AND NOT "${FFMPEG_ROOT}" STREQUAL "${_FFMPEG_CACHED_ROOT}")
   unset(FFMPEG_INCLUDE_DIR CACHE)
   unset(FFMPEG_LIBRARIES CACHE)
   unset(_FFMPEG_AVCODEC_VERSION CACHE)
-  set(_FFMPEG_CACHED_ROOT "${FFMPEG_ROOT}" CACHE INTERNAL "")
+  set(_FFMPEG_CACHED_ROOT "${_FFMPEG_EFFECTIVE_ROOT}" CACHE INTERNAL "")
 endif()
 
 if(FFMPEG_LIBRARIES AND FFMPEG_INCLUDE_DIR)
