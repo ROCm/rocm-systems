@@ -1,11 +1,5 @@
-"""
-Unit tests for run_pre_commit_by_subtree: file grouping, config resolution, and
-the guard that refuses to fall back to the root pre-commit config.
-
-The fall-back guard matters more than it looks: onboarded subtrees are listed in
-the repo-root config's `exclude:` block, so running the root config over their
-files reports "no files to check" and exits 0. A silent pass on a merge-gating
-check is worse than a failure, so a missing subtree config must be fatal.
+"""Unit tests for run_pre_commit_by_subtree: grouping, config resolution, and the
+no-root-fallback guard (a missing subtree config must be fatal, not silently skipped).
 """
 
 from unittest.mock import patch
@@ -116,15 +110,7 @@ class TestRunGroup:
         assert cmd[-1] == "projects/rccl/src/init.cc"
 
     def test_every_file_reaches_pre_commit_after_the_files_flag(self):
-        """The whole list must follow --files, not just the first entry.
-
-        With a single-file list, `*files` and `*files[:1]` are the same
-        command, so a one-file test cannot see the difference. Truncating
-        there checks file #1, skips the rest, and still logs "N file(s)" and
-        exits 0 -- a green gate over unchecked code, which this suite exists
-        to prevent. Three or more files, and an exact tail comparison, is what
-        makes that visible.
-        """
+        """Three files, exact tail compare: a one-file list can't see `*files[:1]`."""
         from run_pre_commit_by_subtree import run_group
 
         files = [
@@ -315,14 +301,7 @@ class TestMain:
     def test_an_unchecked_out_subtree_fails_instead_of_passing_vacuously(
         self, tmp_path, monkeypatch
     ):
-        """The whole silent-green path, end to end.
-
-        `detect` fails to name projects/rccl -- because it is missing from
-        repos-config.json, or get_changed_files returned a partial page -- so
-        the second checkout never widens the sparse cone. The tree diff still
-        names the rccl files, they are all dropped as absent, and the old code
-        logged "nothing to check" and exited 0 on a PR full of rccl changes.
-        """
+        """detect under-reporting rccl must be fatal, not a silent exit 0."""
         from run_pre_commit_by_subtree import main
 
         monkeypatch.chdir(tmp_path)  # workspace holds .github and nothing else
@@ -389,12 +368,7 @@ class TestMain:
 
 
 class TestExcludedProjectListsAgree:
-    """The places that list root-excluded projects must not drift apart.
-
-    A project in the root `exclude:` is invisible to the root config, so anything telling
-    developers to run it (the bot's failure comment, the FAQ) must name every such project or
-    send them to a command that checks nothing and exits 0.
-    """
+    """Places naming root-excluded projects (failure comment, FAQ) must match `exclude:`."""
 
     @staticmethod
     def _repo_root():
@@ -520,11 +494,7 @@ class TestExcludedProjectListsAgree:
 
 
 class TestRcclConfigRegexes:
-    """Pin projects/rccl/.pre-commit-config.yaml's clang-format files:/exclude: regexes.
-
-    Nothing else asserts on them, so a typo could narrow the hook to matching zero files: a
-    green clang-format run that silently checked nothing.
-    """
+    """Pins projects/rccl/.pre-commit-config.yaml's hook scoping and exclude regexes."""
 
     @staticmethod
     def _read_repo_file(relative_path):
@@ -610,3 +580,64 @@ class TestRcclConfigRegexes:
     def test_regular_source_is_not_excluded(self):
         _, exclude_re = self._rccl_config()
         assert not exclude_re.search("projects/rccl/src/init.cc")
+
+    def test_whitespace_hooks_stay_scoped_to_rccl(self):
+        # Only clang-format's files: is pinned above. policy.yml and the FAQ both
+        # document running this config with --all-files, so a hook that lost its
+        # scope would then apply to the whole monorepo, not just rccl.
+        import yaml
+
+        cfg = yaml.safe_load(
+            self._read_repo_file("projects/rccl/.pre-commit-config.yaml")
+        )
+        hooks = [
+            hook
+            for repo in cfg["repos"]
+            for hook in repo["hooks"]
+            if hook["id"] != "clang-format"
+        ]
+        assert hooks, "expected at least one non-clang-format hook to check"
+        for hook in hooks:
+            assert (
+                hook.get("files") == "^projects/rccl/"
+            ), f"{hook['id']} is missing or has the wrong files: scope: {hook.get('files')!r}"
+
+    def test_exclude_block_matches_clang_format_ignores_vendored_entries(self):
+        # This exclude: block re-states .clang-format-ignore's "external"/"special
+        # files" entries so the whitespace hooks respect them too. Nothing else
+        # keeps the two lists in step, so a vendored dir added to one and not the
+        # other is silently unprotected here (or clang-format there).
+        import re
+
+        ignore_lines = self._read_repo_file(
+            "projects/rccl/.clang-format-ignore"
+        ).splitlines()
+        end = next(
+            i for i, line in enumerate(ignore_lines) if "generated codes" in line
+        )
+        vendored_globs = {
+            line.strip()
+            for line in ignore_lines[:end]
+            if line.strip() and not line.strip().startswith("#")
+        }
+        from_ignore = {g[:-3] if g.endswith("/**") else g for g in vendored_globs}
+
+        import yaml
+
+        cfg = yaml.safe_load(
+            self._read_repo_file("projects/rccl/.pre-commit-config.yaml")
+        )
+        inner = re.search(
+            r"\(\?x\)\^projects/rccl/\((.*)\)", cfg["exclude"], re.DOTALL
+        ).group(1)
+        from_config = {
+            alt.strip().rstrip("$").replace("\\.", ".").rstrip("/")
+            for alt in inner.split("|")
+        }
+
+        assert from_ignore == from_config, (
+            "projects/rccl/.clang-format-ignore and .pre-commit-config.yaml's exclude: "
+            "block disagree on the vendored/special-file entries.\n"
+            f"  in .clang-format-ignore only: {sorted(from_ignore - from_config)}\n"
+            f"  in .pre-commit-config.yaml only: {sorted(from_config - from_ignore)}"
+        )
