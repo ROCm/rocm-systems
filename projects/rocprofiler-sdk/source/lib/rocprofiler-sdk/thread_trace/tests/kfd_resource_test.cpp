@@ -24,6 +24,7 @@
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/kfd/capabilities.hpp"
 #include "lib/rocprofiler-sdk/kfd/resource.hpp"
 
 #include <gtest/gtest.h>
@@ -69,6 +70,49 @@ TEST(kfd_resource, copy_support)
     EXPECT_TRUE(kfd::kfd_copy_queue_t::is_supported(90402));   // gfx942
     EXPECT_TRUE(kfd::kfd_copy_queue_t::is_supported(100300));  // gfx1030
     EXPECT_TRUE(kfd::kfd_copy_queue_t::is_supported(120001));  // gfx1201
+}
+
+TEST(kfd_resource, queue_capabilities)
+{
+    namespace caps = kfd::capabilities;
+    EXPECT_FALSE(caps::supports_wave32(90402));
+    EXPECT_TRUE(caps::supports_wave32(100300));
+    EXPECT_TRUE(caps::supports_wave32(110000));
+
+    EXPECT_FALSE(caps::needs_cwsr_control_stack_cap(90402));
+    EXPECT_TRUE(caps::needs_cwsr_control_stack_cap(100300));
+    EXPECT_FALSE(caps::needs_cwsr_control_stack_cap(110000));
+
+    EXPECT_TRUE(caps::needs_aql_eop_buffer(90010));
+    EXPECT_FALSE(caps::needs_aql_eop_buffer(90400));
+    EXPECT_FALSE(caps::needs_aql_eop_buffer(90402));
+    EXPECT_TRUE(caps::needs_aql_eop_buffer(90500));
+    EXPECT_TRUE(caps::needs_aql_eop_buffer(100300));
+}
+
+TEST(kfd_resource, sdma_capabilities)
+{
+    namespace caps = kfd::capabilities;
+    EXPECT_FALSE(caps::has_sdma_copy_scope_fields(90402));
+    EXPECT_FALSE(caps::has_sdma_copy_scope_fields(110000));
+    EXPECT_TRUE(caps::has_sdma_copy_scope_fields(110500));
+    EXPECT_FALSE(caps::has_sdma_copy_scope_fields(120001));
+    EXPECT_TRUE(caps::has_sdma_copy_scope_fields(120500));
+
+    EXPECT_FALSE(caps::needs_sdma_gcr(90402));
+    EXPECT_TRUE(caps::needs_sdma_gcr(100300));
+    EXPECT_TRUE(caps::needs_sdma_gcr(110000));
+    EXPECT_FALSE(caps::needs_sdma_gcr(110500));
+    EXPECT_TRUE(caps::needs_sdma_gcr(120001));
+    EXPECT_FALSE(caps::needs_sdma_gcr(120500));
+
+    EXPECT_FALSE(caps::needs_uncached_sdma_fence(90402));
+    EXPECT_TRUE(caps::needs_uncached_sdma_fence(100300));
+    EXPECT_TRUE(caps::needs_uncached_sdma_fence(120001));
+
+    EXPECT_FALSE(caps::has_sdma_fence_system_bit(110500));
+    EXPECT_TRUE(caps::has_sdma_fence_system_bit(120001));
+    EXPECT_TRUE(caps::has_sdma_fence_system_bit(120500));
 }
 
 TEST_F(kfd_resource_test, memory_allocation)

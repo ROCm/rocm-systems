@@ -11,6 +11,7 @@ set(ROCPROFILER_LIB_KFD_EVENT_SOURCES
     signal_less.cpp
     resource.cpp)
 set(ROCPROFILER_LIB_KFD_EVENT_HEADERS
+    capabilities.hpp
     defines.hpp
     resource.hpp
     kfd.hpp

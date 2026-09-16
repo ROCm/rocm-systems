@@ -22,12 +22,12 @@
 
 #include "lib/rocprofiler-sdk/kfd/resource.hpp"
 
-#include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
+#include "lib/rocprofiler-sdk/kfd/capabilities.hpp"
 #include "lib/rocprofiler-sdk/platform/agent.hpp"
 
 #include <hsa/amd_hsa_queue.h>
@@ -386,11 +386,10 @@ struct kfd_memory_pool_t::impl
 
         // KFD sizes the context-save buffer as (cwsr_size + debug area) * num_xcc and
         // rejects any other size, so all three values below have to agree with the driver.
-        const auto major = ROCPROFILER_GFXIP_MAJOR(gfx_target_version);
-        const auto cus   = (agent.simd_per_cu == 0) ? 0 : agent.simd_count / agent.simd_per_cu;
+        const auto cus = (agent.simd_per_cu == 0) ? 0 : agent.simd_count / agent.simd_per_cu;
 
         uint64_t waves = 0;
-        if(major >= 10)
+        if(capabilities::supports_wave32(gfx_target_version))
             waves = (agent.simd_count / num_xcc) * agent.max_waves_per_simd;
         else if(agent.simd_arrays_per_engine != 0)
             waves =
@@ -417,9 +416,11 @@ struct kfd_memory_pool_t::impl
             (info != nullptr && info->ctl_stack_size != 0)
                 ? info->ctl_stack_size
                 : static_cast<uint32_t>(align_up(
-                      sizeof(kfd_context_save_area_header) + (waves * ((major >= 10) ? 12 : 8)) + 8,
+                      sizeof(kfd_context_save_area_header) +
+                          waves * (capabilities::supports_wave32(gfx_target_version) ? 12 : 8) + 8,
                       KFD_PAGE_SIZE));
-        if(major == 10 && (info == nullptr || info->ctl_stack_size == 0))
+        if(capabilities::needs_cwsr_control_stack_cap(gfx_target_version) &&
+           (info == nullptr || info->ctl_stack_size == 0))
             ctl_stack_size = std::min(ctl_stack_size, 0x7000u);
 
         // The driver only requires the declared area to be large enough, so bound the
@@ -800,9 +801,7 @@ struct direct_queue_t
 
         if(queue_type == KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)
         {
-            // KFD does not use an EOP buffer for AQL queues on gfx94x.
-            if(ROCPROFILER_GFXIP_MAJOR(memory->gfx_target_version()) != 9 ||
-               ROCPROFILER_GFXIP_MINOR(memory->gfx_target_version()) != 4)
+            if(capabilities::needs_aql_eop_buffer(memory->gfx_target_version()))
             {
                 eop = memory->allocate(KFD_PAGE_SIZE, kfd_memory_kind_t::device);
                 if(!eop) return false;
@@ -1002,12 +1001,12 @@ struct sdma_queue_t
     explicit sdma_queue_t(const std::shared_ptr<kfd_memory_pool_t>& memory)
     : queue{memory}
     {
-        const auto major = ROCPROFILER_GFXIP_MAJOR(memory->gfx_target_version());
-        const auto minor = ROCPROFILER_GFXIP_MINOR(memory->gfx_target_version());
-        scope_fields     = (major == 11 || major == 12) && minor >= 5;
-        use_gcr          = major >= 10 && !scope_fields;
-        if(major >= 10) fence_header |= (3u << 16);  // uncached MTYPE
-        if(major >= 12)
+        const auto gfx_target_version = memory->gfx_target_version();
+        scope_fields = capabilities::has_sdma_copy_scope_fields(gfx_target_version);
+        use_gcr      = capabilities::needs_sdma_gcr(gfx_target_version);
+        if(capabilities::needs_uncached_sdma_fence(gfx_target_version))
+            fence_header |= (3u << 16);  // uncached MTYPE
+        if(capabilities::has_sdma_fence_system_bit(gfx_target_version))
         {
             fence_header |= (1u << 20);  // system memory
             if(scope_fields) fence_header |= (SDMA_MEMORY_SCOPE_SYSTEM << 24);
@@ -1111,7 +1110,7 @@ kfd_copy_queue_t::kfd_copy_queue_t(std::unique_ptr<impl> state)
 bool
 kfd_copy_queue_t::is_supported(uint32_t gfx_target_version)
 {
-    return gfx_target_version >= 90010;  // gfx90a and newer use the extended SDMA copy count.
+    return capabilities::supports_extended_sdma_copy(gfx_target_version);
 }
 
 std::shared_ptr<kfd_copy_queue_t>
