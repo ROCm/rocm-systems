@@ -603,7 +603,7 @@ __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t re
 #if defined(__gfx1250__)
   // Larger pack loops make LLVM register allocation scale pathologically on gfx1250.
   // Limit the helper's work quantum; its outer loop still consumes all requested bytes.
-  constexpr int ScalarUnroll = (NativeScalarUnroll > 64) ? 64 : NativeScalarUnroll;
+  constexpr int ScalarUnroll = (useAcc && NativeScalarUnroll > 64) ? 64 : NativeScalarUnroll;
   constexpr int CopyUnroll = ScalarUnroll * 2 / (16 / sizeof(T));
 #else
   constexpr int ScalarUnroll = NativeScalarUnroll;
