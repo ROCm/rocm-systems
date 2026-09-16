@@ -557,6 +557,20 @@ protected:
         return done ? ncclSuccess : ncclInternalError;
     }
 
+    // Agrees a skip decision across ranks before either side acts on it.
+    //
+    // A device-local predicate -- GDR backend support, a NIC count, anything read from
+    // this node -- can differ between nodes, and GTEST_SKIP returns only the rank that
+    // evaluated it. Its peer then walks into the next collective, typically
+    // SetupConnection, and blocks there with no timeout: the same unilateral-exit hang
+    // this branch removes from the setup helpers, arriving through the skip instead.
+    // Reduced with MAX, so one rank wanting to skip skips both.
+    bool SkipAgreedAcrossRanks(bool localWantsSkip) {
+        int skip = localWantsSkip ? 1 : 0;
+        MPI_Allreduce(MPI_IN_PLACE, &skip, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        return skip != 0;
+    }
+
     // Composite block: Init plugin + assert device count > 0.
     // Pass a non-null pointer to receive the count; pass nullptr to discard it.
     void AssertInitAndGetDevices(int* ndev) {
