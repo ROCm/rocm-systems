@@ -1515,6 +1515,8 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
         {"Enabled_8Nodes_AtHalf",     8,  true,  HALF,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 16 nodes, initialized, below threshold --> enabled
         {"Enabled_16Nodes_BelowFull", 16, true,  1ULL << 20, true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // 16 nodes, above the 8-node half ceiling, still under the 16-node 128MB cap
+        {"Enabled_16Nodes_AboveHalf", 16, true,  HALF + 1,   true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 16 nodes, exactly at threshold --> enabled
         {"Enabled_16Nodes_AtFull",    16, true,  FULL,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
     };

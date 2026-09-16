@@ -123,7 +123,7 @@ TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_MultiNodeRejected)
                                  ncclFuncAlltoAllv,
                                  ncclDevSum,
                                  ncclFloat32,
-                                 ncclSymSendRegRecvReg));
+                                 ncclSymSendRegRecvReg, nullptr, nullptr));
 }
 
 TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_NoSymmetricSupportRejected)
@@ -136,7 +136,7 @@ TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_NoSymmetricSupportRejected)
                                  ncclFuncAlltoAllv,
                                  ncclDevSum,
                                  ncclFloat32,
-                                 ncclSymSendRegRecvReg));
+                                 ncclSymSendRegRecvReg, nullptr, nullptr));
 }
 
 TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_UnsupportedWindowRegistrationRejected)
@@ -148,12 +148,12 @@ TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_UnsupportedWindowRegistrationReje
                                  ncclFuncAlltoAllv,
                                  ncclDevSum,
                                  ncclFloat32,
-                                 ncclSymSendNonregRecvNonreg));
+                                 ncclSymSendNonregRecvNonreg, nullptr, nullptr));
     EXPECT_FALSE(ncclCeAvailable(mockComm_.get(),
                                  ncclFuncAlltoAllv,
                                  ncclDevSum,
                                  ncclFloat32,
-                                 ncclSymSendRegRecvNonreg));
+                                 ncclSymSendRegRecvNonreg, nullptr, nullptr));
 }
 
 TEST_F(CeAlltoAllvEligibilityTest, LocalMetadataPackingMatchesGatheredLayout)

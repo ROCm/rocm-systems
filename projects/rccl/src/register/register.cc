@@ -44,8 +44,6 @@ ncclResult_t ncclRegister(struct ncclComm* comm, void* data, size_t size, bool i
   if (ncclCuMemEnable()) {
     CUdeviceptr base;
     size_t baseSize;
-    int numSegments;
-    int legacyIpcCap;
     CUCHECK(cuMemGetAddressRange(&base, &baseSize, (CUdeviceptr)data));
     CUmemorytype memType;
     CUCHECK(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr)data));
@@ -54,12 +52,25 @@ ncclResult_t ncclRegister(struct ncclComm* comm, void* data, size_t size, bool i
     } else {
       // Check for a Sysmem segment is only valid with cuMem based allocators, so a IS_LEGACY_CUDA_IPC check is required to ensure
       // that we're calling ncclCuMemGetAddressRange only when necessary.
+#if HIP_VERSION >= 71260540
+      int numSegments;
+      int legacyIpcCap = 0;
       CUCHECK(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE,
                                     (CUdeviceptr)base));
       if (!legacyIpcCap) {
         NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)data, size, (CUdeviceptr*)&base, &baseSize, &numSegments,
                                            &hasSysmemSegment));
       }
+#else
+      // HIP 7.0.x rejects HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE with
+      // hipErrorNotSupported (same HIP_VERSION gate as ipcRegisterBuffer in p2p.cc).
+      // Do not call ncclCuMemGetAddressRange: that path retains a cuMem handle
+      // and illegal-memory-accesses hipMalloc buffers on HIP 7.0. Skip
+      // registration for managed/unified allocations (cannot walk segments).
+      if (memType != CU_MEMORYTYPE_DEVICE) {
+        hasSysmemSegment = true;
+      }
+#endif
     }
   }
   if (hasSysmemSegment) {

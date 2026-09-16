@@ -980,20 +980,32 @@ namespace RcclUnitTesting
   {
     if (this->verbose) TEST_INFO("Child %d begins DestroyComms", this->childId);
 
-    // Release comms
-    for (int i = 0; i < this->comms.size(); ++i)
+    // Release comms.  Finalize waits on an intra-node barrier with the other
+    // host-local ranks, so when this child owns several ranks they must be
+    // finalized inside one group call: finalizing them one at a time blocks the
+    // first rank in the barrier before any of the others can enter it.
+    if (!this->comms.empty())
     {
-      // Check if the communicator is non-blocking
+      CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart");
+      for (int i = 0; i < this->comms.size(); ++i)
+      {
+        CHILD_NCCL_CALL(ncclCommFinalize(this->comms[i]), "ncclCommFinalize");
+      }
+
       if (this->useBlocking == false)
       {
         // handle the non-blocking case
-        ncclCommFinalize(this->comms[i]);
-        CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorCommFinalize", i);
+        if (ncclGroupEnd() != ncclSuccess)
+        {
+          for (int i = 0; i < this->comms.size(); ++i)
+          {
+            CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorCommFinalize", i);
+          }
+        }
       }
       else
       {
-        // In case of blocking just call Finalize
-        CHILD_NCCL_CALL(ncclCommFinalize(this->comms[i]), "ncclCommFinalize");
+        CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd");
       }
     }
 

@@ -1269,6 +1269,7 @@ enum class InstructionExecutionId : size_t {
   VWmmaF1616x16x128Bf8Fp8Vop3p,
   VWmmaF1616x16x128Bf8Bf8Vop3p,
   VWmmaF3232x16x128F4Vop3p,
+  VPkFmaF64Vop3p,
   VPkMulF64Vop3p,
   VPkAddF64Vop3p,
   VPkAddNcU64Vop3p,

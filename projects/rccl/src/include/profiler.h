@@ -18,15 +18,43 @@ struct ncclTaskP2p;
 struct ncclInfo;
 struct ncclComm;
 struct ncclProxyOp;
-struct ncclProxyConnector;
+struct ncclDevProfiler;
+struct ncclDevProfilerPhases;
 
-struct ncclProfilerProxy {
-  bool initialized;
+struct ncclProfilerWorkOp {
+  int channelId;
+  uint64_t workCounter;
+  int eActivationMask;
+  void* taskEventHandle;
+  void* profilerContext;
+  void* kernelEventHandle;
+  // Captured per-op so a profiler thread shared across comm-split children
+  // polls the correct (originating comm) buffers.
+  struct ncclDevProfiler* workStarted;
+  struct ncclDevProfiler* workCompleted;
+  struct ncclDevProfilerPhases* workPhases;
+  bool started;
+  bool completed;
+  struct ncclProfilerWorkOp* next;
+};
+
+struct ncclProfilerThread;
+
+// Per-comm profiler state polled by the dedicated profiler thread.
+struct ncclProfilerCommState {
   struct ncclDevProfiler* workStarted /*[MAXCHANNELS]*/;
   struct ncclDevProfiler* workCompleted /*[MAXCHANNELS]*/;
-  uint64_t workCounter[MAXCHANNELS]; // host work counter
-  struct ncclProxyConnector sendProxyConn[MAXCHANNELS];
-  struct ncclProxyConnector recvProxyConn[MAXCHANNELS];
+  struct ncclDevProfilerPhases* workPhases /*[MAXCHANNELS]*/;
+  uint64_t workCounter[MAXCHANNELS];
+  // Dedicated counter/buffers for symmetric collectives: sym kernels read a fixed
+  // counter from the args buffer and never advance the device channels[].workCounter,
+  // so sharing the above with regular/p2p kernels would desync the two sequences.
+  struct ncclDevProfiler* symWorkStarted /*[MAXCHANNELS]*/;
+  struct ncclDevProfiler* symWorkCompleted /*[MAXCHANNELS]*/;
+  struct ncclDevProfilerPhases* symWorkPhases /*[MAXCHANNELS]*/;
+  uint64_t symWorkCounter[MAXCHANNELS];
+  // Shared with comm-split children when shareResources is set.
+  struct ncclProfilerThread* profilerThread;
 };
 
 enum groupApiState {
@@ -49,6 +77,9 @@ typedef struct ncclProfilerApiState {
 extern thread_local ncclProfilerApiState_t ncclProfilerApiState;
 
 extern int ncclProfilerEventMask;
+
+// Out-of-band (RAS) override of the event mask; see profiler.cc.
+void ncclProfilerSetRasOverride(int mask);
 
 // Plugin Init/Finalize Wrappers
 ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm);
@@ -93,8 +124,8 @@ ncclResult_t ncclProfilerStartProxyCtrlEvent(void* profilerContext, void** eHand
 ncclResult_t ncclProfilerStopProxyCtrlEvent(void* eHandle);
 
 // Kernel Channel Start/Stop Event Wrappers
-ncclResult_t ncclProfilerStartKernelChEvent(struct ncclProxyArgs* args, int s, uint64_t start);
-ncclResult_t ncclProfilerStopKernelChEvent(struct ncclProxyArgs* args, int s, uint64_t stop);
+ncclResult_t ncclProfilerStartKernelChEvent(struct ncclProfilerWorkOp* op, uint64_t start);
+ncclResult_t ncclProfilerStopKernelChEvent(struct ncclProfilerWorkOp* op, uint64_t stop);
 
 // Record Event Wrappers
 ncclResult_t ncclProfilerRecordProxyOpEventState(int sub, struct ncclProxyArgs* args, ncclProfilerEventState_t eState);
@@ -104,7 +135,6 @@ ncclResult_t ncclProfilerRecordProxyCtrlEventState(void* eHandle, int appended, 
 
 // Profiler utility functions
 ncclResult_t ncclProfilerAddPidToProxyOp(struct ncclProxyOp* op);
-bool ncclProfilerNeedsProxy(struct ncclComm* comm, struct ncclProxyOp* op);
 bool ncclProfilerPluginLoaded(void);
 
 // RCCL proxy-trace-as-profiler-plugin
@@ -114,6 +144,18 @@ bool ncclProfilerProxyDiagEnabled(void);
 ncclResult_t ncclProfilerRecordProxyDiagState(int sub, struct ncclProxyArgs* args, uint8_t counterKind, int64_t value,
                                               int64_t value2, uint16_t flags);
 void ncclProfilerProxyTraceDumpIfAny(void* profilerContext);
+
+// Dedicated profiler thread API
+ncclResult_t ncclProfilerThreadCreate(struct ncclComm* comm, struct ncclComm* parent);
+ncclResult_t ncclProfilerThreadDestroy(struct ncclComm* comm);
+// Post KernelCh work per (task, channel) for every KernelCh-enabled task in
+// plan. Called from hostStreamPlanCallback so the host workCounter stays in
+// lock-step with the device on every (graph-captured) replay.
+ncclResult_t ncclProfilerPostPlanWork(struct ncclComm* comm, struct ncclKernelPlan* plan);
+// Reserve the per-channel sym workCounters into the plan's args buffer before
+// cuLaunchKernel snapshots it (called pre-launch). The matching KernelCh ops are
+// posted later by ncclProfilerPostPlanWork() from the host callback.
+void ncclProfilerReserveSymCounters(struct ncclComm* comm, struct ncclKernelPlan* plan);
 
 // Profiler callback for network plugin
 ncclResult_t ncclProfilerCallback(void** eHandle, int type, void* pHandle, int64_t pluginId, void* extData);

@@ -48,6 +48,18 @@ ifeq ($(HAVE_AMDSMI_FABRIC_API),yes)
 FEATURE_DEFINES += -DAMDSMI_FABRIC_DIRECT
 endif
 
+# ROCm 10.2+ can ship fabric telemetry enumerators without amdsmi_fabric_info_t
+# / AMDSMI_FABRIC_MAX_LOCAL_GPUS. Without this probe, amdsmi_wrap.h emits
+# compat typedefs that collide with the system header (extra topo_expl compile).
+HAVE_AMDSMI_FABRIC_TELEMETRY := $(shell printf '%s\n' \
+  '#include <amd_smi/amdsmi.h>' \
+  'int main() { amdsmi_fabric_telemetry_category_t cat = AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN; (void)cat; }' | \
+  $(HIPCC) -x c++ -std=c++17 -fsyntax-only -I$(ROCM_PATH)/include - \
+  >/dev/null 2>&1 && echo yes || echo no)
+ifeq ($(HAVE_AMDSMI_FABRIC_TELEMETRY),yes)
+FEATURE_DEFINES += -DAMDSMI_HEADER_HAS_FABRIC_TELEMETRY -DAMDSMI_FABRIC_DIRECT
+endif
+
 CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION) \
            -std=c++17 \
            -Wl,--gc-sections -fgpu-rdc \
@@ -127,7 +139,7 @@ hipify:
 	# src/include/sym_kernels.h includes "../device/symmetric/gin_scratch.h"
 	# (relative path), so mirror those headers under hipify_rccl/device/symmetric/.
 	cp -a ../../src/device/symmetric/*.h hipify_rccl/device/symmetric/
-	cp -a ../../src/enqueue.cc hipify_rccl/
+	cp -a ../../src/enqueue/enqueue.cc hipify_rccl/
 	cp -a ../../src/register/register.cc hipify_rccl/
 	cp -a ../../src/collectives.cc hipify_rccl/
 	cp -a ../../src/rccl_wrap.cc hipify_rccl/

@@ -22,6 +22,7 @@
 #include <memory>
 
 #include "comm.h"
+#include "channel.h"
 #include "common/MockComm.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "device.h"
@@ -73,6 +74,40 @@ ResolvedChannels ResolveP2pChannels(const char* arch, int nRanks, int collChanne
 
     CleanupMockComm(comm);
     return resolved;
+}
+
+TEST(P2pBatchEligibility, AppliesThresholdToExplicitEnable)
+{
+    constexpr ssize_t threshold = 64 * 1024;
+
+    EXPECT_TRUE(rcclP2pBatchEligible(/*enabled=*/1, threshold, threshold, threshold));
+    EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/1, threshold + 1, threshold + 1, threshold));
+    EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/1, threshold, threshold / 2, threshold));
+    EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/0, threshold, threshold, threshold));
+}
+
+// Channel map must follow the comm-level planner flag, not per-send size eligibility.
+TEST(P2pChannelBase, IndependentOfSizeEligibility)
+{
+    constexpr int nNodes        = 16;
+    constexpr int maxLocalRanks = 8;
+    constexpr int nRanks        = nNodes * maxLocalRanks;
+    constexpr int p2pRound      = 5;
+
+    ncclComm_t comm = nullptr;
+    auto       topo = std::make_unique<ncclTopoSystem>();
+    auto       gpu  = std::make_unique<ncclTopoNode>();
+    CreateMockComm(comm, *topo, *gpu, "gfx950", nRanks);
+    SetMockNodes(comm, nNodes, nRanks);
+    comm->maxLocalRanks = maxLocalRanks;
+
+    const uint8_t batched   = ncclP2pChannelBaseForRound(comm, p2pRound, /*p2pBatchEnable=*/1);
+    const uint8_t unbatched = ncclP2pChannelBaseForRound(comm, p2pRound, /*p2pBatchEnable=*/0);
+    EXPECT_NE(batched, unbatched);
+    EXPECT_EQ(batched, ncclP2pChannelBaseForRound(comm, p2pRound, 1));
+    EXPECT_EQ(unbatched, ncclP2pChannelBaseForRound(comm, p2pRound, 0));
+
+    CleanupMockComm(comm);
 }
 
 // ncclP2pChannelToPart cannot recover part indices >= nP2pChannels, so a per-peer count

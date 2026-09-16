@@ -5315,10 +5315,12 @@ class CodeGenerator:
               uint32_t hi;
             };
 
-            Operand packed_register_dword_offset(const Operand &operand, uint32_t dword_offset) {
-              Operand shifted = operand;
-              shifted.encoding_value_ += static_cast<int>(dword_offset);
-              return shifted;
+            uint32_t packed_vgpr_physical_base(const Operand &operand,
+                                               const amdgpu::Wavefront &wf) {
+              const auto offset = Isa::resolved_vgpr_offset(
+                  wf, operand.opr_type_, operand.encoding_value_, operand.vgpr_msb_role());
+              assert(offset);
+              return wf.vgpr_alloc().base + *offset;
             }
 
             PkU64Pair read_pk_u64_pair(const Operand &operand, const amdgpu::Wavefront &wf,
@@ -5328,8 +5330,8 @@ class CodeGenerator:
               if (!reg || reg->cls != RegClass::VGPR)
                 return {lo, lo};
 
-              const Operand hi_operand = packed_register_dword_offset(operand, 2);
-              return {lo, amdgpu::RegisterAccess(wf).read_lane64(hi_operand, lane)};
+              const uint32_t base = packed_vgpr_physical_base(operand, wf);
+              return {lo, amdgpu::RegisterAccess(wf).read_vgpr64(base + 2, lane)};
             }
 
             PkU32Pair read_pk_u32_pair(const Operand &operand, const amdgpu::Wavefront &wf,
@@ -5347,10 +5349,10 @@ class CodeGenerator:
 
             void write_pk_u64_pair(const Operand &operand, amdgpu::Wavefront &wf, uint32_t lane,
                                    PkU64Pair value) {
-              const Operand hi_operand = packed_register_dword_offset(operand, 2);
               amdgpu::RegisterAccess access(wf);
               access.write_lane64(operand, lane, value.lo);
-              access.write_lane64(hi_operand, lane, value.hi);
+              const uint32_t base = packed_vgpr_physical_base(operand, wf);
+              access.write_vgpr64(base + 2, lane, value.hi);
             }
             ''')
         model = (
@@ -10392,7 +10394,7 @@ class CodeGenerator:
                         )
 
                     # LLVM's public gfx1251 profiles define the packed U64 and
-                    # F64 binary operations without op_sel.  The profile and
+                    # F64 arithmetic operations without op_sel.  The profile and
                     # corresponding MC vectors are permanently linked here:
                     # https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/lib/Target/AMDGPU/VOP3PInstructions.td#L130-L162
                     # https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s#L1-L403
@@ -10409,6 +10411,7 @@ class CodeGenerator:
                     # selector set.
                     if inst_sem is not None and inst_sem.semantic_class in {
                         'pk_binop_f64',
+                        'pk_ternary_f64',
                         'pk_binop_u64',
                         'pk_lshl_add_u64',
                     }:
@@ -10417,7 +10420,8 @@ class CodeGenerator:
                         )
                         layout_name = (
                             'packed F64'
-                            if inst_sem.semantic_class == 'pk_binop_f64'
+                            if inst_sem.semantic_class
+                            in {'pk_binop_f64', 'pk_ternary_f64'}
                             else 'packed U64'
                         )
                         factory_validation_parts.append(
@@ -10454,12 +10458,14 @@ class CodeGenerator:
                             register_count = (opnd.size + 31) // 32
                             raw_value = f'{raw_inst}->{opnd.name}'
                             if opnd.operand_type == 'OPR_VGPR':
-                                max_selector = 256 - register_count
-                                invalid_span = f'{raw_value} > {max_selector}u'
+                                # Wide VGPR tuples may cross the end of the
+                                # encoded v0-v255 window. The field constrains
+                                # only the tuple's first register; alignment
+                                # constrains the legal base selector.
+                                invalid_span = None
                                 invalid_alignment = f'({raw_value} & 1u) != 0u'
                             elif opnd.operand_type == 'OPR_SRC':
                                 max_sgpr = 106 - register_count
-                                max_vgpr = 512 - register_count
                                 invalid_sgpr_span = f'{raw_value} > {max_sgpr}u'
                                 if opnd.size == 128:
                                     # SGPR104_128 is a named VS_128 member:
@@ -10468,9 +10474,11 @@ class CodeGenerator:
                                     invalid_sgpr_span = (
                                         f'({invalid_sgpr_span} && {raw_value} != 104u)'
                                     )
+                                # The 9-bit VGPR selector names the tuple's
+                                # first register and may legally cross from
+                                # selector 511 to the next physical VGPR.
                                 invalid_span = (
-                                    f'({raw_value} <= 105u && {invalid_sgpr_span}) || '
-                                    f'({raw_value} >= 256u && {raw_value} > {max_vgpr}u)'
+                                    f'{raw_value} <= 105u && {invalid_sgpr_span}'
                                 )
                                 invalid_alignment = (
                                     f'({raw_value} <= 105u && '
@@ -10481,11 +10489,12 @@ class CodeGenerator:
                                 )
                             else:
                                 continue
-                            factory_validation_parts.append(
-                                f'if ({invalid_span}) '
-                                f'[[unlikely]] return emit_error.emit() << "{inst.name} has a '
-                                f'{opnd.name} register tuple that exceeds the selector range";'
-                            )
+                            if invalid_span is not None:
+                                factory_validation_parts.append(
+                                    f'if ({invalid_span}) '
+                                    f'[[unlikely]] return emit_error.emit() << "{inst.name} has a '
+                                    f'{opnd.name} register tuple that exceeds the selector range";'
+                                )
                             factory_validation_parts.append(
                                 f'if ({invalid_alignment}) '
                                 f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
@@ -10502,7 +10511,7 @@ class CodeGenerator:
                                         f'({raw_value} >= 128u && {raw_value} <= 208u) || '
                                         f'({raw_value} >= 240u && {raw_value} <= 248u) || '
                                         f'{raw_value} == 255u || '
-                                        f'({raw_value} >= 256u && {raw_value} <= 508u && '
+                                        f'({raw_value} >= 256u && {raw_value} <= 510u && '
                                         f'({raw_value} & 1u) == 0u)'
                                     )
                                 else:

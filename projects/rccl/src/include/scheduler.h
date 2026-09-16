@@ -31,6 +31,7 @@ static inline int rcclProtoGrainSize(int proto, ncclComm* comm) {
 ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskColl* task,
                                        struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next>* symTaskQueue,
                                        struct ncclTaskColl** remainTasksHead);
+void convertSymTaskDevOp(struct ncclComm* comm, struct ncclTaskColl* task);
 ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
                                         struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next>* symTaskQueue,
                                         struct ncclKernelPlan* plan);
