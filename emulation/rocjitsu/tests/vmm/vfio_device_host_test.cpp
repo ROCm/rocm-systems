@@ -964,8 +964,8 @@ void run_streaming_transfer_test(uint64_t iova_base, std::size_t window_count) {
 
 TEST(VfioDeviceHostDma, ResizesTheScatterGatherListBetweenTheLimits) {
   // One window past the initial capacity: the first count the library cannot
-  // answer in one shot, forcing the resize-and-retry path. Staying below
-  // kMaxSgEntries keeps the direct mapping, so this exercises resize only.
+  // answer in one shot, forcing the resize-and-retry path. At or below
+  // kMaxSgEntries the direct mapping is kept, so this exercises resize only.
   static_assert(rocjitsu::VfioDeviceHost::kInitialSgEntries + 1 <=
                 rocjitsu::VfioDeviceHost::kMaxSgEntries);
   run_streaming_transfer_test(kStreamingIova, rocjitsu::VfioDeviceHost::kInitialSgEntries + 1);
