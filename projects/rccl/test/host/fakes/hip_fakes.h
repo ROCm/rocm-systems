@@ -31,6 +31,13 @@
 extern std::function<hipError_t(hipDeviceptr_t* /*pbase*/, std::size_t* /*psize*/,
                                 hipDeviceptr_t /*dptr*/)>
     g_hipMemGetAddressRange;
+
+// hipIpcCloseMemHandle: the legacy-IPC teardown path of p2pSendFree /
+// p2pRecvFree closes each retained peer handle through this call. Default
+// returns hipErrorInvalidValue so an unexpected close surfaces as a
+// CUDACHECK failure; free-path tests install a hook that records the call
+// and returns hipSuccess.
+extern std::function<hipError_t(void* /*devPtr*/)> g_hipIpcCloseMemHandle;
 extern std::function<hipError_t(hipIpcMemHandle_t* /*handle*/, void* /*devPtr*/)>
     g_hipIpcGetMemHandle;
 
