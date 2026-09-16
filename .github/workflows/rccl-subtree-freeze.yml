@@ -2,17 +2,18 @@ name: Block RCCL subtree PRs
 
 # Fails when a pull request targeting develop changes projects/rccl or
 # projects/rccl-tests. pull_request_target runs this definition from the
-# trusted base branch so a PR cannot rewrite the guard. The job never
-# checks out PR code; it only reads PR metadata through the GitHub API.
+# trusted base branch so a PR cannot rewrite the guard. The job checks
+# out only the freeze switch from the PR base and otherwise only reads
+# PR metadata through the GitHub API.
 # Always runs on develop-bound PRs (no path filter) so it can be a
 # required status check without blocking unrelated PRs as "expected
 # checks were not posted".
 # After this lands, add `rccl-subtree-freeze` as a required check on develop.
 #
-# On/off switch: repository variable RCCL_SUBTREE_FREEZE
-# (Settings → Secrets and variables → Actions → Variables).
-# Unset or true/on/1 keeps the freeze active. false/off/0 disables it;
-# the job still runs and succeeds so a required check is not left pending.
+# On/off switch: .github/rccl-subtree-freeze.yml on develop.
+# Set enabled: false and land that PR to disable. The file is read from
+# the PR base, so a PR cannot turn the freeze off while also editing RCCL.
+# The job still runs when disabled so a required check is not left pending.
 
 on:
   pull_request_target:
@@ -32,19 +33,45 @@ jobs:
     name: rccl-subtree-freeze
     runs-on: ubuntu-24.04
     steps:
+      - name: Read freeze switch from develop
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github/rccl-subtree-freeze.yml
+          sparse-checkout-cone-mode: false
+
       - name: Reject changes under frozen RCCL trees
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          RCCL_SUBTREE_FREEZE: ${{ vars.RCCL_SUBTREE_FREEZE }}
+          FREEZE_CONFIG: .github/rccl-subtree-freeze.yml
         run: |
           set -euo pipefail
 
-          freeze_switch="${RCCL_SUBTREE_FREEZE:-true}"
-          freeze_switch="${freeze_switch,,}"
+          freeze_switch=$(python3 - "${FREEZE_CONFIG}" <<'PY'
+import re, sys
+path = sys.argv[1]
+try:
+    text = open(path, encoding="utf-8").read()
+except FileNotFoundError:
+    print("true")
+    sys.exit(0)
+value = None
+for raw in text.splitlines():
+    line = raw.split("#", 1)[0].strip()
+    if not line:
+        continue
+    match = re.fullmatch(r"enabled:\s*(true|false|on|off|1|0)", line, re.I)
+    if match:
+        value = match.group(1).lower()
+print(value or "true")
+PY
+          )
           if [[ "${freeze_switch}" == "false" || "${freeze_switch}" == "off" || "${freeze_switch}" == "0" ]]; then
-            msg="RCCL subtree freeze is off (RCCL_SUBTREE_FREEZE=${RCCL_SUBTREE_FREEZE:-unset})."
+            msg="RCCL subtree freeze is off (${FREEZE_CONFIG} on develop has enabled: ${freeze_switch})."
             echo "${msg}"
             echo "${msg}" >> "$GITHUB_STEP_SUMMARY"
             exit 0
