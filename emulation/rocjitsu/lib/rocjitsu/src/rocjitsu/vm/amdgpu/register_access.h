@@ -971,6 +971,17 @@ public:
       return 0;
     return op.read_scalar(wf);
   }
+
+  /// Statically typed fast path for generated final class, enabling
+  /// devirtualization of the hot 32-bit operand accessors.
+  template <typename OperandT>
+    requires OperandT::kStaticRegisterAccess
+  [[nodiscard]] uint32_t read_scalar(const OperandT &op) const {
+    const Wavefront &wf = wavefront();
+    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
+      return 0;
+    return op.read_scalar(wf);
+  }
   [[nodiscard]] uint64_t read_scalar64(const Operand &op) const {
     const Wavefront &wf = wavefront();
     if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 2))
@@ -978,6 +989,15 @@ public:
     return op.read_scalar64(wf);
   }
   [[nodiscard]] uint32_t read_lane(const Operand &op, uint32_t lane) const {
+    const Wavefront &wf = wavefront();
+    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
+      return 0;
+    return op.read_lane(wf, lane);
+  }
+  /// Optimization: fast path for generated operands opted in via kStaticRegisterAccess.
+  template <typename OperandT>
+    requires OperandT::kStaticRegisterAccess
+  [[nodiscard]] uint32_t read_lane(const OperandT &op, uint32_t lane) const {
     const Wavefront &wf = wavefront();
     if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
       return 0;
@@ -1038,6 +1058,15 @@ public:
       return;
     op.write_scalar(wf, value);
   }
+  /// Optimization: fast path for generated operands opted in via kStaticRegisterAccess.
+  template <typename OperandT>
+    requires OperandT::kStaticRegisterAccess
+  void write_scalar(const OperandT &op, uint32_t value) const {
+    Wavefront &wf = mutable_wavefront();
+    if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
+      return;
+    op.write_scalar(wf, value);
+  }
   void write_scalar64(const Operand &op, uint64_t value) const {
     Wavefront &wf = mutable_wavefront();
     if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 2))
@@ -1045,6 +1074,17 @@ public:
     op.write_scalar64(wf, value);
   }
   void write_lane(const Operand &op, uint32_t lane, uint32_t value) const {
+    Wavefront &wf = mutable_wavefront();
+    if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
+      return;
+    if (op.simd_vgpr_storage_mut(wf) && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
+      return;
+    op.write_lane(wf, lane, value);
+  }
+  /// Optimization: fast path for generated operands opted in via kStaticRegisterAccess.
+  template <typename OperandT>
+    requires OperandT::kStaticRegisterAccess
+  void write_lane(const OperandT &op, uint32_t lane, uint32_t value) const {
     Wavefront &wf = mutable_wavefront();
     if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
       return;
