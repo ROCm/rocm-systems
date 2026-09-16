@@ -245,9 +245,9 @@ rocprofiler_ompt_start_tool(unsigned int omp_version, const char* /*runtime_vers
 {
     // The OpenMP runtime discovers tools while holding its initialization lock. Initializing
     // rocprofiler-sdk here loads client tool libraries, and their constructors can call back into
-    // the OpenMP runtime and re-enter that lock on the same thread. Only proceed when the SDK is
-    // already initialized, so no client libraries need to be loaded.
-    if(::rocprofiler::registration::get_init_status() == 0)
+    // the OpenMP runtime and re-enter that lock on the same thread. A status of 0 is "not
+    // started" and -1 is "in progress"; only a completed initialization proceeds.
+    if(::rocprofiler::registration::get_init_status() <= 0)
     {
         std::clog << "WARNING: rocprofiler-sdk OMPT support is not enabled because the OpenMP "
                      "runtime initialized before rocprofiler-sdk. Initialize rocprofiler-sdk "
@@ -264,13 +264,21 @@ rocprofiler_ompt_start_tool(unsigned int omp_version, const char* /*runtime_vers
         return nullptr;
     }
 
-    ::rocprofiler::ompt::omp_version_value.store(static_cast<uint64_t>(omp_version));
-
-    // Initialize so client tool_init callbacks have registered their OMPT contexts
-    // before the runtime calls initialize() and arms the callbacks. Needed when a
-    // user OMPT tool hands the role back to us by calling this directly; harmless
-    // otherwise, since registration::initialize() is idempotent.
+    // The guard above already implies client tool_init callbacks have run, so this is idempotent
+    // and does no work. Relaxing that guard makes it load client tool libraries on this thread,
+    // which is the re-entry the guard exists to prevent.
     ::rocprofiler::registration::initialize();
+
+    // Take the OMPT tool role only when a registered client subscribes to OMPT. Every route
+    // into the SDK's OMPT support reaches here, including a user's own OMPT tool calling this
+    // directly to hand the role over.
+    if(!::rocprofiler::ompt::ompt_service_requested())
+    {
+        ROCP_INFO << "no rocprofiler client subscribes to OMPT; declining the OMPT tool role";
+        return nullptr;
+    }
+
+    ::rocprofiler::ompt::omp_version_value.store(static_cast<uint64_t>(omp_version));
 
     auto* _result = ::rocprofiler::ompt::get_start_tool_result();
 

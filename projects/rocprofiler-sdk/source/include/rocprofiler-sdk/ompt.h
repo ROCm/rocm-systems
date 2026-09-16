@@ -36,7 +36,9 @@
  *
  * The rocprofiler-sdk library does not itself export an ompt_start_tool symbol. A tool that wants
  * rocprofiler-sdk to act as the OMPT tool must provide its own ompt_start_tool and invoke
- * rocprofiler_ompt_start_tool() from it.
+ * rocprofiler_ompt_start_tool() from it. That call returns NULL unless rocprofiler-sdk is already
+ * initialized and a registered client subscribes to OMPT tracing, so the tool must be prepared to
+ * keep the role.
  *
  * @{
  */
@@ -75,6 +77,11 @@ rocprofiler_ompt_is_finalized(int* status) ROCPROFILER_API ROCPROFILER_NONNULL(1
  * @param [in] omp_version Refer to OpenMP OMPT docs for more information
  * @param [in] runtime_version  Refer to OpenMP OMPT docs for more information
  * @return ompt_start_tool_result_t*
+ * @retval NULL rocprofiler-sdk declined the OMPT tool role, because it was not initialized before
+ * the OpenMP runtime or because no registered client subscribes to
+ * ::ROCPROFILER_CALLBACK_TRACING_OMPT or ::ROCPROFILER_BUFFER_TRACING_OMPT. The caller retains the
+ * role and should return its own result, or NULL if it has none.
+ * @retval non-NULL rocprofiler-sdk accepted the role. Return this value to the OpenMP runtime.
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 ompt_start_tool_result_t*

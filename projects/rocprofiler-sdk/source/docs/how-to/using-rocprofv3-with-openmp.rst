@@ -137,6 +137,16 @@ Recognised categories are ``thread``, ``parallel``, ``task``, ``sync``, ``mutex`
 
 Equivalently, set ``ROCPROF_OMPT_TRACE_OPERATIONS=parallel,task,target`` in the environment (env vars use commas because they are single strings). When OMPT tracing is enabled, an unrecognised category in this variable is a fatal error.
 
+Running alongside another OMPT tool
+-----------------------------------
+
+The OpenMP runtime hosts exactly one OMPT tool, so ``rocprofv3`` and a tool such as TAU or Score-P cannot both hold the role. Which one holds it follows from the ``rocprofv3`` command line:
+
+* **With** ``--ompt-trace`` (or ``--sys-trace`` / ``--runtime-trace``, which enable it implicitly), ``rocprofv3`` takes the OMPT tool role and the OpenMP runtime does not look for another tool.
+* **Without** it, ``rocprofv3`` hands the role on, and the OpenMP runtime uses the next tool it finds -- one already loaded into the process, or one named by ``OMP_TOOL_LIBRARIES``. Every other trace requested on the command line is still collected.
+
+A tool that holds the role may pass it to rocprofiler-sdk by calling ``rocprofiler_ompt_start_tool`` directly. That call is accepted only when something in the process is subscribed to OMPT tracing, so it cannot switch on collection that was never requested.
+
 .. note::
 
    ``--ompt-trace`` requires an OMPT-capable OpenMP runtime that implements ``ompt_start_tool``. The LLVM-based ``libomp`` shipped with ROCm / AOMP (used by ``amdclang++ -fopenmp`` above) qualifies. GCC's ``libgomp`` does not implement the OMPT interface (see the `GOMP status page <https://www.gnu.org/software/gcc/projects/gomp/>`_), so ``g++ -fopenmp`` binaries do not produce OMPT records.
@@ -145,4 +155,4 @@ Equivalently, set ``ROCPROF_OMPT_TRACE_OPERATIONS=parallel,task,target`` in the 
 
    The ``librocprofiler-sdk`` library does not itself provide an ``ompt_start_tool`` symbol -- OMPT is engaged only when the rocprofv3 tool library is loaded, as it is when running under ``rocprofv3``. An application that merely has rocprofiler-sdk in its address space, without running under ``rocprofv3``, is therefore not registered as an OMPT tool.
 
-   OMPT is engaged only when rocprofiler-sdk is already initialized at the point the OpenMP runtime looks for a tool. That lookup happens while the OpenMP runtime holds its initialization lock, so initializing rocprofiler-sdk there would load client tool libraries whose constructors can call back into the OpenMP runtime and block. When the OpenMP runtime initializes first -- for example, when a library calls an OpenMP routine from its constructor before ``main`` -- OMPT is not enabled and a warning is emitted. Applications that first use OpenMP from ``main`` are unaffected.
+   OMPT is engaged only when rocprofiler-sdk is already initialized at the point the OpenMP runtime looks for a tool. That lookup happens while the OpenMP runtime holds its initialization lock, so initializing rocprofiler-sdk there would load client tool libraries whose constructors can call back into the OpenMP runtime and block. When the OpenMP runtime initializes first -- for example, when a library calls an OpenMP routine from its constructor before ``main`` -- ``rocprofv3`` emits a warning and hands the OMPT tool role to the next tool. Applications that first use OpenMP from ``main`` are unaffected.
