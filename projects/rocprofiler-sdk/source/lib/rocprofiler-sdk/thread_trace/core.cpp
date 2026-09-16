@@ -232,6 +232,7 @@ ThreadTracerAgent::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_dat
     else if(status != HSA_STATUS_SUCCESS)
         ROCP_CI_LOG(ERROR) << "Failed to iterate ATT data: " << status;
 
+    auto lock = std::unique_lock{trace_resources_mut};
     active_traces.fetch_sub(1);
     resources->end_trace(params.context_id);
 }
@@ -242,7 +243,6 @@ ThreadTracerAgent::iterate_data()
     // Already executed by producer thread, skip
     if(params.num_buffers > 1) return;
 
-    auto lock = std::unique_lock{trace_resources_mut};
     iterate_data(control_packet->GetHandle(), params.callback_userdata);
 }
 
