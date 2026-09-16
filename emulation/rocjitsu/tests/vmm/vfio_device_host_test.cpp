@@ -64,12 +64,15 @@ constexpr simdojo::PciId kTestId = {.vendor = 0x1002,
 /// @brief A served device plus the client attached to it.
 ///
 /// @details Serving happens on its own thread, as it does in the product, so
-/// the tests exercise the same threading the transport ships with. Tests
-/// that hand callbacks to `ask_serving_thread` must declare every local the
-/// callback captures by reference BEFORE constructing this fixture, and must
-/// call `stop_serving()` before reading anything the callback wrote: the
-/// destructor joins the serving thread, so with the reverse order a still-
-/// pending callback can touch state that has already been destroyed.
+/// the tests exercise the same threading the transport ships with. Two
+/// separate rules govern state shared with those callbacks. First, lifetime:
+/// any local a callback captures by reference must be declared BEFORE this
+/// fixture, because the destructor joins the serving thread and a local
+/// destroyed earlier can be touched by a callback that is still pending.
+/// Second, synchronization: reading what a callback wrote requires a
+/// happens-before with the callback. `stop_serving()` provides one, but so do
+/// the futures some tests wait on, and a test that knows serving has already
+/// stopped may read without either -- the tests below use whichever fits.
 class ServedDevice {
 public:
   ServedDevice()
