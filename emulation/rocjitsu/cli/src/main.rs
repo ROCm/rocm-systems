@@ -77,10 +77,33 @@ enum TopCmd {
     /// built from (with their licenses).
     About,
 
+    /// Serve an emulated GPU to a VMM as a PCI device, over vfio-user.
+    ///
+    /// The machine comes from `--config`, so a different part is a
+    /// different config file. Needs a rocjitsu built with
+    /// `-DROCJITSU_ENABLE_VFIO=ON`; an ordinary one does not carry the
+    /// transport.
+    #[cfg(feature = "rocjitsu")]
+    #[command(name = VFIO_SERVE)]
+    VfioServe(VfioArgs),
+
     /// Every other subcommand (profile, topology, agent, emulators,
     /// state, run, exec, paths) is flattened in here.
     #[command(flatten)]
     Ctl(CtlCmd),
+}
+
+/// `rocjitsu vfio-serve`, and the older `--vfio-socket` that routes to it.
+#[cfg(feature = "rocjitsu")]
+#[derive(clap::Args, Debug)]
+struct VfioArgs {
+    /// Simulation config describing the GPU to present.
+    #[arg(long, value_name = "PATH")]
+    config: String,
+    /// Filesystem path of the AF_UNIX socket to listen on. Spelled as
+    /// the older CLI spelled it, which is how that spelling still works.
+    #[arg(long = VFIO_SOCKET_FLAG, value_name = "PATH")]
+    vfio_socket: String,
 }
 
 /// The status clap exits with on a usage error, and therefore the one a
@@ -114,6 +137,29 @@ fn main() -> ExitCode {
             ExitCode::from(1)
         }
     }
+}
+
+/// Serve the GPU `a.config` describes on `a.vfio_socket` until signalled.
+///
+/// Returns the server's own exit status, as the CLI this replaced did:
+/// what went wrong belongs to the transport and the config, and the
+/// server has already said which on stderr.
+#[cfg(feature = "rocjitsu")]
+fn serve_vfio(a: &VfioArgs) -> anyhow::Result<ExitCode> {
+    // Absolute, and existing, before anything is stood up. The old CLI
+    // checked both here too, and the reason is the same: the server
+    // reports a missing config as a parse failure several layers down,
+    // by which point the message names an internal step rather than the
+    // path the user typed.
+    let config = std::fs::canonicalize(&a.config).map_err(|e| {
+        anyhow::anyhow!(
+            "--config {}: {e}. Name an emulator config file that exists.",
+            a.config
+        )
+    })?;
+    let status = rj_backend_rocjitsu::serve_vfio(&config, std::path::Path::new(&a.vfio_socket))
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(ExitCode::from(u8::try_from(status).unwrap_or(1)))
 }
 
 /// Print this CLI's package version and RocJITsu's shared build identity.
@@ -287,6 +333,12 @@ const RUN: &str = "run";
 /// The one-line shape shown by every usage error [`dropin_argv`] raises.
 const DROPIN_USAGE: &str = "Usage: rocjitsu [OPTIONS] -- <COMMAND> [ARGS]...";
 
+/// The subcommand a `--vfio-socket` invocation is routed to.
+const VFIO_SERVE: &str = "vfio-serve";
+
+/// The flag that names the socket, and the thing the rewriter keys on.
+const VFIO_SOCKET_FLAG: &str = "vfio-socket";
+
 /// Whether `arg` is plausibly a program the user meant to run rather
 /// than a mistyped subcommand.
 ///
@@ -384,16 +436,24 @@ fn check_flags(args: &[String], from: usize, sep: Option<usize>, sub: &str) -> R
 /// `rocjitsu --config <cfg> [--daemon|--attach] -- <app>`; there is no
 /// subcommand. `rocjitsu` is subcommand-based, so when an invocation has
 /// the `rocjitsu` shape — a `--` application separator with no
-/// recognised subcommand before it — we splice in `run` and translate
-/// `--attach` to `--daemon`. Everything `run` already accepts
-/// (`--config`, `--profile`, `--daemon`, `--env`, …) then flows straight
-/// through.
+/// recognised subcommand before it — we splice in `run`. Everything
+/// `run` already accepts (`--config`, `--profile`, `--daemon`, `--env`,
+/// …) then flows straight through.
+///
+/// Two things are restored rather than passed through, because the
+/// subcommand's defaults are not the old CLI's and a command line
+/// written against the old one should still mean what it meant:
+///
+/// * The execution mode. Upstream ran the workload in-process and forked
+///   a daemon only for `--daemon`; `run` uses a daemon unless told not
+///   to. A legacy invocation that did not ask for a daemon is given
+///   `--in-process`.
+/// * The daemon-only form, `rocjitsu --daemon --config <cfg>` with no
+///   workload at all, which has no `--` for the rule above to key on.
 ///
 /// Invocations that name a subcommand (`rocjitsu run …`, `rocjitsu profile
-/// …`, `rocjitsu exec --session s -- cmd`) and those with no `--` separator
-/// (so `--help`/`--version` keep working) are left untouched. `run`
-/// declares `--attach` as an alias of `--daemon` itself, so an explicit
-/// `rocjitsu run --attach` needs nothing from here.
+/// …`, `rocjitsu exec --session s -- cmd`) are left untouched, and so is
+/// a bare `--help`/`--version`.
 ///
 /// # Errors
 ///
@@ -443,10 +503,49 @@ fn dropin_argv(args: Vec<String>) -> Result<Vec<String>, String> {
     if matches!(head, Some("--help" | "-h" | "--version" | "-V")) {
         return Ok(args);
     }
+    // `rocjitsu --config <cfg> --vfio-socket <path>` — the older spelling
+    // for serving a GPU to a VMM. It is not a workload invocation and
+    // must not be routed to `run`, whose signal handling this mode
+    // cannot share; it goes to `vfio-serve`, which is dispatched before
+    // any of that is armed.
+    if names_a_vfio_socket(&args[1..scan_end]) {
+        // The old CLI refused these combinations outright rather than
+        // picking one, and so does this: serving a VMM is a whole mode,
+        // not a modifier on a run.
+        if asks_for_a_daemon(&args[1..scan_end]) || sep.is_some() {
+            return Err(vfio_is_its_own_mode_error());
+        }
+        check_flags(&args, 1, None, VFIO_SERVE)?;
+        let mut out = Vec::with_capacity(args.len() + 1);
+        out.push(args[0].clone());
+        out.push(VFIO_SERVE.to_string());
+        out.extend(args[1..].iter().cloned());
+        return Ok(out);
+    }
     let Some(sep) = sep else {
-        // Without a separator there is nothing to rewrite. Clap reports
-        // the unrecognised subcommand, and does it better than we could
-        // — unless what the user typed is obviously a program, in which
+        // `rocjitsu --daemon --config <cfg>` — upstream's daemon-only
+        // form, which served the emulator with no workload of its own.
+        // It has no `--`, so the rewrite below never saw it and clap
+        // called it a missing subcommand. `run` with an empty argv is
+        // the same thing: it brings the session up and holds it until
+        // stopped, which is what that invocation asked for.
+        //
+        // "No workload" is the whole of the shape, so nothing here may
+        // look like one. Without that, `rocjitsu --daemon ./app` — a
+        // command line missing its `--` — would be rewritten into a
+        // session that holds itself open and never runs `./app`, which
+        // is a worse answer than the error it gets today.
+        if asks_for_a_daemon(&args[1..]) && !args[1..].iter().any(|a| looks_like_a_program(a)) {
+            check_flags(&args, 1, None, RUN)?;
+            let mut out = Vec::with_capacity(args.len() + 1);
+            out.push(args[0].clone());
+            out.push(RUN.to_string());
+            out.extend(args[1..].iter().cloned());
+            return Ok(out);
+        }
+        // Otherwise there is nothing to rewrite. Clap reports the
+        // unrecognised subcommand, and does it better than we could —
+        // unless what the user typed is obviously a program, in which
         // case the missing piece is the `--`, not the spelling.
         return match head {
             Some(h) if looks_like_a_program(h) => Err(missing_separator_error(
@@ -463,11 +562,66 @@ fn dropin_argv(args: Vec<String>) -> Result<Vec<String>, String> {
         return Err(empty_separator_error());
     }
     // Drop-in: splice `run` in where the subcommand would go.
-    let mut out = Vec::with_capacity(args.len() + 1);
+    let mut out = Vec::with_capacity(args.len() + 2);
     out.extend(args[..head_idx].iter().cloned());
     out.push(RUN.to_string());
+    // The upstream CLI ran the workload in-process and forked a daemon
+    // only for `--daemon`. `rocjitsu run` is the other way round, which
+    // is the right default for a subcommand people are typing today but
+    // the wrong one to hand an invocation written against the old CLI:
+    // it would quietly put a workload in a mode it had never used. So a
+    // legacy invocation keeps the legacy default, and `--daemon` is
+    // still how it asks for the other one.
+    if !names_an_execution_mode(&args[1..sep]) {
+        out.push("--in-process".to_string());
+    }
     out.extend(args[head_idx..].iter().cloned());
     Ok(out)
+}
+
+/// Whether a drop-in invocation's own arguments ask for a daemon.
+///
+/// `--attach` counts. It is refused later, with an explanation of why
+/// there is no daemon to attach to, and that is a better thing to read
+/// than a complaint about the in-process mode this would otherwise have
+/// added underneath it.
+fn asks_for_a_daemon(opts: &[String]) -> bool {
+    opts.iter().any(|a| a == "--daemon" || a == "--attach")
+}
+
+/// Whether the invocation has already said which mode it wants, and so
+/// needs nothing supplied.
+///
+/// `--in-process` counts as much as `--daemon` does. Supplying a second
+/// one would be harmless to clap and confusing to read in a `ps` line,
+/// and the point of the rule is to answer a question the user left open
+/// — not to answer one they did not.
+fn names_an_execution_mode(opts: &[String]) -> bool {
+    asks_for_a_daemon(opts) || opts.iter().any(|a| a == "--in-process")
+}
+
+/// Whether the invocation asks to serve a VMM.
+///
+/// Both spellings clap accepts for the flag, since either is how a user
+/// would have written it against the older CLI.
+fn names_a_vfio_socket(opts: &[String]) -> bool {
+    let long = format!("--{VFIO_SOCKET_FLAG}");
+    let joined = format!("{long}=");
+    opts.iter().any(|a| *a == long || a.starts_with(&joined))
+}
+
+/// The message for `--vfio-socket` asked for alongside something it
+/// cannot be combined with.
+fn vfio_is_its_own_mode_error() -> String {
+    format!(
+        "error: --{VFIO_SOCKET_FLAG} serves a GPU to a VMM and cannot be combined with \
+         --daemon, --attach, or a workload\n\n\
+         Serving a VMM is a mode of its own: there is no workload to launch and no \
+         session to\nshare, only a PCI device on a socket for something else to attach \
+         to.\n\n\
+         Usage: rocjitsu {VFIO_SERVE} --config <PATH> --{VFIO_SOCKET_FLAG} <PATH>\n\n\
+         For more information, try 'rocjitsu {VFIO_SERVE} --help'."
+    )
 }
 
 /// The message for a `--` with nothing after it.
@@ -515,6 +669,18 @@ fn dispatch(cli: Cli) -> anyhow::Result<ExitCode> {
             print_about(cli.json)?;
             Ok(ExitCode::from(0))
         }
+        // Deliberately here, beside `about`, and not through the runtime
+        // below. The server blocks for its whole life on the thread that
+        // calls it, and while it runs it blocks SIGINT, SIGTERM and
+        // SIGUSR1 and takes them itself — the first two to stop, the
+        // third to raise an interrupt on the emulated device. `run` and
+        // `exec` install tokio handlers for all three and mean different
+        // things by them; SIGUSR1 in particular they forward to a
+        // workload. Whichever armed them first would win, and this is
+        // not a mode with a workload to forward anything to. So it never
+        // enters a runtime that has them.
+        #[cfg(feature = "rocjitsu")]
+        TopCmd::VfioServe(a) => serve_vfio(&a),
         // Everything else, including `run`, happens right here in this
         // process. There is no routing decision to make: no command
         // reaches a session it does not own, because the only command
@@ -534,6 +700,8 @@ mod tests {
 
     use rj_ctl::usage::AcceptedFlags;
 
+    #[cfg(feature = "rocjitsu")]
+    use super::TopCmd;
     use super::{Cli, cli, dropin_argv, ends_in_a_workload, is_global_flag, is_subcommand};
 
     fn v_args(args: &[&str]) -> Vec<String> {
@@ -665,8 +833,61 @@ mod tests {
     fn bare_dropin_routes_to_run() {
         assert_eq!(
             rewrite(&["rocjitsu", "--", "./app", "arg"]),
-            v_args(&["rocjitsu", "run", "--", "./app", "arg"])
+            v_args(&["rocjitsu", "run", "--in-process", "--", "./app", "arg"])
         );
+    }
+
+    /// A legacy invocation keeps the legacy execution mode.
+    ///
+    /// Upstream ran the workload in-process unless asked for a daemon.
+    /// `run` is the other way round, and passing a drop-in command line
+    /// through untouched therefore moved every one of them into a mode
+    /// it had never used — one that starts a second process and shares
+    /// GPU memory through it.
+    #[test]
+    fn a_dropin_without_daemon_keeps_the_upstream_in_process_default() {
+        assert_eq!(
+            rewrite(&["rocjitsu", "--config", "c.json", "--", "./app"]),
+            v_args(&[
+                "rocjitsu",
+                "run",
+                "--in-process",
+                "--config",
+                "c.json",
+                "--",
+                "./app"
+            ])
+        );
+        // And asking for a daemon is still how you get one. Nothing is
+        // added there: `--in-process` would contradict the flag.
+        for spelling in ["--daemon", "--attach"] {
+            let out = rewrite(&["rocjitsu", spelling, "--config", "c.json", "--", "./app"]);
+            assert!(
+                !out.iter().any(|a| a == "--in-process"),
+                "{spelling} asked for a daemon: {out:?}"
+            );
+        }
+        // `rocjitsu run` itself is untouched: its own default is the
+        // daemon, and that is not this rule's to change.
+        let explicit = &["rocjitsu", "run", "--config", "c.json", "--", "./app"][..];
+        assert_eq!(rewrite(explicit), v_args(explicit));
+    }
+
+    /// Upstream's daemon-only form, which has no workload and so no `--`
+    /// for the rewriter to key on. It served the emulator and nothing
+    /// else; `run` with an empty argv does the same and holds the
+    /// session until it is stopped.
+    #[test]
+    fn daemon_only_without_a_workload_routes_to_run() {
+        assert_eq!(
+            rewrite(&["rocjitsu", "--daemon", "--config", "c.json"]),
+            v_args(&["rocjitsu", "run", "--daemon", "--config", "c.json"])
+        );
+        // Without `--daemon` there is no such form: a config and no
+        // workload is the mistake upstream also refused, and clap's
+        // report of it is better than one invented here.
+        let bare = &["rocjitsu", "--config", "c.json"][..];
+        assert_eq!(rewrite(bare), v_args(bare));
     }
 
     #[test]
@@ -679,13 +900,11 @@ mod tests {
         );
     }
 
-    /// `--attach` is the upstream `rocjitsu` spelling of `--daemon`, and
-    /// `run` declares it as a clap alias, so the rewriter passes it
-    /// through untouched rather than translating it. It used to do the
-    /// translation itself, which meant the alias worked only on the
-    /// drop-in path: `rocjitsu run --attach -- app` brought a session up
-    /// and exited 127 with `command not found: --attach`. One mechanism
-    /// cannot disagree with itself.
+    /// `--attach` reaches `run` untouched, where it is refused with an
+    /// explanation. The rewriter does not translate it: it used to mean
+    /// `--daemon`, which is not what upstream did with it, and turning
+    /// one into the other here would bury the explanation under a mode
+    /// the user did not ask for.
     #[test]
     fn attach_reaches_run_untranslated() {
         assert_eq!(
@@ -702,11 +921,12 @@ mod tests {
         }
     }
 
-    /// And the alias really is accepted by the parser, which is the half
-    /// the rewriter now relies on: if `run` ever stopped declaring it,
-    /// the test above would still pass while every spelling broke.
+    /// And the parser really does accept it, which is the half the
+    /// rewriter relies on: if `run` ever stopped declaring `--attach`,
+    /// the test above would still pass while the spelling this CLI is a
+    /// drop-in for turned into "unexpected argument".
     #[test]
-    fn run_accepts_the_attach_alias() {
+    fn run_accepts_the_attach_spelling() {
         use clap::Parser as _;
         for argv in [
             &["rocjitsu", "run", "--attach", "--", "./app"][..],
@@ -716,8 +936,10 @@ mod tests {
         }
     }
 
-    /// The translation stops at the separator: `--attach` is a rocjitsu
-    /// flag in front of it and the workload's own argument behind it.
+    /// The rewriter stops at the separator: `--attach` is a rocjitsu flag
+    /// in front of it and the workload's own argument behind it. Behind
+    /// it, it does not even count as asking for a daemon — which is why
+    /// the second case still gets the in-process default.
     #[test]
     fn attach_after_the_separator_belongs_to_the_workload() {
         assert_eq!(
@@ -726,7 +948,7 @@ mod tests {
         );
         assert_eq!(
             rewrite(&["rocjitsu", "--", "./app", "--attach"]),
-            v_args(&["rocjitsu", "run", "--", "./app", "--attach"])
+            v_args(&["rocjitsu", "run", "--in-process", "--", "./app", "--attach"])
         );
     }
 
@@ -756,6 +978,7 @@ mod tests {
                 "rocjitsu",
                 "--json",
                 "run",
+                "--in-process",
                 "--profile",
                 "mi350x",
                 "--",
@@ -804,9 +1027,19 @@ mod tests {
                     "`rocjitsu run` accepts {flag} but the drop-in rewriter would \
                      refuse it before `--`"
                 );
+                // A flag that names the execution mode is answering the
+                // question the in-process default exists to answer, so
+                // nothing is supplied alongside it.
+                let names_the_mode =
+                    matches!(flag.as_str(), "--daemon" | "--attach" | "--in-process");
+                let mut want = vec!["rocjitsu", "run"];
+                if !names_the_mode {
+                    want.push("--in-process");
+                }
+                want.extend([flag.as_str(), "x", "--", "./app"]);
                 assert_eq!(
                     rewrite(&["rocjitsu", &flag, "x", "--", "./app"]),
-                    v_args(&["rocjitsu", "run", &flag, "x", "--", "./app"]),
+                    v_args(&want),
                     "{flag} should route to `run`, not be refused"
                 );
             }
@@ -833,7 +1066,15 @@ mod tests {
     fn a_negative_value_is_not_mistaken_for_a_flag() {
         assert_eq!(
             rewrite(&["rocjitsu", "--num-nodes", "-1", "--", "./app"]),
-            v_args(&["rocjitsu", "run", "--num-nodes", "-1", "--", "./app"])
+            v_args(&[
+                "rocjitsu",
+                "run",
+                "--in-process",
+                "--num-nodes",
+                "-1",
+                "--",
+                "./app"
+            ])
         );
     }
 
@@ -843,11 +1084,25 @@ mod tests {
     fn joined_flag_values_are_recognised() {
         assert_eq!(
             rewrite(&["rocjitsu", "--config=c.json", "--", "./app"]),
-            v_args(&["rocjitsu", "run", "--config=c.json", "--", "./app"])
+            v_args(&[
+                "rocjitsu",
+                "run",
+                "--in-process",
+                "--config=c.json",
+                "--",
+                "./app"
+            ])
         );
         assert_eq!(
             rewrite(&["rocjitsu", "-okey=value", "--", "./app"]),
-            v_args(&["rocjitsu", "run", "-okey=value", "--", "./app"])
+            v_args(&[
+                "rocjitsu",
+                "run",
+                "--in-process",
+                "-okey=value",
+                "--",
+                "./app"
+            ])
         );
     }
 
@@ -902,7 +1157,7 @@ mod tests {
             );
             assert_eq!(
                 rewrite(&["rocjitsu", v, "--", "./app"]),
-                v_args(&["rocjitsu", v, "run", "--", "./app"]),
+                v_args(&["rocjitsu", v, "run", "--in-process", "--", "./app"]),
                 "{v} should be stepped over when splicing `run`"
             );
         }
@@ -1007,7 +1262,15 @@ mod tests {
         assert!(!is_subcommand("definitely-not-a-subcommand"));
         assert_eq!(
             rewrite(&["rocjitsu", "--config", "c.json", "--", "./app"]),
-            v_args(&["rocjitsu", "run", "--config", "c.json", "--", "./app"])
+            v_args(&[
+                "rocjitsu",
+                "run",
+                "--in-process",
+                "--config",
+                "c.json",
+                "--",
+                "./app"
+            ])
         );
     }
 
@@ -1081,5 +1344,109 @@ mod tests {
         assert_eq!(dropin_argv(args.clone()).unwrap(), args);
         let help = v_args(&["rocjitsu", "--help"]);
         assert_eq!(dropin_argv(help.clone()).unwrap(), help);
+    }
+
+    /// `--vfio-socket` routes to its own subcommand, not to `run`.
+    ///
+    /// The C++ CLI dispatched it before it built a machine, and the mode
+    /// it starts cannot share `run`'s signal handling: the server takes
+    /// SIGINT, SIGTERM and SIGUSR1 for itself, and `run` means something
+    /// else by each of them.
+    #[cfg(feature = "rocjitsu")]
+    #[test]
+    fn a_vfio_socket_routes_to_its_own_subcommand() {
+        assert_eq!(
+            rewrite(&["rocjitsu", "--config", "c.json", "--vfio-socket", "/tmp/s"]),
+            v_args(&[
+                "rocjitsu",
+                "vfio-serve",
+                "--config",
+                "c.json",
+                "--vfio-socket",
+                "/tmp/s"
+            ])
+        );
+        // The joined spelling is the same request.
+        assert_eq!(
+            rewrite(&["rocjitsu", "--config", "c.json", "--vfio-socket=/tmp/s"]),
+            v_args(&[
+                "rocjitsu",
+                "vfio-serve",
+                "--config",
+                "c.json",
+                "--vfio-socket=/tmp/s"
+            ])
+        );
+        // An explicit subcommand is left alone, as every other one is.
+        let explicit = &[
+            "rocjitsu",
+            "vfio-serve",
+            "--config",
+            "c.json",
+            "--vfio-socket",
+            "/tmp/s",
+        ][..];
+        assert_eq!(rewrite(explicit), v_args(explicit));
+    }
+
+    /// And it is a whole mode, so it refuses to be half of one.
+    #[cfg(feature = "rocjitsu")]
+    #[test]
+    fn a_vfio_socket_refuses_to_be_combined_with_a_run() {
+        for argv in [
+            &[
+                "rocjitsu",
+                "--config",
+                "c.json",
+                "--vfio-socket",
+                "/tmp/s",
+                "--",
+                "./app",
+            ][..],
+            &[
+                "rocjitsu",
+                "--daemon",
+                "--config",
+                "c.json",
+                "--vfio-socket",
+                "/tmp/s",
+            ][..],
+            &[
+                "rocjitsu",
+                "--attach",
+                "--config",
+                "c.json",
+                "--vfio-socket",
+                "/tmp/s",
+            ][..],
+        ] {
+            let msg = refuse(argv);
+            assert!(msg.contains("--vfio-socket"), "{argv:?}: {msg}");
+            assert!(msg.contains("vfio-serve"), "{argv:?}: {msg}");
+        }
+    }
+
+    /// The parser really does accept what the rewriter produces.
+    #[cfg(feature = "rocjitsu")]
+    #[test]
+    fn vfio_serve_parses_what_the_rewriter_builds() {
+        use clap::Parser as _;
+        let argv = rewrite(&["rocjitsu", "--config", "c.json", "--vfio-socket", "/tmp/s"]);
+        let cli = Cli::try_parse_from(&argv).unwrap_or_else(|e| panic!("{argv:?}: {e}"));
+        match cli.command {
+            TopCmd::VfioServe(a) => {
+                assert_eq!(a.config, "c.json");
+                assert_eq!(a.vfio_socket, "/tmp/s");
+            }
+            other => panic!("{argv:?} should be vfio-serve, not {other:?}"),
+        }
+        // Both halves are required: a socket with nothing to serve on it,
+        // or a config with nowhere to serve it, is not a usable request.
+        for partial in [
+            &["rocjitsu", "vfio-serve", "--config", "c.json"][..],
+            &["rocjitsu", "vfio-serve", "--vfio-socket", "/tmp/s"][..],
+        ] {
+            Cli::try_parse_from(partial).expect_err(&format!("{partial:?} is incomplete"));
+        }
     }
 }

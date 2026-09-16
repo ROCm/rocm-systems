@@ -31,11 +31,27 @@ const KFD_NODES: &str = "/sys/class/kfd/kfd/topology/nodes";
 const KFD_NODES_DEVICE: &str = "/sys/devices/virtual/kfd/kfd/topology/nodes";
 
 /// Enumerate the `gfx_target_version` of every GPU node the kernel's
-/// KFD topology exposes on this host. Returns an empty vector when no
-/// AMD GPU is present or the KFD interface is unavailable. CPU-only
-/// nodes (`gfx_target_version 0`) are excluded.
+/// KFD topology exposes on this host, in [`kfd_gpus`] order. Returns an
+/// empty vector when no AMD GPU is present or the KFD interface is
+/// unavailable. CPU-only nodes are excluded.
+///
+/// A projection of [`kfd_gpus`] rather than a second walk of the same
+/// sysfs tree. The two had drifted in three ways, and every one of them
+/// was a way for two backends to disagree about the same machine: this
+/// read only the class view, so a container that mounts just
+/// `/sys/devices/virtual/kfd` had GPUs in DBT guest mode and none in
+/// HotSwap or `rocjitsu-dbt`; it returned nodes in `readdir` order,
+/// which is arbitrary; and it identified CPU nodes by a zero
+/// `gfx_target_version` where the other uses a zero `gpu_id`.
+#[must_use]
 pub fn gpu_gfx_versions() -> Vec<u32> {
-    detect_from(Path::new(KFD_NODES))
+    kfd_gpus()
+        .into_iter()
+        .map(|gpu| gpu.gfx_target_version)
+        // A GPU node that does not name its architecture tells a caller
+        // asking only about architectures nothing.
+        .filter(|version| *version != 0)
+        .collect()
 }
 
 /// Render a packed `gfx_target_version` as a conventional `gfxNNN`
@@ -77,13 +93,20 @@ pub fn gfx_target_version_from_name(name: &str) -> Option<u32> {
 /// inside ROCR. Returns an empty vector when no AMD GPU is present.
 #[must_use]
 pub fn kfd_gpus() -> Vec<VisibleGpu> {
-    for root in [KFD_NODES_DEVICE, KFD_NODES] {
-        let root = Path::new(root);
-        if root.is_dir() {
-            return kfd_gpus_from(root);
-        }
+    match kfd_nodes_root(&[Path::new(KFD_NODES_DEVICE), Path::new(KFD_NODES)]) {
+        Some(root) => kfd_gpus_from(root),
+        None => Vec::new(),
     }
-    Vec::new()
+}
+
+/// The first of `roots` that exists.
+///
+/// Split out so the fallback itself can be tested: which of the two
+/// sysfs views is present is a property of the host — or of what a
+/// container was given — and is not something a test can arrange for the
+/// real paths.
+fn kfd_nodes_root<'a>(roots: &[&'a Path]) -> Option<&'a Path> {
+    roots.iter().copied().find(|root| root.is_dir())
 }
 
 /// Read the GPU nodes under `root`. Split out from [`kfd_gpus`] so it
@@ -148,49 +171,36 @@ fn parse_property(properties: &str, key: &str) -> Option<u64> {
     None
 }
 
-/// Read the GPU nodes under `root`, collecting the non-zero
-/// `gfx_target_version` of each. Split out from [`gpu_gfx_versions`] so
-/// it can be exercised against a fixture directory in tests.
-fn detect_from(root: &Path) -> Vec<u32> {
-    let mut out = Vec::new();
-    let Ok(entries) = fs::read_dir(root) else {
-        return out;
-    };
-    for entry in entries.flatten() {
-        let props = entry.path().join("properties");
-        let Ok(text) = fs::read_to_string(&props) else {
-            continue;
-        };
-        if let Some(v) = parse_gfx_target_version(&text)
-            && v != 0
-        {
-            out.push(v);
-        }
-    }
-    out
-}
-
-/// Pull the `gfx_target_version` value out of a KFD node `properties`
-/// file.
-fn parse_gfx_target_version(properties: &str) -> Option<u32> {
-    parse_property(properties, "gfx_target_version").and_then(|v| u32::try_from(v).ok())
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
 
+    /// Write a KFD node directory as sysfs presents one.
+    fn node(root: &Path, id: u32, gpu_id: u32, gfx: u64, unique: u64) {
+        let dir = root.join(id.to_string());
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("gpu_id"), format!("{gpu_id}\n")).unwrap();
+        fs::write(
+            dir.join("properties"),
+            format!("simd_count 304\ngfx_target_version {gfx}\nunique_id {unique}\n"),
+        )
+        .unwrap();
+    }
+
     #[test]
     fn parses_gfx_target_version_line() {
         let props = "cpu_cores_count 0\ngfx_target_version 90402\nsimd_count 304\n";
-        assert_eq!(parse_gfx_target_version(props), Some(90402));
+        assert_eq!(parse_property(props, "gfx_target_version"), Some(90402));
     }
 
     #[test]
     fn missing_gfx_target_version_is_none() {
-        assert_eq!(parse_gfx_target_version("cpu_cores_count 16\n"), None);
+        assert_eq!(
+            parse_property("cpu_cores_count 16\n", "gfx_target_version"),
+            None
+        );
     }
 
     #[test]
@@ -200,29 +210,63 @@ mod tests {
         assert_eq!(gfx_name(90010), "gfx90a");
     }
 
+    /// The architecture list is the GPU list, in the same order.
+    ///
+    /// These were two walks of the same sysfs tree and they disagreed:
+    /// this one returned `readdir` order, so the architectures came back
+    /// in an order that need not match the ordinals every visibility
+    /// selector is written against.
     #[test]
-    fn detect_skips_cpu_nodes_and_collects_gpus() {
-        let dir = std::env::temp_dir().join(format!("rocjitsu-hw-test-{}", std::process::id()));
-        let node0 = dir.join("0");
-        let node1 = dir.join("1");
-        fs::create_dir_all(&node0).unwrap();
-        fs::create_dir_all(&node1).unwrap();
-        // CPU node: gfx_target_version 0 -> skipped.
-        fs::write(
-            node0.join("properties"),
-            "cpu_cores_count 16\ngfx_target_version 0\n",
-        )
-        .unwrap();
-        // GPU node.
-        fs::write(
-            node1.join("properties"),
-            "simd_count 304\ngfx_target_version 90402\n",
-        )
-        .unwrap();
+    fn architectures_come_back_in_kfd_order() {
+        let dir = std::env::temp_dir().join(format!("rocjitsu-hw-order-{}", std::process::id()));
+        fs::remove_dir_all(&dir).ok();
+        // Out of order on purpose, and with the CPU node in the middle.
+        node(&dir, 4, 0x9500, 90500, 0x2222);
+        node(&dir, 0, 0, 0, 0);
+        node(&dir, 2, 0x9400, 90402, 0x1111);
 
-        let mut found = detect_from(&dir);
-        found.sort_unstable();
-        assert_eq!(found, vec![90402]);
+        let gpus = kfd_gpus_from(&dir);
+        let versions: Vec<u32> = gpus.iter().map(|g| g.gfx_target_version).collect();
+        assert_eq!(
+            versions,
+            vec![90402, 90500],
+            "node 2 before node 4, and the CPU node in neither"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Both views of the same topology are consulted, device path first.
+    ///
+    /// A container may be given only one of them. Reading just the class
+    /// view is what made such a container look GPU-less to HotSwap and
+    /// `rocjitsu-dbt` while DBT guest mode, which asks the other
+    /// function, saw its GPUs.
+    #[test]
+    fn the_device_view_is_tried_before_the_class_view() {
+        let dir = std::env::temp_dir().join(format!("rocjitsu-hw-roots-{}", std::process::id()));
+        fs::remove_dir_all(&dir).ok();
+        let device = dir.join("device");
+        let class = dir.join("class");
+        let absent = dir.join("absent");
+        fs::create_dir_all(&device).unwrap();
+        fs::create_dir_all(&class).unwrap();
+
+        assert_eq!(
+            kfd_nodes_root(&[&device, &class]),
+            Some(device.as_path()),
+            "the device view wins when both are present"
+        );
+        assert_eq!(
+            kfd_nodes_root(&[&absent, &class]),
+            Some(class.as_path()),
+            "the class view answers when the device view is absent"
+        );
+        assert_eq!(
+            kfd_nodes_root(&[&absent]),
+            None,
+            "a host with neither has no KFD topology"
+        );
 
         fs::remove_dir_all(&dir).ok();
     }
@@ -230,7 +274,7 @@ mod tests {
     #[test]
     fn missing_root_yields_empty() {
         let missing = std::env::temp_dir().join("rocjitsu-hw-does-not-exist-xyz");
-        assert!(detect_from(&missing).is_empty());
+        assert!(kfd_gpus_from(&missing).is_empty());
     }
 
     #[test]

@@ -122,11 +122,16 @@ pub enum Request {
     /// node takes. A caller that needs to know when it is finished
     /// watches the socket go away rather than waiting on this reply.
     ///
-    /// This is the only request that changes anything, and it exists for
-    /// one shape: a session started without a workload, which has nothing
-    /// of its own to finish and would otherwise be ended only by
-    /// signalling the run process directly. That works but needs a pid;
-    /// the socket is what a caller already has.
+    /// This is the only request that changes anything, and it applies to
+    /// a session in any state: still starting, running a workload, or
+    /// held open with none. A run that is still bringing its session up
+    /// abandons what it has built; one supervising a workload terminates
+    /// it first, because the workload is the session's and stopping the
+    /// session while leaving it running would be an answer that is true
+    /// of the flag and false of the machine.
+    ///
+    /// Signalling the run process directly does the same thing, but
+    /// needs a pid; the socket is what a caller already has.
     Stop,
 }
 

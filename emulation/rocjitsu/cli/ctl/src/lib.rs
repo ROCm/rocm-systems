@@ -891,25 +891,28 @@ pub struct RunArgs {
         conflicts_with_all = ["gpus_per_node", "exec_mode", "options", "plugins"]
     )]
     config: Option<String>,
-    /// Run the emulator in out-of-process daemon mode. This is the
-    /// default; the flag is accepted for explicitness and under the
-    /// upstream `rocjitsu` spelling `--attach`, which means the same
-    /// thing here: rocjitsu owns the emulator's whole lifecycle, so
-    /// "attach to a daemon" and "use a daemon" are one request.
-    // Declared here rather than only rewritten on the way in. `rocjitsu
-    // run --attach` already worked, but the rewrite happens before clap
-    // ever sees the arguments, so `rocjitsu run --help` omitted a spelling
-    // the drop-in help offers — and the one page a user checks a `run`
-    // flag against was the page that denied it. Not a doc comment:
-    // `--help` prints those.
-    #[arg(long, visible_alias = "attach", conflicts_with = "in_process")]
+    /// Run the emulator in an out-of-process daemon, which several
+    /// processes can share. `rocjitsu run` uses one unless told
+    /// otherwise; a drop-in `rocjitsu --config … -- <app>` does not, as
+    /// the upstream CLI did not, and this is how such an invocation asks
+    /// for one.
+    #[arg(long, conflicts_with = "in_process")]
     daemon: bool,
-    /// Run the emulator in-process (local mode) instead of the default
-    /// out-of-process daemon. In-process mode cannot share GPU memory
-    /// across processes, so multi-GPU RCCL collectives require the
-    /// daemon (the default).
+    /// Run the emulator in-process (local mode) instead of a daemon.
+    /// In-process mode cannot share GPU memory across processes, so
+    /// multi-GPU RCCL collectives require the daemon.
     #[arg(long = "in-process")]
     in_process: bool,
+    // Upstream `rocjitsu --attach` joined a daemon that something else
+    // had already started, at a well-known socket. rocjitsu has no such
+    // thing: every daemon belongs to the run that started it and dies
+    // with it, so there is no foreign one to join and no socket to look
+    // for. Accepted and refused with that explanation rather than left
+    // to clap, which would call a spelling this CLI is meant to be a
+    // drop-in for an "unexpected argument". Hidden: it is not an option,
+    // it is an epitaph.
+    #[arg(long, hide = true)]
+    attach: bool,
     // No `--capture-all`. Whether output is multiplexed is decided by
     // the shape of the job, not by a flag: one process gets the terminal
     // and its stdin, several get their output labelled and none of them
@@ -983,6 +986,7 @@ impl Default for RunArgs {
             config: None,
             daemon: false,
             in_process: false,
+            attach: false,
             clear_env_vars: false,
             gdb: false,
             gdb_ex: Vec::new(),
@@ -2122,7 +2126,7 @@ const CONFIG_SECTIONS: [&str; 2] = ["vm", "topology"];
 /// emulate one at all, when the host is real hardware), so it carries
 /// neither of [`CONFIG_SECTIONS`] and is still a config the emulator
 /// takes. See `emulation/rocjitsu/configs/guest_*.json`.
-const GUEST_SECTION: &str = "dbt_guest";
+const GUEST_SECTION: &str = rj_core::config::DBT_GUEST_SECTION;
 
 /// Resolve `--config <path>` to an absolute path, having checked that it
 /// is a config file the emulator can actually be given.
@@ -2171,8 +2175,11 @@ fn check_config_file(path: &str) -> anyhow::Result<std::path::PathBuf> {
     })?;
     // A guest config is the other shape a config comes in, and it is
     // structurally nothing like the first: no `vm`, no `topology`, just
-    // the guest device and the host to lay it over.
-    if doc.get(GUEST_SECTION).is_some() {
+    // the guest device and the host to lay it over. Only an enabled
+    // block is that shape. A disabled one is an ordinary config carrying
+    // settings for a guest it is not using, and it still owes the
+    // sections below — which is what the emulator will ask it for.
+    if rj_core::config::enabled_dbt_guest(&doc).is_some() {
         return Ok(abs);
     }
     let missing: Vec<&str> = CONFIG_SECTIONS
@@ -2181,9 +2188,22 @@ fn check_config_file(path: &str) -> anyhow::Result<std::path::PathBuf> {
         .filter(|section| doc.get(section).is_none())
         .collect();
     if !missing.is_empty() {
+        // A `dbt_guest` that is present but switched off is a different
+        // mistake from one that was never written, and it has a
+        // different fix. Saying "no `dbt_guest` section either" to
+        // somebody looking at one would send them to add what they can
+        // already see.
+        let guest = if doc.get(GUEST_SECTION).is_some() {
+            format!(
+                ". Its `{GUEST_SECTION}` section does not count: that describes a machine \
+                 only with `\"enabled\": true`, and this one does not say so"
+            )
+        } else {
+            format!(", and no `{GUEST_SECTION}` section either")
+        };
         anyhow::bail!(
             "--config {path}: this is JSON, but not an emulator config — it has no {} \
-             {}, and no `{GUEST_SECTION}` section either. A config describes the machine \
+             {}{guest}. A config describes the machine \
              to emulate, and is the same file the upstream `rocjitsu --config` takes; \
              `rocjitsu profile show <name>` is the profile rocjitsu would have built one from.",
             and_list(&missing),
@@ -2208,7 +2228,7 @@ pub(crate) fn names_a_guest_config(profile: &ProfileDef) -> bool {
     std::fs::read(path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-        .is_some_and(|doc| doc.get(GUEST_SECTION).is_some())
+        .is_some_and(|doc| rj_core::config::enabled_dbt_guest(&doc).is_some())
 }
 
 /// Names the emulator config file to hand the backend verbatim, the
@@ -3675,28 +3695,38 @@ mod tests {
     }
 
     #[test]
-    fn run_declares_the_rocjitsu_spelling_of_daemon_rather_than_only_accepting_it() {
-        // `--attach` reached `run` by a rewrite in the binary, before
-        // clap saw the arguments, so `rocjitsu run --help` did not list a
-        // flag the drop-in help offers — and the page a user checks a
-        // `run` flag against was the page that denied it.
-        // As clap's own alias line, not as a word in the prose beside it:
-        // a flag that is only *described* is still a flag `--help` does
-        // not offer.
+    fn attach_parses_so_that_it_can_be_refused_with_a_reason() {
+        // `--attach` used to be a clap alias of `--daemon`, which is not
+        // what it meant: upstream it joined a daemon something else had
+        // started. rocjitsu has no such daemon, so the honest answer is a
+        // refusal that says why — and to give one, the flag has to parse.
+        let a = parse_run(&["--attach", "--", "./app"]).unwrap();
+        assert!(a.attach);
+        assert!(!a.daemon, "--attach is not a spelling of --daemon");
+        assert!(!parse_run(&["--", "./app"]).unwrap().attach);
+
+        // Hidden, because offering it in `--help` would advertise a mode
+        // this CLI does not have.
         let help = run_long_help();
         assert!(
-            help.contains("[aliases: --attach]"),
-            "`rocjitsu run --help` must list the spelling it accepts:\n{help}"
+            !help.contains("--attach"),
+            "`--attach` is accepted, not offered:\n{help}"
         );
+    }
 
-        // Declared, so it parses here too and means exactly `--daemon`.
+    /// And the refusal itself, which is the part a user reads.
+    #[test]
+    fn attach_is_refused_by_pointing_at_what_replaces_it() {
+        let profile = sample_profile();
         let a = parse_run(&["--attach", "--", "./app"]).unwrap();
-        assert!(a.daemon, "--attach is --daemon");
-        assert!(!parse_run(&["--", "./app"]).unwrap().daemon);
-        // Including the conflict, which is the whole content of the flag:
-        // one emulator cannot be both in-process and out of it.
-        parse_run(&["--attach", "--in-process", "--", "./app"])
-            .expect_err("`--attach --in-process` contradicts itself");
+        let e = run::check_run_args(&a, &profile)
+            .expect_err("--attach names a mode rocjitsu does not have")
+            .to_string();
+        assert!(e.contains("--attach"), "{e}");
+        assert!(
+            e.contains("rocjitsu exec --session"),
+            "the refusal has to name the thing to use instead: {e}"
+        );
     }
 
     /// Parse a whole `rocjitsu …` command line as the binary does.
@@ -3984,11 +4014,13 @@ mod tests {
         // every one of them: `configs/guest_*.json` carry a `dbt_guest`
         // block and nothing else, because the machine to emulate is
         // named by that block's `simulator_config` (or is real hardware,
-        // and there is no machine to describe at all).
+        // and there is no machine to describe at all). Enabled, as every
+        // shipped one is — a block turned off buys no exemption, since
+        // the emulator would then want the sections above.
         let guest = dir.path().join("guest.json");
         std::fs::write(
             &guest,
-            r#"{"dbt_guest": {"guest_isa": "gfx950", "host_isa": "gfx942"}}"#,
+            r#"{"dbt_guest": {"enabled": true, "guest_isa": "gfx950", "host_isa": "gfx942"}}"#,
         )
         .unwrap();
         assert!(
@@ -4008,8 +4040,66 @@ mod tests {
         );
     }
 
+    /// A `dbt_guest` that is not an enabled block is no exemption from
+    /// describing a machine.
+    ///
+    /// The exemption above used to be granted on the key alone, so any
+    /// of these shapes skipped the `vm`/`topology` check entirely. A
+    /// config describing neither an ordinary machine nor an enabled
+    /// guest then reached the emulator, where `guest::load` said it was
+    /// not guest mode and the run proceeded as if the file had been
+    /// fine: `rocjitsu --config disabled.json -- /bin/true` exited 0
+    /// having emulated nothing.
     #[test]
-    fn a_guest_config_is_recognised_by_its_section_alone() {
+    fn a_disabled_or_malformed_guest_block_is_not_a_machine_description() {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, body) in [
+            ("off.json", r#"{"dbt_guest": {"enabled": false}}"#),
+            ("unset.json", r#"{"dbt_guest": {"guest_isa": "gfx950"}}"#),
+            ("null.json", r#"{"dbt_guest": null}"#),
+            ("number.json", r#"{"dbt_guest": 5}"#),
+            ("array.json", r#"{"dbt_guest": []}"#),
+            ("string.json", r#"{"dbt_guest": "enabled"}"#),
+        ] {
+            let path = dir.path().join(name);
+            std::fs::write(&path, body).unwrap();
+            let e = check_config_file(&path.to_string_lossy())
+                .unwrap_err()
+                .to_string();
+            assert!(
+                e.contains("not an emulator config"),
+                "{name} describes no machine: {e}"
+            );
+        }
+
+        // And the refusal tells the two apart. A block that is present
+        // but off is a different mistake from one never written, and
+        // being told to add what you are looking at helps nobody.
+        let off = dir.path().join("off.json");
+        let e = check_config_file(&off.to_string_lossy())
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains(r#""enabled": true"#), "{e}");
+        assert!(
+            !e.contains("no `dbt_guest` section either"),
+            "the section is right there: {e}"
+        );
+
+        // The same block, switched on, is a machine description.
+        let on = dir.path().join("on.json");
+        std::fs::write(&on, r#"{"dbt_guest": {"enabled": true}}"#).unwrap();
+        assert!(check_config_file(&on.to_string_lossy()).is_ok());
+    }
+
+    /// The section is not the switch; `enabled` is.
+    ///
+    /// The emulator reads `dbt_guest.enabled` and treats everything else
+    /// as an ordinary config. Answering this on the section alone put a
+    /// config with the block turned off into in-process mode nobody
+    /// asked for, and refused `--daemon` for a guest it would never have
+    /// built.
+    #[test]
+    fn a_guest_config_is_one_whose_guest_is_enabled() {
         let dir = tempfile::tempdir().unwrap();
         let mut profile = sample_profile();
         // No `--config` at all: the common case, and the one that must
@@ -4034,11 +4124,30 @@ mod tests {
         );
         assert!(!names_a_guest_config(&profile));
 
+        // A block with no `enabled` key, and one that says so outright,
+        // are the same answer: the emulator defaults it off.
+        set(
+            &mut profile,
+            write(
+                "unset.json",
+                r#"{"dbt_guest": {"guest_isa": "gfx950", "host_isa": "gfx942"}}"#,
+            ),
+        );
+        assert!(!names_a_guest_config(&profile));
+        set(
+            &mut profile,
+            write(
+                "off.json",
+                r#"{"dbt_guest": {"enabled": false, "guest_isa": "gfx950", "host_isa": "gfx942"}}"#,
+            ),
+        );
+        assert!(!names_a_guest_config(&profile));
+
         set(
             &mut profile,
             write(
                 "guest.json",
-                r#"{"dbt_guest": {"guest_isa": "gfx950", "host_isa": "gfx942"}}"#,
+                r#"{"dbt_guest": {"enabled": true, "guest_isa": "gfx950", "host_isa": "gfx942"}}"#,
             ),
         );
         assert!(names_a_guest_config(&profile));
@@ -4619,10 +4728,11 @@ exit 0
 
         let run = run_long_help();
         assert!(
-            !run.contains("Declared here rather than only rewritten"),
+            !run.contains("it is an epitaph"),
             "why `--attach` is declared here is not a user's question:\n{run}"
         );
-        assert!(run.contains("[aliases: --attach]"), "{run}");
+        // What `--daemon` is for is still there.
+        assert!(run.contains("several processes can share"), "{run}");
     }
 
     /// A prompt is put only to a terminal, and to nothing else.

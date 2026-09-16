@@ -37,6 +37,7 @@ use std::os::raw::{c_char, c_int, c_void};
 type FnGetVersionString = unsafe extern "C" fn() -> *const c_char;
 
 type FnDbtWriteHandoff = unsafe extern "C" fn(*const c_char, *const c_char, u32) -> c_int;
+type FnRunVfioServer = unsafe extern "C" fn(*const c_char, *const c_char) -> c_int;
 
 /// Load and copy the formatted build identity exported by `librocjitsu.so`.
 ///
@@ -45,7 +46,7 @@ type FnDbtWriteHandoff = unsafe extern "C" fn(*const c_char, *const c_char, u32)
 /// Returns a diagnostic when the library cannot be loaded, predates the version
 /// API, or violates the API's non-null string contract.
 pub fn version_string(path: impl AsRef<OsStr>) -> Result<String, String> {
-    // SAFETY: RocJITsu's RocJITsu discovery selects the library. The resolved
+    // SAFETY: the CLI's own library discovery selects the path. The resolved
     // symbol has the C signature declared in rj_version.h, and its static string
     // is copied while the library remains loaded.
     unsafe {
@@ -104,7 +105,7 @@ pub fn write_dbt_handoff(
 ) -> Result<(), String> {
     let runtime_dir = path_to_cstring(runtime_dir)?;
     let config_path = path_to_cstring(config_path)?;
-    // SAFETY: RocJITsu's RocJITsu discovery selects the library. The resolved
+    // SAFETY: the caller's library discovery selects the path. The resolved
     // symbol has the C signature declared in rj_dbt.h, and both strings
     // outlive the call.
     unsafe {
@@ -119,6 +120,89 @@ pub fn write_dbt_handoff(
         match write_handoff(runtime_dir.as_ptr(), config_path.as_ptr(), host_gpu_id) {
             ROCJITSU_STATUS_SUCCESS => Ok(()),
             status => Err(format!("rj_dbt_write_handoff failed with status {status}")),
+        }
+    }
+}
+
+/// Serve the GPU `config_path` describes to a VMM on `socket_path`,
+/// through the library's own vfio-user server (`rj_run_vfio_server`).
+///
+/// Returns the server's exit status: zero on an orderly shutdown.
+///
+/// # Blocking and signals
+///
+/// Blocks for the lifetime of the server, on the calling thread. While
+/// it runs it blocks `SIGINT`, `SIGTERM` and `SIGUSR1` and consumes them
+/// itself — the first two stop it, the third delivers an interrupt to
+/// the emulated device. A caller that has installed handlers for those
+/// will not see them until this returns, so this must not be called from
+/// a process that has: see the CLI's own dispatch, which reaches this
+/// before it arms anything.
+///
+/// # Errors
+///
+/// Returns a diagnostic when the library cannot be loaded, or when it
+/// was built without vfio-user support and so does not export the entry
+/// point at all.
+pub fn run_vfio_server(
+    library: impl AsRef<OsStr>,
+    config_path: &std::path::Path,
+    socket_path: &std::path::Path,
+) -> Result<c_int, String> {
+    let config_path = path_to_cstring(config_path)?;
+    let socket_path = path_to_cstring(socket_path)?;
+    // SAFETY: rocjitsu's own discovery selects the library. The resolved
+    // symbol has the C signature declared in rj_vfio.h, and both strings
+    // outlive the call.
+    unsafe {
+        let lib = libloading::Library::new(library.as_ref()).map_err(|error| error.to_string())?;
+        let serve = *lib
+            .get::<FnRunVfioServer>(b"rj_run_vfio_server\0")
+            .map_err(|_| {
+                "librocjitsu.so does not export rj_run_vfio_server; this build has no \
+             vfio-user support. Reconfigure rocjitsu with -DROCJITSU_ENABLE_VFIO=ON."
+                    .to_string()
+            })?;
+        Ok(serve(config_path.as_ptr(), socket_path.as_ptr()))
+    }
+}
+
+/// Build a VM from `json` and immediately release it, reporting whether
+/// the emulator accepted the config.
+///
+/// The question is not academic and cannot be answered by inspecting the
+/// document: the loader enforces relationships between fields, and the
+/// one that says `num_sdma_queues_per_engine` must be nonzero when
+/// `num_sdma_engines` is shipped in three profiles that no test of the
+/// config's own fields could have caught. Every session begins by
+/// putting a config through this, so a test that wants to know a config
+/// will start a session has to ask the same code.
+///
+/// Safe, deliberately: the rest of the workspace forbids `unsafe`, so
+/// without a wrapper the only callers able to check this are inside this
+/// crate — which is the wrong place for a test about what the builtin
+/// profiles generate.
+///
+/// # Errors
+///
+/// Returns the loader's status when it refuses the config, or a
+/// diagnostic when the library cannot be loaded at all. The emulator
+/// prints its own reason to stderr on the way out.
+pub fn config_is_loadable(library: impl AsRef<OsStr>, json: &CStr) -> Result<(), String> {
+    // SAFETY: the library is rocjitsu's own, `json` is a valid C string
+    // for the whole call, and the VM this creates is destroyed below
+    // before the handle goes out of scope.
+    unsafe {
+        let lib = Lib::open(library.as_ref()).map_err(|error| error.to_string())?;
+        let (status, vm) = lib.vm_create_from_string(json, RjVmMode::Default);
+        if !vm.is_null() {
+            lib.vm_destroy(vm);
+        }
+        match status {
+            ROCJITSU_STATUS_SUCCESS => Ok(()),
+            status => Err(format!(
+                "rj_vm_create_from_string rejected the config: {status}"
+            )),
         }
     }
 }

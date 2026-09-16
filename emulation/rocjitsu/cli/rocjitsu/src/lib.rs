@@ -13,7 +13,7 @@
 //!   topology + agent references and wrapping them with rocjitsu's
 //!   required runtime fields.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rj_core::agent::AgentDef;
 use rj_core::common::{MaybeRef, SimpleMap, SimpleValue};
@@ -180,7 +180,7 @@ impl EmulatorBackend for Rocjitsu {
 
     fn injection_def(&self, ctx: &SessionContext) -> Result<InjectionDef> {
         let def = ctx.emulator();
-        let config = kmd_config(def, &ctx.runtime_dir)?;
+        let config = session_config(ctx)?;
         // Refuse to run unemulated: if the KMD interposer can't be
         // located there is nothing to emulate the workload, so fail
         // loudly rather than silently running on real hardware.
@@ -366,7 +366,10 @@ impl EmulatorBackend for Rocjitsu {
             );
             return Ok(None);
         };
-        let config = kmd_config(ctx.emulator(), &ctx.runtime_dir)?;
+        // The daemon is the one load the launcher cannot avoid: it hosts
+        // the emulator in this very process.
+        check_sanitizer_preload()?;
+        let config = session_config(ctx)?;
         // A guest GPU is synthesised by the interposer inside the
         // workload's own process, on top of a host the launcher resolved
         // for that process. A daemon hosts a simulated machine for
@@ -461,7 +464,7 @@ pub const PLUGIN_LIB_SUFFIX: &str = ".so";
 /// Names of the rocjitsu plugins whose shared objects sit next to the
 /// interposer `preload` (the `<name>` in `librocjitsu_plugin_<name>.so`),
 /// sorted and de-duplicated. Empty when the directory cannot be read.
-pub fn discover_plugin_names(preload: &std::path::Path) -> Vec<String> {
+pub fn discover_plugin_names(preload: &Path) -> Vec<String> {
     let Some(dir) = preload.parent() else {
         return Vec::new();
     };
@@ -491,7 +494,7 @@ pub fn discover_plugin_names(preload: &std::path::Path) -> Vec<String> {
 /// in-container plugin loader resolves them (rocjitsu adds the mount dir to
 /// `LD_LIBRARY_PATH`). A requested plugin with no matching `.so` on disk
 /// is omitted; the loader logs and skips it at runtime.
-pub fn enabled_plugin_libs(preload: &std::path::Path, plugins: &PluginsDef) -> Vec<PathBuf> {
+pub fn enabled_plugin_libs(preload: &Path, plugins: &PluginsDef) -> Vec<PathBuf> {
     let Some(dir) = preload.parent() else {
         return Vec::new();
     };
@@ -513,7 +516,7 @@ pub const RJ_CONFIG_NAME: &str = "rj_config.json";
 /// Path of the synthesised `SimulationConfig` inside a session's scratch
 /// directory.
 #[must_use]
-pub fn rj_config_path(runtime_dir: &std::path::Path) -> PathBuf {
+pub fn rj_config_path(runtime_dir: &Path) -> PathBuf {
     runtime_dir.join(RJ_CONFIG_NAME)
 }
 
@@ -544,10 +547,7 @@ impl EmulatorDaemon for RocjitsuDaemon {
 /// `--config` mode in particular, where `config` is a file of the
 /// user's that rocjitsu has no business writing next to and that two
 /// concurrent runs may well share.
-pub fn write_config_discovery(
-    session_dir: &std::path::Path,
-    config: &std::path::Path,
-) -> Result<PathBuf> {
+pub fn write_config_discovery(session_dir: &Path, config: &Path) -> Result<PathBuf> {
     let runtime_dir = session_dir.join(RUNTIME_SUBDIR);
     let config_path_file = runtime_dir.join("config_path");
     rj_core::state::write_bytes(
@@ -576,7 +576,7 @@ pub const LIB_ENV: &str = "ROCJITSU_LIB";
 /// (`in_tree_relative_dirs`) and, last, the in-container mount
 /// directory ([`CONTAINER_LIB_DIR`]).
 pub fn kmd_preload() -> Option<PathBuf> {
-    runtime_location().path().map(std::path::Path::to_path_buf)
+    runtime_location().path().map(Path::to_path_buf)
 }
 
 /// Return the formatted build identity exported by the installed RocJITsu library.
@@ -590,6 +590,9 @@ pub fn kmd_preload() -> Option<PathBuf> {
 /// or cannot be loaded.
 pub fn version_string() -> std::result::Result<String, String> {
     let path = kmd_preload().ok_or_else(|| format!("{LIB_NAME} not found"))?;
+    if let Some(why) = rj_core::discovery::sanitizer_preload_missing() {
+        return Err(why);
+    }
     rocjitsu_sys::version_string(&path)
 }
 
@@ -619,7 +622,7 @@ pub fn runtime_location() -> RuntimeLocation {
     // process that did not inherit it. It is part of the search, so it
     // belongs in the list of places a failed search reports having
     // looked.
-    let in_container = std::path::Path::new(CONTAINER_LIB_DIR).join(LIB_NAME);
+    let in_container = Path::new(CONTAINER_LIB_DIR).join(LIB_NAME);
     if in_container.is_file() {
         return RuntimeLocation::found(in_container);
     }
@@ -723,7 +726,7 @@ fn in_tree_relative_dirs() -> Vec<String> {
 }
 
 /// First existing entry named `name` inside `dir`, if any.
-fn find_lib_in(dir: &std::path::Path, name: &str) -> Option<PathBuf> {
+fn find_lib_in(dir: &Path, name: &str) -> Option<PathBuf> {
     let candidate = dir.join(name);
     candidate.is_file().then_some(candidate)
 }
@@ -850,9 +853,9 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
     // config is supplied (rocjitsu being used as a `rocjitsu` replacement)
     // use that file verbatim instead of synthesising one from the
     // profile's topology. This is the `--config` of the upstream
-    // `rocjitsu` CLI. (Container path remapping is not applied; the
-    // explicit-config path is intended for direct, non-containerised
-    // drop-in use.)
+    // `rocjitsu` CLI. A containerised session cannot reach an arbitrary
+    // host path, so it gets a copy in its own scratch instead; see
+    // [`session_config`].
     if let Some(SimpleValue::String(path)) = def.options.get("config") {
         let cfg = PathBuf::from(path);
         if !cfg.exists() {
@@ -973,7 +976,7 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
 /// Returns an error when the topology or agent references cannot be
 /// resolved, the profile asks for more GPUs than rocjitsu will emulate
 /// (see [`MAX_GPUS_PER_NODE`]), or the config cannot be written.
-pub fn kmd_config(def: &EmulatorDef, session_dir: &std::path::Path) -> Result<PathBuf> {
+pub fn kmd_config(def: &EmulatorDef, session_dir: &Path) -> Result<PathBuf> {
     match resolve_sim_config(def)? {
         SimConfig::Supplied(cfg) => Ok(cfg),
         SimConfig::Synthesised(bytes) => {
@@ -982,6 +985,81 @@ pub fn kmd_config(def: &EmulatorDef, session_dir: &std::path::Path) -> Result<Pa
             Ok(cfg)
         }
     }
+}
+
+/// [`kmd_config`], with a supplied config brought inside a containerised
+/// session's reach.
+///
+/// A synthesised config is written into session scratch, which the
+/// supervisor bind-mounts at its host path as well as at
+/// `/mnt/rocjitsu/runtime` — so the one absolute path names the same
+/// file in both views and everything downstream can keep recording host
+/// paths verbatim. A `--config` the user supplied has no such
+/// arrangement: it is an arbitrary path on the host, the container plan
+/// does not mount it, and the discovery file the in-container interposer
+/// reads would name a file that is not there. What the workload does
+/// then is worse than failing — with no emulated device, it finds the
+/// real one.
+///
+/// So it is copied in beside the synthesised ones, and the copy is what
+/// gets recorded. A guest config's `simulator_config` sibling comes with
+/// it: that reference is resolved relative to the config, which is what
+/// makes a guest config movable as a unit, and moving one without it
+/// would break the very property being relied on.
+fn session_config(ctx: &SessionContext) -> Result<PathBuf> {
+    let config = kmd_config(ctx.emulator(), &ctx.runtime_dir)?;
+    if ctx.profile.containerize.is_none() || config.starts_with(&ctx.runtime_dir) {
+        return Ok(config);
+    }
+    stage_config(&config, &ctx.runtime_dir)
+}
+
+/// Copy `config`, and anything it names relative to itself, into `dir`.
+fn stage_config(config: &Path, dir: &Path) -> Result<PathBuf> {
+    let copy = |from: &Path, to: &Path| -> Result<()> {
+        std::fs::copy(from, to).map(|_| ()).map_err(|e| {
+            RocJITsuError::Other(format!(
+                "rocjitsu: cannot stage {} for a containerised session: {e}",
+                from.display()
+            ))
+        })
+    };
+
+    let name = config.file_name().ok_or_else(|| {
+        RocJITsuError::Other(format!("rocjitsu: {} has no file name", config.display()))
+    })?;
+    let staged = dir.join(name);
+
+    // Before the config itself, so that reading the guest block below
+    // still reads the original next to its original sibling.
+    if let Some(guest) = guest::load(config)?
+        && !guest.simulator_config.is_empty()
+    {
+        let sibling = guest::simulator_config_path(config, &guest.simulator_config);
+        // An absolute `simulator_config` is as unreachable as the config
+        // was, but rewriting the reference would mean rewriting file
+        // contents, which nothing here does. Named in the error instead,
+        // where a user can act on it.
+        if Path::new(&guest.simulator_config).is_absolute() {
+            return Err(RocJITsuError::Other(format!(
+                "rocjitsu: dbt_guest.simulator_config {} is an absolute host path, \
+                 which a containerised session cannot reach. Make it relative to {}, \
+                 or mount it into the container yourself.",
+                sibling.display(),
+                config.display()
+            )));
+        }
+        let sibling_name = sibling.file_name().ok_or_else(|| {
+            RocJITsuError::Other(format!(
+                "rocjitsu: dbt_guest.simulator_config {} has no file name",
+                sibling.display()
+            ))
+        })?;
+        copy(&sibling, &dir.join(sibling_name))?;
+    }
+
+    copy(config, &staged)?;
+    Ok(staged)
 }
 
 /// Check that `def` describes a machine rocjitsu can stand up, without
@@ -1000,6 +1078,51 @@ pub fn kmd_config(def: &EmulatorDef, session_dir: &std::path::Path) -> Result<Pa
 /// asks for more GPUs than rocjitsu will emulate.
 pub fn check_config(def: &EmulatorDef) -> Result<()> {
     resolve_sim_config(def).map(|_| ())
+}
+
+/// Refuse before a `dlopen` this process would not survive.
+///
+/// Every entry point below loads `librocjitsu.so` into the launcher, and
+/// against a sanitizer build that aborts the process unless the
+/// sanitizer runtime is already in its initial library list. Checked
+/// here, once per entry point, because the abort comes from the runtime
+/// itself: it is not a return value anything can inspect, and its
+/// message mentions neither rocjitsu nor the variable that fixes it.
+fn check_sanitizer_preload() -> Result<()> {
+    match rj_core::discovery::sanitizer_preload_missing() {
+        Some(why) => Err(RocJITsuError::Other(format!("rocjitsu: {why}"))),
+        None => Ok(()),
+    }
+}
+
+/// Serve the GPU `config` describes to a VMM on `socket`, over
+/// vfio-user.
+///
+/// Blocks until the server stops, and handles signals while it does; see
+/// [`rocjitsu_sys::run_vfio_server`], which says which ones and why that
+/// constrains who may call this. Returns the server's exit status.
+///
+/// Here rather than in the binary because everything it needs is here:
+/// the same discovery that finds the interposer finds the library the
+/// server lives in, and a second copy of that search in the CLI would be
+/// a second answer to "where is rocjitsu?".
+///
+/// # Errors
+///
+/// Returns an error when the runtime library cannot be located, or when
+/// it was built without vfio-user support.
+pub fn serve_vfio(config: &Path, socket: &Path) -> Result<i32> {
+    check_sanitizer_preload()?;
+    let lib = kmd_preload().ok_or_else(|| {
+        let detail = runtime_location()
+            .explain_missing()
+            .unwrap_or_else(|| format!("{LIB_NAME} was not found"));
+        RocJITsuError::Other(format!(
+            "rocjitsu: the rocjitsu runtime library was not found, and the vfio-user \
+             server is part of it — {detail}"
+        ))
+    })?;
+    rocjitsu_sys::run_vfio_server(&lib, config, socket).map_err(RocJITsuError::Other)
 }
 
 /// Returns true if rocjitsu is reachable on this machine — i.e. a
@@ -1028,7 +1151,7 @@ pub fn is_installed() -> bool {
 /// wrong, what it costs, and the one flag that runs without it — except
 /// for a library that will not load at all, which is told the truth
 /// instead, because no flag runs without a library.
-pub fn daemon_capability_of(lib: &std::path::Path) -> Result<()> {
+pub fn daemon_capability_of(lib: &Path) -> Result<()> {
     rocjitsu_sys::daemon::Daemon::probe(lib).map_err(|e| {
         // Two failures, opposite advice, and only the loader can tell
         // them apart. `--in-process` emulation `LD_PRELOAD`s this very
@@ -1077,9 +1200,15 @@ pub fn daemon_capability_of(lib: &std::path::Path) -> Result<()> {
 /// one it is about to get.
 fn located_daemon_capability() -> &'static Result<()> {
     static ANSWER: std::sync::OnceLock<Result<()>> = std::sync::OnceLock::new();
-    ANSWER.get_or_init(|| match kmd_preload() {
-        Some(lib) => daemon_capability_of(&lib),
-        None => Ok(()),
+    ANSWER.get_or_init(|| {
+        // Before the probe, which is itself a `dlopen`: this is the
+        // first thing a daemon bring-up loads, so it is where a
+        // sanitizer build ends the process if it is going to.
+        check_sanitizer_preload()?;
+        match kmd_preload() {
+            Some(lib) => daemon_capability_of(&lib),
+            None => Ok(()),
+        }
     })
 }
 
@@ -1088,6 +1217,86 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
+
+    /// A supplied config reaches a containerised workload by being
+    /// copied where that workload can see it.
+    ///
+    /// The container plan mounts session scratch, the config store and
+    /// the emulator libraries. An arbitrary `--config` is none of those,
+    /// so the discovery file used to name a path that does not exist
+    /// inside the container — and a workload that cannot find an
+    /// emulated device finds the real one.
+    #[test]
+    fn staging_puts_a_supplied_config_in_the_session_scratch() {
+        let src = tempfile::tempdir().unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        let config = src.path().join("machine.json");
+        std::fs::write(&config, r#"{"vm": {}, "topology": {}}"#).unwrap();
+
+        let staged = stage_config(&config, scratch.path()).unwrap();
+        assert_eq!(staged, scratch.path().join("machine.json"));
+        assert_eq!(
+            std::fs::read_to_string(&staged).unwrap(),
+            std::fs::read_to_string(&config).unwrap()
+        );
+    }
+
+    /// And the file it names beside itself comes with it.
+    ///
+    /// `simulator_config` is resolved relative to the guest config, so a
+    /// guest config moves as a unit or not at all. Copying only the
+    /// config would leave the reference pointing at a sibling that is
+    /// not there.
+    #[test]
+    fn staging_takes_the_relative_simulator_config_along() {
+        let src = tempfile::tempdir().unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        std::fs::write(
+            src.path().join("host.json"),
+            r#"{"vm": {}, "topology": {}}"#,
+        )
+        .unwrap();
+        let config = src.path().join("guest.json");
+        std::fs::write(
+            &config,
+            r#"{"dbt_guest": {"enabled": true, "guest_isa": "gfx950",
+                 "host_isa": "gfx942", "simulator_config": "host.json"}}"#,
+        )
+        .unwrap();
+
+        let staged = stage_config(&config, scratch.path()).unwrap();
+        assert!(staged.exists(), "the guest config");
+        assert!(
+            scratch.path().join("host.json").exists(),
+            "the sibling it names, without which the reference dangles"
+        );
+    }
+
+    /// An absolute `simulator_config` is refused rather than staged into
+    /// something that still cannot be reached.
+    #[test]
+    fn staging_refuses_an_absolute_simulator_config() {
+        let src = tempfile::tempdir().unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        let host = src.path().join("host.json");
+        std::fs::write(&host, r#"{"vm": {}, "topology": {}}"#).unwrap();
+        let config = src.path().join("guest.json");
+        std::fs::write(
+            &config,
+            format!(
+                r#"{{"dbt_guest": {{"enabled": true, "guest_isa": "gfx950",
+                     "host_isa": "gfx942", "simulator_config": "{}"}}}}"#,
+                host.display()
+            ),
+        )
+        .unwrap();
+
+        let e = stage_config(&config, scratch.path())
+            .expect_err("an absolute sibling cannot be reached from a container")
+            .to_string();
+        assert!(e.contains("absolute host path"), "{e}");
+        assert!(e.contains(&host.display().to_string()), "{e}");
+    }
 
     #[test]
     fn the_installed_flag_and_the_located_library_are_one_answer() {
@@ -1117,7 +1326,7 @@ mod tests {
         // never heard of the rocjitsu C API. Anything with those three
         // properties would do; a host with no glibc `libc.so.6` to borrow
         // cannot run this, which is not a failure of the check.
-        let libc = std::path::Path::new("libc.so.6");
+        let libc = Path::new("libc.so.6");
 
         // Whether this host *has* a libc to borrow is decided on the typed
         // error, not by sniffing the rendered message for the loader's
@@ -1154,7 +1363,7 @@ mod tests {
         // a library that cannot be loaded at all is advice to hit the same
         // wall from the other side. Only a library that *loads* and lacks
         // `rj_daemon_start` is an old rocjitsu.
-        let missing = std::path::Path::new("/nonexistent/librocjitsu.so");
+        let missing = Path::new("/nonexistent/librocjitsu.so");
         let Err(e) = daemon_capability_of(missing) else {
             panic!("a library that is not there hosts a daemon?");
         };
@@ -1543,7 +1752,7 @@ mod tests {
             // backend's search on top of the shared policy and would
             // otherwise be a location rocjitsu probed without saying so.
             assert!(
-                searched.contains(&std::path::Path::new(CONTAINER_LIB_DIR).join(LIB_NAME)),
+                searched.contains(&Path::new(CONTAINER_LIB_DIR).join(LIB_NAME)),
                 "the in-container fallback is searched, so it must be reported: {searched:?}"
             );
         }

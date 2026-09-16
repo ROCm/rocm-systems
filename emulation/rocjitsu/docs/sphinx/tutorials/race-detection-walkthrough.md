@@ -71,11 +71,19 @@ hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
 
 ## Run under the race detector
 
+The CLI is built by cargo, so where it lands depends on
+`$CARGO_TARGET_DIR`. CMake records the path; an installed rocjitsu is on
+`PATH` and `ROCJITSU=rocjitsu` will do instead:
+
+``` bash
+ROCJITSU=$(cmake -LA -N build | sed -n 's/^RJ_CLI_BIN:FILEPATH=//p')
+```
+
 Set `RJ_RACE=1` to activate the race detection plugin, then launch the
 binary under rocJITsu:
 
 ``` bash
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu -- /tmp/race_example
+RJ_RACE=1 "$ROCJITSU" run --in-process -- /tmp/race_example
 ```
 
 ## Interpret the race report
@@ -129,7 +137,7 @@ Recompile and rerun:
 
 ``` bash
 hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu -- /tmp/race_example
+RJ_RACE=1 "$ROCJITSU" run --in-process -- /tmp/race_example
 ```
 
 The output should complete with `done` and no `RACE` reports.
@@ -141,7 +149,7 @@ using the sink system:
 
 ``` bash
 RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
-  build/tools/rocjitsu/rocjitsu -- /tmp/race_example
+  "$ROCJITSU" run --in-process -- /tmp/race_example
 ```
 
 Reports are written to `/tmp/output/race.log`.

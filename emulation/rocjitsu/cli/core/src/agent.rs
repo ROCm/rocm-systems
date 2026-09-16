@@ -142,72 +142,113 @@ pub struct AgentTopologyDef {
 
 /// KFD device identity and topology properties for sysfs generation.
 /// Mirrors `KfdDeviceInfo` in the rocjitsu flatbuffer schema.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
+///
+/// # Defaults are the schema's
+///
+/// `Default` is [hand-written](#impl-Default-for-KfdDeviceInfo) from
+/// values the build script reads out of the schema, and `serde(default)`
+/// is on the container so a field a document omits gets that rather than
+/// `u32::default()`. Both halves are needed and neither is optional.
+///
+/// Every field here is serialised, so leaving one at zero does not omit
+/// it — it writes a zero, and the emulator cannot tell that from a
+/// deliberate one. Eighteen of these fields have a nonzero default in
+/// the schema, and the derived `Default` overrode six of them in every
+/// shipped profile: a 0 KB L1, 0-byte cache lines, 0-way associativity
+/// and no scratch slots.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+// No `serde(default)` on any field below. It would mean the *field
+// type's* default — zero — and take precedence over the container's,
+// which is the whole point of this struct having one.
 pub struct KfdDeviceInfo {
-    #[serde(default)]
     pub gpu_id: u32,
-    #[serde(default)]
     pub gfx_target_version: u32,
-    #[serde(default)]
     pub vendor_id: u32,
-    #[serde(default)]
     pub device_id: u32,
-    #[serde(default)]
     pub family_id: u32,
-    #[serde(default)]
     pub unique_id: u64,
-    #[serde(default)]
     pub marketing_name: String,
-    #[serde(default)]
     pub drm_render_minor: u32,
-    #[serde(default)]
     pub simd_count: u32,
-    #[serde(default)]
     pub max_waves_per_simd: u32,
-    #[serde(default)]
     pub num_shader_engines: u32,
-    #[serde(default)]
     pub num_shader_arrays_per_engine: u32,
-    #[serde(default)]
     pub num_cu_per_sh: u32,
-    #[serde(default)]
     pub simd_per_cu: u32,
-    #[serde(default)]
     pub wave_front_size: u32,
-    #[serde(default)]
     pub max_slots_scratch_cu: u32,
-    #[serde(default)]
     pub local_mem_size: u64,
-    #[serde(default)]
     pub lds_size_kb: u32,
-    #[serde(default)]
     pub mem_width: u32,
-    #[serde(default)]
     pub mem_clk_max: u32,
-    #[serde(default)]
     pub l1_size_kb: u32,
-    #[serde(default)]
     pub l1_line_size: u32,
-    #[serde(default)]
     pub l1_assoc: u32,
-    #[serde(default)]
     pub l2_size_kb: u32,
-    #[serde(default)]
     pub l2_line_size: u32,
-    #[serde(default)]
     pub l2_assoc: u32,
-    #[serde(default)]
     pub num_sdma_engines: u32,
-    #[serde(default)]
     pub num_sdma_xgmi_engines: u32,
     /// Rejected by the emulator when zero and `num_sdma_engines` is not.
-    #[serde(default)]
     pub num_sdma_queues_per_engine: u32,
-    #[serde(default)]
     pub num_cp_queues: u32,
-    #[serde(default)]
     pub max_engine_clk_fcompute: u32,
+}
+
+/// The schema's own defaults, read from `simulation_config.fbs` at build
+/// time. See `core/build.rs`.
+mod kfd_device_defaults {
+    // The schema declares 40 fields and `KfdDeviceInfo` models 31, so
+    // nine of these constants have no reader — `location_id`,
+    // `hive_id`, `capability` and the rest, which this crate leaves to
+    // the emulator's own defaults. Publishing the whole table is what
+    // keeps the build script from having to know which subset is
+    // modelled, and the failure that matters still fails: a field the
+    // struct names and the schema drops takes the constant with it, and
+    // the `Default` below stops compiling.
+    #![allow(dead_code)]
+
+    include!(concat!(env!("OUT_DIR"), "/kfd_device_defaults.rs"));
+}
+
+impl Default for KfdDeviceInfo {
+    fn default() -> Self {
+        use kfd_device_defaults as d;
+        Self {
+            gpu_id: d::GPU_ID,
+            gfx_target_version: d::GFX_TARGET_VERSION,
+            vendor_id: d::VENDOR_ID,
+            device_id: d::DEVICE_ID,
+            family_id: d::FAMILY_ID,
+            unique_id: d::UNIQUE_ID,
+            marketing_name: String::new(),
+            drm_render_minor: d::DRM_RENDER_MINOR,
+            simd_count: d::SIMD_COUNT,
+            max_waves_per_simd: d::MAX_WAVES_PER_SIMD,
+            num_shader_engines: d::NUM_SHADER_ENGINES,
+            num_shader_arrays_per_engine: d::NUM_SHADER_ARRAYS_PER_ENGINE,
+            num_cu_per_sh: d::NUM_CU_PER_SH,
+            simd_per_cu: d::SIMD_PER_CU,
+            wave_front_size: d::WAVE_FRONT_SIZE,
+            max_slots_scratch_cu: d::MAX_SLOTS_SCRATCH_CU,
+            local_mem_size: d::LOCAL_MEM_SIZE,
+            lds_size_kb: d::LDS_SIZE_KB,
+            mem_width: d::MEM_WIDTH,
+            mem_clk_max: d::MEM_CLK_MAX,
+            l1_size_kb: d::L1_SIZE_KB,
+            l1_line_size: d::L1_LINE_SIZE,
+            l1_assoc: d::L1_ASSOC,
+            l2_size_kb: d::L2_SIZE_KB,
+            l2_line_size: d::L2_LINE_SIZE,
+            l2_assoc: d::L2_ASSOC,
+            num_sdma_engines: d::NUM_SDMA_ENGINES,
+            num_sdma_xgmi_engines: d::NUM_SDMA_XGMI_ENGINES,
+            num_sdma_queues_per_engine: d::NUM_SDMA_QUEUES_PER_ENGINE,
+            num_cp_queues: d::NUM_CP_QUEUES,
+            max_engine_clk_fcompute: d::MAX_ENGINE_CLK_FCOMPUTE,
+        }
+    }
 }
 
 /// AMDGPU memory configuration.

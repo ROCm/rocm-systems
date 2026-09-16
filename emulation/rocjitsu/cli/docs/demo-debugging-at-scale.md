@@ -2,7 +2,7 @@
 marp: true
 theme: default
 paginate: true
-title: "Debugging ROCm at Scale with rocjitsu + rocjitsu"
+title: "Debugging ROCm at Scale with the rocjitsu CLI and emulator"
 ---
 
 <!--
@@ -38,7 +38,7 @@ Debugging GPU code at scale is **expensive and slow**:
 > **What if every engineer could spin up a 2-node MI450X "cluster" on their laptop,
 > run it like any other command, and re-run instantly?**
 
-That is what **rocjitsu + rocjitsu** does.
+That is what **rocjitsu** does — the CLI and the emulator it drives.
 
 ---
 
@@ -746,7 +746,7 @@ flowchart LR
       B3["Queue + share HW"]
       B4["Core dump + prayer"]
     end
-    subgraph after["With rocjitsu + rocjitsu"]
+    subgraph after["With rocjitsu"]
       A1["Laptop = N-node cluster"]
       A2["Deterministic replay"]
       A3["Instant, local, private"]

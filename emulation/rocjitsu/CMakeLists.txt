@@ -422,6 +422,22 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(rocjitsu_shared PRIVATE dl)
 endif()
 
+# The vfio-user front end, when it is built at all.
+#
+# It used to be linked into the C++ CLI, which was the only thing that
+# called it. That CLI is gone and its replacement is not C++: it resolves
+# `rj_run_vfio_server` out of this library at runtime, so the code has to
+# be in the library rather than in a binary beside it. Still inside the
+# option, so an ordinary build neither compiles it nor acquires a
+# dependency on libvfio-user; `rocjitsu_vmm_vfu` does not even exist
+# otherwise (see lib/rocjitsu/src/rocjitsu/vmm/CMakeLists.txt).
+if(ROCJITSU_ENABLE_VFIO)
+    target_link_libraries(
+        rocjitsu_shared
+        PRIVATE rocjitsu_pci rocjitsu_vmm_vfu libvfio-user::libvfio-user
+    )
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(rocjitsu_shared PRIVATE "LINKER:--exclude-libs,ALL")
 endif()
@@ -441,7 +457,16 @@ add_subdirectory(fuzz/decode)
 # workload in front of the emulator at all. It sets `RJ_CLI_BIN` and
 # `RJ_CLI_TARGET`, or leaves both unset when cargo is missing, which is
 # what `tests/` gates on.
-add_subdirectory(cli)
+#
+# Linux-only, as the C++ front end it replaced was. The workspace is not
+# portable and does not pretend to be: POSIX process groups, Unix domain
+# sockets and `tokio::signal::unix` are in its production types, not
+# behind `cfg(unix)`. Without this guard a Windows host that happens to
+# have cargo would start a build that cannot finish, and one without
+# cargo would skip the CLI for the wrong reason.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_subdirectory(cli)
+endif()
 
 if(BUILD_TESTING)
     add_subdirectory(tests)

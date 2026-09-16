@@ -18,19 +18,20 @@ cargo test --workspace # run the test suite
 ./target/debug/rocjitsu --help
 ```
 
-Rust is the only toolchain the rocjitsu build itself needs. Everything
-below that is about rocjitsu, which is a separate C++ project rocjitsu
-merely loads at runtime.
+Rust is the only toolchain the CLI itself needs. Everything below that is
+about the emulator — the C++ half of rocjitsu, built separately and
+loaded at runtime as `librocjitsu.so`. The CLI builds and its own tests
+pass without it; what needs it is running a workload.
 
 ## Prerequisites
 
 | Tool | Version | Needed for | Notes |
 |------|---------|------------|-------|
 | Rust + Cargo | 1.88+ (edition 2024) | everything | Install via [rustup](https://rustup.rs). 1.88 is the floor for let-chains, which the workspace uses. |
-| CMake | 3.22+ | building rocjitsu from source | Only if you want live GPU emulation. rocjitsu's own wrapper needs 3.20. |
-| Ninja | any recent | building rocjitsu from source | `-G Ninja`. |
-| C++20 compiler | GCC 12+ / Clang 16+ | building rocjitsu from source | |
-| Python | 3.10+ | regenerating rocjitsu's ISA sources | Not a build prerequisite: the generated sources are checked in, and nothing in either CMake build invokes Python. Only needed to re-run the `amdisa` generator. |
+| CMake | 3.22+ | building the emulator from source | Only if you want live GPU emulation. The CLI's own cargo wrapper needs 3.20. |
+| Ninja | any recent | building the emulator from source | `-G Ninja`. |
+| C++20 compiler | GCC 12+ / Clang 16+ | building the emulator from source | |
+| Python | 3.10+ | regenerating the emulator's ISA sources | Not a build prerequisite: the generated sources are checked in, and nothing in either CMake build invokes Python. Only needed to re-run the `amdisa` generator. |
 
 rocjitsu runs on Linux. It leans on POSIX process groups and Unix domain
 sockets: each workload process leads its own group so it can be

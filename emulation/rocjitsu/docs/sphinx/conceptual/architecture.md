@@ -209,7 +209,8 @@ lib/
       config/           JSON/FlatBuffers configuration
   util/                 Shared utilities
   python/amdisa/        ISA codegen pipeline
-tools/rocjitsu/         CLI (local, daemon, attach modes)
+cli/                    CLI (Rust workspace; in-process and daemon modes)
+tools/                  Developer tools (DBT translate, pre-translate, benchmarks)
 configs/                GPU topology JSON files
 schemas/                FlatBuffers schemas
 ```

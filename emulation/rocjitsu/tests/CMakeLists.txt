@@ -352,6 +352,23 @@ function(rj_add_test)
             APPEND ARG_ENVIRONMENT
             "ROCJITSU_SANITIZER_PRELOAD=${RJ_SANITIZER_PRELOAD}"
         )
+        # And into this process, not just the workload it launches.
+        #
+        # The CLI loads librocjitsu.so itself — to start the daemon, to
+        # write the DBT guest handoff, to print the emulator's version —
+        # and a sanitizer build of it refuses to be loaded by a process
+        # that does not already have the runtime first in its library
+        # list. The C++ CLI was built with the same -fsanitize flags and
+        # so always did; the Rust one is not instrumented, and the only
+        # way to put the runtime in its image is to preload it here.
+        #
+        # Not set when the registration brought its own: those tests
+        # preload the interposer themselves via
+        # RJ_SANITIZER_PRELOAD_PREFIX, which already begins with this.
+        rj_environment_has(_has_preload "LD_PRELOAD" ${ARG_ENVIRONMENT})
+        if(NOT _has_preload)
+            list(APPEND ARG_ENVIRONMENT "LD_PRELOAD=${RJ_SANITIZER_PRELOAD}")
+        endif()
     endif()
     # The CLI otherwise searches the ROCm install locations for the two
     # libraries it launches a workload with — the KMD interposer and the
@@ -1530,70 +1547,13 @@ rj_add_test(
         "--gtest_filter=GuestKfdConfigTest.LongPathHandoffSkipsWhenRuntimeDirIsTooDeep"
 )
 if(RJ_HAS_GFX1201_GPU)
-    add_test(
-        NAME
-            "GuestKfdMultiprocessTest.ForkedChildrenRefuseGpuAndLeaveParentOverlayIntact"
-        COMMAND
-            ${RJ_CLI_LOCAL} --config
-            ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
-            $<TARGET_FILE:guest_kfd_test>
-            --gtest_filter=GuestKfdMultiprocessTest.ForkedChildrenRefuseGpuAndLeaveParentOverlayIntact
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-    add_test(
-        NAME "GuestKfdMultiprocessTest.ForkedChildCannotUseInheritedGuestDriver"
-        COMMAND
-            ${RJ_CLI_LOCAL} --config
-            ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
-            $<TARGET_FILE:guest_kfd_test>
-            --gtest_filter=GuestKfdMultiprocessTest.ForkedChildCannotUseInheritedGuestDriver
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-    add_test(
-        NAME "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
-        COMMAND
-            ${RJ_CLI_LOCAL} --config
-            ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
-            $<TARGET_FILE:guest_kfd_test>
-            --gtest_filter=GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-    add_test(
-        NAME "GuestKfdLifecycleTest.ReopensAfterLastClose"
-        COMMAND
-            ${RJ_CLI_LOCAL} --config
-            ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
-            $<TARGET_FILE:guest_kfd_test>
-            --gtest_filter=GuestKfdLifecycleTest.ReopensAfterLastClose
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-    add_test(
-        NAME "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
-        COMMAND
-            ${RJ_CLI_LOCAL} --config
-            ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
-            $<TARGET_FILE:guest_kfd_test>
-            --gtest_filter=GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-    add_test(
-        NAME "GuestKfdFdReuseTest.OverwritingHiddenRealFdKeepsRoutingCorrect"
-        COMMAND
-            ${RJ_CLI_LOCAL} --config
-            ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
-            $<TARGET_FILE:guest_kfd_test>
-            --gtest_filter=GuestKfdFdReuseTest.OverwritingHiddenRealFdKeepsRoutingCorrect
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-    set_tests_properties(
-        "GuestKfdMultiprocessTest.ForkedChildrenRefuseGpuAndLeaveParentOverlayIntact"
-        "GuestKfdMultiprocessTest.ForkedChildCannotUseInheritedGuestDriver"
-        "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
-        "GuestKfdLifecycleTest.ReopensAfterLastClose"
-        "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
-        "GuestKfdFdReuseTest.OverwritingHiddenRealFdKeepsRoutingCorrect"
-        PROPERTIES TIMEOUT 60 SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
-    )
+    # Through `rj_add_test`, for the reason the DBT guest rocminfo suite
+    # is: these launch the CLI, and a bare `add_test` leaves out the
+    # `ROCJITSU_LIB` and `ROCJITSU_HOOKS_LIB` that tell it to use *this*
+    # tree's interposer and HSA tools hook rather than whatever is
+    # installed — and on a sanitizer build, the runtime that has to be
+    # loaded before either. Guest mode translates through the hook, and
+    # the hook is not on any path the CLI searches by default.
     foreach(
         _guest_kfd_test
         IN
@@ -1605,7 +1565,17 @@ if(RJ_HAS_GFX1201_GPU)
             "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
             "GuestKfdFdReuseTest.OverwritingHiddenRealFdKeepsRoutingCorrect"
     )
-        rj_set_default_runtime_dir("${_guest_kfd_test}")
+        rj_add_test(
+            NAME "${_guest_kfd_test}"
+            COMMAND
+                ${RJ_CLI_LOCAL} --config
+                ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+                $<TARGET_FILE:guest_kfd_test>
+                "--gtest_filter=${_guest_kfd_test}"
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            TIMEOUT 60
+            SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
+        )
     endforeach()
     message(
         STATUS
@@ -2048,83 +2018,52 @@ if(ROCMINFO_EXECUTABLE AND RJ_HAS_KFD_DEVICE)
     )
 
     if(RJ_HAS_GFX1201_GPU)
-        add_test(
-            NAME "DbtGuestRocminfoTest.ExitsSuccessfully"
-            COMMAND
-                dbt_guest_rocminfo_test
-                --gtest_filter=RocminfoTest.ExitsSuccessfully
-            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        )
-        add_test(
-            NAME "DbtGuestRocminfoTest.InterposerActive"
-            COMMAND
-                dbt_guest_rocminfo_test
-                --gtest_filter=RocminfoTest.InterposerActive
-            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        )
-        add_test(
-            NAME "DbtGuestRocminfoTest.HsaSystemAttributes"
-            COMMAND
-                dbt_guest_rocminfo_test
-                --gtest_filter=RocminfoTest.HsaSystemAttributes
-            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        )
-        add_test(
-            NAME "DbtGuestRocminfoTest.DetectsGpuAgent"
-            COMMAND
-                dbt_guest_rocminfo_test
-                --gtest_filter=RocminfoTest.DetectsGpuAgent
-            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        )
-        add_test(
-            NAME "DbtGuestRocminfoTest.ReportsGfx950"
-            COMMAND
-                dbt_guest_rocminfo_test
-                --gtest_filter=RocminfoTest.ReportsGfx950
-            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        )
-        add_test(
-            NAME "DbtGuestRocminfoTest.ReportsWavefrontSize"
-            COMMAND
-                dbt_guest_rocminfo_test
-                --gtest_filter=RocminfoTest.ReportsWavefrontSize
-            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        )
+        # Through `rj_add_test`, like every other launcher test.
+        #
+        # These were six bare `add_test()` calls with a runtime directory
+        # bolted on afterwards, which left out the rest of what a test
+        # that launches the CLI needs: `ROCJITSU_LIB` and
+        # `ROCJITSU_HOOKS_LIB` naming *this* tree's interposer and HSA
+        # tools hook, and the sanitizer runtime on a sanitizer build. The
+        # hook is the half guest mode translates through and it is not
+        # installed anywhere the CLI searches, so all six failed with the
+        # missing-hook diagnostic on a machine that had the GPU for them.
+        #
+        # No `ENVIRONMENT` here on purpose. `RJ_KMD_PRELOAD_ENV`, which
+        # the plain `RocminfoTest` cases above pass, preloads the
+        # interposer directly and names a non-guest config; this suite
+        # goes through the CLI, which composes its own `LD_PRELOAD`, and
+        # its config is compiled in as `RJ_CONFIG_PATH`. Taking the
+        # defaults is the whole point.
+        #
+        # Six cases, not the eight above: the two MI350X ones assert
+        # against a part this guest is not.
         foreach(
             _dbt_guest_rocminfo_test
             IN
             ITEMS
-                "DbtGuestRocminfoTest.ExitsSuccessfully"
-                "DbtGuestRocminfoTest.InterposerActive"
-                "DbtGuestRocminfoTest.HsaSystemAttributes"
-                "DbtGuestRocminfoTest.DetectsGpuAgent"
-                "DbtGuestRocminfoTest.ReportsGfx950"
-                "DbtGuestRocminfoTest.ReportsWavefrontSize"
+                ExitsSuccessfully
+                InterposerActive
+                HsaSystemAttributes
+                DetectsGpuAgent
+                ReportsGfx950
+                ReportsWavefrontSize
         )
-            rj_set_default_runtime_dir("${_dbt_guest_rocminfo_test}")
-            if(RJ_DBT_GUEST_ASAN_ENV OR RJ_DBT_GUEST_TSAN_ENV)
-                get_property(
-                    _dbt_guest_rocminfo_env
-                    TEST "${_dbt_guest_rocminfo_test}"
-                    PROPERTY ENVIRONMENT
-                )
-                if(RJ_DBT_GUEST_ASAN_ENV)
-                    list(
-                        APPEND _dbt_guest_rocminfo_env
-                        "${RJ_DBT_GUEST_ASAN_ENV}"
-                    )
-                endif()
-                if(RJ_DBT_GUEST_TSAN_ENV)
-                    list(
-                        APPEND _dbt_guest_rocminfo_env
-                        "${RJ_DBT_GUEST_TSAN_ENV}"
-                    )
-                endif()
-                set_tests_properties(
-                    "${_dbt_guest_rocminfo_test}"
-                    PROPERTIES ENVIRONMENT "${_dbt_guest_rocminfo_env}"
-                )
-            endif()
+            # Registered through the helper, which supplies ROCJITSU_LIB,
+            # the hooks library and the sanitizer preload these need; the
+            # per-client ASan/TSan overrides are handed to it rather than
+            # applied afterwards, so the helper can merge them with the
+            # options it sets itself.
+            rj_add_test(
+                NAME "DbtGuestRocminfoTest.${_dbt_guest_rocminfo_test}"
+                COMMAND
+                    dbt_guest_rocminfo_test
+                    "--gtest_filter=RocminfoTest.${_dbt_guest_rocminfo_test}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                ENVIRONMENT
+                    ${RJ_DBT_GUEST_ASAN_ENV}
+                    ${RJ_DBT_GUEST_TSAN_ENV}
+            )
         endforeach()
         message(
             STATUS

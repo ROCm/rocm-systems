@@ -47,6 +47,13 @@
 //! * `$ROCJITSU_CLI_RUNTIME_DIR` — overrides the rocjitsu runtime dir (would
 //!   otherwise be `$XDG_RUNTIME_DIR/rocjitsu`).
 //!
+//! `$MIRAGE_CONFIG` and `$MIRAGE_RUNTIME` are honoured after those, and
+//! `$XDG_CONFIG_HOME/mirage` is read when no rocjitsu config directory
+//! exists yet. This CLI shipped under the name `mirage` before the two
+//! projects were merged, and still answers to it through a symlink; a
+//! user whose command line did not change should not find their own
+//! profiles, agents and topologies gone. See `LEGACY_NAMESPACE`.
+//!
 //! There is no persistent *state* directory. RocJITsu writes nothing that
 //! has to survive a reboot beyond its configuration: a session and
 //! everything in it belongs to the `rocjitsu run` that created it and is
@@ -124,34 +131,73 @@ fn home_dir() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("/"))
 }
 
+/// The namespace this CLI shipped under before it was merged into
+/// rocjitsu, and the prefix of the environment variables that named its
+/// directories.
+///
+/// A `mirage` symlink is installed beside `rocjitsu` so the old name
+/// keeps working, but a name is not a configuration: the process behind
+/// it reads `rocjitsu`'s directories, and an upgrade that changed where
+/// a user's own profiles, agents and topologies were looked for — while
+/// the command they typed stayed the same — would look like losing them.
+/// The shipped builtins are rewritten into any empty config directory,
+/// so what is actually at stake is everything the user wrote or edited.
+const LEGACY_NAMESPACE: &str = "mirage";
+
 /// Returns the rocjitsu config directory.
 ///
-/// Honors `$ROCJITSU_CLI_CONFIG_DIR` as a direct override; otherwise returns
-/// `$XDG_CONFIG_HOME/rocjitsu`.
+/// Honors `$ROCJITSU_CLI_CONFIG_DIR` as a direct override, then
+/// `$MIRAGE_CONFIG` for anyone still setting it; otherwise returns
+/// `$XDG_CONFIG_HOME/rocjitsu`, falling back to the `mirage` directory
+/// beside it while that is the only one with anything in it.
 #[must_use]
 pub fn rocjitsu_config_dir() -> PathBuf {
     if test_root().is_none()
-        && let Ok(p) = std::env::var("ROCJITSU_CLI_CONFIG_DIR")
-        && !p.is_empty()
+        && let Some(p) = env_dir("ROCJITSU_CLI_CONFIG_DIR").or_else(|| env_dir("MIRAGE_CONFIG"))
     {
-        return PathBuf::from(p);
+        return p;
     }
-    xdg_config_home().join(APP_NAMESPACE)
+    let base = xdg_config_home();
+    legacy_or(base.join(APP_NAMESPACE), base.join(LEGACY_NAMESPACE))
 }
 
 /// Returns the rocjitsu runtime directory.
 ///
-/// Honors `$ROCJITSU_CLI_RUNTIME_DIR` as a direct override; otherwise returns
-/// `$XDG_RUNTIME_DIR/rocjitsu`.
+/// Honors `$ROCJITSU_CLI_RUNTIME_DIR` as a direct override, then
+/// `$MIRAGE_RUNTIME`; otherwise returns `$XDG_RUNTIME_DIR/rocjitsu`.
 #[must_use]
 pub fn rocjitsu_runtime_dir() -> PathBuf {
     if test_root().is_none()
-        && let Ok(p) = std::env::var("ROCJITSU_CLI_RUNTIME_DIR")
-        && !p.is_empty()
+        && let Some(p) = env_dir("ROCJITSU_CLI_RUNTIME_DIR").or_else(|| env_dir("MIRAGE_RUNTIME"))
     {
-        return PathBuf::from(p);
+        return p;
     }
     xdg_runtime_dir().join(APP_NAMESPACE)
+}
+
+/// A directory named by `var`, if it names one at all.
+fn env_dir(var: &str) -> Option<PathBuf> {
+    std::env::var(var)
+        .ok()
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+}
+
+/// `current`, unless it does not exist yet and `legacy` does.
+///
+/// Reading the old directory rather than copying out of it: a copy has
+/// to decide what to do about every way the two can disagree, and there
+/// is no answer to that which is right for a user who then edits one of
+/// them. Keeping one directory means there is nothing to disagree. The
+/// condition is deliberately "the new one does not exist": the moment
+/// anything writes to it — the builtins are written on the first command
+/// that finds it empty — it becomes the only one consulted, and the old
+/// one is left untouched on disk for a user who wants it back.
+fn legacy_or(current: PathBuf, legacy: PathBuf) -> PathBuf {
+    if !current.exists() && legacy.is_dir() {
+        return legacy;
+    }
+    current
 }
 
 /// Directory holding the sockets of every live run:
@@ -287,6 +333,55 @@ mod tests {
             profile_path("foo"),
             tmp.path().join("config/rocjitsu/profile/foo.json")
         );
+    }
+
+    /// An upgrade does not hide what the user already wrote.
+    ///
+    /// The CLI shipped as `mirage`, keeps answering to that name through
+    /// a symlink, and reads `rocjitsu`'s directories. A user who kept
+    /// typing `mirage` would have found their own profiles, agents and
+    /// topologies gone — not deleted, but looked for somewhere else,
+    /// which from the prompt is the same thing.
+    #[test]
+    fn the_mirage_config_directory_is_read_while_it_is_the_only_one() {
+        let _g = test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        set_test_root(tmp.path());
+        let rocjitsu = tmp.path().join("config/rocjitsu");
+        let mirage = tmp.path().join("config/mirage");
+
+        // Neither exists: the answer is rocjitsu's, and nothing is
+        // invented for a user who has never run either.
+        assert_eq!(rocjitsu_config_dir(), rocjitsu);
+
+        // Only the old one: that is where the profiles are.
+        std::fs::create_dir_all(mirage.join("profile")).unwrap();
+        assert_eq!(rocjitsu_config_dir(), mirage);
+        assert_eq!(profile_path("p"), mirage.join("profile/p.json"));
+
+        // Once the new one exists it is the only one consulted, and the
+        // old one is left alone rather than merged — there is no right
+        // answer to two directories disagreeing.
+        std::fs::create_dir_all(&rocjitsu).unwrap();
+        assert_eq!(rocjitsu_config_dir(), rocjitsu);
+        assert!(mirage.join("profile").exists(), "left where it was");
+
+        clear_test_root();
+    }
+
+    /// The runtime directory has no such fallback, and should not.
+    ///
+    /// It holds live sockets and session scratch, not anything a user
+    /// wrote. Reading an old one would mean adopting the sessions of
+    /// runs this build never started.
+    #[test]
+    fn the_runtime_directory_does_not_fall_back() {
+        let _g = test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        set_test_root(tmp.path());
+        std::fs::create_dir_all(tmp.path().join("runtime/mirage")).unwrap();
+        assert_eq!(rocjitsu_runtime_dir(), tmp.path().join("runtime/rocjitsu"));
+        clear_test_root();
     }
 
     #[test]

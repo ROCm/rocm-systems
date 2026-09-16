@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # rocjitsu — top-level CMake wrapper around cargo.
 #
 # This is a thin orchestration layer; the real build is done by
@@ -9,7 +12,7 @@
 #   * `rocjitsu`            — runs `cargo build --release`, output is
 #                           `target/release/rocjitsu`
 #   * `install` (default) — copies the release binary to
-#                           `${CMAKE_INSTALL_PREFIX}/bin/rocjitsu`
+#                           `${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/rocjitsu`
 #   * `ctest`             — runs the full Rust test suite via
 #                           `cargo test --release --workspace`. The
 #                           end-to-end suites bring up real sessions on
@@ -36,6 +39,15 @@
 #
 cmake_minimum_required(VERSION 3.20)
 project(rocjitsu NONE)
+
+# For `CMAKE_INSTALL_BINDIR`. The enclosing rocjitsu build includes this
+# too and installs its own binaries through it, so hardcoding `bin` here
+# would put the CLI somewhere else than the rest of the package — and
+# somewhere else than `tests/CMakeLists.txt` looks for it, which already
+# derives the installed path from the variable. Included here as well
+# because this project can be configured on its own, where nothing else
+# would define it.
+include(GNUInstallDirs)
 
 # HotSwap is a full LLVM + COMGR + ROCR source build, so it is opt-in. When ON,
 # cmake/Hotswap.cmake builds and stages the HotSwap artifacts rocjitsu discovers.
@@ -226,11 +238,16 @@ endif()
 # CI jobs, shell history and documentation outside this repository; a
 # symlink costs nothing and the binary answers to either. Relative, so the
 # pair survives being moved, and relocated with `DESTDIR` staging intact.
-install(PROGRAMS ${_rocjitsu_bin} DESTINATION bin)
+install(PROGRAMS ${_rocjitsu_bin} DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(
     CODE
         "
-    set(_bin \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/bin\")
+    set(_bindir \"${CMAKE_INSTALL_BINDIR}\")
+    if(IS_ABSOLUTE \"\${_bindir}\")
+        set(_bin \"\$ENV{DESTDIR}\${_bindir}\")
+    else()
+        set(_bin \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/\${_bindir}\")
+    endif()
     file(CREATE_LINK rocjitsu \"\${_bin}/mirage\" SYMBOLIC)
     message(STATUS \"Installing: \${_bin}/mirage -> rocjitsu\")
 "

@@ -93,7 +93,11 @@ pub const ENV_EXEC: &str = "ROCJITSU_EXEC";
 /// The C++ CLI found the same path by `dladdr(&__asan_init)` on itself;
 /// this workspace forbids `unsafe`, and the build that has the answer can
 /// simply say so.
-pub const ENV_SANITIZER_PRELOAD: &str = "ROCJITSU_SANITIZER_PRELOAD";
+///
+/// Re-exported from `rj_core` rather than named twice: the launcher reads
+/// the same variable for its own image, which is a different need with
+/// the same answer. See [`rj_core::discovery::sanitizer_preload_missing`].
+pub use rj_core::discovery::ENV_SANITIZER_PRELOAD;
 
 /// Read [`ENV_SANITIZER_PRELOAD`] from this process.
 ///
@@ -264,6 +268,7 @@ pub fn build_specs(
     exec_id: &ExecId,
     caller: CallerStreams,
 ) -> Result<Vec<SpawnSpec>> {
+    check_visibility(desc, def)?;
     let node_count = desc.node_count.max(1);
     // The job's shape and this exec's, kept apart deliberately; see the
     // "Identity" section above for what conflating them cost.
@@ -602,12 +607,60 @@ fn collectives_cross_containers(desc: &SessionDescription) -> bool {
     desc.containers.is_some() && desc.node_count > 1
 }
 
+/// Refuse an exec whose `--env` would overwrite a GPU visibility
+/// selector the emulator set for itself.
+///
+/// [`process_env`] layers `--env` over the injection, which is right for
+/// everything the emulator contributes as a default and wrong for the
+/// one thing it contributes as a conclusion. DBT guest mode appends a
+/// synthetic GPU to the KFD topology and then widens
+/// `ROCR_VISIBLE_DEVICES` so that the new ordinal is inside the
+/// selection — with an ambient `ROCR_VISIBLE_DEVICES=0` and one host
+/// GPU, `0` becomes `0,1`. A `--env ROCR_VISIBLE_DEVICES=0` put that
+/// back to `0` and the guest, which is ordinal 1, stopped existing. The
+/// workload then ran on the host GPU with no guest agent to shadow,
+/// which is not the mode anybody asked for and says nothing about it.
+///
+/// Refused rather than merged. Merging would keep the guest visible but
+/// not make the selection honest: the host GPU was resolved from the
+/// launcher's environment and *published* in the runtime config handoff
+/// (see the `guest` module on why the launcher resolves it), and the
+/// three runtime layers that read it do not re-resolve. A narrowed
+/// selection that hid that GPU would leave the handoff naming a device
+/// the workload cannot see, and nothing downstream would notice.
+///
+/// `dbt_guest.host_gpu_id` is the knob for choosing the physical GPU,
+/// and the error says so.
+fn check_visibility(desc: &SessionDescription, def: &ExecDef) -> Result<()> {
+    let execs = std::iter::once(&def.exec).chain(def.worker_exec.as_ref());
+    for args in execs {
+        for key in rj_core::visibility::VISIBILITY_SELECTORS {
+            let (Some(ours), Some(theirs)) = (desc.env.get(key), args.env.get(key)) else {
+                continue;
+            };
+            if ours == theirs {
+                continue;
+            }
+            return Err(RocJITsuError::other(format!(
+                "--env {key}={theirs} would overwrite the device visibility the emulator \
+                 set for this session ({key}={ours}), which is what keeps its synthetic \
+                 GPU visible to the workload. Choose the physical GPU with \
+                 `dbt_guest.host_gpu_id` in the config instead."
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// The environment one workload process runs with.
 ///
 /// Layering order: the emulator's injection first, then the user's
 /// per-exec environment, then rocjitsu's own rank variables. RocJITsu's go
 /// last so a workload cannot accidentally break its own rendezvous by
 /// exporting `RANK` or `WORLD_SIZE`.
+///
+/// The visibility selectors are the exception, and they are refused
+/// rather than layered; see [`check_visibility`].
 ///
 /// The one correction rocjitsu makes to the emulator's own layer sits at
 /// the bottom rather than the top: the collective's interface selection
@@ -1544,6 +1597,84 @@ mod tests {
         let mut def = exec_def(1, None);
         def.exec.workdir = Some(workdir.to_string());
         def
+    }
+
+    /// A guest session as the emulator leaves it: the synthetic GPU is
+    /// ordinal 1, so the selection the launcher widened names both.
+    fn guest_session() -> SessionDescription {
+        let mut d = desc(1);
+        d.env
+            .insert("ROCR_VISIBLE_DEVICES".to_string(), "0,1".to_string());
+        d
+    }
+
+    /// An exec cannot narrow the selection the emulator widened.
+    ///
+    /// `--env` is layered over the injection, which is what makes every
+    /// emulator default overridable. The visibility selectors are not a
+    /// default — the guest GPU is appended to the topology, so the
+    /// widened selection is the only reason the workload can see it, and
+    /// `--env ROCR_VISIBLE_DEVICES=0` silently deleted the guest and ran
+    /// the workload on the bare host GPU.
+    #[test]
+    fn an_exec_cannot_hide_the_guest_gpu_with_its_own_visibility() {
+        let mut def = exec_def(1, None);
+        def.exec
+            .env
+            .insert("ROCR_VISIBLE_DEVICES".to_string(), "0".to_string());
+        let e = build_specs(&guest_session(), &def, &id(), CAPTURED)
+            .expect_err("narrowing the selection hides the guest")
+            .to_string();
+        assert!(e.contains("ROCR_VISIBLE_DEVICES"), "{e}");
+        assert!(
+            e.contains("dbt_guest.host_gpu_id"),
+            "the refusal has to name the knob that does work: {e}"
+        );
+
+        // A worker command is an exec too, and reaches the same layering.
+        let mut def = exec_def(1, None);
+        def.worker_exec = Some(ExecArgs {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            env: BTreeMap::from([("HIP_VISIBLE_DEVICES".to_string(), "0".to_string())]),
+            workdir: None,
+        });
+        let mut session = guest_session();
+        session
+            .env
+            .insert("HIP_VISIBLE_DEVICES".to_string(), "1".to_string());
+        build_specs(&session, &def, &id(), CAPTURED)
+            .expect_err("a worker command cannot hide it either");
+    }
+
+    /// And everything that is a default stays overridable.
+    #[test]
+    fn an_exec_may_still_override_the_emulators_defaults() {
+        let mut def = exec_def(1, None);
+        def.exec.env.insert("EMU".to_string(), "mine".to_string());
+        // Agreeing with the emulator is not a conflict either: a script
+        // that re-exports what it was given must keep working.
+        def.exec
+            .env
+            .insert("ROCR_VISIBLE_DEVICES".to_string(), "0,1".to_string());
+        let specs = build_specs(&guest_session(), &def, &id(), CAPTURED).unwrap();
+        assert_eq!(specs[0].env.get("EMU").map(String::as_str), Some("mine"));
+        assert_eq!(
+            specs[0].env.get("ROCR_VISIBLE_DEVICES").map(String::as_str),
+            Some("0,1")
+        );
+
+        // A session the emulator set no selector for is not guest mode,
+        // and there is nothing to protect.
+        let mut def = exec_def(1, None);
+        def.exec
+            .env
+            .insert("ROCR_VISIBLE_DEVICES".to_string(), "3".to_string());
+        let specs = build_specs(&desc(1), &def, &id(), CAPTURED).unwrap();
+        assert_eq!(
+            specs[0].env.get("ROCR_VISIBLE_DEVICES").map(String::as_str),
+            Some("3")
+        );
     }
 
     /// The value a containerised rank is handed for `key`, which for a

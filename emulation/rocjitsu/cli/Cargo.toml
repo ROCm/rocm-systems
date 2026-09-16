@@ -81,9 +81,10 @@ rust-version = "1.88"
 # what makes "where is the unsafe?" answerable by reading the workspace
 # members.
 #
-# There used to be a second, `rocjitsu_sys`, holding a `pre_exec` closure
-# that set `PR_SET_PDEATHSIG` on every workload so it would be killed by
-# the kernel if rocjitsu were `SIGKILL`ed. It never covered the case that
+# There used to be a second exception, in the crate that spawns
+# processes, holding a `pre_exec` closure that set `PR_SET_PDEATHSIG` on
+# every workload so it would be killed by the kernel if rocjitsu were
+# `SIGKILL`ed. It never covered the case that
 # mattered most — node containers are launched from a `spawn_blocking`
 # thread, where pdeathsig tracks a pool thread that may retire while
 # rocjitsu is perfectly healthy — and closing that would have meant a second

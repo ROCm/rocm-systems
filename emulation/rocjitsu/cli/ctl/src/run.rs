@@ -78,6 +78,13 @@ pub async fn run_cmd(a: RunArgs) -> anyhow::Result<ExitCode> {
     // defaulting into a mode the backend then refuses would make every
     // guest run fail on a flag nobody typed. Asking for it outright is
     // still an error, and `check_run_args` says so.
+    //
+    // `--daemon` is absent from this expression because it cannot change
+    // it: it conflicts with `--in-process`, so asking for a daemon is
+    // exactly not asking for in-process. What it does decide is the
+    // drop-in default, which is in-process as the upstream CLI's was —
+    // `dropin_argv` supplies `--in-process` to a legacy invocation that
+    // did not ask for a daemon, and passing `--daemon` is what stops it.
     let run = Arc::new(Run::start(CreateSessionRequest {
         id: Some(session.clone()),
         profile: profile_ref,
@@ -154,7 +161,10 @@ fn profile_error(e: rj_core::error::RocJITsuError) -> anyhow::Error {
 /// therefore already created a session, containers, a network and an
 /// emulator daemon, and torn all of it down again — several seconds to
 /// say something knowable before the first one.
-fn check_run_args(a: &RunArgs, profile: &rj_core::profile::ProfileDef) -> anyhow::Result<()> {
+pub(crate) fn check_run_args(
+    a: &RunArgs,
+    profile: &rj_core::profile::ProfileDef,
+) -> anyhow::Result<()> {
     // Parsed here for the error; `exec_def` parses it again to build the
     // map it actually passes, which is cheap and keeps that function
     // usable on its own.
@@ -173,6 +183,16 @@ fn check_run_args(a: &RunArgs, profile: &rj_core::profile::ProfileDef) -> anyhow
         && let Some(workdir) = &a.workdir
     {
         crate::check_host_workdir(workdir)?;
+    }
+    if a.attach {
+        anyhow::bail!(
+            "--attach is not supported. Upstream `rocjitsu --attach` joined a daemon \
+             something else had already started, at a well-known socket. Every daemon \
+             rocjitsu starts belongs to the run that started it and is torn down with \
+             it, so there is none to join. To share one emulated machine between \
+             terminals, start it with `rocjitsu run` and join it with \
+             `rocjitsu exec --session <id> -- <command>`."
+        );
     }
     // A guest GPU exists only inside the workload that the interposer
     // synthesised it for, so there is nothing for a second process to
@@ -209,6 +229,21 @@ async fn run_owned(
     // pull from a hung one.
     let health = tokio::select! {
         health = run.wait_ready(READY_TIMEOUT) => health?,
+        // A stop asked for during bring-up is the same request as one
+        // asked for after it, and pulling an image is exactly when a
+        // user changes their mind. Watched here because the socket has
+        // been answering since before bring-up started: `rocjitsu
+        // session stop` was already being told the session was stopping
+        // while nothing was listening for it, so the reply was true of
+        // the flag and false of the session, which went on starting.
+        () = run.wait_stop_requested() => {
+            eprintln!(
+                "rocjitsu: session {} was asked to stop while it was still starting; \
+                 removing what it had created",
+                run.id()
+            );
+            return Ok(ExitCode::SUCCESS);
+        }
         sig = interrupts.next() => {
             // Said, like every other interrupt path says it. This one
             // printed nothing at all: the prompt came back, and the only
@@ -307,8 +342,27 @@ async fn run_owned(
         // Keep serving for as long as the workload runs. `select!` rather
         // than a spawned task so the server stops when the workload does,
         // without a second thing to cancel.
+        //
+        // A stop request ends the workload rather than outliving it. The
+        // session is what `rocjitsu session stop` names, and the workload
+        // is the session's — leaving it running would answer "stopping"
+        // to the asker and leave the thing they were stopping on the
+        // machine. Terminating is the same escalation the second
+        // interrupt performs, and for the same reason: this is a
+        // decision, not a request to reconsider.
+        let stopping = exec.clone();
         tokio::select! {
             code = supervise_locally(exec, output, interrupts, relays) => code,
+            () = run.wait_stop_requested() => {
+                eprintln!(
+                    "rocjitsu: session {} was asked to stop; stopping the workload",
+                    run.id()
+                );
+                stopping.terminate().await;
+                Ok(ExitCode::from(
+                    u8::try_from(128 + libc::SIGTERM).unwrap_or(143),
+                ))
+            }
             () = &mut *serving => unreachable!("the control socket serves until dropped"),
         }
     }
@@ -485,6 +539,14 @@ async fn wait_for_borrowers(
 
     tokio::select! {
         () = run.wait_for_borrowers() => {}
+        () = run.wait_stop_requested() => {
+            eprintln!(
+                "rocjitsu: session {} was asked to stop; tearing it down with {} \
+                 borrower(s) still attached",
+                run.id(),
+                run.borrowers()
+            );
+        }
         _ = interrupts.next() => {
             // Teardown publishes the closing signal, which drops every
             // lease connection, so the borrowers are told rather than

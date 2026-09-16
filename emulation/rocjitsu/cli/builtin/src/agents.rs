@@ -384,6 +384,139 @@ mod tests {
         }
     }
 
+    /// Fields where a builtin deliberately differs from the preset it
+    /// mirrors, because the value is rocjitsu's to choose.
+    ///
+    /// The module docs above say which those are: the shape of the
+    /// emulated machine and the identity it presents. Listed here so the
+    /// comparison below can be exhaustive over everything else.
+    const ROCJITSU_OWN: [(&str, &str); 6] = [
+        ("num_cu_per_sh", "part of the uniform 256-CU grid"),
+        ("num_shader_engines", "part of the uniform 256-CU grid"),
+        (
+            "num_shader_arrays_per_engine",
+            "part of the uniform 256-CU grid",
+        ),
+        ("device_id", "KFD identity is rocjitsu's own"),
+        ("unique_id", "KFD identity is rocjitsu's own"),
+        ("marketing_name", "KFD identity is rocjitsu's own"),
+    ];
+
+    /// Differences nobody has decided about.
+    ///
+    /// These are memory, cache and engine sizes that describe the part
+    /// rather than rocjitsu's emulation of it, and they do not match the
+    /// part. Whether the builtin or the preset is right is a question
+    /// about what the profiles are *for*, and changing one would change
+    /// what every session on it emulates — which is not a thing to do
+    /// quietly.
+    ///
+    /// Listed rather than tolerated. The comparison fails on anything
+    /// not named here, so this is the complete set as of today and it
+    /// can only shrink by decision, never grow by accident.
+    const UNRECONCILED: [(&str, &str); 11] = [
+        ("local_mem_size", "mi350x and mi450x"),
+        ("max_engine_clk_fcompute", "mi350x"),
+        ("mem_clk_max", "mi350x"),
+        ("num_cp_queues", "mi350x"),
+        ("num_sdma_engines", "mi350x: 5 against the preset's 2"),
+        (
+            "num_sdma_xgmi_engines",
+            "mi350x: 12 against the preset's 14",
+        ),
+        ("l1_size_kb", "mi450x"),
+        ("l2_size_kb", "mi450x: 4MB against the preset's 192MB"),
+        ("lds_size_kb", "mi450x"),
+        ("max_waves_per_simd", "mi450x"),
+        ("mem_width", "mi450x: 8192 bits against the preset's 24576"),
+    ];
+
+    /// Every serialized device field, against the preset it mirrors.
+    ///
+    /// The tests beside this one check a handful of fields each, which is
+    /// how three profiles came to ship a device contract that diverged
+    /// from its preset in a dozen places and a cache geometry of all
+    /// zeros. A subset test cannot find a field nobody thought to name;
+    /// this compares the whole serialized document, so a field can only
+    /// differ by appearing in one of the lists above.
+    ///
+    /// "Serialized" is the limit of it, and the limit is deliberate.
+    /// `KfdDeviceInfo` models 31 of the schema's 40 fields; the rest —
+    /// `capability`, `capability2`, `debug_prop`, `revision_id`,
+    /// `location_id`, `hive_id`, `domain`, `vram_type`,
+    /// `pci_revision_id` — it does not write at all, so the emulator
+    /// applies the schema's default to them. For the first three that
+    /// default is zero and zero is a request: the schema says "0 =
+    /// auto-compute from gfx_target_version". The presets hardcode what
+    /// the emulator would have derived, and not copying it is the point.
+    #[test]
+    fn every_device_field_matches_its_preset_or_is_listed() {
+        let configs = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../configs");
+        // What a field the preset omits resolves to. `KfdDeviceInfo`'s
+        // own `Default` is the schema's defaults — see `core/build.rs` —
+        // so this is the same answer the emulator reaches.
+        let schema_default = serde_json::to_value(KfdDeviceInfo::default()).unwrap();
+
+        let excused: std::collections::HashMap<&str, &str> = ROCJITSU_OWN
+            .iter()
+            .chain(UNRECONCILED.iter())
+            .copied()
+            .collect();
+        let mut differ: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+
+        for (agent, preset) in [
+            (mi300x(), "gfx942_cdna3"),
+            (mi350x(), "gfx950_mi355x"),
+            (mi450x(), "gfx1250_mi455x"),
+        ] {
+            let path = configs.join(format!("{preset}.json"));
+            let doc: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            let want = &doc["vm"]["gpu"]["device"];
+            let got = serde_json::to_value(&agent.vm.gpu.device).unwrap();
+
+            let mut unexplained = Vec::new();
+            for (field, got) in got.as_object().unwrap() {
+                // Absent from the preset means the preset takes the
+                // schema default, which is what the builtin now starts
+                // from — so the two agree unless the builtin set it.
+                let want = want.get(field).unwrap_or(&schema_default[field]);
+                if want != got && !excused.contains_key(field.as_str()) {
+                    unexplained.push(format!("  {field}: preset {want}, builtin {got}"));
+                }
+            }
+            assert!(
+                unexplained.is_empty(),
+                "`{}` differs from {preset}.json in fields nothing accounts for. Either \
+                 make them agree, or add each to ROCJITSU_OWN, DERIVED_BY_THE_EMULATOR or \
+                 UNRECONCILED with the reason:\n{}",
+                agent.vm.gpu.device.marketing_name,
+                unexplained.join("\n")
+            );
+            for field in got.as_object().unwrap().keys() {
+                let want = want.get(field).unwrap_or(&schema_default[field]);
+                if want != &got[field] {
+                    differ.insert(field.clone());
+                }
+            }
+        }
+
+        // And the lists are only as long as they need to be. An entry
+        // that excuses a field which no longer differs is a permission
+        // outliving its reason — the next divergence in that field would
+        // land already forgiven.
+        let stale: Vec<&str> = excused
+            .keys()
+            .filter(|f| !differ.contains(**f))
+            .copied()
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "these fields agree with their preset now, so remove them from the lists \
+             above: {stale:?}"
+        );
+    }
+
     /// A builtin that declares SDMA engines must also say how many queues
     /// each engine has.
     ///
