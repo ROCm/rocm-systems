@@ -1904,6 +1904,21 @@ static void jsonWriteHeader(const char* ncclVersion, int cudaRuntime, int cudaDr
   rasOutAppend("  \"nccl_version\": \"%s\",\n", ncclVersion);
   rasOutAppend("  \"cuda_runtime_version\": %d,\n", cudaRuntime);
   rasOutAppend("  \"cuda_driver_version\": %d,\n", cudaDriver);
+  rasOutAppend("  \"hip_runtime_version\": %d,\n", cudaRuntime);
+  rasOutAppend("  \"amdgpu_driver_version\": %d,\n", cudaDriver);
+  rasOutAppend("  \"field_notes\": {\n");
+  rasOutAppend("    \"nccl_version\": \"RCCL library version\",\n");
+  rasOutAppend(
+      "    \"cuda_runtime_version\": \"HIP runtime from hipRuntimeGetVersion(); packed "
+      "MAJOR*10000000+MINOR*100000+PATCH. Same integer as hip_runtime_version. Not a CUDA version.\",\n");
+  rasOutAppend(
+      "    \"cuda_driver_version\": \"HIP/amdgpu driver from hipDriverGetVersion(); same packing. Same integer as "
+      "amdgpu_driver_version.\",\n");
+  rasOutAppend("    \"cuda_dev\": \"HIP device index from hipGetDevice\",\n");
+  rasOutAppend(
+      "    \"nvml_dev\": \"amd-smi device index by PCI bus; unique per node when HIP_VISIBLE_DEVICES remaps "
+      "cuda_dev\"\n");
+  rasOutAppend("  },\n");
   rasOutAppend("  \"timestamp\": \"%s\",\n", timestamp);
   rasOutAppend("  \"communicators_count\": %d,\n", commsCount);
   rasOutAppend("  \"communicators\": [\n");
