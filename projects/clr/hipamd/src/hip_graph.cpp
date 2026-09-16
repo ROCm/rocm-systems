@@ -1194,23 +1194,17 @@ hipError_t hipStreamBeginCapture_common(hipStream_t stream, hipStreamCaptureMode
     return hipErrorInvalidValue;
   }
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
+
   // A capture can only be started on a stream that is not already part of one. An
   // invalidated capture still has to be ended on its origin before any of its streams can be
   // reused, so an invalidated stream is not eligible either.
   if (s->GetCaptureStatus() != hipStreamCaptureStatusNone) {
     return hipErrorIllegalState;
   }
-  // The origin owns its own capture, so GetCaptureOwner() resolves to the origin from any
-  // stream taking part, including the origin itself.
-  s->SetCaptureOwner(stream);
-  if (graph == nullptr) {
-    s->SetCaptureGraph(new hip::Graph(s->GetDevice()));
-  } else {
-    s->SetCaptureGraph(reinterpret_cast<hip::Graph*>(graph));
-  }
-  s->SetCaptureID();
-  s->SetCaptureMode(mode);
-  s->SetOriginStream();
+  hip::Graph* captureGraph =
+      (graph == nullptr) ? new hip::Graph(s->GetDevice()) : reinterpret_cast<hip::Graph*>(graph);
+  s->StartCapture(captureGraph, mode);
+
   if (mode != hipStreamCaptureModeRelaxed) {
     hip::tls.capture_streams_.push_back(s);
   }
@@ -1308,11 +1302,8 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
   }
   // If capture was invalidated, due to a violation of the rules of stream capture
   if (s->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
-    *pGraph = nullptr;
-    // When capture is invalidated, graph should be deleted, otherwise it leaks
-    s->ReleaseCaptureGraph();
-    // Reset capture state to None so the stream is usable after a failed capture
-    s->EndCapture();
+    // Reset capture state to None so the stream is usable after a failed capture.
+    *pGraph = s->EndCapture();
     return hipErrorStreamCaptureInvalidated;
   }
 
@@ -1348,8 +1339,11 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
     s->GetCaptureGraph()->RemoveNode(pGraphNode);
     s->GetCaptureGraph()->RemoveManualNodesDuringCapture();
     if (leafNodes.size() > 1 && foundInRemovedDep == false) {
-      // Release created graph as it can't be retrieved anymore
-      s->ReleaseCaptureGraph();
+      // The unjoined work leaves a graph that can no longer be retrieved. Marking the capture
+      // invalidated has EndCapture discard it and return every stream to the non-capturing
+      // state.
+      s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      (void)s->EndCapture();
       return hipErrorStreamCaptureUnjoined;
     }
   } else {
@@ -1357,9 +1351,9 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
     s->GetCaptureGraph()->RemoveNode(pGraphNode);
   }
 
-  *pGraph = s->GetCaptureGraph();
-  // end capture on all streams/events part of graph capture
-  s->EndCapture();
+  // end capture on all streams/events part of graph capture, which yields the graph the
+  // caller now owns
+  *pGraph = s->EndCapture();
   return hipSuccess;
 }
 
@@ -2235,6 +2229,10 @@ hipError_t ihipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_
   hip::GraphNode** deps = reinterpret_cast<hip::GraphNode**>(dependencies);
   if (s->GetCaptureStatus() == hipStreamCaptureStatusNone) {
     HIP_RETURN(hipErrorIllegalState);
+  }
+
+  if (s->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
+    HIP_RETURN(hipErrorStreamCaptureInvalidated);
   }
   if ((s->GetCaptureGraph()->GetNodeCount() < numDependencies) ||
       (numDependencies > 0 && deps == nullptr) ||

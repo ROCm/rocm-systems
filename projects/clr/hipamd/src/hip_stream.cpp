@@ -38,8 +38,24 @@ void EraseCaptureTracking(Stream* stream) {
 }  // namespace
 
 // ================================================================================================
+Capture::Capture(hip::Stream* origin, hip::Graph* graph, hipStreamCaptureMode mode, uint64_t id)
+    : origin_(origin), graph_(graph), mode_(mode), id_(id) {}
+
+// ================================================================================================
+void Capture::DetachEventsOfStreamLocked(hip::Stream* s) {
+  for (auto it = events_.begin(); it != events_.end();) {
+    if (it->second == s) {
+      reinterpret_cast<hip::Event*>(it->first)->SetCaptureStream(nullptr);
+      it = events_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
+// ================================================================================================
 Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
-               const std::vector<uint32_t>& cuMask, hipStreamCaptureStatus captureStatus)
+               const std::vector<uint32_t>& cuMask)
     : amd::HostQueue(*dev->asContext(), *dev->devices()[0], 0, amd::CommandQueue::RealTimeDisabled,
                      convertToQueuePriority(p), cuMask, null_stream),
       device_(dev),
@@ -47,62 +63,47 @@ Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
       flags_(f),
       null_(null_stream),
       cuMask_(cuMask),
-      stream_id_(GenerateStreamId()),
-      captureStatus_(captureStatus) {
+      stream_id_(GenerateStreamId()) {
   device_->AddStream(this);
 }
 
 // ================================================================================================
-void Stream::InvalidateCapture() {
-  // Should be reachable only for a stream mid-capture.
-  assert(captureStatus_ == hipStreamCaptureStatusActive &&
-         "InvalidateCapture expects a live capture; callers skip the other states");
+hip::Graph* Stream::EndCapture(bool keepStatusQueryable) {
+  assert(capture_ != nullptr && "EndCapture requires a stream taking part in a capture");
 
-  auto* owner = reinterpret_cast<hip::Stream*>(captureOwner_);
-  assert(owner != nullptr && "a stream mid-capture always has a capture owner");
-
-  owner->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
-  std::scoped_lock lock(owner->lock_);
-  for (auto stream : owner->captureStreams_) {
-    reinterpret_cast<hip::Stream*>(stream)->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
-  }
-}
-
-// ================================================================================================
-void Stream::ResetCaptureStateLocked(bool preserveInvalidated) {
-  for (auto event : captureEvents_) {
-    reinterpret_cast<hip::Event*>(event)->SetCaptureStream(nullptr);
-  }
-  captureEvents_.clear();
-  captureStreams_.clear();
-
-  captureStatus_ =
-      preserveInvalidated ? hipStreamCaptureStatusInvalidated : hipStreamCaptureStatusNone;
-  pCaptureGraph_ = nullptr;
-  originStream_ = false;
-  captureOwner_ = nullptr;
-  lastCapturedNodes_.clear();
-}
-
-// ================================================================================================
-void Stream::EndCapture(bool preserveInvalidated) {
-  if (!originStream_ && captureOwner_ != nullptr) {
-    // A participant leaving the capture on its own, via hipStreamDestroy or Detach.
-    reinterpret_cast<hip::Stream*>(captureOwner_)
-        ->EraseCaptureStream(reinterpret_cast<hipStream_t>(this));
-  }
-
-  std::scoped_lock lock(lock_);
-  if (originStream_) {
-    // Holding this lock across the walk is what keeps the participants alive for its
-    // duration: hipStreamDestroy has to take it to erase a stream before freeing it.
-    for (auto stream : captureStreams_) {
-      auto* participant = reinterpret_cast<hip::Stream*>(stream);
-      std::scoped_lock participantLock(participant->lock_);
-      participant->ResetCaptureStateLocked(preserveInvalidated);
+  // Only the origin's teardown ends the capture, so only the origin disposes of the graph.
+  hip::Graph* graph = nullptr;
+  if (capture_->GetOrigin() == this) {
+    if (capture_->GetStatus() == hipStreamCaptureStatusInvalidated) {
+      capture_->graph_.reset();
+    } else {
+      graph = capture_->graph_.release();
     }
   }
-  ResetCaptureStateLocked(preserveInvalidated);
+
+  {
+    std::scoped_lock captureLock(capture_->lock_);
+    capture_->DetachEventsOfStreamLocked(this);
+    if (capture_->GetOrigin() == this) {
+      for (auto* s : capture_->participants_) {
+        capture_->DetachEventsOfStreamLocked(s);
+        if (!keepStatusQueryable) {
+          s->DropCapture();
+        }
+        s->lastCapturedNodes_.clear();
+      }
+      capture_->participants_.clear();
+    } else {
+      // A stream leaving on its own, via hipStreamDestroy or Detach. The capture carries on.
+      capture_->participants_.erase(this);
+    }
+  }
+
+  if (!keepStatusQueryable) {
+    DropCapture();
+  }
+  lastCapturedNodes_.clear();
+  return graph;
 }
 
 // ================================================================================================
@@ -118,23 +119,21 @@ void Stream::Destroy(hip::Stream* stream, bool forceDestroy) {
 
 // ================================================================================================
 void Stream::Detach() {
-  // Invoked by ~ExecutionCtx() on every stream the destroyed ctx still owns.
-  // If this stream still participates in a capture, hipStreamEndCapture's
-  // invalidated cleanup is about to become unreachable through the API.
-  if (captureStatus_ == hipStreamCaptureStatusActive ||
-      captureStatus_ == hipStreamCaptureStatusInvalidated) {
-    captureStatus_ = hipStreamCaptureStatusInvalidated;
+  // Invoked by ~ExecutionCtx() on every stream the destroyed ctx still owns. A detached
+  // stream cannot reach hipStreamEndCapture, so a capture it is taking part in has to be
+  // wound up here instead.
+  if (GetCaptureStatus() == hipStreamCaptureStatusActive ||
+      GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
+    SetCaptureStatus(hipStreamCaptureStatusInvalidated);
 
-    if (originStream_) {
+    if (IsOriginStream()) {
       EraseCaptureTracking(this);
-      ReleaseCaptureGraph();
     }
 
-    // Keep the invalidated status visible on the detached origin and every participant while
-    // clearing all graph, event and membership bookkeeping. A participant removes itself from
-    // its owner's set in here, and only aliases the origin's graph, so there is nothing for
-    // it to free.
-    EndCapture(/*preserveInvalidated=*/true);
+    // hipStreamIsCapturing and hipStreamGetCaptureInfo are the only capture APIs a detached
+    // stream can still reach, so the status is kept rather than cleared: a cleared one reads
+    // as None, which a caller cannot tell from never having captured.
+    (void)EndCapture(/*keepStatusQueryable=*/true);
   }
   detached_.store(true, std::memory_order_release);
 }
@@ -158,12 +157,6 @@ bool isValid(hipStream_t& stream) {
   const auto* s = reinterpret_cast<hip::Stream*>(stream);
   return std::any_of(g_devices.begin(), g_devices.end(),
                      [s](const auto& device) { return device->StreamExists(s); });
-}
-
-// ================================================================================================
-void Stream::ReleaseCaptureGraph() {
-  delete pCaptureGraph_;
-  pCaptureGraph_ = nullptr;
 }
 
 // ================================================================================================
@@ -220,10 +213,7 @@ bool Stream::StreamCaptureOngoing(hipStream_t hStream) {
   if (captureStatus == hipStreamCaptureStatusInvalidated) {
     return true;
   }
-  if (captureStatus != hipStreamCaptureStatusNone) {
-    // Defensive: unknown future enum value — treat as not ongoing.
-    return false;
-  }
+  assert(captureStatus == hipStreamCaptureStatusNone && "unhandled hipStreamCaptureStatus");
 
   // Relaxed mode — no cross-stream interference.
   if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeRelaxed) {
@@ -476,8 +466,14 @@ hipError_t hipStreamDestroy(hipStream_t stream) {
   }
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   if (s->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    // hipStreamEndCapture only works on the origin, so destroying the origin leaves no way to
+    // finish the capture. Marking it invalidated makes EndCapture() delete the graph rather than
+    // hand it back.
+    if (s->IsOriginStream()) {
+      s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+    }
     // EndCapture removes a participant from its owner's set itself.
-    s->EndCapture();
+    (void)s->EndCapture();
   }
   s->GetDevice()->RemoveStreamFromPools(s);
 
@@ -550,26 +546,25 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
       return hipErrorStreamCaptureInvalidated;
     }
 
+    hip::Capture* eventCapture = eventStream->GetCapture();
+    assert(eventCapture != nullptr && "IsEventCaptured implies the stream is in a capture");
+
     // Waiting on an event recorded in a different capture would splice two independent
-    // graphs together. Reject it rather than merging them.
-    if (waitStream->GetCaptureStatus() == hipStreamCaptureStatusActive &&
-        waitStream->GetCaptureID() != eventStream->GetCaptureID()) {
-      waitStream->InvalidateCapture();
-      if (eventStream->GetCaptureStatus() != hipStreamCaptureStatusInvalidated) {
-        eventStream->InvalidateCapture();
-      }
+    // graphs together.
+    if (waitStream->GetCapture() != nullptr && waitStream->GetCapture() != eventCapture) {
+      // One write per capture is enough: the status lives on the capture, so both sequences
+      // go down whole.
+      waitStream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      eventStream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
       return hipErrorStreamCaptureMerge;
     }
 
+    if (eventCapture->GetStatus() == hipStreamCaptureStatusInvalidated) {
+      return hipErrorStreamCaptureInvalidated;
+    }
+
     if (waitStream->GetCaptureStatus() == hipStreamCaptureStatusNone) {
-      // Enroll against the capture's origin, not the stream that happened to record the
-      // event, so every participant is a direct member of one flat set.
-      auto* owner = reinterpret_cast<hip::Stream*>(eventStream->GetCaptureOwner());
-      waitStream->SetCaptureOwner(reinterpret_cast<hipStream_t>(owner));
-      waitStream->SetCaptureGraph(eventStream->GetCaptureGraph());
-      waitStream->SetCaptureID(eventStream->GetCaptureID());
-      waitStream->SetCaptureMode(eventStream->GetCaptureMode());
-      owner->AddCaptureStream(stream);
+      waitStream->JoinCapture(eventCapture);
     }
     waitStream->AddCrossCapturedNode(e->GetNodesPrevToRecorded());
     return hipSuccess;

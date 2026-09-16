@@ -705,6 +705,12 @@ graph:
   Unit_hipStreamBeginCapture_Negative_CrossCaptureWaitIsRejected:
     <<: *level_2
     tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_InvalidationIsCaptureWide:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCapture_Negative_WaitDoesNotJoinInvalidatedCapture:
+    <<: *level_2
+    tags: [capture]
   Unit_hipStreamBeginCapture_Negative_BeginCaptureOnInvalidatedStream:
     <<: *level_2
     tags: [capture]

@@ -1718,6 +1718,9 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_DestroyForkedStreamDuringCaptu
  *      hipErrorStreamCaptureInvalidated rather than being accepted and silently ignored,
  *      which is what CUDA returns and what every operation routed through the
  *      STREAM_CAPTURE macro already did.
+ *    - Also verifies the invalidation reached the origin, so that ending the capture reports
+ *      the invalidation rather than the fork's unjoined work. Both halves were measured on
+ *      CUDA; this test previously asserted HIP's narrower behaviour on both counts.
  * Test source
  * ------------------------
  *    - catch\unit\graph\hipStreamBeginCapture.cc
@@ -1770,12 +1773,14 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_SelfWaitOnInvalidatedForkedStr
   HIP_CHECK(hipStreamIsCapturing(forkedStream, &captureStatus));
   REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
 
-  // Tear the capture down. Invalidating a participant does not invalidate the origin, which
-  // is still active, so ending the capture reports the forked stream's work as unjoined
-  // rather than reporting the invalidation. Only the error code is asserted: on a failure
-  // path hipStreamEndCapture leaves the graph out-param untouched.
+  // Invalidating the fork invalidated the capture, origin included, so ending it reports the
+  // invalidation rather than the fork's orphaned work. Only the error code is asserted: on a
+  // failure path hipStreamEndCapture leaves the graph out-param untouched.
+  HIP_CHECK(hipStreamIsCapturing(captureStream, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
+
   hipGraph_t graph = nullptr;
-  HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureUnjoined);
+  HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureInvalidated);
 }
 
 /**
@@ -2215,6 +2220,150 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_ConcurrentForkIntoOneCapture) 
   REQUIRE(waitFailures == 0);
   REQUIRE(lostEnrollments == 0);
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify that invalidating a capture invalidates every stream in it, not just
+ *      the stream the illegal operation was aimed at. Measured on CUDA across all three ways
+ *      a capture dies: an illegal query on an event recorded by the origin, the same on an
+ *      event recorded by a forked stream, and an unsafe API call during capture. HIP
+ *      previously marked exactly one stream in each case, which left hipStreamEndCapture
+ *      reporting unjoined work instead of the invalidation when a fork was the target.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_InvalidationIsCaptureWide) {
+  enum class Trigger { kQueryOriginEvent, kQueryForkEvent, kUnsafeApi };
+  const Trigger trigger =
+      GENERATE(Trigger::kQueryOriginEvent, Trigger::kQueryForkEvent, Trigger::kUnsafeApi);
+
+  (void)hipGetLastError();
+
+  LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
+  StreamsGuard streams(2);
+  EventsGuard events(3);
+
+  int* devMem = devMem_g.ptr();
+  hipStream_t captureStream = streams[0];
+  hipStream_t forkedStream = streams[1];
+  hipEvent_t forkEvent = events[0];
+  hipEvent_t originEvent = events[1];
+  hipEvent_t forkOwnEvent = events[2];
+
+  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeThreadLocal));
+
+  incrementKernel<<<1, 1, 0, captureStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  HIP_CHECK(hipEventRecord(forkEvent, captureStream));
+  HIP_CHECK(hipStreamWaitEvent(forkedStream, forkEvent, 0));
+  incrementKernel<<<1, 1, 0, forkedStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+
+  // One event on each stream, so either can be the target of an illegal query.
+  HIP_CHECK(hipEventRecord(originEvent, captureStream));
+  HIP_CHECK(hipEventRecord(forkOwnEvent, forkedStream));
+
+  // Both must be capturing first, or the assertions below would hold vacuously.
+  hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone;
+  HIP_CHECK(hipStreamIsCapturing(captureStream, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusActive);
+  HIP_CHECK(hipStreamIsCapturing(forkedStream, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusActive);
+
+  switch (trigger) {
+    case Trigger::kQueryOriginEvent:
+      REQUIRE(hipEventQuery(originEvent) != hipSuccess);
+      break;
+    case Trigger::kQueryForkEvent:
+      REQUIRE(hipEventQuery(forkOwnEvent) != hipSuccess);
+      break;
+    case Trigger::kUnsafeApi: {
+      // hipMalloc is prohibited while a non-relaxed capture is in progress.
+      void* unreachable = nullptr;
+      REQUIRE(hipMalloc(&unreachable, sizeof(int)) != hipSuccess);
+      break;
+    }
+  }
+  (void)hipGetLastError();
+
+  // Whichever stream the illegal operation named, the whole capture is invalidated.
+  HIP_CHECK(hipStreamIsCapturing(captureStream, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
+  HIP_CHECK(hipStreamIsCapturing(forkedStream, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
+
+  // Only the error code is asserted: on this path hipStreamEndCapture leaves the graph
+  // out-param untouched.
+  hipGraph_t graph = nullptr;
+  HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureInvalidated);
+}
+
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify that waiting on an event from an already-invalidated capture does
+ *      not enroll a third stream into that capture, and does not write Active back onto
+ *      the capture. HIP previously set the waiter Active as part of enroll, which with
+ *      capture-wide status would have revived every stream in the capture.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_WaitDoesNotJoinInvalidatedCapture) {
+  (void)hipGetLastError();
+
+  LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
+  StreamsGuard streams(3);
+  EventsGuard events(1);
+
+  int* devMem = devMem_g.ptr();
+  hipStream_t captureStream = streams[0];
+  hipStream_t forkedStream = streams[1];
+  hipStream_t outsider = streams[2];
+  hipEvent_t originEvent = events[0];
+
+  HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeThreadLocal));
+  incrementKernel<<<1, 1, 0, captureStream>>>(devMem);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipEventRecord(originEvent, captureStream));
+  HIP_CHECK(hipStreamWaitEvent(forkedStream, originEvent, 0));
+
+  REQUIRE(hipEventQuery(originEvent) != hipSuccess);
+  (void)hipGetLastError();
+
+  hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone;
+  HIP_CHECK(hipStreamIsCapturing(captureStream, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
+
+  HIP_CHECK_ERROR(hipStreamWaitEvent(outsider, originEvent, 0), hipErrorStreamCaptureInvalidated);
+
+  HIP_CHECK(hipStreamIsCapturing(outsider, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusNone);
+  HIP_CHECK(hipStreamIsCapturing(captureStream, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
+  HIP_CHECK(hipStreamIsCapturing(forkedStream, &captureStatus));
+  REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureInvalidated);
+}
+
 
 /**
  * Test Description

@@ -14,6 +14,7 @@
 #include "hip_graph_capture.hpp"
 
 #include <atomic>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <thread>
@@ -361,13 +362,77 @@ namespace hip {
   class MemoryPool;
   class Event;
   class ExecutionCtx;
+  class Stream;
+
+  /// State shared by every stream taking part in one capture, created by
+  /// hipStreamBeginCapture. Ownership is shared by every stream that is part of this capture.
+  ///
+  /// A Capture dies when the last stream in it drops its reference. Streams detached by
+  /// ~ExecutionCtx keep theirs so hipStreamIsCapturing can still report that the capture was
+  /// invalidated, which outlives the teardown: such a Capture has no graph and no listed
+  /// participants while those streams still point at it.
+  class Capture : public amd::ReferenceCountedObject {
+   public:
+    Capture(hip::Stream* origin, hip::Graph* graph, hipStreamCaptureMode mode, uint64_t id);
+
+    Capture(const Capture&) = delete;
+    Capture& operator=(const Capture&) = delete;
+
+    hip::Stream* GetOrigin() const { return origin_; }
+    hip::Graph* GetGraph() const { return graph_.get(); }
+    hipStreamCaptureMode GetMode() const { return mode_; }
+    uint64_t GetId() const { return id_; }
+
+    hipStreamCaptureStatus GetStatus() const { return status_.load(std::memory_order_relaxed); }
+    void SetStatus(hipStreamCaptureStatus status) {
+      status_.store(status, std::memory_order_relaxed);
+    }
+
+    /// Enroll a stream in this capture.
+    void Join(hip::Stream* s) {
+      assert(s != origin_ && "the origin is never a participant");
+      std::scoped_lock lock(lock_);
+      participants_.insert(s);
+    }
+
+    void AddEvent(hipEvent_t e, hip::Stream* s) {
+      std::scoped_lock lock(lock_);
+      events_[e] = s;
+    }
+    void RemoveEvent(hipEvent_t e) {
+      std::scoped_lock lock(lock_);
+      events_.erase(e);
+    }
+    bool HasEvent(hipEvent_t e) const {
+      std::scoped_lock lock(lock_);
+      return events_.count(e) != 0;
+    }
+    /// Clear the back-pointer on every event s captured, and forget them.
+    /// The caller must hold lock_.
+    void DetachEventsOfStreamLocked(hip::Stream* s);
+
+   private:
+    friend class Stream;
+
+    /// Private so the only way to destroy a Capture is to drop its last reference.
+    ~Capture() = default;
+
+    hip::Stream* const origin_;          //!< Stream that called hipStreamBeginCapture
+    std::unique_ptr<hip::Graph> graph_;  //!< Graph being recorded, released on a successful end
+    const hipStreamCaptureMode mode_;    //!< API restriction mode, fixed at BeginCapture
+    const uint64_t id_;                  //!< Unique for the life of the process
+    std::atomic<hipStreamCaptureStatus> status_{hipStreamCaptureStatusActive};
+    mutable std::mutex lock_;                        //!< Guards participants_ and events_
+    std::unordered_set<hip::Stream*> participants_;  //!< Streams in the capture, excluding origin_
+    std::unordered_map<hipEvent_t, hip::Stream*> events_;  //!< Captured events and their streams
+  };
+
   class Stream : public amd::HostQueue {
   public:
     enum Priority : int { High = -1, Normal = 0, Low = 1 };
 
     Stream(Device* dev, Priority p = Priority::Normal, unsigned int f = 0, bool null_stream = false,
-           const std::vector<uint32_t>& cuMask = {},
-           hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone);
+           const std::vector<uint32_t>& cuMask = {});
 
     // --- Core stream operations ---
 
@@ -419,15 +484,17 @@ namespace hip {
     }
 
     /// Returns capture status of the current stream
-    hipStreamCaptureStatus GetCaptureStatus() const { return captureStatus_; }
+    hipStreamCaptureStatus GetCaptureStatus() const {
+      return capture_ ? capture_->GetStatus() : hipStreamCaptureStatusNone;
+    }
     /// Returns capture mode of the current stream
-    hipStreamCaptureMode GetCaptureMode() const { return captureMode_; }
+    hipStreamCaptureMode GetCaptureMode() const {
+      return capture_ ? capture_->GetMode() : hipStreamCaptureModeGlobal;
+    }
     /// Returns if stream is origin stream
-    bool IsOriginStream() const { return originStream_; }
-    /// Mark this stream as the origin of a capture
-    void SetOriginStream() { originStream_ = true; }
+    bool IsOriginStream() const { return capture_ != nullptr && capture_->GetOrigin() == this; }
     /// Returns captured graph
-    hip::Graph* GetCaptureGraph() const { return pCaptureGraph_; }
+    hip::Graph* GetCaptureGraph() const { return capture_ ? capture_->GetGraph() : nullptr; }
     /// Returns last captured graph node
     const std::vector<hip::GraphNode*>& GetLastCapturedNodes() const { return lastCapturedNodes_; }
     /// Set last captured graph node
@@ -439,62 +506,50 @@ namespace hip {
     /// Append captured node via the wait event cross stream
     void AddCrossCapturedNode(const std::vector<hip::GraphNode*>& graphNodes,
                               bool replace = false);
-    /// Set graph that is being captured
-    void SetCaptureGraph(hip::Graph* pGraph) {
-      pCaptureGraph_ = pGraph;
-      captureStatus_ = hipStreamCaptureStatusActive;
+    /// Start a new capture with this stream as the origin.
+    void StartCapture(hip::Graph* graph, hipStreamCaptureMode mode) {
+      capture_ = new Capture(this, graph, mode, GenerateCaptureID());
     }
-    /// Release graph when capture is invalidated
-    void ReleaseCaptureGraph();
-    /// Drop the capture-graph pointer without freeing it (forks alias the origin's graph).
-    void ClearCaptureGraph() { pCaptureGraph_ = nullptr; }
-    /// Generate and assign a new capture ID (used at BeginCapture)
-    void SetCaptureID() { captureID_ = GenerateCaptureID(); }
-    /// Inherit capture ID from the parent stream
-    void SetCaptureID(uint64_t captureId) { captureID_ = captureId; }
-    /// Reset capture parameters, optionally keeping an invalidated status observable.
+    /// Retain `capture`, adopt that retain, and enroll this stream.
+    void JoinCapture(hip::Capture* capture) {
+      capture->retain();
+      capture_ = capture;
+      capture->Join(this);
+    }
     /// The single entry point for capture teardown, on the origin and on participants alike.
-    void EndCapture(bool preserveInvalidated = false);
-    /// Set capture status
-    void SetCaptureStatus(hipStreamCaptureStatus captureStatus) { captureStatus_ = captureStatus; }
-    /// Set capture mode
-    void SetCaptureMode(hipStreamCaptureMode captureMode) { captureMode_ = captureMode; }
-    /// Set the origin stream that owns the capture this stream takes part in.
-    void SetCaptureOwner(hipStream_t captureOwner) { captureOwner_ = captureOwner; }
-    /// Get the origin stream that owns the capture this stream takes part in.
-    hipStream_t GetCaptureOwner() const { return captureOwner_; }
+    /// keepStatusQueryable leaves every stream pointing at the Capture so its final status
+    /// survives the teardown, for the callers that cannot report that status themselves.
+    ///
+    /// Returns the captured graph, which the caller then owns, when this stream's teardown
+    /// ends a capture that is still valid. Returns null for a participant, whose departure
+    /// leaves the capture running, and for an invalidated capture, whose graph it destroys.
+    [[nodiscard]] hip::Graph* EndCapture(bool keepStatusQueryable = false);
+    /// Set the status of the capture this stream takes part in. Because the status lives on
+    /// the capture, marking any one stream invalidated invalidates all of them.
+    void SetCaptureStatus(hipStreamCaptureStatus captureStatus) {
+      if (capture_ != nullptr) {
+        capture_->SetStatus(captureStatus);
+      }
+    }
     /// Get capture ID
-    uint64_t GetCaptureID() const { return captureID_; }
+    uint64_t GetCaptureID() const { return capture_ ? capture_->GetId() : 0; }
     /// Associate an event with the current capture
     void SetCaptureEvent(hipEvent_t e) {
-      std::scoped_lock lock(lock_);
-      captureEvents_.emplace(e);
+      assert(capture_ != nullptr && "SetCaptureEvent requires a stream taking part in a capture");
+      capture_->AddEvent(e, this);
     }
-    /// Returns true if the event is part of this capture
+    /// Returns true if the event was recorded inside the capture this stream takes part in
     bool IsEventCaptured(hipEvent_t e) const {
-      std::scoped_lock lock(lock_);
-      return captureEvents_.count(e) != 0;
+      return capture_ != nullptr && capture_->HasEvent(e);
     }
     /// Remove an event from the current capture
     void EraseCaptureEvent(hipEvent_t e) {
-      std::scoped_lock lock(lock_);
-      captureEvents_.erase(e);
+      if (capture_ != nullptr) {
+        capture_->RemoveEvent(e);
+      }
     }
-    /// Enroll a stream in this capture. Only meaningful on the origin stream.
-    void AddCaptureStream(hipStream_t s) {
-      assert(originStream_ && "capture membership is tracked on the origin only");
-      std::scoped_lock lock(lock_);
-      captureStreams_.insert(s);
-    }
-    /// Remove a stream from this capture. Only meaningful on the origin stream.
-    void EraseCaptureStream(hipStream_t s) {
-      assert(originStream_ && "capture membership is tracked on the origin only");
-      std::scoped_lock lock(lock_);
-      captureStreams_.erase(s);
-    }
-    /// Mark the whole capture that this stream belongs to as invalidated: the origin and
-    /// every stream enrolled in it. Callable from the origin or from any participant.
-    void InvalidateCapture();
+    /// The capture this stream takes part in, or null when it is not capturing.
+    hip::Capture* GetCapture() const { return capture_; }
 
     // --- Execution context (green context) lifecycle ---
     /// Marks the stream as detached: its owning ExecutionCtx has been
@@ -512,13 +567,16 @@ namespace hip {
     }
 
   private:
-    ~Stream() = default;
+    ~Stream() { DropCapture(); }
 
-    /// Return this stream's capture fields to defaults. Requires lock_ to be held, since
-    /// EndCapture applies it to a participant while holding the origin's lock too.
-    void ResetCaptureStateLocked(bool preserveInvalidated);
+    /// Drop this stream's reference, if it holds one.
+    void DropCapture() {
+      if (capture_ != nullptr) {
+        capture_->release();
+        capture_ = nullptr;
+      }
+    }
 
-    mutable std::recursive_mutex lock_;      //!< Guards captureEvents_ and captureStreams_
     Device* device_;                         //!< Device that owns this stream
     Priority priority_;                      //!< Scheduling priority (High / Normal / Low)
     unsigned int flags_;                     //!< Creation flags (e.g. hipStreamNonBlocking)
@@ -530,18 +588,9 @@ namespace hip {
     std::atomic<hipError_t> async_error_{hipSuccess};
 
     // ----- Stream capture state -----
-    hipStreamCaptureStatus captureStatus_{hipStreamCaptureStatusNone}; //!< Current capture status
-    hip::Graph* pCaptureGraph_ = nullptr;                 //!< Graph being constructed by capture
-    hipStreamCaptureMode captureMode_{hipStreamCaptureModeGlobal}; //!< API restriction mode
-    bool originStream_ = false;                           //!< True if this stream started capture
-    hipStream_t captureOwner_ = nullptr;                  //!< Origin owning this capture; the
-                                                          //!< origin points at itself
+    hip::Capture* capture_{nullptr};                      //!< Capture this stream takes part in
     std::vector<hip::GraphNode*> lastCapturedNodes_;      //!< Last graph node(s) captured
     std::vector<hip::GraphNode*> removedDependencies_;    //!< Deps removed via UpdateCaptureDeps
-    std::unordered_set<hipStream_t> captureStreams_;      //!< Streams enrolled in this capture,
-                                                          //!< excluding the origin. Origin only.
-    std::unordered_set<hipEvent_t> captureEvents_;        //!< Events tied to this capture
-    uint64_t captureID_ = 0;                              //!< Unique ID for this capture sequence
 
     // ----- Execution context (green context) state -----
     std::atomic<bool> detached_{false};  //!< True once the owning ExecutionCtx has been destroyed
