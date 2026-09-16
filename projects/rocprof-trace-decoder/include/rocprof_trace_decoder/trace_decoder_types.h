@@ -248,25 +248,17 @@ typedef struct rocprofiler_thread_trace_decoder_inst_other_simd_t
  * Emitted once per (SIMD, program counter) after parsing completes, and only when
  * ::ROCPROF_TRACE_DECODER_ANALYSIS_HIDDEN_LATENCY was requested. Sum over SIMDs for a
  * per-program-counter total. Hidden cycles overlap work on another instruction pipe, so
- * they are already accounted for by that other work; the exposed cost of an instruction is
- * its latency plus idle time, minus its hidden total, clamped at zero.
+ * they are already accounted for by that other work.
  *
  * Cycles are attributed against four instruction-pipe groups, highest priority first: MATRIX,
- * VALU, vector memory (VMEM, LDS, FLAT) and scalar (SMEM, SALU). Each instruction is scored
- * against its own pipe and against the union of every higher-priority pipe, and the larger
- * total wins. Categories belonging to no pipe are scored once against the union of all four.
- * The own-pipe score omits its issue component, because an instruction's contribution to its
- * own pipe is exactly its issue window and counting it would let every instruction hide
- * behind itself.
+ * VALU, vector memory (VMEM, LDS, FLAT) and scalar (SMEM, SALU). Idle and stalled cycles are
+ * hidden by any busy pipe, including the instruction's own. Issue cycles are hidden only by a
+ * higher-priority pipe, so an instruction never hides behind itself. Categories belonging to
+ * no pipe create no busy interval of their own, but their cycles can still be hidden.
  *
- * MATRIX is not a decoder instruction category. Matrix instructions are recognized from the
- * ISA text the decoder caches while stitching, so v_mfma*, v_smfma*, v_wmma* and v_swmma* are
- * treated as MATRIX rather than the VALU the decoder reports, and each contributes its full
- * interval to MATRIX and three quarters of it to VALU. Without an ISA source they stay VALU,
- * measurably changing results on traces that mix matrix and non-matrix work.
- *
- * Overlapping intervals within one pipe are coalesced by adding their durations rather than
- * only extending to the latest endpoint, so a hidden total can exceed the span it covers.
+ * MATRIX is not a decoder instruction category, so matrix instructions arrive as VALU. Parse
+ * with an ISA source to have them classified as MATRIX; without one they stay VALU, measurably
+ * changing results on traces that mix matrix and non-matrix work.
  * Added in rocprof-trace-decoder 0.2.3
  */
 typedef struct rocprofiler_thread_trace_decoder_hidden_latency_t

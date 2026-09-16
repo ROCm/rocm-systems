@@ -71,7 +71,7 @@ private:
     struct Inst
     {
         int64_t time;
-        int32_t duration;
+        int32_t cycles;
         uint32_t stall : 24;
         uint32_t category : 8;
         uint32_t pc_id;

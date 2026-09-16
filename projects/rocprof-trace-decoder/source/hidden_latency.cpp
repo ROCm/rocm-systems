@@ -232,7 +232,7 @@ void HiddenLatencyAnalysis::add_wave(const WaveDataInternal& wave, const PCTrans
     {
         Inst retained{};
         retained.time = inst.time;
-        retained.duration = inst.duration;
+        retained.cycles = std::max<int32_t>(inst.duration, static_cast<int32_t>(inst.stall));
         retained.stall = inst.stall;
         retained.category = inst.category;
         retained.pc_id = intern_pc(inst.pc, pctranslator);
@@ -262,7 +262,7 @@ void HiddenLatencyAnalysis::finalize(rocprof_trace_decoder_trace_callback_t call
             for (const auto& inst : wave.instructions)
             {
                 const int64_t clock = inst.time + inst.stall;
-                const int64_t cycles = int64_t{inst.duration} - inst.stall;
+                const int64_t cycles = int64_t{inst.cycles} - inst.stall;
                 if (pc_is_matrix[inst.pc_id])
                 {
                     matrix_raw.emplace_back(clock, cycles);
@@ -307,7 +307,7 @@ void HiddenLatencyAnalysis::finalize(rocprof_trace_decoder_trace_callback_t call
             {
                 const int64_t clock = inst.time;
                 const int64_t stall = inst.stall;
-                const int64_t cycles = inst.duration;
+                const int64_t cycles = inst.cycles;
                 HiddenLatency hidden{};
 
                 if (pc_is_matrix[inst.pc_id])

@@ -341,6 +341,23 @@ TEST(HiddenLatencyAnalysisTest, IdleWindowStartsAtThePreviousInstructionsEnd)
     EXPECT_EQ(target->idle, 4);
 }
 
+TEST(HiddenLatencyAnalysisTest, StallLongerThanDurationOccupiesTheStallCycles)
+{
+    Harness harness;
+    auto& wave = harness.add_wave(0, 0);
+    harness.add_instruction(wave, 0x100, WaveInstCategory::IMMED, 0, 4, 20);
+    harness.add_instruction(wave, 0x200, WaveInstCategory::IMMED, 30, 2);
+    auto& busy_wave = harness.add_wave(0, 0);
+    harness.add_instruction(busy_wave, 0x400, WaveInstCategory::VALU, 4, 26);
+
+    auto records = harness.run();
+    const auto* target = harness.find(records, 0x200);
+    ASSERT_NE(target, nullptr);
+    // The stalling instruction occupies 20 cycles, not its 4 cycle duration, so the idle
+    // window opens at 20 and only 10 of the busy pipe's cycles precede this instruction.
+    EXPECT_EQ(target->idle, 10);
+}
+
 namespace
 {
 /// One gfx9 capture: the software header the producer prepends, then a little payload.
