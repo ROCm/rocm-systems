@@ -632,7 +632,7 @@ def probe_docker_replay_env(
     probe_shell = (
         f"export LD_LIBRARY_PATH={ld_inside}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}; "
         "rocm-smi --showid --showproductname 2>/dev/null || true; "
-        "ls ${ROCM_PATH:-/opt/rocm}/lib/libamdhip64.so.*.*.* 2>/dev/null || true"
+        "awk -F= '/^HIP_VERSION_MAJOR/{M=$2}/^HIP_VERSION_MINOR/{m=$2}/^HIP_VERSION_PATCH/{p=$2}END{if(M)print M\".\"m\".\"p}' ${ROCM_PATH:-/opt/rocm}/share/hip/version 2>/dev/null || true"
     )
     docker_args = [
         "run", "--rm",
