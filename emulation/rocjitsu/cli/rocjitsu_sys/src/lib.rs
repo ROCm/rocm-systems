@@ -38,6 +38,9 @@ type FnGetVersionString = unsafe extern "C" fn() -> *const c_char;
 
 type FnDbtWriteHandoff = unsafe extern "C" fn(*const c_char, *const c_char, u32) -> c_int;
 type FnRunVfioServer = unsafe extern "C" fn(*const c_char, *const c_char) -> c_int;
+type FnAvailableHostThreads = unsafe extern "C" fn(*mut u32) -> c_int;
+type FnResolveExecutionThreads =
+    unsafe extern "C" fn(*const c_char, u32, u32, *mut u32, *mut u32, *mut usize) -> c_int;
 
 /// Load and copy the formatted build identity exported by `librocjitsu.so`.
 ///
@@ -204,6 +207,136 @@ pub fn config_is_loadable(library: impl AsRef<OsStr>, json: &CStr) -> Result<(),
                 "rj_vm_create_from_string rejected the config: {status}"
             )),
         }
+    }
+}
+
+/// The execution threads a config resolves to at one budget.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadAllocation {
+    /// Effective engine count (`num_threads`).
+    pub engines: u32,
+    /// Inclusive dispatch width per SoC (`cpu_dispatch_threads`).
+    pub dispatch: Vec<u32>,
+}
+
+impl ThreadAllocation {
+    /// Total threads the allocation retains: the engines plus the workers
+    /// each SoC's dispatch pool keeps beyond the engine already counted.
+    pub fn total(&self) -> u64 {
+        self.dispatch
+            .iter()
+            .map(|width| u64::from(width.saturating_sub(1)))
+            .sum::<u64>()
+            + u64::from(self.engines)
+    }
+}
+
+/// Resolve what `config_path` would allocate at each of `budgets`, without
+/// building a VM (`rj_config_resolve_execution_threads`).
+///
+/// A budget of zero evaluates the budget the config itself requests.
+/// Returns the host width every row was resolved against, and one
+/// allocation per requested budget, in order.
+///
+/// The host width is read once and reused for every row. Resolving each
+/// row against a freshly queried width would let a table drawn across a
+/// change in the process affinity mask mix two bases, which is precisely
+/// the comparison such a table exists to make.
+///
+/// # Errors
+///
+/// Returns a diagnostic when the library cannot be loaded, predates the
+/// entry point, or rejects the config.
+pub fn resolve_execution_threads(
+    library: impl AsRef<OsStr>,
+    config_path: &std::path::Path,
+    budgets: &[u32],
+) -> Result<(u32, Vec<ThreadAllocation>), String> {
+    let config = path_to_cstring(config_path)?;
+    // SAFETY: the caller's library discovery selects the path. Both symbols
+    // have the C signatures declared in rj_threads.h; `config` outlives every
+    // call, and each dispatch buffer is sized by the preceding sizing call.
+    unsafe {
+        let lib = libloading::Library::new(library.as_ref()).map_err(|error| error.to_string())?;
+        let host_threads_fn = *lib
+            .get::<FnAvailableHostThreads>(b"rj_config_available_host_threads\0")
+            .map_err(|_| {
+                "librocjitsu.so does not export rj_config_available_host_threads; this build \
+                 predates thread-budget reporting"
+                    .to_string()
+            })?;
+        let resolve = *lib
+            .get::<FnResolveExecutionThreads>(b"rj_config_resolve_execution_threads\0")
+            .map_err(|_| {
+                "librocjitsu.so does not export rj_config_resolve_execution_threads; this build \
+                 predates thread-budget reporting"
+                    .to_string()
+            })?;
+
+        let mut host_threads: u32 = 0;
+        match host_threads_fn(&mut host_threads) {
+            ROCJITSU_STATUS_SUCCESS => {}
+            status => {
+                return Err(format!(
+                    "rj_config_available_host_threads failed with status {status}"
+                ));
+            }
+        }
+
+        let mut rows = Vec::with_capacity(budgets.len());
+        for &budget in budgets {
+            let mut engines: u32 = 0;
+            let mut count: usize = 0;
+            // Sizing call: a null buffer asks only how many widths there are.
+            match resolve(
+                config.as_ptr(),
+                budget,
+                host_threads,
+                &mut engines,
+                std::ptr::null_mut(),
+                &mut count,
+            ) {
+                ROCJITSU_STATUS_SUCCESS => {}
+                status => return Err(resolve_error(config_path, budget, status)),
+            }
+
+            let mut dispatch = vec![0u32; count];
+            match resolve(
+                config.as_ptr(),
+                budget,
+                host_threads,
+                &mut engines,
+                dispatch.as_mut_ptr(),
+                &mut count,
+            ) {
+                ROCJITSU_STATUS_SUCCESS => {}
+                status => return Err(resolve_error(config_path, budget, status)),
+            }
+            dispatch.truncate(count);
+            rows.push(ThreadAllocation { engines, dispatch });
+        }
+        Ok((host_threads, rows))
+    }
+}
+
+/// Explain a `rj_config_resolve_execution_threads` failure in terms of the
+/// config the caller named, since a bare status number says nothing about
+/// which of several budgets was being evaluated.
+fn resolve_error(config_path: &std::path::Path, budget: u32, status: RjStatus) -> String {
+    let at = if budget == 0 {
+        "the config's own budget".to_string()
+    } else {
+        format!("budget {budget}")
+    };
+    match status {
+        ROCJITSU_STATUS_INVALID_FILE => format!(
+            "{} could not be read, or its thread allocation metadata is invalid",
+            config_path.display()
+        ),
+        status => format!(
+            "resolving {} for {at} failed with status {status}",
+            config_path.display()
+        ),
     }
 }
 

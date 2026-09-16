@@ -87,6 +87,16 @@ enum TopCmd {
     #[command(name = VFIO_SERVE)]
     VfioServe(VfioArgs),
 
+    /// Show the execution threads a config would allocate, at its own
+    /// budget and at a range of ceilings.
+    ///
+    /// Reads the config and applies the allocation rule; it builds no
+    /// GPU and runs no workload, so it answers what a machine will do
+    /// before there is one.
+    #[cfg(feature = "rocjitsu")]
+    #[command(name = THREAD_BUDGET_TABLE)]
+    ThreadBudgetTable(ThreadBudgetArgs),
+
     /// Every other subcommand (profile, topology, agent, emulators,
     /// state, run, exec, paths) is flattened in here.
     #[command(flatten)]
@@ -104,6 +114,15 @@ struct VfioArgs {
     /// the older CLI spelled it, which is how that spelling still works.
     #[arg(long = VFIO_SOCKET_FLAG, value_name = "PATH")]
     vfio_socket: String,
+}
+
+/// `rocjitsu thread-budget-table`.
+#[cfg(feature = "rocjitsu")]
+#[derive(clap::Args, Debug)]
+struct ThreadBudgetArgs {
+    /// Simulation config whose allocations to report.
+    #[arg(long, value_name = "PATH")]
+    config: String,
 }
 
 /// The status clap exits with on a usage error, and therefore the one a
@@ -160,6 +179,49 @@ fn serve_vfio(a: &VfioArgs) -> anyhow::Result<ExitCode> {
     let status = rj_backend_rocjitsu::serve_vfio(&config, std::path::Path::new(&a.vfio_socket))
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(ExitCode::from(u8::try_from(status).unwrap_or(1)))
+}
+
+/// Print what `a.config` would allocate, at its own budget and at each
+/// of the ceilings the shipped tables are indexed by.
+///
+/// The columns, their order and their spelling are the older CLI's: this
+/// output is quoted in the configuration and concurrent-dispatch docs,
+/// and the tables there were read off it.
+#[cfg(feature = "rocjitsu")]
+fn thread_budget_table(a: &ThreadBudgetArgs) -> anyhow::Result<ExitCode> {
+    use rj_backend_rocjitsu::THREAD_BUDGET_TABLE_ROWS as ROWS;
+
+    // Absolute and existing before the library is loaded, for the reason
+    // `serve_vfio` does the same: the loader reports a missing file from
+    // several layers down, naming an internal step instead of the path
+    // the user typed.
+    let config = std::fs::canonicalize(&a.config).map_err(|e| {
+        anyhow::anyhow!(
+            "--config {}: {e}. Name an emulator config file that exists.",
+            a.config
+        )
+    })?;
+    let (_host, rows) = rj_backend_rocjitsu::resolve_thread_budgets(&config, ROWS)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    println!("Budget | num_threads | cpu_dispatch_threads per GPU | Total");
+    for (budget, row) in ROWS.iter().zip(&rows) {
+        // Budget zero is the config's own request rather than a ceiling,
+        // which is why it is labelled instead of numbered.
+        let label = if *budget == 0 {
+            "Configured".to_string()
+        } else {
+            budget.to_string()
+        };
+        let dispatch = row
+            .dispatch
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        println!("{label} | {} | {dispatch} | {}", row.engines, row.total());
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 /// Print this CLI's package version and RocJITsu's shared build identity.
@@ -338,6 +400,13 @@ const VFIO_SERVE: &str = "vfio-serve";
 
 /// The flag that names the socket, and the thing the rewriter keys on.
 const VFIO_SOCKET_FLAG: &str = "vfio-socket";
+
+/// The subcommand a `--thread-budget-table` invocation is routed to.
+///
+/// The older CLI spelled this as a flag on a bare invocation, and the
+/// shipped documentation still does; the rewriter keeps that spelling
+/// working by keying on the flag under the same name as the subcommand.
+const THREAD_BUDGET_TABLE: &str = "thread-budget-table";
 
 /// Whether `arg` is plausibly a program the user meant to run rather
 /// than a mistyped subcommand.
@@ -522,6 +591,29 @@ fn dropin_argv(args: Vec<String>) -> Result<Vec<String>, String> {
         out.extend(args[1..].iter().cloned());
         return Ok(out);
     }
+    // `rocjitsu --config <cfg> --thread-budget-table` — the older
+    // spelling for reporting what a config would allocate. Like serving
+    // a VMM it is not a workload invocation, so it must not reach `run`.
+    if names_a_thread_budget_table(&args[1..scan_end]) {
+        if asks_for_a_daemon(&args[1..scan_end]) || sep.is_some() {
+            return Err(thread_budget_is_its_own_mode_error());
+        }
+        let mut out = Vec::with_capacity(args.len() + 1);
+        out.push(args[0].clone());
+        out.push(THREAD_BUDGET_TABLE.to_string());
+        // The flag named the mode rather than carrying a value, and the
+        // mode is now the subcommand, so it would be an unknown argument
+        // to the very command it selected. Dropping it before the check
+        // below is also what keeps it from being reported as one.
+        out.extend(
+            args[1..]
+                .iter()
+                .filter(|a| *a != "--thread-budget-table")
+                .cloned(),
+        );
+        check_flags(&out, 2, None, THREAD_BUDGET_TABLE)?;
+        return Ok(out);
+    }
     let Some(sep) = sep else {
         // `rocjitsu --daemon --config <cfg>` — upstream's daemon-only
         // form, which served the emulator with no workload of its own.
@@ -610,6 +702,31 @@ fn names_a_vfio_socket(opts: &[String]) -> bool {
     opts.iter().any(|a| *a == long || a.starts_with(&joined))
 }
 
+/// Whether the invocation asks for a thread allocation table.
+///
+/// The older CLI took this as a bare flag, so that is the only spelling
+/// to look for; unlike `--vfio-socket` it carries no value of its own.
+fn names_a_thread_budget_table(opts: &[String]) -> bool {
+    opts.iter().any(|a| a == "--thread-budget-table")
+}
+
+/// The message for `--thread-budget-table` asked for alongside something
+/// it cannot be combined with.
+///
+/// The older CLI refused the same combinations, and for the same reason:
+/// the table is computed from the config alone, so pairing it with a
+/// launch would have to either ignore the launch or ignore the table.
+fn thread_budget_is_its_own_mode_error() -> String {
+    format!(
+        "error: --{THREAD_BUDGET_TABLE} reports what a config would allocate and cannot be \
+         combined with --daemon, --attach, or a workload\n\n\
+         It builds no GPU and runs nothing: it reads the config and applies the \
+         allocation\nrule, which is why it can answer before there is a machine.\n\n\
+         Usage: rocjitsu {THREAD_BUDGET_TABLE} --config <PATH>\n\n\
+         For more information, try 'rocjitsu {THREAD_BUDGET_TABLE} --help'."
+    )
+}
+
 /// The message for `--vfio-socket` asked for alongside something it
 /// cannot be combined with.
 fn vfio_is_its_own_mode_error() -> String {
@@ -681,6 +798,8 @@ fn dispatch(cli: Cli) -> anyhow::Result<ExitCode> {
         // enters a runtime that has them.
         #[cfg(feature = "rocjitsu")]
         TopCmd::VfioServe(a) => serve_vfio(&a),
+        #[cfg(feature = "rocjitsu")]
+        TopCmd::ThreadBudgetTable(a) => thread_budget_table(&a),
         // Everything else, including `run`, happens right here in this
         // process. There is no routing decision to make: no command
         // reaches a session it does not own, because the only command
@@ -1424,6 +1543,89 @@ mod tests {
             assert!(msg.contains("--vfio-socket"), "{argv:?}: {msg}");
             assert!(msg.contains("vfio-serve"), "{argv:?}: {msg}");
         }
+    }
+
+    /// The older CLI reported thread allocations from a bare invocation,
+    /// and the shipped docs still spell it that way, so the flag has to
+    /// keep selecting the mode it always selected.
+    #[cfg(feature = "rocjitsu")]
+    #[test]
+    fn a_thread_budget_table_routes_to_its_own_subcommand() {
+        // The flag named the mode; the subcommand now does, so it is not
+        // carried through to be rejected by the command it selected.
+        assert_eq!(
+            rewrite(&["rocjitsu", "--config", "c.json", "--thread-budget-table"]),
+            v_args(&["rocjitsu", "thread-budget-table", "--config", "c.json"])
+        );
+        // Order is the user's to choose, not ours.
+        assert_eq!(
+            rewrite(&["rocjitsu", "--thread-budget-table", "--config", "c.json"]),
+            v_args(&["rocjitsu", "thread-budget-table", "--config", "c.json"])
+        );
+        // An explicit subcommand is left alone, as every other one is.
+        let explicit = &["rocjitsu", "thread-budget-table", "--config", "c.json"][..];
+        assert_eq!(rewrite(explicit), v_args(explicit));
+    }
+
+    /// It reads a config and runs nothing, so it is not half of a launch.
+    #[cfg(feature = "rocjitsu")]
+    #[test]
+    fn a_thread_budget_table_refuses_to_be_combined_with_a_run() {
+        for argv in [
+            &[
+                "rocjitsu",
+                "--config",
+                "c.json",
+                "--thread-budget-table",
+                "--",
+                "./app",
+            ][..],
+            &[
+                "rocjitsu",
+                "--daemon",
+                "--config",
+                "c.json",
+                "--thread-budget-table",
+            ][..],
+            &[
+                "rocjitsu",
+                "--attach",
+                "--config",
+                "c.json",
+                "--thread-budget-table",
+            ][..],
+        ] {
+            let msg = refuse(argv);
+            assert!(msg.contains("--thread-budget-table"), "{argv:?}: {msg}");
+        }
+    }
+
+    /// The parser really does accept what that rewrite produces.
+    #[cfg(feature = "rocjitsu")]
+    #[test]
+    fn thread_budget_table_parses_what_the_rewriter_builds() {
+        use clap::Parser as _;
+        let argv = rewrite(&["rocjitsu", "--config", "c.json", "--thread-budget-table"]);
+        let cli = Cli::try_parse_from(&argv).unwrap_or_else(|e| panic!("{argv:?}: {e}"));
+        match cli.command {
+            TopCmd::ThreadBudgetTable(a) => assert_eq!(a.config, "c.json"),
+            other => panic!("{argv:?} should be thread-budget-table, not {other:?}"),
+        }
+        // There is nothing to report on without a config.
+        Cli::try_parse_from(["rocjitsu", "thread-budget-table"])
+            .expect_err("a table needs a config to report on");
+    }
+
+    /// Budget zero leads, and stands for the config's own request; the
+    /// rest are the ceilings the shipped tables in the docs are indexed
+    /// by, so a reader can line the two up row for row.
+    #[cfg(feature = "rocjitsu")]
+    #[test]
+    fn the_reported_budgets_are_the_ones_the_docs_tabulate() {
+        assert_eq!(
+            rj_backend_rocjitsu::THREAD_BUDGET_TABLE_ROWS,
+            &[0, 1, 2, 4, 8, 12, 16, 24, 32, 48, 64]
+        );
     }
 
     /// The parser really does accept what the rewriter produces.

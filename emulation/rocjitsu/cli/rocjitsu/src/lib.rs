@@ -1101,6 +1101,44 @@ pub fn serve_vfio(config: &Path, socket: &Path) -> Result<i32> {
     rocjitsu_sys::run_vfio_server(&lib, config, socket).map_err(RocJITsuError::Other)
 }
 
+/// The budgets a thread-allocation table reports on, in the order it
+/// shows them. Zero leads, standing for the budget the config itself
+/// asks for; the rest are the ceilings the shipped tables are indexed by.
+pub const THREAD_BUDGET_TABLE_ROWS: &[u32] = &[0, 1, 2, 4, 8, 12, 16, 24, 32, 48, 64];
+
+/// Resolve what `config` would allocate at each of `budgets`, without
+/// building the GPU it describes.
+///
+/// Returns the host thread width every row was resolved against, and one
+/// allocation per budget. A budget of zero reports the config's own
+/// request, which is what the machine will actually do.
+///
+/// Here rather than in the binary for the same reason as
+/// [`serve_vfio`]: the allocation rule lives in the emulator library, and
+/// restating it in the CLI would be a second answer that can disagree
+/// with the one the machine runs.
+///
+/// # Errors
+///
+/// Returns an error when the runtime library cannot be located, when it
+/// predates the entry point, or when it rejects the config.
+pub fn resolve_thread_budgets(
+    config: &Path,
+    budgets: &[u32],
+) -> Result<(u32, Vec<rocjitsu_sys::ThreadAllocation>)> {
+    check_sanitizer_preload()?;
+    let lib = kmd_preload().ok_or_else(|| {
+        let detail = runtime_location()
+            .explain_missing()
+            .unwrap_or_else(|| format!("{LIB_NAME} was not found"));
+        RocJITsuError::Other(format!(
+            "rocjitsu: the rocjitsu runtime library was not found, and the thread allocator \
+             is part of it — {detail}"
+        ))
+    })?;
+    rocjitsu_sys::resolve_execution_threads(&lib, config, budgets).map_err(RocJITsuError::Other)
+}
+
 /// Returns true if rocjitsu is reachable on this machine — i.e. a
 /// system install or sibling build of the KMD library is detected.
 pub fn is_installed() -> bool {

@@ -117,6 +117,28 @@ have an IP discovery profile for a guest driver to find anything to attach to,
 and the server says so when it does not. On a build without vfio-user support
 the command reports that and exits nonzero.
 
+### Reporting what a config would allocate
+
+`thread-budget-table` prints the execution threads a config resolves to, at its
+own budget and at the ceilings the [configuration
+reference](configuration.md#thread-accounting-and-preferred-allocations)
+tabulates.
+
+```bash
+rocjitsu thread-budget-table --config configs/gfx950_mi355x.json
+```
+
+The older spelling, `rocjitsu --config <cfg> --thread-budget-table`, routes to
+the same place, and like serving a VMM it cannot be combined with `--daemon`,
+`--attach` or a workload.
+
+It builds no GPU and runs nothing: it reads the config and applies the same
+allocation rule the emulator does, which is how it can answer before there is a
+machine. The `Configured` row is the file's own request — what a run will
+actually do — and the numbered rows are ceilings, so the total may sit below one,
+or above it where an explicit `num_threads` or `cpu_dispatch_threads` overrides
+the budget.
+
 ## Architecture
 
 ```
