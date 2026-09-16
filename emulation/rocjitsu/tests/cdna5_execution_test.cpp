@@ -1848,7 +1848,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesBothElementsAndHonorsE
     write_vgpr_packed_u64(*cu, *wf, 4, lane, kInactive);
   }
 
-  cu->execute_instruction(decoded.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
   EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), kExpected);
   EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 1), kInactive);
   EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 2), kExpected);
@@ -1862,7 +1862,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesBothElementsAndHonorsE
   write_vgpr_packed_u64(*cu, *wf, 8, 0, kMultiplicand);
   write_vgpr_packed_u64(*cu, *wf, 12, 0, kMultiplier);
   write_vgpr_packed_u64(*cu, *wf, 16, 0, kAddend);
-  cu->execute_instruction(overlap.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(overlap.get(), *wf).succeeded());
   EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 8, 0), kExpected);
 }
 
@@ -1895,7 +1895,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationDiffersFromRoundedMultiplyAdd)
   write_vgpr_packed_u64(*cu, *wf, 12, 0, {bits(kMultiplier), bits(kMultiplier)});
   write_vgpr_packed_u64(*cu, *wf, 16, 0, {bits(kAddend), bits(kAddend)});
 
-  cu->execute_instruction(decoded.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
   EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), (PackedU64Pair{kFused, kFused}));
 }
 
@@ -1967,7 +1967,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesEveryPublicLlvmSourceF
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
     ASSERT_NE(decoded, nullptr);
     ASSERT_NE(decoded->execute, nullptr);
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     const PackedU64Pair expected{
         bits(std::fma(std::bit_cast<double>(form.multiplicand[0]),
                       std::bit_cast<double>(form.multiplier[0]),
@@ -2027,7 +2027,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesCrossWindowVgprTuples)
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, test_case.words.data()));
     ASSERT_NE(decoded, nullptr);
     ASSERT_NE(decoded->execute, nullptr);
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, test_case.destination, 0), kExpected);
   }
 }
@@ -2051,7 +2051,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationAppliesPublicModifiersAndClamp
   std::unique_ptr<Instruction> negated(decode_valid(*decoder, kNegWords.data()));
   ASSERT_NE(negated, nullptr);
   ASSERT_NE(negated->execute, nullptr);
-  cu->execute_instruction(negated.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(negated.get(), *wf).succeeded());
   EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), (PackedU64Pair{bits(-3.0), bits(20.0)}));
 
   constexpr std::array<uint32_t, 2> kClampWords{0xCC3BC004u, 0x1C421908u};
@@ -2061,7 +2061,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationAppliesPublicModifiersAndClamp
   std::unique_ptr<Instruction> clamped(decode_valid(*decoder, kClampWords.data()));
   ASSERT_NE(clamped, nullptr);
   ASSERT_NE(clamped->execute, nullptr);
-  cu->execute_instruction(clamped.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(clamped.get(), *wf).succeeded());
   EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), (PackedU64Pair{bits(0.0), bits(1.0)}));
 }
 
@@ -2096,7 +2096,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationHonorsRoundingDenormAndExcepti
     write_vgpr_packed_u64(*cu, *wf, 8, 0, {kOne, kNegativeOne});
     write_vgpr_packed_u64(*cu, *wf, 12, 0, {kHalfUlpAtOne, kHalfUlpAtOne});
     write_vgpr_packed_u64(*cu, *wf, 16, 0, {kOne, kNegativeOne});
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), kRounded[round]) << round;
   }
 
@@ -2110,7 +2110,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationHonorsRoundingDenormAndExcepti
     write_vgpr_packed_u64(*cu, *wf, 8, 0, {kMinSubnormal, kMinNormal});
     write_vgpr_packed_u64(*cu, *wf, 12, 0, {kOne, bits(0.5)});
     write_vgpr_packed_u64(*cu, *wf, 16, 0, {0u, 0u});
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     const PackedU64Pair result = read_vgpr_packed_u64(*cu, *wf, 4, 0);
     EXPECT_EQ(result[0], kInputDenormExpected[denorm]) << denorm;
     EXPECT_EQ(result[1], kOutputDenormExpected[denorm]) << denorm;
@@ -2122,7 +2122,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationHonorsRoundingDenormAndExcepti
   write_vgpr_packed_u64(*cu, *wf, 8, 0, {kQuietNan, kInfinity});
   write_vgpr_packed_u64(*cu, *wf, 12, 0, {kOne, bits(2.0)});
   write_vgpr_packed_u64(*cu, *wf, 16, 0, {kOne, kInfinity ^ 0x8000000000000000ULL});
-  cu->execute_instruction(decoded.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
   const PackedU64Pair exceptional = read_vgpr_packed_u64(*cu, *wf, 4, 0);
   EXPECT_TRUE(std::isnan(std::bit_cast<double>(exceptional[0])));
   EXPECT_TRUE(std::isnan(std::bit_cast<double>(exceptional[1])));
@@ -2130,8 +2130,59 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationHonorsRoundingDenormAndExcepti
   write_vgpr_packed_u64(*cu, *wf, 8, 0, {bits(-0.0), bits(-0.0)});
   write_vgpr_packed_u64(*cu, *wf, 12, 0, {bits(2.0), bits(2.0)});
   write_vgpr_packed_u64(*cu, *wf, 16, 0, {bits(0.0), bits(-0.0)});
-  cu->execute_instruction(decoded.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
   EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), (PackedU64Pair{bits(0.0), bits(-0.0)}));
+}
+
+TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesSgpr104InEverySourcePosition) {
+  constexpr auto bits = [](double value) { return std::bit_cast<uint64_t>(value); };
+  struct SourcePosition {
+    std::string_view name;
+    cdna5::Vop3pBuilderFields fields;
+    PackedU64Pair expected;
+  };
+  constexpr std::array kCases{
+      SourcePosition{
+          "src0",
+          {.vdst = 4, .opsel_hi_2 = 1, .src0 = 104, .src1 = 268, .src2 = 272, .opsel_hi = 3},
+          {bits(17.0), bits(20.0)}},
+      SourcePosition{
+          "src1",
+          {.vdst = 4, .opsel_hi_2 = 1, .src0 = 264, .src1 = 104, .src2 = 272, .opsel_hi = 3},
+          {bits(13.0), bits(16.0)}},
+      SourcePosition{
+          "src2",
+          {.vdst = 4, .opsel_hi_2 = 1, .src0 = 264, .src1 = 268, .src2 = 104, .opsel_hi = 3},
+          {bits(17.0), bits(26.0)}},
+  };
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  wf->set_mode_raw(3u << 6);
+
+  constexpr uint64_t kVccPoison = 0xdeadbeefcafef00dULL;
+  write_wave_sgpr(*cu, *wf, 104, static_cast<uint32_t>(bits(2.0)));
+  write_wave_sgpr(*cu, *wf, 105, static_cast<uint32_t>(bits(2.0) >> 32));
+  wf->set_vcc_raw(kVccPoison);
+  write_vgpr_packed_u64(*cu, *wf, 8, 0, {bits(3.0), bits(4.0)});
+  write_vgpr_packed_u64(*cu, *wf, 12, 0, {bits(5.0), bits(6.0)});
+  write_vgpr_packed_u64(*cu, *wf, 16, 0, {bits(7.0), bits(8.0)});
+
+  for (const auto &test_case : kCases) {
+    SCOPED_TRACE(test_case.name);
+    const auto words = cdna5::build_vop3p(cdna5::kVPkFmaF64Vop3p, test_case.fields);
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+    ASSERT_NE(decoded, nullptr);
+    ASSERT_NE(decoded->execute, nullptr);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), test_case.expected);
+    EXPECT_EQ(wf->vcc(), kVccPoison);
+  }
 }
 
 TEST(Gfx1251PackedF64ExecutionTest, FusedOperationRejectsUndefinedLayoutsAndRegisterTuples) {
@@ -2159,7 +2210,7 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationRejectsUndefinedLayoutsAndRegi
       cdna5::Vop3pBuilderFields{
           .vdst = 4, .opsel_hi_2 = 1, .src0 = 265, .src1 = 268, .src2 = 272, .opsel_hi = 3},
       cdna5::Vop3pBuilderFields{
-          .vdst = 4, .opsel_hi_2 = 1, .src0 = 264, .src1 = 104, .src2 = 272, .opsel_hi = 3},
+          .vdst = 4, .opsel_hi_2 = 1, .src0 = 264, .src1 = 103, .src2 = 272, .opsel_hi = 3},
       cdna5::Vop3pBuilderFields{
           .vdst = 4, .opsel_hi_2 = 1, .src0 = 264, .src1 = 1, .src2 = 272, .opsel_hi = 3},
       cdna5::Vop3pBuilderFields{
