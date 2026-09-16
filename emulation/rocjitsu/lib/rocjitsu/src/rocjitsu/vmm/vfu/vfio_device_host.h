@@ -81,15 +81,13 @@ public:
   /// @brief Scatter-gather entries a transfer is attempted with before the
   /// library is asked how many it actually needs. An internal threshold of
   /// the scatter-gather retry path, not a device-facing limit: transfers
-  /// beyond it are retried after resizing, not refused. Exposed for tests,
-  /// which derive their window counts from it.
+  /// beyond it are retried after resizing, not refused.
   static constexpr std::size_t kInitialSgEntries = 8;
 
-  /// @brief Segments a transfer may span before the transport gives up on
-  /// mapping it directly and falls back to copy_by_region. An internal
-  /// threshold of the same retry path rather than a cap on what a transfer
-  /// may request; the fallback still completes the transfer. Exposed for
-  /// tests, which park the streaming case just past it.
+  /// @brief Segments a transfer may span before the transport stops mapping
+  /// it in one shot. An internal threshold of the same retry path rather
+  /// than a cap on what a transfer may request: above it the transfer is
+  /// streamed one registered window at a time and still completes.
   static constexpr std::size_t kMaxSgEntries = 256;
 
   /// @brief Build the libvfio-user context from the device's declared bus shape.
