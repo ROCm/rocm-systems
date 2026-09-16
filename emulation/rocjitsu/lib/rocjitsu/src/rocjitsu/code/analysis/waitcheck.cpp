@@ -3,9 +3,9 @@
 
 #include "rocjitsu/code/analysis/waitcheck.h"
 
-#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
@@ -676,9 +676,9 @@ struct Analyzer {
           set_analysis_error(section_name, word_index * sizeof(uint32_t),
                              util::InvalidInst(std::string(message)));
         };
-        DecodeResult decoded = decoder->decode_window(
-            words.subspan(word_index), word_index * sizeof(uint32_t),
-            DecodeErrorEmitter(emit_decode_error));
+        DecodeResult decoded =
+            decoder->decode_window(words.subspan(word_index), word_index * sizeof(uint32_t),
+                                   DecodeErrorEmitter(emit_decode_error));
         if (decoded.failed())
           return;
         inst = std::move(decoded).value();
