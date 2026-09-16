@@ -297,6 +297,30 @@ TEST(ExecutionThreadBudgetTest, ShippedServerChoicesAndExplicitSerial) {
   EXPECT_EQ(serial.execution_threads.helpers, 0u);
 }
 
+TEST(ExecutionThreadBudgetTest, PresetsKeepSiblingTablesConsistent) {
+  for (const auto &paths :
+       {std::vector<std::string>{"gfx950_mi355x.json", "gfx950_mi355x_kmd.json",
+                                 "gfx950_mi355x_kmd_2gpu.json"},
+        std::vector<std::string>{"gfx1250_mi455x.json", "gfx1250_mi455x_kmd_4gpu.json"},
+        std::vector<std::string>{"gfx942_cdna3.json", "gfx942_cdna3_kmd.json"}}) {
+    const auto expected = config::load_execution_thread_settings(
+                              std::string(CONFIG_DIR) + "/" + paths[0], rocjitsu::kEmbeddedSchema)
+                              .choices;
+    for (const auto &path : paths)
+      EXPECT_EQ(config::load_execution_thread_settings(std::string(CONFIG_DIR) + "/" + path,
+                                                       rocjitsu::kEmbeddedSchema)
+                    .choices,
+                expected)
+          << path;
+  }
+  const auto cdna3 = config::load_execution_thread_settings(
+                         std::string(CONFIG_DIR) + "/gfx942_cdna3.json", rocjitsu::kEmbeddedSchema)
+                         .resolve(64);
+  EXPECT_EQ(cdna3.engines, 8u);
+  EXPECT_EQ(cdna3.dispatch, (std::vector<uint32_t>{1}));
+  EXPECT_EQ(cdna3.helpers, 0u);
+}
+
 TEST(ExecutionThreadBudgetTest, AsyncPoolsBelongToTheirVm) {
   namespace coexec = amdgpu::matrix_coexecution;
   auto first = std::make_shared<coexec::ExecutionResources>(4, 1, 8);

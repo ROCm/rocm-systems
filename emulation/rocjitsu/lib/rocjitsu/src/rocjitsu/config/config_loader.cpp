@@ -52,7 +52,7 @@ ExecutionThreadAllocation resolve_execution_threads(const ExecutionThreadRequest
     throw std::invalid_argument("async_helper_threads must be -1 or between 0 and 128");
   const uint32_t budget = request.budget
                               ? request.budget
-                              : std::min(std::max(host_threads, 1u), kDefaultCpuDispatchThreadCap);
+                              : std::min(std::max(host_threads, 1u), kDefaultExecutionThreadCap);
   xcds = std::max(xcds, 1u);
   if (clocked)
     return {std::min(request.engines ? request.engines : budget, xcds),
@@ -970,9 +970,6 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
   }
 
   result.dbt_guest = dbt_guest_from_fb(fb_config->dbt_guest());
-
-  if (fb_config->vm() && fb_config->vm()->gpu())
-    result.num_gpus = std::max(1u, fb_config->vm()->gpu()->num_gpus());
 
   if (result.num_gpus > 1 && result.device.present) {
     result.devices.resize(result.num_gpus);

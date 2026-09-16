@@ -208,8 +208,20 @@ at four threads, even on a larger host:
 ]
 ```
 
+The one-XCD desktop presets use 1/D/0 entries for D = 1, 2, 4, 8, 16 and 32.
+[Desktop measurements](desktop-thread-scaling.md) show that wide matrix grids
+still benefit substantially from 16 to 32 threads, while small grids plateau
+at four. These tables stop at 32; larger explicit D values remain available.
+
+The unmeasured CDNA2/CDNA3 presets retain serial dispatch and no helpers.
+CDNA3's table scales engines through 1, 2, 4 and 8 to preserve its existing
+XCD parallelism, without extrapolating the desktop dispatch measurements.
+The pinned multi-GPU presets use the aggregate pool cost to select a fitting
+entry; those derived multi-GPU allocations have not been benchmarked here.
+
 Mirage copies these tables from its agent configuration and leaves allocation
-to rocjitsu. Profile options may override `cpu_thread_budget`, `num_threads`,
+to rocjitsu. Its multi-GPU configurations retain E=1 by default until the RCCL
+multi-partition hang is fixed; an explicit option can override that pin. Profile options may override `cpu_thread_budget`, `num_threads`,
 `cpu_dispatch_threads` and `async_helper_threads`; a supplied config file is
 used verbatim. Checkpoints retain requests and preferred tables, so restore
 re-evaluates automatic selection for the receiving process's affinity.

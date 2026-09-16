@@ -131,6 +131,7 @@ public:
     /// Maximum CU step() iterations per functional slice. One step can issue
     /// one instruction for every runnable wavefront resident on the CU.
     uint32_t functional_quantum = kFunctionalQuantum;
+    /// Shared VM resources; null preserves direct-construction environment controls.
     std::shared_ptr<matrix_coexecution::ExecutionResources> async_resources = nullptr;
   };
 
@@ -436,8 +437,11 @@ public:
   /// @brief Return the CU configuration.
   /// @returns Const reference to the CU configuration.
   const Config &config() const { return config_; }
+  /// @brief Effective VM or experimental matrix execution mode.
   int matrix_execution_mode() const;
+  /// @brief Maximum issuer-plus-helper width for one wave.
   unsigned async_issue_width() const;
+  /// @brief Lazily acquire and cache the VM or explicit process helper pool.
   matrix_coexecution::SharedPool &async_pool();
 
   /// @brief Return the shared GPU memory.

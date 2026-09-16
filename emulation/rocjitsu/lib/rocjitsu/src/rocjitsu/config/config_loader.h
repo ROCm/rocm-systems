@@ -30,7 +30,7 @@ class GpuMemory;
 class Xcd;
 namespace matrix_coexecution {
 class ExecutionResources;
-}
+} // namespace matrix_coexecution
 } // namespace amdgpu
 
 namespace config {
@@ -40,7 +40,9 @@ namespace config {
 /// This conservative policy limit bounds persistent worker allocation on
 /// large hosts while retaining substantial CU parallelism. It is not a
 /// hardware limit; embedding callers can override it.
-inline constexpr uint32_t kDefaultCpuDispatchThreadCap = 32;
+inline constexpr uint32_t kDefaultExecutionThreadCap = 32;
+/// Compatibility name for the older dispatch-only override API.
+inline constexpr uint32_t kDefaultCpuDispatchThreadCap = kDefaultExecutionThreadCap;
 
 /// A single VM-wide budget includes engines, retained workers from every SoC's
 /// dispatch pool, and one shared async-helper pool. Explicit knobs take priority.
@@ -52,10 +54,13 @@ struct ExecutionThreadRequest {
 };
 
 /// One target-configured granule, with an inclusive dispatch width per GPU.
+/// engines maps to num_threads, dispatch to cpu_dispatch_threads, and helpers
+/// to async_helper_threads in JSON. E/D/H names distinguish totals from requests.
 struct ExecutionThreadChoice {
   uint32_t engines = 1;
   uint32_t dispatch = 1;
   uint32_t helpers = 0;
+  bool operator==(const ExecutionThreadChoice &) const = default;
 };
 
 struct ExecutionThreadAllocation {
@@ -96,8 +101,9 @@ struct ExecutionThreadSettings {
 ExecutionThreadSettings load_execution_thread_settings(const std::string &json_path,
                                                        const std::string &schema_text);
 
-/// Includes explicit experimental ISA controls.
+/// @brief Check ISA adapter availability with experimental environment overrides.
 bool configured_async_mma_supported(rj_code_arch_t arch);
+/// @brief Create lazy VM-owned helper resources; explicit environment H uses the process pool.
 std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>
 make_async_execution_resources(uint32_t helpers);
 
@@ -182,15 +188,16 @@ struct LoadedConfig {
   uint32_t num_gpus = 1;                ///< Number of simulated GPU instances.
   std::vector<KfdDeviceConfig> devices; ///< Per-GPU configs (populated when num_gpus > 1).
   rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
-  /// Requested functional dispatch width. Automatic mode uses a host-wide
-  /// budget capped at 32; each SoC's effective width is CU-capacity-clamped.
+  /// Requested dispatch width. Omitted/zero selects from thread_allocations;
+  /// each SoC's effective width is CU-capacity-clamped.
   uint32_t cpu_dispatch_threads = 0;
-  uint32_t cpu_thread_budget = 0;
-  int32_t async_helper_threads = -1;
-  uint32_t requested_engine_threads = 0;
-  ExecutionThreadAllocation execution_threads;
-  std::vector<ExecutionThreadChoice> thread_allocations;
-  std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> async_resources;
+  uint32_t cpu_thread_budget = 0;              ///< Zero uses affinity capped at 32.
+  int32_t async_helper_threads = -1;           ///< -1 selects from the table; zero disables.
+  uint32_t requested_engine_threads = 0;       ///< Original request, retained for checkpoints.
+  ExecutionThreadAllocation execution_threads; ///< Effective allocation resolved during loading.
+  std::vector<ExecutionThreadChoice> thread_allocations; ///< Target-preferred granules.
+  std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>
+      async_resources; ///< Shared by CUs.
 
   /// @brief Apply the requested functional dispatch policy to every loaded SoC.
   ///
@@ -200,7 +207,7 @@ struct LoadedConfig {
 
   /// @brief Explicitly override dispatch sizing independently of the total budget.
   /// @details This overload makes host-dependent policy explicit for embedding
-  /// callers and deterministic tests.
+  /// callers and deterministic tests; it does not reallocate engines or helpers.
   /// @param hardware_threads Host-thread count available for automatic sizing.
   /// @param automatic_thread_cap Maximum host-wide width in automatic mode;
   /// values below one are treated as one.
@@ -255,15 +262,12 @@ LoadedConfig load_config(const std::string &json_path, const std::string &schema
 
 /// @brief Load simulation config from a JSON file against a stated host width.
 ///
-/// @details Like the two-argument overload, but resolves an unset (or zero)
-/// `num_threads` against @p host_threads instead of the process's own affinity,
-/// making host-dependent policy explicit for embedding callers and
-/// deterministic tests. @p host_threads is always the width used, including 0,
-/// which means indeterminate and resolves to a single partition.
+/// @details Like the two-argument overload, but uses @p host_threads as the
+/// affinity input to the shared execution budget. Zero means indeterminate and
+/// gives an automatic budget of one. An explicit cpu_thread_budget overrides it.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
-/// @param host_threads Host width to resolve the default partition count
-/// against.
+/// @param host_threads Affinity width used for automatic budget selection.
 /// @returns LoadedConfig with engine parameters and built topology.
 /// @throws std::runtime_error on file I/O, parse errors, or invalid config.
 LoadedConfig load_config(const std::string &json_path, const std::string &schema_text,
@@ -280,8 +284,7 @@ LoadedConfig load_config_from_string(const std::string &json, const std::string 
 /// @details See the three-argument @ref load_config overload.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
-/// @param host_threads Host width to resolve the default partition count
-/// against; 0 means indeterminate and resolves to a single partition.
+/// @param host_threads Affinity width for automatic selection; zero gives a budget of one.
 /// @returns LoadedConfig with engine parameters and built topology.
 /// @throws std::runtime_error on parse errors or invalid config.
 LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text,

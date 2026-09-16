@@ -1,13 +1,14 @@
-//! Build script: read the per-CU limits and the arch name out of the
-//! rocjitsu presets the builtin agents mirror.
+//! Build script: read per-CU limits, arch names and preferred execution-thread
+//! tables from the rocjitsu presets the builtin agents mirror.
 //!
-//! These four values and the arch are not mirage's to choose. They
+//! The limits and arch are not mirage's to choose. They
 //! describe what the emulator will accept: `cdna5` caps `num_wf_slots`
 //! at 64, and rocjitsu refuses a config that asks for more — in
 //! `rj_vm_create_from_string`, which means the session dies at daemon
 //! start rather than at profile validation, where a user could act on
 //! it. So they are read from `configs/*.json` rather than copied into
-//! `agents.rs`, and a preset that changes takes the agent with it.
+//! `agents.rs`, and a preset that changes takes the agent with it. The thread
+//! allocation table is copied for the same reason: rocjitsu owns that policy.
 //!
 //! They were copied, and they drifted exactly as copies do. `gfx1250.json`
 //! became `gfx1250_mi455x.json` with `arch` renamed `cdna5` and its wave

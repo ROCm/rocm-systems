@@ -403,7 +403,8 @@ void print_usage() {
          "                    means -object\n"
          "                    memory-backend-memfd,id=mem,size=<N>,share=on together\n"
          "                    with -machine memory-backend=mem.\n"
-         "  --thread-budget-table  Print E / D / H allocations without running a VM\n"
+         "  --thread-budget-table\n"
+         "                    Print engine / dispatch / helper allocations without running a VM\n"
          "  --version, -v     Print version and exit\n"
          "  --help, -h        Print this help and exit\n";
 }
@@ -470,7 +471,8 @@ int main(int argc, char *argv[]) {
       auto settings =
           rocjitsu::config::load_execution_thread_settings(abs_config, rocjitsu::kEmbeddedSchema);
       const uint32_t host = rocjitsu::amdgpu::available_host_threads();
-      std::cout << "Budget | Engines | Dispatch per GPU | Helpers | Total\n";
+      std::cout
+          << "Budget | num_threads | cpu_dispatch_threads per GPU | async_helper_threads | Total\n";
       auto print = [&](const std::string &label) {
         const auto plan = settings.resolve(host);
         uint64_t total = plan.engines + plan.helpers;

@@ -67,7 +67,7 @@ Here `dispatch_cap` is 36 on gfx950 and 32 on gfx1250. This produces:
 
 This rule uses the budget and target properties, without taking a workload type
 as an input. The runtime selects from explicit config tables using a pure, unit-tested
-selector, rather than evaluating this formula. The shipped tables contain
+selector, rather than evaluating this formula. The measured eight-XCD tables contain
 1, 2, 4, 8, 16, 24, 32 and 64-thread entries, with an automatic ceiling of 32.
 Thus an explicit ceiling of 48 currently selects the 32-thread granule. See
 [configuration](configuration.md#thread-accounting-and-preferred-allocations)

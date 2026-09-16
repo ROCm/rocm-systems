@@ -11,6 +11,7 @@
 #include "rocjitsu/vm/soc.h"
 
 #include <cstdint>
+#include <span>
 #include <string>
 
 namespace rocjitsu {
@@ -27,6 +28,10 @@ namespace config {
 /// @param engine_config Engine configuration to persist alongside the SoC state.
 /// @param cpu_dispatch_threads Original functional dispatch-width request. Zero
 /// selects automatic sizing; nonzero values are explicit per-SoC widths.
+/// @param cpu_thread_budget Original total budget request; zero uses receiving-host affinity.
+/// @param async_helper_threads Original helper request; -1 is automatic. Default zero
+/// preserves legacy save callers' disabled-helper behavior.
+/// @param thread_allocations Preferred triples to re-evaluate when restoring.
 void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
                      const simdojo::SimulationEngine::Config &engine_config,
                      uint32_t cpu_dispatch_threads, uint32_t cpu_thread_budget = 0,

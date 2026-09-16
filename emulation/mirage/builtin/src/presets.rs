@@ -1,7 +1,7 @@
 //! The parts of a rocjitsu preset the builtin agents must not drift from.
 //!
 //! Filled in by `build.rs`, which reads `rocjitsu/configs/*.json` — see
-//! there for why these five values are read rather than written, and for
+//! there for why these values and thread-allocation tables are read rather than written, and for
 //! what is deliberately left to the [`agents`](mod@crate::agents)
 //! module instead.
 
@@ -13,6 +13,7 @@
 /// them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Preset {
+    /// Preferred execution granules copied from rocjitsu, not chosen by Mirage.
     pub(crate) thread_allocations: &'static [mirage_core::agent::ExecutionThreadChoice],
     /// The preset file this came from, for error messages and doc.
     pub(crate) preset: &'static str,
