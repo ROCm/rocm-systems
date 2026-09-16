@@ -56,3 +56,13 @@ repos:
     rev: 0.25.1
     hooks:
       - id: gersemi
+
+  - repo: local
+    hooks:
+      - id: path-freeze-config
+        name: path freeze config
+        entry: python .github/scripts/path_freeze.py validate
+        language: python
+        additional_dependencies: [pyyaml]
+        files: ^\.github/(workflows/path-freeze\.yml|scripts/path_freeze\.py)$
+        pass_filenames: false
