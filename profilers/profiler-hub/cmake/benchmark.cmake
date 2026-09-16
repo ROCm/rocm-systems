@@ -5,32 +5,7 @@ include_guard(DIRECTORY)
 
 set(BENCHMARK_VERSION "1.8.3" CACHE STRING "Minimum Google Benchmark version")
 
-find_package(benchmark QUIET)
-
-set(_benchmark_reason "")
-if(NOT benchmark_FOUND)
-    set(_benchmark_reason "no package was found on CMAKE_PREFIX_PATH")
-elseif(benchmark_VERSION VERSION_LESS BENCHMARK_VERSION)
-    set(_benchmark_reason
-        "version ${benchmark_VERSION} was found, but ${BENCHMARK_VERSION} or newer is required"
-    )
-endif()
-
-if(_benchmark_reason STREQUAL "")
-    message(
-        STATUS
-        "Using system Google Benchmark (version ${benchmark_VERSION})"
-    )
-elseif(NOT PROFILER_HUB_FETCH_DEPENDENCIES)
-    message(
-        FATAL_ERROR
-        "profiler-hub requires Google Benchmark: ${_benchmark_reason}. Provide it on CMAKE_PREFIX_PATH, configure with -DPROFILER_HUB_BUILD_BENCHMARKS=OFF, or configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it."
-    )
-else()
-    message(
-        STATUS
-        "Fetching Google Benchmark ${BENCHMARK_VERSION}: ${_benchmark_reason}"
-    )
+if(PROFILER_HUB_FETCH_DEPENDENCIES)
     include(FetchContent)
 
     FetchContent_Declare(
@@ -38,6 +13,9 @@ else()
         GIT_REPOSITORY https://github.com/google/benchmark.git
         GIT_TAG v${BENCHMARK_VERSION}
         GIT_SHALLOW TRUE
+        # FetchContent derives the find_package call from the content name, which
+        # here is not the name Google Benchmark installs itself under.
+        FIND_PACKAGE_ARGS ${BENCHMARK_VERSION} NAMES benchmark
     )
 
     set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
@@ -54,6 +32,18 @@ else()
     if(NOT TARGET benchmark::benchmark_main)
         add_library(benchmark::benchmark_main ALIAS benchmark_main)
     endif()
-endif()
+else()
+    find_package(benchmark ${BENCHMARK_VERSION})
 
-unset(_benchmark_reason)
+    if(NOT benchmark_FOUND)
+        message(
+            FATAL_ERROR
+            "profiler-hub requires Google Benchmark ${BENCHMARK_VERSION} or newer on CMAKE_PREFIX_PATH. Configure with -DPROFILER_HUB_BUILD_BENCHMARKS=OFF to skip the benchmarks, or with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it instead."
+        )
+    endif()
+
+    message(
+        STATUS
+        "Using system Google Benchmark (version ${benchmark_VERSION})"
+    )
+endif()
