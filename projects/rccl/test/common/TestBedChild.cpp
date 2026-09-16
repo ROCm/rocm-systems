@@ -348,8 +348,15 @@ namespace RcclUnitTesting
       {
         ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
         config.blocking = 0;
-        ncclCommInitRankConfig(&this->comms[localRank], this->totalRanks, id, globalRank, &config);
-        CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorInitRankConfig", localRank);
+        ncclResult_t const initState =
+          ncclCommInitRankConfig(&this->comms[localRank], this->totalRanks, id, globalRank, &config);
+        if (initState != ncclSuccess && initState != ncclInProgress)
+        {
+          TEST_ERROR("Rank %d on child %d unable to call ncclCommInitRankConfig: error %d",
+                     globalRank, this->childId, initState);
+          status = TEST_FAIL;
+          break;
+        }
       }
       else
       {
@@ -363,10 +370,35 @@ namespace RcclUnitTesting
     }
 
     // ALWAYS call ncclGroupEnd() once ncclGroupStart() has been executed!
-    ncclResult_t groupEndErr = ncclGroupEnd();
-    if (groupEndErr != ncclSuccess)
+    ncclResult_t const groupEndState = ncclGroupEnd();
+    if (this->useBlocking == false)
     {
-      TEST_ERROR("Child %d ncclGroupEnd failed with error %d", this->childId, groupEndErr);
+      if (groupEndState != ncclSuccess && groupEndState != ncclInProgress)
+      {
+        TEST_ERROR("Child %d ncclGroupEnd failed with error %d", this->childId, groupEndState);
+        status = TEST_FAIL;
+      }
+      else if (status == TEST_SUCCESS)
+      {
+        // Grouped non-blocking initialization starts at ncclGroupEnd(). Wait
+        // until every communicator has completed before returning to the parent.
+        for (int localRank = 0; localRank < numGpus; ++localRank)
+        {
+          int const currGpu = this->deviceIds[localRank];
+          if (hipSetDevice(currGpu) != hipSuccess)
+          {
+            TEST_ERROR("Child %d unable to switch to GPU %d while waiting for communicator initialization",
+                       this->childId, currGpu);
+            status = TEST_FAIL;
+            break;
+          }
+          CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorInitRankConfig", localRank);
+        }
+      }
+    }
+    else if (groupEndState != ncclSuccess)
+    {
+      TEST_ERROR("Child %d ncclGroupEnd failed with error %d", this->childId, groupEndState);
       status = TEST_FAIL;
     }
 
