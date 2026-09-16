@@ -380,10 +380,9 @@ target_link_libraries(
         rocjitsu_kmd
         rocjitsu_vm
         rocjitsu_vm_amdgpu
-        # Host-side plugin loader. The logging/race/data-hazard plugins are no
-        # longer linked in statically; they are separate
-        # librocjitsu_plugin_<name>.so modules discovered and dlopen()ed at
-        # runtime.
+        # Host-side plugin loader. The logging/race plugins are no longer
+        # linked in statically; they are separate librocjitsu_plugin_<name>.so
+        # modules discovered and dlopen()ed at runtime.
         rocjitsu_plugin_loader
         rocjitsu_vm_risc_v
         rocjitsu_config
