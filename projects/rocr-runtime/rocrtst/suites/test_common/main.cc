@@ -83,6 +83,7 @@
 #include "suites/functional/reference_count.h"
 #include "suites/functional/signal_concurrent.h"
 #include "suites/functional/signal_allocation_validation.h"
+#include "suites/functional/signal_wait_multi.h"
 #include "suites/functional/metadata_prefetch.h"
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
@@ -273,6 +274,27 @@ TEST(rocrtstFunc, Signal_Allocation_Validation) {
   RunCustomTestProlog(&sav);
   sav.TestSignalAllocationValidation();
   RunCustomTestEpilog(&sav);
+}
+
+TEST(rocrtstFunc, Signal_Wait_Any_Nonzero_Index) {
+  SignalWaitMultiTest swm;
+  if (!RunCustomTestProlog(&swm)) return;
+  swm.TestWaitAnyNonzeroSatisfyingIndex();
+  RunCustomTestEpilog(&swm);
+}
+
+TEST(rocrtstFunc, Signal_Wait_Any_Compacted_Conds_Values) {
+  SignalWaitMultiTest swm;
+  if (!RunCustomTestProlog(&swm)) return;
+  swm.TestWaitAnyCompactsConditionsAndValues();
+  RunCustomTestEpilog(&swm);
+}
+
+TEST(rocrtstFunc, Signal_Wait_All_Satisfying_Values) {
+  SignalWaitMultiTest swm;
+  if (!RunCustomTestProlog(&swm)) return;
+  swm.TestWaitAllReportsSatisfyingValues();
+  RunCustomTestEpilog(&swm);
 }
 
 /* Temporary: Disable CU Masking until it is fixed */
@@ -592,6 +614,7 @@ TEST(rocrtstFunc, AgentPropertiesTests) {
 }
 
 TEST(rocrtstFunc, GpuDiscoveryDeprecatedDoorbellTest) {
+  if (rocrtst::SkipOnWsl("KFD topology sysfs (/sys/.../kfd/topology/nodes) unavailable on WSL/DXG")) return;
   // Verifies hsa_init() succeeds when deprecated GPUs (DoorbellType != 2) are
   // present. Regression test for: a single pre-Vega GPU (e.g. Polaris/gfx803)
   // would abort HSA initialization for ALL devices in the system.
@@ -657,6 +680,7 @@ TEST(rocrtstFunc, VirtMemory_Access_Test) {
     vmt.GPUAccessToCPUMemoryTest();
     vmt.GPUAccessToGPUMemoryTest();
     vmt.ImportedShareableHandleSetAccessAfterFdClose();
+    vmt.ExportShareableHandlePcieMapping();
     RunCustomTestEpilog(&vmt);
 }
 
@@ -702,6 +726,7 @@ TEST(rocrtstFunc, VirtMemory_Interprocess_DevicePool_Test) {
 }
 
 TEST(rocrtstFunc, VirtMemory_Interprocess_HostPool_Test) {
+    if (rocrtst::SkipOnWsl("host-pool cross-process VMM (dma-buf) unavailable on WSL/DXG")) return;
     VirtMemoryTestInterProcess vmt(PoolType::kCpuPool);
     if (!RunCustomTestProlog(&vmt)) return;
     RunCustomTestEpilog(&vmt);
@@ -711,6 +736,13 @@ TEST(rocrtstFunc, VirtMemory_FabricExport_Readiness_Test) {
   VirtMemoryTestBasic vmt;
   if (!RunCustomTestProlog(&vmt)) return;
   vmt.TestFabricExportAcceleratorReadiness();
+  RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_Imported_Handle_Pointer_Info_Test) {
+  VirtMemoryTestBasic vmt;
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.TestImportedHandlePointerInfo();
   RunCustomTestEpilog(&vmt);
 }
 

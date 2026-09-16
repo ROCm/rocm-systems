@@ -319,6 +319,15 @@ bool ncclCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncc
   return ncclCeAvailable(comm, ncclFuncAlltoAllv, ncclDevSum, datatype, winRegType);
 }
 
+bool ncclCeAlltoAllEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
+                            bool hasSysmemSegment, bool capturing) {
+  if (ncclGroupDepth != 0) return false;
+  if (!(comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) return false;
+  if (hasSysmemSegment || capturing) return false;
+  // Single-node CE only: hier CE is multi-node and launch is still LSA-only.
+  return ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType);
+}
+
 bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                             ncclSymRegType_t winRegType) {
   if (!ncclCeImplemented(coll, red, ty)) {
@@ -522,9 +531,11 @@ ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream, struct nc
   // Allocate enough slots for all possible ops
   size_t batchSize = (comm->nvlsSupport ? NCCL_CE_SYNC_OPS_PER_RANK_MC : NCCL_CE_SYNC_OPS_PER_RANK_UC) * comm->nRanks;
   size_t opIdx = 0;
+  hipStreamBatchMemOpParams* batchParams = nullptr;
+
+  NCCLCHECKGOTO(ncclProfilerStartCeSyncEvent(comm, args, stream, &ceSyncHandle), ret, fail);
 
   // Prepare batch memory operations for synchronization
-  hipStreamBatchMemOpParams* batchParams = nullptr;
   NCCLCHECKGOTO(ncclCalloc(&batchParams, batchSize), ret, fail);
 
   if (comm->nvlsSupport) {
@@ -564,6 +575,8 @@ ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream, struct nc
   comm->ceColl.useCompletePtr = !comm->ceColl.useCompletePtr;
 
 exit:
+  // Stop unconditionally: the handle is only non-NULL once the event started.
+  ncclProfilerStopCeSyncEvent(comm, ceSyncHandle, stream);
   if (batchParams) free(batchParams);
   return ret;
 fail:
@@ -1733,7 +1746,7 @@ fail:
 
 ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                              ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
-                             struct ncclDevrWindow* recvWin) {
+                             struct ncclDevrWindow* recvWin, struct ncclCeCollArgs* profilerArgs) {
   ncclResult_t ret = ncclSuccess;
 
   const size_t eltSize = ncclTypeSize(datatype);
@@ -1800,6 +1813,11 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   collArgs.sendBuff = (uint8_t*)sendbuff;
   collArgs.recvBuff = (uint8_t*)recvbuff;
   collArgs.recvWin = recvWin;
+  // Inherit the caller's event handles so CE sync/batch events attach to the CeColl parent.
+  if (profilerArgs) {
+    collArgs.collApiEventHandle = profilerArgs->collApiEventHandle;
+    collArgs.ceCollProfHandle = profilerArgs->ceCollProfHandle;
+  }
   cudaStream_t ceStream;
   if (totalSteps > 1) {
     ceStream = ceColl->scatterStream;
@@ -1964,6 +1982,8 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     agArgs.recvBuff = tmpBuf;
     agArgs.sendWin = comm->ceColl.ceARTmpWin;
     agArgs.recvWin = comm->ceColl.ceARTmpWin;
+    agArgs.collApiEventHandle = collArgs.collApiEventHandle;
+    agArgs.ceCollProfHandle = collArgs.ceCollProfHandle;
     NCCLCHECKGOTO(ncclCeAllGather(comm, &agArgs, ceStream), ret, fail);
 
     // Phase 5 (slow path only): Local Copy — move assembled result from
@@ -2017,7 +2037,7 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
       // Pass args->recvWin so ncclCeAllReduce can take the fast path
       // (AG written directly into user recvbuff, no final D2D copy).
     NCCLCHECKGOTO(ncclCeAllReduce(comm, args->sendBuff, args->recvBuff, args->nElts, args->datatype, args->redOp,
-                                  stream, args->recvWin),
+                                  stream, args->recvWin, args),
                   ret, fail);
     break;
   default:
@@ -2075,7 +2095,13 @@ ncclResult_t scheduleCeCollTaskToPlan(struct ncclComm* comm, struct ncclKernelPl
   plan->ceCollArgs->func = task->func;
   plan->ceCollArgs->sendWin = task->sendWin;
   plan->ceCollArgs->recvWin = task->recvWin;
+  plan->ceCollArgs->useDda = task->useDda;
+  plan->ceCollArgs->ddaPeerBases = task->ddaPeerBases;
+  plan->ceCollArgs->ddaUserRecvBuff = task->ddaUserRecvBuff;
+  plan->ceCollArgs->ddaCopyBackBytes = task->ddaCopyBackBytes;
+  plan->ceCollArgs->redOp = task->opHost;
   plan->ceCollArgs->collApiEventHandle = task->collApiEventHandle;
+  plan->ceCollArgs->sizes = (task->func == ncclFuncAlltoAllv) ? task->sizes : nullptr;
 
   if (comm->rank == 0) {
     if (!ncclDevrIsOneLsaTeam(comm)) {

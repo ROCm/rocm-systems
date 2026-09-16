@@ -81,7 +81,7 @@ get_default_max_library_functions()
 }
 }  // namespace
 
-using InstrumentMode = ::rocprofsys::dl::InstrumentMode;
+using InstrumentMode = ::rocprofsys::dl::instrument_mode;
 
 bool   use_return_info              = false;
 bool   use_args_info                = false;
@@ -117,7 +117,6 @@ string_t prefer_library = {};
 //  global variables
 //
 patch_pointer_t  bpatch                        = {};
-call_expr_t*     terminate_expr                = nullptr;
 snippet_vec_t    init_names                    = {};
 snippet_vec_t    fini_names                    = {};
 fmodset_t        available_module_functions    = {};
@@ -1450,7 +1449,7 @@ main(int argc, char** argv)
 
     // prioritize the user environment arguments
     auto instr_mode_v =
-        (binary_rewrite) ? InstrumentMode::BinaryRewrite : InstrumentMode::ProcessCreate;
+        binary_rewrite ? InstrumentMode::binary_rewrite : InstrumentMode::process_create;
     auto instr_mode_v_int = static_cast<int>(instr_mode_v);
     auto env_vars         = parser.get<strvec_t>("env");
     env_vars.reserve(env_vars.size() + env_config_variables.size());

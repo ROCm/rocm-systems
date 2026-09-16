@@ -73,17 +73,17 @@ struct settings_policy
         if(filter_str == "all" || filter_str == "on" || filter_str.empty())
         {
             device_filter result;
-            result.mode = device_selection_mode::ALL;
+            result.mode = device_selection_mode::all;
             return result;
         }
         if(filter_str == "none" || filter_str == "off")
         {
             device_filter result;
-            result.mode = device_selection_mode::NONE;
+            result.mode = device_selection_mode::none;
             return result;
         }
         device_filter result;
-        result.mode    = device_selection_mode::SPECIFIC;
+        result.mode    = device_selection_mode::specific;
         result.indices = parse_numeric_range(filter_str);
         return result;
     }
@@ -135,7 +135,7 @@ struct settings_policy
         {
             // NIC sampling disabled by default
             nic::nic_device_filter result;
-            result.mode = nic::device_selection_mode::NONE;
+            result.mode = nic::device_selection_mode::none;
             return result;
         }
 
@@ -143,20 +143,20 @@ struct settings_policy
         if(filter_str == "all" || filter_str == "on")
         {
             nic::nic_device_filter result;
-            result.mode = nic::device_selection_mode::ALL;
+            result.mode = nic::device_selection_mode::all;
             return result;
         }
 
         if(filter_str == "none" || filter_str == "off" || filter_str.empty())
         {
             nic::nic_device_filter result;
-            result.mode = nic::device_selection_mode::NONE;
+            result.mode = nic::device_selection_mode::none;
             return result;
         }
 
         // Parse comma-separated names
         nic::nic_device_filter result;
-        result.mode  = nic::device_selection_mode::SPECIFIC;
+        result.mode  = nic::device_selection_mode::specific;
         result.names = parse_name_list(filter_str);
         return result;
     }

@@ -33,6 +33,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 ### Resolved Issues
 
+- `RDC_FI_GPU_MEMORY_CUR_BANDWIDTH` no longer reports zero under DMA or copy-only memory traffic on GPUs whose instantaneous UMC activity does not reflect DMA transfers. It now derives memory activity from the `mem_activity_acc` accumulator over firmware time, and falls back to the instantaneous `umc_activity` reading when the accumulator or firmware timestamp is unavailable.
+
 - `RDC_FI_ECC_CORRECT_TOTAL`, `RDC_FI_ECC_UNCORRECT_TOTAL`, and `RDC_FI_ECC_DEFERRED_TOTAL` no longer hang when AMD SMI defines GPU blocks above bit 31. The block iteration used a 32-bit counter that wrapped to zero instead of terminating.
 
 - The `Failed to insert module: N3amd3rdc10RdcRVSLibE` error no longer occurs.

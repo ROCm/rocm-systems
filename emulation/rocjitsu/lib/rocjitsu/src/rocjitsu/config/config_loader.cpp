@@ -14,6 +14,7 @@
 #include "rocjitsu/vm/amdgpu/iod.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/shader_engine.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/soc.h"
@@ -733,7 +734,7 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
   return result;
 }
 
-LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
+LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_threads) {
   LoadedConfig result;
   result.engine_config = engine_config_from_fb(fb_config);
   result.exec_mode = exec_mode_from_fb(fb_config);
@@ -809,6 +810,22 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
     for (uint32_t i = 1; i < result.num_gpus; ++i)
       result.extra_gpu_builds.push_back(
           build_topology(topo_def, result.exec_mode, arch, result.target));
+  }
+
+  // An unset (or zero) num_threads means "use the default": one engine
+  // partition per XCD, capped at the host threads this process may run on.
+  // Resolve it here, once the SoC trees exist, so every LoadedConfig consumer
+  // sees a concrete worker count instead of re-deriving one.
+  if (result.engine_config.num_threads == 0) {
+    std::vector<SoC *> socs;
+    socs.reserve(result.extra_gpu_builds.size() + 1);
+    if (SoC *soc = result.soc())
+      socs.push_back(soc);
+    for (TopologyBuildResult &extra_gpu : result.extra_gpu_builds) {
+      if (SoC *extra_soc = dynamic_cast<SoC *>(extra_gpu.root.get()))
+        socs.push_back(extra_soc);
+    }
+    result.engine_config.num_threads = amdgpu::default_xcd_partition_count(socs, host_threads);
   }
 
   return result;
@@ -895,17 +912,29 @@ DeviceIdentityConfig load_device_identity(const std::string &json_path,
       });
 }
 
-LoadedConfig load_config(const std::string &json_path, const std::string &schema_text) {
+LoadedConfig load_config(const std::string &json_path, const std::string &schema_text,
+                         uint32_t host_threads) {
   std::string json_text = read_config_file(json_path);
-  return with_parsed_simulation_config_json(
-      json_text, schema_text,
-      [](const fb::SimulationConfig *fb_config) { return build_from_fb(fb_config); });
+  return with_parsed_simulation_config_json(json_text, schema_text,
+                                            [host_threads](const fb::SimulationConfig *fb_config) {
+                                              return build_from_fb(fb_config, host_threads);
+                                            });
+}
+
+LoadedConfig load_config(const std::string &json_path, const std::string &schema_text) {
+  return load_config(json_path, schema_text, amdgpu::available_host_threads());
+}
+
+LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text,
+                                     uint32_t host_threads) {
+  return with_parsed_simulation_config_json(json, schema_text,
+                                            [host_threads](const fb::SimulationConfig *fb_config) {
+                                              return build_from_fb(fb_config, host_threads);
+                                            });
 }
 
 LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text) {
-  return with_parsed_simulation_config_json(
-      json, schema_text,
-      [](const fb::SimulationConfig *fb_config) { return build_from_fb(fb_config); });
+  return load_config_from_string(json, schema_text, amdgpu::available_host_threads());
 }
 
 } // namespace config

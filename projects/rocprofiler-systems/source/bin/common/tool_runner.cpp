@@ -325,7 +325,7 @@ tool_runner::get_initial_environment()
     if(auto llvm_dir = rocprofsys::common::discover_llvm_libdir_for_ompt();
        !llvm_dir.empty())
     {
-        data.env.set("LD_LIBRARY_PATH", llvm_dir, update_mode::APPEND);
+        data.env.set("LD_LIBRARY_PATH", llvm_dir, update_mode::append);
         // Also mutate the live process env: any dlopen() that happens before
         // execvpe (e.g. OMPT runtime discovery) reads the real environ, not
         // data.env.current.

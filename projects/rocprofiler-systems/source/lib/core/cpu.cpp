@@ -169,18 +169,19 @@ query_cpu_agents()
     {
         const auto node_id     = node_count++;
         const auto device_name = "CPU" + std::to_string(socket_id);
-        auto       cur_agent   = agent{ agent_type::CPU,
-                                0,
-                                static_cast<std::uint32_t>(socket_id),
-                                node_id,
-                                static_cast<std::int32_t>(socket_id),
-                                static_cast<std::int32_t>(socket_id),
-                                device_name,
-                                model_name,
-                                socket_vendor_ids[socket_id],
-                                "",
-                                0,
-                                "" };
+        auto       cur_agent =
+            agent{ .type                 = agent_type::cpu,
+                   .handle               = 0,
+                   .device_id            = static_cast<std::uint32_t>(socket_id),
+                   .node_id              = node_id,
+                   .logical_node_id      = static_cast<std::int32_t>(socket_id),
+                   .logical_node_type_id = static_cast<std::int32_t>(socket_id),
+                   .name                 = device_name,
+                   .model_name           = model_name,
+                   .vendor_name          = socket_vendor_ids[socket_id],
+                   .product_name         = "",
+                   .device_type_index    = 0,
+                   .agent_info           = "" };
         mgr.insert_agent(cur_agent);
     }
 }
