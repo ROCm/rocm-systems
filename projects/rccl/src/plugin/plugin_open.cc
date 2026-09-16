@@ -2,6 +2,8 @@
  * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
+ * Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
  * See LICENSE.txt for more license information
  *************************************************************************/
 
@@ -20,8 +22,8 @@ static char* libNames[NUM_LIBS];
 char* ncclPluginLibPaths[NUM_LIBS];
 static void* libHandles[NUM_LIBS];
 static const char* pluginNames[NUM_LIBS] = {"NET", "GIN", "RMA", "TUNER", "PROFILER", "ENV"};
-static const char* pluginPrefix[NUM_LIBS] = {"librccl-net",   "libnccl-gin",      "libnccl-rma",
-                                             "libnccl-tuner", "libnccl-profiler", "libnccl-env"};
+static const char* pluginPrefix[NUM_LIBS] = {"librccl-net",   "librccl-gin",      "librccl-rma",
+                                             "librccl-tuner", "librccl-profiler", "librccl-env"};
 static const char* pluginFallback[NUM_LIBS] = {"", "", "", "", "", ""};
 static unsigned long subsys[NUM_LIBS] = {
   NCCL_INIT | NCCL_NET, NCCL_INIT | NCCL_NET, NCCL_INIT | NCCL_NET, NCCL_INIT | NCCL_TUNING, NCCL_INIT,

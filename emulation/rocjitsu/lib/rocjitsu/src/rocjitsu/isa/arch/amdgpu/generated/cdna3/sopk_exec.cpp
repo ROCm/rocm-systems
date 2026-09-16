@@ -86,8 +86,8 @@ void SMulkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCbranchIForkSopk::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
