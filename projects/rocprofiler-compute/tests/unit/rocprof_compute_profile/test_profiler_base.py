@@ -754,6 +754,27 @@ def test_pre_processing_persists_membw_analysis_config(
     assert profiling_config["filter_blocks"] == effective_filter_blocks
 
 
+def test_pre_processing_persists_alias_in_profiling_config(
+    tmp_path: Path,
+) -> None:
+    """Alias in filter_blocks is resolved and persisted to profiling_config.yaml."""
+    effective_filter_blocks = ["12"]
+    profiling_args = argparse.Namespace(
+        attach_pid=None,
+        config_dir=tmp_path / "analysis_configs",
+        experimental=False,
+        filter_blocks=["lds"],
+        membw_analysis=False,
+        no_roof=True,
+        output_directory=str(tmp_path),
+        remaining="./app",
+    )
+    profiling_config = do_pre_processing_and_load_config(
+        tmp_path, profiling_args, effective_filter_blocks
+    )
+    assert profiling_config["filter_blocks"] == effective_filter_blocks
+
+
 @pytest.mark.parametrize(
     "perf_level, expect_warning",
     [
@@ -796,27 +817,6 @@ def test_pre_processing_pmc_power_gating_warning(
     warnings = [str(call.args[0]) for call in warning_mock.call_args_list]
     gating_warnings = [message for message in warnings if "TCP_REQ" in message]
     assert bool(gating_warnings) is expect_warning
-
-
-def test_pre_processing_persists_alias_in_profiling_config(
-    tmp_path: Path,
-) -> None:
-    """Alias in filter_blocks is resolved and persisted to profiling_config.yaml."""
-    effective_filter_blocks = ["12"]
-    profiling_args = argparse.Namespace(
-        attach_pid=None,
-        config_dir=tmp_path / "analysis_configs",
-        experimental=False,
-        filter_blocks=["lds"],
-        membw_analysis=False,
-        no_roof=True,
-        output_directory=str(tmp_path),
-        remaining="./app",
-    )
-    profiling_config = do_pre_processing_and_load_config(
-        tmp_path, profiling_args, effective_filter_blocks
-    )
-    assert profiling_config["filter_blocks"] == effective_filter_blocks
 
 
 # ---------------------------------------------------------------------------
