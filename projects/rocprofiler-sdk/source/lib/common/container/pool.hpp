@@ -72,9 +72,32 @@ struct pool
     template <typename FuncT, typename... Args>
     pool_object<Tp>& acquire(FuncT&& ctor, Args&&... args);
 
+    // retire every object in the pool, running func on each one before it is retired.
+    //
+    // func runs with the pool lock held -- the same lock release() takes -- so it must not call
+    // acquire(), release() or pool_object<Tp>::release(), not even on the object it was handed.
+    // Any of the three self-deadlocks. Read the object and destroy what it owns; that is all
+    // this callback is for. clear() itself clears the in-use flag directly rather than calling
+    // pool_object<Tp>::release() for exactly this reason.
+    //
+    // A violation hangs rather than fails, so it stalls CI on a timeout instead of reporting
+    // anything, which is why the rule is stated here rather than left to be discovered.
     template <typename FuncT = void (*)(pool_object<Tp>&)>
     void clear(FuncT&& func = [](pool_object<Tp>&) {});
 
+    // the pool's counters, snapshotted under both locks. get_usage_report() is this formatted
+    // for a log, so callers that want the numbers should read them here rather than parse the
+    // string: the wording of the report is not an interface.
+    struct usage
+    {
+        size_type size      = 0;
+        size_type available = 0;
+        size_type reused    = 0;
+        size_type released  = 0;
+        size_type batches   = 0;
+    };
+
+    usage       get_usage() const;
     std::string get_usage_report() const;
 
 private:
@@ -241,19 +264,34 @@ pool<Tp>::clear(FuncT&& func)
 }
 
 template <typename Tp>
-std::string
-pool<Tp>::get_usage_report() const
+typename pool<Tp>::usage
+pool<Tp>::get_usage() const
 {
     auto _pool_lk  = std::unique_lock<std::mutex>{m_pool_mtx};
     auto _avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
+
+    auto _usage      = usage{};
+    _usage.size      = m_pool.size();
+    _usage.available = m_available.size();
+    _usage.reused    = m_reused.load();
+    _usage.released  = m_released.load();
+    _usage.batches   = m_new_batch.load();
+    return _usage;
+}
+
+template <typename Tp>
+std::string
+pool<Tp>::get_usage_report() const
+{
+    const auto _usage = get_usage();
     return fmt::format("Usage report for pool (type='{}') :: size={}, available={}, reused={}, "
                        "released={}, batches={}",
                        cxx_demangle(typeid(Tp).name()),
-                       m_pool.size(),
-                       m_available.size(),
-                       m_reused.load(),
-                       m_released.load(),
-                       m_new_batch.load());
+                       _usage.size,
+                       _usage.available,
+                       _usage.reused,
+                       _usage.released,
+                       _usage.batches);
 }
 }  // namespace container
 }  // namespace common

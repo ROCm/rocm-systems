@@ -32,7 +32,6 @@
 #include <exception>
 #include <mutex>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <unordered_set>
 #include <utility>
@@ -95,16 +94,6 @@ private:
     std::atomic<size_t>        m_duplicates = 0;
     std::atomic<size_t>        m_unknown    = 0;
 };
-
-size_t
-usage_field(const std::string& report, std::string_view key)
-{
-    auto _needle = " " + std::string{key} + "=";
-    auto _pos    = report.find(_needle);
-    EXPECT_NE(_pos, std::string::npos) << "'" << key << "' missing from: " << report;
-    if(_pos == std::string::npos) return 0;
-    return std::stoull(report.substr(_pos + _needle.size()));
-}
 
 size_t
 worker_count()
@@ -193,16 +182,15 @@ TEST(common, pool_concurrent_acquire_release)
     EXPECT_EQ(_checkout.size(), 0) << "an acquired object was never released";
     EXPECT_EQ(_failed_release.load(), 0) << "release() rejected an object that was in use";
 
-    auto _report    = _pool.get_usage_report();
-    auto _size      = usage_field(_report, "size");
-    auto _available = usage_field(_report, "available");
-    auto _released  = usage_field(_report, "released");
-    auto _batches   = usage_field(_report, "batches");
+    auto _usage  = _pool.get_usage();
+    auto _report = _pool.get_usage_report();
 
-    EXPECT_GE(_batches, 2) << "the pool never grew, so the growth path went untested: " << _report;
-    EXPECT_EQ(_size, batch_size * (_batches + 1)) << _report;
-    EXPECT_EQ(_available, _size) << "every object must be back in the free list: " << _report;
-    EXPECT_EQ(_released, _total_ops.load()) << _report;
+    EXPECT_GE(_usage.batches, 2)
+        << "the pool never grew, so the growth path went untested: " << _report;
+    EXPECT_EQ(_usage.size, batch_size * (_usage.batches + 1)) << _report;
+    EXPECT_EQ(_usage.available, _usage.size)
+        << "every object must be back in the free list: " << _report;
+    EXPECT_EQ(_usage.released, _total_ops.load()) << _report;
 }
 
 // clear() holds m_pool_mtx across its loop and pool<Tp>::release() takes that lock, so clear()
@@ -218,7 +206,7 @@ TEST(common, pool_clear_with_object_in_use)
 
     // exceeding the initial batch grows the pool exactly once, and the per-object ctor
     // callback must have run for objects from both the initial batch and the new one
-    EXPECT_EQ(usage_field(_pool.get_usage_report(), "batches"), 1);
+    EXPECT_EQ(_pool.get_usage().batches, 1);
     EXPECT_EQ(_held.front()->get().value, payload_sentinel);
     EXPECT_EQ(_held.back()->get().value, payload_sentinel);
 
@@ -231,11 +219,12 @@ TEST(common, pool_clear_with_object_in_use)
 
     _pool.clear();
 
+    auto _usage  = _pool.get_usage();
     auto _report = _pool.get_usage_report();
-    EXPECT_EQ(usage_field(_report, "size"), 0) << _report;
-    EXPECT_EQ(usage_field(_report, "available"), 0) << _report;
-    EXPECT_EQ(usage_field(_report, "released"), 0) << _report;
-    EXPECT_EQ(usage_field(_report, "batches"), 0) << _report;
+    EXPECT_EQ(_usage.size, 0) << _report;
+    EXPECT_EQ(_usage.available, 0) << _report;
+    EXPECT_EQ(_usage.released, 0) << _report;
+    EXPECT_EQ(_usage.batches, 0) << _report;
 
     // a cleared pool must repopulate on the next acquire
     auto& _obj = _pool.acquire();
@@ -267,9 +256,10 @@ TEST(common, pool_release_after_clear)
     EXPECT_FALSE(_held->release());
     EXPECT_EQ(_held->get().value, payload_sentinel);
 
+    auto _usage  = _pool.get_usage();
     auto _report = _pool.get_usage_report();
-    EXPECT_EQ(usage_field(_report, "size"), 0) << _report;
-    EXPECT_EQ(usage_field(_report, "available"), 0) << _report;
+    EXPECT_EQ(_usage.size, 0) << _report;
+    EXPECT_EQ(_usage.available, 0) << _report;
 
     // the repopulated pool starts over at index zero: the same index as the retired object, and
     // necessarily a different object, since the retired storage is still alive
@@ -334,9 +324,10 @@ TEST(common, pool_clear_races_acquire_release)
 
     // the pool is still usable after the races
     _pool.clear();
+    auto _usage  = _pool.get_usage();
     auto _report = _pool.get_usage_report();
-    EXPECT_EQ(usage_field(_report, "size"), 0) << _report;
-    EXPECT_EQ(usage_field(_report, "available"), 0) << _report;
+    EXPECT_EQ(_usage.size, 0) << _report;
+    EXPECT_EQ(_usage.available, 0) << _report;
 
     auto& _obj = _pool.acquire();
     EXPECT_LT(_obj.index(), batch_size);
@@ -344,13 +335,14 @@ TEST(common, pool_clear_races_acquire_release)
 }
 
 // pool<Tp>::acquire(FuncT&&, Args&&...) runs the callable on every acquire, reused objects
-// included, not only on the ones it had to create. hsa::construct_hsa_signal depends on that:
-// the signal pool's batch constructor is a no-op once finalization has started, so a batch
-// grown then holds objects whose handle is null, and this call is what lazily creates their
-// signal. Deleting the call would leave those objects null instead.
+// included, not only on the ones it had to create. hsa::ensure_hsa_signal depends on that: the
+// signal pool's batch constructor is a no-op once finalization has started, so a batch grown
+// then holds objects whose handle is null, and this call is what lazily creates their signal.
+// Deleting the call would leave those objects null instead, and would also stop resetting the
+// value of every reused signal.
 //
-// This pins that precondition, not the signal leak it guards: construct_hsa_signal needs HSA,
-// so nothing here reaches it.
+// This pins that precondition, not the signal leak it guards: ensure_hsa_signal needs HSA, so
+// nothing here reaches it.
 TEST(common, pool_acquire_runs_ctor_on_reused_object)
 {
     container::pool<payload> _pool{std::piecewise_construct, batch_size, init_payload};
@@ -382,8 +374,9 @@ TEST(common, pool_acquire_runs_ctor_on_reused_object)
         EXPECT_TRUE(_obj.release());
     }
 
+    auto _usage  = _pool.get_usage();
     auto _report = _pool.get_usage_report();
-    EXPECT_EQ(usage_field(_report, "batches"), 0) << "the pool grew: " << _report;
-    EXPECT_EQ(usage_field(_report, "reused"), batch_size) << _report;
+    EXPECT_EQ(_usage.batches, 0) << "the pool grew: " << _report;
+    EXPECT_EQ(_usage.reused, batch_size) << _report;
     EXPECT_EQ(_ctor_calls, 2 * batch_size) << "the callable must run on reused objects too";
 }

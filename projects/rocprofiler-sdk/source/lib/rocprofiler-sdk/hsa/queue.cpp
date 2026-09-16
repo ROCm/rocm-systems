@@ -1422,7 +1422,7 @@ Queue::create_signal(uint32_t attribute, hsa_signal_t* signal, bool use_pool)
 {
     if(auto* pool = get_signal_pool(); use_pool && pool && attribute == 0)
     {
-        auto& _signal = pool->acquire(construct_hsa_signal, 0, 0, nullptr, attribute);
+        auto& _signal = pool->acquire(ensure_hsa_signal, 0, 0, nullptr, attribute);
         ROCP_FATAL_IF(!_signal.in_use()) << "Acquired signal from pool that is not in use";
         *signal = _signal.get().value;
         get_core_table()->hsa_signal_store_screlease_fn(_signal.get().value, 1);
