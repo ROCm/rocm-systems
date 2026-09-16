@@ -227,6 +227,28 @@
         }
       ]
     },
+    "cast_multithread": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "10000000"
+      },
+      "tests": [
+        {
+          "name": "Cast_MultiThread_StressMultiRound",
+          "description": "Concurrent IB-CAST connections, each auditing its own WRR token ledger",
+          "test_filter": "NetIbMPITest.CastStressMultiRoundTwoConns"
+        },
+        {
+          "name": "Cast_MultiThread_SendRecvMultipleSizes",
+          "description": "Concurrent schedulers sweep both sides of the WRR/split boundary",
+          "test_filter": "NetIbMPITest.CastSendRecvMultipleSizes"
+        }
+      ]
+    },
     "net_ib_gdr_flush": {
       "extends": "net_ib_base",
       "timeout": 120,
@@ -2787,6 +2809,12 @@
       "name": "NET IB - Multithread Independent Connections (4)",
       "description": "4 worker threads/rank, each on an independent NET/IB context and connection",
       "config": "net_ib_multithread_independent",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Multithread (4)",
+      "description": "4 worker threads/rank driving independent IB-CAST connections and WRR schedulers",
+      "config": "cast_multithread",
       "enabled": true
     },
     {
