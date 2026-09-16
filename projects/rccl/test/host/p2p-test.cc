@@ -2872,3 +2872,333 @@ TEST_F(P2pMicrotestIsolated, Prime_MemcpyDisabled_LeavesSendProxySlotsUnset)
         EXPECT_EQ(p2pTransport.send.proxyProgress, nullptr);
     });
 }
+
+// ===========================================================================
+// Transport eligibility (p2pCanConnect, reached through the
+// p2pTransport.canConnect vtable slot).
+//
+// p2pCanConnect decides whether two peers may use the P2P transport, writing
+// its verdict into *ret (1 = eligible, 0 = not). Its own contract is exactly
+// that verdict plus the short-circuits it takes to reach it; the topology and
+// device-access answers it consults are owned by the ncclTopoCheck* /
+// cudaDeviceCanAccessPeer seams, so tests drive those seams and assert only on
+// *ret and on which seams the function did or did not reach.
+//
+// Reachability notes for the fakes:
+//   - ncclTopoCheckP2p / ncclTopoCheckNet are controllable seams
+//     (g_ncclTopoCheckP2p / g_ncclTopoCheckNet, default "no p2p, no net").
+//   - busIdToCudaDev() resolves a peer's busId to a local device index via
+//     hipDeviceGetPCIBusId + busIdToInt64. The g_hipDeviceGetPCIBusId hook
+//     below encodes the device index into the bus string so distinct peers
+//     map to distinct cudaDev indices; BusIdForDev() mirrors that parse so a
+//     test can set peerInfo.busId to the matching int64.
+//   - useMemcpy sits at 0 for every non-isolated test in this process (the
+//     first canConnect/usesMemcpy call latches it to the param default 0),
+//     so the `if (useMemcpy)` intermediate-rank arm is exercised False here
+//     and True in the isolated test at the end.
+// ===========================================================================
+
+// Encode a device index into a bus-id string and back, mirroring
+// busIdToCudaDev's hipDeviceGetPCIBusId -> busIdToInt64 pipeline so a test can
+// pin peerInfo.busId to the value that resolves to `dev`.
+static void BusStrForDev(int dev, char* out, int len) {
+    std::snprintf(out, len, "0000:00:%02x.0", dev & 0xff);
+}
+static int64_t BusIdForDev(int dev) {
+    char s[32];
+    BusStrForDev(dev, s, sizeof(s));
+    int64_t id = 0;
+    busIdToInt64(s, &id);
+    return id;
+}
+// Hook that makes hipDeviceGetPCIBusId report a distinct bus string per
+// device, so busIdToCudaDev can resolve BusIdForDev(d) back to device d.
+static std::function<hipError_t(char*, int, int)> DeviceDistinctBusIds() {
+    return [](char* buf, int len, int device) -> hipError_t {
+        if (buf && len > 0) BusStrForDev(device, buf, len);
+        return hipSuccess;
+    };
+}
+
+// Fixture owning the comm + peerInfo backing the canConnect call. peerInfo[0]
+// is "my" info (comm.rank == 0); the two candidates default to same-host,
+// fine-grain-capable, and device-resolvable so each test only perturbs the
+// one property it is about.
+class P2pCanConnectMicrotest : public P2pMicrotest {
+protected:
+    void SetUp() override {
+        comm_.rank = 0;
+        comm_.peerInfo = myInfo_.data();
+        // myInfo_[0].hostHash defaults to 0; candidates match it (same host).
+        for (auto* p : {&info1_, &info2_}) {
+            p->hasFineGrain = true;
+            p->hostHash = 0;
+        }
+        info1_.rank = 0;
+        info2_.rank = 1;
+        info1_.busId = BusIdForDev(0);
+        info2_.busId = BusIdForDev(1);
+    }
+
+    int Call() {
+        int ret = -1;
+        EXPECT_EQ(p2pTransport.canConnect(&ret, &comm_, nullptr, &info1_, &info2_),
+                  ncclSuccess);
+        return ret;
+    }
+
+    ncclComm comm_{};
+    std::array<ncclPeerInfo, 2> myInfo_{};
+    ncclPeerInfo info1_{};
+    ncclPeerInfo info2_{};
+};
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+TEST_F(P2pCanConnectMicrotest, FirstPeerLacksFineGrain_ReturnsCannotConnect)
+{
+    info1_.hasFineGrain = false;
+    ScopedHook topo(g_ncclTopoCheckP2p,
+                    [](int, int, int*, int*, int*, int*) -> ncclResult_t {
+                        ADD_FAILURE() << "topo check reached despite missing fine-grain";
+                        return ncclSuccess;
+                    });
+    EXPECT_EQ(Call(), 0);
+}
+
+TEST_F(P2pCanConnectMicrotest, PeerLacksFineGrain_ReturnsCannotConnect)
+{
+    info2_.hasFineGrain = false;
+    // No topo seam should even be consulted -- the fine-grain gate is first.
+    ScopedHook topo(g_ncclTopoCheckP2p,
+                    [](int, int, int*, int*, int*, int*) -> ncclResult_t {
+                        ADD_FAILURE() << "topo check reached despite missing fine-grain";
+                        return ncclSuccess;
+                    });
+    EXPECT_EQ(Call(), 0);
+}
+#endif
+
+TEST_F(P2pCanConnectMicrotest, TopoRejectsP2p_ReturnsCannotConnect)
+{
+    // Default g_ncclTopoCheckP2p reports p2p = 0 -> verdict is "cannot connect"
+    // and the function returns before consulting the NET seam.
+    ScopedHook net(g_ncclTopoCheckNet, [](int, int, int*) -> ncclResult_t {
+        ADD_FAILURE() << "NET check reached after topo already rejected p2p";
+        return ncclSuccess;
+    });
+    EXPECT_EQ(Call(), 0);
+}
+
+TEST_F(P2pCanConnectMicrotest, NetIsBetter_ReturnsCannotConnect)
+{
+    ScopedHook topo(g_ncclTopoCheckP2p,
+                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
+                        if (p2p) *p2p = 1;
+                        if (inter) *inter = -1;
+                        return ncclSuccess;
+                    });
+    ScopedHook net(g_ncclTopoCheckNet, [](int, int, int* useNet) -> ncclResult_t {
+        if (useNet) *useNet = 1;  // NET would work better
+        return ncclSuccess;
+    });
+    EXPECT_EQ(Call(), 0);
+}
+
+TEST_F(P2pCanConnectMicrotest, IntermediateRankNoMemcpy_ReportsEligible)
+{
+    // topo reports p2p-capable via an intermediate hop; with useMemcpy == 0
+    // (this process's latched value) the intermediate arm leaves the verdict
+    // untouched and returns before the NET/device checks.
+    ScopedHook topo(g_ncclTopoCheckP2p,
+                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
+                        if (p2p) *p2p = 1;
+                        if (inter) *inter = 3;  // != -1
+                        return ncclSuccess;
+                    });
+    ScopedHook net(g_ncclTopoCheckNet, [](int, int, int*) -> ncclResult_t {
+        ADD_FAILURE() << "NET check reached despite intermediate-rank short-circuit";
+        return ncclSuccess;
+    });
+    EXPECT_EQ(Call(), 1);
+}
+
+TEST_F(P2pCanConnectMicrotest, FirstPeerCrossHost_ShortCircuitsBeforeDeviceCheck)
+{
+    // "My" host hash differs from info1's -> the first half of the host-mismatch
+    // test fires and the function returns before the device check.
+    myInfo_[0].hostHash = 0x1234;
+    info1_.hostHash = 0xABCD;
+    info2_.hostHash = 0xABCD;
+    ScopedHook topo(g_ncclTopoCheckP2p,
+                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
+                        if (p2p) *p2p = 1;
+                        if (inter) *inter = -1;
+                        return ncclSuccess;
+                    });
+    ScopedHook canAccess(g_hipDeviceCanAccessPeer,
+                         [](int*, int, int) -> hipError_t {
+                             ADD_FAILURE() << "device access queried for a cross-host peer";
+                             return hipErrorInvalidValue;
+                         });
+    EXPECT_EQ(Call(), 1);
+}
+
+TEST_F(P2pCanConnectMicrotest, CrossHostPeers_ShortCircuitsBeforeDeviceCheck)
+{
+    // Peer on a different host: p2pCanConnect returns as soon as it sees the
+    // host mismatch, before any device-access query.
+    info2_.hostHash = 0xBEEF;
+    ScopedHook topo(g_ncclTopoCheckP2p,
+                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
+                        if (p2p) *p2p = 1;
+                        if (inter) *inter = -1;
+                        return ncclSuccess;
+                    });
+    ScopedHook canAccess(g_hipDeviceCanAccessPeer,
+                         [](int*, int, int) -> hipError_t {
+                             ADD_FAILURE() << "device access queried for a cross-host peer";
+                             return hipErrorInvalidValue;
+                         });
+    EXPECT_EQ(p2pTransport.canConnect(new int, &comm_, nullptr, &info1_, &info2_),
+              ncclSuccess);
+}
+
+TEST_F(P2pCanConnectMicrotest, BusIdUnresolved_ReportsEligibleOnHip)
+{
+    // hipDeviceGetPCIBusId fails -> busIdToCudaDev yields -1. On HIP the
+    // invisible-device arm returns success with the topo verdict intact.
+    ScopedHook topo(g_ncclTopoCheckP2p,
+                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
+                        if (p2p) *p2p = 1;
+                        if (inter) *inter = -1;
+                        return ncclSuccess;
+                    });
+    // Default g_hipDeviceGetPCIBusId returns error (g_hipDeviceGetPCIBusIdResult
+    // is hipErrorInvalidValue), so both busIds resolve to -1.
+    EXPECT_EQ(Call(), 1);
+}
+
+TEST_F(P2pCanConnectMicrotest, SecondBusIdUnresolved_ReportsEligibleOnHip)
+{
+    // info1 resolves to a device but info2's bus id does not -> the second
+    // disjunct of the invisible-device gate fires. On HIP that reports
+    // eligible.
+    ScopedHook busid(g_hipDeviceGetPCIBusId,
+                     [](char* buf, int len, int device) -> hipError_t {
+                         if (device != 0) return hipErrorInvalidValue;  // only dev 0 resolvable
+                         if (buf && len > 0) BusStrForDev(device, buf, len);
+                         return hipSuccess;
+                     });
+    info1_.busId = BusIdForDev(0);   // resolves to dev 0
+    info2_.busId = BusIdForDev(5);   // no device reports this bus -> -1
+    ScopedHook topo(g_ncclTopoCheckP2p,
+                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
+                        if (p2p) *p2p = 1;
+                        if (inter) *inter = -1;
+                        return ncclSuccess;
+                    });
+    EXPECT_EQ(Call(), 1);
+}
+
+TEST_F(P2pCanConnectMicrotest, SameDevicePeers_ReportsEligible)
+{
+    // Both peers resolve to the same local device -> p2p is assumed available
+    // (multi-rank GPU) without querying cudaDeviceCanAccessPeer.
+    info2_.busId = info1_.busId;  // same device index 0
+    ScopedHook busid(g_hipDeviceGetPCIBusId, DeviceDistinctBusIds());
+    ScopedHook topo(g_ncclTopoCheckP2p,
+                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
+                        if (p2p) *p2p = 1;
+                        if (inter) *inter = -1;
+                        return ncclSuccess;
+                    });
+    ScopedHook canAccess(g_hipDeviceCanAccessPeer,
+                         [](int*, int, int) -> hipError_t {
+                             ADD_FAILURE() << "same-device path must not query peer access";
+                             return hipErrorInvalidValue;
+                         });
+    EXPECT_EQ(Call(), 1);
+}
+
+TEST_F(P2pCanConnectMicrotest, DistinctDevicesCanAccessPeer_ReportsEligible)
+{
+    ScopedHook busid(g_hipDeviceGetPCIBusId, DeviceDistinctBusIds());
+    ScopedHook topo(g_ncclTopoCheckP2p,
+                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
+                        if (p2p) *p2p = 1;
+                        if (inter) *inter = -1;
+                        return ncclSuccess;
+                    });
+    ScopedHook canAccess(g_hipDeviceCanAccessPeer,
+                         [](int* ok, int, int) -> hipError_t {
+                             if (ok) *ok = 1;
+                             return hipSuccess;
+                         });
+    EXPECT_EQ(Call(), 1);
+}
+
+TEST_F(P2pCanConnectMicrotest, DistinctDevicesCannotAccessPeer_ReturnsCannotConnect)
+{
+    ScopedHook busid(g_hipDeviceGetPCIBusId, DeviceDistinctBusIds());
+    ScopedHook topo(g_ncclTopoCheckP2p,
+                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
+                        if (p2p) *p2p = 1;
+                        if (inter) *inter = -1;
+                        return ncclSuccess;
+                    });
+    // Query succeeds but reports peer access is unavailable -> verdict 0.
+    ScopedHook canAccess(g_hipDeviceCanAccessPeer,
+                         [](int* ok, int, int) -> hipError_t {
+                             if (ok) *ok = 0;
+                             return hipSuccess;
+                         });
+    EXPECT_EQ(Call(), 0);
+}
+
+TEST_F(P2pCanConnectMicrotest, PeerAccessQueryFails_ReturnsCannotConnect)
+{
+    ScopedHook busid(g_hipDeviceGetPCIBusId, DeviceDistinctBusIds());
+    ScopedHook topo(g_ncclTopoCheckP2p,
+                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
+                        if (p2p) *p2p = 1;
+                        if (inter) *inter = -1;
+                        return ncclSuccess;
+                    });
+    // Query itself fails -> verdict 0.
+    ScopedHook canAccess(g_hipDeviceCanAccessPeer,
+                         [](int*, int, int) -> hipError_t { return hipErrorInvalidValue; });
+    EXPECT_EQ(Call(), 0);
+}
+
+// The intermediate-rank arm's `if (useMemcpy)` True direction and the priming
+// side effect both require the memcpy-enabled latch, so they run
+// process-isolated (the latch is one-shot per process).
+class P2pCanConnectMicrotestIsolated : public P2pMicrotest {};
+
+TEST_F(P2pCanConnectMicrotestIsolated, IntermediateRankWithMemcpy_ReturnsCannotConnect)
+{
+    RUN_ISOLATED_TEST("P2p_CanConnect_IntermediateRankWithMemcpy_ReturnsCannotConnect", []() {
+        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
+            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
+            return deft;
+        });
+        ScopedHook topo(g_ncclTopoCheckP2p,
+                        [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
+                            if (p2p) *p2p = 1;
+                            if (inter) *inter = 3;  // != -1
+                            return ncclSuccess;
+                        });
+        ncclComm comm{};
+        std::array<ncclPeerInfo, 2> myInfo{};
+        comm.rank = 0;
+        comm.peerInfo = myInfo.data();
+        ncclPeerInfo i1{}, i2{};
+        i1.hasFineGrain = i2.hasFineGrain = true;
+        int ret = -1;
+        ASSERT_EQ(p2pTransport.canConnect(&ret, &comm, nullptr, &i1, &i2), ncclSuccess);
+        // With memcpy enabled the intermediate-rank hop is disallowed.
+        EXPECT_EQ(ret, 0);
+        // And the call primed useMemcpy, observable through the public getter.
+        EXPECT_TRUE(ncclP2pUsesMemcpy());
+    });
+}

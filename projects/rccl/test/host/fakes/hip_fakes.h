@@ -92,6 +92,11 @@ extern std::function<hipError_t(int* /*pi*/, hipDeviceAttribute_t /*attr*/, int 
 extern std::function<hipError_t(hipLimit_t /*limit*/, size_t /*value*/)> g_hipDeviceSetLimit;
 extern hipError_t g_hipDeviceGetAttributeResult;
 extern hipError_t g_hipDeviceGetPCIBusIdResult;
+// Backs hipDeviceGetPCIBusId. Default returns a fixed bus string gated on
+// g_hipDeviceGetPCIBusIdResult; install a hook to make the string encode the
+// device index (drives busIdToCudaDev's per-device resolution).
+extern std::function<hipError_t(char* /*pciBusId*/, int /*len*/, int /*device*/)>
+    g_hipDeviceGetPCIBusId;
 extern hipError_t g_hipEventCreateResult;
 extern hipError_t g_hipMemPoolResult;
 extern hipError_t g_hipStreamCreateResult;

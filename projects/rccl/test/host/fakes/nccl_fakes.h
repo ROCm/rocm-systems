@@ -88,6 +88,16 @@ extern std::function<ncclResult_t(int /*cudaDev1*/, int /*cudaDev2*/, bool* /*is
     g_ncclTopoGetLinkType;
 extern int g_ncclTopoGetLinkTypeCalls;
 
+// Controllable seams for the topology eligibility checks p2pCanConnect drives.
+// (rank1, rank2, p2p, read, intermediateRank, cudaP2p) -- the topo system
+// pointer and comm are dropped; only the rank pair and out-params matter.
+extern std::function<ncclResult_t(int /*rank1*/, int /*rank2*/, int* /*p2p*/,
+                                  int* /*read*/, int* /*intermediateRank*/,
+                                  int* /*cudaP2p*/)>
+    g_ncclTopoCheckP2p;
+extern std::function<ncclResult_t(int /*rank1*/, int /*rank2*/, int* /*net*/)>
+    g_ncclTopoCheckNet;
+
 // Restore every NCCL controllable seam in this header to its default.
 // Called by ResetP2pFakes(); exposed for tests that only touch NCCL hooks.
 // Hands back an fd the caller must close. Defaults to ncclSystemError (the
