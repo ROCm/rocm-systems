@@ -156,12 +156,6 @@ hipError_t DynCO::getFuncCount(unsigned int* count) {
   return hipSuccess;
 }
 
-bool DynCO::isValidDynFunc(const void* hfunc) {
-  std::scoped_lock lock(dclock_);
-  return std::any_of(functions_.begin(), functions_.end(),
-                     [&](auto& it) { return it.second->IsValidDynFunc(hfunc); });
-}
-
 hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
   std::scoped_lock lock(dclock_);
   amd::Memory* mem = nullptr;
