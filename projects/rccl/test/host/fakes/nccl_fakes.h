@@ -147,6 +147,15 @@ extern std::function<ncclResult_t(struct ncclComm*, void* /*buff*/,
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclReg* /*reg*/)>
     g_commGraphDeregister;
 
+// ncclShmAllocateShareableBuffer: the CE-memcpy arm of p2pSendProxySetup
+// allocates its peer SHM segment through this. Default fails so unexpected
+// call sites surface loudly; the CE proxy-setup test installs a hook that
+// succeeds and hands back backing storage for the host/device SHM pointers.
+extern std::function<ncclResult_t(size_t /*size*/, bool /*legacy*/,
+                                  void* /*desc*/,
+                                  void** /*hptr*/, void** /*dptr*/)>
+    g_shmAllocateShareableBuffer;
+
 // Restore every NCCL controllable seam in this header to its default.
 // Called by ResetP2pFakes(); exposed for tests that only touch NCCL hooks.
 // Hands back an fd the caller must close. Defaults to ncclSystemError (the

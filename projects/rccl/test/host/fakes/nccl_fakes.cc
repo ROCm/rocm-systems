@@ -320,13 +320,26 @@ ncclResult_t ncclCommGraphDeregister(struct ncclComm* comm,
     return g_commGraphDeregister(comm, reg);
 }
 
-ncclResult_t ncclShmAllocateShareableBuffer(size_t            /*size*/,
-                                            bool              /*legacy*/,
-                                            ncclShmIpcDesc_t* /*desc*/,
-                                            void**            /*hptr*/,
-                                            void**            /*dptr*/)
+// --- Controllable seam: ncclShmAllocateShareableBuffer ------------------
+// The CE-memcpy arm of p2pSendProxySetup allocates its peer SHM segment
+// through this. Default fails so unexpected call sites surface loudly; the
+// CE proxy-setup test installs a hook that succeeds and hands back backing
+// storage for the host/device SHM pointers.
+static ncclResult_t DefaultShmAllocateShareableBuffer(size_t, bool, void*,
+                                                      void**, void**)
 {
     return ncclSystemError;
+}
+std::function<ncclResult_t(size_t, bool, void*, void**, void**)>
+    g_shmAllocateShareableBuffer = DefaultShmAllocateShareableBuffer;
+
+ncclResult_t ncclShmAllocateShareableBuffer(size_t            size,
+                                            bool              legacy,
+                                            ncclShmIpcDesc_t* desc,
+                                            void**            hptr,
+                                            void**            dptr)
+{
+    return g_shmAllocateShareableBuffer(size, legacy, desc, hptr, dptr);
 }
 
 // --- Controllable seam: ncclStrongStreamAcquire ---------------------------
@@ -540,6 +553,7 @@ void ResetNcclFakes()
     g_ncclTopoCheckP2p             = DefaultTopoCheckP2p;
     g_ncclTopoCheckNet             = DefaultTopoCheckNet;
     g_regLocalIsValid              = DefaultRegLocalIsValid;
+    g_shmAllocateShareableBuffer   = DefaultShmAllocateShareableBuffer;
     g_commGraphRegister            = DefaultCommGraphRegister;
     g_commGraphDeregister          = DefaultCommGraphDeregister;
 }

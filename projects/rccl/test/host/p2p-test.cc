@@ -6513,3 +6513,816 @@ TEST_F(P2pProxyDeregisterMicrotest, ProxyDeregister_ReleaseFails_PropagatesButSt
     EXPECT_EQ(done, 1);                          // reply still latched
     EXPECT_EQ(QueueHead(conn_), nullptr);        // record already removed
 }
+
+// ===========================================================================
+// Proxy-thread buffer lifecycle: the four proxy-side vtable slots that a
+// proxy connection drives to allocate and release its transport buffer, plus
+// the free counterpart of the shareable-buffer allocator.
+//
+//   ncclP2pFreeShareableBuffer -- the release counterpart of
+//                                 ncclP2pAllocateShareableBuffer.
+//   proxySetup (send / recv)   -- allocate the connection's transport buffer
+//                                 and stash it on connection->transportResources.
+//   proxyFree  (send / recv)   -- release whatever proxySetup stashed.
+//
+// These run through the proxy vtable slots on p2pTransport, which are wired to
+// the proxy statics at static-init time (unlike the CE proxyConnect/
+// proxyProgress slots, which are only patched after memcpy priming and are
+// covered in the isolated suite below).
+//
+// The non-memcpy arm is the one every non-CE connection takes: proxySetup
+// routes through ncclP2pAllocateShareableBuffer (legacy-IPC, cuMemEnable == 0),
+// storing the raw device pointer; proxyFree hands that pointer back to
+// ncclCudaFree. The shutdown-flag guard lets ncclCudaFree return before
+// touching the (absent) HIP runtime.
+// ===========================================================================
+
+class P2pProxyLifecycleMicrotest : public P2pMicrotest {
+protected:
+    ncclProxyConnection conn_{};
+    ncclProxyState      state_{};
+
+    void SetUp() override {
+        P2pMicrotest::SetUp();
+        // useMemcpy latches to its default (0) through the public getter so the
+        // non-memcpy proxy arm is exercised deterministically (ordering
+        // precondition: only p2pCanConnect / ncclP2pUsesMemcpy prime it).
+        ncclP2pUsesMemcpy();
+        state_.tpRank  = 2;
+        state_.cudaDev = 0;
+    }
+};
+
+// ncclP2pFreeShareableBuffer is the release counterpart of the allocator: a
+// descriptor that was populated by a successful allocation is accepted and
+// released without error. (The allocator's own contract -- what it writes into
+// the descriptor -- is pinned by the Allocate_* tests; this pins only that the
+// free counterpart completes.)
+TEST_F(P2pProxyLifecycleMicrotest, FreeShareableBuffer_PopulatedDescriptor_ReleasesSuccessfully)
+{
+    ncclIpcDesc ipcDesc{};
+    void*       ptr = nullptr;
+
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [](hipIpcMemHandle_t* h, void*) -> hipError_t {
+            if (h) std::memset(h, 0x11, sizeof(*h));
+            return hipSuccess;
+        });
+    ASSERT_EQ(ncclP2pAllocateShareableBuffer(/*size=*/256, /*refcount=*/0,
+                                             &ipcDesc, &ptr),
+              ncclSuccess);
+
+    EXPECT_EQ(ncclP2pFreeShareableBuffer(&ipcDesc), ncclSuccess);
+}
+
+// Send proxySetup, non-memcpy arm: a well-formed request allocates the
+// transport buffer through the legacy-IPC allocator, publishes it (pointer +
+// size) into the response ncclP2pBuff, stashes the raw pointer on
+// connection->transportResources, and latches *done.
+TEST_F(P2pProxyLifecycleMicrotest, SendProxySetup_ValidRequest_AllocatesBufferAndPublishesResponse)
+{
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [](hipIpcMemHandle_t*, void*) -> hipError_t { return hipSuccess; });
+
+    ncclP2pRequest req{};
+    req.size     = 0x800;
+    req.refcount = 0;
+    req.peerRank = 1;
+
+    ncclP2pBuff resp{};
+    int         done = 0;
+    auto r = p2pTransport.send.proxySetup(&conn_, &state_, &req, sizeof(req),
+                                          &resp, sizeof(resp), &done);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(done, 1);
+    EXPECT_NE(resp.directPtr, nullptr);                     // buffer published
+    EXPECT_EQ(resp.size, static_cast<size_t>(0x800));       // request size echoed
+    // The raw device pointer is stashed for the matching proxyFree.
+    EXPECT_EQ(conn_.transportResources, resp.directPtr);
+
+    // Release the stashed buffer the way the matching proxyFree would.
+    ShutdownFlagGuard shutdown;
+    EXPECT_EQ(p2pTransport.send.proxyFree(&conn_, &state_), ncclSuccess);
+}
+
+// Send proxySetup, cuMem arm: with cuMemEnable the allocated buffer is copied
+// into a heap p2pCuMemProxyInfo which becomes the stashed transportResources
+// (rather than the raw device pointer), and *done is latched.
+TEST_F(P2pProxyLifecycleMicrotest, SendProxySetup_CuMemEnabled_StashesCuMemProxyInfo)
+{
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    auto saved = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;  // skip export
+
+    ncclP2pRequest req{};
+    req.size     = 0x800;
+    req.peerRank = 1;
+
+    ncclP2pBuff resp{};
+    int         done = 0;
+    auto r = p2pTransport.send.proxySetup(&conn_, &state_, &req, sizeof(req),
+                                          &resp, sizeof(resp), &done);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(done, 1);
+    EXPECT_NE(resp.directPtr, nullptr);
+    // The stash is a distinct p2pCuMemProxyInfo carrying a copy of the buffer,
+    // not the raw device pointer.
+    ASSERT_NE(conn_.transportResources, nullptr);
+    EXPECT_NE(conn_.transportResources, resp.directPtr);
+    auto* info = static_cast<p2pCuMemProxyInfo*>(conn_.transportResources);
+    EXPECT_EQ(info->p2pBuff.directPtr, resp.directPtr);
+
+    ShutdownFlagGuard shutdown;
+    EXPECT_EQ(p2pTransport.send.proxyFree(&conn_, &state_), ncclSuccess);
+    ncclCuMemHandleType = saved;
+}
+
+// Recv proxySetup, cuMem arm: mirrors the send cuMem stash path.
+TEST_F(P2pProxyLifecycleMicrotest, RecvProxySetup_CuMemEnabled_StashesCuMemProxyInfo)
+{
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    auto saved = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+
+    ncclP2pRequest req{};
+    req.size     = 0x400;
+    req.peerRank = 1;
+
+    ncclP2pBuff resp{};
+    int         done = 0;
+    auto r = p2pTransport.recv.proxySetup(&conn_, &state_, &req, sizeof(req),
+                                          &resp, sizeof(resp), &done);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(done, 1);
+    ASSERT_NE(conn_.transportResources, nullptr);
+    EXPECT_NE(conn_.transportResources, resp.directPtr);
+    auto* info = static_cast<p2pCuMemProxyInfo*>(conn_.transportResources);
+    EXPECT_EQ(info->p2pBuff.directPtr, resp.directPtr);
+
+    ShutdownFlagGuard shutdown;
+    EXPECT_EQ(p2pTransport.recv.proxyFree(&conn_, &state_), ncclSuccess);
+    ncclCuMemHandleType = saved;
+}
+
+// Send proxySetup rejects a response buffer whose size does not match the
+// expected ncclP2pBuff, returning an internal error before allocating.
+TEST_F(P2pProxyLifecycleMicrotest, SendProxySetup_WrongResponseSize_ReturnsInternalError)
+{
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [](hipIpcMemHandle_t*, void*) -> hipError_t {
+            ADD_FAILURE() << "must not allocate when the response size is wrong";
+            return hipErrorInvalidValue;
+        });
+
+    ncclP2pRequest req{};
+    req.size = 0x800;
+    ncclP2pBuff resp{};
+    int         done = 0;
+    auto r = p2pTransport.send.proxySetup(&conn_, &state_, &req, sizeof(req),
+                                          &resp, sizeof(resp) - 1, &done);
+
+    EXPECT_EQ(r, ncclInternalError);
+    EXPECT_EQ(done, 0);
+    EXPECT_EQ(conn_.transportResources, nullptr);
+}
+
+// Send proxySetup rejects a request buffer whose size does not match the
+// expected ncclP2pRequest, returning an internal error before allocating.
+TEST_F(P2pProxyLifecycleMicrotest, SendProxySetup_WrongRequestSize_ReturnsInternalError)
+{
+    ncclP2pRequest req{};
+    ncclP2pBuff    resp{};
+    int            done = 0;
+    auto r = p2pTransport.send.proxySetup(&conn_, &state_, &req, sizeof(req) - 1,
+                                          &resp, sizeof(resp), &done);
+
+    EXPECT_EQ(r, ncclInternalError);
+    EXPECT_EQ(done, 0);
+}
+
+// Recv proxySetup, non-memcpy arm: mirrors the send path -- allocate, publish
+// into the response, stash on transportResources, latch *done.
+TEST_F(P2pProxyLifecycleMicrotest, RecvProxySetup_ValidRequest_AllocatesBufferAndPublishesResponse)
+{
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [](hipIpcMemHandle_t*, void*) -> hipError_t { return hipSuccess; });
+
+    ncclP2pRequest req{};
+    req.size     = 0x400;
+    req.peerRank = 1;
+
+    ncclP2pBuff resp{};
+    int         done = 0;
+    auto r = p2pTransport.recv.proxySetup(&conn_, &state_, &req, sizeof(req),
+                                          &resp, sizeof(resp), &done);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(done, 1);
+    EXPECT_NE(resp.directPtr, nullptr);
+    EXPECT_EQ(resp.size, static_cast<size_t>(0x400));
+    EXPECT_EQ(conn_.transportResources, resp.directPtr);
+
+    ShutdownFlagGuard shutdown;
+    EXPECT_EQ(p2pTransport.recv.proxyFree(&conn_, &state_), ncclSuccess);
+}
+
+// Send proxySetup, non-memcpy arm, buffer allocation fails: the allocator's
+// error is propagated and *done is left unlatched.
+TEST_F(P2pProxyLifecycleMicrotest, SendProxySetup_BufferAllocFails_Propagates)
+{
+    ScopedHook alloc(g_fakeCudaCallocAsync,
+        [](void**, std::size_t, hipStream_t) -> ncclResult_t {
+            return ncclSystemError;
+        });
+
+    ncclP2pRequest req{};
+    req.size = 0x800;
+    ncclP2pBuff resp{};
+    int         done = 0;
+    auto r = p2pTransport.send.proxySetup(&conn_, &state_, &req, sizeof(req),
+                                          &resp, sizeof(resp), &done);
+
+    EXPECT_EQ(r, ncclSystemError);
+    EXPECT_EQ(done, 0);
+}
+
+// Recv proxySetup, buffer allocation fails: the allocator's error is
+// propagated before the buffer is published or stashed.
+TEST_F(P2pProxyLifecycleMicrotest, RecvProxySetup_BufferAllocFails_Propagates)
+{
+    ScopedHook alloc(g_fakeCudaCallocAsync,
+        [](void**, std::size_t, hipStream_t) -> ncclResult_t {
+            return ncclSystemError;
+        });
+
+    ncclP2pRequest req{};
+    req.size = 0x400;
+    ncclP2pBuff resp{};
+    int         done = 0;
+    auto r = p2pTransport.recv.proxySetup(&conn_, &state_, &req, sizeof(req),
+                                          &resp, sizeof(resp), &done);
+
+    EXPECT_EQ(r, ncclSystemError);
+    EXPECT_EQ(done, 0);
+    EXPECT_EQ(conn_.transportResources, nullptr);
+}
+
+// Recv proxySetup rejects a response buffer whose size does not match the
+// expected ncclP2pBuff, returning an internal error before allocating.
+TEST_F(P2pProxyLifecycleMicrotest, RecvProxySetup_WrongResponseSize_ReturnsInternalError)
+{
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [](hipIpcMemHandle_t*, void*) -> hipError_t {
+            ADD_FAILURE() << "must not allocate when the response size is wrong";
+            return hipErrorInvalidValue;
+        });
+
+    ncclP2pRequest req{};
+    req.size = 0x400;
+    ncclP2pBuff resp{};
+    int         done = 0;
+    auto r = p2pTransport.recv.proxySetup(&conn_, &state_, &req, sizeof(req),
+                                          &resp, sizeof(resp) - 1, &done);
+
+    EXPECT_EQ(r, ncclInternalError);
+    EXPECT_EQ(done, 0);
+    EXPECT_EQ(conn_.transportResources, nullptr);
+}
+
+// Recv proxySetup rejects a mismatched request size before allocating.
+TEST_F(P2pProxyLifecycleMicrotest, RecvProxySetup_WrongRequestSize_ReturnsInternalError)
+{
+    ncclP2pRequest req{};
+    ncclP2pBuff    resp{};
+    int            done = 0;
+    auto r = p2pTransport.recv.proxySetup(&conn_, &state_, &req, sizeof(req) - 1,
+                                          &resp, sizeof(resp), &done);
+
+    EXPECT_EQ(r, ncclInternalError);
+    EXPECT_EQ(done, 0);
+}
+
+// Send proxyFree with no stashed resources and an empty mem-handle queue is a
+// no-op that succeeds (nothing to release).
+TEST_F(P2pProxyLifecycleMicrotest, SendProxyFree_NoResources_IsNoopSuccess)
+{
+    EXPECT_EQ(p2pTransport.send.proxyFree(&conn_, &state_), ncclSuccess);
+}
+
+// Send proxyFree, cuMem arm: a stashed p2pCuMemProxyInfo is released -- its
+// shareable buffer through ncclP2pFreeShareableBuffer and its device pointer
+// through ncclCudaFree -- then the info struct freed. The shutdown-flag guard
+// lets ncclCudaFree short-circuit before HIP.
+TEST_F(P2pProxyLifecycleMicrotest, SendProxyFree_CuMemResources_ReleasesBufferAndFrees)
+{
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ShutdownFlagGuard shutdown;
+
+    // Allocated the way p2pSendProxySetup's cuMem arm does (ncclCalloc).
+    auto* info = static_cast<p2pCuMemProxyInfo*>(
+        std::calloc(1, sizeof(p2pCuMemProxyInfo)));
+    info->p2pBuff.directPtr = reinterpret_cast<void*>(0x5000);
+    conn_.transportResources = info;
+
+    EXPECT_EQ(p2pTransport.send.proxyFree(&conn_, &state_), ncclSuccess);
+    // production free(proxyInfo) already released `info`.
+}
+
+// Send proxyFree, cuMem arm with no stashed info: the null-guard skips the
+// release and the call is a no-op success.
+TEST_F(P2pProxyLifecycleMicrotest, SendProxyFree_CuMemEnabledNoResources_IsNoopSuccess)
+{
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    EXPECT_EQ(p2pTransport.send.proxyFree(&conn_, &state_), ncclSuccess);
+}
+
+// Recv proxyFree, cuMem arm with no stashed info: the null-guard skips the
+// release and the call is a no-op success.
+TEST_F(P2pProxyLifecycleMicrotest, RecvProxyFree_CuMemEnabledNoResources_IsNoopSuccess)
+{
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    EXPECT_EQ(p2pTransport.recv.proxyFree(&conn_, &state_), ncclSuccess);
+}
+
+// Recv proxyFree, cuMem arm: mirrors the send cuMem release path.
+TEST_F(P2pProxyLifecycleMicrotest, RecvProxyFree_CuMemResources_ReleasesBufferAndFrees)
+{
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ShutdownFlagGuard shutdown;
+
+    auto* info = static_cast<p2pCuMemProxyInfo*>(
+        std::calloc(1, sizeof(p2pCuMemProxyInfo)));
+    info->p2pBuff.directPtr = reinterpret_cast<void*>(0x6000);
+    conn_.transportResources = info;
+
+    EXPECT_EQ(p2pTransport.recv.proxyFree(&conn_, &state_), ncclSuccess);
+}
+
+// Recv proxyFree, non-cuMem arm: the stashed raw device pointer is handed to
+// ncclCudaFree (short-circuited by the shutdown guard) and the call succeeds.
+TEST_F(P2pProxyLifecycleMicrotest, RecvProxyFree_DirectResources_ReleasesThroughCudaFree)
+{
+    ShutdownFlagGuard shutdown;
+    conn_.transportResources = reinterpret_cast<void*>(0x7000);
+    EXPECT_EQ(p2pTransport.recv.proxyFree(&conn_, &state_), ncclSuccess);
+}
+
+// Send proxyFree, non-cuMem arm with no stash: the else arm hands the (null)
+// transportResources to ncclCudaFree, which is a no-op success.
+TEST_F(P2pProxyLifecycleMicrotest, SendProxyFree_DirectResources_ReleasesThroughCudaFree)
+{
+    ShutdownFlagGuard shutdown;
+    conn_.transportResources = reinterpret_cast<void*>(0x9000);
+    EXPECT_EQ(p2pTransport.send.proxyFree(&conn_, &state_), ncclSuccess);
+}
+
+// Recv proxyFree also drains the mem-handle queue before releasing its buffer.
+TEST_F(P2pProxyLifecycleMicrotest, RecvProxyFree_QueuedRegistration_DeregistersAndDrainsQueue)
+{
+    int closes = 0;
+    ScopedHook close(g_hipIpcCloseMemHandle,
+        [&closes](void*) -> hipError_t { ++closes; return hipSuccess; });
+
+    EnqueueRecordedHandle(conn_, reinterpret_cast<void*>(0x8040), /*offset=*/0x40,
+                          /*legacy=*/true, /*segs=*/1);
+
+    EXPECT_EQ(p2pTransport.recv.proxyFree(&conn_, &state_), ncclSuccess);
+    EXPECT_EQ(closes, 1);
+    EXPECT_EQ(QueueHead(conn_), nullptr);
+}
+
+// Both proxyFree slots first drain the connection's proxyMemHandleQueue,
+// deregistering each stale registration before releasing the transport buffer.
+// A queued legacy record is imported-closed via hipIpcCloseMemHandle and the
+// queue emptied.
+TEST_F(P2pProxyLifecycleMicrotest, SendProxyFree_QueuedRegistration_DeregistersAndDrainsQueue)
+{
+    int closes = 0;
+    ScopedHook close(g_hipIpcCloseMemHandle,
+        [&closes](void*) -> hipError_t { ++closes; return hipSuccess; });
+
+    EnqueueRecordedHandle(conn_, reinterpret_cast<void*>(0x8040), /*offset=*/0x40,
+                          /*legacy=*/true, /*segs=*/1);
+
+    // No transport buffer stashed -> the release stage is a no-op; the test
+    // pins the queue-drain half of proxyFree's contract.
+    EXPECT_EQ(p2pTransport.send.proxyFree(&conn_, &state_), ncclSuccess);
+    EXPECT_EQ(closes, 1);                       // the stale record was released
+    EXPECT_EQ(QueueHead(conn_), nullptr);       // queue drained
+}
+
+// ===========================================================================
+// CE-memcpy proxy slots: p2pSendProxyConnect and p2pSendProxyProgress.
+//
+// These two slots are only wired onto p2pTransport.send after memcpy priming
+// (initCeOperation patches them; see the Prime_* isolated tests above). So a
+// test that drives them through the public vtable must prime first -- which
+// latches a one-shot static and permanently mutates the global p2pTransport --
+// and therefore runs process-isolated, exactly like the priming tests.
+//
+// proxyConnect finishes the CE connection: it records the receiver FIFO
+// pointer from the request, creates the copy stream and per-step events, and
+// arms the proxy-append pointer. proxyProgress is the copy pump that advances a
+// CE operation from Ready through Progress to None.
+// ===========================================================================
+
+class P2pProxyCeMicrotestIsolated : public P2pMicrotest {};
+
+// Prime memcpy so the CE proxyConnect slot is wired, then drive it: a
+// request carrying the receiver FIFO pointer is recorded on the proxy info,
+// the copy stream and per-step events are created, and the proxy-append
+// pointer is armed.
+TEST_F(P2pProxyCeMicrotestIsolated, ProxyConnect_ValidRequest_RecordsFifoAndArmsAppend)
+{
+    RUN_ISOLATED_TEST("P2p_ProxyConnect_ValidRequest_RecordsFifoAndArmsAppend", []() {
+        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
+            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
+            return deft;
+        });
+        ncclP2pUsesMemcpy();  // prime -> patches p2pTransport.send.proxyConnect
+        ASSERT_NE(p2pTransport.send.proxyConnect, nullptr);
+
+        // Stream + event creation must succeed for the happy path.
+        g_hipStreamCreateResult = hipSuccess;
+        g_hipEventCreateResult  = hipSuccess;
+
+        ncclProxyConnection conn{};
+        ncclProxyState      state{};
+        auto* info = static_cast<p2pShmProxyInfo*>(
+            std::calloc(1, sizeof(p2pShmProxyInfo)));
+        conn.transportResources = info;
+
+        char  fifoStorage = 0;
+        char* fifo = &fifoStorage;
+        int   done = 0;
+        auto r = p2pTransport.send.proxyConnect(&conn, &state, &fifo, sizeof(void*),
+                                                nullptr, 0, &done);
+
+        EXPECT_EQ(r, ncclSuccess);
+        EXPECT_EQ(info->recvFifo, fifo);                  // FIFO pointer recorded
+        EXPECT_EQ(conn.proxyAppendPtr, &conn.proxyAppend); // append armed
+        std::free(info);
+    });
+}
+
+// proxyConnect rejects a request whose size is not a single pointer, returning
+// an internal error before creating any stream or events.
+TEST_F(P2pProxyCeMicrotestIsolated, ProxyConnect_WrongRequestSize_ReturnsInternalError)
+{
+    RUN_ISOLATED_TEST("P2p_ProxyConnect_WrongRequestSize_ReturnsInternalError", []() {
+        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
+            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
+            return deft;
+        });
+        ncclP2pUsesMemcpy();
+        ASSERT_NE(p2pTransport.send.proxyConnect, nullptr);
+
+        ncclProxyConnection conn{};
+        ncclProxyState      state{};
+        auto* info = static_cast<p2pShmProxyInfo*>(
+            std::calloc(1, sizeof(p2pShmProxyInfo)));
+        conn.transportResources = info;
+
+        char  buf[8] = {};
+        int   done = 0;
+        auto r = p2pTransport.send.proxyConnect(&conn, &state, buf, sizeof(void*) + 1,
+                                                nullptr, 0, &done);
+
+        EXPECT_EQ(r, ncclInternalError);
+        EXPECT_EQ(conn.proxyAppendPtr, nullptr);   // append not armed
+        std::free(info);
+    });
+}
+
+// Prime memcpy, then drive send proxySetup's CE arm: the response size selects
+// the CE path, which allocates the device copy buffer and peer SHM segment,
+// stashes a p2pShmProxyInfo on transportResources, and copies it into the
+// response buffer.
+TEST_F(P2pProxyCeMicrotestIsolated, SendProxySetup_MemcpyEnabled_AllocatesCeStateAndPublishes)
+{
+    RUN_ISOLATED_TEST("P2p_SendProxySetup_MemcpyEnabled_AllocatesCeStateAndPublishes", []() {
+        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
+            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
+            return deft;
+        });
+        ncclP2pUsesMemcpy();  // prime -> useMemcpy = 1
+
+        // ncclCudaHostCalloc swaps the stream-capture mode via the async-ops
+        // seam; enable it so the host allocation succeeds.
+        g_hipAsyncOpsResult = hipSuccess;
+
+        // The peer SHM segment is allocated through this seam; hand back real
+        // backing storage for the host/device SHM pointers.
+        static p2pShm shmHostStorage;
+        static p2pShm shmDevStorage;
+        ScopedHook shmAlloc(g_shmAllocateShareableBuffer,
+            [](size_t, bool, void*, void** hptr, void** dptr) -> ncclResult_t {
+                if (hptr) *hptr = &shmHostStorage;
+                if (dptr) *dptr = &shmDevStorage;
+                return ncclSuccess;
+            });
+
+        ncclProxyConnection conn{};
+        ncclProxyState      state{};
+        state.buffSizes[NCCL_PROTO_SIMPLE] = 0x1000;
+
+        p2pShmProxyInfo resp{};
+        int             done = 0;
+        auto r = p2pTransport.send.proxySetup(&conn, &state, nullptr, 0,
+                                              &resp, sizeof(resp), &done);
+
+        EXPECT_EQ(r, ncclSuccess);
+        EXPECT_EQ(done, 1);
+        ASSERT_NE(conn.transportResources, nullptr);
+        auto* info = static_cast<p2pShmProxyInfo*>(conn.transportResources);
+        EXPECT_EQ(info->shm, &shmHostStorage);      // SHM segment recorded
+        EXPECT_NE(info->ceDevBuff, nullptr);        // device copy buffer allocated
+        // The proxy info was published into the response for the peer.
+        EXPECT_EQ(resp.shm, info->shm);
+    });
+}
+
+// Send proxySetup, CE arm, wrong response size: the memcpy path rejects a
+// response buffer that is not sized as a p2pShmProxyInfo before allocating.
+TEST_F(P2pProxyCeMicrotestIsolated, SendProxySetup_MemcpyEnabledWrongResponseSize_ReturnsInternalError)
+{
+    RUN_ISOLATED_TEST("P2p_SendProxySetup_MemcpyEnabledWrongResponseSize_ReturnsInternalError", []() {
+        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
+            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
+            return deft;
+        });
+        ncclP2pUsesMemcpy();
+
+        ScopedHook shmAlloc(g_shmAllocateShareableBuffer,
+            [](size_t, bool, void*, void**, void**) -> ncclResult_t {
+                ADD_FAILURE() << "must not allocate when the response size is wrong";
+                return ncclSystemError;
+            });
+
+        ncclProxyConnection conn{};
+        ncclProxyState      state{};
+        p2pShmProxyInfo     resp{};
+        int                 done = 0;
+        auto r = p2pTransport.send.proxySetup(&conn, &state, nullptr, 0,
+                                              &resp, sizeof(resp) - 1, &done);
+
+        EXPECT_EQ(r, ncclInternalError);
+        EXPECT_EQ(done, 0);
+    });
+}
+
+// Prime memcpy, then drive send proxyFree's CE arm: a stashed p2pShmProxyInfo
+// is torn down -- the SHM segment closed, the host and device buffers freed,
+// and the copy stream + per-step events destroyed -- and the info struct freed.
+TEST_F(P2pProxyCeMicrotestIsolated, SendProxyFree_MemcpyResources_TearsDownCeState)
+{
+    RUN_ISOLATED_TEST("P2p_SendProxyFree_MemcpyResources_TearsDownCeState", []() {
+        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
+            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
+            return deft;
+        });
+        ncclP2pUsesMemcpy();  // prime -> useMemcpy = 1
+
+        // The device-buffer free routes through ncclCudaFree; the shutdown
+        // guard lets it short-circuit before reaching HIP.
+        rcclShutdownFlag().store(true, std::memory_order_release);
+
+        ncclProxyConnection conn{};
+        ncclProxyState      state{};
+        auto* info = static_cast<p2pShmProxyInfo*>(
+            std::calloc(1, sizeof(p2pShmProxyInfo)));
+        info->ceRecvMem = nullptr;   // ncclCudaHostFree(nullptr) is a no-op
+        info->ceDevBuff = nullptr;
+        conn.transportResources = info;
+
+        auto r = p2pTransport.send.proxyFree(&conn, &state);
+
+        EXPECT_EQ(r, ncclSuccess);
+        rcclShutdownFlag().store(false, std::memory_order_release);
+        // production free(proxyInfo) already released `info`.
+    });
+}
+
+// proxyConnect, stream-create failure: the CE connect propagates the HIP error
+// from stream creation before creating any events or arming the append pointer.
+TEST_F(P2pProxyCeMicrotestIsolated, ProxyConnect_StreamCreateFails_Propagates)
+{
+    RUN_ISOLATED_TEST("P2p_ProxyConnect_StreamCreateFails_Propagates", []() {
+        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
+            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
+            return deft;
+        });
+        ncclP2pUsesMemcpy();
+        ASSERT_NE(p2pTransport.send.proxyConnect, nullptr);
+
+        g_hipStreamCreateResult = hipErrorInvalidValue;  // stream creation fails
+
+        ncclProxyConnection conn{};
+        ncclProxyState      state{};
+        auto* info = static_cast<p2pShmProxyInfo*>(
+            std::calloc(1, sizeof(p2pShmProxyInfo)));
+        conn.transportResources = info;
+
+        char  fifoStorage = 0;
+        char* fifo = &fifoStorage;
+        int   done = 0;
+        auto r = p2pTransport.send.proxyConnect(&conn, &state, &fifo, sizeof(void*),
+                                                nullptr, 0, &done);
+
+        EXPECT_NE(r, ncclSuccess);
+        EXPECT_EQ(conn.proxyAppendPtr, nullptr);   // append not armed
+        std::free(info);
+    });
+}
+
+// proxyProgress, SIMPLE protocol, GPU tail not yet ready: the copy is skipped
+// (the recvTail gate is False) so the op stays in Progress with nothing
+// transmitted or done.
+TEST_F(P2pProxyCeMicrotestIsolated, ProxyProgress_SimpleProtocolTailNotReady_SkipsCopyAndStaysInProgress)
+{
+    RUN_ISOLATED_TEST("P2p_ProxyProgress_SimpleProtocolTailNotReady_SkipsCopyAndStaysInProgress", []() {
+        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
+            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
+            return deft;
+        });
+        ncclP2pUsesMemcpy();
+        ASSERT_NE(p2pTransport.send.proxyProgress, nullptr);
+
+        ncclProxyState state{};
+        state.buffSizes[NCCL_PROTO_SIMPLE] = 8 * NCCL_STEPS;
+
+        ncclRecvMem ceRecvMem{};
+        ceRecvMem.tail = 0;   // GPU has produced nothing -> copy gate stays False
+        p2pShm shm{};
+
+        p2pShmProxyInfo info{};
+        info.ceRecvMem = &ceRecvMem;
+        info.shm       = &shm;
+
+        ncclProxyConnection conn{};
+        conn.transportResources = &info;
+
+        ncclProxyArgs args{};
+        args.state      = ncclProxyOpReady;
+        args.nsubs      = 1;
+        args.protocol   = NCCL_PROTO_SIMPLE;
+        args.chunkSteps = 1;
+        args.sliceSteps = 1;
+        args.subs[0].connection = &conn;
+        args.subs[0].nsteps     = 1;
+
+        auto r = p2pTransport.send.proxyProgress(&state, &args);
+
+        EXPECT_EQ(r, ncclSuccess);
+        EXPECT_EQ(args.done, 0);                        // nothing completed
+        EXPECT_EQ(args.state, ncclProxyOpProgress);     // op still in flight
+        EXPECT_EQ(args.subs[0].transmitted, 0u);        // no copy issued
+    });
+}
+
+// proxyProgress, resumed in-progress with a sub already fully transmitted: the
+// Ready-init is skipped (state is already Progress) and the transmit gate is
+// False (nothing left to send), so the pump only drains the outstanding
+// completion and finishes the op.
+TEST_F(P2pProxyCeMicrotestIsolated, ProxyProgress_ResumedWithTransmittedSub_DrainsCompletionAndFinishes)
+{
+    RUN_ISOLATED_TEST("P2p_ProxyProgress_ResumedWithTransmittedSub_DrainsCompletionAndFinishes", []() {
+        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
+            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
+            return deft;
+        });
+        ncclP2pUsesMemcpy();
+        ASSERT_NE(p2pTransport.send.proxyProgress, nullptr);
+
+        g_hipAsyncOpsResult = hipSuccess;   // event query reports complete
+
+        ncclProxyState state{};
+        state.buffSizes[NCCL_PROTO_SIMPLE] = 8 * NCCL_STEPS;
+
+        ncclRecvMem ceRecvMem{};
+        p2pShm shm{};
+        p2pShmProxyInfo info{};
+        info.ceRecvMem = &ceRecvMem;
+        info.shm       = &shm;
+
+        ncclProxyConnection conn{};
+        conn.transportResources = &info;
+
+        ncclProxyArgs args{};
+        args.state      = ncclProxyOpProgress;   // resumed, not Ready
+        args.nsubs      = 1;
+        args.protocol   = NCCL_PROTO_SIMPLE;
+        args.chunkSteps = 1;
+        args.sliceSteps = 1;
+        // A sub already fully transmitted with one completion still pending.
+        args.subs[0].connection  = &conn;
+        args.subs[0].nsteps      = 1;
+        args.subs[0].base        = 0;
+        args.subs[0].transmitted = 1;   // == nsteps -> transmit gate False
+        args.subs[0].done        = 0;   // one completion left to drain
+
+        auto r = p2pTransport.send.proxyProgress(&state, &args);
+
+        EXPECT_EQ(r, ncclSuccess);
+        EXPECT_EQ(args.done, 1);                    // completion drained
+        EXPECT_EQ(args.state, ncclProxyOpNone);     // op finished
+    });
+}
+
+// proxyProgress, non-SIMPLE protocol: a Ready operation is initialised (its
+// subs re-based) and moved to Progress; because only SIMPLE uses the copy
+// engine, each sub is immediately marked done and the op completes to None in
+// a single pump.
+TEST_F(P2pProxyCeMicrotestIsolated, ProxyProgress_NonSimpleProtocol_CompletesWithoutCopy)
+{
+    RUN_ISOLATED_TEST("P2p_ProxyProgress_NonSimpleProtocol_CompletesWithoutCopy", []() {
+        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
+            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
+            return deft;
+        });
+        ncclP2pUsesMemcpy();  // prime -> patches p2pTransport.send.proxyProgress
+        ASSERT_NE(p2pTransport.send.proxyProgress, nullptr);
+
+        ncclProxyState state{};
+        state.buffSizes[NCCL_PROTO_LL] = 8 * NCCL_STEPS;
+
+        p2pShmProxyInfo info{};
+        info.step = 0;
+
+        ncclProxyConnection conn{};
+        conn.transportResources = &info;
+
+        ncclProxyArgs args{};
+        args.state      = ncclProxyOpReady;
+        args.nsubs      = 1;
+        args.protocol   = NCCL_PROTO_LL;   // != SIMPLE -> no copy engine
+        args.chunkSteps = 1;
+        args.subs[0].connection = &conn;
+        args.subs[0].nsteps     = 4;
+
+        auto r = p2pTransport.send.proxyProgress(&state, &args);
+
+        EXPECT_EQ(r, ncclSuccess);
+        EXPECT_EQ(args.done, 1);                        // the sub completed
+        EXPECT_EQ(args.state, ncclProxyOpNone);         // op finished
+        EXPECT_EQ(info.step, args.subs[0].base + args.subs[0].nsteps);
+    });
+}
+
+// proxyProgress, SIMPLE protocol: a Ready operation drives the copy engine --
+// with the GPU tail ahead of the transmit cursor the pump issues the async
+// copy + event record, the event query reports complete, and the single-step
+// op advances to done and completes to None.
+TEST_F(P2pProxyCeMicrotestIsolated, ProxyProgress_SimpleProtocol_CopiesAndCompletes)
+{
+    RUN_ISOLATED_TEST("P2p_ProxyProgress_SimpleProtocol_CopiesAndCompletes", []() {
+        ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
+            if (std::strcmp(env, "P2P_USE_CUDA_MEMCPY") == 0) return 1;
+            return deft;
+        });
+        ncclP2pUsesMemcpy();
+        ASSERT_NE(p2pTransport.send.proxyProgress, nullptr);
+
+        // Async copy, event record and event query all succeed so the single
+        // step transmits and then completes in one pump.
+        g_hipAsyncOpsResult = hipSuccess;
+
+        ncclProxyState state{};
+        state.buffSizes[NCCL_PROTO_SIMPLE] = 8 * NCCL_STEPS;
+
+        ncclRecvMem ceRecvMem{};
+        ceRecvMem.tail = 64;   // GPU has produced well past the transmit cursor
+        p2pShm shm{};
+
+        p2pShmProxyInfo info{};
+        info.step      = 0;
+        info.ceRecvMem = &ceRecvMem;
+        info.shm       = &shm;
+        char recvFifo[64] = {};
+        char ceDevBuff[64] = {};
+        info.recvFifo = recvFifo;
+        info.ceDevBuff = ceDevBuff;
+
+        ncclProxyConnection conn{};
+        conn.transportResources = &info;
+
+        ncclProxyArgs args{};
+        args.state      = ncclProxyOpReady;
+        args.nsubs      = 1;
+        args.protocol   = NCCL_PROTO_SIMPLE;
+        args.chunkSteps = 1;
+        args.sliceSteps = 1;
+        args.subs[0].connection = &conn;
+        args.subs[0].nsteps     = 1;   // a single step to transmit and complete
+
+        auto r = p2pTransport.send.proxyProgress(&state, &args);
+
+        EXPECT_EQ(r, ncclSuccess);
+        EXPECT_EQ(args.done, 1);                        // the sub completed
+        EXPECT_EQ(args.state, ncclProxyOpNone);         // op finished
+        EXPECT_EQ(shm.recvMem.tail, args.subs[0].base + args.subs[0].done);
+    });
+}
