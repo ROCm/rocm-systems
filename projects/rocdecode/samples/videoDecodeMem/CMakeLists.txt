@@ -99,7 +99,6 @@ message("-- ${White}${PROJECT_NAME} -- AMD GPU_TARGETS: ${GPU_TARGETS}${ColourRe
 
 set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
-find_package(Threads QUIET)
 find_package(rocdecode QUIET)
 if(NOT WIN32)
     find_package(rocprofiler-register QUIET)

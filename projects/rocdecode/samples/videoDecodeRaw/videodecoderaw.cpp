@@ -27,13 +27,13 @@ THE SOFTWARE.
 #include <iomanip>
 #ifndef _WIN32
 #include <unistd.h>
+#include <sys/stat.h>
 #include <libgen.h>
 #endif
 #include <vector>
 #include <string>
 #include <chrono>
-#include <sys/stat.h>
-#if (defined(__cplusplus) && __cplusplus >= 201703L) || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L)
+#if (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L && __has_include(<filesystem>))
     #include <filesystem>
 #else
     #include <experimental/filesystem>

@@ -104,7 +104,6 @@ message("-- ${White}${PROJECT_NAME} -- AMD GPU_TARGETS: ${GPU_TARGETS}${ColourRe
 
 set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
-find_package(Threads QUIET)
 find_package(FFmpeg QUIET)
 find_package(rocdecode QUIET)
 
