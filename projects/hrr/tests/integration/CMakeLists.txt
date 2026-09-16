@@ -9,6 +9,11 @@
 # runs hrr-playback to validate replayed device-to-host buffers byte-for-byte.
 # The workload translation units (hrr_workload / hrr_repro_workload / hrr_spt_workload)
 # provide those hidden _Direct cases and must be linked into the same executable.
+#
+# hrr_regions_test.cc covers the external region annotation channel
+# (hrr/hrr_regions.h): CPU-only sidecar framing tests, plus its own hidden
+# [.][hrr-direct] workload that carves blocks out of a single hipMalloc by
+# pointer arithmetic and is replayed against a synthetic sidecar.
 
 # The workload translation units carry __global__ kernels, device built-ins
 # (blockIdx/blockDim/threadIdx), hipLaunchKernelGGL, and HIP_SYMBOL, so they must
@@ -19,6 +24,7 @@ set(HRR_GPU_WORKLOAD_SOURCES
   hrr_workload_test.cc
   hrr_repro_workload_test.cc
   hrr_spt_workload_test.cc
+  hrr_regions_test.cc
 )
 
 if(NOT DEFINED HIP_PLATFORM)
