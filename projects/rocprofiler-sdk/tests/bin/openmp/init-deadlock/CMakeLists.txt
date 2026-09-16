@@ -20,28 +20,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-#
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
-
-if(NOT OMP_TARGET_COMPILER)
-    find_program(
-        amdclangpp_EXECUTABLE
-        NAMES amdclang++
-        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATH_SUFFIXES bin llvm/bin NO_CACHE)
-    mark_as_advanced(amdclangpp_EXECUTABLE)
-
-    if(amdclangpp_EXECUTABLE)
-        set(OMP_TARGET_COMPILER
-            "${amdclangpp_EXECUTABLE}"
-            CACHE FILEPATH "")
-    endif()
-endif()
-
-project(rocprofiler-sdk-tests-bin-openmp-init-deadlock LANGUAGES CXX)
-
-find_package(rocprofiler-sdk REQUIRED)
 find_package(Threads REQUIRED)
 
 include(rocprofiler-sdk-custom-compilation)

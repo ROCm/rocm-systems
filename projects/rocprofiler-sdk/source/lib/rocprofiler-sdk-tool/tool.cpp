@@ -4982,32 +4982,64 @@ rocprofv3_main(int argc, char** argv, char** envp)
 ompt_start_tool_result_t*
 ompt_start_tool(unsigned int omp_version, const char* runtime_version) ROCPROFILER_PUBLIC_API;
 
+namespace
+{
+// The OpenMP runtime binds the first ompt_start_tool it finds and does not consider any other
+// library already loaded, so declining the role means invoking the next implementation here.
+// Returning null only sends the runtime on to its own OMP_TOOL_LIBRARIES search.
+ompt_start_tool_result_t*
+start_next_ompt_tool(unsigned int omp_version, const char* runtime_version)
+{
+    // never resurrect a tool the user disabled
+    if(const char* _omp_tool = ::getenv("OMP_TOOL");
+       _omp_tool != nullptr && ::strcmp(_omp_tool, "disabled") == 0)
+        return nullptr;
+
+    using ompt_start_tool_t = ompt_start_tool_result_t* (*) (unsigned int, const char*);
+
+    auto* _next = reinterpret_cast<ompt_start_tool_t>(::dlsym(RTLD_NEXT, "ompt_start_tool"));
+    if(_next == nullptr || _next == reinterpret_cast<ompt_start_tool_t>(&ompt_start_tool))
+        return nullptr;
+
+    ROCP_INFO << "rocprofv3 is handing the OMPT tool role to the next ompt_start_tool";
+    return _next(omp_version, runtime_version);
+}
+}  // namespace
+
 ompt_start_tool_result_t*
 ompt_start_tool(unsigned int omp_version, const char* runtime_version)
 {
     initialize_logging();
 
-    ROCP_WARNING << fmt::format(
+    ROCP_INFO << fmt::format(
         "ompt_start_tool(omp_version={}, runtime_version=\"{}\") was invoked in rocprofv3 tool",
         omp_version,
         runtime_version);
 
+    // Take the OMPT tool role only when this invocation collects OMPT, so that a user's own OMPT
+    // tool can have it while rocprofv3 continues tracing everything else. Exactly one OMPT tool
+    // wins, and which one follows from the command line rather than from a separate control.
+    if(!tool::get_config().ompt_trace)
+    {
+        ROCP_INFO << "rocprofv3 is not collecting OMPT; deferring the OMPT tool role";
+        return start_next_ompt_tool(omp_version, runtime_version);
+    }
+
     // The OpenMP runtime discovers tools while holding its initialization lock. Configuring
     // rocprofiler-sdk here loads client tool libraries, and their constructors can call back into
-    // the OpenMP runtime and re-enter that lock on the same thread. Only proceed when the SDK is
-    // already initialized, so no client libraries need to be loaded.
+    // the OpenMP runtime and re-enter that lock on the same thread. Defer instead of configuring,
+    // so no client libraries are loaded on this thread.
     if(int _status = 0;
        rocprofiler_is_initialized(&_status) != ROCPROFILER_STATUS_SUCCESS || _status == 0)
     {
         ROCP_WARNING << "OMPT support is not enabled because the OpenMP runtime initialized "
                         "before rocprofiler-sdk. Initialize rocprofiler-sdk before the first "
                         "OpenMP call to enable OMPT.";
-        return nullptr;
+        return start_next_ompt_tool(omp_version, runtime_version);
     }
 
     initialize_rocprofv3();
 
-    // test force configure
     return rocprofiler_ompt_start_tool(omp_version, runtime_version);
 }
 }
