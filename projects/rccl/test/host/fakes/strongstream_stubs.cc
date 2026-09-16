@@ -53,7 +53,7 @@ ncclResult_t ncclStrongStreamSynchronize(struct ncclStrongStream*) { return g_nc
 // Controllable (was fail-loud in nccl_stubs.cc).
 ncclResult_t g_ncclCudaContextTrackResult = ncclSuccess;
 int g_ncclCudaContextTrackCalls = 0;
-ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) {
+ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out, int, uint64_t) {
   g_ncclCudaContextTrackCalls++;
   if (out) *out = nullptr;
   return g_ncclCudaContextTrackResult;

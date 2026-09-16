@@ -23,11 +23,13 @@ bool g_ceAvailableValue = false;
 bool g_ceScratchAvailableValue = false;
 bool g_hierCeAvailable = false;
 
-static bool DefaultCeAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) {
+static bool DefaultCeAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+                               struct ncclDevrWindow*, struct ncclDevrWindow*) {
   return g_ceAvailableValue;
 }
-std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t)> g_ceAvailable =
-    DefaultCeAvailable;
+std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+                   struct ncclDevrWindow*, struct ncclDevrWindow*)>
+    g_ceAvailable = DefaultCeAvailable;
 
 static bool DefaultCeScratchAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) {
   return g_ceScratchAvailableValue;
@@ -40,8 +42,9 @@ std::function<int(ncclDataType_t, size_t)> g_ceLocalReduceBlocks = DefaultCeLoca
 
 bool ncclCeImplemented(ncclFunc_t, int, ncclDataType_t) { return g_ceImplemented; }
 bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t func, int op, ncclDataType_t type,
-                     ncclSymRegType_t regType) {
-  return g_ceAvailable(comm, func, op, type, regType);
+                     ncclSymRegType_t regType, struct ncclDevrWindow* sendWin,
+                     struct ncclDevrWindow* recvWin) {
+  return g_ceAvailable(comm, func, op, type, regType, sendWin, recvWin);
 }
 bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t func, int op, ncclDataType_t type,
                             ncclSymRegType_t regType) {

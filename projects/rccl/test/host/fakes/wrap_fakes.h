@@ -38,7 +38,6 @@ extern std::function<ncclResult_t(uint32_t, uint64_t*)> g_amdSmiGetFirmwareVersi
 
 // External parameter accessors made settable so tests can drive their
 // respective guards independently.
-extern std::function<int64_t()> g_paramLaunchOrderImplicit;
 extern std::function<int64_t()> g_paramForceCe;
 extern std::function<int64_t()> g_paramP2pDisable;
 
@@ -54,7 +53,7 @@ extern std::function<int64_t()> g_paramP2pDisable;
 // default's rationale.
 // ---------------------------------------------------------------------------
 
-extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*)>
+extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*, bool)>
     g_isSymmetricKernelRequested;
 extern std::function<bool(const struct ncclComm*, size_t, ncclDataType_t, bool, bool)> g_allReduceShouldTakeDdaPath;
 

@@ -18,6 +18,8 @@
 #include "nccl.h"
 
 struct ncclComm;
+struct ncclTuningInput_t;
+struct ncclTuningResult_t;
 
 // -------------------------------------------------------------------------
 // ncclTopoGetAlgoTime (tuning.cc:1599) fills the cost table that a caller's
@@ -43,6 +45,8 @@ extern int64_t g_paramMaxNchannels;
 // a caller forwarding "" instead of comm->archName is invisible without it.
 extern int g_tuningIndexValue;
 extern std::string g_tuningIndexLastArch;
+
+extern std::function<ncclResult_t(struct ncclTuningInput_t*, struct ncclTuningResult_t*)> g_tuningCompute;
 
 void ResetTuningFakes();
 

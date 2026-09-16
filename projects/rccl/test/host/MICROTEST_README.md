@@ -267,11 +267,7 @@ Five things do NOT follow the TU-per-file rule, deliberately:
   collective-transport setup symbols. `rccl-UnitTestsMicro` needs both floors,
   so `RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR` omits the transport copy in
   that target to avoid fakes-versus-fakes duplicate definitions.
-- Two `NCCL_PARAM` bodies stay in `fakes/init_fakes.cc` rather than their owner's
-  fakes file. `ncclParamLaunchOrderImplicit` cannot move because that file links
-  into a target whose unit under test defines the same symbol
-  (`enqueue.cc:1985`); splitting it would be a duplicate definition, not a
-  cleanup. `rcclParamIntraGraphGen` stays because its owner
+- `rcclParamIntraGraphGen` stays in `fakes/init_fakes.cc` because its owner
   (`graph/rccl_graph_gen.cc:34`) has no fakes file at all.
 
 `<uut>_fakes.h` (e.g. `enqueue_fakes.h`) is an aggregation header: it includes

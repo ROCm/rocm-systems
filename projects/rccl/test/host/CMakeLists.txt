@@ -13,7 +13,7 @@ function(rccl_assert_source_line _file _expected _what)
   foreach(_line IN LISTS _lines)
     string(STRIP "${_line}" _line)
     string(FIND "${_line}" "${_expected}" _pos)
-    if(_pos EQUAL 0)
+    if(NOT _pos EQUAL -1)
       set(_found TRUE)
       break()
     endif()
@@ -34,19 +34,14 @@ rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
   "NCCL_PARAM(MinNchannels, \"MIN_NCHANNELS\", -2)" "fakes/tuning_fakes.cc: ncclParamMinNchannels()")
 rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
   "NCCL_PARAM(MaxNchannels, \"MAX_NCHANNELS\", -2)" "fakes/tuning_fakes.cc: ncclParamMaxNchannels()")
-rccl_assert_source_line("${_rccl_src_root}/enqueue.cc"
+rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "RCCL_PARAM(ForceCe, \"FORCE_CE\", 1)" "fakes/wrap_fakes.cc: rcclParamForceCe()")
-rccl_assert_source_line("${_rccl_src_root}/enqueue.cc"
-  "NCCL_PARAM(LaunchOrderImplicit, \"LAUNCH_ORDER_IMPLICIT\", 0)"
-  "fakes/wrap_fakes.cc: ncclParamLaunchOrderImplicit()")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMinNchannels = -2;" "the MinNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMaxNchannels = -2;" "the MaxNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
   "static int64_t DefaultParamForceCe() { return 1; }" "the ForceCe fake default")
-rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
-  "static int64_t DefaultParamLaunchOrderImplicit() { return 0; }" "the LaunchOrderImplicit fake default")
 unset(_rccl_src_root)
 
 set(RCCL_MICRO_TEST_SOURCES
@@ -157,6 +152,7 @@ if(BUILD_TESTS)
     WRAP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rccl_wrap.cc"
     RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
     DEV_RUNTIME_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime.cc"
+    DEV_RUNTIME_SEGMENTS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime_segments.cc"
   )
 
   # Make sure the hipify step has run before trying to compile the test.
@@ -436,15 +432,16 @@ if(BUILD_TESTS)
     ${RCCL_COMMON_INCLUDE_DIRS}
     ${PROJECT_BINARY_DIR}/hipify/src/device          # device/common.h (neutered)
     ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device)
-  # src/enqueue.cc is basename-unique in the tree, so hipify keeps its name --
-  # no _tmp suffix (contrast transport/p2p.cc -> p2p_tmp.cc).
+  # Hipify preserves the src/enqueue/ directory, so the staged file is
+  # hipify/src/enqueue/enqueue.cc (not hipify/src/enqueue.cc). Contrast
+  # transport/p2p.cc -> p2p_tmp.cc, which is a basename collision.
   target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE
     ${RCCL_COMMON_COMPILE_DEFS}
     # Per-symbol omissions from the shared nccl_stubs.cc; enqueue.cc itself
     # supplies both, so neither needs a replacement definition.
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
-    ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc")
+    ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/enqueue.cc")
 
   # Mirrors the opt-out in test/CMakeLists.txt, whose loop does not reach this target.
   # Inheriting ENABLE_ROCSHMEM_GIN defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1, which pulls
@@ -626,17 +623,34 @@ message(STATUS "Hipified sources: ${RCCL_HIPIFY_DIR}")
 # Compile-only (STATIC_LIBRARY) avoids link failures from amdsmi symbols.
 include(CheckCXXSourceCompiles)
 unset(AMDSMI_FABRIC_API CACHE)
+unset(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY CACHE)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 check_cxx_source_compiles("
   #include <amd_smi/amdsmi.h>
   int main() {
+    amdsmi_fabric_telemetry_category_t cat = AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN;
+    (void)cat;
+    return 0;
+  }
+" AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+check_cxx_source_compiles("
+  #include <amd_smi/amdsmi.h>
+  #if !defined(AMDSMI_FABRIC_MAX_LOCAL_GPUS)
+  #error amdsmi.h has no UALoE fabric types
+  #endif
+  int main() {
     amdsmi_fabric_info_t info{};
+    amdsmi_fabric_info_v1_t v1{};
     (void)info;
+    (void)v1;
     return 0;
   }
 " AMDSMI_FABRIC_API)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
-if(AMDSMI_FABRIC_API)
+if(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY AND NOT AMDSMI_FABRIC_API)
+  set(AMDSMI_FABRIC_API TRUE)
+  message(STATUS "amdsmi fabric telemetry types found - enabling AMDSMI_FABRIC_DIRECT")
+elseif(AMDSMI_FABRIC_API)
   message(STATUS "amdsmi fabric API found - enabling AMDSMI_FABRIC_DIRECT")
 else()
   message(STATUS "amdsmi fabric API not found (AMDSMI_FABRIC_DIRECT disabled)")
@@ -722,6 +736,7 @@ target_compile_definitions(rccl-source-wrappers PRIVATE
   NCCL_OS_LINUX
   ROCM_VERSION=70000
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 target_link_libraries(rccl-source-wrappers PRIVATE
@@ -766,6 +781,7 @@ target_compile_definitions(rccl-HostUnitTests PRIVATE
   RCCL_EXPOSE_STATIC
   ARSMI_TEST_BUILD
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
@@ -824,10 +840,12 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   WRAP_CC_PATH="${RCCL_HIPIFY_DIR}/src/rccl_wrap.cc"
   RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
   DEV_RUNTIME_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime.cc"
+  DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime_segments.cc"
   # Same fallback-vs-runtime conflicts the host target guards against: without
   # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
   # enumerators on ROCm 7.14+, and the standalone build fails.
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
@@ -914,6 +932,7 @@ foreach(_variant "" "-uncached" "-faultinj")
     # this from RCCL_COMMON_COMPILE_DEFS instead.
     USE_AMDSMI
     $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+    $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
     $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
     INIT_CC_PATH="${RCCL_HIPIFY_DIR}/src/init.cc"
   )
@@ -999,7 +1018,7 @@ foreach(_enq_variant "" "-devlinker")
     $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
-    ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue.cc"
+    ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue/enqueue.cc"
   )
   if(_enq_variant STREQUAL "-devlinker")
     target_compile_definitions(${_enq_tgt} PRIVATE RCCL_DEVICE_LINKER)

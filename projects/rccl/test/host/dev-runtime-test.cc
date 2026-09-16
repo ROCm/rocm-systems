@@ -72,6 +72,28 @@ private:
 
 #include DEV_RUNTIME_CC_PATH
 
+// NCCL 2.31 moved the segment helpers out of dev_runtime.cc into
+// src/dev_runtime_segments.cc. dev_runtime.cc's calls into them must keep going
+// through the fakes' seams, because suites below drive their failure arms, so
+// that source is #included here under Real* names instead of linked: the copies
+// it defines are what the segment suites call directly, and the fixture installs
+// the two that arrived with no seam of their own as their hooks' behaviour.
+// Same TU as the unit under test, so ScopedCallocFailure reaches their
+// allocations exactly as it reaches dev_runtime.cc's.
+#define ncclDevrPopulateSegmentSizes RealDevrPopulateSegmentSizes
+#define ncclDevrAllocAndPopulateSegmentWindows RealDevrAllocAndPopulateSegmentWindows
+#define ncclDevrVerifySegmentLayouts RealDevrVerifySegmentLayouts
+#define ncclDevrBuildGinSegmentInfos RealDevrBuildGinSegmentInfos
+#define ncclDevrCheckRegistrationSupport RealDevrCheckRegistrationSupport
+#define ncclDevrValidateHandleLocationType RealDevrValidateHandleLocationType
+#include DEV_RUNTIME_SEGMENTS_CC_PATH
+#undef ncclDevrPopulateSegmentSizes
+#undef ncclDevrAllocAndPopulateSegmentWindows
+#undef ncclDevrVerifySegmentLayouts
+#undef ncclDevrBuildGinSegmentInfos
+#undef ncclDevrCheckRegistrationSupport
+#undef ncclDevrValidateHandleLocationType
+
 #include <gtest/gtest.h>
 
 #include "ScopedHook.h"
@@ -201,7 +223,21 @@ TEST(SymIsHostSegment, Invalid_ReturnsFalse) {
 // first after another suite with no emulator at all.
 class DevRuntimeMicroTest : public ::testing::Test {
 protected:
-  void SetUp() override { ResetDevRuntimeMicroFakes(); }
+  // The segment-layout check and the GIN segment-info build are the two helpers
+  // 2.31's move left without a seam of their own: dev_runtime.cc reaches both
+  // from symMemoryRegisterGin, and the suites below assert on what they produce.
+  // Their fakes default to no-ops, so point the hooks at the real bodies -- the
+  // behaviour dev_runtime.cc had inline before the move. A test that wants a
+  // failure arm still installs its own, and TearDown's reset undoes this.
+  static void InstallRealSegmentHelpers() {
+    g_devrVerifySegmentLayouts = RealDevrVerifySegmentLayouts;
+    g_devrBuildGinSegmentInfos = RealDevrBuildGinSegmentInfos;
+  }
+
+  void SetUp() override {
+    ResetDevRuntimeMicroFakes();
+    InstallRealSegmentHelpers();
+  }
   void TearDown() override { ResetDevRuntimeMicroFakes(); }
 
   // Hand the shared fakes back in their pristine state, so the p2p/devcomm
@@ -1419,6 +1455,15 @@ protected:
     team.stride = stride;
     return team;
   }
+
+  // 2.31 added the CFT leader-election arms (cftUc / cftMc) and an optional
+  // needBarrier out-param. Both CFT arms delegate to symTeamObtainUcLe /
+  // symTeamObtainMcLe, which need the CFT device APIs this binary does not
+  // provide, so this suite drives the non-CFT path only: both flags stay
+  // false, which is also how every non-CFT production call site invokes it.
+  static ncclResult_t Obtain(ncclComm* comm, ncclTeam team, bool multimem, ncclDevrTeam** out) {
+    return symTeamObtain(comm, team, multimem, /*cftUc=*/false, /*cftMc=*/false, out, /*needBarrier=*/nullptr);
+  }
 };
 
 // Branch: an empty list, so a team is created and linked. worldRankList is the
@@ -1427,7 +1472,7 @@ TEST_F(SymTeamObtainTest, EmptyList_CreatesAndLinksTeam) {
   ncclTeam team = MakeTeam(/*nRanks=*/3, /*rank=*/1, /*stride=*/2);
   ncclDevrTeam* out = nullptr;
 
-  ASSERT_EQ(symTeamObtain(comm, team, /*multimem=*/false, &out), ncclSuccess);
+  ASSERT_EQ(Obtain(comm, team, /*multimem=*/false, &out), ncclSuccess);
   ASSERT_NE(out, nullptr);
   EXPECT_EQ(comm->devrState.teamHead, out);
   EXPECT_EQ(out->mcBasePtr, nullptr);
@@ -1442,10 +1487,10 @@ TEST_F(SymTeamObtainTest, EmptyList_CreatesAndLinksTeam) {
 TEST_F(SymTeamObtainTest, MatchingTeam_ReturnsExistingWithoutCreating) {
   ncclTeam team = MakeTeam(2, 0, 1);
   ncclDevrTeam* first = nullptr;
-  ASSERT_EQ(symTeamObtain(comm, team, false, &first), ncclSuccess);
+  ASSERT_EQ(Obtain(comm, team, false, &first), ncclSuccess);
 
   ncclDevrTeam* second = nullptr;
-  ASSERT_EQ(symTeamObtain(comm, team, false, &second), ncclSuccess);
+  ASSERT_EQ(Obtain(comm, team, false, &second), ncclSuccess);
   EXPECT_EQ(second, first);
   EXPECT_EQ(comm->devrState.teamHead, first);
   EXPECT_EQ(first->next, nullptr);  // still one entry
@@ -1455,10 +1500,10 @@ TEST_F(SymTeamObtainTest, MatchingTeam_ReturnsExistingWithoutCreating) {
 // match, so the walk continues and a new team is pushed in front.
 TEST_F(SymTeamObtainTest, NonMatchingTeam_WalksListThenCreates) {
   ncclDevrTeam* existing = nullptr;
-  ASSERT_EQ(symTeamObtain(comm, MakeTeam(2, 0, 1), false, &existing), ncclSuccess);
+  ASSERT_EQ(Obtain(comm, MakeTeam(2, 0, 1), false, &existing), ncclSuccess);
 
   ncclDevrTeam* created = nullptr;
-  ASSERT_EQ(symTeamObtain(comm, MakeTeam(2, 0, 4), false, &created), ncclSuccess);  // different stride
+  ASSERT_EQ(Obtain(comm, MakeTeam(2, 0, 4), false, &created), ncclSuccess);  // different stride
   EXPECT_NE(created, existing);
   EXPECT_EQ(comm->devrState.teamHead, created);
   EXPECT_EQ(created->next, existing);
@@ -1469,11 +1514,11 @@ TEST_F(SymTeamObtainTest, NonMatchingTeam_WalksListThenCreates) {
 TEST_F(SymTeamObtainTest, MultimemAlreadyBound_ReturnsExisting) {
   ncclTeam team = MakeTeam(2, 0, 1);
   ncclDevrTeam* first = nullptr;
-  ASSERT_EQ(symTeamObtain(comm, team, false, &first), ncclSuccess);
+  ASSERT_EQ(Obtain(comm, team, false, &first), ncclSuccess);
   first->mcBasePtr = reinterpret_cast<void*>(0x1000);  // pretend multicast is bound
 
   ncclDevrTeam* second = nullptr;
-  EXPECT_EQ(symTeamObtain(comm, team, /*multimem=*/true, &second), ncclSuccess);
+  EXPECT_EQ(Obtain(comm, team, /*multimem=*/true, &second), ncclSuccess);
   EXPECT_EQ(second, first);
 }
 
@@ -1482,21 +1527,21 @@ TEST_F(SymTeamObtainTest, MultimemWithoutNvls_ReturnsInvalidArgument) {
   comm->nvlsSupport = 0;
   ncclDevrTeam* out = nullptr;
 
-  EXPECT_EQ(symTeamObtain(comm, MakeTeam(2, 0, 1), /*multimem=*/true, &out), ncclInvalidArgument);
+  EXPECT_EQ(Obtain(comm, MakeTeam(2, 0, 1), /*multimem=*/true, &out), ncclInvalidArgument);
   EXPECT_EQ(comm->devrState.teamHead, nullptr);  // the new team was freed, not linked
 }
 
 // Branch: outTeam is optional -- callers that only want the team created can
 // pass null.
 TEST_F(SymTeamObtainTest, NullOutTeam_StillCreatesAndLinks) {
-  EXPECT_EQ(symTeamObtain(comm, MakeTeam(2, 0, 1), false, nullptr), ncclSuccess);
+  EXPECT_EQ(Obtain(comm, MakeTeam(2, 0, 1), false, nullptr), ncclSuccess);
   EXPECT_NE(comm->devrState.teamHead, nullptr);
 }
 
 // Boundary: a single-rank team is just ourselves.
 TEST_F(SymTeamObtainTest, SingleRankTeam_ListsSelfOnly) {
   ncclDevrTeam* out = nullptr;
-  ASSERT_EQ(symTeamObtain(comm, MakeTeam(1, 0, 1), false, &out), ncclSuccess);
+  ASSERT_EQ(Obtain(comm, MakeTeam(1, 0, 1), false, &out), ncclSuccess);
   ASSERT_NE(out, nullptr);
   EXPECT_EQ(out->worldRankList[0], comm->rank);
 }
@@ -1718,7 +1763,9 @@ TEST_F(SymMemoryRegisterGinTest, MultipleGlobalSegments_FlagsRegistrationMultiSe
   EXPECT_TRUE(registeredMultiSegment);
 }
 
-// Branch: the GIN registration fails, so no segment info is allocated.
+// Branch: the GIN registration fails, so the segment infos built for it are
+// released again. 2.31 builds them before registering, so the count they were
+// built from stays behind -- only the array is given back.
 TEST_F(SymMemoryRegisterGinTest, RegisterFails_ReturnsErrorWithoutSegmentInfo) {
   ScopedHook reg(g_devrGinRegister,
                  [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) {
@@ -1727,17 +1774,19 @@ TEST_F(SymMemoryRegisterGinTest, RegisterFails_ReturnsErrorWithoutSegmentInfo) {
 
   EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
   EXPECT_EQ(mem.ginSegmentInfos, nullptr);
-  EXPECT_EQ(mem.numGinSegments, 0);
+  EXPECT_EQ(mem.numGinSegments, 1);
 }
 
-// Branch: the segment-info allocation fails after a successful registration.
+// Branch: the segment-info allocation fails, which in 2.31 is before the
+// registration rather than after it -- so nothing is registered at all.
 TEST_F(SymMemoryRegisterGinTest, SegmentInfoAllocFails_ReturnsError) {
   ScopedHook reg(g_devrGinRegister,
                  [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
   ScopedCallocFailure callocFail;  // fail the next ncclCalloc
 
   EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
-  EXPECT_EQ(mem.numGinSegments, 0);
+  EXPECT_EQ(reg.calls, 0);
+  EXPECT_EQ(mem.ginSegmentInfos, nullptr);
 }
 
 
@@ -1860,14 +1909,19 @@ TEST_F(SymMemoryRegisterGinElasticTest, SizeMismatchAcrossRanks_ReturnsInvalidUs
   EXPECT_EQ(reg.calls, 0);
 }
 
-// Branch: reading a segment's allocation properties fails.
-TEST_F(SymMemoryRegisterGinElasticTest, PropertiesFail_ReturnsErrorWithoutGathering) {
+// Branch: reading a segment's allocation properties fails. 2.31 checks the
+// cross-rank layout (which is what gathers) before building the segment infos
+// that read those properties, so the gather is already behind us here.
+TEST_F(SymMemoryRegisterGinElasticTest, PropertiesFail_ReturnsErrorAfterGathering) {
   ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
                    [](hipMemAllocationProp*, hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
-  ScopedHook gather(g_devrBootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
+  ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
+  ScopedHook reg(g_devrGinRegister,
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
 
   EXPECT_NE(symMemoryRegisterGin(comm, &mem), ncclSuccess);
-  EXPECT_EQ(gather.calls, 0);
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_EQ(reg.calls, 0);  // no segment ever became registerable
 }
 
 // Branch: the all-gather itself fails.
@@ -1915,6 +1969,9 @@ protected:
     comm = commStorage.get();
     mem.primaryAddr = reinterpret_cast<void*>(0x100000);
     mem.size = 8192;
+    // 2.31 registers with the proxy only for a communicator-wide single-segment
+    // layout, so the register step is unreachable without this.
+    mem.maxGlobalNumSegments = 1;
   }
   void TearDown() override { ResetDevRuntimeMicroFakes(); }
 };
@@ -1944,6 +2001,18 @@ TEST_F(SymMemoryRegisterRmaTest, Succeeds_ConnectsThenRegisters) {
   EXPECT_EQ(registeredAddr, mem.primaryAddr);
   EXPECT_EQ(registeredSize, mem.size);
   EXPECT_EQ(registeredWins, mem.rmaHostWins);
+}
+
+// Branch: a multi-segment layout still brings the proxy up -- other windows on
+// this communicator need it -- but has nothing RMA can register.
+TEST_F(SymMemoryRegisterRmaTest, MultiSegment_ConnectsWithoutRegistering) {
+  mem.maxGlobalNumSegments = 2;
+  ScopedHook connect(g_devrRmaProxyConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
+
+  EXPECT_EQ(symMemoryRegisterRma(comm, &mem), ncclSuccess);
+  EXPECT_EQ(connect.calls, 1);
+  EXPECT_EQ(reg.calls, 0);
 }
 
 // Branch: the proxy is unreachable, so nothing is registered against it.
@@ -1984,11 +2053,15 @@ protected:
   ncclDevrMemory* obtained = nullptr;
 
   // Mirrors the anonymous struct symMemoryObtain all-gathers. Layout must match
-  // for the hook to populate what the function then reads back.
+  // for the hook to populate what the function then reads back. 2.31 appended
+  // hostCftMode, which the function then requires every rank to agree on; the
+  // per-rank literals below leave it zero-initialised, matching the value a
+  // value-initialised comm reports.
   struct SegmentInfo {
     int numSegments;
     bool hasSysmemSegment;
     size_t totalSize;
+    int hostCftMode;
   };
 
   void SetUp() override {
@@ -2137,15 +2210,6 @@ protected:
   }
 
   std::function<ncclResult_t(void*, void*, int)> agreeing;
-
-  // Satisfy every condition of rmaProxyEnabled except the param, which each
-  // test leaves at its default (RMA_DISABLE=0, i.e. enabled).
-  void EnableRmaPrerequisites() {
-    comm->nRanks = 4;
-    comm->devrState.nLsaTeams = 2;
-    comm->config.numRmaCtx = 1;
-    comm->globalRmaProxySupport = true;
-  }
 };
 
 // Branch: a caller with no VA of its own gets the LSA mapping instead --
@@ -2194,36 +2258,23 @@ TEST_F(SymMemoryObtainRegisterTest, GinDisabled_DefaultsToOneSegment) {
   EXPECT_EQ(obtained->numGinSegments, 1);
 }
 
-// Branch: every rmaProxyEnabled condition holds and the layout is single
-// segment, so RMA registration runs.
-TEST_F(SymMemoryObtainRegisterTest, RmaPrerequisitesMet_RegistersWithRma) {
-  EnableRmaPrerequisites();
+// Branch: the proxy is available and the layout is single segment, so RMA
+// registration runs. 2.31 asks rma.cc's ncclRmaProxyEnabled rather than
+// deriving the conditions here, so that answer is what the test supplies --
+// the conditions themselves belong to rma.cc, which this binary does not build.
+TEST_F(SymMemoryObtainRegisterTest, RmaProxyAvailable_RegistersWithRma) {
+  ScopedHook proxyEnabled(g_devrRmaProxyEnabled, [](ncclComm*) { return true; });
   ScopedHook gather(g_devrBootstrapAllGather, agreeing);
   ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
 
   ASSERT_EQ(Obtain(), ncclSuccess);
-  EXPECT_TRUE(comm->devrState.rmaProxyEnabled);
+  EXPECT_TRUE(comm->devrState.rmaProxyEnabled);  // cached for the teardown path
   EXPECT_EQ(reg.calls, 1);
 }
 
-// Branch: a single LSA team means there is no remote peer to reach over RMA.
-TEST_F(SymMemoryObtainRegisterTest, SingleLsaTeam_LeavesRmaProxyDisabled) {
-  EnableRmaPrerequisites();
-  comm->devrState.nLsaTeams = 1;
-  ScopedHook gather(g_devrBootstrapAllGather, agreeing);
-  ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
-
-  ASSERT_EQ(Obtain(), ncclSuccess);
-  EXPECT_FALSE(comm->devrState.rmaProxyEnabled);
-  EXPECT_EQ(reg.calls, 0);
-}
-
-// Branch: RMA_DISABLE overrides the other three conditions.
-TEST_F(SymMemoryObtainRegisterTest, RmaDisabledByParam_LeavesRmaProxyDisabled) {
-  EnableRmaPrerequisites();
-  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
-    return std::string(env) == "RMA_DISABLE" ? 1 : deftVal;
-  });
+// Branch: the proxy is unavailable, so the whole arm is skipped.
+TEST_F(SymMemoryObtainRegisterTest, RmaProxyUnavailable_LeavesRmaProxyDisabled) {
+  ScopedHook proxyEnabled(g_devrRmaProxyEnabled, [](ncclComm*) { return false; });
   ScopedHook gather(g_devrBootstrapAllGather, agreeing);
   ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
 
@@ -2235,7 +2286,7 @@ TEST_F(SymMemoryObtainRegisterTest, RmaDisabledByParam_LeavesRmaProxyDisabled) {
 // Branch: the proxy is enabled but the layout is multi-segment, which RMA does
 // not handle -- so the flag is set while registration is skipped.
 TEST_F(SymMemoryObtainRegisterTest, RmaEnabledButMultiSegment_SkipsRegistration) {
-  EnableRmaPrerequisites();
+  ScopedHook proxyEnabled(g_devrRmaProxyEnabled, [](ncclComm*) { return true; });
   ScopedHook gather(g_devrBootstrapAllGather,
                     GatherReporting({{1, false, 4096}, {2, false, 4096}, {1, false, 4096}, {1, false, 4096}}));
   ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
@@ -2348,10 +2399,7 @@ TEST_F(SymMemoryObtainRollbackTest, GinRegisterFails_UnbindsTeamsAndReturnsSpace
 // Same label, reached from the RMA branch instead.
 TEST_F(SymMemoryObtainRollbackTest, RmaRegisterFails_ReturnsSpaceWithoutLinking) {
   PushTeam();
-  comm->nRanks = 2;
-  comm->devrState.nLsaTeams = 2;
-  comm->config.numRmaCtx = 1;
-  comm->globalRmaProxySupport = true;
+  ScopedHook proxyEnabled(g_devrRmaProxyEnabled, [](ncclComm*) { return true; });
   ScopedHook gather(g_devrBootstrapAllGather, agreeing);
   ScopedHook alloc(g_devrSpaceAlloc, AllocAt(0));
   ScopedHook spaceFree(g_devrSpaceFree, [](ncclSpace*, int64_t, int64_t) { return ncclSuccess; });
@@ -2480,9 +2528,12 @@ TEST_F(SymWindowTableInitOnceTest, AllocFails_LeavesTableUnset) {
 
 
 // ---------------------------------------------------------------------------
-// allocAndPopulateSegmentWindows allocates the per-segment window array from
-// the shadow pool, and when GIN is on fills the host copy from the memory's
-// per-segment info and pushes it to the device.
+// ncclDevrAllocAndPopulateSegmentWindows allocates the per-segment window array
+// from the shadow pool and fills it from the memory's per-segment info, one
+// copy of every segment per possible GIN backend, then pushes it to the device.
+// 2.31 dropped dev_runtime.cc's own static copy of this helper in favour of the
+// one in dev_runtime_segments.cc, included above as RealDevr*; it reports only
+// the device pointer now, and refuses to run at all with GIN off.
 
 class AllocAndPopulateSegmentWindowsTest : public DevRuntimeMicroTest {
 protected:
@@ -2491,7 +2542,6 @@ protected:
   ncclDevrMemory mem{};
   std::vector<ncclDevrGinSegmentInfo> ginInfos;
   ncclSegmentWindow* dev = nullptr;
-  ncclSegmentWindow* host = nullptr;
 
   void SetUp() override {
     DevRuntimeMicroTest::SetUp();
@@ -2507,40 +2557,50 @@ protected:
     mem.numGinSegments = 2;
   }
   void TearDown() override {
-    dev = host = nullptr;  // owned by the shadow-pool fake; its reset frees it
+    dev = nullptr;  // owned by the shadow-pool fake; its reset frees it
     ResetDevRuntimeMicroFakes();
+  }
+
+  ncclResult_t Alloc() {
+    return RealDevrAllocAndPopulateSegmentWindows(&comm->devrState, &mem, nullptr, &dev);
   }
 };
 
-// Branch: GIN off, so the array is allocated but left untouched -- it is filled
-// later, once GIN is activated.
-TEST_F(AllocAndPopulateSegmentWindowsTest, GinDisabled_AllocatesWithoutPopulating) {
-  ASSERT_EQ(allocAndPopulateSegmentWindows(&comm->devrState, &mem, nullptr, &dev, &host), ncclSuccess);
-  ASSERT_NE(host, nullptr);
-  EXPECT_EQ(host[0].segmentSize, 0u);  // still zeroed
+// Branch: GIN off. The array describes GIN windows and nothing else, so being
+// asked for one without GIN is an internal inconsistency, not an empty array.
+TEST_F(AllocAndPopulateSegmentWindowsTest, GinDisabled_ReturnsInternalError) {
+  EXPECT_EQ(Alloc(), ncclInternalError);
+  EXPECT_EQ(dev, nullptr);
 }
 
-// Branch: GIN on, so each segment's type and size are copied across.
-TEST_F(AllocAndPopulateSegmentWindowsTest, GinEnabled_PopulatesEachSegment) {
+// Branch: GIN on, so each segment's type and size are copied across -- once per
+// backend slot, since a window is per (backend, segment) pair.
+TEST_F(AllocAndPopulateSegmentWindowsTest, GinEnabled_PopulatesEachSegmentPerBackend) {
   comm->devrState.ginEnabled = true;
 
-  ASSERT_EQ(allocAndPopulateSegmentWindows(&comm->devrState, &mem, nullptr, &dev, &host), ncclSuccess);
-  ASSERT_NE(host, nullptr);
-  EXPECT_EQ(host[0].segmentSize, 4096u);
-  EXPECT_EQ(host[0].memType, hipMemLocationTypeDevice);
-  EXPECT_EQ(host[1].segmentSize, 8192u);
-  EXPECT_EQ(host[1].memType, kLocHostNuma);
+  ASSERT_EQ(Alloc(), ncclSuccess);
+  ASSERT_NE(dev, nullptr);
+  // The shadow-pool fake hands back one buffer for both device and host, so the
+  // populated host copy is readable straight off the reported device pointer.
+  for (int backend = 0; backend < NCCL_GIN_MAX_ACTIVE_BACKENDS; backend++) {
+    const ncclSegmentWindow& first = dev[backend * mem.numGinSegments];
+    const ncclSegmentWindow& second = dev[backend * mem.numGinSegments + 1];
+    EXPECT_EQ(first.segmentSize, 4096u) << "backend " << backend;
+    EXPECT_EQ(first.memType, hipMemLocationTypeDevice) << "backend " << backend;
+    EXPECT_EQ(second.segmentSize, 8192u) << "backend " << backend;
+    EXPECT_EQ(second.memType, kLocHostNuma) << "backend " << backend;
+  }
 }
 
 // Branch: the shadow-pool allocation fails, so no windows are reported back.
 TEST_F(AllocAndPopulateSegmentWindowsTest, AllocFails_ReturnsErrorWithoutOutputs) {
+  comm->devrState.ginEnabled = true;
   ScopedHook alloc(g_devrShadowPoolAlloc,
                    [](ncclShadowPool*, size_t, void**, void**, hipStream_t) { return ncclSystemError; });
   ScopedHook poolFree(g_devrShadowPoolFree, [](ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; });
 
-  EXPECT_NE(allocAndPopulateSegmentWindows(&comm->devrState, &mem, nullptr, &dev, &host), ncclSuccess);
+  EXPECT_NE(Alloc(), ncclSuccess);
   EXPECT_EQ(dev, nullptr);
-  EXPECT_EQ(host, nullptr);
   EXPECT_EQ(poolFree.calls, 0);  // nothing was allocated, so nothing to release
 }
 
@@ -2595,6 +2655,9 @@ protected:
 // derived from a different input, so a swapped assignment would show here and
 // nowhere else.
 TEST_F(SymWindowCreateTest, PopulatesDeviceDescriptor) {
+  // numSegments and the segment-window array are filled only on the GIN arm,
+  // which 2.31 gates on this flag.
+  comm->devrState.ginEnabled = true;
   // The shadow-pool fake hands the same buffer back as both device and host
   // object, so the publish to the device is a self-copy and the field
   // assertions below would still pass with it deleted -- they read the host
@@ -2694,8 +2757,10 @@ TEST_F(SymWindowCreateTest, InsertsIntoSortedListByAddress) {
   EXPECT_EQ(devr->winSorted[2].userAddr, 0x300000u);
 }
 
-// Branch: the segment-window allocation fails, so nothing is published.
+// Branch: the segment-window allocation fails, so nothing is published. Only
+// the GIN arm allocates them, which 2.31 gates on ginEnabled.
 TEST_F(SymWindowCreateTest, SegmentWindowsFail_ReturnsErrorWithoutPublishing) {
+  comm->devrState.ginEnabled = true;
   ScopedHook segWins(g_devrAllocAndPopulateSegmentWindows,
                      [](ncclDevrState*, ncclDevrMemory*, hipStream_t, ncclSegmentWindow**) {
                        return ncclSystemError;
@@ -2825,6 +2890,7 @@ TEST_F(SymWindowDestroyTest, Succeeds_ClearsTableSlotAndSortedEntry) {
 
 // Branch: the multi-segment window array is released only when one exists.
 TEST_F(SymWindowDestroyTest, MultiSegmentWins_AreFreed) {
+  comm->devrState.ginEnabled = true;  // only the GIN arm attaches an array to free
   ncclSegmentWindow segWins{};
   ScopedHook segAlloc(g_devrAllocAndPopulateSegmentWindows,
                       [&](ncclDevrState*, ncclDevrMemory*, hipStream_t, ncclSegmentWindow** out) {
@@ -3848,11 +3914,13 @@ TEST(DevrGetRmaWin, ContextPastEnd_ReturnsNull) {
   EXPECT_EQ(ncclDevrGetRmaWin(&win, NCCL_GIN_MAX_CONNECTIONS), nullptr);
 }
 
-// Branch: non-symmetric windows hold their own handles.
+// Branch: non-symmetric windows hold their own handles. 2.31 hands back the
+// host-side handle (rmaHostWins) where earlier releases returned the device
+// one, so the device slots stay empty here on purpose.
 TEST(DevrGetRmaWin, NonSymmetricWindow_ReadsFromWindow) {
   ncclDevrWindow win{};
   win.memory = nullptr;
-  win.rmaDevWins[1] = reinterpret_cast<ncclGinWindow_t>(0x1234);
+  win.rmaHostWins[1] = reinterpret_cast<void*>(0x1234);
   EXPECT_EQ(ncclDevrGetRmaWin(&win, 1), reinterpret_cast<void*>(0x1234));
 }
 
@@ -3862,8 +3930,8 @@ TEST(DevrGetRmaWin, SymmetricWindow_ReadsFromMemory) {
   ncclDevrMemory mem{};
   ncclDevrWindow win{};
   win.memory = &mem;
-  win.rmaDevWins[1] = reinterpret_cast<ncclGinWindow_t>(0x1111);
-  mem.rmaDevWins[1] = reinterpret_cast<ncclGinWindow_t>(0x2222);
+  win.rmaHostWins[1] = reinterpret_cast<void*>(0x1111);
+  mem.rmaHostWins[1] = reinterpret_cast<void*>(0x2222);
   EXPECT_EQ(ncclDevrGetRmaWin(&win, 1), reinterpret_cast<void*>(0x2222));
 }
 
@@ -5171,7 +5239,10 @@ TEST_F(DevCommCreateTest, Succeeds_QueuesTaskWithCopiedRequirements) {
   EXPECT_NE(task->reqs, &reqs);  // a copy, not the caller's object
   EXPECT_EQ(task->reqs->ginSignalCount, 5);
   EXPECT_EQ(task->outDevComm, &outDevComm);
-  EXPECT_EQ(task->devCompat, &ncclDevCommCompat_v22902);
+  // 2.31 queues the device-code version rather than a resolved compat record:
+  // the record is looked up from this value in ncclDevrCommCreateInternal. With
+  // useRuntimeVersion clear and DEV_API_JIT off, it is the caller's own version.
+  EXPECT_EQ(task->deviceCodeVersion, reqs.version);
 }
 
 // Branch: an uninitialised requirements struct is rejected before its version
@@ -5229,16 +5300,24 @@ TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
 // The body past that gate builds the whole devcomm -- GIN activation, resource
 // windows, barriers -- and is not covered here.
 
-class DevrCommCreateInternalTest : public DevRuntimeMicroTest {
+class DevrCommCreateInternalTest : public NcclVersionCompatTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
   ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
   ncclDevComm outDevComm{};
-  ncclDevCommCompat compat{};
 
   void SetUp() override {
     DevRuntimeMicroTest::SetUp();
+    // 2.31 takes the device-code version and resolves the compat record itself,
+    // ahead of the GIN gate these tests target. The records this binary links
+    // are the empty ones from the fakes, which serve no version at all, so open
+    // one wide enough to cover the version Create() asks for -- otherwise every
+    // case below fails on the version check instead of the gate.
+    NcclVersionCompatTest::SetUp();
+    ncclDevCommCompat_v22902.minVersion = 0;
+    ncclDevCommCompat_v22902.maxVersion = NCCL_VERSION_CODE;
+
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->nRanks = 1;
@@ -5246,7 +5325,8 @@ protected:
   }
 
   ncclResult_t Create() {
-    return ncclDevrCommCreateInternal(comm, &reqs, &outDevComm, /*isInternal=*/false, &compat);
+    return ncclDevrCommCreateInternal(comm, &reqs, &outDevComm, /*isInternal=*/false,
+                                      /*deviceCodeVersion=*/NCCL_VERSION_CODE);
   }
 };
 

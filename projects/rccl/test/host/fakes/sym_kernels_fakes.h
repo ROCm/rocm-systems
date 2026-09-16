@@ -26,9 +26,6 @@ extern std::function<ncclResult_t(struct ncclDevrWindow*, struct ncclDevrWindow*
 
 extern std::function<ncclResult_t(struct ncclComm*)> g_symkInitOnce;
 extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t)> g_symkAvailable;
-extern std::function<ncclResult_t(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, size_t, int,
-                                  ncclSymRegType_t, float*, ncclSymkKernelId*, int*, int*, bool*)>
-    g_symkPickKernel;
 extern std::function<bool(int)> g_symkKernelIdIsLL;
 
 void ResetSymKernelsFakes();

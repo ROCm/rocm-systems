@@ -153,15 +153,10 @@ auto ForceParam(const char* name, int64_t value) {
   };
 }
 
-auto PickSymkKernel(ncclSymkKernelId id, int maxChannels) {
-  return [id, maxChannels](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, size_t, int,
-                           ncclSymRegType_t, float* time, ncclSymkKernelId* kernelId, int* channels,
-                           int* nWarps, bool* forced) {
-    *time = 0.0f;
-    *kernelId = id;
-    *channels = maxChannels;
-    *nWarps = 1;
-    *forced = false;
+auto SelectSymkTuning(ncclSymkKernelId id, int maxChannels) {
+  return [id, maxChannels](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
+    result->symKernelId = id;
+    result->maxChannels = maxChannels;
     return ncclSuccess;
   };
 }
@@ -938,9 +933,8 @@ TEST(WrapMicrotest, CanonicalTuningParamDefaults_MatchProduction) {
   EXPECT_EQ(-2, ncclParamMaxNchannels());
 }
 
-TEST(WrapMicrotest, ExternalParamDefaults_MatchProduction) {
+TEST(WrapMicrotest, ExternalParamDefault_MatchesProduction) {
   EXPECT_EQ(1, rcclParamForceCe());
-  EXPECT_EQ(0, ncclParamLaunchOrderImplicit());
 }
 
 // ===========================================================================
@@ -1160,7 +1154,7 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xDelegatesThenP2pDisa
       "Wrap_UpdateCollectiveProtocol_Gfx120xDelegatesThenP2pDisableForcesSimple",
       []() {
         SetMicroEnvAbsent("NCCL_PROTO");
-        ScopedHook p2pDisable(g_paramP2pDisable, []() { return int64_t{1}; });
+        SetMicroEnv("NCCL_P2P_DISABLE", "1");
         ncclComm* comm = MakeCommWithArch("gfx1200");
         comm->nNodes = 1;
         comm->nRanks = 1;
@@ -3157,13 +3151,13 @@ TEST(WrapMicrotest, DdaEnabled_Gfx1250FallsBackToParamThresholdWhenDefaultZero) 
 
 // Closes gap 1 of 3 flagged in the 3-way disable guard: only
 // rcclParamDdaEnable had a dedicated test proving it alone disables DDA.
-// This proves the second disjunct, ncclParamLaunchOrderImplicit() != 0,
+// This proves the second disjunct, comm->config.launchOrderImplicit == 1,
 // independently -- everything else here (arch/rank/size) is set up
 // identically to a case that would otherwise return true.
 TEST(WrapMicrotest, DdaEnabled_ImplicitLaunchOrderReturnsFalse) {
-  ScopedHook launchOrder(g_paramLaunchOrderImplicit, []() { return int64_t(1); });
   ncclComm* comm = MakeCommWithArch("gfx942");
   comm->nRanks = 8;
+  comm->config.launchOrderImplicit = 1;
   EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, 0, 0));
   DeleteCommWithArch(comm);
 }
@@ -3221,7 +3215,7 @@ TEST(WrapMicrotest, DdaEnabled_UnsupportedArchReturnsFalse) {
 // rcclSymkQuery -- rccl_wrap.cc:547-568 (static). Only the four early-return
 // guards, reachable through plain comm/arg setup: everything past
 // ncclSymkInitOnce() is an abort-floor stub (ncclSymkInitOnce/Available/
-// PickKernel) in the default fake configuration; the deep path past these
+// TuningCompute) in the default fake configuration; the deep path past these
 // guards is covered further down, once those stubs are driven as hooks.
 // rcclSymKGetInfo -- rccl_wrap.cc:571-583. This section covers its
 // null-arg-check arm only; its success path (via rcclSymkQuery) and its
@@ -3377,7 +3371,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricGatedOnSumOpOnly) {
       "Wrap_SelectAllReduce_SymmetricGatedOnSumOpOnly",
       []() {
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*) { return true; });
+                                                                  size_t, const void*, void*, bool) { return true; });
         ncclComm* comm = MakeSelectComm();
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclProd,
@@ -3396,11 +3390,11 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricEligibleChoosesSymmetric) {
       "Wrap_SelectAllReduce_SymmetricEligibleChoosesSymmetric",
       []() {
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*) { return true; });
+                                                                  size_t, const void*, void*, bool) { return true; });
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
-        ScopedHook pickKernel(g_symkPickKernel,
-                              PickSymkKernel(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/6));
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/6));
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         rcclCollDecision decision{};
@@ -3423,10 +3417,11 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredBeatsSymmetricWhenBothEl
       []() {
         g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*) { return true; });
+                                                                  size_t, const void*, void*, bool) { return true; });
         ScopedHook ceAvailable(
             g_ceAvailable,
-            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
@@ -3452,7 +3447,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredChosenWithProdOp) {
         g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
         ScopedHook ceAvailable(
             g_ceAvailable,
-            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeSelectComm();
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
@@ -3480,7 +3476,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredNotChosenWhenProbeSaysUn
         g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
         ScopedHook ceAvailable(
             g_ceAvailable,
-            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return false; });
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return false; });
         ncclComm* comm = MakeSelectComm();
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
@@ -3504,7 +3501,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredNotChosenWithUnsupported
         g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
         ScopedHook ceAvailable(
             g_ceAvailable,
-            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeSelectComm();
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
@@ -3528,7 +3526,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredChosenWhenAvailableAndPo
         g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
         ScopedHook ceAvailable(
             g_ceAvailable,
-            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeSelectComm();
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
@@ -3549,7 +3548,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredForwardsBlockCalculatorA
         g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
         ScopedHook ceAvailable(
             g_ceAvailable,
-            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ScopedHook localBlocks(g_ceLocalReduceBlocks, [](ncclDataType_t type, size_t chunkElems) {
           EXPECT_EQ(ncclFloat32, type);
           EXPECT_EQ(16u, chunkElems); // count(16) / nRanks(1)
@@ -3578,7 +3578,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SysmemSegmentBlocksCeRegistered) {
         g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
         ScopedHook ceAvailable(
             g_ceAvailable,
-            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeSelectComm();
         int sendBuffer = 0, recvBuffer = 0;
         TestDevrWindows registered(comm, &sendBuffer, true, &recvBuffer, false);
@@ -3602,7 +3603,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RecvWinSysmemSegmentBlocksCeRegister
         g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
         ScopedHook ceAvailable(
             g_ceAvailable,
-            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeSelectComm();
         TestDevrWindows registered(comm, &sendSentinel, false, &recvSentinel, true);
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
@@ -3928,7 +3930,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_LatchedGraphModeExcludesCeRegistered
         g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
         ScopedHook ceAvailable(
             g_ceAvailable,
-            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeSelectComm();
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         comm->ceColl.graphModeSeen = true;
@@ -4092,7 +4095,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaGatedOnNotSymEligible) {
       "Wrap_SelectAllGather_DdaGatedOnNotSymEligible",
       []() {
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*) { return true; });
+                                                                  size_t, const void*, void*, bool) { return true; });
         ScopedHook ipcEligible(g_allGatherDdaIpcEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942");
@@ -4199,7 +4202,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CaptureExcludesCeRegistered) {
       []() {
         ScopedHook ceAvailable(
             g_ceAvailable,
-            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeSelectComm();
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
@@ -4350,7 +4354,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeRegisteredViaSymmetricWindowsChose
       []() {
         ScopedHook ceAvailable(
             g_ceAvailable,
-            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nRanks = 1;
         comm->nNodes = 1;
@@ -4383,7 +4388,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_SysmemSegmentBlocksCeRegistered) {
       []() {
         ScopedHook ceAvailable(
             g_ceAvailable,
-            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nRanks = 1;
         comm->nNodes = 1;
@@ -4407,7 +4413,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_RecvWinSysmemSegmentBlocksCeRegister
         int sendSentinel = 0, recvSentinel = 0;
         ScopedHook ceAvailable(
             g_ceAvailable,
-            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nRanks = 1;
         comm->nNodes = 1;
@@ -4474,20 +4481,11 @@ TEST(WrapMicrotestIsolated, SelectAllGather_SymmetricReportedWhenQueryAndEligibl
       "Wrap_SelectAllGather_SymmetricReportedWhenQueryAndEligible",
       []() {
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*) { return true; });
+                                                                  size_t, const void*, void*, bool) { return true; });
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
-        ScopedHook symkPick(g_symkPickKernel, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, size_t,
-                                                  int, ncclSymRegType_t, float* estTimeUs,
-                                                  ncclSymkKernelId* kernelId, int* maxChannels, int* nWarps,
-                                                  bool* forced) {
-          *estTimeUs = 0.0f;
-          *kernelId = ncclSymkKernelId_AllGather_LL;
-          *maxChannels = 4;
-          *nWarps = 2;
-          *forced = false;
-          return ncclSuccess;
-        });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclSymkKernelId_AllGather_LL, /*maxChannels=*/4));
         ScopedHook kernelIsLL(g_symkKernelIdIsLL, [](int) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nRanks = 1;
@@ -4514,7 +4512,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_SymmetricEligibleButSymkQueryFailsFa
       "Wrap_SelectAllGather_SymmetricEligibleButSymkQueryFailsFallsThrough",
       []() {
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*) { return true; });
+                                                                  size_t, const void*, void*, bool) { return true; });
         // g_symkAvailable left at its default (false) -> rcclSymkQuery returns false.
         ncclComm* comm = MakeSelectComm(); // not Direct-eligible -> falls all the way to plain kernel
         comm->symmetricSupport = 1;
@@ -4592,7 +4590,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricGatedOnSumOrAvgOpOnly) 
       "Wrap_SelectReduceScatter_SymmetricGatedOnSumOrAvgOpOnly",
       []() {
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*) { return true; });
+                                                                  size_t, const void*, void*, bool) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nRanks = 1;
         comm->nNodes = 1;
@@ -4615,7 +4613,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricAcceptsSumOrAvg) {
       "Wrap_SelectReduceScatter_SymmetricAcceptsSumOrAvg",
       []() {
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*) { return true; });
+                                                                  size_t, const void*, void*, bool) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942"); // not gfx1250 -- DDA can't preempt here
         comm->nRanks = 1;
         comm->nNodes = 1;
@@ -4663,7 +4661,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250DdaPreemptsSymmetricEvenW
       "Wrap_SelectReduceScatter_Gfx1250DdaPreemptsSymmetricEvenWhenEligible",
       []() {
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*) { return true; });
+                                                                  size_t, const void*, void*, bool) { return true; });
         ScopedHook vmmEligible(g_reduceScatterDdaFabricEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                  return true;
@@ -4687,7 +4685,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_NonGfx1250DdaStrictlyGatedOnNotS
       "Wrap_SelectReduceScatter_NonGfx1250DdaStrictlyGatedOnNotSymEligible",
       []() {
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*) { return true; });
+                                                                  size_t, const void*, void*, bool) { return true; });
         ScopedHook ipcEligible(g_reduceScatterDdaIpcEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                  return true;
@@ -5132,7 +5130,8 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_NeverChoosesCeRegardlessOfCeSeam
       []() {
         ScopedHook ceAvailable(
             g_ceAvailable,
-            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                        ncclSymRegType_t) { return true; });
         ncclComm* comm = MakeSelectComm(); // not DDA/Direct/Hierarchical eligible
@@ -5156,11 +5155,11 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricReportedWhenQueryAndEli
       "Wrap_SelectReduceScatter_SymmetricReportedWhenQueryAndEligible",
       []() {
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*) { return true; });
+                                                                  size_t, const void*, void*, bool) { return true; });
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
-        ScopedHook pickKernel(g_symkPickKernel,
-                              PickSymkKernel(ncclSymkKernelId_ReduceScatter_LL, /*maxChannels=*/7));
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclSymkKernelId_ReduceScatter_LL, /*maxChannels=*/7));
         ScopedHook kernelIsLL(g_symkKernelIdIsLL, [](int) { return true; });
         ncclComm* comm = MakeSelectComm(); // not DDA/Direct/Hierarchical eligible
         comm->symmetricSupport = 1;
@@ -5467,7 +5466,7 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllReduceDelegatesToSelectAllReduce)
       "Wrap_GetCollImplInfo_AllReduceDelegatesToSelectAllReduce",
       []() {
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*) { return true; });
+                                                                  size_t, const void*, void*, bool) { return true; });
         // Must have a real archName, not a zeroed comm: symEligible=true skips
         // rcclSelectAllReduce's CE-2-shot early return, so execution reaches its
         // unconditional IsArchMatch(comm->archName, "gfx1250") a few lines later --
@@ -5514,7 +5513,8 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherReachesCeRegisteredUnlikeGe
       []() {
         ScopedHook ceAvailable(
             g_ceAvailable,
-            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nRanks = 1;
         comm->nNodes = 1;
@@ -5614,15 +5614,16 @@ TEST(WrapMicrotestIsolated, SymkQuery_NotAvailableReturnsFalse) {
       });
 }
 
-TEST(WrapMicrotestIsolated, SymkQuery_PickKernelFailureReturnsFalse) {
+TEST(WrapMicrotestIsolated, SymkQuery_TuningComputeFailureReturnsFalse) {
   RUN_ISOLATED_TEST(
-      "Wrap_SymkQuery_PickKernelFailureReturnsFalse",
+      "Wrap_SymkQuery_TuningComputeFailureReturnsFalse",
       []() {
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
-        ScopedHook pickKernel(g_symkPickKernel, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, size_t,
-                                                    int, ncclSymRegType_t, float*, ncclSymkKernelId*, int*, int*,
-                                                    bool*) { return ncclInternalError; });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 [](struct ncclTuningInput_t*, struct ncclTuningResult_t*) {
+                                   return ncclInternalError;
+                                 });
         ncclComm* comm = MakeZeroedComm();
         comm->symmetricSupport = 1;
         int algo, protocol, maxChannels;
@@ -5632,8 +5633,8 @@ TEST(WrapMicrotestIsolated, SymkQuery_PickKernelFailureReturnsFalse) {
       });
 }
 
-// PickKernel itself succeeds (no error), but reports the "nothing matched"
-// sentinel -- distinct from the PickKernel-failure test above, which never
+// TuningCompute itself succeeds (no error), but reports the "nothing matched"
+// sentinel -- distinct from the TuningCompute-failure test above, which never
 // reaches this specific check at all.
 TEST(WrapMicrotestIsolated, SymkQuery_KernelIdCountReturnsFalse) {
   RUN_ISOLATED_TEST(
@@ -5641,18 +5642,8 @@ TEST(WrapMicrotestIsolated, SymkQuery_KernelIdCountReturnsFalse) {
       []() {
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
-        ScopedHook pickKernel(g_symkPickKernel, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, size_t,
-                                                    int, ncclSymRegType_t, float* estTimeUs,
-                                                    ncclSymkKernelId* kernelId, int* maxChannels, int* nWarps,
-                                                    bool* forced) {
-          *estTimeUs = 0.0f;
-          *kernelId = ncclSymkKernelId_Count; // "nothing matched" -- the default already does this,
-                                              // but spelled out here for this test's own clarity
-          *maxChannels = 0;
-          *nWarps = 0;
-          *forced = false;
-          return ncclSuccess;
-        });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclSymkKernelId_Count, /*maxChannels=*/0));
         ncclComm* comm = MakeZeroedComm();
         comm->symmetricSupport = 1;
         int algo, protocol, maxChannels;
@@ -5668,17 +5659,8 @@ TEST(WrapMicrotestIsolated, SymkQuery_SuccessWithLLKernelReportsLLProtocol) {
       []() {
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
-        ScopedHook pickKernel(g_symkPickKernel, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, size_t,
-                                                    int, ncclSymRegType_t, float* estTimeUs,
-                                                    ncclSymkKernelId* kernelId, int* maxChannels, int* nWarps,
-                                                    bool* forced) {
-          *estTimeUs = 0.0f;
-          *kernelId = ncclSymkKernelId_ReduceScatter_LL;
-          *maxChannels = 9;
-          *nWarps = 1;
-          *forced = false;
-          return ncclSuccess;
-        });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclSymkKernelId_ReduceScatter_LL, /*maxChannels=*/9));
         ScopedHook kernelIsLL(g_symkKernelIdIsLL, [](int kernelId) {
           EXPECT_EQ((int)ncclSymkKernelId_ReduceScatter_LL, kernelId);
           return true;
@@ -5703,17 +5685,8 @@ TEST(WrapMicrotestIsolated, SymkQuery_SuccessWithNonLLKernelReportsSimpleProtoco
       []() {
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
-        ScopedHook pickKernel(g_symkPickKernel, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, size_t,
-                                                    int, ncclSymRegType_t, float* estTimeUs,
-                                                    ncclSymkKernelId* kernelId, int* maxChannels, int* nWarps,
-                                                    bool* forced) {
-          *estTimeUs = 0.0f;
-          *kernelId = ncclSymkKernelId_AllReduce_RSxLD_AGxST;
-          *maxChannels = 12;
-          *nWarps = 1;
-          *forced = false;
-          return ncclSuccess;
-        });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/12));
         // g_symkKernelIdIsLL left at its default (false).
         ncclComm* comm = MakeZeroedComm();
         comm->symmetricSupport = 1;
@@ -5761,17 +5734,8 @@ TEST(WrapMicrotestIsolated, SymKGetInfo_ReturnsSymkResultWithoutFallingThrough) 
       []() {
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
-        ScopedHook pickKernel(g_symkPickKernel, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, size_t,
-                                                    int, ncclSymRegType_t, float* estTimeUs,
-                                                    ncclSymkKernelId* kernelId, int* maxChannels, int* nWarps,
-                                                    bool* forced) {
-          *estTimeUs = 0.0f;
-          *kernelId = ncclSymkKernelId_AllReduce_AGxLL_R;
-          *maxChannels = 15;
-          *nWarps = 1;
-          *forced = false;
-          return ncclSuccess;
-        });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclSymkKernelId_AllReduce_AGxLL_R, /*maxChannels=*/15));
         ScopedHook kernelIsLL(g_symkKernelIdIsLL, [](int) { return true; });
         // If this wrongly gets called (fall-through bug), it would report 999 --
         // a value that never appears if rcclSymKGetInfo correctly short-circuits.

@@ -110,6 +110,8 @@ ncclResult_t ncclTransportPatConnect(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTransportRingConnect(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTransportTreeConnect(struct ncclComm* comm) { ::abort(); }
 #endif
+ncclResult_t ncclTransportInitRankMap(struct ncclComm* comm, int, const int*) { return ncclSuccess; }
+ncclResult_t ncclTuningInit(struct ncclComm* comm) { return ncclSuccess; }
 // ncclTreeBasePostset (src/graph/connect.cc): topo_stubs.cc, next to ncclTopoPreset/ncclTopoPostset.
 ncclResult_t ncclTransportCheckP2pType(struct ncclComm*, bool*, bool*, bool*) { ::abort(); }
 ncclResult_t ncclTransportP2pConnect(struct ncclComm*, int, int, int*, int, int*, int) { ::abort(); }

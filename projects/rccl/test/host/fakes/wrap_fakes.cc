@@ -95,18 +95,9 @@ char  ncclLastError[1024] = {};
 // checks the invocation text against the original sources at configure time,
 // when those files are guaranteed to be available.
 // ---------------------------------------------------------------------------
-static int64_t DefaultParamForceCe() { return 1; }          // enqueue.cc:3796
+static int64_t DefaultParamForceCe() { return 1; }  // enqueue/enqueue.cc:4108
 std::function<int64_t()> g_paramForceCe = DefaultParamForceCe;
 int64_t rcclParamForceCe() { return g_paramForceCe(); }
-
-// ncclParamLaunchOrderImplicit: a settable hook, like rcclParamForceCe above,
-// so a test can drive rcclDdaEnabled's
-// `ncclParamLaunchOrderImplicit() != 0` disjunct independently -- the real
-// default (0, "explicit launch order") favors the common case, matching the
-// other three.
-static int64_t DefaultParamLaunchOrderImplicit() { return 0; }  // enqueue.cc:1985
-std::function<int64_t()> g_paramLaunchOrderImplicit = DefaultParamLaunchOrderImplicit;
-int64_t ncclParamLaunchOrderImplicit() { return g_paramLaunchOrderImplicit(); }
 
 // init.cc owns NCCL_PARAM(P2pDisable), but rccl_wrap.cc consults its accessor
 // while applying gfx120x protocol tuning. Keep the production default and let
@@ -193,14 +184,14 @@ bool ncclAllReduceGinSdmaYieldToDda(ncclComm*, const void*, void*, size_t, ncclD
 // "no symmetric-window kernel requested," letting the DDA/CE/Direct/plain
 // paths run, matching every existing (guard-only) test's expectations.
 static bool DefaultIsSymmetricKernelRequested(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*,
-                                              void*) {
+                                              void*, bool) {
   return false;
 }
-std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*)>
+std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*, bool)>
     g_isSymmetricKernelRequested = DefaultIsSymmetricKernelRequested;
 bool isSymmetricKernelRequested(struct ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
-                                size_t nElts, const void* sendbuff, void* recvbuff) {
-  return g_isSymmetricKernelRequested(comm, coll, symkOp, datatype, nElts, sendbuff, recvbuff);
+                                size_t nElts, const void* sendbuff, void* recvbuff, bool agreeAcrossRanks) {
+  return g_isSymmetricKernelRequested(comm, coll, symkOp, datatype, nElts, sendbuff, recvbuff, agreeAcrossRanks);
 }
 
 // rcclAllReduceShouldTakeDdaPath: real body lives in collectives.cc (not
