@@ -270,7 +270,7 @@ TEST_F(AqlProfileV2Test, AttParameter)
 // Test ATT profile structure
 TEST_F(AqlProfileV2Test, AttProfile)
 {
-    hsa_agent_t agent;
+    aqlprofile_agent_handle_t agent;
     agent.handle = 0xABCDEF1234567890;
 
     std::vector<aqlprofile_att_parameter_t> params(1);
