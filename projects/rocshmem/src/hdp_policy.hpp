@@ -34,6 +34,8 @@
 
 namespace rocshmem {
 
+namespace atomic = detail::atomic;
+
 class HdpHostSideFlushRocmPolicy {
  public:
   HdpHostSideFlushRocmPolicy() { set_hdp_flush_ptr(); }
@@ -94,8 +96,9 @@ class HdpHostSideFlushRocmPolicy {
     if (hdp_gpu_cpu_flush_flag_ == nullptr) {
       return false;
     }
-    auto device_flag_value = __hip_atomic_load(
-        hdp_gpu_cpu_flush_flag_, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+    auto device_flag_value = 
+      atomic::load<atomic::memory_scope::system,
+                   atomic::memory_order::acquire>(hdp_gpu_cpu_flush_flag_);
     const auto flush_value = static_cast<std::underlying_type_t<hdp_poll_flag>>(
         hdp_poll_flag::FLUSH);
     return device_flag_value == flush_value;
@@ -108,8 +111,9 @@ class HdpHostSideFlushRocmPolicy {
     const auto no_flush_value =
         static_cast<std::underlying_type_t<hdp_poll_flag>>(
             hdp_poll_flag::NO_FLUSH);
-    __hip_atomic_store(hdp_gpu_cpu_flush_flag_, no_flush_value,
-                       __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+    atomic::store<atomic::memory_scope::system,
+                  atomic::memory_order::release>(
+                    hdp_gpu_cpu_flush_flag_, no_flush_value);
   }
 
   static const int HDP_FLUSH_VAL{0x01};

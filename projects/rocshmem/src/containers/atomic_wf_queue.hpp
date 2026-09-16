@@ -33,6 +33,8 @@
 
 namespace rocshmem {
 
+namespace atomic = detail::atomic;
+
 /*****************************************************************************
  ******************************* WAVE FREE LIST ******************************
  *****************************************************************************/
@@ -238,23 +240,23 @@ class AtomicWFQueue {
  private:
 
   __device__ int atomic_load(const int* address) {
-    return __hip_atomic_load(address, __ATOMIC_SEQ_CST,
-                             __HIP_MEMORY_SCOPE_AGENT);
+    return atomic::load<atomic::memory_scope::device,
+                        atomic::memory_order::seq_cst>(address);
   }
 
   __device__ void atomic_store(int* address, const int val) {
-    __hip_atomic_store(address, val, __ATOMIC_SEQ_CST,
-                       __HIP_MEMORY_SCOPE_AGENT);
+    atomic::store<atomic::memory_scope::device,
+                  atomic::memory_order::seq_cst>(address, val);
   }
 
   __device__ void atomic_add(int* address, const int val) {
-    __hip_atomic_fetch_add(address, val, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_AGENT);
+    atomic::fetch_add<atomic::memory_scope::device,
+                      atomic::memory_order::seq_cst>(address, val);
   }
 
   __device__ void atomic_sub(int* address, const int val) {
-    __hip_atomic_fetch_sub(address, val, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_AGENT);
+    atomic::fetch_sub<atomic::memory_scope::device,
+                      atomic::memory_order::seq_cst>(address, val);
   }
 
   /**
