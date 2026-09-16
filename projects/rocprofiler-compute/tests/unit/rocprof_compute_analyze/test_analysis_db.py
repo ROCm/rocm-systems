@@ -72,7 +72,7 @@ def make_dual_issue_arch_config(metric_name: str, peak_col: str = "Peak"):
     return arch_config
 
 
-def make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df, max_stat_num):
+def make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df):
     """Build a SimpleNamespace analyzer for calc_roofline_data tests."""
     sys_info_df = pd.DataFrame([{"gpu_arch": "gfx90a"}])
     arch_config = SimpleNamespace(dfs={402: roofline_df})
@@ -80,7 +80,7 @@ def make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df, max_stat_num
         _runs={workload_path: SimpleNamespace(sys_info=sys_info_df)},
         _pmc_df_per_workload={workload_path: pmc_df},
         _arch_configs={"gfx90a": arch_config},
-        get_args=lambda: SimpleNamespace(max_stat_num=max_stat_num),
+        get_args=lambda: SimpleNamespace(),
     )
 
 
@@ -3361,9 +3361,7 @@ def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
     })
     roofline_df = pd.DataFrame()  # Empty roofline dataframe triggers early exit
 
-    analyzer = make_roofline_calc_analyzer(
-        workload_path, pmc_df, roofline_df, max_stat_num=10
-    )
+    analyzer = make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df)
 
     warning_messages = []
 
@@ -3475,14 +3473,26 @@ def test_both_instruction_line_paths_share_one_instruction_type(db_session):
 
 def test_calc_roofline_data_includes_all_kernels(monkeypatch):
     """calc_roofline_data computes roofline for all kernels, not just top N."""
-    kernel_names = ["kernel_a", "kernel_b", "kernel_c", "kernel_d", "kernel_e"]
+    NUM_KERNELS = 15
+    kernel_names = [f"kernel_{i:02d}" for i in range(NUM_KERNELS)]
 
-    # Two dispatches per kernel, staggered timestamps
-    pmc_df = pd.DataFrame({
-        "Kernel_Name": [name for name in kernel_names for _ in range(2)],
-        "Start_Timestamp": list(range(100, 1100, 100)),
-        "End_Timestamp": list(range(200, 1200, 100)),
-    })
+    # Two dispatches per kernel: a unique long dispatch and a fixed short
+    # dispatch. The long duration decreases with index so the sort in
+    # calc_roofline_data produces a deterministic descending order.
+    long_durations = [500 - i * 30 for i in range(NUM_KERNELS)]
+    short_duration = 50
+
+    rows = []
+    t = 0
+    for i in range(NUM_KERNELS):
+        rows.append((kernel_names[i], t, t + long_durations[i]))
+        t += long_durations[i] + 10
+        rows.append((kernel_names[i], t, t + short_duration))
+        t += short_duration + 10
+
+    pmc_df = pd.DataFrame(
+        rows, columns=["Kernel_Name", "Start_Timestamp", "End_Timestamp"]
+    )
 
     roofline_metrics = [
         "Performance (GFLOPs)",
@@ -3498,9 +3508,7 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
     })
 
     workload_path = "/mock/workload/path"
-    analyzer = make_roofline_calc_analyzer(
-        workload_path, pmc_df, roofline_df, max_stat_num=2
-    )
+    analyzer = make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df)
 
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_db.db_analysis.evaluate",
@@ -3517,8 +3525,10 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
 
     assert len(kernel_data) == 1
     df = kernel_data[workload_path]
-    assert len(df) == 5, f"Expected 5 kernels, got {len(df)}"
-    assert list(df["kernel_name"]) == kernel_names
+    assert len(df) == NUM_KERNELS, f"Expected {NUM_KERNELS} kernels, got {len(df)}"
+    assert list(df["kernel_name"]) == kernel_names, (
+        f"Expected kernels sorted by duration descending, got {list(df['kernel_name'])}"
+    )
 
     expected_columns = [
         "total_flops",
