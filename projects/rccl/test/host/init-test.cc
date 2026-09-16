@@ -67,8 +67,6 @@ static int g_trCollNetDeviceCount = 0;
 #if defined(__x86_64__) || defined(_M_X64)
 #include <cpuid.h>
 #else
-static inline int __get_cpuid(unsigned int __leaf, unsigned int *__eax,
-                              unsigned int *__ebx, unsigned int *__ecx,
 static inline int __get_cpuid(unsigned int __leaf, unsigned int* __eax,
                               unsigned int* __ebx, unsigned int* __ecx,
                               unsigned int* __edx) {
