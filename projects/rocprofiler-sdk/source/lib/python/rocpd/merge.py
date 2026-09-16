@@ -169,11 +169,11 @@ def merge_sqlite_dbs(
             conn.commit()
 
             conn.execute("PRAGMA foreign_keys = ON")
-            foreign_key_errors = conn.execute("PRAGMA foreign_key_check").fetchall()
+            foreign_key_errors = conn.execute("PRAGMA foreign_key_check").fetchmany(10)
             if foreign_key_errors:
                 raise sqlite3.IntegrityError(
                     f"Merged rocPD database failed foreign-key validation: "
-                    f"{foreign_key_errors[:10]!r}"
+                    f"{foreign_key_errors!r}"
                 )
             quick_check = conn.execute("PRAGMA quick_check").fetchall()
             if quick_check != [("ok",)]:

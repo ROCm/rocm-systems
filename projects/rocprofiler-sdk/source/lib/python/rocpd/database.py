@@ -50,6 +50,11 @@ REGULAR_TABLE_SQL = re.compile(
     flags=re.IGNORECASE,
 )
 METADATA_TABLE = re.compile(r"^rocpd_metadata(?P<uuid>_[A-Za-z0-9_]+)$")
+_SQL_TOKEN = re.compile(
+    r"--[^\r\n]*|/\*[\s\S]*?\*/|"
+    r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|`(?:[^`]|``)*`|\[[^\]]*\]|"
+    r"[A-Za-z_][A-Za-z0-9_$]*|[^\s]"
+)
 
 _METADATA_COLUMNS = (
     (0, "id", "INTEGER", 1, None, 1, 0),
@@ -219,6 +224,43 @@ def _index_signatures(
     return tuple(sorted(signatures, key=repr))
 
 
+def _check_constraints(sql: str) -> Tuple[Tuple[str, ...], ...]:
+    """Extract CHECK expression tokens without evaluating source SQL.
+
+    PRAGMAs do not expose CHECK clauses. Compare their tokens to the trusted
+    schema, ignoring comments, whitespace, keyword case and constraint order.
+    Quoted tokens are preserved so literal contents and parentheses inside
+    strings cannot change or disguise a constraint.
+    """
+
+    checks = []
+    expression = None
+    depth = 0
+    for match in _SQL_TOKEN.finditer(sql):
+        token = match.group()
+        if token.startswith(("--", "/*")):
+            continue
+        if token[0] not in "'\"`[":
+            token = token.lower()
+        if expression is None:
+            if token == "check":
+                expression = []
+            continue
+        if not expression and token != "(":
+            raise ValueError("Invalid CHECK constraint")
+        expression.append(token)
+        if token == "(":
+            depth += 1
+        elif token == ")":
+            depth -= 1
+            if depth == 0:
+                checks.append(tuple(expression))
+                expression = None
+    if expression is not None:
+        raise ValueError("Unterminated CHECK constraint")
+    return tuple(sorted(checks))
+
+
 def _table_signature(
     connection: sqlite3.Connection, alias: str, table: str
 ) -> Tuple[Tuple, Tuple, Tuple]:
@@ -263,15 +305,27 @@ def _metadata_values(
             f"Invalid rocPD metadata table schema in {source_path!r}: {columns!r}"
         )
 
+    required = (
+        "uuid",
+        "guid",
+        "schema_version",
+        "schema_version_major",
+        "schema_version_minor",
+        "schema_version_patch",
+    )
+    placeholders = ", ".join("?" for _ in required)
+    # Read only required metadata, with one extra row to detect duplicates.
+    # Additional metadata remains in the source and is copied by merge.
     rows = connection.execute(
-        f"SELECT tag, value FROM {qualified_identifier(alias, metadata_table)}"
-    ).fetchall()
+        f"SELECT tag, value FROM {qualified_identifier(alias, metadata_table)} "
+        f"WHERE tag COLLATE BINARY IN ({placeholders})",
+        required,
+    ).fetchmany(len(required) + 1)
     values: Dict[str, List[str]] = {}
     for tag, value in rows:
         if isinstance(tag, str):
             values.setdefault(tag, []).append(value)
 
-    required = ("uuid", "guid", "schema_version")
     if any(len(values.get(key, [])) != 1 for key in required):
         raise ValueError(
             f"Invalid or duplicate required rocPD metadata in {source_path!r}"
@@ -373,6 +427,9 @@ def inspect_attached_rocpd(
         schema, reference = _reference_schema(uuid, guid, partition_version)
         try:
             expected_objects = _master_objects(reference, "main")
+            expected_table_sql = {
+                name: sql for kind, name, _, sql in expected_objects if kind == "table"
+            }
             partition_expected = {
                 kind: {
                     name for obj_kind, name, _, _ in expected_objects if obj_kind == kind
@@ -396,6 +453,13 @@ def inspect_attached_rocpd(
                 if not isinstance(sql, str) or not REGULAR_TABLE_SQL.match(sql):
                     raise ValueError(
                         f"Refusing non-table object {table!r} in {source_path!r}"
+                    )
+                if _check_constraints(sql) != _check_constraints(
+                    expected_table_sql[table]
+                ):
+                    raise ValueError(
+                        f"rocPD table {table!r} CHECK constraints do not match schema "
+                        f"version {partition_version} in {source_path!r}"
                     )
                 if _table_signature(connection, alias, table) != _table_signature(
                     reference, "main", table
