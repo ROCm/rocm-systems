@@ -1,7 +1,7 @@
 name: TheRock Test MADEngine Workloads for rccl
 
-# Diagnostic only. Answers one question: when a SLURM task creates a directory
-# under /tmp, does the docker daemon on that node see it through `-v`?
+# Diagnostic only. /tmp is private per job (job_container/tmpfs), so dockerd
+# cannot see it. This probe asks which alternative workspace root *is* visible.
 
 on:
   workflow_dispatch:
@@ -36,7 +36,7 @@ permissions:
 
 jobs:
   probe:
-    name: 'Probe /tmp visibility'
+    name: 'Probe workspace roots'
     runs-on: ${{ inputs.test_runs_on }}
     steps:
       - name: Probe
@@ -47,58 +47,44 @@ jobs:
           #!/bin/bash
           echo "=============================================================="
           echo "node=$(hostname) procid=${SLURM_PROCID:-?} job=${SLURM_JOB_ID:-?}"
-          echo "=============================================================="
-
-          echo "--- slurm private tmp ---"
-          echo "SLURM_TMPDIR=${SLURM_TMPDIR:-<unset>}"
-          scontrol show config 2>/dev/null | grep -i -E "JobContainerType|TmpFS" || true
-          ls -d /etc/slurm/job_container.conf 2>/dev/null || echo "no job_container.conf"
-
-          echo "--- mount namespaces ---"
-          echo "task  mnt ns: $(readlink /proc/self/ns/mnt)"
-          dpid=$(pgrep -x dockerd | head -1)
-          if [ -n "$dpid" ]; then
-            echo "dockerd pid: $dpid"
-            echo "dockerd mnt ns: $(readlink /proc/$dpid/ns/mnt 2>/dev/null || echo '<denied>')"
-          else
-            echo "dockerd not visible from this task"
-          fi
-          systemctl show docker -p PrivateTmp 2>/dev/null || echo "PrivateTmp: <unknown>"
-
-          echo "--- the actual test ---"
-          PROBE=/tmp/probe_${SLURM_JOB_ID:-$$}_${SLURM_PROCID:-0}
-          mkdir -p "$PROBE"
-          echo "i-am-the-marker" > "$PROBE/marker.txt"
-          echo "host sees: $(ls -A "$PROBE" | tr '\n' ' ')"
 
           IMG=$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null \
                 | grep -v '<none>' | head -1)
           if [ -z "$IMG" ]; then
-            echo "RESULT: INCONCLUSIVE - no local docker image to test with"
+            echo "INCONCLUSIVE - no local docker image"
             exit 0
           fi
-          echo "using image: $IMG"
 
-          out=$(docker run --rm -v "$PROBE":/probe --entrypoint sh "$IMG" \
-                  -c 'ls -A /probe; cat /probe/marker.txt 2>/dev/null' 2>&1)
-          echo "container sees: $out"
+          try_root() {
+            root="$1"
+            printf '%-42s ' "$root"
+            if [ ! -d "$root" ]; then echo "ABSENT"; return; fi
+            if [ ! -w "$root" ]; then echo "NOT-WRITABLE"; return; fi
+            d="$root/probe_${SLURM_JOB_ID:-$$}_${SLURM_PROCID:-0}"
+            mkdir -p "$d" 2>/dev/null || { echo "MKDIR-FAILED"; return; }
+            echo "i-am-the-marker" > "$d/marker.txt" 2>/dev/null \
+              || { echo "WRITE-FAILED"; rm -rf "$d"; return; }
+            out=$(docker run --rm -v "$d":/probe --entrypoint sh "$IMG" \
+                    -c 'cat /probe/marker.txt 2>/dev/null' 2>/dev/null)
+            if echo "$out" | grep -q "i-am-the-marker"; then
+              echo "VISIBLE"
+            else
+              echo "NOT-VISIBLE"
+            fi
+            rm -rf "$d"
+          }
 
-          if echo "$out" | grep -q "i-am-the-marker"; then
-            echo "RESULT: VISIBLE - daemon shares /tmp with the job"
-          else
-            echo "RESULT: NOT-VISIBLE - daemon resolves /tmp elsewhere (bind mount is empty)"
-          fi
+          echo "--- candidate workspace roots ---"
+          try_root /tmp
+          try_root /var/tmp
+          try_root /dev/shm
+          try_root "$HOME"
+          try_root /apps/rccl-ci/madengine
+          try_root /scratch
+          try_root /local
 
-          echo "--- same test under \$SLURM_TMPDIR, if any ---"
-          if [ -n "${SLURM_TMPDIR:-}" ] && [ -d "${SLURM_TMPDIR}" ]; then
-            P2="${SLURM_TMPDIR}/probe_$$"
-            mkdir -p "$P2" && echo "i-am-the-marker" > "$P2/marker.txt"
-            out2=$(docker run --rm -v "$P2":/probe --entrypoint sh "$IMG" \
-                     -c 'cat /probe/marker.txt 2>/dev/null' 2>&1)
-            echo "container sees: $out2"
-          else
-            echo "SLURM_TMPDIR unset, skipped"
-          fi
+          echo "--- df of the promising ones ---"
+          df -h /var/tmp /apps/rccl-ci/madengine 2>/dev/null | sed 's/^/  /'
           TASK
           chmod +x probe_task.sh
 
@@ -107,6 +93,6 @@ jobs:
                --ntasks="${{ inputs.nodes }}" \
                --ntasks-per-node=1 \
                --time=00:10:00 \
-               --job-name=madengine-tmp-probe \
+               --job-name=madengine-root-probe \
                --label \
                ./probe_task.sh
