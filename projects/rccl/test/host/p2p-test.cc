@@ -3325,6 +3325,19 @@ protected:
             });
     }
 
+    // Topology hook that reports an intermediate hop (indirect P2P). The setup
+    // path then routes the connect through `inter` rather than the peer's own
+    // rank, selecting the P2P_INTERMEDIATE resource type.
+    void InstallTopoIntermediate(int inter) {
+        topo_.emplace(g_ncclTopoCheckP2p,
+            [inter](int, int, int* p2p, int* rd, int* i, int*) -> ncclResult_t {
+                if (p2p) *p2p = 1;
+                if (rd)  *rd  = 0;
+                if (i)   *i   = inter;
+                return ncclSuccess;
+            });
+    }
+
     static constexpr uint64_t kHost = 0x1111;
     static constexpr uint64_t kPid  = 0x2222;
 
@@ -3450,6 +3463,168 @@ TEST_F(P2pSetupMicrotest, RecvSetup_SameProcessPeer_SelectsDirectAndFillsConnect
     p2pTransport.recv.free(&comm_, &recv);
 }
 
+TEST_F(P2pSetupMicrotest, SendSetup_ReadEnableParamOverridesTopology_ForcesReadFlag)
+{
+    // The topology says "no read", but NCCL_P2P_READ_ENABLE is set to a
+    // non-default (!= -2) value, so p2pGetInfo overrides the topology verdict
+    // and the connect info comes out read-enabled.
+    InstallTopo(/*read=*/0);
+    InstallXgmiLink();
+    InstallHappyProxy();
+    ScopedHook readEnable(g_loadParam,
+        [](const char* env, int64_t def) -> int64_t {
+            if (env && std::string(env) == "P2P_READ_ENABLE") return 1;
+            return def;
+        });
+
+    ASSERT_EQ(p2pTransport.send.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &send_, 0, 0),
+              ncclSuccess);
+
+    const auto* info = AsConnectInfo(connect_info_);
+    EXPECT_EQ(info->read, 1);
+    EXPECT_TRUE(send_.conn.flags & NCCL_P2P_READ);
+
+    p2pTransport.send.free(&comm_, &send_);
+}
+
+TEST_F(P2pSetupMicrotest, SendSetup_DirectDisableParam_SelectsIpcForSameProcessPeer)
+{
+    // Same-process peer would normally select the DIRECT path, but
+    // NCCL_P2P_DIRECT_DISABLE forces it off; with cuMem disabled the fallback
+    // is legacy IPC.
+    InstallTopo(/*read=*/0);
+    InstallXgmiLink();
+    InstallHappyProxy();
+    ScopedHook directDisable(g_loadParam,
+        [](const char* env, int64_t def) -> int64_t {
+            if (env && std::string(env) == "P2P_DIRECT_DISABLE") return 1;
+            return def;
+        });
+
+    ASSERT_EQ(p2pTransport.send.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &send_, 0, 0),
+              ncclSuccess);
+
+    auto* res = static_cast<p2pResources*>(send_.transportResources);
+    ASSERT_NE(res, nullptr);
+    EXPECT_EQ(res->type, kP2pIpc);
+
+    p2pTransport.send.free(&comm_, &send_);
+}
+
+TEST_F(P2pSetupMicrotest, SendSetup_IntermediateHop_SelectsIntermediateAndRoutesConnectRank)
+{
+    // The topology reports an intermediate rank, so setup selects the indirect
+    // P2P_INTERMEDIATE type and writes the intermediate rank (0 == me here)
+    // into the connect info rather than my own rank.
+    InstallTopoIntermediate(/*inter=*/0);
+    InstallXgmiLink();
+    InstallHappyProxy();
+
+    ASSERT_EQ(p2pTransport.send.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &send_, 0, 0),
+              ncclSuccess);
+
+    auto* res = static_cast<p2pResources*>(send_.transportResources);
+    ASSERT_NE(res, nullptr);
+    EXPECT_EQ(res->type, kP2pIntermediate);
+    EXPECT_EQ(AsConnectInfo(connect_info_)->rank, 0);
+
+    p2pTransport.send.free(&comm_, &send_);
+}
+
+TEST_F(P2pSetupMicrotest, SendSetup_CollNetScatterConn_ForcesWriteDespiteReadTopology)
+{
+    // For CollNet (non-null graph) the scatter-reduce connection (connIndex 1)
+    // must use write even when the topology enabled read: p2pSendSetup clears
+    // info->read back to 0.
+    InstallTopo(/*read=*/1);
+    InstallXgmiLink();
+    InstallHappyProxy();
+    ncclTopoGraph graph{};  // non-null; only its address is tested, not read.
+
+    ASSERT_EQ(p2pTransport.send.setup(&comm_, &graph, &myInfo_, &peer_,
+                                      &connect_info_, &send_, /*channelId=*/0,
+                                      /*connIndex=*/1),
+              ncclSuccess);
+
+    EXPECT_EQ(AsConnectInfo(connect_info_)->read, 0);
+    EXPECT_TRUE(send_.conn.flags & NCCL_P2P_WRITE);
+
+    p2pTransport.send.free(&comm_, &send_);
+}
+
+TEST_F(P2pSetupMicrotest, SendSetup_LinkTypeQueryFails_ReturnsInternalError)
+{
+    // A failing ncclTopoGetLinkType aborts setup with an internal error before
+    // any resource type is decided.
+    InstallTopo(/*read=*/0);
+    InstallHappyProxy();
+    link_.emplace(g_ncclTopoGetLinkType,
+        [](int, int, bool*, int) -> ncclResult_t { return ncclInternalError; });
+
+    EXPECT_EQ(p2pTransport.send.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &send_, 0, 0),
+              ncclInternalError);
+
+    p2pTransport.send.free(&comm_, &send_);
+}
+
+TEST_F(P2pSetupMicrotest, RecvSetup_CollNetScatterConn_ForcesWriteDespiteReadTopology)
+{
+    InstallTopo(/*read=*/1);
+    InstallHappyProxy();
+    ncclTopoGraph graph{};
+
+    ncclConnector recv{};
+    ASSERT_EQ(p2pTransport.recv.setup(&comm_, &graph, &myInfo_, &peer_,
+                                      &connect_info_, &recv, 0, /*connIndex=*/1),
+              ncclSuccess);
+
+    EXPECT_EQ(AsConnectInfo(connect_info_)->read, 0);
+    EXPECT_TRUE(recv.conn.flags & NCCL_P2P_WRITE);
+
+    p2pTransport.recv.free(&comm_, &recv);
+}
+
+TEST_F(P2pSetupMicrotest, RecvSetup_IntermediateHop_SelectsIntermediateAndRoutesConnectRank)
+{
+    InstallTopoIntermediate(/*inter=*/0);
+    InstallHappyProxy();
+
+    ncclConnector recv{};
+    ASSERT_EQ(p2pTransport.recv.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &recv, 0, 0),
+              ncclSuccess);
+
+    auto* res = static_cast<p2pResources*>(recv.transportResources);
+    ASSERT_NE(res, nullptr);
+    EXPECT_EQ(res->type, kP2pIntermediate);
+    EXPECT_EQ(AsConnectInfo(connect_info_)->rank, 0);
+
+    p2pTransport.recv.free(&comm_, &recv);
+}
+
+TEST_F(P2pSetupMicrotest, RecvSetup_CrossProcessCuMemPeer_SelectsCumem)
+{
+    peer_.pidHash = kPid + 1;  // different process => not DIRECT
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    InstallTopo(/*read=*/0);
+    InstallHappyProxy();
+
+    ncclConnector recv{};
+    ASSERT_EQ(p2pTransport.recv.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &recv, 0, 0),
+              ncclSuccess);
+
+    auto* res = static_cast<p2pResources*>(recv.transportResources);
+    ASSERT_NE(res, nullptr);
+    EXPECT_EQ(res->type, kP2pCumem);
+
+    p2pTransport.recv.free(&comm_, &recv);
+}
+
 TEST_F(P2pSetupMicrotest, SendSetupThenConnect_WritePath_WiresConnBuffers)
 {
     InstallTopo(/*read=*/0);
@@ -3515,6 +3690,34 @@ TEST_F(P2pSetupMicrotest, RecvSetupThenConnect_WritePath_WiresConnBuffers)
     p2pTransport.recv.free(&comm_, &recv);
 }
 
+TEST_F(P2pSetupMicrotest, RecvSetupThenConnect_ReadPath_TakesRemoteSimpleBuffer)
+{
+    // On the read path recv setup sizes the buffer pool without the SIMPLE
+    // slot and recv connect points buffs[SIMPLE] at the remote ncclSendMem
+    // (remDevMem + 1) instead of the local pool. In this harness the mapped
+    // and local regions share the exchanged backing buffer, so the observable
+    // contract asserted here is that the read verdict propagates and the SIMPLE
+    // buffer lands on the mapped remote region.
+    InstallTopo(/*read=*/1);
+    InstallHappyProxy();
+
+    ncclConnector recv{};
+    ASSERT_EQ(p2pTransport.recv.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &recv, 0, 0),
+              ncclSuccess);
+    EXPECT_EQ(AsConnectInfo(connect_info_)->read, 1);
+
+    ASSERT_EQ(p2pTransport.recv.connect(&comm_, &connect_info_, comm_.nRanks,
+                                        /*rank=*/0, &recv),
+              ncclSuccess);
+
+    EXPECT_EQ(recv.conn.buffs[NCCL_PROTO_SIMPLE],
+              reinterpret_cast<char*>(
+                  reinterpret_cast<ncclSendMem*>(backing_.data()) + 1));
+
+    p2pTransport.recv.free(&comm_, &recv);
+}
+
 // --- free contract -------------------------------------------------------
 
 class P2pFreeMicrotest : public P2pMicrotest {
@@ -3552,10 +3755,73 @@ TEST_F(P2pFreeMicrotest, SendFree_LegacyIpcResources_ClosesEachRetainedHandle)
     EXPECT_EQ(closes, 2);  // one per retained handle
 }
 
+// RAII guard that latches the process-shutdown flag for the duration of a
+// test. With the flag set, ncclCuMemFreeAddr / ncclCudaFree short-circuit to
+// success before touching the (absent) HIP runtime, so the cuMem free arm can
+// be exercised in-process without a real GPU allocation. The flag is a
+// process-global static, so it must be cleared again on scope exit.
+struct ShutdownFlagGuard {
+    ShutdownFlagGuard()  { rcclShutdownFlag().store(true,  std::memory_order_release); }
+    ~ShutdownFlagGuard() { rcclShutdownFlag().store(false, std::memory_order_release); }
+};
+
+TEST_F(P2pFreeMicrotest, SendFree_CuMemResources_ReleasesEachRetainedHandle)
+{
+    // cuMem enabled selects the cuMem free arm rather than the legacy
+    // cudaIpcCloseMemHandle path; the shutdown flag lets ncclCuMemFreeAddr /
+    // ncclCudaFree return without reaching HIP.
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ShutdownFlagGuard shutdown;
+
+    // Two frees with complementary same-proc flags so each handle's
+    // ncclCuMemFreeAddr (same-proc) and ncclCudaFree (cross-proc) arm is hit.
+    ncclConnector send{};
+    auto* res = MakeResources();
+    res->sendMemIpc      = reinterpret_cast<void*>(0x1000);
+    res->recvMemIpc      = reinterpret_cast<void*>(0x2000);
+    res->sendMemSameProc = 1;  // same-proc => ncclCuMemFreeAddr
+    res->recvMemSameProc = 0;  // cross-proc => ncclCudaFree
+    send.transportResources = res;
+    EXPECT_EQ(p2pTransport.send.free(nullptr, &send), ncclSuccess);
+
+    ncclConnector send2{};
+    auto* res2 = MakeResources();
+    res2->sendMemIpc      = reinterpret_cast<void*>(0x1000);
+    res2->recvMemIpc      = reinterpret_cast<void*>(0x2000);
+    res2->sendMemSameProc = 0;  // cross-proc => ncclCudaFree
+    res2->recvMemSameProc = 1;  // same-proc => ncclCuMemFreeAddr
+    send2.transportResources = res2;
+    EXPECT_EQ(p2pTransport.send.free(nullptr, &send2), ncclSuccess);
+}
+
 TEST_F(P2pFreeMicrotest, RecvFree_NoResources_IsNoopSuccess)
 {
     ncclConnector recv{};
     EXPECT_EQ(p2pTransport.recv.free(nullptr, &recv), ncclSuccess);
+}
+
+TEST_F(P2pFreeMicrotest, RecvFree_CuMemResources_ReleasesEachRetainedHandle)
+{
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ShutdownFlagGuard shutdown;
+
+    ncclConnector recv{};
+    auto* res = MakeResources();
+    res->sendMemIpc      = reinterpret_cast<void*>(0x3000);
+    res->recvMemIpc      = reinterpret_cast<void*>(0x4000);
+    res->sendMemSameProc = 1;  // same-proc => ncclCuMemFreeAddr
+    res->recvMemSameProc = 0;  // cross-proc => ncclCudaFree
+    recv.transportResources = res;
+    EXPECT_EQ(p2pTransport.recv.free(nullptr, &recv), ncclSuccess);
+
+    ncclConnector recv2{};
+    auto* res2 = MakeResources();
+    res2->sendMemIpc      = reinterpret_cast<void*>(0x3000);
+    res2->recvMemIpc      = reinterpret_cast<void*>(0x4000);
+    res2->sendMemSameProc = 0;  // cross-proc => ncclCudaFree
+    res2->recvMemSameProc = 1;  // same-proc => ncclCuMemFreeAddr
+    recv2.transportResources = res2;
+    EXPECT_EQ(p2pTransport.recv.free(nullptr, &recv2), ncclSuccess);
 }
 
 TEST_F(P2pFreeMicrotest, RecvFree_LegacyIpcResources_ClosesEachRetainedHandle)
