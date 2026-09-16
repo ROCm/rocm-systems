@@ -184,6 +184,45 @@ bool arch_has_unified_vgpr_allocation(rj_code_arch_t arch) {
   }
 }
 
+// How one kernel's VGPR allocation divides into an ordinary prefix and an
+// AccVGPR window.
+struct KernelVgprBounds {
+  uint32_t total = 0;          // Allocated VGPRs: ordinary prefix plus AccVGPR window.
+  uint32_t ordinary_bound = 0; // One past the last ordinary VGPR.
+  uint32_t acc_count = 0;      // AccVGPRs in the window; 0 when there is none.
+};
+
+// Decode @p desc's VGPR allocation for @p arch.
+KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
+                                    const rocr::llvm::amdhsa::kernel_descriptor_t &desc) {
+  const uint32_t granulated = AMDHSA_BITS_GET(
+      desc.compute_pgm_rsrc1, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+  // The descriptor encoding granule is wave-size dependent on RDNA (8 for
+  // Wave32, 4 for Wave64); using the Wave32 granule for a Wave64 kernel would
+  // overcount the allocation and let the SGPR bridge scan pick an unallocated
+  // VGPR. Share the wave-aware decoder with DBT so the two cannot diverge.
+  const uint32_t total = (granulated + 1) * descriptor_vgpr_granularity_for_wavefront(
+                                                arch, kernel_wavefront_size(arch, desc));
+  // On a unified-allocation arch the VGPR allocation splits at the ACCUM_OFFSET
+  // base ((encoded+1)*4) into an ordinary-VGPR prefix and the AccVGPR window.
+  // Arches without that split (non-CDNA, and CDNA1/gfx908 whose AGPRs allocate
+  // separately) have no ACCUM_OFFSET field, so the whole allocation is ordinary.
+  const uint32_t accum_base =
+      arch_has_unified_vgpr_allocation(arch)
+          ? (AMDHSA_BITS_GET(desc.compute_pgm_rsrc3,
+                             rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
+             1) *
+                4
+          : total;
+  return KernelVgprBounds{
+      .total = total,
+      // An ordinary VGPR is one below the accumulator window: an index inside it
+      // would alias an AGPR.
+      .ordinary_bound = std::min(total, accum_base),
+      .acc_count = total > accum_base ? total - accum_base : 0,
+  };
+}
+
 // Special machine state preserved across a probe call: SCC (via the trampoline
 // envelope), EXEC/VCC/M0 (saved to a dead SGPR temp; the orchestrator sets the
 // plan.preserve_* flags below), and ordinary GPRs (via the spill policy).
@@ -200,19 +239,16 @@ bool check_probe_special_state(const ProbeClobberSummary &summary, std::string *
 }
 
 // Check that the probe does not clobber the link pair.
-bool check_probe_link_pair(const ProbeClobberSummary &summary, ProbeCallingConvention cc,
+bool check_probe_link_pair(const ProbeClobberSummary &summary, const ProbeAbi &abi,
                            std::string *error_out) {
-  const std::optional<uint16_t> link_base = link_pair_for(cc);
-  if (!link_base)
-    return true; // Unknown convention: plan_probe_call rejects it with a cc-specific error.
-  RegisterSet link_pair;
-  link_pair.expand(RegisterRef{RegClass::SGPR, *link_base, 2});
-  if (!summary.ordinary_clobbers.intersects(link_pair))
+  if (!is_valid_probe_abi(abi))
+    return true; // plan_probe_call rejects an unusable ABI with its own error.
+  if (!summary.ordinary_clobbers.intersects(probe_link_pair(abi)))
     return true;
   if (error_out != nullptr) {
-    const uint16_t hi = static_cast<uint16_t>(*link_base + 1);
-    *error_out = "probe body overwrites its own return-link pair s[" + std::to_string(*link_base) +
-                 ":" + std::to_string(hi) +
+    const uint16_t hi = static_cast<uint16_t>(abi.link_pair_base + 1);
+    *error_out = "probe body overwrites its own return-link pair s[" +
+                 std::to_string(abi.link_pair_base) + ":" + std::to_string(hi) +
                  "] before returning; it would return through a corrupted PC";
   }
   return false;
@@ -391,7 +427,7 @@ bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills, rj_cod
   return true;
 }
 
-bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &live_at_anchor,
+bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &bridge_unavailable,
                       const std::vector<SpillSlot> &vgpr_spills, uint32_t kernel_vgpr_count,
                       SpillManager &spills, rj_code_arch_t arch, std::vector<SpillSlot> &out,
                       uint16_t &out_bridge, std::string *error_out) {
@@ -420,14 +456,17 @@ bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &live_at_a
   }
 
   // Bridge, within the kernel's allocated VGPR count (never an unallocated index).
-  // Prefer a dead VGPR; else reuse a spilled VGPR, whose value is already on scratch
-  // (build_spill_bracket orders its store/reload around the bridge use). A spilled
-  // VGPR is live at the anchor, so the dead scan never returns one.
+  // Prefer a VGPR the site is not already using; else reuse a spilled VGPR, whose
+  // own value is already on scratch and gets reloaded after the bridge's last use
+  // (build_spill_bracket orders the VGPR fills after the SGPR ones). Those are the
+  // only two safe choices: the prologue's writelane destroys whatever the bridge
+  // held, so anything live that is not spilled would be lost. bridge_unavailable
+  // covers the live set, so the first scan never returns one of those.
   const uint16_t vgpr_bound =
       static_cast<uint16_t>(std::min<uint32_t>(kernel_vgpr_count, REGISTER_SET_MAX_VGPRS));
   std::optional<uint16_t> bridge;
   for (uint16_t v = 0; v < vgpr_bound; ++v) {
-    if (!live_at_anchor.contains(RegisterRef{RegClass::VGPR, v, 1})) {
+    if (!bridge_unavailable.contains(RegisterRef{RegClass::VGPR, v, 1})) {
       bridge = v;
       break;
     }
@@ -701,7 +740,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     // which a trampoline at an arbitrary site cannot reproduce, so the probe
     // would read whatever the instrumented kernel left behind. An ordinary
     // uninitialized read lands here too, and is equally unusable.
-    auto live_ins = analyze_probe_live_ins(*pt.probe_obj, *sym, arch_, callable->cc, &perr);
+    auto live_ins = analyze_probe_live_ins(*pt.probe_obj, *sym, arch_, callable->abi, &perr);
     if (!live_ins)
       return std::nullopt;
     if (!live_ins->none()) {
@@ -846,6 +885,17 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // the descriptors already scanned above.
   const std::optional<uint32_t> kernel_sgpr_count =
       AmdGpuCodeObject::min_kernel_sgpr_count(arch_, kernels);
+
+  // The kernel's VGPR allocation, decoded once: it depends only on the
+  // descriptor and the arch, both loop-invariant. Stays all-zero unless exactly
+  // one kernel was discovered, since with several there is no single allocation
+  // to name; `kernels.size() != 1` is the guard every use tests. The zero state
+  // fails closed rather than silently widening a bound: `ordinary_bound == 0`
+  // leaves the SGPR bridge scan with nothing to pick, and `acc_count == 0`
+  // rejects every AccVGPR index.
+  const KernelVgprBounds vgpr_bounds = kernels.size() == 1
+                                           ? kernel_vgpr_bounds(arch_, kernels.front().descriptor)
+                                           : KernelVgprBounds{};
   std::optional<SpillManager> spills;
   uint64_t spill_descriptor_file_offset = 0;
 
@@ -879,13 +929,14 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       }
 
       // The kernel must own the fixed return-link pair.
-      if (const std::optional<uint16_t> link_base = link_pair_for(probe.cc);
-          link_base && !probe_link_pair_fits_in_kernel(*kernel_sgpr_count, *link_base)) {
+      if (const uint16_t link_base = probe.abi.link_pair_base;
+          is_valid_probe_abi(probe.abi) &&
+          !probe_link_pair_fits_in_kernel(*kernel_sgpr_count, link_base)) {
         result.errors.push_back(
-            "probe call needs the return-link pair s[" + std::to_string(*link_base) + ":" +
-            std::to_string(*link_base + 1) + "] but the kernel allocates only " +
+            "probe call needs the return-link pair s[" + std::to_string(link_base) + ":" +
+            std::to_string(link_base + 1) + "] but the kernel allocates only " +
             std::to_string(*kernel_sgpr_count) + " SGPRs; rebuild the kernel with at least " +
-            std::to_string(*link_base + 2) + " SGPRs");
+            std::to_string(link_base + 2) + " SGPRs");
         continue;
       }
 
@@ -904,7 +955,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       }
 
       // The probe must not overwrite its own return-link pair before returning.
-      if (!check_probe_link_pair(*summary, probe.cc, &err)) {
+      if (!check_probe_link_pair(*summary, probe.abi, &err)) {
         result.errors.push_back(std::move(err));
         continue;
       }
@@ -933,7 +984,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       plan.kernel_sgpr_count = *kernel_sgpr_count;
       // Given liveness, clobbers, and calling convention, select registers
       // for trampoline and determine how big the trampoline will be
-      if (!TrampolineBuilder::plan_probe_call(plan, probe.cc, live, summary->ordinary_clobbers,
+      if (!TrampolineBuilder::plan_probe_call(plan, probe.abi, live, summary->ordinary_clobbers,
                                               &err)) {
         result.errors.push_back(std::move(err));
         continue;
@@ -948,7 +999,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       const RegisterSet spill = compute_spill_set(live, clobbers);
       if (!spill.none()) {
         // Single-kernel assumption: spilling needs exactly one kernel descriptor
-        // with non-zero fixed scratch to grow.
+        // with non-zero fixed scratch to grow. That is the same condition under
+        // which vgpr_bounds was decoded, so testing it here is what licenses the
+        // reads below.
         if (kernels.size() != 1 || kernels.front().descriptor.private_segment_fixed_size == 0) {
           result.errors.push_back(
               "probe call at anchor_offset " + std::to_string(site.anchor_offset) +
@@ -980,45 +1033,19 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
           result.errors.push_back(std::move(err));
           continue;
         }
-        const uint32_t granulated_vgpr_count =
-            AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc1,
-                            rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
-        // The descriptor encoding granule is wave-size dependent on RDNA (8 for
-        // Wave32, 4 for Wave64); using the Wave32 granule for a Wave64 kernel would
-        // overcount the allocation and let the SGPR bridge scan pick an unallocated
-        // VGPR. Share the wave-aware decoder with DBT so the two cannot diverge.
-        const uint32_t kernel_vgpr_count =
-            (granulated_vgpr_count + 1) *
-            descriptor_vgpr_granularity_for_wavefront(
-                arch_, kernel_wavefront_size(arch_, kernel.descriptor));
-        // On a unified-allocation arch the VGPR allocation splits at the ACCUM_OFFSET
-        // base ((encoded+1)*4) into an ordinary-VGPR prefix and the AccVGPR window.
-        // Arches without that split (non-CDNA, and CDNA1/gfx908 whose AGPRs allocate
-        // separately) have no ACCUM_OFFSET field, so the whole allocation is ordinary.
-        const uint32_t accum_base =
-            arch_has_unified_vgpr_allocation(arch_)
-                ? (AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc3,
-                                   rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
-                   1) *
-                      4
-                : kernel_vgpr_count;
         // The SGPR bridge must be an ordinary VGPR: an index in the accumulator
         // window would alias an AGPR that is not part of acc_spills.
-        const uint32_t ordinary_vgpr_bound = std::min(kernel_vgpr_count, accum_base);
         if (!sgpr_spill.none() &&
-            !plan_sgpr_spills(sgpr_spill, live, plan.vgpr_spills, ordinary_vgpr_bound, *spills,
-                              arch_, plan.sgpr_spills, plan.spill_bridge_vgpr, &err)) {
+            !plan_sgpr_spills(sgpr_spill, live, plan.vgpr_spills, vgpr_bounds.ordinary_bound,
+                              *spills, arch_, plan.sgpr_spills, plan.spill_bridge_vgpr, &err)) {
           result.errors.push_back(std::move(err));
           continue;
         }
         // AccVGPRs (CDNA only): reject an index past the allocated AGPR window.
-        if (!acc_spill.none()) {
-          const uint32_t acc_count =
-              kernel_vgpr_count > accum_base ? kernel_vgpr_count - accum_base : 0;
-          if (!plan_acc_spills(acc_spill, acc_count, *spills, arch_, plan.acc_spills, &err)) {
-            result.errors.push_back(std::move(err));
-            continue;
-          }
+        if (!acc_spill.none() && !plan_acc_spills(acc_spill, vgpr_bounds.acc_count, *spills, arch_,
+                                                  plan.acc_spills, &err)) {
+          result.errors.push_back(std::move(err));
+          continue;
         }
       }
 
