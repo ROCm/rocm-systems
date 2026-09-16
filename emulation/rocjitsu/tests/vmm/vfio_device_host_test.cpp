@@ -1261,11 +1261,11 @@ private:
 
 /// @brief Bytes whose value depends on @p seed, the position, and the page
 ///        holding that position.
-/// @details The first two bytes of each page carry the page index, so two
-/// pages never hold the same bytes regardless of how many there are and a
-/// cursor bug that reuses one page for every region fails the comparison, as
-/// does a transfer that lands at the wrong offset. The remaining bytes vary
-/// with seed and position.
+/// @details The first two bytes of each page carry the low 16 bits of the
+/// page index, so within a transfer of fewer than 65,536 pages no two pages
+/// hold the same bytes and a cursor bug that reuses one page for every
+/// region fails the comparison, as does a transfer that lands at the wrong
+/// offset. The remaining bytes vary with seed and position.
 std::vector<std::byte> byte_pattern(std::size_t length, uint8_t seed, uint64_t base = 0) {
   std::vector<std::byte> bytes(length);
   const uint64_t page_size = static_cast<uint64_t>(::sysconf(_SC_PAGESIZE));
@@ -1429,10 +1429,10 @@ TEST(VfioDeviceHostDma, SplitsATransferAtRegistrationBoundaries) {
 // A client-side IOMMU can reflect one large range as many page-sized windows.
 // The host resolves a multi-window transfer by first asking the library how
 // many scatter-gather entries it needs: above the initial capacity the vector
-// is resized and the request retried, and above the 256-entry ceiling the
-// transfer streams registration by registration instead. This test covers
-// both with more windows than the initial capacity but under the ceiling,
-// and more windows than the ceiling, moving the whole range in both directions
+// is resized and the request retried, and above the kMaxSgEntries threshold
+// the transfer streams registration by registration instead. This test covers
+// both with the first window count that requires resize-and-retry, and more
+// windows than the threshold, moving the whole range in both directions
 // and comparing every byte of every page.
 void run_streaming_transfer_test(uint64_t iova_base, std::size_t window_count) {
   ServedDevice served;
@@ -1473,7 +1473,12 @@ void run_streaming_transfer_test(uint64_t iova_base, std::size_t window_count) {
 }
 
 TEST(VfioDeviceHostDma, ResizesTheScatterGatherListBetweenTheLimits) {
-  run_streaming_transfer_test(kStreamingIova, rocjitsu::VfioDeviceHost::kInitialSgEntries + 8);
+  // One window past the initial capacity: the first count the library cannot
+  // answer in one shot, forcing the resize-and-retry path. Staying below
+  // kMaxSgEntries keeps the direct mapping, so this exercises resize only.
+  static_assert(rocjitsu::VfioDeviceHost::kInitialSgEntries + 1 <=
+                rocjitsu::VfioDeviceHost::kMaxSgEntries);
+  run_streaming_transfer_test(kStreamingIova, rocjitsu::VfioDeviceHost::kInitialSgEntries + 1);
 }
 
 TEST(VfioDeviceHostDma, StreamsAcrossMoreThanTheScatterGatherLimit) {
