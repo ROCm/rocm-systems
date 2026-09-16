@@ -634,6 +634,11 @@ protected:
         return done ? ncclSuccess : ncclInternalError;
     }
 
+    // Set by CastSetupPeerFailurePropagates only: makes this rank's SetupCastConnection
+    // report a local failure after its own listen/accept/connect succeeded, so the peer
+    // stays locally healthy and can only fail through the cross-rank reduction.
+    bool forceSetupFailureAfterConnect_ = false;
+
     // Agrees a skip decision across ranks before either side acts on it.
     //
     // A device-local predicate -- GDR backend support, a NIC count, anything read from
@@ -1001,7 +1006,9 @@ protected:
     // ASSERT_SETUP_CAST_CONNECTION() at the call site so the failure ends the test.
     [[nodiscard]] ncclResult_t SetupCastConnection(int dev,
                                                    void** listenComm, void** sendComm, void** recvComm,
-                                                   std::string* why = nullptr) {
+                                                   std::string* why = nullptr,
+                                                   int timeoutMs = kConnectTimeoutMs) {
+        const int maxAttempts = std::max(1, timeoutMs / kPollIntervalMs);
         const int rank = MPIEnvironment::world_rank;
         const int peer = 1 - rank;
         struct SetupHandshake {
@@ -1030,7 +1037,7 @@ protected:
             // Sent even on failure: the peer is waiting for this message.
             MPI_Send(&handshake, sizeof(handshake), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
 
-            for (int i = 0; localOk && i < kConnectTimeoutMs / kPollIntervalMs
+            for (int i = 0; localOk && i < maxAttempts
                             && *recvComm == nullptr; i++) {
                 if (AcceptConnection(*listenComm, recvComm) != ncclSuccess) {
                     localOk = false;
@@ -1047,7 +1054,7 @@ protected:
                 localReason = "peer's listen failed";
             } else {
                 memcpy(handle, handshake.handle, sizeof(handle));
-                for (int i = 0; localOk && i < kConnectTimeoutMs / kPollIntervalMs
+                for (int i = 0; localOk && i < maxAttempts
                                 && *sendComm == nullptr; i++) {
                     if (ConnectToRemote(dev, &handle, sendComm) != ncclSuccess) {
                         localOk = false;
@@ -1057,6 +1064,18 @@ protected:
                 }
                 if (localOk && *sendComm == nullptr) { localOk = false; localReason = "connect timed out"; }
             }
+        }
+
+        // Test-only seam, and the only way to reach the case the reduction exists for.
+        // A real one-sided device failure cannot produce it: rank 0's accept succeeds
+        // only if rank 1 connected, so the two ranks fail or succeed together and the
+        // reduction is never load-bearing. Forcing a local failure after this rank's own
+        // setup succeeded is what leaves the peer locally healthy, so the peer can only
+        // learn of the failure through the reduction below. Nothing but
+        // CastSetupPeerFailurePropagates sets this.
+        if (forceSetupFailureAfterConnect_ && localOk) {
+            localOk = false;
+            localReason = "failure injected after this rank's setup succeeded";
         }
 
         int ok = localOk ? 1 : 0;
