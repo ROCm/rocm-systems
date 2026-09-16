@@ -2145,6 +2145,8 @@ _CPP_PREAMBLE = """\
 #include "hrr/hrr_api_args.h"
 
 #include "hip/amd_detail/hip_api_trace.hpp"
+#include "utils/debug.hpp"     // LogPrintfWarning — capture diagnostics go through
+                               // amd's log-level machinery, never raw stderr.
 
 #include <atomic>
 #include <cstdint>
@@ -2285,9 +2287,9 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
             lines.append(f"        static bool warned_{d.param} = false;")
             lines.append(f"        if (!warned_{d.param}) {{")
             lines.append(f"          warned_{d.param} = true;")
-            lines.append(f"          fprintf(stderr,")
-            lines.append(f"                  \"[HRR] {entry.name}: {d.param} is %zu characters; \"")
-            lines.append(f"                  \"recording the first {d.max_count - 1} only.\\n\", _n);")
+            lines.append(f"          LogPrintfWarning(")
+            lines.append(f"              \"[HRR] {entry.name}: {d.param} is %zu characters; \"")
+            lines.append(f"              \"recording the first {d.max_count - 1} only\", _n);")
             lines.append(f"        }}")
             lines.append(f"        _n = {d.max_count - 1}u;")
             lines.append(f"      }}")
@@ -2302,10 +2304,10 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
             lines.append(f"        static bool warned_{d.param} = false;")
             lines.append(f"        if (!warned_{d.param}) {{")
             lines.append(f"          warned_{d.param} = true;")
-            lines.append(f"          fprintf(stderr,")
-            lines.append(f"                  \"[HRR] {entry.name}: recording only the first {d.max_count} \"")
-            lines.append(f"                  \"of %u {d.param} entries; replay of this call will be \"")
-            lines.append(f"                  \"incomplete.\\n\", _n);")
+            lines.append(f"          LogPrintfWarning(")
+            lines.append(f"              \"[HRR] {entry.name}: recording only the first {d.max_count} \"")
+            lines.append(f"              \"of %u {d.param} entries; replay of this call will be \"")
+            lines.append(f"              \"incomplete\", _n);")
             lines.append(f"        }}")
             lines.append(f"        _n = {d.max_count}u;")
             lines.append(f"      }}")
