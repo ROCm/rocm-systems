@@ -229,14 +229,9 @@ inline constexpr std::array<metric_desc, HIPFILE_METRICS_COUNT> METRIC_TABLE{
 };
 
 static_assert([]() constexpr {
-    for(const auto& metric : METRIC_TABLE)
-    {
-        if(metric.unit == nullptr || metric.unit[0] == '\0')
-        {
-            return false;
-        }
-    }
-    return true;
+    return std::ranges::all_of(METRIC_TABLE, [](const auto& metric) constexpr {
+        return metric.unit != nullptr && metric.unit[0] != '\0';
+    });
 }());
 
 /**
