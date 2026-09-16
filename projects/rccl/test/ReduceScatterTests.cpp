@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #include "TestBed.hpp"
-#include "ScopedEnvVar.hpp"
+#include "SingleProcMemRegTestUtils.hpp"
 #include "StandaloneUtils.hpp"
 
 namespace RcclUnitTesting
@@ -125,29 +125,21 @@ namespace RcclUnitTesting
 
   TEST(ReduceScatter, SingleProcMemReg)
   {
-    ScopedEnvVar pool("UT_COMM_POOL", "0");
-    ScopedEnvVar singleProcMemReg("NCCL_SINGLE_PROC_MEM_REG_ENABLE", "1");
-    ScopedEnvVar cuMem("NCCL_CUMEM_ENABLE", "1");
-    TestBed testBed;
-    int const hipRuntimeVer = testBed.ev.GetHipRuntimeVersion();
-    if (hipRuntimeVer < 71260540) {
-      GTEST_SKIP() << "Skipping SingleProcMemReg: HIP runtime version ("
-                   << hipRuntimeVer << ") is lower than 71260540";
-    }
+    SingleProcMemRegTestConfig config;
+    config.mode = SingleProcMemRegMode::Enabled;
+    config.funcTypes = {ncclCollReduceScatter};
+    config.dataTypes = {ncclFloat64, ncclFloat32, ncclFloat16,
+                        ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
+    config.redOps = {ncclSum};
+    config.roots = {0};
+    config.numElements = {1, 3, 7, 4314, 5003, 1048575, 1048576};
+    config.inPlaceList = {true, false};
+    config.useHipGraphList = {true, false};
+    RunSingleProcMemRegTest(config);
+  }
 
-    // Configuration
-    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollReduceScatter};
-    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat64,ncclFloat32,ncclFloat16,ncclBfloat16,ncclFloat8e4m3,ncclFloat8e5m2};
-    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
-    std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = {1,3,7,4314,5003,1048575,1048576};
-    std::vector<bool>           const inPlaceList     = {true,false};
-    std::vector<bool>           const managedMemList  = {false};
-    std::vector<bool>           const useHipGraphList = {true,false};
-
-    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
-                           inPlaceList, managedMemList, useHipGraphList,true,MEM_ALLOC_SYMMETRIC_WIN);
-
-    testBed.Finalize();
+  TEST(ReduceScatter, SingleProcMemRegDisabledSmoke)
+  {
+    RunSingleProcMemRegDisabledSmoke(ncclCollReduceScatter, ncclFloat32, true);
   }
 }
