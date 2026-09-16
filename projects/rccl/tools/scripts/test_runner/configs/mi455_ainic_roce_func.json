@@ -1274,6 +1274,14 @@
           "name": "CeAlltoAllEligibilityTest",
           "description": "CE AlltoAll eligibility gating tests matching taskAppend (CTA_POLICY_ZERO, sysmem, capture, group depth)",
           "test_filter": "CeAlltoAllEligibilityTest.*"
+        },
+        {
+          "name": "CeAllReduceEligibilityTest",
+          "description": "CE AllReduce eligibility gate tests. RCCL_CE_AR_MAX_MSG_BYTES activates 2-shot on gfx1250 (ceNonRegMax[AllReduce]=0 by table design).",
+          "test_filter": "CeAllReduceEligibilityTest.*:RcclCeAllReduceEligibility.*",
+          "env_variables": {
+            "RCCL_CE_AR_MAX_MSG_BYTES": "268435456"
+          }
         }
       ]
     },
