@@ -26,7 +26,7 @@
 /// Current pipeline is all-or-nothing across all queued points: any per-site
 /// failure aborts the whole patch.
 /// Future work: predicate-based anchor selection (Instrumentor walks blocks
-/// itself), per-site failure tolerance, probe-call bodies,
+/// itself), per-site failure tolerance,
 /// AfterInst / BlockEntry / BlockExit kinds.
 /// As that lands the per-stage types will thicken
 /// (e.g. ResolvedInstrumentationSite probably gains an ordered list of bodies)
@@ -220,6 +220,8 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 ///   - @p pt.kind is BeforeInst (other kinds are unsupported in this milestone).
 ///   - @p pt.probe_obj and @p pt.probe_symbol are consistent: both set (a probe
 ///     call) or both empty (the inline nop). Setting only one is rejected.
+///   - @p pt.probe_args is empty without a probe: an inline-nop site has
+///     nowhere to put arguments.
 ///   - @p pt.force_full_exec is not set without a probe: an inline-nop site
 ///     has no call envelope whose mask could be widened.
 [[nodiscard]] std::optional<ResolvedInstrumentationSite>
@@ -239,11 +241,12 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 ///        exactly one `before_items` entry containing `s_nop 0`, empty
 ///        `after_items`, and `emit_original == true`.
 ///
-/// One of several places where temporary inlined nop constraints are enforced.
-/// The others: validate_anchor() rejects reserved InstrumentationPoint fields,
-/// and Instrumentor::patch() rejects multi-text code objects and the multi-
-/// point case. This one lives at the orchestrator boundary rather than inside
-/// TrampolineBuilder so the builder stays generic.
+/// One of several places where temporary constraints are enforced. The others:
+/// validate_anchor() rejects a non-zero `filter_flags`, the only
+/// InstrumentationPoint field still reserved, and any `kind` other than
+/// BeforeInst; Instrumentor::patch() rejects multi-text code objects. This one
+/// lives at the orchestrator boundary rather than inside TrampolineBuilder so
+/// the builder stays generic.
 /// Called by Instrumentor::patch() as a defense-check (make sure users/agents
 /// do not misinterpret current DBI support) and also directly by tests
 ///

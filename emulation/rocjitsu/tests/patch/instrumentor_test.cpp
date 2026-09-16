@@ -2024,6 +2024,47 @@ TEST(InstrumentorProbePatch, PointsAgreeingOnPolicyAndSourcesShareOneBody) {
   EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 1);
 }
 
+// An immediate's value is the one part of an argument the probe declaration
+// deliberately excludes: the body reveals nothing about which constant it wants,
+// and each trampoline materializes its own. Two sites agreeing on the source but
+// not the payload are therefore one probe, not two.
+TEST(InstrumentorProbePatch, PointsDifferingOnlyInImmediateValuesShareOneBody) {
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  constexpr uint32_t kFirstValue = 0xAAAAAAAAu;
+  constexpr uint32_t kSecondValue = 0xBBBBBBBBu;
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  for (uint64_t anchor : {uint64_t{0}, uint64_t{4}}) {
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    pt.probe_args = {probe_arg_imm(anchor == 0 ? kFirstValue : kSecondValue)};
+    instr.add_point(pt);
+  }
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 2u);
+  EXPECT_EQ(result.patches[0].probe_target_offset, result.patches[1].probe_target_offset);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  constexpr size_t kOriginalTextWords = 2;
+  ASSERT_GT(text.size(), kOriginalTextWords);
+  const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
+  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 1);
+  // One shared body, but each trampoline still materializes its own constant.
+  EXPECT_EQ(std::count(cave.begin(), cave.end(), kFirstValue), 1);
+  EXPECT_EQ(std::count(cave.begin(), cave.end(), kSecondValue), 1);
+}
+
 // A Wave32 kernel's EXEC is one dword. Passing the high half would hand the
 // probe a register the kernel's wave size gives no meaning, so the site is
 // rejected rather than delivering it.
