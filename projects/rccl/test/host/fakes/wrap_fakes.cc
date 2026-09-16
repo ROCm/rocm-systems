@@ -44,6 +44,9 @@
 #include "group.h"
 #include "nccl.h"
 #include "rccl_common.h"
+#ifdef ENABLE_ROCSHMEM_GIN
+#include "algorithms/gin/gin_all_reduce.h"
+#endif
 #include "signature-drift.h"
 #include "strongstream.h"
 #include "sym_kernels.h"
@@ -172,6 +175,19 @@ ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) { return g_commCou
 // upstream of these seams are unaffected -- verified by rereading each real
 // call site before choosing it.
 // ---------------------------------------------------------------------------
+
+#ifdef ENABLE_ROCSHMEM_GIN
+// The real definitions live in gin_all_reduce_sdma.cu, which this host-only
+// binary intentionally does not compile. Keep GIN-SDMA out of the selector by
+// default so ENABLE_ROCSHMEM_GIN builds retain the non-GIN test behaviour.
+bool ncclAllReduceGinSdmaEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+  return false;
+}
+
+bool ncclAllReduceGinSdmaYieldToDda(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+  return false;
+}
+#endif
 
 // Drives `symEligible` in all three rcclSelectXxx functions. Default false:
 // "no symmetric-window kernel requested," letting the DDA/CE/Direct/plain
