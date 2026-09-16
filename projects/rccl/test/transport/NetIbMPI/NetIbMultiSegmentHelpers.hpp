@@ -97,11 +97,12 @@ inline void FreeMultiSegmentVmm(MultiSegmentVmmBuffer& b) {
 }
 
 // Export one dma-buf fd per segment and register the buffer as a multi-segment
-// MR via the classic NET/IB plugin entry point. Returns the registration result;
-// on ncclSuccess *mhandle holds the composite handle. Returns ncclInvalidUsage
-// (without touching *mhandle) if the dma-buf export API is unavailable at build
-// time (older HIP), so callers can SKIP.
-inline ncclResult_t RegisterMultiSegmentMr(void* comm, const MultiSegmentVmmBuffer& b, void** mhandle) {
+// MR via the matching NET plugin helper (classic ncclIb vs CAST IbCast). The
+// comm object is plugin-specific, so NCCL_NET=IB-CAST must not call the classic
+// helper. Returns the registration result; on ncclSuccess *mhandle holds the
+// composite handle. Returns ncclInvalidUsage (without touching *mhandle) if the
+// dma-buf export API is unavailable at build time (older HIP), so callers can SKIP.
+inline ncclResult_t RegisterMultiSegmentMr(void* comm, const MultiSegmentVmmBuffer& b, bool isCast, void** mhandle) {
 #if NCCL_CUMEM_DMABUF_EXPORT_GATE
     std::vector<void*>    segAddrs(b.nSegments);
     std::vector<size_t>   segLens(b.nSegments);
@@ -120,7 +121,10 @@ inline ncclResult_t RegisterMultiSegmentMr(void* comm, const MultiSegmentVmmBuff
         segLens[s]  = b.segSize;
         segFds[s]   = fd;
     }
-    ret = ncclIbRegMrDmaBufMultiSeg(comm, b.nSegments, segAddrs.data(), segLens.data(),
+    ret = isCast
+        ? IbCastRegMrDmaBufMultiSeg(comm, b.nSegments, segAddrs.data(), segLens.data(),
+                                    segOffsets.data(), segFds.data(), NCCL_PTR_CUDA, mhandle)
+        : ncclIbRegMrDmaBufMultiSeg(comm, b.nSegments, segAddrs.data(), segLens.data(),
                                     segOffsets.data(), segFds.data(), NCCL_PTR_CUDA, mhandle);
 cleanup:
     for (int s = 0; s < b.nSegments; s++) if (segFds[s] != -1) (void)close(segFds[s]);
