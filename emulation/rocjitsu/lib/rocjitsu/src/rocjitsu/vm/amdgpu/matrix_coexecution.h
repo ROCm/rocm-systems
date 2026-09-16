@@ -16,6 +16,7 @@
 #include <exception>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -513,6 +514,31 @@ inline SharedPool &shared_pool() {
   static auto *pool = new SharedPool(shared_helper_limit().value_or(4));
   return *pool;
 }
+
+/// Shared by all CUs and GPUs in one VM. Config parsing does not start helpers;
+/// the first eligible instruction creates the pool. Explicit environment-based
+/// experiments retain their process-wide pool.
+class ExecutionResources {
+public:
+  ExecutionResources(int mode, unsigned helpers, unsigned width, bool process_pool = false)
+      : mode_(mode), helpers_(helpers), width_(width), process_pool_(process_pool) {}
+  int mode() const { return mode_; }
+  unsigned helpers() const { return helpers_; }
+  unsigned width() const { return width_; }
+  SharedPool &pool() {
+    if (process_pool_ || !helpers_enabled())
+      return shared_pool();
+    std::call_once(once_, [&] { pool_ = std::make_unique<SharedPool>(helpers_); });
+    return *pool_;
+  }
+
+private:
+  int mode_;
+  unsigned helpers_, width_;
+  bool process_pool_;
+  std::once_flag once_;
+  std::unique_ptr<SharedPool> pool_;
+};
 
 inline void execute_batch(std::span<Instruction *> instructions, void *wave) {
   if (auto count = shared_helper_limit()) {

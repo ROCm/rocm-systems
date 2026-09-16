@@ -36,7 +36,7 @@ public:
   uint64_t hazards = 0, boundaries = 0, full = 0, retired_mma = 0;
   ~Stats() { flush(); }
   void flush() {
-    if (windows)
+    if (windows && (std::getenv("RJ_ASYNC_STATS") || std::getenv("RJ_MATRIX_COEXEC")))
       util::Logger::warn(std::format("RJ_ASYNC windows={} mma={} inline_overlap={} hazards={} "
                                      "boundaries={} full={} retired_mma={}",
                                      windows, mma, inline_overlap, hazards, boundaries, full,
@@ -197,17 +197,17 @@ public:
       if (i == sources || !operand->const_value())
         return false;
     }
-    const size_t limit = matrix_coexecution::width() - 1;
+    const size_t limit = issue_width_ - 1;
     if (!limit)
       return false;
-    auto &pool = matrix_coexecution::shared_pool();
-    if (!pool.available()) {
+    if (!pool_.available()) {
       ++async_execution::stats.full;
       return false;
     }
     materialize();
     if (!arithmetic_)
-      arithmetic_.emplace(this, retire_arithmetic, AsyncInstructionQueue::Completion::Independent);
+      arithmetic_.emplace(this, retire_arithmetic, AsyncInstructionQueue::Completion::Independent,
+                          pool_);
     if (arithmetic_->size() < limit && arithmetic_->submit(inst, *inst, &wf_, *access, wf_.pc)) {
       ++async_execution::stats.mma;
       started();
@@ -254,6 +254,8 @@ private:
   }
   ComputeUnitCore &cu_;
   Wavefront &wf_;
+  matrix_coexecution::SharedPool &pool_;
+  unsigned issue_width_;
   std::optional<AsyncInstructionQueue> arithmetic_;
   bool has_accvgprs_;
   bool stopped_ = false, started_ = false, materialized_ = false;

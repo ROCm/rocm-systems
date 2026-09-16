@@ -753,11 +753,31 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
     vm.gpu.num_gpus = topology.gpus_per_node.max(1);
     let mut sim = serde_json::json!({
         "max_ticks": 100000u64,
-        "num_threads": 1u32,
         "exec_mode": exec_mode,
         "vm": vm,
         "topology": agent.topology,
+        "thread_allocations": agent.thread_allocations,
     });
+    // Leave allocation to the native target-aware policy unless overridden.
+    for (key, min, max) in [
+        ("cpu_thread_budget", 0, i64::from(u32::MAX)),
+        ("num_threads", 0, i64::from(u32::MAX)),
+        ("cpu_dispatch_threads", 0, i64::from(u32::MAX)),
+        ("async_helper_threads", -1, 128),
+    ] {
+        if let Some(value) = def.options.get(key) {
+            match value {
+                SimpleValue::Number(n) if (min..=max).contains(n) => {
+                    sim[key] = serde_json::Value::from(*n);
+                }
+                _ => {
+                    return Err(MirageError::Other(format!(
+                        "rocjitsu {key} must be an integer between {min} and {max}"
+                    )));
+                }
+            }
+        }
+    }
     // Carry the profile's plugin selection into the synthesised rocjitsu
     // config so the interposer (local path) and the per-node daemon both
     // enable them through the rocjitsu plugin loader. `def.plugins` maps a
@@ -1069,6 +1089,74 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&cfg).unwrap()).unwrap();
         assert_eq!(json["vm"]["gpu"]["num_gpus"], 2);
+    }
+
+    #[test]
+    fn generated_config_preserves_target_allocations() {
+        let mut def = def_with_gpus(2);
+        if let MaybeRef::Owned(topology) = &mut def.topology {
+            topology.agent = MaybeRef::Owned(mirage_core::agent::AgentDef {
+                thread_allocations: vec![mirage_core::agent::ExecutionThreadChoice {
+                    num_threads: 2,
+                    cpu_dispatch_threads: 5,
+                    async_helper_threads: 2,
+                }],
+                ..Default::default()
+            });
+        }
+        let SimConfig::Synthesised(bytes) = resolve_sim_config(&def).unwrap() else {
+            panic!("expected generated config");
+        };
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            json["thread_allocations"],
+            serde_json::json!([
+                {"num_threads":2,"cpu_dispatch_threads":5,"async_helper_threads":2}
+            ])
+        );
+        assert_eq!(json["vm"]["gpu"]["num_gpus"], 2);
+    }
+
+    #[test]
+    fn generated_config_defers_thread_defaults_and_preserves_overrides() {
+        let mut def = def_with_gpus(1);
+        let decode = |def: &EmulatorDef| {
+            let SimConfig::Synthesised(bytes) = resolve_sim_config(def).unwrap() else {
+                panic!("expected generated config");
+            };
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
+        };
+        let default = decode(&def);
+        for key in [
+            "num_threads",
+            "cpu_dispatch_threads",
+            "async_helper_threads",
+            "cpu_thread_budget",
+        ] {
+            assert!(default.get(key).is_none());
+        }
+        for (key, value) in [
+            ("cpu_thread_budget", 64),
+            ("num_threads", 8),
+            ("cpu_dispatch_threads", 17),
+            ("async_helper_threads", 8),
+        ] {
+            def.options
+                .insert(key.to_owned(), SimpleValue::Number(value));
+        }
+        let explicit = decode(&def);
+        assert_eq!(explicit["cpu_thread_budget"], 64);
+        assert_eq!(explicit["num_threads"], 8);
+        assert_eq!(explicit["cpu_dispatch_threads"], 17);
+        assert_eq!(explicit["async_helper_threads"], 8);
+        def.options
+            .insert("async_helper_threads".to_owned(), SimpleValue::Number(-2));
+        assert!(resolve_sim_config(&def).is_err());
+        def.options.insert(
+            "async_helper_threads".to_owned(),
+            SimpleValue::Boolean(true),
+        );
+        assert!(resolve_sim_config(&def).is_err());
     }
 
     /// A drop-in `--config` is used verbatim, but its runtime directory

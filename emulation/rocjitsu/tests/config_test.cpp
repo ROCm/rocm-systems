@@ -2073,10 +2073,9 @@ TEST(CApiTest, FunctionalDispatchThreadsPropagateExplicitAndAutoValues) {
   };
 
   run_case(/*configured=*/7, /*expected=*/7);
-  const auto auto_budget = config::resolve_cpu_dispatch_thread_budgets(
-      /*requested_threads=*/0, std::thread::hardware_concurrency(), /*soc_count=*/1);
-  ASSERT_EQ(auto_budget.size(), 1u);
-  run_case(/*configured=*/0, /*expected=*/std::min(auto_budget.front(), 7u));
+  const auto loaded = config::load_config_from_string(functional_dispatch_threads_config(0),
+                                                      rocjitsu::kEmbeddedSchema);
+  run_case(/*configured=*/0, /*expected=*/loaded.execution_threads.dispatch.front());
 }
 
 TEST(CApiTest, ExplicitFunctionalDispatchThreadsClampToSingleCuCapacity) {
@@ -2128,8 +2127,8 @@ TEST(CApiTest, AutoFunctionalDispatchBudgetAppliesToEveryGpu) {
 
   ASSERT_NE(handle->vm, nullptr);
   ASSERT_EQ(handle->vm->num_socs(), 4u);
-  const auto expected = config::resolve_cpu_dispatch_thread_budgets(
-      /*requested_threads=*/0, std::thread::hardware_concurrency(), handle->vm->num_socs());
+  const auto expected =
+      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema).execution_threads.dispatch;
   ASSERT_EQ(expected.size(), handle->vm->num_socs());
   for (uint32_t i = 0; i < handle->vm->num_socs(); ++i)
     EXPECT_EQ(handle->vm->soc(i)->dispatch_threads(), expected[i]) << "SoC " << i;
@@ -2276,7 +2275,10 @@ TEST(CApiTest, CheckpointRoundTrip) {
 }
 
 TEST(CApiTest, CheckpointRoundTripPreservesAutomaticFunctionalDispatch) {
-  const std::string json = functional_dispatch_threads_config(/*threads=*/0);
+  std::string json = functional_dispatch_threads_config(/*threads=*/0);
+  json.insert(json.find('{') + 1, R"("cpu_thread_budget":8,"thread_allocations":[
+    {"num_threads":1,"cpu_dispatch_threads":1,"async_helper_threads":0},
+    {"num_threads":1,"cpu_dispatch_threads":7,"async_helper_threads":0}],)");
   rj_vm_t *raw_source = nullptr;
   ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_source),
             ROCJITSU_STATUS_SUCCESS);
@@ -2284,6 +2286,7 @@ TEST(CApiTest, CheckpointRoundTripPreservesAutomaticFunctionalDispatch) {
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw_source, &rj_vm_destroy);
   ASSERT_EQ(source->loaded.cpu_dispatch_threads, 0u);
   const uint32_t effective_threads = source->soc->dispatch_threads();
+  ASSERT_EQ(effective_threads, 7u);
 
   test::ScopedTempFile checkpoint_file("rocjitsu-auto-dispatch-checkpoint-");
   ASSERT_EQ(rj_vm_save_checkpoint(source.get(), checkpoint_file.path().c_str(), 42),
@@ -2296,6 +2299,10 @@ TEST(CApiTest, CheckpointRoundTripPreservesAutomaticFunctionalDispatch) {
   EXPECT_TRUE(flatbuffers::IsFieldPresent(checkpoint->config(),
                                           fb::SimulationConfig::VT_CPU_DISPATCH_THREADS));
   EXPECT_EQ(checkpoint->config()->cpu_dispatch_threads(), 0u);
+  EXPECT_EQ(checkpoint->config()->cpu_thread_budget(), 8u);
+  EXPECT_EQ(checkpoint->config()->async_helper_threads(), -1);
+  ASSERT_NE(checkpoint->config()->thread_allocations(), nullptr);
+  EXPECT_EQ(checkpoint->config()->thread_allocations()->size(), 2u);
 
   // The checkpoint retains the automatic request rather than freezing the
   // source host's effective width. Reapplying the restored policy against a

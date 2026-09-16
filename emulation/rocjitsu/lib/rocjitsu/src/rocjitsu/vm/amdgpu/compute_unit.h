@@ -64,6 +64,10 @@ class CommandProcessor;
 class AsyncInstructionWindow;
 class MmaAdmissionCache;
 struct AsyncInstructionWindowStorage;
+namespace matrix_coexecution {
+class ExecutionResources;
+class SharedPool;
+} // namespace matrix_coexecution
 
 inline constexpr int32_t kWorkgroupBarrierId = -1;
 inline constexpr int32_t kWorkgroupTrapBarrierId = -2;
@@ -127,6 +131,7 @@ public:
     /// Maximum CU step() iterations per functional slice. One step can issue
     /// one instruction for every runnable wavefront resident on the CU.
     uint32_t functional_quantum = kFunctionalQuantum;
+    std::shared_ptr<matrix_coexecution::ExecutionResources> async_resources = nullptr;
   };
 
   ~ComputeUnitCore() override = default;
@@ -431,6 +436,9 @@ public:
   /// @brief Return the CU configuration.
   /// @returns Const reference to the CU configuration.
   const Config &config() const { return config_; }
+  int matrix_execution_mode() const;
+  unsigned async_issue_width() const;
+  matrix_coexecution::SharedPool &async_pool();
 
   /// @brief Return the shared GPU memory.
   /// @returns Pointer to the GPU memory.
@@ -1010,6 +1018,7 @@ protected:
   }
 
   Config config_;
+  matrix_coexecution::SharedPool *async_pool_ = nullptr;
   GpuMemory *memory_;
   uint32_t wf_size_ = 0;
   const uint32_t vgprs_per_block_;

@@ -66,7 +66,8 @@ public:
     uint64_t accept = 0, reject = 0, issuer = 0, evictions = 0;
   } stats;
   void flush() {
-    if (!(stats.accept + stats.reject + stats.issuer))
+    if (!(stats.accept + stats.reject + stats.issuer) ||
+        !(std::getenv("RJ_ASYNC_STATS") || std::getenv("RJ_MATRIX_COEXEC")))
       return;
     util::Logger::warn(
         std::format("RJ_ADMISSION decodes={} decode_hits={} plans={} hits={} validations={} "

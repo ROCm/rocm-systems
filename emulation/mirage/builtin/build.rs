@@ -88,6 +88,15 @@ fn main() {
                 .unwrap_or_else(|| panic!("{} has no `{key}` on its compute unit", path.display()));
             writeln!(out, "    {key}: \"{value}\",").expect("writing to a String cannot fail");
         }
+        out.push_str("    thread_allocations: &[\n");
+        if let Some(choices) = json["thread_allocations"].as_array() {
+            for choice in choices {
+                writeln!(out, "        mirage_core::agent::ExecutionThreadChoice {{ num_threads: {}, cpu_dispatch_threads: {}, async_helper_threads: {} }},",
+                    choice["num_threads"], choice["cpu_dispatch_threads"], choice["async_helper_threads"])
+                    .expect("writing to a String cannot fail");
+            }
+        }
+        out.push_str("    ],\n");
         out.push_str("};\n\n");
     }
 

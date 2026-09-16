@@ -74,7 +74,10 @@ The example above is intentionally minimal.
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
 | `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned). Omit for the default. |
-| `cpu_dispatch_threads` | int | Requested functional CU-dispatch width (`1` = serial and the default when omitted; `0` = explicit automatic host-wide budget capped at 32 and split across SoCs; other values = per-SoC width). Each effective SoC width is capped at its largest per-CP CU count. |
+| `cpu_dispatch_threads` | int | Inclusive functional dispatch width per SoC. Omitted/0 selects a preferred allocation; 1 forces serial dispatch. Clamped to per-CP CU capacity. |
+| `async_helper_threads` | int | Shared async helpers per VM. Omitted/-1 selects a preferred allocation; 0 disables helpers. |
+| `cpu_thread_budget` | int | Automatic selection ceiling. Omitted/0 uses `min(process CPU affinity, 32)`; a positive value overrides that ceiling. |
+| `thread_allocations` | array | Preferred `num_threads` / `cpu_dispatch_threads` / `async_helper_threads` triples, selected by total execution-thread cost. |
 | `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
 
@@ -91,15 +94,21 @@ The value is clamped to the number of XCDs visible to the VM. With
 round-robin to four partitions; with `num_threads: 8`, each XCD gets its own
 partition. A single XCD is never split across partitions.
 
-**Default.** Omitting `num_threads` (or setting it to `0`) selects
-`min(available host threads, XCD count)` — normally one partition per XCD, since
-any host that runs the simulator has more CPUs than the GPU has XCDs. "Available"
-is the process's CPU affinity mask, not the machine's core count, so a job
-confined to one CPU by a cgroup, a container, or `taskset` gets one partition
-rather than eight. The cap keeps the simulation from asking for more workers
-than it can actually run concurrently; the conservative PDES barrier makes
-oversubscription markedly worse than a smaller partition count. The shipped
-configs omit the field and take this default. Set it explicitly to pin a count.
+**Default.** Functional mode chooses a triple from the target config's
+`thread_allocations` table. The pure `resolve_execution_threads()` function
+selects the largest effective allocation fitting the budget, after applying
+explicit knob overrides and topology limits. A budget between table entries
+uses the lower entry; it does not create workers merely to exhaust the budget.
+Later entries break ties. The automatic ceiling is `min(process CPU affinity,
+32)`, with a minimum of one. Set `cpu_thread_budget` explicitly to allow a
+larger entry. A config without a table uses serial defaults for unspecified
+knobs. Clocked mode uses only engines, capped by affinity/budget and XCD count.
+
+Explicit E, D or H values take precedence and may exceed the automatic ceiling.
+`RJ_MMA_SHARED_HELPERS` remains an experimental override for H. E is clamped to
+aggregate XCD count, and D to each SoC's largest per-CP CU count. Automatic H is
+zero on targets without an enabled async MMA adapter. No workload inspection
+is involved.
 
 Two separate contracts constrain consumers, and only the first is about the
 config file.
@@ -147,84 +156,63 @@ an empty share and run nothing. Fan-out also reaches only the XCDs of the SoC
 that owns the queue -- so in the two-GPU example above, one dispatch occupies at
 most the partitions covering its own GPU.
 
-`cpu_dispatch_threads` controls how much accepted CU work can execute in
-parallel on host threads. The default value, 1, keeps dispatch serial. A
-nonzero value is applied to every SoC and shared by all command processors
-within that SoC. Setting the field explicitly to 0 selects one host-wide
-automatic budget based on the available hardware threads, capped at 32, and
-divides it as evenly as possible across the SoCs. If there are fewer available
-threads than SoCs, each SoC remains serial. After either selection, each SoC's
-effective width is capped at the largest number of CUs owned by any one of its
-command processors, so the pool does not create workers that cannot run
-additional CU tasks. This setting does not change queue ownership, XCD fan-out,
-or which SPI or CU accepts the next workgroup. In clocked mode the effective
-value is always 1.
+#### Thread accounting and preferred allocations
 
-#### Worked CPU-concurrency examples
+For E engine threads, per-SoC inclusive dispatch widths D, and H shared helpers,
+the retained execution allocation is **E + sum(D - 1) + H**. Each dispatch
+submission also runs on its engine caller; concurrent XCD callers share the
+SoC's worker pool. H is shared across all GPUs in the VM and created lazily
+when async work first needs it. Runtime/doorbell/daemon threads are outside
+this execution budget. Explicit `RJ_MMA_SHARED_HELPERS` uses the existing
+process-wide experimental pool instead of the default VM-owned pool.
 
-The tables below separate the inputs that determine concurrency from the
-resulting host-thread limits. They use current shipped topologies. `S` is the
-SoC count, `X` is the XCD count per SoC, and `K` is the number of CUs reachable
-from one command processor. Each listed topology has one command processor per
-XCD, so `K` is also its CUs per XCD. `N` is `num_threads`, `D` is
-`cpu_dispatch_threads`, `H` is the host value reported by
-`hardware_concurrency()`, and `A` is the automatic-mode cap.
-The no-argument runtime helper uses `A = 32`; embedding callers can supply a
-different cap, but `A` is not a JSON setting. The conservative default of 32
-bounds persistent worker allocation on large hosts while retaining substantial
-CU parallelism. It is a policy limit, not a hardware limit.
+The measured eight-XCD presets use these granules:
 
-| Case | Shipped topology | S | X | CPs/SoC | CUs/CP (`K`) | Mode | N | D | H | A |
-|---|---|---:|---:|---:|---:|---|---:|---:|---:|---:|
-| A | CDNA4, one GPU | 1 | 8 | 8 | 36 | functional | 8 | 1 (omitted) | 64 | 32 |
-| B | CDNA4, one GPU | 1 | 8 | 8 | 36 | functional | 8 | 0 | 64 | 32 |
-| C | CDNA4, one GPU | 1 | 8 | 8 | 36 | functional | 8 | 64 | 16 | 32 |
-| D | CDNA4, two GPUs | 2 | 8 | 8 | 36 | functional | 1 | 0 | 64 | 32 |
-| E | CDNA4, two GPUs | 2 | 8 | 8 | 36 | functional | 16 | 0 | 64 | 32 |
-| F | CDNA5, four GPUs | 4 | 8 | 8 | 32 | functional | 16 | 0 | 128 | 32 |
-| G | CDNA5, four GPUs | 4 | 8 | 8 | 32 | functional | 4 | 20 | 8 | 32 |
-| H | CDNA4, one GPU | 1 | 8 | 8 | 36 | clocked | 8 | 0 | 64 | 32 |
+| Budget | gfx950 E/D/H | gfx1250 E/D/H |
+|---:|---:|---:|
+| 1 | 1/1/0 | 1/1/0 |
+| 2 | 1/2/0 | 1/2/0 |
+| 4 | 1/3/1 | 1/4/0 |
+| 8 | 2/5/2 | 2/5/2 |
+| 16 | 4/9/4 | 4/9/4 |
+| 24 | 8/12/5 | 8/12/5 |
+| 32 | 8/17/8 | 8/17/8 |
+| 64 (explicit budget) | 8/36/21 | 8/32/25 |
 
-`E` below is the effective Simdojo engine-thread count after clamping `N` to
-the total XCD count. The dispatch policy first produces a per-SoC budget `B`,
-then computes `W = min(B, K)`. At runtime, one CP batch uses at most
-`min(W, runnable CUs owned by that CP)` threads. Total CUs across the SoC do not
-increase this per-submission width; concurrent CP submissions share the retained
-worker set and each also executes on its own engine thread. `P` is the total number
-of retained pool workers, `sum(W - 1)`. `T = E + P` counts execution-thread
-slots, including the caller in single-threaded engine mode but excluding
-doorbell monitors, daemon threads, and other runtime threads. `R` is the
-maximum of those slots that can be runnable on useful simulation work at once.
-`Q` counts only threads advancing CU quanta. On one SoC with `E` active engine
-callers, its upper bound is `E + W - 1`. All maxima assume enough runnable work
-and favorable partition placement.
+These tables approximate E:dispatch-workers:H = 1:2:1 while keeping engine
+counts aligned with XCD count. A budget of 12 selects the eight-thread entry;
+48 selects the 32-thread entry. See [the measurements](concurrent-dispatch-heuristic.md).
+For multiple GPUs, selection counts every retained dispatch pool, so the same
+triple costs more than on a single GPU. Actual useful parallelism also depends
+on work reaching those GPUs/XCDs and enough runnable CUs being available.
 
-| Case | E: engine threads | W: CU threads per active CP | P: retained pool workers | T: execution threads | R: max runnable execution threads | Q: max concurrent CU quanta | Physical ceiling `min(H, R)` |
-|---|---:|---|---:|---:|---:|---:|---:|
-| A | 8 | `[1]` | 0 | 8 | 8 | 8 | 8 |
-| B | 8 | `[32]` | 31 | 39 | 39 | 39 | 39 |
-| C | 8 | `[36]` | 35 | 43 | 43 | 43 | 16 |
-| D | 1 | `[16, 16]` | 30 | 31 | 16 | 16 | 16 |
-| E | 16 | `[16, 16]` | 30 | 46 | 46 | 46 | 46 |
-| F | 16 | `[8, 8, 8, 8]` | 28 | 44 | 44 | 44 | 44 |
-| G | 4 | `[20, 20, 20, 20]` | 76 | 80 | 80 | 80 | 8 |
-| H | 8 | `[1]` | 0 | 8 | 8 | 8 | 8 |
+Print the allocations for any target without constructing a simulated GPU:
 
-Width `1` uses no pool, so independent XCD partitions can each advance one CU
-on their engine thread. A width greater than one creates one pool per SoC; the
-width includes the engine thread submitting the batch, and the pool retains
-`W - 1` additional workers. Command processors in the same SoC can submit
-concurrently and join only their own work; different SoCs own separate pools.
-Case D still creates 31 execution-thread slots but can use only 16 at once:
-its single engine caller drives one SoC's batch at a time. Multiplying
-`num_threads` by `cpu_dispatch_threads` is not a valid concurrency formula,
-because concurrent same-SoC callers share the worker set. Cases C and G also
-show that an explicit `D` bypasses the automatic cap and can oversubscribe the
-host.
+```sh
+rocjitsu --config configs/gfx950_mi355x.json --thread-budget-table
+```
 
-A checkpoint retains `D`, not `W`. Restoring `D = 0` therefore recomputes the
-automatic budget from the new host's `H` and `A`; explicit requests retain
-their value. Clocked mode always uses `W = 1` regardless of `D`.
+The configured row reflects the file's budget and current affinity. Remaining
+rows show explicit budget ceilings while retaining the file's knob overrides.
+The total column reports actual allocation, which may be below the ceiling or
+above it when explicitly overridden.
+
+For example, a deliberately small custom target can stop its preferred table
+at four threads, even on a larger host:
+
+```json
+"thread_allocations": [
+  {"num_threads": 1, "cpu_dispatch_threads": 1, "async_helper_threads": 0},
+  {"num_threads": 1, "cpu_dispatch_threads": 2, "async_helper_threads": 0},
+  {"num_threads": 1, "cpu_dispatch_threads": 4, "async_helper_threads": 0}
+]
+```
+
+Mirage copies these tables from its agent configuration and leaves allocation
+to rocjitsu. Profile options may override `cpu_thread_budget`, `num_threads`,
+`cpu_dispatch_threads` and `async_helper_threads`; a supplied config file is
+used verbatim. Checkpoints retain requests and preferred tables, so restore
+re-evaluates automatic selection for the receiving process's affinity.
 
 ### Topology
 

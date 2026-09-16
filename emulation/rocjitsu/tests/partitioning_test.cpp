@@ -3,6 +3,7 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
@@ -44,7 +45,8 @@ std::string config_json_with_num_threads(const std::string &path, uint32_t num_t
     throw std::runtime_error("Failed to open config: " + path);
 
   std::string json((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-  const std::string field = "\"num_threads\":";
+  // Shipped configs indent top-level keys by two spaces; table entries are nested.
+  const std::string field = "\n  \"num_threads\":";
   const std::string replacement = field + " " + std::to_string(num_threads);
 
   const size_t field_pos = json.find(field);
@@ -60,7 +62,7 @@ std::string config_json_with_num_threads(const std::string &path, uint32_t num_t
   if (brace_pos == std::string::npos)
     throw std::runtime_error("Config is not a JSON object: " + path);
 
-  json.insert(brace_pos + 1, "\n  " + replacement + ",");
+  json.insert(brace_pos + 1, replacement + ",");
   return json;
 }
 
@@ -150,15 +152,162 @@ TEST(CpuDispatchBudgetTest, ExplicitWidthRemainsPerSoc) {
             (std::vector<uint32_t>{7, 7, 7}));
 }
 
-TEST(CpuDispatchBudgetTest, ProductionConfigsDefaultToSerialDispatch) {
+TEST(CpuDispatchBudgetTest, ProductionConfigsDefaultToAutomaticDispatch) {
   {
     auto loaded = config::load_config(CONFIG_KMD_PATH, rocjitsu::kEmbeddedSchema);
-    EXPECT_EQ(loaded.cpu_dispatch_threads, 1u);
+    EXPECT_EQ(loaded.cpu_dispatch_threads, 0u);
   }
   {
     auto loaded = config::load_config(CONFIG_2GPU_PATH, rocjitsu::kEmbeddedSchema);
-    EXPECT_EQ(loaded.cpu_dispatch_threads, 1u);
+    EXPECT_EQ(loaded.cpu_dispatch_threads, 0u);
   }
+}
+
+using Choice = config::ExecutionThreadChoice;
+constexpr Choice kCdna4Choices[] = {{1, 1, 0}, {1, 2, 0},  {1, 3, 1},  {2, 5, 2},
+                                    {4, 9, 4}, {8, 12, 5}, {8, 17, 8}, {8, 36, 21}};
+
+TEST(ExecutionThreadBudgetTest, SelectsLargestFittingGranuleAndCapsAutomaticBudget) {
+  struct Case {
+    uint32_t budget, engines, dispatch, helpers;
+  };
+  const Case cases[] = {{1, 1, 1, 0},   {2, 1, 2, 0},   {3, 1, 2, 0},   {4, 1, 3, 1},
+                        {7, 1, 3, 1},   {8, 2, 5, 2},   {12, 2, 5, 2},  {16, 4, 9, 4},
+                        {23, 4, 9, 4},  {24, 8, 12, 5}, {31, 8, 12, 5}, {32, 8, 17, 8},
+                        {48, 8, 17, 8}, {64, 8, 36, 21}};
+  const std::array capacities{36u};
+  for (auto c : cases) {
+    SCOPED_TRACE(c.budget);
+    auto plan = config::resolve_execution_threads({.budget = c.budget}, 128, 8, capacities, true,
+                                                  kCdna4Choices);
+    EXPECT_EQ(plan.engines, c.engines);
+    EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{c.dispatch}));
+    EXPECT_EQ(plan.helpers, c.helpers);
+  }
+  auto capped = config::resolve_execution_threads({}, 128, 8, capacities, true, kCdna4Choices);
+  EXPECT_EQ(capped.engines, 8u);
+  EXPECT_EQ(capped.dispatch, (std::vector<uint32_t>{17}));
+  EXPECT_EQ(capped.helpers, 8u);
+  auto unknown = config::resolve_execution_threads({}, 0, 8, capacities, true, kCdna4Choices);
+  EXPECT_EQ(unknown.engines, 1u);
+  EXPECT_EQ(unknown.dispatch, (std::vector<uint32_t>{1}));
+  EXPECT_EQ(unknown.helpers, 0u);
+}
+
+TEST(ExecutionThreadBudgetTest, ConfigCanStopAtAFewThreads) {
+  const Choice choices[] = {{1, 1, 0}, {1, 2, 0}, {1, 4, 0}};
+  const std::array capacities{64u};
+  auto plan = config::resolve_execution_threads({}, 64, 1, capacities, false, choices);
+  EXPECT_EQ(plan.engines, 1u);
+  EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{4}));
+  EXPECT_EQ(plan.helpers, 0u);
+}
+
+TEST(ExecutionThreadBudgetTest, AccountsForEveryGpuAndTopologyClamps) {
+  const Choice choices[] = {{1, 1, 0}, {2, 5, 2}, {8, 17, 8}};
+  const std::array capacities{36u, 36u};
+  auto plan = config::resolve_execution_threads({}, 32, 16, capacities, true, choices);
+  EXPECT_EQ(plan.engines, 2u);
+  EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{5, 5}));
+  EXPECT_EQ(plan.helpers, 2u); // 2 + 2*(5-1) + 2 = 12; the next entry costs 48.
+  const std::array tiny{2u};
+  plan = config::resolve_execution_threads({}, 32, 1, tiny, false, choices);
+  EXPECT_EQ(plan.engines, 1u);
+  EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{2}));
+  EXPECT_EQ(plan.helpers, 0u);
+}
+
+TEST(ExecutionThreadBudgetTest, ExplicitOverridesAndSafeFallback) {
+  const std::array capacities{64u};
+  auto plan = config::resolve_execution_threads({.engines = 8, .dispatch = 33, .helpers = 8}, 4, 8,
+                                                capacities, true, kCdna4Choices);
+  EXPECT_EQ(plan.engines, 8u);
+  EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{33}));
+  EXPECT_EQ(plan.helpers, 8u);
+  plan = config::resolve_execution_threads({.dispatch = 1, .helpers = 0}, 32, 8, capacities, true,
+                                           kCdna4Choices);
+  EXPECT_EQ(plan.engines, 8u);
+  EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{1}));
+  EXPECT_EQ(plan.helpers, 0u);
+  plan = config::resolve_execution_threads({}, 64, 8, capacities, true, {});
+  EXPECT_EQ(plan.engines, 1u);
+  EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{1}));
+  EXPECT_EQ(plan.helpers, 0u);
+  plan = config::resolve_execution_threads({}, 4, 8, capacities, true, kCdna4Choices, true);
+  EXPECT_EQ(plan.engines, 4u);
+  EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{1}));
+  EXPECT_EQ(plan.helpers, 0u);
+}
+
+TEST(ExecutionThreadBudgetTest, RejectsInvalidRequestsAndGranules) {
+  const std::array capacities{36u};
+  for (int helpers : {-2, 129})
+    EXPECT_THROW(
+        config::resolve_execution_threads({.helpers = helpers}, 64, 8, capacities, true, {}),
+        std::invalid_argument);
+  for (Choice choice : {Choice{0, 1, 0}, Choice{1, 0, 0}, Choice{1, 1, 129}})
+    EXPECT_THROW(
+        config::resolve_execution_threads({}, 64, 8, capacities, true, std::span(&choice, 1)),
+        std::invalid_argument);
+}
+
+TEST(ExecutionThreadBudgetTest, AutomaticPlansStayWithinAffinityAndCapacity) {
+  for (uint32_t host : {0u, 1u, 2u, 3u, 4u, 7u, 8u, 16u, 24u, 32u, 64u, 128u})
+    for (uint32_t xcds : {1u, 2u, 3u, 4u, 7u, 8u, 16u, 32u})
+      for (bool async : {false, true}) {
+        const std::array capacities{2u, 36u};
+        auto plan =
+            config::resolve_execution_threads({}, host, xcds, capacities, async, kCdna4Choices);
+        uint64_t used = plan.engines + plan.helpers;
+        for (size_t i = 0; i < capacities.size(); ++i) {
+          EXPECT_GE(plan.dispatch[i], 1u);
+          EXPECT_LE(plan.dispatch[i], capacities[i]);
+          used += plan.dispatch[i] - 1;
+        }
+        EXPECT_LE(used, std::min(std::max(host, 1u), 32u));
+        EXPECT_LE(plan.engines, xcds);
+      }
+}
+
+TEST(ExecutionThreadBudgetTest, MetadataMatchesBuiltTopology) {
+  for (const auto &path : {CONFIG_PATH, CONFIG_2GPU_PATH, CONFIG_1XCD_PATH}) {
+    auto settings = config::load_execution_thread_settings(path, rocjitsu::kEmbeddedSchema);
+    auto loaded = config::load_config(path, rocjitsu::kEmbeddedSchema, 32);
+    auto plan = settings.resolve(32);
+    EXPECT_EQ(plan.engines, loaded.execution_threads.engines);
+    EXPECT_EQ(plan.dispatch, loaded.execution_threads.dispatch);
+    EXPECT_EQ(plan.helpers, loaded.execution_threads.helpers);
+    EXPECT_EQ(settings.xcds, loaded.build_result.num_xcds * loaded.num_gpus);
+  }
+}
+
+TEST(ExecutionThreadBudgetTest, ShippedServerChoicesAndExplicitSerial) {
+  auto json = config_json_with_num_threads(CONFIG_PATH, 0);
+  json.insert(json.find('{') + 1, R"("cpu_thread_budget":32,)");
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, 64);
+  EXPECT_EQ(loaded.execution_threads.engines, 8u);
+  EXPECT_EQ(loaded.execution_threads.dispatch, (std::vector<uint32_t>{17}));
+  EXPECT_EQ(loaded.execution_threads.helpers, 8u);
+  EXPECT_EQ(loaded.async_resources->mode(), 4);
+  EXPECT_EQ(loaded.async_resources->width(), 8u);
+  json.insert(json.find('{') + 1, R"("cpu_dispatch_threads":1,"async_helper_threads":0,)");
+  auto serial = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, 64);
+  EXPECT_EQ(serial.cpu_dispatch_threads, 1u);
+  EXPECT_EQ(serial.execution_threads.dispatch, (std::vector<uint32_t>{1}));
+  EXPECT_EQ(serial.execution_threads.helpers, 0u);
+}
+
+TEST(ExecutionThreadBudgetTest, AsyncPoolsBelongToTheirVm) {
+  namespace coexec = amdgpu::matrix_coexecution;
+  auto first = std::make_shared<coexec::ExecutionResources>(4, 1, 8);
+  auto second = std::make_shared<coexec::ExecutionResources>(4, 2, 8);
+  EXPECT_NE(&first->pool(), &second->pool());
+  auto shared = first;
+  EXPECT_EQ(&first->pool(), &shared->pool());
+  first.reset();
+  EXPECT_TRUE(shared->pool().available());
+  auto disabled = std::make_shared<coexec::ExecutionResources>(0, 0, 8);
+  EXPECT_FALSE(disabled->pool().available());
 }
 
 TEST(XcdPartitioningTest, EightThreadsMapsEachCdna4XcdToItsOwnPartition) {
@@ -402,10 +551,10 @@ TEST(XcdPartitioningTest, DefaultThreadCountIsHostCappedXcdCount) {
   EXPECT_EQ(amdgpu::default_xcd_partition_count(soc), expected);
 
   // The shipped config omits num_threads, so loading it resolves the default.
-  EXPECT_EQ(loaded.engine_config.num_threads, expected);
+  EXPECT_EQ(loaded.engine_config.num_threads, loaded.execution_threads.engines);
   EXPECT_EQ(config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, /*host_threads=*/4)
                 .engine_config.num_threads,
-            4u);
+            1u);
 }
 
 TEST(XcdPartitioningTest, DefaultThreadCountAggregatesSocsAndFloorsAtOne) {
@@ -453,24 +602,17 @@ TEST(XcdPartitioningTest, LoaderResolvesZeroThreadsAcrossExtraGpuBuilds) {
   ASSERT_EQ(soc->num_xcds(), 8u);
   ASSERT_EQ(extra_soc->num_xcds(), 8u);
 
-  // The literal 16 is the point: a default derived from the first SoC alone
-  // caps at 8. Stating the host width is what keeps that distinction alive on a
-  // constrained runner -- under `taskset -c 0` a measured width resolves both
-  // the correct and the first-SoC-only implementation to 1.
-  EXPECT_EQ(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, /*host_threads=*/16)
+  // Engine partitions share the budget with dispatch workers and helpers.
+  EXPECT_EQ(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, 16)
                 .engine_config.num_threads,
-            16u);
-  EXPECT_EQ(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, /*host_threads=*/9)
+            2u);
+  EXPECT_EQ(
+      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, 9).engine_config.num_threads,
+      1u);
+  EXPECT_EQ(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, 64)
                 .engine_config.num_threads,
-            9u)
-      << "a first-SoC-only default would clamp this to 8";
-  EXPECT_EQ(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, /*host_threads=*/64)
-                .engine_config.num_threads,
-            16u);
-
-  const uint32_t host_threads = amdgpu::available_host_threads();
-  const uint32_t expected = host_threads == 0 ? 1u : std::min(host_threads, 16u);
-  EXPECT_EQ(loaded.engine_config.num_threads, expected);
+            4u);
+  EXPECT_EQ(loaded.engine_config.num_threads, loaded.execution_threads.engines);
 }
 
 // The shipped topology configs take the default by omitting num_threads. Only
@@ -494,7 +636,7 @@ TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
     ASSERT_TRUE(input.is_open()) << entry.path();
     const std::string json((std::istreambuf_iterator<char>(input)),
                            std::istreambuf_iterator<char>());
-    const bool pins_num_threads = json.find("\"num_threads\"") != std::string::npos;
+    const bool pins_num_threads = json.find("\n  \"num_threads\"") != std::string::npos;
     ++configs_checked;
 
     if (kPinnedConfigs.count(entry.path().filename().string()) != 0) {

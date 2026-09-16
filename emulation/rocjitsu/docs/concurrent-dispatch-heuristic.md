@@ -9,8 +9,8 @@ At 32 threads this gives **8/17/8**, which is close to the target-specific
 selections. Prefer engine counts that divide the target's XCD count, and retain
 the four-thread gfx1250 choice 1/4/0. With these adjustments, the observed median
 within-round dispatch penalty is at most about 3% across the tested budgets and
-two workloads. This is a proposed default based on these measurements; other
-workloads were not evaluated here.
+two workloads. These measurements now inform explicit allocation tables in the target
+configs. The study below evaluated only these two workloads.
 
 ## Direct comparison at 31 and 32 threads
 
@@ -66,8 +66,12 @@ Here `dispatch_cap` is 36 on gfx950 and 32 on gfx1250. This produces:
 | 64 | 8/36/21 | 8/32/25 |
 
 This rule uses the budget and target properties, without taking a workload type
-as an input. It is documented here as a recommendation; runtime defaults are
-unchanged.
+as an input. The runtime selects from explicit config tables using a pure, unit-tested
+selector, rather than evaluating this formula. The shipped tables contain
+1, 2, 4, 8, 16, 24, 32 and 64-thread entries, with an automatic ceiling of 32.
+Thus an explicit ceiling of 48 currently selects the 32-thread granule. See
+[configuration](configuration.md#thread-accounting-and-preferred-allocations)
+for overrides and the `--thread-budget-table` command.
 
 ## Testing the literal ratio before rounding E
 

@@ -13,6 +13,7 @@
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/iod.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/shader_engine.h"
@@ -27,6 +28,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <cstdlib>
+#include <limits>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
@@ -38,6 +41,68 @@
 
 namespace rocjitsu {
 namespace config {
+
+ExecutionThreadAllocation resolve_execution_threads(const ExecutionThreadRequest &request,
+                                                    uint32_t host_threads, uint32_t xcds,
+                                                    std::span<const uint32_t> dispatch_capacities,
+                                                    bool async_supported,
+                                                    std::span<const ExecutionThreadChoice> choices,
+                                                    bool clocked) {
+  if (request.helpers < -1 || request.helpers > 128)
+    throw std::invalid_argument("async_helper_threads must be -1 or between 0 and 128");
+  const uint32_t budget = request.budget
+                              ? request.budget
+                              : std::min(std::max(host_threads, 1u), kDefaultCpuDispatchThreadCap);
+  xcds = std::max(xcds, 1u);
+  if (clocked)
+    return {std::min(request.engines ? request.engines : budget, xcds),
+            std::vector<uint32_t>(dispatch_capacities.size(), 1), 0};
+  auto effective = [&](ExecutionThreadChoice choice) {
+    ExecutionThreadAllocation result;
+    result.engines = std::min(request.engines ? request.engines : choice.engines, xcds);
+    result.helpers = request.helpers >= 0 ? static_cast<uint32_t>(request.helpers)
+                                          : (async_supported ? choice.helpers : 0);
+    for (uint32_t capacity : dispatch_capacities)
+      result.dispatch.push_back(
+          std::min(request.dispatch ? request.dispatch : choice.dispatch, std::max(capacity, 1u)));
+    return result;
+  };
+  auto result = effective({});
+  uint64_t best_cost = 0;
+  for (auto choice : choices) {
+    if (!choice.engines || !choice.dispatch || choice.helpers > 128)
+      throw std::invalid_argument("thread_allocations require E >= 1, D >= 1 and H <= 128");
+    auto candidate = effective(choice);
+    uint64_t cost = uint64_t{candidate.engines} + candidate.helpers;
+    for (uint32_t width : candidate.dispatch)
+      cost += width - 1;
+    if (cost <= budget && cost >= best_cost) {
+      result = std::move(candidate);
+      best_cost = cost;
+    }
+  }
+  return result;
+}
+
+bool configured_async_mma_supported(rj_code_arch_t arch) {
+  namespace coexec = amdgpu::matrix_coexecution;
+  if (std::getenv("RJ_MATRIX_COEXEC") && coexec::mode() != 4)
+    return false;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+    return true;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return coexec::mfma_families(amdgpu::async_mma_policy::default_mfma_families(arch)) != 0;
+  return arch == ROCJITSU_CODE_ARCH_RDNA4 && coexec::min_wmma_k() <= 16;
+}
+
+std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>
+make_async_execution_resources(uint32_t helpers) {
+  namespace coexec = amdgpu::matrix_coexecution;
+  const int mode = std::getenv("RJ_MATRIX_COEXEC") ? coexec::mode() : (helpers ? 4 : 0);
+  const unsigned width = std::getenv("RJ_MMA_HELPERS") ? coexec::width() : 8u;
+  return std::make_shared<coexec::ExecutionResources>(mode, helpers, width,
+                                                      coexec::shared_helper_limit().has_value());
+}
 
 std::vector<uint32_t> resolve_cpu_dispatch_thread_budgets(uint32_t requested_threads,
                                                           uint32_t hardware_threads,
@@ -64,7 +129,15 @@ std::vector<uint32_t> resolve_cpu_dispatch_thread_budgets(uint32_t requested_thr
 SoC *LoadedConfig::soc() { return dynamic_cast<SoC *>(build_result.root.get()); }
 
 void LoadedConfig::apply_cpu_dispatch_threads() {
-  apply_cpu_dispatch_threads(std::thread::hardware_concurrency());
+  if (execution_threads.dispatch.empty()) {
+    apply_cpu_dispatch_threads(amdgpu::available_host_threads());
+    return;
+  }
+  if (auto *primary = soc())
+    primary->set_dispatch_threads(execution_threads.dispatch.front());
+  for (size_t i = 0; i < extra_gpu_builds.size(); ++i)
+    if (auto *extra = dynamic_cast<SoC *>(extra_gpu_builds[i].root.get()))
+      extra->set_dispatch_threads(execution_threads.dispatch.at(i + 1));
 }
 
 void LoadedConfig::apply_cpu_dispatch_threads(uint32_t hardware_threads,
@@ -408,10 +481,11 @@ std::vector<simdojo::LinkSpec> expand_link(const fb::LinkDef *ld) {
   return out;
 }
 
+using AsyncResources = std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>;
 using CfgMap = std::unordered_map<std::string, std::string>;
 using FactoryFn = std::function<std::unique_ptr<simdojo::Component>(
     const std::string &name, const CfgMap &cfg, simdojo::ExecMode mode, rj_code_arch_t arch,
-    rj_code_target_id_t target, amdgpu::GpuMemory *mem)>;
+    rj_code_target_id_t target, amdgpu::GpuMemory *mem, const AsyncResources &resources)>;
 
 std::unordered_map<std::string, FactoryFn> &factories() {
   static std::unordered_map<std::string, FactoryFn> f;
@@ -419,38 +493,39 @@ std::unordered_map<std::string, FactoryFn> &factories() {
   if (!init) {
     init = true;
     f["composite"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                        rj_code_target_id_t, amdgpu::GpuMemory *) {
+                        rj_code_target_id_t, amdgpu::GpuMemory *, const AsyncResources &) {
       auto c = std::make_unique<simdojo::CompositeComponent>(n);
       c->set_weight(0);
       return c;
     };
     f["soc"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode mode, rj_code_arch_t arch,
-                  rj_code_target_id_t,
-                  amdgpu::GpuMemory *mem) -> std::unique_ptr<simdojo::Component> {
+                  rj_code_target_id_t, amdgpu::GpuMemory *mem,
+                  const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
       auto soc = std::make_unique<SoC>(n, mem);
       soc->set_arch(arch);
       soc->set_exec_mode(mode);
       return soc;
     };
     f["xcd"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                  rj_code_target_id_t, amdgpu::GpuMemory *) -> std::unique_ptr<simdojo::Component> {
+                  rj_code_target_id_t, amdgpu::GpuMemory *,
+                  const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
       return std::make_unique<amdgpu::Xcd>(n);
     };
     f["shader_engine"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                            rj_code_target_id_t,
-                            amdgpu::GpuMemory *) -> std::unique_ptr<simdojo::Component> {
+                            rj_code_target_id_t, amdgpu::GpuMemory *,
+                            const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
       return std::make_unique<amdgpu::ShaderEngine>(n);
     };
 
     f["gpu_memory"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                         rj_code_target_id_t,
-                         amdgpu::GpuMemory *) -> std::unique_ptr<simdojo::Component> {
+                         rj_code_target_id_t, amdgpu::GpuMemory *,
+                         const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
       return std::make_unique<amdgpu::GpuMemory>(n);
     };
 
     f["iod"] = [](const std::string &n, const CfgMap &cfg, simdojo::ExecMode, rj_code_arch_t,
-                  rj_code_target_id_t,
-                  amdgpu::GpuMemory *mem) -> std::unique_ptr<simdojo::Component> {
+                  rj_code_target_id_t, amdgpu::GpuMemory *mem,
+                  const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
       if (!mem)
         throw std::runtime_error("IOD requires gpu_memory");
       amdgpu::Iod::Config ic{};
@@ -459,32 +534,33 @@ std::unordered_map<std::string, FactoryFn> &factories() {
     };
 
     f["l2_cache"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                       rj_code_target_id_t,
-                       amdgpu::GpuMemory *mem) -> std::unique_ptr<simdojo::Component> {
+                       rj_code_target_id_t, amdgpu::GpuMemory *mem,
+                       const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
       auto l2 = std::make_unique<amdgpu::L2Cache>(n);
       l2->set_backing_memory(mem);
       return l2;
     };
 
     f["memory_side_cache"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode,
-                                rj_code_arch_t, rj_code_target_id_t,
-                                amdgpu::GpuMemory *) -> std::unique_ptr<simdojo::Component> {
+                                rj_code_arch_t, rj_code_target_id_t, amdgpu::GpuMemory *,
+                                const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
       return std::make_unique<amdgpu::MemorySideCache>(n);
     };
 
     f["command_processor"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode mode,
-                                rj_code_arch_t arch, rj_code_target_id_t,
-                                amdgpu::GpuMemory *) -> std::unique_ptr<simdojo::Component> {
+                                rj_code_arch_t arch, rj_code_target_id_t, amdgpu::GpuMemory *,
+                                const AsyncResources &) -> std::unique_ptr<simdojo::Component> {
       auto cp = std::make_unique<amdgpu::CommandProcessor>(n, mode);
       cp->configure_for_arch(arch);
       return cp;
     };
 
     f["compute_unit"] = [](const std::string &n, const CfgMap &cfg, simdojo::ExecMode mode,
-                           rj_code_arch_t arch, rj_code_target_id_t target,
-                           amdgpu::GpuMemory *mem) -> std::unique_ptr<simdojo::Component> {
+                           rj_code_arch_t arch, rj_code_target_id_t target, amdgpu::GpuMemory *mem,
+                           const AsyncResources &resources) -> std::unique_ptr<simdojo::Component> {
       amdgpu::ComputeUnitCore::Config cc{};
       cc.arch = arch;
+      cc.async_resources = resources;
       cc.target = target;
       cc.num_wf_slots = config_u32(cfg, "num_wf_slots", 10);
       cc.sgprs_per_wf = config_u32(cfg, "sgprs_per_wf", default_sgprs_per_wf(arch));
@@ -501,7 +577,7 @@ std::unordered_map<std::string, FactoryFn> &factories() {
 void build_children(simdojo::CompositeComponent *parent,
                     const flatbuffers::Vector<flatbuffers::Offset<fb::ComponentDef>> *children,
                     simdojo::ExecMode mode, rj_code_arch_t arch, rj_code_target_id_t target,
-                    amdgpu::GpuMemory *&mem) {
+                    amdgpu::GpuMemory *&mem, const AsyncResources &resources) {
   if (!children)
     return;
   for (auto *cd : *children) {
@@ -519,14 +595,14 @@ void build_children(simdojo::CompositeComponent *parent,
       auto it = fmap.find(tp);
       if (it == fmap.end())
         throw std::runtime_error("Unknown type: " + tp);
-      auto comp = it->second(n, cfg, mode, arch, target, mem);
+      auto comp = it->second(n, cfg, mode, arch, target, mem, resources);
       auto *raw = comp.get();
       if (auto *gm = dynamic_cast<amdgpu::GpuMemory *>(raw))
         mem = gm;
       parent->add_child(std::move(comp));
       if (cd->children() && cd->children()->size() > 0 && raw->is_composite())
         build_children(static_cast<simdojo::CompositeComponent *>(raw), cd->children(), mode, arch,
-                       target, mem);
+                       target, mem, resources);
     }
   }
 }
@@ -622,7 +698,8 @@ void set_cu_l2(simdojo::CompositeComponent *root) {
 }
 
 TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo::ExecMode mode,
-                                   rj_code_arch_t arch, rj_code_target_id_t target) {
+                                   rj_code_arch_t arch, rj_code_target_id_t target,
+                                   const AsyncResources &resources) {
   if (!topology_def || !topology_def->root())
     throw std::runtime_error("TopologyDef missing root ComponentDef");
 
@@ -641,7 +718,7 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
   auto it = f.find(rt);
   if (it == f.end())
     throw std::runtime_error("Unknown component type for root: " + rt);
-  auto root_comp = it->second(rn, root_cfg, mode, arch, target, nullptr);
+  auto root_comp = it->second(rn, root_cfg, mode, arch, target, nullptr, resources);
   auto *root = dynamic_cast<simdojo::CompositeComponent *>(root_comp.get());
   if (!root)
     throw std::runtime_error("Root component must be a CompositeComponent");
@@ -649,7 +726,7 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
       static_cast<simdojo::CompositeComponent *>(root_comp.release()));
 
   amdgpu::GpuMemory *mem = nullptr;
-  build_children(root, rd->children(), mode, arch, target, mem);
+  build_children(root, rd->children(), mode, arch, target, mem, resources);
 
   if (!mem) {
     std::vector<simdojo::Component *> all;
@@ -734,11 +811,101 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
   return result;
 }
 
+struct ExecutionTopology {
+  uint32_t xcds = 0;
+  uint32_t dispatch_capacity = 1;
+};
+
+ExecutionTopology execution_topology(const fb::ComponentDef *root) {
+  auto type = [](const fb::ComponentDef *c) -> std::string_view {
+    return c->type() ? c->type()->string_view() : "composite";
+  };
+  auto count = [](const fb::ComponentDef *c) -> uint64_t {
+    return expand_range(c->name() ? c->name()->str() : "").size();
+  };
+  auto checked = [](uint64_t n) {
+    if (n > std::numeric_limits<uint32_t>::max())
+      throw std::invalid_argument("Topology execution capacity exceeds uint32 range");
+    return static_cast<uint32_t>(n);
+  };
+  ExecutionTopology result;
+  auto visit = [&](auto &&self, const fb::ComponentDef *node, uint64_t copies) -> void {
+    if (!copies)
+      return;
+    if (type(node) == "xcd")
+      result.xcds = checked(result.xcds + copies);
+    if (!node->children())
+      return;
+    bool has_cp = false, has_se = false;
+    uint64_t direct_cus = 0, se_cus = 0;
+    for (auto *child : *node->children()) {
+      const uint64_t n = count(child);
+      has_cp |= type(child) == "command_processor" && n != 0;
+      if (type(child) == "compute_unit")
+        direct_cus += n;
+      if (type(child) == "shader_engine" && n) {
+        has_se = true;
+        if (child->children())
+          for (auto *cu : *child->children())
+            if (type(cu) == "compute_unit")
+              se_cus += n * count(cu);
+      }
+      self(self, child, checked(copies * n));
+    }
+    // Match do_wire_cps(): a CP drains its sibling SEs, or direct sibling CUs
+    // when the parent has no shader engines.
+    if (has_cp)
+      result.dispatch_capacity =
+          std::max(result.dispatch_capacity, checked(has_se ? se_cus : direct_cus));
+  };
+  if (root)
+    visit(visit, root, 1);
+  return result;
+}
+
+ExecutionThreadSettings execution_thread_settings(const fb::SimulationConfig *config) {
+  ExecutionThreadSettings settings;
+  settings.request = {
+      config->cpu_thread_budget(), config->num_threads(),
+      flatbuffers::IsFieldPresent(config, fb::SimulationConfig::VT_CPU_DISPATCH_THREADS)
+          ? config->cpu_dispatch_threads()
+          : 0,
+      config->async_helper_threads()};
+  if (auto helpers = amdgpu::matrix_coexecution::shared_helper_limit())
+    settings.request.helpers = static_cast<int32_t>(*helpers);
+  if (!config->vm() || !config->vm()->arch() || !config->topology())
+    throw std::invalid_argument("Thread allocation requires vm.arch and topology");
+  settings.arch = parse_arch(config->vm()->arch()->str());
+  if (settings.arch == ROCJITSU_CODE_ARCH_INVALID)
+    throw std::invalid_argument("Invalid vm.arch for thread allocation");
+  const auto dimensions = execution_topology(config->topology()->root());
+  const uint32_t gpus = config->vm()->gpu() ? std::max(1u, config->vm()->gpu()->num_gpus()) : 1u;
+  if (uint64_t{dimensions.xcds} * gpus > std::numeric_limits<uint32_t>::max())
+    throw std::invalid_argument("Total XCD count exceeds uint32 range");
+  settings.xcds = dimensions.xcds * gpus;
+  if (config->thread_allocations())
+    for (const auto *choice : *config->thread_allocations())
+      settings.choices.push_back(
+          {choice->num_threads(), choice->cpu_dispatch_threads(), choice->async_helper_threads()});
+  settings.dispatch_capacities.assign(gpus, dimensions.dispatch_capacity);
+  settings.async_supported = configured_async_mma_supported(settings.arch);
+  settings.clocked = exec_mode_from_fb(config) == simdojo::ExecMode::CLOCKED;
+  return settings;
+}
+
 LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_threads) {
   LoadedConfig result;
   result.engine_config = engine_config_from_fb(fb_config);
   result.exec_mode = exec_mode_from_fb(fb_config);
-  result.cpu_dispatch_threads = fb_config->cpu_dispatch_threads();
+  result.cpu_dispatch_threads =
+      flatbuffers::IsFieldPresent(fb_config, fb::SimulationConfig::VT_CPU_DISPATCH_THREADS)
+          ? fb_config->cpu_dispatch_threads()
+          : 0;
+  result.cpu_thread_budget = fb_config->cpu_thread_budget();
+  result.async_helper_threads = fb_config->async_helper_threads();
+  result.requested_engine_threads = result.engine_config.num_threads;
+  if (auto helpers = amdgpu::matrix_coexecution::shared_helper_limit())
+    result.async_helper_threads = static_cast<int32_t>(*helpers);
 
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
   if (fb_config->vm() && fb_config->vm()->arch())
@@ -785,7 +952,16 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
   if (!topo_def)
     throw std::runtime_error("Config missing 'topology' section");
 
-  result.build_result = build_topology(topo_def, result.exec_mode, arch, result.target);
+  if (fb_config->vm()->gpu())
+    result.num_gpus = std::max(1u, fb_config->vm()->gpu()->num_gpus());
+  const auto thread_settings = execution_thread_settings(fb_config);
+  result.thread_allocations = thread_settings.choices;
+  result.execution_threads = thread_settings.resolve(host_threads);
+  if (!result.engine_config.num_threads)
+    result.engine_config.num_threads = result.execution_threads.engines;
+  result.async_resources = make_async_execution_resources(result.execution_threads.helpers);
+  result.build_result =
+      build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources);
 
   // A config that describes no bus still yields usable defaults, so front ends
   // that attach the GPU to a VMM work without every config being updated.
@@ -809,23 +985,7 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
     }
     for (uint32_t i = 1; i < result.num_gpus; ++i)
       result.extra_gpu_builds.push_back(
-          build_topology(topo_def, result.exec_mode, arch, result.target));
-  }
-
-  // An unset (or zero) num_threads means "use the default": one engine
-  // partition per XCD, capped at the host threads this process may run on.
-  // Resolve it here, once the SoC trees exist, so every LoadedConfig consumer
-  // sees a concrete worker count instead of re-deriving one.
-  if (result.engine_config.num_threads == 0) {
-    std::vector<SoC *> socs;
-    socs.reserve(result.extra_gpu_builds.size() + 1);
-    if (SoC *soc = result.soc())
-      socs.push_back(soc);
-    for (TopologyBuildResult &extra_gpu : result.extra_gpu_builds) {
-      if (SoC *extra_soc = dynamic_cast<SoC *>(extra_gpu.root.get()))
-        socs.push_back(extra_soc);
-    }
-    result.engine_config.num_threads = amdgpu::default_xcd_partition_count(socs, host_threads);
+          build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources));
   }
 
   return result;
@@ -910,6 +1070,12 @@ DeviceIdentityConfig load_device_identity(const std::string &json_path,
         identity.pci = pci_device_from_fb(config->vm()->gpu()->pci());
         return identity;
       });
+}
+
+ExecutionThreadSettings load_execution_thread_settings(const std::string &json_path,
+                                                       const std::string &schema_text) {
+  return with_parsed_simulation_config_json(read_config_file(json_path), schema_text,
+                                            execution_thread_settings);
 }
 
 LoadedConfig load_config(const std::string &json_path, const std::string &schema_text,

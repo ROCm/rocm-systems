@@ -13,6 +13,7 @@
 /// them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Preset {
+    pub(crate) thread_allocations: &'static [mirage_core::agent::ExecutionThreadChoice],
     /// The preset file this came from, for error messages and doc.
     pub(crate) preset: &'static str,
     /// `vm.arch` — which ISA rocjitsu emulates, and therefore which

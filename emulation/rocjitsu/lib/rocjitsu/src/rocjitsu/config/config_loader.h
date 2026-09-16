@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -27,16 +28,78 @@ class SoC;
 namespace amdgpu {
 class GpuMemory;
 class Xcd;
+namespace matrix_coexecution {
+class ExecutionResources;
+}
 } // namespace amdgpu
 
 namespace config {
 
-/// Default host-wide thread cap for automatic functional CU dispatch.
+/// Default execution-thread ceiling, also used by the dispatch-only override.
 ///
 /// This conservative policy limit bounds persistent worker allocation on
 /// large hosts while retaining substantial CU parallelism. It is not a
 /// hardware limit; embedding callers can override it.
 inline constexpr uint32_t kDefaultCpuDispatchThreadCap = 32;
+
+/// A single VM-wide budget includes engines, retained workers from every SoC's
+/// dispatch pool, and one shared async-helper pool. Explicit knobs take priority.
+struct ExecutionThreadRequest {
+  uint32_t budget = 0; ///< Zero: min(affinity, 32); nonzero overrides the default.
+  uint32_t engines = 0;
+  uint32_t dispatch = 0; ///< Inclusive width per SoC; zero selects automatic sizing.
+  int32_t helpers = -1;  ///< -1 selects automatic sizing; zero disables helpers.
+};
+
+/// One target-configured granule, with an inclusive dispatch width per GPU.
+struct ExecutionThreadChoice {
+  uint32_t engines = 1;
+  uint32_t dispatch = 1;
+  uint32_t helpers = 0;
+};
+
+struct ExecutionThreadAllocation {
+  uint32_t engines = 1;
+  std::vector<uint32_t> dispatch;
+  uint32_t helpers = 0;
+};
+
+/// Pure table selector. Choose the largest effective allocation fitting B,
+/// after topology clamps and explicit overrides; later entries break ties.
+/// Explicit knobs may exceed B. With no fitting entry, unspecified knobs use
+/// serial defaults. Clocked mode only allocates engine partitions.
+ExecutionThreadAllocation resolve_execution_threads(const ExecutionThreadRequest &request,
+                                                    uint32_t host_threads, uint32_t xcds,
+                                                    std::span<const uint32_t> dispatch_capacities,
+                                                    bool async_supported,
+                                                    std::span<const ExecutionThreadChoice> choices,
+                                                    bool clocked = false);
+
+/// Metadata needed to evaluate the pure allocation rule without building a VM.
+struct ExecutionThreadSettings {
+  ExecutionThreadRequest request;
+  std::vector<ExecutionThreadChoice> choices;
+  uint32_t xcds = 1;
+  std::vector<uint32_t> dispatch_capacities;
+  bool async_supported = false;
+  bool clocked = false;
+  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+
+  ExecutionThreadAllocation resolve(uint32_t host_threads) const {
+    return resolve_execution_threads(request, host_threads, xcds, dispatch_capacities,
+                                     async_supported, choices, clocked);
+  }
+};
+
+/// Read only thread requests and topology dimensions; allocates no simulator
+/// components or worker threads. Includes explicit experimental ISA controls.
+ExecutionThreadSettings load_execution_thread_settings(const std::string &json_path,
+                                                       const std::string &schema_text);
+
+/// Includes explicit experimental ISA controls.
+bool configured_async_mma_supported(rj_code_arch_t arch);
+std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>
+make_async_execution_resources(uint32_t helpers);
 
 /// Resolve the requested functional CU-dispatch width for each SoC.
 ///
@@ -80,7 +143,7 @@ struct TopologyBuildResult {
 ///
 /// load_config() has already resolved engine_config.num_threads by the time it
 /// returns: a config that omits the field (or sets it to 0) comes back holding
-/// min(available host threads, XCD count). Overriding it here is what the clamp
+/// the shared execution-budget allocation. Overriding it here is what the clamp
 /// is for; pin 1 when the consumer needs SimulationEngine::step(), which
 /// rejects a multi-partition engine.
 /// @code
@@ -121,15 +184,21 @@ struct LoadedConfig {
   rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
   /// Requested functional dispatch width. Automatic mode uses a host-wide
   /// budget capped at 32; each SoC's effective width is CU-capacity-clamped.
-  uint32_t cpu_dispatch_threads = 1;
+  uint32_t cpu_dispatch_threads = 0;
+  uint32_t cpu_thread_budget = 0;
+  int32_t async_helper_threads = -1;
+  uint32_t requested_engine_threads = 0;
+  ExecutionThreadAllocation execution_threads;
+  std::vector<ExecutionThreadChoice> thread_allocations;
+  std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> async_resources;
 
   /// @brief Apply the requested functional dispatch policy to every loaded SoC.
   ///
   /// Call this before transferring topology ownership with take_root(). The
-  /// no-argument overload detects the current host's hardware-thread count.
+  /// no-argument overload applies the allocation resolved during loading.
   void apply_cpu_dispatch_threads();
 
-  /// @brief Apply the dispatch policy using supplied automatic-mode inputs.
+  /// @brief Explicitly override dispatch sizing independently of the total budget.
   /// @details This overload makes host-dependent policy explicit for embedding
   /// callers and deterministic tests.
   /// @param hardware_threads Host-thread count available for automatic sizing.

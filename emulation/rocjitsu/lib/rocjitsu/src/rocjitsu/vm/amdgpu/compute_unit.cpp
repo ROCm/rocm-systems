@@ -153,7 +153,7 @@ static std::unique_ptr<ComputeUnitCore> create_functional_cu(std::string name,
       std::unique_ptr<MmaAdmissionCache> admission = [this] {
         const int mode = MmaAdmissionCache::configured_mode(
             async_mma_policy::default_admission_mode(this->arch()));
-        return mode && matrix_coexecution::mode() == 4
+        return mode && this->matrix_execution_mode() == 4
                    ? std::make_unique<MmaAdmissionCache>(mode,
                                                          MmaAdmissionCache::configured_limit())
                    : nullptr;
@@ -163,7 +163,8 @@ static std::unique_ptr<ComputeUnitCore> create_functional_cu(std::string name,
                                               HasAccVgpr<Isa>);
       }
     };
-    const int mode = matrix_coexecution::mode();
+    const int mode =
+        config.async_resources ? config.async_resources->mode() : matrix_coexecution::mode();
     const bool enabled = async_mma_policy::enabled<Isa>(
         mode, matrix_coexecution::min_wmma_k(),
         matrix_coexecution::mfma_families(async_mma_policy::default_mfma_families(config.arch)));
@@ -745,7 +746,23 @@ void ComputeUnitCore::update_wf_states() {
 
 AsyncInstructionWindow::AsyncInstructionWindow(ComputeUnitCore &cu, Wavefront &wf,
                                                bool has_accvgprs)
-    : cu_(cu), wf_(wf), has_accvgprs_(has_accvgprs) {}
+    : cu_(cu), wf_(wf), pool_(cu.async_pool()), issue_width_(cu.async_issue_width()),
+      has_accvgprs_(has_accvgprs) {}
+
+int ComputeUnitCore::matrix_execution_mode() const {
+  return config_.async_resources ? config_.async_resources->mode() : matrix_coexecution::mode();
+}
+
+unsigned ComputeUnitCore::async_issue_width() const {
+  return config_.async_resources ? config_.async_resources->width() : matrix_coexecution::width();
+}
+
+matrix_coexecution::SharedPool &ComputeUnitCore::async_pool() {
+  if (!async_pool_)
+    async_pool_ = config_.async_resources ? &config_.async_resources->pool()
+                                          : &matrix_coexecution::shared_pool();
+  return *async_pool_;
+}
 
 void AsyncInstructionWindow::retire_arithmetic(void *owner, Instruction *inst, uint64_t pc,
                                                bool failed) {
@@ -773,7 +790,7 @@ bool ComputeUnitCore::try_issue_adjacent_mma_batch(Wavefront *active, Instructio
   const auto inst_size = inst->size();
   const uint32_t vmid = active->process_id();
   util::StringDiagnostic decode_error;
-  if (matrix_coexecution::mode() > 0 && matrix_coexecution::mode() <= 3 &&
+  if (matrix_execution_mode() > 0 && matrix_execution_mode() <= 3 &&
       arch() == ROCJITSU_CODE_ARCH_CDNA5 && matrix_coexecution::candidate(inst->mnemonic()) &&
       inst_size == 8 && active->wf_size() == 32 && active->exec() == 0xFFFFFFFFu &&
       active->vgpr_msb_mode() == 0 && !debug_active() && !active->debug_single_step() &&
@@ -806,7 +823,7 @@ bool ComputeUnitCore::try_issue_adjacent_mma_batch(Wavefront *active, Instructio
       std::array<matrix_coexecution::Footprint, 8> accesses;
       accesses[0] = *first;
       unsigned count = 1;
-      while (count < matrix_coexecution::width() &&
+      while (count < async_issue_width() &&
              (active->pc % GpuMemory::PAGE_SIZE) + (count + 1) * 8 <= GpuMemory::PAGE_SIZE) {
         rj_code_binary_inst_t lookahead[4]{};
         if (count == 1) {
@@ -840,7 +857,7 @@ bool ComputeUnitCore::try_issue_adjacent_mma_batch(Wavefront *active, Instructio
         owned[count] = std::move(candidate);
         ++count;
       }
-      if (count > 1 && matrix_coexecution::mode() >= 2) {
+      if (count > 1 && matrix_execution_mode() >= 2) {
         // Allocate lazy storage before publication: different output registers
         // can share a chunk and its allocation metadata is not concurrent.
         for (unsigned i = 0; i != count; ++i)
@@ -848,7 +865,7 @@ bool ComputeUnitCore::try_issue_adjacent_mma_batch(Wavefront *active, Instructio
             (void)raw_vgpr_data(accesses[i].output.base + reg);
         active->clear_pending_alu_causes();
         active->clear_instruction_execution_error();
-        const bool parallel = matrix_coexecution::mode() == 3;
+        const bool parallel = matrix_execution_mode() == 3;
         const uint64_t first_pc = active->pc;
         unsigned issued = 0, retired = 0;
         try {
@@ -901,7 +918,7 @@ bool ComputeUnitCore::try_issue_adjacent_mma_batch(Wavefront *active, Instructio
 
 void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCache *admission,
                                               unsigned wave_size, bool has_accvgprs) {
-  const int mode = matrix_coexecution::mode();
+  const int mode = matrix_execution_mode();
   // CDNA4 MFMA and the default gfx1250 allowlist have cheap encoding filters.
   // On a cache hit,
   // non-candidates use the ordinary issue body, including its fetchability and
@@ -1033,7 +1050,7 @@ template <bool EnableAsync>
       if (admission)
         ++admission->stats.issuer;
     } else if (admission && matrix_coexecution::async_candidate(inst->mnemonic()) &&
-               admission->applies(*inst) && matrix_coexecution::shared_pool().available()) {
+               admission->applies(*inst) && async_pool().available()) {
       MmaAdmissionCache::Words first;
       std::copy_n(words, first.size(), first.begin());
       issuer = admission->inspect(*decoder_, inst_cache_, *memory_, active->pc, vmid,
@@ -1044,7 +1061,7 @@ template <bool EnableAsync>
         may_submit = issuer.has_value();
     }
     if (may_submit && !window && storage && matrix_coexecution::async_candidate(inst->mnemonic()) &&
-        matrix_coexecution::width() > 1 && matrix_coexecution::shared_pool().available())
+        async_issue_width() > 1 && async_pool().available())
       window = &storage->window.emplace(*this, *active, storage->has_accvgprs);
     if (window) {
       bool transferred = false;
@@ -1068,7 +1085,7 @@ template <bool EnableAsync>
   }
 
   if constexpr (EnableAsync) {
-    if (matrix_coexecution::mode() > 0 && matrix_coexecution::mode() <= 3 &&
+    if (matrix_execution_mode() > 0 && matrix_execution_mode() <= 3 &&
         try_issue_adjacent_mma_batch(active, inst, words))
       return;
   }

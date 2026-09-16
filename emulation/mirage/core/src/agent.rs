@@ -251,10 +251,21 @@ pub struct VirtualMachineConfig {
     pub gpu: AmdgpuConfig,
 }
 
+/// Preferred rocjitsu host execution granule; dispatch includes the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionThreadChoice {
+    pub num_threads: u32,
+    pub cpu_dispatch_threads: u32,
+    pub async_helper_threads: u32,
+}
+
 /// Top-level agent (single-device hardware) definition.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct AgentDef {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub thread_allocations: Vec<ExecutionThreadChoice>,
     pub vm: VirtualMachineConfig,
     pub topology: AgentTopologyDef,
 }

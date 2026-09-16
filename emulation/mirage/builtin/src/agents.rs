@@ -53,6 +53,7 @@ pub fn agents() -> Vec<(&'static str, AgentDef)> {
 /// fabric over a 4-IOD memory tier.
 pub fn mi300x() -> AgentDef {
     AgentDef {
+        thread_allocations: MI300X.thread_allocations.to_vec(),
         vm: VirtualMachineConfig {
             arch: MI300X.arch.to_string(),
             gpu: AmdgpuConfig {
@@ -103,6 +104,7 @@ pub fn mi300x() -> AgentDef {
 /// fabric over a 2-IOD memory tier.
 pub fn mi350x() -> AgentDef {
     AgentDef {
+        thread_allocations: MI350X.thread_allocations.to_vec(),
         vm: VirtualMachineConfig {
             arch: MI350X.arch.to_string(),
             gpu: AmdgpuConfig {
@@ -152,6 +154,7 @@ pub fn mi350x() -> AgentDef {
 /// 8-XCD / 4-SE / 8-CU shader fabric and a 2-IOD memory tier.
 pub fn mi450x() -> AgentDef {
     AgentDef {
+        thread_allocations: MI450X.thread_allocations.to_vec(),
         vm: VirtualMachineConfig {
             arch: MI450X.arch.to_string(),
             gpu: AmdgpuConfig {
@@ -370,6 +373,7 @@ mod tests {
             (mi450x(), &MI450X),
         ] {
             assert_eq!(agent.vm.arch, preset.arch, "{}", preset.preset);
+            assert_eq!(agent.thread_allocations, preset.thread_allocations);
             for (key, want) in [
                 ("num_wf_slots", preset.num_wf_slots),
                 ("sgprs_per_wf", preset.sgprs_per_wf),

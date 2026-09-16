@@ -29,7 +29,9 @@ namespace config {
 /// selects automatic sizing; nonzero values are explicit per-SoC widths.
 void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
                      const simdojo::SimulationEngine::Config &engine_config,
-                     uint32_t cpu_dispatch_threads);
+                     uint32_t cpu_dispatch_threads, uint32_t cpu_thread_budget = 0,
+                     int32_t async_helper_threads = 0,
+                     std::span<const ExecutionThreadChoice> thread_allocations = {});
 
 /// @brief Restore simulation state from a binary FlatBuffer checkpoint.
 ///
