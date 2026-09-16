@@ -89,6 +89,11 @@ def write_pmc_perf(workload_dir, text):
     return write_gzip_csv(pmc_perf_path(workload_dir), text)
 
 
+def write_result_csv(workload_dir, text, pass_index=0):
+    """Write a compressed ROCPD counter artifact into workload_dir."""
+    return write_gzip_csv(workload_dir / f"results_pmc_perf_{pass_index}.csv.gz", text)
+
+
 def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
     """
     Provides a unique output directory based on the name of the calling test function

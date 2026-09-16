@@ -218,7 +218,7 @@ def test_filters() -> None:
 
 
 # =============================================================================
-# create_df_pmc: long-form vs wide pmc_perf.csv.gz
+# create_df_pmc: long-form result artifacts
 # =============================================================================
 
 
@@ -233,7 +233,7 @@ def test_create_df_pmc_pivots_long_form_without_a_profiling_config(tmp_path) -> 
         "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_WAVES,4\n"
         "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_BUSY_CYCLES,100\n"
     )
-    common.write_pmc_perf(tmp_path, long_form_csv)
+    common.write_gzip_csv(tmp_path / "results_pmc_perf_0.csv.gz", long_form_csv)
 
     df = create_df_pmc(str(tmp_path), verbose=0)
 
@@ -243,8 +243,8 @@ def test_create_df_pmc_pivots_long_form_without_a_profiling_config(tmp_path) -> 
     assert "Counter_Name" not in df.columns
 
 
-def test_create_df_pmc_rejects_wide_pmc_perf(tmp_path) -> None:
-    """A wide pmc_perf.csv.gz was written by a removed backend; analyze only
+def test_create_df_pmc_rejects_wide_result_file(tmp_path) -> None:
+    """A wide result file was written by a removed backend; analyze only
     supports the rocpd long format, so it is rejected with a re-profile error."""
     wide_csv = (
         "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
@@ -252,13 +252,20 @@ def test_create_df_pmc_rejects_wide_pmc_perf(tmp_path) -> None:
         "Start_Timestamp,End_Timestamp,Kernel_ID,SQ_WAVES,SQ_BUSY_CYCLES\n"
         "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,4,100\n"
     )
-    common.write_pmc_perf(tmp_path, wide_csv)
+    common.write_gzip_csv(tmp_path / "results_pmc_perf_0.csv.gz", wide_csv)
 
     with pytest.raises(SystemExit):
         create_df_pmc(str(tmp_path), verbose=0)
 
 
 def test_create_df_pmc_missing_file_returns_empty(tmp_path) -> None:
+    assert create_df_pmc(str(tmp_path), verbose=0).empty
+
+
+def test_create_df_pmc_ignores_debug_export_as_input(tmp_path) -> None:
+    """The optional pmc_perf export is never an analysis input."""
+    common.write_pmc_perf(tmp_path, "Kernel_Name,GPU_ID\nkernel_a,0\n")
+
     assert create_df_pmc(str(tmp_path), verbose=0).empty
 
 

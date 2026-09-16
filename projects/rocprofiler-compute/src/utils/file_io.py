@@ -11,9 +11,8 @@ import pandas as pd
 import yaml
 
 import config
-from utils import csv_compression, schema, utils_analysis
+from utils import profile_data
 from utils.logger import (
-    console_debug,
     console_error,
     console_log,
     console_warning,
@@ -305,32 +304,17 @@ def process_pc_sampling_kernel_trace(
 def create_df_pmc(
     raw_data_dir: str,
     verbose: int,
+    gen_pmc: bool = False,
 ) -> pd.DataFrame:
     """
-    Load all raw pmc counters and join into one df.
+    Read all raw PMC counters into one analysis DataFrame.
     """
-    pmc_perf_path = csv_compression.compressed_name(
-        Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
-    )
-    if not pmc_perf_path.is_file():
-        return pd.DataFrame()
+    workload_dir = Path(raw_data_dir)
+    df = profile_data.get_profile_data_reader().read_pmc(workload_dir, verbose)
 
-    df = pd.read_csv(pmc_perf_path)
+    if gen_pmc and not df.empty:
+        profile_data.export_pmc_data(workload_dir, df)
 
-    # The rocpd counter CSV is long: one row per counter per dispatch. Anything
-    # else was written by a removed backend and is no longer supported.
-    if not {"Counter_Name", "Counter_Value"}.issubset(df.columns):
-        console_error(
-            "analysis",
-            f"{pmc_perf_path} is not in the supported rocpd format. "
-            "Please re-profile this workload with a current release.",
-        )
-    df = utils_analysis.process_rocpd_csv(df)
-
-    utils_analysis.add_unit_counter(df)
-
-    if verbose >= 2:
-        console_debug(f"pmc_raw_data final_single_df {df.info}")
     return df
 
 

@@ -36,7 +36,7 @@ from pc_sampling.source_snapshot_analysis import (
 )
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED
-from utils import csv_compression, schema, utils_analysis
+from utils import file_io, schema, utils_analysis
 from utils.analysis_orm import Database
 from utils.file_io import (
     load_pc_sampling_results,
@@ -588,15 +588,13 @@ class db_analysis(OmniAnalyze_Base):
         pmc_df_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
-            pmc_perf = csv_compression.compressed_name(
-                Path(workload_path) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+            pmc_df = file_io.create_df_pmc(
+                workload_path,
+                self.get_args().verbose,
+                getattr(self.get_args(), "gen_pmc", False),
             )
-            if not pmc_perf.exists():
+            if pmc_df.empty:
                 continue
-
-            pmc_df = utils_analysis.process_rocpd_csv(pd.read_csv(pmc_perf))
-
-            utils_analysis.add_unit_counter(pmc_df)
 
             if self._profiling_config.get("iteration_multiplexing") is not None:
                 pmc_df = self.iteration_multiplex_impute_counters(

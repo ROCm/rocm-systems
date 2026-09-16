@@ -38,7 +38,7 @@ from utils.utils_analysis import (
 # CSV with only headers
 # Files with all NaN values that become empty after dropna()
 # Malformed CSV files
-# Missing pmc_perf.csv.gz file
+# Missing result artifact
 # Nonexistent directories
 # Error Conditions:
 #
@@ -62,7 +62,7 @@ from utils.utils_analysis import (
 
 def test_validate_workload_valid_data_file(tmp_path):
     """
-    Test validate_workload with a valid pmc_perf.csv.gz file containing data.
+    Test validate_workload with a valid result artifact containing data.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -75,7 +75,7 @@ def test_validate_workload_valid_data_file(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    common.write_pmc_perf(
+    common.write_result_csv(
         workload_dir,
         """Kernel_Name,GPU_ID,Counter1,Counter2
 kernel1,0,100,200
@@ -96,7 +96,7 @@ kernel3,0,120,220""",
 
 def test_validate_workload_file_with_nan_values(tmp_path):
     """
-    Test validate_workload with pmc_perf.csv.gz containing NaN values.
+    Test validate_workload with a result artifact containing NaN values.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -109,7 +109,7 @@ def test_validate_workload_file_with_nan_values(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = common.write_pmc_perf(
+    result_file = common.write_result_csv(
         workload_dir,
         """Kernel_Name,GPU_ID,Counter1,Counter2
 ,,NaN,
@@ -129,7 +129,7 @@ NaN,,,""",
     error_args = console_error_calls[0][0]
     assert "profiling" in error_args[0]
     assert "Found empty cells" in error_args[1]
-    assert str(pmc_perf_file) in error_args[1]
+    assert str(result_file) in error_args[1]
     assert "Profiling data could be corrupt" in error_args[1]
 
 
@@ -182,7 +182,7 @@ def test_validate_workload_headers_only_csv(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    common.write_pmc_perf(workload_dir, "Kernel_Name,GPU_ID,Counter1,Counter2")
+    common.write_result_csv(workload_dir, "Kernel_Name,GPU_ID,Counter1,Counter2")
 
     console_error_calls = []
 
@@ -198,9 +198,9 @@ def test_validate_workload_headers_only_csv(tmp_path):
     assert "Found empty cells" in error_args[1]
 
 
-def test_validate_workload_no_pmc_perf_file(tmp_path):
+def test_validate_workload_no_result_files(tmp_path):
     """
-    Test validate_workload when pmc_perf.csv.gz file doesn't exist.
+    Test validate_workload when no result artifact exists.
 
     Args:
         tmp_path (Path): Temporary directory for test files.
@@ -265,7 +265,7 @@ def test_validate_workload_malformed_csv(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    common.write_pmc_perf(
+    common.write_result_csv(
         workload_dir,
         """Kernel_Name,GPU_ID,Counter1,Counter2
 kernel1,0,100,200,extra_column_data
@@ -300,7 +300,7 @@ def test_validate_workload_mixed_valid_invalid_data(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    common.write_pmc_perf(
+    common.write_result_csv(
         workload_dir,
         """Kernel_Name,GPU_ID,Counter1,Counter2
 kernel1,0,100,200
@@ -336,7 +336,9 @@ def test_validate_workload_large_dataset_with_nans(tmp_path):
     workload_dir.mkdir()
 
     headers = "Kernel_Name,GPU_ID,Counter1,Counter2\n"
-    common.write_pmc_perf(workload_dir, headers + "\n".join(["NaN,NaN,NaN,NaN"] * 1000))
+    common.write_result_csv(
+        workload_dir, headers + "\n".join(["NaN,NaN,NaN,NaN"] * 1000)
+    )
 
     console_error_calls = []
 
@@ -367,7 +369,7 @@ def test_validate_workload_unicode_content(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    common.write_pmc_perf(
+    common.write_result_csv(
         workload_dir,
         """Kernel_Name,GPU_ID,Counter1,Counter2
 kernel_测试,0,100,200
@@ -401,7 +403,7 @@ def test_validate_workload_special_path_characters(tmp_path):
     workload_dir = tmp_path / "workload-test_dir.with.dots"
     workload_dir.mkdir()
 
-    common.write_pmc_perf(
+    common.write_result_csv(
         workload_dir,
         """Kernel_Name,GPU_ID,Counter1,Counter2
 kernel1,0,100,200""",
@@ -436,8 +438,8 @@ def test_validate_workload_csv_read_permission_error(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = common.write_pmc_perf(workload_dir, "Kernel_Name,GPU_ID\nkernel1,0")
-    pmc_perf_file.chmod(0o000)  # Remove all permissions
+    result_file = common.write_result_csv(workload_dir, "Kernel_Name,GPU_ID\nkernel1,0")
+    result_file.chmod(0o000)  # Remove all permissions
 
     console_error_calls = []
 
@@ -452,7 +454,7 @@ def test_validate_workload_csv_read_permission_error(tmp_path):
     except PermissionError:
         pass
     finally:
-        pmc_perf_file.chmod(0o644)
+        result_file.chmod(0o644)
 
 
 def test_validate_workload_string_path_input():
@@ -493,7 +495,7 @@ def test_validate_workload_console_error_string_formatting(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    pmc_perf_file = common.write_pmc_perf(workload_dir, "Kernel_Name,GPU_ID\nNaN,NaN")
+    result_file = common.write_result_csv(workload_dir, "Kernel_Name,GPU_ID\nNaN,NaN")
 
     console_error_calls = []
 
@@ -505,7 +507,7 @@ def test_validate_workload_console_error_string_formatting(tmp_path):
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
-    assert str(pmc_perf_file) in error_args[1]
+    assert str(result_file) in error_args[1]
     assert "profiling" in error_args[0]
     assert "Found empty cells" in error_args[1]
     assert "Profiling data could be corrupt" in error_args[1]
@@ -526,7 +528,7 @@ def test_validate_workload_function_return_value(tmp_path):
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
-    common.write_pmc_perf(workload_dir, "Kernel_Name,GPU_ID\nkernel1,0")
+    common.write_result_csv(workload_dir, "Kernel_Name,GPU_ID\nkernel1,0")
 
     with patch("utils.utils_analysis.console_error"):
         result = utils_analysis.validate_workload(str(workload_dir))
@@ -559,7 +561,7 @@ def test_validate_workload_pandas_import_dependency():
     with patch.dict("sys.modules", {"pandas": mock_pandas}):
         with patch("utils.utils_analysis.pd", mock_pandas):
             with patch("utils.utils_analysis.console_error"):
-                with patch("pathlib.Path.is_file", return_value=True):
+                with patch("pathlib.Path.glob", return_value=[Path("results.csv.gz")]):
                     utils_analysis.validate_workload("/test/path")
 
     mock_pandas.read_csv.assert_called_once()
