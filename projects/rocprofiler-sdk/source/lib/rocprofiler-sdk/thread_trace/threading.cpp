@@ -84,7 +84,7 @@ consumer_loop(
     auto& shared      = *parameters.shared;
     auto& slot        = shared.buffers[parameters.slot_index];
     auto& stopping    = shared.stopping;
-    auto  agent_id    = shared.queue->agent_id;
+    auto  agent_id    = CHECK_NOTNULL(shared.resources.get())->agent_id();
     auto  userdata    = parameters.userdata;
     auto  callback_fn = parameters.callback_fn;
 
@@ -138,10 +138,11 @@ producer_loop(
     CHECK_NOTNULL(parameters.copy_data_fn);
     CHECK_NOTNULL(parameters.submit_signal);
 
-    auto& queue       = *CHECK_NOTNULL(parameters.shared->queue);
+    auto& resources   = *CHECK_NOTNULL(parameters.shared->resources.get());
+    auto& queue       = resources.queue();
     auto& worker_flag = *CHECK_NOTNULL(parameters.producer_running);
 
-    const size_t buffer_size = queue.buffer_size;
+    const size_t buffer_size = parameters.active_buffer_size;
     auto&        buffers     = parameters.shared->buffers;
     const size_t num_buffers = parameters.shared->num_buffers;
     const auto   sqtt_bandwidth =
