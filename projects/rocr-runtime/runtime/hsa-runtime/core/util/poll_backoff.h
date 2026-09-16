@@ -23,13 +23,13 @@ namespace rocr {
 namespace core {
 
 // Floor (microseconds) for the polling-fallback nap.
-inline constexpr int kPollNapFloorUs = 20;
+inline constexpr unsigned int kPollNapFloorUs = 20;
 
 // Ceiling (microseconds) when the runtime has no interrupt-backed signal
 // events at all (g_use_interrupt_wait == false, e.g. the WSL/dxg thunk).
 // Every signal is polling-only, so the only cost of a long nap is observation
 // latency of the napping wait itself.
-inline constexpr int kPollNapCeilingUs = 2000;
+inline constexpr unsigned int kPollNapCeilingUs = 2000;
 
 // Ceiling (microseconds) when interrupts are available globally but the wait
 // batch was forced into polling by a signal with no EopEvent (an IPC signal
@@ -38,14 +38,15 @@ inline constexpr int kPollNapCeilingUs = 2000;
 // scan, so the nap here bounds the added callback latency of unrelated
 // interrupt-backed handlers. Kept at the interrupt path's 200us active-poll
 // window (see AsyncEventsLoop) so that bound stays at the noise floor.
-inline constexpr int kPollNapCeilingMixedUs = 200;
+inline constexpr unsigned int kPollNapCeilingMixedUs = 200;
 
 // Given the current nap duration, return the next one: double it, capped at
 // ceiling_us. Saturating at the ceiling is a fixed point, so repeated calls
 // converge to and stay at ceiling_us. The multiply is only evaluated when
 // current_us <= ceiling_us/2, so current_us*2 <= ceiling_us and can never
-// overflow even for a ceiling_us up to INT_MAX.
-constexpr int NextPollNapUs(int current_us, int ceiling_us = kPollNapCeilingUs) {
+// overflow even for a ceiling_us up to UINT_MAX.
+constexpr unsigned int NextPollNapUs(unsigned int current_us,
+                                     unsigned int ceiling_us = kPollNapCeilingUs) {
   return (current_us > ceiling_us / 2) ? ceiling_us
                                        : std::min(current_us * 2, ceiling_us);
 }
@@ -56,15 +57,15 @@ constexpr int NextPollNapUs(int current_us, int ceiling_us = kPollNapCeilingUs) 
 // completion which lands promptly keeps full latency -- and then falls back to
 // NextPollNapUs() napping so a wait that drags on for seconds (e.g. a host<->
 // device copy stalled under memory pressure) costs almost no CPU.
-inline constexpr int kHotPollUs = 200;
+inline constexpr unsigned int kHotPollUs = 200;
 
 // HSA_WAIT_STATE_ACTIVE widens the window: the caller asked to trade CPU for
-// latency. It does not remove the nap fallback -- clr's WaitForSignal() re-arms
-// the wait every 4s with the active hint, so "active" is not a licence to spin a
-// core unbounded.
-inline constexpr int kHotPollActiveUs = 10000;
+// reduced latency. It does not remove the nap fallback -- clr's WaitForSignal()
+// re-arms the wait every 4s with the active hint, so "active" is not a licence
+// to spin a core unbounded.
+inline constexpr unsigned int kHotPollActiveUs = 10000;
 
-constexpr int HotPollUs(bool active_hint) {
+constexpr unsigned int HotPollUs(bool active_hint) {
   return active_hint ? kHotPollActiveUs : kHotPollUs;
 }
 

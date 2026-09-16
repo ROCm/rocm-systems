@@ -43,9 +43,9 @@ TEST(PollBackoffTest, BoundsAreOrdered) {
 TEST(PollBackoffTest, EscalatesByDoublingThenSaturates) {
   EXPECT_EQ(NextPollNapUs(kPollNapFloorUs), 2 * kPollNapFloorUs);
 
-  int nap = kPollNapFloorUs;
+  unsigned int nap = kPollNapFloorUs;
   for (int i = 0; i < 64; ++i) {
-    int next = NextPollNapUs(nap);
+    unsigned int next = NextPollNapUs(nap);
     EXPECT_LE(next, kPollNapCeilingUs);  // never exceeds the cap
     EXPECT_GE(next, nap);                // monotonic non-decreasing
     if (nap < kPollNapCeilingUs) {
@@ -68,7 +68,7 @@ TEST(PollBackoffTest, CeilingIsFixedPoint) {
 // into polling: escalation must saturate at that ceiling, never above it, and
 // the ceiling is likewise a fixed point.
 TEST(PollBackoffTest, MixedCeilingSaturates) {
-  int nap = kPollNapFloorUs;
+  unsigned int nap = kPollNapFloorUs;
   while (nap < kPollNapCeilingMixedUs) {
     nap = NextPollNapUs(nap, kPollNapCeilingMixedUs);
     EXPECT_LE(nap, kPollNapCeilingMixedUs);
@@ -84,7 +84,7 @@ TEST(PollBackoffTest, MixedCeilingSaturates) {
 // regardless of how far a previous idle wait had escalated -- the escalated
 // value never carries across waits.
 TEST(PollBackoffTest, ResetReturnsToFloor) {
-  int nap = kPollNapFloorUs;
+  unsigned int nap = kPollNapFloorUs;
   while (nap < kPollNapCeilingUs) nap = NextPollNapUs(nap);
   EXPECT_EQ(nap, kPollNapCeilingUs);
 
@@ -98,12 +98,12 @@ TEST(PollBackoffTest, ResetReturnsToFloor) {
 // enough to absorb a prompt GPU completion without a nap, short enough that a
 // stalled wait stops burning the core quickly. The active hint only widens it.
 TEST(PollBackoffTest, HotPollWindowBounds) {
-  EXPECT_GT(kHotPollUs, 0);
+  EXPECT_GT(kHotPollUs, 0u);
   EXPECT_GE(kHotPollActiveUs, kHotPollUs);
   // A blocked-hint waiter should give up the core in well under a scheduler
   // tick; an active-hint waiter within a few milliseconds.
-  EXPECT_LE(kHotPollUs, 1000);
-  EXPECT_LE(kHotPollActiveUs, 20000);
+  EXPECT_LE(kHotPollUs, 1000u);
+  EXPECT_LE(kHotPollActiveUs, 20000u);
 }
 
 // HotPollUs() selects the window from the wait-state hint.
@@ -118,12 +118,12 @@ TEST(PollBackoffTest, HotPollSelectsOnActiveHint) {
 // longer than any real GPU op (the TheRock#7832 stalls ran ~60s) and confirm
 // the time spent spinning is a tiny fraction of the wait.
 TEST(PollBackoffTest, LongWaitIsMostlyAsleep) {
-  constexpr long kWaitUs = 60L * 1000 * 1000;  // 60 s
+  constexpr unsigned long kWaitUs = 60UL * 1000 * 1000;  // 60 s
 
-  long spinning_us = HotPollUs(false);  // the hot window, spent hot
-  long elapsed_us = spinning_us;
-  int nap = kPollNapFloorUs;
-  long naps = 0;
+  unsigned long spinning_us = HotPollUs(false);  // the hot window, spent hot
+  unsigned long elapsed_us = spinning_us;
+  unsigned int nap = kPollNapFloorUs;
+  unsigned long naps = 0;
   while (elapsed_us < kWaitUs) {
     elapsed_us += nap;  // asleep for this long
     nap = NextPollNapUs(nap);
@@ -133,7 +133,7 @@ TEST(PollBackoffTest, LongWaitIsMostlyAsleep) {
   // Per nap the loop does O(1) work (one atomic load, one clock read) before
   // sleeping again; even at a generous 1 us of work per wake the spin cost is
   // negligible next to the wait.
-  long spin_plus_wake_us = spinning_us + naps;
+  unsigned long spin_plus_wake_us = spinning_us + naps;
   EXPECT_LT(spin_plus_wake_us * 100, kWaitUs)  // < 1% duty cycle
       << "naps=" << naps << " spin_plus_wake_us=" << spin_plus_wake_us;
 

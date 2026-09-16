@@ -111,7 +111,7 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
   // HSA_WAIT_STATE_ACTIVE hint widens the hot-spin window but still backs off.
   const timer::fast_clock::duration kHotPoll =
       std::chrono::microseconds(HotPollUs(wait_hint == HSA_WAIT_STATE_ACTIVE));
-  int poll_nap_us = kPollNapFloorUs;
+  unsigned int poll_nap_us = kPollNapFloorUs;
 
   while (true) {
     if (!IsValid()) return 0;
