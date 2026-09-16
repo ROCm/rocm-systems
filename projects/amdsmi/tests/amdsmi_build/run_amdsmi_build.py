@@ -480,10 +480,13 @@ def install_build_prereqs(cfg: "RunnerConfig") -> None:
                 "pkg-config",
                 # libdrm: pkg_check_modules in CMakeLists.txt. rpm: cpack runs
                 # its RPM generator even on a deb distro. ca-certificates:
-                # FetchContent clones esmi_ib_library over https.
+                # FetchContent clones esmi_ib_library over https. libgtest-dev:
+                # without it the tests link a FetchContent-built libgtest.so
+                # that the tests package does not ship.
                 "libdrm-dev",
                 "rpm",
                 "ca-certificates",
+                "libgtest-dev",
             ],
             name="apt-install-prereqs",
             retries=cfg.retries,
