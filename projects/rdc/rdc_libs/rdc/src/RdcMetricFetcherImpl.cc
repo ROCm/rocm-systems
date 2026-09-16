@@ -776,19 +776,60 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       break;
     }
     case RDC_FI_GPU_MEMORY_CUR_BANDWIDTH: {
-      amdsmi_engine_usage_t engine_usage;
+      amdsmi_gpu_metrics_t gpu_metrics;
       amdsmi_vram_info_t vram_info;
-
-      value->status = amdsmi_get_gpu_activity(processor_handle, &engine_usage);
       value->type = INTEGER;
-      if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = static_cast<int64_t>(engine_usage.umc_activity);
+
+      // A single PMFW metrics snapshot provides both the instantaneous UMC
+      // activity and the accumulator; amdsmi_get_gpu_activity() would fetch the
+      // same snapshot internally, so query it once here.
+      const amdsmi_status_t metrics_status =
+          amdsmi_get_gpu_metrics_info(processor_handle, &gpu_metrics);
+
+      // In gpu_metrics the max value of the type means "not supported".
+      const uint16_t kU16NotSupported = std::numeric_limits<uint16_t>::max();
+      const uint64_t kU64NotSupported = std::numeric_limits<uint64_t>::max();
+
+      // Instantaneous UMC controller activity. On some ASICs this only reflects
+      // compute-shader memory traffic and reads zero under DMA/copy traffic.
+      double activity_pct = 0.0;
+      if (metrics_status == AMDSMI_STATUS_SUCCESS &&
+          gpu_metrics.average_umc_activity != kU16NotSupported) {
+        activity_pct = static_cast<double>(gpu_metrics.average_umc_activity);
       }
 
-      value->status = amdsmi_get_gpu_vram_info(processor_handle, &vram_info);
-      if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = value->value.l_int * vram_info.vram_max_bandwidth / 100;
+      // Prefer the memory-activity accumulator when available: unlike the
+      // instantaneous reading it also captures DMA/copy traffic. Track the
+      // previous sample per GPU and derive a percentage from the accumulator
+      // delta over firmware time (see derive_mem_activity_percent()).
+      if (metrics_status == AMDSMI_STATUS_SUCCESS && gpu_metrics.firmware_timestamp != 0 &&
+          gpu_metrics.firmware_timestamp != kU64NotSupported &&
+          gpu_metrics.mem_activity_acc != kU64NotSupported) {
+        std::lock_guard<std::mutex> lock(mem_activity_mutex_);
+        auto prev = mem_activity_cache_.find(gpu_index);
+        const bool have_prev = prev != mem_activity_cache_.end();
+        activity_pct = derive_mem_activity_percent(
+            activity_pct, have_prev, have_prev ? prev->second.mem_activity_acc : 0,
+            have_prev ? prev->second.firmware_timestamp : 0, gpu_metrics.mem_activity_acc,
+            gpu_metrics.firmware_timestamp);
+        // Only advance the cache with a newer firmware sample: the metrics read
+        // happens before the lock, so concurrent fetches can take the lock out of
+        // firmware-timestamp order and would otherwise cache an older sample last.
+        if (!have_prev || gpu_metrics.firmware_timestamp > prev->second.firmware_timestamp) {
+          mem_activity_cache_[gpu_index] = {gpu_metrics.mem_activity_acc,
+                                            gpu_metrics.firmware_timestamp};
+        }
       }
+
+      const amdsmi_status_t vram_status = amdsmi_get_gpu_vram_info(processor_handle, &vram_info);
+      // Report a bandwidth only when both reads succeeded; otherwise leave a zero
+      // value (not a bare activity percentage) and surface the failing status.
+      value->value.l_int =
+          (vram_status == AMDSMI_STATUS_SUCCESS)
+              ? static_cast<int64_t>(activity_pct * vram_info.vram_max_bandwidth / 100.0)
+              : 0;
+      // Don't mask a metrics-fetch failure with vram-info success.
+      value->status = (metrics_status != AMDSMI_STATUS_SUCCESS) ? metrics_status : vram_status;
       break;
     }
     case RDC_FI_GPU_MEMORY_FREE: {
