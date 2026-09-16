@@ -34,15 +34,11 @@
 
 #include "hsakmt/hsakmt.h"
 #include "hsakmt/hsakmttypes.h"
-#include "atomic.hpp"
 #include "log.hpp"
 #include "sdma_pkt_struct.h"
 #include "sdma_pkt_struct_mi4.h"
 
 namespace sdma_anvil {
-
-namespace atomic = ::rocshmem::detail::atomic;
-
 
 constexpr uint32_t SDMA_QUEUE_SIZE = 1024 * 1024;  // 1MB (matches rocm-xio sdma-ep)
 constexpr HSA_QUEUE_PRIORITY DEFAULT_PRIORITY = HSA_QUEUE_PRIORITY_NORMAL;
@@ -168,8 +164,7 @@ __device__ __forceinline__ SDMA_PKT_FENCE_64B_MI4 CreateFence64BPacketMI4(uint64
 template <int64_t MAX_SPIN_COUNT = -1>
 __device__ __forceinline__ void poll_until_ge(uint64_t* addr, uint64_t expected) {
   [[maybe_unused]] int64_t spin_count = 0;
-  while (atomic::load<atomic::memory_scope::device,
-                      atomic::memory_order::relaxed>(addr) < expected) {
+  while (__scoped_atomic_load_n(addr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) < expected) {
     spin_count++;
     assert(MAX_SPIN_COUNT < 0 || spin_count != MAX_SPIN_COUNT);
   }
@@ -190,8 +185,7 @@ struct SdmaQueueDeviceHandle {
       return true;
     }
     // Only read hardware register if the queue is full based on cached index
-    cachedHwReadIndex = atomic::load<atomic::memory_scope::device,
-                                     atomic::memory_order::relaxed>(rptr);
+    cachedHwReadIndex = __scoped_atomic_load_n(rptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
     return (uptoIndex - cachedHwReadIndex) < queue_size_in_bytes;
   }
@@ -204,8 +198,7 @@ struct SdmaQueueDeviceHandle {
     int retries = 0;
 
     while (true) {
-      cur_index = atomic::load<atomic::memory_scope::device,
-                               atomic::memory_order::relaxed>(cachedWptr);
+      cur_index = __scoped_atomic_load_n(cachedWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
       offset = 0;
 
       // Wraparound and Pad NOPs on remaining bytes
@@ -215,11 +208,9 @@ struct SdmaQueueDeviceHandle {
       uint64_t new_index = cur_index + size_in_bytes + offset;
 
       if (CanWriteUpto(new_index)) {
-        if (atomic::compare_exchange_strong<
-              atomic::memory_scope::device,
-              atomic::memory_order::relaxed,
-              atomic::memory_order::relaxed>(
-                cachedWptr, cur_index, new_index)) {
+        if (__scoped_atomic_compare_exchange_n(
+                cachedWptr, &cur_index, new_index, false,
+                __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE)) {
           break;
         }
       }
@@ -248,17 +239,15 @@ struct SdmaQueueDeviceHandle {
     // First DWORD encodes the NOP count per SDMA spec; remaining DWORDs are zero
     for (uint32_t i = 0; i < numOffsetDwords; i++) {
       uint32_t val = (i == 0) ? (((numOffsetDwords - 1) & 0xFFFF) << 16) : 0;
-      atomic::store<atomic::memory_scope::device,
-                    atomic::memory_order::relaxed>(
-                      queueBuf + base_index_in_dwords + i, val);
+      __scoped_atomic_store_n(queueBuf + base_index_in_dwords + i, val,
+                              __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
     pendingWptr += offset;
     base_index_in_dwords = WrapIntoRing(pendingWptr) / sizeof(uint32_t);
 
     for (uint32_t i = 0; i < numDwords; i++) {
-      atomic::store<atomic::memory_scope::device,
-                    atomic::memory_order::relaxed>(
-                      queueBuf + base_index_in_dwords + i, packetPtr[i]);
+      __scoped_atomic_store_n(queueBuf + base_index_in_dwords + i, packetPtr[i],
+                              __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
     pendingWptr += sizeof(PacketType);
   }
@@ -267,8 +256,7 @@ struct SdmaQueueDeviceHandle {
     int retries = 0;
     while (true) {
       uint64_t val =
-        atomic::load<atomic::memory_scope::device,
-                     atomic::memory_order::relaxed>(committedWptr);
+        __scoped_atomic_load_n(committedWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
       if (val == base) {
         // All stores inside the loop to avoid SIMD reconvergence deadlock:
@@ -282,8 +270,7 @@ struct SdmaQueueDeviceHandle {
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
-        atomic::store<atomic::memory_scope::device,
-                      atomic::memory_order::relaxed>(wptr, pendingWptr);
+        __scoped_atomic_store_n(wptr, pendingWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 
 #if defined(__GFX12__)
         asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
@@ -293,8 +280,7 @@ struct SdmaQueueDeviceHandle {
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
-        atomic::store<atomic::memory_scope::system,
-                      atomic::memory_order::relaxed>(doorbell, pendingWptr);
+        __scoped_atomic_store_n(doorbell, pendingWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
 
 #if defined(__GFX12__)
         asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
@@ -304,8 +290,7 @@ struct SdmaQueueDeviceHandle {
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
-        atomic::store<atomic::memory_scope::device,
-                      atomic::memory_order::relaxed>(committedWptr, pendingWptr);
+        __scoped_atomic_store_n(committedWptr, pendingWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 
 #if defined(__GFX12__)
         asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
@@ -317,8 +302,7 @@ struct SdmaQueueDeviceHandle {
 
         // Relaxed device-scope atomic store writes directly to GL2, making
         // maxWritePtr visible to quiet callers on other CUs.
-        atomic::store<atomic::memory_scope::device,
-                      atomic::memory_order::relaxed>(&maxWritePtr, pendingWptr);
+        __scoped_atomic_store_n(&maxWritePtr, pendingWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
         break;
       }
       __builtin_amdgcn_s_sleep(1);
@@ -336,8 +320,7 @@ struct SdmaQueueDeviceHandle {
   __device__ __forceinline__ void flushTo(uint64_t upToIndex) {
     uint64_t hw_read_index;
     do {
-      hw_read_index = atomic::load<atomic::memory_scope::device,
-                                   atomic::memory_order::relaxed>(rptr);
+      hw_read_index = __scoped_atomic_load_n(rptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     } while (hw_read_index < upToIndex);
   }
 
@@ -345,12 +328,10 @@ struct SdmaQueueDeviceHandle {
   __device__ __forceinline__ void quietAll() {
     // One agent-scope load to read maxWritePtr set by a potentially different CU.
     // Held in a register for the loop — it does not need updated during quietAll.
-    uint64_t target = atomic::load<atomic::memory_scope::device,
-                                   atomic::memory_order::relaxed>(&maxWritePtr);
+    uint64_t target = __scoped_atomic_load_n(&maxWritePtr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     uint64_t hw_read_index;
     do {
-      hw_read_index = atomic::load<atomic::memory_scope::device,
-                                   atomic::memory_order::relaxed>(rptr);
+      hw_read_index = __scoped_atomic_load_n(rptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     } while (hw_read_index < target);
   }
 
@@ -626,8 +607,7 @@ __device__ __forceinline__ void quiet(SdmaQueueSingleProducerDeviceHandle& handl
 __device__ __forceinline__ bool waitForSignal(HSAuint64* addr, uint64_t expected) {
   int retries = 0;
   while (true) {
-    uint64_t value = atomic::load<atomic::memory_scope::device,
-                                  atomic::memory_order::relaxed>(addr);
+    uint64_t value = __scoped_atomic_load_n(addr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     if (value >= expected) {  // >= not == to avoid infinite spin if signal overshoots
       return true;
     }
