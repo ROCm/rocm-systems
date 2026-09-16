@@ -1424,7 +1424,9 @@ std::vector<std::string> Program::ProcessOptions(amd::option::Options* options) 
     if ((appName == "Indigo Benchmark.exe") ||
         (appName == "Adobe Premiere Pro.exe") ||
         (appName == "AfterFX.exe") ||
-        (appName == "BaikalStandalone.exe")) {
+        (appName == "Baikal-Cornell.exe") ||
+        (appName == "Baikal-Rungholt.exe") ||
+        (appName == "Baikal-Sponza.exe")) {
       optionsVec.push_back("-Xclang");
       optionsVec.push_back("-Wno-error=incompatible-pointer-types");
     }
