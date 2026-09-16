@@ -893,14 +893,13 @@ def test_show_operator_summary_renders_na_for_nan_cells(capsys):
 def test_format_table_output_view_table_skips_gfx9_memory_chart_renderer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """--view table renders a mem_chart table as a plain titled table on CDNA."""
-
-    def _fail_if_called(*_args, **_kwargs) -> str:
-        raise AssertionError("gfx9 memory chart renderer ran despite --view table")
+    """--view table renders a mem_chart table as a plain titled table on gfx9."""
 
     monkeypatch.setattr(
         "utils.tty.mem_chart_gfx9.plot_mem_chart",
-        _fail_if_called,
+        lambda *_a, **_k: pytest.fail(
+            "gfx9 memory chart renderer ran despite --view table"
+        ),
     )
     df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
 
@@ -923,12 +922,11 @@ def test_format_table_output_view_table_skips_gfx11_memory_chart_renderer(
 ) -> None:
     """--view table renders a mem_chart table as a plain titled table on RDNA3.5."""
 
-    def _fail_if_called(*_args, **_kwargs) -> str:
-        raise AssertionError("gfx11 memory chart renderer ran despite --view table")
-
     monkeypatch.setattr(
         "utils.tty.mem_chart_gfx11.plot_mem_chart",
-        _fail_if_called,
+        lambda *_a, **_k: pytest.fail(
+            "gfx11 memory chart renderer ran despite --view table"
+        ),
     )
     df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
 
