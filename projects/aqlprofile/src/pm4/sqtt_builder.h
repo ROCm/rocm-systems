@@ -340,6 +340,14 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
       builder.BuildWritePConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_STATUS_ADDR, 0);
 
       if (Primitives::GFXIP_LEVEL == 12) {
+        // Disable-and-reset the perfmon state block before arming the trace, mirroring PAL's
+        // IssueBegin, which writes CP_PERFMON_CNTL = CP_PERFMON_STATE_DISABLE_AND_RESET
+        // (gfx12PerfExperiment.cpp:1910-1914) ahead of WriteStartThreadTraces.  The pure-SQTT
+        // path never calls StartPerfMon, so without this it arms over stale perfmon state.
+        // cp_perfmon_cntl_reset_value() is 0 (PERFMON_STATE = DISABLE_AND_RESET).  Must precede
+        // SPI_SQG_EVENT_CTL to match PAL's ordering.
+        WriteConfigPacket(cmd_buffer, Primitives::CP_PERFMON_CNTL_ADDR,
+                          Primitives::cp_perfmon_cntl_reset_value());
         WriteConfigPacket(cmd_buffer, Primitives::SPI_SQG_EVENT_CTL_ADDR,
                           Primitives::spi_sqg_event_ctl(true));
       }
@@ -426,40 +434,49 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     }
     builder.BuildWriteWaitIdlePacket(cmd_buffer);
 
-    rocprof_trace_decoder_instrument_enable_t header{};
-    header.char1 = '\0';
-    header.char2 = 'R';
-    header.char3 = 'O';
-    header.char4 = 'C';
-    auto userdata_channel = Primitives::SQ_THREAD_TRACE_USERDATA_2;
-
-    builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, header.u32All);
-    builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, 524801);
-
-    rocprof_trace_decoder_packet_header_t packet{};
-    packet.opcode = ROCPROF_TRACE_DECODER_PACKET_OPCODE_AGENT_INFO;
-
-    if (config->enable_rt_timestamp)
+    // The rocprof trace-decoder instrumentation stream ('\0ROC' magic + version + AGENT_INFO
+    // packets) is emitted on SQ_THREAD_TRACE_USERDATA_2 -- the SAME register channel RGP parses
+    // for its own no-resync marker stream. When this capture feeds RGP the preamble desyncs RGP's
+    // marker parser (0x434f5200 has low nibble 0 -> misparsed as an Event marker, eating the real
+    // CbStart), so BindPipeline is never recognized and Instruction Timing stays greyed out. Skip
+    // the whole block on the RGP path; see TraceConfig::emit_decoder_instrument.
+    if (config->emit_decoder_instrument)
     {
-      packet.type = ROCPROF_TRACE_DECODER_AGENT_INFO_TYPE_RT_FREQUENCY_KHZ;
-      packet.data20 = this->timestamp_freq / 1000;
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, packet.u32All);
-    }
-    if (Primitives::GFXIP_LEVEL == 9 && config->perfcounters.size())
-    {
-      packet.type = ROCPROF_TRACE_DECODER_AGENT_INFO_TYPE_COUNTER_INTERVAL;
-      packet.data20 = (1 + cu_per_se) * ((config->perfcounters.size() + 3) & ~3) * config->perfPeriod;
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, packet.u32All);
-    }
-    if (Primitives::GFXIP_LEVEL == 9 && config->enable_rt_timestamp)
-    {
-      for (size_t xcc = 0; xcc < GetXCCNumber(); xcc++)
+      rocprof_trace_decoder_instrument_enable_t header{};
+      header.char1 = '\0';
+      header.char2 = 'R';
+      header.char3 = 'O';
+      header.char4 = 'C';
+      auto userdata_channel = Primitives::SQ_THREAD_TRACE_USERDATA_2;
+
+      builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, header.u32All);
+      builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, 524801);
+
+      rocprof_trace_decoder_packet_header_t packet{};
+      packet.opcode = ROCPROF_TRACE_DECODER_PACKET_OPCODE_AGENT_INFO;
+
+      if (config->enable_rt_timestamp)
       {
-        if (!isXccEnabled(xcc, se_number_xcc, config)) continue;
+        packet.type = ROCPROF_TRACE_DECODER_AGENT_INFO_TYPE_RT_FREQUENCY_KHZ;
+        packet.data20 = this->timestamp_freq / 1000;
+        builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, packet.u32All);
+      }
+      if (Primitives::GFXIP_LEVEL == 9 && config->perfcounters.size())
+      {
+        packet.type = ROCPROF_TRACE_DECODER_AGENT_INFO_TYPE_COUNTER_INTERVAL;
+        packet.data20 = (1 + cu_per_se) * ((config->perfcounters.size() + 3) & ~3) * config->perfPeriod;
+        builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, packet.u32All);
+      }
+      if (Primitives::GFXIP_LEVEL == 9 && config->enable_rt_timestamp)
+      {
+        for (size_t xcc = 0; xcc < GetXCCNumber(); xcc++)
+        {
+          if (!isXccEnabled(xcc, se_number_xcc, config)) continue;
 
-        XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), xcc);
-        auto& control = reinterpret_cast<TraceControl*>(config->control_buffer_ptr)[xcc];
-        InsertTimestampMarker(cmd_buffer, &control.gpu_clock_cnt_start);
+          XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), xcc);
+          auto& control = reinterpret_cast<TraceControl*>(config->control_buffer_ptr)[xcc];
+          InsertTimestampMarker(cmd_buffer, &control.gpu_clock_cnt_start);
+        }
       }
     }
   }

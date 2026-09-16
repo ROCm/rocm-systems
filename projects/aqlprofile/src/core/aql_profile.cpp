@@ -24,6 +24,7 @@
 #include "aqlprofile-sdk/aql_profile_v2.h"
 
 #include <cstdint>
+#include <cstdio>
 #include <future>
 #include <map>
 #include <string>
@@ -267,6 +268,16 @@ PUBLIC_API hsa_status_t hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_prof
       trace_config.xcc_number = pm4_factory->GetXccNumber();
       trace_config.se_number = se_number_total / trace_config.xcc_number;
       trace_config.sa_number = pm4_factory->GetGpuId() >= aql_profile::GFX10_GPU_ID ? 2 : 0;
+
+      // This aqlprofile copy is dedicated to feeding RGP. The rocprof trace-decoder
+      // instrumentation preamble on USERDATA_2 ('\0ROC' magic + version + AGENT_INFO) collides
+      // with RGP's no-resync marker parser (see pm4/sqtt_builder.h Begin), leaving compute kernels
+      // greyed out for Instruction Timing. Suppress it by default; AQLPROFILE_EMIT_DECODER_INSTRUMENT=1
+      // re-enables the '\0ROC' stream for rocprof/ATT decoder consumers.
+      {
+        const char* emit_instr = getenv("AQLPROFILE_EMIT_DECODER_INSTRUMENT");
+        trace_config.emit_decoder_instrument = (emit_instr != nullptr && emit_instr[0] == '1');
+      }
 
       if (profile->parameters) {
         for (const hsa_ven_amd_aqlprofile_parameter_t* p = profile->parameters;
@@ -599,6 +610,10 @@ PUBLIC_API hsa_status_t
 hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* profile,
                                     hsa_ven_amd_aqlprofile_data_callback_t callback, void* data) {
   hsa_status_t status = HSA_STATUS_SUCCESS;
+  // Sticky trace-overflow error. The per-SE data callback below unconditionally overwrites
+  // `status` with its own return value, which would clobber an OUT_OF_RESOURCES set by the
+  // SQTT wrap / out-of-bounds checks. Record the overflow here so it survives to the return.
+  hsa_status_t sticky_trace_error = HSA_STATUS_SUCCESS;
 
   try {
     aql_profile::Pm4Factory* pm4_factory = aql_profile::Pm4Factory::Create(profile);
@@ -735,12 +750,23 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
             reinterpret_cast<pm4_builder::TraceControl*>(cmd_buffer_mgr.GetPrefix1());
         // Check if SQTT buffer was wrapped
         for (size_t se_index = 0; se_index < se_number_total; se_index++) {
+          // Skip SEs excluded by se_mask: they have no buffer allocated (capacity 0) and
+          // their control-buffer status/wptr are meaningless, so checking them yields false
+          // positives (e.g. buffer-full on stale status2). Matches the v2 path in threadtrace.cpp.
+          if (trace_config.GetTargetCU(se_index) < 0) continue;
+          // On gfx12 the buffer-full bit lives in status2, not status. The UTC/WRITE_ERROR
+          // bit stays in status on all gens (0x01000000 on gfx12, same as older gens).
+          auto status2_value = (pm4_factory->GetGpuId() >= aql_profile::GFX12_GPU_ID)
+                                   ? control_ptr[se_index].status2
+                                   : control_ptr[se_index].status;
           if (control_ptr[se_index].status & sqttbuilder->GetUTCErrorMask()) {
             ERR_LOGGING << "SQTT memory error received, SE(" << se_index << ")";
             status = HSA_STATUS_ERROR_EXCEPTION;
-          } else if (control_ptr[se_index].status & sqttbuilder->GetBufferFullMask()) {
+          } else if (status2_value & sqttbuilder->GetBufferFullMask()) {
             ERR2_LOGGING << "SQTT data buffer full, SE(" << se_index << ")";
             if (status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+            if (sticky_trace_error == HSA_STATUS_SUCCESS)
+              sticky_trace_error = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
           }
         }
 
@@ -760,12 +786,18 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
             sample_size &= (1ull << 29) - 1;
           }
 
-          if (sample_size >= sample_capacity) {
+          // Only masked-in SEs have a real buffer. A masked-out SE has capacity 0, which would
+          // make the bounds check below (0 >= 0) a false positive and spuriously flag the whole
+          // capture as overflowed. Guard on bMaskedIn (matches the v2 path in threadtrace.cpp).
+          if (bMaskedIn && sample_size >= sample_capacity) {
             ERR_LOGGING << "SQTT data out of bounds, sample_id(" << se_index << ") size("
                         << sample_size << "/" << sample_capacity << ")";
             sample_size = sample_capacity;
             if (status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+            if (sticky_trace_error == HSA_STATUS_SUCCESS)
+              sticky_trace_error = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
           }
+
           hsa_status_t call_status;
           if (mode == 0) {  // SQTT trace
             if (bMaskedIn) {
@@ -821,6 +853,12 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
     return HSA_STATUS_ERROR;
   }
 
+  // A successful data callback must not mask a trace-buffer overflow detected above. If the
+  // callback loop reset `status` to SUCCESS, promote the recorded overflow so callers (CLR)
+  // see OUT_OF_RESOURCES instead of silently accepting truncated SQTT data.
+  if (status == HSA_STATUS_SUCCESS && sticky_trace_error != HSA_STATUS_SUCCESS)
+    status = sticky_trace_error;
+
   return status;
 }
 
@@ -855,7 +893,14 @@ PUBLIC_API hsa_status_t hsa_ven_amd_aqlprofile_att_marker(
 
 }  // extern "C"
 
-#ifdef _WIN32
+#if defined(AQLPROFILE_STATIC_BUILD)
+// Static build: there is no DllMain (and defining one here would collide with the host
+// binary's), and on Linux the constructor/destructor attributes are not a contract the host
+// can rely on for a static archive.  The host runtime drives the lifecycle explicitly --
+// ROCr calls these from Runtime::Load()/Runtime::Unload().  See aql_profile_static.h.
+extern "C" void hsa_ven_amd_aqlprofile_static_init(void) { aql_profile::constructor(); }
+extern "C" void hsa_ven_amd_aqlprofile_static_fini(void) { aql_profile::destructor(); }
+#elif defined(_WIN32)
 #include <windows.h>
 extern "C" BOOL WINAPI DllMain(HINSTANCE /*hinstDLL*/, DWORD fdwReason, LPVOID /*lpvReserved*/) {
   switch (fdwReason) {

@@ -72,6 +72,13 @@ struct TraceConfig {
 
   bool enable_rt_timestamp{false};
 
+  // Emit the rocprof trace-decoder instrumentation preamble on SQ_THREAD_TRACE_USERDATA_2
+  // at SQTT start (the '\0ROC' magic + version + AGENT_INFO packets). This shares the same
+  // register channel that RGP parses for its own no-resync marker stream, so it must be
+  // suppressed when the capture feeds RGP (see threadtrace.cpp / GpuSqttBuilder::Begin).
+  // Defaults to true here to preserve behavior for direct struct users and pm4 unit tests.
+  bool emit_decoder_instrument{true};
+
   int GetTargetCU(int SE) const { return target_cu_per_se.at(SE); };
   uint64_t GetSEmask() const { return se_mask; };
   uint64_t GetSEBaseAddr(int SE) const { return se_base_addresses.at(SE); }

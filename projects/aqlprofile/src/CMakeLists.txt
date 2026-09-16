@@ -28,17 +28,36 @@ set ( LIB_SRC
   ${LIB_DIR}/util/hsa_rsrc_factory.cpp
 )
 
-add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )
+# AQLPROFILE_BUILD_STATIC builds aqlprofile as a static library intended to be linked
+# directly into the HSA runtime (see ROCR_STATIC_AQLPROFILE in rocr-runtime).  In that
+# configuration the hsa_* calls below resolve at link time against the ROCr objects in the
+# same binary, so there is no import table, no dependency on a runtime DLL re-exporting the
+# HSA API, and no way to bind a different ROCr instance than the one that owns the agent.
+option ( AQLPROFILE_BUILD_STATIC "Build aqlprofile as a static library for in-runtime linking" OFF )
+
+if ( AQLPROFILE_BUILD_STATIC )
+  # OBJECT rather than STATIC: the host runtime consumes $<TARGET_OBJECTS:...> so the objects
+  # land physically inside its archive.  A STATIC library would instead become a link
+  # dependency that propagates through INTERFACE_LINK_LIBRARIES (even when linked PRIVATE)
+  # and would have to be added to the host's install(EXPORT ...) set.
+  add_library ( ${TARGET_LIB} OBJECT ${LIB_SRC} )
+  target_compile_definitions ( ${TARGET_LIB} PUBLIC AQLPROFILE_STATIC_BUILD )
+  set_target_properties ( ${TARGET_LIB} PROPERTIES POSITION_INDEPENDENT_CODE ON )
+else ()
+  add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )
+endif ()
 add_library (aqlprofile::aqlprofile-lib ALIAS ${TARGET_LIB})
 target_include_directories ( ${TARGET_LIB}
   PUBLIC  ${LIB_DIR}
   PRIVATE ${API_PATH}
           ${LIB_DIR}/core/include
 )
-if ( WIN32 )
+if ( WIN32 AND NOT AQLPROFILE_BUILD_STATIC )
   # Link the module-definition file so the linker exports all public symbols
   target_sources ( ${TARGET_LIB} PRIVATE ${LIB_DIR}/hsa-amd-aqlprofile64.def )
-  # Locate the pre-built HIP import library (re-exports all HSA runtime symbols)
+  # Locate the pre-built HIP import library (re-exports all HSA runtime symbols).
+  # Only needed for the shared build: a static library resolves no externals at creation
+  # time, so the static configuration has no runtime-DLL dependency at all.
   find_library ( AMDHIP64_LIB
     NAMES amdhip64
     HINTS "${AMDHIP64_LIB_DIR}"
@@ -52,8 +71,8 @@ endif ()
 target_link_libraries( ${TARGET_LIB}
   PRIVATE
     $<$<NOT:$<BOOL:${WIN32}>>:pthread>
-    $<$<NOT:$<BOOL:${WIN32}>>:hsa-runtime64::hsa-runtime64>
-    $<$<BOOL:${WIN32}>:${AMDHIP64_LIB}>
+    $<$<AND:$<NOT:$<BOOL:${WIN32}>>,$<NOT:$<BOOL:${AQLPROFILE_BUILD_STATIC}>>>:hsa-runtime64::hsa-runtime64>
+    $<$<AND:$<BOOL:${WIN32}>,$<NOT:$<BOOL:${AQLPROFILE_BUILD_STATIC}>>>:${AMDHIP64_LIB}>
   PUBLIC
     aqlprofile::headers
 )
