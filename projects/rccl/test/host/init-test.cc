@@ -1527,6 +1527,20 @@ TEST_F(InitMicrotest, GetAsyncError_GinError_ReturnsRemoteError) {
   EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
   EXPECT_EQ(ncclRemoteError, e);
 }
+TEST_F(InitMicrotest, GetAsyncError_GinNotConnected_SkipsTheGinQuery) {
+  ReadyComm rc;
+  auto sr = std::make_unique<ncclSharedResources>();
+  // A loaded-but-unconnected plugin: ncclGin is what the pre-2.29.7 guard
+  // keyed on, so it must be non-null for this to pin the connected check.
+  // Never dereferenced here, since the guard skips the block.
+  sr->ginState.ncclGin = reinterpret_cast<ncclGin_t*>(0x1);
+  sr->ginState.connected = false;
+  rc.get()->sharedRes = sr.get();
+  g_ginHasError = true;  // would surface as ncclRemoteError if queried
+  ncclResult_t e = ncclSuccess;
+  EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
+  EXPECT_EQ(ncclSuccess, e);
+}
 TEST_F(InitMicrotest, GetAsyncError_GroupJobCompletes_AndClears) {
   ReadyComm rc;
   auto gj = std::make_unique<ncclGroupJob>();
