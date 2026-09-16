@@ -24,19 +24,10 @@
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/spm/decode.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/kfd_resource.hpp"
 
 #include <fmt/format.h>
 #include <hsa/hsa_ext_amd.h>
-
-#define CHECK_HSA(fn, message)                                                                     \
-    {                                                                                              \
-        auto status = (fn);                                                                        \
-        if(status != HSA_STATUS_SUCCESS)                                                           \
-        {                                                                                          \
-            ROCP_FATAL << "HSA Err: " << status << "\n";                                           \
-            exit(1);                                                                               \
-        }                                                                                          \
-    }
 
 namespace rocprofiler
 {
@@ -134,19 +125,34 @@ CounterPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdE
     return std::make_unique<hsa::CounterAQLPacket>(*aql_agent, pool, _events);
 }
 
-ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache&             agent,
-                                                         const thread_trace_parameter_pack& params,
-                                                         const CoreApiTable&                coreapi,
-                                                         const AmdExtTable&                 ext)
+ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(
+    rocprofiler_agent_id_t                           agent_id,
+    const thread_trace_parameter_pack&               params,
+    std::shared_ptr<thread_trace::kfd_memory_pool_t> kfd_memory,
+    std::shared_ptr<thread_trace::kfd_copy_queue_t>  copy_queue)
 {
-    this->tracepool                 = hsa::TraceMemoryPool{};
-    this->tracepool.allocate_fn     = ext.hsa_amd_memory_pool_allocate_fn;
-    this->tracepool.allow_access_fn = ext.hsa_amd_agents_allow_access_fn;
-    this->tracepool.free_fn         = ext.hsa_amd_memory_pool_free_fn;
-    this->tracepool.api_copy_fn     = coreapi.hsa_memory_copy_fn;
-    this->tracepool.gpu_agent       = agent.get_hsa_agent();
-    this->tracepool.cpu_pool_       = agent.cpu_pool();
-    this->tracepool.gpu_pool_       = agent.gpu_pool();
+    this->tracepool           = hsa::TraceMemoryPool{};
+    this->tracepool.agent_id  = agent_id;
+    this->tracepool.aql_agent = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(agent_id));
+    if(kfd_memory)
+    {
+        this->tracepool.kfd_memory     = std::move(kfd_memory);
+        this->tracepool.kfd_copy_queue = std::move(copy_queue);
+    }
+    else
+    {
+        const auto* agent =
+            CHECK_NOTNULL(agent::get_agent_cache(rocprofiler::agent::get_agent(agent_id)));
+        auto* coreapi                   = CHECK_NOTNULL(hsa::get_core_table());
+        auto* ext                       = CHECK_NOTNULL(hsa::get_amd_ext_table());
+        this->tracepool.gpu_agent       = agent->get_hsa_agent();
+        this->tracepool.allocate_fn     = ext->hsa_amd_memory_pool_allocate_fn;
+        this->tracepool.allow_access_fn = ext->hsa_amd_agents_allow_access_fn;
+        this->tracepool.free_fn         = ext->hsa_amd_memory_pool_free_fn;
+        this->tracepool.api_copy_fn     = coreapi->hsa_memory_copy_fn;
+        this->tracepool.cpu_pool_       = agent->cpu_pool();
+        this->tracepool.gpu_pool_       = agent->gpu_pool();
+    }
 
     uint32_t cu                 = static_cast<uint32_t>(params.target_cu);
     uint32_t shader_engine_mask = static_cast<uint32_t>(params.shader_engine_mask);
@@ -209,7 +215,7 @@ std::unique_ptr<hsa::TraceControlAQLPacket>
 ThreadTraceAQLPacketFactory::construct_control_packet()
 {
     auto num_params = static_cast<uint32_t>(aql_params.size());
-    auto profile    = aqlprofile_att_profile_t{tracepool.gpu_agent, aql_params.data(), num_params};
+    auto profile    = aqlprofile_att_profile_t{tracepool.aql_agent, aql_params.data(), num_params};
     auto packet     = std::make_unique<hsa::TraceControlAQLPacket>(this->tracepool, profile);
     packet->clear();
     return packet;

@@ -37,6 +37,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -764,6 +765,33 @@ public:
       uint64_t lo = this->lane(relative_reg, lane);
       uint64_t hi = this->lane(relative_reg + 1, lane);
       return lo | (hi << 32);
+    }
+
+    /// @brief Snapshot dword registers into lane-major memory.
+    /// @details The region acquisition has already reported one plugin read per
+    /// register. This copies only selected lanes without repeating ownership
+    /// lookup and plugin dispatch for every individual lane. The destination
+    /// layout is @c destination[(lane*reg_count()+relative_reg)*sizeof(uint32_t)].
+    /// Bytes belonging to masked-off lanes are left untouched.
+    void copy_dwords_lane_major(std::span<uint8_t> destination, uint64_t lane_mask) const {
+      const size_t lane_stride = static_cast<size_t>(reg_count_) * sizeof(uint32_t);
+      const size_t required_size = static_cast<size_t>(wf_size_) * lane_stride;
+      if (destination.size() < required_size)
+        throw std::invalid_argument("VGPR snapshot destination is smaller than the wave region");
+      const uint64_t wave_lane_mask = wf_size_ >= 64 ? ~uint64_t{0} : (uint64_t{1} << wf_size_) - 1;
+      if (lane_mask & ~wave_lane_mask)
+        throw std::invalid_argument("VGPR snapshot lane mask exceeds the wave width");
+      for (uint32_t reg = 0; reg < reg_count_; ++reg) {
+        const auto values = lanes(reg);
+        uint64_t active_lanes = lane_mask;
+        while (active_lanes) {
+          const uint32_t lane = std::countr_zero(active_lanes);
+          active_lanes &= active_lanes - 1;
+          std::memcpy(destination.data() + static_cast<size_t>(lane) * lane_stride +
+                          static_cast<size_t>(reg) * sizeof(uint32_t),
+                      &values[lane], sizeof(uint32_t));
+        }
+      }
     }
 
   private:
