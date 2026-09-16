@@ -2631,7 +2631,7 @@ TEST(Rcclwrap, AlltoAllDdaDecision_Gfx950_TooFewRanks_NoDda)
 TEST(RcclAlltoAllDdaDecision, Gfx950_FourRanks_RelaxOn_TakesDda)
 {
     RUN_ISOLATED_TEST_WITH_ENV(
-        "Gfx950_FourRanks_RelaxOn_TakesDda",
+        "AlltoAll_Gfx950_FourRanks_RelaxOn_TakesDda",
         []()
         {
             ncclComm comm{};
