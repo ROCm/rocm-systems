@@ -41,13 +41,6 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - Samples under `samples/kernel_replay/` cover counter collection, ATT, SPM, PC sampling, service sequencing, per-dispatch opt-out, and early exit.
     - Beta, with documented limitations: only a single-packet, single-dispatch submission is replayed (HIP graph launches and multi-packet submissions run once), and the snapshot covers coarse-grained device allocations owned by the agent plus module-scope `__device__`/`__constant__` variables. Unified or managed memory, `hipMallocAsync` and other virtual-memory-mapped allocations, and host, fine-grained, and kernarg memory are not captured. See `how-to/using-kernel-replay.rst` for the full list.
 
-  - Experimental kernel dispatch timestamps from the KFD command processor (CP) dispatch log, together with signal-less dispatch completion, behind `ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS` (off by default):
-    - When enabled, kernel dispatch `start_timestamp`/`end_timestamp` are read from the firmware dispatch log at the true hardware dispatch boundaries, so the interval is tighter than the HSA signal-based one.
-    - A qualifying dispatch batch is published with its AQL packet untouched (the SDK allocates no completion signal and does not modify the application's) and completes from the firmware record instead. A batch that does not qualify keeps the signal path, so the two coexist.
-    - Attribution is per doorbell slot: a collision between two live queues sharing a slot retires that slot to the signal path, while queue churn (for example a HIP stream pool) keeps using signal-less. A firmware ring overrun leaves the affected dispatches without a record and logs a warning rather than disabling signal-less.
-    - `ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB` (default 10 MiB), `ROCPROFILER_KFD_DISPATCH_LOG_POLL_TIMEOUT_MS` (default 10), and `ROCPROFILER_KFD_DISPATCH_LOG_CLOSE_DRAIN_MS` (default 250) tune the ring size, reader poll timeout, and per-queue close-drain budget.
-    - Experimental and validated on gfx950 (MI350) only; on every other GPU the dispatches stay on the HSA signal path. Enabling counter collection, advanced thread trace, or PC sampling also puts every dispatch back on the HSA timestamps.
-
 **rocprofv3 (CLI):**
 
   - Kernel replay for multi-group counter collection through the new `--replay-mode` flag (beta):
