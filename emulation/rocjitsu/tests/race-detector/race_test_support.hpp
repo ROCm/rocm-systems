@@ -47,6 +47,31 @@ template <int YoungerReads> __global__ void lgkmcnt_capacity_kernel(int *dst) {
   dst[tid] = result;
 }
 
+/// Fill LGKMCNT with ordered LDS reads, then issue an unordered scalar load.
+/// At capacity, the scalar issue proves that the oldest LDS read completed;
+/// one token below capacity, consuming that LDS result must still race.
+template <int YoungerReads>
+__global__ void mixed_lgkmcnt_capacity_kernel(const int *scalar_src, int *dst) {
+  __shared__ int lds[64];
+  int tid = threadIdx.x;
+  lds[tid] = tid + 1;
+  __syncthreads();
+
+  int producer, younger, scalar_result, result;
+  asm volatile("ds_read_b32 %[producer], %[lds_address]\n"
+               ".rept %c[younger_reads]\n"
+               "ds_read_b32 %[younger], %[lds_address]\n"
+               ".endr\n"
+               "s_load_dword %[scalar_result], %[scalar_address], 0x0\n"
+               "v_mov_b32 %[result], %[producer]\n"
+               : [producer] "=&v"(producer), [younger] "=&v"(younger),
+                 [scalar_result] "=s"(scalar_result), [result] "=&v"(result)
+               : [lds_address] "v"(tid * 4), [scalar_address] "s"(scalar_src),
+                 [younger_reads] "n"(YoungerReads)
+               : "memory");
+  dst[tid] = result;
+}
+
 class RaceTestBase : public ::testing::Test {
 protected:
   template <typename T> T *alloc(int count) {

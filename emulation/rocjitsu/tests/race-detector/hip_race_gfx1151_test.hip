@@ -24,6 +24,7 @@ namespace {
 using rocjitsu::test::FindingCount;
 using rocjitsu::test::RaceExpectation;
 using rocjitsu::test::lgkmcnt_capacity_kernel;
+using rocjitsu::test::mixed_lgkmcnt_capacity_kernel;
 using rocjitsu::test::vmcnt_capacity_kernel;
 
 using Gfx1151RaceTest = rocjitsu::test::RaceTestBase;
@@ -246,6 +247,20 @@ TEST_F(Gfx1151RaceTest, lgkmcnt_capacity_boundary) {
 
 TEST_F(Gfx1151RaceTest, lgkmcnt_below_capacity_race) {
   lgkmcnt_capacity_kernel<kGfx11CounterCapacity - 1><<<1, 32>>>(alloc<int>(32));
+  sync();
+  ExpectRace(kLgkmcntBelowCapacityRaceExpectation);
+}
+
+TEST_F(Gfx1151RaceTest, mixed_lgkmcnt_capacity_boundary) {
+  mixed_lgkmcnt_capacity_kernel<kGfx11CounterCapacity - 1>
+      <<<1, 32>>>(allocWithData<int>(1), alloc<int>(32));
+  sync();
+  ExpectNoRace();
+}
+
+TEST_F(Gfx1151RaceTest, mixed_lgkmcnt_below_capacity_race) {
+  mixed_lgkmcnt_capacity_kernel<kGfx11CounterCapacity - 2>
+      <<<1, 32>>>(allocWithData<int>(1), alloc<int>(32));
   sync();
   ExpectRace(kLgkmcntBelowCapacityRaceExpectation);
 }

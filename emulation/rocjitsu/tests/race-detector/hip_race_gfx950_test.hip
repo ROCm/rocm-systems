@@ -28,6 +28,7 @@
 using rocjitsu::test::FindingCount;
 using rocjitsu::test::RaceExpectation;
 using rocjitsu::test::lgkmcnt_capacity_kernel;
+using rocjitsu::test::mixed_lgkmcnt_capacity_kernel;
 using rocjitsu::test::vmcnt_capacity_kernel;
 
 using Gfx950RaceTest = rocjitsu::test::RaceTestBase;
@@ -251,6 +252,20 @@ TEST_F(Gfx950RaceTest, lgkmcnt_capacity_boundary) {
 
 TEST_F(Gfx950RaceTest, lgkmcnt_below_capacity_race) {
   lgkmcnt_capacity_kernel<kCdnaLgkmcntCapacity - 1><<<1, 64>>>(alloc<int>(64));
+  sync();
+  ExpectRace(kLgkmcntBelowCapacityRaceExpectation);
+}
+
+TEST_F(Gfx950RaceTest, mixed_lgkmcnt_capacity_boundary) {
+  mixed_lgkmcnt_capacity_kernel<kCdnaLgkmcntCapacity - 1>
+      <<<1, 64>>>(allocWithData<int>(1), alloc<int>(64));
+  sync();
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, mixed_lgkmcnt_below_capacity_race) {
+  mixed_lgkmcnt_capacity_kernel<kCdnaLgkmcntCapacity - 2>
+      <<<1, 64>>>(allocWithData<int>(1), alloc<int>(64));
   sync();
   ExpectRace(kLgkmcntBelowCapacityRaceExpectation);
 }

@@ -168,12 +168,15 @@ void WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType type, uin
   case amdgpu::WaitCounterType::ASYNCCNT:
     return;
   default:
-    throw std::invalid_argument("invalid wait counter type");
+    assert(false && "invalid wait counter type");
+    return;
   }
   if (capacity <= 0)
     throw std::logic_error("counter capacity is not configured");
+  assert(increment > 0 && increment <= capacity &&
+         "counter increment is outside the configured capacity");
   if (increment == 0 || increment > capacity)
-    throw std::invalid_argument("counter increment is outside the configured capacity");
+    return;
 
   int pending_tokens = 0;
   for (const EventId event_id : waveMemoryEvents)
@@ -397,7 +400,8 @@ int WaveRaceState::doNotWaitValue(amdgpu::WaitCounterType type) const {
   case amdgpu::WaitCounterType::ASYNCCNT:
     return amdgpu::WaitCounters::ASYNCCNT_MAX;
   }
-  throw std::invalid_argument("invalid wait counter type");
+  assert(false && "invalid wait counter type");
+  return -1;
 }
 
 void WaveRaceState::applyWaitCounter(amdgpu::WaitCounterType type, int threshold) {
