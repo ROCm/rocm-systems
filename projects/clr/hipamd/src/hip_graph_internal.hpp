@@ -963,8 +963,7 @@ class Graph {
 
     bool needs_completion_signal = false;        // True if any downstream segment is on a different stream/device, or this is a leaf
 
-    // Most urgent priority declared by any kernel node (or child graph) in this segment.
-    // Set at CreateSegmentsFromPaths() time; Priority::Normal when nothing declares one.
+    // Most urgent declared priority across this segment's nodes.
     int declared_priority = hip::Stream::Priority::Normal;
     bool priority_set = false;
   };
@@ -1434,20 +1433,7 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
 class GraphKernelNode : public GraphNode {
   hipKernelNodeParams kernelParams_;   //!< Kernel node parameters
   unsigned int numParams_;             //!< No. of kernel params as part of signature
-  //! Kernel node attributes, one independent slot each.
-  //!
-  //! These used to share a single hipKernelNodeAttrValue -- a union, so
-  //! accessPolicyWindow, cooperative and priority all aliased -- plus a
-  //! kernelAttrInUse_ id recording which one was written last. That cannot
-  //! represent a node carrying two attributes at once, which CUDA plainly does:
-  //! cudaGraphKernelNodeCopyAttributes is specified as copying "attributes"
-  //! over the whole of cudaKernelNodeAttrID rather than one of them
-  //! (cuda_runtime_api.h:9670-9689 in CUDA 13.0), and cudaGraphExecUpdate
-  //! constrains a single node's cooperative status and its priority as two
-  //! separate properties in the same list (:12527 and :12529-12530).
-  //!
-  //! hipLaunchAttributeClusterDimension was already stored on its own, in
-  //! clusterDim_ below; this extends that treatment to the rest.
+  //! Each attribute has its own slot; independent of each other.
   hipAccessPolicyWindow accessPolicyWindow_;  //!< hipKernelNodeAttributeAccessPolicyWindow
   int cooperative_;                           //!< hipKernelNodeAttributeCooperative
   int priority_;                              //!< hipLaunchAttributePriority
@@ -1761,41 +1747,14 @@ class GraphKernelNode : public GraphNode {
     return static_cast<size_t>(g.x) * g.y * g.z * static_cast<size_t>(b.x) * b.y * b.z;
   }
 
-  // True when hipLaunchAttributePriority was written on this node, whether by
-  // the application through hipGraphKernelNodeSetAttribute() or by stream
-  // capture copying the capturing stream's priority in.
-  //
-  // This is still a distinct question from "what is the priority", and the
-  // difference is load-bearing for segment priority tracking: a segment
-  // takes the most urgent priority any of its nodes declares, so a node that
-  // declares nothing must not be allowed to pull a sibling's Priority::Low back
-  // up to Normal. It is no longer a guard against union aliasing -- priority_ and
-  // cooperative_ are separate members now, so a node given
-  // hipKernelNodeAttributeCooperative(1) has prioritySet_ false and reads back
-  // Priority::Normal rather than Priority::Low.
+  // True when hipLaunchAttributePriority was set on this node.
   bool HasDeclaredPriority() const { return prioritySet_; }
 
-  // Priority declared with hipLaunchAttributePriority, or Priority::Normal when
-  // this node declares none.
   int GetDeclaredPriority() const {
     return prioritySet_ ? priority_ : static_cast<int>(hip::Stream::Priority::Normal);
   }
 
-  // Store the capturing stream's priority as this node's priority. This is what
-  // CUDA specifies stream capture to do -- "Note that priorities are only
-  // available on kernel nodes, and are copied from stream priority during stream
-  // capture", cuda_runtime_api.h:11563, :11635, :11725 and cuda.h:20369, :20457
-  // in CUDA 13.0 -- and it is the whole reason a plain
-  // torch.cuda.Stream(priority=-1) is all a framework user needs there.
-  //
-  // hip::Stream::priority_ is already clamped to [High, Low] by the Stream
-  // constructor, so the clamp here is belt and braces rather than a behaviour.
-  // Note that it reads the *software* priority: DEBUG_HIP_IGNORE_STREAM_PRIORITY
-  // forces HSA_AMD_QUEUE_PRIORITY_NORMAL at HSA queue creation only
-  // (rocdevice.cpp) and never touches priority_, which hipStreamGetPriority()
-  // also returns verbatim. So this copy is unaffected by that flag, and it does
-  // not reintroduce what that flag was turned on to avoid: no queue is requested
-  // and no HSA priority is named here.
+  // Copy the stream's priority into this node, as CUDA specifies stream capture to do.
   void SetCapturedPriority(int priority) {
     priority_ = std::min(std::max(priority, static_cast<int>(hip::Stream::Priority::High)),
                          static_cast<int>(hip::Stream::Priority::Low));
@@ -1809,16 +1768,8 @@ class GraphKernelNode : public GraphNode {
     }
   }
 
-  // Apply the above to a node just recorded on stream, if it is a kernel node.
-  //
-  // This has to be called from the capture interceptor rather than from
-  // ihipGraphAddKernelNode() or ihipGraphAddNode(), and the reason is the part of
-  // the CUDA contract NVIDIA never writes down. Its wording is "copied from
-  // stream priority", not "from the priority of the stream the node was recorded
-  // on"; for a single-stream capture the two are the same, and for the fork/join
-  // capture this feature exists to serve they are not. Only the interceptor knows
-  // which stream recorded this node: a forked capture has two streams sharing one
-  // hip::Graph, so nothing reachable from the graph can tell them apart.
+  // Copy stream priority into node at capture time. Called from the interceptor,
+  // not ihipGraphAddNode, because only the interceptor knows which stream recorded the node.
   static void CopyCaptureStreamPriority(GraphNode* node, const hip::Stream* stream) {
     if (node == nullptr || stream == nullptr || node->GetType() != hipGraphNodeTypeKernel) {
       return;
@@ -1973,12 +1924,7 @@ class GraphKernelNode : public GraphNode {
     return hipSuccess;
   }
   hipError_t GetAttrParams(hipKernelNodeAttrID attr, hipKernelNodeAttrValue* params) {
-    // Get kernel attr params. An attribute that was never set reads back as its
-    // default rather than as an error: each attribute now has its own slot, so
-    // "which one is in use" is no longer a question this can answer, and CUDA
-    // returns the default too. hip-tests already relies on the default for a
-    // node with nothing set at all -- Unit_hipGraphKernelNodeCopyAttributes_Functional
-    // reads AccessPolicyWindow off a freshly added node before writing anything.
+    // An unset attribute reads back as its default.
     if (attr == hipKernelNodeAttributeAccessPolicyWindow) {
       params->accessPolicyWindow.base_ptr = accessPolicyWindow_.base_ptr;
       params->accessPolicyWindow.hitProp = accessPolicyWindow_.hitProp;
@@ -1996,22 +1942,8 @@ class GraphKernelNode : public GraphNode {
     }
     return hipSuccess;
   }
-  //! Copy every attribute the source node carries, which is what
-  //! cudaGraphKernelNodeCopyAttributes is specified to do. This used to copy the
-  //! single attribute named by srcNode->kernelAttrInUse_ and fail with
-  //! hipErrorInvalidContext when the two nodes disagreed about which that was;
-  //! with independent slots there is nothing to disagree about, and a node whose
-  //! attributes were set one at a time no longer loses all but the last.
+  //! Copy all attribute slots from srcNode, mirroring its exact state.
   hipError_t CopyAttr(const GraphKernelNode* srcNode) {
-    // Every slot is assigned, including the was-set flags, so the destination
-    // ends up an exact mirror of the source. Copying only the slots the source
-    // has set would leave a previously-set destination slot behind, and the two
-    // nodes would then disagree about an attribute hipGraphKernelNodeCopyAttributes
-    // is specified to have copied. For priority that is not only a readback
-    // discrepancy: prioritySet_ is what HasDeclaredPriority() reports, so a stale
-    // one would have the segment scheduler act on a declaration this node never
-    // inherited. A slot whose was-set flag is false carries no meaning, so
-    // assigning it unconditionally is harmless.
     clusterDim_ = srcNode->clusterDim_;
     accessPolicyWindow_ = srcNode->accessPolicyWindow_;
     accessPolicyWindowSet_ = srcNode->accessPolicyWindowSet_;
