@@ -556,6 +556,7 @@ consan_moi_inline_capture_causal_snapshot(std::span<const ConSanMoiInlineCausalT
            snapshot.entries[insertion].ancestor_owner_id < token.producer_owner_id)
       ++insertion;
     if (insertion < snapshot.entry_count &&
+        insertion < kConSanMoiInlineCausalSnapshotEntryCapacity &&
         snapshot.entries[insertion].ancestor_owner_id == token.producer_owner_id) {
       snapshot.entries[insertion].ancestor_epoch_plus_one = std::max(
           snapshot.entries[insertion].ancestor_epoch_plus_one, token.producer_epoch_plus_one);

@@ -3774,8 +3774,8 @@ TEST(ConSan, Cdna4SuperColliderSpillPreservesAliasedLoadAddressWindow) {
   for (uint16_t vgpr = 1; vgpr < 256u; ++vgpr)
     words.push_back(build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), arch));
   words.push_back(build_s_endpgm(arch));
-  auto bytes = make_cdna4_lds_code_object(words, "sc_aliased_address_spill",
-                                         kRdna4Wave64AllVgprsGranulated);
+  auto bytes =
+      make_cdna4_lds_code_object(words, "sc_aliased_address_spill", kRdna4Wave64AllVgprsGranulated);
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63u);
   });
@@ -3785,9 +3785,8 @@ TEST(ConSan, Cdna4SuperColliderSpillPreservesAliasedLoadAddressWindow) {
   options.report_buffer_address = 0x12340000u;
   const auto result = test_lower_consan(bytes, options);
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &p) {
-    return p.spilled_vgpr_count != 0u;
-  });
+  const auto patch = std::ranges::find_if(
+      result.patches, [](const ConSanPatchInfo &p) { return p.spilled_vgpr_count != 0u; });
   ASSERT_NE(patch, result.patches.end());
   // The three-register report window and saved address must fit in the
   // four-register spill. An odd base forces a disjoint report layout instead.
@@ -4108,9 +4107,10 @@ TEST(ConSan, ProbeLdsCheckTrapModeCoversCdna4NativeByteForms) {
 
   for (const Case &test_case : cases) {
     SCOPED_TRACE(test_case.mnemonic);
-    std::vector<uint32_t> text_words = {test_case.instruction[0], test_case.instruction[1]};
-    text_words.insert(text_words.end(), 16u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
-    text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+    std::vector<uint32_t> text_words(19u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+    text_words[0] = test_case.instruction[0];
+    text_words[1] = test_case.instruction[1];
+    text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
     const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words);
     ConSanOptions options;
     options.flavor = ConSanFlavor::SuperCollider;

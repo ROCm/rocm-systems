@@ -2115,8 +2115,9 @@ TEST(ConSanMoi, RecordReplayUniformStoreStillConflictsWithAnotherWave) {
         shadow, proven);
     EXPECT_EQ(result.conflict, cross_wave);
     EXPECT_EQ(result.emitted_diagnostic_count, cross_wave ? 1u : 0u);
-    if (cross_wave)
+    if (cross_wave) {
       EXPECT_NE(diagnostics[0].first_owner_id, diagnostics[0].second_owner_id);
+    }
   }
 }
 
