@@ -155,16 +155,14 @@ assert_conn_check_kernels_in_fatbin() {
     rm -f "${fatbin}"
     exit 1
   fi
-  if ! strings -a "${fatbin}" | grep -q 'ginAnvilConnWriteKernel'; then
-    echo "ERROR: ginAnvilConnWriteKernel missing from ${lib} .hip_fatbin (conn-check not device-linked)" >&2
-    rm -f "${fatbin}"
-    exit 1
-  fi
-  if ! strings -a "${fatbin}" | grep -q 'ginAnvilConnCheckKernel'; then
-    echo "ERROR: ginAnvilConnCheckKernel missing from ${lib} .hip_fatbin (conn-check not device-linked)" >&2
-    rm -f "${fatbin}"
-    exit 1
-  fi
+  local kernel
+  for kernel in ginAnvilConnWriteKernel ginAnvilConnCheckKernel; do
+    if ! grep -qa "${kernel}" "${fatbin}"; then
+      echo "ERROR: ${kernel} missing from ${lib} .hip_fatbin (conn-check not device-linked)" >&2
+      rm -f "${fatbin}"
+      exit 1
+    fi
+  done
   rm -f "${fatbin}"
 }
 assert_conn_check_kernels_in_fatbin "${librccl}"
