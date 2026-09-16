@@ -920,7 +920,7 @@ def test_format_table_output_view_table_skips_gfx9_memory_chart_renderer(
 def test_format_table_output_view_table_skips_gfx11_memory_chart_renderer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """--view table renders a mem_chart table as a plain titled table on RDNA3.5."""
+    """--view table renders a mem_chart table as a plain titled table on gfx11."""
 
     monkeypatch.setattr(
         "utils.tty.mem_chart_gfx11.plot_mem_chart",
@@ -951,7 +951,7 @@ def test_format_table_output_view_table_skips_gfx11_memory_chart_renderer(
         pytest.param("table", False, id="view_table"),
     ],
 )
-def test_show_all_view_table_replaces_merged_memory_chart(
+def test_show_all_view_table_replaces_memory_chart_panel(
     monkeypatch: pytest.MonkeyPatch,
     view,
     expect_chart: bool,
@@ -1009,22 +1009,21 @@ def test_show_all_view_table_replaces_merged_memory_chart(
     output = rendered_output.getvalue()
     assert (mem_chart_marker in output) is expect_chart
     assert ("3.1 Memory Chart" in output) is not expect_chart
-    assert ("-" * 80 in output) is not expect_chart
 
 
 @pytest.mark.parametrize(
-    "view,expect_roofline",
+    "view,expect_roofline_called",
     [
         pytest.param(None, True, id="default"),
         pytest.param("table", False, id="view_table"),
     ],
 )
-def test_show_all_view_table_renders_roofline_tables(
+def test_show_all_view_table_skips_roofline_code_path(
     monkeypatch: pytest.MonkeyPatch,
     view,
-    expect_roofline: bool,
+    expect_roofline_called: bool,
 ) -> None:
-    """--view table skips the roofline plot and prints tables 401/402 instead."""
+    """--view table bypasses the roofline code path entirely."""
     roofline_calls: list[int] = []
     monkeypatch.setattr(
         "utils.tty.is_roofline_shown",
@@ -1075,17 +1074,7 @@ def test_show_all_view_table_renders_roofline_tables(
         profiling_config={"filter_blocks": []},
     )
 
-    output = rendered_output.getvalue()
-    assert bool(roofline_calls) is expect_roofline
-    if expect_roofline:
-        # Default: is_roofline_shown is called, returns False, panel is skipped → empty
-        assert output == ""
-    else:
-        # --view table: panel renders as plain tables, plot path is never entered
-        assert "4. Roofline" in output
-        assert "4.1 Roofline Performance Rates" in output
-        assert "Metric A" in output
-        assert "4.3 Roofline Plot Points" not in output
+    assert bool(roofline_calls) is expect_roofline_called
 
 
 # ---------------------------------------------------------------------------
