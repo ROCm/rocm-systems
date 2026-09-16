@@ -291,6 +291,37 @@ class TestBuildDfs:
         assert list(ac.dfs[201]["Metric"]) == ["M1"]
         assert list(ac.dfs[1101]["Metric"]) == ["X1"]
 
+    def test_analyze_multiple_aliases_resolves_all(self, monkeypatch):
+        monkeypatch.setattr(
+            "utils.utils_common.get_arch_alias_to_panel_id",
+            lambda arch: {"sol": "2", "cu_pipe": "11"},
+        )
+        ac = _two_block_config()
+        build_dfs(
+            ac,
+            filter_metrics=["sol", "cu_pipe"],
+            sys_info=_sys_info(),
+            profiling_config={},
+            arch="gfx942",
+        )
+
+        assert set(ac.dfs.keys()) == {1, 101, 201, 1101}
+
+    def test_analyze_unknown_alias_raises_system_exit(self, monkeypatch):
+        monkeypatch.setattr(
+            "utils.utils_common.get_arch_alias_to_panel_id",
+            lambda arch: {"lds": "11"},
+        )
+        ac = _two_block_config()
+        with pytest.raises(SystemExit):
+            build_dfs(
+                ac,
+                filter_metrics=["bogus_alias"],
+                sys_info=_sys_info(),
+                profiling_config={},
+                arch="gfx942",
+            )
+
     def test_metric_counters_only_for_built_metrics(self):
         ac = _make_arch_config([
             (
