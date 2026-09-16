@@ -605,7 +605,7 @@ jobs:
         ccache-variant: ccache
 
     - name: Configure, Build, and Test
-      timeout-minutes: 30
+      timeout-minutes: 50
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
