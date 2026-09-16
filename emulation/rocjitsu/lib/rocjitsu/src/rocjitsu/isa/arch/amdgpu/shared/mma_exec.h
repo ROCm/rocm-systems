@@ -3774,11 +3774,15 @@ inline void exec_swmmac_i32_i8(auto &cu, uint32_t M, uint32_t N, uint32_t K, uin
 /// destination write so overlapping C/D and A/B tuples preserve read-before-
 /// write behavior.
 inline void exec_wmma_f64_16x16x4_f64(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                                      uint32_t const_acc, uint32_t neg, uint32_t neg_hi,
-                                      uint32_t round_mode, uint32_t denorm_mode,
+                                      uint64_t const_acc, uint32_t neg, uint32_t neg_hi,
                                       uint64_t exec_mask) {
-  // TODO(hanchung): Validate gfx1251 F64 WMMA lane/register mapping and FP-mode
-  // behavior against a physical gfx1251 KFD/ROCm execution capture.
+  // LLVM marks GFX12 WMMA as ReadsModeReg=0. Until physical gfx1251 validation
+  // establishes a more specific fixed arithmetic policy, use the IEEE baseline:
+  // round-to-nearest-even and preserve input/output denormals.
+  constexpr uint32_t kRoundNearestEven = 0;
+  constexpr uint32_t kPreserveInputOutputDenormals = 3;
+  // TODO(hanchung): Validate gfx1251 F64 WMMA lane/register mapping and fixed
+  // arithmetic behavior against a physical gfx1251 KFD/ROCm execution capture.
   constexpr uint32_t M = 16;
   constexpr uint32_t N = 16;
   constexpr uint32_t K = 4;
@@ -3799,8 +3803,9 @@ inline void exec_wmma_f64_16x16x4_f64(auto &cu, uint32_t dst, uint32_t s0, uint3
   std::array<uint64_t, K * N> b{};
   std::array<uint64_t, M * N> result{};
   {
-    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, /*data_bits=*/64,
-                                             /*acc_bits=*/64, const_acc, WMMA_WAVE32);
+    auto reads =
+        read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, /*data_bits=*/64, /*acc_bits=*/64,
+                                    const_acc == ACC_FROM_VGPR ? ACC_FROM_VGPR : 0u, WMMA_WAVE32);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t k = 0; k < K; ++k) {
         const auto loc = wmma_input_loc(M, K, row, k, /*data_bits=*/64);
@@ -3813,16 +3818,15 @@ inline void exec_wmma_f64_16x16x4_f64(auto &cu, uint32_t dst, uint32_t s0, uint3
       }
 
     const uint32_t c_modifier = wmma_c_modifier(neg, neg_hi);
-    const uint64_t constant_bits =
-        std::bit_cast<uint64_t>(static_cast<double>(std::bit_cast<float>(const_acc)));
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         const auto out = wmma_output_loc_64(M, N, row, col);
         uint64_t acc =
-            const_acc == ACC_FROM_VGPR ? reads.acc->lane64(out.reg, out.lane) : constant_bits;
+            const_acc == ACC_FROM_VGPR ? reads.acc->lane64(out.reg, out.lane) : const_acc;
         acc = modify_acc(acc, c_modifier);
         for (uint32_t k = 0; k < K; ++k)
-          acc = fp_mode::fma_f64(a[row * K + k], b[k * N + col], acc, round_mode, denorm_mode);
+          acc = fp_mode::fma_f64(a[row * K + k], b[k * N + col], acc, kRoundNearestEven,
+                                 kPreserveInputOutputDenormals);
         result[row * N + col] = acc;
       }
   }

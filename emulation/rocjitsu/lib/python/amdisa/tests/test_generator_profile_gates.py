@@ -2888,7 +2888,7 @@ def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():
         assert 's2, const_acc, 0u);' in body
 
 
-def test_gfx1251_f64_wmma_uses_wave32_mode_aware_executor():
+def test_gfx1251_f64_wmma_uses_wave32_mode_independent_executor():
     operands = [
         Operand('vdst', 512, 'OPR_VGPR', False, True, False, False, 0),
         Operand('src0', 128, 'OPR_SRC_VGPR', True, False, False, False, 1),
@@ -2901,7 +2901,9 @@ def test_gfx1251_f64_wmma_uses_wave32_mode_aware_executor():
 
     assert 'amdgpu::exec_wmma_f64_16x16x4_f64(cu, dst,' in body
     assert 'inst_.neg, inst_.neg_hi' in body
-    assert 'wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()' in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar64(src2)' in body
+    assert 'wf.fp_round_mode_f16_f64()' not in body
+    assert 'wf.fp_denorm_mode_f16_f64()' not in body
     assert 'wf.exec()' in body
     assert 'amdgpu::exec_f64' not in body
 
@@ -5357,7 +5359,7 @@ def test_gfx1251_packed_f64_fma_rejects_undefined_layouts_and_register_tuples(
         assert f'{operand_name} <= 510u' in body
 
 
-def test_gfx1251_f64_wmma_rejects_unsupported_fields_and_register_tuples(
+def test_gfx1251_f64_wmma_validates_fields_sources_and_register_tuples(
     gfx1250_generated_root: Path,
 ):
     source = (gfx1250_generated_root / 'vop3p.cpp').read_text()
@@ -5371,7 +5373,12 @@ def test_gfx1251_f64_wmma_rejects_unsupported_fields_and_register_tuples(
     assert 'invalid src0 register tuple alignment' in body
     assert 'src1 register tuple that exceeds the selector range' in body
     assert 'invalid src1 register tuple alignment' in body
-    assert 'requires a 16-register VGPR accumulator tuple or inline 1.0' in body
+    assert 'requires a legal inline accumulator or ' in body
+    assert '16-register VGPR tuple' in body
+    assert 'src2 >= 128u &&' in body
+    assert 'src2 <= 208u' in body
+    assert 'src2 >= 240u &&' in body
+    assert 'src2 <= 248u' in body
     assert 'invalid src2 register tuple alignment' in body
 
 

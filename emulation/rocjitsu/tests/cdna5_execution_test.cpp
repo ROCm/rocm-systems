@@ -1881,15 +1881,14 @@ std::unique_ptr<Instruction> decode_gfx1251_wmma(Decoder &decoder,
 }
 
 WmmaF64OutputMatrix reference_wmma_f64(const WmmaF64InputMatrix &a, const WmmaF64InputMatrix &b,
-                                       const WmmaF64OutputMatrix &c, uint32_t round_mode = 0,
-                                       uint32_t denorm_mode = 3) {
+                                       const WmmaF64OutputMatrix &c) {
   WmmaF64OutputMatrix result{};
   for (uint32_t row = 0; row < 16; ++row)
     for (uint32_t col = 0; col < 16; ++col) {
       uint64_t acc = c[row * 16 + col];
       for (uint32_t k = 0; k < 4; ++k)
-        acc =
-            amdgpu::fp_mode::fma_f64(a[row * 4 + k], b[col * 4 + k], acc, round_mode, denorm_mode);
+        acc = amdgpu::fp_mode::fma_f64(a[row * 4 + k], b[col * 4 + k], acc,
+                                       /*round_mode=*/0, /*denorm_mode=*/3);
       result[row * 16 + col] = acc;
     }
   return result;
@@ -1941,7 +1940,7 @@ TEST(Gfx1251F64WmmaExecutionTest, ExecutesPublicLaneAndRegisterMapping) {
   write_wmma_f64_ab(*cu, *wf, 4, b);
   write_wmma_f64_cd(*cu, *wf, 8, c);
 
-  cu->execute_instruction(decoded.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
   EXPECT_EQ(read_wmma_f64_cd(*cu, *wf, 32), reference_wmma_f64(a, b, c));
 }
 
@@ -1989,7 +1988,7 @@ TEST(Gfx1251F64WmmaExecutionTest, ExecutesFinalRegisterTupleBoundaries) {
     std::unique_ptr<Instruction> decoded = decode_gfx1251_wmma(*decoder, words);
     ASSERT_NE(decoded, nullptr);
     ASSERT_NE(decoded->execute, nullptr);
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     EXPECT_EQ(read_wmma_f64_cd(*cu, *wf, test_case.dst), expected);
   }
 }
@@ -2026,7 +2025,7 @@ TEST(Gfx1251F64WmmaExecutionTest, StagesAllInputsBeforeOverlappingDestinationWri
     std::unique_ptr<Instruction> decoded = decode_gfx1251_wmma(*decoder, words);
     ASSERT_NE(decoded, nullptr);
     ASSERT_NE(decoded->execute, nullptr);
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     EXPECT_EQ(read_wmma_f64_cd(*cu, *wf, dst), expected);
   }
 }
@@ -2063,7 +2062,7 @@ TEST(Gfx1251F64WmmaExecutionTest, HonorsExecMaskOnDestinationLanes) {
   write_wmma_f64_cd(*cu, *wf, 8, c);
   write_wmma_f64_cd(*cu, *wf, 32, initial);
 
-  cu->execute_instruction(decoded.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
   const WmmaF64OutputMatrix result = read_wmma_f64_cd(*cu, *wf, 32);
   for (uint32_t row = 0; row < 16; ++row)
     for (uint32_t col = 0; col < 16; ++col) {
@@ -2123,14 +2122,63 @@ TEST(Gfx1251F64WmmaExecutionTest, ExecutesEveryPublicLlvmModifierAndInlineForm) 
     std::unique_ptr<Instruction> decoded = decode_gfx1251_wmma(*decoder, form.words);
     ASSERT_NE(decoded, nullptr);
     ASSERT_NE(decoded->execute, nullptr);
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     const WmmaF64OutputMatrix result = read_wmma_f64_cd(*cu, *wf, 8);
     for (uint32_t i = 0; i < result.size(); ++i)
       EXPECT_EQ(result[i], form.expected) << i;
   }
 }
 
-TEST(Gfx1251F64WmmaExecutionTest, HonorsFusedRoundingDenormAndExceptionalSemantics) {
+TEST(Gfx1251F64WmmaExecutionTest, ExecutesLegalInlineAccumulators) {
+  constexpr auto bits = [](double value) { return std::bit_cast<uint64_t>(value); };
+  struct InlineCase {
+    std::string_view name;
+    uint32_t selector;
+    uint64_t expected;
+  };
+  // Public LLVM's OPERAND_REG_INLINE_C_FP64 class admits integer selectors
+  // 128..208 and FP64 selectors 240..248. Exercise representative values from
+  // both ranges, including the zero-initialized accumulator used by kernels.
+  constexpr std::array kCases{
+      InlineCase{"integer zero", 128, 0u},
+      InlineCase{"integer one bits", 129, 1u},
+      InlineCase{"0.5", 240, bits(0.5)},
+      InlineCase{"-1.0", 243, bits(-1.0)},
+  };
+
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  for (uint32_t selector = 128; selector <= 208; ++selector) {
+    const auto words = build_wmma_f64(/*dst=*/32, /*a=*/0, /*b=*/4, selector);
+    EXPECT_NE(decode_gfx1251_wmma(*decoder, words), nullptr) << selector;
+  }
+  for (uint32_t selector = 240; selector <= 248; ++selector) {
+    const auto words = build_wmma_f64(/*dst=*/32, /*a=*/0, /*b=*/4, selector);
+    EXPECT_NE(decode_gfx1251_wmma(*decoder, words), nullptr) << selector;
+  }
+
+  WmmaF64InputMatrix zero{};
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = sim.dispatch_scratch_wf(48);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0xffffffffu);
+  write_wmma_f64_ab(*cu, *wf, 0, zero);
+  write_wmma_f64_ab(*cu, *wf, 4, zero);
+  for (const InlineCase &test_case : kCases) {
+    SCOPED_TRACE(test_case.name);
+    const auto words = build_wmma_f64(/*dst=*/32, /*a=*/0, /*b=*/4, test_case.selector);
+    std::unique_ptr<Instruction> decoded = decode_gfx1251_wmma(*decoder, words);
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
+    const WmmaF64OutputMatrix result = read_wmma_f64_cd(*cu, *wf, 32);
+    for (uint32_t i = 0; i < result.size(); ++i)
+      EXPECT_EQ(result[i], test_case.expected) << i;
+  }
+}
+
+TEST(Gfx1251F64WmmaExecutionTest, UsesFixedFusedArithmeticIndependentOfMode) {
   constexpr auto bits = [](double value) { return std::bit_cast<uint64_t>(value); };
   auto decoder =
       make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
@@ -2152,55 +2200,45 @@ TEST(Gfx1251F64WmmaExecutionTest, HonorsFusedRoundingDenormAndExceptionalSemanti
     write_wmma_f64_ab(*cu, *wf, 0, a);
     write_wmma_f64_ab(*cu, *wf, 4, b);
     write_wmma_f64_cd(*cu, *wf, 8, c);
-    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     return read_wmma_f64_cd(*cu, *wf, 32);
   };
 
-  // A fused first term produces -2^-54; rounding the product before adding C
-  // would instead produce zero.
-  a.fill(0u);
-  b.fill(0u);
-  c.fill(0u);
-  a[0] = bits(1.0 + 0x1p-27);
-  b[0] = bits(1.0 - 0x1p-27);
-  c[0] = bits(-1.0);
-  wf->set_mode_raw(3u << 6);
-  EXPECT_EQ(execute()[0], bits(-0x1p-54));
-
   constexpr uint64_t kOne = bits(1.0);
   constexpr uint64_t kHalfUlpAtOne = bits(0x1p-53);
-  constexpr std::array<uint64_t, 4> kRounded{kOne, kOne + 1, kOne, kOne};
-  for (uint32_t round = 0; round < 4; ++round) {
-    a.fill(0u);
-    b.fill(0u);
-    c.fill(kOne);
-    a[0] = kOne;
-    b[0] = kHalfUlpAtOne;
-    wf->set_mode_raw((round << 2) | (3u << 6));
-    EXPECT_EQ(execute()[0], kRounded[round]) << round;
-  }
-
   constexpr uint64_t kMinSubnormal = 1u;
   constexpr uint64_t kHalfMinNormal = 0x0008000000000000ULL;
   constexpr uint64_t kMinNormal = 0x0010000000000000ULL;
-  constexpr std::array<uint64_t, 4> kInputExpected{0u, 0u, 0u, kMinSubnormal};
-  constexpr std::array<uint64_t, 4> kOutputExpected{0u, 0u, kHalfMinNormal, kHalfMinNormal};
-  for (uint32_t denorm = 0; denorm < 4; ++denorm) {
-    a.fill(0u);
-    b.fill(0u);
-    c.fill(0u);
-    a[0] = kMinSubnormal;
-    b[0] = kOne;
-    // Put the output-subnormal case in the final reduction term so the result
-    // itself, rather than an intermediate accumulator input, exercises the
-    // output-denorm policy.
-    a[3] = kMinNormal;
-    b[7] = bits(0.5);
-    wf->set_mode_raw(denorm << 6);
-    const WmmaF64OutputMatrix result = execute();
-    EXPECT_EQ(result[0], kInputExpected[denorm]) << denorm;
-    EXPECT_EQ(result[1], kOutputExpected[denorm]) << denorm;
+  a.fill(0u);
+  b.fill(0u);
+  c.fill(0u);
+  // Each output probes a fixed-policy edge: input denorm preservation, output
+  // denorm preservation, nearest-even rounding, and fused multiplication.
+  a[0] = kMinSubnormal;
+  b[0] = kOne;
+  a[3] = kMinNormal;
+  b[7] = bits(0.5);
+  a[1] = kOne;
+  b[9] = kHalfUlpAtOne;
+  c[2] = kOne;
+  a[2] = bits(1.0 + 0x1p-27);
+  b[14] = bits(1.0 - 0x1p-27);
+  c[3] = bits(-1.0);
+  for (uint32_t round = 0; round < 4; ++round) {
+    for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+      SCOPED_TRACE(std::to_string(round) + "," + std::to_string(denorm));
+      wf->set_mode_raw((round << 2) | (denorm << 6));
+      const WmmaF64OutputMatrix result = execute();
+      EXPECT_EQ(result[0], kMinSubnormal);
+      EXPECT_EQ(result[1], kHalfMinNormal);
+      EXPECT_EQ(result[2], kOne);
+      // A fused first term produces -2^-54; rounding the product before adding
+      // C would instead produce zero.
+      EXPECT_EQ(result[3], bits(-0x1p-54));
+    }
   }
+
+  // Exceptional and signed-zero behavior also uses the same fixed policy.
 
   constexpr uint64_t kQuietNan = 0x7ff8000000001234ULL;
   constexpr uint64_t kInfinity = bits(std::numeric_limits<double>::infinity());
@@ -2289,9 +2327,11 @@ TEST(Gfx1251F64WmmaExecutionTest, RejectsUnsupportedControlsSourcesAndRegisterTu
   fields = kValid;
   fields.src2 = 8; // Public LLVM rejects SGPR tuples for the accumulator.
   rejected(fields);
-  fields = kValid;
-  fields.src2 = 243; // Public LLVM only accepts inline 1.0 (selector 242).
-  rejected(fields);
+  for (uint32_t selector : {127u, 209u, 239u, 249u, 255u}) {
+    fields = kValid;
+    fields.src2 = static_cast<uint16_t>(selector);
+    rejected(fields);
+  }
 }
 
 TEST(Gfx1251F64WmmaExecutionTest, RejectsWave64Execution) {

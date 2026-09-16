@@ -5184,12 +5184,18 @@ DecodeResult decodeVWmmaF6416x16x4F64Vop3p(const MachineInst *opcode,
   if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src1 & 1u) != 0u) [[unlikely]]
     return emit_error.emit()
            << "V_WMMA_F64_16X16X4_F64 has an invalid src1 register tuple alignment";
-  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 242u &&
+  if (!((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 >= 128u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 208u) ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 >= 240u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 248u)) &&
       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 < 256u ||
        reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 > 496u)) [[unlikely]]
-    return emit_error.emit()
-           << "V_WMMA_F64_16X16X4_F64 requires a 16-register VGPR accumulator tuple or inline 1.0";
-  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 != 242u &&
+    return emit_error.emit() << "V_WMMA_F64_16X16X4_F64 requires a legal inline accumulator or "
+                                "16-register VGPR tuple";
+  if (!((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 >= 128u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 208u) ||
+        (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 >= 240u &&
+         reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 <= 248u)) &&
       (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src2 & 1u) != 0u) [[unlikely]]
     return emit_error.emit()
            << "V_WMMA_F64_16X16X4_F64 has an invalid src2 register tuple alignment";
