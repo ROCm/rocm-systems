@@ -182,7 +182,7 @@ struct ert_npu_preempt_data {
 
 /// @brief Command chain packet.
 ///
-/// This is the command srtuct defined in xdna-driver (amdxdna_cmd_chain) and XRT ERT
+/// This is the command struct defined in xdna-driver (amdxdna_cmd_chain) and XRT ERT
 /// (ert_cmd_chain).
 struct ert_cmd_chain_data {
   /// @brief Number of commands in the chain.
@@ -228,6 +228,13 @@ constexpr uint32_t DEV_ADDR_OFFSET_MASK = 0x02FFFFFF;
 /// The firmware aborts a command chain whose slot carries an odd argument count below 15. The
 /// driver takes that count straight from this command: amdxdna_cmd_get_payload() reports
 /// (count - 1) dwords and aie2_cmdlist_fill_one_slot_cf() uses it as arg_cnt.
+///
+/// This padding is inside the command's own payload and is independent of
+/// @ref CHAIN_SLOT_HEADER_BYTESIZE, which the driver prepends and sizes itself - the two do not
+/// overlap, so accounting for both in @ref ChainSlotBytesize is not double counting.
+///
+/// Any odd value satisfies the parity rule, 1 is the smallest odd value and returns two dwords per
+/// command to both the firmware argument budget and the chain slot.
 constexpr uint32_t CMD_COUNT_SIZE_INCREASE = 1;
 
 /// @brief Size of the driver's per-command chain buffer, from MAX_CHAIN_CMDBUF_SIZE in
@@ -259,6 +266,22 @@ constexpr uint32_t ELF_CMD_ARG_DWORDS = sizeof(uint64_t) / sizeof(uint32_t);
 constexpr uint32_t default_cu_func = 0;
 
 /// @brief Returns the bytes a command with @p arg_cnt argument dwords occupies in a chain.
+///
+/// @p arg_cnt is how many argument dwords the *driver* copies into the slot, which is not the same
+/// quantity on the two dispatch shapes, and the difference is deliberate:
+///
+/// - PDI + instruction sequence goes through aie2_cmdlist_fill_npu_cf, which copies the command's
+///   whole declared payload, so its arg_cnt is cmd->count - num_cu_masks. BuildPdiInstsCommand
+///   reports exactly that.
+/// - Full ELF goes through aie2_cmdlist_fill_npu_elf, which ignores the declared payload and
+///   writes a fixed-size slot carrying only the kernel opcode. Its arg_cnt is therefore the
+///   constant @ref ELF_CMD_ARG_DWORDS and does not scale with cmd->count, even though a full-ELF
+///   command declares 13 dwords for the ert_npu_preempt_data it has to carry.
+///
+/// So a full-ELF slot is 60 bytes, not the 100 that count - 1 would suggest, and 64 of them fit a
+/// 4 KiB chain. FullElfDispatchTest.ElfFullQueueDispatch is what pins this down: it submits a full
+/// queue of 64 full-ELF packets under a single doorbell ring, so the runtime builds one 64-command
+/// chain. At 100 bytes per slot that chain would need 6400 bytes and the driver would reject it.
 ///
 /// @param[in] arg_cnt argument count
 constexpr uint32_t ChainSlotBytesize(uint32_t arg_cnt) {
@@ -534,7 +557,7 @@ static hsa_status_t AddKernargBOs(const hsa_amd_aie_kernel_dispatch_packet_t* pk
   const size_t kernarg_avail =
       (kernarg_offset <= kernarg_alloc_size) ? kernarg_alloc_size - kernarg_offset : 0;
   if (pkt->num_kernargs > kernarg_avail / (2 * sizeof(uint64_t))) {
-    assert(false && "Packet declares more kernel arguments than its buffer holds.");
+    log_warning_n(10, "AIE: packet declares more kernel arguments than its buffer holds.\n");
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
 
@@ -544,7 +567,7 @@ static hsa_status_t AddKernargBOs(const hsa_amd_aie_kernel_dispatch_packet_t* pk
     uint32_t arg_handle = AMDXDNA_INVALID_BO_HANDLE;
     const hsa_status_t err = ResolveBOHandle(ptr, agent, &arg_handle, nullptr, nullptr);
     if (err != HSA_STATUS_SUCCESS) {
-      assert(false && "Failed to find argument BO for command packet.");
+      log_warning_n(10, "AIE: a kernel argument is not a buffer registered with the driver.\n");
       return err;
     }
     bo_handles->push_back(arg_handle);
@@ -1628,7 +1651,7 @@ static hsa_status_t BuildPdiInstsCommand(const hsa_amd_aie_kernel_dispatch_packe
     FlushCpuCache(pdi_base, 0, pdi_size);
     err = kmq_metadata->pdi_cache.SetNext(pdi_handle, cached_pdi_index);
     if (err != HSA_STATUS_SUCCESS) {
-      assert(false && "Failed to set PDI in cache.");
+      log_warning_n(10, "AIE: no free compute unit for a new PDI; a queue can hold at most 32.\n");
       return err;
     }
     *reconfigure = true;
@@ -1638,11 +1661,26 @@ static hsa_status_t BuildPdiInstsCommand(const hsa_amd_aie_kernel_dispatch_packe
   void* insts_addr =
       reinterpret_cast<void*>(Concat<uint64_t>(pkt->insts_addr_high, pkt->insts_addr_low));
   uint32_t instr_handle = AMDXDNA_INVALID_BO_HANDLE;
-  err = ResolveBOHandle(insts_addr, agent, &instr_handle, nullptr, nullptr);
+  void* insts_base = nullptr;
+  size_t insts_alloc_size = 0;
+  err = ResolveBOHandle(insts_addr, agent, &instr_handle, &insts_base, &insts_alloc_size);
   if (err != HSA_STATUS_SUCCESS) {
-    assert(false && "Failed to find instruction sequence BO for command packet.");
+    log_warning_n(10,
+                  "AIE: the instruction sequence is not a buffer registered with the driver.\n");
     return err;
   }
+
+  // Check insts size.
+  const size_t insts_offset = static_cast<uint8_t*>(insts_addr) - static_cast<uint8_t*>(insts_base);
+  const size_t insts_avail =
+      (insts_offset <= insts_alloc_size) ? insts_alloc_size - insts_offset : 0;
+  if (pkt->insts_size > insts_avail || (pkt->insts_size % sizeof(uint32_t)) != 0) {
+    log_warning_n(10,
+                  "AIE: the instruction sequence does not fit its buffer, or is not a whole "
+                  "number of dwords.\n");
+    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  }
+
   bo_handles->push_back(instr_handle);
   FlushCpuCache(insts_addr, 0, pkt->insts_size);
 
@@ -1729,13 +1767,13 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
   if (ctrl_code_dev_addr == 0) {
     // The control code has to be somewhere the NPU can fetch it from directly, which means the
     // device heap. A host-only buffer has no device address and would not be reachable.
-    assert(false && "Full-ELF control code must be allocated from device memory.");
+    log_warning_n(10, "AIE: full-ELF control code must be allocated from device memory.\n");
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
   if ((ctrl_code_dev_addr % CTRL_CODE_DEV_ADDR_ALIGNMENT) != 0) {
     // Measured on aie2p: the dispatch only completes when the control code's device
     // address is 16 KiB aligned.
-    assert(false && "Full-ELF control code must be 16KiB aligned in device memory.");
+    log_warning_n(10, "AIE: full-ELF control code must be 16 KiB aligned in device memory.\n");
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
   // insts_size comes from the packet, so it has to be shown to fit before anything reads or
@@ -1754,7 +1792,7 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
     return err;
   }
   if (pdi_dev_addr == 0) {
-    assert(false && "Full-ELF PDI must be allocated from device memory.");
+    log_warning_n(10, "AIE: full-ELF PDI must be allocated from device memory.\n");
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
 
@@ -1799,6 +1837,9 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
   // constant, so there is nothing for this code to fill in but the space has to be there,
   // because the driver sizes the chain slot from it.
 
+  // Not cmd->count - 1, which is what the PDI + instruction sequence path reports. The ELF fill
+  // path writes a fixed-size slot and ignores the declared payload, so the slot does not grow with
+  // the ert_npu_preempt_data above. See ChainSlotBytesize.
   *arg_cnt = ELF_CMD_ARG_DWORDS;
   return HSA_STATUS_SUCCESS;
 }
@@ -1919,7 +1960,7 @@ static hsa_status_t SubmitAndWaitChain(int fd, const BOHandle* cmd_bos, size_t n
   hsa_status_t status =
       SubmitCommand(fd, submit_bo->handle, bo_handles, kmq_metadata->hw_ctx_handle, seq);
   if (status != HSA_STATUS_SUCCESS) {
-    assert(false && "Failed to submit command.");
+    log_warning_n(10, "AIE: failed to submit a command to the device.\n");
     return status;
   }
 
@@ -1949,7 +1990,7 @@ static hsa_status_t SubmitAndWaitChain(int fd, const BOHandle* cmd_bos, size_t n
           10, "AIE command failed: state '%s'.\n",
           ErtStateName(static_cast<volatile ert_start_kernel_cmd*>(submit_bo->vaddr)->state));
     }
-    assert(false && "Failed waiting for command.");
+
     return status;
   }
 
