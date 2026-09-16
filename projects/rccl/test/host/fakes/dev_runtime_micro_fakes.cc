@@ -481,15 +481,10 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
   return ncclSuccess;
 }
 
-// ---------------------------------------------------------------------------
-// Other 2.31 externs ncclDevrInitOnce / ncclDevrCommCreateInternal reach.
-// ---------------------------------------------------------------------------
-// Real in rma.cc, which this binary does not compile. The proxy is off unless
-// a test says otherwise: symMemoryObtain caches the answer into
-// devrState.rmaProxyEnabled and gates the connect/register arm on it.
-static bool DefaultRmaProxyEnabled(struct ncclComm*) { return false; }
-std::function<bool(struct ncclComm*)> g_devrRmaProxyEnabled = DefaultRmaProxyEnabled;
-bool ncclRmaProxyEnabled(struct ncclComm* comm) { return g_devrRmaProxyEnabled(comm); }
+// ncclRmaProxyEnabled is no longer faked here: rma-test.cc compiles src/rma/rma.cc
+// into this binary, so the real predicate is linked in and a fake would be a
+// duplicate. Tests drive its terms (ncclDevrIsOneLsaTeam, numRmaCtx,
+// globalRmaProxySupport, NCCL_RMA_DISABLE) instead of its answer.
 
 // Reached only once GIN is activated, which the GIN gate rejects for every
 // comm this binary builds.
@@ -546,7 +541,6 @@ void ResetDevRuntimeMicroFakes() {
   g_devrTeamCftMultimem                         = DefaultTeamCftMultimem;
   g_devrComputeCftSize                          = DefaultComputeCftSize;
   g_devrComputeCftMcSize                        = DefaultComputeCftMcSize;
-  g_devrRmaProxyEnabled                         = DefaultRmaProxyEnabled;
   g_devrNcclCommRegister                        = DefaultCommRegister;
   g_devrNcclCommDeregister                      = DefaultCommDeregister;
   g_devrRmaProxyDeregister                      = DefaultRmaProxyDeregister;

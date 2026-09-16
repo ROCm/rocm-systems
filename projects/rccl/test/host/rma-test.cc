@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <string>
 #include <functional>
 #include <memory>
 #include <utility>
@@ -22,11 +23,18 @@
 
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
+#include "fakes/nccl_fakes.h"   // g_loadParam, behind param_redirect.h
+#include "fakes/dev_runtime_micro_fakes.h"  // g_devrRmaProxyConnectOnce
 #include "fakes/rma_fakes.h"
 
 #include "nccl.h"
 #include "comm.h"
 #include "rma/rma.h"
+
+// rma.cc now declares NCCL_PARAM(RMADisable); the generated body caches its
+// value in a function-local static, so it must be redirected before the unit is
+// included or the first read freezes it for the process.
+#include "fakes/param_redirect.h"
 
 // scheduleRmaTasksToPlan's only failure arms are its two ncclCalloc calls, and
 // ncclCalloc is a macro rather than a symbol, so it cannot be faked at link
@@ -174,6 +182,8 @@ protected:
   std::unique_ptr<ncclKernelPlan> plan_;
   LaunchLog log_;
   ncclCudaStreamList streamNode_{};
+  ncclRma_t rmaVtable_{};  // identity only; ensureRmaProxyReady just null-checks it
+  std::unique_ptr<ScopedHook<ncclResult_t(ncclComm*)>> proxyConnect_;
 
   void SetUp() override {
     // Reset on entry as well as exit: a test that dies mid-body never reaches
@@ -192,6 +202,15 @@ protected:
 
     comm_->rmaState.rmaCeState.ceStream = kCeStream;
     comm_->rmaState.rmaCeState.ceEvent = kCeEvent;
+
+    // ensureRmaProxyReady gates every proxy launch on these, so the launch
+    // suites need a connected proxy to reach the dispatch they are about.
+    comm_->rmaState.rmaProxyState.connected = true;
+    comm_->rmaState.rmaProxyState.ncclRma = &rmaVtable_;
+    // The seam fails loudly by default; these suites are about what happens
+    // after a successful connect, so say so rather than inherit it.
+    proxyConnect_ = std::make_unique<ScopedHook<ncclResult_t(ncclComm*)>>(
+      g_devrRmaProxyConnectOnce, [](ncclComm*) { return ncclSuccess; });
 
     // ncclLaunchRma dereferences comm->planner.streams unconditionally.
     streamNode_.next = nullptr;
@@ -212,7 +231,9 @@ protected:
     g_rmaStackArenas.clear();
     g_rmaPoolArenas.clear();
     g_rmaFreeCalls = 0;
+    proxyConnect_.reset();
     ResetRmaFakes();
+    ResetDevRuntimeMicroFakes();
     ResetHipFakes();
   }
 };
@@ -870,6 +891,7 @@ protected:
   // deque: the task arrays must keep a stable address once handed to a task.
   std::deque<std::vector<int>> waitPeerStore_;
   std::deque<std::vector<int>> waitSignalStore_;
+  std::deque<std::vector<int>> waitSignalIdxStore_;
 
   void SetUp() override {
     RmaTestBase::SetUp();
@@ -929,11 +951,17 @@ protected:
     t->npeers = static_cast<int>(peers.size());
     waitPeerStore_.push_back(peers);
     waitSignalStore_.emplace_back();
+    waitSignalIdxStore_.emplace_back();
     for (size_t i = 0; i < peers.size(); i++) {
       waitSignalStore_.back().push_back(static_cast<int>(10 + i));
+      // A third distinct series, so a split that pairs a peer with another
+      // peer's signal index is visible rather than coincidentally right.
+      waitSignalIdxStore_.back().push_back(static_cast<int>(100 + i));
     }
     t->peers = waitPeerStore_.back().empty() ? nullptr : waitPeerStore_.back().data();
     t->nsignals = waitSignalStore_.back().empty() ? nullptr : waitSignalStore_.back().data();
+    t->signalIdxs =
+      waitSignalIdxStore_.back().empty() ? nullptr : waitSignalIdxStore_.back().data();
     ncclIntruQueueEnqueue(&ctxQueues_[ctx], t);
     comm_->planner.nTasksRma++;
     return t;
@@ -962,8 +990,10 @@ protected:
       // scheduleRmaTasksToPlan does. Uncounted: the macro ends at the unit.
       free(t->peers);
       free(t->nsignals);
+      free(t->signalIdxs);
       t->peers = nullptr;
       t->nsignals = nullptr;
+      t->signalIdxs = nullptr;
     }
   }
 };
@@ -992,9 +1022,12 @@ TEST_F(RmaScheduleTest, PicksLowestNonEmptyContext) {
   ASSERT_EQ(scheduleRmaTasksToPlan(comm_.get(), plan_.get()), ncclSuccess);
 
   EXPECT_TRUE(plan_->isRma);
-  EXPECT_EQ(plan_->rmaArgs->ctx, 2);
-  EXPECT_FALSE(ncclIntruQueueEmpty(&ctxQueues_[3]));
-  EXPECT_EQ(comm_->planner.nTasksRma, 1);
+  // The scan picks ctx 2, but the put/signal arm then drains every context into
+  // this one plan, so ctx 3's task comes along and nothing is left queued.
+  EXPECT_EQ(PeersOf(&plan_->rmaTaskQueueCe), (std::vector<int>{0, 0}));
+  EXPECT_EQ(plan_->rmaArgs->nRmaTasks, 2);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&ctxQueues_[3]));
+  EXPECT_EQ(comm_->planner.nTasksRma, 0);
 }
 
 // The scan runs to the last context, not one short of it. Every other test seeds
@@ -1008,7 +1041,6 @@ TEST_F(RmaScheduleTest, PicksTaskOnTheLastContext) {
   // dereference below would crash rather than report.
   ASSERT_TRUE(plan_->isRma);
   ASSERT_NE(plan_->rmaArgs, nullptr);
-  EXPECT_EQ(plan_->rmaArgs->ctx, 3);
   EXPECT_EQ(plan_->rmaArgs->nRmaTasks, 1);
   EXPECT_EQ(comm_->planner.nTasksRma, 0);
 }
@@ -1031,20 +1063,23 @@ TEST_F(RmaScheduleTest, WaitSignal_AllPeersLsa_ProducesOnlyCeTask) {
   EXPECT_EQ(ce->ctx, 0);
   EXPECT_EQ(ce->signalMode, NCCL_SIGNAL);
   // The rmaArgs cell, then both CE arrays sized for the whole peer list.
-  EXPECT_EQ(g_rmaStackCounts, (std::vector<size_t>{1, 3, 3}));
+  EXPECT_EQ(g_rmaStackCounts, (std::vector<size_t>{1, 3, 3, 3}));
   // All three come from the scoped arena, which is released per plan; taking
   // them from memPermanent instead would outlive the plan and leave the counts
   // unchanged.
   EXPECT_EQ(g_rmaStackArenas, (std::vector<const void*>{&comm_->memScoped,
                                                        &comm_->memScoped,
+                                                       &comm_->memScoped,
                                                        &comm_->memScoped}));
   ASSERT_EQ(ce->npeers, 3);
   EXPECT_EQ(std::vector<int>(ce->peers, ce->peers + 3), (std::vector<int>{1, 2, 3}));
   EXPECT_EQ(std::vector<int>(ce->nsignals, ce->nsignals + 3), (std::vector<int>{10, 11, 12}));
+  EXPECT_EQ(std::vector<int>(ce->signalIdxs, ce->signalIdxs + 3),
+            (std::vector<int>{100, 101, 102}));
   EXPECT_EQ(comm_->planner.nTasksRma, 0);
-  // Both proxy arrays were allocated and, with no proxy peers, must be released
-  // here -- nothing downstream will ever see them.
-  EXPECT_EQ(g_rmaFreeCalls, 2);
+  // All three proxy arrays were allocated and, with no proxy peers, must be
+  // released here -- nothing downstream will ever see them.
+  EXPECT_EQ(g_rmaFreeCalls, 3);
   // The split consumes the original task, which must return to the pool.
   EXPECT_EQ(reinterpret_cast<void*>(comm_->memPool_ncclTaskRma.head),
             reinterpret_cast<void*>(orig));
@@ -1069,8 +1104,10 @@ TEST_F(RmaScheduleTest, WaitSignal_NoPeersLsa_ProducesOnlyProxyTask) {
   ASSERT_EQ(proxy->npeers, 2);
   EXPECT_EQ(std::vector<int>(proxy->peers, proxy->peers + 2), (std::vector<int>{7, 8}));
   EXPECT_EQ(std::vector<int>(proxy->nsignals, proxy->nsignals + 2), (std::vector<int>{10, 11}));
+  EXPECT_EQ(std::vector<int>(proxy->signalIdxs, proxy->signalIdxs + 2),
+            (std::vector<int>{100, 101}));
   // Both arrays must be sized for every peer on the original task.
-  EXPECT_EQ(g_rmaCallocCounts, (std::vector<size_t>{2, 2}));
+  EXPECT_EQ(g_rmaCallocCounts, (std::vector<size_t>{2, 2, 2}));
   // Ownership transfers to the task here, so nothing is released: a free() added
   // to this arm would still read {7, 8} back out of unscrubbed heap and pass.
   EXPECT_EQ(g_rmaFreeCalls, 0);
@@ -1083,7 +1120,6 @@ TEST_F(RmaScheduleTest, WaitSignal_MixedPeers_SplitsPreservingSignalPairing) {
 
   ASSERT_EQ(scheduleRmaTasksToPlan(comm_.get(), plan_.get()), ncclSuccess);
 
-  EXPECT_EQ(plan_->rmaArgs->ctx, 1);
   EXPECT_EQ(plan_->rmaArgs->nRmaTasks, 2);
   EXPECT_EQ(plan_->rmaArgs->nRmaTasksCe, 1);
   EXPECT_EQ(plan_->rmaArgs->nRmaTasksProxy, 1);
@@ -1096,6 +1132,8 @@ TEST_F(RmaScheduleTest, WaitSignal_MixedPeers_SplitsPreservingSignalPairing) {
   ASSERT_EQ(ce->npeers, 2);
   EXPECT_EQ(std::vector<int>(ce->peers, ce->peers + 2), (std::vector<int>{2, 0}));
   EXPECT_EQ(std::vector<int>(ce->nsignals, ce->nsignals + 2), (std::vector<int>{11, 13}));
+  EXPECT_EQ(std::vector<int>(ce->signalIdxs, ce->signalIdxs + 2),
+            (std::vector<int>{101, 103}));
 
   ncclTaskRma* proxy = plan_->rmaTaskQueueProxy.head;
   ASSERT_NE(proxy, nullptr);
@@ -1105,12 +1143,14 @@ TEST_F(RmaScheduleTest, WaitSignal_MixedPeers_SplitsPreservingSignalPairing) {
   ASSERT_EQ(proxy->npeers, 2);
   EXPECT_EQ(std::vector<int>(proxy->peers, proxy->peers + 2), (std::vector<int>{9, 8}));
   EXPECT_EQ(std::vector<int>(proxy->nsignals, proxy->nsignals + 2), (std::vector<int>{10, 12}));
+  EXPECT_EQ(std::vector<int>(proxy->signalIdxs, proxy->signalIdxs + 2),
+            (std::vector<int>{100, 102}));
 
   // Sized for the whole peer list, not just each side's share of it. This is the
   // case that discriminates: the all-LSA test has npeersCe == npeers, so a
   // mis-size to npeersCe would pass there and fail here.
-  EXPECT_EQ(g_rmaCallocCounts, (std::vector<size_t>{4, 4}));
-  EXPECT_EQ(g_rmaStackCounts, (std::vector<size_t>{1, 4, 4}));
+  EXPECT_EQ(g_rmaCallocCounts, (std::vector<size_t>{4, 4, 4}));
+  EXPECT_EQ(g_rmaStackCounts, (std::vector<size_t>{1, 4, 4, 4}));
   EXPECT_EQ(g_rmaFreeCalls, 0);  // both sides in use, so neither array is released
   // Both synthesised tasks are enqueued onto the plan and consumed by the
   // launchers later, so they must come from the permanent arena -- the scoped
@@ -1168,8 +1208,8 @@ TEST_F(RmaScheduleTest, WaitSignal_FirstCallocFails_ReturnsError) {
   EXPECT_EQ(scheduleRmaTasksToPlan(comm_.get(), plan_.get()), ncclSystemError);
   EXPECT_TRUE(ncclIntruQueueEmpty(&plan_->rmaTaskQueueCe));
   EXPECT_TRUE(ncclIntruQueueEmpty(&plan_->rmaTaskQueueProxy));
-  // The fail label frees both pointers even though neither was allocated.
-  EXPECT_EQ(g_rmaFreeCalls, 2);
+  // The fail label frees all three pointers even though none was allocated.
+  EXPECT_EQ(g_rmaFreeCalls, 3);
   // The fail label leaves the plan half-built: the task was dequeued at
   // rma.cc:159 and is neither re-queued nor returned to the pool, the decrement
   // at rma.cc:236 is unreachable, and isRma was already set at rma.cc:162.
@@ -1187,7 +1227,7 @@ TEST_F(RmaScheduleTest, WaitSignal_SecondCallocFails_FreesFirstAllocation) {
   EXPECT_TRUE(ncclIntruQueueEmpty(&plan_->rmaTaskQueueProxy));
   // The name of this test is the assertion: the first allocation must be
   // released by the fail label, not leaked.
-  EXPECT_EQ(g_rmaFreeCalls, 2);
+  EXPECT_EQ(g_rmaFreeCalls, 3);
   // The fail label leaves the plan half-built: the task was dequeued at
   // rma.cc:159 and is neither re-queued nor returned to the pool, the decrement
   // at rma.cc:236 is unreachable, and isRma was already set at rma.cc:162.
@@ -1272,9 +1312,8 @@ TEST_F(RmaScheduleTest, Batching_WaitSignalBehindPut_StopsBatching) {
   EXPECT_EQ(comm_->planner.nTasksRma, 1);
 }
 
-// The WaitSignal arm does no batching at all (rma.cc:136), so a put queued behind
-// one is left for the next plan. Without this the batch loop could be hoisted out
-// of the put/signal arm and no assertion would notice.
+// Each context's queue is drained only up to its first WaitSignal, so per-context
+// FIFO holds and WaitSignal stays one-context-per-plan.
 TEST_F(RmaScheduleTest, Batching_PutBehindWaitSignal_IsLeftForTheNextPlan) {
   EnqueueWait(0, {2});
   EnqueuePut(0, 1);
@@ -1288,47 +1327,47 @@ TEST_F(RmaScheduleTest, Batching_PutBehindWaitSignal_IsLeftForTheNextPlan) {
   EXPECT_EQ(comm_->planner.nTasksRma, 1);
 }
 
-// isRmaPutOrSignal(task1) false short-circuits the &&. Reached for any leading
-// func that is neither WaitSignal nor put/signal, since the else branch treats
-// "not WaitSignal" as put/signal without checking.
-TEST_F(RmaScheduleTest, Batching_NonPutSignalLeadFunc_StopsBatching) {
+// The else branch takes the leading task without checking its func, and the
+// drain loop gates only on the tasks it walks -- so a leading non-put/signal
+// func does not hold back the puts queued behind it.
+TEST_F(RmaScheduleTest, Batching_NonPutSignalLeadFunc_StillTakesFollowingPuts) {
   EnqueuePut(0, 1, ncclFuncAllReduce);
   EnqueuePut(0, 2, ncclFuncPutSignal);
 
   ASSERT_EQ(scheduleRmaTasksToPlan(comm_.get(), plan_.get()), ncclSuccess);
 
   EXPECT_EQ(plan_->rmaArgs->func, ncclFuncAllReduce);
-  EXPECT_EQ(plan_->rmaArgs->nRmaTasks, 1);
-  ASSERT_EQ(QueueLength(&ctxQueues_[0]), 1);
-  EXPECT_EQ(ctxQueues_[0].head->func, ncclFuncPutSignal);
-  EXPECT_EQ(comm_->planner.nTasksRma, 1);
+  EXPECT_EQ(plan_->rmaArgs->nRmaTasks, 2);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&ctxQueues_[0]));
+  EXPECT_EQ(comm_->planner.nTasksRma, 0);
 }
 
-// canBatchRmaTasks' same-func arm in isolation: two tasks sharing a func that
-// isRmaPutOrSignal rejects still batch, which only that arm can allow.
-TEST_F(RmaScheduleTest, Batching_ConsecutiveSameNonPutSignalFunc_StillBatches) {
+// The drain loop stops at the first task that is not a put or signal, whatever
+// the leading task's func was -- matching a func is no longer a reason to batch.
+TEST_F(RmaScheduleTest, Batching_StopsAtFirstNonPutSignalTask) {
   EnqueuePut(0, 1, ncclFuncAllReduce);
   EnqueuePut(0, 2, ncclFuncAllReduce);
 
   ASSERT_EQ(scheduleRmaTasksToPlan(comm_.get(), plan_.get()), ncclSuccess);
 
-  EXPECT_EQ(plan_->rmaArgs->nRmaTasks, 2);
-  EXPECT_EQ(PeersOf(&plan_->rmaTaskQueueCe), (std::vector<int>{1, 2}));
-  EXPECT_TRUE(ncclIntruQueueEmpty(&ctxQueues_[0]));
+  EXPECT_EQ(plan_->rmaArgs->nRmaTasks, 1);
+  EXPECT_EQ(PeersOf(&plan_->rmaTaskQueueCe), (std::vector<int>{1}));
+  ASSERT_EQ(QueueLength(&ctxQueues_[0]), 1);
+  EXPECT_EQ(comm_->planner.nTasksRma, 1);
 }
 
-// canBatchRmaTasks: mismatched ctx returns false before the func checks. Two
-// tasks in one queue disagreeing about their context is the only way there.
-TEST_F(RmaScheduleTest, Batching_ContextMismatch_StopsBatching) {
+// A task's own ctx field no longer gates batching -- the loop walks the queues,
+// so a task whose ctx disagrees with the queue it sits in is batched anyway.
+TEST_F(RmaScheduleTest, Batching_TaskCtxFieldDoesNotGateBatching) {
   EnqueuePut(0, 1);
   ncclTaskRma* stray = EnqueuePut(0, 2);
   stray->ctx = 3;
 
   ASSERT_EQ(scheduleRmaTasksToPlan(comm_.get(), plan_.get()), ncclSuccess);
 
-  EXPECT_EQ(plan_->rmaArgs->nRmaTasks, 1);
-  EXPECT_EQ(QueueLength(&ctxQueues_[0]), 1);
-  EXPECT_EQ(comm_->planner.nTasksRma, 1);
+  EXPECT_EQ(plan_->rmaArgs->nRmaTasks, 2);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&ctxQueues_[0]));
+  EXPECT_EQ(comm_->planner.nTasksRma, 0);
 }
 
 // The loop's own accessibility test, distinct from the first task's: one batch
@@ -1360,18 +1399,19 @@ TEST_F(RmaScheduleTest, Batching_DrainsQueueWithoutOverrun) {
   EXPECT_EQ(comm_->planner.nTasksRma, 0);
 }
 
-// Tasks on a context the scheduler did not pick keep their nTasksRma share.
-TEST_F(RmaScheduleTest, Batching_LeavesOtherContextsUntouched) {
+// One launch covers every context: put/signal tasks are pulled from all of
+// them into a single plan, not just the one the scan selected.
+TEST_F(RmaScheduleTest, Batching_PullsPutsFromEveryContext) {
   EnqueuePut(1, 1);
   EnqueuePut(1, 2);
   EnqueuePut(2, 3);
 
   ASSERT_EQ(scheduleRmaTasksToPlan(comm_.get(), plan_.get()), ncclSuccess);
 
-  EXPECT_EQ(plan_->rmaArgs->ctx, 1);
-  EXPECT_EQ(plan_->rmaArgs->nRmaTasks, 2);
-  EXPECT_EQ(QueueLength(&ctxQueues_[2]), 1);
-  EXPECT_EQ(comm_->planner.nTasksRma, 1);
+  EXPECT_EQ(plan_->rmaArgs->nRmaTasks, 3);
+  EXPECT_EQ(PeersOf(&plan_->rmaTaskQueueCe), (std::vector<int>{1, 2, 3}));
+  EXPECT_TRUE(ncclIntruQueueEmpty(&ctxQueues_[2]));
+  EXPECT_EQ(comm_->planner.nTasksRma, 0);
 }
 
 // The debug states that change which arm of a log predicate is taken. INFO is
@@ -1627,6 +1667,168 @@ TEST_F(RmaDebugLoggingTest, BothCallocFailuresUnwindUnderEveryDebugState) {
       g_rmaCallocFailAt = -1;
     }
   }
+}
+
+// --- ncclRmaProxyEnabled / ncclRmaInitialized (rma.cc:19, :24) --------------
+//
+// Both arrived with the NCCL 2.31.2 sync and are plain predicates over comm
+// state, so they need no plan or launch machinery.
+
+class RmaProxyGatingTest : public RmaTestBase {
+protected:
+  void SetUp() override {
+    RmaTestBase::SetUp();
+    // The combination that makes ncclRmaProxyEnabled true, so each test can
+    // knock out exactly one term.
+    comm_->config.numRmaCtx = 4;
+    comm_->globalRmaProxySupport = true;
+    comm_->hostRmaSupport = true;
+    comm_->rmaState.rmaCeState.initialized = true;
+    SetOneLsaTeam(false);
+  }
+
+  // ncclDevrIsOneLsaTeam is dev_runtime.cc's real predicate here, derived from
+  // computeLsaSize; a non-zero bigSize short-circuits that to lsaSize, so the
+  // team is "one" exactly when lsaSize == nRanks.
+  void SetOneLsaTeam(bool oneTeam) {
+    comm_->devrState.bigSize = 1;
+    comm_->nRanks = 4;
+    comm_->devrState.lsaSize = oneTeam ? 4 : 2;
+  }
+};
+
+// All four terms hold, which is the only way the predicate is true.
+TEST_F(RmaProxyGatingTest, ProxyEnabled_AllTermsHold) {
+  EXPECT_TRUE(ncclRmaProxyEnabled(comm_.get()));
+}
+
+// A single LSA team means every peer is local, so the proxy is not wanted.
+TEST_F(RmaProxyGatingTest, ProxyEnabled_OneLsaTeam_IsFalse) {
+  SetOneLsaTeam(true);
+  EXPECT_FALSE(ncclRmaProxyEnabled(comm_.get()));
+}
+
+// No RMA contexts configured.
+TEST_F(RmaProxyGatingTest, ProxyEnabled_NoContexts_IsFalse) {
+  comm_->config.numRmaCtx = 0;
+  EXPECT_FALSE(ncclRmaProxyEnabled(comm_.get()));
+}
+
+// The comm-wide proxy support flag is the third term.
+TEST_F(RmaProxyGatingTest, ProxyEnabled_NoGlobalProxySupport_IsFalse) {
+  comm_->globalRmaProxySupport = false;
+  EXPECT_FALSE(ncclRmaProxyEnabled(comm_.get()));
+}
+
+// NCCL_RMA_DISABLE is the operator override, read through the param redirect.
+TEST_F(RmaProxyGatingTest, ProxyEnabled_RmaDisableSet_IsFalse) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deflt) -> int64_t {
+    return std::string(env) == "RMA_DISABLE" ? 1 : deflt;
+  });
+  EXPECT_FALSE(ncclRmaProxyEnabled(comm_.get()));
+}
+
+// Initialized needs host RMA, CE set up, and -- only when the proxy is enabled --
+// a connected proxy.
+TEST_F(RmaProxyGatingTest, Initialized_AllPrerequisitesMet) {
+  comm_->rmaState.rmaProxyState.connected = true;
+  EXPECT_TRUE(ncclRmaInitialized(comm_.get()));
+}
+
+TEST_F(RmaProxyGatingTest, Initialized_NoHostRmaSupport_IsFalse) {
+  comm_->hostRmaSupport = false;
+  EXPECT_FALSE(ncclRmaInitialized(comm_.get()));
+}
+
+TEST_F(RmaProxyGatingTest, Initialized_CeNotInitialized_IsFalse) {
+  comm_->rmaState.rmaCeState.initialized = false;
+  EXPECT_FALSE(ncclRmaInitialized(comm_.get()));
+}
+
+// Proxy enabled but not connected is the one arm that depends on the predicate.
+TEST_F(RmaProxyGatingTest, Initialized_ProxyEnabledButNotConnected_IsFalse) {
+  comm_->rmaState.rmaProxyState.connected = false;
+  EXPECT_FALSE(ncclRmaInitialized(comm_.get()));
+}
+
+// ...and with the proxy disabled, connectivity stops mattering.
+TEST_F(RmaProxyGatingTest, Initialized_ProxyDisabled_IgnoresConnectedFlag) {
+  SetOneLsaTeam(true);
+  comm_->rmaState.rmaProxyState.connected = false;
+  EXPECT_TRUE(ncclRmaInitialized(comm_.get()));
+}
+
+// --- ensureRmaProxyReady (rma.cc:43) ---------------------------------------
+//
+// New with the NCCL 2.31.2 sync: every proxy launch is gated on the proxy being
+// connected. It runs before the dispatch both launch suites cover, so its arms
+// live here rather than being repeated in each.
+
+class RmaProxyReadyTest : public RmaTestBase {
+protected:
+  ncclRmaArgs args_{};
+
+  void SetUp() override {
+    RmaTestBase::SetUp();
+    plan_->rmaArgs = &args_;
+    args_.func = ncclFuncPutSignal;
+    args_.nRmaTasksProxy = 1;
+    args_.nRmaTasksCe = 0;
+  }
+};
+
+// Proxy work queued but the proxy never connected.
+TEST_F(RmaProxyReadyTest, ProxyTasksButNotConnected_ReturnsInvalidUsage) {
+  comm_->rmaState.rmaProxyState.connected = false;
+  AllHooks hooks(log_);
+
+  EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclInvalidUsage);
+  EXPECT_TRUE(log_.entries.empty());
+}
+
+// Connected, but no vtable to dispatch through -- the second half of the check.
+TEST_F(RmaProxyReadyTest, ProxyTasksButNoVtable_ReturnsInvalidUsage) {
+  comm_->rmaState.rmaProxyState.ncclRma = nullptr;
+  AllHooks hooks(log_);
+
+  EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclInvalidUsage);
+  EXPECT_TRUE(log_.entries.empty());
+}
+
+// A failing connect attempt surfaces unchanged rather than being reported as a
+// readiness problem.
+TEST_F(RmaProxyReadyTest, ConnectOnceFails_Propagates) {
+  ScopedHook connect(g_devrRmaProxyConnectOnce, [](ncclComm*) { return ncclSystemError; });
+  AllHooks hooks(log_);
+
+  EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclSystemError);
+  EXPECT_EQ(connect.calls, 1);
+  EXPECT_TRUE(log_.entries.empty());
+}
+
+// No proxy work means the gate is skipped entirely, so a disconnected proxy is
+// irrelevant to a CE-only plan.
+TEST_F(RmaProxyReadyTest, CeOnlyPlanSkipsTheGate) {
+  args_.nRmaTasksProxy = 0;
+  args_.nRmaTasksCe = 1;
+  comm_->rmaState.rmaProxyState.connected = false;
+  comm_->rmaState.rmaProxyState.ncclRma = nullptr;
+  ScopedHook connect(g_devrRmaProxyConnectOnce, [](ncclComm*) { return ncclSystemError; });
+  AllHooks hooks(log_);
+
+  EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclSuccess);
+  EXPECT_EQ(connect.calls, 0);
+  EXPECT_EQ(log_.CountOf(LaunchLog::kCePut), 1);
+}
+
+// The same gate fronts the WaitSignal entry point.
+TEST_F(RmaProxyReadyTest, WaitSignalIsGatedToo) {
+  args_.func = ncclFuncWaitSignal;
+  comm_->rmaState.rmaProxyState.connected = false;
+  AllHooks hooks(log_);
+
+  EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclInvalidUsage);
+  EXPECT_TRUE(log_.entries.empty());
 }
 
 }  // namespace
