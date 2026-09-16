@@ -5987,6 +5987,19 @@ class CodeGenerator:
             return _MaskResultKind.IMPLICIT_VCC
         return None
 
+    @staticmethod
+    def _is_unimplemented_execute_stub(body: str) -> bool:
+        # Comments may precede the stub or follow its throw. Require the whole
+        # body to match so conditional failures and side effects stay intact.
+        statements = re.sub(r'//[^\n]*|/\*.*?\*/', '', body, flags=re.DOTALL)
+        return (
+            re.fullmatch(
+                r'\s*\(void\)wf;\s*throw\s+util::UnimplementedInst\(mnemonic\(\)\);\s*',
+                statements,
+            )
+            is not None
+        )
+
     def _gen_execute_body(
         self,
         inst: Instruction,
@@ -6594,10 +6607,22 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'tensor_load_to_lds':
-            return '  amdgpu::execute_tensor_load_to_lds(*this, wf);'
+            return (
+                '  if (amdgpu::execute_tensor_load_to_lds(*this, wf).failed()) [[unlikely]] {\n'
+                '    wf.report_instruction_execution_error(\n'
+                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
+                '    return;\n'
+                '  }'
+            )
 
         if cls == 'tensor_store_from_lds':
-            return '  amdgpu::execute_tensor_store_from_lds(*this, wf);'
+            return (
+                '  if (amdgpu::execute_tensor_store_from_lds(*this, wf).failed()) [[unlikely]] {\n'
+                '    wf.report_instruction_execution_error(\n'
+                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
+                '    return;\n'
+                '  }'
+            )
 
         if cls == 'barrier':
             L.append('  wf.set_state(amdgpu::WfState::BARRIER);')
@@ -7907,34 +7932,31 @@ class CodeGenerator:
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
-        L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(f'  uint32_t data_base = {data_base};')
+        data_regs = ne if esz == 4 else 1
+        L.append(
+            f'  auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, {data_regs}, exec);'
+        )
         stride = esz * ne
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
+        if esz == 4:
+            L.append('  data.copy_dwords_lane_major(d->store_data, exec);')
+            L.append('  set_data(std::move(d));')
+            return '\n'.join(L)
+        L.append('  const auto data0 = data.lanes(0);')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(ne):
-            if esz == 4:
-                L.append(
-                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base + {i}, lane);'
-                )
-                L.append(
-                    f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 4);'
-                )
-            elif esz == 2:
-                L.append(
-                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);'
-                )
+            if esz == 2:
+                L.append(f'    uint32_t val{i} = data0[lane];')
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
                 L.append(
                     f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 2);'
                 )
             elif esz == 1:
-                L.append(
-                    f'    uint32_t val{i} = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);'
-                )
+                L.append(f'    uint32_t val{i} = data0[lane];')
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
                 L.append(
@@ -10361,6 +10383,135 @@ class CodeGenerator:
                             f'<< "{inst.name} requires its GLOBAL segment";'
                         )
 
+                    # LLVM's public gfx1251 profiles define the packed U64
+                    # operations without op_sel.  The profile and corresponding
+                    # MC vectors are permanently linked here:
+                    # https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/lib/Target/AMDGPU/VOP3PInstructions.td#L147-L162
+                    # https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s#L257-L403
+                    # https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/SIRegisterInfo.td#L887-L917
+                    # https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/Disassembler/AMDGPUDisassembler.cpp#L2133-L2143
+                    # These references establish the operand profile and
+                    # encoding, not execution ordering for combined modifiers.
+                    # The fixed whole-element VOP3P layout therefore lets us
+                    # fail closed instead of accepting field combinations for
+                    # which no operation is defined.  Also reject register
+                    # tuples with alignment or spans outside LLVM's register
+                    # classes; the generic Operand validator only validates the
+                    # tuple's first selector and its width-independent source
+                    # selector set.
+                    if inst_sem is not None and inst_sem.semantic_class in {
+                        'pk_binop_u64',
+                        'pk_lshl_add_u64',
+                    }:
+                        raw_inst = (
+                            f'reinterpret_cast<const {factory_op_encoding}*>(inst)'
+                        )
+                        factory_validation_parts.append(
+                            f'if ({raw_inst}->opsel != 0u || '
+                            f'{raw_inst}->opsel_hi != 3u || '
+                            f'{raw_inst}->opsel_hi_2 != 1u) '
+                            f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                            'packed U64 element layout";'
+                        )
+                        if inst_sem.semantic_class == 'pk_binop_u64':
+                            factory_validation_parts.append(
+                                f'if ({raw_inst}->src2 != 128u || '
+                                f'({raw_inst}->neg & 4u) != 0u || '
+                                f'({raw_inst}->neg_hi & 4u) != 0u) '
+                                f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                                'unused src2 encoding";'
+                            )
+                        else:
+                            factory_validation_parts.append(
+                                f'if ({raw_inst}->clamp != 0u || '
+                                f'{raw_inst}->neg != 0u || '
+                                f'{raw_inst}->neg_hi != 0u) '
+                                f'[[unlikely]] return emit_error.emit() << "{inst.name} does not support '
+                                'source modifiers or clamp";'
+                            )
+
+                        for opnd in inst.operands:
+                            if (
+                                opnd.fieldless
+                                or opnd.name not in enc_field_names
+                                or opnd.size <= 32
+                            ):
+                                continue
+                            register_count = (opnd.size + 31) // 32
+                            raw_value = f'{raw_inst}->{opnd.name}'
+                            if opnd.operand_type == 'OPR_VGPR':
+                                max_selector = 256 - register_count
+                                invalid_span = f'{raw_value} > {max_selector}u'
+                                invalid_alignment = f'({raw_value} & 1u) != 0u'
+                            elif opnd.operand_type == 'OPR_SRC':
+                                max_sgpr = 106 - register_count
+                                max_vgpr = 512 - register_count
+                                invalid_sgpr_span = f'{raw_value} > {max_sgpr}u'
+                                if opnd.size == 128:
+                                    # SGPR104_128 is a named VS_128 member:
+                                    # s104:s105 provide the scalar U64 value,
+                                    # while vcc_lo:vcc_hi complete the tuple.
+                                    invalid_sgpr_span = (
+                                        f'({invalid_sgpr_span} && {raw_value} != 104u)'
+                                    )
+                                invalid_span = (
+                                    f'({raw_value} <= 105u && {invalid_sgpr_span}) || '
+                                    f'({raw_value} >= 256u && {raw_value} > {max_vgpr}u)'
+                                )
+                                invalid_alignment = (
+                                    f'({raw_value} <= 105u && '
+                                    f'({raw_value} % {register_count}u) != 0u) || '
+                                    f'({raw_value} >= 108u && {raw_value} <= 123u && '
+                                    f'(({raw_value} - 108u) % {register_count}u) != 0u) || '
+                                    f'({raw_value} >= 256u && ({raw_value} & 1u) != 0u)'
+                                )
+                            else:
+                                continue
+                            factory_validation_parts.append(
+                                f'if ({invalid_span}) '
+                                f'[[unlikely]] return emit_error.emit() << "{inst.name} has a '
+                                f'{opnd.name} register tuple that exceeds the selector range";'
+                            )
+                            factory_validation_parts.append(
+                                f'if ({invalid_alignment}) '
+                                f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                                f'{opnd.name} register tuple alignment";'
+                            )
+                            if opnd.operand_type == 'OPR_SRC':
+                                if opnd.size == 128:
+                                    valid_width_specific = (
+                                        f'({raw_value} <= 100u && ({raw_value} % 4u) == 0u) || '
+                                        f'{raw_value} == 104u || '
+                                        f'({raw_value} >= 108u && {raw_value} <= 120u && '
+                                        f'(({raw_value} - 108u) % 4u) == 0u) || '
+                                        f'{raw_value} == 124u || '
+                                        f'({raw_value} >= 128u && {raw_value} <= 208u) || '
+                                        f'({raw_value} >= 240u && {raw_value} <= 248u) || '
+                                        f'{raw_value} == 255u || '
+                                        f'({raw_value} >= 256u && {raw_value} <= 508u && '
+                                        f'({raw_value} & 1u) == 0u)'
+                                    )
+                                else:
+                                    valid_width_specific = (
+                                        f'({raw_value} <= 104u && ({raw_value} & 1u) == 0u) || '
+                                        f'{raw_value} == 106u || '
+                                        f'({raw_value} >= 108u && {raw_value} <= 122u && '
+                                        f'(({raw_value} - 108u) & 1u) == 0u) || '
+                                        f'{raw_value} == 124u || {raw_value} == 126u || '
+                                        f'({raw_value} >= 128u && {raw_value} <= 208u) || '
+                                        f'{raw_value} == 230u || '
+                                        f'({raw_value} >= 235u && {raw_value} <= 236u) || '
+                                        f'({raw_value} >= 240u && {raw_value} <= 248u) || '
+                                        f'{raw_value} == 253u || {raw_value} == 255u || '
+                                        f'({raw_value} >= 256u && {raw_value} <= 510u && '
+                                        f'({raw_value} & 1u) == 0u)'
+                                    )
+                                factory_validation_parts.append(
+                                    f'if (!({valid_width_specific})) '
+                                    f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                                    f'{opnd.name} packed U64 source selector";'
+                                )
+
                     # Flat segment-aware operands: adjust addr width and add
                     # saddr for SCRATCH (seg==1) and GLOBAL (seg==2) segments.
                     if rule.use_flat_mnemonic:
@@ -11746,12 +11897,7 @@ class CodeGenerator:
                         # instructions whose body is ONLY a throw — the cleanup
                         # code after the throw would be unreachable. Only match
                         # pure-throw bodies, not bodies with conditional throws.
-                        body_stripped = body.strip().rstrip(';').strip()
-                        body_throws = (
-                            body_stripped.startswith('(void)wf;')
-                            and 'throw util::UnimplementedInst' in body_stripped
-                            and body_stripped.count('\n') <= 1
-                        )
+                        body_throws = self._is_unimplemented_execute_stub(body)
                         can_share = self._can_share_execute(
                             inst.mnemonic, inst, enc.enc_name
                         )
@@ -11823,7 +11969,10 @@ class CodeGenerator:
                         if body_throws:
                             exec_impl = cgen.Line(
                                 f'void {inst.fmt_name}::execute_impl'
-                                f'(amdgpu::Wavefront &wf) {{ (void)wf; throw util::UnimplementedInst(mnemonic()); }}'
+                                f'(amdgpu::Wavefront &wf) {{\n'
+                                '  wf.report_instruction_execution_error(\n'
+                                '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                                '}'
                             )
                         elif can_share or _portable_probe:
                             enc_key = enc.enc_name.lower().replace('enc_', '')
@@ -11962,7 +12111,10 @@ class CodeGenerator:
                     else:
                         exec_impl = cgen.Line(
                             f'void {inst.fmt_name}::execute_impl'
-                            f'(amdgpu::Wavefront &wf) {{ (void)wf; throw util::UnimplementedInst(mnemonic()); }}'
+                            f'(amdgpu::Wavefront &wf) {{\n'
+                            '  wf.report_instruction_execution_error(\n'
+                            '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                            '}'
                         )
 
                     s = cgen.Struct(
@@ -12181,6 +12333,7 @@ class CodeGenerator:
                     ),
                     ('rocjitsu/isa/arch/amdgpu/shared/simd_glue.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/fp_mode.h', False),
+                    ('rocjitsu/isa/arch/amdgpu/shared/division.h', False),
                     ('util/except.h', False),
                 ]
                 _MEM_ENC_NAMES = frozenset(
@@ -12294,6 +12447,11 @@ class CodeGenerator:
                             ('limits', True),
                         ]
                     )
+                    if any(
+                        'util::int128_t' in str(impl)
+                        for impl in class_func_impls.model + class_func_impls.execution
+                    ):
+                        cpp_includes.append(('util/big_int.h', False))
                     if any(
                         'std::optional' in str(impl)
                         for impl in class_func_impls.model + class_func_impls.execution
@@ -12715,6 +12873,11 @@ class CodeGenerator:
                 'optional': 'std::optional',
                 'rocjitsu/base/rj_compiler.h': 'RJ_NOINLINE',
                 'rocjitsu/isa/arch/amdgpu/shared/fp_mode.h': 'fp_mode::',
+                'rocjitsu/isa/arch/amdgpu/shared/division.h': (
+                    'div_scale(',
+                    'div_fmas(',
+                    'div_fixup(',
+                ),
                 'rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h': 'pseudo_scalar::',
             }
             result: list[tuple[str, bool]] = []
@@ -13163,6 +13326,7 @@ class CodeGenerator:
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/division.h"',
             *simd_extra_includes(),
             '#include "util/data_types.h"',
             '#include "util/except.h"',
@@ -13213,6 +13377,7 @@ class CodeGenerator:
                 'v_sqrt_f32_vop1': 'classify_sqrt_f32_vop1',
                 'v_sqrt_f32_vop3': 'classify_sqrt_f32_vop3',
                 'v_div_fixup_f32_vop3': 'classify_div_fixup_f32_exceptions',
+                'v_div_fixup_f64_vop3': 'classify_div_fixup_f64_exceptions',
                 'v_rcp_iflag_f32_vop1': 'classify_rcp_iflag_f32_exceptions',
                 'v_rcp_iflag_f32_vop3': 'classify_rcp_iflag_f32_exceptions',
             }
@@ -13738,7 +13903,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         uses_packed_16bit_sources = (
             self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
         )
-
         switch_cases = []
         ref_switch_cases = []
         opnd_types_with_selectors = set()
@@ -15962,8 +16126,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
         Produces ``test_encodings.h`` containing a constexpr array of
         ``{mnemonic, {word0, word1}}`` entries.  The test harness decodes
-        each entry and calls ``execute()`` to verify no ``UnimplementedInst``
-        is thrown.
+        each entry and checks execution results against the expected coverage.
         """
         entries: list[str] = []
         profile = self.isa_spec.profile

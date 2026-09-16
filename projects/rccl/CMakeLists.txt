@@ -86,7 +86,7 @@ option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on 
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
 option(BUILD_TESTS                             "Build unit test programs"                      OFF)
 option(BUILD_PROFILER_INSPECTOR                "Build the NCCL Inspector profiler plugin"      ${BUILD_TESTS})
-option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example libraries (net, tuner, profiler, env)" OFF)
+option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example libraries (net, tuner, profiler, env, gin, mixed, proxytrace, accl)" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
 set(ENABLE_FULL_COVERAGE "OFF" CACHE STRING
@@ -100,6 +100,7 @@ if(NOT ENABLE_FULL_COVERAGE MATCHES "^(AUTO|ON|OFF)$")
     "received '${ENABLE_FULL_COVERAGE}'.")
 endif()
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
+option(ENABLE_NET_PROFILING                    "Emit NET_IB/NET_SOCK profiler events"          OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
 option(DISABLE_KERNARG_PRELOAD                 "Disable amdgpu-kernarg-preload-count compile/link flag" OFF)
@@ -766,6 +767,11 @@ file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include/rccl")
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/rccl/rccl.h) # For external linking
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used by some internal files
 
+# Example plugins are C sources
+if(BUILD_TESTS AND BUILD_PLUGIN_EXAMPLES)
+  enable_language(C)
+endif()
+
 # Add subdirectories
 #==================================================================================================
 # Source directory contains library creation
@@ -902,6 +908,10 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/profiler/example)
     add_subdirectory(plugins/profiler/proxytrace)
     add_subdirectory(plugins/profiler/accl)
+    add_subdirectory(plugins/env/example)
+    add_subdirectory(plugins/env/json)
+    add_subdirectory(plugins/gin/example)
+    add_subdirectory(plugins/mixed/example)
   endif()
   add_subdirectory(test)
 
@@ -917,6 +927,12 @@ rccl_add_nccl_compat_package_targets()
 
 if(GENERATE_SYM_KERNELS)
   target_compile_definitions(rccl PRIVATE GENERATE_SYM_KERNELS)
+endif()
+
+# Off by default: the NET_IB/NET_SOCK profiler events instrument the network
+# data path, so they are opt-in rather than always compiled in.
+if(ENABLE_NET_PROFILING)
+  target_compile_definitions(rccl PRIVATE NCCL_ENABLE_NET_PROFILING)
 endif()
 
 # Keep librccl outputs in the top-level build dir for existing scripts.

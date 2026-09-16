@@ -471,7 +471,8 @@ enumerate()
             continue;
         }
 
-        auto info                 = common::init_public_api_struct(rocprofiler_agent_t{});
+        auto  internal_info       = platform::agent_info{};
+        auto& info                = common::init_public_api_struct(internal_info.public_info);
         info.type                 = ROCPROFILER_AGENT_TYPE_GPU;
         info.logical_node_id      = logical;
         info.node_id              = static_cast<uint32_t>(logical);
@@ -521,12 +522,12 @@ enumerate()
             seg.DedicatedVideoMemorySize,
             adapter_name);
 
-        out.emplace_back(new rocprofiler_agent_t{info}, [](rocprofiler_agent_t* p) {
+        out.emplace_back(new platform::agent_info{internal_info}, [](platform::agent_info* p) {
             if(p)
             {
-                delete[] p->mem_banks;
-                delete[] p->caches;
-                delete[] p->io_links;
+                delete[] p->public_info.mem_banks;
+                delete[] p->public_info.caches;
+                delete[] p->public_info.io_links;
             }
             delete p;
         });

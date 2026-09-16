@@ -126,6 +126,8 @@ set(SRC_FILES
   algorithms/dda/all_reduce/all_reduce_dda.h
   algorithms/dda/all_reduce/all_reduce_dda_ll.h
   algorithms/dda/all_reduce/all_reduce_dda_ll_twoshot.h
+  algorithms/dda/all_reduce/all_reduce_dda_ll128.h
+  algorithms/dda/all_reduce/all_reduce_dda_ll128_twoshot.h
   algorithms/dda/all_reduce/all_reduce_dda_fabric_ll128.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda.h
   algorithms/dda/all_gather/all_gather_dda.h
@@ -483,7 +485,6 @@ set(SRC_FILES
   transport/net_ib/gin.cc
   transport/net_ib/gin.h
   transport/net_ib/init.cc
-  transport/net_ib/net_ib_flush_fault_inject.h
   transport/net_ib/p2p.cc
   transport/net_ib/p2p.h
   transport/net_ib/p2p_resiliency.cc

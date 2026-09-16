@@ -28,6 +28,8 @@
 #include "strongstream.h" // ncclStrongStream*
 #include "mem_manager.h"  // ncclMemTrack / ncclMemUntrack / ncclDynMemMarkExportToPeer
 
+#include <functional>
+
 #include "nccl_fakes.h"   // controllable seam hooks
 
 #include <type_traits>
@@ -165,13 +167,22 @@ ncclResult_t ncclProxyCallBlocking(struct ncclComm*           comm,
                                respBuff, respSize);
 }
 
-ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* /*comm*/,
-                                          int              /*rank*/,
-                                          void*            /*handle*/,
-                                          int*             /*convertedFd*/)
+// A seam rather than a fixed return: the dev_runtime suite's symmetric-memory
+// export path needs a real fd to hand on. The default is the previous fixed
+// ncclSystemError, so nothing that relied on it failing changed.
+static ncclResult_t DefaultNcclProxyClientGetFdBlocking(struct ncclComm*, int, void*, int*)
 {
     return ncclSystemError;
 }
+std::function<ncclResult_t(struct ncclComm*, int, void*, int*)>
+    g_ncclProxyClientGetFdBlocking = DefaultNcclProxyClientGetFdBlocking;
+
+ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* comm, int rank, void* handle,
+                                          int* convertedFd)
+{
+    return g_ncclProxyClientGetFdBlocking(comm, rank, handle, convertedFd);
+}
+
 
 ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm*           comm,
                                             struct ncclProxyConnector* proxyConn,
@@ -387,6 +398,7 @@ int64_t ncclParamMultiSegmentRegister() { return 0; }
 
 void ResetNcclFakes()
 {
+    g_ncclProxyClientGetFdBlocking = DefaultNcclProxyClientGetFdBlocking;
     g_strongStreamAcquire          = DefaultStrongStreamAcquire;
     g_proxyConnect                 = DefaultProxyConnect;
     g_proxyCallBlocking            = DefaultProxyCallBlocking;
