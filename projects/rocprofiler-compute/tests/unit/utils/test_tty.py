@@ -1018,12 +1018,12 @@ def test_show_all_view_table_replaces_memory_chart_panel(
         pytest.param("table", False, id="view_table"),
     ],
 )
-def test_show_all_view_table_skips_roofline_code_path(
+def test_show_all_view_table_skips_roofline_plot(
     monkeypatch: pytest.MonkeyPatch,
     view,
     expect_roofline_called: bool,
 ) -> None:
-    """--view table bypasses the roofline plotting code path."""
+    """--view table do not render roofline plot."""
     roofline_called = False
 
     def _spy(*_a, **_k) -> bool:
@@ -1078,6 +1078,10 @@ def test_show_all_view_table_skips_roofline_code_path(
     )
 
     assert roofline_called is expect_roofline_called
+
+    output = rendered_output.getvalue()
+    if view == "table":
+        assert "4.3 Roofline Plot" not in output
 
 
 # ---------------------------------------------------------------------------
