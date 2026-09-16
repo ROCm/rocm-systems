@@ -13,6 +13,7 @@ extern "C"
     /// @brief Identifier for categories
     ///
     // C-style enum/typedef for C ABI compatibility
+    // NOLINTBEGIN(readability-identifier-naming)
     // NOLINTNEXTLINE(cppcoreguidelines-use-enum-class,modernize-use-using)
     typedef enum ROCPROFSYS_CATEGORIES
     {
@@ -109,11 +110,14 @@ extern "C"
         ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING,
         ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_MIGRATION_THROUGHPUT,
         ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_FAULT_RATE,
+        ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_PAGE_FAULT,
+        ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_PAGE_MIGRATE,
         ROCPROFSYS_CATEGORY_LAST
         // the value of below enum is used for iterating
         // over the enum in C++ templates. It MUST
         // be the last enumerated id
     } rocprofsys_category_t;
+    // NOLINTEND(readability-identifier-naming)
 
 #if defined(__cplusplus)
 }
