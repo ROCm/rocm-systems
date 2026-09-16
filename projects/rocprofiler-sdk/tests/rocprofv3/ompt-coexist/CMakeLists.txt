@@ -36,7 +36,8 @@
 #
 # In the defer-back cases the tool is loaded ahead of rocprofv3 and claims the role, then
 # hands it back through the public rocprofiler_ompt_start_tool. That bypasses rocprofv3's
-# own entry point, so the command line has to still decide there.
+# own entry point, so the decision falls to the SDK, which accepts the role only when a
+# client subscribes to OMPT.
 #
 cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
@@ -90,13 +91,20 @@ set(ompt-coexist-env ${ompt-coexist-base-env}
 set(ompt-coexist-keep-output-dir ${CMAKE_CURRENT_BINARY_DIR}/ompt-coexist-keep)
 set(ompt-coexist-keep-mock-output ${ompt-coexist-keep-output-dir}/mock-summary.json)
 # the stand-in tool writes its summary from inside the workload, so the directory has to
-# exist before rocprofv3 creates its own output there
+# exist before rocprofv3 creates its own output there. The cleanup fixtures below clear
+# the artifacts rather than the directory, which would take this with it.
 file(MAKE_DIRECTORY ${ompt-coexist-keep-output-dir})
 set(ompt-coexist-keep-env ${ompt-coexist-env}
                           "COEXIST_MOCK_OUTPUT=${ompt-coexist-keep-mock-output}")
 set(ompt-coexist-keep-validate-k
     "test_rocprofv3_kept_ompt_role or test_other_tool_did_not_get_role or test_kernel_dispatch_tracing_intact"
     )
+
+rocprofiler_add_integration_cleanup_test(
+    rocprofv3-test-ompt-coexist-keep
+    FILES ${ompt-coexist-keep-mock-output} ${ompt-coexist-keep-output-dir}/out_results.db
+    LABELS "integration-tests;openmp-target;ompt-coexist"
+    FIXTURES_SETUP rocprofv3-test-ompt-coexist-keep-clean)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-ompt-coexist-keep
@@ -109,6 +117,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;openmp-target;ompt-coexist"
     ENVIRONMENT "${ompt-coexist-keep-env}"
     PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_REQUIRED rocprofv3-test-ompt-coexist-keep-clean
     FIXTURES_SETUP rocprofv3-test-ompt-coexist-keep
     DISABLED "${IS_DISABLED}")
 
@@ -136,6 +145,13 @@ set(ompt-coexist-defer-validate-k
     "test_rocprofv3_deferred_ompt_role or test_other_tool_got_role or test_kernel_dispatch_tracing_intact"
     )
 
+rocprofiler_add_integration_cleanup_test(
+    rocprofv3-test-ompt-coexist-defer
+    FILES ${ompt-coexist-defer-mock-output}
+          ${ompt-coexist-defer-output-dir}/out_results.db
+    LABELS "integration-tests;openmp-target;ompt-coexist"
+    FIXTURES_SETUP rocprofv3-test-ompt-coexist-defer-clean)
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-ompt-coexist-defer
     COMMAND
@@ -147,6 +163,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;openmp-target;ompt-coexist"
     ENVIRONMENT "${ompt-coexist-defer-env}"
     PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_REQUIRED rocprofv3-test-ompt-coexist-defer-clean
     FIXTURES_SETUP rocprofv3-test-ompt-coexist-defer
     DISABLED "${IS_DISABLED}")
 
@@ -184,8 +201,15 @@ set(ompt-coexist-deferback-asked-env
     ${ompt-coexist-deferback-env}
     "COEXIST_MOCK_OUTPUT=${ompt-coexist-deferback-mock-output}")
 set(ompt-coexist-deferback-validate-k
-    "test_deferback_rocprofv3_collected_ompt or test_deferback_other_tool_forwarded or test_kernel_dispatch_tracing_intact"
+    "test_deferback_rocprofv3_collected_ompt or test_deferback_other_tool_forwarded or test_deferback_handback_accepted or test_kernel_dispatch_tracing_intact"
     )
+
+rocprofiler_add_integration_cleanup_test(
+    rocprofv3-test-ompt-coexist-deferback
+    FILES ${ompt-coexist-deferback-mock-output}
+          ${ompt-coexist-deferback-output-dir}/out_results.db
+    LABELS "integration-tests;openmp-target;ompt-coexist"
+    FIXTURES_SETUP rocprofv3-test-ompt-coexist-deferback-clean)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-ompt-coexist-deferback
@@ -198,6 +222,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;openmp-target;ompt-coexist"
     ENVIRONMENT "${ompt-coexist-deferback-asked-env}"
     PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_REQUIRED rocprofv3-test-ompt-coexist-deferback-clean
     FIXTURES_SETUP rocprofv3-test-ompt-coexist-deferback
     DISABLED "${IS_DISABLED}")
 
@@ -225,8 +250,15 @@ set(ompt-coexist-deferback-unasked-env
     ${ompt-coexist-deferback-env}
     "COEXIST_MOCK_OUTPUT=${ompt-coexist-deferback-unasked-mock-output}")
 set(ompt-coexist-deferback-unasked-validate-k
-    "test_deferback_without_request_collects_no_ompt or test_deferback_other_tool_forwarded or test_kernel_dispatch_tracing_intact"
+    "test_deferback_without_request_collects_no_ompt or test_deferback_other_tool_forwarded or test_deferback_handback_declined or test_kernel_dispatch_tracing_intact"
     )
+
+rocprofiler_add_integration_cleanup_test(
+    rocprofv3-test-ompt-coexist-deferback-unasked
+    FILES ${ompt-coexist-deferback-unasked-mock-output}
+          ${ompt-coexist-deferback-unasked-output-dir}/out_results.db
+    LABELS "integration-tests;openmp-target;ompt-coexist"
+    FIXTURES_SETUP rocprofv3-test-ompt-coexist-deferback-unasked-clean)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-ompt-coexist-deferback-unasked
@@ -240,6 +272,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;openmp-target;ompt-coexist"
     ENVIRONMENT "${ompt-coexist-deferback-unasked-env}"
     PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_REQUIRED rocprofv3-test-ompt-coexist-deferback-unasked-clean
     FIXTURES_SETUP rocprofv3-test-ompt-coexist-deferback-unasked
     DISABLED "${IS_DISABLED}")
 
