@@ -65,6 +65,11 @@ void OCLPinnedMemory::open(unsigned int test, char* units, double& conversion,
     return;
   }
 
+  cl_ulong max_alloc = 0;
+  status = clGetDeviceInfo(devices_[deviceId], CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(cl_ulong),
+                           &max_alloc, nullptr);
+  CHECK_ERROR(status, "clGetDeviceInfo failed.");
+
   row_size_ = getTotalSystemMemory();
   if (row_size_ <= (1ull << 32u)) {
     printf("System memory below 4GB, skipping...\n");
@@ -79,6 +84,19 @@ void OCLPinnedMemory::open(unsigned int test, char* units, double& conversion,
 #endif
   row_size_ = floor(sqrt(row_size_));
   row_size_ = (row_size_ + row_data_size_ - 1) & ~(row_data_size_ - 1);
+
+  // Cap lock size (row_size_^2) at max alloc; CLR waives that for USE_HOST_PTR.
+  uint64_t square = static_cast<uint64_t>(row_size_) * static_cast<uint64_t>(row_size_);
+  if (max_alloc > 0 && square > max_alloc) {
+    size_t max_row = static_cast<size_t>(floor(sqrt(static_cast<double>(max_alloc))));
+    max_row &= ~(row_data_size_ - 1);
+    if (max_row == 0) {
+      printf("CL_DEVICE_MAX_MEM_ALLOC_SIZE too small, skipping...\n");
+      _openTest = -1;
+      return;
+    }
+    row_size_ = max_row;
+  }
 
   pin_size_ = row_size_ * row_size_ / row_data_size_;
   host_memory_ = new row_data_t[pin_size_];
