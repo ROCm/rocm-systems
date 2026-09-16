@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -126,7 +127,12 @@ inline bool ParseArgIndex(const char* name, std::uint32_t* index) {
   std::uint32_t value = 0;
   for (const char* p = name; *p != '\0'; ++p) {
     if (*p < '0' || *p > '9') return false;
-    value = value * 10 + static_cast<std::uint32_t>(*p - '0');
+    const auto digit = static_cast<std::uint32_t>(*p - '0');
+    // Refuse rather than wrap. The caller bounds the result against kMaxArgIndex, and a value
+    // that wrapped can land back under that bound and name a different argument than the ELF
+    // asked for -- so the overflow has to be caught here, not there.
+    if (value > (std::numeric_limits<std::uint32_t>::max() - digit) / 10) return false;
+    value = value * 10 + digit;
   }
   *index = value;
   return true;
@@ -344,6 +350,13 @@ inline std::map<std::string, Kernel> Parse(const std::uint8_t* image_data, std::
       if (k.pdi_patch_offset + sizeof(std::uint64_t) > k.ctrl_code.size() ||
           k.pdi_patch_offset % sizeof(std::uint32_t) != 0) {
         throw std::runtime_error("PDI patch site does not fit the control code");
+      }
+      // Offset 0 is how hsa_amd_aie_kernel_dispatch_packet_t::pdi_patch_offset spells "PDI plus
+      // instruction sequence", so a kernel reporting it would build a packet that silently takes
+      // the other dispatch shape. A real full-ELF control code opens with a transaction header and
+      // never puts the patch site there, so this rejects a malformed ELF rather than a legal one.
+      if (k.pdi_patch_offset == 0) {
+        throw std::runtime_error("PDI patch site at offset 0 is indistinguishable from no patch");
       }
     }
 
