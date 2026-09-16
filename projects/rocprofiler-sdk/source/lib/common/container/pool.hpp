@@ -171,8 +171,8 @@ pool<Tp>::acquire()
     }
 
     auto& _obj = m_pool.at(_idx);
-    ROCP_FATAL_IF(!_obj.acquire()) << fmt::format(
-        "Pool object at index {} was expected to be available but was not", _idx);
+    ROCP_FATAL_IF(!_obj.acquire())
+        << fmt::format("Pool object at index {} was expected to be available but was not", _idx);
     return _obj;
 }
 

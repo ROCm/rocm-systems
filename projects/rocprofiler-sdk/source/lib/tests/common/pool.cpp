@@ -185,8 +185,8 @@ TEST(common, pool_concurrent_acquire_release)
     auto _usage  = _pool.get_usage();
     auto _report = _pool.get_usage_report();
 
-    EXPECT_GE(_usage.batches, 2)
-        << "the pool never grew, so the growth path went untested: " << _report;
+    EXPECT_GE(_usage.batches, 2) << "the pool never grew, so the growth path went untested: "
+                                 << _report;
     EXPECT_EQ(_usage.size, batch_size * (_usage.batches + 1)) << _report;
     EXPECT_EQ(_usage.available, _usage.size)
         << "every object must be back in the free list: " << _report;
