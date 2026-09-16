@@ -51,13 +51,14 @@ std::unique_ptr<SQTTParser> AnalyseBinary_GFX9_internal(
     uint64_t buffersize,
     int target_cu,
     class Stitcher& stitch,
-    bool double_buffer
+    bool double_buffer,
+    bool is_mi350
 )
 {
     stitch.setgfxip(9);
 
     auto generator = gfx9::MITokenGenerator(tokendata, buffersize, 0, 0);
-    auto parser = std::make_unique<gfx9::MISQTTParser>(target_cu, double_buffer);
+    auto parser = std::make_unique<gfx9::MISQTTParser>(target_cu, double_buffer, is_mi350);
     parser->sqtt_simd_analysis(info, generator, stitch);
 
     return parser;
@@ -165,7 +166,13 @@ std::unique_ptr<SQTTParser> AnalyseBinary_internal(
 
             BUFFER_SIZE -= sizeof(rocprof_trace_decoder_gfx9_header_t);
             return AnalyseBinary_GFX9_internal(
-                info, buffer, BUFFER_SIZE, gfx9_header.DCU, stitch, gfx9_header.double_buffer
+                info,
+                buffer,
+                BUFFER_SIZE,
+                gfx9_header.DCU,
+                stitch,
+                gfx9_header.double_buffer,
+                gfx9_header.gfx9_version2 >= 6
             );
         }
         else if (gfx9_header.legacy_version != 0)
@@ -182,7 +189,7 @@ std::unique_ptr<SQTTParser> AnalyseBinary_internal(
                 return AnalyseBinary_GFX10_internal(info, buffer, BUFFER_SIZE, stitch);
         }
     }
-    else { return AnalyseBinary_GFX9_internal(info, buffer, BUFFER_SIZE, gfx9_target_cu, stitch, false); }
+    else { return AnalyseBinary_GFX9_internal(info, buffer, BUFFER_SIZE, gfx9_target_cu, stitch, false, false); }
 
     return nullptr;
 }

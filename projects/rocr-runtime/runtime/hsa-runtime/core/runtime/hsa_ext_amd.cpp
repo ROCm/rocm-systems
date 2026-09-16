@@ -54,6 +54,7 @@
 
 #include "core/inc/agent.h"
 #include "core/inc/amd_aie_agent.h"
+#include "core/inc/amd_aql_queue.h"
 #include "core/inc/amd_cpu_agent.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
@@ -1055,10 +1056,14 @@ uint32_t hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* hsa_signal
   // Treat NULL and invalid signals as already satisfied their condition and skip them
   std::vector<hsa_signal_t> valid_signals;
   std::vector<uint32_t> valid_signal_ids;
+  std::vector<hsa_signal_condition_t> valid_conds;
+  std::vector<hsa_signal_value_t> valid_values;
   for (uint32_t i = 0; i < signal_count; i++){
     if (hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid()){
       valid_signals.emplace_back(hsa_signals[i]);
       valid_signal_ids.emplace_back(i);
+      valid_conds.emplace_back(conds[i]);
+      valid_values.emplace_back(values[i]);
     }
   }
 
@@ -1074,10 +1079,16 @@ uint32_t hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* hsa_signal
   uint32_t valid_signal_count = valid_signals.size();
 
   std::vector<hsa_signal_value_t> satisfying_values_vec(valid_signal_count);
-  uint32_t first_satysifying_signal_idx =
-      core::Signal::WaitMultiple(valid_signal_count, valid_signals.data(), conds, values, timeout_hint, wait_hint,
-                                 satisfying_values_vec, true);
+  uint32_t first_satisfying_signal_idx =
+      core::Signal::WaitMultiple(valid_signal_count, valid_signals.data(), valid_conds.data(),
+                                 valid_values.data(), timeout_hint, wait_hint, satisfying_values_vec, true);
 
+  // Note: on timeout (or if a signal became invalid mid-wait), WaitMultiple() returns
+  // uint32_t(-1) and satisfying_values_vec is only partially filled -- entries for
+  // signals whose condition was never met remain at their zero-initialized value and do
+  // not represent a real satisfying value. satisfying_values is still populated below in
+  // that case; callers must check the return value before treating its contents as
+  // meaningful.
   if (satisfying_values) {
     // Set 0 as satisfying value for NULL and invalid signals
     std::vector<hsa_signal_value_t> satisfying_values_vec_result(signal_count, 0);
@@ -1087,7 +1098,7 @@ uint32_t hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* hsa_signal
     std::copy(satisfying_values_vec_result.begin(), satisfying_values_vec_result.end(), satisfying_values);
   }
 
-  return first_satysifying_signal_idx;
+  return first_satisfying_signal_idx;
   CATCHRET(uint32_t);
 }
 
@@ -1103,10 +1114,14 @@ uint32_t hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* hsa_signal
   // Ignore NULL and invalid signals
   std::vector<hsa_signal_t> valid_signals;
   std::vector<uint32_t> valid_signal_ids;
+  std::vector<hsa_signal_condition_t> valid_conds;
+  std::vector<hsa_signal_value_t> valid_values;
   for (uint32_t i = 0; i < signal_count; i++){
     if (hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid()){
       valid_signals.emplace_back(hsa_signals[i]);
       valid_signal_ids.emplace_back(i);
+      valid_conds.emplace_back(conds[i]);
+      valid_values.emplace_back(values[i]);
     }
   }
 
@@ -1116,14 +1131,24 @@ uint32_t hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* hsa_signal
     return std::numeric_limits<uint32_t>::max();
   }
 
+  // For wait-any, WaitMultiple() only ever writes the satisfying value to slot 0.
   std::vector<hsa_signal_value_t> satisfying_value_vec(1);
-  uint32_t satisfying_signal_idx =
-      core::Signal::WaitMultiple(valid_signals.size(), valid_signals.data(), conds, values, timeout_hint, wait_hint,
-                                 satisfying_value_vec, false);
-  //  Map back the index
-  satisfying_signal_idx = valid_signal_ids[satisfying_signal_idx];
+  uint32_t local_satisfying_signal_idx =
+      core::Signal::WaitMultiple(valid_signals.size(), valid_signals.data(), valid_conds.data(),
+                                 valid_values.data(), timeout_hint, wait_hint, satisfying_value_vec, false);
+
+  // WaitMultiple() returns uint32_t(-1) on timeout (or if a signal became invalid mid-wait);
+  // there is no local index to read a satisfying value from or map back to the caller's
+  // original signal array position in that case.
+  if (local_satisfying_signal_idx == uint32_t(-1)) {
+    return local_satisfying_signal_idx;
+  }
 
   if (satisfying_value) *satisfying_value = satisfying_value_vec.at(0);
+
+  //  Map back the index: the INDEX returned to the caller is in the caller's ORIGINAL
+  //  signal array position, via valid_signal_ids.
+  uint32_t satisfying_signal_idx = valid_signal_ids[local_satisfying_signal_idx];
 
   return satisfying_signal_idx;
   CATCHRET(uint32_t);
@@ -1460,8 +1485,17 @@ hsa_status_t hsa_amd_agent_memory_pool_get_info(
 }
 
 hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t* agents,
-                                        hsa_handle_t interop_handle, uint32_t flags, size_t* size,
-                                        void** ptr, size_t* metadata_size, const void** metadata) {
+                                       hsa_handle_t interop_handle, uint32_t flags, size_t* size,
+                                       void** ptr, size_t* metadata_size, const void** metadata) {
+  return AMD::hsa_amd_interop_map_buffer_with_size(num_agents, agents, interop_handle, flags,
+                                               size_t{0},  // size_hint = 0 for legacy API
+                                               size, ptr, metadata_size, metadata);
+}
+
+hsa_status_t hsa_amd_interop_map_buffer_with_size(uint32_t num_agents, hsa_agent_t* agents,
+                                                   hsa_handle_t interop_handle, uint32_t flags,
+                                                   size_t size_hint, size_t* size, void** ptr,
+                                                   size_t* metadata_size, const void** metadata) {
   static const int tinyArraySize = 8;
   TRY;
   IS_OPEN();
@@ -1488,8 +1522,8 @@ hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t* agents
   }
 
   auto ret = core::Runtime::runtime_singleton_->InteropMap(
-      num_agents, core_agents, interop_handle, static_cast<hsa_interop_map_flag_t>(flags), size,
-      ptr, metadata_size, metadata);
+      num_agents, core_agents, interop_handle, static_cast<hsa_interop_map_flag_t>(flags),
+      size_hint, size, ptr, metadata_size, metadata);
 
   return ret;
   CATCH;
@@ -1600,9 +1634,11 @@ hsa_status_t hsa_amd_queue_intercept_create(
   IS_OPEN();
   IS_BAD_PTR(queue);
 
-  // A wrapped queue for the intercept queue must have at least 3 slots so
-  // there is space for a packet, a new retry barrier packet, and an existing
-  // retry packet that is in the process of being processed.
+  // The intercept queue needs at least 3 wrapped-queue slots to guarantee forward
+  // progress when draining overflow: one for a data packet, one for a new retry barrier
+  // to drain the remainder, and one for a previously inserted retry barrier that has
+  // completed but whose slot has not yet been reclaimed (invalidated by StoreRelaxed).
+  // See PlanSubmit() in intercept_queue_logic.h for the slot accounting this enables.
   if (size < 3) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   hsa_queue_t* lower_queue;
@@ -1834,8 +1870,9 @@ hsa_status_t hsa_amd_portable_export_dmabuf_v2(const void* ptr, size_t size,
 }
 
 hsa_status_t hsa_amd_portable_close_dmabuf(int dmabuf) {
+  /* dmabuf is passed by value; caller's copy is not zeroed — ABI constraint */
   TRY;
-  return rocr::os::DmaBufClose(dmabuf);
+  return rocr::os::DmaBufClose(&dmabuf);
   CATCH;
 }
 
@@ -1917,6 +1954,12 @@ hsa_status_t hsa_amd_vmem_handle_create(hsa_amd_memory_pool_t memory_pool, size_
 
   MemoryRegion::AllocateFlags alloc_flag = core::MemoryRegion::AllocateMemoryOnly;
   if (type == MEMORY_TYPE_PINNED) alloc_flag |= core::MemoryRegion::AllocatePinned;
+
+  if (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG)
+    alloc_flag |= core::MemoryRegion::AllocateUncached;
+
+  if (mem_region->owner()->device_type() == core::Agent::kAmdCpuDevice)
+    alloc_flag |= core::MemoryRegion::AllocateNonPaged;
 
   return core::Runtime::runtime_singleton_->VMemoryHandleCreate(mem_region, size, alloc_flag, flags,
                                                                 memory_handle);
@@ -2185,6 +2228,35 @@ hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes,
   CATCH;
 }
 
+hsa_status_t HSA_API hsa_amd_svm_discard_and_prefetch_batch_async(
+    void** ptrs, size_t* sizes, uint32_t count,
+    const hsa_agent_t* dst_agents, uint32_t num_dst_agents,
+    uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+    hsa_signal_t completion_signal) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(ptrs);
+  IS_BAD_PTR(sizes);
+  IS_ZERO(count);
+  IS_BAD_PTR(dst_agents);
+  IS_ZERO(num_dst_agents);
+
+  if (!core::Runtime::runtime_singleton_->XnackEnabled())
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_XNACK_DISABLED);
+
+  // every memory range passed must have a prefetch dest agent
+  if (count != num_dst_agents) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  if ((num_dep_signals == 0 && dep_signals != nullptr) ||
+      (num_dep_signals > 0 && dep_signals == nullptr))
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  return core::Runtime::runtime_singleton_->SvmDiscardAndPrefetchBatch(
+      ptrs, sizes, count, dst_agents, num_dst_agents,
+      num_dep_signals, dep_signals, completion_signal);
+  CATCH;
+}
+
 hsa_status_t hsa_amd_enable_logging(uint8_t* flags, void *file) {
   TRY;
   return core::Runtime::runtime_singleton_->EnableLogging(flags, file);
@@ -2204,14 +2276,12 @@ hsa_status_t hsa_amd_external_semaphore_handle_open(
       core_agent->device_type() != core::Agent::kAmdGpuDevice)
     return HSA_STATUS_ERROR_INVALID_AGENT;
 
-  // The descriptor union has separate active members per handle type
-  // (win32_handle for OPAQUE_WIN32 / OPAQUE_WIN32_KMT, fd for OPAQUE_FD).
-  // Only the Win32 NT-handle path is wired through the driver today, so
-  // reject other types up front: reading an inactive union member is
-  // undefined behaviour in C++.
+  // Only the Win32 NT-handle path is wired today. Reject other types up
+  // front: NOT_SUPPORTED (vs malformed-handle INVALID_ARGUMENT), and reading
+  // the wrong union member would be UB anyway.
   if (desc->type != HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32 &&
       desc->type != HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
   }
 
   return core_agent->driver().ImportExternalSemaphore(
@@ -2254,6 +2324,66 @@ hsa_status_t hsa_amd_vmem_import_fabric_handle(hsa_fabric_handle_t fabric_handle
   CATCH;
 }
 
+
+// Tool layers wrap the queue in a core::InterceptQueue, which is not an
+// AqlQueue, so a direct static_cast is UB. Peel off any (nestable) wrapper
+// layers and confirm the concrete type via IsType() (dynamic_cast is
+// unavailable; RTTI is off). Returns nullptr if the queue is not, or does
+// not wrap, an AqlQueue.
+static AMD::AqlQueue *UnwrapAqlQueue(core::Queue *core_queue) {
+  while (core_queue != nullptr && core::InterceptQueue::IsType(core_queue)) {
+    core_queue = static_cast<core::InterceptQueue *>(core_queue)->wrapped.get();
+  }
+  if (core_queue == nullptr || !AMD::AqlQueue::IsType(core_queue))
+    return nullptr;
+  return static_cast<AMD::AqlQueue *>(core_queue);
+}
+
+hsa_status_t hsa_amd_queue_signal_external_semaphore(
+    hsa_queue_t *queue,
+    hsa_amd_external_semaphore_t sem,
+    uint64_t value) {
+  TRY;
+  IS_OPEN();
+  if (queue == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
+  if (sem.handle == 0)  return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  core::Queue *core_queue = core::Queue::Convert(queue);
+  IS_VALID(core_queue);
+
+  // Only AMD AQL queues carry a KMD queue id; unwrap tool layers first.
+  AMD::AqlQueue *aql = UnwrapAqlQueue(core_queue);
+  if (aql == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
+
+  core::Agent *core_agent = aql->GetAgent();
+  IS_VALID(core_agent);
+
+  return core_agent->driver().SignalExternalSemaphore(aql->aql_queue_id(), sem, value);
+  CATCH;
+}
+
+hsa_status_t hsa_amd_queue_wait_external_semaphore(
+    hsa_queue_t *queue,
+    hsa_amd_external_semaphore_t sem,
+    uint64_t value) {
+  TRY;
+  IS_OPEN();
+  if (queue == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
+  if (sem.handle == 0)  return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  core::Queue *core_queue = core::Queue::Convert(queue);
+  IS_VALID(core_queue);
+
+  // Same unwrap as the signal path.
+  AMD::AqlQueue *aql = UnwrapAqlQueue(core_queue);
+  if (aql == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
+
+  core::Agent *core_agent = aql->GetAgent();
+  IS_VALID(core_agent);
+
+  return core_agent->driver().WaitExternalSemaphore(aql->aql_queue_id(), sem, value);
+  CATCH;
+}
 
 hsa_status_t hsa_amd_queue_create(hsa_agent_t agent_handle,
                                   hsa_amd_queue_create_desc_t* descs,

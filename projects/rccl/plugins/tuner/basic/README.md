@@ -79,7 +79,7 @@ The cost table is a 2D array where:
 make
 ```
 
-This creates `libnccl-tuner-basic.so` which can be loaded by NCCL.
+This creates `librccl-tuner-basic.so` which can be loaded by NCCL.
 
 ## Usage
 
@@ -92,8 +92,8 @@ mpirun -np 4 your_nccl_application
 
 ```bash
 export NCCL_TUNER_PLUGIN=basic
-export NCCL_TUNER_PLUGIN=libnccl-tuner-basic.so
-export NCCL_TUNER_PLUGIN=/path/to/your/plugin/libnccl-tuner-basic.so
+export NCCL_TUNER_PLUGIN=librccl-tuner-basic.so
+export NCCL_TUNER_PLUGIN=/path/to/your/plugin/librccl-tuner-basic.so
 ```
 
 ### Verifying Plugin Loading

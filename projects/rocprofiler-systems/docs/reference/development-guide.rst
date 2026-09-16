@@ -49,10 +49,9 @@ rocprof-sys-instrument: `source/bin/rocprof-sys-instrument <https://github.com/R
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 * Requires a command-line format of ``rocprof-sys-instrument <options> -- <command> <command-args>``
-* Allows the user to provide options specifying whether to perform runtime instrumentation, use binary rewrite, or
-  attach to process
-* Either opens the instrumentation target (for binary rewrite), launches the target and stops it
-  before it starts executing ``main``, or attaches to a running executable and pauses it
+* Allows the user to provide options specifying whether to perform runtime instrumentation, or use binary rewrite
+* Either opens the instrumentation target (for binary rewrite), or launches the target and stops it
+  before it starts executing ``main``
 * Finds all functions in the targets
 * Finds ``librocprof-sys-dl`` and locates the functions
 * Iterates over and instruments all the functions, provided they satisfy the
@@ -64,8 +63,8 @@ rocprof-sys-instrument: `source/bin/rocprof-sys-instrument <https://github.com/R
   but it diverges after instrumentation is complete:
 
   * For a binary rewrite: it produces a new instrumented binary and exits
-  * For runtime instrumentation or attaching to a process: it instructs the application
-    to resume and then waits for it to exit
+  * For runtime instrumentation: it instructs the application to resume and
+    then waits for it to exit
 
 Libraries
 ========================================
@@ -103,15 +102,17 @@ This is a lightweight, front-end library for ``librocprof-sys`` which serves thr
   Dyninst must parse the entire library in order to find the instrumentation functions
   (a ``dlopen`` call is made on ``librocprof-sys`` when the instrumentation functions get called)
 * Prevents re-entry if ``librocprof-sys`` calls an instrumented function internally
-* Coordinates communication between ``librocprof-sys-user`` and ``librocprof-sys``
+* Coordinates communication between ``librocprof-sys-causal-api`` and ``librocprof-sys``
 
-librocprof-sys-user: `source/lib/rocprof-sys-user <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/lib/rocprof-sys-user>`_
-------------------------------------------------------------------------------------------------------------------------------------------------------------------
+librocprof-sys-causal-api: `source/lib/rocprof-sys-causal-api <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/lib/rocprof-sys-causal-api>`_
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-* Provides a set of functions and types for the users to add to their code, for example,
-  disabling data collection globally or on a specific thread or
-  user-defined region
-* If ``librocprof-sys-dl`` is not loaded, the user API is effectively a set of no-op function calls.
+* Provides the ``ROCPROFSYS_CAUSAL_*`` macros (see :doc:`causal profiling <../how-to/performing-causal-profiling>`)
+  that applications link directly, without pulling in the full ``librocprof-sys`` backend.
+* If ``librocprof-sys-dl`` is not loaded, these macros are effectively no-op function calls.
+* General-purpose manual instrumentation (starting/stopping tracing, custom regions, and so on)
+  is provided by `ROCTx <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-sdk-roctx.html>`_
+  instead.
 
 Testing tools
 ========================================
@@ -300,10 +301,9 @@ Collected data is generally handled in one of the three following ways:
 
 In general, only instrumentation for relatively simple data is directly passed to
 Perfetto and/or Timemory during runtime.
-For example, the callbacks from binary instrumentation, user API instrumentation,
-and rocprofiler-sdk directly invoke
-calls to Perfetto or Timemory's storage model. Otherwise, the data is stored
-by ROCm Systems Profiler in the thread-data model
+For example, the callbacks from binary instrumentation and rocprofiler-sdk
+directly invoke calls to Perfetto or Timemory's storage model. Otherwise, the data
+is stored by ROCm Systems Profiler in the thread-data model
 which is more persistent than simply using ``thread_local`` static data, which gets deleted
 when the thread stops.
 
@@ -342,7 +342,7 @@ Configuring thread limits
 
 ROCm Systems Profiler uses a single CMake configuration option to control thread-related memory allocation:
 
-* ``ROCPROFSYS_MAX_THREADS``: Maximum number of threads supported (default if not explicitly set: ``128`` if nproc < 8, otherwise ``pow2_ceil(16 * nproc)``; must be a power of 2)
+* ``ROCPROFSYS_MAX_THREADS``: Maximum number of threads supported (default if not explicitly set: ``2048`` if nproc < 128, otherwise ``pow2_ceil(16 * nproc)``; must be a power of 2)
 
 This setting controls:
 

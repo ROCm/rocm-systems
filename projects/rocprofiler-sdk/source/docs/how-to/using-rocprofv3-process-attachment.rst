@@ -11,6 +11,10 @@ Dynamic process attachment using rocprofv3
 
 For profiling long-running applications or services where restarting the application is not feasible, ``rocprofv3`` provides dynamic process attachment using the ``--attach`` option. This feature facilitates attaching the profiler to a running application without the need to restart it. The attachment is performed using the ``ptrace`` system call, which enables the profiler to monitor and collect performance data from the target process.
 
+.. note::
+
+   The target process must have attach support enabled before you can attach to it: use a ``rocprofiler-register`` build configured with ``ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON``. Without this, ``rocprofv3 --attach`` fails because the target process doesn't have the required attachment thread.
+
 Here is an example syntax for dynamic process attachment:
 
 .. code-block:: bash

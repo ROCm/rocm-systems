@@ -21,7 +21,9 @@
 // SOFTWARE.
 
 #include <gtest/gtest.h>
+#include <array>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 #include "gfx12/gfx12parser.h"
 #include "gfx12/gfx12token.h"
@@ -295,6 +297,26 @@ TEST(Gfx12TokenGeneratorTest, LargeBufferProcessesWithoutOob)
         if (token.type == RdnaType::TIMESTAMP && token.time == 0 && token.contents == 0) break;
     }
     EXPECT_GT(tokenCount, 0);
+}
+
+TEST(Gfx12TokenGeneratorTest, SafeReaderRecordsRealtimeTimestamp)
+{
+    gfx12::timestamp_type ts{};
+    ts.header = 0b0000001;
+    ts.rt = 1;
+    ts.pl = 0;
+    ts.time = 0x23456789ull;
+
+    std::array<uint8_t, sizeof(uint64_t)> buffer{};
+    std::memcpy(buffer.data(), &ts.raw, sizeof(ts.raw));
+
+    gfx12::TokenGenerator gen(buffer.data(), buffer.size(), 0, 0);
+    auto token = gen.next();
+
+    EXPECT_EQ(token.type, RdnaType::TIMESTAMP);
+    ASSERT_EQ(gen.realtime.size(), 1u);
+    EXPECT_EQ(gen.realtime.front().shader_clock, 0);
+    EXPECT_EQ(gen.realtime.front().realtime_clock, ts.time);
 }
 
 // Edge case tests for field boundaries

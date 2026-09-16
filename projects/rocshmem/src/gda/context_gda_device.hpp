@@ -28,6 +28,8 @@
 #include "context.hpp"
 #include "team.hpp"
 #include "queue_pair.hpp"
+#include "constmem.hpp"
+#include "gda/gda_symm_table.hpp"
 
 namespace rocshmem {
 
@@ -48,7 +50,7 @@ class GDAContext : public Context {
   __device__ void putmem_nbi(void *dest, const void *source, size_t nelems,
                              int pe);
 
-  __device__ void getmem_nbi(void *dest, const void *source, size_t size,
+  __device__ void getmem_nbi(void *dest, const void *source, size_t nelems,
                              int pe);
 
   __device__ void fence();
@@ -142,14 +144,38 @@ class GDAContext : public Context {
 
   // Collectives
   template <typename T, ROCSHMEM_OP Op>
-  __device__ int reduce(rocshmem_team_t team, T *dest, const T *source, int nreduce);
+  __device__ int reduce_wg(rocshmem_team_t team, T *dest, const T *source, int nreduce);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int reduce_scatter_wg(rocshmem_team_t team, T *dest, const T *source,
+                                   int nreduce);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int reduce_wave(rocshmem_team_t team, T *dest, const T *source, int nreduce);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int reduce_scatter_wave(rocshmem_team_t team, T *dest, const T *source,
+                                     int nreduce);
 
   template <typename T>
-  __device__ void broadcast(rocshmem_team_t team, T *dest, const T *source,
+  __device__ void broadcast_wg(rocshmem_team_t team, T *dest, const T *source,
                             int nelems, int pe_root);
 
+  __device__ void broadcastmem_wg(rocshmem_team_t team, void *dest, const void* source,
+                                  int nelems, int PE_root);
+
   template <typename T>
-  __device__ void alltoall(rocshmem_team_t team, T *dest, const T *source,
+  __device__ int broadcast_wave(rocshmem_team_t team,
+                                T *dest, const T* source, int nelems, int PE_root);
+
+  __device__ int broadcastmem_wave(rocshmem_team_t team,
+                                void *dest, const void* source, int nelems, int PE_root);
+
+  template <typename T>
+  __device__ void alltoall_wg(rocshmem_team_t team, T *dest, const T *source,
+                           int nelems);
+
+  __device__ void alltoallmem_wg(rocshmem_team_t team, void *dest, const void *source,
                            int nelems);
 
   template <typename T>
@@ -174,9 +200,25 @@ class GDAContext : public Context {
                                 const size_t source_displs[]);
 
   template <typename T>
-  __device__ void fcollect(rocshmem_team_t team, T *dest, const T *source,
+  __device__ int alltoall_wave(rocshmem_team_t team, T* dest,
+                                  const T* source, int nelems);
+
+  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest,
+                                  const void* source, int nelems);
+
+  template <typename T>
+  __device__ void fcollect_wg(rocshmem_team_t team, T *dest, const T *source,
                            int nelems);
 
+  __device__ void fcollectmem_wg(rocshmem_team_t team, void *dest, const void *source,
+                           int nelems);
+
+  template <typename T>
+  __device__ int fcollect_wave(rocshmem_team_t team, T *dest, const T *source,
+                           int nelems);
+
+  __device__ int fcollectmem_wave(rocshmem_team_t team, void *dest, const void *source,
+                           int nelems);
 
   // Block/wave functions
   __device__ void putmem_wg(void *dest, const void *source, size_t nelems,
@@ -188,7 +230,7 @@ class GDAContext : public Context {
   __device__ void putmem_nbi_wg(void *dest, const void *source, size_t nelems,
                                 int pe);
 
-  __device__ void getmem_nbi_wg(void *dest, const void *source, size_t size,
+  __device__ void getmem_nbi_wg(void *dest, const void *source, size_t nelems,
                                 int pe);
 
   __device__ void putmem_wave(void *dest, const void *source, size_t nelems,
@@ -200,7 +242,7 @@ class GDAContext : public Context {
   __device__ void putmem_nbi_wave(void *dest, const void *source, size_t nelems,
                                   int pe);
 
-  __device__ void getmem_nbi_wave(void *dest, const void *source, size_t size,
+  __device__ void getmem_nbi_wave(void *dest, const void *source, size_t nelems,
                                   int pe);
 
   template <typename T>
@@ -252,30 +294,62 @@ class GDAContext : public Context {
  private:
 
   //internal functions used by collective operations
+  __device__ void internal_broadcastmem_wg(void *dest, const void *source, int nelems,
+      int pe_root, int pe_start, int stride, int pe_size, long *p_sync);  // NOLINT(runtime/int)
+
+  __device__ void internal_put_broadcastmem_wg(void *dst, const void *src, int nelems,
+      int pe_root, int PE_start, int logPE_stride, int PE_size,
+      ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
+
+  __device__ void internal_get_broadcastmem_wg(void *dst, const void *src, int nelems,
+      int pe_root, ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
+
   template <typename T>
-  __device__ void internal_broadcast(T *dest, const T *source, int nelems,
+  __device__ void internal_broadcast_wave(T *dest, const T *source, int nelems,
       int pe_root, int pe_start, int stride, int pe_size, long *p_sync);  // NOLINT(runtime/int)
 
   template <typename T>
-  __device__ void internal_put_broadcast(T *dst, const T *src, int nelems,
+  __device__ void internal_put_broadcast_wave(T *dst, const T *src, int nelems,
       int pe_root, int PE_start, int logPE_stride, int PE_size,
       ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
 
   template <typename T>
-  __device__ void internal_get_broadcast(T *dst, const T *src, int nelems,
+  __device__ void internal_get_broadcast_wave(T *dst, const T *src, int nelems,
       int pe_root, ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
 
+  __device__ void internal_broadcastmem_wave(void *dst, const void *src,
+    int nelems, int pe_root, int pe_start, int stride, int pe_size,
+    long *p_sync);
+
+  __device__ void internal_get_broadcastmem_wave(void *dst, const void *src,
+    int nelems, int pe_root, ActiveWFInfo &wf_info);
+
+  __device__ void internal_put_broadcastmem_wave(void *dst, const void *src,
+    int nelems, int pe_root, int pe_start, int stride, int pe_size,
+    ActiveWFInfo &wf_info);
+
   template <typename T>
-  __device__ void fcollect_linear(rocshmem_team_t team, T *dest,
+  __device__ void fcollect_linear_wg(rocshmem_team_t team, T *dest,
       const T *source, int nelems);
 
-  template <typename T>
-  __device__ void alltoall_linear(rocshmem_team_t team, T *dest,
-    const T *source, int nelems);
+  __device__ void fcollectmem_linear_wg(rocshmem_team_t team, void *dest,
+      const void *source, int nelems);
+
+  __device__ void fcollectmem_linear_wave(rocshmem_team_t team, void *dest,
+      const void *source, int nelems);
 
   template <typename T>
-  __device__ void alltoall_linear_thread_puts(rocshmem_team_t team, T *dest,
-                                              const T *source, int nelems);
+  __device__ void alltoall_linear_wg(rocshmem_team_t team, T *dest,
+    const T *source, int nelems);
+
+  __device__ void alltoallmem_linear_thread_puts_wg(rocshmem_team_t team, void *dest,
+                                              const void *source, int nelems);
+
+  __device__ void alltoallmem_linear_wave(rocshmem_team_t team, void *dst,
+                                          const void *src, int nelems);
+
+  __device__ void alltoallmem_linear_thread_puts_wave(rocshmem_team_t team,
+    void *dst, const void *src, int nelems);
 
   __device__ void internal_sync(int pe, int PE_start, int stride, int PE_size,
       int64_t *pSync, ActiveWFInfo &wf_info);
@@ -296,11 +370,20 @@ class GDAContext : public Context {
       int n_pes, int64_t *pSync, ActiveWFInfo &wf_info);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ void internal_direct_allreduce(T *dst, const T *src, int nelems,
+  __device__ void internal_direct_allreduce_wg(T *dst, const T *src, int nelems,
       GDATeam *team_obj, ActiveWFInfo &wf_info);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ void internal_ring_allreduce(T *dst, const T *src, int nelems,
+  __device__ void internal_direct_allreduce_wave(T *dst, const T *src, int nelems,
+      GDATeam *team_obj, ActiveWFInfo &wf_info);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ void internal_ring_allreduce_wg(T *dst, const T *src, int nelems,
+      GDATeam *team_obj, int n_seg, int seg_size, int chunk_size,
+      ActiveWFInfo &wf_info);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ void internal_ring_allreduce_wave(T *dst, const T *src, int nelems,
       GDATeam *team_obj, int n_seg, int seg_size, int chunk_size,
       ActiveWFInfo &wf_info);
 
@@ -339,6 +422,121 @@ class GDAContext : public Context {
 
   __device__ void internal_getmem_nbi_wave(void *dest, const void *source,
       size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  __device__ void tile_finish_put(int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  __device__ void tile_finish_get(int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  /**
+   * @brief Post a single NBI put/get chunk from every participating lane.
+   *
+   * All lanes of the wave that reach the call share @p qp_index, so they post
+   * through the wave-collective path (put_nbi/get_nbi with an ActiveWFInfo
+   * built from the current execution mask). That path elects one lane to take
+   * the SQ lock and reserve slots for the whole group, then each lane fills its
+   * own WQE. Lanes that already fell out of a striped loop are simply absent
+   * from the group, so unequal per-lane chunk counts are fine.
+   *
+   * These must not use the *_single posters: those take the SQ lock per lane
+   * and advance the SQ producer non-atomically, which is only valid when every
+   * active lane holds a *different* QP. With one QP per wave the lock holder
+   * cannot make progress until its peers leave the spin loop, so the wave
+   * deadlocks.
+   *
+   * @p pe must be wave-uniform here (it is, since it also selects the shared
+   * QP), so the collective group spans every active lane.
+   */
+  __device__ void tile_put_chunk_nbi(char *dst, const char *src, size_t bytes,
+                                     int pe, int qp_index);
+  __device__ void tile_get_chunk_nbi(char *dst, const char *src, size_t bytes,
+                                     int pe, int qp_index);
+  __device__ int tile_qp_index_for_worker(int pe, int worker_id,
+                                          int worker_count);
+  __device__ void tile_quiet_gda_workers(int pe, int worker_id, int worker_count,
+                                         int wave_qp_index);
+  __device__ void tile_put_contig_slices_nbi(char *dst, const char *src,
+                                             size_t bytes, int pe, int qp_index,
+                                             int worker_id, int worker_count);
+  __device__ void tile_get_contig_slices_nbi(char *dst, const char *src,
+                                             size_t bytes, int pe, int qp_index,
+                                             int worker_id, int worker_count);
+
+  /**
+   * @brief Post NBI puts for contiguous rows, striped across workers.
+   *
+   * Workers may diverge when num_rows is not a multiple of worker_count; each
+   * round posts as a collective over whichever lanes are still in the loop.
+   * Does not quiet; caller must quiet_single (or tile_finish_put) after a
+   * wave/block barrier.
+   * Strides are in bytes between consecutive rows.
+   */
+  __device__ void tile_put_rows_nbi(char *dst_base, const char *src_base,
+                                    size_t dst_row_stride_bytes,
+                                    size_t src_row_stride_bytes,
+                                    size_t num_rows, size_t row_bytes,
+                                    int pe, int qp_index, int worker_id,
+                                    int worker_count);
+
+  /**
+   * @brief Post NBI puts for contiguous columns, striped across workers.
+   * Strides are in bytes between consecutive columns.
+   */
+  __device__ void tile_put_cols_nbi(char *dst_base, const char *src_base,
+                                    size_t dst_col_stride_bytes,
+                                    size_t src_col_stride_bytes,
+                                    size_t num_cols, size_t col_bytes,
+                                    int pe, int qp_index, int worker_id,
+                                    int worker_count);
+
+  /**
+   * @brief Post NBI gets for contiguous rows, striped across workers.
+   */
+  __device__ void tile_get_rows_nbi(char *dst_base, const char *src_base,
+                                    size_t dst_row_stride_bytes,
+                                    size_t src_row_stride_bytes,
+                                    size_t num_rows, size_t row_bytes,
+                                    int pe, int qp_index, int worker_id,
+                                    int worker_count);
+
+  /**
+   * @brief Post NBI gets for contiguous columns, striped across workers.
+   */
+  __device__ void tile_get_cols_nbi(char *dst_base, const char *src_base,
+                                    size_t dst_col_stride_bytes,
+                                    size_t src_col_stride_bytes,
+                                    size_t num_cols, size_t col_bytes,
+                                    int pe, int qp_index, int worker_id,
+                                    int worker_count);
+
+  __device__ void tile_put_strided_2d_nbi(char *dst_base, const char *src_base,
+                                          size_t dst_s0, size_t dst_s1,
+                                          size_t src_s0, size_t src_s1,
+                                          size_t extent0, size_t extent1,
+                                          size_t element_size, int pe,
+                                          int qp_index, int worker_id,
+                                          int worker_count);
+  __device__ void tile_get_strided_2d_nbi(char *dst_base, const char *src_base,
+                                          size_t dst_s0, size_t dst_s1,
+                                          size_t src_s0, size_t src_s1,
+                                          size_t extent0, size_t extent1,
+                                          size_t element_size, int pe,
+                                          int qp_index, int worker_id,
+                                          int worker_count);
+
+  __device__ void tile_put_gda_workers(void *dst_data, const void *src_data,
+                                       const size_t *dst_strides,
+                                       const size_t *src_strides,
+                                       const size_t *start_coord,
+                                       const size_t *boundary, int ndim,
+                                       size_t element_size, int pe,
+                                       int worker_id, int worker_count);
+  __device__ void tile_get_gda_workers(void *dst_data, const void *src_data,
+                                       const size_t *dst_strides,
+                                       const size_t *src_strides,
+                                       const size_t *start_coord,
+                                       const size_t *boundary, int ndim,
+                                       size_t element_size, int pe,
+                                       int worker_id, int worker_count);
 
   __device__
   void internal_quiet(ActiveWFInfo &wf_info);
@@ -391,7 +589,7 @@ class GDAContext : public Context {
 
  public:
   /**************************************************************************
-   ****************** TILE API METHODS (NOT IMPLEMENTED) ********************
+   ****************** TILE API METHODS **************************************
    *************************************************************************/
 
   // RMA PUT operations - Type-erased interface
@@ -508,6 +706,43 @@ class GDAContext : public Context {
                                     const size_t* dst_strides, const size_t* src_strides,
                                     const size_t* start_coord, const size_t* boundary,
                                     int ndim, size_t element_size, int root, uint64_t flags);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int tile_reduce_typed_impl(rocshmem_team_t team,
+                                        const void* src_data,
+                                        const size_t* src_strides,
+                                        const size_t* start_coord,
+                                        const size_t* boundary, int ndim,
+                                        int root, size_t segment_start,
+                                        size_t segment_elems,
+                                        size_t segment_capacity,
+                                        int worker_id, int worker_count);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int tile_reduce_typed(rocshmem_team_t team, void* dst_data,
+                                   const void* src_data,
+                                   const size_t* dst_strides,
+                                   const size_t* src_strides,
+                                   const size_t* start_coord,
+                                   const size_t* boundary, int ndim, int root);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int tile_reduce_typed_wave(rocshmem_team_t team, void* dst_data,
+                                        const void* src_data,
+                                        const size_t* dst_strides,
+                                        const size_t* src_strides,
+                                        const size_t* start_coord,
+                                        const size_t* boundary, int ndim,
+                                        int root);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int tile_reduce_typed_wg(rocshmem_team_t team, void* dst_data,
+                                      const void* src_data,
+                                      const size_t* dst_strides,
+                                      const size_t* src_strides,
+                                      const size_t* start_coord,
+                                      const size_t* boundary, int ndim,
+                                      int root);
 
   // Rooted SUM Reduction operations
   // Rooted MAX Reduction operations

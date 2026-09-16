@@ -16,7 +16,8 @@ if(UNIX)
   if(HIP_PLATFORM MATCHES "amd")
     set(TEST_SRC
       ${TEST_SRC}
-      hipMemGetHandleForAddressRange.cc)
+      hipMemGetHandleForAddressRange.cc
+      hipMemCreateHostNuma.cc)
   endif()
   set(TEST_SRC
       ${TEST_SRC}
@@ -44,3 +45,20 @@ set(TEST_SRC
 hip_add_exe_to_target(NAME VirtualMemoryManagementTest
   TEST_SRC ${TEST_SRC}
   TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
+
+if(UNIX AND HIP_PLATFORM MATCHES "amd")
+  # hipMemCreateHostNuma.cc uses libnuma for NUMA node discovery and placement
+  # verification (numa_available(), numa_max_node(), move_pages(), etc.).
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
+  find_package(NUMA QUIET)
+  if(NUMA_FOUND)
+    set(NUMA "${NUMA_LIBRARIES}")
+  else()
+    find_library(NUMA NAMES numa REQUIRED)
+    find_path(NUMA_INCLUDE_DIR NAMES numa.h)
+  endif()
+  if(NUMA_INCLUDE_DIR)
+    target_include_directories(VirtualMemoryManagementTest PRIVATE ${NUMA_INCLUDE_DIR})
+  endif()
+  target_link_libraries(VirtualMemoryManagementTest ${NUMA})
+endif()

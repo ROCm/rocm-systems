@@ -32,6 +32,16 @@
 #define ROCCLR_MEM_HSA_CONTIGUOUS (1u << 24)
 #define ROCCLR_MEM_IO_MEMORY (1u << 23)
 
+//! Host-NUMA VMM encoding in the upper 32 bits of the 64-bit cl_svm_mem_flags.
+//! The low 32 bits hold the existing CL_MEM_*/ROCCLR_MEM_* flags; host-NUMA VMM
+//! allocations pack a marker plus the target NUMA node here so the node reaches
+//! roc::Memory::create without changing the svmAlloc/malloc signatures.
+//! Bit 32 set => host-NUMA VMM allocation. Bits 33..47 hold (node + 1); a stored
+//! value of 0 means "resolve current node" (HostNumaCurrent).
+#define ROCCLR_MEM_HOST_NUMA (1ull << 32)
+#define ROCCLR_MEM_HOST_NUMA_NODE_SHIFT 33
+#define ROCCLR_MEM_HOST_NUMA_NODE_MASK (0x7FFFull << ROCCLR_MEM_HOST_NUMA_NODE_SHIFT)
+
 namespace amd::device {
 class Memory;
 class VirtualDevice;
@@ -145,6 +155,8 @@ class Memory : public amd::RuntimeObject {
     int deviceId = 0;  //!< Device ID memory is allocated on
     int locationType =
         0;  //!< The type of the location (i.e. device or host) memory is allocated on
+    //!< NUMA node for host-NUMA VMM allocations; -1 means default/current node or N/A
+    int numaNode = -1;
     void* data = nullptr;                  //!< Opaque user data from CL or HIP or etc.
     amd::Memory* phys_mem_obj = nullptr;   //<! Physical mem obj, only set on virtual mem
     amd::Memory* vaddr_mem_obj = nullptr;  //<! Virtual address mem obj, only set on virtual mem

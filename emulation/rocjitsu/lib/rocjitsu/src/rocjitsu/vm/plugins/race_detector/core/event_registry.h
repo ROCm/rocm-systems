@@ -35,6 +35,7 @@ class EventRegistry {
     WaveId waveId;
     uint64_t pc;
     MemoryEventType type;
+    amdgpu::WaitCounterType waitCounterType;
     EventStatus status;
     uint8_t byteMask;
     uint64_t execMask;
@@ -45,9 +46,10 @@ class EventRegistry {
 public:
   /// Allocate a new event. Returns a unique EventId.
   EventId add(WaveId waveId, uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
-              uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals) {
+              uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
+              amdgpu::WaitCounterType waitCounterType) {
     int id = base_offset_ + static_cast<int>(entries_.size());
-    entries_.push_back({waveId, pc, type, EventStatus::ACTIVE, byteMask, execMask,
+    entries_.push_back({waveId, pc, type, waitCounterType, EventStatus::ACTIVE, byteMask, execMask,
                         std::move(registers), std::move(ldsIntervals)});
 
     // To prevent the number of events recorded growing indefinitely, we try to
@@ -69,7 +71,11 @@ public:
   // -- Typed accessors (all inline) --
 
   MemoryEventType type(EventId id) const { return entries_[index(id)].type; }
+  amdgpu::WaitCounterType waitCounterType(EventId id) const {
+    return entries_[index(id)].waitCounterType;
+  }
   EventStatus status(EventId id) const { return entries_[index(id)].status; }
+  bool isTrimmable(EventId id) const { return isEntryTrimmable(entries_[index(id)]); }
   uint64_t pc(EventId id) const { return entries_[index(id)].pc; }
   uint8_t byteMask(EventId id) const { return entries_[index(id)].byteMask; }
   uint64_t execMask(EventId id) const { return entries_[index(id)].execMask; }
@@ -91,6 +97,11 @@ public:
   /// Total events ever allocated (including trimmed).
   int totalAllocated() const { return base_offset_ + size(); }
 
+  /// Whether @p id names an event still present in this registry.
+  bool contains(EventId id) const {
+    return id.isValid() && id.value >= base_offset_ && id.value < totalAllocated();
+  }
+
   /// Number of events trimmed so far.
   int trimmedCount() const { return base_offset_; }
 
@@ -99,7 +110,7 @@ public:
 private:
   int index(EventId id) const { return id.value - base_offset_; }
 
-  static bool isTrimmable(const EventInfo &e) {
+  static bool isEntryTrimmable(const EventInfo &e) {
     if (e.status == EventStatus::RETIRED)
       return true;
     return e.status == EventStatus::WAVE_COMPLETE && isWaveLocal(e.type);
@@ -108,7 +119,7 @@ private:
   void tryTrimEvents() {
     int trimCount = 0;
     int size = static_cast<int>(entries_.size());
-    while (trimCount < size && isTrimmable(entries_[trimCount]))
+    while (trimCount < size && isEntryTrimmable(entries_[trimCount]))
       trimCount++;
 
     if (trimCount < size / 2)

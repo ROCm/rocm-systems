@@ -1,0 +1,51 @@
+{
+    "required_tables": [
+        {
+            "min_rows": 1,
+            "name_prefix": "rocpd_info_pmc",
+            "required_columns": [
+                "agent_id",
+                "target_arch",
+                "name",
+                "symbol",
+                "description",
+                "units",
+                "value_type"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Check for SDMA usage PMC info (device_sdma_usage)",
+                    "error_message": "device_sdma_usage not found in rocpd_info_pmc",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'device_sdma_usage'"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Check for SdmaUsage symbol in amd-smi metrics",
+                    "error_message": "SdmaUsage symbol not found in amd-smi PMC info",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE symbol LIKE '%SdmaUsage%' OR name = 'device_sdma_usage'"
+                }
+            ]
+        },
+        {
+            "min_rows": 10,
+            "name_prefix": "rocpd_pmc_event",
+            "required_columns": [
+                "event_id",
+                "pmc_id",
+                "value"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Check for SDMA usage counter events in trace",
+                    "error_message": "Insufficient device_sdma_usage PMC events in rocpd_pmc_event",
+                    "expected_result": 5,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_sdma_usage'"
+                }
+            ]
+        }
+    ]
+}

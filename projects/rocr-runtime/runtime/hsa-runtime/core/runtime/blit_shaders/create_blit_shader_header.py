@@ -46,8 +46,10 @@ def DumpFile(header, input_name):
 
   except FileNotFoundError:
     print(f"Error: The file {input_name} was not found.")
+    sys.exit(1)
   except Exception as e:
     print(f"An error occurred: {e}")
+    sys.exit(1)
 
 
 if len(sys.argv) > 1:

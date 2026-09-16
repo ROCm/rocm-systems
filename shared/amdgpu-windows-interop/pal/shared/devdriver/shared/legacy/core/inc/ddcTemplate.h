@@ -40,6 +40,11 @@ namespace DevDriver
         public:
             explicit LockGuard(T &lock) : m_lock(lock) { lock.Lock(); }
             ~LockGuard() { m_lock.Unlock(); }
+
+            LockGuard(LockGuard&&) = delete;
+            LockGuard(const LockGuard&) = delete;
+            LockGuard& operator=(LockGuard&&) = delete;
+            LockGuard& operator=(const LockGuard&) = delete;
         private:
             T &m_lock;
         };
@@ -105,9 +110,13 @@ namespace DevDriver
         /// Determines if a value is a power of two.
         ///
         /// @returns True if it is a power of two, false otherwise.
-        inline constexpr bool IsPowerOfTwo(uint64 value)
+        template<typename T>
+        inline constexpr bool IsPowerOfTwo(T value)
         {
-            return (value == 0) ? false : ((value & (value - 1)) == 0);
+#if !defined(_MSC_VER)
+            static_assert(std::is_integral<T>::value, "IsPowerOfTwo requires an integral type");
+#endif
+            return (value > 0) ? ((value & (value - 1)) == 0) : false;
         }
 
         /// Rounds the specified uint 'value' up to the nearest value meeting the specified 'alignment'.  Only power of 2
@@ -144,7 +153,7 @@ namespace DevDriver
             return ret;
         }
 
-        /// Rounds the specified uint 'value' up to the nearest power of 2. Constexpr variant.
+        /// Rounds the specified uint 'value' up to the nearest power of 2. Constexpr varient.
         ///
         /// @returns Power of 2 padded value.
         template<typename T>
@@ -153,13 +162,13 @@ namespace DevDriver
             return (padded < value) ? _ConstPow2Pad(value, padded << 1) : padded;
         }
 
-        /// Rounds the specified uint 'value' up to the nearest power of 2. Constexpr variant.
+        /// Rounds the specified uint 'value' up to the nearest power of 2. Constexpr varient.
         ///
         /// @returns Power of 2 padded value.
         template<typename T>
         inline constexpr T ConstPow2Pad(T value)  ///< Value to pad.
         {
-            return (IsPowerOfTwo(value)) ? value : _ConstPow2Pad(value, (T)1);
+            return IsPowerOfTwo(value) ? value : _ConstPow2Pad(value, static_cast<T>(1));
         }
 
         static_assert(ConstPow2Pad(512) == 512, "ConstPow2Pad failure");

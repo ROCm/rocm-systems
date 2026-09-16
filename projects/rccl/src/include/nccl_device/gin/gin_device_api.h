@@ -15,5 +15,14 @@
 #if NCCL_GIN_PROXY_ENABLE
 #include "proxy/gin_proxy.h"
 #endif
+#if NCCL_GIN_GPI_ENABLE
+#include "gpi/gin_gpi.h"
+#endif
+#if NCCL_GIN_ROCSHMEM_GDA_ENABLE
+#include "rocshmem_gda/gin_rocshmem_gda.h"
+#endif
+#if NCCL_GIN_ANVIL_SDMA_ENABLE
+#include "anvil_sdma/gin_anvil_sdma.h"
+#endif
 
 #endif

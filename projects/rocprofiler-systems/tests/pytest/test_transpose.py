@@ -4,7 +4,7 @@
 """
 Tests for the transpose example.
 Equivalent to rocprof-sys-rocm-tests.cmake
-    Note: MPI is not yet supported
+    Note: MPI multi-process execution is exercised if built with MPI support.
 
 This module tests the transpose HIP example with various instrumentation modes:
 - Baseline execution (no instrumentation)
@@ -27,13 +27,13 @@ from conftest import RocprofsysTest
 pytestmark = [
     pytest.mark.transpose,
     pytest.mark.gpu,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
     pytest.mark.rocm,
 ]
 
 from rocprofsys import (
     GPUInfo,
 )
+from rocprofsys.gpu import UNSUPPORTED_PERF_COUNTER_GFX
 
 # =============================================================================
 # Transpose fixtures
@@ -145,16 +145,11 @@ class TestTranspose(RocprofsysTest):
         [
             "baseline",
             "binary_rewrite",
-            pytest.param(
-                "runtime_instrument",
-                marks=pytest.mark.ci_disable(
-                    "all"
-                ),  # TODO: Deprecate once TheRock switches to CTest
-            ),
+            "runtime_instrument",
             "sys_run",
         ],
     )
-    def test(self, mode, transpose_env, num_processes):
+    def test(self, mode, transpose_env):
         result = self.run_test(
             mode,
             "transpose",
@@ -163,7 +158,7 @@ class TestTranspose(RocprofsysTest):
             runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
             check_target_arch=True,
             launcher="mpi",
-            num_procs=num_processes,
+            num_procs=2,
         )
         self.assert_regex(result)
         if mode != "baseline":
@@ -171,7 +166,7 @@ class TestTranspose(RocprofsysTest):
 
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("transpose_env")
-    def test_sampling(self, transpose_env, transpose_rules, num_processes):
+    def test_sampling(self, transpose_env, transpose_rules):
         env = transpose_env.copy()
         env.update(self.SAMPLING_ENV)
         result = self.run_test(
@@ -181,7 +176,7 @@ class TestTranspose(RocprofsysTest):
             run_args=self.SAMPLING_RUN_ARGS,
             check_target_arch=True,
             launcher="mpi",
-            num_procs=num_processes,
+            num_procs=2,
         )
         self.assert_regex(result)
         self.assert_perfetto(
@@ -205,6 +200,40 @@ class TestTranspose(RocprofsysTest):
             env=transpose_env,
             run_args=self.TWO_KERNELS_RUN_ARGS,
             check_target_arch=True,
+        )
+        self.assert_regex(result)
+
+    _LOCK_MODE_REGRESSIONS = {
+        "mutex-locks": "hung rocprof-sys-run indefinitely "
+        "(self-deadlock on buffer_storage's m_mutex)",
+        "rw-locks": "aborted rocprof-sys-run with SIGABRT "
+        "(self-deadlock on synchronized<>'s rwlock)",
+    }
+
+    @pytest.mark.locks
+    @pytest.mark.timeout(60)
+    @pytest.mark.parametrize(
+        "lock_mode",
+        [
+            pytest.param("mutex-locks", id="mutex-locks"),
+            pytest.param("rw-locks", id="rw-locks"),
+        ],
+    )
+    def test_locks(self, lock_mode, transpose_env):
+        """
+        Regression test: pthread_mutex_gotcha used to intercept rocprof-sys's
+        own internal locks, recursively re-entering them on the same thread
+        while recording the trace event for the lock acquisition itself.
+        See _LOCK_MODE_REGRESSIONS for the per-mode failure signature.
+        """
+        result = self.run_test(
+            "sys_run",
+            "transpose",
+            env=transpose_env,
+            sys_run_args=["-I", lock_mode],
+            run_args=["2", "50", "10"],
+            check_target_arch=True,
+            fail_message=f"Regression: {self._LOCK_MODE_REGRESSIONS[lock_mode]}",
         )
         self.assert_regex(result)
 
@@ -258,7 +287,7 @@ class TestTranspose(RocprofsysTest):
             pytest.param("group-by-stream", marks=pytest.mark.group_by_stream),
         ],
     )
-    def test_hip_stream(self, mode, type, num_processes):
+    def test_hip_stream(self, mode, type):
         if type == "group-by-queue":
             env = {"ROCPROFSYS_ROCM_GROUP_BY_QUEUE": "YES"}
         else:
@@ -270,7 +299,7 @@ class TestTranspose(RocprofsysTest):
             env=env,
             check_target_arch=True,
             launcher="mpi",
-            num_procs=num_processes,
+            num_procs=2,
         )
         self.assert_regex(result)
 
@@ -289,14 +318,14 @@ class TestTransposeROCProfiler(RocprofsysTest):
 
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("rocprofiler_env")
-    def test(self, mode, rocprofiler_env, gpu_info, num_processes, rocprofiler_rules):
+    def test(self, mode, rocprofiler_env, gpu_info, rocprofiler_rules):
         result = self.run_test(
             mode,
             "transpose",
             env=rocprofiler_env,
             check_target_arch=True,
             launcher="mpi",
-            num_procs=num_processes,
+            num_procs=2,
             binary_rewrite_args=self.BINARY_REWRITE_ARGS,
         )
         self.assert_regex(result)
@@ -333,25 +362,23 @@ class TestTransposeROCProfiler(RocprofsysTest):
 @pytest.mark.rocprofiler
 @pytest.mark.class_name("transpose-gpu-perf-counters")
 @pytest.mark.timeout(120)
+@pytest.mark.cap_perfmon
+@pytest.mark.disable_archs(UNSUPPORTED_PERF_COUNTER_GFX)
 class TestTransposeGPUPerfCounters(RocprofsysTest):
     @pytest.mark.rocpd("gpu_perf_counter_env")
     def test(
         self,
         gpu_perf_counter_env,
         gpu_info,
-        num_processes,
         validation_rules_dir,
     ):
-        if "gfx1151" in gpu_info.architectures:
-            pytest.skip("transpose GPU perf counter test skipped on gfx1151")
-
         result = self.run_test(
             "sampling",
             "transpose",
             env=gpu_perf_counter_env,
             check_target_arch=True,
             launcher="mpi",
-            num_procs=num_processes,
+            num_procs=2,
         )
         self.assert_regex(result)
         self.assert_perfetto(

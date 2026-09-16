@@ -85,7 +85,7 @@ main(int argc, char *argv[])
     }
 
     /* 2. Build CPU pattern + copy to GPU */
-    cpu_pattern = (uint8_t *)malloc(payload_size);
+    cpu_pattern = static_cast<uint8_t *>(malloc(payload_size));
     if (!cpu_pattern) {
         fprintf(stderr, "Could not allocate CPU pattern buffer\n");
         return EXIT_FAILURE;
@@ -130,7 +130,7 @@ main(int argc, char *argv[])
     }
 
     /* 6. ftruncate to exact size (defensive; no-op when we wrote payload_size exactly) */
-    if (-1 == ftruncate(out_fd, (off_t)payload_size)) {
+    if (-1 == ftruncate(out_fd, static_cast<off_t>(payload_size))) {
         fprintf(stderr, "Could not truncate %s (%s)\n", out_path, strerror(errno));
         goto close_out;
     }

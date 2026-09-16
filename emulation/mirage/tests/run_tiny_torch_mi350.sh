@@ -16,6 +16,8 @@
 #   VENV          venv location (default: <mirage>/.venv-mi350)
 #   INDEX_URL     pip index (default: gfx950-dcgpu nightly)
 #   SKIP_INSTALL  set to 1 to reuse an already-populated venv
+#   MIRAGE_SKIP_BUILD  set to 1 to reuse an already-built mirage prefix
+#                 (otherwise scripts/mirage.sh rebuilds via Docker)
 #
 set -euo pipefail
 
@@ -51,7 +53,7 @@ else
 fi
 
 # 2b. Expand the devel package. rocm[devel] ships its contents (headers,
-#     libs incl. librocjitsu_kmd.so) compressed; `rocm-sdk init` unpacks
+#     libs incl. librocjitsu.so) compressed; `rocm-sdk init` unpacks
 #     them into site-packages/_rocm_sdk_devel. Safe to re-run.
 if [[ -x "$VENV/bin/rocm-sdk" ]]; then
   log "expanding ROCm devel contents (rocm-sdk init)"
@@ -59,13 +61,15 @@ if [[ -x "$VENV/bin/rocm-sdk" ]]; then
 fi
 
 # 3. Run the fixture through mirage on the emulated MI350X. Use the venv's
-#    python3 explicitly so the workload imports the nightly torch. Build &
-#    run mirage from the workspace (cargo run) so its own rocjitsu KMD
-#    discovery and preload wiring work; the first `--` ends cargo's args.
+#    python3 explicitly so the workload imports the nightly torch. Run mirage
+#    via scripts/mirage.sh, which builds the glibc-portable mirage + rocjitsu
+#    prefix (build/manylinux) and execs the installed binary; that binary's
+#    sibling librocjitsu*.so provides the KMD discovery and preload wiring.
+#    Set MIRAGE_SKIP_BUILD=1 to reuse an already-built prefix.
 cd "$MIRAGE_DIR"
 log "running tiny_torch.py via mirage --profile $PROFILE"
 set +e
-OUTPUT="$(cargo run --quiet -- run --profile "$PROFILE" \
+OUTPUT="$("$MIRAGE_DIR/scripts/mirage.sh" run --profile "$PROFILE" \
   -- "$VENV_PY" "$FIXTURE" 2>&1)"
 STATUS=$?
 set -e

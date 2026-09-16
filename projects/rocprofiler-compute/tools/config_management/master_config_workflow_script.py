@@ -20,7 +20,7 @@ GFX11_TEMPLATE = ANALYSIS_CONFIGS / "gfx11_config_template.yaml"
 PYTHON = sys.executable
 
 VERIFY_SCRIPT = TOOLS_DIR / "verify_against_config_template.py"
-HASH_CHECKER_SCRIPT = REPO_ROOT / "src" / "utils" / "hash_checker.py"
+HASH_CHECKER_SCRIPT = TOOLS_DIR / "hash_checker.py"
 
 
 def run(cmd):

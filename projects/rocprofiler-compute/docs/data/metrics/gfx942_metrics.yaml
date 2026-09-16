@@ -20,9 +20,6 @@ System Speed-of-Light:
   MFMA IOPs (Int8):
     rst: 'The total number of 8-bit integer :ref:`MFMA <desc-mfma>` operations executed per second. Note: this does not include any 8-bit integer operations from :ref:`VALU <desc-valu>` instructions. This is also presented as a percent of the peak theoretical INT8 MFMA operations achievable on the specific accelerator.'
     unit: GIOP/s
-  Active CUs (deprecated):
-    rst: Total number of active compute units (CUs) on the accelerator during the kernel execution. (Deprecated - See CU Utilization instead)
-    unit: CUs
   SALU Utilization:
     rst: Indicates what percent of the kernel's duration the :ref:`SALU <desc-salu>` was busy executing instructions. Computed as the ratio of the total number of cycles spent by the :ref:`scheduler <desc-scheduler>` issuing SALU / :ref:`SMEM <desc-smem>` instructions over the :ref:`total CU cycles <total-cu-cycles>`.
     unit: Percent
@@ -124,7 +121,7 @@ Roofline Performance Rates:
     rst: 'The total number of 8-bit integer MFMA operations executed per second. Note: this does not include any 8-bit integer operations from VALU instructions. The peak empirically measured INT8 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
     unit: GIOP/s
   HBM Bandwidth:
-    rst: The total number of bytes read from and written to High-Bandwidth Memory (HBM) per second. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.
+    rst: The total number of bytes read from and written to High-Bandwidth Memory (HBM) per second. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison. It reflects peak single-direction (read-only) bandwidth, so write-heavy or mixed kernels fall below it.
     unit: GB/s
   L2 Cache Bandwidth:
     rst: The number of bytes looked up in the L2 cache per unit time. The number of bytes is calculated as the number of cache lines requested multiplied by the cache line size. This value does not consider partial requests, so e.g., if only a single value is requested in a cache line, the data movement will still be counted as a full cache line. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.

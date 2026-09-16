@@ -45,10 +45,12 @@ class TestKpackOffloadBinary:
         # Verify output exists
         assert output_binary.exists()
 
-        # Verify size reduction
+        # Device code is removed (.hip_fatbin -> NOBITS, verified below). On-disk
+        # size is not asserted to shrink: executables get their PHDR table
+        # normalized to p_vaddr == p_offset for old-kernel (EL8 4.18) direct exec,
+        # and on a tiny fully-zero-paged fixture that overhead can exceed the
+        # savings. Real binaries (host image >> stub .hip_fatbin) are unaffected.
         new_size = output_binary.stat().st_size
-        assert new_size < original_size
-        assert result["removed"] > 0
         assert result["original_size"] == original_size
         assert result["new_size"] == new_size
 

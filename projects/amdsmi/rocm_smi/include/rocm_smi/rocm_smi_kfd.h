@@ -1,28 +1,10 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_
 #define INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
@@ -34,6 +16,10 @@
 #include "rocm_smi/rocm_smi_io_link.h"
 
 namespace amd::smi {
+
+// Sentinel for KFDNode::numa_node_* when no CPU io_link was found.
+constexpr auto kInvalidNumaNode = std::numeric_limits<uint32_t>::max();
+constexpr auto kInvalidNumaNodeWeight = std::numeric_limits<uint64_t>::max();
 
 class KFDNode {
  public:
@@ -83,9 +69,9 @@ class KFDNode {
   uint32_t amdgpu_dev_index_;
   uint64_t gpu_id_;
   std::string name_;
-  uint32_t numa_node_number_;
-  uint64_t numa_node_weight_;
-  IO_LINK_TYPE numa_node_type_;
+  uint32_t numa_node_number_ = kInvalidNumaNode;
+  uint64_t numa_node_weight_ = kInvalidNumaNodeWeight;
+  IO_LINK_TYPE numa_node_type_ = IOLINK_TYPE_UNDEFINED;
   uint64_t xgmi_hive_id_;
   uint32_t cu_count_;
   std::map<uint32_t, IO_LINK_TYPE> io_link_type_;
@@ -109,6 +95,7 @@ int ReadKFDDeviceProperties(uint32_t dev_id, std::vector<std::string>* retVec);
 int read_node_properties(uint32_t node, std::string property_name, uint64_t* val);
 int get_gpu_id(uint32_t node, uint64_t* gpu_id);
 
+// Replaces the contents of *out with the KFD GPU ids for pid (clears first).
 int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out);
 
 }  // namespace amd::smi

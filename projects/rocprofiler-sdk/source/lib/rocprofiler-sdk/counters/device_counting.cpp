@@ -40,6 +40,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <thread>
 #include <unordered_map>
 
 namespace rocprofiler
@@ -179,7 +180,7 @@ bool
 agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
 {
     if(!data) return false;
-    const auto& callback_data = *static_cast<rocprofiler::counters::agent_callback_data*>(data);
+    auto& callback_data = *static_cast<rocprofiler::counters::agent_callback_data*>(data);
 
     const auto& prof_config = callback_data.profile;
 
@@ -201,6 +202,7 @@ agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
     {
         // reset the signal to allow another sample to start
         hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 1);
+        callback_data.sample_in_flight.store(false, std::memory_order_release);
         return true;
     }
 
@@ -226,7 +228,17 @@ agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
 
     // reset the signal to allow another sample to start
     hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 1);
+    callback_data.sample_in_flight.store(false, std::memory_order_release);
     return true;
+}
+
+void
+wait_for_sample_handler(rocprofiler::counters::agent_callback_data& callback_data)
+{
+    while(callback_data.sample_in_flight.load(std::memory_order_acquire))
+    {
+        std::this_thread::yield();
+    }
 }
 
 /**
@@ -343,6 +355,7 @@ read_agent_ctx(const context::context*                    ctx,
         // No AQL packet, nothing to do here.
         if(!callback_data.packet) continue;
 
+        wait_for_sample_handler(callback_data);
         wait_if_sync();
 
         if((flags & ROCPROFILER_COUNTER_FLAG_ASYNC) == 0)
@@ -354,6 +367,7 @@ read_agent_ctx(const context::context*                    ctx,
         if(callback_data.profile->reqired_hw_counters.empty())
         {
             callback_data.user_data = user_data;
+            callback_data.sample_in_flight.store(true, std::memory_order_release);
             hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, -1);
             wait_if_sync();
             continue;
@@ -374,6 +388,7 @@ read_agent_ctx(const context::context*                    ctx,
         barrier.barrier_and.completion_signal = callback_data.completion;
         hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 0);
         callback_data.user_data = user_data;
+        callback_data.sample_in_flight.store(true, std::memory_order_release);
 
         // Submit both READ and BARRIER packets in a batch (single doorbell ring)
         const void* packets[2] = {&callback_data.packet->packets.read_packet, &barrier.barrier_and};
@@ -582,6 +597,8 @@ stop_agent_ctx(const context::context* ctx)
 
         const auto* agent = agent::get_agent_cache(callback_data.profile->agent);
         if(!agent || !agent->profile_queue()) continue;
+
+        wait_for_sample_handler(callback_data);
 
         if(!callback_data.profile->reqired_hw_counters.empty())
         {

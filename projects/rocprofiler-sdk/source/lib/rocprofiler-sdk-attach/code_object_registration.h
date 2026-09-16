@@ -52,4 +52,9 @@ rocprofiler_attach_add_code_object_cb(rocprofiler_attach_code_object_cb_t cb,
 int
 rocprofiler_attach_remove_code_object_cb(rocprofiler_attach_code_object_cb_t cb) ROCPROFILER_API;
 
+int
+rocprofiler_attach_lookup_memory_codeobj_data(hsa_loaded_code_object_t loaded_code_object,
+                                              const void**             data_out,
+                                              uint64_t*                size_out) ROCPROFILER_API;
+
 ROCPROFILER_EXTERN_C_FINI

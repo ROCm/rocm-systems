@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -67,7 +67,7 @@ struct instance
     buffer_t& get_internal_buffer(size_t);
 };
 
-using unique_buffer_vec_t = common::container::stable_vector<std::unique_ptr<instance>, 4>;
+using unique_buffer_vec_t = common::container::stable_vector<std::unique_ptr<instance>, 16>;
 
 bool
 is_valid_buffer_id(rocprofiler_buffer_id_t id);

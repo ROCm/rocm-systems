@@ -32,8 +32,14 @@
 extern "C" {
 #endif
 
-/* Forward declaration for debug trap ioctl arguments */
+/* Forward declarations for the KFD ioctl arguments the entry points below take
+ * by pointer. linux/kfd_ioctl.h defines them and the dev package excludes it,
+ * so without these a consumer's C compiler invents a type scoped to the
+ * prototype and the pointer it passes is a different one.
+ */
 struct kfd_ioctl_dbg_trap_args;
+struct kfd_runtime_info;
+struct kfd_dbg_device_info_entry;
 
 /**
   "Opens" the HSA kernel driver for user-kernel mode communication.
@@ -437,6 +443,21 @@ hsaKmtGetQueueInfo(
     HsaQueueInfo *QueueInfo	//IN
 );
 
+/**
+ * Get the kernel-assigned internal queue ID from a queue handle.
+ *
+ * @param[in] QueueId Queue handle returned from hsaKmtCreateQueue
+ * @param[out] KernelInternalQueueId Pointer to receive the kernel's internal queue ID
+ *
+ * @returns HSAKMT_STATUS_SUCCESS on success
+ */
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetKernelQueueId(
+    HSA_QUEUEID QueueId,              //IN
+    HSAuint32 *KernelInternalQueueId  //OUT
+);
+
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtQueueRingDoorbell(
@@ -505,6 +526,18 @@ HSAKMTAPI
 hsaKmtAvailableMemory(
     HSAuint32 Node,
     HSAuint64 *AvailableBytes
+    );
+
+/**
+  Returns the KFD topology-first GPU used as the default host/GTT anchor
+  (libhsakmt gpu_mem[0] / first_gpu_mem).
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetDefaultHostGpu(
+    HSAuint32 *NodeId,  // OUT
+    HSAuint32 *GpuId    // OUT
     );
 
 /**
@@ -598,6 +631,37 @@ HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtDestroyExternalSemaphore(
     HSA_EXTERNAL_SEMAPHORE_HANDLE Handle   //IN
+    );
+
+/**
+  Enqueues a GPU-side signal of an imported external semaphore on
+  QueueId, ordered behind prior submissions. Handle must come from
+  hsaKmtImportExternalSemaphore on the same node as QueueId's device;
+  cross-adapter use returns HSAKMT_STATUS_INVALID_NODE_UNIT.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueueSignalExternalSemaphore(
+    HSA_QUEUEID                   QueueId,   //IN
+    HSA_EXTERNAL_SEMAPHORE_HANDLE Handle,    //IN
+    HSAuint64                     Value      //IN
+    );
+
+/**
+  Posts a GPU-side wait on an imported external semaphore. The wait
+  blocks any subsequent submissions on QueueId until the syncobj
+  reaches Value. The semaphore must have been imported via
+  hsaKmtImportExternalSemaphore on the same node as QueueId's device;
+  cross-adapter use returns HSAKMT_STATUS_INVALID_NODE_UNIT.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueueWaitExternalSemaphore(
+    HSA_QUEUEID                   QueueId,   //IN
+    HSA_EXTERNAL_SEMAPHORE_HANDLE Handle,    //IN
+    HSAuint64                     Value      //IN
     );
 
 /**
@@ -738,7 +802,7 @@ hsaKmtMapMemoryToGPUNodes(
     void*           MemoryAddress,         //IN (page-aligned)
     HSAuint64       MemorySizeInBytes,     //IN (page-aligned)
     HSAuint64*      AlternateVAGPU,        //OUT (page-aligned)
-    HsaMemMapFlags  MemMapFlags,           //IN
+    HsaMemFlags     MemFlags,              //IN
     HSAuint64       NumberOfNodes,         //IN
     HSAuint32*      NodeArray              //IN
     );
@@ -869,6 +933,19 @@ HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtGetRuntimeCapabilities(
     HSAuint32	*caps_mask // OUT
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetCoreRuntimeInfo(
+    struct kfd_runtime_info *runtime_info // OUT
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetCoreDeviceInfo(
+    HSAuint32 gpu_id, // IN
+    struct kfd_dbg_device_info_entry *device_info // OUT
     );
 
 /**
@@ -1423,7 +1500,7 @@ HSAKMTAPI
 hsaKmtMemoryGetCpuAddr(
   HsaAMDGPUDeviceHandle DeviceHandle,
   HsaMemoryObjectHandle MemoryHandle,
-  HSAuint64* cpu_addr // OUT
+  HSAuint64* cpu_addr // OUT for newer ROCr; legacy ROCr passes HSAint32* fd here
 );
 
 HSAKMT_STATUS

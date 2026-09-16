@@ -8,9 +8,9 @@
 hipFile documentation
 **********************
 
-hipFile is AMD's Infinity Storage library that provides direct-to-GPU I/O for the ROCm platform. The library provides C and Python APIs for synchronous, asynchronous, and batch I/O operations. hipFile automatically falls back to POSIX I/O when operations are unable to use the direct-to-GPU path.
+hipFile is AMD's Infinity Storage library that provides direct-to-GPU I/O without requiring a host-side buffer. The library provides C and Python APIs for synchronous, asynchronous, and batch I/O operations. hipFile automatically falls back to POSIX I/O when operations are unable to use the direct-to-GPU path.
 
-The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROCm/rocm-systems/tree/develop/projects/hipfile>`_.
+hipFile is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. The hipFile source code is located at https://github.com/ROCm/rocm-systems/tree/develop/projects/hipfile.
 
 .. grid:: 2
    :gutter: 3
@@ -21,8 +21,15 @@ The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROC
       * :doc:`Build hipFile from source <install/build-from-source>`
       * :doc:`Install the hipFile Python bindings <install/python-bindings>`
 
+.. grid:: 2
+   :gutter: 3
+
    .. grid-item-card:: How to
 
+      * :doc:`Check for fastpath compatibility <how-to/checking-system-compatibility>`
+      * :doc:`Set up a local NVMe drive <how-to/setup-local-nvme>`
+      * :doc:`Set up an NVMe-oF disk <how-to/setup-nvmeof>`
+      * :doc:`Set up an NFSoRDMA share <how-to/setup-nfsordma>`
       * :doc:`Register a file and GPU buffer for GPU I/O <how-to/register-file-and-buffer>`
       * :doc:`Benchmark hipFile with fio <how-to/use-with-fio>`
       * :doc:`Use the hipFile Python API <how-to/use-python-api>`
@@ -45,7 +52,10 @@ The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROC
       * :doc:`cuFile compatibility <reference/hipFile-cuFile-compatibility>`
       * :doc:`hipFile API reference <reference/hipFile-api-reference>`
 
-To contribute to the documentation, refer to
-`Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
+   .. grid-item-card:: Troubleshooting
+
+      * :doc:`Troubleshooting <troubleshooting/troubleshooting>`
+      * :doc:`Known issues <troubleshooting/known-issues>`
+      * :doc:`Limitations <troubleshooting/limitations>`
 
 Licensing information is in the `LICENSE.md <https://github.com/ROCm/rocm-systems/blob/develop/projects/hipfile/LICENSE.md>`_ file in the repository.

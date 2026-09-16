@@ -25,7 +25,7 @@
 #ifndef LIBRARY_SRC_MEMORY_HIP_ALLOCATOR_VMM_COMMON_HPP_
 #define LIBRARY_SRC_MEMORY_HIP_ALLOCATOR_VMM_COMMON_HPP_
 
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
 
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_version.h>
@@ -39,6 +39,40 @@ struct VMMCommonAllocationInfo {
   hipMemGenericAllocationHandle_t handle;
   size_t size;
 };
+
+/**
+ * @brief Query the minimum HIP VMM allocation granularity for this device.
+ *
+ * The property used for the query must match the one used at allocation time
+ * (see VMMAllocCommon), since granularity can depend on the requested handle
+ * type and allocation flags.
+ *
+ * @param handle_type Handle type the allocations will request (e.g.
+ *                    hipMemHandleTypePosixFileDescriptor or hipMemHandleTypeFabric)
+ * @return Minimum allocation granularity in bytes, or 0 on failure.
+ */
+inline size_t VMMQueryGranularity(hipMemAllocationHandleType handle_type) {
+  hipMemAllocationProp prop = {};
+  prop.type = hipMemAllocationTypeUncached;
+  prop.location.type = hipMemLocationTypeDevice;
+
+  int device_id = 0;
+  if (hipGetDevice(&device_id) != hipSuccess) {
+    return 0;
+  }
+  prop.location.id = device_id;
+  prop.requestedHandleTypes = handle_type;
+
+  // Match VMMAllocCommon: allocations are made RDMA-capable.
+  prop.allocFlags.gpuDirectRDMACapable = 1;
+
+  size_t granularity = 0;
+  if (hipMemGetAllocationGranularity(&granularity, &prop,
+                                     hipMemAllocationGranularityMinimum) != hipSuccess) {
+    return 0;
+  }
+  return granularity;
+}
 
 /**
  * Common VMM allocation helper
@@ -56,11 +90,7 @@ inline hipError_t VMMAllocCommon(void** ptr, size_t size, hipMemAllocationHandle
   hipMemGenericAllocationHandle_t handle;
   hipMemAllocationProp prop = {};
 
-#if HIP_VERSION < 7020000
-  prop.type = hipMemAllocationTypePinned;
-#else
   prop.type = hipMemAllocationTypeUncached;
-#endif
   prop.location.type = hipMemLocationTypeDevice;
 
   // Get current device ID
@@ -208,6 +238,6 @@ inline hipError_t VMMGetDmabufHandleCommon(void *dev_ptr, size_t size,
 
 }  // namespace rocshmem
 
-#endif  // HIP_VERSION >= 70000000
+#endif  // HIP_VERSION >= 70200000
 
 #endif  // LIBRARY_SRC_MEMORY_HIP_ALLOCATOR_VMM_COMMON_HPP_

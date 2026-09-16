@@ -11,11 +11,9 @@
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((visibility("default")))
 #endif
-ncclResult_t rcclCheckRomeTopoModelIdxConsensus(
-  int nranks,
-  std::function<int(int)> getRomeTopoModelIdx,
-  std::function<const char*(int)> getHostname,
-  std::function<uint64_t(int)> getHostHash) {
+ncclResult_t rcclCheckRomeTopoModelIdxConsensus(int nranks, std::function<int(int)> getRomeTopoModelIdx,
+                                                std::function<const char*(int)> getHostname,
+                                                std::function<uint64_t(int)> getHostHash) {
   if (nranks <= 0) return ncclSuccess;
 
   std::unordered_map<int, std::pair<int, int>> tallies; // modelIdx -> (vote count, first rank)
@@ -47,7 +45,9 @@ ncclResult_t rcclCheckRomeTopoModelIdxConsensus(
     if (getRomeTopoModelIdx(r) != refIdx) nDisagree++;
   }
   if (nDisagree > 0) {
-    WARN("RCCL FATAL: mismatched Rome preset topology model index across ranks; all ranks must agree for precomputed graphs (voted refIdx %d from %d of %d ranks).", refIdx, refVotes, nranks);
+    WARN("RCCL FATAL: mismatched Rome preset topology model index across ranks; all ranks must agree for precomputed "
+         "graphs (voted refIdx %d from %d of %d ranks).",
+         refIdx, refVotes, nranks);
     std::unordered_map<uint64_t, int> lowestMismatchRankByHost;
     lowestMismatchRankByHost.reserve(nranks);
     for (int r = 0; r < nranks; r++) {

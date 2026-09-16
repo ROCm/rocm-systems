@@ -202,8 +202,12 @@ TEST_CASE("Unit_hipMemExportFabricHandleToStdout_Positive_Basic") {
   HIP_CHECK(hipMemSetAccess(reinterpret_cast<void*>(addr), allocSize, &accessDesc, 1));
 
   int fabrichandle;
-  HIP_CHECK(hipMemExportToShareableHandle(reinterpret_cast<void*>(&fabrichandle), allocHandle,
-                                          hipMemHandleTypeFabric, 0));
+  hipError_t err = hipMemExportToShareableHandle(reinterpret_cast<void*>(&fabrichandle), allocHandle,
+                                                 hipMemHandleTypeFabric, 0);
+  if (err == hipErrorNotReady) {
+    HIP_SKIP_TEST("Accelerator not ready for fabric handle export.");
+  }
+  HIP_CHECK(err);
 
   REQUIRE(fabrichandle != 0);
 

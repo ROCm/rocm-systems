@@ -5,7 +5,7 @@
 import argparse
 import sys
 
-from common import iter_group_configs
+from common import iter_group_configs, ERROR, RESET
 
 
 def parse_args():
@@ -34,11 +34,11 @@ def main():
 
     if missing:
         print(
-            "ERROR: The following test cases are missing a 'level' in their YAML config:",
+            f"[check_config] {ERROR}ERROR: The following test cases are missing a 'level' in their YAML config:{RESET}",
             file=sys.stderr,
         )
         for entry in missing:
-            print(entry, file=sys.stderr)
+            print(f"[check_config] {ERROR}{entry}{RESET}", file=sys.stderr)
         sys.exit(1)
 
 

@@ -75,6 +75,11 @@ Delete the demuxer once demultiplexing is complete.
 
   delete demuxer;
 
+.. note::
+
+  Before running the sample, ensure that the ``ROCM_PATH`` environment variable is pointing to the location of your ROCm installation.
+
+
 .. |videodecode| replace:: ``videodecode.cpp``
 .. _videodecode: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples/videoDecode/videodecode.cpp
 

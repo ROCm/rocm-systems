@@ -44,7 +44,7 @@ DEBIAN/                             ← postinst, prerm, control
 
 ## Critical Rules
 
-- gRPC 1.67.1 is hardcoded — `GRPC_ROOT` must be set; system gRPC is not used. Flag any attempt to use system gRPC.
+- gRPC 1.78.1 is hardcoded — `GRPC_ROOT` must be set; system gRPC is not used. Flag any attempt to use system gRPC.
 - Proto stubs must be regenerated when `protos/rdc.proto` changes — verify CMake custom command is present and correct.
 - Module libs (`librdc_rocr.so` etc.) are dlopen'd at runtime from `/opt/rocm/lib/rdc/` — install path must be exact.
 - `BUILD_STANDALONE` controls rdcd/rdci build (requires gRPC) — CMake guards must be correct.

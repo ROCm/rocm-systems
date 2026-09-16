@@ -146,12 +146,33 @@ set(TEST_host_int_amo_fadd 127)
 set(TEST_host_int_amo_fcswap 128)
 set(TEST_host_amo_all_pes 129)
 set(TEST_host_amo_self 130)
-set(TEST_tile_broadcast 131)
-set(TEST_tile_broadcast_wave 132)
-set(TEST_tile_broadcast_wg 133)
-set(TEST_tile_allgather 134)
-set(TEST_tile_allgather_wave 135)
-set(TEST_tile_allgather_wg 136)
+set(TEST_host_amo_add 131)
+set(TEST_tile_broadcast 132)
+set(TEST_tile_broadcast_wave 133)
+set(TEST_tile_broadcast_wg 134)
+set(TEST_tile_allgather 135)
+set(TEST_tile_allgather_wave 136)
+set(TEST_tile_allgather_wg 137)
+set(TEST_host_wait_until 138)
+set(TEST_host_test 139)
+set(TEST_host_wait_until_all 140)
+set(TEST_host_wait_until_any 141)
+set(TEST_host_wait_until_some 142)
+set(TEST_host_wait_until_all_vector 143)
+set(TEST_host_wait_until_any_vector 144)
+set(TEST_host_wait_until_some_vector 145)
+set(TEST_host_wait_until_all_status 146)
+set(TEST_host_wait_until_any_status 147)
+set(TEST_host_wait_until_some_status 148)
+set(TEST_teamreducescatter 149)
+set(TEST_broadcast_wave 150)
+set(TEST_alltoall_wave 151)
+set(TEST_fcollect_wave 152)
+set(TEST_reduce_wave 153)
+set(TEST_reducescatter_wave 154)
+set(TEST_tile_reduce 155)
+set(TEST_tile_reduce_wave 156)
+set(TEST_tile_reduce_wg 157)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
@@ -212,9 +233,13 @@ function(write_install_test_definition TEST_NAME TEST_COMMAND TEST_LABELS TEST_T
             # Relative from working dir: ../../../../share/rocshmem/test_wrapper.sh
             list(APPEND INSTALL_CMD_PARTS "../../../../share/rocshmem/test_wrapper.sh")
         elseif("${part}" STREQUAL "$<TARGET_FILE:rocshmem_functional_tests>")
-            # Executable is at: <install>/share/rocshmem/rocshmem_functional_tests
-            # Relative from working dir: ../../../../share/rocshmem/rocshmem_functional_tests
-            list(APPEND INSTALL_CMD_PARTS "../../../../share/rocshmem/rocshmem_functional_tests")
+            # Executable is at: <install>/bin/rocshmem_functional_tests
+            # Relative from working dir bin/rocshmem/tests/functional: ../../../rocshmem_functional_tests
+            list(APPEND INSTALL_CMD_PARTS "../../../rocshmem_functional_tests")
+        elseif("${part}" STREQUAL "${CMAKE_COMMAND}")
+            # Replace build-host cmake path with portable system env
+            # This prevents build-host absolute paths from leaking into install files
+            list(APPEND INSTALL_CMD_PARTS "env")
         elseif("${part}" STREQUAL "${MPIEXEC_EXECUTABLE}")
             # Use the MPI executable found at configure time (absolute path)
             list(APPEND INSTALL_CMD_PARTS "${MPIEXEC_EXECUTABLE}")
@@ -286,8 +311,11 @@ set(ALL_TEST_VARIANT_NAMES default_stream)
 function(generate_variant_combinations global_variants test_variants output_var)
     set(ALL_COMBINATIONS "")
 
-    # Always include base variant (no global variants, no test variants)
-    list(APPEND ALL_COMBINATIONS "base")
+    # When using SLR launcher, skip base variant (no difference from uuid variant in SLR mode)
+    # Only include base variant for MPI mode
+    if(NOT USE_SLR_LAUNCHER)
+        list(APPEND ALL_COMBINATIONS "base")
+    endif()
 
     # Add global-only variants
     foreach(global_var ${global_variants})
@@ -441,7 +469,7 @@ endfunction()
 function(add_rocshmem_functional_test)
     set(options NO_VERIFY)
     set(oneValueArgs NAME RANKS WORKGROUPS THREADS MAX_MSG_SIZE VOLUME_SIZE
-                     LOCALBUFTYPE TIMEOUT TIER)  # TIER kept for backward compatibility but ignored
+                     LOCALBUFTYPE TIMEOUT TIER NUM_WF)  # TIER kept for backward compatibility but ignored
     set(multiValueArgs ENV_VARS EXTRA_LABELS BACKENDS GPUS TEST_VARIANTS)
     cmake_parse_arguments(TEST "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
@@ -518,37 +546,29 @@ function(add_rocshmem_functional_test)
         endif()
 
         # Call internal function to create actual CTest test
-        # Only pass NO_VERIFY flag if it was explicitly set
+        set(_extra_flags)
         if(TEST_NO_VERIFY)
-            _add_single_rocshmem_test(
-                NAME ${TEST_NAME}
-                RANKS ${TEST_RANKS}
-                WORKGROUPS ${TEST_WORKGROUPS}
-                THREADS ${TEST_THREADS}
-                MAX_MSG_SIZE ${TEST_MAX_MSG_SIZE}
-                VOLUME_SIZE ${TEST_VOLUME_SIZE}
-                LOCALBUFTYPE ${TEST_LOCALBUFTYPE}
-                TIMEOUT ${TEST_TIMEOUT}
-                SUFFIX "${variant_suffix}"
-                ENV_VARS ${combined_env_vars}
-                LABELS "${all_labels}"
-                NO_VERIFY
-            )
-        else()
-            _add_single_rocshmem_test(
-                NAME ${TEST_NAME}
-                RANKS ${TEST_RANKS}
-                WORKGROUPS ${TEST_WORKGROUPS}
-                THREADS ${TEST_THREADS}
-                MAX_MSG_SIZE ${TEST_MAX_MSG_SIZE}
-                VOLUME_SIZE ${TEST_VOLUME_SIZE}
-                LOCALBUFTYPE ${TEST_LOCALBUFTYPE}
-                TIMEOUT ${TEST_TIMEOUT}
-                SUFFIX "${variant_suffix}"
-                ENV_VARS ${combined_env_vars}
-                LABELS "${all_labels}"
-            )
+            list(APPEND _extra_flags NO_VERIFY)
         endif()
+        if(DEFINED TEST_NUM_WF)
+            list(APPEND _extra_flags NUM_WF ${TEST_NUM_WF})
+        endif()
+
+        _add_single_rocshmem_test(
+            NAME ${TEST_NAME}
+            RANKS ${TEST_RANKS}
+            WORKGROUPS ${TEST_WORKGROUPS}
+            THREADS ${TEST_THREADS}
+            MAX_MSG_SIZE ${TEST_MAX_MSG_SIZE}
+            VOLUME_SIZE ${TEST_VOLUME_SIZE}
+            LOCALBUFTYPE ${TEST_LOCALBUFTYPE}
+            TIMEOUT ${TEST_TIMEOUT}
+            SUFFIX "${variant_suffix}"
+            ENV_VARS ${combined_env_vars}
+            LABELS "${all_labels}"
+            ${_extra_flags}
+        )
+
     endforeach()
 endfunction()
 
@@ -559,13 +579,16 @@ endfunction()
 function(_add_single_rocshmem_test)
     set(options NO_VERIFY)
     set(oneValueArgs NAME RANKS WORKGROUPS THREADS MAX_MSG_SIZE VOLUME_SIZE
-                     LOCALBUFTYPE TIMEOUT SUFFIX)
+                     LOCALBUFTYPE TIMEOUT SUFFIX NUM_WF)
     set(multiValueArgs ENV_VARS LABELS)
     cmake_parse_arguments(TEST "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
     # Validate required arguments
-    if(NOT DEFINED TEST_NAME OR NOT DEFINED TEST_RANKS OR NOT DEFINED TEST_WORKGROUPS OR NOT DEFINED TEST_THREADS)
-        message(FATAL_ERROR "_add_single_rocshmem_test: NAME, RANKS, WORKGROUPS, and THREADS are required")
+    if(NOT DEFINED TEST_NAME OR NOT DEFINED TEST_RANKS OR NOT DEFINED TEST_WORKGROUPS)
+        message(FATAL_ERROR "_add_single_rocshmem_test: NAME, RANKS, and WORKGROUPS are required")
+    endif()
+    if(NOT DEFINED TEST_NUM_WF AND NOT DEFINED TEST_THREADS)
+        message(FATAL_ERROR "_add_single_rocshmem_test: either THREADS or NUM_WF is required")
     endif()
 
     # Get test number from mapping
@@ -575,7 +598,13 @@ function(_add_single_rocshmem_test)
     set(TEST_NUM ${TEST_${TEST_NAME}})
 
     # Build test name following driver.sh convention
-    set(FULL_TEST_NAME "${TEST_NAME}_n${TEST_RANKS}_w${TEST_WORKGROUPS}_z${TEST_THREADS}")
+    # When NUM_WF is set the actual thread count is determined at runtime, so
+    # encode the wavefront count instead in file name (e.g. _wf1, _wf2).
+    if(DEFINED TEST_NUM_WF)
+        set(FULL_TEST_NAME "${TEST_NAME}_n${TEST_RANKS}_w${TEST_WORKGROUPS}_wf${TEST_NUM_WF}")
+    else()
+        set(FULL_TEST_NAME "${TEST_NAME}_n${TEST_RANKS}_w${TEST_WORKGROUPS}_z${TEST_THREADS}")
+    endif()
 
     # Add size suffix
     if(DEFINED TEST_MAX_MSG_SIZE)
@@ -612,8 +641,9 @@ function(_add_single_rocshmem_test)
     # Build test command - choose launcher based on MPI availability
     if(USE_SLR_LAUNCHER)
         # SLR mode: Direct execution with ROCSHMEM_SLR_NP environment variable
+        # Use system env instead of cmake -E env for portability (build-host cmake path doesn't leak into install)
         set(TEST_COMMAND
-            ${CMAKE_COMMAND} -E env "ROCSHMEM_SLR_NP=${TEST_RANKS}"
+            env "ROCSHMEM_SLR_NP=${TEST_RANKS}"
             "ROCSHMEM_MAX_NUM_CONTEXTS=${TEST_WORKGROUPS}"
             "ROCSHMEM_HEAP_SIZE=6442450944"
         )
@@ -683,8 +713,10 @@ function(_add_single_rocshmem_test)
     list(APPEND TEST_COMMAND
         -a ${TEST_NUM}
         -w ${TEST_WORKGROUPS}
-        -z ${TEST_THREADS}
     )
+    if(DEFINED TEST_THREADS)
+        list(APPEND TEST_COMMAND -z ${TEST_THREADS})
+    endif()
 
     # Add size argument
     if(DEFINED TEST_MAX_MSG_SIZE)
@@ -696,6 +728,11 @@ function(_add_single_rocshmem_test)
     # Add verification flag
     if(TEST_NO_VERIFY)
         list(APPEND TEST_COMMAND -noverif)
+    endif()
+
+    # Add num-wf flag: wg_size is set at runtime to NUM_WF * GPU's actual warpSize
+    if(DEFINED TEST_NUM_WF)
+        list(APPEND TEST_COMMAND --num-wf ${TEST_NUM_WF})
     endif()
 
     # Add buffer type
@@ -978,6 +1015,8 @@ function(add_coll_tests)
 
     begin_test_group(CATEGORY "COLLECTIVE;SYNC" TIER standard BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME syncall RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME syncall RANKS 3 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME syncall RANKS 5 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME wavesyncall RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME wgsyncall RANKS 2 WORKGROUPS 1 THREADS 1)
 
@@ -985,6 +1024,8 @@ function(add_coll_tests)
         add_rocshmem_functional_test(NAME teamsync RANKS 2 WORKGROUPS 16 THREADS 64)
         add_rocshmem_functional_test(NAME teamsync RANKS 2 WORKGROUPS 32 THREADS 256)
         add_rocshmem_functional_test(NAME teamsync RANKS 2 WORKGROUPS 39 THREADS 1024)
+        add_rocshmem_functional_test(NAME teamsync RANKS 3 WORKGROUPS 16 THREADS 64)
+        add_rocshmem_functional_test(NAME teamsync RANKS 5 WORKGROUPS 16 THREADS 64)
 
         add_rocshmem_functional_test(NAME teamwavesync RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME teamwavesync RANKS 2 WORKGROUPS 16 THREADS 64)
@@ -999,6 +1040,8 @@ function(add_coll_tests)
 
     begin_test_group(CATEGORY "COLLECTIVE;BARRIER" TIER standard BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME barrierall RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME barrierall RANKS 3 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME barrierall RANKS 5 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME wavebarrierall RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME wgbarrierall RANKS 2 WORKGROUPS 1 THREADS 1)
 
@@ -1006,6 +1049,8 @@ function(add_coll_tests)
         add_rocshmem_functional_test(NAME teambarrier RANKS 2 WORKGROUPS 16 THREADS 64)
         add_rocshmem_functional_test(NAME teambarrier RANKS 2 WORKGROUPS 32 THREADS 256)
         add_rocshmem_functional_test(NAME teambarrier RANKS 2 WORKGROUPS 39 THREADS 1024)
+        add_rocshmem_functional_test(NAME teambarrier RANKS 3 WORKGROUPS 16 THREADS 64)
+        add_rocshmem_functional_test(NAME teambarrier RANKS 5 WORKGROUPS 16 THREADS 64)
 
         add_rocshmem_functional_test(NAME teamwavebarrier RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME teamwavebarrier RANKS 2 WORKGROUPS 16 THREADS 64)
@@ -1020,14 +1065,33 @@ function(add_coll_tests)
 
     begin_test_group(CATEGORY "COLLECTIVE" TIER standard BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME alltoall RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 512)
+        add_rocshmem_functional_test(NAME alltoall RANKS 3 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 512)
+        add_rocshmem_functional_test(NAME alltoall RANKS 5 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 512)
         add_rocshmem_functional_test(NAME teambroadcast RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME teambroadcast RANKS 3 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME teambroadcast RANKS 5 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
         add_rocshmem_functional_test(NAME fcollect RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME fcollect RANKS 3 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME fcollect RANKS 5 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
         add_rocshmem_functional_test(NAME teamreduction RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME teamreducescatter RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
     end_test_group()
 
     # Team split 2D test - requires exactly 4 PEs
     begin_test_group(CATEGORY "COLLECTIVE;TEAM" TIER comprehensive BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME teamsplit2d RANKS 4 WORKGROUPS 1 THREADS 1)
+    end_test_group()
+
+    # AIROCSHMEM-409: wave tests not supported on RO
+    # NUM_WF 1: wg_size is set at runtime to 1 * GPU's wave-front size
+    begin_test_group(CATEGORY "COLLECTIVE;WAVE" TIER full BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME broadcast_wave RANKS 2 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 1)
+        add_rocshmem_functional_test(NAME alltoall_wave RANKS 2 WORKGROUPS 1 MAX_MSG_SIZE 512 NUM_WF 1)
+        add_rocshmem_functional_test(NAME fcollect_wave RANKS 2 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 1)
+        add_rocshmem_functional_test(NAME reduce_wave RANKS 2 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 1)
+        add_rocshmem_functional_test(NAME reducescatter_wave RANKS 2 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 1)
+        add_rocshmem_functional_test(NAME reducescatter_wave RANKS 4 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 1)
+        add_rocshmem_functional_test(NAME reducescatter_wave RANKS 8 WORKGROUPS 1 MAX_MSG_SIZE 32768 NUM_WF 1)
     end_test_group()
 endfunction()
 
@@ -1065,7 +1129,8 @@ function(add_stream_tests)
     begin_test_group(CATEGORY "COLLECTIVE;STREAM" TIER full BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME quiet_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME sync_all_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
-        add_rocshmem_functional_test(NAME reduce_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME reduce_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576
+            ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024;ROCSHMEM_MAX_NUM_HOST_CONTEXTS=1024")
         add_rocshmem_functional_test(NAME alltoallmem_on_stream RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
         add_rocshmem_functional_test(NAME broadcastmem_on_stream RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
     end_test_group()
@@ -1108,18 +1173,15 @@ function(add_other_tests)
         add_rocshmem_functional_test(NAME flood_p RANKS 8 WORKGROUPS 64 THREADS 1024)
     end_test_group()
 
-    # Temporarily disabled flood_get tests
-    # begin_test_group(CATEGORY "FLOOD;RMA;GET" TIER full BACKENDS "ipc;gda" GPUS "all")
-    #     add_rocshmem_functional_test(NAME flood_get RANKS 2 WORKGROUPS 64 THREADS 1024)
-    #     add_rocshmem_functional_test(NAME flood_get RANKS 8 WORKGROUPS 64 THREADS 1024)
-    #     add_rocshmem_functional_test(NAME flood_getnbi RANKS 8 WORKGROUPS 64 THREADS 1024)
-    # end_test_group()
+    begin_test_group(CATEGORY "FLOOD;RMA;GET" TIER full BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME flood_get RANKS 2 WORKGROUPS 64 THREADS 1024)
+        add_rocshmem_functional_test(NAME flood_get RANKS 8 WORKGROUPS 64 THREADS 1024)
+        add_rocshmem_functional_test(NAME flood_getnbi RANKS 8 WORKGROUPS 64 THREADS 1024)
+    end_test_group()
 
-    # Temporarily disabled flood_g test
-    # flood_g - only works with IPC (not GDA, not RO)
-    # begin_test_group(CATEGORY "FLOOD;RMA;GET" TIER full BACKENDS "ipc" GPUS "all")
-    #     add_rocshmem_functional_test(NAME flood_g RANKS 8 WORKGROUPS 64 THREADS 1024)
-    # end_test_group()
+    begin_test_group(CATEGORY "FLOOD;RMA;GET" TIER full BACKENDS "ipc" GPUS "all")
+        add_rocshmem_functional_test(NAME flood_g RANKS 8 WORKGROUPS 64 THREADS 1024)
+    end_test_group()
 
     begin_test_group(CATEGORY "FLOOD;AMO" TIER full BACKENDS "ipc;gda" GPUS "all")
         add_rocshmem_functional_test(NAME flood_add RANKS 2 WORKGROUPS 64 THREADS 1024)
@@ -1212,9 +1274,9 @@ endfunction()
 ###############################################################################
 
 function(add_tile_tests)
-    # Tile tests are only supported on IPC backend
+	# Tile tests are only supported on IPC and GDA backends
     # These tests use 2D strided memory access patterns
-    begin_test_group(CATEGORY "TILE;RMA;PUT" TIER comprehensive BACKENDS "ipc" GPUS "all")
+    begin_test_group(CATEGORY "TILE;RMA;PUT" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
         add_rocshmem_functional_test(NAME tile_put_contiguous RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_put_rowmajor RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_put_colmajor RANKS 2 WORKGROUPS 1 THREADS 1)
@@ -1223,13 +1285,13 @@ function(add_tile_tests)
     end_test_group()
 
     # Wavefront and workgroup tile put tests
-    begin_test_group(CATEGORY "TILE;RMA;PUT" TIER comprehensive BACKENDS "ipc" GPUS "all")
-        # Note: WAVE_SIZE is typically 64 on most AMD GPUs, 32 on gfx11xx
-        add_rocshmem_functional_test(NAME tile_put_wave_contiguous RANKS 2 WORKGROUPS 1 THREADS 64)
-        add_rocshmem_functional_test(NAME tile_put_wg_contiguous RANKS 2 WORKGROUPS 1 THREADS 1024)
+    # NUM_WF 1: wg_size is set at runtime to 1 * GPU's wave-front size
+    begin_test_group(CATEGORY "TILE;RMA;PUT" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME tile_put_wave_contiguous RANKS 2 WORKGROUPS 1 NUM_WF 1)
+        add_rocshmem_functional_test(NAME tile_put_wg_contiguous RANKS 2 WORKGROUPS 1 NUM_WF 16)
     end_test_group()
 
-    begin_test_group(CATEGORY "TILE;RMA;GET" TIER comprehensive BACKENDS "ipc" GPUS "all")
+    begin_test_group(CATEGORY "TILE;RMA;GET" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
         add_rocshmem_functional_test(NAME tile_get_contiguous RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_get_rowmajor RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_get_colmajor RANKS 2 WORKGROUPS 1 THREADS 1)
@@ -1238,35 +1300,50 @@ function(add_tile_tests)
     end_test_group()
 
     # Wavefront and workgroup tile get tests
-    begin_test_group(CATEGORY "TILE;RMA;GET" TIER comprehensive BACKENDS "ipc" GPUS "all")
-        add_rocshmem_functional_test(NAME tile_get_wave_contiguous RANKS 2 WORKGROUPS 1 THREADS 64)
-        add_rocshmem_functional_test(NAME tile_get_wg_contiguous RANKS 2 WORKGROUPS 1 THREADS 1024)
-        add_rocshmem_functional_test(NAME tile_get_wg_contiguous RANKS 2 WORKGROUPS 4 THREADS 1024)
+    # NUM_WF 1: wg_size is set at runtime to 1 * GPU's wave-front size
+    begin_test_group(CATEGORY "TILE;RMA;GET" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME tile_get_wave_contiguous RANKS 2 WORKGROUPS 1 NUM_WF 1)
+        add_rocshmem_functional_test(NAME tile_get_wg_contiguous RANKS 2 WORKGROUPS 1 NUM_WF 16)
+        add_rocshmem_functional_test(NAME tile_get_wg_contiguous RANKS 2 WORKGROUPS 4 NUM_WF 16)
     end_test_group()
 
     # Tile collective tests (broadcast and allgather)
-    begin_test_group(CATEGORY "TILE;COLLECTIVE;BROADCAST" TIER comprehensive BACKENDS "ipc" GPUS "all")
+    # NUM_WF 1: wg_size is set at runtime to 1 * GPU's wave-front size
+    begin_test_group(CATEGORY "TILE;COLLECTIVE;BROADCAST" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
         # Thread-level broadcast - test with 2 and 4 PEs
         add_rocshmem_functional_test(NAME tile_broadcast RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_broadcast RANKS 4 WORKGROUPS 1 THREADS 1)
         # Wave-level broadcast
-        add_rocshmem_functional_test(NAME tile_broadcast_wave RANKS 2 WORKGROUPS 1 THREADS 64)
-        add_rocshmem_functional_test(NAME tile_broadcast_wave RANKS 4 WORKGROUPS 1 THREADS 64)
+        add_rocshmem_functional_test(NAME tile_broadcast_wave RANKS 2 WORKGROUPS 1 NUM_WF 1)
+        add_rocshmem_functional_test(NAME tile_broadcast_wave RANKS 4 WORKGROUPS 1 NUM_WF 1)
         # Workgroup-level broadcast
-        add_rocshmem_functional_test(NAME tile_broadcast_wg RANKS 2 WORKGROUPS 1 THREADS 1024)
-        add_rocshmem_functional_test(NAME tile_broadcast_wg RANKS 4 WORKGROUPS 1 THREADS 1024)
+        add_rocshmem_functional_test(NAME tile_broadcast_wg RANKS 2 WORKGROUPS 4 NUM_WF 1)
+        add_rocshmem_functional_test(NAME tile_broadcast_wg RANKS 4 WORKGROUPS 4 NUM_WF 1)
     end_test_group()
 
-    begin_test_group(CATEGORY "TILE;COLLECTIVE;ALLGATHER" TIER comprehensive BACKENDS "ipc" GPUS "all")
+    begin_test_group(CATEGORY "TILE;COLLECTIVE;ALLGATHER" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
         # Thread-level allgather - test with 2 and 4 PEs
         add_rocshmem_functional_test(NAME tile_allgather RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_allgather RANKS 4 WORKGROUPS 1 THREADS 1)
         # Wave-level allgather
-        add_rocshmem_functional_test(NAME tile_allgather_wave RANKS 2 WORKGROUPS 1 THREADS 64)
-        add_rocshmem_functional_test(NAME tile_allgather_wave RANKS 4 WORKGROUPS 1 THREADS 64)
+        add_rocshmem_functional_test(NAME tile_allgather_wave RANKS 2 WORKGROUPS 1 NUM_WF 1)
+        add_rocshmem_functional_test(NAME tile_allgather_wave RANKS 4 WORKGROUPS 1 NUM_WF 1)
         # Workgroup-level allgather
-        add_rocshmem_functional_test(NAME tile_allgather_wg RANKS 2 WORKGROUPS 1 THREADS 1024)
-        add_rocshmem_functional_test(NAME tile_allgather_wg RANKS 4 WORKGROUPS 1 THREADS 1024)
+        add_rocshmem_functional_test(NAME tile_allgather_wg RANKS 2 WORKGROUPS 4 NUM_WF 1)
+        add_rocshmem_functional_test(NAME tile_allgather_wg RANKS 4 WORKGROUPS 4 NUM_WF 1)
+    end_test_group()
+
+    begin_test_group(CATEGORY "TILE;COLLECTIVE;REDUCE" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
+        # Each tile_reduce test exercises sum, max, and min reductions.
+        add_rocshmem_functional_test(NAME tile_reduce RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_reduce RANKS 4 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_reduce RANKS 4 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 262144)
+        add_rocshmem_functional_test(NAME tile_reduce_wave RANKS 2 WORKGROUPS 1 THREADS 64)
+        add_rocshmem_functional_test(NAME tile_reduce_wave RANKS 4 WORKGROUPS 1 THREADS 64)
+        add_rocshmem_functional_test(NAME tile_reduce_wave RANKS 4 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 2048)
+        add_rocshmem_functional_test(NAME tile_reduce_wg RANKS 2 WORKGROUPS 1 THREADS 1024)
+        add_rocshmem_functional_test(NAME tile_reduce_wg RANKS 4 WORKGROUPS 1 THREADS 1024)
+        add_rocshmem_functional_test(NAME tile_reduce_wg RANKS 4 WORKGROUPS 1 THREADS 1024 MAX_MSG_SIZE 2048)
     end_test_group()
 endfunction()
 
@@ -1292,6 +1369,8 @@ function(add_host_tests)
             ENV_VARS "ROCSHMEM_TEST_UUID=1")
         add_rocshmem_functional_test(NAME host_int_amo_fcswap RANKS 2 WORKGROUPS 1 THREADS 1
             ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_amo_add    RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1;ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2")
     end_test_group()
 
     # Explicit-context put/get - need slot 1 available for the explicit ctx
@@ -1307,6 +1386,32 @@ function(add_host_tests)
         add_rocshmem_functional_test(NAME host_amo_all_pes RANKS 4 WORKGROUPS 1 THREADS 1
             ENV_VARS "ROCSHMEM_TEST_UUID=1")
         add_rocshmem_functional_test(NAME host_amo_self    RANKS 4 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+    end_test_group()
+
+    # P2P sync tests: wait_until / test variants (AIROCSHMEM-419)
+    begin_test_group(CATEGORY "HOST;P2P" TIER comprehensive BACKENDS "ipc" GPUS "all")
+        add_rocshmem_functional_test(NAME host_wait_until            RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_test                  RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_all        RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_any        RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_some       RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_all_vector RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_any_vector RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_some_vector RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_all_status RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_any_status RANKS 2 WORKGROUPS 1 THREADS 1
+            ENV_VARS "ROCSHMEM_TEST_UUID=1")
+        add_rocshmem_functional_test(NAME host_wait_until_some_status RANKS 2 WORKGROUPS 1 THREADS 1
             ENV_VARS "ROCSHMEM_TEST_UUID=1")
     end_test_group()
 endfunction()

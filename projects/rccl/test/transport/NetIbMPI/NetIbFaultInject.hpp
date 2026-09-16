@@ -11,8 +11,9 @@
 
 /*
  * Re-export the shared fault injection API declarations from the library's
- * internal header. Using the same header in both the library and the tests
+ * internal headers. Using the same headers in both the library and the tests
  * guarantees that the ABI can never silently diverge.
+ *   - net_ib_fault_inject.h        : CAST transport (src/transport/net_ib_cast)
  */
 #include "net_ib_fault_inject.h"
 

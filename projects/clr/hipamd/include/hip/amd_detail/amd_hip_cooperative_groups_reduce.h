@@ -18,10 +18,6 @@
 
 namespace cooperative_groups {
 namespace impl {
-  template <typename T, typename U>
-  using is_param_type_same = __hip_internal::is_same<typename __hip_internal::remove_cvref<T>,
-                                                     typename __hip_internal::remove_cvref<U>>;
-
   template <typename T, typename = void>
   struct has_add : __hip_internal::false_type {
   };
@@ -76,25 +72,6 @@ namespace impl {
                  __hip_internal::void_t<decltype(__reduce_xor_sync<unsigned long long>(0ull, T {}))>
     > : __hip_internal::true_type {};
 
-  // we can call reduce() only the block tiles that have a compile-time size
-  template <class TyGroup>
-  struct isTiledGroup : __hip_internal::false_type {
-  };
-
-  template <unsigned int N, class ParentCGTy>
-  struct isTiledGroup<cooperative_groups::thread_block_tile<N, ParentCGTy>>
-    : __hip_internal::integral_constant<bool,
-          (N == 1  || N == 2  || N == 4  || N == 8 ||
-           N == 16 || N == 32 || N == 64)> {
-  };
-
-  template <class TyGroup>
-  struct isCoalescedGroup : __hip_internal::false_type {
-  };
-
-  template <>
-  struct isCoalescedGroup<cooperative_groups::coalesced_group> : __hip_internal::true_type {
-  };
 }
 
 /** \ingroup CooperativeGAPI
@@ -126,15 +103,7 @@ __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> de
 
   unsigned long long mask = ~0ull;
 
-  // we cannot simply just use the __activemask() here, because more than one tile could have active
-  // threads at a time; we need to mask away the threads that not part of this tile first
-  if constexpr (!__hip_internal::is_same<TyGroup, cooperative_groups::coalesced_group>::value) {
-    mask >>= (64 - group.num_threads());
-    mask <<= (((threadIdx.x % warpSize) / group.num_threads()) * group.num_threads());
-  }
-
-  // for coalesced_groups, the mask is simply the activemask
-  mask &= __activemask();
+  mask = impl::groupMask(group);
 
   if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value &&
                 impl::has_add<Val>::value) {

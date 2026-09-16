@@ -4,7 +4,9 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[2]  # Assuming script is in .github/scripts/
 OUTPUT_FILE = ROOT_DIR / ".gitmodules"
-MODULE_FILES = list(ROOT_DIR.glob("*/.gitmodules")) + list(ROOT_DIR.glob("*/.github/.gitmodules"))
+MODULE_FILES = list(ROOT_DIR.glob("*/.gitmodules")) + list(
+    ROOT_DIR.glob("*/.github/.gitmodules")
+)
 
 combined = configparser.ConfigParser()
 combined.optionxform = str  # Preserve case sensitivity

@@ -84,7 +84,6 @@ union immed_one_type
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -92,7 +91,6 @@ union immed_one_type
         return ss;
     }
     const char* typestr() const { return "IMMEDONE"; };
-#endif
 };
 
 union lds_config_type
@@ -122,7 +120,6 @@ union misc_type
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
@@ -130,7 +127,6 @@ union misc_type
         return ss;
     }
     const char* typestr() const { return "MISC"; };
-#endif
 };
 
 union header_type
@@ -172,15 +168,14 @@ union header_type
     };
     uint64_t raw;
 
-#ifdef SQTT_LOGGING
     std::stringstream print() const
     {
-        return std::stringstream{} << "TT Version:" << version << "DWGP:" << DWGP << " DSIMD:" << DSIMD
-                                   << " DSA:" << DSA << " NSA:" << NSA << " UCF:" << UCF << "DPRate:" << DPRate
-                                   << " WSM:" << WSM;
+        std::stringstream ss;
+        ss << "TT Version:" << version << "DWGP:" << DWGP << " DSIMD:" << DSIMD << " DSA:" << DSA << " NSA:" << NSA
+           << " UCF:" << UCF << "DPRate:" << DPRate << " WSM:" << WSM;
+        return ss;
     }
     const char* typestr() const { return "HEADER"; };
-#endif
 };
 
 class Token : public gfx12::Token

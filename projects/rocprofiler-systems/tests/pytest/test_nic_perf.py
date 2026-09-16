@@ -21,7 +21,6 @@ pytestmark = [pytest.mark.nic, pytest.mark.network]
 def nic_perf_env(rocprof_config) -> dict[str, str]:
     """Environment variables for NIC performance tests."""
     return {
-        "ROCPROFSYS_TRACE_LEGACY": "ON",
         "ROCPROFSYS_USE_PID": "OFF",
         "ROCPROFSYS_LOG_LEVEL": "trace",
         "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
@@ -85,7 +84,12 @@ class TestNIC(RocprofsysTest):
         self.assert_regex(result)
         self.assert_perfetto(
             result,
-            counter_names=["rx:byte", "rx:packet", "tx:byte", "tx:packet"],
+            counter_names=[
+                "receive byte",
+                "receive packet",
+                "transmit byte",
+                "transmit packet",
+            ],
             pass_regex=self.PERFETTO_PASS_REGEX,
             fail_regex=self.PERFETTO_FAIL_REGEX,
         )

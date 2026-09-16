@@ -132,6 +132,16 @@ inline uint16_t f32_to_f16(float val) {
   return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exp) << 10) | mant);
 }
 
+/// @brief Convert F32 to FP16 with MODE.FP16_OVFL overflow handling.
+/// @details When `fp16_ovfl` is set, finite overflow that rounded to INF is
+/// clamped to signed MAX_FP16; true infinities remain infinities.
+inline uint16_t f32_to_f16_mode(float val, bool fp16_ovfl) {
+  uint16_t result = f32_to_f16(val);
+  if (fp16_ovfl && std::isfinite(val) && (result & 0x7FFFu) == 0x7C00u)
+    return static_cast<uint16_t>((result & 0x8000u) | 0x7BFFu);
+  return result;
+}
+
 inline uint16_t f32_to_f16_rtz(float val) {
   uint32_t f = std::bit_cast<uint32_t>(val);
   uint32_t sign = (f >> 16) & 0x8000;
@@ -283,6 +293,16 @@ inline uint16_t f32_to_bf16_rne(float val) {
   return static_cast<uint16_t>(f >> 16);
 }
 
+/// @brief Convert F32 to BF16 RNE with MODE.FP16_OVFL overflow handling.
+/// @details RDNA4 and CDNA4 data-conversion prose define FP16_OVFL for BF16
+/// destinations; use this for explicit F32-to-BF16 conversion results.
+inline uint16_t f32_to_bf16_rne_mode(float val, bool fp16_ovfl) {
+  uint16_t result = f32_to_bf16_rne(val);
+  if (fp16_ovfl && std::isfinite(val) && (result & 0x7FFFu) == 0x7F80u)
+    return static_cast<uint16_t>((result & 0x8000u) | 0x7F7Fu);
+  return result;
+}
+
 // ---- OCP-MX E8M0 unsigned exponent scale ----
 
 inline float e8m0_to_f32(uint8_t code) {
@@ -293,9 +313,9 @@ inline float e8m0_to_f32(uint8_t code) {
   return std::bit_cast<float>(static_cast<uint32_t>(code) << 23);
 }
 
-// ---- FP8 E4M3 (OCP E4M3FN) — 1 sign, 4 exponent, 3 mantissa, bias=7 ----
+// ---- FP8 E4M3 (OCP E4M3FN) - 1 sign, 4 exponent, 3 mantissa, bias=7 ----
 
-inline float fp8_e4m3_to_f32(uint8_t v) {
+inline float fp8_e4m3_ocp_to_f32(uint8_t v) {
   uint32_t sign = (v >> 7) & 1;
   uint32_t exp = (v >> 3) & 0xF;
   uint32_t mant = v & 0x7;
@@ -315,6 +335,183 @@ inline float fp8_e4m3_to_f32(uint8_t v) {
   }
   uint32_t f = (sign << 31) | ((exp + 127 - 7) << 23) | (mant << 20);
   return std::bit_cast<float>(f);
+}
+
+// Legacy unqualified FP8 names are OCP by default.
+inline float fp8_e4m3_to_f32(uint8_t v) { return fp8_e4m3_ocp_to_f32(v); }
+
+// ---- FP8 E4M3FNUZ - 1 sign, 4 exponent, 3 mantissa, bias=8 ----
+
+inline float fp8_e4m3_fnuz_to_f32(uint8_t v) {
+  if (v == 0x80u)
+    return std::bit_cast<float>(0xFFC00000u);
+  uint32_t sign = (v >> 7) & 1;
+  uint32_t exp = (v >> 3) & 0xF;
+  uint32_t mant = v & 0x7;
+  if (exp == 0 && mant == 0)
+    return 0.0f;
+  if (exp == 0) {
+    float result = std::ldexp(static_cast<float>(mant), -10);
+    return sign ? -result : result;
+  }
+  uint32_t f = (sign << 31) | ((exp + 127 - 8) << 23) | (mant << 20);
+  return std::bit_cast<float>(f);
+}
+
+namespace detail {
+
+struct FnuzNarrowResult {
+  uint8_t value;
+  bool overflow;
+};
+
+inline uint8_t fnuz_max_finite_code(uint32_t exp_bits, uint32_t mant_bits, uint32_t sign) {
+  const uint32_t exp_max = (1u << exp_bits) - 1u;
+  const uint32_t mant_max = (1u << mant_bits) - 1u;
+  return static_cast<uint8_t>(sign | (exp_max << mant_bits) | mant_max);
+}
+
+inline FnuzNarrowResult f32_to_fnuz_rne(float val, uint32_t exp_bits, uint32_t mant_bits,
+                                        int32_t bias) {
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 24) & 0x80;
+  if (std::isnan(val))
+    return {0x80u, false};
+
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  if (f_exp == 0xFF)
+    return {fnuz_max_finite_code(exp_bits, mant_bits, sign), true};
+
+  const uint32_t mant_limit = 1u << mant_bits;
+  const int32_t exp_max = static_cast<int32_t>((1u << exp_bits) - 1u);
+  int32_t exp = f_exp - 127 + bias;
+  if (exp <= 0) {
+    uint32_t mant = f_mant | 0x800000;
+    int shift = static_cast<int>(24u - mant_bits) - exp;
+    if (shift > 24)
+      return {0, false};
+    uint32_t round_bit = (mant >> (shift - 1)) & 1u;
+    uint32_t sticky = (mant & ((1u << (shift - 1)) - 1u)) ? 1u : 0u;
+    uint32_t result = mant >> shift;
+    result += round_bit & (sticky | (result & 1u));
+    if (result >= mant_limit)
+      return {static_cast<uint8_t>(sign | mant_limit), false};
+    if (result == 0)
+      return {0, false};
+    return {static_cast<uint8_t>(sign | (result & (mant_limit - 1u))), false};
+  }
+  if (exp > exp_max)
+    return {fnuz_max_finite_code(exp_bits, mant_bits, sign), true};
+
+  const uint32_t discarded_bits = 23u - mant_bits;
+  uint32_t round_bit = (f_mant >> (discarded_bits - 1u)) & 1u;
+  uint32_t sticky = (f_mant & ((1u << (discarded_bits - 1u)) - 1u)) ? 1u : 0u;
+  uint32_t mant = (f_mant >> discarded_bits) & (mant_limit - 1u);
+  mant += round_bit & (sticky | (mant & 1u));
+  if (mant >= mant_limit) {
+    mant = 0;
+    ++exp;
+  }
+  if (exp > exp_max)
+    return {fnuz_max_finite_code(exp_bits, mant_bits, sign), true};
+  return {static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << mant_bits) | mant), false};
+}
+
+inline FnuzNarrowResult f32_to_fnuz_sr(float val, uint32_t seed, uint32_t exp_bits,
+                                       uint32_t mant_bits, int32_t bias) {
+  if (std::isnan(val))
+    return {0x80u, false};
+
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 24) & 0x80;
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  if (f_exp == 0xFF)
+    return {fnuz_max_finite_code(exp_bits, mant_bits, sign), true};
+
+  const uint32_t mant_limit = 1u << mant_bits;
+  const int32_t exp_max = static_cast<int32_t>((1u << exp_bits) - 1u);
+  int32_t exp = f_exp - 127 + bias;
+  if (exp <= 0) {
+    uint32_t full_mant = f_mant | 0x800000;
+    int shift = static_cast<int>(24u - mant_bits) - exp;
+    if (shift > 24)
+      return {0, false};
+    uint32_t result = full_mant >> shift;
+    uint32_t trunc_mask = (1u << shift) - 1u;
+    uint32_t trunc_bits = full_mant & trunc_mask;
+    uint32_t random_add = seed >> (32 - shift);
+    if ((trunc_bits + random_add) >= (1u << shift))
+      result += 1;
+    if (result >= mant_limit)
+      return {static_cast<uint8_t>(sign | mant_limit), false};
+    if (result == 0)
+      return {0, false};
+    return {static_cast<uint8_t>(sign | (result & (mant_limit - 1u))), false};
+  }
+  if (exp > exp_max)
+    return {fnuz_max_finite_code(exp_bits, mant_bits, sign), true};
+
+  const uint32_t discarded_bits = 23u - mant_bits;
+  const uint32_t trunc_mask = (1u << discarded_bits) - 1u;
+  uint32_t trunc_bits = f_mant & trunc_mask;
+  uint32_t random_add = seed >> (32u - discarded_bits);
+  uint32_t mant = (f_mant >> discarded_bits) & (mant_limit - 1u);
+  if ((trunc_bits + random_add) > trunc_mask) {
+    ++mant;
+    if (mant >= mant_limit) {
+      mant = 0;
+      ++exp;
+    }
+  }
+  if (exp > exp_max)
+    return {fnuz_max_finite_code(exp_bits, mant_bits, sign), true};
+  return {static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << mant_bits) | mant), false};
+}
+
+} // namespace detail
+
+inline uint8_t f32_to_fp8_e4m3_fnuz_rne(float val) {
+  return detail::f32_to_fnuz_rne(val, 4, 3, 8).value;
+}
+
+inline uint8_t f32_to_fp8_e4m3_fnuz_sr(float val, uint32_t seed) {
+  return detail::f32_to_fnuz_sr(val, seed, 4, 3, 8).value;
+}
+
+namespace detail {
+
+// CDNA3 FNUZ conversions classify FP16_OVFL overflow after FP8 rounding. Values
+// such as +/-300.0f round back to max finite when FP16_OVFL=1 and only become
+// the FNUZ NaN code when FP16_OVFL=0; the emulator regression is
+// Cdna3CvtFp8Test.SetregImm32ModeChangeRecomputesFp16OvflRounding.
+inline bool f32_to_fp8_e4m3_fnuz_rne_overflows(float val) {
+  return f32_to_fnuz_rne(val, 4, 3, 8).overflow;
+}
+
+inline bool f32_to_fp8_e4m3_fnuz_sr_overflows(float val, uint32_t seed) {
+  return f32_to_fnuz_sr(val, seed, 4, 3, 8).overflow;
+}
+
+} // namespace detail
+
+/// @brief Convert F32 to FP8 E4M3 FNUZ RNE with MODE.FP16_OVFL handling.
+/// @details With `fp16_ovfl` clear, overflow maps to the FNUZ NaN code; with it
+/// set, overflow uses signed max finite.
+inline uint8_t f32_to_fp8_e4m3_fnuz_rne_mode(float val, bool fp16_ovfl) {
+  if (!fp16_ovfl && detail::f32_to_fp8_e4m3_fnuz_rne_overflows(val))
+    return 0x80u;
+  return f32_to_fp8_e4m3_fnuz_rne(val);
+}
+
+/// @brief Convert F32 to FP8 E4M3 FNUZ SR with MODE.FP16_OVFL handling.
+/// @details With `fp16_ovfl` clear, overflow maps to the FNUZ NaN code; with it
+/// set, overflow uses signed max finite.
+inline uint8_t f32_to_fp8_e4m3_fnuz_sr_mode(float val, uint32_t seed, bool fp16_ovfl) {
+  if (!fp16_ovfl && detail::f32_to_fp8_e4m3_fnuz_sr_overflows(val, seed))
+    return 0x80u;
+  return f32_to_fp8_e4m3_fnuz_sr(val, seed);
 }
 
 inline uint8_t f32_to_fp8_e4m3(float val) {
@@ -337,7 +534,7 @@ inline uint8_t f32_to_fp8_e4m3_rne(float val) {
   int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
   uint32_t f_mant = f & 0x7FFFFF;
   if (f_exp == 0xFF)
-    return static_cast<uint8_t>(sign | 0x7E);
+    return static_cast<uint8_t>(sign | 0x7F);
   int32_t exp = f_exp - 127 + 7;
   if (exp <= 0) {
     if (exp < -3)
@@ -356,7 +553,7 @@ inline uint8_t f32_to_fp8_e4m3_rne(float val) {
     return static_cast<uint8_t>(sign | (result & 0x7));
   }
   if (exp > 15)
-    return static_cast<uint8_t>(sign | 0x7E);
+    return static_cast<uint8_t>(sign | 0x7F);
   uint32_t round_bit = (f_mant >> 19) & 1;
   uint32_t sticky = (f_mant & 0x7FFFF) ? 1 : 0;
   uint32_t mant = (f_mant >> 20) & 0x7;
@@ -365,8 +562,10 @@ inline uint8_t f32_to_fp8_e4m3_rne(float val) {
     mant = 0;
     exp += 1;
   }
+  // OCP non-saturating E4M3 produces a signed NaN when the rounded
+  // magnitude exceeds the maximum finite value.
   if (exp > 15 || (exp == 15 && mant >= 7))
-    return static_cast<uint8_t>(sign | 0x7E);
+    return static_cast<uint8_t>(sign | 0x7F);
   return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
 }
 
@@ -378,7 +577,7 @@ inline uint8_t f32_to_fp8_e4m3_sr(float val, uint32_t seed) {
   int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
   uint32_t f_mant = f & 0x7FFFFF;
   if (f_exp == 0xFF)
-    return static_cast<uint8_t>(sign | 0x7E);
+    return static_cast<uint8_t>(sign | 0x7F);
   int32_t exp = f_exp - 127 + 7;
   if (exp <= 0) {
     uint32_t full_mant = f_mant | 0x800000;
@@ -396,7 +595,7 @@ inline uint8_t f32_to_fp8_e4m3_sr(float val, uint32_t seed) {
     return static_cast<uint8_t>(sign | (result & 0x7));
   }
   if (exp > 15)
-    return static_cast<uint8_t>(sign | 0x7E);
+    return static_cast<uint8_t>(sign | 0x7F);
   uint32_t trunc_bits = f_mant & 0xFFFFF;
   uint32_t random_add = seed >> 12;
   uint32_t mant = (f_mant >> 20) & 0x7;
@@ -408,8 +607,28 @@ inline uint8_t f32_to_fp8_e4m3_sr(float val, uint32_t seed) {
     }
   }
   if (exp > 15 || (exp == 15 && mant >= 7))
-    return static_cast<uint8_t>(sign | 0x7E);
+    return static_cast<uint8_t>(sign | 0x7F);
   return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
+}
+
+/// @brief Convert F32 to FP8 OCP E4M3 RNE with MODE.FP16_OVFL handling.
+/// @details FP8/BF8 tables clamp terminal overflow encodings to signed max
+/// finite when `fp16_ovfl` is set; NaN payloads stay NaN.
+inline uint8_t f32_to_fp8_e4m3_rne_mode(float val, bool fp16_ovfl) {
+  uint8_t result = f32_to_fp8_e4m3_rne(val);
+  if (fp16_ovfl && !std::isnan(val) && (result & 0x7Fu) == 0x7Fu)
+    return static_cast<uint8_t>((result & 0x80u) | 0x7Eu);
+  return result;
+}
+
+/// @brief Convert F32 to FP8 OCP E4M3 SR with MODE.FP16_OVFL handling.
+/// @details FP8/BF8 tables clamp terminal overflow encodings to signed max
+/// finite when `fp16_ovfl` is set; NaN payloads stay NaN.
+inline uint8_t f32_to_fp8_e4m3_sr_mode(float val, uint32_t seed, bool fp16_ovfl) {
+  uint8_t result = f32_to_fp8_e4m3_sr(val, seed);
+  if (fp16_ovfl && !std::isnan(val) && (result & 0x7Fu) == 0x7Fu)
+    return static_cast<uint8_t>((result & 0x80u) | 0x7Eu);
+  return result;
 }
 
 // ---- FP8 E5M3 (gfx1250 unsigned scale format) — 5 exponent, 3 mantissa, bias=15 ----
@@ -509,9 +728,29 @@ inline uint8_t f32_to_fp8_e5m3_sr(float val, uint32_t seed) {
   return static_cast<uint8_t>((static_cast<uint32_t>(exp) << 3) | mant);
 }
 
-// ---- BF8 E5M2 — 1 sign, 5 exponent, 2 mantissa, bias=15 ----
+/// @brief Convert F32 to unsigned FP8 E5M3 RNE with MODE.FP16_OVFL handling.
+/// @details Used by gfx1250 format-select paths; `fp16_ovfl` clamps the
+/// terminal 0xff encoding to unsigned max finite 0xfe.
+inline uint8_t f32_to_fp8_e5m3_rne_mode(float val, bool fp16_ovfl) {
+  uint8_t result = f32_to_fp8_e5m3_rne(val);
+  if (fp16_ovfl && !std::isnan(val) && result == 0xFFu)
+    return 0xFEu;
+  return result;
+}
 
-inline float bf8_e5m2_to_f32(uint8_t v) {
+/// @brief Convert F32 to unsigned FP8 E5M3 SR with MODE.FP16_OVFL handling.
+/// @details Used by gfx1250 format-select paths; `fp16_ovfl` clamps the
+/// terminal 0xff encoding to unsigned max finite 0xfe.
+inline uint8_t f32_to_fp8_e5m3_sr_mode(float val, uint32_t seed, bool fp16_ovfl) {
+  uint8_t result = f32_to_fp8_e5m3_sr(val, seed);
+  if (fp16_ovfl && !std::isnan(val) && result == 0xFFu)
+    return 0xFEu;
+  return result;
+}
+
+// ---- BF8 E5M2 (OCP) - 1 sign, 5 exponent, 2 mantissa, bias=15 ----
+
+inline float bf8_e5m2_ocp_to_f32(uint8_t v) {
   uint32_t sign = (v >> 7) & 1;
   uint32_t exp = (v >> 2) & 0x1F;
   uint32_t mant = v & 0x3;
@@ -528,6 +767,67 @@ inline float bf8_e5m2_to_f32(uint8_t v) {
   }
   uint32_t f = (sign << 31) | ((exp + 127 - 15) << 23) | (mant << 21);
   return std::bit_cast<float>(f);
+}
+
+// Legacy unqualified BF8 names are OCP by default.
+inline float bf8_e5m2_to_f32(uint8_t v) { return bf8_e5m2_ocp_to_f32(v); }
+
+// ---- BF8 E5M2FNUZ - 1 sign, 5 exponent, 2 mantissa, bias=16 ----
+
+inline float bf8_e5m2_fnuz_to_f32(uint8_t v) {
+  if (v == 0x80u)
+    return std::bit_cast<float>(0xFFC00000u);
+  uint32_t sign = (v >> 7) & 1;
+  uint32_t exp = (v >> 2) & 0x1F;
+  uint32_t mant = v & 0x3;
+  if (exp == 0 && mant == 0)
+    return 0.0f;
+  if (exp == 0) {
+    float result = std::ldexp(static_cast<float>(mant), -17);
+    return sign ? -result : result;
+  }
+  uint32_t f = (sign << 31) | ((exp + 127 - 16) << 23) | (mant << 21);
+  return std::bit_cast<float>(f);
+}
+
+inline uint8_t f32_to_bf8_e5m2_fnuz_rne(float val) {
+  return detail::f32_to_fnuz_rne(val, 5, 2, 16).value;
+}
+
+inline uint8_t f32_to_bf8_e5m2_fnuz_sr(float val, uint32_t seed) {
+  return detail::f32_to_fnuz_sr(val, seed, 5, 2, 16).value;
+}
+
+namespace detail {
+
+// See the FP8 FNUZ overflow note above; BF8 FNUZ uses the same rounded-overflow
+// ordering.
+inline bool f32_to_bf8_e5m2_fnuz_rne_overflows(float val) {
+  return f32_to_fnuz_rne(val, 5, 2, 16).overflow;
+}
+
+inline bool f32_to_bf8_e5m2_fnuz_sr_overflows(float val, uint32_t seed) {
+  return f32_to_fnuz_sr(val, seed, 5, 2, 16).overflow;
+}
+
+} // namespace detail
+
+/// @brief Convert F32 to BF8 E5M2 FNUZ RNE with MODE.FP16_OVFL handling.
+/// @details With `fp16_ovfl` clear, overflow maps to the FNUZ NaN code; with it
+/// set, overflow uses signed max finite.
+inline uint8_t f32_to_bf8_e5m2_fnuz_rne_mode(float val, bool fp16_ovfl) {
+  if (!fp16_ovfl && detail::f32_to_bf8_e5m2_fnuz_rne_overflows(val))
+    return 0x80u;
+  return f32_to_bf8_e5m2_fnuz_rne(val);
+}
+
+/// @brief Convert F32 to BF8 E5M2 FNUZ SR with MODE.FP16_OVFL handling.
+/// @details With `fp16_ovfl` clear, overflow maps to the FNUZ NaN code; with it
+/// set, overflow uses signed max finite.
+inline uint8_t f32_to_bf8_e5m2_fnuz_sr_mode(float val, uint32_t seed, bool fp16_ovfl) {
+  if (!fp16_ovfl && detail::f32_to_bf8_e5m2_fnuz_sr_overflows(val, seed))
+    return 0x80u;
+  return f32_to_bf8_e5m2_fnuz_sr(val, seed);
 }
 
 inline uint8_t f32_to_bf8_e5m2(float val) {
@@ -624,49 +924,113 @@ inline uint8_t f32_to_bf8_e5m2_sr(float val, uint32_t seed) {
   return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 2) | mant);
 }
 
+/// @brief Convert F32 to BF8 OCP E5M2 RNE with MODE.FP16_OVFL handling.
+/// @details When `fp16_ovfl` is set, non-NaN terminal INF encodings clamp to
+/// signed max finite.
+inline uint8_t f32_to_bf8_e5m2_rne_mode(float val, bool fp16_ovfl) {
+  uint8_t result = f32_to_bf8_e5m2_rne(val);
+  if (fp16_ovfl && !std::isnan(val) && (result & 0x7Fu) == 0x7Cu)
+    return static_cast<uint8_t>((result & 0x80u) | 0x7Bu);
+  return result;
+}
+
+/// @brief Convert F32 to BF8 OCP E5M2 SR with MODE.FP16_OVFL handling.
+/// @details When `fp16_ovfl` is set, non-NaN terminal INF encodings clamp to
+/// signed max finite.
+inline uint8_t f32_to_bf8_e5m2_sr_mode(float val, uint32_t seed, bool fp16_ovfl) {
+  uint8_t result = f32_to_bf8_e5m2_sr(val, seed);
+  if (fp16_ovfl && !std::isnan(val) && (result & 0x7Fu) == 0x7Cu)
+    return static_cast<uint8_t>((result & 0x80u) | 0x7Bu);
+  return result;
+}
+
 namespace detail {
 
 /// 256-entry fp8/bf8 -> f32 tables filled from the scalar converters, so every
 /// entry (including the NaN payloads) is bit-exact with the per-element path
 /// by construction.
-inline const float *fp8_e4m3_lut() {
+inline const float *fp8_e4m3_ocp_lut() {
   static const auto lut = [] {
     std::array<float, 256> t{};
     for (uint32_t i = 0; i < 256; ++i)
-      t[i] = fp8_e4m3_to_f32(static_cast<uint8_t>(i));
+      t[i] = fp8_e4m3_ocp_to_f32(static_cast<uint8_t>(i));
     return t;
   }();
   return lut.data();
 }
 
-inline const float *bf8_e5m2_lut() {
+inline const float *bf8_e5m2_ocp_lut() {
   static const auto lut = [] {
     std::array<float, 256> t{};
     for (uint32_t i = 0; i < 256; ++i)
-      t[i] = bf8_e5m2_to_f32(static_cast<uint8_t>(i));
+      t[i] = bf8_e5m2_ocp_to_f32(static_cast<uint8_t>(i));
     return t;
   }();
   return lut.data();
 }
+
+inline const float *fp8_e4m3_fnuz_lut() {
+  static const auto lut = [] {
+    std::array<float, 256> t{};
+    for (uint32_t i = 0; i < 256; ++i)
+      t[i] = fp8_e4m3_fnuz_to_f32(static_cast<uint8_t>(i));
+    return t;
+  }();
+  return lut.data();
+}
+
+inline const float *bf8_e5m2_fnuz_lut() {
+  static const auto lut = [] {
+    std::array<float, 256> t{};
+    for (uint32_t i = 0; i < 256; ++i)
+      t[i] = bf8_e5m2_fnuz_to_f32(static_cast<uint8_t>(i));
+    return t;
+  }();
+  return lut.data();
+}
+
+inline const float *fp8_e4m3_lut() { return fp8_e4m3_ocp_lut(); }
+
+inline const float *bf8_e5m2_lut() { return bf8_e5m2_ocp_lut(); }
 
 } // namespace detail
 
 /// @brief Convert `n` contiguous E4M3 FP8 bytes to float via the lookup table.
 ///
-/// Bit-exact with fp8_e4m3_to_f32 for every code. The scalar gather loop is
+/// Bit-exact with fp8_e4m3_ocp_to_f32 for every code. The scalar gather loop is
 /// enough to amortize the per-element converter cost on the MFMA/WMMA bulk
 /// hoists (no vector path needed; works on every target).
-inline void fp8_e4m3_to_f32_block(const uint8_t *src, float *dst, size_t n) {
-  const float *lut = detail::fp8_e4m3_lut();
+inline void fp8_e4m3_ocp_to_f32_block(const uint8_t *src, float *dst, size_t n) {
+  const float *lut = detail::fp8_e4m3_ocp_lut();
   for (size_t i = 0; i < n; ++i)
     dst[i] = lut[src[i]];
 }
 
 /// @brief Convert `n` contiguous E5M2 BF8 bytes to float via the lookup table.
-inline void bf8_e5m2_to_f32_block(const uint8_t *src, float *dst, size_t n) {
-  const float *lut = detail::bf8_e5m2_lut();
+inline void bf8_e5m2_ocp_to_f32_block(const uint8_t *src, float *dst, size_t n) {
+  const float *lut = detail::bf8_e5m2_ocp_lut();
   for (size_t i = 0; i < n; ++i)
     dst[i] = lut[src[i]];
+}
+
+inline void fp8_e4m3_fnuz_to_f32_block(const uint8_t *src, float *dst, size_t n) {
+  const float *lut = detail::fp8_e4m3_fnuz_lut();
+  for (size_t i = 0; i < n; ++i)
+    dst[i] = lut[src[i]];
+}
+
+inline void bf8_e5m2_fnuz_to_f32_block(const uint8_t *src, float *dst, size_t n) {
+  const float *lut = detail::bf8_e5m2_fnuz_lut();
+  for (size_t i = 0; i < n; ++i)
+    dst[i] = lut[src[i]];
+}
+
+inline void fp8_e4m3_to_f32_block(const uint8_t *src, float *dst, size_t n) {
+  fp8_e4m3_ocp_to_f32_block(src, dst, n);
+}
+
+inline void bf8_e5m2_to_f32_block(const uint8_t *src, float *dst, size_t n) {
+  bf8_e5m2_ocp_to_f32_block(src, dst, n);
 }
 
 // ---- Generalized SR + OCP MX helpers (used by gfx1250 WMMA) ----
@@ -733,9 +1097,29 @@ inline uint16_t f32_to_f16_sr(float val, uint32_t seed) {
       f32_to_binary_float_sr(val, seed, 5, 10, 15, 15, -14, 0x7FFFu, 0x7C00u));
 }
 
+/// @brief Convert F32 to FP16 SR with MODE.FP16_OVFL overflow handling.
+/// @details When `fp16_ovfl` is set, finite overflow that rounded to INF is
+/// clamped to signed MAX_FP16; true infinities remain infinities.
+inline uint16_t f32_to_f16_sr_mode(float val, uint32_t seed, bool fp16_ovfl) {
+  uint16_t result = f32_to_f16_sr(val, seed);
+  if (fp16_ovfl && std::isfinite(val) && (result & 0x7FFFu) == 0x7C00u)
+    return static_cast<uint16_t>((result & 0x8000u) | 0x7BFFu);
+  return result;
+}
+
 inline uint16_t f32_to_bf16_sr(float val, uint32_t seed) {
   return static_cast<uint16_t>(
       f32_to_binary_float_sr(val, seed, 8, 7, 127, 127, -126, 0x7FFFu, 0x7F80u));
+}
+
+/// @brief Convert F32 to BF16 SR with MODE.FP16_OVFL overflow handling.
+/// @details RDNA4 and CDNA4 data-conversion prose define FP16_OVFL for BF16
+/// destinations; use this for explicit F32-to-BF16 SR conversion results.
+inline uint16_t f32_to_bf16_sr_mode(float val, uint32_t seed, bool fp16_ovfl) {
+  uint16_t result = f32_to_bf16_sr(val, seed);
+  if (fp16_ovfl && std::isfinite(val) && (result & 0x7FFFu) == 0x7F80u)
+    return static_cast<uint16_t>((result & 0x8000u) | 0x7F7Fu);
+  return result;
 }
 
 inline float ocp_mx_to_f32(uint32_t raw, uint32_t exp_bits, uint32_t mant_bits, int32_t bias) {

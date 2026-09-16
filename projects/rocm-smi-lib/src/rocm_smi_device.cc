@@ -777,7 +777,10 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string* retStr) {
   return 0;
 }
 
-int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr) {
+// The returnWriteErr parameter is unused: this implementation always surfaces
+// the underlying errno on write failure. It is retained solely to preserve the
+// exported symbol's ABI, which included this argument in earlier releases.
+int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr, bool /* returnWriteErr */) {
   auto sysfs_path = path_;
   sysfs_path += "/device/";
   sysfs_path += kDevAttribNameMap.at(type);

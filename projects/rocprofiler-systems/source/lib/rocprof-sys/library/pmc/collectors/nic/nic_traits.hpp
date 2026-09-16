@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "backends/amd_smi/device_backend.hpp"
 #include "core/agent_manager.hpp"
 #include "library/pmc/collectors/nic/device.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
@@ -15,8 +14,7 @@
 #include <set>
 #include <vector>
 
-#include <spdlog/fmt/fmt.h>
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 namespace rocprofsys::pmc::collectors::nic
 {
@@ -36,15 +34,17 @@ using ::rocprofsys::pmc::nic_device_filter;
  * - Device context storage for NIC-specific API signatures (device_name, product_name)
  * - Agent registration during device enumeration
  *
- * @tparam Backend The AMD SMI backend type (real or mock for testing)
+ * @tparam BackendProvider Device provider type.
+ * @tparam DeviceType      Concrete device type; exposes @c backend_type so traits
+ *                         stay decoupled from the AMD SMI backend headers.
  */
-template <typename BackendProvider>
+template <typename BackendProvider, typename DeviceType>
 struct nic_traits
 {
     using metrics_t         = pmc::collectors::nic::metrics;
     using enabled_metrics_t = pmc::collectors::nic::enabled_metrics;
-    using backend_t         = ::rocprofsys::backends::amd_smi::device_backend;
-    using device_t          = device<backend_t>;
+    using backend_t         = DeviceType::backend_type;
+    using device_t          = DeviceType;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;
 
@@ -119,13 +119,13 @@ struct nic_traits
         std::vector<device_entry> entries;
         auto                      filter = get_device_filter<Settings>();
 
-        if(filter.mode == device_selection_mode::NONE)
+        if(filter.mode == device_selection_mode::none)
         {
             LOG_DEBUG("{} sampling disabled via configuration", device_name);
             return entries;
         }
 
-        auto devices = provider->template get_nic_devices<device_t, backend_t>();
+        auto devices = provider->template get_nic_devices<device_t>();
 
         LOG_DEBUG("Discovered {} AI NIC device(s) via AMD SMI", devices.size());
 
@@ -138,10 +138,10 @@ struct nic_traits
             bool should_include = false;
             switch(filter.mode)
             {
-                case device_selection_mode::ALL: should_include = true; break;
+                case device_selection_mode::all: should_include = true; break;
                 // Unreachable (early return above), kept for switch exhaustiveness
-                case device_selection_mode::NONE: should_include = false; break;
-                case device_selection_mode::SPECIFIC:
+                case device_selection_mode::none: should_include = false; break;
+                case device_selection_mode::specific:
                     should_include = filter.names.count(device->get_name()) > 0;
                     break;
             }
@@ -152,7 +152,7 @@ struct nic_traits
                 {
                     // Warn only when the user explicitly requested this device; under
                     // ALL an unsupported (e.g. non-RDMA) NIC is expected, not an error.
-                    if(filter.mode == device_selection_mode::SPECIFIC)
+                    if(filter.mode == device_selection_mode::specific)
                     {
                         LOG_WARNING("Requested NIC device [{}] ({}) has no supported "
                                     "RDMA metrics, skipping",
@@ -188,7 +188,10 @@ struct nic_traits
     static void warn_invalid_names(const nic_device_filter&     filter,
                                    const std::set<std::string>& available_names)
     {
-        if(filter.mode != device_selection_mode::SPECIFIC) return;
+        if(filter.mode != device_selection_mode::specific)
+        {
+            return;
+        }
         if(available_names.empty())
         {
             LOG_WARNING("No AI NIC devices were discovered.");
@@ -210,7 +213,7 @@ struct nic_traits
         size_t nic_index = 0;
         for(const auto& entry : entries)
         {
-            agent cur_agent{ agent_type::NIC,
+            agent cur_agent{ agent_type::nic,
                              0,
                              nic_index,
                              static_cast<std::uint32_t>(nic_index),
@@ -220,7 +223,6 @@ struct nic_traits
                              entry.device->get_vendor_name().c_str(),
                              "AI NIC",
                              "AI NIC",
-                             0,
                              0,
                              {} };
 

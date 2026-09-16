@@ -36,13 +36,13 @@
 // ---------------------------------------------------------------------------
 
 /** Force ncclCeInit() to return ncclSystemError. */
-#define CE_FAULT_INIT        0x01U
+#define CE_FAULT_INIT 0x01U
 
 /** Force ncclPrepUCSync() to return ncclSystemError. */
-#define CE_FAULT_SYNC_PREP   0x02U
+#define CE_FAULT_SYNC_PREP 0x02U
 
 /** Force ncclCeLaunchBatchOps() to return ncclSystemError. */
-#define CE_FAULT_LAUNCH_OP   0x04U
+#define CE_FAULT_LAUNCH_OP 0x04U
 
 // ---------------------------------------------------------------------------
 // Inline implementations – ncclComm is defined in comm.h, ncclResult_t in nccl.h.

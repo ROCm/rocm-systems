@@ -31,9 +31,9 @@ static ncclTuner_t* tunerSymbol = nullptr;
 static bool usingBuiltinCsvTuner = false;
 
 enum {
-  tunerPluginLoadFailed  = -1,
-  tunerPluginLoadReady   =  0,
-  tunerPluginLoadSuccess =  1,
+  tunerPluginLoadFailed = -1,
+  tunerPluginLoadReady = 0,
+  tunerPluginLoadSuccess = 1,
 };
 
 #define MAX_PLUGIN_LOAD 4
@@ -61,9 +61,8 @@ ncclResult_t ncclTunerPluginLoad(struct ncclComm* comm) {
   }
 
   if ((tunerName = ncclGetEnv("NCCL_TUNER_PLUGIN")) != nullptr) {
-    INFO(NCCL_ENV|NCCL_TUNING, "NCCL_TUNER_PLUGIN set by environment to %s", tunerName);
-    if (strcasecmp(tunerName, "none") == 0)
-      goto fail;
+    INFO(NCCL_ENV | NCCL_TUNING, "NCCL_TUNER_PLUGIN set by environment to %s", tunerName);
+    if (strcasecmp(tunerName, "none") == 0) goto fail;
   }
   tunerPluginLib = ncclOpenTunerPluginLib(tunerName);
   if (nullptr == tunerPluginLib) {
@@ -79,7 +78,7 @@ ncclResult_t ncclTunerPluginLoad(struct ncclComm* comm) {
       // Check if CSV config file exists
       const char* csvConfigPath = rcclCsvTunerFindConfig(gpuArch);
       if (csvConfigPath != nullptr) {
-        INFO(NCCL_INIT|NCCL_TUNING, "Using built-in CSV tuner, config: %s", csvConfigPath);
+        INFO(NCCL_INIT | NCCL_TUNING, "Using built-in CSV tuner, config: %s", csvConfigPath);
         tunerSymbol = &rcclCsvTuner;
         usingBuiltinCsvTuner = true;
         comm->tuner = tunerSymbol;
@@ -110,10 +109,10 @@ ncclResult_t ncclTunerPluginLoad(struct ncclComm* comm) {
     tunerSymbol = getNcclTuner_v2(tunerPluginLib);
   }
   if (tunerSymbol == NULL) {
-    if (tunerName) INFO(NCCL_INIT|NCCL_TUNING, "External tuner plugin %s is unsupported", tunerName);
+    if (tunerName) INFO(NCCL_INIT | NCCL_TUNING, "External tuner plugin %s is unsupported", tunerName);
     goto fail;
   }
-  if (tunerName) INFO(NCCL_INIT|NCCL_TUNING, "Successfully loaded external tuner plugin %s", tunerName);
+  if (tunerName) INFO(NCCL_INIT | NCCL_TUNING, "Successfully loaded external tuner plugin %s", tunerName);
 
   usingBuiltinCsvTuner = false;
   comm->tuner = tunerSymbol;
@@ -133,7 +132,7 @@ fail:
 ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) {
   std::lock_guard<std::mutex> lock(tunerPluginMutex);
   if (comm->tunerPluginLoaded && 0 == (--tunerPluginRefCount)) {
-    INFO(NCCL_DESTROY|NCCL_TUNING, "TUNER/Plugin: Closing tuner: '%s'", tunerSymbol->name);
+    INFO(NCCL_DESTROY | NCCL_TUNING, "TUNER/Plugin: Closing tuner: '%s'", tunerSymbol->name);
     // Only close plugin lib if we're not using the built-in CSV tuner
     if (!usingBuiltinCsvTuner && tunerPluginLib) {
       NCCLCHECK(ncclClosePluginLib(tunerPluginLib, ncclPluginTypeTuner));

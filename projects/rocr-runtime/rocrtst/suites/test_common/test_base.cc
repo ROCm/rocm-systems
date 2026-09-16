@@ -76,6 +76,8 @@ bool TestBase::checkPlatformFiltering() {
   if (!rocrtst::TestFilterManager::getInstance().
           shouldRunTest(testName, &skipReason)) {
     std::cout << "[ SKIPPED ] " << skipReason << '\n';
+    // Record the skip for end-of-run summary
+    rocrtst::SkippedTestTracker::getInstance().recordSkip(testName, skipReason);
     test_skipped_ = true;
     return false;  // Test should be skipped
   }

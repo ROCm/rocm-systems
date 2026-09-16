@@ -38,8 +38,8 @@ set(SOURCES_CHECK_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/check_sources.py)
 set(HIP_TEST_CONFIG_HEADER ${CATCH_INCLUDE_BINARY_DIR}/hip_test_config.hh)
 set(HIP_TEST_PARAMETERS_HEADER ${CATCH_INCLUDE_BINARY_DIR}/hip_test_parameters.hh)
 
-file(GLOB HIP_TESTS_GROUP_CONFIGS ${HIP_TESTS_CONFIGS_DIR}/*.yaml)
-file(GLOB HIP_TESTS_UNIT_CONFIGS ${HIP_TESTS_CONFIGS_DIR}/unit/*.yaml)
+file(GLOB HIP_TESTS_GROUP_CONFIGS CONFIGURE_DEPENDS ${HIP_TESTS_CONFIGS_DIR}/*.yaml)
+file(GLOB HIP_TESTS_UNIT_CONFIGS CONFIGURE_DEPENDS ${HIP_TESTS_CONFIGS_DIR}/unit/*.yaml)
 
 # When building with Address Sanitizer, pass --asan so the parser skips test
 # cases that list 'asan' in their 'disabled' field.
@@ -58,6 +58,15 @@ if(ENABLE_YAML_TAGS)
         COMMAND "${Python3_EXECUTABLE}" "${SOURCES_CHECK_SCRIPT}" "${HIP_TESTS_CONFIGS_DIR}" "${CMAKE_SOURCE_DIR}"
         COMMENT "Checking hip-tests sources for missing YAML configurations"
     )
+endif()
+
+# Compile-time switch: register disabled tests as enabled in ctest.
+# OFF (default): disabled tests carry [disabled] tag and are DISABLED TRUE in ctest.
+# ON: ctest registers them as normal enabled tests; binary tags are unchanged.
+option(HIP_TESTS_RUN_DISABLED
+    "Register disabled tests as enabled in ctest so plain ctest runs them." OFF)
+if(HIP_TESTS_RUN_DISABLED)
+    message(STATUS "HIP_TESTS_RUN_DISABLED=ON: disabled tests will run in plain ctest")
 endif()
 
 # Generate both test definitions and parameter headers from YAML

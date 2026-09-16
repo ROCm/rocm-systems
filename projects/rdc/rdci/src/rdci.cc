@@ -61,11 +61,17 @@ int main(int argc, char** argv) {
       "          discovery, dmon, group, fieldgroup, stats, diag, config, policy, health, topo, "
       "link\n"
       "options: \n"
+      "        -h(--help)    : Print this help message\n"
       "        -v(--version) : Print client version information only\n";
 
   if (argc <= 1) {
     std::cout << usage_help;
-    exit(0);
+    return 0;
+  }
+
+  if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
+    std::cout << usage_help;
+    return 0;
   }
 
   if (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0) {
@@ -75,7 +81,7 @@ int main(int argc, char** argv) {
 #else
     std::cout << "RDCI : " << RDC_CLIENT_VERSION_STRING << std::endl;
 #endif
-    exit(0);
+    return 0;
   }
 
   amd::rdc::RdciSubSystemPtr subsystem;
@@ -104,8 +110,9 @@ int main(int argc, char** argv) {
     } else if (subsystem_name == "config") {
       subsystem.reset(new amd::rdc::RdciConfigSubSystem());
     } else {
-      std::cout << usage_help;
-      exit(0);
+      std::cerr << "rdci Error: Unknown subsystem: " << subsystem_name << std::endl;
+      std::cerr << usage_help;
+      return 1;
     }
 
     subsystem->parse_cmd_opts(argc, argv);
@@ -122,8 +129,7 @@ int main(int argc, char** argv) {
     return e.error_code();
   } catch (...) {
     if (subsystem && subsystem->is_json_output()) {
-      std::cout << "\"status\": \"error\", \"description\": "
-                << "\"Unhandled exception.\"";
+      std::cout << "\"status\": \"error\", \"description\": " << "\"Unhandled exception.\"";
     } else {
       std::cout << "Unhandled exception." << std::endl;
     }

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,32 +20,42 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
+#include "lib/rocprofiler-sdk/hip/event.hpp"
+#include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
+#include "lib/rocprofiler-sdk/hipfile/hipfile.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/kernel_dispatch.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/kernel_replay.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/ompt/ompt.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
 #include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
+#include "lib/rocprofiler-sdk/rocshmem/rocshmem.hpp"
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip/table_id.h>
+#include <rocprofiler-sdk/hipfile/table_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
 #include <rocprofiler-sdk/marker/table_id.h>
 #include <rocprofiler-sdk/rccl/table_id.h>
 #include <rocprofiler-sdk/rocdecode/table_id.h>
 #include <rocprofiler-sdk/rocjpeg/table_id.h>
+#include <rocprofiler-sdk/rocshmem/table_id.h>
 
 #include <atomic>
 #include <cstdint>
@@ -96,6 +106,11 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCDECODE_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCJPEG_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_STREAM)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MARKER_CORE_RANGE_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_GRAPH)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCSHMEM_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIPFILE_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(KERNEL_REPLAY)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_EVENT)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -149,6 +164,27 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
     if(ctx->callback_tracer->callback_data.at(kind).callback)
         return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
 
+    // Kernel replay runs one replay loop per dispatch (a single pass count + plan), so only one
+    // context may own it process-wide. Reject a second subscriber instead of silently sharing the
+    // planner -- otherwise replay_pass_count is last-writer-wins and one tool's user_data is
+    // delivered to another. Claimed atomically: an already-registered check followed by a later
+    // flag store would be a check-then-act pair that two concurrent configurations could both
+    // pass. Claimed before mutating ctx so a rejection leaves it unconfigured.
+    bool claimed_replay = false;
+    if(kind == ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY)
+    {
+        if(rocprofiler::kernel_replay::has_registered_replay_context() ||
+           !rocprofiler::kernel_replay::try_claim_replay_service())
+            return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
+        claimed_replay = true;
+    }
+
+    // Hand the claim back if this configuration fails after taking it, so a rejected attempt does
+    // not leave replay owned by nobody for the rest of the process.
+    auto _replay_claim_guard = rocprofiler::common::scope_destructor{[&claimed_replay]() {
+        if(claimed_replay) rocprofiler::kernel_replay::release_replay_service_claim();
+    }};
+
     RETURN_STATUS_ON_FAIL(rocprofiler::context::add_domain(ctx->callback_tracer->domains, kind));
 
     ctx->callback_tracer->callback_data.at(kind) = {callback, callback_args};
@@ -158,6 +194,16 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
         RETURN_STATUS_ON_FAIL(rocprofiler::context::add_domain_op(
             ctx->callback_tracer->domains, kind, operations[i]));
     }
+
+    if(kind == ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY)
+    {
+        rocprofiler::kernel_replay::memory_tracker::set_tracking_enabled(true);
+        // Configuration succeeded: keep the claim taken above.
+        claimed_replay = false;
+    }
+
+    if(kind == ROCPROFILER_CALLBACK_TRACING_HIP_EVENT)
+        rocprofiler::hip::event::set_service_configured(true);
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -259,6 +305,16 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
             val = rocprofiler::kernel_dispatch::name_by_id(operation);
             break;
         }
+        case ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY:
+        {
+            val = rocprofiler::kernel_replay::name_by_id(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIP_EVENT:
+        {
+            val = rocprofiler::hip::event::name_by_id(operation);
+            break;
+        }
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
         {
             val = rocprofiler::hsa::async_copy::name_by_id(operation);
@@ -301,7 +357,22 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
                 operation);
             break;
         }
-    };
+        case ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH:
+        {
+            val = rocprofiler::hip::graph::name_by_id(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
+        {
+            val = rocprofiler::rocshmem::name_by_id<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
+        {
+            val = rocprofiler::hipfile::name_by_id<ROCPROFILER_HIPFILE_TABLE_ID_CORE>(operation);
+            break;
+        }
+    }
 
     if(!val)
     {
@@ -410,6 +481,16 @@ rocprofiler_iterate_callback_tracing_kind_operations(
             ops = rocprofiler::kernel_dispatch::get_ids();
             break;
         }
+        case ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY:
+        {
+            ops = rocprofiler::kernel_replay::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIP_EVENT:
+        {
+            ops = rocprofiler::hip::event::get_ids();
+            break;
+        }
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
         {
             ops = rocprofiler::hsa::async_copy::get_ids();
@@ -450,7 +531,22 @@ rocprofiler_iterate_callback_tracing_kind_operations(
             ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxCoreRange>();
             break;
         }
-    };
+        case ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH:
+        {
+            ops = rocprofiler::hip::graph::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
+        {
+            ops = rocprofiler::rocshmem::get_ids<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
+        {
+            ops = rocprofiler::hipfile::get_ids<ROCPROFILER_HIPFILE_TABLE_ID_CORE>();
+            break;
+        }
+    }
 
     for(const auto& itr : ops)
     {
@@ -597,15 +693,39 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
                 user_data);
             return ROCPROFILER_STATUS_SUCCESS;
         }
+        case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
+        {
+            rocprofiler::rocshmem::iterate_args<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>(
+                record.operation,
+                static_cast<rocprofiler_callback_tracing_rocshmem_api_data_t*>(record.payload)
+                    ->args,
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
+        {
+            rocprofiler::hipfile::iterate_args<ROCPROFILER_HIPFILE_TABLE_ID_CORE>(
+                record.operation,
+                static_cast<rocprofiler_callback_tracing_hipfile_api_data_t*>(record.payload)->args,
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
         case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
         case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
+        case ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY:
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
         case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
         case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
         case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
         case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
+        case ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH:
+        case ROCPROFILER_CALLBACK_TRACING_HIP_EVENT:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }

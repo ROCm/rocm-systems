@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import gzip
 import inspect
 import os
 import re
@@ -8,10 +9,11 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from threading import Thread
+from typing import Set
 from unittest.mock import Mock
 
-import pandas as pd
-import pytest
+from utils import csv_compression, schema
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 src_candidate = os.path.join(ROOT, "src")
@@ -29,6 +31,8 @@ SUPPORTED_ARCHS = {
     "gfx1150": {"rdna35_point_1": ["RDNA35_POINT_1"]},
     "gfx1151": {"rdna35_halo": ["RDNA35_HALO"]},
     "gfx1152": {"rdna35_point_2": ["RDNA35_POINT_2"]},
+    "gfx1153": {"rdna35_gorgon_point": ["RDNA35_GORGON_POINT"]},
+    "gfx1250": {"gfx1250_series": ["gfx1250"]},
 }
 
 
@@ -53,11 +57,36 @@ def check_resource_allocation():
 
 
 def check_file_pattern(pattern, file_path):
-    """Check if the given pattern exists in the file"""
-    content = ""
-    with open(file_path) as f:
+    """Check if the given pattern exists in the file.
+
+    Callers pass compressed counter artifacts as well as plain files such as
+    sysinfo.csv and profiling_config.yaml, so the reader follows the name.
+    """
+    if str(file_path).endswith(".gz"):
+        opener = gzip.open(file_path, "rt", encoding="utf-8")
+    else:
+        opener = open(file_path, encoding="utf-8")
+    with opener as f:
         content = f.read()
     return len(re.findall(pattern, content)) != 0
+
+
+def pmc_perf_path(workload_dir):
+    """Path of the merged counter intermediate analyze writes and reads back."""
+    name = f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+    return csv_compression.compressed_name(Path(workload_dir) / name)
+
+
+def write_gzip_csv(path, text):
+    """Write text to a gzip CSV through the interface the source uses."""
+    with csv_compression.open_gzip_csv_write(path) as f:
+        f.write(text)
+    return Path(path)
+
+
+def write_pmc_perf(workload_dir, text):
+    """Write the merged counter intermediate into workload_dir."""
+    return write_gzip_csv(pmc_perf_path(workload_dir), text)
 
 
 def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
@@ -89,41 +118,6 @@ def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
     return output_dir
 
 
-def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=None):
-    """Provides a unique input workload directory with contents of input_dir
-    based on the name of the calling test function. For parametrized tests,
-    pass param_id to ensure unique directory names and avoid NFS conflicts.
-
-    Creates a copy to avoid modifying source workload data.
-
-    Args:
-        input_dir (str): Source directory to copy from.
-        suffix (str, optional): suffix to append to output_dir.
-            Defaults to "_tmp".
-        clean_existing (bool, optional): Whether to remove existing directory if exists.
-            Defaults to True.
-        param_id (str, optional): Unique identifier for parametrized tests.
-            When provided, appended to the directory name to ensure uniqueness.
-            Defaults to None.
-    """
-
-    func_name = inspect.stack()[1].function
-
-    # Include param_id in directory name if provided
-    param_suffix = ""
-    if param_id:
-        # Sanitize param_id: replace special chars that may not be valid in paths
-        param_suffix = "_" + re.sub(r"[^\w\-]", "_", str(param_id))
-
-    output_dir = func_name + param_suffix + suffix
-    if clean_existing:
-        if Path(output_dir).exists():
-            shutil.rmtree(output_dir)
-
-    shutil.copytree(input_dir, output_dir)
-    return output_dir
-
-
 def clean_output_dir(cleanup, output_dir):
     """Remove output directory generated from rocprofiler-compute execution
 
@@ -142,100 +136,71 @@ def clean_output_dir(cleanup, output_dir):
     return
 
 
-def check_csv_files(output_dir, num_devices, num_kernels):
-    """Check profiling output csv files for expected
-    number of entries (based on kernel invocations)
+def read_binary_file_tree(root: Path) -> dict[Path, bytes]:
+    """Return binary contents keyed by each file's path relative to root."""
+    return {
+        file_path.relative_to(root): file_path.read_bytes()
+        for file_path in root.rglob("*")
+        if file_path.is_file()
+    }
 
-    Args:
-        output_dir (string): output directory containing csv files
-        num_kernels (int): number of kernels expected to have been profiled
 
-    Returns:
-        dict: dictionary housing file contents as pandas dataframe
-              (excludes PMC files - those are validated internally)
+def _tee(pipe, sink, out) -> None:
+    """Echo each line from pipe to sink while accumulating it in out."""
+    with pipe:
+        for line in pipe:
+            print(line, end="", file=sink, flush=True)
+            out.append(line)
+
+
+def run_subprocess(
+    command, capture_output=False, stream=False
+) -> subprocess.CompletedProcess:
+    """Run command in text mode and return a CompletedProcess.
+
+    capture_output: capture stdout and stderr onto the returned object.
+    stream: echo output line by line as the child produces it (requires
+        capture_output); otherwise captured output is printed once at the end.
     """
-    files_in_workload = os.listdir(output_dir)
+    if not capture_output:
+        return subprocess.run(command, text=True)
 
-    # Validate PMC data exists (profile creates pmc_perf_*.csv or results_*.csv)
-    has_separate = any(
-        f.startswith("pmc_perf_") and f.endswith(".csv") for f in files_in_workload
+    if not stream:
+        # Capture everything, then echo it in one shot after the child exits.
+        process = subprocess.run(command, text=True, capture_output=True)
+        if process.stdout:
+            print(process.stdout, end="")
+        if process.stderr:
+            print(process.stderr, end="", file=sys.stderr)
+        return process
+
+    # Read each pipe on its own thread; reading serially can deadlock if one
+    # fills its buffer while we block on the other.
+    proc = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
     )
-    has_results = any(
-        f.startswith("results_") and f.endswith(".csv") for f in files_in_workload
+    out_buf, err_buf = [], []
+    # Tee to the real fds, not sys.stdout/stderr, which pytest's capsys swaps
+    # for in-memory buffers that never reach the terminal.
+    with os.fdopen(os.dup(1), "w", closefd=True) as real_out, os.fdopen(
+        os.dup(2), "w", closefd=True
+    ) as real_err:
+        readers = [
+            Thread(target=_tee, args=(proc.stdout, real_out, out_buf)),
+            Thread(target=_tee, args=(proc.stderr, real_err, err_buf)),
+        ]
+        for r in readers:
+            r.start()
+        for r in readers:
+            r.join()
+        proc.wait()
+    return subprocess.CompletedProcess(
+        command, proc.returncode, "".join(out_buf), "".join(err_buf)
     )
-
-    assert has_separate or has_results, (
-        "Expected pmc_perf_*.csv or results_*.csv from profile mode"
-    )
-
-    # Validate row counts for PMC files (but don't add to return dict)
-    for file in files_in_workload:
-        is_pmc = file.startswith("pmc_perf_") or file.startswith("results_")
-        if is_pmc and file.endswith(".csv"):
-            df = pd.read_csv(output_dir + "/" + file)
-            err_msg = (
-                f"PMC file {file} has insufficient rows: "
-                f"{len(df.index)} < {num_kernels}"
-            )
-            assert len(df.index) >= num_kernels, err_msg
-
-    # Check and return non-PMC files
-    return check_non_pmc_files(output_dir, num_devices, num_kernels)
-
-
-def check_non_pmc_files(output_dir, num_devices, num_kernels):
-    """
-    Check profiling output non-PMC files and return them as a dictionary.
-
-    Args:
-        output_dir (string): output directory containing non-PMC files
-        num_devices (int): number of devices expected to have been profiled
-        num_kernels (int): number of kernels expected to have been profiled
-
-    Returns:
-        dict: dictionary housing file contents as pandas dataframe
-    """
-    file_dict = {}
-    files_in_workload = os.listdir(output_dir)
-
-    # Load non-PMC files into return dict
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            # Skip PMC files (already validated above)
-            if file.startswith("pmc_perf_") or file.startswith("results_"):
-                continue
-
-            # Load other CSV files
-            file_dict[file] = pd.read_csv(output_dir + "/" + file)
-            if "roofline" in file:
-                assert len(file_dict[file].index) >= num_devices
-            elif "sysinfo" not in file and "ps_file" not in file:
-                assert len(file_dict[file].index) >= num_kernels
-        elif file.endswith(".html"):
-            file_dict[file] = "html"
-        elif file.endswith(".json"):
-            file_dict[file] = "json"
-
-    return file_dict
-
-
-def get_num_pmc_file(output_dir):
-    """
-    Returns:
-        int: number of pmc perf yaml files in perfmon dir
-    """
-
-    perfmon_path = Path(output_dir) / "perfmon"
-    return len([
-        f
-        for f in perfmon_path.iterdir()
-        if f.is_file() and f.name.startswith("pmc_perf_") and f.suffix == ".yaml"
-    ])
-
-
-def strip_ansi(s: str) -> str:
-    ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
-    return ansi_escape.sub("", s)
 
 
 def patch_console(monkeypatch, module, *names, **overrides):
@@ -252,45 +217,14 @@ def patch_console(monkeypatch, module, *names, **overrides):
     return mocks
 
 
-def gpu_soc():
-    """Return (arch, model) from rocminfo, e.g. ('gfx942', 'MI300').
-
-    Both are '' when no supported GPU is detected.
-    """
-    # decode with utf-8 to account for rocm-smi changes in latest rocm
-    rocminfo = (
-        subprocess
-        .run(["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        .stdout.decode("utf-8")
-        .split("\n")
-    )
-    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
-    devices = list(filter(soc_regex.match, rocminfo))
-    if not devices:
-        return "", ""
-    arch = devices[0].split()[1]
-    if arch not in SUPPORTED_ARCHS:
-        return "", ""
-    model = list(SUPPORTED_ARCHS[arch].keys())[0].upper()
-    return arch, model
+_KERNEL_SUFFIX_RE = re.compile(r"(?:\s*(?:\[clone \.[^\]]+\]|\.kd))+\s*$")
 
 
-def skip_unsupported_pc_sampling_soc(is_stochastic=False):
-    """Skip PC-sampling tests on SoCs that do not support the selected mode."""
-    _, soc = gpu_soc()
-
-    unsupported_socs = {"MI100", "RDNA35_POINT_1", "RDNA35_HALO", "RDNA35_POINT_2"}
-    if is_stochastic:
-        unsupported_socs.add("MI200")
-
-    if soc in unsupported_socs:
-        pytest.skip(f"PC sampling is not supported on {soc}")
+def normalize_kernel_name(name: str) -> str:
+    """Return ``name`` without trailing ``.kd`` or ``[clone ...]`` suffixes."""
+    return _KERNEL_SUFFIX_RE.sub("", name).strip()
 
 
-def require_pc_sampling_gpu(is_stochastic=False):
-    """Skip the test unless a GPU that supports the selected PC sampling mode is
-    present."""
-    _, soc = gpu_soc()
-    if not soc:
-        pytest.skip("GPU not supported")
-    skip_unsupported_pc_sampling_soc(is_stochastic=is_stochastic)
+def normalize_kernel_names(names: Set[str]) -> Set[str]:
+    """Return the normalized form of each name in ``names``."""
+    return {normalize_kernel_name(name) for name in names}

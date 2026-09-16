@@ -67,7 +67,7 @@ struct gpu_perf_counter_traits
                                                       const enabled_metrics_t& enabled,
                                                       std::uint64_t            timestamp)
     {
-        return dev->get_gpu_perf_counter_metrics(enabled, timestamp);
+        return dev->sample_metrics(enabled, timestamp);
     }
 
     struct device_entry
@@ -86,7 +86,7 @@ struct gpu_perf_counter_traits
     {
         std::vector<device_entry> entries;
 
-        auto devices = provider->template get_devices<device_t>(device_type::GPU);
+        auto devices = provider->template get_devices<device_t>(device_type::gpu);
 
         for(auto& dev : devices)
         {

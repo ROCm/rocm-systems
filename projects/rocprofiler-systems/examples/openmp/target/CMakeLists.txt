@@ -70,8 +70,31 @@ set(_LLVM_LIB_HINTS
     "/opt/rocm/lib/llvm/lib"
 )
 
+# Determine LLVM host triple as libomptarget might be installed there.
+execute_process(
+    COMMAND "${OMP_TARGET_COMPILER}" --print-target-triple
+    OUTPUT_VARIABLE LLVM_HOST_TRIPLE
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+    RESULT_VARIABLE _llvm_host_triple_rc
+)
+
+if(NOT _llvm_host_triple_rc EQUAL 0)
+    set(LLVM_HOST_TRIPLE "")
+    rocprofiler_systems_message(
+        FATAL_ERROR
+        "'${OMP_TARGET_COMPILER} --print-target-triple' failed (exit code ${_llvm_host_triple_rc})"
+        "This toolchain may be broken."
+    )
+endif()
+
 # Find libomptarget
-find_library(LIBOMPTARGET_SO NAMES omptarget HINTS ${_LLVM_LIB_HINTS})
+find_library(
+    LIBOMPTARGET_SO
+    NAMES omptarget
+    HINTS ${_LLVM_LIB_HINTS}
+    PATH_SUFFIXES ${LLVM_HOST_TRIPLE}
+)
 
 if(NOT LIBOMPTARGET_SO)
     message(FATAL_ERROR "Could not find libomptarget in any of:\n  ${_LLVM_LIB_HINTS}")

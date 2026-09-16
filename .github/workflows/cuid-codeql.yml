@@ -1,0 +1,110 @@
+name: "CodeQL Security Scan"
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'projects/cuid/**'
+      - '.github/workflows/cuid-codeql.yml'
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  DEBCONF_NONINTERACTIVE_SEEN: true
+  BUILD_TYPE: Release
+  ROCM_DIR: /opt/rocm
+
+jobs:
+  analyze:
+    name: Analyze C/C++ Code
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    container:
+      image: ${{ vars.Ubuntu22_DOCKER_IMAGE }}
+      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['cpp']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # AMD's custom query pack (amd-sit-sast-scv/cpp-queries) ships inside this bundle --
+      # no GHCR login or token needed to pull it.
+      - name: Download and extract CodeQL bundle
+        shell: bash
+        run: |
+          curl -sS -o codeql-bundle-linux64.tar.gz \
+            "https://mkmartifactory.amd.com:8443/artifactory/system-provisioning/CodeQL/bundles/latest/codeql-bundle-linux64.tar.gz"
+          tar -xzf codeql-bundle-linux64.tar.gz
+          chmod +x ./codeql/codeql
+          ./codeql/codeql --version
+      # Pack/suite version numbers change over time, so find the suite instead of hardcoding its path
+      - name: Locate AMD custom query suite
+        shell: bash
+        run: |
+          AMD_SUITE=$(find ./codeql/qlpacks/codeql/cpp-queries -path "*/amd-sit-sast-scv/cpp-queries/*/codeql-suites/amd-cpp-windows-driver.qls" | head -1)
+          echo "Using AMD suite: $AMD_SUITE"
+          if [ -z "$AMD_SUITE" ]; then
+            echo "Could not locate AMD custom query suite (amd-cpp-windows-driver.qls) under: ./codeql/qlpacks/codeql/cpp-queries" >&2
+            exit 1
+          fi
+          echo "AMD_SUITE=$AMD_SUITE" >> "$GITHUB_ENV"
+
+      - name: Set Project Directory
+        run: |
+          # Find the directory containing the main CMakeLists.txt for CUID
+          # Prioritize finding it in projects/cuid
+          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/cuid/CMakeLists.txt" -exec dirname {} \; | head -n 1)
+
+          if [ -z "$TARGET_DIR" ]; then
+            echo "Could not find CMakeLists.txt in projects/cuid. Searching workspace..."
+            TARGET_DIR=$(find $GITHUB_WORKSPACE -name "CMakeLists.txt" | grep "projects/cuid" | head -n 1 | xargs dirname)
+          fi
+
+          if [ -z "$TARGET_DIR" ]; then
+             echo "Could not find CMakeLists.txt for CUID."
+             exit 1
+          fi
+
+          echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
+
+      # CodeQL's bundled autobuilder still auto-detects Makefile/CMake, same as the old Autobuild action
+      - name: Create CodeQL database
+        shell: bash
+        run: |
+          # Discard any stale CMakeCache from a previous run/environment to force a clean configure
+          rm -rf "$PROJECT_DIR/build"
+          ./codeql/codeql database create codeqldb --language=${{ matrix.language }} --source-root=$PROJECT_DIR \
+          --command="cmake -S $PROJECT_DIR -B $PROJECT_DIR/build" \
+          --command="cmake --build $PROJECT_DIR/build -j$(nproc)"
+
+      - name: Perform CodeQL Analysis
+        shell: bash
+        run: |
+          mkdir -p sarif-results
+          ./codeql/codeql database analyze codeqldb \
+            codeql/cpp-queries:codeql-suites/cpp-security-extended.qls "$AMD_SUITE" \
+            --format=sarifv2.1.0 \
+            --sarif-category "/language:${{ matrix.language }}" \
+            --output=sarif-results/cpp.sarif
+      # Upload SARIF to GitHub Security > Code scanning alerts tab
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
+        with:
+          sarif_file: sarif-results/cpp.sarif
+          category: "/language:${{ matrix.language }}"

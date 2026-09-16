@@ -25,9 +25,9 @@ Panel Config:
           # Use GRBM_SPI_BUSY (not SPI_BUSY): SPI_BUSY is summed over all SPI instances, so it
           # can exceed GRBM_GUI_ACTIVE when multiple SEs are busy in the same cycle. GRBM counts
           # "any SPI busy" vs GUI active.
-          avg: SUM(100 * GRBM_SPI_BUSY) / SUM(GRBM_GUI_ACTIVE)
-          min: MIN(100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE)
-          max: MAX(100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE)
+          avg: 100 * SUM(GRBM_SPI_BUSY) / SUM(GRBM_GUI_ACTIVE)
+          min: 100 * MIN(GRBM_SPI_BUSY / GRBM_GUI_ACTIVE)
+          max: 100 * MAX(GRBM_SPI_BUSY / GRBM_GUI_ACTIVE)
           unit: Percent
 
   # =========================================================================

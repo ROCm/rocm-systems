@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
@@ -147,7 +148,7 @@ ompt_task_create_callback(ompt_data_t*        encountering_task_data,
                                                                  codeptr_ra);
     if(!corr_id) return;  // During finalization
 
-    auto* state                  = new ompt_task_save_state{corr_id, flags};
+    auto* state = new ompt_task_save_state{.corr_id = corr_id, .task_flags = flags};
     INTERNAL(new_task_data)->ptr = state;
 
     context::pop_latest_correlation_id(corr_id);
@@ -164,32 +165,48 @@ ompt_task_schedule_callback(ompt_data_t*       prior_task_data,
     context::pop_latest_correlation_id(corr_id);
     corr_id->sub_ref_count();
 
+    // A task's INTERNAL slot may hold an explicit-task ompt_task_save_state (from
+    // ompt_task_create_callback) or, for an implicit task, an ompt_save_state (from
+    // ompt_implicit_task begin). Only explicit-task state participates in the task
+    // correlation push/pop below, so use the kind tag to recover it and treat implicit
+    // tasks as "no explicit-task state" (reinterpreting an ompt_save_state here would
+    // alias corr_id onto ompt_save_state::thr_id and crash push_correlation_id).
+    auto as_task_state = [](ompt_data_t* slot) -> ompt_task_save_state* {
+        if(slot == nullptr || slot->ptr == nullptr) return nullptr;
+        auto* _state = static_cast<ompt_task_save_state*>(slot->ptr);
+        return (_state->kind == ompt_save_state_kind::task) ? _state : nullptr;
+    };
+
     /* Warning: some tasks like early_fulfill may be scheduled
      * out twice. The ordering between early_fulfill and task_complete
      * is not specified.
      *
-     * If early_fulfill is dispatched after task_complete, state_prior
-     * will be nullptr because task_complete deleted it. Return immediately
+     * If early_fulfill is dispatched after task_complete, the prior slot
+     * will be empty because task_complete deleted it. Return immediately
      * to avoid failing on a valid trailing callback.
      */
     auto* pprior = INTERNAL(prior_task_data);
     auto* pnext  = INTERNAL(next_task_data);
     assert(pprior != nullptr);
-    auto* state_prior = reinterpret_cast<ompt_task_save_state*>(pprior->ptr);
+    auto* state_prior = as_task_state(pprior);
     if(state_prior == nullptr)
     {
-        if(prior_task_status == ompt_task_early_fulfill) return;
-        ROCP_FATAL << "state_prior == nullptr prior_task_status: " << prior_task_status << ".";
+        // An implicit task has no explicit-task correlation to pop or retire, and has no
+        // saved state at all unless implicit_task is among the enabled operations.
+        if(pprior->ptr == nullptr && prior_task_status == ompt_task_early_fulfill) return;
+    }
+    else
+    {
+        auto* prior_corrid = context::get_latest_correlation_id();
+        if(state_prior->corr_id == prior_corrid && state_prior->task_flags != 0)
+        {
+            // pop the current correlation ID (for the prior_task)
+            assert((state_prior->task_flags & 0xFF) == ompt_task_explicit);
+            context::pop_latest_correlation_id(prior_corrid);
+        }
     }
 
-    auto* state_next   = pnext ? reinterpret_cast<ompt_task_save_state*>(pnext->ptr) : nullptr;
-    auto* prior_corrid = context::get_latest_correlation_id();
-    if(state_prior->corr_id == prior_corrid && state_prior->task_flags != 0)
-    {
-        // pop the current correlation ID (for the prior_task)
-        assert((state_prior->task_flags & 0xFF) == ompt_task_explicit);
-        context::pop_latest_correlation_id(prior_corrid);
-    }
+    auto* state_next = as_task_state(pnext);
     if(state_next && (state_next->task_flags & 0xFF) == ompt_task_explicit)
     {
         // push the next correlation ID (for the next_task)
@@ -198,13 +215,11 @@ ompt_task_schedule_callback(ompt_data_t*       prior_task_data,
     if(prior_task_status == ompt_task_yield || prior_task_status == ompt_task_detach ||
        prior_task_status == ompt_task_switch || prior_task_status == ompt_task_early_fulfill)
         return;
-    // the prior task is done
-    assert(state_prior != nullptr);
-    assert(state_prior->task_flags != 0);
-    if(prior_task_status == ompt_task_complete)
+    // the prior (explicit) task is done
+    if(state_prior != nullptr && prior_task_status == ompt_task_complete)
     {
-        // FIXME? do we need to decrement the ref count
-        // state_prior->corr_id->sub_ref_count();
+        assert(state_prior->task_flags != 0);
+        state_prior->corr_id->sub_ref_count();
         delete state_prior;
         pprior->ptr = nullptr;
     }
@@ -752,9 +767,15 @@ ompt_impl<OpIdx>::begin(ompt_data_t* data, Args... args)
                                buffered_contexts,
                                external_corr_ids);
 
-    auto* corr_id          = tracing::correlation_service::construct(ref_count);
-    auto  internal_corr_id = corr_id->internal;
-    auto  ancestor_corr_id = corr_id->ancestor;
+    auto* corr_id = tracing::correlation_service::construct(ref_count);
+    if(!corr_id)
+    {
+        // finalization began mid-call: construct() returns null. Skip this OMPT region; no state
+        // is stashed, so the paired end() skips too (see the null-state guard there).
+        return;
+    }
+    auto internal_corr_id = corr_id->internal;
+    auto ancestor_corr_id = corr_id->ancestor;
 
     tracing::populate_external_correlation_ids(external_corr_ids,
                                                thr_id,
@@ -816,9 +837,12 @@ ompt_impl<OpIdx>::end(ompt_data_t* data, Args... args)
     ompt_save_state* state = nullptr;
     if(data != nullptr)
         state = static_cast<ompt_save_state*>(data->ptr);
-    else
-        state = get_ompt_state_stack().pop_back_val();
-    assert(state != nullptr);
+    else if(auto& _state_stack = get_ompt_state_stack(); !_state_stack.empty())
+        state = _state_stack.pop_back_val();
+
+    // begin() does not stash state when it cannot construct a correlation id (finalization in
+    // progress), so there is nothing to pair this end() with -- skip instead of dereferencing null.
+    if(!state) return;
 
     ROCP_FATAL_IF(state->operation_idx != info_type::operation_idx)
         << "Mismatch of OMPT operation: begin=" << state->operation_idx
@@ -1089,6 +1113,7 @@ update_table(ompt_update_func f, std::index_sequence<OpIdx, OpIdxTail...>)
     update_table(f, std::integral_constant<size_t, OpIdx>{});
     if constexpr(sizeof...(OpIdxTail) > 0) update_table(f, std::index_sequence<OpIdxTail...>{});
 }
+
 }  // namespace
 
 template <size_t OpIdx>
@@ -1183,6 +1208,28 @@ void
 update_table(ompt_update_func f)
 {
     update_table(f, std::make_index_sequence<ompt::ompt_domain_info::ompt_last>{});
+}
+
+// Returns true if any registered rocprofiler client subscribes to the OMPT
+// callback or buffered tracing domain, i.e. the SDK has a reason to be the OMPT
+// tool. Must be called *after* registration::initialize() so that client
+// tool_init callbacks have run and contexts exist.
+//
+// Deliberately domain-level: this answers the once-per-process question of
+// whether the OMPT tool role belongs to us, asked at ompt_start_tool() before
+// any operation exists. should_enable_callback() above answers the narrower
+// per-operation "which callbacks do I register" question and reads the same
+// context domains() bitsets, so the two cannot disagree.
+bool
+ompt_service_requested()
+{
+    for(const auto& itr : context::get_registered_contexts())
+    {
+        if(!itr) continue;
+        if(itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_OMPT)) return true;
+        if(itr->is_tracing(ROCPROFILER_BUFFER_TRACING_OMPT)) return true;
+    }
+    return false;
 }
 
 }  // namespace ompt

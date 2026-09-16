@@ -7,7 +7,7 @@ callback:
     <<: *level_2
     # Does not play well with ASAN
     disabled: [asan]
-    tags: []
+    tags: [P0]
   Unit_hipGetStreamDeviceId_Negative_Parameters: *level_2
   Unit_hipKernelNameRef_Positive_Basic:
     <<: *level_2

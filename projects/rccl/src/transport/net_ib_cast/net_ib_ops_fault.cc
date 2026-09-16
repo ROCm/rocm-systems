@@ -19,10 +19,10 @@ namespace {
 // Per-QP fault configuration. A zero/disarmed value leaves the corresponding op
 // forwarding to the saved real op.
 struct QpFault {
-  int  sendErrno      = 0;      // returned from post_send when != 0
-  int  recvErrno      = 0;      // returned from post_recv when != 0
-  int  pollWcStatus   = 0;      // ibv_wc_status applied when != 0 (0 == IBV_WC_SUCCESS)
-  int  pollInjectCount = 0;     // remaining completions to corrupt; <0 == unlimited
+  int sendErrno = 0;      // returned from post_send when != 0
+  int recvErrno = 0;      // returned from post_recv when != 0
+  int pollWcStatus = 0;      // ibv_wc_status applied when != 0 (0 == IBV_WC_SUCCESS)
+  int pollInjectCount = 0;     // remaining completions to corrupt; <0 == unlimited
   bool injectWhenIdle = false;  // synthesize an error WC when real poll returns 0
 };
 
@@ -166,11 +166,11 @@ ncclResult_t ncclIbOpsFaultInstall(struct ibv_context* ctx) {
   OpsEntry entry;
   entry.realPostSend = ctx->ops.post_send;
   entry.realPostRecv = ctx->ops.post_recv;
-  entry.realPollCq   = ctx->ops.poll_cq;
+  entry.realPollCq = ctx->ops.poll_cq;
   g_ctxFaults.emplace(ctx, entry);
   ctx->ops.post_send = shimPostSend;
   ctx->ops.post_recv = shimPostRecv;
-  ctx->ops.poll_cq   = shimPollCq;
+  ctx->ops.poll_cq = shimPollCq;
   INFO(NCCL_NET, "NET/IB ops-fault: installed shims on context %p", ctx);
   return ncclSuccess;
 }
@@ -182,7 +182,7 @@ ncclResult_t ncclIbOpsFaultRemove(struct ibv_context* ctx) {
   if (ctxIt == g_ctxFaults.end()) return ncclSuccess;
   ctx->ops.post_send = ctxIt->second.realPostSend;
   ctx->ops.post_recv = ctxIt->second.realPostRecv;
-  ctx->ops.poll_cq   = ctxIt->second.realPollCq;
+  ctx->ops.poll_cq = ctxIt->second.realPollCq;
   g_ctxFaults.erase(ctxIt);
   return ncclSuccess;
 }
@@ -205,8 +205,8 @@ ncclResult_t ncclIbOpsFaultArmPostRecv(struct ibv_context* ctx, uint32_t qpNum, 
   return ncclSuccess;
 }
 
-ncclResult_t ncclIbOpsFaultArmPollCq(struct ibv_context* ctx, uint32_t qpNum,
-                                     int wcStatus, int injectCount, bool injectWhenIdle) {
+ncclResult_t ncclIbOpsFaultArmPollCq(struct ibv_context* ctx, uint32_t qpNum, int wcStatus, int injectCount,
+                                     bool injectWhenIdle) {
   if (!ctx) return ncclInvalidArgument;
   std::lock_guard<std::mutex> lk(g_faultMtx);
   auto ctxIt = g_ctxFaults.find(ctx);

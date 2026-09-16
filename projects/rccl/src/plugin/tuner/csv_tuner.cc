@@ -42,22 +42,22 @@
 
 // CSV field indices for configuration parsing
 // Format: colltype,minbytes,maxbytes,algorithm,protocol,channels,nNodes,nRanks,numPipeOps,regBuff
-#define CONFIG_FIELD_COLLTYPE     0
-#define CONFIG_FIELD_MINBYTES     1
-#define CONFIG_FIELD_MAXBYTES     2
-#define CONFIG_FIELD_ALGORITHM    3
-#define CONFIG_FIELD_PROTOCOL     4
-#define CONFIG_FIELD_CHANNELS     5
-#define CONFIG_FIELD_NNODES       6
-#define CONFIG_FIELD_NRANKS       7
-#define CONFIG_FIELD_PIPEOPS      8  // Optional field
-#define CONFIG_FIELD_REGBUFF      9  // Optional field
+#define CONFIG_FIELD_COLLTYPE 0
+#define CONFIG_FIELD_MINBYTES 1
+#define CONFIG_FIELD_MAXBYTES 2
+#define CONFIG_FIELD_ALGORITHM 3
+#define CONFIG_FIELD_PROTOCOL 4
+#define CONFIG_FIELD_CHANNELS 5
+#define CONFIG_FIELD_NNODES 6
+#define CONFIG_FIELD_NRANKS 7
+#define CONFIG_FIELD_PIPEOPS 8  // Optional field
+#define CONFIG_FIELD_REGBUFF 9  // Optional field
 
 // Field count constants
-#define CONFIG_FIELDS_REQUIRED    8   // Minimum required fields (up to nRanks)
+#define CONFIG_FIELDS_REQUIRED 8   // Minimum required fields (up to nRanks)
 #define CONFIG_FIELDS_WITH_PIPEOPS 9  // Fields including numPipeOps
 #define CONFIG_FIELDS_WITH_REGBUFF 10 // Fields including both numPipeOps and regBuff
-#define CONFIG_FIELDS_MAX         10  // Maximum number of fields supported
+#define CONFIG_FIELDS_MAX 10  // Maximum number of fields supported
 
 // Global state for CSV config file path discovery
 static std::mutex csvTunerMutex;
@@ -105,12 +105,18 @@ static ncclFunc_t parseCollType(const char* str, bool* valid) {
 // Convert collective type to string (for logging)
 static const char* collTypeToString(ncclFunc_t collType) {
   switch (collType) {
-    case ncclFuncBroadcast: return "broadcast";
-    case ncclFuncReduce: return "reduce";
-    case ncclFuncAllGather: return "allgather";
-    case ncclFuncReduceScatter: return "reducescatter";
-    case ncclFuncAllReduce: return "allreduce";
-    default: return "unknown";
+  case ncclFuncBroadcast:
+    return "broadcast";
+  case ncclFuncReduce:
+    return "reduce";
+  case ncclFuncAllGather:
+    return "allgather";
+  case ncclFuncReduceScatter:
+    return "reducescatter";
+  case ncclFuncAllReduce:
+    return "allreduce";
+  default:
+    return "unknown";
   }
 }
 
@@ -131,14 +137,22 @@ static int parseAlgorithm(const char* str, bool* valid) {
 // Convert algorithm to string (for logging)
 static const char* algorithmToString(int algorithm) {
   switch (algorithm) {
-    case NCCL_ALGO_TREE: return "tree";
-    case NCCL_ALGO_RING: return "ring";
-    case NCCL_ALGO_COLLNET_DIRECT: return "collnet_direct";
-    case NCCL_ALGO_COLLNET_CHAIN: return "collnet_chain";
-    case NCCL_ALGO_NVLS: return "nvls";
-    case NCCL_ALGO_NVLS_TREE: return "nvls_tree";
-    case NCCL_ALGO_PAT: return "pat";
-    default: return "unknown";
+  case NCCL_ALGO_TREE:
+    return "tree";
+  case NCCL_ALGO_RING:
+    return "ring";
+  case NCCL_ALGO_COLLNET_DIRECT:
+    return "collnet_direct";
+  case NCCL_ALGO_COLLNET_CHAIN:
+    return "collnet_chain";
+  case NCCL_ALGO_NVLS:
+    return "nvls";
+  case NCCL_ALGO_NVLS_TREE:
+    return "nvls_tree";
+  case NCCL_ALGO_PAT:
+    return "pat";
+  default:
+    return "unknown";
   }
 }
 
@@ -155,10 +169,14 @@ static int parseProtocol(const char* str, bool* valid) {
 // Convert protocol to string (for logging)
 static const char* protocolToString(int protocol) {
   switch (protocol) {
-    case NCCL_PROTO_LL: return "ll";
-    case NCCL_PROTO_LL128: return "ll128";
-    case NCCL_PROTO_SIMPLE: return "simple";
-    default: return "unknown";
+  case NCCL_PROTO_LL:
+    return "ll";
+  case NCCL_PROTO_LL128:
+    return "ll128";
+  case NCCL_PROTO_SIMPLE:
+    return "simple";
+  default:
+    return "unknown";
   }
 }
 
@@ -196,8 +214,8 @@ static ncclResult_t loadConfig(CsvTunerContext* ctx, const char* filename) {
   FILE* file = fopen(filename, "r");
   if (!file) {
     if (ctx->logFunction) {
-      ctx->logFunction(NCCL_LOG_INFO, NCCL_TUNING, __FILE__, __LINE__,
-                       "TUNER/CsvTuner: Config file %s not found", filename);
+      ctx->logFunction(NCCL_LOG_INFO, NCCL_TUNING, __FILE__, __LINE__, "TUNER/CsvTuner: Config file %s not found",
+                       filename);
     }
     return ncclSuccess; // Not finding config file is not an error
   }
@@ -280,8 +298,7 @@ static ncclResult_t loadConfig(CsvTunerContext* ctx, const char* filename) {
       if (*token == '\0') {
         if (ctx->logFunction) {
           ctx->logFunction(NCCL_LOG_WARN, NCCL_TUNING, __FILE__, __LINE__,
-                           "TUNER/CsvTuner: Skipping malformed line %d with empty field: %s",
-                           lineNum, line);
+                           "TUNER/CsvTuner: Skipping malformed line %d with empty field: %s", lineNum, line);
         }
         lineValid = false;
         break;
@@ -309,12 +326,9 @@ static ncclResult_t loadConfig(CsvTunerContext* ctx, const char* filename) {
       if (!collTypeValid || !algoValid || !protoValid) {
         if (ctx->logFunction) {
           ctx->logFunction(NCCL_LOG_WARN, NCCL_TUNING, __FILE__, __LINE__,
-                           "TUNER/CsvTuner: Skipping line %d with unknown %s%s%s value: %s",
-                           lineNum,
-                           !collTypeValid ? "colltype " : "",
-                           !algoValid ? "algorithm " : "",
-                           !protoValid ? "protocol" : "",
-                           line);
+                           "TUNER/CsvTuner: Skipping line %d with unknown %s%s%s value: %s", lineNum,
+                           !collTypeValid ? "colltype " : "", !algoValid ? "algorithm " : "",
+                           !protoValid ? "protocol" : "", line);
         }
         continue;
       }
@@ -339,8 +353,8 @@ static ncclResult_t loadConfig(CsvTunerContext* ctx, const char* filename) {
         ctx->logFunction(NCCL_LOG_INFO, NCCL_TUNING, __FILE__, __LINE__,
                          "TUNER/CsvTuner: Loaded config: %s [%zu-%zu] %s/%s channels=%d nodes=%d ranks=%d",
                          collTypeToString(config->collType), config->minBytes, config->maxBytes,
-                         algorithmToString(config->algorithm), protocolToString(config->protocol),
-                         config->nChannels, config->nNodes, config->nRanks);
+                         algorithmToString(config->algorithm), protocolToString(config->protocol), config->nChannels,
+                         config->nNodes, config->nRanks);
       }
     }
   }
@@ -390,8 +404,8 @@ static bool findTunerFileInDir(const char* dirPath, char* outPath, size_t outPat
 // Get the directory containing librccl.so using dladdr1 (same pattern as MSCCL)
 static bool getLibraryDirectory(std::string& libDir) {
   Dl_info dl_info;
-  struct link_map *link_map_ptr = nullptr;
-  if (!dladdr1((void *)&rcclCsvTuner, &dl_info, (void **)&link_map_ptr, RTLD_DL_LINKMAP)) {
+  struct link_map* link_map_ptr = nullptr;
+  if (!dladdr1((void*)&rcclCsvTuner, &dl_info, (void**)&link_map_ptr, RTLD_DL_LINKMAP)) {
     return false;
   }
   std::string selfLibPath = link_map_ptr->l_name;
@@ -426,14 +440,12 @@ const char* rcclCsvTunerFindConfig(const char* gpuArch) {
   if (getLibraryDirectory(libDir)) {
     std::string tunerDir = libDir + "/tuner";
     if (gpuArch && gpuArch[0]) {
-      snprintf(csvTunerConfigPath, sizeof(csvTunerConfigPath),
-               "%s/rccl_tuner_%s.csv", tunerDir.c_str(), gpuArch);
+      snprintf(csvTunerConfigPath, sizeof(csvTunerConfigPath), "%s/rccl_tuner_%s.csv", tunerDir.c_str(), gpuArch);
       if (fileExists(csvTunerConfigPath)) {
         return csvTunerConfigPath;
       }
     }
-    snprintf(csvTunerConfigPath, sizeof(csvTunerConfigPath),
-             "%s/rccl_tuner.csv", tunerDir.c_str());
+    snprintf(csvTunerConfigPath, sizeof(csvTunerConfigPath), "%s/rccl_tuner.csv", tunerDir.c_str());
     if (fileExists(csvTunerConfigPath)) {
       return csvTunerConfigPath;
     }
@@ -447,14 +459,12 @@ const char* rcclCsvTunerFindConfig(const char* gpuArch) {
     // 3. Check relative share path: <libdir>/../share/rccl/tuner/ (for installed RCCL)
     std::string tunerShareDir = libDir + "/../share/rccl/tuner";
     if (gpuArch && gpuArch[0]) {
-      snprintf(csvTunerConfigPath, sizeof(csvTunerConfigPath),
-               "%s/rccl_tuner_%s.csv", tunerShareDir.c_str(), gpuArch);
+      snprintf(csvTunerConfigPath, sizeof(csvTunerConfigPath), "%s/rccl_tuner_%s.csv", tunerShareDir.c_str(), gpuArch);
       if (fileExists(csvTunerConfigPath)) {
         return csvTunerConfigPath;
       }
     }
-    snprintf(csvTunerConfigPath, sizeof(csvTunerConfigPath),
-             "%s/rccl_tuner.csv", tunerShareDir.c_str());
+    snprintf(csvTunerConfigPath, sizeof(csvTunerConfigPath), "%s/rccl_tuner.csv", tunerShareDir.c_str());
     if (fileExists(csvTunerConfigPath)) {
       return csvTunerConfigPath;
     }
@@ -474,16 +484,15 @@ const char* rcclCsvTunerFindConfig(const char* gpuArch) {
 
   // 4. Check GPU arch-specific config: ${ROCM_PATH}/share/rccl/tuner/rccl_tuner_<arch>.csv
   if (gpuArch && gpuArch[0]) {
-    snprintf(csvTunerConfigPath, sizeof(csvTunerConfigPath),
-             "%s/share/rccl/tuner/rccl_tuner_%s.csv", rocmPath, gpuArch);
+    snprintf(csvTunerConfigPath, sizeof(csvTunerConfigPath), "%s/share/rccl/tuner/rccl_tuner_%s.csv", rocmPath,
+             gpuArch);
     if (fileExists(csvTunerConfigPath)) {
       return csvTunerConfigPath;
     }
   }
 
   // 5. Check generic config: ${ROCM_PATH}/share/rccl/tuner/rccl_tuner.csv
-  snprintf(csvTunerConfigPath, sizeof(csvTunerConfigPath),
-           "%s/share/rccl/tuner/rccl_tuner.csv", rocmPath);
+  snprintf(csvTunerConfigPath, sizeof(csvTunerConfigPath), "%s/share/rccl/tuner/rccl_tuner.csv", rocmPath);
   if (fileExists(csvTunerConfigPath)) {
     return csvTunerConfigPath;
   }
@@ -511,8 +520,8 @@ void rcclCsvTunerResetConfigPath() {
 
 // Tuner init function
 static ncclResult_t csvTunerInit(void** context, uint64_t commId, size_t nRanks, size_t nNodes,
-                                  ncclDebugLogger_t logFunction, ncclNvlDomainInfo_t* nvlDomainInfo,
-                                  ncclTunerConstants_t* constants) {
+                                 ncclDebugLogger_t logFunction, ncclNvlDomainInfo_t* nvlDomainInfo,
+                                 ncclTunerConstants_t* constants) {
   CsvTunerContext* ctx = (CsvTunerContext*)malloc(sizeof(CsvTunerContext));
   if (!ctx) return ncclSystemError;
 
@@ -530,8 +539,7 @@ static ncclResult_t csvTunerInit(void** context, uint64_t commId, size_t nRanks,
 
   if (logFunction) {
     logFunction(NCCL_LOG_INFO, NCCL_TUNING, __FILE__, __LINE__,
-                "TUNER/CsvTuner: Initializing built-in CSV tuner for %zu nodes, %zu ranks",
-                nNodes, nRanks);
+                "TUNER/CsvTuner: Initializing built-in CSV tuner for %zu nodes, %zu ranks", nNodes, nRanks);
   }
 
   // Use the config path that was discovered earlier
@@ -565,9 +573,8 @@ static ncclResult_t csvTunerInit(void** context, uint64_t commId, size_t nRanks,
 }
 
 // Tuner getCollInfo function
-static ncclResult_t csvTunerGetCollInfo(void* context, ncclFunc_t collType, size_t nBytes,
-                                         int numPipeOps, float** collCostTable, int numAlgo, int numProto,
-                                         int regBuff, int* nChannels) {
+static ncclResult_t csvTunerGetCollInfo(void* context, ncclFunc_t collType, size_t nBytes, int numPipeOps,
+                                        float** collCostTable, int numAlgo, int numProto, int regBuff, int* nChannels) {
   CsvTunerContext* ctx = (CsvTunerContext*)context;
   if (!ctx) return ncclInternalError;
 
@@ -588,14 +595,11 @@ static ncclResult_t csvTunerGetCollInfo(void* context, ncclFunc_t collType, size
     CsvTuningConfig* config = &ctx->configs[i];
 
     // Check if this config matches the current collective, size range, topology, pipeline ops, and regBuff
-    if (config->collType == collType &&
-        nBytes >= config->minBytes &&
-        nBytes <= config->maxBytes &&
+    if (config->collType == collType && nBytes >= config->minBytes && nBytes <= config->maxBytes &&
         (config->nNodes == -1 || config->nNodes == (int)ctx->nNodes) &&
         (config->nRanks == -1 || config->nRanks == (int)ctx->nRanks) &&
         (config->numPipeOps == -1 || config->numPipeOps == numPipeOps) &&
         (config->regBuff == -1 || config->regBuff == regBuff)) {
-
       // Check bounds
       if (config->algorithm < numAlgo && config->protocol < numProto) {
         if (table[config->algorithm][config->protocol] != NCCL_ALGO_PROTO_IGNORE) {
@@ -607,17 +611,16 @@ static ncclResult_t csvTunerGetCollInfo(void* context, ncclFunc_t collType, size
           } else if (config->nChannels != -1) {
             if (ctx->logFunction) {
               ctx->logFunction(NCCL_LOG_WARN, NCCL_TUNING, __FILE__, __LINE__,
-                               "TUNER/CsvTuner: Ignoring invalid channel count %d for %s, bytes=%zu",
-                               config->nChannels, collTypeToString(config->collType), nBytes);
+                               "TUNER/CsvTuner: Ignoring invalid channel count %d for %s, bytes=%zu", config->nChannels,
+                               collTypeToString(config->collType), nBytes);
             }
           }
 
           if (ctx->logFunction) {
             ctx->logFunction(NCCL_LOG_INFO, NCCL_TUNING, __FILE__, __LINE__,
                              "TUNER/CsvTuner: Applied config for %s, bytes=%zu: algo=%s, proto=%s, channels=%d",
-                             collTypeToString(config->collType), nBytes,
-                             algorithmToString(config->algorithm), protocolToString(config->protocol),
-                             config->nChannels);
+                             collTypeToString(config->collType), nBytes, algorithmToString(config->algorithm),
+                             protocolToString(config->protocol), config->nChannels);
           }
           return ncclSuccess;
         }
@@ -628,8 +631,7 @@ static ncclResult_t csvTunerGetCollInfo(void* context, ncclFunc_t collType, size
   // No matching config found
   if (ctx->logFunction) {
     ctx->logFunction(NCCL_LOG_TRACE, NCCL_TUNING, __FILE__, __LINE__,
-                     "TUNER/CsvTuner: No matching config for %s, bytes=%zu",
-                     collTypeToString(collType), nBytes);
+                     "TUNER/CsvTuner: No matching config for %s, bytes=%zu", collTypeToString(collType), nBytes);
   }
 
   return ncclSuccess;
@@ -647,10 +649,6 @@ static ncclResult_t csvTunerFinalize(void* context) {
   return ncclSuccess;
 }
 
-
 ncclTuner_t rcclCsvTuner = {
-  .name = "RcclCsvTuner",
-  .init = csvTunerInit,
-  .getCollInfo = csvTunerGetCollInfo,
-  .finalize = csvTunerFinalize
+  .name = "RcclCsvTuner", .init = csvTunerInit, .getCollInfo = csvTunerGetCollInfo, .finalize = csvTunerFinalize
 };

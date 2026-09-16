@@ -13,4 +13,11 @@ rj_add_object_library(rocjitsu_isa_risc_v
     zicsr.cpp
     zifencei.cpp
     privileged.cpp
+    target_provider.cpp
+)
+
+rj_add_isa_target_provider(
+    rocjitsu_isa_risc_v
+    HEADER rocjitsu/isa/arch/risc_v/target_provider.h
+    BUILTIN
 )

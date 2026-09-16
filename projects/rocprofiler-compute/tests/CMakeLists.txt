@@ -55,6 +55,8 @@ set_target_properties(
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
 )
 
+add_subdirectory(../sample/conjugate_gradient conjugate_gradient)
+
 set(DYNAMIC_SHARED_SOURCES ../sample/dynamic_shared/dynamic_shared.hip)
 set_source_files_properties(${DYNAMIC_SHARED_SOURCES} PROPERTIES LANGUAGE HIP)
 add_executable(hip_dynamic_shared ${DYNAMIC_SHARED_SOURCES})
@@ -108,4 +110,22 @@ add_custom_target(
         ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/sample/simple_net.py
         ${CMAKE_SOURCE_DIR}/tests/simple_net.py
     COMMENT "Copying simple_net.py to tests directory"
+)
+
+add_custom_target(
+    triton_ffn
+    ALL
+    COMMAND
+        ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/sample/triton_ffn.py
+        ${CMAKE_SOURCE_DIR}/tests/triton_ffn.py
+    COMMENT "Copying triton_ffn.py to tests directory"
+)
+
+add_custom_target(
+    torch_compile_triton
+    ALL
+    COMMAND
+        ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/sample/torch_compile_triton.py
+        ${CMAKE_SOURCE_DIR}/tests/torch_compile_triton.py
+    COMMENT "Copying torch_compile_triton.py to tests directory"
 )

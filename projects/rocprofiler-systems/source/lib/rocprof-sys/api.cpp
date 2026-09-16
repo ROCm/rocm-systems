@@ -4,8 +4,9 @@
 #include "api.hpp"
 
 #include "logger/debug.hpp"
+#include "rocprofiler-systems/annotation.h"
+#include "rocprofiler-systems/categories.h"
 #include <exception>
-#include <stdexcept>
 
 extern "C" void
 rocprofsys_push_trace(const char* _name)
@@ -87,6 +88,40 @@ rocprofsys_pop_category_region(rocprofsys_category_t _category, const char* _nam
     return 0;
 }
 
+extern "C" int
+rocprofsys_push_category_region_python(const char*              _name,
+                                       rocprofsys_annotation_t* _annotations,
+                                       size_t                   _annotation_count)
+{
+    try
+    {
+        rocprofsys_push_category_region_python_hidden(_name, _annotations,
+                                                      _annotation_count);
+    } catch(std::exception& _err)
+    {
+        LOG_WARNING("Exception caught: {}", _err.what());
+        return -1;
+    }
+    return 0;
+}
+
+extern "C" int
+rocprofsys_pop_category_region_python(const char*              _name,
+                                      rocprofsys_annotation_t* _annotations,
+                                      size_t                   _annotation_count)
+{
+    try
+    {
+        rocprofsys_pop_category_region_python_hidden(_name, _annotations,
+                                                     _annotation_count);
+    } catch(std::exception& _err)
+    {
+        LOG_WARNING("Exception caught: {}", _err.what());
+        return -1;
+    }
+    return 0;
+}
+
 extern "C" void
 rocprofsys_progress(const char* _name)
 {
@@ -137,9 +172,9 @@ rocprofsys_set_env(const char* env_name, const char* env_val)
 }
 
 extern "C" void
-rocprofsys_set_mpi(bool use, bool attached)
+rocprofsys_set_mpi(bool use)
 {
-    rocprofsys_set_mpi_hidden(use, attached);
+    rocprofsys_set_mpi_hidden(use);
 }
 
 extern "C" void

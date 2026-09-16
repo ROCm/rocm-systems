@@ -7,7 +7,10 @@
 #
 # rocprofiler-systems-dl: contains minimal symbols and dlopen's rocprofiler-systems
 #
-# rocprofiler-systems-user: contains symbols for user API
+# rocprofiler-systems-common-api: shared public API headers (rocprofsys_category_t,
+# rocprofsys_annotation_t)
+#
+# rocprofiler-systems-causal-api: minimal library backing ROCPROFSYS_CAUSAL_*
 #
 # ----------------------------------------------------------------------------- #
 
@@ -41,7 +44,6 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-definitions>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-perfetto>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sqlite3>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-json>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-logger>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-timemory>
@@ -63,6 +65,7 @@ target_link_libraries(
 #
 # ------------------------------------------------------------------------------#
 
+add_subdirectory(policies)
 add_subdirectory(common)
 add_subdirectory(core)
 add_subdirectory(backends)
@@ -75,7 +78,8 @@ add_subdirectory(logger)
 #
 # ------------------------------------------------------------------------------#
 
+add_subdirectory(rocprof-sys-common-api)
+add_subdirectory(rocprof-sys-causal-api)
 add_subdirectory(rocprof-sys)
 add_subdirectory(rocprof-sys-dl)
 add_subdirectory(rocprof-sys-rt)
-add_subdirectory(rocprof-sys-user)

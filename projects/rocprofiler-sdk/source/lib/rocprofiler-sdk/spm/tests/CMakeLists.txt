@@ -14,7 +14,8 @@ find_program(
 set(_ROCPROFILER_SHARE_DIR
     "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
 
-set(ROCPROFILER_LIB_SPM_COUNTER_TEST_SOURCES core.cpp spm_memory_pool_test.cpp)
+set(ROCPROFILER_LIB_SPM_COUNTER_TEST_SOURCES core.cpp spm_memory_pool_test.cpp
+                                             local_context.cpp)
 
 add_executable(spm-counter-test)
 
@@ -35,10 +36,12 @@ rocprofiler_add_unit_test(
     TARGET spm-counter-test
     SOURCES ${ROCPROFILER_LIB_SPM_COUNTER_TEST_SOURCES}
     TIMEOUT 60
+    LABELS "unittests;spm"
     ENVIRONMENT
         "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
         "ROCPROFILER_SPM_BETA_ENABLED=True"
         "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    SKIP_REGULAR_EXPRESSION "SPM unavailable"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 set_tests_properties(unit.spm_core.check_packet_generation unit.spm_core.check_callbacks

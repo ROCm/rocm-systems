@@ -84,6 +84,11 @@
       "folder": "hipfile",
       "rtd_slug": "advanced-micro-devices-hipfile",
       "rtd_alias": "hipFile"
+    },
+    {
+      "folder": "rocdbgapi",
+      "rtd_slug": "advanced-micro-devices-rocdbgapi-docs",
+      "rtd_alias": "ROCdbgapi"
     }
   ]
 }

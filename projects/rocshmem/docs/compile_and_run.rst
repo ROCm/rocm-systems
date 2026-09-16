@@ -37,7 +37,7 @@ Example compile and link commands are provided at the top of the example files i
     -L/opt/rocm/lib -lamdhip64 -lhsa-runtime64
 
 If your project uses CMake, see
-`Using CMake with AMD ROCm <https://rocmdocs.amd.com/en/latest/conceptual/cmake-packages.html>`_.
+`Using CMake with AMD ROCm <https://rocmdocs.amd.com/en/docs-7.2.4/conceptual/cmake-packages.html>`_.
 
 Running a rocSHMEM application
 ------------------------------

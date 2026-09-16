@@ -1,0 +1,78 @@
+set(stage_dir "@CMAKE_CURRENT_BINARY_DIR@/python-api-install")
+file(REMOVE_RECURSE "${stage_dir}")
+
+execute_process(
+    COMMAND "@CMAKE_COMMAND@" --install "@CMAKE_BINARY_DIR@" --prefix "${stage_dir}"
+            --component runtime
+    RESULT_VARIABLE install_result
+    OUTPUT_VARIABLE install_stdout
+    ERROR_VARIABLE install_stderr)
+
+if(NOT install_result EQUAL 0)
+    message("${install_stdout}")
+    message("${install_stderr}")
+    message(FATAL_ERROR "Runtime install failed: ${install_result}")
+endif()
+
+set(pythonpath "${stage_dir}/@ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR@")
+set(libdir "${stage_dir}/@CMAKE_INSTALL_LIBDIR@")
+set(libpath
+    "${libdir}/@CMAKE_SHARED_LIBRARY_PREFIX@rocprof-trace-decoder@CMAKE_SHARED_LIBRARY_SUFFIX@")
+
+execute_process(
+    COMMAND
+        "@CMAKE_COMMAND@" -E env "PYTHONPATH=${pythonpath}" "ROCM_PATH=${stage_dir}"
+        "LD_LIBRARY_PATH=${libdir}:@PYTHON_API_LD_LIBRARY_PATH@:$ENV{LD_LIBRARY_PATH}"
+        "@Python3_EXECUTABLE@" "@CMAKE_CURRENT_SOURCE_DIR@/python_api_test.py" --lib
+        "${libpath}"
+    RESULT_VARIABLE import_result
+    OUTPUT_VARIABLE import_stdout
+    ERROR_VARIABLE import_stderr)
+
+if(NOT import_result EQUAL 0)
+    message("${import_stdout}")
+    message("${import_stderr}")
+    message(FATAL_ERROR "Installed Python API import failed: ${import_result}")
+endif()
+
+execute_process(
+    COMMAND
+        "@CMAKE_COMMAND@" -E env "PYTHONPATH=${pythonpath}" "ROCM_PATH=${stage_dir}"
+        "LD_LIBRARY_PATH=${libdir}:@PYTHON_API_DEP_LIBRARY_PATH@:$ENV{LD_LIBRARY_PATH}"
+        "@Python3_EXECUTABLE@" "@CMAKE_CURRENT_SOURCE_DIR@/python_api_test.py"
+    RESULT_VARIABLE prefix_result
+    OUTPUT_VARIABLE prefix_stdout
+    ERROR_VARIABLE prefix_stderr)
+
+if(NOT prefix_result EQUAL 0)
+    message("${prefix_stdout}")
+    message("${prefix_stderr}")
+    message(FATAL_ERROR "Installed Python API prefix lookup failed: ${prefix_result}")
+endif()
+
+set(fake_site "${stage_dir}/fake-site")
+set(fake_core "${fake_site}/_rocm_sdk_core")
+file(REMOVE_RECURSE "${fake_site}")
+file(MAKE_DIRECTORY "${fake_core}/lib")
+file(WRITE "${fake_core}/__init__.py" "")
+set(versioned_libpath "${fake_core}/lib/@CMAKE_SHARED_LIBRARY_PREFIX@rocprof-trace-decoder")
+string(APPEND versioned_libpath
+       "@CMAKE_SHARED_LIBRARY_SUFFIX@.@VERSION_MAJOR@.@VERSION_MINOR@")
+file(COPY_FILE "${libpath}" "${versioned_libpath}")
+
+execute_process(
+    COMMAND
+        "@CMAKE_COMMAND@" -E env "PYTHONPATH=${pythonpath}:${fake_site}"
+        "ROCM_PATH=${stage_dir}/missing" "ROCM_HOME=${stage_dir}/missing"
+        "ROCPROF_TRACE_DECODER_LIB="
+        "LD_LIBRARY_PATH=@PYTHON_API_DEP_LIBRARY_PATH@:$ENV{LD_LIBRARY_PATH}" "@Python3_EXECUTABLE@"
+        "@CMAKE_CURRENT_SOURCE_DIR@/python_api_test.py"
+    RESULT_VARIABLE therock_result
+    OUTPUT_VARIABLE therock_stdout
+    ERROR_VARIABLE therock_stderr)
+
+if(NOT therock_result EQUAL 0)
+    message("${therock_stdout}")
+    message("${therock_stderr}")
+    message(FATAL_ERROR "Installed Python API TheRock lookup failed: ${therock_result}")
+endif()

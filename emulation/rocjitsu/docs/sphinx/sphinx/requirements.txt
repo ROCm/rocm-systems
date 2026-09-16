@@ -1,0 +1,3 @@
+rocm-docs-core>=1.7.1
+sphinxcontrib-mermaid>=1.0
+doxysphinx>=3.3.0

@@ -62,12 +62,17 @@ struct mpilib_funcs_t {
   int (*Allgather)(const void *sendbuf, int sendcount, MPI_Datatype sendtype, void *recvbuf, int recvcount, MPI_Datatype recvtype, MPI_Comm comm);
   int (*Allreduce)(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype,
                    MPI_Op op, MPI_Comm comm);
+  int (*Reduce_scatter_block)(const void *sendbuf, void *recvbuf, int recvcount,
+                              MPI_Datatype datatype, MPI_Op op, MPI_Comm comm);
   int (*Alltoall)(const void *sendbuf, int sendcount, MPI_Datatype sendtype, void *recvbuf, int recvcount,
                   MPI_Datatype recvtype, MPI_Comm comm);
   int (*Bcast)(void *buffer, int count, MPI_Datatype datatype, int root, MPI_Comm comm);
   int (*Barrier)(MPI_Comm comm);
   int (*Iallreduce)(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype,
                     MPI_Op op, MPI_Comm comm, MPI_Request *request);
+  int (*Ireduce_scatter_block)(const void *sendbuf, void *recvbuf, int recvcount,
+                               MPI_Datatype datatype, MPI_Op op, MPI_Comm comm,
+                               MPI_Request *request);
   int (*Ibarrier)(MPI_Comm comm, MPI_Request *request);
   int (*Win_create)(void *base, MPI_Aint size, int disp_unit, MPI_Info info, MPI_Comm comm, MPI_Win *win);
   int (*Win_free)(MPI_Win *win);

@@ -86,8 +86,14 @@ template <typename T> __device__ inline T __hip_readfirstlane(T val) {
   u.d = val;
   // NOTE: The builtin returns int, so we first cast it to unsigned int and only
   // then extend it to 64 bits.
-  unsigned long long lower = (unsigned)__builtin_amdgcn_readfirstlane(u.l);
-  unsigned long long upper = (unsigned)__builtin_amdgcn_readfirstlane(u.l >> 32);
+  unsigned long long lower = (unsigned)(
+      __builtin_amdgcn_is_invocable(__builtin_amdgcn_readfirstlane)
+          ? __builtin_amdgcn_readfirstlane(u.l)
+          : 0);
+  unsigned long long upper = (unsigned)(
+      __builtin_amdgcn_is_invocable(__builtin_amdgcn_readfirstlane)
+          ? __builtin_amdgcn_readfirstlane(u.l >> 32)
+          : 0);
   u.l = (upper << 32) | lower;
   return u.d;
 }
@@ -159,9 +165,12 @@ template <typename T> __device__ inline T __hip_readfirstlane(T val) {
   } while (0)
 
 __device__ inline void __syncwarp() {
-  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
-  __builtin_amdgcn_wave_barrier();
-  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_wave_barrier))
+    __builtin_amdgcn_wave_barrier();
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
 }
 
 template <typename MaskT> __device__ inline void __syncwarp(MaskT mask) {
@@ -314,6 +323,7 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
                                         1 :
                                         (sizeof(T) + sizeof(unsigned int) - 1) / sizeof(unsigned int);
   static constexpr auto kMaskNumBits = sizeof(MaskT) * 8;
+  static constexpr auto alignment = alignof(T) <= 4? 4 : alignof(T);
   static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
                 "The mask must be a 64-bit integer. "
                 "Implicitly promoting a smaller integer is almost always an error.");
@@ -330,9 +340,13 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
   int lastLane = kMaskNumBits - leadingZeroes - 1;
   int maskNumBits;
   int numIterations;
+
   // unsigned int[N] is used in some cases, e.g. when T is wider than 32-bit
-  typename __hip_internal::conditional<isPrimitiveType && (sizeof(T) == 4 || sizeof(T) == 2), permuteType,
-                                       permuteType[kNumOfPermutes]>::type result, permuteResult;
+  using ResultType = typename __hip_internal::conditional<
+                       isPrimitiveType && (sizeof(T) == 4 || sizeof(T) == 2),
+                       permuteType, permuteType[kNumOfPermutes]>::type;
+  alignas(alignment) ResultType result;
+  alignas(alignment) ResultType permuteResult;
   auto backwardPermute = [](int index, permuteType arg) {
     if constexpr (__hip_internal::is_floating_point<T>::value &&
                   sizeof(T) <= 4) {
@@ -372,7 +386,7 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
   if constexpr (isPrimitiveType && (sizeof(T) == 2 || sizeof(T) == 4)) { 
     result = val;
   } else {
-    __builtin_memcpy(result, &val, sizeof(result));
+    __builtin_memcpy(result, &val, sizeof(T));
   }
 
   // add the values from the lanes using a reduction tree (first the threads with even-numbered
@@ -465,7 +479,135 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
   }
 }
 
+// Compiler now provides builtins to optimized code for reduce device functions
+// Checking for one, they all were added at the same time.
+// Quite a lot of our work should be offloaded now, all we need to do is validations
+#if __has_builtin(__builtin_amdgcn_wave_reduce_add_u32)
+#define HIP_WARP_REDUCE_COMPILER_BUILTINS
+
+template <
+    typename MaskT, typename ValueT,
+    typename __hip_internal::enable_if<__hip_internal::is_same<ValueT, int>::value ||
+                                           __hip_internal::is_same<ValueT, unsigned int>::value,
+                                       int>::type = 0>
+static __device__ ValueT __reduce_add_sync_builtins_variant(MaskT mask, ValueT val) {
+  // Mask size checks
+  static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
+                "The mask must be a 64-bit integer. "
+                "Implicitly promoting a smaller integer is almost always an error.");
+
+  // Adjust mask for 32 warp size
+  __hip_adjust_mask_for_wave32(mask);
+
+  unsigned int ret{};
+  __hip_do_sync(ret, __builtin_amdgcn_wave_reduce_add_u32, mask, val, 0);
+  // the builtin is unsigned but it should work fine for signed as well
+  return static_cast<ValueT>(ret);
+}
+
+template <
+    typename MaskT, typename ValueT,
+    typename __hip_internal::enable_if<__hip_internal::is_same<ValueT, int>::value ||
+                                           __hip_internal::is_same<ValueT, unsigned int>::value,
+                                       int>::type = 0>
+static __device__ ValueT __reduce_min_sync_builtins_variant(MaskT mask, ValueT val) {
+  // Mask size checks
+  static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
+                "The mask must be a 64-bit integer. "
+                "Implicitly promoting a smaller integer is almost always an error.");
+
+  // Adjust mask for 32 warp size
+  __hip_adjust_mask_for_wave32(mask);
+
+  ValueT ret{};
+  if constexpr (__hip_internal::is_same<ValueT, int>::value) {
+    __hip_do_sync(ret, __builtin_amdgcn_wave_reduce_min_i32, mask, val, 0);
+  } else {
+    __hip_do_sync(ret, __builtin_amdgcn_wave_reduce_min_u32, mask, val, 0);
+  }
+  return ret;
+}
+
+template <
+    typename MaskT, typename ValueT,
+    typename __hip_internal::enable_if<__hip_internal::is_same<ValueT, int>::value ||
+                                           __hip_internal::is_same<ValueT, unsigned int>::value,
+                                       int>::type = 0>
+static __device__ ValueT __reduce_max_sync_builtins_variant(MaskT mask, ValueT val) {
+  // Mask size checks
+  static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
+                "The mask must be a 64-bit integer. "
+                "Implicitly promoting a smaller integer is almost always an error.");
+
+  // Adjust mask for 32 warp size
+  __hip_adjust_mask_for_wave32(mask);
+
+  ValueT ret{};
+  if constexpr (__hip_internal::is_same<ValueT, int>::value) {
+    __hip_do_sync(ret, __builtin_amdgcn_wave_reduce_max_i32, mask, val, 0);
+  } else {
+    __hip_do_sync(ret, __builtin_amdgcn_wave_reduce_max_u32, mask, val, 0);
+  }
+  return ret;
+}
+
+
+template <typename MaskT, typename ValueT,
+          typename __hip_internal::enable_if<__hip_internal::is_same<ValueT, unsigned int>::value,
+                                             int>::type = 0>
+static __device__ ValueT __reduce_and_sync_builtins_variant(MaskT mask, ValueT val) {
+  // Mask size checks
+  static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
+                "The mask must be a 64-bit integer. "
+                "Implicitly promoting a smaller integer is almost always an error.");
+
+  // Adjust mask for 32 warp size
+  __hip_adjust_mask_for_wave32(mask);
+
+  ValueT ret{};
+  __hip_do_sync(ret, __builtin_amdgcn_wave_reduce_and_b32, mask, val, 0);
+  return ret;
+}
+
+template <typename MaskT, typename ValueT,
+          typename __hip_internal::enable_if<__hip_internal::is_same<ValueT, unsigned int>::value,
+                                             int>::type = 0>
+static __device__ ValueT __reduce_or_sync_builtins_variant(MaskT mask, ValueT val) {
+  // Mask size checks
+  static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
+                "The mask must be a 64-bit integer. "
+                "Implicitly promoting a smaller integer is almost always an error.");
+
+  // Adjust mask for 32 warp size
+  __hip_adjust_mask_for_wave32(mask);
+
+  ValueT ret{};
+  __hip_do_sync(ret, __builtin_amdgcn_wave_reduce_or_b32, mask, val, 0);
+  return ret;
+}
+
+template <typename MaskT, typename ValueT,
+          typename __hip_internal::enable_if<__hip_internal::is_same<ValueT, unsigned int>::value,
+                                             int>::type = 0>
+static __device__ ValueT __reduce_xor_sync_builtins_variant(MaskT mask, ValueT val) {
+  // Mask size checks
+  static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
+                "The mask must be a 64-bit integer. "
+                "Implicitly promoting a smaller integer is almost always an error.");
+
+  // Adjust mask for 32 warp size
+  __hip_adjust_mask_for_wave32(mask);
+
+  ValueT ret{};
+  __hip_do_sync(ret, __builtin_amdgcn_wave_reduce_xor_b32, mask, val, 0);
+  return ret;
+}
+#endif
+
 template <typename MaskT> __device__ inline int __reduce_add_sync(MaskT mask, int val) {
+#if defined(HIP_WARP_REDUCE_COMPILER_BUILTINS)
+  return __reduce_add_sync_builtins_variant(mask, val);
+#else
   // although C++ has std::plus and other functors, we do not use them because
   // they are in the header <functional> and they were causing problems with hipRTC
   // at this time
@@ -473,68 +615,101 @@ template <typename MaskT> __device__ inline int __reduce_add_sync(MaskT mask, in
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_add_i32(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
+#endif
 }
 
 template <typename MaskT>
 __device__ inline unsigned int __reduce_add_sync(MaskT mask, unsigned int val) {
+#if defined(HIP_WARP_REDUCE_COMPILER_BUILTINS)
+  return __reduce_add_sync_builtins_variant(mask, val);
+#else
   auto op = [](decltype(val)& a, decltype(val)& b) { return a + b; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_add_u32(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
+#endif
 }
 
 template <typename MaskT> __device__ inline int __reduce_min_sync(MaskT mask, int val) {
+#if defined(HIP_WARP_REDUCE_COMPILER_BUILTINS)
+  return __reduce_min_sync_builtins_variant(mask, val);
+#else
   auto op = [](decltype(val) lhs, decltype(val) rhs) { return rhs < lhs ? rhs : lhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_min_i32(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
+#endif
 }
 
 template <typename MaskT>
 __device__ inline unsigned int __reduce_min_sync(MaskT mask, unsigned int val) {
+#if defined(HIP_WARP_REDUCE_COMPILER_BUILTINS)
+  return __reduce_min_sync_builtins_variant(mask, val);
+#else
   auto op = [](decltype(val) lhs, decltype(val) rhs) { return rhs < lhs ? rhs : lhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_min_u32(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
+#endif
 }
 
 template <typename MaskT> __device__ inline int __reduce_max_sync(MaskT mask, int val) {
+#if defined(HIP_WARP_REDUCE_COMPILER_BUILTINS)
+  return __reduce_max_sync_builtins_variant(mask, val);
+#else
   auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs < rhs ? rhs : lhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_max_i32(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
+#endif
 }
 
 template <typename MaskT>
 __device__ inline unsigned int __reduce_max_sync(MaskT mask, unsigned int val) {
+#if defined(HIP_WARP_REDUCE_COMPILER_BUILTINS)
+  return __reduce_max_sync_builtins_variant(mask, val);
+#else
   auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs < rhs ? rhs : lhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_max_u32(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
+#endif
 }
 
 template <typename MaskT>
 __device__ inline unsigned int __reduce_or_sync(MaskT mask, unsigned int val) {
+#if defined(HIP_WARP_REDUCE_COMPILER_BUILTINS)
+  return __reduce_or_sync_builtins_variant(mask, val);
+#else
   auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs | rhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_or_u32(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
+#endif
 }
 
 template <typename MaskT>
 __device__ inline unsigned int __reduce_and_sync(MaskT mask, unsigned int val) {
+#if defined(HIP_WARP_REDUCE_COMPILER_BUILTINS)
+  return __reduce_and_sync_builtins_variant(mask, val);
+#else
   auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs & rhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_and_u32(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
+#endif
 }
 
 template <typename MaskT>
 __device__ inline unsigned int __reduce_xor_sync(MaskT mask, unsigned int val) {
+#if defined(HIP_WARP_REDUCE_COMPILER_BUILTINS)
+  return __reduce_xor_sync_builtins_variant(mask, val);
+#else
   auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs ^ rhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_xor_u32(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
+#endif
 }
 
 #ifdef HIP_ENABLE_EXTRA_WARP_SYNC_TYPES
@@ -696,6 +871,10 @@ __device__ inline unsigned long long __reduce_xor_sync(MaskT mask, unsigned long
 #undef __hip_adjust_mask_for_wave32
 
 #endif  // HIP_ENABLE_EXTRA_WARP_SYNC_TYPES
+
+#if defined(HIP_WARP_REDUCE_COMPILER_BUILTINS)
+#undef HIP_WARP_REDUCE_COMPILER_BUILTINS
+#endif
 
 #pragma pop_macro("MAYBE_UNDEF")
 

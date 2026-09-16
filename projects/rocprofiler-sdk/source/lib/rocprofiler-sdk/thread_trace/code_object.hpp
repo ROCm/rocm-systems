@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "lib/rocprofiler-sdk-attach/table.h"
+
 #include <rocprofiler-sdk/fwd.h>
 
 #include <hsa/hsa_api_trace.h>
@@ -50,6 +52,9 @@ struct CodeobjCallbackRegistry
 
 void
 initialize(HsaApiTable* table);
+
+void
+initialize(RocAttachDispatchTable* table);
 
 void
 finalize();

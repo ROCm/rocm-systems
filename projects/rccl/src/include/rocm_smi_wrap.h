@@ -33,6 +33,6 @@ ncclResult_t rocm_smi_init();
 ncclResult_t rocm_smi_getNumDevice(uint32_t* num_devs);
 ncclResult_t rocm_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* pciBusId, size_t len);
 ncclResult_t rocm_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* deviceIndex);
-ncclResult_t rocm_smi_getLinkInfo(int srcDev, int dstDev, RSMI_IO_LINK_TYPE* rsmi_type, int *hops, int *count);
+ncclResult_t rocm_smi_getLinkInfo(int srcDev, int dstDev, RSMI_IO_LINK_TYPE* rsmi_type, int* hops, int* count);
 
 #endif

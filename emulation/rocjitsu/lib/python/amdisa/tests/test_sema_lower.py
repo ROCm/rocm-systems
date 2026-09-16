@@ -15,6 +15,11 @@ from amdisa.sema_ast import (
     SemaType,
 )
 from amdisa.codegen.execute.sema_lower import (
+    _INLINE_BINARY_OPS,
+    _INLINE_TERNARY_OPS,
+    _lower_apply_clamp,
+    _lower_apply_omod,
+    InlineBinaryOp,
     LoweringContext,
     OperandBinding,
     OperandMap,
@@ -25,6 +30,44 @@ from amdisa.codegen.execute.sema_lower import (
 _MRISA = os.environ.get('MRISA_PATH', os.path.expanduser('~/rocm-dev/mrisa'))
 SEMA_XML_PATH = os.path.join(_MRISA, 'amdgpu_isa_cdna4.semantics.xml')
 _HAS_SEMA_XML = os.path.isfile(SEMA_XML_PATH)
+
+
+@pytest.mark.parametrize(
+    'name', ['addc', 'subb', 'lshl1_add', 'lshl2_add', 'lshl3_add', 'lshl4_add']
+)
+def test_scc_writing_inline_operations_declare_their_effect(name):
+    inline_op = _INLINE_BINARY_OPS[name]
+    assert isinstance(inline_op, InlineBinaryOp)
+    assert inline_op.effects.writes_scc
+
+
+@pytest.mark.parametrize('name', ['addc', 'subb'])
+def test_scc_carry_inline_operations_declare_their_read(name):
+    inline_op = _INLINE_BINARY_OPS[name]
+    assert isinstance(inline_op, InlineBinaryOp)
+    assert inline_op.effects.reads_scc
+
+
+@pytest.mark.parametrize('name', ['lshl1_add', 'lshl2_add', 'lshl3_add', 'lshl4_add'])
+def test_scc_shift_add_inline_operations_do_not_read_scc(name):
+    inline_op = _INLINE_BINARY_OPS[name]
+    assert isinstance(inline_op, InlineBinaryOp)
+    assert not inline_op.effects.reads_scc
+
+
+def test_non_scc_inline_operation_has_no_scc_effect():
+    assert not isinstance(_INLINE_BINARY_OPS['add_co'], InlineBinaryOp)
+
+
+def test_packed_byte_inline_operations_match_isa_special_cases():
+    lerp = _INLINE_TERNARY_OPS['lerp_u8']
+    msad = _INLINE_TERNARY_OPS['msad_u8']
+    perm = _INLINE_TERNARY_OPS['perm']
+
+    assert '(ab + bb + round_up) >> 1' in lerp
+    assert 'if (reference != 0)' in msad
+    assert '(sel - 8) * 2 + 1' in perm
+    assert 'sel >= 13' in perm
 
 
 def _src(idx: int) -> SemaNode:
@@ -51,6 +94,24 @@ def _dst(idx: int) -> SemaNode:
 
 def _cast(inner: SemaNode, target: SemaType) -> SemaNode:
     return SemaNode(SemaNodeKind.CAST, ty=target, cast_target=target, children=(inner,))
+
+
+def _cvt_f32_fp8_assignment() -> SemaNode:
+    return SemaNode(
+        SemaNodeKind.ASSIGN,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name='tmp'),
+            SemaNode(
+                SemaNodeKind.CALL,
+                call_name='cvt_f32_fp8',
+                ty=SemaType.U32,
+                children=(
+                    SemaNode(SemaNodeKind.ID, id_name='cvt_f32_fp8'),
+                    SemaNode(SemaNodeKind.LIT, lit_value='0x40', ty=SemaType.U32),
+                ),
+            ),
+        ),
+    )
 
 
 class TestLowerEmptyBlock:
@@ -99,6 +160,57 @@ class TestLowerScalarAdd:
 
 
 class TestLowerVectorAdd:
+    def test_apply_clamp_uses_architecture_mode_policy(self):
+        node = SemaNode(
+            SemaNodeKind.CALL,
+            call_name='apply_clamp',
+            ty=SemaType.F32,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='apply_clamp'),
+                SemaNode(SemaNodeKind.LIT, lit_value='0.5', ty=SemaType.F32),
+            ),
+        )
+
+        result = _lower_apply_clamp(node, LoweringContext(exec_model=ExecModel.VECTOR))
+
+        assert 'amdgpu::clamp_floating_result(v, wf)' in result
+        assert 'std::clamp' not in result
+
+    @pytest.mark.parametrize(
+        ('result_type', 'expected_helper', 'expected_denorm_mode'),
+        [
+            (SemaType.F32, 'effective_omod', 'fp_denorm_mode_f32'),
+            (SemaType.F16, 'effective_f16_omod', 'fp_denorm_mode_f16_f64'),
+            (SemaType.BF16, 'effective_omod', 'fp_denorm_mode_f16_f64'),
+            (SemaType.F64, 'effective_omod', 'fp_denorm_mode_f16_f64'),
+        ],
+    )
+    def test_apply_omod_uses_result_type_mode_policy(
+        self,
+        result_type: SemaType,
+        expected_helper: str,
+        expected_denorm_mode: str,
+    ) -> None:
+        node = SemaNode(
+            SemaNodeKind.CALL,
+            call_name='apply_omod',
+            ty=result_type,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='apply_omod'),
+                SemaNode(SemaNodeKind.LIT, lit_value='0.5', ty=result_type),
+            ),
+        )
+
+        result = _lower_apply_omod(node, LoweringContext(exec_model=ExecModel.VECTOR))
+
+        assert f'amdgpu::fp_mode::{expected_helper}' in result
+        assert expected_denorm_mode in result
+        assert 'const uint32_t effective_omod' in result
+        assert 'finalize_omod_' in result
+        assert 'if (inst_.omod ==' not in result
+        if result_type == SemaType.F16:
+            assert 'false, inst_.omod' in result
+
     def test_vector_add_f32(self):
         body = SemaNode(
             SemaNodeKind.ASSIGN,
@@ -118,8 +230,8 @@ class TestLowerVectorAdd:
         result = lower_sema_block(block)
         assert 'for (uint32_t lane = 0' in result
         assert 'wf.exec()' in result
-        assert 'read_lane(wf, lane)' in result
-        assert 'write_lane(wf, lane' in result
+        assert 'read_lane(inst.src0, lane)' in result
+        assert 'write_lane(inst.dst0, lane' in result
 
     def test_vector_fma(self):
         body = SemaNode(
@@ -141,7 +253,7 @@ class TestLowerVectorAdd:
         result = lower_sema_block(block)
         assert 'std::fma(' in result
 
-    def test_vector_explicit_vcc_dst_preserves_high_sgpr_on_wave32(self):
+    def test_vector_explicit_vcc_dst_uses_wave_mask_helper(self):
         body = SemaNode(
             SemaNodeKind.ASSIGN,
             children=(
@@ -174,9 +286,17 @@ class TestLowerVectorAdd:
 
         result = lower_sema_block(block, ctx)
 
-        assert 'if (wf.wf_size() <= 32)' in result
-        assert 'sdst.write_scalar(wf, static_cast<uint32_t>(vcc))' in result
-        assert 'sdst.write_scalar64(wf, vcc)' in result
+        assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc);' in result
+
+        callback_ctx = LoweringContext(
+            exec_model=ExecModel.VECTOR,
+            operand_map=omap,
+            vcc_dst='sdst',
+            mask_result_writer='commit_result',
+        )
+        callback_result = lower_sema_block(block, callback_ctx)
+        assert 'commit_result(vcc);' in callback_result
+        assert 'write_wave_mask_scalar' not in callback_result
 
     def test_vector_block_can_write_scalar_destination(self):
         body = SemaNode(
@@ -197,8 +317,8 @@ class TestLowerVectorAdd:
 
         assert 'if (exec != 0)' not in result
         assert 'for (uint32_t lane = 0' in result
-        assert 'src0.read_scalar(wf)' in result
-        assert 'vdst.write_scalar(wf' in result
+        assert 'amdgpu::RegisterAccess(wf).read_scalar(src0)' in result
+        assert 'amdgpu::RegisterAccess(wf).write_scalar(vdst,' in result
         assert 'vdst.write_lane' not in result
 
     def test_vector_sgpr_once_avoids_repeated_aliased_writes(self):
@@ -225,8 +345,8 @@ class TestLowerVectorAdd:
         assert 'uint64_t exec = wf.exec();' in result
         assert 'if (exec != 0)' in result
         assert 'for (uint32_t lane = 0' not in result
-        assert 'src0.read_scalar(wf)' in result
-        assert 'vdst.write_scalar(wf' in result
+        assert 'amdgpu::RegisterAccess(wf).read_scalar(src0)' in result
+        assert 'amdgpu::RegisterAccess(wf).write_scalar(vdst,' in result
 
     def test_less_greater_compare_reads_operands_once(self):
         s0 = _cast(_src(0), SemaType.F32)
@@ -264,8 +384,8 @@ class TestLowerVectorAdd:
         )
 
         assert 'return (a < b) || (a > b);' in result
-        assert result.count('src0.read_lane(wf, lane)') == 1
-        assert result.count('src1.read_lane(wf, lane)') == 1
+        assert result.count('amdgpu::RegisterAccess(wf).read_lane(src0, lane)') == 1
+        assert result.count('amdgpu::RegisterAccess(wf).read_lane(src1, lane)') == 1
 
     def test_zero_initialized_vcc_mask_omits_false_lane_clear(self):
         body = SemaNode(
@@ -325,24 +445,17 @@ class TestLowerVectorAdd:
             exec_model=ExecModel.VECTOR,
             operand_map=omap,
             true16_dst_select='inst_.pad_16',
-            true16_dst_reg='inst_.vdst & 0x7fu',
         )
 
         result = lower_sema_block(block, ctx)
 
-        assert (
-            'wf.cu().read_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane)'
-            in result
-        )
-        assert (
-            'wf.cu().write_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane, merged)'
-            in result
-        )
+        assert 'amdgpu::RegisterAccess(wf).read_lane(vdst, lane)' in result
+        assert 'amdgpu::RegisterAccess(wf).write_lane(vdst, lane, merged)' in result
         assert '0x0000ffffu' in result
         assert '0xffff0000u' in result
         assert 'inst_.pad_16' in result
 
-    def test_true16_source_select_uses_raw_source(self):
+    def test_true16_source_uses_logical_operand(self):
         u16 = SemaType('U', 16)
         body = SemaNode(
             SemaNodeKind.ASSIGN,
@@ -359,15 +472,13 @@ class TestLowerVectorAdd:
         ctx = LoweringContext(
             exec_model=ExecModel.VECTOR,
             operand_map=omap,
-            true16_dst_select='inst_.opsel & 0x2u',
-            true16_src_select='inst_.opsel & 0x1u',
-            true16_src_raw='src0_raw',
         )
 
         result = lower_sema_block(block, ctx)
 
-        assert '(src0_raw >> 16)' in result
-        assert '(static_cast<uint16_t>(src0.read_lane(wf, lane)) >> 16)' not in result
+        assert 'amdgpu::RegisterAccess(wf).read_lane(src0, lane)' in result
+        assert 'amdgpu::RegisterAccess(wf).write_lane(vdst, lane' in result
+        assert 'read_vgpr' not in result
 
     def test_true16_source_selects_are_per_operand(self):
         u16 = SemaType('U', 16)
@@ -401,15 +512,16 @@ class TestLowerVectorAdd:
                 0: 'inst_.opsel & 0x1u',
                 1: 'inst_.opsel & 0x2u',
             },
+            true16_vop3_opsel='inst_.opsel',
         )
 
         result = lower_sema_block(block, ctx)
 
-        assert '((inst_.opsel & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)' in result
-        assert '((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)' in result
+        assert 'read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)' in result
+        assert 'read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1)' in result
         assert (
             '::rocjitsu::amdgpu::write_vop3_true16_dst('
-            'vdst, wf, lane, inst_.opsel & 0x8u, src_half);' in result
+            'vdst, wf, lane, inst_.opsel, src_half, true);' in result
         )
 
     def test_true16_cndmask_keeps_selector_scalar(self):
@@ -450,17 +562,18 @@ class TestLowerVectorAdd:
                 0: 'inst_.opsel & 0x1u',
                 1: 'inst_.opsel & 0x2u',
             },
-            vcc_read='src2.read_scalar64(wf)',
+            true16_vop3_opsel='inst_.opsel',
+            vcc_read='amdgpu::RegisterAccess(wf).read_scalar64(src2)',
         )
 
         result = lower_sema_block(block, ctx)
 
-        assert 'src2.read_scalar64(wf)' in result
+        assert 'amdgpu::RegisterAccess(wf).read_scalar64(src2)' in result
         assert 'src2.read_lane' not in result
-        assert '((inst_.opsel & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)' in result
-        assert '((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)' in result
+        assert 'read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)' in result
+        assert 'read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1)' in result
         assert (
-            'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel & 0x8u, src_half);'
+            'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel, src_half, true);'
             in result
         )
 
@@ -486,6 +599,7 @@ class TestLowerVectorAdd:
             operand_map=omap,
             true16_dst_select='inst_.opsel & 0x8u',
             true16_src_selects={0: 'inst_.opsel & 0x1u'},
+            true16_vop3_opsel='inst_.opsel',
         )
 
         result = lower_sema_block(block, ctx)
@@ -496,7 +610,7 @@ class TestLowerVectorAdd:
             in result
         )
         assert (
-            'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel & 0x8u, src_half);'
+            'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel, src_half, true);'
             in result
         )
         assert 'std::cos' in result
@@ -534,15 +648,13 @@ class TestLowerVectorAdd:
             exec_model=ExecModel.VECTOR,
             operand_map=omap,
             true16_dst_select='inst_.opsel & 0x8u',
-            true16_dst_reg='inst_.vdst & 0x7fu',
         )
 
         result = lower_sema_block(block, ctx)
 
         assert (
             '((inst_.opsel & 0x8u) != 0 ? '
-            '(wf.cu().read_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane) >> 16)'
-            in result
+            '(amdgpu::RegisterAccess(wf).read_lane(vdst, lane) >> 16)' in result
         )
 
 
@@ -651,6 +763,61 @@ class TestLowerControlFlow:
         block = SemaBlock('TEST', ExecModel.SCALAR, body)
         result = lower_sema_block(block)
         assert 'for (' in result
+
+    @pytest.mark.parametrize('control', ['if', 'for', 'while'])
+    def test_nested_control_flow_preserves_arch_name(self, control):
+        nested_body = _cvt_f32_fp8_assignment()
+        if control == 'if':
+            body = SemaNode(
+                SemaNodeKind.IF,
+                children=(
+                    SemaNode(SemaNodeKind.ID, id_name='SCC', ty=SemaType.U1),
+                    nested_body,
+                ),
+            )
+        elif control == 'for':
+            body = SemaNode(
+                SemaNodeKind.FOR,
+                children=(
+                    SemaNode(
+                        SemaNodeKind.ASSIGN,
+                        children=(
+                            SemaNode(SemaNodeKind.ID, id_name='i'),
+                            SemaNode(SemaNodeKind.LIT, lit_value='0', ty=SemaType.U32),
+                        ),
+                    ),
+                    SemaNode(
+                        SemaNodeKind.LT,
+                        children=(
+                            SemaNode(SemaNodeKind.ID, id_name='i'),
+                            SemaNode(SemaNodeKind.LIT, lit_value='1', ty=SemaType.U32),
+                        ),
+                    ),
+                    SemaNode(
+                        SemaNodeKind.ADD_ASSIGN,
+                        children=(
+                            SemaNode(SemaNodeKind.ID, id_name='i'),
+                            SemaNode(SemaNodeKind.LIT, lit_value='1', ty=SemaType.U32),
+                        ),
+                    ),
+                    nested_body,
+                ),
+            )
+        else:
+            body = SemaNode(
+                SemaNodeKind.WHILE,
+                children=(
+                    SemaNode(SemaNodeKind.ID, id_name='SCC', ty=SemaType.U1),
+                    nested_body,
+                ),
+            )
+        block = SemaBlock('TEST', ExecModel.SCALAR, body)
+        ctx = LoweringContext(exec_model=ExecModel.SCALAR, arch_name='cdna3')
+
+        result = lower_sema_block(block, ctx)
+
+        assert 'util::fp8_e4m3_fnuz_to_f32' in result
+        assert 'util::fp8_e4m3_to_f32' not in result
 
 
 class TestLowerContextIds:

@@ -1,7 +1,7 @@
 .. meta::
    :description: ROCm Compute Profiler installation and deployment
    :keywords: rocm, comp, compute, perf, rocprofiler-compute, Instinct, accelerator, AMD,
-              install, deploy, client, configuration, modulefiles
+              install, deploy, client, configuration, modulefiles, sanitizer
 
 *****************************************
 Install ROCm Compute Profiler from source
@@ -11,18 +11,20 @@ The core ROCm Compute Profiler application requires the following basic software
 dependencies. As of ROCm 6.2, the core ROCm Compute Profiler is included with your ROCm
 installation.
 
-* Python ``>= 3.8``
+* Python (see the Python version support table in :doc:`/install/quickstart`)
 * CMake ``>= 3.19``
 * ROCm ``>= 5.7.1``
 
 .. note::
 
    ROCm Compute Profiler will use the first version of ``python3`` found in your system's
-   ``PATH``. If the default version of Python is older than 3.8, you may need to
-   update your system's ``PATH`` to point to a newer version.
+   ``PATH``. If that version is too old for the mode you want to run, update your
+   system's ``PATH`` to point to a newer version.
 
-ROCm Compute Profiler depends on a number of Python packages documented in the top-level
-``requirements.txt`` file. Install these *before* configuring ROCm Compute Profiler.
+Analyze mode depends on a number of Python packages documented in the top-level
+``requirements.txt`` file. Profile mode uses only the standard library and needs
+none of them. Install these *before* configuring ROCm Compute Profiler, into a
+virtual environment separate from the one your profiled application uses.
 
 .. tip::
 
@@ -36,9 +38,6 @@ ROCm Compute Profiler depends on a number of Python packages documented in the t
 
        * - ``requirements-test.txt``
          - Python packages required to run ROCm Compute Profiler's CI suite using PyTest.
-
-   When building with ``ENABLE_TESTS=ON``, ``TORCH_TRACE_PYTHON`` selects the Python
-   interpreter for the ``roctx_recordfn`` test build.
 
 The recommended procedure for ROCm Compute Profiler usage is to install into a shared file
 system so that multiple users can access the final installation. The
@@ -74,23 +73,13 @@ follows.
       - Specifies the path to the ROCprofiler-SDK CMake package configuration directory used to build the rocprofiler-compute counter collection tool.
         This directory should contain ``rocprofiler-sdkConfig.cmake`` (for example, ``<rocprofiler-sdk-install-path>/lib/cmake/rocprofiler-sdk``).
 
-    * - ``STANDALONEBINARY_EXTRACT_DIR``
-      - Specifies an optional temporary path to be used for extraction by the ROCm Compute Profiler standalone binary.
-
-    * - ``STANDALONEBINARY``
-      - Should be ON to enable the build of a standalone binary for ROCm Compute Profiler.
-
     * - ``TEST_FROM_INSTALL``
       - Should be ON to enable testing from the installation location without dependency on the source directory.
 
-    * - ``SKIP_NATIVE_TOOL_BUILD``
-      - Should be ON to skip building the native profiling tool. When enabled, the native tool will be compiled at runtime instead of build time. This is useful when ROCprofiler-SDK is not available during build time.
-
     * - ``ENABLE_SANITIZER``
       - Builds with sanitizer instrumentation for development.
-        One of ``OFF`` (default), ``ASAN``, ``HOST_ASAN``, or ``TSAN``. See
-        :ref:`sanitizer builds <source-install-sanitizers>`. Cannot be combined with
-        ``STANDALONEBINARY=ON``.
+        One of ``OFF`` (default), ``ASAN``, ``HOST_ASAN``, ``TSAN``, or ``UBSAN``. See
+        :ref:`sanitizer builds <source-install-sanitizers>`.
 
 .. _core-install-steps:
 
@@ -180,6 +169,9 @@ off by default; set ``ENABLE_SANITIZER`` at configure time to one of the followi
     * - ``TSAN``
       - ThreadSanitizer for data-race detection.
 
+    * - ``UBSAN``
+      - UndefinedBehaviorSanitizer on host code only.
+
 Add ``-DENABLE_SANITIZER=`` to the configure step. For example, to build with
 AddressSanitizer.
 
@@ -193,8 +185,6 @@ AddressSanitizer.
               -DENABLE_SANITIZER=ASAN ..
 
 .. note::
-
-   ``ENABLE_SANITIZER`` cannot be combined with ``STANDALONEBINARY=ON``.
 
    For device-side instrumentation with ``ASAN`` or ``TSAN`` on ``gfx942`` or
    ``gfx950``, pass ``-DGPU_TARGETS=...`` so the targets are rewritten to

@@ -72,6 +72,12 @@ class  IScreen;
 struct PalPlatformSettings;
 enum class PalEvent : uint32;
 
+namespace CrashAnalysis
+{
+    struct MarkerState;
+    class IEventCache;
+}
+
 /// Maximum number of Devices possibly attached to a system.
 constexpr uint32 MaxDevices = 16;
 /// Maximum number of Screens possibly attached to a Device.
@@ -162,39 +168,6 @@ enum class ApplicationProfileClient : uint32
     Count
 };
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 948
-/// Describes a primary surface view
-///
-/// @see IPlatform::GetPrimaryLayout()
-struct PrimaryViewInfo
-{
-    Rect    rect;                       ///< Rectangle defining one portion of a primary surface layout.
-    uint32  numIndices;                 ///< The size of the gpuIndex array.
-    uint32  gpuIndex[MaxDevices];       ///< The devices in a linked adapter chain that can use this view.
-};
-
-/// Specifies output arguments for IPlatform::GetPrimaryLayout(), returning information about the layout of the primary
-/// surface.
-///
-/// @see IPlatform::GetPrimaryLayout()
-struct GetPrimaryLayoutOutput
-{
-    uint32                numViews;         ///< The number of views in the pViewInfoList array.
-    PrimaryViewInfo*      pViewInfoList;    ///< The primary surface is composed of these views.
-    union
-    {
-        struct
-        {
-            uint32 disablePartialCopy : 1;  ///< If this flag is not set, the client can transfer the specific views of
-                                            ///  primary surface to peer GPUs. Otherwise, the client must transfer the
-                                            ///  whole primary surface to peer GPUs.
-            uint32 reserved           : 31; ///< Reserved for future use.
-        };
-        uint32 u32All;  ///< Flags packed as 32-bit uint.
-    } flags;            ///< specifies primary surface layout flags.
-};
-#endif
-
 /// Specifies TurboSync control mode
 enum class TurboSyncControlMode : uint32
 {
@@ -264,6 +237,25 @@ public:
     virtual Result EnumerateDevices(
         uint32*    pDeviceCount,
         IDevice*   pDevices[MaxDevices]) = 0;
+
+    /// Creates a PAL null-device for the specified ASIC revision.
+    ///
+    /// Passing AsicRevision::Unknown will create a null device for the default ASIC revision, maintaining backward
+    /// compatibility with the legacy NullGpuId::Default behavior.
+    ///
+    /// The platform owns the returned device and destroys it when the platform is destroyed.
+    ///
+    /// @param [in]  asicRevision  The ASIC revision to create a null device for, or Unknown for the default.
+    /// @param [out] ppDevice      Pointer to receive the created null device.
+    ///
+    /// @returns Success if the null device was created or already exists.
+    ///          ErrorInvalidPointer if ppDevice is null.
+    ///          ErrorInvalidValue if the asicRevision is out of range.
+    ///          ErrorInitializationFailed if device creation failed.
+    ///          Unsupported if null device support is not compiled in.
+    virtual Result CreateNullDevice(
+        AsicRevision asicRevision,
+        IDevice**    ppDevice) = 0;
 
     /// Returns the storage size of the object implementing IScreen.
     ///
@@ -411,6 +403,14 @@ public:
     /// @returns A valid EventServer pointer or nullptr if not valid.
     virtual DevDriver::EventProtocol::EventServer* GetEventServer() = 0;
 
+    /// Safely shuts down the DevDriver infrastructure (event providers, logger, RPC services). Only call this
+    /// when a GPU debug configuration is invalid or was never applied and DevDriver must be disabled before
+    /// normal device operation.
+    ///
+    /// @returns Success if DevDriver infrastructure was successfully shut down, ErrorUnavailable if
+    ///          DevDriver server was not initialized or already torn down.
+    virtual Result ForceDevDriverShutdown() = 0;
+
 #if PAL_BUILD_RDF
     /// Returns a pointer to the current trace session if one was created during startup
     ///
@@ -454,6 +454,16 @@ public:
     /// @returns True if crash analysis is enabled, false otherwise.
     virtual bool IsCrashAnalysisModeEnabled() const = 0;
 
+    /// @brief Dumps all crash-analysis data from one command buffer to the DevDriver server for delivery to
+    ///        external tools (e.g. RGD). The caller iterates its own pending command buffers and calls this
+    ///        once per buffer.
+    ///
+    /// @param [in] markerState  GPU-resident marker snapshot for this command buffer.
+    /// @param [in] pEventCache  Cached execution-marker events for this command buffer. May be null.
+    virtual void DumpCrashAnalysisData(
+        const CrashAnalysis::MarkerState& markerState,
+        const CrashAnalysis::IEventCache* pEventCache) = 0;
+
     /// Indicates whether the driver has been signaled to enable Raytracing Shader Data Tokens.
     ///
     /// @returns True if Raytracing Shader Data Tokens is enabled, false otherwise.
@@ -463,30 +473,6 @@ public:
     ///
     /// @returns A reference to a PalPlatformSettings structure.
     virtual const PalPlatformSettings& PlatformSettings() const = 0;
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 948
-    /// Get primary surface layout based upon VidPnSource provided by client.
-    ///
-    /// This function is used by client to query the layout of the primary surface. The layout describes how primary
-    /// surface is composed with a set of views. Each view provides the rectangle of the surface area and the GPUs
-    /// this surface area will be displayed on.
-    /// Client should make first call pass in pPrimaryLayoutOutput->pViewInfoList as NULL to query the number of views
-    /// this primary surface has.
-    /// Client then based on pPrimaryLayoutOutput->numViews, allocates the buffer for pViewInfoList. And client then
-    /// makes the escape call again to query the actual view information.
-    ///
-    /// @param [in]      vidPnSourceId          VidPnSource ID that's associated to a primary surface.
-    /// @param [in, out] pPrimaryLayoutOutput   Primary surface layout output arguments.
-    ///
-    /// @returns Success if the display layout on given vidPnSourceId was successfully queried.
-    ///          Otherwise, one of the following errors may be returned:
-    ///          + ErrorInvalidValue if pPrimaryLayoutOutput is invalid.
-    ///          + ErrorUnavailable if no implementation on current platform.
-    ///          + ErrorOutOfMemory if there is not enough system memory.
-    inline Result GetPrimaryLayout(
-        uint32                  vidPnSourceId,
-        GetPrimaryLayoutOutput* pPrimaryLayoutOutput) { return Result::ErrorUnavailable; }
-#endif
 
     /// Calls TurboSyncControl escape to control TurboSync on specific vidPnSourceId.
     ///

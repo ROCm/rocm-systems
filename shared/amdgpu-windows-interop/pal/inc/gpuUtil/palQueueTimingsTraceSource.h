@@ -45,20 +45,21 @@ namespace TraceChunk
 {
 
 /// "QueueInfo" RDF chunk identifier & version
-constexpr char        QueueInfoChunkId[TextIdentifierSize] = "QueueInfo";
-constexpr Pal::uint32 QueueInfoChunkVersion                = 1;
+constexpr TraceChunkId QueueInfoChunkId      = TraceChunkId("QueueInfo");
+constexpr Pal::uint32  QueueInfoChunkVersion = 1;
 
 /// Enum describing logical queue types
 enum class QueueType : Pal::uint8
 {
-    Unknown        = 0,
-    Universal      = 1,
-    Compute        = 2,
-    Dma            = 3,
-    Encode         = 4,
-    Decode         = 5,
-    Security       = 6,
-    VideoProcessor = 7
+    Unknown          = 0,
+    Universal        = 1,
+    Compute          = 2,
+    Dma              = 3,
+    Encode           = 4,
+    Decode           = 5,
+    Security         = 6,
+    VideoProcessor   = 7,
+    MotionEstimation = 8,
 };
 
 /// Enum describing hardware engine types
@@ -74,7 +75,8 @@ enum class HwEngineType : Pal::uint8
     HighPriorityUniversal = 7,
     HighPriorityGraphics  = 8,
     Security              = 9,
-    Vpe                   = 10
+    Vpe                   = 10,
+    MotionEstimation      = 11,
 };
 
 /// Structure describing a queue's properties
@@ -91,8 +93,8 @@ struct QueueInfo
 // ------------------------------------------------------------------------------------------- //
 
 /// "QueueEvent" RDF chunk identifier & version
-constexpr char        QueueEventChunkId[TextIdentifierSize] = "QueueEvent";
-constexpr Pal::uint32 QueueEventChunkVersion                = 1;
+constexpr TraceChunkId QueueEventChunkId      = TraceChunkId("QueueEvent");
+constexpr Pal::uint32  QueueEventChunkVersion = 1;
 
 /// The type of queue-level timings event
 enum class QueueEventType : Pal::uint32
@@ -100,7 +102,8 @@ enum class QueueEventType : Pal::uint32
     CmdBufSubmit    = 0,
     SignalSemaphore = 1,
     WaitSemaphore   = 2,
-    Present         = 3
+    Present         = 3,
+    Unknown         = 0xFF,
 };
 
 /// Structure describing a queue-level timings event
@@ -194,18 +197,8 @@ public:
 
     virtual void OnTraceAccepted(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override;
     virtual void OnTraceBegin(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override { };
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 939
-    virtual void OnPostambleEnd(
-        Pal::uint32      gpuIndex,
-        Pal::ICmdBuffer* pCmdBuf) override;
-    virtual void OnTraceEnd(
-        Pal::uint32      gpuIndex,
-        Pal::ICmdBuffer* pCmdBuf) override {};
-#else
-    virtual void OnTraceEnd(
-        Pal::uint32      gpuIndex,
-        Pal::ICmdBuffer* pCmdBuf) override;
-#endif
+    virtual void OnPostambleEnd(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override;
+    virtual void OnTraceEnd(Pal::uint32 gpuIndex, Pal::ICmdBuffer* pCmdBuf) override {};
     virtual void OnTraceFinished() override;
 
     virtual const char* GetName() const override { return QueueTimingsTraceSourceName; }

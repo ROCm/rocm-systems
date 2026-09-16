@@ -69,14 +69,14 @@ rocprofiler_register_iterate_registration_callback(rocprofiler_register_registra
 }  // namespace
 
 std::optional<runtime_registration_vec_t>
-get_runtime_registrations()
+get_runtime_registrations(void* handle)
 {
     auto _data = std::vector<rocprofiler_runtime_registration_info_t>{};
 
     // Step 1: Get the rocprofiler_register_iterate_registration_info function
     // Use dlsym(nullptr, ...) since rocprofiler-register should already be loaded
     auto* iterate_info_fn = reinterpret_cast<rocprofiler_register_iterate_registration_info_fn_t>(
-        dlsym(nullptr, "rocprofiler_register_iterate_registration_info"));
+        dlsym(handle, "rocprofiler_register_iterate_registration_info"));
 
     if(!iterate_info_fn) return std::nullopt;
 

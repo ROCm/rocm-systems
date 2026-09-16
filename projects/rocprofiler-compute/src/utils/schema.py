@@ -3,9 +3,11 @@
 
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 import pandas as pd
+
+from membw_analysis.models import MemBwAnalysisResult
 
 
 @dataclass
@@ -43,14 +45,15 @@ class Workload:
     filter_kernel_ids: list[int] = field(default_factory=list)
     filter_gpu_ids: list[int] = field(default_factory=list)
     filter_dispatch_ids: list[int] = field(default_factory=list)
-    filter_nodes: list[str] = field(default_factory=list)
     avail_ips: list[int] = field(default_factory=list)
     roofline_peaks: pd.DataFrame = field(default_factory=pd.DataFrame)
     roofline_metrics: dict[int, dict[str, Any]] = field(default_factory=dict)
     path: str = field(default_factory=str)
     filter_top_n: str = field(default_factory=str)
-    matched_torch_trace_df: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # Matched ML API trace rows keyed by backend, populated by operator filters.
+    matched_ml_api_trace_dfs: dict[str, pd.DataFrame] = field(default_factory=dict)
+    membw_result: Optional[MemBwAnalysisResult] = None
 
 
-# The prefix of raw pmc_perf.csv
+# Stem of the merged counter intermediate; csv_compression owns the suffix.
 PMC_PERF_FILE_PREFIX = "pmc_perf"

@@ -63,10 +63,10 @@ The matrix is the full cross product of the following dimensions.
 
 ### Plugins
 
-| Value              | Description                     |
-| ------------------ | ------------------------------- |
-| `none`             | No emulator plugins.            |
-| `hazard-detection` | Memory-hazard detection plugin. |
+| Value  | Description                                |
+| ------ | ------------------------------------------ |
+| `none` | No emulator plugins.                       |
+| `race` | Rocjitsu's data-race detection plugin.     |
 
 ## Skip policy
 
@@ -82,8 +82,8 @@ The reason is recorded in the test output. The following rules apply:
 * **`rocjitsu` without its KMD library** — the software emulator is
   skipped when `mirage` reports it as not installed (its KMD library
   could not be located by mirage's own discovery).
-* **`hazard-detection` when unavailable** — skipped when the active
-  backend does not advertise the plugin.
+* **`race` when unavailable** — skipped when the selected backend does
+  not advertise the plugin.
 
 The suite asserts that at least one combination runs whenever the
 software emulator is installed, so an environment misconfiguration cannot
@@ -101,8 +101,9 @@ cargo test --test matrix_e2e -- --nocapture
 summary line (`N ran, M skipped, T total`).
 
 The `rocjitsu` rows run whenever `mirage` discovers its KMD library; see
-[`building.md`](../docs/building.md) for the discovery order (a sibling
-monorepo build, `$ROCM_HOME/lib`, or `$(rocm-sdk path --root)/lib`).
+[`building.md`](../docs/building.md) for the discovery order (a
+`<prefix>/lib` beside the test binary, a sibling monorepo build,
+`$ROCM_HOME/lib`, or `$(rocm-sdk path --root)/lib` — in that order).
 
 The containerized dimensions (`podman`, `docker`) are driven through a
 hermetic mock provider — a small shell script standing in for the

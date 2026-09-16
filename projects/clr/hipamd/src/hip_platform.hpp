@@ -11,6 +11,8 @@
 #include "device/device.hpp"
 #include "hip_code_object.hpp"
 
+#include <unordered_set>
+
 namespace hip_impl {
 
 hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
@@ -26,7 +28,24 @@ class PlatformState {
   // Dynamic Code Objects functions
   hipError_t LoadModule(hipModule_t* module, const char* fname, const void* image = nullptr);
   hipError_t UnloadModule(hipModule_t hmod);
-  bool IsValidDynFunc(const void* hfunc);
+
+  //! Tracks kernel handles from creation to release, so IsValidFuncHandle() can
+  //! reject a pointer that never came from the runtime.
+  void RegisterFuncHandle(const void* hfunc) {
+    std::scoped_lock lock(funcHandleLock_);
+    funcHandles_.insert(hfunc);
+  }
+
+  void UnregisterFuncHandle(const void* hfunc) {
+    std::scoped_lock lock(funcHandleLock_);
+    funcHandles_.erase(hfunc);
+  }
+
+  bool IsValidFuncHandle(const void* hfunc) {
+    std::scoped_lock lock(funcHandleLock_);
+    return funcHandles_.find(hfunc) != funcHandles_.end();
+  }
+
   hipError_t GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod, const char* func_name);
   hipError_t GetFuncCount(unsigned int* count, hipModule_t hmod);
   hipError_t GetDynGlobalVar(const char* hostVar, hipModule_t hmod, hipDeviceptr_t* dev_ptr,
@@ -97,6 +116,8 @@ class PlatformState {
 
   //! Dynamic Code Object map, keyin module to get the corresponding object
   std::unordered_map<hipModule_t, hip::DynCO*> dynCO_map_;
+  std::mutex funcHandleLock_;
+  std::unordered_set<const void*> funcHandles_;
   hip::StatCO statCO_;              //!< Static Code object var
   bool initialized_{false};         //!< Platform initialization state
   //! Texture reference map: texRef -> (module, name)

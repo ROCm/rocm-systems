@@ -24,7 +24,6 @@ from .types import (
     SHF_ALLOC,
     SHT_NOBITS,
     SHT_NULL,
-    R_X86_64_RELATIVE,
     round_up_to_page,
     page_align_offset,
 )
@@ -135,20 +134,21 @@ def map_section_to_load(
     # first non-alloc section instead.  All subsequent sh_offset / p_offset
     # values are shifted automatically by insert_bytes_at().
     section_offset = section.header.sh_offset
-    vaddr_mod = vaddr % PAGE_SIZE
+    page_size = surgery.page_size
+    vaddr_mod = vaddr % page_size
     non_alloc_split = _first_non_alloc_file_offset(surgery)
 
     new_offset = section_offset
     if non_alloc_split is not None and section_offset >= non_alloc_split:
         # ASAN / debug-info build: section content landed after non-alloc data.
         # Compute an insert point that satisfies mmap alignment:
-        #   (insert_offset % PAGE_SIZE) == (vaddr % PAGE_SIZE)
+        #   (insert_offset % page_size) == (vaddr % page_size)
         # We choose the smallest offset >= non_alloc_split with this property.
-        insert_offset = page_align_offset(non_alloc_split, vaddr)
+        insert_offset = page_align_offset(non_alloc_split, vaddr, page_size)
         if insert_offset < non_alloc_split:
             # page_align_offset can return a value < non_alloc_split when
             # non_alloc_split is already past the desired residue — advance one page.
-            insert_offset += PAGE_SIZE
+            insert_offset += page_size
         padding = insert_offset - non_alloc_split
         section_data = surgery.get_section_content(section)
         # Splice: padding bytes + section content inserted at insert_offset.
@@ -160,10 +160,10 @@ def map_section_to_load(
             f"insert {section_name} before non-alloc sections (ASAN layout fix)",
         )
         new_offset = insert_offset
-    elif (section_offset % PAGE_SIZE) != vaddr_mod:
+    elif (section_offset % page_size) != vaddr_mod:
         # Normal build, alignment mismatch: copy to a correctly-aligned position
         # at end of file (the original behavior, unchanged).
-        new_offset = page_align_offset(len(surgery.data), vaddr)
+        new_offset = page_align_offset(len(surgery.data), vaddr, page_size)
         padding = new_offset - len(surgery.data)
         if padding > 0:
             surgery.append_bytes(b"\x00" * padding, "mmap alignment padding")
@@ -178,6 +178,7 @@ def map_section_to_load(
         file_offset=new_offset,
         size=section.header.sh_size,
         flags=PF_R,  # Read-only
+        page_size=page_size,
     )
     manager.add_program_header(new_load)
 
@@ -302,7 +303,7 @@ def update_relocation_addend(
         surgery: ElfSurgery instance to operate on
         target_vaddr: Virtual address the relocation targets (r_offset)
         new_addend: New addend value to set
-        convert_to_relative: Convert to R_X86_64_RELATIVE if not already
+        convert_to_relative: Convert to the architecture's R_RELATIVE type if not already
 
     Returns:
         UpdateRelocationResult with operation outcome
@@ -318,8 +319,8 @@ def update_relocation_addend(
 
     # Create updated relocation entry
     if convert_to_relative:
-        # Convert to R_X86_64_RELATIVE with symbol index 0
-        new_info = RelaEntry.make_info(0, R_X86_64_RELATIVE)
+        # Convert to R_RELATIVE for this binary's architecture, with symbol index 0
+        new_info = RelaEntry.make_info(0, surgery.arch_config.r_relative)
     else:
         new_info = reloc_info.entry.r_info
 

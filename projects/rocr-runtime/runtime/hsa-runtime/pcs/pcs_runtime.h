@@ -115,13 +115,16 @@ class PcsRuntime {
     };
     struct client_session_data_t csd;
 
+    // Buffer info for DataCopyCallback. Made public so thread_local can access it.
+   public:
     struct data_ready_info_t {
       uint8_t* buf1;
       size_t buf1_sz;
       uint8_t* buf2;
       size_t buf2_sz;
     };
-    struct data_ready_info_t data_rdy;
+
+   private:
   };  // class PcSamplingSession
 
   hsa_status_t PcSamplingIterateConfig(
@@ -148,6 +151,11 @@ class PcsRuntime {
   hsa_status_t PcSamplingFlush(hsa_ven_amd_pcs_t handle);
 
  private:
+
+  // Ensures all sessions are stopped before Runtime::Unload() tears down mutexes
+  // that otherwise may still be held by the sessions.
+  void StopActiveSessions();
+
   /// @brief Initialize singleton object, must be called once.
   static PcsRuntime* CreateSingleton();
 

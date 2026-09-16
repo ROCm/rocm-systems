@@ -137,24 +137,7 @@ template <>
 std::string
 to_string (os_exception_mask_t exception_mask)
 {
-  std::string str;
-
-  if (exception_mask == os_exception_mask_t::none)
-    return one_os_exception_to_string (exception_mask);
-
-  while (exception_mask != os_exception_mask_t::none)
-    {
-      os_exception_mask_t one_bit
-        = exception_mask ^ (exception_mask & (exception_mask - 1));
-
-      if (!str.empty ())
-        str += " | ";
-      str += one_os_exception_to_string (one_bit);
-
-      exception_mask ^= one_bit;
-    }
-
-  return str;
+  return utils::flags_to_string (exception_mask, one_os_exception_to_string);
 }
 
 template <>
@@ -279,24 +262,7 @@ template <>
 std::string
 to_string (os_queue_state_t queue_state)
 {
-  std::string str;
-
-  if (!queue_state)
-    return one_queue_state_t_to_string (queue_state);
-
-  while (!!queue_state)
-    {
-      os_queue_state_t one_flag
-        = queue_state ^ (queue_state & (queue_state - 1));
-
-      if (!str.empty ())
-        str += " | ";
-      str += one_queue_state_t_to_string (one_flag);
-
-      queue_state ^= one_flag;
-    }
-
-  return str;
+  return utils::flags_to_string (queue_state, one_queue_state_t_to_string);
 }
 
 template <>
@@ -355,23 +321,7 @@ template <>
 std::string
 to_string (os_process_flags_t flags)
 {
-  std::string str;
-
-  if (!flags)
-    return one_os_process_flag_to_string (flags);
-
-  while (!!flags)
-    {
-      os_process_flags_t one_flag = flags ^ (flags & (flags - 1));
-
-      if (!str.empty ())
-        str += " | ";
-      str += one_os_process_flag_to_string (one_flag);
-
-      flags ^= one_flag;
-    }
-
-  return str;
+  return utils::flags_to_string (flags, one_os_process_flag_to_string);
 }
 
 template <>

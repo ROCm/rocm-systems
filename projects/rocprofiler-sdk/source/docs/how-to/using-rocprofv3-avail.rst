@@ -92,6 +92,14 @@ Sample output (truncated):
 
   Note that the option ``-d`` is not applicable here.
 
+- To list the agents supporting SPM, use:
+
+  .. code-block:: bash
+
+   rocprofv3-avail list --spm-config
+
+  Note that the option ``-d`` is not applicable here.
+
 info option
 ------------
 
@@ -172,6 +180,14 @@ Sample output (truncated):
 
   Note that ``-d`` option is not applicable here.
 
+- To list the supported SPM configurations for each agent that supports SPM, use:
+
+   .. code-block:: bash
+
+   rocprofv3-avail info --spm-config
+
+  Note that ``-d`` option is not applicable here.
+   
 pmc-check option
 -----------------
 

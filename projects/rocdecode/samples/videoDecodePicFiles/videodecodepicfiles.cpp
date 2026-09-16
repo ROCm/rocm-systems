@@ -73,6 +73,7 @@ int main(int argc, char **argv) {
     bool b_extract_sei_messages = false;
     bool b_generate_md5 = false;
     bool b_md5_check = false;
+    bool b_md5_check_failed = false;
     bool b_flush_frames_during_reconfig = true;
     Rect crop_rect = {};
     Rect *p_crop_rect = nullptr;
@@ -341,6 +342,10 @@ int main(int argc, char **argv) {
 
         std::cout << "info: Total pictures decoded: " << n_pic_decoded << std::endl;
         std::cout << "info: Total frames output/displayed: " << n_frame << std::endl;
+        if (n_frame == 0) {
+            std::cerr << "Error: No frames were decoded!" << std::endl;
+            return 1;
+        }
         if (!dump_output_frames) {
             std::cout << "info: avg decoding time per picture: " << total_dec_time / n_pic_decoded << " ms" <<std::endl;
             std::cout << "info: avg decode FPS: " << (n_pic_decoded / total_dec_time) * 1000 << std::endl;
@@ -382,6 +387,7 @@ int main(int argc, char **argv) {
                     std::cout << "MD5 digest matches the reference MD5 digest: ";
                 } else {
                     std::cout << "MD5 digest does not match the reference MD5 digest: ";
+                    b_md5_check_failed = true;
                 }
                 std::cout << ref_md5_string.c_str() << std::endl;
                 ref_md5_file.close();
@@ -397,5 +403,5 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    return 0;
+    return b_md5_check_failed ? 1 : 0;
 }

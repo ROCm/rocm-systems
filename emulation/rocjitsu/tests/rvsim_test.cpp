@@ -30,7 +30,7 @@ protected:
     hart_ = static_cast<rocjitsu::risc_v::Hart *>(root_ptr->add_child(std::move(hart_ptr)));
 
     engine_->topology().set_root(std::move(root_ptr));
-    engine_->build();
+    engine_->create();
   }
 
   void load_and_run(const uint32_t *program, size_t num_words, uint64_t base_addr = 0) {

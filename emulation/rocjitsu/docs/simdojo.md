@@ -68,10 +68,9 @@ registered directly on ports via `Port::set_handler()`. Key virtual
 methods:
 
 - `initialize()` / `startup()` / `shutdown()` - lifecycle hooks called by
-  the engine
-- `step()` - execute one logical step; return true to continue
-- `run()` - default loops `while (step()) {}`; override for custom
-  lifecycle (e.g., blocking on a condition variable)
+  the engine during `create()`, `run()`, and `shutdown()` respectively
+- `step()` - execute one unit of component-specific work (domain-level
+  API for concrete types, not called by the engine)
 - `is_composite()` - returns false for leaves, true for composites
 
 **CompositeComponent** extends Component with a child list. Critically, a
@@ -80,13 +79,9 @@ container. This lets you model a block that both contains sub-blocks
 and directly handles some events (e.g., routing, arbitration) without
 introducing artificial wrapper components.
 
-`CompositeComponent` overrides `run()` and `step()` with default
-delegation behavior: `run()` calls `run()` on each child, and `step()`
-calls `step()` on each child, returning true if any child is still active.
-Subclasses (e.g., SoC) override these for custom lifecycle
-logic. This means a `CompositeComponent` can serve as the topology root
-directly - the engine calls `root->run()` and the composite delegates to
-its children automatically.
+`CompositeComponent` can serve as the topology root directly. All
+execution is event-driven — components schedule events during `startup()`
+and respond to them via event handlers.
 
 `collect_components()` flattens the entire subtree including composites,
 so the engine initializes and dispatches to all components uniformly.
@@ -214,6 +209,95 @@ controllers.
 indexed read/write access. **VectorReg** (`vector_reg.h`) models a
 SIMD-width vector register with per-element access.
 
+### Register-file storage
+
+The functional GPU model provisions vector-register storage for every fixed
+wavefront slot in each simulated compute unit. Slots are independent of
+hardware occupancy: a wave that uses many registers still occupies one
+simulator slot, and register pressure does not reduce the number of admitted
+waves. For the shipped gfx942 configuration, the vector backing has the
+following dimensions:
+
+| Quantity                  | Value                                      |
+|---------------------------|--------------------------------------------|
+| Simulated compute units   | 320                                        |
+| Wavefront slots per CU    | 32                                         |
+| Registers per slot        | 512 combined VGPR and AGPR entries         |
+| Register width            | 64 lanes × 4 bytes                         |
+| Complete vector backing   | 1,280 MiB                                  |
+
+`RegisterFile` divides the physical VGPR index space into fixed 4 KiB chunks.
+An untouched chunk is represented by a null entry and reads as zero; its
+storage is allocated and zero-initialized on the first mutable access. Retiring
+a wave releases wholly covered chunks and clears any shared boundary chunk.
+The implementation uses only portable C++ allocation and does not require
+virtual-memory APIs. Mutable handles and handles into materialized registers
+remain stable until their allocation retires, but the complete register file is
+deliberately not contiguous. Const access to an unmaterialized register observes
+its logical zero value through shared immutable backing without allocating a
+chunk. That read-only handle is an ephemeral value observation, not a persistent
+storage identity, and need not observe a later write through another handle.
+
+This is a functional storage model, not a model of a physical register file.
+In particular, filling all 32 simulator slots with high-pressure waves can
+represent an occupancy that hardware could not admit. That distinction is
+important when interpreting memory measurements or using register pressure to
+approximate hardware throughput.
+
+#### Representative workloads
+
+The fixed-topology and IREE measurements were collected on 2026-08-10 from
+rocjitsu revision `49e6ddafeb9fd8cadda1c78b891466fd498ec676`. Fixed topology
+reports the median of six processes; IREE reports the median of five processes,
+all of which matched the checked-in output exactly. The CTS rows report the
+median of three source-identical processes from rocjitsu revision
+`4d5779c15beb0d9495b319dce5d906e966275e23` and test-corpus revision
+`ce5da512188dd40de0bc7da298ec11b587d8fdd3`; all tests passed. Every build was
+Release, pinned to CPU 8, and used an AMD EPYC 9554 host running Linux 6.8.
+
+| Workload                             | Eager runtime | Software runtime | Eager peak RSS | Software peak RSS | Effect                              |
+|--------------------------------------|--------------:|-----------------:|---------------:|------------------:|-------------------------------------|
+| Fixed topology, no kernel            |        0.87 s |          0.125 s |  1,511,424 KiB |       201,728 KiB | 85.6% faster, 86.7% less RSS        |
+| IREE softmax, exact output            |        2.50 s |           0.99 s |  1,630,208 KiB |       326,656 KiB | 60.4% faster, 80.0% less RSS        |
+| CTS math                             |       28.37 s |          27.94 s |  2,235,924 KiB |       926,788 KiB | 1.5% faster, 58.5% less RSS         |
+| CTS MFMA                             |      151.40 s |         150.78 s |  2,235,392 KiB |       926,720 KiB | 0.4% faster, 58.5% less RSS         |
+
+Unlike fixed topology and the shorter IREE workload, the CTS suites are
+dominated by simulated instruction execution and therefore amortize the fixed
+initialization work that lazy storage eliminates. Across three runs, the
+startup proxy (whole-process wall time minus test-body time) fell from about
+1.29 seconds to 0.54 seconds. Test-body time increased by 1.2% for math and was
+unchanged to measurement precision for MFMA (+0.1%). The result is a smaller
+end-to-end runtime improvement even as peak RSS falls by 58.5%.
+
+#### Worst-case saturation validation
+
+The qualified gfx942 saturation workload was measured on 2026-08-10 from
+rocjitsu revision `49e6ddafeb9fd8cadda1c78b891466fd498ec676`. The
+representative case places eight waves on each of one XCD's 40 CUs and reports
+three-launch medians. The all-slot case deliberately fills all 32 functional
+simulator slots on all 320 CUs with 253-VGPR waves—an occupancy that hardware
+could not admit—and reports one checksum-validated launch.
+
+| Saturation runtime                          |       Eager | Software lazy | Change      |
+|---------------------------------------------|------------:|--------------:|-------------|
+| 253-VGPR initialization-only median launch  |  156.201 ms |    157.479 ms | 0.8% slower |
+| 253-VGPR eight-update median launch         | 1,332.955 ms |  1,335.671 ms | 0.2% slower |
+| All-slot 253-VGPR eight-update timed launch |    48.127 s |      48.780 s | 1.4% slower |
+
+Peak RSS is a process-wide high-water measurement. The representative sweep
+therefore has one result covering all 9--253-VGPR pressure points rather than
+separate values for its individual launch timings.
+
+| Saturation peak RSS                |          Eager | Software lazy | Change         |
+|------------------------------------|---------------:|--------------:|----------------|
+| Complete 9--253-VGPR sweep         | 1,609,728 KiB  |  318,280 KiB  | 80.2% less RSS |
+| All slots, 253 VGPR, eight updates | 1,622,016 KiB  |  967,064 KiB  | 40.4% less RSS |
+
+The qualified workload, complete methodology, and reproduction commands are
+pinned at rocjitsu test corpus revision
+[`b3f5fa8a263ee2cd83666a62bc18731b09b1166a`](https://github.com/ROCm/rocjitsu-test-corpus/tree/b3f5fa8a263ee2cd83666a62bc18731b09b1166a/corpus/kernels/benchmarks/vgpr_saturation).
+
 ---
 
 ## Messages and Events
@@ -267,9 +351,12 @@ its own incoming queues at the start of each barrier epoch (Phase 1).
 
 ## Topology and Partitioning
 
-The `Topology` owns the entire simulation graph: the root composite, all
-links, clock domains, and partition assignments. It serves as the single
-entry point for building and wiring a model.
+The `Topology` owns the component tree reachable from the root composite,
+all links, clock domains, and partition assignments. Link-endpoint owners
+outside the root tree are borrowed. Those external components and their ports
+must remain alive through every repartition and engine create, run, and
+shutdown operation that retains them. It serves as the single entry point for
+building and wiring a model.
 
 ### Building a Model
 
@@ -290,7 +377,8 @@ engine.topology().set_root(std::move(root));
 engine.topology().add_link(pipe_req_port, mem_req_port, /*latency=*/10);
 engine.topology().add_link(mem_resp_port, pipe_resp_port, /*latency=*/5);
 
-engine.build();
+engine.topology().partition_balanced(4);
+engine.create();
 auto exit = engine.run();
 ```
 
@@ -315,7 +403,7 @@ library dependencies.
 
 The `SimulationEngine` owns the simulation `Topology` and drives the full
 lifecycle: build, run/step, and shutdown. Components participate by
-scheduling events during `initialize()` or `startup()`:
+scheduling events during `startup()`:
 
 - A `Clocked` component schedules clock-edge events (timing simulation).
 - A `Functional` component self-schedules a timer callback and re-enqueues
@@ -506,11 +594,11 @@ injected events realistic timestamps instead of tick 0.
 ### Interactive Stepping (`step()`)
 
 For GUI, debugger, or test harness use. Single-threaded only. On the first
-call, starts all components (initialization happens in `build()`). Each
-subsequent call drains async events and processes all events at the next
-timestamp (one tick step). Returns true if the simulation can continue.
-If the queue is empty but primaries are registered, returns true so the
-caller can poll.
+call, starts all components (initialization happens in `create()`). Each
+subsequent call drains async events and advances to the next event time,
+processing all events at that timestamp. Ticks without scheduled events
+are skipped. Returns true if the simulation can continue. If the queue is
+empty but primaries are registered, returns true so the caller can poll.
 
 ---
 
@@ -520,16 +608,18 @@ caller can poll.
 SimulationEngine engine({.max_ticks = 10000, .num_threads = 4});
 engine.topology().set_root(std::move(my_model));
 engine.topology().add_link(src_port, dst_port, latency);
-engine.build();       // partitions, initializes components
+engine.topology().partition_balanced(4);
+engine.create();       // validates partitions, initializes components
 // (user enqueues work via CP)
 auto exit = engine.run();   // starts up components, runs to completion
 engine.shutdown();    // called automatically by destructor if needed
 ```
 
-`build()` partitions the topology and calls `initialize()` on all
-components. `run()` calls `startup()` on all components and enters the
-event loop. `shutdown()` is called automatically by the destructor if the
-engine is still built.
+For multi-threaded engines, callers select a partition policy before
+`create()`. `create()` validates the selected partitions and calls
+`initialize()` on all components. `run()` calls `startup()` on all components
+and enters the event loop. `shutdown()` is called automatically by the
+destructor if the engine is still built.
 
 ## References
 

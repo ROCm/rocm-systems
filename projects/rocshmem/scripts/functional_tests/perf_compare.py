@@ -257,12 +257,13 @@ def plot_latency(
     baseline_df: pd.DataFrame,
     variant_dfs: dict[str, pd.DataFrame],
     outdir: Path,
+    baseline_label: str = "baseline",
 ) -> None:
     """Generate a latency-vs-message-size plot for one test."""
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    for label, df in [("baseline", baseline_df), *variant_dfs.items()]:
-        style = _VARIANT_STYLES.get(label, {})
+    for label, df in [(baseline_label, baseline_df), *variant_dfs.items()]:
+        style = _VARIANT_STYLES["baseline"] if label == baseline_label else _VARIANT_STYLES.get(label, {})
         ax.plot(
             df["msg_size"],
             df["latency_us"],
@@ -301,6 +302,7 @@ def make_heatmap(
     baseline_data: dict[str, pd.DataFrame],
     variant_datasets: dict[str, dict[str, pd.DataFrame]],
     outdir: Path,
+    baseline_label: str = "baseline",
 ) -> None:
     """Generate a summary heatmap of % performance change vs baseline."""
     # Compute metrics for baseline
@@ -412,7 +414,7 @@ def make_heatmap(
         ax=ax,
         cbar_kws={"label": "% change (green = better)", "ticks": boundaries},
     )
-    ax.set_title("Performance vs develop baseline (% change)")
+    ax.set_title(f"Performance vs {baseline_label} (% change)")
     ax.set_ylabel("")
     fig.tight_layout()
     fig.savefig(outdir / "heatmap_summary.png", dpi=150)
@@ -431,6 +433,7 @@ def write_per_test_txt(
     baseline_iqr: dict,           # msg_size -> stats (may be empty for single-iter)
     variant_iqr: dict[str, dict], # variant -> msg_size -> stats
     outdir: Path,
+    baseline_label: str = "baseline",
 ) -> None:
     """Write a per-test summary text file with salient metrics and IQR stats."""
     lines = []
@@ -442,7 +445,7 @@ def write_per_test_txt(
     lines.append("Salient Metrics")
     lines.append("-" * 40)
     VAL_W, PCT_W = 12, 8
-    hdr = f"{'Metric':<14} {'baseline':>{VAL_W}}"
+    hdr = f"{'Metric':<14} {baseline_label:>{VAL_W}}"
     for vname in variant_dfs:
         col_w = VAL_W + 1 + PCT_W
         hdr += f"  {vname:>{col_w}}"
@@ -480,7 +483,7 @@ def write_per_test_txt(
                 f"{lo}  {hi}  {s['lat_med']:>10.3f}  {s['bw_med']:>10.3f}"
             )
 
-    _iqr_table("baseline", baseline_iqr)
+    _iqr_table(baseline_label, baseline_iqr)
     for vname in variant_dfs:
         _iqr_table(vname, variant_iqr.get(vname, {}))
 
@@ -514,6 +517,10 @@ def main():
     parser.add_argument(
         "--baseline", required=True,
         help="Baseline log dir(s) — single path or glob (e.g. build-develop/logs-heatmap-*)",
+    )
+    parser.add_argument(
+        "--baseline-label", default="baseline",
+        help="Label for the baseline series in plots/tables (default: baseline)",
     )
     parser.add_argument(
         "--variants", nargs="+", required=True,
@@ -574,7 +581,7 @@ def main():
     for test_name in sorted(all_test_names):
         vdfs = {vn: vd[test_name] for vn, vd in variant_datasets.items()
                 if test_name in vd}
-        plot_latency(test_name, baseline_data[test_name], vdfs, plot_dir)
+        plot_latency(test_name, baseline_data[test_name], vdfs, plot_dir, args.baseline_label)
         write_per_test_txt(
             test_name,
             baseline_data[test_name],
@@ -582,11 +589,12 @@ def main():
             baseline_iqr.get(test_name, {}),
             {vn: variant_iqr.get(vn, {}).get(test_name, {}) for vn in vdfs},
             plot_dir,
+            args.baseline_label,
         )
     print(f"Generated {len(all_test_names)} per-test plots and summaries in {plot_dir}/")
 
     # Generate summary heatmap
-    make_heatmap(baseline_data, variant_datasets, args.outdir)
+    make_heatmap(baseline_data, variant_datasets, args.outdir, args.baseline_label)
 
     # Print summary table to stdout and save to file
     _RAW_FMT = {
@@ -608,7 +616,7 @@ def main():
     _p("\n" + "=" * 80)
     _p("SUMMARY: metrics for tests common to all variants")
     _p("=" * 80)
-    header = f"{'Test':<30} {'Metric':<12} {'baseline':>{VAL_W}}"
+    header = f"{'Test':<30} {'Metric':<12} {args.baseline_label:>{VAL_W}}"
     for vname in variant_datasets:
         header += f"  {vname:>{COL_W}}"
     _p(header)

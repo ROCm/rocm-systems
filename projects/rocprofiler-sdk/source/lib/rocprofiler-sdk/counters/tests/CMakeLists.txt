@@ -55,13 +55,14 @@ target_sources(
 target_link_libraries(
     counter_test_constants
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-static-library
             rocprofiler-sdk::rocprofiler-sdk-hip
             rocprofiler-sdk::rocprofiler-sdk-hsa-runtime)
 
 set(ROCPROFILER_LIB_COUNTER_TEST_SOURCES
     metrics_test.cpp evaluate_ast_test.cpp dimension.cpp core.cpp code_object_loader.cpp
-    device_counting.cpp firmware_restrictions.cpp)
+    device_counting.cpp firmware_restrictions_test.cpp local_context.cpp)
 set(ROCPROFILER_LIB_COUNTER_TEST_HEADERS code_object_loader.hpp device_counting.hpp)
 
 add_executable(counter-tests)
@@ -77,12 +78,13 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
             rocprofiler-sdk::rocprofiler-sdk-hip
             rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-static-library
             GTest::gtest
             GTest::gtest_main)
 
 set(_ROCPROFILER_SHARE_DIR
-    "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
 
 # unstable counter collection test: Generates HW exception leading to GPU hang or memory
 # access fault
@@ -93,17 +95,12 @@ rocprofiler_add_unit_test(
     ENVIRONMENT
         "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+        RESOURCE_LOCK
+        "rocprofiler_device_counting_pmc"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     SKIP_REGULAR_EXPRESSION
-        "Running non-intercept test(.*)could not be locked for profiling due to lack of permissions.*"
-        DISABLE_TESTS
-        device_counting_service_test.sync_counters
-        device_counting_service_test.async_counters
-        device_counting_service_test.sync_gpu_util_verify
-        device_counting_service_test.sync_sq_waves_verify
-        device_counting_service_test.sync_sq_waves_verify_non_intercept
-        device_counting_service_test.raw_sq_waves_verify
-        device_counting_service_test.sync_grbm_verify)
+        "Running non-intercept test(.*)could not be locked for profiling due to lack of permissions.*|\\[  SKIPPED \\]"
+    )
 
 set(ROCPROFILER_LIB_CONSUMER_TEST_SOURCES consumer_test.cpp)
 

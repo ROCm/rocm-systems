@@ -1,0 +1,5 @@
+# Testing dependencies for the kernel-count guards.
+# The guards themselves only use the Python standard library; pytest is the
+# only external dependency (test framework + JUnit XML for the test_runner
+# harness).
+pytest

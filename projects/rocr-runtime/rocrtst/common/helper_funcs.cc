@@ -50,6 +50,8 @@
 #endif
 #include <assert.h>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -233,6 +235,29 @@ double CalcStdDeviation(std::vector<double> scores, int score_mean) {
   ret /= scores.size();
 
   return sqrt(ret);
+}
+
+bool ReadDrmRenderMinor(uint32_t node_id, int32_t* drm_render_minor) {
+  char path[256];
+  snprintf(path, sizeof(path), "/sys/class/kfd/kfd/topology/nodes/%u/properties", node_id);
+
+  FILE* file = fopen(path, "r");
+  if (!file) {
+    return false;
+  }
+
+  char prop_name[64];
+  unsigned long long prop_val = 0;
+  while (fscanf(file, "%63s %llu", prop_name, &prop_val) == 2) {
+    if (strcmp(prop_name, "drm_render_minor") == 0) {
+      *drm_render_minor = static_cast<int32_t>(prop_val);
+      fclose(file);
+      return *drm_render_minor > 0;
+    }
+  }
+
+  fclose(file);
+  return false;
 }
 
 /////////////////////////////////////////////////////////////////

@@ -1,0 +1,891 @@
+{
+  "system_configurations": {
+    "name": "RCCL-Validate-MI300X-Perf",
+    "description": "rccl-tests perf sweep for MI300X: 11 collectives x 12 datatypes (1B-4G)."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-/opt/ompi}",
+    "test_binary_dir": "${RCCL_TEST_BIN_DIR:-${RCCL_TESTS_DIR:-$HOME/rccl-tests}/build}"
+  },
+  "env_variables": {
+    "NCCL_CUMEM_ENABLE": "1",
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "RCCL_MSCCL_ENABLE": "0",
+    "NCCL_DEBUG": "INFO",
+    "NCCL_SOCKET_IFNAME": "eth0,eth1",
+    "NCCL_IB_HCA": "^mlx5_1,mlx5_6"
+  },
+  "mpi_args": [
+    "--mca pml ucx",
+    "--mca btl ^openib",
+    "--bind-to none"
+  ],
+  "build_configuration": {
+    "install_flags": [
+      "--debug",
+      "-t",
+      "-l",
+      "--log-trace",
+      "--enable-code-coverage",
+      "--enable-mpi-tests",
+      "--no_clean"
+    ],
+    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+    "parallel_jobs": 64
+  },
+  "rccl_tests_build_configuration": {
+    "enabled": true,
+    "source_dir": "${RCCL_TESTS_DIR:-${WORKDIR}/../rccl-tests}",
+    "install_script": "install.sh",
+    "install_flags": [
+      "--mpi",
+      "--enable-device-api",
+      "--gpu_targets",
+      "gfx942"
+    ],
+    "rccl_home": "${RCCL_HOME:-${WORKDIR}/build/debug}",
+    "env_variables": {}
+  },
+  "test_configurations": {
+    "perf_base": {
+      "is_gtest": false,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "num_ranks": 4,
+      "timeout": 1200,
+      "command_args": "-b 1 -e 4G -f 2 -g 1 -n 100 -w 20 -N 6 -A 1",
+      "env_variables": {
+        "NCCL_LAUNCH_MODE": "GROUP"
+      }
+    },
+    "all_reduce_perf": {
+      "extends": "perf_base",
+      "binary": "all_reduce_perf",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4"
+      },
+      "tests": [
+        {
+          "name": "AllReduce_int8",
+          "description": "AllReduce perf, datatype int8",
+          "command_args": "-d int8"
+        },
+        {
+          "name": "AllReduce_uint8",
+          "description": "AllReduce perf, datatype uint8",
+          "command_args": "-d uint8"
+        },
+        {
+          "name": "AllReduce_int32",
+          "description": "AllReduce perf, datatype int32",
+          "command_args": "-d int32"
+        },
+        {
+          "name": "AllReduce_uint32",
+          "description": "AllReduce perf, datatype uint32",
+          "command_args": "-d uint32"
+        },
+        {
+          "name": "AllReduce_int64",
+          "description": "AllReduce perf, datatype int64",
+          "command_args": "-d int64"
+        },
+        {
+          "name": "AllReduce_uint64",
+          "description": "AllReduce perf, datatype uint64",
+          "command_args": "-d uint64"
+        },
+        {
+          "name": "AllReduce_half",
+          "description": "AllReduce perf, datatype half",
+          "command_args": "-d half"
+        },
+        {
+          "name": "AllReduce_float",
+          "description": "AllReduce perf, datatype float",
+          "command_args": "-d float"
+        },
+        {
+          "name": "AllReduce_double",
+          "description": "AllReduce perf, datatype double",
+          "command_args": "-d double"
+        },
+        {
+          "name": "AllReduce_bfloat16",
+          "description": "AllReduce perf, datatype bfloat16",
+          "command_args": "-d bfloat16"
+        },
+        {
+          "name": "AllReduce_fp8_e4m3",
+          "description": "AllReduce perf, datatype fp8_e4m3",
+          "command_args": "-d fp8_e4m3"
+        },
+        {
+          "name": "AllReduce_fp8_e5m2",
+          "description": "AllReduce perf, datatype fp8_e5m2",
+          "command_args": "-d fp8_e5m2"
+        }
+      ]
+    },
+    "reduce_scatter_perf": {
+      "extends": "perf_base",
+      "binary": "reduce_scatter_perf",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4"
+      },
+      "tests": [
+        {
+          "name": "ReduceScatter_int8",
+          "description": "ReduceScatter perf, datatype int8",
+          "command_args": "-d int8"
+        },
+        {
+          "name": "ReduceScatter_uint8",
+          "description": "ReduceScatter perf, datatype uint8",
+          "command_args": "-d uint8"
+        },
+        {
+          "name": "ReduceScatter_int32",
+          "description": "ReduceScatter perf, datatype int32",
+          "command_args": "-d int32"
+        },
+        {
+          "name": "ReduceScatter_uint32",
+          "description": "ReduceScatter perf, datatype uint32",
+          "command_args": "-d uint32"
+        },
+        {
+          "name": "ReduceScatter_int64",
+          "description": "ReduceScatter perf, datatype int64",
+          "command_args": "-d int64"
+        },
+        {
+          "name": "ReduceScatter_uint64",
+          "description": "ReduceScatter perf, datatype uint64",
+          "command_args": "-d uint64"
+        },
+        {
+          "name": "ReduceScatter_half",
+          "description": "ReduceScatter perf, datatype half",
+          "command_args": "-d half"
+        },
+        {
+          "name": "ReduceScatter_float",
+          "description": "ReduceScatter perf, datatype float",
+          "command_args": "-d float"
+        },
+        {
+          "name": "ReduceScatter_double",
+          "description": "ReduceScatter perf, datatype double",
+          "command_args": "-d double"
+        },
+        {
+          "name": "ReduceScatter_bfloat16",
+          "description": "ReduceScatter perf, datatype bfloat16",
+          "command_args": "-d bfloat16"
+        },
+        {
+          "name": "ReduceScatter_fp8_e4m3",
+          "description": "ReduceScatter perf, datatype fp8_e4m3",
+          "command_args": "-d fp8_e4m3"
+        },
+        {
+          "name": "ReduceScatter_fp8_e5m2",
+          "description": "ReduceScatter perf, datatype fp8_e5m2",
+          "command_args": "-d fp8_e5m2"
+        }
+      ]
+    },
+    "all_reduce_bias_perf": {
+      "extends": "perf_base",
+      "binary": "all_reduce_bias_perf",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4"
+      },
+      "tests": [
+        {
+          "name": "AllReduceBias_int8",
+          "description": "AllReduceBias perf, datatype int8",
+          "command_args": "-d int8"
+        },
+        {
+          "name": "AllReduceBias_uint8",
+          "description": "AllReduceBias perf, datatype uint8",
+          "command_args": "-d uint8"
+        },
+        {
+          "name": "AllReduceBias_int32",
+          "description": "AllReduceBias perf, datatype int32",
+          "command_args": "-d int32"
+        },
+        {
+          "name": "AllReduceBias_uint32",
+          "description": "AllReduceBias perf, datatype uint32",
+          "command_args": "-d uint32"
+        },
+        {
+          "name": "AllReduceBias_int64",
+          "description": "AllReduceBias perf, datatype int64",
+          "command_args": "-d int64"
+        },
+        {
+          "name": "AllReduceBias_uint64",
+          "description": "AllReduceBias perf, datatype uint64",
+          "command_args": "-d uint64"
+        },
+        {
+          "name": "AllReduceBias_half",
+          "description": "AllReduceBias perf, datatype half",
+          "command_args": "-d half"
+        },
+        {
+          "name": "AllReduceBias_float",
+          "description": "AllReduceBias perf, datatype float",
+          "command_args": "-d float"
+        },
+        {
+          "name": "AllReduceBias_double",
+          "description": "AllReduceBias perf, datatype double",
+          "command_args": "-d double"
+        },
+        {
+          "name": "AllReduceBias_bfloat16",
+          "description": "AllReduceBias perf, datatype bfloat16",
+          "command_args": "-d bfloat16"
+        },
+        {
+          "name": "AllReduceBias_fp8_e4m3",
+          "description": "AllReduceBias perf, datatype fp8_e4m3",
+          "command_args": "-d fp8_e4m3"
+        },
+        {
+          "name": "AllReduceBias_fp8_e5m2",
+          "description": "AllReduceBias perf, datatype fp8_e5m2",
+          "command_args": "-d fp8_e5m2"
+        }
+      ]
+    },
+    "reduce_perf": {
+      "extends": "perf_base",
+      "binary": "reduce_perf",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4"
+      },
+      "tests": [
+        {
+          "name": "Reduce_int8",
+          "description": "Reduce perf, datatype int8",
+          "command_args": "-d int8"
+        },
+        {
+          "name": "Reduce_uint8",
+          "description": "Reduce perf, datatype uint8",
+          "command_args": "-d uint8"
+        },
+        {
+          "name": "Reduce_int32",
+          "description": "Reduce perf, datatype int32",
+          "command_args": "-d int32"
+        },
+        {
+          "name": "Reduce_uint32",
+          "description": "Reduce perf, datatype uint32",
+          "command_args": "-d uint32"
+        },
+        {
+          "name": "Reduce_int64",
+          "description": "Reduce perf, datatype int64",
+          "command_args": "-d int64"
+        },
+        {
+          "name": "Reduce_uint64",
+          "description": "Reduce perf, datatype uint64",
+          "command_args": "-d uint64"
+        },
+        {
+          "name": "Reduce_half",
+          "description": "Reduce perf, datatype half",
+          "command_args": "-d half"
+        },
+        {
+          "name": "Reduce_float",
+          "description": "Reduce perf, datatype float",
+          "command_args": "-d float"
+        },
+        {
+          "name": "Reduce_double",
+          "description": "Reduce perf, datatype double",
+          "command_args": "-d double"
+        },
+        {
+          "name": "Reduce_bfloat16",
+          "description": "Reduce perf, datatype bfloat16",
+          "command_args": "-d bfloat16"
+        },
+        {
+          "name": "Reduce_fp8_e4m3",
+          "description": "Reduce perf, datatype fp8_e4m3",
+          "command_args": "-d fp8_e4m3"
+        },
+        {
+          "name": "Reduce_fp8_e5m2",
+          "description": "Reduce perf, datatype fp8_e5m2",
+          "command_args": "-d fp8_e5m2"
+        }
+      ]
+    },
+    "all_gather_perf": {
+      "extends": "perf_base",
+      "binary": "all_gather_perf",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4"
+      },
+      "tests": [
+        {
+          "name": "AllGather_int8",
+          "description": "AllGather perf, datatype int8",
+          "command_args": "-d int8"
+        },
+        {
+          "name": "AllGather_uint8",
+          "description": "AllGather perf, datatype uint8",
+          "command_args": "-d uint8"
+        },
+        {
+          "name": "AllGather_int32",
+          "description": "AllGather perf, datatype int32",
+          "command_args": "-d int32"
+        },
+        {
+          "name": "AllGather_uint32",
+          "description": "AllGather perf, datatype uint32",
+          "command_args": "-d uint32"
+        },
+        {
+          "name": "AllGather_int64",
+          "description": "AllGather perf, datatype int64",
+          "command_args": "-d int64"
+        },
+        {
+          "name": "AllGather_uint64",
+          "description": "AllGather perf, datatype uint64",
+          "command_args": "-d uint64"
+        },
+        {
+          "name": "AllGather_half",
+          "description": "AllGather perf, datatype half",
+          "command_args": "-d half"
+        },
+        {
+          "name": "AllGather_float",
+          "description": "AllGather perf, datatype float",
+          "command_args": "-d float"
+        },
+        {
+          "name": "AllGather_double",
+          "description": "AllGather perf, datatype double",
+          "command_args": "-d double"
+        },
+        {
+          "name": "AllGather_bfloat16",
+          "description": "AllGather perf, datatype bfloat16",
+          "command_args": "-d bfloat16"
+        },
+        {
+          "name": "AllGather_fp8_e4m3",
+          "description": "AllGather perf, datatype fp8_e4m3",
+          "command_args": "-d fp8_e4m3"
+        },
+        {
+          "name": "AllGather_fp8_e5m2",
+          "description": "AllGather perf, datatype fp8_e5m2",
+          "command_args": "-d fp8_e5m2"
+        }
+      ]
+    },
+    "broadcast_perf": {
+      "extends": "perf_base",
+      "binary": "broadcast_perf",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4"
+      },
+      "tests": [
+        {
+          "name": "Broadcast_int8",
+          "description": "Broadcast perf, datatype int8",
+          "command_args": "-d int8"
+        },
+        {
+          "name": "Broadcast_uint8",
+          "description": "Broadcast perf, datatype uint8",
+          "command_args": "-d uint8"
+        },
+        {
+          "name": "Broadcast_int32",
+          "description": "Broadcast perf, datatype int32",
+          "command_args": "-d int32"
+        },
+        {
+          "name": "Broadcast_uint32",
+          "description": "Broadcast perf, datatype uint32",
+          "command_args": "-d uint32"
+        },
+        {
+          "name": "Broadcast_int64",
+          "description": "Broadcast perf, datatype int64",
+          "command_args": "-d int64"
+        },
+        {
+          "name": "Broadcast_uint64",
+          "description": "Broadcast perf, datatype uint64",
+          "command_args": "-d uint64"
+        },
+        {
+          "name": "Broadcast_half",
+          "description": "Broadcast perf, datatype half",
+          "command_args": "-d half"
+        },
+        {
+          "name": "Broadcast_float",
+          "description": "Broadcast perf, datatype float",
+          "command_args": "-d float"
+        },
+        {
+          "name": "Broadcast_double",
+          "description": "Broadcast perf, datatype double",
+          "command_args": "-d double"
+        },
+        {
+          "name": "Broadcast_bfloat16",
+          "description": "Broadcast perf, datatype bfloat16",
+          "command_args": "-d bfloat16"
+        },
+        {
+          "name": "Broadcast_fp8_e4m3",
+          "description": "Broadcast perf, datatype fp8_e4m3",
+          "command_args": "-d fp8_e4m3"
+        },
+        {
+          "name": "Broadcast_fp8_e5m2",
+          "description": "Broadcast perf, datatype fp8_e5m2",
+          "command_args": "-d fp8_e5m2"
+        }
+      ]
+    },
+    "gather_perf": {
+      "extends": "perf_base",
+      "binary": "gather_perf",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4"
+      },
+      "tests": [
+        {
+          "name": "Gather_int8",
+          "description": "Gather perf, datatype int8",
+          "command_args": "-d int8"
+        },
+        {
+          "name": "Gather_uint8",
+          "description": "Gather perf, datatype uint8",
+          "command_args": "-d uint8"
+        },
+        {
+          "name": "Gather_int32",
+          "description": "Gather perf, datatype int32",
+          "command_args": "-d int32"
+        },
+        {
+          "name": "Gather_uint32",
+          "description": "Gather perf, datatype uint32",
+          "command_args": "-d uint32"
+        },
+        {
+          "name": "Gather_int64",
+          "description": "Gather perf, datatype int64",
+          "command_args": "-d int64"
+        },
+        {
+          "name": "Gather_uint64",
+          "description": "Gather perf, datatype uint64",
+          "command_args": "-d uint64"
+        },
+        {
+          "name": "Gather_half",
+          "description": "Gather perf, datatype half",
+          "command_args": "-d half"
+        },
+        {
+          "name": "Gather_float",
+          "description": "Gather perf, datatype float",
+          "command_args": "-d float"
+        },
+        {
+          "name": "Gather_double",
+          "description": "Gather perf, datatype double",
+          "command_args": "-d double"
+        },
+        {
+          "name": "Gather_bfloat16",
+          "description": "Gather perf, datatype bfloat16",
+          "command_args": "-d bfloat16"
+        },
+        {
+          "name": "Gather_fp8_e4m3",
+          "description": "Gather perf, datatype fp8_e4m3",
+          "command_args": "-d fp8_e4m3"
+        },
+        {
+          "name": "Gather_fp8_e5m2",
+          "description": "Gather perf, datatype fp8_e5m2",
+          "command_args": "-d fp8_e5m2"
+        }
+      ]
+    },
+    "scatter_perf": {
+      "extends": "perf_base",
+      "binary": "scatter_perf",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4"
+      },
+      "tests": [
+        {
+          "name": "Scatter_int8",
+          "description": "Scatter perf, datatype int8",
+          "command_args": "-d int8"
+        },
+        {
+          "name": "Scatter_uint8",
+          "description": "Scatter perf, datatype uint8",
+          "command_args": "-d uint8"
+        },
+        {
+          "name": "Scatter_int32",
+          "description": "Scatter perf, datatype int32",
+          "command_args": "-d int32"
+        },
+        {
+          "name": "Scatter_uint32",
+          "description": "Scatter perf, datatype uint32",
+          "command_args": "-d uint32"
+        },
+        {
+          "name": "Scatter_int64",
+          "description": "Scatter perf, datatype int64",
+          "command_args": "-d int64"
+        },
+        {
+          "name": "Scatter_uint64",
+          "description": "Scatter perf, datatype uint64",
+          "command_args": "-d uint64"
+        },
+        {
+          "name": "Scatter_half",
+          "description": "Scatter perf, datatype half",
+          "command_args": "-d half"
+        },
+        {
+          "name": "Scatter_float",
+          "description": "Scatter perf, datatype float",
+          "command_args": "-d float"
+        },
+        {
+          "name": "Scatter_double",
+          "description": "Scatter perf, datatype double",
+          "command_args": "-d double"
+        },
+        {
+          "name": "Scatter_bfloat16",
+          "description": "Scatter perf, datatype bfloat16",
+          "command_args": "-d bfloat16"
+        },
+        {
+          "name": "Scatter_fp8_e4m3",
+          "description": "Scatter perf, datatype fp8_e4m3",
+          "command_args": "-d fp8_e4m3"
+        },
+        {
+          "name": "Scatter_fp8_e5m2",
+          "description": "Scatter perf, datatype fp8_e5m2",
+          "command_args": "-d fp8_e5m2"
+        }
+      ]
+    },
+    "alltoall_perf": {
+      "extends": "perf_base",
+      "binary": "alltoall_perf",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "1"
+      },
+      "tests": [
+        {
+          "name": "AlltoAll_int8",
+          "description": "AlltoAll perf, datatype int8",
+          "command_args": "-d int8"
+        },
+        {
+          "name": "AlltoAll_uint8",
+          "description": "AlltoAll perf, datatype uint8",
+          "command_args": "-d uint8"
+        },
+        {
+          "name": "AlltoAll_int32",
+          "description": "AlltoAll perf, datatype int32",
+          "command_args": "-d int32"
+        },
+        {
+          "name": "AlltoAll_uint32",
+          "description": "AlltoAll perf, datatype uint32",
+          "command_args": "-d uint32"
+        },
+        {
+          "name": "AlltoAll_int64",
+          "description": "AlltoAll perf, datatype int64",
+          "command_args": "-d int64"
+        },
+        {
+          "name": "AlltoAll_uint64",
+          "description": "AlltoAll perf, datatype uint64",
+          "command_args": "-d uint64"
+        },
+        {
+          "name": "AlltoAll_half",
+          "description": "AlltoAll perf, datatype half",
+          "command_args": "-d half"
+        },
+        {
+          "name": "AlltoAll_float",
+          "description": "AlltoAll perf, datatype float",
+          "command_args": "-d float"
+        },
+        {
+          "name": "AlltoAll_double",
+          "description": "AlltoAll perf, datatype double",
+          "command_args": "-d double"
+        },
+        {
+          "name": "AlltoAll_bfloat16",
+          "description": "AlltoAll perf, datatype bfloat16",
+          "command_args": "-d bfloat16"
+        },
+        {
+          "name": "AlltoAll_fp8_e4m3",
+          "description": "AlltoAll perf, datatype fp8_e4m3",
+          "command_args": "-d fp8_e4m3"
+        },
+        {
+          "name": "AlltoAll_fp8_e5m2",
+          "description": "AlltoAll perf, datatype fp8_e5m2",
+          "command_args": "-d fp8_e5m2"
+        }
+      ]
+    },
+    "alltoallv_perf": {
+      "extends": "perf_base",
+      "binary": "alltoallv_perf",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "1"
+      },
+      "tests": [
+        {
+          "name": "AlltoAllv_int8",
+          "description": "AlltoAllv perf, datatype int8",
+          "command_args": "-d int8"
+        },
+        {
+          "name": "AlltoAllv_uint8",
+          "description": "AlltoAllv perf, datatype uint8",
+          "command_args": "-d uint8"
+        },
+        {
+          "name": "AlltoAllv_int32",
+          "description": "AlltoAllv perf, datatype int32",
+          "command_args": "-d int32"
+        },
+        {
+          "name": "AlltoAllv_uint32",
+          "description": "AlltoAllv perf, datatype uint32",
+          "command_args": "-d uint32"
+        },
+        {
+          "name": "AlltoAllv_int64",
+          "description": "AlltoAllv perf, datatype int64",
+          "command_args": "-d int64"
+        },
+        {
+          "name": "AlltoAllv_uint64",
+          "description": "AlltoAllv perf, datatype uint64",
+          "command_args": "-d uint64"
+        },
+        {
+          "name": "AlltoAllv_half",
+          "description": "AlltoAllv perf, datatype half",
+          "command_args": "-d half"
+        },
+        {
+          "name": "AlltoAllv_float",
+          "description": "AlltoAllv perf, datatype float",
+          "command_args": "-d float"
+        },
+        {
+          "name": "AlltoAllv_double",
+          "description": "AlltoAllv perf, datatype double",
+          "command_args": "-d double"
+        },
+        {
+          "name": "AlltoAllv_bfloat16",
+          "description": "AlltoAllv perf, datatype bfloat16",
+          "command_args": "-d bfloat16"
+        },
+        {
+          "name": "AlltoAllv_fp8_e4m3",
+          "description": "AlltoAllv perf, datatype fp8_e4m3",
+          "command_args": "-d fp8_e4m3"
+        },
+        {
+          "name": "AlltoAllv_fp8_e5m2",
+          "description": "AlltoAllv perf, datatype fp8_e5m2",
+          "command_args": "-d fp8_e5m2"
+        }
+      ]
+    },
+    "sendrecv_perf": {
+      "extends": "perf_base",
+      "binary": "sendrecv_perf",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "1"
+      },
+      "tests": [
+        {
+          "name": "SendRecv_int8",
+          "description": "SendRecv perf, datatype int8",
+          "command_args": "-d int8"
+        },
+        {
+          "name": "SendRecv_uint8",
+          "description": "SendRecv perf, datatype uint8",
+          "command_args": "-d uint8"
+        },
+        {
+          "name": "SendRecv_int32",
+          "description": "SendRecv perf, datatype int32",
+          "command_args": "-d int32"
+        },
+        {
+          "name": "SendRecv_uint32",
+          "description": "SendRecv perf, datatype uint32",
+          "command_args": "-d uint32"
+        },
+        {
+          "name": "SendRecv_int64",
+          "description": "SendRecv perf, datatype int64",
+          "command_args": "-d int64"
+        },
+        {
+          "name": "SendRecv_uint64",
+          "description": "SendRecv perf, datatype uint64",
+          "command_args": "-d uint64"
+        },
+        {
+          "name": "SendRecv_half",
+          "description": "SendRecv perf, datatype half",
+          "command_args": "-d half"
+        },
+        {
+          "name": "SendRecv_float",
+          "description": "SendRecv perf, datatype float",
+          "command_args": "-d float"
+        },
+        {
+          "name": "SendRecv_double",
+          "description": "SendRecv perf, datatype double",
+          "command_args": "-d double"
+        },
+        {
+          "name": "SendRecv_bfloat16",
+          "description": "SendRecv perf, datatype bfloat16",
+          "command_args": "-d bfloat16"
+        },
+        {
+          "name": "SendRecv_fp8_e4m3",
+          "description": "SendRecv perf, datatype fp8_e4m3",
+          "command_args": "-d fp8_e4m3"
+        },
+        {
+          "name": "SendRecv_fp8_e5m2",
+          "description": "SendRecv perf, datatype fp8_e5m2",
+          "command_args": "-d fp8_e5m2"
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "Perf - AllReduce (datatype sweep)",
+      "description": "rccl-tests AllReduce perf sweep across 12 datatypes (1B-4G)",
+      "config": "all_reduce_perf",
+      "enabled": true
+    },
+    {
+      "name": "Perf - ReduceScatter (datatype sweep)",
+      "description": "rccl-tests ReduceScatter perf sweep across 12 datatypes (1B-4G)",
+      "config": "reduce_scatter_perf",
+      "enabled": true
+    },
+    {
+      "name": "Perf - AllReduceBias (datatype sweep)",
+      "description": "rccl-tests AllReduceBias perf sweep across 12 datatypes (1B-4G)",
+      "config": "all_reduce_bias_perf",
+      "enabled": true
+    },
+    {
+      "name": "Perf - Reduce (datatype sweep)",
+      "description": "rccl-tests Reduce perf sweep across 12 datatypes (1B-4G)",
+      "config": "reduce_perf",
+      "enabled": true
+    },
+    {
+      "name": "Perf - AllGather (datatype sweep)",
+      "description": "rccl-tests AllGather perf sweep across 12 datatypes (1B-4G)",
+      "config": "all_gather_perf",
+      "enabled": true
+    },
+    {
+      "name": "Perf - Broadcast (datatype sweep)",
+      "description": "rccl-tests Broadcast perf sweep across 12 datatypes (1B-4G)",
+      "config": "broadcast_perf",
+      "enabled": true
+    },
+    {
+      "name": "Perf - Gather (datatype sweep)",
+      "description": "rccl-tests Gather perf sweep across 12 datatypes (1B-4G)",
+      "config": "gather_perf",
+      "enabled": true
+    },
+    {
+      "name": "Perf - Scatter (datatype sweep)",
+      "description": "rccl-tests Scatter perf sweep across 12 datatypes (1B-4G)",
+      "config": "scatter_perf",
+      "enabled": true
+    },
+    {
+      "name": "Perf - AlltoAll (datatype sweep)",
+      "description": "rccl-tests AlltoAll perf sweep across 12 datatypes (1B-4G)",
+      "config": "alltoall_perf",
+      "enabled": true
+    },
+    {
+      "name": "Perf - AlltoAllv (datatype sweep)",
+      "description": "rccl-tests AlltoAllv perf sweep across 12 datatypes (1B-4G)",
+      "config": "alltoallv_perf",
+      "enabled": true
+    },
+    {
+      "name": "Perf - SendRecv (datatype sweep)",
+      "description": "rccl-tests SendRecv perf sweep across 12 datatypes (1B-4G)",
+      "config": "sendrecv_perf",
+      "enabled": true
+    }
+  ]
+}

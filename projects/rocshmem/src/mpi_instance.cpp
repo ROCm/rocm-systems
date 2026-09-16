@@ -72,9 +72,11 @@ int MPIInstance::mpilib_dl_init() {
   DLSYM_HELPER(mpilib_ftable_, MPI_, mpilib_handle_, Allgather);
   DLSYM_HELPER(mpilib_ftable_, MPI_, mpilib_handle_, Alltoall);
   DLSYM_HELPER(mpilib_ftable_, MPI_, mpilib_handle_, Allreduce);
+  DLSYM_HELPER(mpilib_ftable_, MPI_, mpilib_handle_, Reduce_scatter_block);
   DLSYM_HELPER(mpilib_ftable_, MPI_, mpilib_handle_, Bcast);
   DLSYM_HELPER(mpilib_ftable_, MPI_, mpilib_handle_, Barrier);
   DLSYM_HELPER(mpilib_ftable_, MPI_, mpilib_handle_, Iallreduce);
+  DLSYM_HELPER(mpilib_ftable_, MPI_, mpilib_handle_, Ireduce_scatter_block);
   DLSYM_HELPER(mpilib_ftable_, MPI_, mpilib_handle_, Ibarrier);
   DLSYM_HELPER(mpilib_ftable_, MPI_, mpilib_handle_, Win_create);
   DLSYM_HELPER(mpilib_ftable_, MPI_, mpilib_handle_, Win_free);

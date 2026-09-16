@@ -8,10 +8,8 @@
 #include "archinfo.h"
 #include "profiler.h"
 
-__attribute__ ((visibility("default")))
-ncclResult_t ncclCommDump(
-    const ncclComm_t comm,
-    std::unordered_map<std::string, std::string>& map) {
+__attribute__((visibility("default"))) ncclResult_t ncclCommDump(const ncclComm_t comm,
+                                                                 std::unordered_map<std::string, std::string>& map) {
   (void)map;
   if (comm == nullptr) {
     WARN("ncclCommDump comm is null");

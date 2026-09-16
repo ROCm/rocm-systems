@@ -291,9 +291,8 @@ void
 process_t::read_string (host_address_t address, std::string *string,
                         size_t size) const
 {
-  constexpr size_t cache_line_size
-    = memory_cache_t<host_address_t>::cache_line_size;
-  constexpr size_t chunk_size = 4 * cache_line_size;
+  constexpr size_t host_cache_line_size = 64;
+  constexpr size_t chunk_size = 4 * host_cache_line_size;
 
   dbgapi_assert (string && "invalid argument");
 
@@ -306,8 +305,9 @@ process_t::read_string (host_address_t address, std::string *string,
          which could read less than a chunk if the start address is not
          cache line aligned.  */
 
-      static_assert (utils::is_power_of_two (cache_line_size));
-      size_t request_size = chunk_size - (address & (cache_line_size - 1));
+      static_assert (utils::is_power_of_two (host_cache_line_size));
+      size_t request_size
+        = chunk_size - (address & (host_cache_line_size - 1));
 
       size_t xfer_size
         = read_host_memory_partial (address, staging_buffer, request_size);

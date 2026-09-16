@@ -7,7 +7,7 @@ Vector L1 cache (vL1D)
 **********************
 
 The vector L1 data (vL1D) cache is local to each
-:doc:`compute unit <compute-unit>` on the accelerator, and handles vector memory
+:doc:`compute unit <compute-unit>` on the GPUs, and handles vector memory
 operations issued by a wavefront. The vL1D cache consists of several components:
 
 * An address processing unit, also known as the
@@ -46,7 +46,7 @@ Together, this complex is known as the vL1D, or Texture Cache per Pipe
    :alt: Performance model of the vL1D Cache on AMD Instinct
    :width: 800
 
-   Performance model of the vL1D Cache on AMD Instinct MI-series accelerators.
+   Performance model of the vL1D Cache on AMD Instinct MI-Series GPUs.
 
 .. _vl1d-sol:
 
@@ -57,7 +57,7 @@ vL1D Speed-of-Light
 
    The theoretical maximum throughput for some metrics in this section are
    currently computed with the maximum achievable clock frequency, as reported
-   by ``rocminfo``, for an accelerator. This may not be realistic for all
+   by ``rocminfo``, for a GPU. This may not be realistic for all
    workloads.
 
 The vL1D’s speed-of-light chart shows several key metrics for the vL1D
@@ -111,14 +111,10 @@ categories:
 
 .. _ta-busy-stall:
 
-Busy / stall metrics
+Busy/stall metrics
 --------------------
 
-When executing vector memory instructions, the compute unit must send an
-address (and in the case of writes/atomics, data) to the address
-processing unit. When the front-end cannot accept any more addresses, it
-must backpressure the wave-issue logic for the VMEM pipe and prevent the
-issue of further vector memory instructions.
+When executing vector memory instructions, the compute unit sends an address (and data for writes or atomics) to the address processing unit. If the address processing unit becomes saturated and cannot accept more requests, it stalls the wave-issue logic for the VMEM pipe, preventing further vector memory instructions from being issued.
 
 .. tab-set::
 
@@ -166,7 +162,7 @@ kernel. These are broken down into a few major categories:
      - Global memory
 
      - Global memory can be seen by all threads from a process. This includes
-       the local accelerator's DRAM, remote accelerator's DRAM, and the host's
+       the local GPU's DRAM, remote GPU's DRAM, and the host's
        DRAM.
 
    * - Generic
@@ -184,8 +180,8 @@ kernel. These are broken down into a few major categories:
 
      - Private memory, or "scratch" memory, is only visible to a particular
        :ref:`work-item <desc-work-item>` in a particular
-       :ref:`workgroup <desc-workgroup>`. On AMD Instinct™ MI-series
-       accelerators, private memory is used to implement both register spills
+       :ref:`workgroup <desc-workgroup>`. On AMD Instinct MI-Series
+       GPUs, private memory is used to implement both register spills
        and stack memory accesses.
 
 The address processor counts these instruction types as follows:
@@ -224,8 +220,8 @@ The address processor counts these instruction types as follows:
    * Global/Generic: global and flat memory operations, that are used for global
      and generic memory access.
 
-   * Spill/Stack: buffer instructions which are used on the MI100, and
-     :ref:`MI2XX <mixxx-note>` accelerators for register spills / stack memory.
+   * Spill/Stack: buffer instructions which are used on the AMD Instinct MI100 and
+     :ref:`MI2XX <mixxx-note>` GPUs for register spills/stack memory.
 
    These concepts are described in more detail in the :ref:`memory-spaces`,
    while generic memory access is explored in the
@@ -233,7 +229,7 @@ The address processor counts these instruction types as follows:
 
 .. _ta-spill-stack:
 
-Spill / stack metrics
+Spill/stack metrics
 ---------------------
 
 Finally, the address processing unit contains a separate coalescing
@@ -301,8 +297,8 @@ ROCm Compute Profiler reports the following L1 TLB metrics:
 
 .. note::
 
-   On current CDNA accelerators, such as the :ref:`MI2XX <mixxx-note>`, the
-   UTCL1 does *not* count hit-on-miss requests.
+   On CDNA2 architecture-based GPUs, such as the :ref:`MI2XX <mixxx-note>`, the
+   UTCL1 doesn't count hit-on-miss requests.
 
 .. _desc-tc:
 
@@ -334,7 +330,7 @@ indicate performance limiters of the cache. A stall in the pipeline may
 result in backpressuring earlier parts of the pipeline, e.g., a stall on
 L2 requests may backpressure the wave-issue logic of the :ref:`VMEM <desc-vmem>`
 pipe and prevent it from issuing more vector memory instructions until
-the vL1D’s outstanding requests are completed.
+the vL1D's outstanding requests are completed.
 
 .. tab-set::
 
@@ -397,12 +393,11 @@ latencies of read/write memory operations to the :doc:`L2 cache <l2-cache>`.
 .. note::
 
    All cache accesses in vL1D are for a single cache line's worth of data.
-   The size of a cache line may vary, however on current AMD Instinct MI CDNA
-   accelerators and GCN™ GPUs the L1 cache line size is 64B.
+   The size of a cache line may vary, however on current CDNA architecture-based AMD Instinct MI-Series GPUs and GCN™ GPUs the L1 cache line size is 64B.
 
 .. rubric :: Footnotes
 
-.. [#vl1d-hit] The vL1D cache on AMD Instinct MI-series CDNA accelerators
+.. [#vl1d-hit] The vL1D cache on CDNA architecture-based AMD Instinct MI-Series GPUs
    uses a "hit-on-miss" approach to reporting cache hits. That is, if while
    satisfying a miss, another request comes in that would hit on the same
    pending cache line, the subsequent request will be counted as a "hit".

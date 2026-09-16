@@ -107,7 +107,6 @@ jobs:
       - name: Fetching code repository...
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          fetch-depth: 0
           path: rocm-systems
           sparse-checkout: |
             projects/hipfile
@@ -181,7 +180,7 @@ jobs:
             -w /ais/build/hipfile \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              cmake --build . --parallel
+              cmake --build . --parallel 8
             '
       - name: Test hipFile for the AMD platform (${{ inputs.cxx_compiler }})
         run: |
@@ -190,7 +189,7 @@ jobs:
             -w /ais/build/hipfile \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              ctest -V -L "unit" --parallel
+              ctest -V -L "unit" --parallel 8
             '
       # Release build for signal only: configure, build, and unit-test in a
       # separate directory. The Debug build above remains the one that is
@@ -222,7 +221,7 @@ jobs:
             -w /ais/build/hipfile-release \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              cmake --build . --parallel
+              cmake --build . --parallel 8
             '
       - name: Test hipFile Release for the AMD platform (${{ inputs.cxx_compiler }})
         run: |
@@ -231,7 +230,7 @@ jobs:
             -w /ais/build/hipfile-release \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              ctest -V -L "unit" --parallel
+              ctest -V -L "unit" --parallel 8
             '
       - name: Generate coverage summary (${{ inputs.cxx_compiler }})
         if: ${{ env.AIS_USE_CODE_COVERAGE == 'true' }}

@@ -195,23 +195,34 @@ __device__ static inline __hip_uint64_t __bitinsert_u64(__hip_uint64_t src0, __h
 __device__ inline unsigned int __funnelshift_l(unsigned int lo, unsigned int hi,
                                                unsigned int shift) {
   __hip_uint32_t mask_shift = shift & 31;
-  return mask_shift == 0 ? hi : __builtin_amdgcn_alignbit(hi, lo, 32 - mask_shift);
+  if (mask_shift == 0) return hi;
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_alignbit))
+    return __builtin_amdgcn_alignbit(hi, lo, 32 - mask_shift);
+  __builtin_trap();
 }
 
 __device__ inline unsigned int __funnelshift_lc(unsigned int lo, unsigned int hi,
                                                 unsigned int shift) {
   __hip_uint32_t min_shift = shift >= 32 ? 32 : shift;
-  return min_shift == 0 ? hi : __builtin_amdgcn_alignbit(hi, lo, 32 - min_shift);
+  if (min_shift == 0) return hi;
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_alignbit))
+    return __builtin_amdgcn_alignbit(hi, lo, 32 - min_shift);
+  __builtin_trap();
 }
 
 __device__ inline unsigned int __funnelshift_r(unsigned int lo, unsigned int hi,
                                                unsigned int shift) {
-  return __builtin_amdgcn_alignbit(hi, lo, shift);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_alignbit))
+    return __builtin_amdgcn_alignbit(hi, lo, shift);
+  __builtin_trap();
 }
 
 __device__ inline unsigned int __funnelshift_rc(unsigned int lo, unsigned int hi,
                                                 unsigned int shift) {
-  return shift >= 32 ? hi : __builtin_amdgcn_alignbit(hi, lo, shift);
+  if (shift >= 32) return hi;
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_alignbit))
+    return __builtin_amdgcn_alignbit(hi, lo, shift);
+  __builtin_trap();
 }
 
 __device__ static unsigned int __byte_perm(unsigned int x, unsigned int y, unsigned int s);
@@ -319,11 +330,15 @@ __device__ static inline unsigned int __usad(unsigned int x, unsigned int y, uns
 }
 
 __device__ static inline unsigned int __mbcnt_lo(unsigned int x, unsigned int y) {
-  return __builtin_amdgcn_mbcnt_lo(x, y);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mbcnt_lo))
+    return __builtin_amdgcn_mbcnt_lo(x, y);
+  __builtin_trap();
 };
 
 __device__ static inline unsigned int __mbcnt_hi(unsigned int x, unsigned int y) {
-  return __builtin_amdgcn_mbcnt_hi(x, y);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mbcnt_hi))
+    return __builtin_amdgcn_mbcnt_hi(x, y);
+  __builtin_trap();
 };
 
 /*
@@ -636,7 +651,9 @@ __device__ inline __attribute__((always_inline)) long long int clock64() { retur
 __device__ inline __attribute__((always_inline)) long long int clock() { return __clock(); }
 
 // hip.amdgcn.bc - named sync
-__device__ inline void __named_sync() { __builtin_amdgcn_s_barrier(); }
+__device__ inline void __named_sync() {
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier)) __builtin_amdgcn_s_barrier();
+}
 
 #endif  // __HIP_DEVICE_COMPILE__
 
@@ -663,30 +680,38 @@ __device__ inline __hip_uint64_t __lanemask_eq() {
 }
 
 // Memory Fence Functions
-__device__ inline static void __threadfence() { __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "agent"); }
+__device__ inline static void __threadfence() {
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "agent");
+}
 
 __device__ inline static void __threadfence_block() {
-  __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "workgroup");
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "workgroup");
 }
 
 __device__ inline static void __threadfence_system() {
-  __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "");
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "");
 }
 __device__ inline static void __work_group_barrier(__cl_mem_fence_flags flags) {
-  if (flags == (__CLK_GLOBAL_MEM_FENCE | __CLK_LOCAL_MEM_FENCE)) {
-    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
-    __builtin_amdgcn_s_barrier();
-    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
-  } else if (flags & (__CLK_GLOBAL_MEM_FENCE)) {
-    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "global");
-    __builtin_amdgcn_s_barrier();
-    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "global");
-  } else if (flags & (__CLK_LOCAL_MEM_FENCE)) {
-    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
-    __builtin_amdgcn_s_barrier();
-    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
-  } else {
-    __builtin_amdgcn_s_barrier();
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence) &&
+      __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier)) {
+    if (flags == (__CLK_GLOBAL_MEM_FENCE | __CLK_LOCAL_MEM_FENCE)) {
+      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+      __builtin_amdgcn_s_barrier();
+      __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+    } else if (flags & (__CLK_GLOBAL_MEM_FENCE)) {
+      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "global");
+      __builtin_amdgcn_s_barrier();
+      __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "global");
+    } else if (flags & (__CLK_LOCAL_MEM_FENCE)) {
+      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+      __builtin_amdgcn_s_barrier();
+      __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+    } else {
+      __builtin_amdgcn_s_barrier();
+    }
   }
 }
 
@@ -817,47 +842,69 @@ unsigned __smid(void)
   unsigned se_bits{}, sa_bits{}, wgp_bits{}, cu_bits{};
 
   #if defined(__GFX12__)
-    unsigned msg = __builtin_amdgcn_s_sendmsg_rtn(RTN_GET_SE_HW_ID);
+    unsigned msg = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_sendmsg_rtn)
+                       ? __builtin_amdgcn_s_sendmsg_rtn(RTN_GET_SE_HW_ID)
+                       : 0u;
     se       = (msg >> SE_HW_ID_SE_ID_OFFSET) & ((1 << SE_HW_ID_SE_ID_SIZE) - 1);
     se_bits  = SE_HW_ID_SE_ID_SIZE;
 
-    unsigned hw = __builtin_amdgcn_s_getreg(GETREG_IMMED(31, 0, HW_ID));
+    unsigned hw = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_getreg)
+                      ? __builtin_amdgcn_s_getreg(GETREG_IMMED(31, 0, HW_ID))
+                      : 0u;
     wgp      = (hw >> HW_ID_WGP_ID_OFFSET) & ((1 << HW_ID_WGP_ID_SIZE) - 1);
     sa       = (hw >> HW_ID_SA_ID_OFFSET) & ((1 << HW_ID_SA_ID_SIZE) - 1);
     wgp_bits = HW_ID_WGP_ID_SIZE;
     sa_bits  = HW_ID_SA_ID_SIZE;
 
   #elif defined(__GFX10__) || defined(__GFX11__)
-    se   = __builtin_amdgcn_s_getreg(
-             GETREG_IMMED(HW_ID_SE_ID_SIZE - 1, HW_ID_SE_ID_OFFSET, HW_ID));
-    sa   = __builtin_amdgcn_s_getreg(
-             GETREG_IMMED(HW_ID_SA_ID_SIZE - 1, HW_ID_SA_ID_OFFSET, HW_ID));
-    wgp  = __builtin_amdgcn_s_getreg(
-             GETREG_IMMED(HW_ID_WGP_ID_SIZE - 1, HW_ID_WGP_ID_OFFSET, HW_ID));
+    se   = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_getreg)
+               ? __builtin_amdgcn_s_getreg(
+                     GETREG_IMMED(HW_ID_SE_ID_SIZE - 1, HW_ID_SE_ID_OFFSET, HW_ID))
+               : 0u;
+    sa   = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_getreg)
+               ? __builtin_amdgcn_s_getreg(
+                     GETREG_IMMED(HW_ID_SA_ID_SIZE - 1, HW_ID_SA_ID_OFFSET, HW_ID))
+               : 0u;
+    wgp  = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_getreg)
+               ? __builtin_amdgcn_s_getreg(
+                     GETREG_IMMED(HW_ID_WGP_ID_SIZE - 1, HW_ID_WGP_ID_OFFSET, HW_ID))
+               : 0u;
     se_bits  = HW_ID_SE_ID_SIZE;
     sa_bits  = HW_ID_SA_ID_SIZE;
     wgp_bits = HW_ID_WGP_ID_SIZE;
     #if defined(__AMDGCN_CUMODE__)
-      cu = __builtin_amdgcn_s_getreg(
-             GETREG_IMMED(HW_ID_CU_ID_SIZE - 1, HW_ID_CU_ID_OFFSET, HW_ID));
+      cu = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_getreg)
+               ? __builtin_amdgcn_s_getreg(
+                     GETREG_IMMED(HW_ID_CU_ID_SIZE - 1, HW_ID_CU_ID_OFFSET, HW_ID))
+               : 0u;
       cu_bits = HW_ID_CU_ID_SIZE;
     #endif
 
   #elif defined(__gfx94plus_clr__)
-    se   = __builtin_amdgcn_s_getreg(
-             GETREG_IMMED(HW_ID_SE_ID_SIZE - 1, HW_ID_SE_ID_OFFSET, HW_ID));
-    xcc  = __builtin_amdgcn_s_getreg(
-             GETREG_IMMED(XCC_ID_XCC_ID_SIZE - 1, XCC_ID_XCC_ID_OFFSET, XCC_ID));
-    cu   = __builtin_amdgcn_s_getreg(
-             GETREG_IMMED(HW_ID_CU_ID_SIZE - 1, HW_ID_CU_ID_OFFSET, HW_ID));
+    se   = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_getreg)
+               ? __builtin_amdgcn_s_getreg(
+                     GETREG_IMMED(HW_ID_SE_ID_SIZE - 1, HW_ID_SE_ID_OFFSET, HW_ID))
+               : 0u;
+    xcc  = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_getreg)
+               ? __builtin_amdgcn_s_getreg(
+                     GETREG_IMMED(XCC_ID_XCC_ID_SIZE - 1, XCC_ID_XCC_ID_OFFSET, XCC_ID))
+               : 0u;
+    cu   = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_getreg)
+               ? __builtin_amdgcn_s_getreg(
+                     GETREG_IMMED(HW_ID_CU_ID_SIZE - 1, HW_ID_CU_ID_OFFSET, HW_ID))
+               : 0u;
     se_bits  = HW_ID_SE_ID_SIZE;
     cu_bits  = HW_ID_CU_ID_SIZE;
 
   #else
-    se = __builtin_amdgcn_s_getreg(
-           GETREG_IMMED(HW_ID_SE_ID_SIZE - 1, HW_ID_SE_ID_OFFSET, HW_ID));
-    cu = __builtin_amdgcn_s_getreg(
-           GETREG_IMMED(HW_ID_CU_ID_SIZE - 1, HW_ID_CU_ID_OFFSET, HW_ID));
+    se = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_getreg)
+             ? __builtin_amdgcn_s_getreg(
+                   GETREG_IMMED(HW_ID_SE_ID_SIZE - 1, HW_ID_SE_ID_OFFSET, HW_ID))
+             : 0u;
+    cu = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_getreg)
+             ? __builtin_amdgcn_s_getreg(
+                   GETREG_IMMED(HW_ID_CU_ID_SIZE - 1, HW_ID_CU_ID_OFFSET, HW_ID))
+             : 0u;
     se_bits = HW_ID_SE_ID_SIZE;
     cu_bits = HW_ID_CU_ID_SIZE;
   #endif
@@ -893,5 +940,14 @@ static inline __device__ void* memset(void* ptr, int val, size_t size) {
   return __hip_hc_memset(ptr, val, size);
 }
 #endif  // !__OPENMP_AMDGCN__
+
+#define HIP_IMPL_GENERATE_SCAN_FUNC(OP, TYPE_ALIAS, TYPE) \
+  extern "C" __device__ __attribute__((const)) TYPE __ockl_wfscan_ ## OP ## _ ## TYPE_ALIAS(TYPE, bool);\
+\
+    template <bool Inclusive>\
+    __device__ __forceinline__ TYPE scan_ ## OP(TYPE val)\
+    {\
+      return __ockl_wfscan_ ## OP ## _ ## TYPE_ALIAS(val, Inclusive);\
+    }
 
 #endif
