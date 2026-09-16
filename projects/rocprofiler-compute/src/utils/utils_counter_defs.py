@@ -102,7 +102,7 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Block remapping — SQC and SP counters belong to the SQ IP block
+# Block remapping: SQC and SP counters belong to the SQ IP block
 # ---------------------------------------------------------------------------
 
 BLOCK_REMAP: dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
@@ -114,11 +114,11 @@ BLOCK_REMAP: dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
 
 
 def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
-    """Extract HW counter names and ``$variable`` names from formula *text*.
+    """Extract HW counter names and $variable names from formula text.
 
-    Returns ``(hw_counters, variables)`` where *variables* are the names
-    without the leading ``$``.  Matches that look like variables are removed
-    from the HW counter set.
+    Returns (hw_counters, variables) where variables are the names without
+    the leading $. Matches that look like variables are removed from the HW
+    counter set.
     """
     hw_counter_matches = set(HW_COUNTER_RE.findall(text))
     variable_matches = set(VARIABLE_RE.findall(text))
@@ -128,18 +128,24 @@ def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
 
 
 def extract_counters_and_variables(
-    text: str, gpu_series: str
+    text: str, gpu_series: str, include_supported_denom: bool = True
 ) -> tuple[set[str], set[str]]:
     """Return (hw_counters, builtin_vars) referenced by text, with transitive
     resolution. Recognizes both $var and ammolite__var forms.
+
+    Profiling must collect the SUPPORTED_DENOM counters too, because every
+    metric is implicitly divided by its unit denominator. Pass
+    include_supported_denom=False to get only the counters a formula names
+    itself, which is what deciding perfmon bucket membership needs.
     """
     hw, variables = parse_counters_text(text)
     variables.update(AMMOLITE_VAR_RE.findall(text))
 
-    for formula in SUPPORTED_DENOM.values():
-        hw_d, var_d = parse_counters_text(formula)
-        hw.update(hw_d)
-        variables.update(var_d)
+    if include_supported_denom:
+        for formula in SUPPORTED_DENOM.values():
+            hw_d, var_d = parse_counters_text(formula)
+            hw.update(hw_d)
+            variables.update(var_d)
 
     build_in_vars = get_build_in_vars(gpu_series)
     builtin_vars: set[str] = set()
@@ -159,7 +165,7 @@ def extract_counters_and_variables(
 
 
 def counter_to_block(counter: str) -> str:
-    """Map a counter name to its IP block, applying :data:`BLOCK_REMAP`."""
+    """Map a counter name to its IP block, applying the BLOCK_REMAP table."""
     if counter.startswith("GC_CANE_"):
         return "GC_CANE"
     if counter.startswith("GC_EA_SE_"):

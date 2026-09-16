@@ -80,7 +80,7 @@ public:
     if (decoded.failed())
       throw std::runtime_error("Instruction encoding rejected by decoder");
     std::unique_ptr<Instruction> instruction(std::move(decoded).value());
-    cu->execute_instruction(instruction.get(), *wave);
+    EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
     if (memory_op) {
       amdgpu::L1VectorCache l1(&cache);
       amdgpu::GlobalMemPipeline pipeline(&l1, &cache);
@@ -193,7 +193,7 @@ TEST(AtomicSemanticsAndDecode, TranslatedCompareStorePreservesOperandOrder) {
       DecodeResult decoded = machine.decoder->decode(translated.words);
       ASSERT_FALSE(decoded.failed());
       std::unique_ptr<Instruction> instruction(std::move(decoded).value());
-      machine.cu->execute_instruction(instruction.get(), *machine.wave);
+      EXPECT_TRUE(machine.cu->execute_instruction(instruction.get(), *machine.wave).succeeded());
       amdgpu::LocalMemPipeline pipeline;
       pipeline.issue(instruction.release(), *machine.wave);
       EXPECT_EQ(machine.wave->lds().read32(0x100), equal ? 5u : 3u);
@@ -217,7 +217,7 @@ TEST(AtomicSemanticsAndDecode, ConditionalAndClampedDsSubtract) {
       machine.cu->write_vgpr(machine.base, 0, 5);
       machine.cu->write_vgpr(machine.base + 6, 0, 0xbad);
       std::unique_ptr<Instruction> instruction(machine.decoder->decode(words.data()).value());
-      machine.cu->execute_instruction(instruction.get(), *machine.wave);
+      EXPECT_TRUE(machine.cu->execute_instruction(instruction.get(), *machine.wave).succeeded());
       amdgpu::LocalMemPipeline pipeline;
       pipeline.issue(instruction.release(), *machine.wave);
       witness("ds_conditional_clamped_sub", arch, machine.wave->lds().read32(0x100),
@@ -338,7 +338,7 @@ TEST(AtomicSemanticsAndDecode, PackedAtomicsAcrossOlderTargets) {
         DecodeResult decoded = machine.decoder->decode(words.data());
         ASSERT_FALSE(decoded.failed());
         std::unique_ptr<Instruction> instruction(std::move(decoded).value());
-        machine.cu->execute_instruction(instruction.get(), *machine.wave);
+        EXPECT_TRUE(machine.cu->execute_instruction(instruction.get(), *machine.wave).succeeded());
         amdgpu::LocalMemPipeline pipeline;
         pipeline.issue(instruction.release(), *machine.wave);
         EXPECT_EQ(machine.cu->read_vgpr(machine.base + 6, 0), 0x00010001u);
@@ -464,7 +464,7 @@ protected:
       ADD_FAILURE() << "Invalid DS opcode " << opcode;
       return 0;
     }
-    compute_unit_->execute_instruction(instruction.get(), *wave_);
+    EXPECT_TRUE(compute_unit_->execute_instruction(instruction.get(), *wave_).succeeded());
     if (!instruction->data()) {
       ADD_FAILURE() << "No memory request for " << instruction->mnemonic();
       return old_bits;
@@ -604,7 +604,7 @@ protected:
       ADD_FAILURE() << "Invalid memory atomic";
       return old_bits;
     }
-    compute_unit_->execute_instruction(instruction.get(), *wave_);
+    EXPECT_TRUE(compute_unit_->execute_instruction(instruction.get(), *wave_).succeeded());
     if (!instruction->data()) {
       ADD_FAILURE() << "No request for " << instruction->mnemonic();
       return old_bits;

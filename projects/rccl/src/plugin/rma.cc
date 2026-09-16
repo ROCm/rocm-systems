@@ -2,6 +2,8 @@
  * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
+ * Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
  * See LICENSE.txt for more license information
  *************************************************************************/
 
@@ -156,7 +158,7 @@ static ncclResult_t ncclRmaPluginDisableOtherExternal(int pluginIndex) {
 
 static void initPluginLibsOnceFunc() {
   char* rmaPluginName = nullptr;
-  const char* defaultRmaPlugin = "libnccl-rma.so";
+  const char* defaultRmaPlugin = "librccl-rma.so";
   const char* envRmaPlugin = nullptr;
   char* envRmaPluginList = nullptr;
   char* savePtr = nullptr;

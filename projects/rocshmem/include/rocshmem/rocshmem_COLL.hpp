@@ -141,7 +141,7 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_alltoall_wg(
  *
  * This function must be called as a work-group collective.
  *
- * @param[in] ctx          The ROCSHMEM context associated with this operation.    
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
  * @param[in] team         The team participating in the collective.
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
@@ -229,7 +229,7 @@ __device__ ATTR_NO_INLINE int rocshmem_ctx_ulonglong_alltoall_wave(
  *
  * This function must be called as a wave collective.
  *
- * @param[in] ctx          The ROCSHMEM context associated with this operation.    
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
  * @param[in] team         The team participating in the collective.
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
@@ -518,7 +518,7 @@ __host__ void rocshmem_ctx_ulonglong_broadcast(
  *                         heap.
  * @param[in] nelems       Size of buffer to participate in the broadcast.
  * @param[in] PE_root      Root PE (relative to team) from which to broadcast.
- * 
+ *
  *
  * @return void
  */
@@ -540,7 +540,7 @@ __device__ void rocshmem_ctx_broadcastmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t
  *                         heap.
  * @param[in] nelems       Number of elements to participate in the broadcast.
  * @param[in] PE_root      Root PE (relative to team) from which to broadcast.
- * 
+ *
  *
  * @return int; zero when sucessful, non-zero otherwise
  */
@@ -598,7 +598,7 @@ __device__ int rocshmem_ctx_ulonglong_broadcast_wave(rocshmem_ctx_t ctx, rocshme
  *                         heap.
  * @param[in] nelems       Size of buffer to participate in the broadcast.
  * @param[in] PE_root      Root PE (relative to team) from which to broadcast.
- * 
+ *
  *
  * @return int; zero when successful, non-zero otherwise
  */
