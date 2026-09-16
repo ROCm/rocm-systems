@@ -1,23 +1,23 @@
 name: ROCm Merge Gate tests
 
-# Unit tests for the path-freeze merge gate. This is a plain pull_request
-# workflow with a read-only token, kept separate from path-freeze.yml so PR
+# Unit tests for the rocm-merge-gate merge gate. This is a plain pull_request
+# workflow with a read-only token, kept separate from rocm-merge-gate.yml so PR
 # code never runs under that workflow's pull_request_target privileges.
 
 on:
   push:
     branches: [develop]
     paths:
-      - '.github/workflows/path-freeze.yml'
-      - '.github/workflows/path-freeze-tests.yml'
-      - '.github/scripts/path_freeze.py'
-      - '.github/scripts/tests/path_freeze_test.py'
+      - '.github/workflows/rocm-merge-gate.yml'
+      - '.github/workflows/rocm-merge-gate-tests.yml'
+      - '.github/scripts/rocm_merge_gate.py'
+      - '.github/scripts/tests/rocm_merge_gate_test.py'
   pull_request:
     paths:
-      - '.github/workflows/path-freeze.yml'
-      - '.github/workflows/path-freeze-tests.yml'
-      - '.github/scripts/path_freeze.py'
-      - '.github/scripts/tests/path_freeze_test.py'
+      - '.github/workflows/rocm-merge-gate.yml'
+      - '.github/workflows/rocm-merge-gate-tests.yml'
+      - '.github/scripts/rocm_merge_gate.py'
+      - '.github/scripts/tests/rocm_merge_gate_test.py'
 
 permissions:
   contents: read
@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  path-freeze-tests:
+  rocm-merge-gate-tests:
     runs-on: ubuntu-24.04
     steps:
       # Only .github is checked out; `validate` resolves freeze paths through
@@ -43,15 +43,15 @@ jobs:
           python-version: '3.12'
 
       # pytest matches the other .github/scripts tests; pyyaml lets the tests
-      # assert on the freeze list that path-freeze.yml actually ships.
+      # assert on the freeze list that rocm-merge-gate.yml actually ships.
       - name: Install python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pytest pyyaml
 
-      - name: Run path freeze tests
-        run: python -m pytest .github/scripts/tests/path_freeze_test.py -v
+      - name: Run merge gate tests
+        run: python -m pytest .github/scripts/tests/rocm_merge_gate_test.py -v
 
       # Fails if FREEZES is unparseable or names a path that is not in the repo.
       - name: Validate the shipped freeze config
-        run: python .github/scripts/path_freeze.py validate
+        run: python .github/scripts/rocm_merge_gate.py validate

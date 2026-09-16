@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Path freeze: block develop PRs that change frozen trees.
+"""ROCm Merge Gate: block develop PRs that change frozen trees.
 
-Driven by .github/workflows/path-freeze.yml, which holds the freeze list.
+Driven by .github/workflows/rocm-merge-gate.yml, which holds the freeze list.
 Reads PR metadata through the GitHub API and never checks out PR code.
 """
 
@@ -18,18 +18,21 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-WORKFLOW = REPO_ROOT / ".github" / "workflows" / "path-freeze.yml"
+WORKFLOW = REPO_ROOT / ".github" / "workflows" / "rocm-merge-gate.yml"
 # GitHub's pull-files REST endpoint returns at most 3000 files.
 MAX_LISTED_FILES = 3000
 # PRs fetched per GraphQL page, and files fetched per PR within that page.
 PR_PAGE_SIZE = 50
 FILE_PAGE_SIZE = 100
-CHECK_NAME = "path-freeze"
+CHECK_NAME = "rocm-merge-gate"
 # Never frozen, so a repository-wide freeze can still be lifted by a PR.
-EXEMPT_PATHS = (".github/workflows/path-freeze.yml", ".github/scripts/path_freeze.py")
+EXEMPT_PATHS = (
+    ".github/workflows/rocm-merge-gate.yml",
+    ".github/scripts/rocm_merge_gate.py",
+)
 LIFT_HINT = (
     "Lift or narrow a freeze by editing `FREEZES` in "
-    "`.github/workflows/path-freeze.yml` and merging that change to develop."
+    "`.github/workflows/rocm-merge-gate.yml` and merging that change to develop."
 )
 
 # Sweeping the whole backlog one PR at a time would exceed GITHUB_TOKEN's

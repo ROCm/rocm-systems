@@ -59,10 +59,10 @@ repos:
 
   - repo: local
     hooks:
-      - id: path-freeze-config
-        name: path freeze config
-        entry: python .github/scripts/path_freeze.py validate
+      - id: rocm-merge-gate-config
+        name: ROCm Merge Gate config
+        entry: python .github/scripts/rocm_merge_gate.py validate
         language: python
         additional_dependencies: [pyyaml]
-        files: ^\.github/(workflows/path-freeze\.yml|scripts/path_freeze\.py)$
+        files: ^\.github/(workflows/rocm-merge-gate\.yml|scripts/rocm_merge_gate\.py)$
         pass_filenames: false
