@@ -2,7 +2,7 @@
 
 Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projects/rocprofiler-sdk](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html)
 
-## Unreleased
+## ROCprofiler-SDK 1.4.1 for ROCm release 10.1.0
 
 ### Added
 
@@ -20,6 +20,11 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - New tracing kinds `ROCPROFILER_CALLBACK_TRACING_HIP_EVENT` and `ROCPROFILER_BUFFER_TRACING_HIP_EVENT` with operation enum `rocprofiler_hip_event_operation_t` (RECORD, WAIT).
     - New `--hip-event-trace` CLI flag, automatically enabled by `--hip-trace` and `--hip-runtime-trace`.
     - rocpd schema bumped to 3.0.4 with new `rocpd_hip_event` table and `hip_events` data view.
+
+  - Anytime initialization support.
+    - Tools can call `rocprofiler_force_configure` after one or more other tools have configured ROCprofiler-SDK.
+    - NOTE: during the initialization of another tool, there is a small window where previously existing tools don't receive records generated from the application's background threads.
+
 
 **rocprof-trace-decoder:**
 
@@ -110,9 +115,6 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - New experimental API in `rocprofiler-sdk/experimental/spm.h`:
     - GPU-timestamped counter values alongside kernel dispatch information.
   - Added `spm_support` along with reserved padding to `rocprofiler_counter_info_v1_t`
-  - Anytime initialization support.
-    - Tools can call `rocprofiler_force_configure` after one or more other tools have configured rocprofiler-sdk.
-      - NOTE: during the initialization of another tool, there is a small window where previously existing tools will not receive records generated from application background threads.
 
 **rocprofv3(CLI):**
   - SPM counter collection support in `rocprofv3` (beta):
