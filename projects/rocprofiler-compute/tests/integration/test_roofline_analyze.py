@@ -7,6 +7,8 @@ MI200 (gfx90a) tests run through the ``analyze`` CLI and assert that roofline
 HTML is generated, including the per-datatype VALU/MFMA legend.
 """
 
+import json
+import re
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -23,6 +25,17 @@ config["cleanup"] = True
 roofline_dir = "tests/workloads/mem_levels_HBM/MI200"
 
 
+def embedded_roofline_model(document: str) -> dict:
+    """Parse the JSON model from a standalone roofline document."""
+    match = re.search(
+        r'<script id="roofline-model" type="application/json">(.*?)</script>',
+        document,
+        re.DOTALL,
+    )
+    assert match is not None
+    return json.loads(match.group(1))
+
+
 # Roofline HTML generation
 
 
@@ -34,22 +47,31 @@ def test_analyze_generates_roofline_html(
     Uses MI200 workload with roofline.csv.
     """
     workload_dir = integration_common.setup_workload_dir(roofline_dir)
+    try:
+        assert (Path(workload_dir) / "roofline.csv").exists()
 
-    assert (Path(workload_dir) / "roofline.csv").exists()
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--roofline-data-type",
+            "FP32",
+        ])
+        assert code == 0
 
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--roofline-data-type",
-        "FP32",
-    ])
-    assert code == 0
+        html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+        assert [html_file.name for html_file in html_files] == ["empirRoof_gpu-0.html"]
 
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
-    assert len(html_files) > 0, "Analyze should generate roofline HTML files"
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
+        html_text = html_files[0].read_text(encoding="utf-8")
+        assert 'id="roofline-precision-btn"' in html_text
+        model = embedded_roofline_model(html_text)
+        assert "FP32" in model["precisions"]
+        assert model["frame"] == {
+            "x": [0.01, 1000.0],
+            "y": [10.0, 1000000.0],
+        }
+    finally:
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 def test_analyze_roofline_datatype_independently(
@@ -74,7 +96,7 @@ def test_analyze_roofline_datatype_independently(
         assert code == 0
 
     html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
-    assert len(html_files) > 0, "Analyze should generate roofline HTML files"
+    assert [html_file.name for html_file in html_files] == ["empirRoof_gpu-0.html"]
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -302,10 +324,10 @@ def test_analyze_roofline_datatype_html_legend(
     ])
     assert code == 0
 
-    html_files = list(Path(workload_dir).glob(f"empirRoof_*{dtype}*.html"))
-    assert len(html_files) > 0, f"Analyze should generate a {dtype} roofline HTML"
+    html_path = Path(workload_dir) / "empirRoof_gpu-0.html"
+    assert html_path.is_file(), f"Analyze should generate a {dtype} roofline HTML"
 
-    html_text = html_files[0].read_text(encoding="utf-8")
+    html_text = html_path.read_text(encoding="utf-8")
     for legend in DATATYPE_LEGEND_CASES[dtype]["present"]:
         assert legend in html_text, f"{dtype} HTML should contain '{legend}'"
     for legend in DATATYPE_LEGEND_CASES[dtype]["absent"]:

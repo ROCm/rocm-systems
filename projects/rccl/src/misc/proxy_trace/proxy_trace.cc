@@ -11,7 +11,10 @@
 #else
 #include "debug.h"
 #endif
+#include <cstdio>
+#include <iomanip>
 #include <map>
+#include <sstream>
 
 constexpr int32_t kFinishedProxyOpItems = 32;
 static std::unordered_map<facebook_rccl::ProxyOpStepStatus, std::string> proxyStepStatusStrMap = {
@@ -111,7 +114,7 @@ void facebook_rccl::ProxyTraceOp::computeStatus() {
 
 std::string facebook_rccl::ProxyTrace::dump(uint64_t commHash) {
   std::lock_guard<std::mutex> lock(mutex_);
-  std::string result = fmt::format("commDump for commHash:{}\n", commHash);
+  std::string result = "commDump for commHash:" + std::to_string(commHash) + "\n";
   std::map<std::string, std::string> sortedDumpStrMap;
   for (auto& opCountMap : activeOps.at(commHash)) {
     for (auto& proxyOpMap : opCountMap.second) {
@@ -128,8 +131,9 @@ std::string facebook_rccl::ProxyTrace::dump(uint64_t commHash) {
 
 std::string facebook_rccl::ProxyTrace::dump() {
   std::lock_guard<std::mutex> lock(mutex_);
-  std::string result = "commDump for all active ops ";
-  result += fmt::format("mapSizeMB:{:.2f}\n", getMapSizeMB());
+  std::ostringstream oss;
+  oss << "commDump for all active ops mapSizeMB:" << std::fixed << std::setprecision(2) << getMapSizeMB() << "\n";
+  std::string result = oss.str();
 
   // maps serialized key to serliazed proxyOp; sorted by key
   std::map<std::string, std::string> sortedDumpStrMap;
@@ -155,26 +159,36 @@ std::string facebook_rccl::ProxyTrace::dump() {
 
 std::string facebook_rccl::ProxyTraceOp::str() {
   computeStatus();
-  std::string ret =
-    fmt::format("createT:{}, lastT:{}, postT:{}, sendT:{}, cntNm:{}, {}, {}, {}->{}({}), "
-                "chan:{}, status:{}, ns:{}, nb:{}, po:{}, ke:{}, tail/h:{}, recvT:{}, "
-                "connSz/h:{}, trans:{}, flushed:{}, recvd:{}, done:{}\n",
-                std::chrono::duration_cast<std::chrono::milliseconds>(startTs.time_since_epoch()).count(),
-                std::chrono::duration_cast<std::chrono::milliseconds>(lastUpdateTs.time_since_epoch()).count(),
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                  timestamps[facebook_rccl::ProxyCounterTypes::POSTED].time_since_epoch())
-                  .count(),
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                  timestamps[facebook_rccl::ProxyCounterTypes::KERNEL_COPY_READY].time_since_epoch())
-                  .count(),
-                static_cast<int>(lastUpdatingCounter), traceKey.str(), extraInfo.str(), myRank, peerRank,
-                opType == ProxyOpType::SEND ? "S" : "R", channelId, proxyStepStatusStrMap[status], nSteps, nbytes,
-                counters[ProxyCounterTypes::POSTED], counters[ProxyCounterTypes::KERNEL_COPY_READY],
-                counters[ProxyCounterTypes::TAIL_OR_HEAD], counters[ProxyCounterTypes::RECV_TAIL],
-                counters[ProxyCounterTypes::FIFO_SZ_OR_HEAD_CACHE], counters[ProxyCounterTypes::TRANSMITTED],
-                counters[ProxyCounterTypes::FLUSHED], counters[ProxyCounterTypes::RECEIVED],
-                counters[ProxyCounterTypes::DONE]);
-  return ret;
+  auto ms = [](const std::chrono::time_point<std::chrono::high_resolution_clock>& tp) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count();
+  };
+  char buf[512];
+  snprintf(buf, sizeof(buf),
+           "createT:%lld, lastT:%lld, postT:%lld, sendT:%lld, cntNm:%d, %s, %s, %d->%d(%s), "
+           "chan:%d, status:%s, ns:%d, nb:%u, po:%lld, ke:%lld, tail/h:%lld, recvT:%lld, "
+           "connSz/h:%lld, trans:%lld, flushed:%lld, recvd:%lld, done:%lld\n",
+           (long long)ms(startTs),
+           (long long)ms(lastUpdateTs),
+           (long long)ms(timestamps[facebook_rccl::ProxyCounterTypes::POSTED]),
+           (long long)ms(timestamps[facebook_rccl::ProxyCounterTypes::KERNEL_COPY_READY]),
+           static_cast<int>(lastUpdatingCounter),
+           traceKey.str().c_str(),
+           extraInfo.str().c_str(),
+           myRank, peerRank,
+           opType == ProxyOpType::SEND ? "S" : "R",
+           channelId,
+           proxyStepStatusStrMap[status].c_str(),
+           nSteps, nbytes,
+           (long long)counters[ProxyCounterTypes::POSTED],
+           (long long)counters[ProxyCounterTypes::KERNEL_COPY_READY],
+           (long long)counters[ProxyCounterTypes::TAIL_OR_HEAD],
+           (long long)counters[ProxyCounterTypes::RECV_TAIL],
+           (long long)counters[ProxyCounterTypes::FIFO_SZ_OR_HEAD_CACHE],
+           (long long)counters[ProxyCounterTypes::TRANSMITTED],
+           (long long)counters[ProxyCounterTypes::FLUSHED],
+           (long long)counters[ProxyCounterTypes::RECEIVED],
+           (long long)counters[ProxyCounterTypes::DONE]);
+  return std::string(buf);
 }
 
 float facebook_rccl::ProxyTrace::getMapSizeMB() const {
