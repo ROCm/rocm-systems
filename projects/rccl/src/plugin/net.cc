@@ -462,10 +462,18 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
 #endif
   static int gdrSupportMatrix[32] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
                                      -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
-  if (gdrSupportMatrix[comm->cudaDev] == -1) {
+  // Which network plugin produced the cached verdict. The verdict is read off that plugin's
+  // ptrSupport, so it does not carry over to a communicator using a different one: the Socket
+  // plugin reports no NCCL_PTR_CUDA on any device, and caching its answer under the GPU alone left
+  // every later IB communicator in the process believing the GPU cannot do GDR.
+  static int gdrSupportPlugin[32] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+                                     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+  if (gdrSupportMatrix[comm->cudaDev] == -1 ||
+      gdrSupportPlugin[comm->cudaDev] != comm->netPluginIndex) {
     int netDevs;
     NCCLCHECK(comm->ncclNet->devices(&netDevs));
     gdrSupportMatrix[comm->cudaDev] = 0;
+    gdrSupportPlugin[comm->cudaDev] = comm->netPluginIndex;
     for (int dev = 0; dev < netDevs; dev++) {
       // Find a net device which is GDR-capable
       ncclNetProperties_t props;
