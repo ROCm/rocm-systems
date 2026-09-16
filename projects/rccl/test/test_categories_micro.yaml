@@ -16,6 +16,8 @@ test_categories:
     test_patterns:
       - "P2pMicrotest.*"
       - "P2pMicrotestIsolated.*"
+      - "P2pCanConnectMicrotest.*"
+      - "P2pCanConnectMicrotestIsolated.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
       - "RasClientMicrotest.*"

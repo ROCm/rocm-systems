@@ -200,6 +200,7 @@ std::function<hipError_t(int*)> g_hipGetDeviceCount = DefaultHipGetDeviceCount;
 // Defined with the plain HIP stubs below, where the attribute switch lives.
 static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device);
 static hipError_t DefaultHipDeviceSetLimit(hipLimit_t limit, size_t value);
+static hipError_t DefaultHipDeviceGetPCIBusId(char* pciBusId, int len, int device);
 
 static hipError_t DefaultHipDeviceCanAccessPeer(int* canAccessPeer, int, int)
 {
@@ -501,6 +502,7 @@ void ResetHipFakes()
     g_hipDeviceSetLimit             = DefaultHipDeviceSetLimit;
     g_hipDeviceGetAttributeResult   = hipErrorInvalidValue;
     g_hipDeviceGetPCIBusIdResult    = hipErrorInvalidValue;
+    g_hipDeviceGetPCIBusId          = DefaultHipDeviceGetPCIBusId;
     g_hipEventCreateResult          = hipErrorInvalidValue;
     g_hipMemPoolResult              = hipErrorInvalidValue;
     g_hipStreamCreateResult         = hipErrorInvalidValue;
@@ -604,7 +606,12 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
     return g_hipDeviceGetAttribute(pi, attr, device);
 }
 
-hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int)
+// Default preserves the historical behaviour: a fixed bus-id string gated on
+// the g_hipDeviceGetPCIBusIdResult flag. Tests that need a device-distinct
+// bus id (so busIdToCudaDev resolves distinct cudaDev indices -- the
+// p2pCanConnect device-selection branches) install a hook that encodes the
+// device index into the string.
+static hipError_t DefaultHipDeviceGetPCIBusId(char* pciBusId, int len, int)
 {
     if (pciBusId && len > 0) {
         if (g_hipDeviceGetPCIBusIdResult == hipSuccess)
@@ -613,6 +620,13 @@ hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int)
             pciBusId[0] = '\0';
     }
     return g_hipDeviceGetPCIBusIdResult;
+}
+std::function<hipError_t(char*, int, int)> g_hipDeviceGetPCIBusId =
+    DefaultHipDeviceGetPCIBusId;
+
+hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device)
+{
+    return g_hipDeviceGetPCIBusId(pciBusId, len, device);
 }
 
 hipError_t hipEventCreate(hipEvent_t* event)
