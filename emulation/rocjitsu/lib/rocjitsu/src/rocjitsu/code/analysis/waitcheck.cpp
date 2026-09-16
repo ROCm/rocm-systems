@@ -956,7 +956,6 @@ struct Analyzer {
     std::vector<uint8_t> queued(analysis_blocks.size(), 1);
     for (size_t i = 0; i < analysis_blocks.size(); ++i)
       dataflow_worklist.push_back(i);
-    size_t node_visits = 0;
     size_t last_changed_node = 0;
     std::string last_changed_components;
     auto differing_components = [](const PendingState &lhs, const PendingState &rhs) {
@@ -997,10 +996,23 @@ struct Analyzer {
       return result;
     };
     const size_t max_node_visits = analysis_blocks.size() * 64 + 1024;
+    // A join whose predecessors disagree on pending-event identity can keep
+    // producing states that differ only in facts the analysis can no longer
+    // use, so its successors requeue forever and the solver burns the whole
+    // visit budget without settling (ROCm/aorta#453). Apply the usual dataflow
+    // remedy: once a node has been revisited this many times it is cycling
+    // rather than converging, so pin its unordered counters to lattice top.
+    // Nodes under the threshold keep exact state equality, so objects that
+    // converge on their own are unaffected.
+    const size_t widen_after_visits =
+        options_.cfg_widen_after_visits != 0 ? options_.cfg_widen_after_visits : 8;
+    std::vector<uint32_t> node_visit_counts(analysis_blocks.size(), 0);
+    size_t node_visits = 0;
     while (!dataflow_worklist.empty() && node_visits++ < max_node_visits) {
       const size_t i = dataflow_worklist.front();
       dataflow_worklist.pop_front();
       queued[i] = 0;
+      const bool widen = ++node_visit_counts[i] > widen_after_visits;
 
       PendingState merged = merge_predecessors(cfg_predecessors[i], out, out_initialized);
       if (conservative_sgpr_entries[i] != 0) {
@@ -1029,10 +1041,17 @@ struct Analyzer {
                           /*is_valu=*/false, producer);
         }
       }
+      if (widen)
+        widen_pending_counters_to_top(merged);
       PendingState next_out =
           analyze_block(*analysis_blocks[i], merged, section_name, file_offset_base, arch, false);
-      const bool input_changed = !same_dataflow_state(merged, in[i]);
-      const bool output_changed = out_initialized[i] == 0 || !same_dataflow_state(next_out, out[i]);
+      if (widen)
+        widen_pending_counters_to_top(next_out);
+      // Only a widened node may treat unordered counters as interchangeable.
+      const bool input_changed = widen ? !same_dataflow_state(merged, in[i]) : !(merged == in[i]);
+      const bool output_changed =
+          out_initialized[i] == 0 ||
+          (widen ? !same_dataflow_state(next_out, out[i]) : !(next_out == out[i]));
       if (!input_changed && !output_changed)
         continue;
 
@@ -1060,71 +1079,17 @@ struct Analyzer {
     }
 
     if (!dataflow_worklist.empty()) {
-      // Remaining work is unordered-counter churn, not an unsound CFG.
-      // Widen those counters to top and drain once more; if the worklist
-      // still is not empty, emit diagnostics from the last states rather
-      // than aborting with no waitcheck signal (ROCm/aorta#453).
-      static_cast<void>(last_changed_node);
-      static_cast<void>(last_changed_components);
-      for (size_t n = 0; n < analysis_blocks.size(); ++n) {
-        widen_uncertain_counters(in[n]);
-        if (out_initialized[n] != 0)
-          widen_uncertain_counters(out[n]);
-      }
-      dataflow_worklist.clear();
-      std::fill(queued.begin(), queued.end(), 1);
-      for (size_t n = 0; n < analysis_blocks.size(); ++n)
-        dataflow_worklist.push_back(n);
-      node_visits = 0;
-      while (!dataflow_worklist.empty() && node_visits++ < max_node_visits) {
-        const size_t i = dataflow_worklist.front();
-        dataflow_worklist.pop_front();
-        queued[i] = 0;
-
-        PendingState merged = merge_predecessors(cfg_predecessors[i], out, out_initialized);
-        if (conservative_sgpr_entries[i] != 0) {
-          merged.sgpr_hazards.tracked_pairs.set();
-          merged.sgpr_hazards.tracked_vcc = true;
-        }
-        if (const auto &continuation = std::get<2>(analysis_node_keys[i])) {
-          const auto [return_sreg, source_call_offset] = *continuation;
-          const auto source = instruction_by_offset.find(source_call_offset);
-          const SgprHazardProducer producer{
-              .section_name = section_name,
-              .section_offset = source_call_offset,
-              .file_offset = file_offset_base + source_call_offset,
-              .instruction = source == instruction_by_offset.end() ? std::string{}
-                                                                   : source->second->disassemble(),
-          };
-          set_sgpr_hazard(merged.sgpr_hazards, RegisterRef{RegClass::SGPR, return_sreg, 1},
-                          /*is_valu=*/false, producer);
-          if (return_sreg < 127) {
-            set_sgpr_hazard(merged.sgpr_hazards,
-                            RegisterRef{RegClass::SGPR, static_cast<uint16_t>(return_sreg + 1), 1},
-                            /*is_valu=*/false, producer);
-          }
-        }
-        widen_uncertain_counters(merged);
-        PendingState next_out =
-            analyze_block(*analysis_blocks[i], merged, section_name, file_offset_base, arch, false);
-        widen_uncertain_counters(next_out);
-        const bool input_changed = !same_dataflow_state(merged, in[i]);
-        const bool output_changed =
-            out_initialized[i] == 0 || !same_dataflow_state(next_out, out[i]);
-        if (!input_changed && !output_changed)
-          continue;
-        in[i] = std::move(merged);
-        out[i] = std::move(next_out);
-        out_initialized[i] = 1;
-        if (output_changed) {
-          for (size_t successor : cfg_successors[i]) {
-            if (queued[successor] != 0)
-              continue;
-            queued[successor] = 1;
-            dataflow_worklist.push_back(successor);
-          }
-        }
-      }
+      // Widening bounds the lattice, so reaching here means the states are not
+      // a fixed point for some reason other than unordered-counter churn.
+      // Diagnostics derived from them would be unsound, so still fail loudly.
+      report_.supported = false;
+      std::ostringstream os;
+      os << "waitcheck CFG dataflow did not converge at .text+0x" << std::hex
+         << analysis_blocks[last_changed_node]->start_offset();
+      if (!last_changed_components.empty())
+        os << " (" << last_changed_components << ')';
+      report_.analysis_error = os.str();
+      return;
     }
 
     prepare_cfg_path_filter(analysis_blocks, cfg_predecessors, cfg_successors);
@@ -2564,7 +2529,15 @@ private:
            lhs.delay_alu == rhs.delay_alu && lhs.expert_scheduling == rhs.expert_scheduling;
   }
 
-  static void widen_uncertain_counters(PendingState &state) {
+  // Pin every counter that still carries pending events to lattice top.
+  // This deliberately marks well-ordered counters uncertain too: it is what
+  // bounds the lattice height enough for a cycling node to settle, since
+  // same_dataflow_state() then stops comparing their event lists. The lists
+  // themselves are kept, only canonicalized, so a genuinely missing wait is
+  // still reported; the cost is that the surviving list is whichever one
+  // reached the block first, so a widened run may name a less precise counter
+  // value than an unwidened one would.
+  static void widen_pending_counters_to_top(PendingState &state) {
     for (size_t i = 0; i < kCounterCount; ++i) {
       if (state.pending[i].empty() && !state.uncertain_order[i])
         continue;
@@ -2664,12 +2637,6 @@ private:
       merged.ready_regs = *ready_regs;
     if (all_previous_vm_vsrc_zero_wait)
       merged.previous_vm_vsrc_zero_wait = *all_previous_vm_vsrc_zero_wait;
-    for (size_t i = 0; i < kCounterCount; ++i) {
-      if (!merged.uncertain_order[i])
-        continue;
-      for (PendingEvent &event : merged.pending[i])
-        event.min_younger = 0;
-    }
     return merged;
   }
 

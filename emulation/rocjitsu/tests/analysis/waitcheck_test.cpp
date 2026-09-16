@@ -1623,29 +1623,6 @@ TEST(WaitcheckTest, Gfx950AcceptsSWaitcntVmcntZeroBeforeBufferLoadUse) {
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
-TEST(WaitcheckTest, Gfx950UncertainLoadOrderAtLoopingCfgMergeDoesNotAbort) {
-  // Two swapped buffer-load paths join, then the join loops. Distinct pending
-  // loadcnt identities at the merge set uncertain-order; the analysis must
-  // still produce a verdict instead of aborting CFG dataflow (ROCm/aorta#453).
-  std::vector<uint32_t> program;
-  program.push_back(0xBF840005u); // 0: s_cbranch_scc0 to the else path (5 dwords).
-  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
-  append_gfx950_buffer_load_dword_v1_v8_s0_offen(program);
-  program.push_back(0xBF820004u); // s_branch over the else path (4 dwords).
-  append_gfx950_buffer_load_dword_v1_v8_s0_offen(program);
-  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
-  program.push_back(0xBF840001u); // join: s_cbranch_scc0 to the drain (exit loop).
-  program.push_back(0xBF82FFF4u); // s_branch back to the header.
-  append_gfx950_s_waitcnt_vmcnt_0(program);
-  append_gfx950_v_mov_b32_v1_v0(program);
-  program.push_back(0xBF810000u); // s_endpgm.
-
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
-
-  ASSERT_TRUE(report.supported) << report.analysis_error;
-  EXPECT_TRUE(report.analysis_error.empty()) << report.analysis_error;
-}
-
 TEST(WaitcheckTest, Gfx950NonReturningFlatAtomicDoesNotDefineVdst) {
   std::vector<uint32_t> program;
   append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
@@ -6595,6 +6572,38 @@ TEST(WaitcheckTest, ObjectAnalysisAcceptsConsistentOlderLoadAtJoinAfterPartialWa
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, ObjectAnalysisWidenedUnorderedCountersStillReportTheHazard) {
+  // Swapped load order on the two predecessors of the join leaves loadcnt
+  // unordered. On large generated kernels that shape kept the dataflow
+  // worklist churning until it exhausted its visit budget, and the analysis
+  // then abandoned the object with no waitcheck signal at all
+  // (ROCm/aorta#453). Widening every node immediately forces the conservative
+  // path that now breaks the cycle, and it must stay sound: the hazard the
+  // unwidened run reports has to survive, or the remedy becomes a false pass.
+  std::vector<uint32_t> program;
+  append_inst(program, sopp(33, 7)); // s_cbranch_scc0 to the else path
+  append_inst(program, global_load_b32(0));
+  append_inst(program, global_load_b32(1));
+  append_inst(program, sopp(32, 6)); // s_branch to join
+  append_inst(program, global_load_b32(1));
+  append_inst(program, global_load_b32(0));
+  append_inst(program, sopp(64, 1)); // one predecessor still has v0 as newest load
+  append_inst(program, v_mov_b32(2, 0));
+
+  TestCodeObject code_object(program);
+  WaitcheckOptions options;
+  options.cfg_widen_after_visits = 1;
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.analysis_error.empty()) << report.analysis_error;
+  ASSERT_FALSE(report.diagnostics.empty()) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
 }
 
 TEST(WaitcheckTest, ObjectAnalysisAcceptsZeroWaitForMixedLoadOrderAtJoin) {

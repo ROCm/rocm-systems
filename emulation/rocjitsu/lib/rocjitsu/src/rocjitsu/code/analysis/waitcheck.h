@@ -141,6 +141,14 @@ struct WaitcheckOptions {
   /// optimization; entries beyond this budget are computed transiently, so
   /// reducing the budget does not change diagnostic results.
   size_t max_reachability_cache_bytes = 16 * 1024 * 1024;
+  /// @brief Revisit count after which a CFG dataflow node has its unordered wait
+  /// counters widened to lattice top, or zero for the default.
+  ///
+  /// @details Widening is what stops a join with conflicting pending-event
+  /// identities from cycling until the visit budget runs out. It costs
+  /// precision, so it only engages for nodes that are genuinely churning;
+  /// lowering this forces it earlier and exists to exercise that path in tests.
+  size_t cfg_widen_after_visits = 0;
   /// @brief Optional callback invoked after each kernel descriptor is fully
   /// analyzed. The callback is not invoked for symbol-less whole-section
   /// fallback analysis.
