@@ -481,7 +481,8 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
   int setupState = kSetupReady;
   if (!ginAnvilConnCheckEnabledFromEnv()) {
     setupState = kSetupBypass;
-  } else if (nRanks != devr->lsaSize || ctx->nSignals < nRanks) {
+  } else if (comm->globalGinSupport == NCCL_GIN_CONNECTION_RAIL || nRanks != devr->lsaSize ||
+             ctx->nSignals < nRanks) {
     setupState = kSetupSkip;
   }
   if (setupState == kSetupReady &&
@@ -561,7 +562,12 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
         ret = ncclSystemError;
         goto cleanup;
       }
-      if (nRanks != devr->lsaSize) {
+      if (comm->globalGinSupport == NCCL_GIN_CONNECTION_RAIL) {
+        INFO(NCCL_INIT,
+             "GIN anvil-sdma: skipping LSA signal conn-check (NCCL_GIN_CONNECTION_RAIL, rank %d, "
+             "ginRank=%d, lsaSelf=%d, nRanks=%d, lsaSize=%d)",
+             rank, rank, devr->lsaSelf, nRanks, devr->lsaSize);
+      } else if (nRanks != devr->lsaSize) {
         INFO(NCCL_INIT,
              "GIN anvil-sdma: skipping LSA signal conn-check (nRanks=%d != lsaSize=%d, rank %d)", nRanks,
              devr->lsaSize, rank);
