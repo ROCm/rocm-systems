@@ -3323,6 +3323,84 @@ fn the_suite_can_actually_run() {
     harness::assert_suite_can_run();
 }
 
+/// The allocations `thread-budget-table` reports are the ones the
+/// configuration reference tabulates for gfx950.
+///
+/// Those tables were read off the C++ CLI this command replaced, and are
+/// what a reader sizing a run compares against. Asserting the rows here
+/// is what makes the doc and the binary one claim rather than two: a
+/// change to the allocator that is not also a documentation change fails.
+#[test]
+fn the_thread_budget_table_reports_the_allocations_the_docs_publish() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    let config = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../configs/gfx950_mi355x.json")
+        .canonicalize()
+        .expect("the shipped gfx950 preset");
+    let out = env.ok(&["thread-budget-table", "--config", &config.to_string_lossy()]);
+
+    assert!(
+        out.starts_with("Budget | num_threads | cpu_dispatch_threads per GPU | Total"),
+        "the header is quoted in the docs: {out}"
+    );
+    // configuration.md, "the initial single-GPU tables use these
+    // engine/dispatch pairs", gfx950 column.
+    for row in [
+        "1 | 1 | 1 | 1",
+        "2 | 1 | 2 | 2",
+        "4 | 2 | 3 | 4",
+        "8 | 2 | 7 | 8",
+        "16 | 8 | 9 | 16",
+        "24 | 8 | 17 | 24",
+        "32 | 8 | 25 | 32",
+    ] {
+        assert!(
+            out.lines().any(|line| line == row),
+            "missing documented row {row:?} in:\n{out}"
+        );
+    }
+    // "A budget of 12 selects the eight-thread row."
+    assert!(
+        out.lines().any(|line| line == "12 | 2 | 7 | 8"),
+        "budget 12 should select the eight-thread row:\n{out}"
+    );
+    // The configured row reports the file's own request, not a ceiling.
+    assert!(
+        out.lines().any(|line| line.starts_with("Configured | ")),
+        "the configured row is what the machine will actually do:\n{out}"
+    );
+}
+
+/// The older CLI's spelling still selects the same report.
+///
+/// Every published invocation of it — configuration.md,
+/// concurrent-dispatch.md and two Sphinx pages — is written this way, so
+/// this is the form a reader following the docs will type.
+#[test]
+fn the_legacy_thread_budget_flag_still_reports_the_table() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    let config = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../configs/gfx950_mi355x.json")
+        .canonicalize()
+        .expect("the shipped gfx950 preset");
+    let legacy = env.ok(&[
+        "--config",
+        &config.to_string_lossy(),
+        "--thread-budget-table",
+    ]);
+    let subcommand = env.ok(&["thread-budget-table", "--config", &config.to_string_lossy()]);
+    assert_eq!(
+        legacy, subcommand,
+        "the old spelling and the subcommand are one report"
+    );
+}
+
 #[test]
 fn thread_overrides_reach_the_generated_rocjitsu_config() {
     let env = Env::new();

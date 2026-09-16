@@ -7,5 +7,6 @@
 #define ROCJITSU_CONFIG_API_H_
 
 #include "rocjitsu/config/rj_dbt.h"
+#include "rocjitsu/config/rj_threads.h"
 
 #endif // ROCJITSU_CONFIG_API_H_
