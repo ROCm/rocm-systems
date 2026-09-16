@@ -68,6 +68,7 @@
 #include "rocm_smi_wrap.h"
 #endif
 #include "rccl_common.h"
+#include "xtp_wrap.h"
 // [/RCCL]
 
 #ifdef ENABLE_ROCSHMEM
@@ -460,6 +461,9 @@ static ncclResult_t commFree(ncclComm_t comm) {
   int abort = 0;
   /* commFree() should not involve any sync among ranks. */
   if (comm == NULL) return ncclSuccess;
+
+  // Release the XTP binding, if this comm ever acquired one. No-op otherwise.
+  rcclXtpCommFree(comm);
 
   NCCLCHECK(ncclCeFinalize(comm));
 
