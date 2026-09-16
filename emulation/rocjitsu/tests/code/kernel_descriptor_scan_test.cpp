@@ -173,5 +173,75 @@ TEST(KernelDescriptorVgprGranule, Rdna4Wave64ZeroGranulatedCountDeclaresFourVgpr
   EXPECT_EQ((granulated + 1) * g32, 8u);
 }
 
+// The kernarg pointer's user-SGPR index is the summed width of whichever of
+// private_segment_buffer (4), dispatch_ptr (2) and queue_ptr (2) precede it.
+// Every consumer that loads through the pointer needs this index, so a wrong sum
+// reads an unrelated register rather than failing.
+TEST(KernargSegmentPtr, SlotIsTheWidthOfTheEnabledPredecessors) {
+  using namespace rocr::llvm::amdhsa;
+
+  EXPECT_EQ(kernarg_segment_ptr_slot(KD{}), 0);
+
+  KD buffer{};
+  AMDHSA_BITS_SET(buffer.kernel_code_properties,
+                  KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER, 1);
+  EXPECT_EQ(kernarg_segment_ptr_slot(buffer), 4);
+
+  KD dispatch{};
+  AMDHSA_BITS_SET(dispatch.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR,
+                  1);
+  EXPECT_EQ(kernarg_segment_ptr_slot(dispatch), 2);
+
+  KD queue{};
+  AMDHSA_BITS_SET(queue.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR, 1);
+  EXPECT_EQ(kernarg_segment_ptr_slot(queue), 2);
+
+  KD buffer_and_dispatch = buffer;
+  AMDHSA_BITS_SET(buffer_and_dispatch.kernel_code_properties,
+                  KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR, 1);
+  EXPECT_EQ(kernarg_segment_ptr_slot(buffer_and_dispatch), 6);
+
+  KD all_three = buffer_and_dispatch;
+  AMDHSA_BITS_SET(all_three.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR, 1);
+  EXPECT_EQ(kernarg_segment_ptr_slot(all_three), 8);
+}
+
+// The slot query answers where the pointer would go; the sgpr query answers where
+// it is. Keeping them distinct lets a caller inserting the pointer ask for the
+// index before setting the bit, without suppressing a nullopt it knows is wrong.
+TEST(KernargSegmentPtr, SgprIsEmptyUntilTheDescriptorEnablesThePointer) {
+  using namespace rocr::llvm::amdhsa;
+
+  KD desc{};
+  AMDHSA_BITS_SET(desc.kernel_code_properties,
+                  KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER, 1);
+  EXPECT_FALSE(has_kernarg_segment_ptr(desc));
+  EXPECT_FALSE(kernarg_segment_ptr_sgpr(desc).has_value());
+  EXPECT_EQ(kernarg_segment_ptr_slot(desc), 4); // still answers, and with the right slot
+
+  AMDHSA_BITS_SET(desc.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                  1);
+  EXPECT_TRUE(has_kernarg_segment_ptr(desc));
+  ASSERT_TRUE(kernarg_segment_ptr_sgpr(desc).has_value());
+  EXPECT_EQ(*kernarg_segment_ptr_sgpr(desc), 4);
+}
+
+// Length and offset occupy one descriptor field. A decoder that confused them
+// would report "preloading is on" for a kernel whose offset is non-zero and
+// length zero, which is not a preloading kernel at all.
+TEST(KernargPreload, LengthAndOffsetDecodeIndependently) {
+  KD desc{};
+  EXPECT_EQ(kernarg_preload_length(desc), 0u);
+  EXPECT_EQ(kernarg_preload_offset(desc), 0u);
+
+  AMDHSA_BITS_SET(desc.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 3);
+  EXPECT_EQ(kernarg_preload_length(desc), 3u);
+  EXPECT_EQ(kernarg_preload_offset(desc), 0u);
+
+  AMDHSA_BITS_SET(desc.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_OFFSET, 5);
+  EXPECT_EQ(kernarg_preload_length(desc), 3u);
+  EXPECT_EQ(kernarg_preload_offset(desc), 5u);
+}
+
 } // namespace
 } // namespace rocjitsu

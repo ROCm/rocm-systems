@@ -243,4 +243,38 @@ void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, KD &desc,
                   user_sgpr_count);
 }
 
+bool has_kernarg_segment_ptr(const KD &desc) {
+  return AMDHSA_BITS_GET(
+             desc.kernel_code_properties,
+             rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR) != 0;
+}
+
+uint16_t kernarg_segment_ptr_slot(const KD &desc) {
+  const uint32_t properties = desc.kernel_code_properties;
+  uint32_t sgpr = 0;
+  if (AMDHSA_BITS_GET(properties,
+                      rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER))
+    sgpr += 4;
+  if (AMDHSA_BITS_GET(properties,
+                      rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR))
+    sgpr += 2;
+  if (AMDHSA_BITS_GET(properties, rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR))
+    sgpr += 2;
+  return static_cast<uint16_t>(sgpr);
+}
+
+std::optional<uint16_t> kernarg_segment_ptr_sgpr(const KD &desc) {
+  if (!has_kernarg_segment_ptr(desc))
+    return std::nullopt;
+  return kernarg_segment_ptr_slot(desc);
+}
+
+uint32_t kernarg_preload_length(const KD &desc) {
+  return AMDHSA_BITS_GET(desc.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH);
+}
+
+uint32_t kernarg_preload_offset(const KD &desc) {
+  return AMDHSA_BITS_GET(desc.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_OFFSET);
+}
+
 } // namespace rocjitsu
