@@ -69,7 +69,9 @@ static int g_trCollNetDeviceCount = 0;
 #else
 static inline int __get_cpuid(unsigned int __leaf, unsigned int *__eax,
                               unsigned int *__ebx, unsigned int *__ecx,
-                              unsigned int *__edx) {
+static inline int __get_cpuid(unsigned int __leaf, unsigned int* __eax,
+                              unsigned int* __ebx, unsigned int* __ecx,
+                              unsigned int* __edx) {
   return 0;
 }
 #endif
