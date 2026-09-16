@@ -39,7 +39,9 @@ concurrency:
 jobs:
   pre-commit:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # Under systems-pr-bot.yml's 900s poll window, or the bot times out on a check that's
+    # merely slow, not failed -- the exact outcome this gate exists to prevent.
+    timeout-minutes: 10
     steps:
       - name: Checkout code (initial)
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
