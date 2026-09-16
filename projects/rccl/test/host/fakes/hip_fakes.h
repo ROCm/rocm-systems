@@ -59,6 +59,37 @@ extern std::function<hipError_t(void* /*shareableHandle*/,
 extern std::function<hipError_t(hipMemGenericAllocationHandle_t /*handle*/)>
     g_hipMemRelease;
 
+// cuMem*-import + legacy-IPC-import primitives the shareable-buffer import
+// path (ncclP2pImportShareableBuffer) and, on the alloc side, the cuMem
+// granularity query drive. Defaults return hipErrorInvalidValue so any
+// unexercised call surfaces via CUCHECK; import tests install a happy-path
+// hook. hipMemGetAllocationGranularity's default hands back a non-zero
+// granularity so the ALIGN_SIZE division does not divide by zero.
+extern std::function<hipError_t(std::size_t* /*granularity*/,
+                                const hipMemAllocationProp* /*prop*/,
+                                hipMemAllocationGranularity_flags /*option*/)>
+    g_hipMemGetAllocationGranularity;
+extern std::function<hipError_t(hipMemGenericAllocationHandle_t* /*handle*/,
+                                void* /*osHandle*/,
+                                hipMemAllocationHandleType /*shHandleType*/)>
+    g_hipMemImportFromShareableHandle;
+extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/,
+                                std::size_t /*alignment*/, void* /*addr*/,
+                                unsigned long long /*flags*/)>
+    g_hipMemAddressReserve;
+extern std::function<hipError_t(void* /*ptr*/, std::size_t /*size*/,
+                                std::size_t /*offset*/,
+                                hipMemGenericAllocationHandle_t /*handle*/,
+                                unsigned long long /*flags*/)>
+    g_hipMemMap;
+extern std::function<hipError_t(void* /*ptr*/, std::size_t /*size*/,
+                                const hipMemAccessDesc* /*desc*/,
+                                std::size_t /*count*/)>
+    g_hipMemSetAccess;
+extern std::function<hipError_t(void** /*devPtr*/, hipIpcMemHandle_t /*handle*/,
+                                unsigned int /*flags*/)>
+    g_hipIpcOpenMemHandle;
+
 // hipPointerGetAttribute: on HIP_VERSION >= 71260540 the fresh-registration
 // arm of ipcRegisterBuffer queries legacy-IPC capability
 // (HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE) through this call

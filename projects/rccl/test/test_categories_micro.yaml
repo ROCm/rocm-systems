@@ -20,6 +20,8 @@ test_categories:
       - "P2pCanConnectMicrotestIsolated.*"
       - "P2pSetupMicrotest.*"
       - "P2pFreeMicrotest.*"
+      - "P2pShareableBufferMicrotest.*"
+      - "GuardOperands/P2pAllocateSkipMarkExport.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
       - "RasMicrotest.*"

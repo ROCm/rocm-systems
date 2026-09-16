@@ -68,6 +68,31 @@ extern std::function<ncclResult_t(struct ncclComm*,
                                   int /*localFd*/, int* /*rmtFd*/)>
     g_proxyClientQueryFdBlocking;
 
+// ncclProxyClientGetFdBlocking: the cuMem*-import POSIX_FD arm of
+// ncclP2pImportShareableBuffer ships the remote cuMem handle to the peer
+// proxy for conversion into a local fd. Default returns ncclSystemError so
+// unexpected calls fail loudly; the POSIX_FD import test installs a hook
+// that succeeds and writes a canned local fd.
+extern std::function<ncclResult_t(struct ncclComm*, int /*rank*/,
+                                  void* /*handle*/, int* /*convertedFd*/)>
+    g_proxyClientGetFdBlocking;
+
+// ncclDynMemMarkExportToPeer / ncclMemTrackImportFromPeer: the memory-manager
+// bookkeeping the cuMem arms of ncclP2pAllocateShareableBuffer /
+// ncclP2pImportShareableBuffer drive. Neither leaves observable public state
+// here, so the shareable-buffer tests assert mock-style that the arm reached
+// (or skipped) them. Defaults succeed.
+extern std::function<ncclResult_t(struct ncclMemManager*, void* /*ptr*/,
+                                  int /*peerRank*/)>
+    g_dynMemMarkExportToPeer;
+extern std::function<ncclResult_t(struct ncclMemManager*, void* /*ptr*/,
+                                  size_t /*size*/,
+                                  hipMemGenericAllocationHandle_t /*handle*/,
+                                  hipMemAllocationHandleType /*handleType*/,
+                                  ncclMemType_t /*memType*/, int /*ownerRank*/,
+                                  int /*ownerDev*/, void* /*ownerPtr*/)>
+    g_memTrackImportFromPeer;
+
 // NCCL_PARAM redirector: p2p-test.cc replaces the body of every
 // NCCL_PARAM(name, env, deftVal) generator in the #included p2p.cc with a
 // thin trampoline that calls g_loadParam(env, deftVal) on every invocation
