@@ -54,7 +54,10 @@
 
 
 // devcomm compat tables (defined in devcomm/devcomm_v*.cc in the real build).
+// devcomm-test.cc supplies v22902 and v22907 by compiling their sources; the
+// rest only need to exist for getNcclVersionCompat's table to link.
 struct ncclDevCommCompat ncclDevCommCompat_v23000 = {};
+struct ncclDevCommCompat ncclDevCommCompat_v23100 = {};
 
 // ---------------------------------------------------------------------------
 // Debug / error.
@@ -389,6 +392,24 @@ ncclResult_t ncclDevrAllocAndPopulateSegmentWindows(struct ncclDevrState* devr, 
   return g_devrAllocAndPopulateSegmentWindows(devr, mem, stream, out);
 }
 
+// The segment cross-rank layout check and the GIN segment-info build, both
+// reached from symMemoryRegisterGin and both real in dev_runtime_segments.cc.
+// dev-runtime-test.cc compiles that source and routes these seams to it, so
+// the no-op defaults here only serve the other suites in this binary, which
+// never enable GIN and so never reach either call.
+static ncclResult_t DefaultVerifySegmentLayouts(struct ncclDevrMemory*, struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclDevrMemory*, struct ncclComm*)> g_devrVerifySegmentLayouts =
+    DefaultVerifySegmentLayouts;
+
+ncclResult_t ncclDevrVerifySegmentLayouts(struct ncclDevrMemory* mem, struct ncclComm* comm) {
+  return g_devrVerifySegmentLayouts(mem, comm);
+}
+
+static ncclResult_t DefaultBuildGinSegmentInfos(struct ncclDevrMemory*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclDevrMemory*)> g_devrBuildGinSegmentInfos = DefaultBuildGinSegmentInfos;
+
+ncclResult_t ncclDevrBuildGinSegmentInfos(struct ncclDevrMemory* mem) { return g_devrBuildGinSegmentInfos(mem); }
+
 // ---------------------------------------------------------------------------
 // Team accessors (host variants).
 // ---------------------------------------------------------------------------
@@ -406,6 +427,57 @@ std::function<ncclTeam_t(ncclComm_t)> g_devrTeamWorld = DefaultTeamWorld;
 extern "C" ncclTeam_t ncclTeamWorld(ncclComm_t comm) { return g_devrTeamWorld(comm); }
 extern "C" ncclTeam_t ncclTeamRail(ncclComm_t) { return ncclTeam_t{}; }
 
+// The CFT teams, read by symMemoryObtain and ncclDevrCommCreateInternal. Same
+// shape as the real host accessors in nccl_device/core.cc, reading the sizes
+// ncclDevrInitOnce already computed, minus their ncclDevrInitOnce call: these
+// are reached from inside that very function's callees, so calling it here
+// would recurse. Stride 1 for the same SIGFPE reason as the world team above.
+static ncclTeam_t DefaultTeamCft(ncclComm_t comm, ncclCftTeamMode_t) {
+  if (comm == nullptr) return ncclTeam_t{0, 0, 1};
+  return ncclTeam_t{comm->devrState.cftSize, comm->devrState.cftSelf, 1};
+}
+std::function<ncclTeam_t(ncclComm_t, ncclCftTeamMode_t)> g_devrTeamCft = DefaultTeamCft;
+ncclTeam_t ncclTeamCft(ncclComm_t comm, ncclCftTeamMode_t mode) { return g_devrTeamCft(comm, mode); }
+
+static ncclTeam_t DefaultTeamCftMultimem(ncclComm_t comm) {
+  if (comm == nullptr) return ncclTeam_t{0, 0, 1};
+  return ncclTeam_t{comm->devrState.cftMcSize, comm->devrState.cftMcSelf, 1};
+}
+std::function<ncclTeam_t(ncclComm_t)> g_devrTeamCftMultimem = DefaultTeamCftMultimem;
+ncclTeam_t ncclTeamCftMultimem(ncclComm_t comm) { return g_devrTeamCftMultimem(comm); }
+
+// ---------------------------------------------------------------------------
+// CFT logical endpoints (real in cft_dev_runtime.cc).
+// ---------------------------------------------------------------------------
+// Sizes first: ncclDevrInitOnce stores both into devrState, so the defaults
+// mirror the real pair's answer on a GPU without CFT support (gpuCftSupport
+// below 13030), which is what a zero-initialised test comm reports.
+static int DefaultComputeCftSize(struct ncclComm* comm) {
+  return (comm != nullptr && comm->devrState.bigSize != 0) ? comm->devrState.cftSize : 1;
+}
+std::function<int(struct ncclComm*)> g_devrComputeCftSize = DefaultComputeCftSize;
+int computeCftSize(struct ncclComm* comm) { return g_devrComputeCftSize(comm); }
+
+static int DefaultComputeCftMcSize(struct ncclComm* comm) {
+  return (comm != nullptr && comm->devrState.bigSize != 0) ? comm->devrState.cftMcSize : 1;
+}
+std::function<int(struct ncclComm*)> g_devrComputeCftMcSize = DefaultComputeCftMcSize;
+int computeCftMcSize(struct ncclComm* comm) { return g_devrComputeCftMcSize(comm); }
+
+// The bind/obtain half. Every call site is guarded by a live logical-endpoint
+// id or an explicit CFT request, and a zero-initialised comm has neither, so
+// these are link satisfiers on paths no suite in this binary reaches. Success
+// rather than ::abort() so a future CFT test fails on its own assertion
+// instead of taking the whole binary down.
+ncclResult_t symBindTeamLe(struct ncclComm*, struct ncclDevrMemory*, ncclCftLeId) { return ncclSuccess; }
+ncclResult_t symUnbindTeamLe(struct ncclComm*, struct ncclDevrMemory*, ncclCftLeId) { return ncclSuccess; }
+ncclResult_t symTeamObtainUcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool*) {
+  return ncclSuccess;
+}
+ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool*) {
+  return ncclSuccess;
+}
+
 // ---------------------------------------------------------------------------
 // Barrier requirement builders (host variants).
 // ---------------------------------------------------------------------------
@@ -415,6 +487,35 @@ extern "C" ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t, int, ncclLsa
 }
 extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, int, ncclGinBarrierHandle_t*,
                                                         ncclDevResourceRequirements_t*) {
+  return ncclSuccess;
+}
+extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCftBarrierHandle_t*,
+                                                        ncclDevResourceRequirements_t*) {
+  return ncclSuccess;
+}
+
+// ---------------------------------------------------------------------------
+// Other 2.31 externs ncclDevrInitOnce / ncclDevrCommCreateInternal reach.
+// ---------------------------------------------------------------------------
+// Real in rma.cc, which this binary does not compile. The proxy is off unless
+// a test says otherwise: symMemoryObtain caches the answer into
+// devrState.rmaProxyEnabled and gates the connect/register arm on it.
+static bool DefaultRmaProxyEnabled(struct ncclComm*) { return false; }
+std::function<bool(struct ncclComm*)> g_devrRmaProxyEnabled = DefaultRmaProxyEnabled;
+bool ncclRmaProxyEnabled(struct ncclComm* comm) { return g_devrRmaProxyEnabled(comm); }
+
+// Reached only once GIN is activated, which the GIN gate rejects for every
+// comm this binary builds.
+ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
+                                 uint32_t) {
+  return ncclSuccess;
+}
+
+// The enqueue-rearch job path: collective_stubs.cc pins
+// ncclParamEnqueueRearchEnable to 0, so every call site takes the in-group task
+// branch instead and nothing here enqueues a job.
+ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*),
+                                 ncclComm_t) {
   return ncclSuccess;
 }
 
@@ -455,10 +556,17 @@ void ResetDevRuntimeMicroFakes() {
   g_devrIntruAddressMapInsert                   = DefaultIntruAddressMapInsert;
   g_devrNcclCommWindowDeregister                = DefaultCommWindowDeregister;
   g_devrTeamWorld                               = DefaultTeamWorld;
+  g_devrTeamCft                                 = DefaultTeamCft;
+  g_devrTeamCftMultimem                         = DefaultTeamCftMultimem;
+  g_devrComputeCftSize                          = DefaultComputeCftSize;
+  g_devrComputeCftMcSize                        = DefaultComputeCftMcSize;
+  g_devrRmaProxyEnabled                         = DefaultRmaProxyEnabled;
   g_devrNcclCommRegister                        = DefaultCommRegister;
   g_devrNcclCommDeregister                      = DefaultCommDeregister;
   g_devrRmaProxyDeregister                      = DefaultRmaProxyDeregister;
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
+  g_devrVerifySegmentLayouts                = DefaultVerifySegmentLayouts;
+  g_devrBuildGinSegmentInfos                = DefaultBuildGinSegmentInfos;
 
   // Not a hook either, but 12 tests assign it directly to steer the
   // POSIX-FD-vs-shareable-handle split in symMemory{Export,ImportAndMap}

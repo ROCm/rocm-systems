@@ -552,8 +552,11 @@ hipError_t hipDeviceEnablePeerAccess(int, unsigned int)
 
 hipError_t hipDeviceGet(hipDevice_t* device, int)
 {
+    // fillInfo() CUCHECKs cuDeviceGet (hipDeviceGet) on every rank before it
+    // probes the fabric-handle attribute, so this must succeed on the default
+    // TransportsRankComm path or initTransportsRank never reaches the postset.
     if (device) *device = 0;
-    return hipErrorInvalidValue;
+    return hipSuccess;
 }
 
 hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t)
