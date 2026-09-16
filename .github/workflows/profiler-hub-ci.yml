@@ -29,11 +29,25 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Ubuntu 22.04's apt CMake is 3.22, below the project's 3.25 floor. Pinned on
+  # both runners so the matrix varies OS, compiler and build type, not CMake.
+  CMAKE_VERSION: "3.28.4"
+  PYTHON_VENV_PATH: ".venv-profiler-hub"
+  # Floors from profilers/profiler-hub/cmake/*.cmake, mirrored here for the
+  # from-source prefix the fetch-disabled lane builds. Keep the two in step.
+  FMT_VERSION: "11.1.3"
+  SPDLOG_VERSION: "1.15.3"
+  NLOHMANN_JSON_VERSION: "3.11.3"
+  GTEST_VERSION: "1.14.0"
+  BENCHMARK_VERSION: "1.8.3"
+
 jobs:
-  build-test:
-    name: ${{ matrix.os }} / ${{ matrix.compiler.name }} / ${{ matrix.build-type }}
+  # Lane 1 of 2: downloading is permitted, and stated. Covers the full matrix.
+  build-test-fetch:
+    name: fetch=ON / ${{ matrix.os }} / ${{ matrix.compiler.name }} / ${{ matrix.build-type }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -48,28 +62,28 @@ jobs:
         with:
           sparse-checkout: |
             profilers/profiler-hub
+            projects/rocprofiler-sdk/source/share/rocprofiler-sdk-rocpd
             .github/workflows
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            cmake \
             ${{ matrix.compiler.pkg }} \
             libsqlite3-dev libspdlog-dev libfmt-dev nlohmann-json3-dev \
-            libgtest-dev libgmock-dev
-          # libbenchmark-dev on ubuntu-22.04 ships LTO bytecode from gcc 11.2,
-          # incompatible with the current runner's gcc 11.4 (lto1: bytecode
-          # stream ... version 11.2 instead of the expected 11.3). The runner
-          # image pre-installs libbenchmark-dev, so actively purge it on 22.04
-          # and let the build fall back to FetchContent. Install on other OSes.
-          if [[ "${{ matrix.os }}" == "ubuntu-22.04" ]]; then
-            sudo apt-get purge -y libbenchmark-dev libbenchmark1 || true
-          else
-            sudo apt-get install -y libbenchmark-dev
-          fi
+            libgtest-dev libgmock-dev libbenchmark-dev
+          # Installed on both runners on purpose, including where they are too
+          # old to satisfy the floors: that exercises reject-then-fetch, which
+          # is the case the acquisition gate exists for.
 
-      - name: Configure
+      - name: Install CMake ${{ env.CMAKE_VERSION }}
+        run: |
+          python3 -m venv --system-site-packages "${GITHUB_WORKSPACE}/${PYTHON_VENV_PATH}"
+          "${GITHUB_WORKSPACE}/${PYTHON_VENV_PATH}/bin/python3" -m pip install --upgrade pip
+          "${GITHUB_WORKSPACE}/${PYTHON_VENV_PATH}/bin/python3" -m pip install "cmake==${CMAKE_VERSION}"
+          echo "${GITHUB_WORKSPACE}/${PYTHON_VENV_PATH}/bin" >> "${GITHUB_PATH}"
+
+      - name: Configure (fetch enabled)
         working-directory: profilers/profiler-hub
         env:
           CC: ${{ matrix.compiler.cc }}
@@ -77,15 +91,11 @@ jobs:
         run: |
           cmake --version
           ${CXX} --version
-          EXTRA_CMAKE_ARGS=()
-          if [[ "${{ matrix.os }}" == "ubuntu-22.04" ]]; then
-            EXTRA_CMAKE_ARGS+=(-DCMAKE_DISABLE_FIND_PACKAGE_benchmark=ON)
-          fi
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
             -DPROFILER_HUB_BUILD_TESTS=ON \
             -DPROFILER_HUB_BUILD_BENCHMARKS=ON \
-            "${EXTRA_CMAKE_ARGS[@]}"
+            -DPROFILER_HUB_FETCH_DEPENDENCIES=ON
 
       - name: Build
         working-directory: profilers/profiler-hub
@@ -109,4 +119,161 @@ jobs:
         with:
           name: test-results-${{ matrix.os }}-${{ matrix.compiler.name }}-${{ matrix.build-type }}
           path: profilers/profiler-hub/build/test-results.xml
+          if-no-files-found: warn
+
+  # Lane 2 of 2: one cell, and the configure runs with no network reachable.
+  # Only the steps named "(network)" may reach out; the configure proves the
+  # default build acquires nothing.
+  build-test-no-fetch:
+    name: fetch=OFF / ubuntu-24.04 / gcc / Release / isolated configure
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      DEPS_PREFIX: ${{ github.workspace }}/deps-prefix
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            profilers/profiler-hub
+            projects/rocprofiler-sdk/source/share/rocprofiler-sdk-rocpd
+            .github/workflows
+
+      - name: Install system dependencies (network)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc g++ util-linux curl
+
+      - name: Install CMake ${{ env.CMAKE_VERSION }} (network)
+        run: |
+          python3 -m venv --system-site-packages "${GITHUB_WORKSPACE}/${PYTHON_VENV_PATH}"
+          "${GITHUB_WORKSPACE}/${PYTHON_VENV_PATH}/bin/python3" -m pip install --upgrade pip
+          "${GITHUB_WORKSPACE}/${PYTHON_VENV_PATH}/bin/python3" -m pip install "cmake==${CMAKE_VERSION}"
+          echo "${GITHUB_WORKSPACE}/${PYTHON_VENV_PATH}/bin" >> "${GITHUB_PATH}"
+
+      - name: Restore dependency prefix
+        id: deps-cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.DEPS_PREFIX }}
+          key: >-
+            profiler-hub-deps-ubuntu-24.04-gcc-cmake${{ env.CMAKE_VERSION }}-fmt${{ env.FMT_VERSION }}-spdlog${{ env.SPDLOG_VERSION }}-json${{ env.NLOHMANN_JSON_VERSION }}-gtest${{ env.GTEST_VERSION }}-benchmark${{ env.BENCHMARK_VERSION }}
+
+      - name: Build dependency prefix from source (network)
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        env:
+          CC: gcc
+          CXX: g++
+        run: |
+          set -euo pipefail
+          SRC="${RUNNER_TEMP}/deps-src"
+          mkdir -p "${SRC}" "${DEPS_PREFIX}"
+
+          # Same repositories and tags the cmake/*.cmake files declare, so this
+          # prefix holds what a fetch-enabled build would have produced.
+          clone() { git clone --depth 1 --branch "$2" "$1" "${SRC}/$3"; }
+          clone https://github.com/fmtlib/fmt.git       "${FMT_VERSION}"            fmt
+          clone https://github.com/gabime/spdlog.git    "v${SPDLOG_VERSION}"        spdlog
+          clone https://github.com/nlohmann/json.git    "v${NLOHMANN_JSON_VERSION}" json
+          clone https://github.com/google/googletest.git "v${GTEST_VERSION}"        googletest
+          clone https://github.com/google/benchmark.git "v${BENCHMARK_VERSION}"     benchmark
+
+          build() {
+            local name="$1"; shift
+            cmake -S "${SRC}/${name}" -B "${SRC}/${name}/build" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX="${DEPS_PREFIX}" \
+              -DCMAKE_PREFIX_PATH="${DEPS_PREFIX}" \
+              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+              "$@"
+            cmake --build "${SRC}/${name}/build" --parallel "$(nproc)"
+            cmake --install "${SRC}/${name}/build"
+          }
+
+          build fmt -DFMT_TEST=OFF -DFMT_DOC=OFF
+          # External fmt is not optional: cmake/spdlog.cmake rejects a spdlog
+          # whose exported target lacks SPDLOG_FMT_EXTERNAL.
+          build spdlog -DSPDLOG_FMT_EXTERNAL=ON -DSPDLOG_BUILD_TESTS=OFF -DSPDLOG_BUILD_EXAMPLE=OFF
+          build json -DJSON_BuildTests=OFF
+          build googletest -DBUILD_GMOCK=ON -DINSTALL_GTEST=ON
+          build benchmark -DBENCHMARK_ENABLE_TESTING=OFF -DBENCHMARK_ENABLE_GTEST_TESTS=OFF
+
+      - name: Stage SQLite3 amalgamation (network)
+        working-directory: profilers/profiler-hub
+        run: |
+          set -euo pipefail
+          # cmake/sqlite3.cmake clones at configure time outside the gate, so
+          # pre-populating its build-tree location is what lets the isolated
+          # configure run. Not a fix; the lint lists the same pending exception.
+          SQLITE_TAG="$(sed -n 's/.*"\(version-[0-9.]*\)".*/\1/p' cmake/sqlite3.cmake | head -1)"
+          test -n "${SQLITE_TAG}" || { echo "::error::could not read SQLITE3_GIT_TAG from cmake/sqlite3.cmake"; exit 1; }
+          echo "Staging SQLite3 ${SQLITE_TAG}"
+          DST="${PWD}/build-no-fetch/external/sqlite3"
+          mkdir -p "$(dirname "${DST}")"
+          git clone --depth 1 --filter=blob:none --branch "${SQLITE_TAG}" \
+            https://github.com/sqlite/sqlite.git "${DST}"
+          (cd "${DST}" && ./configure --disable-tcl && make sqlite3.c)
+          test -f "${DST}/sqlite3.c" && test -f "${DST}/sqlite3.h"
+
+      - name: Configure with no network namespace (fetch disabled)
+        working-directory: profilers/profiler-hub
+        run: |
+          set -euo pipefail
+          cat > "${RUNNER_TEMP}/isolated-configure.sh" <<'ISOLATED'
+          set -euo pipefail
+          cd "${SRC_DIR}"
+
+          # An isolation wrapper that silently no-ops would leave this lane
+          # green with the network up - the exact false negative it exists to
+          # prevent. Assert the namespace before trusting the configure.
+          ifaces="$(sed -n '3,$s/^[[:space:]]*\([^:]*\):.*/\1/p' /proc/net/dev | grep -v '^lo$' || true)"
+          if [[ -n "${ifaces}" ]]; then
+            echo "::error::isolation failed open: non-loopback interfaces present: ${ifaces}"
+            exit 1
+          fi
+          if curl -sS --max-time 10 -o /dev/null https://github.com 2>/dev/null; then
+            echo "::error::isolation failed open: github.com is reachable inside the namespace"
+            exit 1
+          fi
+          echo "Network namespace confirmed: loopback only, github.com unreachable"
+
+          cmake -S . -B build-no-fetch \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${DEPS_PREFIX}" \
+            -DPROFILER_HUB_BUILD_TESTS=ON \
+            -DPROFILER_HUB_BUILD_BENCHMARKS=ON \
+            -DPROFILER_HUB_FETCH_DEPENDENCIES=OFF
+          ISOLATED
+
+          # Unprivileged `unshare -rn` needs a user namespace, which Ubuntu
+          # 24.04 restricts by default. Take the net namespace as root and drop
+          # straight back so the build tree stays owned by the runner account.
+          sudo unshare --net -- \
+            setpriv --reuid="$(id -u)" --regid="$(id -g)" --init-groups \
+            env PATH="${PATH}" HOME="${HOME}" CC=gcc CXX=g++ \
+                SRC_DIR="${PWD}" DEPS_PREFIX="${DEPS_PREFIX}" \
+            bash "${RUNNER_TEMP}/isolated-configure.sh"
+
+      - name: Build
+        working-directory: profilers/profiler-hub
+        run: cmake --build build-no-fetch --parallel $(nproc)
+
+      - name: Verify library artifacts
+        working-directory: profilers/profiler-hub
+        run: |
+          set -e
+          test -f build-no-fetch/lib/libprofiler-hub.so || { echo "::error::libprofiler-hub.so not built"; exit 1; }
+          test -f build-no-fetch/lib/libprofiler-hub.a  || { echo "::error::libprofiler-hub.a not built";  exit 1; }
+          ls -la build-no-fetch/lib/
+
+      - name: Test
+        working-directory: profilers/profiler-hub/build-no-fetch
+        run: ctest --output-on-failure --output-junit test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-no-fetch-ubuntu-24.04-gcc-Release
+          path: profilers/profiler-hub/build-no-fetch/test-results.xml
           if-no-files-found: warn
