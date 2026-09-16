@@ -296,19 +296,27 @@ int main(int argc, char *argv[]) {
 
   /**
    * Using the arguments we just constructed, call the tester factory
-   * method to get the tester (specified by the arguments).
+   * method to get the testers (specified by the arguments).
    */
-  std::vector<Tester *> tests = Tester::create(args);
+  std::vector<TesterFactory> tests = Tester::create(args);
 
   /**
-   * Run the tests
+   * Run the tests.
+   *
+   * Each tester is constructed, run, and destroyed before moving to the next
+   * one. Testers allocate their symmetric buffers in their constructors, so
+   * building them all up front would keep every tester's buffers resident at
+   * once -- which overruns the symmetric heap once a test type expands into a
+   * dozen or more per-type testers (-tc full).
    */
-  for (auto test : tests) {
+  for (auto &make_test : tests) {
+    Tester *test = make_test();
+
     test->execute();
 
     /**
-     * The tester factory method news the tester to create it so we clean
-     * up the memory here.
+     * The factory news the tester to create it so we clean up the memory
+     * here, releasing its buffers before the next tester allocates.
      */
     delete test;
   }
