@@ -23,12 +23,16 @@
 # THE SOFTWARE.
 ###############################################################################
 
+import os
 import sqlite3
 import stat
+import subprocess
+import sys
 import tempfile
 from contextlib import closing
 from pathlib import Path
 import unittest
+from unittest import mock
 
 from rocpd.database import (
     attach_readonly,
@@ -37,7 +41,9 @@ from rocpd.database import (
 )
 from rocpd.features import get_supported_features_from_version
 from rocpd.importer import RocpdImportData, _create_meta_views, _create_temp_views
+from rocpd import database as database_module
 from rocpd import merge as merge_module
+from rocpd import package as package_module
 from rocpd.merge import merge_sqlite_dbs
 from rocpd.schema import RocpdSchema, query_supported_schema_versions
 
@@ -46,10 +52,12 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
     UUIDS = (
         "_12345678_1234_7123_8123_123456789abc",
         "_22345678_1234_7123_8123_123456789abc",
+        "_32345678_1234_7123_8123_123456789abc",
     )
     GUIDS = (
         "12345678-1234-7123-8123-123456789abc",
         "22345678-1234-7123-8123-123456789abc",
+        "32345678-1234-7123-8123-123456789abc",
     )
 
     def setUp(self):
@@ -65,7 +73,7 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
         guid = guid or self.GUIDS[0]
         version = version or self.version
         schema = RocpdSchema(uuid=uuid, guid=guid, version=version)
-        with closing(sqlite3.connect(path)) as connection, connection:
+        with closing(sqlite3.connect(str(path))) as connection, connection:
             connection.executescript(schema.tables)
             connection.executescript(schema.metadata)
             connection.executescript(schema.indexes)
@@ -77,7 +85,7 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
         return schema
 
     def add_region_data(self, path, uuid, guid, index):
-        with closing(sqlite3.connect(path)) as connection, connection:
+        with closing(sqlite3.connect(str(path))) as connection, connection:
             connection.execute(
                 f'INSERT INTO "rocpd_string{uuid}" (id, guid, string) '
                 "VALUES (2, ?, ?)",
@@ -126,7 +134,7 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
         self.add_region_data(source, self.UUIDS[0], self.GUIDS[0], 0)
         self.add_region_data(second_source, self.UUIDS[1], self.GUIDS[1], 1)
 
-        with closing(sqlite3.connect(source)) as connection, connection:
+        with closing(sqlite3.connect(str(source))) as connection, connection:
             source_table_sql = connection.execute(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
                 (f"rocpd_string{self.UUIDS[0]}",),
@@ -139,7 +147,7 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
 
         merge_sqlite_dbs([str(source), str(second_source)], str(destination))
 
-        with closing(sqlite3.connect(destination)) as connection, connection:
+        with closing(sqlite3.connect(str(destination))) as connection, connection:
             merged_table_sql = connection.execute(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
                 (f"rocpd_string{self.UUIDS[0]}",),
@@ -187,7 +195,7 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
 
         remerged = self.directory / "remerged.db"
         merge_sqlite_dbs([str(destination)], str(remerged))
-        with closing(sqlite3.connect(remerged)) as connection, connection:
+        with closing(sqlite3.connect(str(remerged))) as connection, connection:
             self.assertEqual(
                 connection.execute(
                     "SELECT string FROM rocpd_string "
@@ -207,14 +215,16 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
         self.create_database(source)
         destination.write_bytes(b"existing destination")
 
-        with closing(sqlite3.connect(source)) as connection, connection:
-            connection.execute(f"""
+        with closing(sqlite3.connect(str(source))) as connection, connection:
+            connection.execute(
+                f"""
                 CREATE TRIGGER attacker_trigger
                 AFTER INSERT ON "rocpd_metadata{self.UUIDS[0]}"
                 BEGIN
                     DELETE FROM "rocpd_metadata{self.UUIDS[0]}";
                 END
-                """)
+                """
+            )
 
         with self.assertRaisesRegex(ValueError, "trigger"):
             merge_sqlite_dbs([str(source)], str(destination))
@@ -223,12 +233,13 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
     def test_unexpected_tables_views_and_schema_changes_are_rejected(self):
         mutations = {
             "table": "CREATE TABLE rocpd_attacker_controlled (payload TEXT)",
+            "sqlite_prefix": "CREATE TABLE sqliteXattacker (payload TEXT)",
             "view": "CREATE VIEW attacker_view AS SELECT 1",
             "index": (
                 f'CREATE INDEX attacker_index ON "rocpd_string{self.UUIDS[0]}" '
                 "(string)"
             ),
-            "missing_view": "DROP VIEW processes",
+            "missing_table": f'DROP TABLE "rocpd_arg{self.UUIDS[0]}"',
             "column": (
                 f'ALTER TABLE "rocpd_string{self.UUIDS[0]}" '
                 "ADD COLUMN attacker_value TEXT"
@@ -239,11 +250,127 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
                 source = self.directory / f"{name}.db"
                 destination = self.directory / f"{name}-merged.db"
                 self.create_database(source)
-                with closing(sqlite3.connect(source)) as connection, connection:
+                with closing(sqlite3.connect(str(source))) as connection, connection:
                     connection.execute(statement)
                 with self.assertRaises(ValueError):
                     merge_sqlite_dbs([str(source)], str(destination))
                 self.assertFalse(destination.exists())
+
+    def test_missing_source_views_are_rebuilt_for_merge_and_import(self):
+        for version in query_supported_schema_versions():
+            with self.subTest(version=str(version)):
+                source = self.directory / f"no-views-{version}.db"
+                destination = self.directory / f"rebuilt-views-{version}.db"
+                self.create_database(source, version=str(version))
+                with closing(sqlite3.connect(str(source))) as connection:
+                    views = {
+                        row[0]
+                        for row in connection.execute(
+                            "SELECT name FROM sqlite_master WHERE type='view'"
+                        )
+                    }
+                    self.assertTrue(views)
+                    for view in views:
+                        connection.execute(f'DROP VIEW "{view}"')
+                before = source.read_bytes()
+
+                merge_sqlite_dbs([str(source)], str(destination))
+                with closing(sqlite3.connect(str(destination))) as connection:
+                    self.assertEqual(
+                        {
+                            row[0]
+                            for row in connection.execute(
+                                "SELECT name FROM sqlite_master WHERE type='view'"
+                            )
+                        },
+                        views,
+                    )
+                for path in (source, destination):
+                    imported = RocpdImportData(str(path), skip_auto_merge=True)
+                    try:
+                        self.assertEqual(
+                            imported.connection.execute(
+                                "SELECT string FROM rocpd_string"
+                            ).fetchall(),
+                            [(f"value-{self.UUIDS[0]}",)],
+                        )
+                        self.assertEqual(
+                            {
+                                row[0]
+                                for row in imported.connection.execute(
+                                    "SELECT name FROM sqlite_temp_master WHERE type='view'"
+                                )
+                            },
+                            views,
+                        )
+                    finally:
+                        imported.connection.close()
+                self.assertEqual(source.read_bytes(), before)
+
+    def test_canonical_indexes_are_optional_but_validated_when_present(self):
+        source = self.directory / "no-index.db"
+        destination = self.directory / "rebuilt-index.db"
+        self.create_database(source)
+        index = f"rocpd_string{self.UUIDS[0]}_test_idx"
+
+        # Current bundled schemas have no standalone indexes. Add one to the
+        # trusted reference so this test exercises real index reconstruction.
+        def indexed_schema(**kwargs):
+            schema = RocpdSchema(**kwargs)
+            uuid = kwargs["uuid"]
+            schema.indexes += (
+                f'\nCREATE INDEX "rocpd_string{uuid}_test_idx" '
+                f'ON "rocpd_string{uuid}" (string);'
+            )
+            return schema
+
+        with mock.patch.object(
+            database_module, "RocpdSchema", side_effect=indexed_schema
+        ):
+            imported = RocpdImportData(str(source), skip_auto_merge=True)
+            imported.connection.close()
+            merge_sqlite_dbs([str(source)], str(destination))
+            with closing(sqlite3.connect(str(destination))) as connection:
+                self.assertEqual(
+                    connection.execute(f'PRAGMA index_info("{index}")').fetchall(),
+                    [(0, 2, "string")],
+                )
+            imported = RocpdImportData(str(destination), skip_auto_merge=True)
+            imported.connection.close()
+
+            # A familiar name must not disguise an altered index definition.
+            with closing(sqlite3.connect(str(source))) as connection:
+                connection.execute(
+                    f'CREATE INDEX "{index}" ON "rocpd_string{self.UUIDS[0]}" (guid)'
+                )
+            before = destination.read_bytes()
+            with self.assertRaisesRegex(ValueError, "does not match schema"):
+                merge_sqlite_dbs([str(source)], str(destination))
+            self.assertEqual(destination.read_bytes(), before)
+            with self.assertRaisesRegex(ValueError, "does not match schema"):
+                imported = RocpdImportData(str(source), skip_auto_merge=True)
+                imported.connection.close()
+
+    def test_implicit_unique_index_is_still_required(self):
+        source = self.directory / "missing-unique.db"
+        destination = self.directory / "missing-unique-output.db"
+        self.create_database(source)
+        table = f"rocpd_string{self.UUIDS[0]}"
+        with closing(sqlite3.connect(str(source))) as connection:
+            table_sql = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone()[0]
+            without_unique = table_sql.replace("UNIQUE ON CONFLICT ABORT", "")
+            self.assertNotEqual(without_unique, table_sql)
+            connection.execute(f'DROP TABLE "{table}"')
+            connection.execute(without_unique)
+
+        with self.assertRaisesRegex(ValueError, "does not match schema"):
+            merge_sqlite_dbs([str(source)], str(destination))
+        self.assertFalse(destination.exists())
+        with self.assertRaisesRegex(ValueError, "does not match schema"):
+            imported = RocpdImportData(str(source), skip_auto_merge=True)
+            imported.connection.close()
 
     def test_identifier_breakout_is_rejected(self):
         source = self.directory / "identifier.db"
@@ -253,7 +380,7 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
         injected_name = (
             'rocpd_x"; ATTACH DATABASE ' + repr(str(payload)) + " AS attacker; --"
         )
-        with closing(sqlite3.connect(source)) as connection, connection:
+        with closing(sqlite3.connect(str(source))) as connection, connection:
             quoted_name = '"' + injected_name.replace('"', '""') + '"'
             connection.execute(f"CREATE TABLE {quoted_name} (value INTEGER)")
 
@@ -264,7 +391,7 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
     def test_import_uses_read_only_tables_and_trusted_views(self):
         source = self.directory / "source'with-quote.db"
         self.create_database(source)
-        with closing(sqlite3.connect(source)) as connection, connection:
+        with closing(sqlite3.connect(str(source))) as connection, connection:
             connection.execute("DROP VIEW processes")
             connection.execute(
                 "CREATE VIEW processes AS SELECT randomblob(1000000) AS payload"
@@ -332,7 +459,7 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
         source = self.directory / "extended-metadata.db"
         destination = self.directory / "extended-metadata-merged.db"
         self.create_database(source)
-        with closing(sqlite3.connect(source)) as connection, connection:
+        with closing(sqlite3.connect(str(source))) as connection, connection:
             connection.execute(
                 f'INSERT INTO "rocpd_metadata{self.UUIDS[0]}" (tag, value) '
                 "VALUES (?, ?)",
@@ -379,7 +506,7 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
             ]
         )
         output = self.directory / "cli-output.db"
-        with closing(sqlite3.connect(output)) as connection, connection:
+        with closing(sqlite3.connect(str(output))) as connection, connection:
             self.assertEqual(
                 connection.execute("SELECT string FROM rocpd_string").fetchall(),
                 [(f"value-{self.UUIDS[0]}",)],
@@ -391,7 +518,7 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
         self.create_database(source)
         destination.write_bytes(b"existing destination")
 
-        with closing(sqlite3.connect(source)) as writer:
+        with closing(sqlite3.connect(str(source))) as writer:
             writer.execute("PRAGMA journal_mode = WAL")
             writer.execute("PRAGMA wal_autocheckpoint = 0")
             writer.execute(
@@ -406,6 +533,219 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
 
         self.assertEqual(destination.read_bytes(), b"existing destination")
 
+    def test_destination_cannot_alias_input_through_home_expansion(self):
+        source = self.directory / "source.db"
+        self.create_database(source)
+        before = source.read_bytes()
+        with mock.patch.dict(
+            os.environ,
+            {"HOME": str(self.directory), "USERPROFILE": str(self.directory)},
+        ):
+            for input_path in (str(source), "~/source.db"):
+                with self.subTest(input_path=input_path):
+                    with self.assertRaisesRegex(ValueError, "must not also be an input"):
+                        merge_sqlite_dbs([input_path], str(source))
+                    self.assertEqual(source.read_bytes(), before)
+
+    def test_destination_wal_is_preserved_until_recovered(self):
+        source = self.directory / "source.db"
+        destination = self.directory / "destination.db"
+        self.create_database(source)
+        self.create_database(destination, uuid=self.UUIDS[1], guid=self.GUIDS[1])
+
+        # Exit without closing SQLite to leave a real committed WAL behind.
+        subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import os, sqlite3, sys\n"
+                "connection = sqlite3.connect(sys.argv[1])\n"
+                "connection.execute('PRAGMA journal_mode = WAL')\n"
+                "connection.execute('PRAGMA wal_autocheckpoint = 0')\n"
+                "connection.execute('CREATE TABLE old_destination (value TEXT)')\n"
+                "connection.execute('INSERT INTO old_destination VALUES (?)', "
+                "('committed-in-wal',))\n"
+                "connection.commit()\n"
+                "os._exit(0)\n",
+                str(destination),
+            ],
+            check=True,
+            timeout=30,
+        )
+        self.assertGreater(Path(f"{destination}-wal").stat().st_size, 0)
+        paths = [destination] + [
+            Path(f"{destination}{suffix}") for suffix in ("-wal", "-shm", "-journal")
+        ]
+        before = {path: path.read_bytes() for path in paths if path.exists()}
+        with self.assertRaisesRegex(
+            ValueError, "Destination database has SQLite sidecar"
+        ):
+            merge_sqlite_dbs([str(source)], str(destination))
+        self.assertEqual(
+            {path: path.read_bytes() for path in paths if path.exists()}, before
+        )
+        self.assertEqual(list(self.directory.glob(f".{destination.name}.*")), [])
+
+        # Explicit recovery preserves the old committed data. Once the old
+        # database is closed, publishing and reopening the new result is safe.
+        with closing(sqlite3.connect(str(destination))) as connection:
+            self.assertEqual(
+                connection.execute("SELECT value FROM old_destination").fetchall(),
+                [("committed-in-wal",)],
+            )
+            connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            connection.execute("PRAGMA journal_mode = DELETE")
+        merge_sqlite_dbs([str(source)], str(destination))
+        with closing(sqlite3.connect(str(destination))) as connection:
+            self.assertEqual(
+                connection.execute("SELECT string FROM rocpd_string").fetchall(),
+                [(f"value-{self.UUIDS[0]}",)],
+            )
+            self.assertEqual(
+                connection.execute(
+                    "SELECT name FROM sqlite_master WHERE name='old_destination'"
+                ).fetchall(),
+                [],
+            )
+            inspected = inspect_attached_rocpd(connection, "main", str(destination))
+            self.assertEqual(inspected.uuids, (self.UUIDS[0],))
+
+    def test_destination_sidecars_are_rejected_even_without_main_file(self):
+        source = self.directory / "source.db"
+        self.create_database(source)
+        for suffix, contents in (
+            ("-wal", b""),
+            ("-shm", b""),
+            ("-journal", b"existing journal"),
+        ):
+            with self.subTest(suffix=suffix):
+                destination = self.directory / "new-output.db"
+                sidecar = Path(f"{destination}{suffix}")
+                sidecar.write_bytes(contents)
+                try:
+                    with self.assertRaisesRegex(ValueError, "SQLite sidecar"):
+                        merge_sqlite_dbs([str(source)], str(destination))
+                    self.assertFalse(destination.exists())
+                    self.assertEqual(sidecar.read_bytes(), contents)
+                    self.assertEqual(
+                        list(self.directory.glob(f".{destination.name}.*")), []
+                    )
+                finally:
+                    sidecar.unlink()
+
+    def test_destination_sidecar_appearing_during_merge_prevents_publication(self):
+        source = self.directory / "source.db"
+        destination = self.directory / "existing-output.db"
+        self.create_database(source)
+        destination.write_bytes(b"existing destination")
+        sidecar = Path(f"{destination}-journal")
+
+        def create_sidecar(message):
+            if "Detached" in message:
+                sidecar.write_bytes(b"journal appeared during merge")
+
+        with self.assertRaisesRegex(ValueError, "SQLite sidecar"):
+            merge_sqlite_dbs([str(source)], str(destination), on_log=create_sidecar)
+        self.assertEqual(destination.read_bytes(), b"existing destination")
+        self.assertEqual(sidecar.read_bytes(), b"journal appeared during merge")
+        self.assertEqual(list(self.directory.glob(f".{destination.name}.*")), [])
+
+    def create_batch_sources(self):
+        sources = []
+        for index, (uuid, guid) in enumerate(zip(self.UUIDS, self.GUIDS)):
+            source = self.directory / f"batch-input-{index}.db"
+            self.create_database(source, uuid=uuid, guid=guid)
+            sources.append(str(source))
+        return sources
+
+    def import_batched_sources(self, sources):
+        # Keep generated packages in the test directory while exercising the
+        # public importer and its real flatten/merge/repackage path.
+        with mock.patch.object(
+            package_module,
+            "prepare_output_folder",
+            return_value=str(self.directory / "batched.rpdb"),
+        ):
+            return RocpdImportData(sources, automerge_limit=2)
+
+    def test_auto_merge_singleton_wal_is_rejected_then_preserved_after_close(self):
+        sources = self.create_batch_sources()
+        singleton = sources[-1]
+        with closing(sqlite3.connect(singleton)) as writer:
+            writer.execute("PRAGMA journal_mode = WAL")
+            writer.execute("PRAGMA wal_autocheckpoint = 0")
+            writer.execute(
+                f'INSERT INTO "rocpd_string{self.UUIDS[-1]}" (guid, string) '
+                "VALUES (?, ?)",
+                (self.GUIDS[-1], "committed-in-wal"),
+            )
+            writer.commit()
+            wal = Path(f"{singleton}-wal")
+            self.assertGreater(wal.stat().st_size, 0)
+            before = (Path(singleton).read_bytes(), wal.read_bytes())
+            with self.assertRaisesRegex(ValueError, "uncheckpointed"):
+                imported = self.import_batched_sources(sources)
+                imported.connection.close()
+            self.assertEqual((Path(singleton).read_bytes(), wal.read_bytes()), before)
+            self.assertEqual(
+                list((self.directory / "batched.rpdb").glob("merged_db_1_*.db")), []
+            )
+
+        imported = self.import_batched_sources(sources)
+        try:
+            self.assertEqual(len(imported.databases), 2)
+            self.assertEqual(
+                imported.connection.execute(
+                    "SELECT string FROM rocpd_string ORDER BY string"
+                ).fetchall(),
+                sorted(
+                    [(f"value-{uuid}",) for uuid in self.UUIDS] + [("committed-in-wal",)]
+                ),
+            )
+        finally:
+            imported.connection.close()
+
+    def test_auto_merge_singleton_validates_schema_and_rebuilds_views(self):
+        sources = self.create_batch_sources()
+        singleton = sources[-1]
+        with closing(sqlite3.connect(singleton)) as connection:
+            connection.execute("CREATE TABLE unexpected_table (value TEXT)")
+        before = Path(singleton).read_bytes()
+        with self.assertRaisesRegex(ValueError, "table objects"):
+            imported = self.import_batched_sources(sources)
+            imported.connection.close()
+        self.assertEqual(Path(singleton).read_bytes(), before)
+        self.assertEqual(
+            list((self.directory / "batched.rpdb").glob("merged_db_1_*.db")), []
+        )
+
+        # Once the unexpected object is removed, the singleton can be published,
+        # but its source-controlled view definition must still be replaced.
+        with closing(sqlite3.connect(singleton)) as connection:
+            connection.execute("DROP TABLE unexpected_table")
+            connection.execute("DROP VIEW processes")
+            connection.execute("CREATE VIEW processes AS SELECT randomblob(1000000)")
+        imported = self.import_batched_sources(sources)
+        try:
+            self.assertEqual(len(imported.databases), 2)
+            self.assertEqual(
+                imported.connection.execute(
+                    "SELECT COUNT(*) FROM rocpd_string"
+                ).fetchone(),
+                (3,),
+            )
+            singleton_output = imported.databases[-1]
+        finally:
+            imported.connection.close()
+        with closing(sqlite3.connect(singleton_output)) as connection:
+            view_sql = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE name='processes'"
+            ).fetchone()[0]
+            self.assertNotIn("randomblob", view_sql.lower())
+            inspected = inspect_attached_rocpd(connection, "main", singleton_output)
+            self.assertEqual(inspected.uuids, (self.UUIDS[-1],))
+
+    @unittest.skipUnless(os.name == "posix", "Requires POSIX file modes")
     def test_output_permissions_follow_existing_mode_or_process_umask(self):
         source = self.directory / "permissions-source.db"
         self.create_database(source)
@@ -417,7 +757,7 @@ class RocpdDatabaseValidationTest(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(existing.stat().st_mode), 0o640)
 
         mode_reference = self.directory / "mode-reference.db"
-        with closing(sqlite3.connect(mode_reference)) as connection, connection:
+        with closing(sqlite3.connect(str(mode_reference))) as connection, connection:
             connection.execute("CREATE TABLE mode_reference (value INTEGER)")
         expected_new_mode = stat.S_IMODE(mode_reference.stat().st_mode)
         new_output = self.directory / "new-mode.db"

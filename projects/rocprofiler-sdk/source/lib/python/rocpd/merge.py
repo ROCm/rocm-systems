@@ -42,6 +42,7 @@ from .database import (
     inspect_attached_rocpd,
     qualified_identifier,
     quote_identifier,
+    validate_merge_destination,
 )
 from .schema import RocpdSchema
 
@@ -72,10 +73,13 @@ def merge_sqlite_dbs(
     if not sources:
         raise ValueError("No source databases provided")
 
-    source_paths = [os.path.realpath(os.path.abspath(src)) for src in sources]
+    source_paths = [
+        os.path.realpath(os.path.abspath(os.path.expanduser(src))) for src in sources
+    ]
     destination = os.path.realpath(os.path.abspath(dest_path))
     if destination in source_paths:
         raise ValueError("The destination database must not also be an input database")
+    validate_merge_destination(dest_path)
 
     # Prepare output directory. The existing destination remains untouched until
     # a fully validated merged database is ready to replace it atomically.
@@ -179,6 +183,10 @@ def merge_sqlite_dbs(
 
         if destination_mode is not None:
             os.chmod(temporary_path, destination_mode)
+        # Old destination journals must never be replayed onto the new file.
+        # Recheck after building the output, without opening or changing the
+        # destination. Callers must keep it offline until publication completes.
+        validate_merge_destination(dest_path)
         os.replace(temporary_path, dest_path)
         try:
             os.rmdir(temporary_dir)
