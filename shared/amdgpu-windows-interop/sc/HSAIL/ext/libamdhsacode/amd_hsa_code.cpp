@@ -598,7 +598,11 @@ namespace code {
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1151: name = "gfx1151"; xnack_supported = false; sramecc_supported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1152: name = "gfx1152"; xnack_supported = false; sramecc_supported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1153: name = "gfx1153"; xnack_supported = false; sramecc_supported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1170: name = "gfx1170"; xnack_supported = false; sramecc_supported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1171: name = "gfx1171"; xnack_supported = false; sramecc_supported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1172: name = "gfx1172"; xnack_supported = false; sramecc_supported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC: name = "gfx11-generic"; xnack_supported = false; sramecc_supported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX11_7_GENERIC: name = "gfx11-7-generic"; xnack_supported = false; sramecc_supported = false; break;
 #endif // GFX11_BUILD
 #if defined(GFX12_BUILD)
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1200: name = "gfx1200"; xnack_supported = false; sramecc_supported = false; break;

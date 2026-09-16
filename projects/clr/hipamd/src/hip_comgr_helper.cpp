@@ -719,6 +719,7 @@ const std::map<std::string, std::string>& GenericTargetMapping() {
       // "gfx11-7-generic"
       {"gfx1170", "gfx11-7-generic"},
       {"gfx1171", "gfx11-7-generic"},
+      {"gfx1172", "gfx11-7-generic"},
       // "gfx12-generic"
       {"gfx1200", "gfx12-generic"},
       {"gfx1201", "gfx12-generic"},

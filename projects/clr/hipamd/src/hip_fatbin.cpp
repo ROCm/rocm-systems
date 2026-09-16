@@ -136,6 +136,7 @@ static std::string TargetGenericMap(const std::string& input) {
       {"amdgcn-amd-amdhsa--gfx1153", "amdgcn-amd-amdhsa--gfx11-generic"  },
       {"amdgcn-amd-amdhsa--gfx1170", "amdgcn-amd-amdhsa--gfx11-7-generic"  },
       {"amdgcn-amd-amdhsa--gfx1171", "amdgcn-amd-amdhsa--gfx11-7-generic"  },
+      {"amdgcn-amd-amdhsa--gfx1172", "amdgcn-amd-amdhsa--gfx11-7-generic"  },
       {"amdgcn-amd-amdhsa--gfx1200", "amdgcn-amd-amdhsa--gfx12-generic"  },
       {"amdgcn-amd-amdhsa--gfx1201", "amdgcn-amd-amdhsa--gfx12-generic"  },
       {"amdgcn-amd-amdhsa--gfx1250", "amdgcn-amd-amdhsa--gfx12-5-generic"},
