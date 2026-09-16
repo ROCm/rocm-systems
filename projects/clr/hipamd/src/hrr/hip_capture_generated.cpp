@@ -36,6 +36,8 @@
 #include "hrr/hrr_api_args.h"
 
 #include "hip/amd_detail/hip_api_trace.hpp"
+#include "utils/debug.hpp"     // LogPrintfWarning — capture diagnostics go through
+                               // amd's log-level machinery, never raw stderr.
 
 #include <atomic>
 #include <cstdint>
@@ -983,10 +985,10 @@ static hipError_t capture_hipDrvGraphAddMemcpyNode(hipGraphNode_t* phGraphNode, 
         static bool warned_dependencies = false;
         if (!warned_dependencies) {
           warned_dependencies = true;
-          fprintf(stderr,
-                  "[HRR] hipDrvGraphAddMemcpyNode: recording only the first 16 "
-                  "of %u dependencies entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipDrvGraphAddMemcpyNode: recording only the first 16 "
+              "of %u dependencies entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -1595,10 +1597,10 @@ static hipError_t capture_hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode, 
         static bool warned_pDependencies = false;
         if (!warned_pDependencies) {
           warned_pDependencies = true;
-          fprintf(stderr,
-                  "[HRR] hipGraphAddChildGraphNode: recording only the first 16 "
-                  "of %u pDependencies entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipGraphAddChildGraphNode: recording only the first 16 "
+              "of %u pDependencies entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -1627,10 +1629,10 @@ static hipError_t capture_hipGraphAddDependencies(hipGraph_t graph, const hipGra
         static bool warned_from = false;
         if (!warned_from) {
           warned_from = true;
-          fprintf(stderr,
-                  "[HRR] hipGraphAddDependencies: recording only the first 16 "
-                  "of %u from entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipGraphAddDependencies: recording only the first 16 "
+              "of %u from entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -1644,10 +1646,10 @@ static hipError_t capture_hipGraphAddDependencies(hipGraph_t graph, const hipGra
         static bool warned_to = false;
         if (!warned_to) {
           warned_to = true;
-          fprintf(stderr,
-                  "[HRR] hipGraphAddDependencies: recording only the first 16 "
-                  "of %u to entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipGraphAddDependencies: recording only the first 16 "
+              "of %u to entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -1676,10 +1678,10 @@ static hipError_t capture_hipGraphAddEmptyNode(hipGraphNode_t* pGraphNode, hipGr
         static bool warned_pDependencies = false;
         if (!warned_pDependencies) {
           warned_pDependencies = true;
-          fprintf(stderr,
-                  "[HRR] hipGraphAddEmptyNode: recording only the first 16 "
-                  "of %u pDependencies entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipGraphAddEmptyNode: recording only the first 16 "
+              "of %u pDependencies entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -1709,10 +1711,10 @@ static hipError_t capture_hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode,
         static bool warned_pDependencies = false;
         if (!warned_pDependencies) {
           warned_pDependencies = true;
-          fprintf(stderr,
-                  "[HRR] hipGraphAddEventRecordNode: recording only the first 16 "
-                  "of %u pDependencies entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipGraphAddEventRecordNode: recording only the first 16 "
+              "of %u pDependencies entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -1742,10 +1744,10 @@ static hipError_t capture_hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode, h
         static bool warned_pDependencies = false;
         if (!warned_pDependencies) {
           warned_pDependencies = true;
-          fprintf(stderr,
-                  "[HRR] hipGraphAddEventWaitNode: recording only the first 16 "
-                  "of %u pDependencies entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipGraphAddEventWaitNode: recording only the first 16 "
+              "of %u pDependencies entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -1794,10 +1796,10 @@ static hipError_t capture_hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hi
         static bool warned_pDependencies = false;
         if (!warned_pDependencies) {
           warned_pDependencies = true;
-          fprintf(stderr,
-                  "[HRR] hipGraphAddMemAllocNode: recording only the first 16 "
-                  "of %u pDependencies entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipGraphAddMemAllocNode: recording only the first 16 "
+              "of %u pDependencies entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -1831,10 +1833,10 @@ static hipError_t capture_hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode, hip
         static bool warned_pDependencies = false;
         if (!warned_pDependencies) {
           warned_pDependencies = true;
-          fprintf(stderr,
-                  "[HRR] hipGraphAddMemFreeNode: recording only the first 16 "
-                  "of %u pDependencies entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipGraphAddMemFreeNode: recording only the first 16 "
+              "of %u pDependencies entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -1864,10 +1866,10 @@ static hipError_t capture_hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode, hipG
         static bool warned_pDependencies = false;
         if (!warned_pDependencies) {
           warned_pDependencies = true;
-          fprintf(stderr,
-                  "[HRR] hipGraphAddMemcpyNode: recording only the first 16 "
-                  "of %u pDependencies entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipGraphAddMemcpyNode: recording only the first 16 "
+              "of %u pDependencies entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -1904,10 +1906,10 @@ static hipError_t capture_hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode, hi
         static bool warned_pDependencies = false;
         if (!warned_pDependencies) {
           warned_pDependencies = true;
-          fprintf(stderr,
-                  "[HRR] hipGraphAddMemcpyNode1D: recording only the first 16 "
-                  "of %u pDependencies entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipGraphAddMemcpyNode1D: recording only the first 16 "
+              "of %u pDependencies entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -1939,10 +1941,10 @@ static hipError_t capture_hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode, hipG
         static bool warned_pDependencies = false;
         if (!warned_pDependencies) {
           warned_pDependencies = true;
-          fprintf(stderr,
-                  "[HRR] hipGraphAddMemsetNode: recording only the first 16 "
-                  "of %u pDependencies entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipGraphAddMemsetNode: recording only the first 16 "
+              "of %u pDependencies entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -4391,10 +4393,10 @@ static hipError_t capture_hipSetupArgument(const void* arg, size_t size, size_t 
         static bool warned_arg = false;
         if (!warned_arg) {
           warned_arg = true;
-          fprintf(stderr,
-                  "[HRR] hipSetupArgument: recording only the first 256 "
-                  "of %u arg entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipSetupArgument: recording only the first 256 "
+              "of %u arg entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 256u;
       }
@@ -5760,10 +5762,10 @@ static hipError_t capture_hipDrvGraphAddMemsetNode(hipGraphNode_t* phGraphNode, 
         static bool warned_dependencies = false;
         if (!warned_dependencies) {
           warned_dependencies = true;
-          fprintf(stderr,
-                  "[HRR] hipDrvGraphAddMemsetNode: recording only the first 16 "
-                  "of %u dependencies entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipDrvGraphAddMemsetNode: recording only the first 16 "
+              "of %u dependencies entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -5976,9 +5978,9 @@ static hipError_t capture_hipGetProcAddress(const char* symbol, void** pfn, int 
         static bool warned_symbol = false;
         if (!warned_symbol) {
           warned_symbol = true;
-          fprintf(stderr,
-                  "[HRR] hipGetProcAddress: symbol is %zu characters; "
-                  "recording the first 255 only.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipGetProcAddress: symbol is %zu characters; "
+              "recording the first 255 only", _n);
         }
         _n = 255u;
       }
@@ -6009,10 +6011,10 @@ static hipError_t capture_hipStreamBeginCaptureToGraph(hipStream_t stream, hipGr
         static bool warned_dependencies = false;
         if (!warned_dependencies) {
           warned_dependencies = true;
-          fprintf(stderr,
-                  "[HRR] hipStreamBeginCaptureToGraph: recording only the first 16 "
-                  "of %u dependencies entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipStreamBeginCaptureToGraph: recording only the first 16 "
+              "of %u dependencies entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -6026,10 +6028,10 @@ static hipError_t capture_hipStreamBeginCaptureToGraph(hipStream_t stream, hipGr
         static bool warned_dependencyData = false;
         if (!warned_dependencyData) {
           warned_dependencyData = true;
-          fprintf(stderr,
-                  "[HRR] hipStreamBeginCaptureToGraph: recording only the first 16 "
-                  "of %u dependencyData entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipStreamBeginCaptureToGraph: recording only the first 16 "
+              "of %u dependencyData entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -6183,10 +6185,10 @@ static hipError_t capture_hipDrvGraphAddMemFreeNode(hipGraphNode_t* phGraphNode,
         static bool warned_dependencies = false;
         if (!warned_dependencies) {
           warned_dependencies = true;
-          fprintf(stderr,
-                  "[HRR] hipDrvGraphAddMemFreeNode: recording only the first 16 "
-                  "of %u dependencies entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipDrvGraphAddMemFreeNode: recording only the first 16 "
+              "of %u dependencies entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -6373,10 +6375,10 @@ static hipError_t capture_hipStreamBatchMemOp(hipStream_t stream, unsigned int c
         static bool warned_paramArray = false;
         if (!warned_paramArray) {
           warned_paramArray = true;
-          fprintf(stderr,
-                  "[HRR] hipStreamBatchMemOp: recording only the first 16 "
-                  "of %u paramArray entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipStreamBatchMemOp: recording only the first 16 "
+              "of %u paramArray entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -6424,9 +6426,9 @@ static hipError_t capture_hipLinkAddFile(hipLinkState_t state, hipJitInputType t
         static bool warned_path = false;
         if (!warned_path) {
           warned_path = true;
-          fprintf(stderr,
-                  "[HRR] hipLinkAddFile: path is %zu characters; "
-                  "recording the first 255 only.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipLinkAddFile: path is %zu characters; "
+              "recording the first 255 only", _n);
         }
         _n = 255u;
       }
@@ -6440,10 +6442,10 @@ static hipError_t capture_hipLinkAddFile(hipLinkState_t state, hipJitInputType t
         static bool warned_options = false;
         if (!warned_options) {
           warned_options = true;
-          fprintf(stderr,
-                  "[HRR] hipLinkAddFile: recording only the first 32 "
-                  "of %u options entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipLinkAddFile: recording only the first 32 "
+              "of %u options entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 32u;
       }
@@ -6457,10 +6459,10 @@ static hipError_t capture_hipLinkAddFile(hipLinkState_t state, hipJitInputType t
         static bool warned_optionValues = false;
         if (!warned_optionValues) {
           warned_optionValues = true;
-          fprintf(stderr,
-                  "[HRR] hipLinkAddFile: recording only the first 32 "
-                  "of %u optionValues entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipLinkAddFile: recording only the first 32 "
+              "of %u optionValues entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 32u;
       }
@@ -6503,10 +6505,10 @@ static hipError_t capture_hipLinkCreate(unsigned int numOptions, hipJitOption* o
         static bool warned_options = false;
         if (!warned_options) {
           warned_options = true;
-          fprintf(stderr,
-                  "[HRR] hipLinkCreate: recording only the first 32 "
-                  "of %u options entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipLinkCreate: recording only the first 32 "
+              "of %u options entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 32u;
       }
@@ -6520,10 +6522,10 @@ static hipError_t capture_hipLinkCreate(unsigned int numOptions, hipJitOption* o
         static bool warned_optionValues = false;
         if (!warned_optionValues) {
           warned_optionValues = true;
-          fprintf(stderr,
-                  "[HRR] hipLinkCreate: recording only the first 32 "
-                  "of %u optionValues entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipLinkCreate: recording only the first 32 "
+              "of %u optionValues entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 32u;
       }
@@ -6741,10 +6743,10 @@ static hipError_t capture_hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* 
         static bool warned_dsts = false;
         if (!warned_dsts) {
           warned_dsts = true;
-          fprintf(stderr,
-                  "[HRR] hipMemcpyBatchAsync: recording only the first 16 "
-                  "of %u dsts entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipMemcpyBatchAsync: recording only the first 16 "
+              "of %u dsts entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -6758,10 +6760,10 @@ static hipError_t capture_hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* 
         static bool warned_srcs = false;
         if (!warned_srcs) {
           warned_srcs = true;
-          fprintf(stderr,
-                  "[HRR] hipMemcpyBatchAsync: recording only the first 16 "
-                  "of %u srcs entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipMemcpyBatchAsync: recording only the first 16 "
+              "of %u srcs entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -6775,10 +6777,10 @@ static hipError_t capture_hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* 
         static bool warned_sizes = false;
         if (!warned_sizes) {
           warned_sizes = true;
-          fprintf(stderr,
-                  "[HRR] hipMemcpyBatchAsync: recording only the first 16 "
-                  "of %u sizes entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipMemcpyBatchAsync: recording only the first 16 "
+              "of %u sizes entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -6792,10 +6794,10 @@ static hipError_t capture_hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* 
         static bool warned_attrs = false;
         if (!warned_attrs) {
           warned_attrs = true;
-          fprintf(stderr,
-                  "[HRR] hipMemcpyBatchAsync: recording only the first 16 "
-                  "of %u attrs entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipMemcpyBatchAsync: recording only the first 16 "
+              "of %u attrs entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -6809,10 +6811,10 @@ static hipError_t capture_hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* 
         static bool warned_attrsIdxs = false;
         if (!warned_attrsIdxs) {
           warned_attrsIdxs = true;
-          fprintf(stderr,
-                  "[HRR] hipMemcpyBatchAsync: recording only the first 16 "
-                  "of %u attrsIdxs entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipMemcpyBatchAsync: recording only the first 16 "
+              "of %u attrsIdxs entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -6846,10 +6848,10 @@ static hipError_t capture_hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3
         static bool warned_opList = false;
         if (!warned_opList) {
           warned_opList = true;
-          fprintf(stderr,
-                  "[HRR] hipMemcpy3DBatchAsync: recording only the first 16 "
-                  "of %u opList entries; replay of this call will be "
-                  "incomplete.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipMemcpy3DBatchAsync: recording only the first 16 "
+              "of %u opList entries; replay of this call will be "
+              "incomplete", _n);
         }
         _n = 16u;
       }
@@ -7127,9 +7129,9 @@ static hipError_t capture_hipGetProcAddress_spt(const char* symbol, void** pfn, 
         static bool warned_symbol = false;
         if (!warned_symbol) {
           warned_symbol = true;
-          fprintf(stderr,
-                  "[HRR] hipGetProcAddress_spt: symbol is %zu characters; "
-                  "recording the first 255 only.\n", _n);
+          LogPrintfWarning(
+              "[HRR] hipGetProcAddress_spt: symbol is %zu characters; "
+              "recording the first 255 only", _n);
         }
         _n = 255u;
       }
@@ -7785,9 +7787,9 @@ static void capture___hipRegisterVar(void** modules, void* var, char* hostVar, c
         static bool warned_deviceVar = false;
         if (!warned_deviceVar) {
           warned_deviceVar = true;
-          fprintf(stderr,
-                  "[HRR] __hipRegisterVar: deviceVar is %zu characters; "
-                  "recording the first 255 only.\n", _n);
+          LogPrintfWarning(
+              "[HRR] __hipRegisterVar: deviceVar is %zu characters; "
+              "recording the first 255 only", _n);
         }
         _n = 255u;
       }
