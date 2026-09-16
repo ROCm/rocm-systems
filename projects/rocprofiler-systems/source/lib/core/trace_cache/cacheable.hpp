@@ -105,11 +105,12 @@ store_value(const Type& value, std::uint8_t* buffer, size_t& position)
 
     if constexpr(type_traits::is_string_view_v<DecayedType>)
     {
-        const size_t data_size = value.size();
+        const size_t data_size  = value.size();
+        const size_t entry_size = sizeof(size_t) + data_size + sizeof(char);
         std::memcpy(dest, &data_size, sizeof(size_t));
         std::memcpy(dest + sizeof(size_t), value.data(), data_size);
-        dest[sizeof(size_t) + data_size] = '\0';
-        position += get_size(value);
+        dest[entry_size - sizeof(char)] = '\0';
+        position += entry_size;
     }
     else if constexpr(type_traits::is_vector_v<DecayedType> ||
                       type_traits::is_span_v<DecayedType>)
