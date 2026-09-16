@@ -1264,11 +1264,12 @@ write_rocpd(
         auto json_cfg          = get_json_string([&cfg](auto& ar) { cfg.save(ar); });
 
         static constexpr auto sensitive_env_keywords =
-            std::array<std::string_view, 11>{"api_key",
+            std::array<std::string_view, 12>{"api_key",
                                              "auth",
                                              "bearer",
                                              "cert",
                                              "credential",
+                                             "header",
                                              "key",
                                              "password",
                                              "private",
