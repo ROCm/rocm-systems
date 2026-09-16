@@ -72,8 +72,8 @@ class BlitSdmaBase : public core::Blit {
                                              std::vector<core::Signal*>& dep_signals,
                                              core::Signal& out_signal) = 0;
 
-  virtual hsa_status_t SubmitBatchCopyRectCommand(const hsa_amd_memory_copy_rect_op_t* ops,
-                                                  size_t num_ops,
+  virtual hsa_status_t SubmitBatchCopyRectCommand(const hsa_amd_memory_copy_rect_entry_t* entries,
+                                                  size_t num_entries,
                                                   std::vector<core::Signal*>& dep_signals,
                                                   core::Signal& out_signal) = 0;
 
@@ -258,16 +258,16 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
                                              std::vector<core::Signal*>& dep_signals,
                                              core::Signal& out_signal) override;
 
-  /// @brief Lower num_ops independent rect copies into one command buffer and issue a
+  /// @brief Lower num_entries independent rect copies into one command buffer and issue a
   /// single SubmitCommand, so the batch costs one ring reservation, one fence and one
-  /// completion signal instead of num_ops of each.
+  /// completion signal instead of num_entries of each.
   ///
-  /// @param ops Array of rect copy operands, lowered (and thus executed) in array order.
-  /// @param num_ops Number of operands.
-  /// @param dep_signals Signals waited on once, before the first operand.
-  /// @param out_signal Signal decremented once, after the last operand retires.
-  virtual hsa_status_t SubmitBatchCopyRectCommand(const hsa_amd_memory_copy_rect_op_t* ops,
-                                                  size_t num_ops,
+  /// @param entries Array of rect copy entries, lowered (and thus executed) in array order.
+  /// @param num_entries Number of entries.
+  /// @param dep_signals Signals waited on once, before the first entry.
+  /// @param out_signal Signal decremented once, after the last entry retires.
+  virtual hsa_status_t SubmitBatchCopyRectCommand(const hsa_amd_memory_copy_rect_entry_t* entries,
+                                                  size_t num_entries,
                                                   std::vector<core::Signal*>& dep_signals,
                                                   core::Signal& out_signal) override;
 

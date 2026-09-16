@@ -1941,11 +1941,11 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
 
 template <bool useGCR, bool scopeFields>
 hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBatchCopyRectCommand(
-    const hsa_amd_memory_copy_rect_op_t* ops, size_t num_ops,
+    const hsa_amd_memory_copy_rect_entry_t* entries, size_t num_entries,
     std::vector<core::Signal*>& dep_signals, core::Signal& out_signal) {
   std::vector<SDMA_PKT_COPY_LINEAR_RECT> pkts;
-  // Most operands lower to a single packet; oversized ones grow the vector further.
-  pkts.reserve(num_ops);
+  // Most entries lower to a single packet; oversized ones grow the vector further.
+  pkts.reserve(num_entries);
   auto append = [&](size_t size) {
     assert(size == sizeof(SDMA_PKT_COPY_LINEAR_RECT) && "SDMA packet size missmatch");
     pkts.emplace_back(SDMA_PKT_COPY_LINEAR_RECT());
@@ -1953,12 +1953,14 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBatchCopyRectCommand(
   };
 
   uint64_t size = 0;
-  for (size_t i = 0; i < num_ops; ++i) {
-    const hsa_amd_memory_copy_rect_op_t& op = ops[i];
+  for (size_t i = 0; i < num_entries; ++i) {
+    const hsa_amd_memory_copy_rect_entry_t& entry = entries[i];
     // Throws on invalid geometry, which unwinds out of the API entry point before anything
     // has been written to the ring, so a rejected batch submits nothing.
-    ValidateAndBuildCopyRect(append, &op.dst, &op.dst_offset, &op.src, &op.src_offset, &op.range);
-    size += static_cast<uint64_t>(op.range.x) * static_cast<uint64_t>(op.range.y) * op.range.z;
+    ValidateAndBuildCopyRect(append, &entry.dst, &entry.dst_offset, &entry.src,
+                             &entry.src_offset, &entry.range);
+    size += static_cast<uint64_t>(entry.range.x) * static_cast<uint64_t>(entry.range.y) *
+            entry.range.z;
   }
 
   std::vector<core::Signal*> gang_signals(0);

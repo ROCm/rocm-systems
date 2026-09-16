@@ -330,12 +330,6 @@ class GpuAgent : public GpuAgentInt {
                            const hsa_dim3_t* range, hsa_amd_copy_direction_t dir,
                            std::vector<core::Signal*>& dep_signals, core::Signal& out_signal);
 
-  // @brief Submit num_ops independent rect copies as one SDMA submission.
-  hsa_status_t DmaBatchCopyRect(const hsa_amd_memory_copy_rect_op_t* ops, size_t num_ops,
-                                hsa_amd_copy_direction_t dir,
-                                std::vector<core::Signal*>& dep_signals,
-                                core::Signal& out_signal);
-
   // @brief Override from core::Agent.
   hsa_status_t DmaFill(void* ptr, uint32_t value, size_t count) override;
 
@@ -850,6 +844,15 @@ class GpuAgent : public GpuAgentInt {
   // commands ahead of the copy.  The runtime itself therefore does not need
   // to know how, or by whom, the slot gets populated.
   hsa_status_t DmaCopyIndirect(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
+  // Rect copy: the op's num_entries rect regions are lowered into one command
+  // buffer and issued as a single SDMA submission, so the batch costs one ring
+  // reservation, one fence and one decrement of the op's completion signal.
+  // The engine is picked from the op's agent pair rather than from an explicit
+  // direction; all entries of an op share that pair.
+  hsa_status_t DmaCopyRectBatch(
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
 
