@@ -342,6 +342,7 @@ if(BUILD_TESTS)
       CheapPostSendFenceTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
+      device/LlFifoSysScopeTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestAsyncCopy.cpp
