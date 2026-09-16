@@ -1454,6 +1454,353 @@ protected:
         return result;
     }
 
+    // ── Worker-safe IB-CAST scheduler inspection ─────────────────────
+    // Token and cursor state is per send communicator, so a worker can arm and
+    // read its own connection without disturbing the others.
+
+    ThreadResult WorkerCastSetTokens(void* sendComm, const std::vector<int>& tokens) {
+        ThreadResult result;
+        if (ncclIbCastSetTokens(sendComm, tokens.data(), (int)tokens.size()) != ncclSuccess) {
+            result.ok = false;
+            result.msg = "ncclIbCastSetTokens failed";
+        }
+        return result;
+    }
+
+    ThreadResult WorkerCastGetSchedState(void* sendComm, struct ncclIbCastSchedState* out) {
+        ThreadResult result;
+        memset(out, 0, sizeof(*out));
+        if (ncclIbCastGetSchedState(sendComm, out) != ncclSuccess) {
+            result.ok = false;
+            result.msg = "ncclIbCastGetSchedState failed";
+        }
+        return result;
+    }
+
+    // QPs the connection actually uses. NCCL_IB_QPS_PER_CONNECTION states only a
+    // request: on a merged device the plugin creates that many per member, so a
+    // count taken from the environment would not describe this connection, and a
+    // split threshold built from it would sit on the wrong side of the boundary.
+    // Valid once the scheduler is warm, which the first successful send does.
+    ThreadResult WorkerCastLiveNqps(void* sendComm, int* nqps) {
+        struct ncclIbCastSchedState state;
+        ThreadResult result = WorkerCastGetSchedState(sendComm, &state);
+        if (!result.ok) return result;
+        if (state.nqps <= 0) {
+            result.ok = false;
+            result.msg = "scheduler reports nqps=" + std::to_string(state.nqps);
+            return result;
+        }
+        *nqps = state.nqps;
+        return result;
+    }
+
+    // Every CAST helper below measures and arms the sender's scheduler, because that is
+    // the only side the scheduler exists on. None of the signatures carry that, so the
+    // convention is named once here rather than left as a bare literal at each use: a
+    // future CAST body that sends from rank 0 would otherwise silently size its
+    // transfers against the peer's connection.
+    static constexpr int kCastSenderRank   = 1;
+    static constexpr int kCastReceiverRank = 0;
+
+    // The connection's live QP count, agreed across ranks: on a merged device the plugin
+    // creates the requested QPs per member, so an environment-derived split threshold is
+    // wrong, and a worker cannot broadcast the real one.
+    // 0 usable, 1 single queue pair (caller skips), -1 failure (reported here).
+    int ThreadedCastAgreedNqps(int dev, int* nqps) {
+        // The count describes the plugin's device configuration, not any one connection,
+        // so it cannot change between tests in the same process. Probing it once per CAST
+        // body per worker count rebuilt an entire connection -- listen, accept, connect,
+        // register, warm-up transfer, teardown -- for an answer that was already known.
+        // Cache it instead. Both ranks run the same test sequence, so they populate and
+        // hit this cache in lockstep and the collectives below stay matched; a failed
+        // probe is deliberately not cached, so a later caller re-probes rather than
+        // inheriting the failure.
+        static std::map<int, int> agreedNqpsByDev;
+        const auto cached = agreedNqpsByDev.find(dev);
+        if (cached != agreedNqpsByDev.end()) {
+            *nqps = cached->second;
+            return (*nqps == 1) ? 1 : 0;
+        }
+
+        void* listenComm = nullptr;
+        void* sendComm = nullptr;
+        void* recvComm = nullptr;
+
+        // The probe brings up its own connection rather than calling
+        // SetupCastConnection, which asserts fatally and sends the handle only after
+        // its assertions: a listen that fails on rank 0 leaves rank 1 waiting in
+        // MPI_Recv forever, which is a hang instead of the failure this helper
+        // promises. Here the handle carries a status word, so both ranks agree before
+        // either one waits on the other.
+        const int rank = MPIEnvironment::world_rank;
+        const int peer = 1 - rank;
+        ncclNetHandle_t handle;
+        memset(&handle, 0, sizeof(handle));
+        int localOk = 1;
+
+        // ncclNetHandle_t is a char array, so the handshake copies rather than assigns.
+        struct ProbeHandshake {
+            int             ok;
+            ncclNetHandle_t handle;
+        };
+
+        if (rank == kCastReceiverRank) {
+            if (CreateListenComm(dev, &handle, &listenComm) != ncclSuccess || !listenComm)
+                localOk = 0;
+            ProbeHandshake msg{};
+            msg.ok = localOk;
+            memcpy(msg.handle, handle, sizeof(handle));
+            MPI_Send(&msg, sizeof(msg), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
+            if (localOk) {
+                for (int i = 0; i < kMaxRetryAttempts && recvComm == nullptr; i++) {
+                    if (AcceptConnection(listenComm, &recvComm) != ncclSuccess) break;
+                    if (!recvComm) usleep(kPollIntervalUs);
+                }
+                if (!recvComm) localOk = 0;
+            }
+        } else {
+            ProbeHandshake msg{};
+            MPI_Recv(&msg, sizeof(msg), MPI_BYTE, peer, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            localOk = msg.ok;
+            if (localOk) {
+                memcpy(handle, msg.handle, sizeof(handle));
+                for (int i = 0; i < kMaxRetryAttempts && sendComm == nullptr; i++) {
+                    if (ConnectToRemote(dev, &handle, &sendComm) != ncclSuccess) break;
+                    if (!sendComm) usleep(kPollIntervalUs);
+                }
+                if (!sendComm) localOk = 0;
+            }
+        }
+
+        int bothUp = 0;
+        if (MPI_Allreduce(&localOk, &bothUp, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD) != MPI_SUCCESS)
+            bothUp = 0;
+        if (!bothUp) {
+            ADD_FAILURE() << "could not establish the probe connection used to agree the "
+                             "connection's live QP count";
+            TeardownConnection(recvComm, listenComm, sendComm, nullptr);
+            return -1;
+        }
+
+        void* comm = (rank == kCastReceiverRank) ? recvComm : sendComm;
+        // A guarded allocation rather than a std::vector: if the warm-up below times out
+        // the buffer has to outlive this function, and a vector's storage cannot be
+        // retained -- clearing it frees exactly the memory that must not be freed.
+        static constexpr size_t kProbeBytes = 128;
+        void* probe = malloc(kProbeBytes);
+        // Agreed before either rank acts on it, for the same reason the registration
+        // below is: a rank that returned here on its own would walk into
+        // TeardownConnection's barrier while its peer was still inside the registration
+        // MPI_Allreduce, and the two would wait on each other instead of reporting
+        // anything. free(nullptr) is a no-op, so the failing rank can join the same exit.
+        int allocated     = (probe != nullptr) ? 1 : 0;
+        int bothAllocated = 0;
+        if (MPI_Allreduce(&allocated, &bothAllocated, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD)
+            != MPI_SUCCESS) {
+            bothAllocated = 0;
+        }
+        if (!bothAllocated) {
+            ADD_FAILURE() << "allocating the probe buffer failed on at least one rank, so the "
+                             "connection's live QP count could not be agreed";
+            free(probe);
+            TeardownConnection(recvComm, listenComm, sendComm, nullptr);
+            return -1;
+        }
+        auto probeGuard = makeHostBufferAutoGuard(probe);
+        memset(probe, 0, kProbeBytes);
+        void* mhandle = nullptr;
+        const int registered = RegisterMemory(comm, probe, kProbeBytes,
+                                              NCCL_PTR_HOST, &mhandle) == ncclSuccess;
+        // Agreed before either side moves: a one-sided failure would otherwise send
+        // the failing rank into the teardown barrier while its peer waits inside
+        // GetActualNqps for traffic that is never coming, and the test would hang
+        // instead of reporting anything. TeardownConnection accepts a null handle.
+        int bothOk = 0;
+        if (MPI_Allreduce(&registered, &bothOk, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD)
+            != MPI_SUCCESS) {
+            bothOk = 0;
+        }
+        if (!bothOk) {
+            ADD_FAILURE() << "registering the probe buffer failed on at least one rank, so the "
+                             "connection's live QP count could not be agreed";
+            TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+            return -1;
+        }
+        // Not GetActualNqps: its CastDoSendRecv asserts fatally and reports nothing about
+        // whether a timed-out request is still posted. A fatal assertion there returns from
+        // that helper alone, so execution would arrive back here and tear down the
+        // registration and free `probe` underneath a request the NIC can still write into --
+        // the lifetime hazard the worker paths in this file exist to avoid. This warm-up
+        // reports instead, and the ranks agree on it before either one tears anything down.
+        bool outstanding = false;
+        int  warmOk      = 1;
+        {
+            void*  req   = nullptr;
+            void*  bufs[1]    = {probe};
+            size_t sizes[1]   = {kProbeBytes};
+            int    tags[1]    = {1};
+            void*  handles[1] = {mhandle};
+            if (rank == kCastReceiverRank) {
+                if (PostRecv(recvComm, 1, bufs, sizes, tags, handles, &req) != ncclSuccess
+                    || req == nullptr) {
+                    warmOk = 0;
+                }
+            } else {
+                for (int attempt = 0; attempt < kMaxRetryAttempts && req == nullptr; attempt++) {
+                    if (PostSend(sendComm, probe, kProbeBytes, 1, mhandle, &req)
+                        != ncclSuccess) {
+                        break;
+                    }
+                    if (req == nullptr) usleep(kPollIntervalUs);
+                }
+                if (req == nullptr) warmOk = 0;
+            }
+            if (warmOk) {
+                int sz = 0;
+                if (WaitForCompletion(req, &sz, kConnectTimeoutMs) != ncclSuccess) {
+                    warmOk = 0;
+                    outstanding = true;  // the wait timed out; the request is still posted
+                }
+            }
+        }
+
+        int warmBothOk = 0;
+        if (MPI_Allreduce(&warmOk, &warmBothOk, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD)
+            != MPI_SUCCESS) {
+            warmBothOk = 0;
+        }
+        if (!warmBothOk) {
+            ADD_FAILURE() << "the probe warm-up transfer did not complete on at least one "
+                             "rank, so the connection's live QP count could not be agreed";
+            if (outstanding) {
+                // Deregistering now would hand the device freed memory. Leaking one 128-byte
+                // probe and its registration on a failing run is the cheaper mistake, and it
+                // is the same trade the worker retain paths make.
+                ADD_FAILURE() << "the probe buffer and its registration are retained, since "
+                                 "the warm-up request may still reference them";
+                probeGuard.release();
+                TeardownConnection(recvComm, listenComm, sendComm, nullptr);
+            } else {
+                TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+            }
+            return -1;
+        }
+
+        // Both sides completed, so the scheduler is warm and nothing references the probe.
+        // Read from the sender: the scheduler only exists on that side, which is why the
+        // count is broadcast from the same rank rather than computed independently.
+        if (rank == kCastSenderRank) {
+            struct ncclIbCastSchedState state = {};
+            if (ncclIbCastGetSchedState(sendComm, &state) != ncclSuccess) {
+                ADD_FAILURE() << "ncclIbCastGetSchedState failed after the warm-up transfer";
+                *nqps = 0;
+            } else {
+                *nqps = state.nqps;
+            }
+        }
+        MPI_Bcast(nqps, 1, MPI_INT, kCastSenderRank, MPI_COMM_WORLD);
+        TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+        if (*nqps > 0) agreedNqpsByDev[dev] = *nqps;
+        // One queue pair is a legitimate configuration -- CastSingleQPBypassesWrr
+        // covers it -- but not one these branches can make claims about: the scheduler
+        // returns before split selection and token accounting when nqps is 1, so a
+        // token delta of 1 never appears and the split path is never taken. Reported
+        // separately from a failure so the caller can skip rather than fail.
+        if (*nqps == 1) return 1;
+        if (*nqps > 0) return 0;
+        ADD_FAILURE() << "the scheduler reported " << *nqps
+                      << " queue pairs after a successful warm-up transfer";
+        return -1;
+    }
+
+    // Warm the scheduler up (it initializes on the first send) and arm equal weights.
+    // nqps is the live count ThreadedCastAgreedNqps agreed on the main thread, so both
+    // ranks size their transfers the same way and merged devices work; the sender
+    // confirms its own connection reports the same count.
+    // totTokens is the ledger to arm. Callers whose audit asserts the ledger ends empty
+    // pass the number of sub-threshold sends they make, so the two cannot drift into a
+    // false "the sends did not take the WRR path"; the serial bodies couple them the
+    // same way with their own kTotTokens.
+    ThreadResult WorkerCastPrepareTokens(int rank, ConnectionPair& pair, void* buffer,
+                                         void* mhandle, int nqps, int tag, int seed,
+                                         int totTokens = 100, bool* outstanding = nullptr) {
+        ThreadResult result =
+            WorkerSendRecvPattern(rank, pair, buffer, 64, tag, mhandle, seed,
+                                 kDefaultTimeoutMs, outstanding);
+        if (!result.ok || rank != kCastSenderRank) return result;
+
+        // The expectations are built from the agreed live count, so this checks that
+        // this worker's own connection reports the same thing; a mismatch means the
+        // expectations belong to a different connection than the one carrying data.
+        // This is also what enforces the kCastSenderRank convention at run time: the
+        // agreed count comes from the sender's connection, and a body that sent from
+        // the other rank would arm a scheduler whose nqps this check does not match.
+        int liveNqps = 0;
+        result = WorkerCastLiveNqps(pair.sendComm, &liveNqps);
+        if (!result.ok) return result;
+        if (liveNqps != nqps) {
+            result.ok = false;
+            result.msg = "this worker's connection reports nqps=" + std::to_string(liveNqps)
+                         + " but the run agreed on " + std::to_string(nqps);
+            return result;
+        }
+        // Scope of what arming the tokens here buys, because it is narrower than it
+        // looks. ncclIbCastSetTokens fills the token ledger and sets qpTxSchedInit, but
+        // it does not touch qpTxSched[].weight -- scheduler.cc writes those only from
+        // IbCastQpSchedUpdateTx, which fires off the RTT timer. The threaded CAST suites
+        // pin RCCL_IB_QP_SCHED_UPDATE_INTERVAL to 10 s precisely so that timer cannot
+        // rewrite the ledger mid-assertion, so in those runs it never fires at all and
+        // every weight stays 0. With zero weights the split branch in p2p.cc:209-216
+        // computes a zero-length chunk for every QP but the last, which then takes the
+        // whole payload: the data still arrives and still verifies, and the split path
+        // is still the one selected (that is what the 0-token deltas prove), but nothing
+        // is actually striped across QPs.
+        //
+        // So these branches cover split-vs-WRR path *selection* and data integrity, not
+        // striping, and not the RTT/weight path the serial bodies reach via their
+        // "initQpTokens were rewritten" checks. Closing that needs the scheduler weights
+        // (or per-QP tx counters) exposed through net_ib_cast_inspect.h plus a
+        // short-interval threaded suite -- a transport-side change, out of scope for a
+        // test-only branch. Tracked as follow-up; do not read the split coverage below
+        // as proof that concurrent senders stripe correctly.
+        return WorkerCastSetTokens(pair.sendComm, EqualTokens(liveNqps, totTokens));
+    }
+
+    // Worker-safe CAST transfer with a token-consumption expectation. Only the
+    // sender owns scheduler state, so it checks the delta while the receiver
+    // verifies the payload. Pass a negative delta to skip the token check.
+    ThreadResult WorkerCastTransferExpectTokens(int rank, ConnectionPair& pair, void* buffer,
+                                                size_t size, int tag, void* mhandle, int seed,
+                                                int expectedTokenDelta,
+                                                int timeoutMs = kLargeTransferTimeoutMs,
+                                                bool* outstanding = nullptr) {
+        struct ncclIbCastSchedState before = {};
+        ThreadResult result;
+        if (rank == kCastSenderRank) {
+            result = WorkerCastGetSchedState(pair.sendComm, &before);
+            if (!result.ok) return result;
+        }
+
+        result = WorkerSendRecvPattern(rank, pair, buffer, size, tag, mhandle, seed, timeoutMs,
+                                       outstanding);
+        if (!result.ok) return result;
+
+        if (rank == kCastSenderRank && expectedTokenDelta >= 0) {
+            struct ncclIbCastSchedState after = {};
+            result = WorkerCastGetSchedState(pair.sendComm, &after);
+            if (!result.ok) return result;
+            const int delta = before.activeTotTokens - after.activeTotTokens;
+            if (delta != expectedTokenDelta) {
+                result.ok = false;
+                result.msg = "expected a WRR token delta of "
+                             + std::to_string(expectedTokenDelta) + " at size "
+                             + std::to_string(size) + ", observed " + std::to_string(delta);
+            }
+        }
+        return result;
+    }
+
     ncclResult_t InitNetIbCtx(void** ctxOut) {
         ncclNetCommConfig_t commConfig = {};
         commConfig.trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
