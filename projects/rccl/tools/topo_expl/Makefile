@@ -95,6 +95,7 @@ CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION)
 		   -Ihipify_rccl/include/nccl_device \
            -Ihipify_rccl/src/device/include -Ihipify_rccl/graph -I$(ROCM_PATH)/include/ \
            -DTOPO_EXPL -DENABLE_TRACE -DENABLE_LL128 -DNVTX_NO_IMPL -DRCCL_EXPOSE_STATIC \
+           -DUSE_AMDSMI \
            $(NCCL_OS_DEFINE) $(FEATURE_DEFINES) \
            -lpthread
 
