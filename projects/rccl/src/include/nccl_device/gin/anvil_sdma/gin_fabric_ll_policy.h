@@ -34,7 +34,7 @@ namespace gin {
 namespace fabric {
 
 // Keep in sync with dda::common::kDdaMaxNranks / kDdaLLMaxBytes / LLPacket16.
-constexpr int kGinFabricLlMaxNranks = 72;
+constexpr int kGinFabricLlMaxNranks = 144;
 constexpr size_t kGinFabricLlMaxBytes = (size_t)16 * 1024 * 1024;
 constexpr size_t kGinFabricLlPacketBytes = 16;
 constexpr size_t kGinFabricLlA2ASlotStridePkts = kGinFabricLlMaxBytes / kGinFabricLlPacketBytes;
