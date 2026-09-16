@@ -280,9 +280,8 @@ ncclGinBarrierSession
       defaults to ``ncclGinFenceLevel::Put | ncclGinFenceLevel::Get`` so callers who do not opt in explicitly get the
       strongest guarantee:
 
-      * ``ncclGinFenceLevel::None`` — no put or get drain. On the Anvil SDMA backend the barrier's per-peer arrival
-        signal is still a windowless put, so the peer SDMA queue is quieted before that signal is posted. Choose this
-        when the kernel already waits on signals and calls ``gin.flush`` (for example AlltoAll that uses ``waitSignal``).
+      * ``ncclGinFenceLevel::None`` — no put or get drain. Choose this when the kernel already waits on
+        signals and calls ``gin.flush`` (for example AlltoAll that uses ``waitSignal``).
       * ``ncclGinFenceLevel::Put`` — after the barrier returns, puts issued by other team members targeting the
         calling rank prior to the barrier are visible in the calling rank's memory. Self-puts (loopback to this rank)
         issued before the barrier are included.
