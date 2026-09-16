@@ -2180,14 +2180,30 @@ protected:
         AssertNoRdmaLeaks(before, CaptureRdmaResources(), label);
     }
 
+    void RunThreadedBody(int dev, int nThreads, const char* label,
+                         std::function<ThreadResult(int, ConnectionPair&)> body) {
+        RunThreadedBody(ThreadDevPolicy::Fixed(dev), nThreads, label, std::move(body));
+    }
+
+    // How a threaded size sweep gets its memory. On a fused device the PerSize shape is
+    // the point of the test, since every registration fans out across both members'
+    // protection domains and caches. The allocation churns with it, as the serial body
+    // does: registering sub-ranges of one block would keep handing back the same cache
+    // entry once a covering registration were live. The threaded branch has to match
+    // whichever its serial body does, or it quietly covers less.
+    enum class SweepRegistration { Once, PerSize };
+
     // Threaded size sweep: every worker walks the steps that fit its share of the
-    // registration budget, on its own connection and with a per-worker payload seed, so
-    // a transfer delivered on the wrong connection fails verification. Registers one
-    // buffer covering the largest step it will run and reuses that handle. Wraps the run
+    // registration budget, on its own connection and with a per-worker payload seed, so a
+    // transfer delivered on the wrong connection fails verification. Memory comes from
+    // `registration`: Once registers a buffer covering the largest step it will run and
+    // reuses that handle, PerSize allocates and registers each step fresh. Wraps the run
     // in an RDMA resource leak check.
+
     void RunThreadedSizeSweep(ThreadDevPolicy policy, int nThreads,
                               const std::vector<size_t>& sizes, int repeats,
-                              const char* label) {
+                              const char* label,
+                              SweepRegistration registration = SweepRegistration::Once) {
         const int rank = MPIEnvironment::world_rank;
 
         // Capped by worker count, the way MemoryRegistrationStorm holds its own
@@ -2209,11 +2225,15 @@ protected:
 
         RunThreadedBody(
             policy, nThreads, label, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
-                WorkerHostBuffer h = WorkerSetupHostBuffer(rank, pair, maxSize);
-                if (!h.result.ok) return h.result;
-                void* buffer = h.buffer;
-                void* mhandle = h.mhandle;
-                ThreadResult result;
+                const bool perSize = (registration == SweepRegistration::PerSize);
+
+                // Once: one allocation and one registration covering the largest
+                // step, reused by all of them.
+                WorkerHostBuffer whole;
+                if (!perSize) {
+                    whole = WorkerSetupHostBuffer(rank, pair, maxSize);
+                    if (!whole.result.ok) return whole.result;
+                }
 
                 // One pattern for this worker across the whole sweep. Varying it per
                 // step aliased modulo 256 -- WorkerSeed(0, 8) and WorkerSeed(8, 0) are
@@ -2223,8 +2243,19 @@ protected:
                 // and the payload check. The tag and the expected size identify the
                 // step; the payload identifies the worker.
                 const int workerPattern = WorkerSeed(threadIdx, 0);
+                ThreadResult result;
                 int tag = 0;
                 for (size_t size : steps) {
+                    // PerSize: allocated and registered fresh for this step and
+                    // released at the end of it, so the next step starts over.
+                    WorkerHostBuffer step;
+                    if (perSize) {
+                        step = WorkerSetupHostBuffer(rank, pair, size);
+                        if (!step.result.ok) return step.result;
+                    }
+                    void* buffer  = perSize ? step.buffer  : whole.buffer;
+                    void* mhandle = perSize ? step.mhandle : whole.mhandle;
+
                     for (int repeat = 0; repeat < repeats; repeat++) {
                         const int timeout = (size > 1024 * 1024) ? kLargeTransferTimeoutMs
                                                                  : kDefaultTimeoutMs;
@@ -2232,7 +2263,12 @@ protected:
                         result = WorkerSendRecvPattern(rank, pair, buffer, size, tag, mhandle,
                                                        workerPattern, timeout, &outstanding);
                         if (!result.ok) {
-                            return outstanding ? WorkerRetainHostBuffer(result, h) : result;
+                            // Whichever holder owns this step's registration is the one to
+                            // retain -- the same choice buffer/mhandle make above. Splitting
+                            // the old single `h` into these two left this site naming a
+                            // variable that no longer exists.
+                            WorkerHostBuffer& held = perSize ? step : whole;
+                            return outstanding ? WorkerRetainHostBuffer(result, held) : result;
                         }
                         tag++;
                     }
