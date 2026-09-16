@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <filesystem>
 #include <string>
 
 #include <hip/hip_runtime_api.h>
@@ -17,13 +18,14 @@
 namespace {
 constexpr size_t kByteCount = 64;
 
-// Builds a unique temporary file path for the exported dot graph so concurrent
-// test binaries do not collide on a shared filename.
+// Use the temp directory because installed test directories may be read-only.
 std::string UniqueDotPath() {
   int device = 0;
   HIP_CHECK(hipGetDevice(&device));
-  return std::string("hip_contract_graph_debug_") + std::to_string(device) + "_" +
-         std::to_string(static_cast<long long>(reinterpret_cast<intptr_t>(&device))) + ".dot";
+  return (std::filesystem::temp_directory_path() /
+          (std::string("hip_contract_graph_debug_") + std::to_string(device) + "_" +
+           std::to_string(static_cast<long long>(reinterpret_cast<intptr_t>(&device))) + ".dot"))
+      .string();
 }
 
 hipMemsetParams MakeByteMemsetParams(void* device_ptr, unsigned int value) {
