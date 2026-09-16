@@ -102,6 +102,16 @@ fn every_builtin_generates_a_config_the_emulator_accepts() {
     let Some(lib) = kmd_preload() else {
         return;
     };
+    // This case answers its question by loading the library, and against
+    // a sanitizer build it cannot: the runtime has to be in the process's
+    // initial library list, and putting it there means preloading it into
+    // `cargo test` and so into `rustc`. Without this the `dlopen` fails
+    // and the failure is reported as "the builtin generates a config
+    // rocjitsu refuses", which is a claim about the builtin and is false.
+    if let Some(why) = rj_core::discovery::sanitizer_preload_missing() {
+        eprintln!("SKIP: the builtins cannot be put through the real loader here: {why}");
+        return;
+    }
     let agents = rj_builtin::ensure_agents(false).unwrap();
     assert!(
         !agents.documents.is_empty(),

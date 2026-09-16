@@ -287,6 +287,29 @@ if(NOT _rocjitsu_standalone AND TARGET rocjitsu_hooks)
     )
 endif()
 
+# A sanitizer build of librocjitsu.so refuses to be loaded by a process
+# that does not already have the sanitizer runtime first in its library
+# list, and some of these suites load it: the smoke test puts every
+# builtin's generated config through the real loader, which is the whole
+# point of it. Left to discover that for itself it does not fail on the
+# config at all — it fails on the `dlopen`, reporting "cannot allocate
+# memory in static TLS block" as though the builtin were at fault.
+#
+# Named, but not preloaded here. `ctest` runs this as one command and
+# cargo compiles the test targets before running them, so an `LD_PRELOAD`
+# on it would put the sanitizer runtime inside `rustc` — which is neither
+# instrumented nor the thing under test, and under TSan is a poor bargain
+# for a compiler. The variable alone is enough: it is what
+# `rj_core::discovery::sanitizer_preload_missing` reads, and a test that
+# needs the emulator can say so and skip rather than fail on a `dlopen`
+# it was never going to complete.
+if(RJ_SANITIZER_PRELOAD)
+    list(
+        APPEND _rocjitsu_test_env
+        "ROCJITSU_SANITIZER_PRELOAD=${RJ_SANITIZER_PRELOAD}"
+    )
+endif()
+
 add_test(
     NAME cargo_test
     COMMAND

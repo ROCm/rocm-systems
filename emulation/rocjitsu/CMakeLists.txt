@@ -312,6 +312,23 @@ endif()
 unset(_rj_sanitizer_count)
 unset(_rj_sanitizer_kinds)
 
+# The sanitizer runtime(s) a shared-sanitizer build has to load ahead of
+# everything else, as an LD_PRELOAD-ordered list. Empty on a normal
+# build, which is every build but the sanitizer ones.
+#
+# Here rather than beside its first use because both `cli/` and `tests/`
+# need it and `cli/` is configured first: the Rust workspace's own
+# `cargo test` loads librocjitsu.so exactly as the CLI does, and needs
+# the runtime in its image for the same reason.
+set(RJ_SANITIZER_PRELOAD "")
+if(RJ_ASAN_SHARED_LIBRARY)
+    list(APPEND RJ_SANITIZER_PRELOAD "${RJ_ASAN_SHARED_LIBRARY}")
+endif()
+if(RJ_TSAN_SHARED_LIBRARY)
+    list(APPEND RJ_SANITIZER_PRELOAD "${RJ_TSAN_SHARED_LIBRARY}")
+endif()
+list(JOIN RJ_SANITIZER_PRELOAD ":" RJ_SANITIZER_PRELOAD)
+
 if(RJ_CLANG_TIDY)
     find_program(CLANG_TIDY_EXE NAMES clang-tidy)
     if(CLANG_TIDY_EXE)

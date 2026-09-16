@@ -11,6 +11,24 @@ use std::path::PathBuf;
 
 use rocjitsu_sys::{Lib, version_string};
 
+/// Whether a sanitizer build is present that this process cannot load.
+///
+/// Both cases below exist to `dlopen` the library, and against a
+/// sanitizer build that cannot succeed: the runtime has to be in the
+/// process's initial library list, and putting it there means preloading
+/// it into `cargo test` and so into `rustc`. Left to find out the hard
+/// way they fail on "cannot allocate memory in static TLS block", which
+/// reads as a fault in the library rather than in how it was asked for.
+fn skip_for_sanitizer_build() -> bool {
+    match rj_core::discovery::sanitizer_preload_missing() {
+        Some(why) => {
+            eprintln!("skipping: {why}");
+            true
+        }
+        None => false,
+    }
+}
+
 /// Locate the rocjitsu library to load (the combined `librocjitsu.so`).
 fn locate_lib() -> Option<PathBuf> {
     const LIBS: &[&str] = &["librocjitsu.so"];
@@ -38,6 +56,9 @@ fn loads_shared_version_string() {
         eprintln!("no rocjitsu library found; skipping rocjitsu_sys version test");
         return;
     };
+    if skip_for_sanitizer_build() {
+        return;
+    }
     let version = version_string(&path)
         .unwrap_or_else(|error| panic!("failed to read version from {path:?}: {error}"));
     let mut lines = version.lines();
@@ -65,6 +86,9 @@ fn loads_and_resolves_symbols() {
         eprintln!("no rocjitsu library found; skipping rocjitsu_sys load test");
         return;
     };
+    if skip_for_sanitizer_build() {
+        return;
+    }
     // Loading succeeds only if every `rj_vm_*` symbol resolves.
     let lib = unsafe { Lib::open(&path) };
     assert!(
