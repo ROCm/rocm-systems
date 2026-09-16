@@ -1024,11 +1024,14 @@ def test_show_all_view_table_skips_roofline_code_path(
     expect_roofline_called: bool,
 ) -> None:
     """--view table bypasses the roofline code path entirely."""
-    roofline_calls: list[int] = []
-    monkeypatch.setattr(
-        "utils.tty.is_roofline_shown",
-        lambda *_a, **_k: roofline_calls.append(1) or False,
-    )
+    roofline_called = False
+
+    def _spy(*_a, **_k) -> bool:
+        nonlocal roofline_called
+        roofline_called = True
+        return False
+
+    monkeypatch.setattr("utils.tty.is_roofline_shown", _spy)
     df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
     monkeypatch.setattr("utils.tty.process_table_data", lambda *_a, **_k: df)
     rendered_output = StringIO()
@@ -1074,7 +1077,7 @@ def test_show_all_view_table_skips_roofline_code_path(
         profiling_config={"filter_blocks": []},
     )
 
-    assert bool(roofline_calls) is expect_roofline_called
+    assert roofline_called is expect_roofline_called
 
 
 # ---------------------------------------------------------------------------
