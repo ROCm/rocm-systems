@@ -755,18 +755,6 @@ target_include_directories(rccl-source-wrappers PRIVATE
   ${ACCL_PROFILER_DIR}
   ${RCCL_INCLUDE_DIRS}
 )
-# Standalone HostUnitTests never find_package(hip); in-tree already has hip::host.
-if(NOT TARGET hip::host)
-  find_package(hip QUIET)
-endif()
-foreach(_hip_tgt hip::host hip::device)
-  if(TARGET ${_hip_tgt})
-    target_include_directories(rccl-source-wrappers PRIVATE
-      $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
-    target_compile_definitions(rccl-source-wrappers PRIVATE
-      $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
-  endif()
-endforeach()
 # accl_profiler_wrapper.cc needs the non-hipified profiler headers;
 # scope the extra include to just that file to avoid os.h/rocmwrap.h
 # conflicts with the hipified sources used by other wrappers.
@@ -971,6 +959,10 @@ foreach(_variant "" "-uncached" "-faultinj")
   target_compile_definitions(${_init_tgt} PRIVATE
     NCCL_OS_LINUX
     ROCM_VERSION=70000
+    # init.cc selects amdsmi_wrap.h (amd_smi/amdsmi.h, ships with ROCm) over the
+    # legacy rocm_smi_wrap.h; the amd_smi_* wrapper API it declares is stubbed by
+    # init_fakes.cc, so no SMI runtime is linked. The in-RCCL-build path inherits
+    # this from RCCL_COMMON_COMPILE_DEFS instead.
     USE_AMDSMI
     $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
     $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
@@ -1054,6 +1046,10 @@ foreach(_enq_variant "" "-devlinker")
   target_compile_definitions(${_enq_tgt} PRIVATE
     NCCL_OS_LINUX
     ROCM_VERSION=70000
+    # init.cc selects amdsmi_wrap.h (amd_smi/amdsmi.h, ships with ROCm) over the
+    # legacy rocm_smi_wrap.h; the amd_smi_* wrapper API it declares is stubbed by
+    # init_fakes.cc, so no SMI runtime is linked. The in-RCCL-build path inherits
+    # this from RCCL_COMMON_COMPILE_DEFS instead.
     USE_AMDSMI
     $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
     $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>

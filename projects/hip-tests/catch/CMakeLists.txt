@@ -55,11 +55,21 @@ include_directories(${hip_INCLUDE_DIRS})
 find_package(hiprtc)
 find_package(Git)
 find_package(Python 3 COMPONENTS Interpreter REQUIRED)
-# HIP version is available directly from find_package(hip)
-set(HIP_VERSION ${hip_VERSION})
-
 # hip root dir is 3 levels down the hip-config.cmake file path
 set(HIP_PATH ${hip_DIR}/../../../)
+
+# Reconstruct MAJOR.MINOR.PATCH-GITHASH from find_package(hip) and
+# share/hip/version. hip_VERSION only carries MAJOR.MINOR.PATCH; the
+# git hash lives in share/hip/version as HIP_VERSION_GITHASH.
+set(HIP_VERSION ${hip_VERSION})
+file(STRINGS "${HIP_PATH}/share/hip/version" _hip_githash_line
+     REGEX "^HIP_VERSION_GITHASH=")
+if(_hip_githash_line)
+  string(REGEX REPLACE "^HIP_VERSION_GITHASH=" "" _hip_githash "${_hip_githash_line}")
+  set(HIP_VERSION "${HIP_VERSION}-${_hip_githash}")
+  unset(_hip_githash)
+endif()
+unset(_hip_githash_line)
 if(NOT DEFINED ROCM_PATH)
   # Derive ROCM_PATH from the HIP location instead of hardcoding to /opt/rocm
   set(ROCM_PATH ${HIP_PATH})

@@ -11,8 +11,9 @@
 #
 # This shim exists so existing callers that do find_package(HIP) or
 # find_package(HIP QUIET) continue to work without modification.
-# All callers in TheRock only use HIP_FOUND and the hip::host / hip::device
-# imported targets, both of which are provided by find_package(hip CONFIG).
+# Callers use HIP_FOUND, the hip::host / hip::device imported targets, and
+# legacy macros (HIP_ADD_LIBRARY, HIP_ADD_EXECUTABLE, HIP_INCLUDE_DIRECTORIES)
+# — all provided by this shim without requiring hipcc or hipconfig.
 ###############################################################################
 
 # Delegate to CMake's HIP CONFIG package which provides hip::host, hip::device,
