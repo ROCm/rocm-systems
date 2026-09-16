@@ -121,3 +121,80 @@ def test_parse_patterns_star():
 
     args = Namespace(torch_operator=["*,torch.relu"])
     assert parse_operator_patterns(args, "torch_operator") == ["*", "torch.relu"]
+
+
+# -- pre_processing: membw auto-run -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "membw_collected, expect_called",
+    [
+        pytest.param(True, True, id="collected_runs_analysis"),
+        pytest.param(False, False, id="not_collected_skips_analysis"),
+    ],
+)
+def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypatch):
+    """run_membw_analysis is called iff profiling config recorded membw data."""
+    import argparse
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from rocprof_compute_analyze.analysis_cli import cli_analysis
+
+    inst = cli_analysis.__new__(cli_analysis)
+    inst._profiling_config = {"membw_analysis": membw_collected}
+
+    workload = SimpleNamespace(
+        dfs={1: pd.DataFrame()},
+        sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
+        raw_pmc=pd.DataFrame(),
+        filter_gpu_ids=None,
+        filter_dispatch_ids=None,
+        membw_result=None,
+    )
+    inst._runs = {"/tmp/test": workload}
+    inst._arch_configs = {"gfx950": SimpleNamespace(dfs_expressions={})}
+
+    args = argparse.Namespace(
+        path=[["/tmp/test"]],
+        verbose=0,
+        time_unit="ns",
+        random_port=False,
+        torch_operator=None,
+        triton_operator=None,
+        ml_api_operator=None,
+        torch_list_ops=False,
+        triton_list_ops=False,
+        ml_api_list_ops=False,
+    )
+    inst._OmniAnalyze_Base__args = args
+
+    mock_run = MagicMock(return_value=None)
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.run_membw_analysis", mock_run
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_base.OmniAnalyze_Base.pre_processing",
+        lambda self: None,
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.cli_analysis.pc_sampling_only",
+        lambda self: False,
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.cli_analysis.load_pc_sampling_tool_data",
+        lambda self, _path: None,
+    )
+    monkeypatch.setattr("utils.file_io.create_df_pmc", lambda *a, **kw: pd.DataFrame())
+    monkeypatch.setattr(
+        "utils.file_io.create_df_kernel_top_stats",
+        lambda *a, **kw: (pd.DataFrame(), pd.DataFrame()),
+    )
+    monkeypatch.setattr("utils.parser.load_table_data", lambda *a, **kw: None)
+
+    inst.pre_processing()
+
+    if expect_called:
+        mock_run.assert_called_once()
+    else:
+        mock_run.assert_not_called()
