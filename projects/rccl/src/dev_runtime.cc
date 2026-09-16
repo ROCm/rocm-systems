@@ -2025,9 +2025,8 @@ ncclResult_t ncclCommWindowRegister_impl(struct ncclComm* comm, void* userPtr, s
   // non-sym fallback cannot back cuMem/VMM buffers (cudaIpcGetMemHandle rejects
   // them). Decline the registration instead of failing callers that register
   // symmetric buffers unconditionally; their collectives run on unregistered
-  // buffers.  Host-RMA windows (comm->hostRmaSupport) are independent of
-  // NCCL_WIN_ENABLE and must still be registered on RMA-capable comms.
-  if (!ncclParamWinEnable() && !comm->hostRmaSupport) {
+  // buffers.
+  if (!ncclParamWinEnable()) {
     INFO(NCCL_INIT, "%s: NCCL_WIN_ENABLE=0, skipping registration of %p (%zu bytes)", __func__, userPtr, userSize);
     return ncclSuccess;
   }
