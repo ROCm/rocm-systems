@@ -317,11 +317,17 @@ ncclConfig_t
   (since 2.30)
 
   Set the maximum number of peers any rank will concurrently communicate with
-  using P2P communication. Setting this value will influence all send/recv and
-  send/recv-based collectives (all-to-all, scatter, gather): RCCL divides the P2P
-  channel pool among this many peers rather than among all ranks, so a smaller
-  value gives each peer more channels. It does not restrict which peers a rank is
-  allowed to communicate with.
+  using P2P communication. Where it applies, RCCL divides the P2P channel pool
+  among this many peers rather than among all ranks, so a smaller value gives each
+  peer more channels, influencing send/recv and the send/recv-based collectives
+  (all-to-all, scatter, gather). It does not restrict which peers a rank is allowed
+  to communicate with.
+
+  The value is read in two places only: the per-peer channel tiling enabled by
+  ``RCCL_SATURATE_P2P_NCHANNELS`` (on by default for gfx1250 only), and the
+  multi-node per-peer reduction, which requires more than one node and
+  ``nChannelsPerNetPeer`` left unset. A single-node job on another architecture
+  with default settings is unaffected by this field.
 
   Defaults to ``NCCL_CONFIG_UNDEF_INT``, which resolves to the number of ranks in
   the communicator. Values greater than the number of ranks are capped to the

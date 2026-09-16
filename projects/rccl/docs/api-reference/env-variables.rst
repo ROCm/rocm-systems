@@ -386,11 +386,17 @@ in the following table.
     * - | ``NCCL_P2P_MAX_PEERS``
         | Sets the maximum number of peers a rank communicates with concurrently
         | over P2P. This overrides the value of the ``maxP2pPeers`` field in
-        | ``ncclConfig_t``. RCCL divides the P2P channel pool among this many
-        | peers instead of among all ranks, so a smaller value gives each peer
-        | more channels. It affects ``ncclSend``/``ncclRecv`` and the
-        | send/recv-based collectives (all-to-all, scatter, gather). It does not
-        | restrict which peers a rank is allowed to communicate with.
+        | ``ncclConfig_t``. Where it applies, RCCL divides the P2P channel pool
+        | among this many peers instead of among all ranks, so a smaller value
+        | gives each peer more channels, affecting ``ncclSend``/``ncclRecv`` and
+        | the send/recv-based collectives (all-to-all, scatter, gather). It does
+        | not restrict which peers a rank is allowed to communicate with.
+        | It is read in two places only: the per-peer channel tiling enabled by
+        | ``RCCL_SATURATE_P2P_NCHANNELS`` (on by default for gfx1250 only), and
+        | the multi-node per-peer reduction, which requires more than one node
+        | and ``NCCL_NCHANNELS_PER_NET_PEER`` / ``nChannelsPerNetPeer`` unset.
+        | A single-node job on another architecture with default settings is
+        | therefore unaffected.
       - | Integer value, ``1`` to the number of ranks (default: unset, which
         | means the number of ranks in the communicator)
         | Values ``<= 0`` are ignored and a message is logged.

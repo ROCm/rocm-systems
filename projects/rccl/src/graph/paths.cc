@@ -1271,8 +1271,9 @@ int ncclP2pChannelsUpperBound(struct ncclComm* comm, bool* userOptedHigherOut) {
 // (nNodes >= 16) to reduce P2P CU usage. Disabled by default.
 NCCL_PARAM(P2pCuReduceScaleEnable, "P2P_CU_REDUCE_SCALE_ENABLE", 0);
 // When set, pick p2pnChannelsPerPeer so that a P2P plan touches every channel
-// in the pool: ppp = pow2Down(p2pnChannels / nRanks). The pow2 step matters --
-// ncclP2pChannelForPart mods channel ids by the pool, so ppp*nRanks > pool
+// in the pool: ppp = pow2Down(p2pnChannels / maxP2pPeers), where maxP2pPeers is
+// the configured peer limit and defaults to nRanks. The pow2 step matters --
+// ncclP2pChannelForPart mods channel ids by the pool, so ppp*maxP2pPeers > pool
 // causes round bases to wrap and channels to collide.
 // Unset defaults to on for gfx1250, off elsewhere.
 RCCL_PARAM(SaturateP2pNChannels, "SATURATE_P2P_NCHANNELS", RCCL_VALUE_UNSET);
@@ -1412,8 +1413,9 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
   // Final safety: arch-specific caps above and the halving loop may still
   // leave p2pnChannelsPerPeer > p2pnChannels (e.g. when the loop bottoms out
   // at 1 but divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) is large, or when
-  // a later arch cap shrinks p2pnChannels). Clamp to preserve the device-side
-  // invariant required by ncclP2pChannelToPart.
+  // a later arch cap shrinks p2pnChannels). Covers the plain ncclP2pChannelToPart
+  // bound only; the shift branch (device.h) needs p2pnChannels >> p2pChannelShiftSize,
+  // which this does not enforce. That gap predates this change.
   comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
 
   // Same grow reconciliation as ncclTopoPostset, for p2p channels (the grow path

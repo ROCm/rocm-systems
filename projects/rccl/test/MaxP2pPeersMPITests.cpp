@@ -208,7 +208,8 @@ TEST_F(MaxP2pPeersMPITest, ConfigField_HonoredAcrossRanks)
     ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
 
     constexpr int kRequested = 4;
-    ASSERT_MPI_TRUE(MPIEnvironment::world_size >= kRequested);
+    if(MPIEnvironment::world_size < kRequested)
+        GTEST_SKIP() << "Needs at least " << kRequested << " ranks to be distinguishable";
     configured_value_ = kRequested;
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
@@ -228,7 +229,8 @@ TEST_F(MaxP2pPeersMPITest, Env_HonoredAcrossRanks)
     ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
 
     constexpr int kEnvValue = 4;
-    ASSERT_MPI_TRUE(MPIEnvironment::world_size >= kEnvValue);
+    if(MPIEnvironment::world_size < kEnvValue)
+        GTEST_SKIP() << "Needs at least " << kEnvValue << " ranks to be distinguishable";
     setenv("NCCL_P2P_MAX_PEERS", "4", /*overwrite=*/1);
     configured_value_ = kLeaveConfigUnset; // env alone drives the value
 
@@ -251,7 +253,8 @@ TEST_F(MaxP2pPeersMPITest, Env_OverridesConfig_AcrossRanks)
     ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
 
     constexpr int kEnvValue = 4;
-    ASSERT_MPI_TRUE(MPIEnvironment::world_size >= kEnvValue);
+    if(MPIEnvironment::world_size < kEnvValue)
+        GTEST_SKIP() << "Needs at least " << kEnvValue << " ranks to be distinguishable";
     setenv("NCCL_P2P_MAX_PEERS", "4", /*overwrite=*/1);
     configured_value_ = 2; // must lose to the env
 
@@ -320,7 +323,17 @@ TEST_F(MaxP2pPeersMPITest, Zero_RejectedWithInvalidArgument)
 
 // ---------------------------------------------------------------------------
 // The halving loop only runs when nNodes > 1, so this is where the knob changes the
-// mapping. Exact values are arch/NIC dependent, so assert direction, not a constant.
+// mapping on real hardware. Seeds and pool sizes are arch/NIC dependent, so this
+// derives its expectation from the observed pool rather than a constant.
+//
+// Scope: a library that ignored maxP2pPeers everywhere would produce identical
+// output for every requested value, so no black-box comparison here can detect it.
+// The divisor itself is gated white-box by
+// P2pMaxNchannelsMultiNodeTests.Gfx950_2Node16Rank_MaxP2pPeers4_KeepsHigherPerPeer,
+// which sets comm->p2pMaxPeers directly and asserts an exact result. What this test
+// adds is that the value survives config parsing, the rank-count cap and the
+// allGather3 reconciliation to reach a real multi-node comm, and that the loop stops
+// at the right place for the value it was given.
 // ---------------------------------------------------------------------------
 TEST_F(MaxP2pPeersMPITest, MultiNode_PerPeerChannelsRespondToMaxP2pPeers)
 {
@@ -334,6 +347,14 @@ TEST_F(MaxP2pPeersMPITest, MultiNode_PerPeerChannelsRespondToMaxP2pPeers)
 
     unsetenv("NCCL_P2P_MAX_PEERS");
 
+    // maxP2pPeers=1 makes divUp(1, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) == 1, so the loop
+    // cannot halve while the per-peer count is below the pool: this recovers the
+    // unreduced seed the other runs start from.
+    configured_value_ = 1;
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    const int perpeer_seed = getActiveCommunicator()->p2pnChannelsPerPeer;
+    destroyTestCommunicator();
+
     configured_value_ = kLeaveConfigUnset;
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
     const int perpeer_default = getActiveCommunicator()->p2pnChannelsPerPeer;
@@ -345,13 +366,25 @@ TEST_F(MaxP2pPeersMPITest, MultiNode_PerPeerChannelsRespondToMaxP2pPeers)
     const int perpeer_limited = getActiveCommunicator()->p2pnChannelsPerPeer;
     const int pool_limited    = getActiveCommunicator()->p2pnChannels;
 
-    TEST_INFO("p2pnChannelsPerPeer: default=%d (pool %d) -> maxP2pPeers=2 gives %d (pool %d)",
-              perpeer_default, pool_default, perpeer_limited, pool_limited);
+    TEST_INFO("p2pnChannelsPerPeer: seed=%d, default=%d (pool %d), maxP2pPeers=2 -> %d (pool %d)",
+              perpeer_seed, perpeer_default, pool_default, perpeer_limited, pool_limited);
 
+    // The requested value reached this comm intact.
+    ASSERT_MPI_EQ(getActiveCommunicator()->p2pMaxPeers, 2);
+    // The peer count must not move the channel pool itself.
+    ASSERT_MPI_EQ(pool_limited, pool_default);
     // Fewer declared peers can only stop the reduction earlier, never later.
     ASSERT_MPI_TRUE(perpeer_limited >= perpeer_default);
     // ncclP2pChannelToPart cannot recover parts >= the pool.
     ASSERT_MPI_TRUE(perpeer_limited <= pool_limited);
+
+    // Maximality: with maxP2pPeers=2 the loop stops as soon as perPeer < pool, so if it
+    // halved at all the previous iterate must have failed that test, i.e. 2*perPeer >=
+    // pool. Anything smaller is over-reduced, which is what a stale nRanks divisor on
+    // this path looks like.
+    if(perpeer_limited < perpeer_seed)
+        ASSERT_MPI_TRUE(2 * perpeer_limited >= pool_limited);
+
     expectAllRanksAgree(perpeer_limited);
 }
 
