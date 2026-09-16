@@ -113,25 +113,21 @@ static ncclResult_t ncclAllToAllDdaFabricLL128Typed(
   INFO(NCCL_COLL, "DDA fabric AllToAll LL128: nRanks=%d perChunkBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
        nRanks, perChunkBytes, grid.x, grid.y, block.x, blocksPerPeer);
 
-  T* const* peersArg = peers;
-  T* recvArg = static_cast<T*>(recvbuff);
-  const T* sendArg = static_cast<const T*>(sendbuff);
-
   switch (nRanks) {
   case 4:
-    hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128<T, 4>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, perChunkBytes,
-                          comm->rank, nRanks, epochDev, epochLen);
+    hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen);
     break;
   case 8:
-    hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128<T, 8>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, perChunkBytes,
-                          comm->rank, nRanks, epochDev, epochLen);
+    hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen);
     break;
   default:
-    hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128<T, 0>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, perChunkBytes,
-                          comm->rank, nRanks, epochDev, epochLen);
+    hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen);
     break;
   }
 

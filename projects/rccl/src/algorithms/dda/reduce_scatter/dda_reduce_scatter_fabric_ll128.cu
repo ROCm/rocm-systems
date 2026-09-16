@@ -82,10 +82,6 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
-  T* const* peersArg = peers;
-  T* recvArg = static_cast<T*>(recvbuff);
-  const T* sendArg = static_cast<const T*>(sendbuff);
-
   INFO(NCCL_COLL, "DDA fabric ReduceScatter LL128: nRanks=%d shardBytes=%zu numLines=%zu grid=%u block=%u", nRanks,
        bytes, numLines, grid.x, block.x);
 
@@ -93,18 +89,18 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
   switch (nRanks) {
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 4>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, recvcount,
-                          comm->rank, nRanks, epochDev, epochLen);
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
+                          static_cast<const T*>(sendbuff), recvcount, comm->rank, nRanks, epochDev, epochLen);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 8>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, recvcount,
-                          comm->rank, nRanks, epochDev, epochLen);
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
+                          static_cast<const T*>(sendbuff), recvcount, comm->rank, nRanks, epochDev, epochLen);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 0>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, recvcount,
-                          comm->rank, nRanks, epochDev, epochLen);
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
+                          static_cast<const T*>(sendbuff), recvcount, comm->rank, nRanks, epochDev, epochLen);
     break;
   }
 

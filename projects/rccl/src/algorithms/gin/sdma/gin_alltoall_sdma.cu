@@ -229,10 +229,9 @@ ncclResult_t ncclAllToAllGinSdma(const void* sendbuff, void* recvbuff, size_t co
   if (useSdma) {
     int sdmaThreads = ginA2ASdmaThreads(comm->nRanks);
     INFO(NCCL_COLL, "AllToAll GIN: transport=sdma bytesPerPeer=%zu threads=%d", bytesPerPeer, sdmaThreads);
-    const size_t sdmaChunkBytes = 0;
     hipExtLaunchKernelGGL((ncclGinA2AKernel<true>), kGinA2ASdmaCtas, sdmaThreads, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, bytesPerPeer,
-                          sdmaChunkBytes, comm->ginA2AState.devComm);
+                          stopEvent, /*flags=*/0, sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, bytesPerPeer, 0,
+                          comm->ginA2AState.devComm);
   } else {
     // Under LSA the CTAs do the copying, so the grid scales with the message.
     int lsaChunks, lsaThreads;

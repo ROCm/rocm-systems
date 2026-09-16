@@ -301,10 +301,8 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
   // Step 3: Shuffle tempBuffer (local-rank-major) -> recvbuff (node-major).
   size_t totalAGBytes = (size_t)nNodes * localRanks * rankOffset;
   int numBlocks = hierarchicalShuffleNumBlocks(totalAGBytes);
-  const char* shuffleSrc = (const char*)tempBuffer;
-  char* shuffleDst = (char*)recvbuff;
-  hipExtLaunchKernelGGL(hierarchicalShuffle, numBlocks, HIERARCHICAL_SHUFFLE_THREADS, 0, stream,
-                        /*startEvent=*/nullptr, stopEvent, /*flags=*/0, shuffleSrc, shuffleDst, rankOffset, nNodes,
+  hipExtLaunchKernelGGL(hierarchicalShuffle, numBlocks, HIERARCHICAL_SHUFFLE_THREADS, 0, stream, /*startEvent=*/nullptr,
+                        stopEvent, /*flags=*/0, (const char*)tempBuffer, (char*)recvbuff, rankOffset, nNodes,
                         localRanks);
   CUDACHECK(hipGetLastError());
 

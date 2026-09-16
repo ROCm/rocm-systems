@@ -55,19 +55,15 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  T* const* ipcbuffsArg = d_ipcbuffs;
-  T* recvArg = static_cast<T*>(recvbuff);
-  const T* sendArg = static_cast<const T*>(sendbuff);
-
   if (dda::common::ddaAlltoAllSingleBlockGrid(count, sizeof(T))) {
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllIpc<T, kDdaNranks, false, true>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, ipcbuffsArg, recvArg, count, sendArg,
-                          comm->rank, barrierHost);
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
+                          static_cast<const T*>(sendbuff), comm->rank, barrierHost);
   } else {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllIpc<T, kDdaNranks, false, false>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, ipcbuffsArg, recvArg, count, sendArg,
-                          comm->rank, barrierHost);
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
+                          static_cast<const T*>(sendbuff), comm->rank, barrierHost);
   }
   CUDACHECK(cudaGetLastError());
 

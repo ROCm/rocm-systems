@@ -55,14 +55,10 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* rec
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  T* const* ipcbuffsArg = d_ipcbuffs;
-  T* recvArg = static_cast<T*>(recvbuff);
-  const T* sendArg = static_cast<const T*>(sendbuff);
-
   CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
   hipExtLaunchKernelGGL((dda::common::ddaReduceScatterIpc<T, kDdaNranks, false>), grid, block, 0, stream,
-                        /*startEvent=*/nullptr, stopEvent, /*flags=*/0, ipcbuffsArg, recvArg, recvcount, sendArg,
-                        comm->rank, barrierHost);
+                        /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                        recvcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
   CUDACHECK(cudaGetLastError());
 
   return ncclSuccess;

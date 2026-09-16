@@ -58,10 +58,6 @@ static ncclResult_t ncclAllGatherDdaFabricTyped(const void* sendbuff, void* recv
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  T* const* ipcbuffsArg = d_ipcbuffs;
-  T* recvArg = static_cast<T*>(recvbuff);
-  const T* sendArg = static_cast<const T*>(sendbuff);
-
   INFO(NCCL_COLL, "DDA fabric AllGather: launching kernel: nRanks=%d sendcount=%zu grid=%u block=%u%s", nRanks,
        sendcount, grid.x, block.x, (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
 
@@ -70,19 +66,19 @@ static ncclResult_t ncclAllGatherDdaFabricTyped(const void* sendbuff, void* recv
   // (NRANKS_CT == 0) for any other size.
   switch (nRanks) {
   case 4:
-    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabric<T, 4>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, ipcbuffsArg, recvArg, sendcount, sendArg,
-                          comm->rank, nRanks, barrierHost);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabric<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), sendcount,
+                          static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
     break;
   case 8:
-    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabric<T, 8>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, ipcbuffsArg, recvArg, sendcount, sendArg,
-                          comm->rank, nRanks, barrierHost);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabric<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), sendcount,
+                          static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
     break;
   default:
-    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabric<T, 0>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, ipcbuffsArg, recvArg, sendcount, sendArg,
-                          comm->rank, nRanks, barrierHost);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabric<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), sendcount,
+                          static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
     break;
   }
 

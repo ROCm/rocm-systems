@@ -100,10 +100,6 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
-  T* const* peersArg = peers;
-  T* recvArg = static_cast<T*>(recvbuff);
-  const T* sendArg = static_cast<const T*>(sendbuff);
-
   INFO(NCCL_COLL,
        "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu slices=%zu grid=%ux%u block=%u "
        "(warp-per-slice, bpp=%u, slotWords=%zu)",
@@ -112,19 +108,19 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
   switch (nRanks) {
   case 4:
-    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 4>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, perRankBytes,
-                          comm->rank, nRanks, epochDev, epochLen, slices, slotWords);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, slotWords);
     break;
   case 8:
-    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 8>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, perRankBytes,
-                          comm->rank, nRanks, epochDev, epochLen, slices, slotWords);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, slotWords);
     break;
   default:
-    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 0>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peersArg, recvArg, sendArg, perRankBytes,
-                          comm->rank, nRanks, epochDev, epochLen, slices, slotWords);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, slotWords);
     break;
   }
 

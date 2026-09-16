@@ -60,13 +60,9 @@ static ncclResult_t ncclAllGatherDdaIpcTyped(const void* sendbuff, void* recvbuf
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  T* const* ipcbuffsArg = d_ipcbuffs;
-  T* recvArg = static_cast<T*>(recvbuff);
-  const T* sendArg = static_cast<const T*>(sendbuff);
-
   hipExtLaunchKernelGGL((dda::common::ddaAllGatherIpc<T, kDdaNranks, false>), grid, block, 0, stream,
-                        /*startEvent=*/nullptr, stopEvent, /*flags=*/0, ipcbuffsArg, recvArg, sendcount, sendArg,
-                        comm->rank, barrierHost);
+                        /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                        sendcount, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
 
   CUDACHECK(cudaGetLastError());
 
