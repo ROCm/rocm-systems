@@ -1212,14 +1212,13 @@ update_table(ompt_update_func f)
 
 // Returns true if any registered rocprofiler client subscribes to the OMPT
 // callback or buffered tracing domain, i.e. the SDK has a reason to be the OMPT
-// tool. Must be called *after* registration::initialize() so that client
-// tool_init callbacks have run and contexts exist.
+// tool. Reads the registered contexts, so it is valid only once client tool_init
+// callbacks have run and those contexts exist.
 //
-// Deliberately domain-level: this answers the once-per-process question of
-// whether the OMPT tool role belongs to us, asked at ompt_start_tool() before
-// any operation exists. should_enable_callback() above answers the narrower
-// per-operation "which callbacks do I register" question and reads the same
-// context domains() bitsets, so the two cannot disagree.
+// Domain-level, and asked once per process at rocprofiler_ompt_start_tool()
+// before any operation exists. should_enable_callback() above answers the
+// narrower per-operation "which callbacks do I register" question and reads the
+// same context domains() bitsets, so the two cannot disagree.
 bool
 ompt_service_requested()
 {
