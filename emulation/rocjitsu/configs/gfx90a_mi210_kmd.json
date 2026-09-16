@@ -1,7 +1,8 @@
 {
   "thread_allocations": [
     {"num_threads": 1, "cpu_dispatch_threads": 1, "async_helper_threads": 0}
-  ],  "max_ticks": 0,
+  ],
+  "max_ticks": 0,
   "exec_mode": "functional",
   "vm": {
     "arch": "cdna2",

@@ -5,16 +5,14 @@
 //! what is deliberately left to the [`agents`](mod@crate::agents)
 //! module instead.
 
-/// The arch name and per-CU limits of one rocjitsu preset.
+/// The arch name, per-CU limits and preferred thread granules of one rocjitsu preset.
 ///
-/// Strings because that is what a component's `config` carries: rocjitsu
+/// CU limits are strings because that is what a component's `config` carries: rocjitsu
 /// reads these back out of the JSON mirage writes, and parsing them to
 /// integers here only to print them again would be a chance to change
 /// them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Preset {
-    /// Preferred execution granules copied from rocjitsu, not chosen by Mirage.
-    pub(crate) thread_allocations: &'static [mirage_core::agent::ExecutionThreadChoice],
     /// The preset file this came from, for error messages and doc.
     pub(crate) preset: &'static str,
     /// `vm.arch` — which ISA rocjitsu emulates, and therefore which
@@ -29,6 +27,8 @@ pub(crate) struct Preset {
     pub(crate) vgprs_per_wf: &'static str,
     /// Local data share per compute unit, in KiB.
     pub(crate) lds_size_kb: &'static str,
+    /// Preferred execution granules copied from rocjitsu, not chosen by Mirage.
+    pub(crate) thread_allocations: &'static [mirage_core::agent::ExecutionThreadChoice],
 }
 
 include!(concat!(env!("OUT_DIR"), "/presets.rs"));

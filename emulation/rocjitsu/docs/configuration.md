@@ -221,7 +221,9 @@ entry; those derived multi-GPU allocations have not been benchmarked here.
 
 Mirage copies these tables from its agent configuration and leaves allocation
 to rocjitsu. Its multi-GPU configurations retain E=1 by default until the RCCL
-multi-partition hang is fixed; an explicit option can override that pin. Profile options may override `cpu_thread_budget`, `num_threads`,
+multi-partition hang is fixed; an explicit positive engine count can override
+that pin. `num_threads: 0` retains the default pin.
+Profile options may override `cpu_thread_budget`, `num_threads`,
 `cpu_dispatch_threads` and `async_helper_threads`; a supplied config file is
 used verbatim. Checkpoints retain requests and preferred tables, so restore
 re-evaluates automatic selection for the receiving process's affinity.

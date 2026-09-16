@@ -321,6 +321,27 @@ TEST(ExecutionThreadBudgetTest, PresetsKeepSiblingTablesConsistent) {
   EXPECT_EQ(cdna3.helpers, 0u);
 }
 
+TEST(ExecutionThreadBudgetTest, DesktopTablesStopAtTheMeasuredCeiling) {
+  for (const auto *name : {"gfx1100_w7900", "gfx1151", "gfx1201_r9700"}) {
+    auto settings = config::load_execution_thread_settings(
+        std::string(CONFIG_DIR) + "/" + name + ".json", rocjitsu::kEmbeddedSchema);
+    for (uint32_t budget : {32u, 64u}) {
+      settings.request.budget = budget;
+      auto plan = settings.resolve(128);
+      EXPECT_EQ(plan.engines, 1u);
+      EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{32}));
+      EXPECT_EQ(plan.helpers, 0u);
+    }
+  }
+  const auto cdna2 =
+      config::load_execution_thread_settings(std::string(CONFIG_DIR) + "/gfx90a_mi210_kmd.json",
+                                             rocjitsu::kEmbeddedSchema)
+          .resolve(64);
+  EXPECT_EQ(cdna2.engines, 1u);
+  EXPECT_EQ(cdna2.dispatch, (std::vector<uint32_t>{1}));
+  EXPECT_EQ(cdna2.helpers, 0u);
+}
+
 TEST(ExecutionThreadBudgetTest, AsyncPoolsBelongToTheirVm) {
   namespace coexec = amdgpu::matrix_coexecution;
   auto first = std::make_shared<coexec::ExecutionResources>(4, 1, 8);

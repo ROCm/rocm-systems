@@ -47,8 +47,8 @@ inline constexpr uint32_t kDefaultCpuDispatchThreadCap = kDefaultExecutionThread
 /// A single VM-wide budget includes engines, retained workers from every SoC's
 /// dispatch pool, and one shared async-helper pool. Explicit knobs take priority.
 struct ExecutionThreadRequest {
-  uint32_t budget = 0; ///< Zero: min(affinity, 32); nonzero overrides the default.
-  uint32_t engines = 0;
+  uint32_t budget = 0;   ///< Zero: min(affinity, 32); nonzero overrides the default.
+  uint32_t engines = 0;  ///< Zero selects from the table.
   uint32_t dispatch = 0; ///< Inclusive width per SoC; zero selects automatic sizing.
   int32_t helpers = -1;  ///< -1 selects automatic sizing; zero disables helpers.
 };

@@ -334,7 +334,7 @@ pub fn describe() -> EmulatorDescription {
             ),
             (
                 "num_threads",
-                "Engine partitions; 0 selects from the target table",
+                "Engine partitions; 0 uses the target default.",
             ),
             (
                 "cpu_dispatch_threads",
@@ -798,6 +798,10 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
         if let Some(value) = def.options.get(key) {
             match value {
                 SimpleValue::Number(n) if (min..=max).contains(n) => {
+                    // Zero asks for the default, including the multi-GPU pin.
+                    if key == "num_threads" && *n == 0 && topology.gpus_per_node > 1 {
+                        continue;
+                    }
                     sim[key] = serde_json::Value::from(*n);
                 }
                 _ => {
@@ -1146,7 +1150,7 @@ mod tests {
     fn generated_config_preserves_target_allocations() {
         let mut def = def_with_gpus(2);
         if let MaybeRef::Owned(topology) = &mut def.topology {
-            topology.agent = MaybeRef::Owned(mirage_core::agent::AgentDef {
+            topology.agent = MaybeRef::Owned(AgentDef {
                 thread_allocations: vec![mirage_core::agent::ExecutionThreadChoice {
                     num_threads: 2,
                     cpu_dispatch_threads: 5,
@@ -1171,14 +1175,16 @@ mod tests {
 
     #[test]
     fn multi_gpu_engine_pin_can_be_overridden() {
-        let mut def = def_with_gpus(2);
-        def.options
-            .insert("num_threads".into(), SimpleValue::Number(4));
-        let SimConfig::Synthesised(bytes) = resolve_sim_config(&def).unwrap() else {
-            panic!("expected generated config");
-        };
-        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(json["num_threads"], 4);
+        for (requested, expected) in [(0, 1), (4, 4)] {
+            let mut def = def_with_gpus(2);
+            def.options
+                .insert("num_threads".into(), SimpleValue::Number(requested));
+            let SimConfig::Synthesised(bytes) = resolve_sim_config(&def).unwrap() else {
+                panic!("expected generated config");
+            };
+            let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(json["num_threads"], expected);
+        }
     }
 
     #[test]

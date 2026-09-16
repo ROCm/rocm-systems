@@ -3163,6 +3163,7 @@ fn thread_overrides_reach_the_generated_rocjitsu_config() {
         return;
     }
     env.create_profile("thread-overrides");
+    let show_config = r#"cat "$(cat "$ROCJITSU_RUNTIME_DIR/config_path")""#;
     let out = env.ok(&[
         "run",
         "--profile",
@@ -3179,7 +3180,7 @@ fn thread_overrides_reach_the_generated_rocjitsu_config() {
         "--",
         "sh",
         "-c",
-        r#"cat "$(cat "$ROCJITSU_RUNTIME_DIR/config_path")""#,
+        show_config,
     ]);
     let config: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(config["cpu_thread_budget"], 64);
@@ -3191,4 +3192,21 @@ fn thread_overrides_reach_the_generated_rocjitsu_config() {
             .as_array()
             .is_some_and(|v| !v.is_empty())
     );
+    let out = env.ok(&[
+        "run",
+        "--profile",
+        "thread-overrides",
+        "--in-process",
+        "--gpus-per-node",
+        "2",
+        "-o",
+        "num_threads=0",
+        "--",
+        "sh",
+        "-c",
+        show_config,
+    ]);
+    let config: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(config["num_threads"], 1);
+    assert_eq!(config["vm"]["gpu"]["num_gpus"], 2);
 }
