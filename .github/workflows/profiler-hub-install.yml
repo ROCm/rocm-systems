@@ -46,24 +46,28 @@ jobs:
         with:
           sparse-checkout: |
             profilers/profiler-hub
+            projects/rocprofiler-sdk/source/share/rocprofiler-sdk-rocpd
             .github/workflows
 
+      # No cmake package: jammy's is 3.22, below the project's 3.25 floor, and it
+      # would sit at /usr/bin behind the runner image's own newer cmake anyway.
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            cmake \
             gcc g++ \
             libsqlite3-dev libspdlog-dev libfmt-dev nlohmann-json3-dev
 
       - name: Configure profiler-hub
         working-directory: profilers/profiler-hub
         run: |
+          cmake --version
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX} \
             -DPROFILER_HUB_BUILD_TESTS=OFF \
-            -DPROFILER_HUB_BUILD_BENCHMARKS=OFF
+            -DPROFILER_HUB_BUILD_BENCHMARKS=OFF \
+            -DPROFILER_HUB_FETCH_DEPENDENCIES=ON
 
       - name: Build profiler-hub
         working-directory: profilers/profiler-hub
