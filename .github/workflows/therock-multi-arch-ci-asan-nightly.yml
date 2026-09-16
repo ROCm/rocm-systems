@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@e8f07c1459a0fd72dcf67c3943ac7f9f33bf21d6 # 2026-09-14
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
     with:
       build_variant: "asan"
       # Python/PyTorch/JAX builds are not supported with ASAN yet
@@ -37,7 +37,7 @@ jobs:
       build_jax: false
       linux_amdgpu_families: "gfx94X,gfx950,gfx125X"
       repository: ROCm/TheRock
-      ref: e8f07c1459a0fd72dcf67c3943ac7f9f33bf21d6 # 2026-09-14
+      ref: dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
   log_therock_ref:
@@ -64,7 +64,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@e8f07c1459a0fd72dcf67c3943ac7f9f33bf21d6 # 2026-09-14
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -74,13 +74,13 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: e8f07c1459a0fd72dcf67c3943ac7f9f33bf21d6 # 2026-09-14
+      ref: dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
     permissions:
       contents: read
       id-token: write
 
-  multi_arch_ci_summary:
-    name: Multi-Arch CI Summary
+  multi_arch_ci_asan_nightly_summary:
+    name: Multi-Arch CI ASAN Nightly Summary
     if: always()
     needs:
       - setup
@@ -91,7 +91,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: e8f07c1459a0fd72dcf67c3943ac7f9f33bf21d6 # 2026-09-14
+          ref: dd17fd59491c8b05a1ddb8d8403cfde7f27b8222 # 2026-09-15
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
