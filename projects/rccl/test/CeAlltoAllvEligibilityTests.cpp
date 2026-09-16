@@ -126,6 +126,36 @@ TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_MultiNodeRejected)
                                  ncclSymSendRegRecvReg));
 }
 
+// The LSA-local CE routines address peers by LSA rank, so a team that does not
+// cover the comm moves only lsaSize slices and places them at LSA rather than
+// communicator offsets. Reachable on a single node via NCCL_LSA_TEAM_SIZE.
+TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_LsaTeamSmallerThanCommRejected)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    mockComm_.comm.devrState.lsaSize = mockComm_.comm.nRanks / 2;
+    EXPECT_FALSE(ncclCeScratchAvailable(mockComm_.get(),
+                                        ncclFuncAlltoAllv,
+                                        ncclDevSum,
+                                        ncclFloat32,
+                                        ncclSymSendRegRecvReg));
+    EXPECT_FALSE(ncclCeAvailable(mockComm_.get(),
+                                 ncclFuncAlltoAllv,
+                                 ncclDevSum,
+                                 ncclFloat32,
+                                 ncclSymSendRegRecvReg));
+
+    // Restoring only the team size flips the verdict, so no other clause is
+    // responsible for the rejection above.
+    mockComm_.comm.devrState.lsaSize = mockComm_.comm.nRanks;
+    EXPECT_TRUE(ncclCeScratchAvailable(mockComm_.get(),
+                                       ncclFuncAlltoAllv,
+                                       ncclDevSum,
+                                       ncclFloat32,
+                                       ncclSymSendRegRecvReg));
+}
+
 TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_NoSymmetricSupportRejected)
 {
     if (!isCeRuntimeDriverSupported())
@@ -324,6 +354,26 @@ TEST_F(CeAlltoAllEligibilityTest, MultiNodeRejected)
                                         ncclSymSendRegRecvReg,
                                         /*hasSysmemSegment=*/false,
                                         /*capturing=*/false));
+}
+
+TEST_F(CeAlltoAllEligibilityTest, LsaTeamSmallerThanCommRejected)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    mockComm_.comm.devrState.lsaSize = mockComm_.comm.nRanks / 2;
+    EXPECT_FALSE(ncclCeAlltoAllEligible(mockComm_.get(),
+                                        ncclFloat32,
+                                        ncclSymSendRegRecvReg,
+                                        /*hasSysmemSegment=*/false,
+                                        /*capturing=*/false));
+
+    mockComm_.comm.devrState.lsaSize = mockComm_.comm.nRanks;
+    EXPECT_TRUE(ncclCeAlltoAllEligible(mockComm_.get(),
+                                       ncclFloat32,
+                                       ncclSymSendRegRecvReg,
+                                       /*hasSysmemSegment=*/false,
+                                       /*capturing=*/false));
 }
 
 TEST_F(CeAlltoAllEligibilityTest, MultiNodeHierAvailable_DoesNotYieldDda)
