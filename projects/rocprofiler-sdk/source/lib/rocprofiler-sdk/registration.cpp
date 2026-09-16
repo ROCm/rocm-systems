@@ -1319,8 +1319,8 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
                         "rocprofiler-sdk initialization is already in progress (init_status="
                      << _init_status
                      << "). The configuration window is closed; this commonly occurs when the "
-                        "OpenMP runtime invoked the SDK's ompt_start_tool() before the application "
-                        "called rocprofiler_force_configure().";
+                        "OpenMP runtime started an OMPT tool that initialized rocprofiler-sdk "
+                        "before the application called rocprofiler_force_configure().";
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
     }
 
