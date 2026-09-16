@@ -103,11 +103,10 @@ class TestGpuEvents(unittest.TestCase):
             return None
 
         if supported:
-            # Group-level support does not guarantee every counter in the group:
-            # e.g. gfx906 (MI50) reports the xGMI group supported but only wires up
-            # the lower XGMI_DATA_OUT links, so the higher-index links refuse START
-            # with NOT_SUPPORTED. Accept that; the not-started teardown path below
-            # then drives read/stop/destroy for the links that never opened.
+            # Group support is a stat() on the PMU directory, so it says nothing about
+            # which events exist. See amdgpu_pmu.c in the Linux kernel:
+            #    - gfx906 wires only xgmi_link{0,1}_data_outbound
+            #    - gfx908 wires xgmi_link{0-5}_data_outbound
             start_accept = [amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
         else:
             # No perf event source to open, so the sysfs read behind it returns
