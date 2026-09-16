@@ -877,7 +877,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_arithmetic, int, uns
 }
 
 HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_boolean, int, unsigned int, long long,
-                   unsigned long long)
+                       unsigned long long, bool)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1493,7 +1493,7 @@ TEST_CASE(Unit_Thread_Block_Tile_Inclusive_Scan_Basic)
   }
 }
 
-TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic, int, half)
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic, int, half, bool)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
