@@ -1,0 +1,77 @@
+name: Block RCCL subtree PRs
+
+# Fails when a pull request changes projects/rccl or projects/rccl-tests.
+# The job always runs (no path filter) so it can be a required status check
+# without blocking unrelated PRs as "expected checks were not posted".
+# After this lands on the default branch, add `rccl-subtree-freeze` as a
+# required check on develop (and any other protected landing branches).
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  rccl-subtree-freeze:
+    name: rccl-subtree-freeze
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Reject changes under frozen RCCL trees
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          frozen_prefixes=(
+            "projects/rccl"
+            "projects/rccl-tests"
+          )
+
+          is_frozen() {
+            local path="$1"
+            local prefix
+            for prefix in "${frozen_prefixes[@]}"; do
+              if [[ "$path" == "$prefix" || "$path" == "$prefix/"* ]]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          mapfile -t paths < <(
+            gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" \
+              --jq '.[] | .filename, (.previous_filename // empty)'
+          )
+
+          blocked=()
+          for path in "${paths[@]}"; do
+            [[ -z "$path" ]] && continue
+            if is_frozen "$path"; then
+              blocked+=("$path")
+            fi
+          done
+
+          if ((${#blocked[@]} > 0)); then
+            {
+              echo "### RCCL subtree freeze"
+              echo
+              echo "This PR cannot land: it modifies frozen trees \`projects/rccl\` and/or \`projects/rccl-tests\`."
+              echo
+              echo "Blocked paths:"
+              echo
+              printf -- '- `%s`\n' "${blocked[@]}"
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "::error::PR touches frozen RCCL subtrees and cannot be merged."
+            exit 1
+          fi
+
+          echo "No frozen RCCL subtree paths were changed."
+          echo "RCCL subtree freeze: no blocked paths." >> "$GITHUB_STEP_SUMMARY"
