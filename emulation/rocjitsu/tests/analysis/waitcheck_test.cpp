@@ -3,9 +3,9 @@
 
 #include "../tools/waitcheck_fixture.h"
 #include "decode_test_util.h"
+#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/analysis/waitcheck.h"
-#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
@@ -6590,6 +6590,58 @@ TEST(WaitcheckTest, ObjectAnalysisAcceptsZeroWaitForMixedLoadOrderAtJoin) {
 
   EXPECT_TRUE(report.supported);
   EXPECT_TRUE(report.diagnostics.empty());
+}
+
+TEST(WaitcheckTest, ObjectAnalysisConvergesWhenOldValueAvailabilityChangesAroundLoop) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    for (bool wait_before_use : {false, true}) {
+      SCOPED_TRACE(wait_before_use);
+      // Reduced from the Tensile GEMM in ROCm/aorta#453. Availability of the
+      // committed v0 value changes as the two pre-loop joins are revisited.
+      // Replacing each input used to circulate different old_value_regs facts
+      // around the three-block loop forever, despite stable events and ages.
+      std::vector<uint32_t> program{
+          0xbf850002u,              // s_cbranch_scc1 to the wait
+          0xe0501000u, 0x80000008u, // buffer_load_dword v0, v8, s[0:3], 0 offen
+          0xbf8c0f70u,              // s_waitcnt vmcnt(0)
+          0xbf060100u,              // s_cmp_eq_u32 s0, s1: independent load condition
+          0xbf850002u,              // s_cbranch_scc1 to loop header
+          0xe0501000u, 0x80000008u, // buffer_load_dword v0, v8, s[0:3], 0 offen
+          0xbf060302u,              // loop header: s_cmp_eq_u32 s2, s3
+          0xbf850002u,              // s_cbranch_scc1 to exit
+          0xbf850001u,              // s_cbranch_scc1 to exit
+          0xbf84fffcu,              // s_cbranch_scc0 to loop header
+      };
+      // A fresh result at the exit must still be diagnosed unless waited for.
+      // Convergence must not hide pending events or stop diagnostic emission.
+      append_gfx942_buffer_load_dword(program, /*vdst=*/3, /*vaddr=*/8);
+      if (wait_before_use)
+        append_gfx942_s_waitcnt_vmcnt_0(program);
+      program.push_back(0x7e020300u); // v_mov_b32 v1, v0: observe the loop-carried fact
+      program.push_back(0x7e020303u); // v_mov_b32 v1, v3
+      program.push_back(0xbf810000u); // s_endpgm
+      TestCodeObject code_object(program);
+      WaitcheckKernelInfo kernel;
+      kernel.entry_offset = 0;
+      kernel.code_size = program.size() * sizeof(uint32_t);
+      kernel.wavefront_size = 64;
+      auto report = analyze_waitcnts_for_kernel(code_object, arch, kernel);
+
+      ASSERT_TRUE(report.supported) << report.analysis_error;
+      if (wait_before_use) {
+        EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+      } else {
+        ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
+        for (const auto &diagnostic : report.diagnostics) {
+          EXPECT_EQ(diagnostic.counter, WaitCounterKind::Load);
+          EXPECT_EQ(diagnostic.access, WaitcheckAccessKind::Use);
+        }
+        EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
+        EXPECT_EQ(report.diagnostics[1].reg, (RegisterRef{RegClass::VGPR, 3, 1}));
+      }
+    }
+  }
 }
 
 TEST(WaitcheckTest, ObjectAnalysisReportsLoopCarriedDsLoadUse) {

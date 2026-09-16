@@ -3,9 +3,9 @@
 
 #include "rocjitsu/code/analysis/waitcheck.h"
 
-#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
@@ -676,9 +676,9 @@ struct Analyzer {
           set_analysis_error(section_name, word_index * sizeof(uint32_t),
                              util::InvalidInst(std::string(message)));
         };
-        DecodeResult decoded = decoder->decode_window(
-            words.subspan(word_index), word_index * sizeof(uint32_t),
-            DecodeErrorEmitter(emit_decode_error));
+        DecodeResult decoded =
+            decoder->decode_window(words.subspan(word_index), word_index * sizeof(uint32_t),
+                                   DecodeErrorEmitter(emit_decode_error));
         if (decoded.failed())
           return;
         inst = std::move(decoded).value();
@@ -1002,7 +1002,13 @@ struct Analyzer {
       dataflow_worklist.pop_front();
       queued[i] = 0;
 
-      PendingState merged = merge_predecessors(cfg_predecessors[i], out, out_initialized);
+      // Accumulate inputs across visits: old-value availability is a must fact
+      // and cannot be regained just because an earlier, more precise state
+      // circulates around a loop. Keep the full join (including all pending
+      // events), rather than ignoring differences once an order is uncertain.
+      // An unvisited input is bottom, not an initialized empty state.
+      PendingState merged = merge_predecessors(cfg_predecessors[i], out, out_initialized,
+                                               out_initialized[i] ? &in[i] : nullptr);
       if (conservative_sgpr_entries[i] != 0) {
         // Linked code objects do not retain whether LLVM's boundary-cull
         // option was enabled. Model its default disabled behavior: every
@@ -2517,55 +2523,57 @@ private:
     }
   }
 
-  [[nodiscard]] static PendingState
-  merge_predecessors(std::span<const size_t> predecessors, const std::vector<PendingState> &outputs,
-                     std::span<const uint8_t> output_initialized) {
+  [[nodiscard]] static PendingState merge_predecessors(std::span<const size_t> predecessors,
+                                                       const std::vector<PendingState> &outputs,
+                                                       std::span<const uint8_t> output_initialized,
+                                                       const PendingState *previous_input) {
     PendingState merged;
-    if (predecessors.empty())
-      return merged;
 
     std::array<std::optional<std::vector<PendingEvent>>, kCounterCount> first_source;
     std::optional<RegisterSet> ready_regs;
     std::optional<VgprMsbState> first_vgpr_msb;
     std::optional<ExpertSchedulingState> first_expert_scheduling;
     std::optional<bool> all_previous_vm_vsrc_zero_wait;
-    for (size_t predecessor : predecessors) {
-      if (predecessor >= outputs.size() || predecessor >= output_initialized.size() ||
-          output_initialized[predecessor] == 0)
-        continue;
-      const PendingState &pred_out = outputs[predecessor];
+    auto merge_input = [&](const PendingState &input) {
       if (!all_previous_vm_vsrc_zero_wait) {
-        all_previous_vm_vsrc_zero_wait = pred_out.previous_vm_vsrc_zero_wait;
+        all_previous_vm_vsrc_zero_wait = input.previous_vm_vsrc_zero_wait;
       } else {
-        *all_previous_vm_vsrc_zero_wait &= pred_out.previous_vm_vsrc_zero_wait;
+        *all_previous_vm_vsrc_zero_wait &= input.previous_vm_vsrc_zero_wait;
       }
       if (!ready_regs) {
-        ready_regs = pred_out.ready_regs;
+        ready_regs = input.ready_regs;
       } else {
-        *ready_regs &= pred_out.ready_regs;
+        *ready_regs &= input.ready_regs;
       }
       if (!first_expert_scheduling) {
-        first_expert_scheduling = pred_out.expert_scheduling;
-      } else if (*first_expert_scheduling != pred_out.expert_scheduling) {
+        first_expert_scheduling = input.expert_scheduling;
+      } else if (*first_expert_scheduling != input.expert_scheduling) {
         first_expert_scheduling->known = false;
         first_expert_scheduling->enabled = true;
       }
       if (!first_vgpr_msb) {
-        first_vgpr_msb = pred_out.vgpr_msb;
-      } else if (*first_vgpr_msb != pred_out.vgpr_msb) {
+        first_vgpr_msb = input.vgpr_msb;
+      } else if (*first_vgpr_msb != input.vgpr_msb) {
         first_vgpr_msb->known = false;
         first_vgpr_msb->mode = 0;
       }
       for (size_t i = 0; i < kCounterCount; ++i) {
-        if (!pred_out.pending[i].empty()) {
+        if (!input.pending[i].empty()) {
           if (!first_source[i]) {
-            first_source[i] = pred_out.pending[i];
-          } else if (*first_source[i] != pred_out.pending[i]) {
+            first_source[i] = input.pending[i];
+          } else if (*first_source[i] != input.pending[i]) {
             merged.uncertain_order[i] = true;
           }
         }
       }
-      merge_into(merged, pred_out);
+      merge_into(merged, input);
+    };
+    if (previous_input)
+      merge_input(*previous_input);
+    for (size_t predecessor : predecessors) {
+      if (predecessor < outputs.size() && predecessor < output_initialized.size() &&
+          output_initialized[predecessor] != 0)
+        merge_input(outputs[predecessor]);
     }
     if (first_vgpr_msb)
       merged.vgpr_msb = *first_vgpr_msb;
