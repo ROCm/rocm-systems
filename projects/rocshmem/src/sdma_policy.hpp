@@ -88,7 +88,8 @@ class SdmaImpl {
       // the SDMA engine reads from GL2, but __syncthreads() in the caller only
       // drains stores to GL0 without flushing to GL2.  Agent scope is sufficient
       // because SDMA probes GL2 via the coherence protocol on the same die.
-      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+      atomic::threadfence<atomic::memory_scope::device,
+                          atomic::memory_order::release>();
       sdma_anvil::put(*handle, dst, src, size);
       // Mark (local_pe, effective_channel) dirty so sdmaQuiet drains the right
       // channel.  Blocking copies drain inline via quietAll, so the dirty bit

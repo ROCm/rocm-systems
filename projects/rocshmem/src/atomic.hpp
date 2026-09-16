@@ -172,31 +172,12 @@ T fetch_min(T* obj, type_identity_t<T> arg) {
                                    static_cast<int>(scope));
 }
 
-#define ROCSHMEM_DISPATCH_FENCE_ORDER(SCOPE_STR)         \
-  if constexpr (order == memory_order::acquire)          \
-    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, SCOPE_STR); \
-  else if constexpr (order == memory_order::release)     \
-    __builtin_amdgcn_fence(__ATOMIC_RELEASE, SCOPE_STR); \
-  else if constexpr (order == memory_order::acq_rel)     \
-    __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, SCOPE_STR); \
-  else                                                   \
-    __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, SCOPE_STR)
-
 template <memory_scope scope = memory_scope::system,
           memory_order order = memory_order::seq_cst>
 __device__ __forceinline__ void threadfence() {
-  if constexpr (scope == memory_scope::single ||
-                scope == memory_scope::wavefront ||
-                scope == memory_scope::workgroup) {
-    ROCSHMEM_DISPATCH_FENCE_ORDER("workgroup");
-  } else if constexpr (scope == memory_scope::device) {
-    ROCSHMEM_DISPATCH_FENCE_ORDER("agent");
-  } else {
-    ROCSHMEM_DISPATCH_FENCE_ORDER("");  // system scope
-  }
+  __scoped_atomic_thread_fence(static_cast<int>(order),
+                               static_cast<int>(scope));
 }
-
-#undef ROCSHMEM_DISPATCH_FENCE_ORDER
 
 } // namespace atomic
 } // namespace detail
