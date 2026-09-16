@@ -4,19 +4,19 @@
 #pragma once
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 
+#include <cassert>
 #include <ostream>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 
 namespace rocjitsu::plugins::race_detector {
 
 /// Categorizes in-flight memory operations for race detection.
 enum class MemoryEventType {
-  GLOBAL_TO_VGPR = 0, ///< Load from global memory to VGPR (counted by vmcnt).
-  VGPR_TO_GLOBAL,     ///< Store from VGPR to global memory (counted by vmcnt).
-  LDS_TO_VGPR,        ///< Load from LDS to VGPR (counted by lgkmcnt).
-  VGPR_TO_LDS,        ///< Store from VGPR to LDS (counted by lgkmcnt).
+  GLOBAL_TO_VGPR = 0, ///< Load from global memory to VGPR.
+  VGPR_TO_GLOBAL,     ///< Store from VGPR to global memory.
+  LDS_TO_VGPR,        ///< Load from LDS to VGPR.
+  VGPR_TO_LDS,        ///< Store from VGPR to LDS.
 
   /// Direct-to-LDS (DTL): `buffer_load ... lds` bypasses VGPRs and writes
   /// global memory data directly to LDS. Unlike VGPR_TO_LDS (which has VGPR
@@ -84,7 +84,8 @@ inline amdgpu::WaitCounterType defaultWaitCounterType(MemoryEventType t) {
   case MemoryEventType::N:
     break;
   }
-  throw std::invalid_argument("invalid memory event type");
+  assert(false && "invalid memory event type");
+  return amdgpu::WaitCounterType::VMCNT;
 }
 
 /// Ordering used by architecture-neutral unit-test helpers. Runtime callers
@@ -105,7 +106,8 @@ inline MemoryOrderClass defaultMemoryOrder(MemoryEventType t) {
   case MemoryEventType::N:
     break;
   }
-  throw std::invalid_argument("invalid memory event type");
+  assert(false && "invalid memory event type");
+  return MemoryOrderClass::UNORDERED;
 }
 
 /// A register reference (type + index).

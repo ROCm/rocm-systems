@@ -30,9 +30,29 @@
 using namespace rocjitsu::plugins::race_detector;
 namespace amdgpu = rocjitsu::amdgpu;
 
-TEST(RaceDetectorDefaults, RejectsInvalidMemoryEventType) {
-  EXPECT_THROW(defaultWaitCounterType(MemoryEventType::N), std::invalid_argument);
-  EXPECT_THROW(defaultMemoryOrder(MemoryEventType::N), std::invalid_argument);
+TEST(RaceDetectorDefaults, CoversEveryMemoryEventType) {
+  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::GLOBAL_TO_VGPR),
+            amdgpu::WaitCounterType::VMCNT);
+  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::VGPR_TO_GLOBAL),
+            amdgpu::WaitCounterType::VMCNT);
+  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::GLOBAL_TO_LDS), amdgpu::WaitCounterType::VMCNT);
+  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::LDS_TO_VGPR), amdgpu::WaitCounterType::LGKMCNT);
+  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::VGPR_TO_LDS), amdgpu::WaitCounterType::LGKMCNT);
+  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::GLOBAL_TO_SGPR),
+            amdgpu::WaitCounterType::LGKMCNT);
+  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::GLOBAL_TO_TTMP),
+            amdgpu::WaitCounterType::LGKMCNT);
+  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::SCALAR_TO_GLOBAL),
+            amdgpu::WaitCounterType::LGKMCNT);
+
+  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_VGPR), MemoryOrderClass::VMEM);
+  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::VGPR_TO_GLOBAL), MemoryOrderClass::VMEM);
+  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_LDS), MemoryOrderClass::VMEM);
+  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::LDS_TO_VGPR), MemoryOrderClass::LDS);
+  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::VGPR_TO_LDS), MemoryOrderClass::LDS);
+  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_SGPR), MemoryOrderClass::UNORDERED);
+  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_TTMP), MemoryOrderClass::UNORDERED);
+  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::SCALAR_TO_GLOBAL), MemoryOrderClass::UNORDERED);
 }
 
 // ---- VGPR races (vmcnt) ----

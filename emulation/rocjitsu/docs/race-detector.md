@@ -172,10 +172,10 @@ following lifecycle:
    same-wave DS read or write does not race solely because the earlier DS event
    is still active. Direct-to-LDS VMEM writes still require the owning wave to
    wait for `vmcnt` before reading the destination bytes.
-1. **WAVE_COMPLETE** — `s_waitcnt` has retired the event for the owning wave.
-   This means the event is no longer in flight from the perspective of the wave
-   that issued the operation, but is still in flight from the perspective of
-   other waves in the same workgroup.
+1. **WAVE_COMPLETE** — waits have satisfied every counter obligation for the
+   event. This means the event is no longer in flight from the perspective of
+   the wave that issued the operation, but is still in flight from the
+   perspective of other waves in the same workgroup.
 1. **RETIRED** — `s_barrier` has synchronized all waves. The event is fully
    retired and, from the perspective of all threads in all wavefronts, the
    operation is complete.
