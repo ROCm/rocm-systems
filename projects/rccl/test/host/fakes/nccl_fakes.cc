@@ -41,6 +41,7 @@
 ASSERT_HOOK_MATCHES_PROD(g_proxyConnect,              ncclProxyConnect);
 ASSERT_HOOK_MATCHES_PROD(g_proxyCallBlocking,         ncclProxyCallBlocking);
 ASSERT_HOOK_MATCHES_PROD(g_proxyClientQueryFdBlocking, ncclProxyClientQueryFdBlocking);
+ASSERT_HOOK_MATCHES_PROD(g_proxyClientBatchQueryFdBlocking, ncclProxyClientBatchQueryFdBlocking);
 ASSERT_HOOK_MATCHES_PROD(g_strongStreamAcquire,       ncclStrongStreamAcquire);
 // ncclCuMemEnable: header declares `int ncclCuMemEnable()` (rocmwrap.h).
 ASSERT_HOOK_MATCHES_PROD(g_cuMemEnable,               ncclCuMemEnable);
@@ -488,15 +489,28 @@ ncclResult_t ncclDynMemMarkExportToPeer(struct ncclMemManager* manager,
 }
 
 // Batch fd-query variant added upstream for multi-segment registration.
-// Returns failure by default -- no microtest drives the multi-segment
-// path (ncclParamMultiSegmentRegister is stubbed to 0 below).
-ncclResult_t ncclProxyClientBatchQueryFdBlocking(struct ncclComm*           /*comm*/,
-                                                 struct ncclProxyConnector* /*proxyConn*/,
-                                                 int*                       /*localFds*/,
-                                                 int*                       /*rmtFds*/,
-                                                 int                        /*numSegments*/)
+// The POSIX_FD, cross-process arm of ipcHandleMultiSegmentRegistration ships
+// every exported segment fd to the remote proxy and gets an imported-fd
+// handle per segment back. Default returns ncclSystemError so unexpected
+// call sites fail loudly; tests driving that arm install a hook that
+// succeeds and fills the imported-fd array.
+static ncclResult_t DefaultProxyClientBatchQueryFdBlocking(
+    struct ncclComm*, struct ncclProxyConnector*, int*, int*, int)
 {
     return ncclSystemError;
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*,
+                           int*, int*, int)>
+    g_proxyClientBatchQueryFdBlocking = DefaultProxyClientBatchQueryFdBlocking;
+
+ncclResult_t ncclProxyClientBatchQueryFdBlocking(struct ncclComm*           comm,
+                                                 struct ncclProxyConnector* proxyConn,
+                                                 int*                       localFds,
+                                                 int*                       rmtFds,
+                                                 int                        numSegments)
+{
+    return g_proxyClientBatchQueryFdBlocking(comm, proxyConn, localFds, rmtFds,
+                                             numSegments);
 }
 
 // NCCL_PARAM(MultiSegmentRegister, ...) generated symbol. Return 0 so the
@@ -517,6 +531,7 @@ void ResetNcclFakes()
     g_loadParam                    = DefaultLoadParam;
     g_cuMemEnable                  = DefaultCuMemEnable;
     g_proxyClientQueryFdBlocking   = DefaultProxyClientQueryFdBlocking;
+    g_proxyClientBatchQueryFdBlocking = DefaultProxyClientBatchQueryFdBlocking;
     g_proxyClientGetFdBlocking     = DefaultProxyClientGetFdBlocking;
     g_memTrackImportFromPeer       = DefaultMemTrackImportFromPeer;
     g_dynMemMarkExportToPeer       = DefaultDynMemMarkExportToPeer;
