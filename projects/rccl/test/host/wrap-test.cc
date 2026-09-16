@@ -40,6 +40,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <string>
@@ -65,6 +67,16 @@
 // WRAP_CC_PATH is defined by test/host/CMakeLists.txt as the hipified copy of
 // src/rccl_wrap.cc, e.g. ${PROJECT_BINARY_DIR}/hipify/src/rccl_wrap.cc.
 #include WRAP_CC_PATH
+
+#include "dev_runtime_internal.h"
+
+// Private layout consumed by the real ncclDevrFindWindow implementation in
+// dev_runtime.cc, which is compiled by dev-runtime-test.cc in this binary.
+struct ncclDevrWindowSorted {
+  uintptr_t userAddr;
+  size_t size;
+  struct ncclDevrWindow* win;
+};
 
 namespace {
 
@@ -115,6 +127,25 @@ void DeleteCommWithArch(ncclComm* comm) {
   delete comm->topo;
   delete comm;
 }
+
+struct TestDevrWindows {
+  TestDevrWindows(ncclComm* comm, const void* sendPtr, bool sendHasSysmem,
+                  const void* recvPtr, bool recvHasSysmem) {
+    memories[0].globalHasSysmemSegment = sendHasSysmem;
+    memories[1].globalHasSysmemSegment = recvHasSysmem;
+    windows[0].memory = &memories[0];
+    windows[1].memory = &memories[1];
+    sorted[0] = {reinterpret_cast<uintptr_t>(sendPtr), 1, &windows[0]};
+    sorted[1] = {reinterpret_cast<uintptr_t>(recvPtr), 1, &windows[1]};
+    if (sorted[1].userAddr < sorted[0].userAddr) std::swap(sorted[0], sorted[1]);
+    comm->devrState.winSorted = sorted;
+    comm->devrState.winSortedCount = 2;
+  }
+
+  ncclDevrMemory memories[2]{};
+  ncclDevrWindow windows[2]{};
+  ncclDevrWindowSorted sorted[2]{};
+};
 
 auto ForceParam(const char* name, int64_t value) {
   return [name = std::string(name), value](const char* env, int64_t defaultValue) {
@@ -3536,12 +3567,10 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredForwardsBlockCalculatorA
       });
 }
 
-// g_devrWindowHasSysmemSegment had a controllable seam (wrap_fakes.cc) but
-// no test had ever driven it true anywhere in this file (llvm-cov: 0 hits
-// on the true side of ncclDevrWindowHasSysmemSegment at every call site).
 // Same setup as CeRegisteredChosenWhenAvailableAndPolicyZero above, but with
-// the sysmem-segment guard forced true -- proves it blocks CE_REGISTERED
-// even when every other CE-eligibility input stays identical.
+// a real registered window whose backing memory has a sysmem segment. This
+// proves that guard blocks CE_REGISTERED even when every other CE-eligibility
+// input stays identical.
 TEST(WrapMicrotestIsolated, SelectAllReduce_SysmemSegmentBlocksCeRegistered) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_SysmemSegmentBlocksCeRegistered",
@@ -3550,11 +3579,12 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SysmemSegmentBlocksCeRegistered) {
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
-        ScopedHook hasSysmem(g_devrWindowHasSysmemSegment, [](struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeSelectComm();
+        int sendBuffer = 0, recvBuffer = 0;
+        TestDevrWindows registered(comm, &sendBuffer, true, &recvBuffer, false);
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
-        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, &sendBuffer, &recvBuffer, /*count=*/8, ncclFloat32, ncclSum,
                                                     /*stream=*/nullptr, /*query=*/true,
                                                     /*graphCapturingHint=*/false, &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
@@ -3562,10 +3592,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SysmemSegmentBlocksCeRegistered) {
       });
 }
 
-// Complementary proof: recvWin's own side of hasSysmemSegment's `||`
-// (sendWin's already proven above -- both windows got the same hook return
-// value there, so recvWin's own check, gated by short-circuit, never ran).
-// Distinguished via sentinel addresses (never dereferenced by the fakes).
+// Complementary proof: recvWin's own side of hasSysmemSegment's `||`, with
+// only the receive window backed by memory carrying a sysmem segment.
 TEST(WrapMicrotestIsolated, SelectAllReduce_RecvWinSysmemSegmentBlocksCeRegistered) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_RecvWinSysmemSegmentBlocksCeRegistered",
@@ -3575,14 +3603,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RecvWinSysmemSegmentBlocksCeRegister
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
-        ScopedHook findWindow(g_devrFindWindow, [&](struct ncclComm*, void const* ptr, struct ncclDevrWindow** window) {
-          *window = reinterpret_cast<struct ncclDevrWindow*>(ptr == &recvSentinel ? 0x2 : 0x1);
-          return ncclSuccess;
-        });
-        ScopedHook hasSysmem(g_devrWindowHasSysmemSegment, [](struct ncclDevrWindow* w) {
-          return w == reinterpret_cast<struct ncclDevrWindow*>(0x2); // true only for recvWin's sentinel
-        });
         ncclComm* comm = MakeSelectComm();
+        TestDevrWindows registered(comm, &sendSentinel, false, &recvSentinel, true);
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, &sendSentinel, &recvSentinel, /*count=*/8, ncclFloat32,
@@ -3734,17 +3756,13 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ChosenWhenLLNotEligibl
       });
 }
 
-// Distinguishes the LL128 branch's own threshold check (msgBytes <=
-// rcclParamDdaLL128Threshold(), default 64MiB) from mere LL128-
-// ineligibility (the test above): RCCL_DDA_LL128 stays enabled and the
-// LL128 eligibility seam stays true-capable, but msgBytes (~76MiB) exceeds
-// the threshold, so the second conjunct -- not eligibility -- is what
-// falls through to VMM.
-TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricVmmChosenWhenLL128ThresholdExceeded) {
+// The selector delegates LL128 parameter and message-size gating to the
+// eligibility helper. An eligible message above the former selector-owned
+// 64MiB threshold must therefore still select LL128 rather than VMM.
+TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ChosenAboveLegacyThreshold) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAllReduce_DdaFabricVmmChosenWhenLL128ThresholdExceeded",
+      "Wrap_SelectAllReduce_DdaFabricLL128ChosenAboveLegacyThreshold",
       []() {
-        g_loadParam = ForceParam("RCCL_DDA_LL128", int64_t(1));
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
                                  [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible,
@@ -3761,39 +3779,9 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricVmmChosenWhenLL128Threshold
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/20000000, ncclFloat32, ncclSum,
                                                     /*stream=*/nullptr, /*query=*/true,
                                                     /*graphCapturingHint=*/false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, decision.algo);
-        DeleteCommWithArch(comm);
-      });
-}
-
-TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ThresholdBoundary) {
-  RUN_ISOLATED_TEST(
-      "Wrap_SelectAllReduce_DdaFabricLL128ThresholdBoundary",
-      []() {
-        g_loadParam = ForceParam("RCCL_DDA_LL128", int64_t(1));
-        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
-        ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible,
-                                 [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
-                                   return true;
-                                 });
-        ScopedHook vmmEligible(g_allReduceDdaFabricEligible,
-                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
-        ncclComm* comm = MakeCommWithArch("gfx1250");
-        comm->nRanks = 1;
-        comm->nNodes = 1;
-
-        rcclCollDecision atCutoff{};
-        EXPECT_EQ(ncclSuccess,
-                  rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/16777216, ncclFloat32, ncclSum,
-                                      /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &atCutoff));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, atCutoff.algo);
-
-        rcclCollDecision pastCutoff{};
-        EXPECT_EQ(ncclSuccess,
-                  rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/16777217, ncclFloat32, ncclSum,
-                                      /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &pastCutoff));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, pastCutoff.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, decision.algo);
+        EXPECT_EQ(114u, decision.nMaxChannels);
+        EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
         DeleteCommWithArch(comm);
       });
 }
@@ -4292,13 +4280,15 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchRejectsSysmemSegment) 
       []() {
         ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                        ncclSymRegType_t) { return true; });
-        ScopedHook hasSysmem(g_devrWindowHasSysmemSegment, [](struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeSelectComm();
+        int sendBuffer = 0, recvBuffer = 0;
+        TestDevrWindows registered(comm, &sendBuffer, true, &recvBuffer, false);
         uint8_t scratch[64];
         comm->ddaScratch = scratch;
         comm->ddaScratchBytes = sizeof(scratch);
         rcclCollDecision decision{};
-        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, 8, ncclFloat32, true, false, &decision));
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectAllGather(comm, &sendBuffer, &recvBuffer, 8, ncclFloat32, true, false, &decision));
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
@@ -4394,24 +4384,22 @@ TEST(WrapMicrotestIsolated, SelectAllGather_SysmemSegmentBlocksCeRegistered) {
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
-        ScopedHook hasSysmem(g_devrWindowHasSysmemSegment, [](struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nRanks = 1;
         comm->nNodes = 1;
+        int sendBuffer = 0, recvBuffer = 0;
+        TestDevrWindows registered(comm, &sendBuffer, true, &recvBuffer, false);
         rcclCollDecision decision{};
-        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, &sendBuffer, &recvBuffer, /*sendcount=*/8, ncclFloat32,
                                                     /*query=*/true, /*graphCapturingHint=*/false, &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
 
-// hasSysmemSegment's `||` has two disjuncts (sendWin's check, recvWin's
-// check); the test above only ever drove it true via sendWin (both
-// windows got the same hook return value, so recvWin's own check -- gated
-// by short-circuit -- never actually ran). Distinguishing sendWin/recvWin
-// via distinct sentinel addresses (never dereferenced by the fakes) proves
-// recvWin's side of the `||` independently.
+// hasSysmemSegment's `||` has two disjuncts. The test above drives the send
+// side; this one gives only the receive window a sysmem segment and proves the
+// second operand independently.
 TEST(WrapMicrotestIsolated, SelectAllGather_RecvWinSysmemSegmentBlocksCeRegistered) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllGather_RecvWinSysmemSegmentBlocksCeRegistered",
@@ -4420,16 +4408,10 @@ TEST(WrapMicrotestIsolated, SelectAllGather_RecvWinSysmemSegmentBlocksCeRegister
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
-        ScopedHook findWindow(g_devrFindWindow, [&](struct ncclComm*, void const* ptr, struct ncclDevrWindow** window) {
-          *window = reinterpret_cast<struct ncclDevrWindow*>(ptr == &recvSentinel ? 0x2 : 0x1);
-          return ncclSuccess;
-        });
-        ScopedHook hasSysmem(g_devrWindowHasSysmemSegment, [](struct ncclDevrWindow* w) {
-          return w == reinterpret_cast<struct ncclDevrWindow*>(0x2); // true only for recvWin's sentinel
-        });
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nRanks = 1;
         comm->nNodes = 1;
+        TestDevrWindows registered(comm, &sendSentinel, false, &recvSentinel, true);
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, &sendSentinel, &recvSentinel, /*sendcount=*/8, ncclFloat32,
                                                     /*query=*/true, /*graphCapturingHint=*/false, &decision));

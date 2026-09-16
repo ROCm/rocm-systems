@@ -20,7 +20,6 @@
 #include "ce_fakes.h"
 #include "comm.h"
 #include "dda_fakes.h"
-#include "dev_runtime_fakes.h"
 #include "enqueue.h"
 #include "nccl.h"
 #include "strongstream_stubs.h"

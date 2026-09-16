@@ -46,11 +46,15 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
     `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
     covered yet.
+  - `dev_runtime.cc` (`DEV_RUNTIME_CC_PATH`, from `dev-runtime-test.cc`);
+    suites `Alloc*`, `Comm*`, `Compute*`, `DeepCopy*`, `Dev*`, `Gin*`, `Nccl*`,
+    `Sym*`, and `Win*`.
   - `rccl_wrap.cc` (`WRAP_CC_PATH`, from `wrap-test.cc`); suites
     `WrapMicrotest.*`, `WrapMicrotestIsolated.*`. Shared dependency seams live
-    in their production-TU owners (`ce_fakes.cc`, `dev_runtime_fakes.cc`,
-    `sym_kernels_fakes.cc`, etc.); `wrap_fakes.cc` contains only link-closure
-    seams without an existing shared owner. Real
+    in their production-TU owners (`ce_fakes.cc`, `sym_kernels_fakes.cc`,
+    etc.); `dev_runtime.cc`'s real window lookup and predicates are supplied by
+    `dev-runtime-test.cc`, and `wrap_fakes.cc` contains only link-closure seams
+    without an existing shared owner. Real
     `archinfo.cc` is compiled alongside it for `IsArchMatch`
     (`rcclIsArchSupportedForFunc` et al. need the real prefix-match
     behaviour) -- the same real-oracle-TU technique
@@ -204,7 +208,7 @@ symbol.
 | `src/bootstrap.cc` | `fakes/bootstrap_stubs.cc` |
 | `src/ce_coll.cc` | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
-| `src/dev_runtime.cc` | `fakes/dev_runtime_fakes.cc` |
+| `src/dev_runtime.cc` (targets that do not compile the real file) | `fakes/dev_runtime_fakes.cc` |
 | `src/graph/*.cc` (topo, paths, search, connect, rome consensus) | `fakes/topo_stubs.cc` |
 | `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
 | `src/group.cc` | `fakes/group_fakes.cc` |

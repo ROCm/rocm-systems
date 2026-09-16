@@ -14,11 +14,13 @@
 // ScopedHook when a branch needs different behaviour.
 //
 // Dependencies with an established owner live in their canonical fake files:
-// collectives_fakes, strongstream_stubs, dev_runtime_fakes, ce_fakes,
-// sym_kernels_fakes, transport_stubs, and tuning_fakes. This file contains
-// only the remaining rccl_wrap.cc link-closure seams that have no shared owner
-// yet. nccl_stubs.cc is not linked because it defines commSetUnrollFactor,
-// which is a real function supplied by the unit under test itself.
+// collectives_fakes, strongstream_stubs, ce_fakes, sym_kernels_fakes,
+// transport_stubs, and tuning_fakes. dev_runtime.cc is now another unit under
+// test in this binary, so its real window lookup/predicate functions satisfy
+// rccl_wrap.cc directly. This file contains only the remaining rccl_wrap.cc
+// link-closure seams that have no shared owner yet. nccl_stubs.cc is not linked
+// because it defines commSetUnrollFactor, which is a real function supplied by
+// the unit under test itself.
 //
 // RCCL_PARAM / NCCL_PARAM: every RCCL_PARAM(...) invocation textually inside
 // rccl_wrap.cc is redirected by wrap-test.cc to route through a g_loadParam

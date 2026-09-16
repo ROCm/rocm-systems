@@ -55,6 +55,8 @@ set(RCCL_MICRO_TEST_SOURCES
   group-test.cc
   devcomm-test.cc
   wrap-test.cc                         # rccl_wrap.cc microtests (AICOMRCCL-2195)
+  dev-runtime-test.cc                  # src/dev_runtime.cc (symmetric memory, windows, devcomm)
+  fakes/dev_runtime_micro_fakes.cc     # dev_runtime's non-HIP externs (shadow pool, space, gin, rma)
   fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
   fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
   fakes/rma_fakes.cc                   # rma_proxy_progress externals (circular-buf / destroy)
@@ -68,7 +70,6 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/ce_fakes.cc                    # src/ce_coll.cc availability seams
   fakes/collectives_fakes.cc           # src/collectives.cc name helpers
   fakes/dda_fakes.cc                   # src/algorithms/dda/* selection seams
-  fakes/dev_runtime_fakes.cc           # src/dev_runtime.cc window seams
   fakes/strongstream_stubs.cc          # src/misc/strongstream.cc capture seam
   fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc query seams
   fakes/transport_stubs.cc             # transport/PXN/AINIC seams
@@ -155,6 +156,7 @@ if(BUILD_TESTS)
     DEVCOMM_V22907_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/devcomm/devcomm_v22907.cc"
     WRAP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rccl_wrap.cc"
     RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
+    DEV_RUNTIME_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime.cc"
   )
 
   # Make sure the hipify step has run before trying to compile the test.
@@ -821,6 +823,7 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   DEVCOMM_V22907_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
   WRAP_CC_PATH="${RCCL_HIPIFY_DIR}/src/rccl_wrap.cc"
   RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
+  DEV_RUNTIME_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime.cc"
   # Same fallback-vs-runtime conflicts the host target guards against: without
   # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
   # enumerators on ROCm 7.14+, and the standalone build fails.
@@ -1041,10 +1044,7 @@ if(HOST_TEST_COVERAGE)
 endif()
 
 # NOTE: the standalone project intentionally does not register these binaries
-# with CTest (matching test/host from #9320); run them directly, e.g.
-#   ./build/rccl-UnitTestsMicro   or   ./build/rccl-HostUnitTests
-#   ./build/rccl-UnitTestsMicroInit   ./build/rccl-UnitTestsMicroInit-uncached
-#   ./build/rccl-UnitTestsMicroInit-faultinj
-#   ./build/rccl-UnitTestsMicroEnqueue  ./build/rccl-UnitTestsMicroEnqueue-devlinker
-# The in-RCCL-build path registers the micro/init/enqueue binaries via CTest
-# categories.
+# with CTest (matching test/host from #9320); run them directly out of the build
+# directory. The binaries are the add_test_executable() calls above rather than a
+# list repeated here, so the two cannot drift. The in-RCCL-build path registers
+# them via CTest categories.

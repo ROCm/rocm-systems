@@ -494,6 +494,12 @@ Set it to either a suffix string or to a library name to choose among multiple N
 
 For example, setting ``NCCL_PROFILER_PLUGIN=foo`` will cause NCCL to try to load ``foo`` and, if ``foo`` cannot be found, ``librccl-profiler-foo.so`` (provided that it exists on the system).
 
+The RCCL Inspector plugin (since RCCL 2.29) is loaded by pointing this variable
+at ``librccl-profiler-inspector.so`` and setting ``NCCL_INSPECTOR_ENABLE=1``.
+Prometheus textfile mode is ``NCCL_INSPECTOR_PROM_DUMP=1``. Metric names stay
+``nccl_*``; ``# HELP`` text and the ``gpu`` label are RCCL/HIP. See
+``docs/how-to/using-rccl-inspector-plugin.rst``.
+
 Values accepted
 ^^^^^^^^^^^^^^^
 
@@ -1774,8 +1780,10 @@ NCCL_RAS_ENABLE
 ---------------
 (since 2.24)
 
-Enable NCCL's reliability, availability, and serviceability (RAS) subsystem, which can be used to query the health of
-NCCL jobs during execution (see :doc:`troubleshooting/ras`).
+Enable RCCL's reliability, availability, and serviceability (RAS) subsystem, which can be used to query the health of
+RCCL jobs during execution (see :doc:`troubleshooting/ras`).  The client binary is ``rcclras``.  Use ``rcclras -f json``
+for machine-parsable output; JSON key names follow the NCCL schema (``cuda_*``) but the values are HIP/amd-smi (see
+the mapping table in that page).
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -1788,9 +1796,10 @@ NCCL_RAS_ADDR
 (since 2.24)
 
 Specify the IP address and port number of a socket that the RAS subsystem will listen on for client connections. RAS
-can share this socket between multiple processes but that would not be desirable if multiple independent NCCL jobs share
+can share this socket between multiple processes but that would not be desirable if multiple independent RCCL jobs share
 a single node (and if those jobs belong to different users, the OS will not allow the socket to be shared). In such
-cases, each job should be started with a different value (e.g., ``localhost:12345``, ``localhost:12346``, etc.). Since
+cases, each job should be started with a different value (e.g., ``localhost:12345``, ``localhost:12346``, etc.) and
+queried with ``rcclras -p <port>``. The default ``28028`` is often already in use on shared cluster nodes. Since
 ``localhost`` is normally used, only those with access to the nodes where the job is running can connect to the socket.
 If desired, the address of an externally accessible network interface can be specified instead, which will make RAS
 accessible from other nodes (such as a cluster's head node), but that has security implications that should be
@@ -1809,9 +1818,9 @@ NCCL_RAS_TIMEOUT_FACTOR
 Specify the multiplier factor to apply to all the timeouts of the RAS subsystem. RAS relies on multiple timeouts,
 ranging from 5 to 60 seconds, to determine the state of the application and to maintain its internal communication, with
 complex interdependencies between different timeouts. This variable can be used to scale up all these timeouts in a
-safe, consistent manner, should any of the defaults turn out to be too small; e.g., if the NCCL application is subject
+safe, consistent manner, should any of the defaults turn out to be too small; e.g., if the RCCL application is subject
 to high-overhead debugging/tracing/etc., which makes its execution less predictable. If one wants to use the
-``rcclras`` client in such circumstances, its timeout may need to be increased as well (or disabled).
+``rcclras`` client in such circumstances, its timeout may need to be increased as well (or disabled) with ``-t``.
 
 Values accepted
 ^^^^^^^^^^^^^^^
