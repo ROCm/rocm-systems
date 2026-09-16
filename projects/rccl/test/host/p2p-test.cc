@@ -4843,3 +4843,316 @@ TEST_F(P2pRegisterFamilyMicrotest, Deregister_ShipsDeregisterMessageWithImpInfoP
     EXPECT_EQ(msgReq, &regInfo.impInfo);
     EXPECT_EQ(msgReqSize, static_cast<int>(sizeof(struct ncclIpcImpInfo)));
 }
+
+// ===========================================================================
+// Multi-segment registration: ipcHandleMultiSegmentRegistration walks a
+// buffer whose mapped physical allocation spans several segments, retaining
+// one handle per segment and populating a p2pIpcExpInfo array that grows
+// (realloc) past its initial two-slot capacity as the segment count climbs.
+//
+// The unit's own contract:
+//   - one segment per physical allocation range cuMemGetAddressRange reports,
+//     with numSegments and totalMappedBufferSize summing them;
+//   - the p2pIpcExpInfo array grows to hold every segment (the realloc arm);
+//   - each retained allocation handle is released again -- on the success
+//     path (final release loop) and on the cleanup path when the segment
+//     count exceeds NCCL_P2P_MAX_PHYSICAL_SEGMENTS, so retains and releases
+//     always balance.
+//
+// These drive the sameProcess + non-POSIX handle type combination so the
+// export / batch-fd-query sub-arms stay out of scope: each segment simply
+// retains a handle, memcpy's it into the ipcInfo, and is released. The
+// NCCL_P2P_MAX_PHYSICAL_SEGMENTS constant is 8192 (src/transport/p2p.cc).
+// ===========================================================================
+
+namespace {
+
+// SegmentRangeEmulator -- stands in for cuMemGetAddressRange
+// (hipMemGetAddressRange). Reports fixed-size contiguous physical segments
+// starting at each queried address, so a buffer of size N*segSize resolves to
+// exactly N segments. Also counts retain/release calls so a test can assert
+// they balance.
+struct SegmentRangeEmulator {
+    std::size_t segSize;
+    int retainCalls  = 0;
+    int releaseCalls = 0;
+
+    std::unique_ptr<ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>> memGet;
+    std::unique_ptr<ScopedHook<hipError_t(hipMemGenericAllocationHandle_t*, void*)>> retain;
+    std::unique_ptr<ScopedHook<hipError_t(hipMemGenericAllocationHandle_t)>> release;
+
+    explicit SegmentRangeEmulator(std::size_t segSize_) : segSize(segSize_) {
+        std::size_t s = segSize;
+        memGet = std::make_unique<ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>>(
+            g_hipMemGetAddressRange,
+            [s](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t dptr) -> hipError_t {
+                if (pbase) *pbase = dptr;      // segment starts at the query address
+                if (psize) *psize = s;         // fixed physical span
+                return hipSuccess;
+            });
+        retain = std::make_unique<ScopedHook<hipError_t(hipMemGenericAllocationHandle_t*, void*)>>(
+            g_hipMemRetainAllocationHandle,
+            [this](hipMemGenericAllocationHandle_t* h, void* addr) -> hipError_t {
+                ++retainCalls;
+                if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(addr);
+                return hipSuccess;
+            });
+        release = std::make_unique<ScopedHook<hipError_t(hipMemGenericAllocationHandle_t)>>(
+            g_hipMemRelease,
+            [this](hipMemGenericAllocationHandle_t) -> hipError_t {
+                ++releaseCalls;
+                return hipSuccess;
+            });
+    }
+};
+
+}  // namespace
+
+class P2pMultiSegmentMicrotest : public P2pMicrotest {
+protected:
+    void SetUp() override {
+        P2pMicrotest::SetUp();
+        // Drive the sameProcess + non-POSIX handle-type combination so the
+        // shareable-handle export and batch-fd-query sub-arms are skipped;
+        // this isolates the segment-walk / grow / retain-release contract.
+        saved_handle_type_ = ncclCuMemHandleType;
+        ncclCuMemHandleType = hipMemHandleTypeFabric;  // anything != POSIX_FD
+        proxyConn_.sameProcess = 1;
+    }
+    void TearDown() override {
+        ncclCuMemHandleType = saved_handle_type_;
+        P2pMicrotest::TearDown();
+    }
+
+    hipMemAllocationHandleType saved_handle_type_{};
+    ncclComm            comm_{};
+    ncclProxyConnector  proxyConn_{};
+};
+
+// A buffer spanning more segments than the initial two-slot capacity walks
+// the realloc arm: every segment is recorded, numSegments and
+// totalMappedBufferSize sum them, and each retained handle is released again.
+TEST_F(P2pMultiSegmentMicrotest, Walk_BufferSpansManySegments_GrowsArrayAndBalancesHandles)
+{
+    constexpr std::size_t kSegSize     = 0x1000;
+    constexpr int         kNumSegments = 5;   // > initial capacity 2 -> realloc
+    SegmentRangeEmulator seg(kSegSize);
+
+    const hipDeviceptr_t userBuff = reinterpret_cast<hipDeviceptr_t>(0x100000);
+    const size_t userBuffSize  = kSegSize * kNumSegments;
+    size_t totalMappedBufferSize = 0;
+    int    numSegments           = 0;
+    p2pIpcExpInfo* ipcInfos      = nullptr;
+
+    auto r = ipcHandleMultiSegmentRegistration(userBuff, userBuffSize, &comm_,
+                                               &proxyConn_, &totalMappedBufferSize,
+                                               &numSegments, &ipcInfos);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(numSegments, kNumSegments);
+    EXPECT_EQ(totalMappedBufferSize, userBuffSize);
+    ASSERT_NE(ipcInfos, nullptr);
+    // The array grew to hold every segment; each slot carries that segment's
+    // physical size.
+    for (int i = 0; i < numSegments; ++i) {
+        EXPECT_EQ(ipcInfos[i].size, kSegSize);
+    }
+    // Every retained handle was released again on the success path.
+    EXPECT_EQ(seg.retainCalls, kNumSegments);
+    EXPECT_EQ(seg.releaseCalls, kNumSegments);
+
+    std::free(ipcInfos);
+}
+
+// A buffer that resolves to more than NCCL_P2P_MAX_PHYSICAL_SEGMENTS segments
+// fails, and the cleanup path releases every handle retained up to the point
+// of failure -- retains and releases still balance and the ipcInfos array is
+// freed (left null).
+TEST_F(P2pMultiSegmentMicrotest, Walk_ExceedsMaxSegments_FailsAndReleasesRetainedHandles)
+{
+    constexpr int kMaxSegments = 8192;  // NCCL_P2P_MAX_PHYSICAL_SEGMENTS
+    constexpr std::size_t kSegSize = 1;
+    // One segment past the ceiling triggers the failure branch.
+    const int kNumSegments = kMaxSegments + 1;
+    SegmentRangeEmulator seg(kSegSize);
+
+    const hipDeviceptr_t userBuff = reinterpret_cast<hipDeviceptr_t>(0x100000);
+    const size_t userBuffSize  = kSegSize * kNumSegments;
+    size_t totalMappedBufferSize = 0;
+    int    numSegments           = 0;
+    p2pIpcExpInfo* ipcInfos      = nullptr;
+
+    auto r = ipcHandleMultiSegmentRegistration(userBuff, userBuffSize, &comm_,
+                                               &proxyConn_, &totalMappedBufferSize,
+                                               &numSegments, &ipcInfos);
+
+    EXPECT_EQ(r, ncclInternalError);
+    // The array is freed on the cleanup path.
+    EXPECT_EQ(ipcInfos, nullptr);
+    // Every handle retained before the ceiling was hit is released again.
+    EXPECT_EQ(seg.releaseCalls, seg.retainCalls);
+    EXPECT_EQ(seg.retainCalls, kNumSegments);
+}
+
+// Cross-process registration with a POSIX-fd handle type exports every
+// segment as a shareable fd, batch-queries the remote proxy for the imported
+// fds, and stores each returned fd on its segment's ipcInfo.
+TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdCrossProcess_ExportsFdsAndStoresImportedFds)
+{
+    ncclCuMemHandleType    = hipMemHandleTypePosixFileDescriptor;
+    proxyConn_.sameProcess = 0;   // cross-process arm
+
+    constexpr std::size_t kSegSize     = 0x1000;
+    constexpr int         kNumSegments = 3;   // > initial capacity 2 -> realloc
+    SegmentRangeEmulator seg(kSegSize);
+
+    // Each export hands back a real, closeable fd (production close()s the
+    // exported fd once the batch query has consumed it).
+    int exportCalls = 0;
+    ScopedHook xport(g_hipMemExportToShareableHandle,
+        [&exportCalls](void* shareableHandle, hipMemGenericAllocationHandle_t,
+                       hipMemAllocationHandleType type,
+                       unsigned long long) -> hipError_t {
+            ++exportCalls;
+            EXPECT_EQ(type, hipMemHandleTypePosixFileDescriptor);
+            if (shareableHandle) *static_cast<int*>(shareableHandle) = ::dup(0);
+            return hipSuccess;
+        });
+
+    // The batch query returns a recognisable imported fd per segment.
+    constexpr int kImpFdBase = 1000;
+    int   batchCalls    = 0;
+    int   batchSegments = -1;
+    ScopedHook batch(g_proxyClientBatchQueryFdBlocking,
+        [&](struct ncclComm*, struct ncclProxyConnector*, int*, int* rmtFds,
+            int numSegments) -> ncclResult_t {
+            ++batchCalls;
+            batchSegments = numSegments;
+            for (int i = 0; i < numSegments; ++i) rmtFds[i] = kImpFdBase + i;
+            return ncclSuccess;
+        });
+
+    const hipDeviceptr_t userBuff = reinterpret_cast<hipDeviceptr_t>(0x100000);
+    const size_t userBuffSize  = kSegSize * kNumSegments;
+    size_t totalMappedBufferSize = 0;
+    int    numSegments           = 0;
+    p2pIpcExpInfo* ipcInfos      = nullptr;
+
+    auto r = ipcHandleMultiSegmentRegistration(userBuff, userBuffSize, &comm_,
+                                               &proxyConn_, &totalMappedBufferSize,
+                                               &numSegments, &ipcInfos);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(numSegments, kNumSegments);
+    EXPECT_EQ(exportCalls, kNumSegments);      // one export per segment
+    EXPECT_EQ(batchCalls, 1);                  // a single batched fd query
+    EXPECT_EQ(batchSegments, kNumSegments);
+    ASSERT_NE(ipcInfos, nullptr);
+    // Each segment carries the imported fd the proxy handed back.
+    for (int i = 0; i < numSegments; ++i) {
+        EXPECT_EQ(ipcInfos[i].impFd, kImpFdBase + i);
+    }
+    EXPECT_EQ(seg.retainCalls, kNumSegments);
+    EXPECT_EQ(seg.releaseCalls, kNumSegments);
+
+    std::free(ipcInfos);
+}
+
+// Cross-process registration with a fabric (non-POSIX) handle type exports
+// each segment's handle straight into that segment's ipcDesc; there is no
+// fd batch-query, and every retained handle is still released.
+TEST_F(P2pMultiSegmentMicrotest, Walk_FabricCrossProcess_ExportsHandlesIntoIpcDesc)
+{
+    // SetUp() already selected the fabric handle type; make it cross-process.
+    proxyConn_.sameProcess = 0;
+
+    constexpr std::size_t kSegSize     = 0x1000;
+    constexpr int         kNumSegments = 3;
+    SegmentRangeEmulator seg(kSegSize);
+
+    int exportCalls = 0;
+    ScopedHook xport(g_hipMemExportToShareableHandle,
+        [&exportCalls](void* shareableHandle, hipMemGenericAllocationHandle_t,
+                       hipMemAllocationHandleType type,
+                       unsigned long long) -> hipError_t {
+            ++exportCalls;
+            EXPECT_NE(type, hipMemHandleTypePosixFileDescriptor);
+            if (shareableHandle) std::memset(shareableHandle, 0x5A, 4);
+            return hipSuccess;
+        });
+    // The batch fd-query must not run on the non-POSIX arm.
+    ScopedHook batch(g_proxyClientBatchQueryFdBlocking,
+        [](struct ncclComm*, struct ncclProxyConnector*, int*, int*, int)
+            -> ncclResult_t {
+            ADD_FAILURE() << "non-POSIX arm must not batch-query fds";
+            return ncclSystemError;
+        });
+
+    const hipDeviceptr_t userBuff = reinterpret_cast<hipDeviceptr_t>(0x100000);
+    const size_t userBuffSize  = kSegSize * kNumSegments;
+    size_t totalMappedBufferSize = 0;
+    int    numSegments           = 0;
+    p2pIpcExpInfo* ipcInfos      = nullptr;
+
+    auto r = ipcHandleMultiSegmentRegistration(userBuff, userBuffSize, &comm_,
+                                               &proxyConn_, &totalMappedBufferSize,
+                                               &numSegments, &ipcInfos);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(numSegments, kNumSegments);
+    EXPECT_EQ(exportCalls, kNumSegments);
+    ASSERT_NE(ipcInfos, nullptr);
+    // The exported descriptor landed in each segment's cuDesc.handle.
+    for (int i = 0; i < numSegments; ++i) {
+        unsigned char* bytes =
+            reinterpret_cast<unsigned char*>(&ipcInfos[i].ipcDesc.cuDesc.handle);
+        EXPECT_EQ(bytes[0], 0x5A);
+    }
+    EXPECT_EQ(seg.retainCalls, kNumSegments);
+    EXPECT_EQ(seg.releaseCalls, kNumSegments);
+
+    std::free(ipcInfos);
+}
+
+// A POSIX-fd, cross-process registration whose batch fd-query fails takes the
+// cleanup path: the exported fds are closed, every retained handle released,
+// and the ipcInfos array freed.
+TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdBatchQueryFails_ClosesFdsAndReleasesHandles)
+{
+    ncclCuMemHandleType    = hipMemHandleTypePosixFileDescriptor;
+    proxyConn_.sameProcess = 0;
+
+    constexpr std::size_t kSegSize     = 0x1000;
+    constexpr int         kNumSegments = 3;
+    SegmentRangeEmulator seg(kSegSize);
+
+    ScopedHook xport(g_hipMemExportToShareableHandle,
+        [](void* shareableHandle, hipMemGenericAllocationHandle_t,
+           hipMemAllocationHandleType, unsigned long long) -> hipError_t {
+            if (shareableHandle) *static_cast<int*>(shareableHandle) = ::dup(0);
+            return hipSuccess;
+        });
+    ScopedHook batch(g_proxyClientBatchQueryFdBlocking,
+        [](struct ncclComm*, struct ncclProxyConnector*, int*, int*, int)
+            -> ncclResult_t {
+            return ncclSystemError;   // force the cleanup path
+        });
+
+    const hipDeviceptr_t userBuff = reinterpret_cast<hipDeviceptr_t>(0x100000);
+    const size_t userBuffSize  = kSegSize * kNumSegments;
+    size_t totalMappedBufferSize = 0;
+    int    numSegments           = 0;
+    p2pIpcExpInfo* ipcInfos      = nullptr;
+
+    auto r = ipcHandleMultiSegmentRegistration(userBuff, userBuffSize, &comm_,
+                                               &proxyConn_, &totalMappedBufferSize,
+                                               &numSegments, &ipcInfos);
+
+    EXPECT_EQ(r, ncclSystemError);
+    EXPECT_EQ(ipcInfos, nullptr);          // freed on the cleanup path
+    // All segments were walked before the query failed; each retained handle
+    // is released again on cleanup.
+    EXPECT_EQ(numSegments, kNumSegments);
+    EXPECT_EQ(seg.releaseCalls, seg.retainCalls);
+    EXPECT_EQ(seg.retainCalls, kNumSegments);
+}

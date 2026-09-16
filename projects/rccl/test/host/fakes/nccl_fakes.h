@@ -68,6 +68,17 @@ extern std::function<ncclResult_t(struct ncclComm*,
                                   int /*localFd*/, int* /*rmtFd*/)>
     g_proxyClientQueryFdBlocking;
 
+// ncclProxyClientBatchQueryFdBlocking: the POSIX_FD, cross-process arm of
+// ipcHandleMultiSegmentRegistration ships every exported segment fd to the
+// remote proxy and receives an imported fd per segment. Default returns
+// ncclSystemError so unexpected calls fail loudly; tests driving that arm
+// install a hook that succeeds and fills the imported-fd array.
+extern std::function<ncclResult_t(struct ncclComm*,
+                                  struct ncclProxyConnector*,
+                                  int* /*localFds*/, int* /*rmtFds*/,
+                                  int /*numSegments*/)>
+    g_proxyClientBatchQueryFdBlocking;
+
 // ncclProxyClientGetFdBlocking: the cuMem*-import POSIX_FD arm of
 // ncclP2pImportShareableBuffer ships the remote cuMem handle to the peer
 // proxy for conversion into a local fd. Default returns ncclSystemError so
