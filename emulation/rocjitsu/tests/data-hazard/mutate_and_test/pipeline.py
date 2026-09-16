@@ -64,8 +64,9 @@ class KernelRunner(Protocol):
     implements this for rocJitsu.
     """
 
-    def command(self, exe: Path, report_path: Path) -> Tuple[List[str], Dict[str, str]]:
-        ...
+    def command(
+        self, exe: Path, report_path: Path
+    ) -> Tuple[List[str], Dict[str, str]]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -284,9 +285,9 @@ def create_memory_mutant_asm(asm_path: Path, mem: MemoryMutation, output: Path) 
     # Preserve the original line's leading indentation.
     original = lines[mem.line_number]
     indent = original[: len(original) - len(original.lstrip())]
-    lines[
-        mem.line_number
-    ] = f"{indent}{mem.rewritten_line}  ; MUTANT: load->store {mem.full_line.strip()}\n"
+    lines[mem.line_number] = (
+        f"{indent}{mem.rewritten_line}  ; MUTANT: load->store {mem.full_line.strip()}\n"
+    )
 
     with open(output, "w") as f:
         f.writelines(lines)
@@ -467,9 +468,7 @@ def _run_baseline(
         reason = (
             "TIMEOUT"
             if ec == -1
-            else (stderr or "could not be started")
-            if ec < 0
-            else f"exit {ec}"
+            else (stderr or "could not be started") if ec < 0 else f"exit {ec}"
         )
         report.error = f"baseline run failed: {reason}"
         print(f"  [SKIP] {report.error}", file=sys.stderr)
@@ -652,9 +651,7 @@ def _build_run_and_evaluate_mutant(
             else (
                 "WRONG"
                 if mr.ran and not mr.stdout_match
-                else "CRASH"
-                if mr.ran and ec != 0
-                else "FAIL"
+                else "CRASH" if mr.ran and ec != 0 else "FAIL"
             )
         )
     )
