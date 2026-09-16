@@ -15,7 +15,7 @@ struct ncclGinAnvilIpcBufEntry;
 #define NCCL_GIN_ANVIL_SDMA_NET_VERSION 117
 
 /** Must match host plugin and device kernel build; checked on device. */
-#define NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC 0xA6E17113u
+#define NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC 0xA6E17114u
 
 /** Default SDMA threshold (bytes). Transfers of at most this size use inlined IPC flat stores;
  *  larger transfers use direct Anvil SDMA. */
@@ -61,6 +61,11 @@ struct ncclGinAnvilSdmaGPUContext {
   // Opt-in direct LSA-flat-from-fabric AllToAll (peer recv windows via fabric LSA map).
   uint32_t fabricA2ALsaEnabled;
   size_t fabricA2ALsaThreshold;
+
+  // Device mutex for one in-flight fabric-LL AllToAll on this GIN context.
+  // 0 = free; otherwise the owning kernel's launchId. Inflight counts LL CTAs.
+  uint32_t fabricA2ALlBusy;
+  uint32_t fabricA2ALlInflight;
 };
 
 /** Current size of the context above, in bytes, on the LP64 targets RCCL builds for.
@@ -73,7 +78,7 @@ struct ncclGinAnvilSdmaGPUContext {
  *  compile error instead. When you change the layout, bump the magic and update
  *  this constant in the same commit.
  */
-#define NCCL_GIN_ANVIL_SDMA_GPU_CONTEXT_BYTES 168
+#define NCCL_GIN_ANVIL_SDMA_GPU_CONTEXT_BYTES 176
 
 #if defined(__cplusplus)
 static_assert(sizeof(struct ncclGinAnvilSdmaGPUContext) == NCCL_GIN_ANVIL_SDMA_GPU_CONTEXT_BYTES,

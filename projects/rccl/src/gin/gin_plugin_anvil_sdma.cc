@@ -924,6 +924,8 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
   ctx->gpuCtxHost.fabricA2AEnabled = 0;
   ctx->gpuCtxHost.fabricA2ALsaEnabled = 0;
   ctx->gpuCtxHost.fabricA2ALsaThreshold = 0;
+  ctx->gpuCtxHost.fabricA2ALlBusy = 0;
+  ctx->gpuCtxHost.fabricA2ALlInflight = 0;
 
   if (ginAnvilUseFabricMem(cctx->comm)) {
     const size_t llThreshold = gin::fabric::resolveGinFabricLLThresholdAlltoAll();

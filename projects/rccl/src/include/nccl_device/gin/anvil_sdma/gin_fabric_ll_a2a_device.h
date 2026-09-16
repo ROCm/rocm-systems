@@ -12,9 +12,39 @@
 #define _NCCL_DEVICE_GIN_ANVIL_SDMA_GIN_FABRIC_LL_A2A_DEVICE_H_
 
 #include "gin_fabric_ll_device_prims.h"
+#include "gin_anvil_sdma_device_host_common.h"
 
 namespace dda {
 namespace common {
+
+// One GIN fabric-LL AllToAll at a time per Anvil GPU context. Leader CTA 0
+// CAS-es launchId into fabricA2ALlBusy; other CTAs wait until busy != 0, then
+// proceed only if they own it. A concurrent launch sees a foreign id and must
+// not touch the LL epoch/scratch (it should fall back to gin.put).
+__device__ __forceinline__ bool ginFabricLlBusyTryAcquire(ncclGinAnvilSdmaGPUContext* ctx, uint32_t launchId) {
+  if (ctx == nullptr || launchId == 0u) return false;
+  if (threadIdx.x == 0 && blockIdx.x == 0 && blockIdx.y == 0) {
+    (void)atomicCAS(&ctx->fabricA2ALlBusy, 0u, launchId);
+  }
+  uint32_t owner = 0;
+  do {
+    owner = atomicAdd(&ctx->fabricA2ALlBusy, 0u);
+  } while (owner == 0u);
+  return owner == launchId;
+}
+
+__device__ __forceinline__ void ginFabricLlBusyEnter(ncclGinAnvilSdmaGPUContext* ctx) {
+  if (threadIdx.x == 0) (void)atomicAdd(&ctx->fabricA2ALlInflight, 1u);
+  __syncthreads();
+}
+
+__device__ __forceinline__ void ginFabricLlBusyRelease(ncclGinAnvilSdmaGPUContext* ctx, uint32_t launchId) {
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    uint32_t left = atomicSub(&ctx->fabricA2ALlInflight, 1u);
+    if (left == 1u) (void)atomicCAS(&ctx->fabricA2ALlBusy, launchId, 0u);
+  }
+}
 
 constexpr size_t kDdaLLA2ASlotStridePkts = kDdaLLMaxBytes / sizeof(LLPacket16);
 

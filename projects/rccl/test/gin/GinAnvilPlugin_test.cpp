@@ -287,6 +287,8 @@ TEST_F(GinAnvilPluginTest, CreateContext_EnvAndCounters) {
   ncclGinAnvilSdmaGPUContext hostCtx{};
   ASSERT_EQ(hipMemcpy(&hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
   EXPECT_EQ(hostCtx.layoutMagic, NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC);
+  EXPECT_EQ(hostCtx.fabricA2ALlBusy, 0u);
+  EXPECT_EQ(hostCtx.fabricA2ALlInflight, 0u);
   EXPECT_EQ(hostCtx.sdmaThreshold, 256u);
   EXPECT_EQ(hostCtx.fusedSdmaSignal, 1u);
   EXPECT_NE(hostCtx.counters, nullptr);

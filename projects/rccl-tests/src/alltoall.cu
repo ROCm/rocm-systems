@@ -397,7 +397,8 @@ __device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWin
 // backend context + size (LL first on 1p4g MI455). The host only sizes a covering 2D grid.
 template <typename T, int NRANKS_CT>
 __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset,
-                                  size_t count, int ginPutCtas, int llMaxBpp, struct ncclDevComm devComm) {
+                                  size_t count, int ginPutCtas, int llMaxBpp, uint32_t llLaunchId,
+                                  struct ncclDevComm devComm) {
   auto* ctx = reinterpret_cast<ncclGinAnvilSdmaGPUContext*>(devComm.ginHandles[0]);
   const size_t perChunkBytes = count * sizeof(T);
   const bool ctxOk = ctx != nullptr && ctx->layoutMagic == NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
@@ -419,13 +420,21 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
     if (slotPkts != 0 && nPk <= slotPkts) {
       int bpp = ginFabricLlAlltoAllBlocksPerPeer(perChunkBytes);
       if (llMaxBpp > 0 && bpp > llMaxBpp) bpp = llMaxBpp;
-      if ((int)blockIdx.x >= devComm.nRanks || (int)blockIdx.y >= bpp) return;
-      T* sendPtr = static_cast<T*>(ncclGetLsaPointer(sendwin, sendoffset, devComm.lsaRank));
-      T* recvPtr = static_cast<T*>(ncclGetLsaPointer(recvwin, recvoffset, devComm.lsaRank));
-      dda::common::ddaAllToAllFabricLLBody<T, NRANKS_CT>(
-          reinterpret_cast<T**>(ctx->fabricA2APeerScratch), recvPtr, sendPtr, perChunkBytes, devComm.rank, devComm.nRanks,
-          ctx->fabricA2ALlEpoch, ctx->fabricA2ALlEpochLen, bpp, slotPkts);
-      return;
+      const bool ownLl = dda::common::ginFabricLlBusyTryAcquire(ctx, llLaunchId);
+      if (!ownLl) {
+        // Another GIN LL launch holds the epoch/scratch. Do not alias it.
+      } else if ((int)blockIdx.x >= devComm.nRanks || (int)blockIdx.y >= bpp) {
+        return;
+      } else {
+        dda::common::ginFabricLlBusyEnter(ctx);
+        T* sendPtr = static_cast<T*>(ncclGetLsaPointer(sendwin, sendoffset, devComm.lsaRank));
+        T* recvPtr = static_cast<T*>(ncclGetLsaPointer(recvwin, recvoffset, devComm.lsaRank));
+        dda::common::ddaAllToAllFabricLLBody<T, NRANKS_CT>(
+            reinterpret_cast<T**>(ctx->fabricA2APeerScratch), recvPtr, sendPtr, perChunkBytes, devComm.rank,
+            devComm.nRanks, ctx->fabricA2ALlEpoch, ctx->fabricA2ALlEpochLen, bpp, slotPkts);
+        dda::common::ginFabricLlBusyRelease(ctx, llLaunchId);
+        return;
+      }
     }
   }
 
@@ -465,15 +474,21 @@ static testResult_t AlltoAllLaunchGinA2A(void* sendbuff, size_t sendoffset, void
   if (gy < 1) gy = 1;
   dim3 block(256);
   dim3 grid((unsigned)gx, (unsigned)gy);
+  static uint32_t llLaunchSeq = 1;
+  uint32_t llLaunchId = llLaunchSeq++;
+  if (llLaunchId == 0) llLaunchId = llLaunchSeq++;
   if (devComm->nRanks == 4) {
     GinAlltoAllKernel<T, 4><<<grid, block, 0, stream>>>((ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff,
-                                                        recvoffset, count, deviceCtaCount, llMaxBpp, *devComm);
+                                                        recvoffset, count, deviceCtaCount, llMaxBpp, llLaunchId,
+                                                        *devComm);
   } else if (devComm->nRanks == 8) {
     GinAlltoAllKernel<T, 8><<<grid, block, 0, stream>>>((ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff,
-                                                        recvoffset, count, deviceCtaCount, llMaxBpp, *devComm);
+                                                        recvoffset, count, deviceCtaCount, llMaxBpp, llLaunchId,
+                                                        *devComm);
   } else {
     GinAlltoAllKernel<T, 0><<<grid, block, 0, stream>>>((ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff,
-                                                        recvoffset, count, deviceCtaCount, llMaxBpp, *devComm);
+                                                        recvoffset, count, deviceCtaCount, llMaxBpp, llLaunchId,
+                                                        *devComm);
   }
   CUDACHECK(cudaGetLastError());
   return testSuccess;

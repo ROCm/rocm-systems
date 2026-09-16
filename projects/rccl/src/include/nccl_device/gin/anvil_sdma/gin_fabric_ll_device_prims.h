@@ -92,10 +92,11 @@ __device__ __forceinline__ uint32_t ddaGetLLEpochInc(const uint32_t* __restrict_
 // __syncthreads() in ddaGetLLEpochInc above: every thread of the block has read
 // epochDev[flatBlockId] before any thread here overwrites cell flatBlockId, so
 // no thread can observe the next call's flag while still polling this one's.
-// The caller must also keep one LL operation per epoch buffer in flight; these
-// are plain loads and stores, so two overlapping launches over the same buffer
-// are a data race. Host DDA uses comm->ddaLLEpochDev and the GIN device API
-// uses gpuCtx->fabricA2ALlEpoch precisely so the two never share one buffer.
+// The caller must also keep one LL operation per epoch buffer in flight unless
+// a device busy-lock serializes launches (ginFabricLlBusyTryAcquire on
+// gpuCtx->fabricA2ALlBusy). These epoch loads and stores are otherwise a data
+// race. Host DDA uses comm->ddaLLEpochDev and the GIN device API uses
+// gpuCtx->fabricA2ALlEpoch so the two never share one buffer.
 __device__ __forceinline__ void ddaSetLLEpoch(uint32_t* __restrict__ epochDev, int epochLen, int flatBlockId, int total,
                                               uint32_t flag) {
   for (int e = flatBlockId + (int)threadIdx.x * total; e < epochLen; e += total * (int)blockDim.x) {
