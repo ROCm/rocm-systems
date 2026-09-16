@@ -77,7 +77,9 @@ def convert_dbs_to_csv(
 
     with ExitStack() as stack:
         writers = {
-            path: csv.writer(stack.enter_context(csv_compression.open_csv_write(path)))
+            path: csv.writer(
+                stack.enter_context(csv_compression.open_gzip_csv_write(path))
+            )
             for path in queries
         }
         for db_path in db_paths:

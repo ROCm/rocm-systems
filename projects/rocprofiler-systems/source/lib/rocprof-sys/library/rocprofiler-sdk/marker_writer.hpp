@@ -90,7 +90,7 @@ public:
     }
 
     void write_end(std::string_view name, std::uint64_t begin_ts, std::uint64_t end_ts,
-                   const std::string&                    args,
+                   std::string_view                      args,
                    rocprofiler_callback_tracing_record_t record) const
     {
         if(m_use_timemory)
@@ -118,7 +118,7 @@ public:
             { getppid(), getpid(), record.thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
 
         MarkerWriterPolicy::store_region(trace_cache::region_sample{
-            record.thread_id, std::string{ name }.c_str(), record.correlation_id.internal,
+            record.thread_id, name, record.correlation_id.internal,
             record.correlation_id.external.value, begin_ts, end_ts, "{}", args,
             tim::trait::name<tim::category::rocm_marker_api>::value });
     }

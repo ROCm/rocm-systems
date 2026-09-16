@@ -180,8 +180,8 @@ def test_counter_csv_has_correlation_id_from_stack_id():
     workload_dir = common.get_output_dir()
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
 
-    counter_csv = str(Path(workload_dir) / "counter_collection.csv")
-    marker_csv = str(Path(workload_dir) / "marker_api_trace.csv")
+    counter_csv = str(Path(workload_dir) / "counter_collection.csv.gz")
+    marker_csv = str(Path(workload_dir) / "marker_api_trace.csv.gz")
 
     db_path = create_rocpd_test_db(workload_dir)
     convert_dbs_to_csv([db_path], counter_csv, marker_csv)
@@ -200,8 +200,8 @@ def test_marker_csv_has_correlation_id_from_stack_id():
     workload_dir = common.get_output_dir()
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
 
-    counter_csv = str(Path(workload_dir) / "counter_collection.csv")
-    marker_csv = str(Path(workload_dir) / "marker_api_trace.csv")
+    counter_csv = str(Path(workload_dir) / "counter_collection.csv.gz")
+    marker_csv = str(Path(workload_dir) / "marker_api_trace.csv.gz")
 
     db_path = create_rocpd_test_db(workload_dir)
     convert_dbs_to_csv([db_path], counter_csv, marker_csv)
@@ -321,8 +321,10 @@ def write_rocpd_layout(workload_dir, fbase="run0"):
     marker_df = build_marker_df(include_guid=True)
     counter_df = build_counter_df(include_guid=True)
 
-    marker_path = Path(workload_dir) / f"ml_api_trace_{fbase}_marker_api_trace.csv"
-    counter_path = Path(workload_dir) / f"ml_api_trace_{fbase}_counter_collection.csv"
+    marker_path = Path(workload_dir) / f"ml_api_trace_{fbase}_marker_api_trace.csv.gz"
+    counter_path = (
+        Path(workload_dir) / f"ml_api_trace_{fbase}_counter_collection.csv.gz"
+    )
 
     marker_df.to_csv(marker_path, index=False)
     counter_df.to_csv(counter_path, index=False)
@@ -336,8 +338,8 @@ def write_csv_layout(workload_dir, fbase="run0", pid="12345"):
     marker_df = build_marker_df(include_guid=False)
     counter_df = build_counter_df(include_guid=False)
 
-    marker_path = subdir / f"ml_api_trace_{pid}_marker_api_trace.csv"
-    counter_path = subdir / f"ml_api_trace_{pid}_counter_collection.csv"
+    marker_path = subdir / f"ml_api_trace_{pid}_marker_api_trace.csv.gz"
+    counter_path = subdir / f"ml_api_trace_{pid}_counter_collection.csv.gz"
 
     marker_df.to_csv(marker_path, index=False)
     counter_df.to_csv(counter_path, index=False)
@@ -370,7 +372,7 @@ def test_ml_api_trace_counter_copy_stays_compressed(tmp_path):
     src_dir = tmp_path / "out" / "pmc_1"
     src_dir.mkdir(parents=True)
     build_marker_df(include_guid=True).to_csv(
-        src_dir / "run0_marker_api_trace.csv", index=False
+        src_dir / "run0_marker_api_trace.csv.gz", index=False
     )
 
     save_ml_api_trace_inputs(str(tmp_path), "run0", src_counter)
@@ -468,7 +470,7 @@ def test_process_ml_api_trace_output_preserves_per_row_backend(tmp_path):
 
     # Overwrite the fixture with what save_ml_api_trace_inputs would produce:
     # Function has prefixes stripped, Backend carries per-row attribution.
-    marker_path = Path(workload_dir) / "ml_api_trace_run0_marker_api_trace.csv"
+    marker_path = Path(workload_dir) / "ml_api_trace_run0_marker_api_trace.csv.gz"
     df = pd.read_csv(marker_path)
     df["Backend"] = ["torch", "torch", "triton"]
     df.to_csv(marker_path, index=False)

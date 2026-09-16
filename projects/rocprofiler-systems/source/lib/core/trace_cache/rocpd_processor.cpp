@@ -240,7 +240,7 @@ rocpd_processor_t::handle(const region_sample& reg_sample)
 
     auto event =
         make_event(reg_sample.correlation_id_internal, reg_sample.correlation_id_ancestor,
-                   0, reg_sample.category.c_str());
+                   0, reg_sample.category.data());
     event.call_stack.push_back({});
     // call_stack and line_info are serialized JSON in the old code; in profiler-hub
     // they are structured types. For now pass the raw JSON via extdata.
@@ -273,7 +273,7 @@ rocpd_processor_t::handle(const backtrace_region_sample& bts)
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
 
-    auto event = make_event(0, 0, 0, bts.category.c_str());
+    auto event = make_event(0, 0, 0, bts.category.data());
     event.call_stack.push_back({});
     // call_stack and line_info are serialized JSON in the old code; in profiler-hub
     // they are structured types. For now pass the raw JSON via extdata.
@@ -295,7 +295,7 @@ void
 rocpd_processor_t::handle(const in_time_sample& its)
 {
     auto event    = make_event(its.stack_id, its.parent_stack_id, its.correlation_id,
-                               its.track_name.c_str());
+                               its.track_name.data());
     event.extdata = its.event_metadata;
 
     profiler_hub::writer_types::pmc_event_data_t pmc_data;
@@ -336,7 +336,7 @@ rocpd_processor_t::handle(const pmc_event_with_sample& pmc)
 
     const auto& agent_ref = *agent_ptr;
     auto        event = make_event(pmc.stack_id, pmc.parent_stack_id, pmc.correlation_id,
-                                   pmc.track_name.c_str());
+                                   pmc.track_name.data());
     event.extdata     = pmc.event_metadata;
 
     profiler_hub::writer_types::pmc_event_data_t pmc_data;
@@ -902,7 +902,7 @@ rocpd_processor_t::handle(const kfd_sample& kfd)
     auto& n_info       = node_info::get_instance();
     auto  process_info = m_metadata->get_process_info();
 
-    auto event    = make_event(0, 0, 0, kfd.category.c_str());
+    auto event    = make_event(0, 0, 0, kfd.category.data());
     event.extdata = kfd.event_metadata;
 
     profiler_hub::writer_types::region_data_t region;
@@ -935,7 +935,7 @@ rocpd_processor_t::handle(const kfd_sample& kfd)
         pmc_data.value = kfd.value;
 
         profiler_hub::writer_types::track_info_t track;
-        track.name       = kfd.track_name.c_str();
+        track.name       = kfd.track_name;
         track.node_id    = n_info.id;
         track.process_id = process_info.pid;
         if(kfd.system_tid.has_value()) track.thread_id = kfd.system_tid.value();

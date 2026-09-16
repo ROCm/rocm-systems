@@ -305,12 +305,19 @@ struct wrapper
         rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t;
     using kfd_event_dropped_record =
         rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t;
+    using kfd_event_page_migrate_record =
+        rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t;
+    using kfd_event_page_fault_record =
+        rocprofiler_buffer_tracing_kfd_event_page_fault_record_t;
     using kfd_event_queue_operation_t = rocprofiler_kfd_event_queue_operation_t;
     using kfd_event_unmap_from_gpu_operation_t =
         rocprofiler_kfd_event_unmap_from_gpu_operation_t;
     using kfd_page_fault_operation_t   = rocprofiler_kfd_page_fault_operation_t;
     using kfd_page_migrate_operation_t = rocprofiler_kfd_page_migrate_operation_t;
     using kfd_queue_operation_t        = rocprofiler_kfd_queue_operation_t;
+    using kfd_event_page_migrate_operation_t =
+        rocprofiler_kfd_event_page_migrate_operation_t;
+    using kfd_event_page_fault_operation_t = rocprofiler_kfd_event_page_fault_operation_t;
 #endif
 
     // ─── Status constants ────────────────────────────────────────────────────────
@@ -460,6 +467,12 @@ struct wrapper
         ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU;
     static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS =
         ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE =
+        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_PAGE_FAULT =
+        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT;
 #endif
 
     // ─── Counter flag constants ───────────────────────────────────────────────────

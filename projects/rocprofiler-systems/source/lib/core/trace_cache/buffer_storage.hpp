@@ -7,7 +7,6 @@
 #include "core/trace_cache/cache_type_traits.hpp"
 #include "core/trace_cache/cacheable.hpp"
 
-#include "common/defines.h"
 #include "policies/thread_state_policy.hpp"
 
 #include <atomic>
@@ -165,7 +164,7 @@ public:
         serialize(buf + position, value);
     }
 
-    ROCPROFSYS_INLINE bool is_running() const
+    [[nodiscard]] __attribute__((always_inline)) bool is_running() const
     {
         return m_worker_synchronization != nullptr &&
                m_worker_synchronization->is_running;
@@ -230,7 +229,8 @@ private:
     }
 
     // Caller must hold m_mutex.
-    ROCPROFSYS_INLINE std::uint8_t* reserve_memory_space(const size_t& number_of_bytes)
+    [[nodiscard]] __attribute__((always_inline)) std::uint8_t* reserve_memory_space(
+        const size_t& number_of_bytes)
     {
         if(__builtin_expect((m_head + number_of_bytes + header_size<TypeIdentifierEnum>) >
                                 buffer_size,
