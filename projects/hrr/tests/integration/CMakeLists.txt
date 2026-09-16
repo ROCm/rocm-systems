@@ -94,6 +94,16 @@ target_link_libraries(hrr-integration-tests PRIVATE
   hiprtc::hiprtc
   Catch2::Catch2WithMain)
 
+# hrr_repro_workload_test.cc zeroes a device allocation with hsa_amd_memory_fill
+# so the fill itself is never recorded. hip::host resolves ROCr for its own
+# needs but does not carry it in its link interface, so a direct call from our
+# objects needs the runtime named here. Windows has no ROCr and the call site is
+# compiled out there.
+if(NOT WIN32)
+  find_package(hsa-runtime64 CONFIG REQUIRED)
+  target_link_libraries(hrr-integration-tests PRIVATE hsa-runtime64::hsa-runtime64)
+endif()
+
 # Optional: hip_raw_trace, a genuine multi-threaded capture workload used only by
 # Unit_HRR_MultiThreadRoundtrip. If it is not found, HRR_RAW_TRACE_EXE is defined
 # empty and that test skips itself at run time.
