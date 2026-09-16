@@ -75,10 +75,6 @@ start_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
                                       std::string_view{ _name }, _args...);
         }
     }
-    else
-    {
-        tim::consume_parameters(_args...);
-    }
     if(get_use_timemory())
     {
         _bundle.push(_tid);
@@ -118,10 +114,6 @@ stop_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
             category_region_t{}.audit(quirk::config<quirk::perfetto>{},
                                       std::string_view{ _name }, _args...);
         }
-    }
-    else
-    {
-        tim::consume_parameters(_args...);
     }
 }
 

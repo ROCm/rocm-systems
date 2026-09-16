@@ -20,7 +20,6 @@
 #include "library/thread_info.hpp"
 #include <cstdint>
 
-#include <timemory/macros.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/sampling/overflow.hpp>
@@ -66,7 +65,7 @@ ROCPROFSYS_DEFINE_CONCRETE_TRAIT(provide_backtrace, causal::sampling::causal_sam
                                  std::false_type)
 
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(buffer_size, causal::sampling::causal_sampler_t,
-                                 TIMEMORY_ESC(std::integral_constant<size_t, 4096>))
+                                 std::integral_constant<size_t, 4096>)
 
 namespace rocprofsys
 {

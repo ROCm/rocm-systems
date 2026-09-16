@@ -4,16 +4,33 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
-## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
+## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
+
+### Changed
+
+- Minimum supported GCC raised from 10 to **GCC 11**, the first release with the
+  C++20 support this project relies on. GCC 10 is no longer tested; configuring
+  with an older GCC now emits a CMake warning. The RHEL 8 CI and release
+  containers moved from `gcc-toolset-10` to `gcc-toolset-11`.
+- `ROCPROFSYS_MONOCHROME` and `MONOCHROME` now treat any value other than a recognized
+  false token (`off`/`false`/`no`/`n`/`f`/`0`) as `true`, instead of only recognizing a
+  fixed set of true tokens.
+
+### Resolved issues
+
+- Fixed per-link XGMI and device-level JPEG AMD SMI metrics missing from rocpd output
+  because PMC metadata names did not match the sample insertion path.
+
+## ROCm Systems Profiler 1.9.0 for ROCm 10.1
 
 ### Changed
 
 - **rocpd is now the default output format.** When no output format is specified,
-profiling data is emitted as a rocpd SQLite database (`rocpd.db`). Perfetto (`.proto`)
-output must now be explicitly enabled via `--output-format proto`. Requires
-ROCProfiler-SDK 1.0.0 or later (ROCm 7.0.0+).
+  profiling data is emitted as a rocpd SQLite database (`rocpd.db`). Perfetto (`.proto`)
+  output must now be explicitly enabled via `--output-format proto`. Requires
+  ROCProfiler-SDK 1.0.0 or later (ROCm 7.0.0+).
 - `ROCPROFSYS_PROFILE` (timemory backend) now defaults to `false`, since rocpd
-replaces Perfetto as the primary trace output.
+  replaces Perfetto as the primary trace output.
 - All built-in presets that perform tracing (`--balanced`, `--detailed`, `--sys-trace`,
   `--runtime-trace`, `--trace-gpu`, `--trace-hpc`, `--trace-hw-counters`, `--trace-openmp`,
   `--workload-trace`) now produce a rocpd database by default, because rocpd is the new
@@ -25,9 +42,6 @@ replaces Perfetto as the primary trace output.
   default. Pass `--profile` to get a call-stack-based profile instead.
 - `rocprof-sys-python` no longer accepts abbreviated long options (for example,
   `--conf` for `--config`). Spell out the full option name.
-- `ROCPROFSYS_MONOCHROME` and `MONOCHROME` now treat any value other than a recognized
-false token (`off`/`false`/`no`/`n`/`f`/`0`) as `true`, instead of only recognizing a
-fixed set of true tokens.
 
 ### Resolved issues
 
@@ -60,7 +74,7 @@ fixed set of true tokens.
     `COMPONENTS causal-api`. The `user` component no longer exists, so requesting
     it now fails at configure time.
 
-## ROCm Systems Profiler 1.8.0 for ROCm 10.0 (unreleased)
+## ROCm Systems Profiler 1.8.0 for ROCm 10.0
 
 ### Added
 
