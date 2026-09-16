@@ -108,6 +108,68 @@ struct HipMemcpyAsyncRecord {
 };
 extern std::vector<HipMemcpyAsyncRecord> g_hipMemcpyAsyncArgs;
 
+// --- VMM / IPC / stream seams -------------------------------------------
+// The driver-level surface dev_runtime.cc builds symmetric memory on, plus the
+// stream and copy calls its teardown paths use. These were plain stubs until
+// the dev_runtime suite needed to drive their failure arms; every default below
+// is the stub's old return verbatim, so nothing that relied on the fail-loud
+// floor changed. A suite that wants working memory installs
+// InstallHipVmmEmulator() instead of hooking them one by one.
+extern std::function<hipError_t(void** /*ptr*/, size_t /*size*/, size_t /*alignment*/,
+                                void* /*addr*/, unsigned long long /*flags*/)>
+    g_hipMemAddressReserve;
+extern std::function<hipError_t(void* /*ptr*/, size_t /*size*/)> g_hipMemAddressFree;
+extern std::function<hipError_t(hipMemGenericAllocationHandle_t* /*handle*/, size_t /*size*/,
+                                const hipMemAllocationProp* /*prop*/, unsigned long long /*flags*/)>
+    g_hipMemCreate;
+extern std::function<hipError_t(size_t* /*granularity*/, const hipMemAllocationProp* /*prop*/,
+                                hipMemAllocationGranularity_flags /*flags*/)>
+    g_hipMemGetAllocationGranularity;
+extern std::function<hipError_t(hipMemAllocationProp* /*prop*/, hipMemGenericAllocationHandle_t /*handle*/)>
+    g_hipMemGetAllocationPropertiesFromHandle;
+extern std::function<hipError_t(hipMemGenericAllocationHandle_t* /*handle*/, void* /*shareable*/,
+                                hipMemAllocationHandleType /*type*/)>
+    g_hipMemImportFromShareableHandle;
+extern std::function<hipError_t(void* /*ptr*/, size_t /*size*/, size_t /*offset*/,
+                                hipMemGenericAllocationHandle_t /*handle*/, unsigned long long /*flags*/)>
+    g_hipMemMap;
+extern std::function<hipError_t(void* /*ptr*/, size_t /*size*/, const hipMemAccessDesc* /*desc*/,
+                                size_t /*count*/)>
+    g_hipMemSetAccess;
+extern std::function<hipError_t(void* /*ptr*/, size_t /*size*/)> g_hipMemUnmap;
+
+extern std::function<hipError_t(void** /*ptr*/, hipIpcMemHandle_t /*handle*/, unsigned /*flags*/)>
+    g_hipIpcOpenMemHandle;
+extern std::function<hipError_t(void* /*ptr*/)> g_hipIpcCloseMemHandle;
+
+extern std::function<hipError_t(void* /*dst*/, const void* /*src*/, size_t /*bytes*/,
+                                hipMemcpyKind /*kind*/)>
+    g_hipMemcpy;
+// The wrapper records into g_hipMemcpyAsyncCalls / g_hipMemcpyAsyncArgs before
+// calling this, so installing a hook does not cost a test that recording.
+extern std::function<hipError_t(void* /*dst*/, const void* /*src*/, size_t /*bytes*/,
+                                hipMemcpyKind /*kind*/, hipStream_t /*stream*/)>
+    g_hipMemcpyAsync;
+extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/, hipStream_t /*stream*/)>
+    g_hipMemsetAsync;
+
+extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned /*flags*/)> g_hipStreamCreateWithFlags;
+extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamSynchronize;
+extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamDestroy;
+extern std::function<hipError_t(hipStreamCaptureMode* /*mode*/)> g_hipThreadExchangeStreamCaptureMode;
+extern std::function<hipError_t(void)> g_hipGetLastError;
+
+// Install a working host-memory stand-in for the VMM surface: mmap-backed
+// reserve/free (honouring the requested alignment), succeeding map/unmap/
+// create/import, and copies that actually copy.
+//
+// Opt-in rather than the default because the fail-loud defaults above are what
+// make an unstubbed call surface, and four suites depend on that. A unit whose
+// code under test must allocate real memory to run at all -- dev_runtime.cc's
+// symmetric-memory paths -- calls this from its fixture SetUp.
+// ResetHipFakes() puts the fail-loud defaults back.
+void InstallHipVmmEmulator();
+
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.
 void ResetHipFakes();
