@@ -310,7 +310,7 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
     agent_buffers = new std::vector<agent_output_buffer_t>{};
 
     auto status = rocprofiler_thread_trace_decoder_create(&decoder, "");
-    if (status != ROCPROFILER_STATUS_SUCCESS)
+    if(status != ROCPROFILER_STATUS_SUCCESS)
         status = rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib");
     ROCPROFILER_CALL(status, "decoder create");
 
