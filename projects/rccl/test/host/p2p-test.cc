@@ -5156,3 +5156,499 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdBatchQueryFails_ClosesFdsAndRelease
     EXPECT_EQ(seg.releaseCalls, seg.retainCalls);
     EXPECT_EQ(seg.retainCalls, kNumSegments);
 }
+
+// ===========================================================================
+// Proxy-side register / deregister, reached through the send vtable's
+// proxyRegister / proxyDeregister slots (p2pProxyRegister / p2pProxyDeregister).
+//
+// These run on the proxy thread: proxyRegister receives a request buffer of
+// one p2pIpcExpInfo per segment, imports/maps each segment's handle into a
+// local VA, writes the mapped address back into respBuff, and records a
+// proxyMemHandle (carrying an ncclIpcImpInfo) on the connection's
+// proxyMemHandleQueue. proxyDeregister receives an ncclIpcImpInfo, finds the
+// matching queued handle via p2pHandleCmp, releases the import, and frees the
+// record.
+//
+// Observable state through the surface these functions own:
+//   - respBuff carries the mapped register address (proxyRegister's output);
+//   - *done is latched to 1;
+//   - connection->proxyMemHandleQueue gains/loses the record;
+//   - the recorded ncclIpcImpInfo reflects the request (rmtRegAddr, offset,
+//     legacyIpcCap, numSegments).
+// The import/map/release themselves are HIP driver seams with no observable
+// state here, so those are asserted mock-style ("the arm drove this seam").
+//
+// The vtable slots are populated at static init of p2pTransport (not gated on
+// initCeOperation's useMemcpy latch), so these run in-process without fork.
+// ===========================================================================
+
+namespace {
+
+// Head of the connection's proxyMemHandleQueue, or nullptr if empty. The
+// queue is intrusive; a bare zero-initialised connection is already in the
+// empty/constructed state.
+inline proxyMemHandle* QueueHead(ncclProxyConnection& conn) {
+    return ncclIntruQueueEmpty(&conn.proxyMemHandleQueue)
+               ? nullptr
+               : ncclIntruQueueHead(&conn.proxyMemHandleQueue);
+}
+
+// Allocate a proxyMemHandle + ncclIpcImpInfo the way p2pProxyRegister does
+// (ncclCalloc == calloc), so production's free() on the deregister path
+// matches the allocation. Enqueues it on the connection.
+inline proxyMemHandle* EnqueueRecordedHandle(ncclProxyConnection& conn,
+                                             void* rmtRegAddr, uintptr_t offset,
+                                             bool legacyIpcCap, int numSegments) {
+    auto* mh = static_cast<proxyMemHandle*>(std::calloc(1, sizeof(proxyMemHandle)));
+    auto* ii = static_cast<ncclIpcImpInfo*>(std::calloc(1, sizeof(ncclIpcImpInfo)));
+    ii->rmtRegAddr   = rmtRegAddr;
+    ii->offset       = offset;
+    ii->legacyIpcCap = legacyIpcCap;
+    ii->numSegments  = numSegments;
+    mh->handle       = ii;
+    ncclIntruQueueEnqueue(&conn.proxyMemHandleQueue, mh);
+    return mh;
+}
+
+}  // namespace
+
+class P2pProxyRegisterMicrotest : public P2pMicrotest {
+protected:
+    ncclProxyConnection conn_{};
+    ncclProxyState      state_{};
+
+    void SetUp() override {
+        P2pMicrotest::SetUp();
+        state_.tpRank  = 2;
+        state_.cudaDev = 0;
+    }
+
+    // Drain any records the test did not consume, freeing them the way
+    // production would, so nothing leaks between cases.
+    void TearDown() override {
+        while (!ncclIntruQueueEmpty(&conn_.proxyMemHandleQueue)) {
+            auto* mh = ncclIntruQueueDequeue(&conn_.proxyMemHandleQueue);
+            std::free(mh->handle);
+            std::free(mh);
+        }
+        P2pMicrotest::TearDown();
+    }
+};
+
+// Legacy-IPC register: a single-segment request imports the peer handle with
+// cudaIpcOpenMemHandle, returns the mapped address (offset applied) in
+// respBuff, and records a matching ncclIpcImpInfo on the queue.
+TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_LegacyIpc_ImportsHandleAndRecordsIt)
+{
+    constexpr uintptr_t kBase   = 0x8000;
+    constexpr uintptr_t kOffset = 0x40;
+
+    p2pIpcExpInfo req{};
+    req.legacyIpcCap = true;
+    req.size         = 0x1000;
+    req.offset       = kOffset;
+
+    int openCalls = 0;
+    ScopedHook open(g_hipIpcOpenMemHandle,
+        [&openCalls](void** devPtr, hipIpcMemHandle_t, unsigned int) -> hipError_t {
+            ++openCalls;
+            if (devPtr) *devPtr = reinterpret_cast<void*>(kBase);
+            return hipSuccess;
+        });
+
+    void* resp = nullptr;
+    int   done = 0;
+    auto r = p2pTransport.send.proxyRegister(&conn_, &state_, &req,
+                                             sizeof(p2pIpcExpInfo), &resp,
+                                             sizeof(void*), &done);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(openCalls, 1);                    // the legacy import arm fired
+    EXPECT_EQ(done, 1);
+    // The mapped address returned to the caller is the import + request offset.
+    EXPECT_EQ(resp, reinterpret_cast<void*>(kBase + kOffset));
+
+    // A record carrying the request's impInfo now sits on the queue.
+    proxyMemHandle* head = QueueHead(conn_);
+    ASSERT_NE(head, nullptr);
+    auto* ii = static_cast<ncclIpcImpInfo*>(head->handle);
+    EXPECT_EQ(ii->rmtRegAddr,   resp);
+    EXPECT_EQ(ii->offset,       kOffset);
+    EXPECT_TRUE(ii->legacyIpcCap);
+    EXPECT_EQ(ii->numSegments,  1);
+}
+
+// Legacy-IPC register whose import fails takes the fail path: no address is
+// returned (respBuff stays NULL), nothing is recorded, but *done is still
+// latched so the proxy reply is sent.
+TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_LegacyIpcImportFails_RecordsNothing)
+{
+    p2pIpcExpInfo req{};
+    req.legacyIpcCap = true;
+    req.size         = 0x1000;
+
+    ScopedHook open(g_hipIpcOpenMemHandle,
+        [](void** devPtr, hipIpcMemHandle_t, unsigned int) -> hipError_t {
+            if (devPtr) *devPtr = nullptr;
+            return hipErrorInvalidValue;
+        });
+
+    void* resp = reinterpret_cast<void*>(0xDEAD);
+    int   done = 0;
+    auto r = p2pTransport.send.proxyRegister(&conn_, &state_, &req,
+                                             sizeof(p2pIpcExpInfo), &resp,
+                                             sizeof(void*), &done);
+
+    EXPECT_NE(r, ncclSuccess);
+    EXPECT_EQ(resp, nullptr);                   // no address handed back
+    EXPECT_EQ(done, 1);                         // reply still latched
+    EXPECT_EQ(QueueHead(conn_), nullptr);       // nothing recorded
+}
+
+#if ROCM_VERSION >= 70000
+
+// Same-process cuMem register: a multi-segment request reserves a VA range,
+// maps each segment's handle (copied in directly, no cross-process import),
+// grants device access, and records the mapped range. numSegments on the
+// record reflects the segment count.
+TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_SameProcessCuMem_MapsSegmentsAndRecords)
+{
+    conn_.sameProcess = 1;
+
+    constexpr int      kNumSegments = 2;
+    constexpr uintptr_t kBase       = 0x100000;
+    constexpr uintptr_t kOffset     = 0x80;
+
+    std::array<p2pIpcExpInfo, kNumSegments> req{};
+    for (auto& seg : req) seg.size = 0x1000;
+    req[0].offset = kOffset;
+
+    ScopedHook reserve(g_hipMemAddressReserve,
+        [](void** ptr, std::size_t, std::size_t, void*, unsigned long long) -> hipError_t {
+            if (ptr) *ptr = reinterpret_cast<void*>(kBase);
+            return hipSuccess;
+        });
+    int mapCalls = 0;
+    ScopedHook map(g_hipMemMap,
+        [&mapCalls](void*, std::size_t, std::size_t,
+                    hipMemGenericAllocationHandle_t, unsigned long long) -> hipError_t {
+            ++mapCalls;
+            return hipSuccess;
+        });
+    int setAccessCalls = 0;
+    ScopedHook access(g_hipMemSetAccess,
+        [&setAccessCalls](void*, std::size_t, const hipMemAccessDesc*, std::size_t) -> hipError_t {
+            ++setAccessCalls;
+            return hipSuccess;
+        });
+    // Same-process copies the handle in directly; the cross-process import
+    // seam must not run.
+    ScopedHook import(g_hipMemImportFromShareableHandle,
+        [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) -> hipError_t {
+            ADD_FAILURE() << "same-process register must not import a shareable handle";
+            return hipErrorInvalidValue;
+        });
+
+    void* resp = nullptr;
+    int   done = 0;
+    auto r = p2pTransport.send.proxyRegister(&conn_, &state_, req.data(),
+                                             sizeof(p2pIpcExpInfo) * kNumSegments,
+                                             &resp, sizeof(void*), &done);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(mapCalls, kNumSegments);          // one map per segment
+    EXPECT_EQ(setAccessCalls, 1);               // one access grant over the range
+    EXPECT_EQ(done, 1);
+    // Returned address is the reserved base plus the first segment's offset.
+    EXPECT_EQ(resp, reinterpret_cast<void*>(kBase + kOffset));
+
+    proxyMemHandle* head = QueueHead(conn_);
+    ASSERT_NE(head, nullptr);
+    auto* ii = static_cast<ncclIpcImpInfo*>(head->handle);
+    EXPECT_EQ(ii->numSegments, kNumSegments);
+    EXPECT_FALSE(ii->legacyIpcCap);
+}
+
+// Cross-process cuMem register with a POSIX-fd handle type: each segment's
+// handle is imported from its shareable fd (then the fd closed), mapped, and
+// the range recorded.
+TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CrossProcessPosixFd_ImportsFromFdAndMaps)
+{
+    conn_.sameProcess = 0;
+    auto saved = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+
+    constexpr int kNumSegments = 2;
+    std::array<p2pIpcExpInfo, kNumSegments> req{};
+    for (auto& seg : req) {
+        seg.size  = 0x1000;
+        seg.impFd = ::dup(0);   // a real, closeable fd for production's close()
+    }
+
+    ScopedHook reserve(g_hipMemAddressReserve,
+        [](void** ptr, std::size_t, std::size_t, void*, unsigned long long) -> hipError_t {
+            if (ptr) *ptr = reinterpret_cast<void*>(0x200000);
+            return hipSuccess;
+        });
+    int importCalls = 0;
+    ScopedHook import(g_hipMemImportFromShareableHandle,
+        [&importCalls](hipMemGenericAllocationHandle_t* h, void*,
+                       hipMemAllocationHandleType type) -> hipError_t {
+            ++importCalls;
+            EXPECT_EQ(type, hipMemHandleTypePosixFileDescriptor);
+            if (h) *h = nullptr;
+            return hipSuccess;
+        });
+    int mapCalls = 0;
+    ScopedHook map(g_hipMemMap,
+        [&mapCalls](void*, std::size_t, std::size_t,
+                    hipMemGenericAllocationHandle_t, unsigned long long) -> hipError_t {
+            ++mapCalls;
+            return hipSuccess;
+        });
+    ScopedHook access(g_hipMemSetAccess,
+        [](void*, std::size_t, const hipMemAccessDesc*, std::size_t) -> hipError_t {
+            return hipSuccess;
+        });
+
+    void* resp = nullptr;
+    int   done = 0;
+    auto r = p2pTransport.send.proxyRegister(&conn_, &state_, req.data(),
+                                             sizeof(p2pIpcExpInfo) * kNumSegments,
+                                             &resp, sizeof(void*), &done);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(importCalls, kNumSegments);       // one fd import per segment
+    EXPECT_EQ(mapCalls, kNumSegments);
+    EXPECT_EQ(done, 1);
+    ASSERT_NE(QueueHead(conn_), nullptr);
+    ncclCuMemHandleType = saved;
+}
+
+// Cross-process cuMem register with a non-POSIX (fabric) handle type imports
+// each segment's handle straight from its ipcDesc.cuDesc rather than an fd.
+TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CrossProcessNonPosix_ImportsFromCuDesc)
+{
+    conn_.sameProcess = 0;
+    auto saved = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypeFabric;  // anything != POSIX_FD
+
+    p2pIpcExpInfo req{};
+    req.size = 0x1000;
+
+    ScopedHook reserve(g_hipMemAddressReserve,
+        [](void** ptr, std::size_t, std::size_t, void*, unsigned long long) -> hipError_t {
+            if (ptr) *ptr = reinterpret_cast<void*>(0x300000);
+            return hipSuccess;
+        });
+    int importCalls = 0;
+    ScopedHook import(g_hipMemImportFromShareableHandle,
+        [&importCalls](hipMemGenericAllocationHandle_t* h, void*,
+                       hipMemAllocationHandleType type) -> hipError_t {
+            ++importCalls;
+            EXPECT_NE(type, hipMemHandleTypePosixFileDescriptor);
+            if (h) *h = nullptr;
+            return hipSuccess;
+        });
+    ScopedHook map(g_hipMemMap,
+        [](void*, std::size_t, std::size_t,
+           hipMemGenericAllocationHandle_t, unsigned long long) -> hipError_t {
+            return hipSuccess;
+        });
+    ScopedHook access(g_hipMemSetAccess,
+        [](void*, std::size_t, const hipMemAccessDesc*, std::size_t) -> hipError_t {
+            return hipSuccess;
+        });
+
+    void* resp = nullptr;
+    int   done = 0;
+    auto r = p2pTransport.send.proxyRegister(&conn_, &state_, &req,
+                                             sizeof(p2pIpcExpInfo), &resp,
+                                             sizeof(void*), &done);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(importCalls, 1);                   // imported from the cuDesc
+    EXPECT_EQ(done, 1);
+    ASSERT_NE(QueueHead(conn_), nullptr);
+    ncclCuMemHandleType = saved;
+}
+
+// A cuMem register whose per-segment map fails takes the fail-cleanup path:
+// every segment mapped/imported before the failure is unmapped and released,
+// no record is left on the queue, respBuff is NULL, and *done is still latched.
+TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CuMemMapFails_ReleasesImportedHandlesAndRecordsNothing)
+{
+    conn_.sameProcess = 1;   // same-process: handle copied in, no import seam
+
+    constexpr int kNumSegments = 2;
+    std::array<p2pIpcExpInfo, kNumSegments> req{};
+    for (auto& seg : req) seg.size = 0x1000;
+
+    ScopedHook reserve(g_hipMemAddressReserve,
+        [](void** ptr, std::size_t, std::size_t, void*, unsigned long long) -> hipError_t {
+            if (ptr) *ptr = reinterpret_cast<void*>(0x400000);
+            return hipSuccess;
+        });
+    // First segment maps, second fails -> cleanup releases the first.
+    int mapCalls = 0;
+    ScopedHook map(g_hipMemMap,
+        [&mapCalls](void*, std::size_t, std::size_t,
+                    hipMemGenericAllocationHandle_t, unsigned long long) -> hipError_t {
+            return (++mapCalls == 1) ? hipSuccess : hipErrorInvalidValue;
+        });
+    int releaseCalls = 0;
+    ScopedHook release(g_hipMemRelease,
+        [&releaseCalls](hipMemGenericAllocationHandle_t) -> hipError_t {
+            ++releaseCalls;
+            return hipSuccess;
+        });
+
+    void* resp = reinterpret_cast<void*>(0xDEAD);
+    int   done = 0;
+    auto r = p2pTransport.send.proxyRegister(&conn_, &state_, req.data(),
+                                             sizeof(p2pIpcExpInfo) * kNumSegments,
+                                             &resp, sizeof(void*), &done);
+
+    EXPECT_NE(r, ncclSuccess);
+    EXPECT_EQ(resp, nullptr);                    // no address handed back
+    EXPECT_EQ(done, 1);
+    // Both segments were marked imported (handle copied in) before the map of
+    // the second failed; cleanup releases each imported handle.
+    EXPECT_EQ(releaseCalls, kNumSegments);
+    EXPECT_EQ(QueueHead(conn_), nullptr);        // nothing recorded
+}
+
+#endif  // ROCM_VERSION >= 70000
+
+class P2pProxyDeregisterMicrotest : public P2pProxyRegisterMicrotest {};
+
+// Deregister finds the queued record whose impInfo matches the request (by
+// p2pHandleCmp), releases its legacy import, and removes it from the queue --
+// leaving an unrelated record untouched.
+TEST_F(P2pProxyDeregisterMicrotest, ProxyDeregister_MatchingRecord_ReleasesAndRemovesOnlyIt)
+{
+    void* const    kTargetAddr = reinterpret_cast<void*>(0x8040);
+    constexpr uintptr_t kOffset = 0x40;
+
+    // An unrelated record (different address) that must survive, plus the
+    // target the request will match.
+    proxyMemHandle* other  = EnqueueRecordedHandle(conn_, reinterpret_cast<void*>(0x9000),
+                                                   0x10, /*legacy=*/true, /*segs=*/1);
+    EnqueueRecordedHandle(conn_, kTargetAddr, kOffset, /*legacy=*/true, /*segs=*/1);
+
+    // The request is an ncclIpcImpInfo identifying the target record.
+    ncclIpcImpInfo reqInfo{};
+    reqInfo.rmtRegAddr   = kTargetAddr;
+    reqInfo.offset       = kOffset;
+    reqInfo.legacyIpcCap = true;
+    reqInfo.numSegments  = 1;
+
+    int closeCalls = 0;
+    void* closedPtr = nullptr;
+    ScopedHook close(g_hipIpcCloseMemHandle,
+        [&](void* devPtr) -> hipError_t {
+            ++closeCalls;
+            closedPtr = devPtr;
+            return hipSuccess;
+        });
+
+    int  done = 0;
+    auto r = p2pTransport.send.proxyDeregister(&conn_, &state_, &reqInfo,
+                                               sizeof(ncclIpcImpInfo), &done);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(done, 1);
+    // The legacy import was released at (rmtRegAddr - offset).
+    EXPECT_EQ(closeCalls, 1);
+    EXPECT_EQ(closedPtr, reinterpret_cast<void*>(
+                             reinterpret_cast<uintptr_t>(kTargetAddr) - kOffset));
+    // Only the unrelated record remains on the queue (the target was removed);
+    // TearDown frees it the way production would.
+    proxyMemHandle* head = QueueHead(conn_);
+    ASSERT_NE(head, nullptr);
+    EXPECT_EQ(head, other);
+    EXPECT_EQ(head->next, nullptr);   // exactly one record left
+}
+
+#if ROCM_VERSION >= 70000
+
+// cuMem deregister: a non-legacy record is released via the cuMem free arm
+// -- ncclCuMemFreeAddr for a same-process connection, ncclCudaFree for a
+// cross-process one -- selected off connection->sameProcess. The shutdown
+// flag lets those header-only frees short-circuit before touching HIP.
+TEST_F(P2pProxyDeregisterMicrotest, ProxyDeregister_CuMemSameProcessRecord_ReleasesAndRemoves)
+{
+    conn_.sameProcess = 1;   // same-process => ncclCuMemFreeAddr arm
+    ShutdownFlagGuard shutdown;
+
+    void* const kAddr = reinterpret_cast<void*>(0x50040);
+    EnqueueRecordedHandle(conn_, kAddr, /*offset=*/0x40,
+                          /*legacy=*/false, /*segs=*/1);
+
+    ncclIpcImpInfo reqInfo{};
+    reqInfo.rmtRegAddr   = kAddr;
+    reqInfo.offset       = 0x40;
+    reqInfo.legacyIpcCap = false;
+    reqInfo.numSegments  = 1;
+
+    int  done = 0;
+    auto r = p2pTransport.send.proxyDeregister(&conn_, &state_, &reqInfo,
+                                               sizeof(ncclIpcImpInfo), &done);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(done, 1);
+    EXPECT_EQ(QueueHead(conn_), nullptr);        // record removed
+}
+
+TEST_F(P2pProxyDeregisterMicrotest, ProxyDeregister_CuMemCrossProcessRecord_ReleasesAndRemoves)
+{
+    conn_.sameProcess = 0;   // cross-process => ncclCudaFree arm
+    ShutdownFlagGuard shutdown;
+
+    void* const kAddr = reinterpret_cast<void*>(0x60080);
+    EnqueueRecordedHandle(conn_, kAddr, /*offset=*/0x80,
+                          /*legacy=*/false, /*segs=*/1);
+
+    ncclIpcImpInfo reqInfo{};
+    reqInfo.rmtRegAddr   = kAddr;
+    reqInfo.offset       = 0x80;
+    reqInfo.legacyIpcCap = false;
+    reqInfo.numSegments  = 1;
+
+    int  done = 0;
+    auto r = p2pTransport.send.proxyDeregister(&conn_, &state_, &reqInfo,
+                                               sizeof(ncclIpcImpInfo), &done);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(done, 1);
+    EXPECT_EQ(QueueHead(conn_), nullptr);
+}
+
+#endif  // ROCM_VERSION >= 70000
+
+// When releasing the found record's import fails, deregister propagates the
+// error (fail arm) yet still latches *done so the proxy reply is sent, and the
+// record has already been removed from the queue.
+TEST_F(P2pProxyDeregisterMicrotest, ProxyDeregister_ReleaseFails_PropagatesButStillLatchesDone)
+{
+    void* const kAddr = reinterpret_cast<void*>(0x70040);
+    EnqueueRecordedHandle(conn_, kAddr, /*offset=*/0x40,
+                          /*legacy=*/true, /*segs=*/1);
+
+    ncclIpcImpInfo reqInfo{};
+    reqInfo.rmtRegAddr   = kAddr;
+    reqInfo.offset       = 0x40;
+    reqInfo.legacyIpcCap = true;
+    reqInfo.numSegments  = 1;
+
+    ScopedHook close(g_hipIpcCloseMemHandle,
+        [](void*) -> hipError_t { return hipErrorInvalidValue; });
+
+    int  done = 0;
+    auto r = p2pTransport.send.proxyDeregister(&conn_, &state_, &reqInfo,
+                                               sizeof(ncclIpcImpInfo), &done);
+
+    EXPECT_NE(r, ncclSuccess);                   // release failure propagated
+    EXPECT_EQ(done, 1);                          // reply still latched
+    EXPECT_EQ(QueueHead(conn_), nullptr);        // record already removed
+}
