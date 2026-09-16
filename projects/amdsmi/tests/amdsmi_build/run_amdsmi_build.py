@@ -430,21 +430,37 @@ def package_glob(package_format: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def build_prereqs_present() -> bool:
+    """True if every tool the build needs is already on the image.
+
+    cmake/make/gcc alone are not enough: a missing pkg-config, git, libdrm
+    header or rpmbuild only surfaces much later, at cmake configure, at
+    FetchContent's clone, or inside `make package`.
+    """
+    if not all(shutil.which(t) for t in ("cmake", "make", "pkg-config", "git", "rpmbuild")):
+        return False
+    if not (shutil.which("gcc") or shutil.which("cc")):
+        return False
+    return (
+        subprocess.call(
+            ["pkg-config", "--exists", "libdrm"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        == 0
+    )
+
+
 def install_build_prereqs(cfg: "RunnerConfig") -> None:
-    """Ensure cmake + a basic build toolchain are installed.
+    """Install the build toolchain when the image does not already carry it.
 
     Several ROCm base images (notably rhel-9.x-bld, rhel-10.x-bld) do not
-    ship cmake on PATH. This step installs cmake/gcc/g++/make on demand so
-    the cmake-configure step doesn't die with FileNotFoundError.
+    ship cmake on PATH, and the official Debian images ship none of it.
     """
-    if (
-        shutil.which("cmake")
-        and shutil.which("make")
-        and (shutil.which("gcc") or shutil.which("cc"))
-    ):
+    if build_prereqs_present():
         return
 
-    print("Installing build prerequisites (cmake/gcc/make)...")
+    print("Installing build prerequisites...")
     if cfg.package_manager == "apt":
         run_command(
             ["apt-get", "update"],
@@ -462,6 +478,12 @@ def install_build_prereqs(cfg: "RunnerConfig") -> None:
                 "build-essential",
                 "git",
                 "pkg-config",
+                # libdrm: pkg_check_modules in CMakeLists.txt. rpm: cpack runs
+                # its RPM generator even on a deb distro. ca-certificates:
+                # FetchContent clones esmi_ib_library over https.
+                "libdrm-dev",
+                "rpm",
+                "ca-certificates",
             ],
             name="apt-install-prereqs",
             retries=cfg.retries,
@@ -602,8 +624,8 @@ def is_externally_managed() -> bool:
 
 def upgrade_setuptools(cfg: "RunnerConfig") -> None:
     # On PEP 668 systems the pip upgrade is refused outright, and the distro
-    # may not preinstall setuptools at all (Debian 13), which breaks the
-    # setuptools.build_meta backend the wheel build needs. Take them from apt.
+    # may preinstall neither pip nor setuptools (Debian 12/13), which the
+    # wheel build needs for `pip wheel` and setuptools.build_meta. Use apt.
     if is_externally_managed():
         if cfg.package_manager != "apt":
             print("System Python is externally managed; skipping pip upgrade")
@@ -622,6 +644,7 @@ def upgrade_setuptools(cfg: "RunnerConfig") -> None:
                 "install",
                 "-y",
                 "--no-install-recommends",
+                "python3-pip",
                 "python3-setuptools",
                 "python3-wheel",
             ],
@@ -801,6 +824,7 @@ def install_package(cfg: "RunnerConfig", package_path: Path) -> None:
             [
                 "dnf",
                 "install",
+                "python3-pip",
                 "python3-setuptools",
                 "python3-wheel",
                 "-y",
