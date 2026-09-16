@@ -324,20 +324,16 @@ class HiddenLatencyAnalysisTest(unittest.TestCase):
         overlapping = _instruction(2, InstCategory.IMMED, time=2, duration=2)
         target = _instruction(3, InstCategory.IMMED, time=8, duration=2)
         busy = _instruction(4, InstCategory.VALU, time=4, duration=4)
+        wave = _wave(first, overlapping, target)
         result = analyze_hidden_latency(
-            {
-                0: TraceRecords(
-                    waves=[_wave(first, overlapping, target), _wave(busy)]
-                )
-            }
+            {0: TraceRecords(waves=[wave, _wave(busy)])}
         )
         self.assertEqual(result.by_pc[target.pc], HiddenLatency(idle=4))
+        code_index = CodeIndex([])
+        code_index.accumulate_wave(wave)
+        self.assertEqual(code_index.entries[target.pc].idle, 0)
 
     def test_hidden_stall_and_issue_stay_within_the_instruction(self):
-        # Coalescing adds overlapping same-pipe durations, so a utilization interval can end
-        # past the last instruction that contributed to it. That still cannot report more
-        # hidden stall or issue cycles than the instruction spent there, which is what lets
-        # non-hidden cost subtract those two components without bounding them.
         randomizer = random.Random(11451)
         categories = (
             InstCategory.VALU,
@@ -367,8 +363,7 @@ class HiddenLatencyAnalysisTest(unittest.TestCase):
                     instructions.append(inst)
                     stall_by_pc[inst.pc] = stall_by_pc.get(inst.pc, 0) + stall
                     issue_by_pc[inst.pc] = issue_by_pc.get(inst.pc, 0) + duration - stall
-                    # Advance by less than the duration so same-pipe intervals overlap.
-                    clock += randomizer.randrange(0, 20)
+                    clock += randomizer.randrange(0, duration)
                 waves.append(_wave(*instructions))
 
             result = analyze_hidden_latency({0: TraceRecords(waves=waves)})

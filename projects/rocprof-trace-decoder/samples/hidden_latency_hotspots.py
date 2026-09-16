@@ -44,8 +44,6 @@ def main() -> int:
         if not total:
             continue
         hidden = hidden_by_pc.get(entry.pc, HiddenLatency())
-        # Hidden idle is measured from the previous instruction's end, CodeEntry.idle from
-        # the furthest end reached, so that component is the only one needing a bound.
         hidden_total = hidden.stall + hidden.issue + min(hidden.idle, entry.idle)
         rows.append((total - hidden_total, total, hidden_total, entry))
     rows.sort(key=lambda row: (row[0], row[1], row[3].hitcount), reverse=True)
