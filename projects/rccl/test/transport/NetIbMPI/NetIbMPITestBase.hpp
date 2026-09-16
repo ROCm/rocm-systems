@@ -757,6 +757,20 @@ protected:
 
     // On return: rank 0 owns listenComm+recvComm, rank 1 owns sendComm.
     // Caller is responsible for closing all comms.
+    // Nothing here asserts fatally, and that is the point. A fatal assertion
+    // returns from this helper alone, so the rank whose accept or connect failed
+    // skipped the barrier below while its peer -- which did get a communicator --
+    // waited in that barrier forever: the test hung instead of reporting the setup
+    // error, and a caller's own agreement afterwards came too late to prevent it,
+    // because the peer never reached it. Failures are reported non-fatally instead
+    // and both ranks always reach the same collectives, so a caller that checks its
+    // communicator (they all should) can report and bail out with its peer.
+    //
+    // A message is sent even when listen failed, for the same reason: otherwise the
+    // peer blocks in MPI_Recv. What it carries is a status word, not a zeroed handle
+    // for the peer to try anyway -- interpreting a handle that was never filled in can
+    // block rather than fail, which would put back the hang this helper exists to
+    // remove. The peer reads that word, skips the connect, and reports.
     void SetupCastConnection(int dev,
                              void** listenComm, void** sendComm, void** recvComm) {
         const int rank = MPIEnvironment::world_rank;
@@ -764,27 +778,63 @@ protected:
         ncclNetHandle_t handle;
         memset(&handle, 0, sizeof(handle));
 
+        // The handle travels with a status word, the way SetupConnection's handshake and the
+        // threaded probe's both do. Sending the zeroed handle on a listen failure and
+        // leaving the peer to have connect reject it is not safe: interpreting a handle that
+        // was never filled in can block rather than fail, which is exactly why the threaded
+        // setup sends a listenerReady flag. Sent either way, so the peer is never left
+        // waiting for a message that is not coming.
+        struct CastHandshake {
+            int             listening;
+            ncclNetHandle_t handle;
+        } msg{};
+
         if (rank == 0) {
-            ASSERT_EQ(CreateListenComm(dev, &handle, listenComm), ncclSuccess);
-            ASSERT_NE(*listenComm, nullptr);
-
-            MPI_Send(&handle, sizeof(handle), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
-
-            for (int i = 0; i < kMaxRetryAttempts && *recvComm == nullptr; i++) {
-                ASSERT_EQ(AcceptConnection(*listenComm, recvComm), ncclSuccess);
-                if (*recvComm == nullptr) usleep(kPollIntervalUs);
+            const ncclResult_t listenRet = CreateListenComm(dev, &handle, listenComm);
+            const bool listening = listenRet == ncclSuccess && *listenComm != nullptr;
+            if (!listening) {
+                ADD_FAILURE() << "IB-CAST listen failed on rank 0 (" << listenRet
+                              << "), so the peer has nothing to connect to";
             }
-            ASSERT_NE(*recvComm, nullptr);
+
+            msg.listening = listening ? 1 : 0;
+            if (listening) memcpy(msg.handle, handle, sizeof(handle));
+            MPI_Send(&msg, sizeof(msg), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
+
+            if (listening) {
+                for (int i = 0; i < kMaxRetryAttempts && *recvComm == nullptr; i++) {
+                    if (AcceptConnection(*listenComm, recvComm) != ncclSuccess) {
+                        ADD_FAILURE() << "IB-CAST accept failed on rank 0";
+                        break;
+                    }
+                    if (*recvComm == nullptr) usleep(kPollIntervalUs);
+                }
+                if (*recvComm == nullptr) {
+                    ADD_FAILURE() << "IB-CAST accept produced no communicator on rank 0 after "
+                                  << kMaxRetryAttempts << " attempts";
+                }
+            }
         } else {
-            MPI_Recv(&handle, sizeof(handle), MPI_BYTE, peer, 0, MPI_COMM_WORLD,
-                     MPI_STATUS_IGNORE);
+            MPI_Recv(&msg, sizeof(msg), MPI_BYTE, peer, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-            for (int i = 0; i < kMaxRetryAttempts && *sendComm == nullptr; i++) {
-                ncclResult_t r = ConnectToRemote(dev, &handle, sendComm);
-                ASSERT_EQ(r, ncclSuccess);
-                if (*sendComm == nullptr) usleep(kPollIntervalUs);
+            if (!msg.listening) {
+                // The peer has already reported why. Not attempting the connect is the
+                // point: there is no listener, and the handle carries nothing to interpret.
+                ADD_FAILURE() << "IB-CAST connect skipped on rank 1: the peer's listen failed";
+            } else {
+                memcpy(handle, msg.handle, sizeof(handle));
+                for (int i = 0; i < kMaxRetryAttempts && *sendComm == nullptr; i++) {
+                    if (ConnectToRemote(dev, &handle, sendComm) != ncclSuccess) {
+                        ADD_FAILURE() << "IB-CAST connect failed on rank 1";
+                        break;
+                    }
+                    if (*sendComm == nullptr) usleep(kPollIntervalUs);
+                }
+                if (*sendComm == nullptr) {
+                    ADD_FAILURE() << "IB-CAST connect produced no communicator on rank 1 after "
+                                  << kMaxRetryAttempts << " attempts";
+                }
             }
-            ASSERT_NE(*sendComm, nullptr);
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
@@ -1505,11 +1555,10 @@ protected:
         void* recvComm = nullptr;
 
         // The probe brings up its own connection rather than calling
-        // SetupCastConnection, which asserts fatally and sends the handle only after
-        // its assertions: a listen that fails on rank 0 leaves rank 1 waiting in
-        // MPI_Recv forever, which is a hang instead of the failure this helper
-        // promises. Here the handle carries a status word, so both ranks agree before
-        // either one waits on the other.
+        // SetupCastConnection because it has to answer with a status rather than
+        // report one: the handle carries a status word, so both ranks agree on
+        // whether the connection came up before either waits on the other, and the
+        // caller gets a return value it can act on.
         const int rank = MPIEnvironment::world_rank;
         const int peer = 1 - rank;
         ncclNetHandle_t handle;
