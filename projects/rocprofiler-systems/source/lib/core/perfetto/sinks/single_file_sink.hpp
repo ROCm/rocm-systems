@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -30,7 +31,7 @@ public:
     explicit single_file_sink(output_file_registry& registry,
                               std::string           output_filename_override = {});
 
-    void on_source_drained(int source_id, std::vector<char> bytes) override;
+    void on_source_drained(int source_id, std::span<const char> bytes) override;
     void finalize() override;
 
     // Enables cross-process aggregation into one shared output file. seq_id_base

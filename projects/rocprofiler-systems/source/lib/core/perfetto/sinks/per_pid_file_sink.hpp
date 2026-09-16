@@ -6,6 +6,7 @@
 #include "core/perfetto/sinks/trace_sink.hpp"
 
 #include <functional>
+#include <span>
 #include <vector>
 
 #include <sys/types.h>
@@ -24,7 +25,7 @@ class per_pid_file_sink : public trace_sink_interface
 public:
     per_pid_file_sink(pid_t parent_pid, output_file_registry& registry);
 
-    void on_source_drained(int source_id, std::vector<char> bytes) override;
+    void on_source_drained(int source_id, std::span<const char> bytes) override;
     void finalize() override;
 
 private:

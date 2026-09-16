@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -561,7 +562,7 @@ public:
     : m_throw_pids{ std::move(pids_to_throw_on) }
     {}
 
-    void on_source_drained(int source_id, std::vector<char> bytes) override
+    void on_source_drained(int source_id, std::span<const char> bytes) override
     {
         m_drained_count++;
         if(std::find(m_throw_pids.begin(), m_throw_pids.end(), source_id) !=
@@ -575,7 +576,7 @@ public:
             throw std::runtime_error{ "throwing_sink on_source_drained: pid " +
                                       std::to_string(source_id) };
         }
-        m_kept.emplace_back(source_id, std::move(bytes));
+        m_kept.emplace_back(source_id, std::vector<char>(bytes.begin(), bytes.end()));
     }
 
     void finalize() override { m_finalize_count++; }

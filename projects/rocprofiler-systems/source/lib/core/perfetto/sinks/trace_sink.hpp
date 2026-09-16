@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <span>
 #include <vector>
 
 namespace rocprofsys::core
@@ -23,7 +24,7 @@ public:
     trace_sink_interface(trace_sink_interface&&)                 = delete;
     trace_sink_interface& operator=(trace_sink_interface&&)      = delete;
 
-    virtual void on_source_drained(int source_id, std::span<char> bytes) = 0;
-    virtual void finalize()                                                = 0;
+    virtual void on_source_drained(int source_id, std::span<const char> bytes) = 0;
+    virtual void finalize()                                                    = 0;
 };
 }  // namespace rocprofsys::core

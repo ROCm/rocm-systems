@@ -147,7 +147,7 @@ basic_cached_perfetto_engine<Backend>::stop()
         if(bytes.empty()) continue;
         try
         {
-            sink->on_source_drained(source_pid, std::move(bytes));
+            sink->on_source_drained(source_pid, bytes);
         } catch(...)
         {
             if(!first_exc) first_exc = std::current_exception();

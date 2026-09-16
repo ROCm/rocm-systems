@@ -8,6 +8,7 @@
 #include "core/output_file_registry.hpp"
 #include "logger/debug.hpp"
 
+#include <span>
 #include <string>
 #include <utility>
 
@@ -19,7 +20,7 @@ per_pid_file_sink::per_pid_file_sink(pid_t parent_pid, output_file_registry& reg
 {}
 
 void
-per_pid_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
+per_pid_file_sink::on_source_drained(int source_id, std::span<const char> bytes)
 {
     if(bytes.empty()) return;
 

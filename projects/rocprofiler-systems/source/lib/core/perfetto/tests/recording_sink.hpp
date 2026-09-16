@@ -5,6 +5,7 @@
 
 #include "core/perfetto/sinks/trace_sink.hpp"
 
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -17,9 +18,9 @@ class recording_sink : public trace_sink_interface
 public:
     using record_t = std::pair<int, std::vector<char>>;
 
-    void on_source_drained(int source_id, std::vector<char> bytes) override
+    void on_source_drained(int source_id, std::span<const char> bytes) override
     {
-        m_records.emplace_back(source_id, std::move(bytes));
+        m_records.emplace_back(source_id, std::vector<char>(bytes.begin(), bytes.end()));
     }
     void finalize() override { m_finalized = true; }
 
