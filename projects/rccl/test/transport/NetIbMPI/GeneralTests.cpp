@@ -89,7 +89,7 @@ TEST_F(NetIbMPITest, ListenAndConnect) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     if (rank == 0) {
         EXPECT_NE(pair.recvComm, nullptr) << "Recv comm should be established";
@@ -127,7 +127,7 @@ TEST_F(NetIbMPITest, RegisterHostMemory) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     const size_t bufferSize = kSmallBufferSize;
     void* buffer = malloc(bufferSize);
@@ -154,7 +154,7 @@ TEST_F(NetIbMPITest, RegisterGpuMemory) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     const size_t bufferSize = kSmallBufferSize;
     void* buffer = nullptr;
@@ -181,7 +181,7 @@ TEST_F(NetIbMPITest, RegisterMemoryNullPointer) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     void* mhandle = nullptr;
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
@@ -201,7 +201,7 @@ TEST_F(NetIbMPITest, DeregisterNullHandle) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
 
@@ -229,7 +229,7 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
     if (nThreads == 1) {
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        SetupConnectionWithGuard(0, pair, connGuard);
+        ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
         const size_t bufferSize = kSmallBufferSize;
         const int tag = 42;
@@ -384,7 +384,7 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
 
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     for (size_t size : testSizes) {
         const int tag = 100;
@@ -441,7 +441,7 @@ TEST_F(NetIbMPITest, SendRecvZeroSize) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     const size_t bufferSize = kSmallBufferSize;
     const int tag = 50;
@@ -605,7 +605,7 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
     if (nThreads == 1) {
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        SetupConnectionWithGuard(0, pair, connGuard);
+        ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
         void* sendBuffer = nullptr;
         void* recvBuffer = nullptr;
@@ -791,7 +791,7 @@ TEST_F(NetIbMPITest, LargeTransfer) {
 
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
     const size_t bufferSize = kLargeBufferSize; // 16 MB
     const int tag = 400;
@@ -843,7 +843,7 @@ TEST_F(NetIbMPITest, CloseWithoutWaitingForCompletion) {
 
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 }
 
 TEST_F(NetIbMPITest, ListenCloseListen) {
