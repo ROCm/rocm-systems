@@ -4,7 +4,10 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #include <fcntl.h>
+#include <cerrno>
 #include <csignal>
+#include <cstdio>
+#include <cstring>
 #include <unistd.h>
 #include "TestBed.hpp"
 #include "PipeUtils.hpp"
@@ -69,6 +72,86 @@ namespace RcclUnitTesting
     this->configUsedPool = false;
   }
 
+  bool TestBed::SpawnChildProcess(TestBedChild* child, MemAllocType const memAllocType)
+  {
+    if (child == nullptr)
+      return false;
+
+    auto closePipes = [child]()
+    {
+      if (child->parentWriteFd >= 0) close(child->parentWriteFd);
+      if (child->parentReadFd >= 0) close(child->parentReadFd);
+      if (child->childWriteFd >= 0) close(child->childWriteFd);
+      if (child->childReadFd >= 0) close(child->childReadFd);
+      child->parentWriteFd = -1;
+      child->parentReadFd = -1;
+      child->childWriteFd = -1;
+      child->childReadFd = -1;
+    };
+
+    if (child->InitPipes() != TEST_SUCCESS)
+    {
+      closePipes();
+      return false;
+    }
+
+    // Parent-side descriptors must not leak into subsequently exec'd workers.
+    // Child-side descriptors are the only descriptors preserved across exec.
+    if (fcntl(child->parentWriteFd, F_SETFD, FD_CLOEXEC) == -1 ||
+        fcntl(child->parentReadFd, F_SETFD, FD_CLOEXEC) == -1 ||
+        fcntl(child->childWriteFd, F_SETFD, 0) == -1 ||
+        fcntl(child->childReadFd, F_SETFD, 0) == -1)
+    {
+      TEST_ERROR("Unable to configure pipe descriptors for child %d: %s",
+                 child->childId, strerror(errno));
+      closePipes();
+      return false;
+    }
+
+    // Construct all arguments before fork. A HIP-initialized parent can have
+    // background threads holding libc locks, so the child must do only
+    // async-signal-safe work before replacing its process image.
+    std::string const sChildId      = std::to_string(child->childId);
+    std::string const sChildReadFd  = std::to_string(child->childReadFd);
+    std::string const sChildWriteFd = std::to_string(child->childWriteFd);
+    std::string const sVerbose      = std::to_string(ev.verbose ? 1 : 0);
+    std::string const sPrintVal     = std::to_string(ev.printValues);
+    std::string const sThreading    = std::to_string(ev.useMultithreading ? 1 : 0);
+    std::string const sMemAllocType = std::to_string(static_cast<int>(memAllocType));
+
+    fflush(nullptr);
+    pid_t const pid = fork();
+    if (pid == 0)
+    {
+      close(child->parentWriteFd);
+      close(child->parentReadFd);
+      execl("/proc/self/exe", "rccl_unit_test",
+            "--child",
+            sChildId.c_str(),
+            sChildReadFd.c_str(),
+            sChildWriteFd.c_str(),
+            sVerbose.c_str(),
+            sPrintVal.c_str(),
+            sThreading.c_str(),
+            sMemAllocType.c_str(),
+            static_cast<char*>(nullptr));
+      _exit(127);
+    }
+    if (pid < 0)
+    {
+      TEST_ERROR("fork() failed for child %d: %s", child->childId, strerror(errno));
+      closePipes();
+      return false;
+    }
+
+    child->pid = pid;
+    close(child->childWriteFd);
+    close(child->childReadFd);
+    child->childWriteFd = -1;
+    child->childReadFd = -1;
+    return true;
+  }
+
   void TestBed::InitComms(std::vector<std::vector<int>> const& deviceIdsPerProcess,
                           std::vector<int>              const& numCollectivesInGroup,
                           std::vector<int>              const& numStreamsPerGroup,
@@ -125,12 +208,10 @@ namespace RcclUnitTesting
     this->configUsedPool = false;
     if (this->poolMode)
     {
-      // Each worker snapshots env at fork and NCCL_PARAM caches it; a test that
-      // changes env must call Finalize() to re-fork the pool.
+      // Each worker snapshots env at exec and NCCL_PARAM caches it; a test that
+      // changes env must call Finalize() to re-exec the pool.
       if (this->poolChildren.empty())
       {
-        // CRITICAL: no HIP call in the parent before fork -- HIP state does not
-        // survive fork() and workers SEGV. Use ev.GetNumDetectedGpus() instead.
         int poolSize = this->numDevicesAvailable;
         int const detectedGpus = ev.GetNumDetectedGpus();
         if (detectedGpus > 0 && detectedGpus < poolSize)
@@ -141,37 +222,13 @@ namespace RcclUnitTesting
         for (int d = 0; d < poolSize; ++d)
         {
           this->poolChildren[d] = new TestBedChild(d, ev.verbose, ev.printValues, ev.useMultithreading);
-          if (this->poolChildren[d]->InitPipes() != TEST_SUCCESS)
+          if (!SpawnChildProcess(this->poolChildren[d], memAllocType))
           {
             // Reap the half-built pool; FAIL() (not TEST_ERROR) so the sweep
             // stops instead of indexing an empty childList -> SEGV.
             TeardownPool();
-            FAIL() << "Unable to create pipes to pool child process " << d;
+            FAIL() << "Unable to start pool child process " << d;
           }
-          pid_t pid = fork();
-          if (pid == 0)
-          {
-            // Pool workers are forked sequentially, so this child inherits the
-            // parent's pipe ends for its own worker and every earlier worker.
-            // Close all of them so an unexpected parent exit delivers EOF to
-            // each worker's command pipe instead of leaving orphaned workers.
-            for (int i = 0; i <= d; ++i)
-            {
-              if (this->poolChildren[i] == nullptr) continue;
-              close(this->poolChildren[i]->parentWriteFd);
-              close(this->poolChildren[i]->parentReadFd);
-            }
-            this->poolChildren[d]->StartExecutionLoop();
-            return;
-          }
-          if (pid < 0)
-          {
-            TeardownPool();
-            FAIL() << "fork() failed for pool child process " << d;
-          }
-          this->poolChildren[d]->pid = pid;
-          close(this->poolChildren[d]->childWriteFd);
-          close(this->poolChildren[d]->childReadFd);
         }
         // Do NOT pre-warm workers: under the runner's --jobs N it storms
         // ncclCommInitAll across all GPUs and fails intermittently.
@@ -211,68 +268,15 @@ namespace RcclUnitTesting
       for (int childId = 0; childId < this->numActiveChildren; ++childId)
       {
         childList[childId] = new TestBedChild(childId, ev.verbose, ev.printValues, ev.useMultithreading);
-        if (childList[childId]->InitPipes() != TEST_SUCCESS)
+        if (!SpawnChildProcess(childList[childId], memAllocType))
         {
-          TEST_ERROR("Unable to create pipes to child process %d", childId);
-          return;
-        }
-
-        // Ensure child-side pipe descriptors remain open across execl()
-        fcntl(childList[childId]->childReadFd, F_SETFD, 0);
-        fcntl(childList[childId]->childWriteFd, F_SETFD, 0);
-
-        pid_t pid = fork();
-        if (pid == 0)
-        {
-          // Child process enters execution loop
-          close(childList[childId]->parentWriteFd);
-          close(childList[childId]->parentReadFd);
-
-          // String arguments for execl
-          std::string sChildId      = std::to_string(childId);
-          std::string sChildReadFd  = std::to_string(childList[childId]->childReadFd);
-          std::string sChildWriteFd = std::to_string(childList[childId]->childWriteFd);
-          std::string sVerbose      = std::to_string(ev.verbose ? 1 : 0);
-          std::string sPrintVal     = std::to_string(ev.printValues);
-          std::string sThreading    = std::to_string(ev.useMultithreading ? 1 : 0);
-          std::string sMemAllocType = std::to_string(static_cast<int>(memAllocType));
-
-          // Re-execute binary to clear inherited HIP/HSA driver state
-          execl("/proc/self/exe", "rccl_unit_test",
-                "--child",
-                sChildId.c_str(),
-                sChildReadFd.c_str(),
-                sChildWriteFd.c_str(),
-                sVerbose.c_str(),
-                sPrintVal.c_str(),
-                sThreading.c_str(),
-                sMemAllocType.c_str(),
-                NULL);
-          perror("execl failed");
-          _exit(1);
-        }
-        else if (pid > 0)
-        {
-          // Parent records child process ID and closes unused ends of pipe
-          childList[childId]->pid = pid;
-          close(childList[childId]->childWriteFd);
-          close(childList[childId]->childReadFd);
-        }
-        else
-        {
-          // No child exists to close its inherited descriptors. Close all
-          // descriptors owned by the parent for this failed fork, then remove
-          // the never-forked child so teardown does not write to or wait on it.
+          // SpawnChildProcess already closed the failed child's pipe descriptors.
+          // Remove the never-started child so teardown does not write to or wait on it.
           TestBedChild* failedChild = childList[childId];
-          close(failedChild->parentWriteFd);
-          close(failedChild->parentReadFd);
-          close(failedChild->childWriteFd);
-          close(failedChild->childReadFd);
           delete failedChild;
           childList.resize(childId);
           this->numActiveChildren = childId;
-          TEST_ERROR("fork() failed when creating child process %d", childId);
-          FAIL() << "fork() failed when creating child process " << childId;
+          FAIL() << "Unable to start child process " << childId;
         }
       }
     }

@@ -201,6 +201,10 @@ namespace RcclUnitTesting
     void StopChild(int const childId);
 
   private:
+    // Starts a worker in a fresh process image so it never inherits HIP/HSA
+    // runtime state from the test parent.
+    bool SpawnChildProcess(TestBedChild* child, MemAllocType memAllocType);
+
     // AllocateMem is split into AllocateMemInternal + RegisterMemInternal to maintain
     // compatibility with existing tests, and extend registration for symmetric memory
     void AllocateMemInternal(bool   const inPlace = false,

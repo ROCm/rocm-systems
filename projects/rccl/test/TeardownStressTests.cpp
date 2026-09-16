@@ -4,6 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #include "TestBed.hpp"
+#include <hip/hip_runtime.h>
 
 namespace RcclUnitTesting
 {
@@ -101,6 +102,33 @@ namespace RcclUnitTesting
     for (int ranks = testBed.ev.maxGpus; ranks >= 2 && isCorrect; ranks /= 2)
       RunTeardownCycles(testBed, ranks, /*useBlocking*/ true,
                         /*iterations*/ 1, isCorrect);
+    EXPECT_TRUE(isCorrect);
+    testBed.Finalize();
+  }
+
+  // Pool workers must start from a fresh process image even when an earlier
+  // test initialized HIP in the parent process.
+  TEST(Teardown, PoolAfterParentHipInitialization)
+  {
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+    void* parentAllocation = nullptr;
+    ASSERT_EQ(hipMalloc(&parentAllocation, 1), hipSuccess);
+    ASSERT_EQ(hipFree(parentAllocation), hipSuccess);
+
+    TestBed testBed;
+    if (!testBed.poolMode)
+      GTEST_SKIP() << "Requires communicator pooling (UT_COMM_POOL=1)";
+    if (testBed.ev.maxGpus < 2)
+      GTEST_SKIP() << "Teardown stress requires at least 2 GPUs (detected "
+                   << testBed.ev.maxGpus << ")";
+    if (!(testBed.ev.processMask & (1 << 1)))
+      GTEST_SKIP() << "Teardown stress requires multi-process mode (UT_PROCESS_MASK)";
+    if (!float32Supported(testBed))
+      GTEST_SKIP() << "Teardown stress requires ncclFloat32 (excluded by UT_DATATYPES)";
+
+    bool isCorrect = true;
+    RunTeardownCycles(testBed, testBed.ev.maxGpus, /*useBlocking*/ true,
+                      /*iterations*/ 1, isCorrect);
     EXPECT_TRUE(isCorrect);
     testBed.Finalize();
   }
