@@ -221,6 +221,16 @@ resolve_spm_depth(aql_profile::Pm4Factory*            pm4_factory,
                   const aqlprofile_pmc_event_t&       event,
                   aqlprofile_spm_depth_t*             resolved_depth = nullptr)
 {
+    const auto depth_name = [](aqlprofile_spm_depth_t depth) {
+        switch(depth)
+        {
+            case AQLPROFILE_SPM_DEPTH_NONE: return "default";
+            case AQLPROFILE_SPM_DEPTH_16_BITS: return "16-bit";
+            case AQLPROFILE_SPM_DEPTH_32_BITS: return "32-bit";
+            default: return "unknown";
+        }
+    };
+
     const auto requested_depth =
         static_cast<aqlprofile_spm_depth_t>(event.flags.spm_flags.depth);
     const bool is_gfx9_sq =
@@ -251,7 +261,7 @@ resolve_spm_depth(aql_profile::Pm4Factory*            pm4_factory,
     {
         WARN_LOGGING("{} requires 32-bit SPM depth, but {} was requested",
                      (is_gfx9_sq ? "gfx9 SQ" : "gfx12 SQG"),
-                     static_cast<int>(requested_depth));
+                     depth_name(requested_depth));
         return false;
     }
 

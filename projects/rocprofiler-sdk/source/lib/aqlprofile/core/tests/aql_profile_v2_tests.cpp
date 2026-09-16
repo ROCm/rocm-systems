@@ -830,7 +830,7 @@ TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedGfx9SqDefaultDepth)
 TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedGfx9SqRejectsWrongExplicitDepth)
 {
     aqlprofile_agent_info_v1_t info{};
-    info.agent_gfxip          = "gfx90a";
+    info.agent_gfxip          = "gfx942";
     info.xcc_num              = 1;
     info.se_num               = 4;
     info.cu_num               = 64;
@@ -884,5 +884,31 @@ TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedRejectsBlockWithoutSpmSupport)
     event.event_id   = 1;
 
     EXPECT_FALSE(aqlprofile_spm_is_event_supported(agent, event));
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedNonSqDepthOptions)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx942";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI;
+    event.event_id   = 1;
+
+    event.flags.spm_flags.depth = AQLPROFILE_SPM_DEPTH_NONE;
+    EXPECT_TRUE(aqlprofile_spm_is_event_supported(agent, event));
+
+    event.flags.spm_flags.depth = AQLPROFILE_SPM_DEPTH_16_BITS;
+    EXPECT_TRUE(aqlprofile_spm_is_event_supported(agent, event));
+
+    event.flags.spm_flags.depth = AQLPROFILE_SPM_DEPTH_32_BITS;
+    EXPECT_TRUE(aqlprofile_spm_is_event_supported(agent, event));
 }
 }  // namespace aql_profile_v2_tests
