@@ -35,10 +35,6 @@ THE SOFTWARE.
     namespace fs = std::experimental::filesystem;
 #endif
 
-#ifdef _MSC_VER
-#define __attribute__(x)
-#endif
-
 #include <hip/hip_runtime.h>
 #include <rocdecode/rocdecode.h>
 #include <rocdecode/rocparser.h>
@@ -46,13 +42,20 @@ THE SOFTWARE.
     #include <rocdecode/rocdecode_host.h>
 #endif
 
+// MSVC has no equivalent of the ELF visibility attribute; symbols are hidden by default.
+#ifdef _MSC_VER
+    #define ROCDEC_HIDDEN
+#else
+    #define ROCDEC_HIDDEN __attribute__((visibility("hidden")))
+#endif
 
-__attribute__((visibility("hidden"))) inline bool is_error(rocDecStatus status)
+
+ROCDEC_HIDDEN inline bool is_error(rocDecStatus status)
 {
     return status != ROCDEC_SUCCESS;
 }
 
-__attribute__((visibility("hidden"))) inline const char* error_string(rocDecStatus status)
+ROCDEC_HIDDEN inline const char* error_string(rocDecStatus status)
 {
     return rocDecGetErrorName(status);
 }
@@ -65,7 +68,7 @@ struct Rect {
 };
 
 template <typename Status, typename... Args>
-__attribute__((visibility("hidden"))) inline void report_error(
+ROCDEC_HIDDEN inline void report_error(
     Status status, const char* function_name, const char* file_name, int line, Args&&... args)
 {
     ((std::cerr << "ERROR: " << error_string(status) << "; " << function_name << "; "
@@ -198,8 +201,9 @@ struct DecoderInfo {
  */
 void save_frame_to_file(DecoderInfo *p_dec_info, void *surf_mem[], uint32_t *pitch) {
     uint8_t *hst_ptr = nullptr;
-    uint64_t output_image_size_luma = pitch[0] * p_dec_info->coded_height;
-    uint64_t output_image_size_chroma = static_cast<uint64_t>(pitch[1] * (p_dec_info->coded_height * GetChromaHeightFactor(p_dec_info->surf_format)));
+    uint32_t coded_chroma_height = static_cast<uint32_t>(GetChromaHeightFactor(p_dec_info->surf_format) * p_dec_info->coded_height);
+    uint64_t output_image_size_luma = static_cast<uint64_t>(pitch[0]) * p_dec_info->coded_height;
+    uint64_t output_image_size_chroma = static_cast<uint64_t>(pitch[1]) * coded_chroma_height;
     if (p_dec_info->mem_type == OUT_SURFACE_MEM_DEV_INTERNAL) {
         if (hst_ptr == nullptr) {
             hst_ptr = new uint8_t [output_image_size_luma + output_image_size_chroma];

@@ -187,9 +187,10 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
     add_executable(${PROJECT_NAME} ${SOURCES})
     if(NOT WIN32)
         target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS})
-    elseif(WIN32)
+    else()
         add_dependencies(${PROJECT_NAME} hip_kernels)
         target_link_libraries(${PROJECT_NAME} ${KERNEL_OBJS})
+    endif()
     # On TheRock installs libva is vendored under lib/rocm_sysdeps, but FFmpeg still
     # links the system libva, so both load at runtime. librocdecode already depends
     # on the vendored libva, so force librocdecode to be the FIRST direct dependency
@@ -197,7 +198,7 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
     # symbol scope first and wins VA symbol interposition, loading the matching
     # vendored VA driver. It must be injected as a raw path because CMake
     # topologically reorders normal link entries, placing FFmpeg ahead otherwise.
-    elseif(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+    if(NOT WIN32 AND EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
       set(LINK_LIBRARY_LIST -Wl,--push-state,--no-as-needed ${rocdecode_LIBRARY} -Wl,--pop-state ${LINK_LIBRARY_LIST})
     endif()
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
