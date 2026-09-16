@@ -163,8 +163,7 @@ struct settings_policy
     {
         // Case and stray whitespace are folded away exactly as ROCPROFSYS_AMD_SMI_METRICS
         // does it, so "All" and " fastpath, fallback " behave as written.
-        const auto normalized =
-            utility::string::to_lower(utility::string::trim(setting));
+        const auto normalized = utility::string::to_lower(utility::string::trim(setting));
 
         hipfile::enabled_metrics metrics;
 
