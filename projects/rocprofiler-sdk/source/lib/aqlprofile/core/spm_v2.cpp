@@ -349,8 +349,8 @@ GetCounter(aql_profile::Pm4Factory* pm4_factory, const aqlprofile_pmc_event_t& e
 
 struct spm_counter_des_t
 {
-    uint32_t index;  // in 16bit
-    bool     is_32bit;
+    uint32_t index    = 0;      // in 16bit
+    bool     is_32bit = false;
 };
 
 void
