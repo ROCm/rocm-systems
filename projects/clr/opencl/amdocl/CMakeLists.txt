@@ -93,7 +93,30 @@ endif()
 
 if(BUILD_SHARED_LIBS)
   if(WIN32)
-    target_sources(amdocl PRIVATE amdocl.def)
+    # Re-export the HSA runtime symbols, mirroring amdhip64 (hipamd/src/CMakeLists.txt).
+    # ROCr is statically linked into amdocl64, but without exporting these,
+    # hsa-amd-aqlprofile64.dll (which imports them by name from a runtime DLL) resolves
+    # against the driver's amdhip64_7.dll in System32 -- which exports none of them --
+    # so os::LoadLib(kAqlProfileLib) fails with ERROR_PROC_NOT_FOUND and SQTT/RGP capture
+    # dies at "SQTT: failed to obtain aqlprofile extension table" (rocgpuopen.cpp).
+    # Exporting them here lets an OpenCL-linked aqlprofile bind to THIS runtime instance,
+    # which is required: the agent/queue handles passed to aqlprofile come from amdocl64's
+    # ROCr, so aqlprofile must call into the same instance.
+    set(AMDOCL_DEF_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/amdocl_generated.def")
+    file(READ "${CMAKE_CURRENT_LIST_DIR}/amdocl.def" AMDOCL_DEF_BASE)
+    # With ROCR_STATIC_AQLPROFILE the only consumer of these re-exports is gone: aqlprofile
+    # is linked inside the runtime and resolves the HSA API at link time.
+    if(ROCCLR_ENABLE_HSA AND NOT ROCR_STATIC_AQLPROFILE)
+      set(HSA_EXPORTS_DEF "${CMAKE_CURRENT_LIST_DIR}/../../hipamd/src/hsa_exports.def")
+      set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HSA_EXPORTS_DEF}")
+      file(READ "${HSA_EXPORTS_DEF}" HSA_EXPORTS)
+    else()
+      set(HSA_EXPORTS "")
+    endif()
+    file(WRITE "${AMDOCL_DEF_OUTPUT}" "${AMDOCL_DEF_BASE}\n${HSA_EXPORTS}")
+    string(REPLACE "/" "\\" AMDOCL_DEF_OUTPUT_NATIVE "${AMDOCL_DEF_OUTPUT}")
+    target_link_options(amdocl PRIVATE "/DEF:${AMDOCL_DEF_OUTPUT_NATIVE}")
+    set_target_properties(amdocl PROPERTIES LINK_DEPENDS "${AMDOCL_DEF_OUTPUT}")
   else()
     # -Bsymbolic is required to make sure all AMD OpenCL runtime symbols are resolved internally
     # Otherwise ld might resolve them using symbols from the OpenCL ICD

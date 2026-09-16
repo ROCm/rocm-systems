@@ -1243,6 +1243,16 @@ bool KernelBlitManager::createProgram(Device& device) {
       if (kernels_[i] == nullptr) {
         break;
       }
+      // These are internal rocclr blit/copy/heap kernels by definition. The internal flag
+      // normally flows from the "-cl-internal-kernel" build option through Program::linkImpl,
+      // but it can be lost when the blit program is served from a cached/precompiled binary.
+      // Set it explicitly so RGP's capture manager (PreDispatch) tags these dispatches as blit
+      // events rather than user compute events; otherwise their wave64 waves are attributed to
+      // a wave32 user compute event's SQTT window.
+      if (auto* devKernel =
+              const_cast<device::Kernel*>(kernels_[i]->getDeviceKernel(device))) {
+        devKernel->setInternalKernelFlag(true);
+      }
       // Validate blit kernels for the scratch memory usage (pre SI)
       if (!device.validateKernel(*kernels_[i], &gpu())) {
         break;

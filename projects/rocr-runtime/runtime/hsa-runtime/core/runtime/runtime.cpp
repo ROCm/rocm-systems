@@ -92,6 +92,9 @@ extern "C" void __sanitizer_purge_allocator(void);
 #include "core/util/os.h"
 #include "core/util/poll_backoff.h"
 #include "inc/hsa_ven_amd_aqlprofile.h"
+#ifdef ROCR_STATIC_AQLPROFILE
+#include <aqlprofile-sdk/aql_profile_static.h>
+#endif
 
 #ifndef HSA_VERSION_MAJOR
 #define HSA_VERSION_MAJOR 1
@@ -867,7 +870,7 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
         setFlag(HSA_EXTENSION_IMAGES);
       }
 
-      if (aqlprofile_lib_ != nullptr) {
+      if (AqlProfileAvailable()) {
         setFlag(HSA_EXTENSION_AMD_AQLPROFILE);
       }
 
@@ -2803,6 +2806,11 @@ hsa_status_t Runtime::Load() {
 
   loader_.reset(amd::hsa::loader::Loader::Create(&loader_context_));
 
+#ifdef ROCR_STATIC_AQLPROFILE
+  // aqlprofile is statically linked into this binary: nothing to probe or dlopen.  Its
+  // DllMain/constructor-attribute never runs for a static archive, so drive init explicitly.
+  hsa_ven_amd_aqlprofile_static_init();
+#else
   // Probe aqlprofile availability once and cache the result. Prefer the
   // version-suffixed file name (libhsa-amd-aqlprofile64.so.<major>) that matches
   // the aqlprofile ABI this runtime is built against; the unversioned dev
@@ -2813,6 +2821,7 @@ hsa_status_t Runtime::Load() {
   if (aqlprofile_lib_ == nullptr) {
     aqlprofile_lib_ = os::LoadLib(kAqlProfileLib);
   }
+#endif
 
   // Load extensions
   LoadExtensions();
@@ -2873,6 +2882,11 @@ void Runtime::Unload() {
   UnloadTools();
   UnloadExtensions();
 
+#ifdef ROCR_STATIC_AQLPROFILE
+  // Statically linked: no handle to close, but the teardown DllMain/destructor-attribute
+  // would normally perform still has to happen.
+  hsa_ven_amd_aqlprofile_static_fini();
+#else
   // Close the aqlprofile probe handle. Skip the dlclose when
   // running under Valgrind due to a Valgrind bug, see below:
   // http://valgrind.org/docs/manual/faq.html#faq.unhelpful
@@ -2882,6 +2896,7 @@ void Runtime::Unload() {
     }
     aqlprofile_lib_ = nullptr;
   }
+#endif
 
   amd::hsa::loader::Loader::Destroy(loader_.get());
   loader_.reset();
