@@ -1806,8 +1806,8 @@ TEST(ConSanMoi, SparseExactByteShadowRetiresOnlyProvenEpochsAndReclaimsCapacity)
   EXPECT_FALSE(model.access(boundary).capacity_exhausted);
   EXPECT_FALSE(model.access(other_generation).capacity_exhausted);
 
-  retire_consan_moi_sparse_exact_byte_shadow_before_epoch(
-      model, /*generation=*/7, /*first_live_epoch=*/1);
+  retire_consan_moi_sparse_exact_byte_shadow_before_epoch(model, /*generation=*/7,
+                                                          /*first_live_epoch=*/1);
 
   ConSanMoiExactByteAccess reclaimed = boundary;
   reclaimed.lds_byte_offset = 12;
@@ -1858,8 +1858,8 @@ TEST(ConSanMoi, SparseExactByteShadowRetirementKeepsSameSiteLaneGroup) {
 
   EXPECT_FALSE(model.access(retired).conflict);
   EXPECT_FALSE(model.access(boundary).conflict);
-  retire_consan_moi_sparse_exact_byte_shadow_before_epoch(
-      model, /*generation=*/7, /*first_live_epoch=*/1);
+  retire_consan_moi_sparse_exact_byte_shadow_before_epoch(model, /*generation=*/7,
+                                                          /*first_live_epoch=*/1);
 
   ConSanMoiExactByteAccess second_group = boundary;
   second_group.lane_mask = 0x2;
@@ -2091,6 +2091,33 @@ TEST(ConSanMoi, RecordReplayMultiLaneWriteReportsExactSameWaveConflict) {
   EXPECT_EQ(diagnostic.second_lds_byte_count, 2u);
   EXPECT_EQ(diagnostic.first_access_kind, static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write));
   EXPECT_EQ(diagnostic.second_access_kind, static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write));
+}
+
+TEST(ConSanMoi, RecordReplayUniformStoreStillConflictsWithAnotherWave) {
+  for (bool cross_wave : {false, true}) {
+    auto header = make_consan_moi_report_header(7, 11, 2, 2, 4, 0);
+    std::array<ConSanMoiAccessRecord, 2> records{};
+    records[0].lane_mask = 3;
+    records[0].instruction_offset = 0x40;
+    records[0].access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write);
+    records[0].lds_byte_count = 16;
+    records[0].cell_count = 4;
+    records[0].flags = kConSanMoiAccessRecordFlagExactAddressGroupMask;
+    records[1] = records[0];
+    records[1].wave_id = 1;
+    records[1].event_index = 1;
+    header.access_record_count = cross_wave ? 2 : 1;
+    std::array<ConSanMoiDiagnosticRecord, 2> diagnostics{};
+    std::array<uint64_t, 4> shadow{};
+    const std::array<uint32_t, 1> proven{0x40};
+    const auto result = consan_moi_record_replay_access_records(
+        header, std::span(records).first(header.access_record_count), {}, {}, {}, diagnostics,
+        shadow, proven);
+    EXPECT_EQ(result.conflict, cross_wave);
+    EXPECT_EQ(result.emitted_diagnostic_count, cross_wave ? 1u : 0u);
+    if (cross_wave)
+      EXPECT_NE(diagnostics[0].first_owner_id, diagnostics[0].second_owner_id);
+  }
 }
 
 TEST(ConSanMoi, RecordReplayDistinctSameWaveGroupsConflictOnlyOnByteOverlap) {

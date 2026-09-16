@@ -574,6 +574,56 @@ function(rj_add_consan_device_conformance_cases)
         endforeach()
     endif()
 
+    foreach(_value_engine IN ITEMS sampled record-replay)
+        foreach(_value_case IN ITEMS IdenticalWords VaryingLastWord CrossWave)
+            # gfx1250 Sampled still has no exact-lane evidence. Replay covers
+            # its same-instruction collision; both engines cover cross-wave.
+            if(_device_TARGET STREQUAL "gfx1250" AND _value_engine STREQUAL "sampled"
+               AND _value_case STREQUAL "VaryingLastWord")
+                continue()
+            endif()
+            set(_value_race 1)
+            set(_value_clean 0)
+            if(_value_case STREQUAL "IdenticalWords")
+                set(_value_race 0)
+                set(_value_clean 1)
+            endif()
+            if(_value_engine STREQUAL "sampled")
+                set(_value_regex "sampled_conflicts=[1-9][0-9]*")
+                if(_value_clean)
+                    set(_value_regex "sampled_conflicts=0")
+                endif()
+            else()
+                set(_value_regex "conflict=true")
+                if(_value_clean)
+                    set(_value_regex "conflict=false")
+                endif()
+            endif()
+            rj_add_consan_hip_case(
+                NAME "${_device_PREFIX}.UniformValue.${_value_engine}.${_value_case}"
+                TARGET hip_consan_device_sampled_selection_${_device_TARGET}_test
+                FILTER "ConSanDeviceUniformValueTest.${_value_case}"
+                ${_config_args}
+                ${_resource_lock_args}
+                TIMEOUT 120
+                PASS_REGEX "${_value_regex}"
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_MODE=${_value_engine}"
+                    "RJ_CONSAN_LOG=3"
+                    "RJ_CONSAN_FAIL_CLOSED=1"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+                    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1"
+                    "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                    "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=${_value_race}"
+                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=${_value_clean}"
+                LABELS ${_labels} uniform-value
+            )
+        endforeach()
+    endforeach()
+
     # Production-rate qualification is separate from the dense semantic
     # matrix. Every selector is explicit to avoid inherited environment and
     # the helper's usual stride-1 override.

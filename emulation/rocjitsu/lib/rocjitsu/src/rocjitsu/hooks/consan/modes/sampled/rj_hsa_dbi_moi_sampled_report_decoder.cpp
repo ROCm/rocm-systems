@@ -72,7 +72,19 @@ AutoMoiSampledDecodedReport decode_auto_moi_sampled_report(
           const uint64_t relative = slot - candidate.first_slot;
           return relative < static_cast<uint64_t>(candidate.range_count) * candidate.bank_count;
         });
-    return mapping == sampled_static_mappings.end() ? nullptr : &*mapping;
+    if (mapping == sampled_static_mappings.end())
+      return static_cast<const AutoMoiSampledStaticMapping *>(nullptr);
+    if (mapping->uniform_lds_store) {
+      // A proof may suppress a diagnostic only with unambiguous attribution.
+      if (sampled_metadata->malformed ||
+          std::ranges::any_of(sampled_static_mappings, [&](const auto &other) {
+            return &other != &*mapping && slot >= other.first_slot &&
+                   uint64_t{slot - other.first_slot} <
+                       uint64_t{other.range_count} * other.bank_count;
+          }))
+        return static_cast<const AutoMoiSampledStaticMapping *>(nullptr);
+    }
+    return &*mapping;
   };
   uint32_t visible_sampled_sync_metadata = 0;
   uint64_t sampled_watchpoint_slots_examined = 0;

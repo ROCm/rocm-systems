@@ -32,6 +32,7 @@ make_moi_access_attribution(const ConSanObservationPlan &observation,
       .original_semantic_sites = {},
       .execution_owner_kernel_ids = {},
       .owner_provenance_complete = !candidate.site().execution_owners.empty(),
+      .uniform_lds_store = candidate.site().uniform_lds_store,
   };
   access.execution_owner_kernel_ids.reserve(candidate.site().execution_owners.size());
   for (const ConSanExecutionOwner &owner : candidate.site().execution_owners)

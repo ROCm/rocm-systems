@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_sync_analysis.h"
 #include "rocjitsu/code/patch/consan/consan_uniform_address.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/kernel_scope.h"
@@ -2206,19 +2207,32 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   }
 
   // Reuse the exact CFG boundaries already built for ownership. No facts
-  // cross a join, call, or EXEC change; selectable VGPR banks stay unsupported.
-  const bool indexed_register_mode = std::ranges::any_of(blocks, [](const auto &block) {
-    return std::ranges::any_of(block->instructions(), [](const Instruction &inst) {
+  // cross a join, call, or EXEC change. Selectable bank transitions remain
+  // unsupported; a transition-free CDNA5 object uses the ABI entry bank zero.
+  const bool indexed_register_mode = std::ranges::any_of(blocks, [arch](const auto &block) {
+    return std::ranges::any_of(block->instructions(), [arch](const Instruction &inst) {
       const auto name = inst.mnemonic();
       // A MODE write may enable indexed VGPR addressing on CDNA. Refuse the
       // entire object, including later blocks, rather than model that state.
-      return name.starts_with("s_set_gpr_idx") || name.starts_with("s_setreg");
+      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && name.starts_with("s_setreg") && inst.raw_encoding()) {
+        const auto slice = amdgpu::decode_vgpr_msb_hwreg(inst.raw_encoding()[0] & 0xffffu);
+        // gfx1250 compiler prologues write unrelated WAVE_MODE fields. Plain
+        // integer broadcasts are unaffected when the write misses VGPR_MSB.
+        if (slice.id == amdgpu::MODE_HWREG &&
+            (slice.begin >= 20 || slice.begin + slice.width <= 12))
+          return false;
+      }
+      return name.starts_with("s_set_gpr_idx") || name.starts_with("s_setreg") ||
+             (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+              (name.starts_with("s_set_vgpr_msb") ||
+               (inst.flags() & (INDIRECT_CALL | INDIRECT_BRANCH)) != 0));
     });
   });
-  if (arch != ROCJITSU_CODE_ARCH_CDNA5 && !indexed_register_mode) {
+  if (!indexed_register_mode) {
     std::unordered_map<uint64_t, std::vector<ConSanProgramSite *>> accesses;
     for (ConSanProgramSite &site : inventory.program_sites) {
       site.uniform_lds_address = false;
+      site.uniform_lds_store = false;
       if (site.lowering.form &&
           site.lowering.form->kind == ConSanAccessLoweringFormKind::NativeSingleRange &&
           site.lowering.form->address_vgpr && site.ranges.size() == 1u)
@@ -2228,8 +2242,20 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
       ConSanUniformAddressTracker tracker;
       for (const Instruction &inst : block->instructions()) {
         if (const auto found = accesses.find(inst.src_loc()); found != accesses.end())
-          for (ConSanProgramSite *site : found->second)
-            site->uniform_lds_address = tracker.contains(*site->lowering.form->address_vgpr);
+          for (ConSanProgramSite *site : found->second) {
+            const auto &form = *site->lowering.form;
+            const bool uniform_address = tracker.contains(*form.address_vgpr);
+            // Keep Sampled's existing exact-mask capability unchanged. For
+            // CDNA5, value suppression is safe only in an object with no bank
+            // transitions or indirect transfers (kernel-entry banks are zero).
+            site->uniform_lds_address = arch != ROCJITSU_CODE_ARCH_CDNA5 && uniform_address;
+            bool uniform_data = uniform_address && site->kind == ConSanLdsAccessKind::Write &&
+                                form.data_vgpr && form.data_register_count != 0 &&
+                                !form.second_data_vgpr;
+            for (uint32_t word = 0; uniform_data && word < form.data_register_count; ++word)
+              uniform_data = tracker.contains(*form.data_vgpr + word);
+            site->uniform_lds_store = uniform_data;
+          }
         tracker.observe(inst);
       }
     }

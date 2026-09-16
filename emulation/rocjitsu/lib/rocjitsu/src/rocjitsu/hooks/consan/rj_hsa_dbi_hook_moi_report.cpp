@@ -284,12 +284,14 @@ public:
               .owner_kernel_ids = {},
               .owner_provenance_complete = static_access.access.owner_provenance_complete &&
                                            !static_access.access.execution_owner_kernel_ids.empty(),
+              .uniform_lds_store = static_access.access.uniform_lds_store,
           });
           for (rocjitsu::ConSanProgramContainerId owner :
                static_access.access.execution_owner_kernel_ids)
             metadata.mappings.back().owner_kernel_ids.push_back(owner.ordinal);
         } else {
           mapping->owner_provenance_complete &= static_access.access.owner_provenance_complete;
+          mapping->uniform_lds_store &= static_access.access.uniform_lds_store;
           for (rocjitsu::ConSanProgramContainerId owner :
                static_access.access.execution_owner_kernel_ids) {
             if (std::ranges::find(mapping->owner_kernel_ids, owner.ordinal) ==
@@ -334,6 +336,7 @@ public:
               .owner_kernel_ids = {},
               .owner_provenance_complete = static_access.access.owner_provenance_complete &&
                                            !static_access.access.execution_owner_kernel_ids.empty(),
+              .uniform_lds_store = static_access.access.uniform_lds_store,
           });
           for (rocjitsu::ConSanProgramContainerId owner :
                static_access.access.execution_owner_kernel_ids)

@@ -20,6 +20,7 @@ struct AutoMoiRecordReplayStaticMapping {
   uint32_t instruction_offset = 0;
   std::vector<uint32_t> owner_kernel_ids;
   bool owner_provenance_complete = false;
+  bool uniform_lds_store = false;
 };
 
 struct AutoMoiSampledStaticMapping {
@@ -32,6 +33,7 @@ struct AutoMoiSampledStaticMapping {
   std::optional<uint16_t> scratch_vgpr;
   std::vector<uint32_t> owner_kernel_ids;
   bool owner_provenance_complete = false;
+  bool uniform_lds_store = false;
 };
 
 struct AutoMoiRecordReplayStaticMetadata {

@@ -145,12 +145,23 @@ analyze_auto_moi_record_replay(const ConSanMoiReportHeader &header,
       std::min(header.diagnostic_capacity, result.replay_header.access_record_count);
   result.diagnostics.resize(result.replay_header.diagnostic_capacity);
   std::vector<uint64_t> exact_shadow_entries(static_cast<size_t>(result.replay_shadow_entry_count));
+  std::vector<uint32_t> uniform_store_offsets;
+  if (!static_mapping_malformed) {
+    for (const auto &mapping : static_mappings)
+      if (mapping.uniform_lds_store)
+        uniform_store_offsets.push_back(mapping.instruction_offset);
+    std::ranges::sort(uniform_store_offsets);
+    // Conflicting duplicate attribution must never authorize suppression.
+    for (const auto &mapping : static_mappings)
+      if (!mapping.uniform_lds_store)
+        std::erase(uniform_store_offsets, mapping.instruction_offset);
+  }
   result.replay = consan_moi_record_replay_access_records(
       result.replay_header, access_records, barrier_records,
       std::span<const ConSanMoiRecordReplayAtomicEvent>(atomic_records.data(),
                                                         atomic_records.size()),
       std::span<const ConSanMoiRecordReplayFenceEvent>(fence_records.data(), fence_records.size()),
-      result.diagnostics, exact_shadow_entries);
+      result.diagnostics, exact_shadow_entries, uniform_store_offsets);
 
   const uint32_t raw_visible_diagnostics =
       std::min<uint32_t>(result.replay.emitted_diagnostic_count, result.diagnostics.size());

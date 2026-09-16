@@ -586,7 +586,20 @@ participating masks. Otherwise that side prints `unavailable`. A single-group
 write diagnostic splits one mask into its first lane and remaining lanes; it
 counts one conflict example rather than enumerating every lane pair. Read-only
 and atomic groups do not create these ordinary write/write diagnostics.
-Uniform addresses do not imply uniform values or suppress races. Existing
+Uniform addresses alone do not suppress races. Sampled and Record/Replay suppress
+only the lane collision within one ordinary native LDS store when static analysis
+proves both an identical address and identical data across its participating lanes.
+The proof checks every stored data register using local scalar/constant broadcasts
+and copies, and is discarded on clobbers, EXEC changes, or CFG boundaries. Unknown
+values retain the diagnostic. This is a narrow benign-machine-instruction policy,
+not a general rule that equal-value writes are synchronized.
+
+The store evidence remains available for cross-wave checking, including conflicts
+with reads and identical-valued writes from other waves. The proof adds no GPU
+value capture or comparison and does not enlarge report records. Record/Replay
+also supports this proof on gfx1250 objects without selectable-bank transitions
+or indirect transfers; unrelated WAVE_MODE writes that do not touch VGPR_MSB are
+allowed. Sampled's gfx1250 exact-lane limitation remains unchanged. Existing
 sampling still determines whether any evidence is retained.
 
 Report ABI version 13 adds an eight-byte exact mask to each causal window,
@@ -626,10 +639,9 @@ capacity permits. A later valid identity after every bank fills is
 separate counters and makes the analysis incomplete.
 
 Sampled diagnostics attribute the retained instruction, wave owner and byte
-range. They do not provide exact lane masks or diagnose intra-wave races.
-Window publication retains a representative access; its winning lanes and the
-saved EXEC mask do not identify every lane accessing that address. Dense
-sampling or additional banks do not recover that missing provenance.
+range. Exact masks and intra-wave diagnostics are limited to the locally proven
+uniform-address cases described above. Other windows retain representative
+accesses; dense sampling or additional banks do not recover missing lane provenance.
 
 A retained conflict prints `ambiguous` when overlapping static mappings name
 different original instructions for its slot. Missing mappings print

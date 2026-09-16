@@ -124,6 +124,63 @@ TEST(ConSanMoi, SampledUniformAddressFactsDoNotCrossCfgJoins) {
   EXPECT_FALSE(result.program_inventory.access_sites()[0].uniform_lds_address);
 }
 
+TEST(ConSanMoi, UniformStoreRequiresProvenAddressAndEveryDataWord) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  for (bool varying_address : {false, true}) {
+    for (bool varying_value : {false, true}) {
+      const std::vector<uint32_t> words{
+          build_v_mov_b32_e32(1, varying_address ? vector_source_vgpr(5) : 4u, arch),
+          build_v_mov_b32_e32(2, varying_value ? vector_source_vgpr(6) : 7u, arch), 0xd8340000u,
+          0x00000201u, // ds_store_b32 v1, v2
+          build_s_endpgm(arch)};
+      for (auto engine : {ConSanMoiEngine::Sampled, ConSanMoiEngine::RecordReplay}) {
+        const auto result =
+            test_lower_consan(make_rdna4_lds_code_object(words), moi_options(engine));
+        ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+        ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+        EXPECT_EQ(result.program_inventory.access_sites()[0].uniform_lds_store,
+                  !varying_address && !varying_value);
+      }
+    }
+  }
+}
+
+TEST(ConSanMoi, UniformStoreForgetsClobbersAndExecChanges) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  const auto exec = instrumentation::build_s_mov_b64(kAmdGpuExecLo, 6, arch);
+  ASSERT_TRUE(exec);
+  for (uint32_t invalidator : {*exec, build_v_mov_b32_e32(2, vector_source_vgpr(0), arch)}) {
+    const std::vector<uint32_t> words{build_v_mov_b32_e32(1, 4, arch),
+                                      build_v_mov_b32_e32(2, 7, arch),
+                                      invalidator,
+                                      0xd8340000u,
+                                      0x00000201u,
+                                      build_s_endpgm(arch)};
+    const auto result = test_lower_consan(make_rdna4_lds_code_object(words), moi_options());
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+    EXPECT_FALSE(result.program_inventory.access_sites()[0].uniform_lds_store);
+  }
+}
+
+TEST(ConSanMoi, UniformStoreGfx1250AllowsUnrelatedModeButRejectsBankWrites) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
+  for (const auto &[mode, expected] :
+       std::array{std::pair{0x0641u, true}, std::pair{0x0301u, false}}) {
+    std::vector<uint32_t> words{0xb9800000u | mode, 1u};
+    words.push_back(build_v_mov_b32_e32(1, 3, arch));
+    for (uint16_t reg = 20; reg < 24; ++reg)
+      words.push_back(build_v_mov_b32_e32(reg, 4, arch));
+    words.insert(words.end(), {0xdb7c0000u, 0x00001401u, build_s_endpgm(arch)});
+    const auto result = test_lower_consan(make_gfx1250_code_object(words, "uniform_value"),
+                                          moi_options(ConSanMoiEngine::RecordReplay));
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+    EXPECT_EQ(result.program_inventory.access_sites()[0].uniform_lds_store, expected);
+    EXPECT_FALSE(result.program_inventory.access_sites()[0].uniform_lds_address);
+  }
+}
+
 TEST(ConSan, SampledOwnsOneNormalizedScopeToReportAbiMapping) {
   EXPECT_EQ(consan_moi_sampled_sync_scope(ConSanMemoryScope::Wavefront),
             ConSanMoiSampledSyncScope::Wavefront);

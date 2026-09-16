@@ -756,6 +756,8 @@ struct ConSanStaticAccessAttribution {
   std::vector<SemanticSiteId> original_semantic_sites;
   std::vector<ConSanProgramContainerId> execution_owner_kernel_ids;
   bool owner_provenance_complete = false;
+  /// Proven identical-value, identical-address lanes of one store instruction.
+  bool uniform_lds_store = false;
 
   bool operator==(const ConSanStaticAccessAttribution &) const = default;
 };

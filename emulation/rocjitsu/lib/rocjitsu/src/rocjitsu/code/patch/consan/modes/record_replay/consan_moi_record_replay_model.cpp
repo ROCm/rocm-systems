@@ -415,7 +415,8 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     std::span<const ConSanMoiRecordReplayAtomicEvent> atomic_events,
     std::span<const ConSanMoiRecordReplayFenceEvent> fence_events,
     std::span<ConSanMoiDiagnosticRecord> diagnostic_records,
-    std::span<uint64_t> exact_shadow_entries) {
+    std::span<uint64_t> exact_shadow_entries,
+    std::span<const uint32_t> uniform_store_instruction_offsets) {
   auto span_size_u32 = [](size_t size) {
     return size > std::numeric_limits<uint32_t>::max() ? std::numeric_limits<uint32_t>::max()
                                                        : static_cast<uint32_t>(size);
@@ -936,7 +937,10 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
       state.exported_exact_shadow_entries[cell] = packed;
     }
     const std::optional<ConSanMoiDiagnosticRecord> intra_wave =
-        (record.flags & kConSanMoiAccessRecordFlagExactAddressGroupMask) != 0u
+        (record.flags & kConSanMoiAccessRecordFlagExactAddressGroupMask) != 0u &&
+                !std::binary_search(uniform_store_instruction_offsets.begin(),
+                                    uniform_store_instruction_offsets.end(),
+                                    record.instruction_offset)
             ? make_intra_wave_write_diagnostic(access)
             : std::nullopt;
     if (!intra_wave)

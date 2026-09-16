@@ -118,6 +118,9 @@ struct ConSanProgramSite {
   /// Identical effective interval across participating lanes, proven locally
   /// for an ordinary, single-range native LDS access. Unknown is false.
   bool uniform_lds_address = false;
+  /// Same-address ordinary store with every data word proven wave-uniform.
+  /// Only its intra-instruction collision is benign; cross-wave checks remain.
+  bool uniform_lds_store = false;
   /// CFG-derived kernels that can execute this physical instruction. This is
   /// the authoritative owner proof for access and synchronization consumers;
   /// derived events retain only `source_site` rather than copying it.

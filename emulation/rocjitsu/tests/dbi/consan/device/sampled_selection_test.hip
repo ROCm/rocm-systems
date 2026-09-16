@@ -176,3 +176,65 @@ TEST(ConSanDeviceSampledUniformTest, PartialExec) { run_uniform<5>(); }
 } // namespace
 
 TEST(ConSanDeviceSampledUniformTest, NonzeroCell) { run_uniform<7>(); }
+
+// Identical data must be proven for every word; one varying word is enough
+// to retain the intra-wave diagnostic. Multiple waves must still conflict.
+template <bool VaryLast> __global__ void uniform_value_b128(uint32_t *out, uint32_t seed) {
+  __shared__ alignas(16) uint32_t words[4];
+  uint32_t base =
+      __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(words)));
+  const uint32_t a = __builtin_amdgcn_readfirstlane(seed + 11);
+  const uint32_t b = __builtin_amdgcn_readfirstlane(seed + 22);
+  const uint32_t c = __builtin_amdgcn_readfirstlane(seed + 33);
+  const uint32_t d = __builtin_amdgcn_readfirstlane(seed + 44);
+#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
+#define RJ_VALUE_STORE "ds_write_b128 %0, v[20:23]\n\t"
+#else
+#define RJ_VALUE_STORE "ds_store_b128 %0, v[20:23]\n\t"
+#endif
+  uint32_t addr;
+  if constexpr (VaryLast) {
+    asm volatile("v_mov_b32 %0, %1\n\t"
+                 "v_mov_b32 v20, %2\n\t"
+                 "v_mov_b32 v21, %3\n\t"
+                 "v_mov_b32 v22, %4\n\t"
+                 "v_mov_b32 v23, %5\n\t" RJ_VALUE_STORE
+                 : "=&v"(addr)
+                 : "s"(base), "s"(a), "s"(b), "s"(c), "v"(threadIdx.x + d)
+                 : "v20", "v21", "v22", "v23", "memory");
+  } else {
+    asm volatile("v_mov_b32 %0, %1\n\t"
+                 "v_mov_b32 v20, %2\n\t"
+                 "v_mov_b32 v21, %3\n\t"
+                 "v_mov_b32 v22, %4\n\t"
+                 "v_mov_b32 v23, %5\n\t" RJ_VALUE_STORE
+                 : "=&v"(addr)
+                 : "s"(base), "s"(a), "s"(b), "s"(c), "s"(d)
+                 : "v20", "v21", "v22", "v23", "memory");
+  }
+#undef RJ_VALUE_STORE
+  __syncthreads();
+  if (threadIdx.x == 0)
+    for (unsigned i = 0; i < 4; ++i)
+      out[i] = words[i];
+}
+
+template <bool VaryLast> void run_uniform_value(unsigned waves) {
+  uint32_t *device = nullptr;
+  HIP_ASSERT(hipMalloc(&device, 4 * sizeof(uint32_t)));
+  uniform_value_b128<VaryLast><<<1, waves * consan_device_test::active_wave_size()>>>(device, 19);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  uint32_t result[4];
+  HIP_ASSERT(hipMemcpy(result, device, sizeof(result), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device));
+  EXPECT_EQ(result[0], 30u);
+  EXPECT_EQ(result[1], 41u);
+  EXPECT_EQ(result[2], 52u);
+  if constexpr (!VaryLast)
+    EXPECT_EQ(result[3], 63u);
+}
+
+TEST(ConSanDeviceUniformValueTest, IdenticalWords) { run_uniform_value<false>(1); }
+TEST(ConSanDeviceUniformValueTest, VaryingLastWord) { run_uniform_value<true>(1); }
+TEST(ConSanDeviceUniformValueTest, CrossWave) { run_uniform_value<false>(2); }

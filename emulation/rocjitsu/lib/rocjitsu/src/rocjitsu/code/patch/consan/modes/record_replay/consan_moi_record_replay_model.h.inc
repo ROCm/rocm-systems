@@ -37,10 +37,13 @@ consan_moi_access_record_is_unpublished(const ConSanMoiAccessRecord &record) {
          record.site_token == 0 && record.flags == 0;
 }
 
+/// uniform_store_instruction_offsets is a sorted host-proven set of stores whose
+/// same-instruction lane collisions are benign. Records still enter the shadow.
 [[nodiscard]] ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     ConSanMoiReportHeader &header, std::span<const ConSanMoiAccessRecord> access_records,
     std::span<const ConSanMoiBarrierRecord> barrier_records,
     std::span<const ConSanMoiRecordReplayAtomicEvent> atomic_events,
     std::span<const ConSanMoiRecordReplayFenceEvent> fence_events,
     std::span<ConSanMoiDiagnosticRecord> diagnostic_records,
-    std::span<uint64_t> exact_shadow_entries);
+    std::span<uint64_t> exact_shadow_entries,
+    std::span<const uint32_t> uniform_store_instruction_offsets = {});
