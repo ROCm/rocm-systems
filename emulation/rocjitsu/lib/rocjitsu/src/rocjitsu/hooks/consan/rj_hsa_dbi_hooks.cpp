@@ -2227,7 +2227,25 @@ public:
     moi_forbid_overflow_ = config.moi_forbid_overflow;
     moi_runtime_sample_stride_ = config.moi_runtime_sample_stride;
     moi_runtime_sample_offset_ = config.moi_runtime_sample_offset;
-    configure_auto_moi_epoch_analysis(config.moi_epoch_analysis);
+    configure_auto_moi_epoch_analysis(config.moi_epoch_analysis, config.moi_sampled_conflict_limit,
+                                      config.moi_sampled_total_conflict_limit);
+    if (config.flavor == ConSanFlavor::Moi && config.moi_engine == ConSanMoiEngine::Sampled) {
+      const auto cell = config.sampled_cell_selection();
+      log_message(kLogInfo,
+                  "ConSan Sampled configuration static_stride=%u static_offset=%u "
+                  "workgroup_stride=%u workgroup_offset=%u cell_stride=%u cell_offset=%u "
+                  "selection=%s requested_banks=%s report_ceiling=%llu epoch_analysis=%s "
+                  "per_report_limit=%u session_limit=%u preset=%s",
+                  config.moi_sample_stride, config.moi_sample_offset,
+                  config.moi_runtime_sample_stride, config.moi_runtime_sample_offset, cell.stride,
+                  cell.offset, config.moi_sampled_cell_selection ? "independent" : "legacy-coupled",
+                  config.moi_sampled_banks == 0 ? "auto"
+                                                : std::to_string(config.moi_sampled_banks).c_str(),
+                  static_cast<unsigned long long>(config.moi_auto_report_buffer_size),
+                  moi_epoch_analysis_policy_name(config.moi_epoch_analysis).c_str(),
+                  config.moi_sampled_conflict_limit, config.moi_sampled_total_conflict_limit,
+                  config.moi_sampled_preset);
+    }
     fault_load_selector_.reset();
     if (config.fault_load_occurrence)
       fault_load_selector_.emplace(*config.fault_load_occurrence);
@@ -2351,7 +2369,9 @@ public:
         config.requested_moi_epoch_vgpr ? std::to_string(*config.requested_moi_epoch_vgpr).c_str()
                                         : "unset",
         config.moi_runtime_sample_stride,
-        config.moi_runtime_sample_stride_explicit ? "expert-override" : "standard-profile",
+        config.moi_runtime_sample_stride_explicit                  ? "expert-override"
+        : std::string_view(config.moi_sampled_preset) != "default" ? "sampled-preset"
+                                                                   : "standard-profile",
         moi_epoch_analysis_policy_name(config.moi_epoch_analysis).c_str(),
         config.moi_report_buffer_address ? std::to_string(*config.moi_report_buffer_address).c_str()
                                          : "disabled",
@@ -2451,6 +2471,7 @@ public:
     const bool moi_forbid_overflow = moi_forbid_overflow_;
     const uint32_t moi_runtime_sample_stride = moi_runtime_sample_stride_;
     const uint32_t moi_runtime_sample_offset = moi_runtime_sample_offset_;
+    const auto moi_cell_selection = config_ ? config_->moi_sampled_cell_selection : std::nullopt;
     const KernelPrivateDispatchRegistry::DispatchSummary dispatch_summary =
         KernelPrivateDispatchRegistry::instance().dispatch_summary();
     const std::vector<KernelPrivateDispatchRegistry::AllowlistEntrySummary> allowlist_summary =
@@ -2722,13 +2743,28 @@ public:
                      "kernel object\n",
                      static_cast<unsigned long long>(moi_report_summary.buffer_count),
                      static_cast<unsigned long long>(dispatch_summary.packet_count));
+      } else if (moi_cell_selection &&
+                 (moi_runtime_sample_stride > 1u || moi_cell_selection->stride > 1u)) {
+        std::fprintf(stderr,
+                     "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_REQUIRE_RECORDS requested, but %llu auto "
+                     "MOI report buffer(s) contained zero visible records after %llu "
+                     "instrumented dispatch packet(s); independent sampling may have selected no "
+                     "workgroups or LDS cells (workgroup_stride=%u workgroup_offset=%u "
+                     "cell_stride=%u cell_offset=%u). Set RJ_CONSAN_MOI_WORKGROUP_SAMPLE_STRIDE=1 "
+                     "and RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE=1 with both offsets zero to "
+                     "distinguish sampling gaps from dense-path gaps\n",
+                     static_cast<unsigned long long>(moi_report_summary.buffer_count),
+                     static_cast<unsigned long long>(dispatch_summary.instrumented_packet_count),
+                     moi_runtime_sample_stride, moi_runtime_sample_offset,
+                     moi_cell_selection->stride, moi_cell_selection->offset);
       } else if (moi_runtime_sample_stride > 1u) {
         std::fprintf(stderr,
                      "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_REQUIRE_RECORDS requested, but %llu auto "
                      "MOI report buffer(s) contained zero visible records after %llu "
                      "instrumented dispatch packet(s); runtime sampling may have selected no "
                      "workgroups, or selected workgroups may not have executed an instrumented "
-                     "site (stride=%u offset=%u). Set RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1 to "
+                     "site (stride=%u offset=%u). Set RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1 "
+                     "and RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET=0 to "
                      "distinguish sampling gaps from dense-path gaps\n",
                      static_cast<unsigned long long>(moi_report_summary.buffer_count),
                      static_cast<unsigned long long>(dispatch_summary.instrumented_packet_count),

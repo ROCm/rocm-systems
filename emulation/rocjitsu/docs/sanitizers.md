@@ -135,8 +135,9 @@ exhaustive load-time waitcheck first. A waitcheck diagnostic is printed with a
 `rocjitsu-waitcheck:` prefix, then ConSan continues with DBI. Add
 `RJ_CONSAN_LOG=1` only when you want verbose pass and instrumentation summaries.
 
-Record/Replay is the default. Select another analysis with
-`RJ_CONSAN_MODE=inline-shadow`, `sampled`, or `supercollider`. For a focused
+Sampled is the default, using bounded sampled evidence and probabilistic
+detection. Select another analysis with `RJ_CONSAN_MODE=record-replay`,
+`inline-shadow`, or `supercollider`. For a focused
 test where incomplete instrumentation must fail, add
 `RJ_CONSAN_POLICY=strict`; race diagnostics themselves remain non-fatal.
 

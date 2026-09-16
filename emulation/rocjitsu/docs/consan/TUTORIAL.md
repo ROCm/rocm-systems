@@ -24,7 +24,7 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" \
   ./application
 ```
 
-Loading the hook selects ConSan's mechanical default, MOI Record/Replay, and
+Loading the hook selects ConSan's default, MOI Sampled, and
 its standard settings. ConSan discovers relevant sites and manages registers,
 report memory, synchronization tracking, and other instrumentation resources
 automatically.
@@ -38,6 +38,11 @@ before running it:
 export LD_LIBRARY_PATH="$ROCM_DIST_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
 
+For small repros, use `RJ_CONSAN_MOI_SAMPLED_PRESET=high`; use `max` to remove
+workgroup and cell sampling. `low` trades coverage for lower recording overhead,
+and `default` preserves standard behavior. See [Sampled presets](USAGE.md#sampled-presets)
+for exact settings, overrides, and bounded-retention limitations.
+
 ## 3. Read the result
 
 At `RJ_CONSAN_LOG=1`, first verify that applicable code was transformed:
@@ -48,21 +53,23 @@ ConSan coverage ... access=... barrier=... atomic=... fence=...
 ConSan analysis verdict ... static_complete=... dynamic_complete=...
 ```
 
-The default analysis then reports a bounded host-side replay in a line shaped
-like:
+The default analysis reports retained sampled evidence and conflict counts:
 
 ```text
-ConSan MOI auto replay ... diagnostics=N conflict=true|false ...
+ConSan MOI auto report ... visible_sampled=N ... sampled_conflicts=N ...
+ConSan MOI auto sampled conflict ... first_instruction=... second_instruction=...
 ```
 
-This default is called **MOI Record/Replay**. It instruments admitted memory and
-synchronization sites, retains a bounded snapshot of runtime events, and
-reconstructs their ordering on the host.
+This default is called **MOI Sampled**. It instruments admitted memory and
+synchronization sites, retains bounded causal windows selected at runtime, and
+checks their ordering on the host. Its standard runtime sampling stride is 256
+with offset zero; the workgroup and LDS-cell selectors can also be configured
+independently (see [USAGE.md](USAGE.md#moi-event-and-sampling-controls)).
 
-`conflict=true` with an attributed replay diagnostic is positive ConSan
-evidence. `conflict=false` means only that the retained bounded snapshot did
-not expose a conflict. Complete static-site instrumentation does not guarantee
-that every dynamic event survived for replay.
+A nonzero `sampled_conflicts` count with an attributed diagnostic is positive
+ConSan evidence. Zero means only that the retained samples exposed no conflict;
+unsampled accesses and bounded retention can hide races. Complete static-site
+instrumentation does not guarantee complete dynamic evidence.
 
 If the application's own correctness checks still pass, ConSan preserved the
 result for that run. That does not make a clean ConSan report proof of race
@@ -73,15 +80,15 @@ a ConSan diagnostic.
 
 (Full document: [FLAVORS.md](FLAVORS.md))
 
-The default is a useful inspectable starting point. Select another mode when
+The default favors lower overhead and bounded evidence. Select another mode when
 its evidence model better matches the investigation; ConSan offers two other
 MOI engines and the complementary SuperCollider flavor.
 
 | Flavor | Engine | Useful positive evidence | Main tradeoff |
 | --- | --- | --- | --- |
-| MOI (default) | **Record/Replay (default)** | Host replay emits an attributed conflict from its retained snapshot. | Clear, inspectable model, but runtime history is bounded. |
+| MOI (default) | **Record/Replay** | Host replay emits an attributed conflict from its retained snapshot. | Clear, inspectable model, but runtime history is bounded. |
 | MOI (default) | **Inline Shadow** | The GPU emits an immediate diagnostic for a supported access. | Strong device-side attribution with more device work. |
-| MOI (default) | **Sampled** | A retained statistical campaign emits sampled conflicts. | Lower retained state with probabilistic detection. |
+| MOI (default) | **Sampled (default)** | A retained statistical campaign emits sampled conflicts. | Lower retained state with probabilistic detection. |
 | **SuperCollider** | — | A delayed redundant observation changes the automatic mismatch marker. | Complementary instability signal, not a happens-before diagnosis. |
 
 ### Other MOI engines
@@ -98,12 +105,12 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" \
   ./application
 ```
 
-Use Sampled for broad statistical campaigns where probabilistic detection is
-acceptable:
+Use Record/Replay when inspecting retained synchronization history and the
+host replay model is central:
 
 ```sh
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_MODE=sampled \
+  RJ_CONSAN_MODE=record-replay \
   RJ_CONSAN_LOG=1 \
   ./application
 ```

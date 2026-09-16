@@ -134,20 +134,62 @@ AutoMoiModeRendering render_auto_moi_sampled_report(
                       static_cast<unsigned long long>(input.reader),
                       mode.evidence.size() - kSampledLogLimit, kSampledLogLimit)});
   }
-  if (analysis.first_conflict) {
-    const AutoMoiSampledEvidence &first = analysis.first_conflict->first;
-    const AutoMoiSampledEvidence &second = analysis.first_conflict->second;
+  result.summary_fields += format_auto_moi_report_text(
+      " sampled_conflict_examples=%zu sampled_conflict_pairs_without_example=%u",
+      analysis.conflicts.size(),
+      analysis.conflict_count - static_cast<uint32_t>(analysis.conflicts.size()));
+  for (const auto &[first, second] : analysis.conflicts) {
+    const auto lane_text = [](uint64_t mask) {
+      return mask ? format_auto_moi_report_text("0x%016llx", static_cast<unsigned long long>(mask))
+                  : std::string("unavailable");
+    };
+
+    const auto instruction = [&](const AutoMoiSampledEvidence &entry) {
+      const auto *metadata = input.static_metadata
+                                 ? std::get_if<AutoMoiSampledStaticMetadata>(input.static_metadata)
+                                 : nullptr;
+      std::optional<uint64_t> offset;
+      if (metadata) {
+        // Check only retained diagnostics. The decoder's first matching
+        // mapping is insufficient to promise a unique instruction location.
+        for (const auto &mapping : metadata->mappings) {
+          if (entry.index < mapping.first_slot ||
+              static_cast<uint64_t>(entry.index - mapping.first_slot) >=
+                  static_cast<uint64_t>(mapping.range_count) * mapping.bank_count)
+            continue;
+          if (offset && *offset != mapping.instruction_offset)
+            return std::string("ambiguous");
+          offset = mapping.instruction_offset;
+        }
+      } else if (entry.static_mapping) {
+        offset = entry.static_mapping->instruction_offset;
+      }
+      return offset
+                 ? format_auto_moi_report_text("0x%llx", static_cast<unsigned long long>(*offset))
+                 : std::string("unavailable");
+    };
+    const std::string first_instruction = instruction(first);
+    const std::string second_instruction = instruction(second);
     result.details.push_back(
-        {kDetail, format_auto_moi_report_text(
-                      "ConSan MOI auto sampled conflict reader=%llu first_index=%u second_index=%u "
-                      "first_kind=%u second_kind=%u first_owner=%u second_owner=%u epoch=%u "
-                      "generation=%u first_bytes=[%u,%u) second_bytes=[%u,%u)",
-                      static_cast<unsigned long long>(input.reader), first.index, second.index,
-                      static_cast<uint32_t>(first.entry.kind),
-                      static_cast<uint32_t>(second.entry.kind), first.entry.owner_id,
-                      second.entry.owner_id, second.entry.epoch, second.entry.generation,
-                      first.entry.start_byte, first.entry.start_byte + first.entry.byte_count,
-                      second.entry.start_byte, second.entry.start_byte + second.entry.byte_count)});
+        {kDetail,
+         format_auto_moi_report_text(
+             "ConSan MOI auto sampled conflict reader=%llu first_index=%u second_index=%u "
+             "first_kind=%u second_kind=%u first_owner=%u second_owner=%u epoch=%u "
+             "generation=%u first_bytes=[%u,%u) second_bytes=[%u,%u) "
+             "code_object=%.*s first_instruction=%s second_instruction=%s "
+             "dispatch=0x%llx workgroup=(%u,%u,%u) cluster_workgroup=%u "
+             "first_lanes=%s second_lanes=%s",
+             static_cast<unsigned long long>(input.reader), first.index, second.index,
+             static_cast<uint32_t>(first.entry.kind), static_cast<uint32_t>(second.entry.kind),
+             first.entry.owner_id, second.entry.owner_id, second.entry.epoch,
+             second.entry.generation, first.entry.start_byte,
+             first.entry.start_byte + first.entry.byte_count, second.entry.start_byte,
+             second.entry.start_byte + second.entry.byte_count,
+             static_cast<int>(input.input_fingerprint.size()), input.input_fingerprint.data(),
+             first_instruction.c_str(), second_instruction.c_str(),
+             static_cast<unsigned long long>(second.dispatch_id), second.workgroup_x,
+             second.workgroup_y, second.workgroup_z, second.cluster_workgroup_id,
+             lane_text(first.exact_lane_mask).c_str(), lane_text(second.exact_lane_mask).c_str())});
   }
   return result;
 }

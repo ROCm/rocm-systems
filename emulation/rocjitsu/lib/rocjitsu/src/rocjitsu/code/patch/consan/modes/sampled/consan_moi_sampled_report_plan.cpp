@@ -107,7 +107,7 @@ fit_consan_moi_sampled_auto_report_inventory(ConSanMoiAutoReportInventory invent
 }
 
 bool ConSanSampledEvidenceRequirements::well_formed() const {
-  if (sizing_inventory.diagnostic_count != sizing_inventory.access_range_count ||
+  if (sizing_inventory.diagnostic_count != 0u ||
       sizing_inventory.sampled_bank_count_adaptive != (sizing_inventory.access_range_count != 0u)) {
     return false;
   }
@@ -147,18 +147,18 @@ consan_moi_impl::plan_sampled_evidence_requirements(const MoiEvidencePlanningCon
   (void)consan_moi_impl::accumulate_moi_evidence_counts(
       context.observation_plan, context.maximum_access_probe_count, inventory);
 
-  constexpr uint64_t kSampledBanksPerLogicalRange = 8u;
-  const uint64_t access_banks =
-      util::saturating_mul(inventory.access_range_count, kSampledBanksPerLogicalRange);
+  const uint64_t banks_per_range = context.sampled_banks == 0 ? 8u : context.sampled_banks;
+  const uint64_t access_banks = util::saturating_mul(inventory.access_range_count, banks_per_range);
   inventory.sampled_range_bank_count = access_banks;
   const uint64_t sampled_slots =
       access_banks == 0u ? 0u : util::saturating_add(access_banks, inventory.atomic_event_count);
   inventory.sampled_sync_slot_count = sampled_slots;
   inventory.sampled_watchpoint_count = sampled_slots;
   inventory.sampled_bank_count_adaptive = inventory.access_range_count != 0u;
-  inventory.diagnostic_count = inventory.access_range_count == 0u
-                                   ? 0u
-                                   : std::max<uint64_t>(inventory.access_range_count, 1u);
+  // Sampled diagnoses on the host; its optional immediate checker only
+  // increments event_counter. No device diagnostic records are published.
+  // Reclaim this unused reservation to pay for exact masks without losing banks.
+  inventory.diagnostic_count = 0u;
   inventory =
       fit_consan_moi_sampled_auto_report_inventory(inventory, context.requested_report_buffer_size);
 

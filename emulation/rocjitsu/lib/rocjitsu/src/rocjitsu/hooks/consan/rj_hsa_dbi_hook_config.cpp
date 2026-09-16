@@ -464,7 +464,7 @@ void warn_env(const char *name, const char *message) {
   const char *value = std::getenv("RJ_CONSAN_MODE");
   if (value == nullptr || *value == '\0') {
     config->flavor = rocjitsu::ConSanFlavor::Moi;
-    config->moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
+    config->moi_engine = rocjitsu::ConSanMoiEngine::Sampled;
     return true;
   }
 
@@ -539,6 +539,8 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
           "RJ_CONSAN_MOI_SAMPLE_STRIDE",
           "RJ_CONSAN_MOI_SAMPLE_OFFSET",
           "RJ_CONSAN_MOI_SAMPLED_CHECK",
+          "RJ_CONSAN_MOI_SAMPLED_CONFLICT_LIMIT",
+          "RJ_CONSAN_MOI_SAMPLED_TOTAL_CONFLICT_LIMIT",
       };
       for (const char *name : kSampledOnlyKnobs) {
         if (env_has_value(name))
@@ -592,6 +594,8 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE",
       "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
       "RJ_CONSAN_MOI_SAMPLED_CHECK",
+      "RJ_CONSAN_MOI_SAMPLED_CONFLICT_LIMIT",
+      "RJ_CONSAN_MOI_SAMPLED_TOTAL_CONFLICT_LIMIT",
       "RJ_CONSAN_MOI_EPOCH_ANALYSIS",
   };
   for (const char *name : kMoiOnlyKnobs) {
@@ -861,15 +865,85 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     return std::nullopt;
   if (!parse_u32_env("RJ_CONSAN_MOI_SAMPLE_OFFSET", 0, &config.moi_sample_offset))
     return std::nullopt;
+  // Presets supply selector defaults only. Explicit selectors keep their
+  // existing precedence and validation; the default preset preserves coupled
+  // selection exactly, including legacy offset overrides.
+  uint32_t workgroup_default = moi_mode_policy.default_runtime_sample_stride;
+  uint32_t cell_default = workgroup_default;
+  if (const char *preset = std::getenv("RJ_CONSAN_MOI_SAMPLED_PRESET");
+      preset != nullptr && *preset != '\0') {
+    if (config.flavor != rocjitsu::ConSanFlavor::Moi ||
+        config.moi_engine != rocjitsu::ConSanMoiEngine::Sampled) {
+      std::fprintf(stderr, "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_SAMPLED_PRESET requires Sampled\n");
+      return std::nullopt;
+    }
+    if (ascii_iequals(preset, "default")) {
+      config.moi_sampled_preset = "default";
+    } else if (ascii_iequals(preset, "low")) {
+      config.moi_sampled_preset = "low";
+      workgroup_default = cell_default = 1024;
+    } else if (ascii_iequals(preset, "high")) {
+      config.moi_sampled_preset = "high";
+      workgroup_default = 1;
+      cell_default = 4;
+    } else if (ascii_iequals(preset, "max")) {
+      config.moi_sampled_preset = "max";
+      workgroup_default = cell_default = 1;
+    } else {
+      std::fprintf(stderr,
+                   "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_SAMPLED_PRESET='%s'; "
+                   "expected low|default|high|max\n",
+                   preset);
+      return std::nullopt;
+    }
+  }
+  const bool legacy_sample_selection = env_has_value("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE") ||
+                                       env_has_value("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET");
+  const bool explicit_independent_selection =
+      env_has_value("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_STRIDE") ||
+      env_has_value("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_OFFSET") ||
+      env_has_value("RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE") ||
+      env_has_value("RJ_CONSAN_MOI_CELL_SAMPLE_OFFSET");
   config.moi_runtime_sample_stride_explicit = env_has_value("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE");
-  const uint32_t runtime_sample_stride_default = config.flavor == rocjitsu::ConSanFlavor::Moi
-                                                     ? moi_mode_policy.default_runtime_sample_stride
-                                                     : 1u;
+  const uint32_t runtime_sample_stride_default =
+      config.flavor == rocjitsu::ConSanFlavor::Moi ? workgroup_default : 1u;
   if (!parse_u32_env("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", runtime_sample_stride_default,
-                     &config.moi_runtime_sample_stride))
+                     &config.moi_runtime_sample_stride) ||
+      !parse_u32_env("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", 0, &config.moi_runtime_sample_offset))
     return std::nullopt;
-  if (!parse_u32_env("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", 0, &config.moi_runtime_sample_offset))
+  const bool independent_sample_selection =
+      explicit_independent_selection ||
+      (!legacy_sample_selection && workgroup_default != cell_default);
+  if (independent_sample_selection) {
+    if (config.flavor != rocjitsu::ConSanFlavor::Moi ||
+        config.moi_engine != rocjitsu::ConSanMoiEngine::Sampled || legacy_sample_selection) {
+      std::fprintf(stderr, "[rocjitsu-dbi-hooks] independent workgroup/cell selectors require "
+                           "Sampled and cannot be combined with legacy runtime selectors\n");
+      return std::nullopt;
+    }
+    rocjitsu::ConSanSampleSelector cell;
+    if (!parse_u32_env("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_STRIDE", workgroup_default,
+                       &config.moi_runtime_sample_stride) ||
+        !parse_u32_env("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_OFFSET", 0,
+                       &config.moi_runtime_sample_offset) ||
+        !parse_u32_env("RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE", cell_default, &cell.stride) ||
+        !parse_u32_env("RJ_CONSAN_MOI_CELL_SAMPLE_OFFSET", 0, &cell.offset))
+      return std::nullopt;
+    config.moi_sampled_cell_selection = cell;
+    config.moi_runtime_sample_stride_explicit = explicit_independent_selection;
+  }
+  if (!parse_u32_env("RJ_CONSAN_MOI_SAMPLED_BANKS", 0, &config.moi_sampled_banks))
     return std::nullopt;
+  if (!parse_u32_env("RJ_CONSAN_MOI_SAMPLED_CONFLICT_LIMIT", 8,
+                     &config.moi_sampled_conflict_limit) ||
+      !parse_u32_env("RJ_CONSAN_MOI_SAMPLED_TOTAL_CONFLICT_LIMIT", 64,
+                     &config.moi_sampled_total_conflict_limit))
+    return std::nullopt;
+  if (config.moi_sampled_conflict_limit > 1024 || config.moi_sampled_total_conflict_limit > 65536) {
+    std::fprintf(stderr, "[rocjitsu-dbi-hooks] sampled conflict limits exceed bounds "
+                         "(per report: 1024, per hook session: 65536)\n");
+    return std::nullopt;
+  }
   if (!parse_moi_epoch_analysis_env(&config.moi_epoch_analysis))
     return std::nullopt;
   if (!refresh_report_config_from_env(&config))

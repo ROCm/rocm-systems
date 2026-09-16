@@ -8,7 +8,7 @@ ConSan
 ├── SuperCollider
 └── MOI
     ├── Record/Replay
-    ├── Sampled
+    ├── Sampled (default)
     └── Inline Shadow
 ```
 
@@ -113,8 +113,8 @@ diagnostic.
 
 ## Choosing a mode
 
-The coded default is **Record/Replay**. It is a useful inspectable starting
-point, not a claim of exhaustive history.
+The default is **Sampled**, using bounded retained evidence and runtime
+sampling to limit overhead. A clean sampled report is not proof of race freedom.
 
 - Choose **Inline Shadow** when immediate supported-form attribution matters
   more than device cost.

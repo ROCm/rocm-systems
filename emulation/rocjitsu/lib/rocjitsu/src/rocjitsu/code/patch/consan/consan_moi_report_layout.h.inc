@@ -3,7 +3,7 @@
 /// assume that one sampled causal window holds only one watchpoint, or that
 /// all Inline ordering tables have the same capacity.
 struct ConSanMoiAutoReportInventory {
-  ConSanMoiEngine engine = ConSanMoiEngine::RecordReplay;
+  ConSanMoiEngine engine = ConSanMoiEngine::Sampled;
   uint64_t access_range_count = 0;
   uint64_t barrier_event_count = 0;
   uint64_t atomic_event_count = 0;

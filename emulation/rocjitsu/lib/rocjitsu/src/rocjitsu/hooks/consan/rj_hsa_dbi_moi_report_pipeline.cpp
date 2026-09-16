@@ -32,7 +32,12 @@ AutoMoiReportPipelineResult process_auto_moi_report(const AutoMoiReportPipelineI
       render_auto_moi_report({input, decoded, summary, analysis ? &analysis->mode : nullptr});
   for (const AutoMoiReportDiagnostic &diagnostic : diagnostics)
     log_message(kLogInfo, "%s", diagnostic.text.c_str());
-  return {.summary = summary, .complete = decoded.complete()};
+  const auto *sampled_analysis =
+      analysis ? std::get_if<AutoMoiSampledConflictAnalysis>(&analysis->mode) : nullptr;
+  return {.summary = summary,
+          .complete = decoded.complete(),
+          .sampled_conflict_example_count =
+              sampled_analysis ? static_cast<uint32_t>(sampled_analysis->conflicts.size()) : 0u};
 }
 
 AutoMoiReportSummary summarize_auto_moi_report(const AutoMoiReportPipelineInput &input,

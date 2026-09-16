@@ -50,7 +50,7 @@ enum class ConSanMoiFenceEventKind : uint8_t {
 };
 
 inline constexpr uint32_t kConSanMoiReportMagic = 0x494f4d43u; // "CMOI" little-endian.
-inline constexpr uint32_t kConSanMoiReportAbiVersion = 12;
+inline constexpr uint32_t kConSanMoiReportAbiVersion = 13;
 inline constexpr uint32_t kConSanMoiReportFlagRecordReplayBankSaturated = 1u << 0u;
 inline constexpr uint32_t kConSanMoiReportFlagRecordReplayDispatchBankSaturated = 1u << 1u;
 inline constexpr uint32_t kConSanMoiReportFlagRecordReplayOwnerBankSaturated = 1u << 2u;
@@ -210,6 +210,9 @@ struct alignas(8) ConSanMoiSampledCausalWindow {
   // Zero for ordinary dispatches. On CDNA5 clustered kernels this carries
   // the launch-provided workgroup-within-cluster identity.
   uint32_t cluster_workgroup_id = 0;
+  // Zero means unavailable. Published with the winning access under the
+  // window claim, before Ready; reset with the rest of the report epoch.
+  uint64_t exact_lane_mask = 0;
 };
 
 struct alignas(8) ConSanMoiSampledSyncMetadataPacked {
@@ -247,7 +250,7 @@ static_assert(sizeof(ConSanMoiAccessRecord) == 80);
 static_assert(sizeof(ConSanMoiBarrierRecord) == 40);
 static_assert(sizeof(ConSanMoiAtomicRecord) == 80);
 static_assert(sizeof(ConSanMoiFenceRecord) == 56);
-static_assert(sizeof(ConSanMoiSampledCausalWindow) == 48);
+static_assert(sizeof(ConSanMoiSampledCausalWindow) == 56);
 static_assert(sizeof(ConSanMoiSampledSyncMetadataPacked) == 24);
 static_assert(sizeof(ConSanMoiSampledPendingAcquireSlot) == 72);
 

@@ -168,6 +168,7 @@ struct MoiEvidencePlanningContext {
   std::optional<uint64_t> maximum_access_probe_count;
   std::optional<uint32_t> maximum_workgroup_lds_bytes;
   bool dynamic_access_records = false;
+  uint32_t sampled_banks = 0;
 };
 
 /// Mode-owned representation selected when no code-object-wide transient

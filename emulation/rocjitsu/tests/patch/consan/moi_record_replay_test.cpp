@@ -8896,8 +8896,8 @@ TEST(ConSanMoi, Cdna4RecordReplayScalarSpillBypassesEmptyExec) {
   // complete instrumentation transaction, including scalar restoration.
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
-  const auto body = text_words_at_offset(patched, access_patch->trampoline_offset,
-                                         access_patch->trampoline_size);
+  const auto body =
+      text_words_at_offset(patched, access_patch->trampoline_offset, access_patch->trampoline_size);
   ASSERT_FALSE(body.empty());
   const int16_t distance = static_cast<int16_t>(body.front() & 0xffffu);
   const auto guard = instrumentation::build_s_cbranch_execz(distance, kArch);
@@ -12846,6 +12846,7 @@ TEST(ConSanMoi, FenceRecordPatchRejectsStaleCommunicationIdentityWithoutGuessing
   ASSERT_FALSE(bytes.empty());
   MoiOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::Moi;
+  inventory_options.moi_engine = ConSanMoiEngine::RecordReplay;
   ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
   ASSERT_TRUE(inventory.errors.empty());
   ASSERT_EQ(inventory.program_inventory.sync().moi_fence_candidates.size(), 2u);
@@ -12892,6 +12893,7 @@ TEST(ConSanMoi, FenceRecordTreatsUnownedRuntimeCommunicationAsNotApplicable) {
   ASSERT_FALSE(bytes.empty());
   MoiOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::Moi;
+  inventory_options.moi_engine = ConSanMoiEngine::RecordReplay;
   ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
   ASSERT_TRUE(inventory.errors.empty());
   ASSERT_EQ(inventory.program_inventory.sync().moi_fence_candidates.size(), 2u);

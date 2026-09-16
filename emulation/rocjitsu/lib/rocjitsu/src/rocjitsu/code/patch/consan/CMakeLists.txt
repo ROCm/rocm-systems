@@ -53,6 +53,7 @@ rj_add_object_library(
         consan_fault_selection.cpp
         consan_program_analysis.cpp
         consan_sync_analysis.cpp
+        consan_uniform_address.cpp
 )
 target_link_libraries(
     rocjitsu_consan_analysis

@@ -90,6 +90,9 @@ struct HookConfig : rocjitsu::ConSanRequest,
   bool moi_auto_report_buffer_size_explicit = false;
   bool max_patches_explicit = false;
   bool moi_runtime_sample_stride_explicit = false;
+  const char *moi_sampled_preset = "default";
+  uint32_t moi_sampled_conflict_limit = 8;
+  uint32_t moi_sampled_total_conflict_limit = 64;
   enum class MoiEpochAnalysisKind : uint8_t { Every, Nth, Periodic, Manual };
   struct MoiEpochAnalysisPolicy {
     MoiEpochAnalysisKind kind = MoiEpochAnalysisKind::Every;
@@ -369,7 +372,9 @@ void bind_auto_moi_report_buffer_to_executable(uint64_t reader, uint64_t generat
                                                hsa_executable_t executable);
 void discard_auto_moi_report_buffer(CoreApiTable *core, uint64_t reader, uint64_t generation);
 void retire_auto_moi_report_buffers(CoreApiTable *core, hsa_executable_t executable);
-void configure_auto_moi_epoch_analysis(HookConfig::MoiEpochAnalysisPolicy policy);
+void configure_auto_moi_epoch_analysis(HookConfig::MoiEpochAnalysisPolicy policy,
+                                       uint32_t sampled_conflict_limit = 8,
+                                       uint32_t sampled_total_conflict_limit = 64);
 [[nodiscard]] bool begin_auto_moi_epoch_analysis_window();
 [[nodiscard]] bool end_auto_moi_epoch_analysis_window();
 /// Analyze and recycle every live automatic MOI report after the caller has

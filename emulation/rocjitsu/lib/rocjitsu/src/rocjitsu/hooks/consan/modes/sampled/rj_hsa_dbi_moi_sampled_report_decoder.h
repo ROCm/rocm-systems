@@ -25,9 +25,13 @@ struct AutoMoiSampledEvidence {
   uint32_t workgroup_z = 0;
   uint32_t epoch = 0;
   uint32_t cluster_workgroup_id = 0;
-  const AutoMoiSampledStaticMapping *static_mapping = nullptr;
   bool sync_snapshot_usable = true;
+  const AutoMoiSampledStaticMapping *static_mapping = nullptr;
+  uint64_t exact_lane_mask = 0;
 };
+
+static_assert(sizeof(AutoMoiSampledEvidence) <= 128,
+              "Sampled host evidence must fit within 128 bytes");
 
 enum class AutoMoiSampledEvidenceReason : uint8_t {
   MalformedWindow,

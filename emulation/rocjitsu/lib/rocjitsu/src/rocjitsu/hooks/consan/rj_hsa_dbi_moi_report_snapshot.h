@@ -44,7 +44,7 @@ struct AutoMoiReportSnapshotRequest {
   const void *source = nullptr;
   size_t size = 0;
   ConSanMoiReportBufferLayout expected_layout;
-  ConSanMoiEngine expected_engine = ConSanMoiEngine::RecordReplay;
+  ConSanMoiEngine expected_engine = ConSanMoiEngine::Sampled;
   bool fine_grained = false;
 };
 

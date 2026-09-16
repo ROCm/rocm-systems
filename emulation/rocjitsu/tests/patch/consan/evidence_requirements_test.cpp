@@ -662,7 +662,7 @@ TEST(ConSanEvidenceRequirements, SampledIntentKindsMapToIndependentTypedCapaciti
   EXPECT_EQ(requirements.sizing_inventory.sampled_range_bank_count, 24u);
   EXPECT_EQ(requirements.sizing_inventory.sampled_sync_slot_count, 25u);
   EXPECT_EQ(requirements.sizing_inventory.sampled_watchpoint_count, 25u);
-  EXPECT_EQ(requirements.sizing_inventory.diagnostic_count, 3u);
+  EXPECT_EQ(requirements.sizing_inventory.diagnostic_count, 0u);
   EXPECT_TRUE(requirements.runtime_requirements.host_device_visible_memory);
   EXPECT_TRUE(requirements.runtime_requirements.host_device_coherent_memory);
   EXPECT_TRUE(requirements.runtime_requirements.device_atomic_publication);
@@ -690,6 +690,41 @@ TEST(ConSanEvidenceRequirements,
   EXPECT_EQ(requirements.sizing_inventory.sampled_sync_slot_count, 17u);
   EXPECT_EQ(requirements.sizing_inventory.barrier_event_count, 2u);
   EXPECT_EQ(requirements.sizing_inventory.atomic_event_count, 1u);
+}
+
+TEST(ConSanEvidenceRequirements, RequestedSampledBanksAdaptToCapWithoutDroppingRanges) {
+  const auto observation =
+      EvidenceObservationPlanBuilder(ConSanCapabilityEngine::Sampled)
+          .add(ConSanProbeIntentKind::SampledAccess, ConSanSemanticSiteDomain::Access, 2)
+          .add(ConSanProbeIntentKind::SampledAtomicOrdering,
+               ConSanSemanticSiteDomain::SynchronizationEvent, 1, true)
+          .build();
+  ProgramInventory inventory;
+  const auto plan = [&](uint32_t banks, uint64_t ceiling) {
+    return std::get<ConSanSampledEvidenceRequirements>(
+        consan_moi_impl::plan_moi_evidence_requirements(
+            ConSanMoiEngine::Sampled, {.program_inventory = inventory,
+                                       .observation_plan = observation,
+                                       .requested_report_buffer_size = ceiling,
+                                       .maximum_access_probe_count = std::nullopt,
+                                       .maximum_workgroup_lds_bytes = std::nullopt,
+                                       .sampled_banks = banks}));
+  };
+  const auto two = plan(2, 0);
+  ASSERT_TRUE(two.complete());
+  for (uint32_t banks : {0u, 1u, 2u, 4u, 8u}) {
+    const uint32_t expected = banks == 0 ? 8u : banks;
+    const auto full = plan(banks, 0);
+    ASSERT_TRUE(full.complete());
+    EXPECT_EQ(full.sizing_inventory.access_range_count, 2u);
+    EXPECT_EQ(full.sizing_inventory.sampled_range_bank_count, 2u * expected);
+    EXPECT_EQ(full.sizing_inventory.sampled_sync_slot_count, 2u * expected + 1u);
+    const auto capped = plan(banks, two.abi_plan.required_bytes);
+    ASSERT_TRUE(capped.complete());
+    EXPECT_EQ(capped.sizing_inventory.access_range_count, 2u);
+    EXPECT_EQ(capped.sizing_inventory.sampled_range_bank_count, 2u * std::min(expected, 2u));
+    EXPECT_EQ(capped.sizing_inventory.atomic_event_count, 1u);
+  }
 }
 
 TEST(ConSanEvidenceRequirements, SampledRejectsInvalidWrongForeignAndMalformedPlans) {
@@ -744,7 +779,7 @@ TEST(ConSanEvidenceRequirements, SampledWellFormedChecksEveryCrossTypeInvariant)
   expect_rejected([](auto &value) { value.runtime_requirements.dispatch_segment_binding = true; });
   expect_rejected(
       [](auto &value) { value.sizing_inventory.engine = ConSanMoiEngine::InlineShadow; });
-  expect_rejected([](auto &value) { ++value.sizing_inventory.access_range_count; });
+  expect_rejected([](auto &value) { value.sizing_inventory.access_range_count += 2u; });
   expect_rejected([](auto &value) { ++value.sizing_inventory.diagnostic_count; });
   expect_rejected([](auto &value) { value.sizing_inventory.sampled_bank_count_adaptive = false; });
   expect_rejected([](auto &value) { ++value.sizing_inventory.sampled_range_bank_count; });

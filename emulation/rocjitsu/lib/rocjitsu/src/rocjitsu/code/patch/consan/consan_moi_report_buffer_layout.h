@@ -19,7 +19,7 @@ namespace rocjitsu {
 /// protocol. This value owns no allocation, device address, generation, or
 /// lifetime.
 struct ConSanMoiReportBufferLayout {
-  ConSanMoiEngine engine = ConSanMoiEngine::RecordReplay;
+  ConSanMoiEngine engine = ConSanMoiEngine::Sampled;
   uint32_t layout_flags = 0;
   uint32_t access_record_capacity = 0;
   uint32_t record_replay_logical_access_range_count = 0;

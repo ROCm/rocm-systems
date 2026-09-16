@@ -258,7 +258,7 @@ function(rj_add_consan_hip_case)
         elseif(_environment_entry MATCHES "^RJ_CONSAN_MOI_TRACK_ATOMICS=")
             set(_case_sets_atomic_tracking TRUE)
         elseif(
-            _environment_entry MATCHES "^RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE="
+            _environment_entry MATCHES "^RJ_CONSAN_MOI_(SAMPLED_PRESET|RUNTIME_SAMPLE_STRIDE|WORKGROUP_SAMPLE_(STRIDE|OFFSET)|CELL_SAMPLE_(STRIDE|OFFSET))="
         )
             set(_case_sets_runtime_sample_stride TRUE)
         endif()
@@ -477,10 +477,188 @@ function(rj_add_consan_device_conformance_cases)
     endif()
     set(_labels consan consan-device "${_device_TARGET}" "${_backend}")
 
+    # Exact masks currently require ordinary VGPR addressing, without the
+    # selectable-bank state of gfx1250.
+    if(NOT _device_TARGET STREQUAL "gfx1250")
+        foreach(_uniform_case IN ITEMS DifferentValues DefaultSelected SingleWriter Disjoint ReadOnly Atomic PartialExec EmptyExec CrossWave)
+            set(_uniform_stride 1)
+            set(_uniform_race 0)
+            set(_uniform_records 1)
+            set(_uniform_clean 1)
+            set(_uniform_regex "sampled_conflicts=0")
+            if(_uniform_case MATCHES "^(DifferentValues|DefaultSelected|PartialExec|CrossWave)$")
+                set(_uniform_race 1)
+                set(_uniform_clean 0)
+                set(_uniform_regex "first_lanes=0x0000000000000001 second_lanes=0x[0-9a-f]*[1-9a-f][0-9a-f]*")
+            endif()
+            if(_uniform_case STREQUAL "EmptyExec")
+                set(_uniform_records 0)
+                set(_uniform_regex "visible_sampled=0.*sampled_conflicts=0")
+            elseif(_uniform_case STREQUAL "PartialExec")
+                set(_uniform_regex "first_lanes=0x0000000000000001 second_lanes=0x0000000000000008")
+            elseif(_uniform_case STREQUAL "CrossWave")
+                set(_uniform_regex "first_lanes=0x[0f]*ffffffff second_lanes=0x[0f]*ffffffff")
+            endif()
+            if(_uniform_case STREQUAL "DefaultSelected")
+                set(_uniform_stride 256)
+            endif()
+            rj_add_consan_hip_case(
+                NAME "${_device_PREFIX}.SampledUniform.${_uniform_case}"
+                TARGET hip_consan_device_sampled_selection_${_device_TARGET}_test
+                FILTER "ConSanDeviceSampledUniformTest.${_uniform_case}"
+                ${_config_args}
+                ${_resource_lock_args}
+                TIMEOUT 120
+                PASS_REGEX "${_uniform_regex}"
+                ALSO_PASS_REGEX "analysis_complete=true static_complete=true dynamic_complete=true"
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_MODE=sampled"
+                    "RJ_CONSAN_LOG=3"
+                    "RJ_CONSAN_FAIL_CLOSED=1"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+                    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=${_uniform_stride}"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=${_uniform_records}"
+                    "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=${_uniform_race}"
+                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=${_uniform_clean}"
+                LABELS ${_labels} sampled sampled-uniform
+            )
+        endforeach()
+    endif()
+
+    if(NOT _device_TARGET STREQUAL "gfx1250")
+        foreach(_preset IN ITEMS high max)
+            foreach(_case IN ITEMS DifferentValues CrossWave SingleWriter NonzeroCell)
+                set(_records 1)
+                set(_race 1)
+                set(_clean 0)
+                set(_regex "sampled_conflicts=[1-9][0-9]*")
+                if(_case STREQUAL "CrossWave")
+                    set(_regex "first_lanes=0x[0f]*ffffffff second_lanes=0x[0f]*ffffffff")
+                endif()
+                if(_case STREQUAL "SingleWriter")
+                    set(_race 0)
+                    set(_clean 1)
+                    set(_regex "sampled_conflicts=0")
+                endif()
+                if(_case STREQUAL "NonzeroCell" AND _preset STREQUAL "high")
+                    set(_records 0)
+                    set(_race 0)
+                    set(_clean 1)
+                    set(_regex "sampled_conflicts=0")
+                endif()
+                rj_add_consan_hip_case(
+                    NAME "${_device_PREFIX}.SampledPreset.${_preset}.${_case}"
+                    TARGET hip_consan_device_sampled_selection_${_device_TARGET}_test
+                    FILTER "ConSanDeviceSampledUniformTest.${_case}"
+                    ${_config_args}
+                    ${_resource_lock_args}
+                    TIMEOUT 120
+                    PASS_REGEX "${_regex}"
+                    ALSO_PASS_REGEX "analysis_complete=true static_complete=true dynamic_complete=true"
+                    ENVIRONMENT
+                        "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                        "RJ_CONSAN_MODE=sampled"
+                        "RJ_CONSAN_MOI_SAMPLED_PRESET=${_preset}"
+                        "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                        "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                        "RJ_CONSAN_LOG=3"
+                        "RJ_CONSAN_FAIL_CLOSED=1"
+                        "RJ_CONSAN_REQUIRE_PATCH=1"
+                        "RJ_CONSAN_MOI_REQUIRE_RECORDS=${_records}"
+                        "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=${_race}"
+                        "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=${_clean}"
+                    LABELS ${_labels} sampled sampled-preset
+                )
+            endforeach()
+        endforeach()
+    endif()
+
+    # Production-rate qualification is separate from the dense semantic
+    # matrix. Every selector is explicit to avoid inherited environment and
+    # the helper's usual stride-1 override.
+    foreach(_selection_case IN ITEMS
+            "DefaultSelected|RaceCellZero|256|0|256|0|legacy|race"
+            "DefaultUnselectedAddress|RaceCellOne|256|0|256|0|legacy|empty"
+            "DefaultOrdered|OrderedCellZero|256|0|256|0|legacy|clean"
+            "OffsetSelectsAddress|RaceCellOne|256|0|256|1|independent|race"
+            "OtherWorkgroupOffset|RaceCellZero|256|1|1|0|independent|race"
+            "DenseSelectsAddress|RaceCellOneSingleWorkgroup|1|0|1|0|independent|race"
+            "DenseWorkgroupSparseCell|RaceCellZeroSingleWorkgroup|1|0|256|0|independent|race")
+        string(REPLACE "|" ";" _selection_fields "${_selection_case}")
+        list(GET _selection_fields 0 _selection_name)
+        list(GET _selection_fields 1 _selection_filter)
+        list(GET _selection_fields 2 _workgroup_stride)
+        list(GET _selection_fields 3 _workgroup_offset)
+        list(GET _selection_fields 4 _cell_stride)
+        list(GET _selection_fields 5 _cell_offset)
+        list(GET _selection_fields 6 _selector_mode)
+        list(GET _selection_fields 7 _expectation)
+        if(_selector_mode STREQUAL "legacy")
+            set(_selection_environment
+                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=${_workgroup_stride}"
+                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET=${_workgroup_offset}"
+                "RJ_CONSAN_MOI_WORKGROUP_SAMPLE_STRIDE="
+                "RJ_CONSAN_MOI_WORKGROUP_SAMPLE_OFFSET="
+                "RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE="
+                "RJ_CONSAN_MOI_CELL_SAMPLE_OFFSET=")
+        else()
+            set(_selection_environment
+                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE="
+                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET="
+                "RJ_CONSAN_MOI_WORKGROUP_SAMPLE_STRIDE=${_workgroup_stride}"
+                "RJ_CONSAN_MOI_WORKGROUP_SAMPLE_OFFSET=${_workgroup_offset}"
+                "RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE=${_cell_stride}"
+                "RJ_CONSAN_MOI_CELL_SAMPLE_OFFSET=${_cell_offset}")
+        endif()
+        if(_expectation STREQUAL "race")
+            set(_selection_regex "sampled_conflicts=[1-9][0-9]*")
+            list(APPEND _selection_environment
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=0")
+        else()
+            list(APPEND _selection_environment
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=0"
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1")
+            if(_expectation STREQUAL "empty")
+                set(_selection_regex "visible_sampled=0.*sampled_conflicts=0")
+                list(APPEND _selection_environment "RJ_CONSAN_MOI_REQUIRE_RECORDS=0")
+            else()
+                set(_selection_regex "visible_sampled=[1-9][0-9]*.*sampled_conflicts=0")
+                list(APPEND _selection_environment "RJ_CONSAN_MOI_REQUIRE_RECORDS=1")
+            endif()
+        endif()
+        rj_add_consan_hip_case(
+            NAME "${_device_PREFIX}.SampledSelection.${_selection_name}"
+            TARGET hip_consan_device_sampled_selection_${_device_TARGET}_test
+            FILTER "ConSanDeviceSampledSelectionTest.${_selection_filter}"
+            ${_config_args}
+            ${_resource_lock_args}
+            TIMEOUT 120
+            PASS_REGEX "${_selection_regex}"
+            ALSO_PASS_REGEX "analysis_complete=true static_complete=true dynamic_complete=true"
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_MODE=sampled"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_FAIL_CLOSED=1"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+                "RJ_CONSAN_MOI_SAMPLE_STRIDE=1"
+                "RJ_CONSAN_MOI_SAMPLE_OFFSET=0"
+                "RJ_CONSAN_MOI_SAMPLED_BANKS=0"
+                "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                "RJ_CONSAN_MOI_EPOCH_ANALYSIS=every"
+                ${_selection_environment}
+            LABELS ${_labels} sampled sampled-selection
+        )
+    endforeach()
+
     # Loading the tool DSO is ConSan's activation contract and selects
-    # Record/Replay by default. Exercise synchronized and racy real LDS
+    # Sampled by default. Exercise synchronized and racy real LDS
     # workloads and require a fine-grained report snapshot so the
-    # no-configuration path cannot pass merely by leaving the hook inert or by
+    # default-mode path cannot pass merely by leaving the hook inert or by
     # allocating topology-sensitive coarse memory.
     foreach(_outcome IN ITEMS Correct Incorrect)
         string(TOLOWER "${_outcome}" _outcome_label)
@@ -500,12 +678,17 @@ function(rj_add_consan_device_conformance_cases)
         else()
             list(
                 APPEND _hook_default_environment
-                "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
             )
+        endif()
+        if(_outcome STREQUAL "Correct")
+            set(_hook_default_conflicts "sampled_conflicts=0")
+        else()
+            set(_hook_default_conflicts "sampled_conflicts=[1-9][0-9]*")
         endif()
         rj_add_consan_hip_case(
             NAME
-                "${_device_PREFIX}.HookLoadDefaultsToRecordReplayLds.${_outcome}"
+                "${_device_PREFIX}.HookLoadDefaultsToSampledLds.${_outcome}"
             TARGET
                 hip_consan_device_ordered_tile_handoff_${_device_TARGET}_test
             FILTER "ConSanDeviceOrderedTileHandoffTest.${_outcome}"
@@ -514,13 +697,14 @@ function(rj_add_consan_device_conformance_cases)
             TIMEOUT 60
             PASS_REGEX
                 "fine_grained_snapshot_bytes=[1-9][0-9]* coarse_grained_snapshot_bytes=0"
+            ALSO_PASS_REGEX "${_hook_default_conflicts}"
             FAIL_REGEX "coarse_grained_snapshot_bytes=[1-9][0-9]*"
             ENVIRONMENT ${_hook_default_environment}
             LABELS
                 ${_labels}
                 hook-default
                 "${_outcome_label}"
-                record-replay
+                sampled
                 regression-10622
         )
     endforeach()
@@ -1487,6 +1671,7 @@ endfunction()
 function(rj_add_consan_device_fixture_targets target)
     rj_add_consan_device_module_lifecycle_fixture(${target})
     set(_device_workload_sources
+        "sampled_selection|sampled_selection_test.hip"
         "ordered_tile_handoff|ordered_tile_handoff_test.hip"
         "reduction|reduction_test.hip"
         "shared_helper_owners|shared_helper_owners_test.hip"

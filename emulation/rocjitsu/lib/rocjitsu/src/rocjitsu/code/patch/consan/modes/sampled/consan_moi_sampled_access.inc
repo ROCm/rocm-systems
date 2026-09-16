@@ -68,7 +68,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   uint32_t window_bank_count = 1;
   if (sampled_filter_range_count != 0) {
     const uint32_t available_per_range = max_access_record_slots / sampled_filter_range_count;
-    while (window_bank_count < 8u && window_bank_count * 2u <= available_per_range)
+    const uint32_t requested_banks =
+        options.moi_sampled_banks == 0 ? 8u : options.moi_sampled_banks;
+    while (window_bank_count < requested_banks && window_bank_count * 2u <= available_per_range)
       window_bank_count *= 2u;
   }
 
@@ -239,6 +241,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         prior_patch == planned_patches.rend() ? 0u : prior_patch->access_range_count;
     MoiSampledAccessEmissionPlan emission{
         .sampled_check = options.moi_sampled_check,
+        .uniform_lds_address = candidate.site().uniform_lds_address,
         .delay_mode = options.delay_mode,
         .delay_count = options.delay_nops,
         .delay_variable_source = options.delay_var_ssrc,
@@ -246,6 +249,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         .report_generation = options.moi_report_generation,
         .runtime_sample_stride = options.moi_runtime_sample_stride,
         .runtime_sample_offset = options.moi_runtime_sample_offset,
+        .cell_selection = options.sampled_cell_selection(),
         .exec_save_sgpr = candidate_point.moi_exec_save_sgpr,
         .automatic_private_epoch = candidate_point.automatic_moi_private_epoch,
         .persistent_sgprs = candidate_point.moi_persistent_sgprs,
@@ -255,7 +259,10 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         .scratch_vgpr = resources->base,
         .base_scratch_vgpr_count = static_cast<uint16_t>(
             (options.moi_sampled_check ? 7u : 5u) +
-            (options.moi_runtime_sample_stride > 1u || window_bank_count > 1u ? 1u : 0u)),
+            (options.moi_runtime_sample_stride > 1u ||
+                     options.sampled_cell_selection().stride > 1u || window_bank_count > 1u
+                 ? 1u
+                 : 0u)),
         .scratch_vgpr_count = expected_scratch_count,
         .supports_native_lds_spill_recovery =
             access_resource_facts.supports_native_lds_spill_recovery,

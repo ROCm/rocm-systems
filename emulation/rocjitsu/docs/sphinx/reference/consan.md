@@ -13,11 +13,10 @@ For a hands-on walkthrough, see [Detect an LDS data race with ConSan](/tutorials
 
 ## Enabling ConSan
 
-ConSan loads through the HSA tools interface. Set `HSA_TOOLS_LIB` to the built hook shared library and select an instrumentation mode with `RJ_CONSAN_MODE`. Loading the hook activates ConSan; when the mode is unset, it defaults to `record-replay`.
+ConSan loads through the HSA tools interface. Set `HSA_TOOLS_LIB` to the built hook shared library and select an instrumentation mode with `RJ_CONSAN_MODE`. Loading the hook activates ConSan; when the mode is unset or empty, it defaults to `sampled`.
 
 ``` bash
 env HSA_TOOLS_LIB="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so" \
-  RJ_CONSAN_MODE=supercollider \
   RJ_CONSAN_LOG=1 \
   ./application
 ```
@@ -30,14 +29,14 @@ ConSan exposes four modes.
 | --- | --- |
 | `RJ_CONSAN_MODE=supercollider` | Duplicate or read-back supported LDS accesses, delay, compare, and set an automatically allocated non-trapping mismatch marker. |
 | `RJ_CONSAN_MODE=record-replay` | Instrument all admitted supported access, barrier, atomic, and fence sites; allocate an inventory-sized report; replay visible records on the host. |
-| `RJ_CONSAN_MODE=sampled` | Patch all admitted supported sites; use automatic runtime sampling; retain bounded sampled causal windows and synchronization metadata. |
+| default or `RJ_CONSAN_MODE=sampled` | Patch all admitted supported sites; use automatic runtime sampling; retain bounded sampled causal windows and synchronization metadata. |
 | `RJ_CONSAN_MODE=inline-shadow` | Publish exact-shadow cells and bounded diagnostics on the GPU; track admitted barriers and atomics. |
 
 ### Core environment variables
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `RJ_CONSAN_MODE` | `record-replay` | Select `record-replay`, `sampled`, `inline-shadow`, or `supercollider`. |
+| `RJ_CONSAN_MODE` | `sampled` | Select `record-replay`, `sampled`, `inline-shadow`, or `supercollider`. |
 | `RJ_CONSAN_LOG` | disabled | Enable compact logs at `1`; larger values add inventory detail. |
 | `RJ_CONSAN_FAIL_CLOSED` | `0` | Reject unsupported or invalid transformation outcomes instead of loading the original code object. |
 | `RJ_CONSAN_REQUIRE_PATCH` | `0` | Reject an applicable code object when no real access, barrier, atomic, or fence instrumentation patch is emitted. |
@@ -116,6 +115,15 @@ The conflict predicate, in simplified terms, requires:
 | `RJ_CONSAN_DELAY_MODE` | `nop` | Select `s_nop`, `s_sleep`, or `s_sleep_var` delay lowering. |
 | `RJ_CONSAN_DELAY_VAR_SSRC` | `106` | Scalar source encoding used by `sleep_var`. |
 | `RJ_CONSAN_CHECK_TRAP_MODE` | `all` | Restrict SuperCollider to native DS (`lds`), admitted flat LDS (`flat`), or both (`all`). |
+
+## Sampled presets
+
+Use `RJ_CONSAN_MOI_SAMPLED_PRESET=low|default|high|max` to tune Sampled coverage.
+Unset, empty, and `default` preserve existing behavior. Workgroup/cell strides
+are respectively `1024/1024`, `256/256`, `1/4`, and `1/1`. Use `high` for small
+repros and `max` to remove both sampling filters; bounded retention still applies.
+Explicit selector knobs override preset defaults. See the
+[usage guide](../../consan/USAGE.md#sampled-presets) for precedence and limitations.
 
 ## MOI report buffer controls
 

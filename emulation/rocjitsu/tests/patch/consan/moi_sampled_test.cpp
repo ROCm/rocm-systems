@@ -4,14 +4,125 @@
 #include "consan_report_test_support.h"
 #include "consan_sampled_model_test_support.h"
 #include "consan_test_support.h"
+#include "decode_test_util.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
+#include "rocjitsu/code/patch/consan/consan_uniform_address.h"
 #include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_atomic_emission.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
+#include "rocjitsu/isa/instruction.h"
 
 namespace rocjitsu {
 namespace {
+
+TEST(ConSan, SampledUniformAddressBroadcastCopiesAndClobbers) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+                    ROCJITSU_CODE_ARCH_RDNA4}) {
+    auto decoder = Decoder::create(arch);
+    ASSERT_TRUE(decoder);
+    ConSanUniformAddressTracker tracker;
+    const auto observe = [&](uint32_t word) {
+      std::array<uint32_t, 4> words{word};
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_TRUE(inst);
+      tracker.observe(*inst);
+    };
+    EXPECT_FALSE(tracker.contains(1));
+    observe(build_v_mov_b32_e32(1, scalar_positive_inline_u32(0), arch));
+    EXPECT_TRUE(tracker.contains(1));
+    observe(build_v_mov_b32_e32(2, vector_source_vgpr(1), arch));
+    EXPECT_TRUE(tracker.contains(2));
+    observe(build_v_mov_b32_e32(1, vector_source_vgpr(0), arch));
+    EXPECT_FALSE(tracker.contains(1));
+    EXPECT_TRUE(tracker.contains(2));
+    observe(build_v_mov_b32_e32(3, 4, arch)); // SGPR broadcast
+    EXPECT_TRUE(tracker.contains(3));
+    auto clobber = build_s_mov_b32(4, scalar_positive_inline_u32(7), arch);
+    observe(clobber); // copied value remains uniform after its scalar source changes
+    EXPECT_TRUE(tracker.contains(3));
+    auto exec = instrumentation::build_s_mov_b64(kAmdGpuExecLo, 6, arch);
+    ASSERT_TRUE(exec);
+    observe(*exec);
+    EXPECT_FALSE(tracker.contains(2));
+    EXPECT_FALSE(tracker.contains(3));
+    // A new broadcast is exact even if the new EXEC is partial or empty.
+    observe(build_v_mov_b32_e32(3, 4, arch));
+    EXPECT_TRUE(tracker.contains(3));
+    ConSanUniformAddressTracker join;
+    EXPECT_FALSE(join.contains(3)); // facts are never imported into a CFG join
+  }
+}
+
+TEST(ConSan, SampledUniformAddressRejectsLaneModifiers) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(decoder);
+  ConSanUniformAddressTracker tracker;
+  std::array<uint32_t, 4> broadcast{
+      build_v_mov_b32_e32(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4)};
+  std::unique_ptr<Instruction> move(decode_valid(*decoder, broadcast.data()));
+  ASSERT_TRUE(move);
+  tracker.observe(*move);
+  ASSERT_TRUE(tracker.contains(2));
+  // DPP's partial row mask preserves old destination lanes even when its
+  // source is uniform. A byte-width SDWA move is likewise not a plain copy.
+  for (auto words : {std::array<uint32_t, 4>{0x7e0a02fau, 0x7f000002u},
+                     std::array<uint32_t, 4>{0x7e0a02f9u, 0x00001002u}}) {
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_TRUE(inst);
+    tracker.observe(*inst);
+    EXPECT_FALSE(tracker.contains(5));
+  }
+}
+
+TEST(ConSan, SampledUniformAddressForgetsRelativeRegisterWrites) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(decoder);
+  ConSanUniformAddressTracker tracker;
+  for (auto word : {build_v_mov_b32_e32(5, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4),
+                    uint32_t{0x7e028708}}) {
+    std::array<uint32_t, 4> words{word};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_TRUE(inst);
+    tracker.observe(*inst);
+  }
+  EXPECT_FALSE(tracker.contains(5));
+}
+
+TEST(ConSanMoi, SampledUniformAddressDeclinesUnmodeledRegisterModeWrites) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  const auto hwreg = build_hwreg_imm(1u, 0u, 32u);
+  ASSERT_TRUE(hwreg);
+  const auto mode = build_s_setreg_imm32_b32(*hwreg, 0u, arch);
+  ASSERT_TRUE(mode);
+  const std::vector<uint32_t> words{
+      (*mode)[0],  (*mode)[1],  build_v_mov_b32_e32(1, scalar_positive_inline_u32(0), arch),
+      0xd8340000u, 0x00000001u, build_s_endpgm(arch)};
+  const auto result =
+      test_lower_consan(make_rdna4_lds_code_object(words), moi_options(ConSanMoiEngine::Sampled));
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+  EXPECT_FALSE(result.program_inventory.access_sites()[0].uniform_lds_address);
+}
+
+TEST(ConSanMoi, SampledUniformAddressFactsDoNotCrossCfgJoins) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  const auto branch = instrumentation::build_s_cbranch_scc0(2, arch);
+  ASSERT_TRUE(branch);
+  const std::vector<uint32_t> words{build_v_mov_b32_e32(1, scalar_positive_inline_u32(0), arch),
+                                    *branch,
+                                    build_v_mov_b32_e32(1, vector_source_vgpr(0), arch),
+                                    build_s_branch(1, arch),
+                                    build_s_nop(0, arch),
+                                    0xd8340000u,
+                                    0x00000001u, // ds_store_b32 v1, v0
+                                    build_s_endpgm(arch)};
+  const auto result =
+      test_lower_consan(make_rdna4_lds_code_object(words), moi_options(ConSanMoiEngine::Sampled));
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+  EXPECT_FALSE(result.program_inventory.access_sites()[0].uniform_lds_address);
+}
 
 TEST(ConSan, SampledOwnsOneNormalizedScopeToReportAbiMapping) {
   EXPECT_EQ(consan_moi_sampled_sync_scope(ConSanMemoryScope::Wavefront),
@@ -5328,6 +5439,58 @@ TEST(ConSanMoi, DirectSampledProbeRuntimeAddressSelectionKeepsAllSitesPatchable)
     EXPECT_TRUE(contains_subsequence(patched_words, *selected_value));
     EXPECT_NE(std::find(patched_words.begin(), patched_words.end(), *selected),
               patched_words.end());
+  }
+}
+
+TEST(ConSanMoi, SampledIndependentCellSelectionPreservesLegacyCodeAndBankGeometry) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  std::vector<uint32_t> text_words(800, build_s_nop(0, arch));
+  text_words[0] = 0xD8340000u;
+  text_words[1] = 0x00000000u; // ds_store_b32 v0, v0
+  text_words.back() = build_s_endpgm(arch);
+  const auto bytes = make_rdna4_lds_code_object(text_words, "independent_sampled",
+                                                kRdna4Wave64AllVgprsGranulated, false, false, 7);
+  auto options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(8);
+  options.max_patches = 16;
+  for (uint32_t stride : {1u, 256u}) {
+    options.moi_runtime_sample_stride = stride;
+    options.moi_sampled_cell_selection.reset();
+    const auto legacy = test_lower_consan(bytes, options);
+    ASSERT_TRUE(consan_patch_succeeded(legacy)) << testing::PrintToString(legacy.errors);
+    options.moi_sampled_cell_selection = ConSanSampleSelector{stride, 0};
+    const auto explicit_axes = test_lower_consan(bytes, options);
+    ASSERT_TRUE(consan_patch_succeeded(explicit_axes))
+        << testing::PrintToString(explicit_axes.errors);
+    EXPECT_EQ(legacy.replacement, explicit_axes.replacement);
+  }
+  for (uint32_t workgroup_stride : {1u, 256u}) {
+    for (uint32_t cell_stride : {1u, 16u}) {
+      for (uint32_t banks : {1u, 2u, 4u, 8u}) {
+        SCOPED_TRACE(testing::Message() << workgroup_stride << '/' << cell_stride << '/' << banks);
+        options.moi_runtime_sample_stride = workgroup_stride;
+        options.moi_sampled_cell_selection = ConSanSampleSelector{cell_stride, cell_stride - 1};
+        options.moi_sampled_banks = banks;
+        const auto result = test_lower_consan(bytes, options);
+        ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+        ASSERT_TRUE(result.modified());
+        const auto mappings = consan_sampled_static_access_mappings(result);
+        ASSERT_EQ(mappings.size(), 1u);
+        EXPECT_EQ(mappings[0].bank_count, banks);
+        AmdGpuCodeObject object(result.replacement.data(), result.replacement.size());
+        const auto words = executable_kernel_words(object);
+        const auto access =
+            std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
+                              &ConSanPatchInfo::kind);
+        ASSERT_NE(access, result.patches.end());
+        ASSERT_TRUE(access->scratch_vgpr);
+        const auto low = static_cast<uint16_t>(*access->scratch_vgpr + 2u);
+        const auto mask = build_v_and_b32_e32_literal(low, cell_stride - 1, low, arch);
+        ASSERT_TRUE(mask);
+        EXPECT_EQ(contains_subsequence(words, *mask), cell_stride > 1);
+      }
+    }
   }
 }
 

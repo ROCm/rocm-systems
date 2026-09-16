@@ -115,6 +115,9 @@ struct ConSanProgramSite {
   uint32_t decoded_width_bits = 0;
   ConSanFlatAddressSpaceHint flat_address_space_hint = ConSanFlatAddressSpaceHint::Unknown;
   ConSanAccessOperandFacts operands;
+  /// Identical effective interval across participating lanes, proven locally
+  /// for an ordinary, single-range native LDS access. Unknown is false.
+  bool uniform_lds_address = false;
   /// CFG-derived kernels that can execute this physical instruction. This is
   /// the authoritative owner proof for access and synchronization consumers;
   /// derived events retain only `source_site` rather than copying it.

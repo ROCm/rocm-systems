@@ -47,9 +47,13 @@ public:
     return *registry;
   }
 
-  void configure_epoch_analysis(HookConfig::MoiEpochAnalysisPolicy policy) {
+  void configure_epoch_analysis(HookConfig::MoiEpochAnalysisPolicy policy,
+                                uint32_t sampled_conflict_limit,
+                                uint32_t sampled_total_conflict_limit) {
     std::lock_guard lock(mutex_);
     epoch_analysis_policy_ = policy;
+    sampled_conflict_limit_ = sampled_conflict_limit;
+    sampled_conflict_examples_remaining_ = sampled_total_conflict_limit;
     automatic_epoch_ = 0;
     manual_analysis_window_open_ = false;
   }
@@ -305,6 +309,8 @@ public:
       entry->static_metadata = std::move(metadata);
     } else if (const auto *static_accesses = static_mapping.sampled()) {
       AutoMoiSampledStaticMetadata metadata;
+      uint32_t minimum_banks = std::numeric_limits<uint32_t>::max();
+      uint32_t maximum_banks = 0;
       for (const rocjitsu::ConSanSampledStaticAccessMapping &static_access : *static_accesses) {
         if (static_access.access.owner_provenance_complete &&
             static_access.access.execution_owner_kernel_ids.empty()) {
@@ -315,6 +321,8 @@ public:
         if (static_access.range_count != 0u && static_access.bank_count != 0u &&
             static_access.first_slot <= entry->layout.sampled_watchpoint_capacity &&
             slot_count <= entry->layout.sampled_watchpoint_capacity - static_access.first_slot) {
+          minimum_banks = std::min(minimum_banks, static_access.bank_count);
+          maximum_banks = std::max(maximum_banks, static_access.bank_count);
           metadata.mappings.push_back({
               .first_slot = static_access.first_slot,
               .range_count = static_access.range_count,
@@ -337,10 +345,11 @@ public:
       if (!static_accesses->empty()) {
         log_message(kLogInfo,
                     "ConSan MOI sampled diagnostic map reader=%llu entries=%zu mappings=%zu "
-                    "capacity=%u malformed=%s",
+                    "capacity=%u malformed=%s effective_banks_min=%u effective_banks_max=%u",
                     static_cast<unsigned long long>(reader), static_accesses->size(),
                     metadata.mappings.size(), entry->layout.sampled_watchpoint_capacity,
-                    metadata.malformed ? "true" : "false");
+                    metadata.malformed ? "true" : "false",
+                    metadata.mappings.empty() ? 0u : minimum_banks, maximum_banks);
       }
       entry->static_metadata = std::move(metadata);
     }
@@ -449,15 +458,7 @@ public:
 
     for (PreparedEpoch &epoch : prepared) {
       const Entry &entry = entries_[epoch.entry_index];
-      const AutoMoiReportPipelineResult result =
-          process_auto_moi_report({.reader = entry.reader,
-                                   .source_address = reinterpret_cast<uint64_t>(entry.ptr),
-                                   .size = entry.size,
-                                   .layout = entry.layout,
-                                   .fine_grained = entry.fine_grained,
-                                   .input_fingerprint = entry.input_fingerprint,
-                                   .static_metadata = &entry.static_metadata},
-                                  epoch.snapshot);
+      const AutoMoiReportPipelineResult result = process_report(entry, epoch.snapshot);
       if (!result.complete) {
         log_message(kLogInfo,
                     "ConSan MOI epoch checkpoint outcome=snapshot-failed reader=%llu "
@@ -711,6 +712,26 @@ private:
                                             core);
   }
 
+  // All callers hold mutex_. Budget spans reports, executables, and epochs;
+  // exhausting it suppresses examples only, never conflict analysis/counts.
+  AutoMoiReportPipelineResult
+  process_report(const Entry &entry, const AutoMoiReportSnapshot &snapshot, Summary summary = {}) {
+    const auto limit = std::min(sampled_conflict_limit_, sampled_conflict_examples_remaining_);
+    const auto result =
+        process_auto_moi_report({.reader = entry.reader,
+                                 .source_address = reinterpret_cast<uint64_t>(entry.ptr),
+                                 .size = entry.size,
+                                 .layout = entry.layout,
+                                 .fine_grained = entry.fine_grained,
+                                 .input_fingerprint = entry.input_fingerprint,
+                                 .static_metadata = &entry.static_metadata,
+                                 .sampled_conflict_example_limit = limit},
+                                snapshot, summary);
+    sampled_conflict_examples_remaining_ -=
+        std::min(sampled_conflict_examples_remaining_, result.sampled_conflict_example_count);
+    return result;
+  }
+
   Summary summarize(CoreApiTable *core, const Entry &entry) {
     Summary summary;
     summary.buffer_count = 1;
@@ -736,14 +757,7 @@ private:
     else
       summary.coarse_grained_snapshot_bytes = snapshot.copied_bytes;
 
-    summary = summarize_auto_moi_report({.reader = entry.reader,
-                                         .source_address = reinterpret_cast<uint64_t>(entry.ptr),
-                                         .size = entry.size,
-                                         .layout = entry.layout,
-                                         .fine_grained = entry.fine_grained,
-                                         .input_fingerprint = entry.input_fingerprint,
-                                         .static_metadata = &entry.static_metadata},
-                                        snapshot, summary);
+    summary = process_report(entry, snapshot, summary).summary;
     if (entry.static_metadata_counted)
       summary.sampled_static_mapping_malformed_count = 0;
     return summary;
@@ -761,6 +775,8 @@ private:
   uint64_t cleanup_failure_count_ = 0;
   Summary completed_summary_;
   HookConfig::MoiEpochAnalysisPolicy epoch_analysis_policy_;
+  uint32_t sampled_conflict_limit_ = 8;
+  uint32_t sampled_conflict_examples_remaining_ = 64;
   uint64_t automatic_epoch_ = 0;
   bool manual_analysis_window_open_ = false;
   std::atomic<uint64_t> next_generation_{0};
@@ -804,8 +820,11 @@ void retire_auto_moi_report_buffers(CoreApiTable *core, hsa_executable_t executa
   AutoMoiReportBufferRegistry::instance().retire(core, executable);
 }
 
-void configure_auto_moi_epoch_analysis(HookConfig::MoiEpochAnalysisPolicy policy) {
-  AutoMoiReportBufferRegistry::instance().configure_epoch_analysis(policy);
+void configure_auto_moi_epoch_analysis(HookConfig::MoiEpochAnalysisPolicy policy,
+                                       uint32_t sampled_conflict_limit,
+                                       uint32_t sampled_total_conflict_limit) {
+  AutoMoiReportBufferRegistry::instance().configure_epoch_analysis(policy, sampled_conflict_limit,
+                                                                   sampled_total_conflict_limit);
 }
 
 bool begin_auto_moi_epoch_analysis_window() {

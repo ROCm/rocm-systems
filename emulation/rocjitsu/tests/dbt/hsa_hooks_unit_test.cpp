@@ -2175,50 +2175,58 @@ TEST(HsaHooksUnitTest, ConSanRepeatedUnloadDoesNotEmitAnotherVerdict) {
   EXPECT_EQ(log.find("ConSan analysis verdict", first + 1), std::string::npos) << log;
 }
 
-TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiRecordReplay) {
-  ScopedEnvVar log_level("RJ_CONSAN_LOG", "3");
-  ScopedEnvVar mode("RJ_CONSAN_MODE", nullptr);
-  ScopedEnvVar policy("RJ_CONSAN_POLICY", nullptr);
-  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
-  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
-  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "0");
-  ScopedEnvVar absolute_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", nullptr);
-  ScopedEnvVar relative_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT", nullptr);
-  ScopedEnvVar process_transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", nullptr);
-  ScopedEnvVar process_image_limit("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_BYTES", nullptr);
-  ScopedEnvVar process_growth_limit("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES", nullptr);
+TEST(HsaHooksUnitTest, ConSanLoadedWithoutConfigurationDefaultsToMoiSampled) {
+  EXPECT_EQ(rocjitsu::ConSanRequest{}.moi_engine, rocjitsu::ConSanMoiEngine::Sampled);
+  for (const char *selection : {static_cast<const char *>(nullptr), ""}) {
+    SCOPED_TRACE(selection ? "empty mode" : "unset mode");
+    ScopedEnvVar log_level("RJ_CONSAN_LOG", "3");
+    ScopedEnvVar mode("RJ_CONSAN_MODE", selection);
+    ScopedEnvVar policy("RJ_CONSAN_POLICY", nullptr);
+    ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+    ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+    ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "0");
+    ScopedEnvVar absolute_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", nullptr);
+    ScopedEnvVar relative_growth_limit("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_PERCENT", nullptr);
+    ScopedEnvVar process_transform_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES",
+                                         nullptr);
+    ScopedEnvVar process_image_limit("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_BYTES", nullptr);
+    ScopedEnvVar process_growth_limit("RJ_CONSAN_MAX_PROCESS_PATCHED_IMAGE_GROWTH_BYTES", nullptr);
 
-  reset_code_object_observations();
-  rocjitsu::ConSanTransformArtifacts unchanged;
-  unchanged.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
-  g_transform_override_result = unchanged;
+    reset_code_object_observations();
+    rocjitsu::ConSanTransformArtifacts unchanged;
+    unchanged.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+    g_transform_override_result = unchanged;
 
-  FakeApiTable api;
-  const auto original_load = api.core.hsa_executable_load_agent_code_object_fn;
-  InstalledDbiHook hook(api);
-  ASSERT_TRUE(hook.installed()) << hook.error();
-  EXPECT_NE(api.core.hsa_executable_load_agent_code_object_fn, original_load);
-  EXPECT_EQ(hook.instrumentation_nanoseconds(), 0u);
+    FakeApiTable api;
+    const auto original_load = api.core.hsa_executable_load_agent_code_object_fn;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+    EXPECT_NE(api.core.hsa_executable_load_agent_code_object_fn, original_load);
+    EXPECT_EQ(hook.instrumentation_nanoseconds(), 0u);
 
-  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
-  hsa_code_object_reader_t reader{};
-  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
-                                                                  &reader),
-            HSA_STATUS_SUCCESS);
-  ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
-                                                              reader, nullptr, nullptr),
-            HSA_STATUS_SUCCESS);
-  EXPECT_GT(hook.instrumentation_nanoseconds(), 0u);
-  ASSERT_EQ(g_transform_override_flavors.size(), 1u);
-  EXPECT_EQ(g_transform_override_flavors.front(), rocjitsu::ConSanFlavor::Moi);
-  ASSERT_EQ(g_transform_override_engines.size(), 1u);
-  EXPECT_EQ(g_transform_override_engines.front(), rocjitsu::ConSanMoiEngine::RecordReplay);
+    constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                reader, nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+    EXPECT_GT(hook.instrumentation_nanoseconds(), 0u);
+    ASSERT_EQ(g_transform_override_flavors.size(), 1u);
+    EXPECT_EQ(g_transform_override_flavors.front(), rocjitsu::ConSanFlavor::Moi);
+    ASSERT_EQ(g_transform_override_engines.size(), 1u);
+    EXPECT_EQ(g_transform_override_engines.front(), rocjitsu::ConSanMoiEngine::Sampled);
 
-  testing::internal::CaptureStderr();
-  hook.unload();
-  const std::string unload_log = testing::internal::GetCapturedStderr();
-  EXPECT_NE(unload_log.find("ConSan instrumentation timing total_ns="), std::string::npos)
-      << unload_log;
+    ASSERT_EQ(g_transform_override_runtime_sample_strides.size(), 1u);
+    EXPECT_EQ(g_transform_override_runtime_sample_strides.front(), 256u);
+
+    testing::internal::CaptureStderr();
+    hook.unload();
+    const std::string unload_log = testing::internal::GetCapturedStderr();
+    EXPECT_NE(unload_log.find("ConSan instrumentation timing total_ns="), std::string::npos)
+        << unload_log;
+  }
 }
 
 TEST(HsaHooksUnitTest, ConSanThreadsAbsoluteAndRelativePatchedImageGrowthLimits) {
@@ -3714,9 +3722,9 @@ TEST(HsaHooksUnitTest, ConSanMoiEngineAnalyzerOwnsSampledAndReplayConflicts) {
   const auto sampled_conflict =
       rocjitsu::consan_hook::analyze_auto_moi_sampled_conflicts(sampled, false);
   EXPECT_EQ(sampled_conflict.conflict_count, 1u);
-  ASSERT_TRUE(sampled_conflict.first_conflict);
-  EXPECT_EQ(sampled_conflict.first_conflict->first.index, 0u);
-  EXPECT_EQ(sampled_conflict.first_conflict->second.index, 1u);
+  ASSERT_EQ(sampled_conflict.conflicts.size(), 1u);
+  EXPECT_EQ(sampled_conflict.conflicts.front().first.index, 0u);
+  EXPECT_EQ(sampled_conflict.conflicts.front().second.index, 1u);
 
   std::array<rocjitsu::consan_hook::AutoMoiSampledStaticMapping, 2> mappings{};
   mappings[0].owner_kernel_ids = {0x100};
@@ -4623,17 +4631,18 @@ sampled_atomic(rocjitsu::ConSanMoiSampledSyncRole role, rocjitsu::ConSanMoiSampl
                rocjitsu::ConSanMoiSampledSyncOutcome outcome, uint64_t address = 0x1000,
                uint32_t byte_count = 4, uint32_t epoch = 7) {
   return {
-      rocjitsu::ConSanMoiSampledSyncClassification::Valid,
-      {
-          .address = address,
-          .byte_count = byte_count,
-          .kind = rocjitsu::ConSanMoiSampledSyncKind::Atomic,
-          .role = role,
-          .scope = scope,
-          .outcome = outcome,
-          .epoch_before = epoch,
-          .epoch_after = epoch,
-      },
+      .metadata =
+          {
+              .address = address,
+              .byte_count = byte_count,
+              .kind = rocjitsu::ConSanMoiSampledSyncKind::Atomic,
+              .role = role,
+              .scope = scope,
+              .outcome = outcome,
+              .epoch_before = epoch,
+              .epoch_after = epoch,
+          },
+      .classification = rocjitsu::ConSanMoiSampledSyncClassification::Valid,
   };
 }
 
@@ -8596,6 +8605,186 @@ TEST(HsaHooksUnitTest, AutoSampledConflictRequiresSameDispatchClusterAndKernelOw
   }
 }
 
+TEST(HsaHooksUnitTest, AutoSampledExampleBudgetSpansReportsWithoutSuppressingCounts) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "4194304");
+  ScopedEnvVar runtime_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "1");
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  ScopedEnvVar example_limit("RJ_CONSAN_MOI_SAMPLED_CONFLICT_LIMIT", "1");
+  ScopedEnvVar total_limit("RJ_CONSAN_MOI_SAMPLED_TOTAL_CONFLICT_LIMIT", "2");
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result =
+      auto_report_sampled_transform_result(false, AutoSampledOwnerScope::SharedOwnerPair);
+  g_seed_auto_sampled_conflict_pair = true;
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+    for (uint8_t i = 0; i < 3; ++i) {
+      g_seed_auto_sampled_report_on_load = true;
+      g_seed_auto_sampled_report_succeeded = false;
+      const std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, i};
+      hsa_code_object_reader_t reader{};
+      ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                      original.size(), &reader),
+                HSA_STATUS_SUCCESS);
+      ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(
+                    hsa_executable_t{7u + i}, kHostAgent, reader, nullptr, nullptr),
+                HSA_STATUS_SUCCESS);
+      EXPECT_TRUE(g_seed_auto_sampled_report_succeeded);
+    }
+  }
+  const auto log = testing::internal::GetCapturedStderr();
+  const auto occurrences = [&](std::string_view needle) {
+    size_t count = 0, position = 0;
+    while ((position = log.find(needle, position)) != std::string::npos) {
+      ++count;
+      position += needle.size();
+    }
+    return count;
+  };
+  EXPECT_EQ(occurrences("effective_banks_min=1 effective_banks_max=1"), 3u) << log;
+  EXPECT_EQ(occurrences("sampled_conflicts=1 "), 3u) << log;
+  EXPECT_EQ(occurrences("ConSan MOI auto sampled conflict reader="), 2u) << log;
+  EXPECT_EQ(occurrences("sampled_conflict_examples=0 sampled_conflict_pairs_without_example=1"), 1u)
+      << log;
+}
+
+TEST(HsaHooksUnitTest, ConSanSampledResolvesIndependentSelectorsAndRejectsAmbiguity) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+  ScopedEnvVar legacy_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", nullptr);
+  ScopedEnvVar legacy_offset("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", nullptr);
+  ScopedEnvVar workgroup_stride("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_STRIDE", "1");
+  ScopedEnvVar workgroup_offset("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_OFFSET", nullptr);
+  ScopedEnvVar cell_stride("RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE", "4");
+  ScopedEnvVar cell_offset("RJ_CONSAN_MOI_CELL_SAMPLE_OFFSET", "3");
+  ScopedEnvVar banks("RJ_CONSAN_MOI_SAMPLED_BANKS", "2");
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  const auto install = [] {
+    reset_code_object_observations();
+    testing::internal::CaptureStderr();
+    bool installed = false;
+    {
+      FakeApiTable api;
+      InstalledDbiHook hook(api);
+      installed = hook.installed();
+    }
+    return std::pair{installed, testing::internal::GetCapturedStderr()};
+  };
+  const auto [installed, log] = install();
+  ASSERT_TRUE(installed) << log;
+  EXPECT_NE(log.find("workgroup_stride=1 workgroup_offset=0 cell_stride=4 cell_offset=3"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("selection=independent requested_banks=2"), std::string::npos) << log;
+  {
+    ScopedEnvVar ambiguous("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", "0");
+    EXPECT_FALSE(install().first);
+  }
+  {
+    ScopedEnvVar unspecified_stride("RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE", nullptr);
+    const auto [default_installed, default_log] = install();
+    ASSERT_TRUE(default_installed) << default_log;
+    EXPECT_NE(default_log.find("cell_stride=256 cell_offset=3"), std::string::npos) << default_log;
+  }
+  {
+    ScopedEnvVar wrong_mode("RJ_CONSAN_MODE", "record_replay");
+    EXPECT_FALSE(install().first);
+  }
+}
+
+TEST(HsaHooksUnitTest, ConSanSampledPresetsResolveAndAllowExplicitOverrides) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", nullptr);
+  ScopedEnvVar legacy_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", nullptr);
+  ScopedEnvVar legacy_offset("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", nullptr);
+  ScopedEnvVar workgroup_stride("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_STRIDE", nullptr);
+  ScopedEnvVar workgroup_offset("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_OFFSET", nullptr);
+  ScopedEnvVar cell_stride("RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE", nullptr);
+  ScopedEnvVar cell_offset("RJ_CONSAN_MOI_CELL_SAMPLE_OFFSET", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  const auto install = [] {
+    reset_code_object_observations();
+    testing::internal::CaptureStderr();
+    bool installed;
+    {
+      FakeApiTable api;
+      InstalledDbiHook hook(api);
+      installed = hook.installed();
+    }
+    return std::pair{installed, testing::internal::GetCapturedStderr()};
+  };
+  for (const auto &[preset, selection] : std::array{
+           std::pair{static_cast<const char *>(nullptr),
+                     "workgroup_stride=256 workgroup_offset=0 cell_stride=256 cell_offset=0"},
+           std::pair{"", "workgroup_stride=256 workgroup_offset=0 cell_stride=256 cell_offset=0"},
+           std::pair{"default",
+                     "workgroup_stride=256 workgroup_offset=0 cell_stride=256 cell_offset=0"},
+           std::pair{"low",
+                     "workgroup_stride=1024 workgroup_offset=0 cell_stride=1024 cell_offset=0"},
+           std::pair{"high", "workgroup_stride=1 workgroup_offset=0 cell_stride=4 cell_offset=0"},
+           std::pair{"max", "workgroup_stride=1 workgroup_offset=0 cell_stride=1 cell_offset=0"}}) {
+    ScopedEnvVar selected("RJ_CONSAN_MOI_SAMPLED_PRESET", preset);
+    const auto [ok, log] = install();
+    ASSERT_TRUE(ok) << log;
+    EXPECT_NE(log.find(selection), std::string::npos) << log;
+    EXPECT_NE(log.find("requested_banks=auto"), std::string::npos) << log;
+    EXPECT_NE(log.find("epoch_analysis=every"), std::string::npos) << log;
+  }
+  ScopedEnvVar high("RJ_CONSAN_MOI_SAMPLED_PRESET", "high");
+  {
+    ScopedEnvVar explicit_cell("RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE", "8");
+    ScopedEnvVar explicit_offset("RJ_CONSAN_MOI_CELL_SAMPLE_OFFSET", "7");
+    const auto [ok, log] = install();
+    ASSERT_TRUE(ok) << log;
+    EXPECT_NE(log.find("workgroup_stride=1 workgroup_offset=0 cell_stride=8 cell_offset=7"),
+              std::string::npos)
+        << log;
+    ScopedEnvVar mixed("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "2");
+    EXPECT_FALSE(install().first);
+  }
+  {
+    ScopedEnvVar explicit_legacy("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "2");
+    const auto [ok, log] = install();
+    ASSERT_TRUE(ok) << log;
+    EXPECT_NE(log.find("workgroup_stride=2 workgroup_offset=0 cell_stride=2 cell_offset=0"),
+              std::string::npos)
+        << log;
+  }
+  {
+    ScopedEnvVar bad_offset("RJ_CONSAN_MOI_CELL_SAMPLE_OFFSET", "4");
+    EXPECT_FALSE(install().first);
+  }
+  {
+    ScopedEnvVar invalid("RJ_CONSAN_MOI_SAMPLED_PRESET", "highest");
+    const auto [ok, log] = install();
+    EXPECT_FALSE(ok);
+    EXPECT_NE(log.find("expected low|default|high|max"), std::string::npos) << log;
+  }
+  for (const char *other : {"record-replay", "inline-shadow", "supercollider"}) {
+    ScopedEnvVar other_mode("RJ_CONSAN_MODE", other);
+    EXPECT_FALSE(install().first);
+  }
+}
+
+TEST(HsaHooksUnitTest, ConSanSampledRejectsUnboundedExampleLimits) {
+  for (const auto &[name, value] :
+       std::array{std::pair{"RJ_CONSAN_MOI_SAMPLED_CONFLICT_LIMIT", "1025"},
+                  std::pair{"RJ_CONSAN_MOI_SAMPLED_TOTAL_CONFLICT_LIMIT", "65537"},
+                  std::pair{"RJ_CONSAN_MOI_SAMPLED_CONFLICT_LIMIT", "-1"}}) {
+    ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
+    ScopedEnvVar limit(name, value);
+    reset_code_object_observations();
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    EXPECT_FALSE(hook.installed()) << name;
+  }
+}
+
 TEST(HsaHooksUnitTest, AutoSampledEmptyReportSkipsCapacityScanAndSurfacesMalformedStaticMapping) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", "sampled");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
@@ -10611,6 +10800,29 @@ TEST(HsaHooksUnitTest, ConSanZeroRecordDiagnosticReportsRuntimeSampledDispatch) 
       testing::ExitedWithCode(86),
       "zero visible records after 1 instrumented dispatch packet.*runtime sampling may have "
       "selected no workgroups.*stride=65536 offset=0");
+}
+
+TEST(HsaHooksUnitTest, ConSanZeroRecordDiagnosticRecognizesIndependentCellSampling) {
+  configure_consan_profile(kConSanHookProfiles[3], false);
+  ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
+  ScopedEnvVar legacy_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", nullptr);
+  ScopedEnvVar legacy_offset("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", nullptr);
+  ScopedEnvVar workgroup_stride("RJ_CONSAN_MOI_WORKGROUP_SAMPLE_STRIDE", "1");
+  ScopedEnvVar cell_stride("RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE", "256");
+  configure_consan_zero_record_case();
+  g_transform_override_result.patches.front().kind =
+      rocjitsu::ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+  install_test_access_coverage(
+      g_transform_override_result, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
+      rocjitsu::ConSanAccessPolicyReason::None, rocjitsu::ConSanLoweringOutcomeKind::Instrumented,
+      rocjitsu::ConSanCapabilityEngine::Sampled, rocjitsu::ConSanProbeIntentKind::SampledAccess);
+  ASSERT_EXIT(([] {
+                run_consan_zero_record_case(/*iterate_symbol=*/true, /*dispatch_kernel=*/true);
+                std::_Exit(8);
+              }()),
+              testing::ExitedWithCode(86),
+              "independent sampling may have selected no workgroups or LDS cells "
+              ".*workgroup_stride=1 workgroup_offset=0 cell_stride=256 cell_offset=0");
 }
 
 TEST(HsaHooksUnitTest, ConSanZeroRecordDiagnosticReportsNoDispatch) {

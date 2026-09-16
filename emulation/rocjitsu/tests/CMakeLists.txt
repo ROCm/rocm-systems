@@ -471,6 +471,13 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/dbi/consan/test_consan_benchmark.py -v
 )
 add_test(
+    NAME ConSanSampledSweepUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/dbi/consan/test_consan_sampled_sweep.py -v
+)
+set_tests_properties(ConSanSampledSweepUnitTest PROPERTIES LABELS consan)
+add_test(
     NAME ConSanHipblasltBenchmarkWorkloadUnitTest
     COMMAND
         ${Python3_EXECUTABLE}
@@ -1594,6 +1601,7 @@ endif()
 
 add_executable(
     hsa_hooks_unit_test
+    dbt/consan_sampled_report_test.cpp
     dbt/hsa_code_object_reader_registry_test.cpp
     dbt/hsa_hooks_unit_test.cpp
     dbt/sidecar_registry_test.cpp

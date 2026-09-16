@@ -238,10 +238,10 @@ plan_sampled_persistent_state_demand(const ConSanRequest &request, const BoundRu
   // A synchronization-aware Sampled probe must preserve one owner identity
   // from kernel entry through both access and sync sites. Access-only Sampled
   // objects retain the cheaper private-state choice.
-  demand.needs_persistent_state = point.moi_initialize_owner_epoch ||
-                                  demand.needs_entry_workgroup_tuple || request.moi_track_atomics ||
-                                  request.moi_track_barriers ||
-                                  request.moi_runtime_sample_stride > 1u;
+  demand.needs_persistent_state =
+      point.moi_initialize_owner_epoch || demand.needs_entry_workgroup_tuple ||
+      request.moi_track_atomics || request.moi_track_barriers ||
+      (request.moi_runtime_sample_stride > 1u || request.sampled_cell_selection().stride > 1u);
   demand.synchronization_requires_persistent_owner = facts.atomic_count || facts.barrier_count;
   demand.scalar_state_supported = true;
   demand.private_state_supported = request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId;

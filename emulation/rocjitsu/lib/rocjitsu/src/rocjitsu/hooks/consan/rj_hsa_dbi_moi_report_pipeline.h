@@ -58,11 +58,13 @@ struct AutoMoiReportPipelineInput {
   bool fine_grained = false;
   std::string_view input_fingerprint;
   const AutoMoiRuntimeStaticMetadata *static_metadata = nullptr;
+  uint32_t sampled_conflict_example_limit = 8;
 };
 
 struct AutoMoiReportPipelineResult {
   AutoMoiReportSummary summary;
   bool complete = false;
+  uint32_t sampled_conflict_example_count = 0;
 };
 
 /// Decode, analyze, and render one quiescent automatic report. `complete` is

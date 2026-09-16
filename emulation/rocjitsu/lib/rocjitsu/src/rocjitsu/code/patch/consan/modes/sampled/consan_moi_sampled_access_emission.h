@@ -16,6 +16,7 @@ namespace rocjitsu::consan_moi_impl {
 /// placement has committed to the body's size.
 struct MoiSampledAccessEmissionPlan {
   bool sampled_check = false;
+  bool uniform_lds_address = false;
   ConSanDelayMode delay_mode = ConSanDelayMode::Nop;
   uint32_t delay_count = 0;
   uint32_t delay_variable_source = 0;
@@ -23,6 +24,7 @@ struct MoiSampledAccessEmissionPlan {
   uint64_t report_generation = 0;
   uint32_t runtime_sample_stride = 1;
   uint32_t runtime_sample_offset = 0;
+  ConSanSampleSelector cell_selection;
   std::optional<uint16_t> exec_save_sgpr;
   bool automatic_private_epoch = false;
   ConSanMoiPersistentSgprState persistent_sgprs;

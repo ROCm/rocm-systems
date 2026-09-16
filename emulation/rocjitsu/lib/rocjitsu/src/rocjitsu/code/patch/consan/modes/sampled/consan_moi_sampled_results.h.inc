@@ -142,8 +142,8 @@ classify_consan_moi_sampled_pending_acquire(const ConSanMoiSampledPendingAcquire
                                             uint32_t window_epoch);
 
 struct ConSanMoiSampledSyncMetadata {
-  uint32_t version = consan_moi_sampled_sync_abi::version;
   uint64_t address = 0;
+  uint32_t version = consan_moi_sampled_sync_abi::version;
   uint32_t byte_count = 0;
   ConSanMoiSampledSyncKind kind = ConSanMoiSampledSyncKind::None;
   ConSanMoiSampledSyncRole role = ConSanMoiSampledSyncRole::None;
@@ -173,8 +173,10 @@ enum class ConSanMoiSampledSyncClassification : uint8_t {
 };
 
 struct ConSanMoiSampledSyncDecodeResult {
+  // Reuse host metadata tail padding so decoded evidence stays compact without
+  // over-aligning records. The packed device representation is separate.
+  [[no_unique_address]] ConSanMoiSampledSyncMetadata metadata;
   ConSanMoiSampledSyncClassification classification = ConSanMoiSampledSyncClassification::Malformed;
-  ConSanMoiSampledSyncMetadata metadata;
 };
 
 struct ConSanMoiSampledSyncSnapshotWords {

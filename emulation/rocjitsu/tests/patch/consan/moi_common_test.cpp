@@ -3612,7 +3612,10 @@ TEST(ConSanMoi, AutoReportInventoryCountsAdmittedLogicalRangesBeforeAllocation) 
         plan_test_moi_evidence_inventory(result, options);
     EXPECT_EQ(inventory.engine, engine);
     EXPECT_EQ(inventory.access_range_count, 2u);
-    EXPECT_GE(inventory.diagnostic_count, 2u);
+    if (engine == ConSanMoiEngine::Sampled)
+      EXPECT_EQ(inventory.diagnostic_count, 0u);
+    else
+      EXPECT_GE(inventory.diagnostic_count, 2u);
     if (engine == ConSanMoiEngine::Sampled) {
       EXPECT_EQ(inventory.sampled_range_bank_count, 16u);
       EXPECT_EQ(inventory.sampled_watchpoint_count, 16u);

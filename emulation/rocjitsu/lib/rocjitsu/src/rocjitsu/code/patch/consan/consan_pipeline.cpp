@@ -851,7 +851,8 @@ ConSanTransformTransaction::execute(std::optional<ConSanTransformArtifacts> supp
                                .requested_report_buffer_size = request.moi_auto_report_buffer_size,
                                .maximum_access_probe_count = maximum_access_probe_count,
                                .maximum_workgroup_lds_bytes = capabilities.max_workgroup_lds_bytes,
-                               .dynamic_access_records = request.moi_dynamic_access_records});
+                               .dynamic_access_records = request.moi_dynamic_access_records,
+                               .sampled_banks = request.moi_sampled_banks});
     }
     if (!result.evidence_requirements ||
         !consan_evidence_requirements_well_formed(*result.evidence_requirements)) {

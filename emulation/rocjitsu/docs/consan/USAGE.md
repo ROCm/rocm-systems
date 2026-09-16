@@ -37,7 +37,7 @@ env \
 ```
 
 Loading the hook is itself the activation action and defaults to MOI
-Record/Replay; no separate enable variable is required. `RJ_CONSAN_LOG=1` is
+Sampled; no separate enable variable is required. `RJ_CONSAN_LOG=1` is
 optional.
 
 Every valid code object on a waitcheck-supported target that is not excluded
@@ -59,13 +59,14 @@ comparison in [FLAVORS.md](FLAVORS.md).
 
 | Selection | Ordinary `standard-v1` behavior | Primary tradeoff |
 | --- | --- | --- |
-| default or `RJ_CONSAN_MODE=record-replay` | Instrument all admitted supported access, barrier, atomic, and fence sites; allocate an inventory-sized report; replay visible records on the host. | Mechanical default and expert synchronization engine with clear reference/debug semantics, but only a bounded dynamic snapshot. |
+| `RJ_CONSAN_MODE=record-replay` | Instrument all admitted supported access, barrier, atomic, and fence sites; allocate an inventory-sized report; replay visible records on the host. | Expert synchronization engine with clear reference/debug semantics, but only a bounded dynamic snapshot. |
 | `RJ_CONSAN_MODE=inline-shadow` | Publish exact-shadow cells and bounded diagnostics on the GPU; track admitted barriers and atomics. | Strongest supported-form attribution, with higher overhead. |
-| `RJ_CONSAN_MODE=sampled` | Patch all admitted supported sites; use automatic runtime stride 256 and offset zero; retain bounded sampled causal windows and synchronization metadata. | Bounded retained state and probabilistic detection. |
+| default or `RJ_CONSAN_MODE=sampled` | Patch all admitted supported sites; use automatic runtime stride 256 and offset zero; retain bounded sampled causal windows and synchronization metadata. | Default engine: bounded retained state, lower overhead, and probabilistic detection. |
 | `RJ_CONSAN_MODE=supercollider` | Duplicate/read-back supported LDS accesses, delay, compare, and set an automatically allocated non-trapping mismatch marker. | Complementary value-instability diagnostic; it does not attribute a happens-before edge or exact racing pair. |
 
-`RJ_CONSAN_MODE` defaults to `record-replay`; spelling it explicitly can make a
-saved command self-describing.
+`RJ_CONSAN_MODE` defaults to `sampled` when unset or empty. To retain the
+previous default behavior, explicitly set `RJ_CONSAN_MODE=record-replay`.
+Spelling the mode explicitly also makes saved commands self-describing.
 
 Record/Replay's complete static-site instrumentation is not an exhaustive
 dynamic trace. The ordinary automatic layout uses a report-wide dispatch
@@ -88,7 +89,7 @@ an expert override.
 
 ## Minimal commands
 
-Current mechanical default, Record/Replay:
+Default engine, Sampled:
 
 ```sh
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
@@ -105,11 +106,11 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" \
   ./application
 ```
 
-Sampled:
+Record/Replay (explicit opt-in):
 
 ```sh
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_MODE=sampled \
+  RJ_CONSAN_MODE=record-replay \
   RJ_CONSAN_LOG=1 \
   ./application
 ```
@@ -149,7 +150,7 @@ continues to return the HSA error to callers that correctly handle it.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `RJ_CONSAN_MODE=record-replay|inline-shadow|sampled|supercollider` | `record-replay` | Select the analysis. Loading the hook activates ConSan. |
+| `RJ_CONSAN_MODE=record-replay|inline-shadow|sampled|supercollider` | `sampled` | Select the analysis. Loading the hook activates ConSan. |
 | `RJ_CONSAN_POLICY=default|strict` | `default` | `strict` defaults fail-closed and require-patch guards to true; for MOI it also defaults automatic-record and forbid-overflow guards to true. It does not require complete static coverage or make race diagnostics fatal. A load-time rejection terminates with exit code 92. |
 | `RJ_CONSAN_LOG=N` | disabled | Enable compact logs at `1`; larger values add inventory detail. |
 | `RJ_CONSAN_FAIL_CLOSED=0|1` | `0` | Reject unsupported/invalid transformation outcomes instead of loading the original. |
@@ -488,7 +489,46 @@ status other than `0` or the expected SuperCollider `2` as an error.
 SuperCollider does not use the MOI report layout. Its mismatch marker is
 lifetime-sticky and capacity-independent, so status `2` leaves it unchanged.
 
+## Sampled presets
+
+`RJ_CONSAN_MOI_SAMPLED_PRESET=low|default|high|max` selects a performance/coverage
+trade-off for Sampled. Unset, empty, and `default` preserve the existing behavior.
+Explicit nonempty presets require the Sampled engine; invalid names are rejected.
+Names are case-insensitive.
+
+| Preset | Workgroup stride | LDS-cell stride | Intended use |
+| --- | ---: | ---: | --- |
+| `low` | 1024 | 1024 | Try reducing recording overhead on large workloads, accepting more misses. |
+| `default` | 256 | 256 | Existing standard settings, unchanged. |
+| `high` | 1 | 4 | Small/minimized repros: retain every workgroup and one in four four-byte LDS cells. |
+| `max` | 1 | 1 | Remove workgroup and cell filtering when `high` misses an issue. |
+
+For example:
+
+```sh
+HSA_TOOLS_LIB="$CONSAN_HOOK" RJ_CONSAN_MOI_SAMPLED_PRESET=high ./application
+```
+
+Every preset keeps all eligible static sites, offset zero, automatic banks (up
+to eight per logical range), the 128 MiB report ceiling, synchronization tracking,
+every-epoch analysis, and the existing diagnostic-example limits. These are
+selector defaults, not a percentage of all dynamic accesses or guaranteed
+performance ratios. The `high` setting covers the aligned-address minimized
+intra-wave and cross-wave store repros; it can miss races on other cell residues.
+`max` removes that cell filter but retains bounded windows and the existing
+limitations of the analysis. It is not exhaustive tracing.
+
+Explicit knobs override preset defaults. Independent workgroup/cell settings
+replace only the specified fields; unspecified fields inherit the preset.
+Either legacy `RUNTIME_SAMPLE_*` variable selects coupled operation instead:
+the preset's workgroup stride is the fallback for both selectors. Mixing explicit
+legacy and independent selectors remains an error. Offsets must fit the resolved
+stride. All other knobs retain their existing meanings and can also be overridden.
+`RJ_CONSAN_LOG=1` shows the preset and the resolved configuration.
+
 ## MOI event and sampling controls
+
+Defaults below assume the `default` preset.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -499,7 +539,71 @@ lifetime-sticky and capacity-independent, so status `2` leaves it unchanged.
 | `RJ_CONSAN_MOI_SAMPLE_OFFSET=M` | `0` | Static residue, smaller than the static stride. |
 | `RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=N` | `65,536` for Record/Replay; `256` for Sampled; `1` for Inline Shadow | Expert power-of-two runtime stride in `1..16777216`; leaves all eligible static sites patched. |
 | `RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET=M` | `0` | Expert runtime residue smaller than the runtime stride. |
+| `RJ_CONSAN_MOI_WORKGROUP_SAMPLE_STRIDE=N` | `256` | Sampled-only independent workgroup stride; power of two in `1..16777216`. Applies consistently to access and synchronization probes. |
+| `RJ_CONSAN_MOI_WORKGROUP_SAMPLE_OFFSET=M` | `0` | Residue smaller than the workgroup stride. |
+| `RJ_CONSAN_MOI_CELL_SAMPLE_STRIDE=N` | `256` | Sampled-only independent LDS-cell stride; power of two in `1..16777216`. Selects `(byte_address >> 2) % stride`, keeping all waves that touch a selected cell. |
+| `RJ_CONSAN_MOI_CELL_SAMPLE_OFFSET=M` | `0` | Residue smaller than the cell stride. |
+| `RJ_CONSAN_MOI_SAMPLED_BANKS=N` | `0` (auto) | Requested maximum banks per logical range: `0`, `1`, `2`, `4`, or `8`. Auto requests eight; report memory limits may reduce the achieved geometry. Bank routing is unchanged. |
 | `RJ_CONSAN_MOI_SAMPLED_CHECK=0|1` | `0` | Enable the lower-fidelity immediate adjacent-range GPU check in addition to host scanning. |
+| `RJ_CONSAN_MOI_SAMPLED_CONFLICT_LIMIT=N` | `8` | Maximum distinct conflict examples retained per Sampled report (`0..1024`). Zero suppresses examples, not analysis or conflict counting. |
+| `RJ_CONSAN_MOI_SAMPLED_TOTAL_CONFLICT_LIMIT=N` | `64` | Maximum Sampled conflict examples across all reports, executables, and epochs of one hook session (`0..65536`). |
+
+With the `default` preset and no independent selector variables, Sampled keeps
+the legacy coupled runtime stride/offset for both workgroups and LDS cells. Setting any
+`WORKGROUP_SAMPLE_*` or `CELL_SAMPLE_*` variable enables independent selection:
+unspecified strides inherit the preset (256 with `default`) and offsets default to zero. Mixing these variables
+with either legacy `RUNTIME_SAMPLE_*` variable is rejected, even if the values
+agree. For example, workgroup stride 1 and cell stride 256 selects every
+workgroup while retaining only the chosen LDS-cell residue. Synchronization
+selection follows the workgroup setting, never the cell setting.
+
+With `RJ_CONSAN_LOG=1`, the Sampled configuration line includes both resolved
+selectors, static-site selection, requested banks, report ceiling, analysis
+policy, and example limits. Per-object planning and static mapping lines show
+the achieved slots and bank geometry (`effective_banks_min`/`effective_banks_max`
+for admitted static mappings); a request is not a capacity guarantee.
+
+
+Sampled conflict examples contain the code-object fingerprint, both original
+instruction offsets, dispatch/workgroup identity, owners, access kinds, and LDS
+byte ranges. An unavailable instruction mapping is printed as `unavailable`,
+which is distinct from a mapped offset of zero. Attribution does not depend on
+the separate 64-entry watchpoint detail listing.
+
+Sampled also reports single-instruction write collisions among lanes when it
+can prove one exact LDS byte interval for all participating lanes. The current
+proof recognizes plain constant/scalar broadcasts and VGPR copies within one
+basic block, invalidates clobbered registers, and discards facts on EXEC changes
+and CFG edges. Only ordinary single-range native LDS forms qualify; FLAT,
+multi-range accesses, lane-permuting moves, and gfx1250 selectable VGPR banks
+remain unsupported for exact masks. Objects that write register mode through
+`s_setreg*` or `s_set_gpr_idx*` also receive no exact masks; relative VGPR moves
+clear local proof facts. These restrictions affect lane evidence,
+not the existing cross-wave access checking.
+
+For a qualifying retained access, `first_lanes` and `second_lanes` show exact
+participating masks. Otherwise that side prints `unavailable`. A single-group
+write diagnostic splits one mask into its first lane and remaining lanes; it
+counts one conflict example rather than enumerating every lane pair. Read-only
+and atomic groups do not create these ordinary write/write diagnostics.
+Uniform addresses do not imply uniform values or suppress races. Existing
+sampling still determines whether any evidence is retained.
+
+Report ABI version 13 adds an eight-byte exact mask to each causal window,
+protected by the same publication claim and report generation as the access.
+Automatic Sampled layouts no longer reserve unused device diagnostic records;
+diagnostics are built on the host. Direct callers must size their buffers with
+the current layout helpers. A fixed byte budget determines capacity using the
+new record size; use the reported achieved bank count when comparing runs.
+
+Examples are deduplicated within each report by the two sites (or slot indices
+when unmapped), execution identity, owners, epochs, access kinds, and byte ranges.
+Traversal order determines which examples are retained. The total
+`sampled_conflicts` counts cross-wave evidence pairs plus one conflict per
+retained exact group with colliding lanes, including repeated examples. `sampled_conflict_examples` counts retained examples and
+`sampled_conflict_pairs_without_example` counts the remaining pairs, including
+duplicates and pairs omitted by either limit. Reaching an output limit does not
+stop analysis or change the diagnostic guards' verdict.
 
 Record/Replay runtime selection retains whole workgroups. Its per-probe gate
 mixes the exact x/y/z workgroup coordinates and the CDNA5 cluster coordinate
@@ -507,7 +611,11 @@ when present, but deliberately does not rotate selection by dispatch identity.
 Offset zero therefore includes workgroup zero across repeated launches.
 Dispatch identity remains part of each retained record and host-replay key.
 
-Sampled uses the same dispatch/workgroup vocabulary. When entry-captured
+Sampled uses the same dispatch/workgroup vocabulary. Its workgroup selector
+includes dispatch identity, so offset zero does not guarantee selecting
+workgroup zero, and repeated processes can select different workgroups at the
+same offset. A fixed offset schedule reproduces selector settings, not dispatch
+identities. Workgroup stride 1 removes this source of selection misses. When entry-captured
 identity and scalar resources permit, a fast gate skips the shared access body
 for an unselected workgroup; private-identity and compact-spill operating points
 use an in-body fallback. Selected workgroups additionally mix owner, epoch,
@@ -516,6 +624,53 @@ windows. Each logical range receives as many as eight immutable windows when
 capacity permits. A later valid identity after every bank fills is
 `sampled_saturated_windows`; malformed publication or true evidence loss uses
 separate counters and makes the analysis incomplete.
+
+Sampled diagnostics attribute the retained instruction, wave owner and byte
+range. They do not provide exact lane masks or diagnose intra-wave races.
+Window publication retains a representative access; its winning lanes and the
+saved EXEC mask do not identify every lane accessing that address. Dense
+sampling or additional banks do not recover that missing provenance.
+
+A retained conflict prints `ambiguous` when overlapping static mappings name
+different original instructions for its slot. Missing mappings print
+`unavailable`; neither case is presented as instruction offset zero.
+
+### Repeatable offset sweeps
+
+The [Sampled sweep runner](../../tests/dbi/consan/consan_sampled_sweep.py) runs an
+unchanged command with a fixed, bounded schedule. For example, from
+`emulation/rocjitsu`:
+
+```sh
+python3 tests/dbi/consan/consan_sampled_sweep.py \
+  --hook /path/to/librocjitsu_dbi_hooks.so --output /tmp/sampled-investigation \
+  --workgroup-stride 256 --workgroup-offsets 0,1 \
+  --cell-stride 256 --cell-offsets 0,1,2,3 --banks 0 --run-budget 8 \
+  --timeout 180 -- ./workload its-arguments
+```
+
+The workgroup offsets are the outer loop and cell offsets the inner loop, in
+supplied order. The budget selects a prefix of their Cartesian product; the
+manifest records both requested and scheduled counts. The runner replaces
+inherited runtime selectors, enables Sampled logging and fail-closed patching,
+and preserves other controls, including static selection, report ceilings,
+epoch policy and diagnostic assertions. Use a fresh output directory. Inherit
+the same SDK/library environment used to build and run the workload.
+
+Each run keeps its complete log, effective configuration, report geometry,
+retention/saturation/mapping counters, completeness verdicts and diagnosed
+pairs. `summary.json` aggregates references to already diagnosed pairs; it
+never joins accesses from different executions. Missing hook evidence, a
+nonzero exit or a timeout stops the sweep and remains a failure in the summary.
+A run with no diagnostic remains an observed miss/clean result to interpret
+against the workload's independent fault and correctness oracle. The tool does
+not certify race freedom or change expected fault outcomes. Denser selectors,
+more banks and additional runs request more investigation work; their elapsed
+cost is recorded per run and is not an unchanged-default overhead measurement.
+
+The `sampled-selection` CTest label exercises an explicit production-rate
+positive, an unselected address, an ordered control and independent-offset
+cases. These are separate from the ordinary dense semantic device matrix.
 
 ## Resource overrides
 

@@ -500,6 +500,13 @@ struct ConSanMoiModePolicy {
 
 [[nodiscard]] ConSanMoiModePolicy consan_moi_mode_policy(ConSanMoiEngine engine);
 
+/// A deterministic residue selector over a power-of-two stride.
+struct ConSanSampleSelector {
+  uint32_t stride = 1;
+  uint32_t offset = 0;
+  friend bool operator==(const ConSanSampleSelector &, const ConSanSampleSelector &) = default;
+};
+
 /// User-visible sanitizer choices that determine which semantic observations
 /// ConSan requests from a code object.
 ///
@@ -513,7 +520,7 @@ struct ConSanRequest {
   /// the supported default before validating the request.
   std::optional<ConSanFlavor> flavor;
   /// MOI implementation selected when `flavor` is `ConSanFlavor::Moi`.
-  ConSanMoiEngine moi_engine = ConSanMoiEngine::RecordReplay;
+  ConSanMoiEngine moi_engine = ConSanMoiEngine::Sampled;
   /// Source of the logical owner identity recorded by MOI probes.
   ConSanMoiOwnerSource moi_owner_source = ConSanMoiOwnerSource::Automatic;
   /// Admission policy for FLAT sites whose group provenance is heuristic.
@@ -545,6 +552,18 @@ struct ConSanRequest {
   uint32_t moi_runtime_sample_stride = 1;
   /// Selected residue in the dynamic runtime stride.
   uint32_t moi_runtime_sample_offset = 0;
+  /// Sampled LDS-cell selector. When absent, use the legacy runtime selector
+  /// for both workgroups and cells. Synchronization uses only the workgroup
+  /// selector, irrespective of which cells are retained.
+  std::optional<ConSanSampleSelector> moi_sampled_cell_selection;
+  /// Requested maximum banks per logical Sampled range: 0 (auto), 1, 2, 4, 8.
+  /// The report ceiling can reduce the achieved count.
+  uint32_t moi_sampled_banks = 0;
+
+  [[nodiscard]] constexpr ConSanSampleSelector sampled_cell_selection() const {
+    return moi_sampled_cell_selection.value_or(
+        ConSanSampleSelector{moi_runtime_sample_stride, moi_runtime_sample_offset});
+  }
 
   /// SuperCollider delay implementation used between the original and repeat
   /// observation.

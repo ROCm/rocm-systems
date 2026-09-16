@@ -105,6 +105,7 @@ AutoMoiSampledDecodedReport decode_auto_moi_sampled_report(
     const uint32_t window_first_entry = window.first_entry;
     const uint32_t window_entry_count = window.entry_count;
     const uint32_t window_cluster_workgroup_id = window.cluster_workgroup_id;
+    const uint64_t exact_lane_mask = window.exact_lane_mask;
     ConSanMoiSampledSyncMetadataPacked sync_packed{};
     uint32_t sync_descriptor_before = 0;
     uint32_t sync_descriptor_after = 0;
@@ -194,7 +195,8 @@ AutoMoiSampledDecodedReport decode_auto_moi_sampled_report(
           {i, snapshot.entry, sync,
            static_cast<uint64_t>(low_after) | (static_cast<uint64_t>(high) << 32u),
            window_generation, window_dispatch_id, window_x, window_y, window_z, window_epoch,
-           window_cluster_workgroup_id, sampled_static_mapping_for_slot(i), sync_snapshot_usable});
+           window_cluster_workgroup_id, sync_snapshot_usable, sampled_static_mapping_for_slot(i),
+           exact_lane_mask});
       break;
     case ConSanMoiSampledSnapshotState::StaleGeneration:
       ++summary.sampled_stale_snapshot_count;

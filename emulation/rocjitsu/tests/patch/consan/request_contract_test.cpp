@@ -58,7 +58,7 @@ static_assert(HasFailClosed<RuntimePolicy>);
 TEST(ConSanRequestContractTest, DefaultsExposeOnlyConstructionSentinel) {
   const ConSanRequest request;
   EXPECT_EQ(validate_consan_request(request), ConSanContractIssue::MissingFlavor);
-  EXPECT_EQ(request.moi_engine, ConSanMoiEngine::RecordReplay);
+  EXPECT_EQ(request.moi_engine, ConSanMoiEngine::Sampled);
   EXPECT_EQ(request.moi_sample_stride, 1u);
   EXPECT_EQ(request.moi_runtime_sample_stride, 1u);
   EXPECT_EQ(request.delay_mode, ConSanDelayMode::Nop);
@@ -101,6 +101,33 @@ TEST(ConSanRequestContractTest, AcceptsEverySupportedModeAndRejectsInvalidEnums)
   invalid_sc_evidence.flavor = ConSanFlavor::SuperCollider;
   invalid_sc_evidence.supercollider_evidence_mode = ConSanSuperColliderEvidenceMode::Count;
   EXPECT_EQ(validate_consan_request(invalid_sc_evidence), ConSanContractIssue::InvalidMode);
+}
+
+TEST(ConSanRequestContractTest, SampledIndependentSelectorsAndBankRequestsAreBounded) {
+  auto request = valid_moi_request(ConSanMoiEngine::Sampled);
+  request.moi_runtime_sample_stride = 256;
+  request.moi_runtime_sample_offset = 17;
+  EXPECT_EQ(request.sampled_cell_selection(), (ConSanSampleSelector{256, 17}));
+  request.moi_sampled_cell_selection = ConSanSampleSelector{4, 3};
+  EXPECT_EQ(request.sampled_cell_selection(), (ConSanSampleSelector{4, 3}));
+  for (uint32_t banks : {0u, 1u, 2u, 4u, 8u}) {
+    request.moi_sampled_banks = banks;
+    EXPECT_EQ(validate_consan_request(request), ConSanContractIssue::None);
+  }
+  for (uint32_t banks : {3u, 16u, UINT32_MAX}) {
+    request.moi_sampled_banks = banks;
+    EXPECT_EQ(validate_consan_request(request), ConSanContractIssue::InvalidMode);
+  }
+  request.moi_sampled_banks = 0;
+  for (uint32_t stride : {0u, 3u, 1u << 25u}) {
+    request.moi_sampled_cell_selection = ConSanSampleSelector{stride, 0};
+    EXPECT_EQ(validate_consan_request(request), ConSanContractIssue::InvalidSampleStride);
+  }
+  request.moi_sampled_cell_selection = ConSanSampleSelector{4, 4};
+  EXPECT_EQ(validate_consan_request(request), ConSanContractIssue::InvalidSampleOffset);
+  request.moi_sampled_cell_selection = ConSanSampleSelector{4, 3};
+  request.moi_engine = ConSanMoiEngine::RecordReplay;
+  EXPECT_EQ(validate_consan_request(request), ConSanContractIssue::ModeConflict);
 }
 
 TEST(ConSanRequestContractTest, ValidatesStaticAndRuntimeSamplingBoundaries) {

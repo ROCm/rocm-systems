@@ -36,13 +36,11 @@ cmake --build "$ROCJITSU_BUILD_DIR" --target rocjitsu_dbi_hooks
 
 export CONSAN_HOOK="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
 
-env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_MODE=sampled \
-  ./application
+env HSA_TOOLS_LIB="$CONSAN_HOOK" ./application
 ```
 
 Loading the hook is itself the activation action; no separate enable variable
-is required. It selects MOI Record/Replay by default. Add `RJ_CONSAN_LOG=1` for
+is required. It selects MOI Sampled by default. Add `RJ_CONSAN_LOG=1` for
 instrumentation and completeness summaries.
 
 For code objects not excluded by the kernel allowlist, the same hook runs
@@ -69,6 +67,11 @@ ConSan analysis verdict ... static_complete=... dynamic_complete=...
 If the program's own correctness checks pass, ConSan preserved its result for
 that run; this does not prove the program race-free. A failure, timeout, signal,
 or GPU reset is not by itself a ConSan diagnostic.
+
+For small repros, use `RJ_CONSAN_MOI_SAMPLED_PRESET=high`; use `max` to remove
+workgroup and cell sampling. `low` trades coverage for lower recording overhead,
+and `default` preserves standard behavior. See [Sampled presets](USAGE.md#sampled-presets)
+for exact settings, overrides, and bounded-retention limitations.
 
 ## Documents
 

@@ -273,7 +273,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   // needs its bank index to survive all ordinary temporaries in that cave.
   // Reserve the dedicated bank VGPR based on the emitted layout, not solely on
   // whether the inner vector sampler remains enabled.
-  const bool dedicated_bank_vgpr = plan.runtime_sample_stride > 1 || plan.window_bank_count > 1;
+  const bool dedicated_bank_vgpr = plan.runtime_sample_stride > 1 ||
+                                   plan.cell_selection.stride > 1 || plan.window_bank_count > 1;
   const bool reserve_two_address_replay_scratch =
       moi_guest_access_relocation_requires_adjusted_address(candidate, *target);
   if (static_cast<uint32_t>(plan.scratch_vgpr) + plan.scratch_vgpr_count > kMaxVgprs) {
@@ -321,7 +322,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   const uint16_t high_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 3u);
   const uint16_t tmp_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 4u);
   const uint16_t owner_vgpr = plan.owner_epoch_vgprs.owner.value_or(derived_owner_vgpr.value_or(0));
-  const bool runtime_sampled = plan.runtime_sample_stride > 1;
+  const bool runtime_sampled = plan.runtime_sample_stride > 1 || plan.cell_selection.stride > 1;
   const uint16_t bank_vgpr =
       dedicated_bank_vgpr
           ? static_cast<uint16_t>(plan.scratch_vgpr + (plan.sampled_check ? 7u : 5u))
@@ -461,19 +462,19 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
       return std::nullopt;
     }
   }
-  if (runtime_sampled) {
-    if (plan.runtime_workgroup_gate_in_body) {
-      require_emission(
-          append_sampled_workgroup_residue(words, plan, bank_vgpr, high_vgpr, low_vgpr, arch),
-          "ConSan MOI runtime sampled probe could not select a private-state workgroup");
-      require_emission.append(
-          "ConSan MOI runtime sampled probe could not encode its body workgroup gate",
-          instrumentation::build_v_mov_b32_literal(high_vgpr, plan.runtime_sample_offset, arch),
-          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(high_vgpr), bank_vgpr, arch));
-      sequence.branch(restore_label, InstructionSequence::BranchKind::VccZero)
-          .append(instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr,
-                                                            kAmdGpuVccLo, arch));
-    }
+  if (plan.runtime_workgroup_gate_in_body) {
+    require_emission(
+        append_sampled_workgroup_residue(words, plan, bank_vgpr, high_vgpr, low_vgpr, arch),
+        "ConSan MOI runtime sampled probe could not select a private-state workgroup");
+    require_emission.append(
+        "ConSan MOI runtime sampled probe could not encode its body workgroup gate",
+        instrumentation::build_v_mov_b32_literal(high_vgpr, plan.runtime_sample_offset, arch),
+        instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(high_vgpr), bank_vgpr, arch));
+    sequence.branch(restore_label, InstructionSequence::BranchKind::VccZero)
+        .append(instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr, kAmdGpuVccLo,
+                                                          arch));
+  }
+  if (plan.cell_selection.stride > 1) {
     // Sample addresses while retaining every wave which touches the selected
     // cell. Selecting owners here would discard the cross-wave evidence that
     // the sampled checker needs in order to identify a race.
@@ -496,9 +497,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
         instrumentation::build_v_lshrrev_b32(
             low_vgpr, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift), low_vgpr,
             arch),
-        instrumentation::build_v_and_b32_literal(low_vgpr, plan.runtime_sample_stride - 1u,
+        instrumentation::build_v_and_b32_literal(low_vgpr, plan.cell_selection.stride - 1u,
                                                  low_vgpr, arch),
-        instrumentation::build_v_mov_b32_literal(high_vgpr, plan.runtime_sample_offset, arch),
+        instrumentation::build_v_mov_b32_literal(high_vgpr, plan.cell_selection.offset, arch),
         instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(high_vgpr), low_vgpr, arch));
     sequence.branch(restore_label, InstructionSequence::BranchKind::VccZero)
         .append(instrumentation::build_s_and_saveexec_b64(publication_exec_save_sgpr, kAmdGpuVccLo,
@@ -631,6 +632,15 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
           record.store_workgroup(offsetof(ConSanMoiSampledCausalWindow, cluster_workgroup_id),
                                  plan.workgroup_sources.cluster_workgroup_id),
       "ConSan MOI sampled probe could not publish causal window metadata");
+
+  if (plan.uniform_lds_address) {
+    require_emission(
+        record.store_sgpr(offsetof(ConSanMoiSampledCausalWindow, exact_lane_mask),
+                          original_exec_save_sgpr) &&
+            record.store_sgpr(offsetof(ConSanMoiSampledCausalWindow, exact_lane_mask) + 4u,
+                              original_exec_save_sgpr + 1u),
+        "ConSan MOI sampled probe could not publish its exact lane mask");
+  }
 
   require_emission.append("ConSan MOI sampled probe could not encode sampled entry low word",
                           instrumentation::build_v_mov_b32_literal(low_vgpr, low_literal, arch));

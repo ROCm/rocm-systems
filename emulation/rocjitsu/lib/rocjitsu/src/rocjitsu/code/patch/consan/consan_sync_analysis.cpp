@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/consan_sync_analysis.h"
+#include "rocjitsu/code/patch/consan/consan_uniform_address.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/kernel_scope.h"
@@ -2200,6 +2201,36 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
     if (scope) {
       for (const auto &[block, proof] : scope->owner_proofs) {
         owners_by_block[block].push_back({.kernel = kernel.id, .proof = owner_proof_kind(proof)});
+      }
+    }
+  }
+
+  // Reuse the exact CFG boundaries already built for ownership. No facts
+  // cross a join, call, or EXEC change; selectable VGPR banks stay unsupported.
+  const bool indexed_register_mode = std::ranges::any_of(blocks, [](const auto &block) {
+    return std::ranges::any_of(block->instructions(), [](const Instruction &inst) {
+      const auto name = inst.mnemonic();
+      // A MODE write may enable indexed VGPR addressing on CDNA. Refuse the
+      // entire object, including later blocks, rather than model that state.
+      return name.starts_with("s_set_gpr_idx") || name.starts_with("s_setreg");
+    });
+  });
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5 && !indexed_register_mode) {
+    std::unordered_map<uint64_t, std::vector<ConSanProgramSite *>> accesses;
+    for (ConSanProgramSite &site : inventory.program_sites) {
+      site.uniform_lds_address = false;
+      if (site.lowering.form &&
+          site.lowering.form->kind == ConSanAccessLoweringFormKind::NativeSingleRange &&
+          site.lowering.form->address_vgpr && site.ranges.size() == 1u)
+        accesses[site.text_offset()].push_back(&site);
+    }
+    for (const auto &block : blocks) {
+      ConSanUniformAddressTracker tracker;
+      for (const Instruction &inst : block->instructions()) {
+        if (const auto found = accesses.find(inst.src_loc()); found != accesses.end())
+          for (ConSanProgramSite *site : found->second)
+            site->uniform_lds_address = tracker.contains(*site->lowering.form->address_vgpr);
+        tracker.observe(inst);
       }
     }
   }

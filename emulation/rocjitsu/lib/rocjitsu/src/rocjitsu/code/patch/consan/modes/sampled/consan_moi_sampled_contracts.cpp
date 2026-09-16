@@ -30,7 +30,8 @@ bool sampled_access_can_plan_spill_over_guest_operands(const ConSanRequest &requ
   // Admit the overlap provisionally when entry-persistent owner state will be
   // resolved later; emission still requires a concrete persistent owner VGPR.
   return resource_facts.initialize_owner_epoch || request.moi_track_atomics ||
-         request.moi_track_barriers || request.moi_runtime_sample_stride > 1u;
+         request.moi_track_barriers ||
+         (request.moi_runtime_sample_stride > 1u || request.sampled_cell_selection().stride > 1u);
 }
 
 uint16_t direct_sampled_scratch_count(const ConSanRequest &request,

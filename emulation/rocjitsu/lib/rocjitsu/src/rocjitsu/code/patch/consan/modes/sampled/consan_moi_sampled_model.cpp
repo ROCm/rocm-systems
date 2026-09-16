@@ -88,19 +88,19 @@ ConSanMoiSampledSyncDecodeResult
 decode_consan_moi_sampled_sync_metadata(const ConSanMoiSampledSyncMetadataPacked &packed) {
   using Classification = ConSanMoiSampledSyncClassification;
   if (packed == ConSanMoiSampledSyncMetadataPacked{})
-    return {Classification::Empty, {}};
+    return {.metadata = {}, .classification = Classification::Empty};
   if (packed.descriptor == kConSanMoiSampledSyncPublishingDescriptor)
-    return {Classification::Publishing, {}};
+    return {.metadata = {}, .classification = Classification::Publishing};
   if ((packed.descriptor & consan_moi_sampled_sync_abi::reserved_mask) != 0)
-    return {Classification::Malformed, {}};
+    return {.metadata = {}, .classification = Classification::Malformed};
 
   const auto extract = [&](uint32_t shift, uint32_t bits) {
     return (packed.descriptor >> shift) & ((uint32_t{1} << bits) - 1u);
   };
   ConSanMoiSampledSyncMetadata metadata{
+      packed.address,
       extract(consan_moi_sampled_sync_abi::version_shift,
               consan_moi_sampled_sync_abi::version_bits),
-      packed.address,
       packed.byte_count,
       static_cast<ConSanMoiSampledSyncKind>(
           extract(consan_moi_sampled_sync_abi::kind_shift, consan_moi_sampled_sync_abi::kind_bits)),
@@ -114,7 +114,7 @@ decode_consan_moi_sampled_sync_metadata(const ConSanMoiSampledSyncMetadataPacked
       packed.epoch_after,
   };
   const Classification classification = classify_consan_moi_sampled_sync_metadata(metadata);
-  return {classification, metadata};
+  return {.metadata = metadata, .classification = classification};
 }
 
 ConSanMoiSampledSyncDecodeResult
@@ -122,7 +122,7 @@ classify_consan_moi_sampled_sync_snapshot(ConSanMoiSampledSyncSnapshotWords word
                                           uint32_t paired_window_epoch) {
   using Classification = ConSanMoiSampledSyncClassification;
   if (words.descriptor_before != words.descriptor_after)
-    return {Classification::ChangedDuringRead, {}};
+    return {.metadata = {}, .classification = Classification::ChangedDuringRead};
   // The descriptor is the commit word. Ignore the copy captured with the
   // payload so callers cannot accidentally validate anything but the stable
   // descriptor observations which bracketed it.
@@ -132,10 +132,10 @@ classify_consan_moi_sampled_sync_snapshot(ConSanMoiSampledSyncSnapshotWords word
     if (decoded.metadata.kind == ConSanMoiSampledSyncKind::Atomic &&
         (decoded.metadata.epoch_before != paired_window_epoch ||
          decoded.metadata.epoch_after != paired_window_epoch))
-      return {Classification::UnsupportedSequence, decoded.metadata};
+      return {.metadata = decoded.metadata, .classification = Classification::UnsupportedSequence};
     if (decoded.metadata.kind == ConSanMoiSampledSyncKind::Barrier &&
         decoded.metadata.epoch_before != paired_window_epoch)
-      return {Classification::UnsupportedSequence, decoded.metadata};
+      return {.metadata = decoded.metadata, .classification = Classification::UnsupportedSequence};
   }
   return decoded;
 }

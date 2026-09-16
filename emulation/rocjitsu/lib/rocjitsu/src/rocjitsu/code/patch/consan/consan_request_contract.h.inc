@@ -214,6 +214,18 @@ static_assert(kConSanContractIssues.size() == static_cast<size_t>(ConSanContract
       request.moi_runtime_sample_offset >= request.moi_runtime_sample_stride) {
     return ConSanContractIssue::InvalidSampleOffset;
   }
+  if (request.moi_sampled_cell_selection || request.moi_sampled_banks != 0) {
+    if (*request.flavor != ConSanFlavor::Moi || request.moi_engine != ConSanMoiEngine::Sampled)
+      return ConSanContractIssue::ModeConflict;
+    const auto cell = request.sampled_cell_selection();
+    if (cell.stride == 0 || cell.stride > (1u << 24u) || (cell.stride & (cell.stride - 1u)) != 0)
+      return ConSanContractIssue::InvalidSampleStride;
+    if (cell.offset >= cell.stride)
+      return ConSanContractIssue::InvalidSampleOffset;
+    if (request.moi_sampled_banks > 8 ||
+        (request.moi_sampled_banks & (request.moi_sampled_banks - 1u)) != 0)
+      return ConSanContractIssue::InvalidMode;
+  }
   if (request.moi_dynamic_access_records && (*request.flavor != ConSanFlavor::Moi ||
                                              request.moi_engine != ConSanMoiEngine::RecordReplay)) {
     return ConSanContractIssue::ModeConflict;

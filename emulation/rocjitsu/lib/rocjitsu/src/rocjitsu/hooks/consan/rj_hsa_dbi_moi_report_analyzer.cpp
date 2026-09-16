@@ -33,7 +33,8 @@ AutoMoiReportAnalysis analyze_auto_moi_report(const AutoMoiReportPipelineInput &
           return {summary, AutoMoiInlineShadowAnalysis{}};
         } else {
           AutoMoiSampledConflictAnalysis analysis = analyze_auto_moi_sampled_conflicts(
-              decoded_mode.evidence, decoded_mode.synchronization_evidence_complete);
+              decoded_mode.evidence, decoded_mode.synchronization_evidence_complete,
+              input.sampled_conflict_example_limit);
           accumulate_auto_moi_sampled_analysis(summary, analysis);
           return {summary, std::move(analysis)};
         }

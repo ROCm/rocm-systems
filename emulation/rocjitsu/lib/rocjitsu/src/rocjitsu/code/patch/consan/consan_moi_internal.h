@@ -180,7 +180,7 @@ private:
 /// consume this value instead of independently consulting the complete MOI
 /// option bus, so changing an unrelated option cannot change scalar sizing.
 struct MoiExecSaveRequirement {
-  ConSanMoiEngine engine = ConSanMoiEngine::RecordReplay;
+  ConSanMoiEngine engine = ConSanMoiEngine::Sampled;
   bool has_report_buffer = false;
   bool track_atomics = false;
   bool automatic_banked_record_capture = false;
