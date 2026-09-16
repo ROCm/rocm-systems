@@ -696,6 +696,10 @@ struct AqlQueueRecord : AqlQueueConfig {
   bool faulted = false;
   bool debug_suspended = false;
   bool runtime_suspended = false;
+  bool exception_suspended = false;
+  [[nodiscard]] bool suspended() const {
+    return debug_suspended || runtime_suspended || exception_suspended;
+  }
   /// A command-processor pass observed this queue while its debugger gate was closed.
   /// Cleared on resume after scheduling one pass to process the deferred work.
   bool debug_work_deferred = false;

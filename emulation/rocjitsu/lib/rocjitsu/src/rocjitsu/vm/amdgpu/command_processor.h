@@ -40,6 +40,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -238,8 +239,17 @@ public:
   /// @brief Reconfigure only the queue incarnation identified by @p registration_id.
   [[nodiscard]] bool update_queue_registration(uint64_t registration_id, uint64_t ring_base_va,
                                                uint32_t ring_size, uint32_t queue_percentage);
-  void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended);
-  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
+  void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended,
+                                 bool resolve_exception = false);
+  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status,
+                              bool publish_interrupt = true);
+  /// @brief Publish a prepared queue exception without entering any CU.
+  /// @details The caller must first stop every queue replica with
+  /// signal_queue_exception(..., false). This operation is safe to serialize
+  /// under a driver status-publication mutex because it cannot flush CU
+  /// notifications back into the driver.
+  bool publish_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
+
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
     if (completion_) {
@@ -485,11 +495,20 @@ public:
     drain_fanout_inbox();
   }
 
+  [[nodiscard]] bool queue_exception_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    auto queue = std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const auto &candidate) {
+      return candidate.queue_id == queue_id && candidate.process_id == process_id;
+    });
+    return queue != aql_queues_.end() && queue->exception_suspended;
+  }
+
   /// @brief Test-only count of executed command-processor doorbell passes.
   [[nodiscard]] uint64_t doorbell_handle_count_for_test() const {
     return doorbell_handle_count_.load(std::memory_order_relaxed);
   }
   bool schedule_retry_event_for_test() { return schedule_retry_event(); }
+
 
 private:
   friend class CommandProcessorCloseTestAccess;
