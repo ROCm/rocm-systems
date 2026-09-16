@@ -557,6 +557,11 @@ protected:
         return done ? ncclSuccess : ncclInternalError;
     }
 
+    // Set by CastSetupPeerFailurePropagates only: makes this rank's SetupCastConnection
+    // report a local failure after its own listen/accept/connect succeeded, so the peer
+    // stays locally healthy and can only fail through the cross-rank reduction.
+    bool forceSetupFailureAfterConnect_ = false;
+
     // Agrees a skip decision across ranks before either side acts on it.
     //
     // A device-local predicate -- GDR backend support, a NIC count, anything read from
@@ -943,6 +948,18 @@ protected:
                 }
                 if (localOk && *sendComm == nullptr) { localOk = false; localReason = "connect timed out"; }
             }
+        }
+
+        // Test-only seam, and the only way to reach the case the reduction exists for.
+        // A real one-sided device failure cannot produce it: rank 0's accept succeeds
+        // only if rank 1 connected, so the two ranks fail or succeed together and the
+        // reduction is never load-bearing. Forcing a local failure after this rank's own
+        // setup succeeded is what leaves the peer locally healthy, so the peer can only
+        // learn of the failure through the reduction below. Nothing but
+        // CastSetupPeerFailurePropagates sets this.
+        if (forceSetupFailureAfterConnect_ && localOk) {
+            localOk = false;
+            localReason = "failure injected after this rank's setup succeeded";
         }
 
         int ok = localOk ? 1 : 0;
