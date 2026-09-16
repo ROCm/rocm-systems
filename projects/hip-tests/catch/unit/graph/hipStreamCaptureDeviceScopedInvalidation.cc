@@ -91,6 +91,7 @@ TEST_CASE("ThreadLocal_SameDevice_SyncInvalidates", "[graph][capture][multithrea
 
   threadA.join();
   threadB.join();
+  HIP_CHECK_THREAD_FINALIZE();
 
   INFO("captureErrA=" << captureErrA << " endCaptureErrA=" << endCaptureErrA
                       << " syncErrB=" << syncErrB);
@@ -168,6 +169,7 @@ TEST_CASE("Global_SameDevice_SyncInvalidates", "[graph][capture][multithreaded]"
 
   threadA.join();
   threadB.join();
+  HIP_CHECK_THREAD_FINALIZE();
 
   INFO("captureErrA=" << captureErrA << " endCaptureErrA=" << endCaptureErrA
                       << " syncErrB=" << syncErrB);
@@ -240,6 +242,7 @@ TEST_CASE("Relaxed_SameDevice_SyncInvalidates", "[graph][capture][multithreaded]
 
   threadA.join();
   threadB.join();
+  HIP_CHECK_THREAD_FINALIZE();
 
   INFO("captureErrA=" << captureErrA << " endCaptureErrA=" << endCaptureErrA
                       << " syncErrB=" << syncErrB);
@@ -324,6 +327,7 @@ TEST_CASE("Global_DifferentDevice_SyncDoesNotInvalidate",
 
   threadA.join();
   threadB.join();
+  HIP_CHECK_THREAD_FINALIZE();
 
   INFO("captureErrA=" << captureErrA << " endCaptureErrA=" << endCaptureErrA
                       << " syncErrB=" << syncErrB);
@@ -408,6 +412,7 @@ TEST_CASE("ThreadLocal_DifferentDevice_SyncDoesNotInvalidate",
 
   threadA.join();
   threadB.join();
+  HIP_CHECK_THREAD_FINALIZE();
 
   INFO("captureErrA=" << captureErrA << " endCaptureErrA=" << endCaptureErrA
                       << " syncErrB=" << syncErrB);
@@ -488,6 +493,7 @@ TEST_CASE("Relaxed_DifferentDevice_SyncDoesNotInvalidate",
 
   threadA.join();
   threadB.join();
+  HIP_CHECK_THREAD_FINALIZE();
 
   INFO("captureErrA=" << captureErrA << " endCaptureErrA=" << endCaptureErrA
                       << " syncErrB=" << syncErrB);
@@ -591,6 +597,7 @@ TEST_CASE("ThreadLocal_GraphLaunch_DifferentDevice",
 
   threadA.join();
   threadB.join();
+  HIP_CHECK_THREAD_FINALIZE();
 
   INFO("captureErrA=" << captureErrA << " captureErrB=" << captureErrB
                       << " launchErrB=" << launchErrB);
