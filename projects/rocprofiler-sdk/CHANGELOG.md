@@ -6,6 +6,18 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 
+### Changed
+
+### Resolved issues
+
+### Known issues
+
+### Removed
+
+## ROCprofiler-SDK 1.4.1 for ROCm release 10.0.1
+
+### Added
+
 **API:**
 
   - Advanced Thread Trace (ATT) support in the live attach workflow:
@@ -20,6 +32,29 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - New tracing kinds `ROCPROFILER_CALLBACK_TRACING_HIP_EVENT` and `ROCPROFILER_BUFFER_TRACING_HIP_EVENT` with operation enum `rocprofiler_hip_event_operation_t` (RECORD, WAIT).
     - New `--hip-event-trace` CLI flag, automatically enabled by `--hip-trace` and `--hip-runtime-trace`.
     - rocpd schema bumped to 3.0.4 with new `rocpd_hip_event` table and `hip_events` data view.
+
+  - Kernel replay service (beta): in-process replay of a kernel dispatch so several counter groups can be collected in a single application run:
+    - New experimental API in `rocprofiler-sdk/experimental/kernel_replay.h`, exposed as the callback tracing domain `ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY` with the operations `ROCPROFILER_KERNEL_REPLAY_CONFIG` and `ROCPROFILER_KERNEL_REPLAY_PASS` (`rocprofiler_kernel_replay_operation_t`).
+    - A tool sets `replay_pass_count` during CONFIG to choose the pass count per dispatch (fixed loop, indefinite loop, or per-dispatch opt-out), and optionally `replay_continue` to leave the loop early.
+    - `replay_start_context` and `replay_stop_context` mark an already-active context enabled or disabled for the current replay loop only, so a tool can position services per pass without touching global context state. Each context's pre-replay state is restored when the loop completes.
+    - Device memory is snapshotted and restored between passes so every pass observes identical inputs.
+    - Samples under `samples/kernel_replay/` cover counter collection, ATT, SPM, PC sampling, service sequencing, per-dispatch opt-out, and early exit.
+    - Beta, with documented limitations: only a single-packet, single-dispatch submission is replayed (HIP graph launches and multi-packet submissions run once), and the snapshot covers coarse-grained device allocations owned by the agent plus module-scope `__device__`/`__constant__` variables. Unified or managed memory, `hipMallocAsync` and other virtual-memory-mapped allocations, and host, fine-grained, and kernarg memory are not captured. See `how-to/using-kernel-replay.rst` for the full list.
+
+  - Experimental kernel dispatch timestamps from the KFD command processor (CP) dispatch log, together with signal-less dispatch completion, behind `ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS` (off by default):
+    - When enabled, kernel dispatch `start_timestamp`/`end_timestamp` are read from the firmware dispatch log at the true hardware dispatch boundaries, so the interval is tighter than the HSA signal-based one.
+    - A qualifying dispatch batch is published with its AQL packet untouched (the SDK allocates no completion signal and does not modify the application's) and completes from the firmware record instead. A batch that does not qualify keeps the signal path, so the two coexist.
+    - Attribution is per doorbell slot: a collision between two live queues sharing a slot retires that slot to the signal path, while queue churn (for example a HIP stream pool) keeps using signal-less. A firmware ring overrun leaves the affected dispatches without a record and logs a warning rather than disabling signal-less.
+    - `ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB` (default 10 MiB), `ROCPROFILER_KFD_DISPATCH_LOG_POLL_TIMEOUT_MS` (default 10), and `ROCPROFILER_KFD_DISPATCH_LOG_CLOSE_DRAIN_MS` (default 250) tune the ring size, reader poll timeout, and per-queue close-drain budget.
+    - Experimental and validated on gfx950 (MI350) only; on every other GPU the dispatches stay on the HSA signal path. Enabling counter collection, advanced thread trace, or PC sampling also puts every dispatch back on the HSA timestamps.
+
+**rocprofv3 (CLI):**
+
+  - Kernel replay for multi-group counter collection through the new `--replay-mode` flag (beta):
+    - `--replay-mode kernel` collects every counter group in a single application run by replaying each dispatch once per group, with a device-memory snapshot and restore between passes, instead of re-running the whole application per group.
+    - `--replay-mode application` is the existing behavior and remains the default.
+    - Requires `--pmc` (or `pmc_groups` from an input file) and the `--kernel-replay-beta-enabled` acknowledgement flag. It cannot be combined with other tracing services, which would report each kernel once per pass.
+    - Documented in `how-to/using-kernel-replay-rocprofv3.rst`.
 
 **rocprof-trace-decoder:**
 
