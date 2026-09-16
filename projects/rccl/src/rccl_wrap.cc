@@ -823,7 +823,7 @@ inline size_t rcclCeAr2ShotMaxTab(const rcclArchThresholds* table) {
   if (table == nullptr) return NCCL_CE_AR_TMPBUF_DEFAULT_BYTES;
   return table->ceNonRegMax[ncclFuncAllReduce];
 }
-inline size_t rcclCeAr2ShotMax(const ncclComm* comm) {
+size_t rcclCeAr2ShotMax(const ncclComm* comm) {
   return rcclCeAr2ShotMaxTab(extAlgoArchTable(comm));
 }
 
@@ -1413,10 +1413,12 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   #endif
     const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
     const size_t arDdaVmmMax = rcclDdaVmmThresholdCtxTab(archTable, ncclFuncAllReduce, winRegType, ceCapturing);
-    if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, ddaSymEligible, ceAllReduceAllowed)) {
+    // Hoist thresholds and the path decision so dispatch and logging share them.
+    const size_t arDdaLLMax    = ddaFabricArch1250 ? rcclDdaLLThresholdTab(archTable, ncclFuncAllReduce)    : 0;
+    const size_t arDdaLL128Max = ddaFabricArch1250 ? rcclDdaLL128ThresholdTab(archTable, ncclFuncAllReduce) : 0;
+    const bool arShouldTakeDda = rcclAllReduceShouldTakeDdaPath(comm, count, datatype, ddaSymEligible, ceAllReduceAllowed);
+    if (arShouldTakeDda) {
       if (ddaFabricArch1250) {
-        const size_t arDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncAllReduce);
-        const size_t arDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncAllReduce);
         // Small-message fast lane: LL protocol (no GPU barrier).
         if (rcclParamDdaLL() && msgBytes <= arDdaLLMax &&
             ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
@@ -1451,9 +1453,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     }
 
   if (!query) {
-    if (!rcclAllReduceShouldTakeDdaPath(comm, count, datatype, ddaSymEligible, ceAllReduceAllowed)) {
-      const size_t arDdaLL    = rcclDdaLLThresholdTab(archTable, ncclFuncAllReduce);
-      const size_t arDdaLL128 = rcclDdaLL128ThresholdTab(archTable, ncclFuncAllReduce);
+    if (!arShouldTakeDda) {
       if (ddaSymEligible)
         INFO(NCCL_TUNING, "AR DDA disqualified: symk requested+eligible (symEligible=%d ddaSymEligible=%d)", (int)symEligible, (int)ddaSymEligible);
       else if (!rcclParamDdaEnable())
@@ -1462,18 +1462,16 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
         INFO(NCCL_TUNING, "AR DDA disqualified: ceAllReduceAllowed=1 on non-gfx1250 arch");
       else
         INFO(NCCL_TUNING, "AR DDA disqualified: msgBytes=%zu > entryThreshold (LL=%zu LL128=%zu VMM=%zu)",
-             msgBytes, arDdaLL, arDdaLL128, arDdaVmmMax);
+             msgBytes, arDdaLLMax, arDdaLL128Max, arDdaVmmMax);
     } else if (ddaFabricArch1250) {
-      const size_t arDdaLL    = rcclDdaLLThresholdTab(archTable, ncclFuncAllReduce);
-      const size_t arDdaLL128 = rcclDdaLL128ThresholdTab(archTable, ncclFuncAllReduce);
-      if (!rcclParamDdaLL() || msgBytes > arDdaLL ||
+      if (!rcclParamDdaLL() || msgBytes > arDdaLLMax ||
           !ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op))
         INFO(NCCL_TUNING, "AR DDA/LL disqualified: paramDdaLL=%d msgBytes=%zu arDdaLLMax=%zu",
-             (int)rcclParamDdaLL(), msgBytes, arDdaLL);
-      if ((!rcclParamDdaLL128() || msgBytes > arDdaLL128) && msgBytes > arDdaLL)
+             (int)rcclParamDdaLL(), msgBytes, arDdaLLMax);
+      if ((!rcclParamDdaLL128() || msgBytes > arDdaLL128Max) && msgBytes > arDdaLLMax)
         INFO(NCCL_TUNING, "AR DDA/LL128 disqualified: paramDdaLL128=%d msgBytes=%zu arDdaLL128Max=%zu",
-             (int)rcclParamDdaLL128(), msgBytes, arDdaLL128);
-      if ((arDdaVmmMax == 0 || msgBytes > arDdaVmmMax) && msgBytes > arDdaLL128)
+             (int)rcclParamDdaLL128(), msgBytes, arDdaLL128Max);
+      if ((arDdaVmmMax == 0 || msgBytes > arDdaVmmMax) && msgBytes > arDdaLL128Max)
         INFO(NCCL_TUNING, "AR DDA/VMM disqualified: arDdaVmmMax=%zu msgBytes=%zu",
              arDdaVmmMax, msgBytes);
     }
