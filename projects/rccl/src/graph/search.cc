@@ -1385,6 +1385,9 @@ search:
     // here rather than later because the search relaxes path types before bandwidth. The budget
     // goes back too, or the guard above freezes the first solution the retry finds.
     if (graph->nChannels == 0 && maxTypeInter < maxTypeInterUnbounded) {
+      WARN("Search %d : no ring within the local GPU-to-NIC path type %s, widening to %s, so the ring may take a NIC "
+           "without GDR",
+           graph->id, topoPathTypeStr[maxTypeInter], topoPathTypeStr[maxTypeInterUnbounded]);
       maxTypeInter = maxTypeInterUnbounded;
       globalTimeout = NCCL_SEARCH_GLOBAL_TIMEOUT;
       goto search;
