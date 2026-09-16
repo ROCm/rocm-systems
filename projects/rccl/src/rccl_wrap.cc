@@ -997,37 +997,6 @@ inline size_t rcclDdaVmmThresholdCtxTab(const rcclArchThresholds* table, ncclFun
   return funcThresholdFromTable(table->ddaVmmMax, func);
 }
 
-// Apply the per-size unroll factor from the arch table for `func` and `msgBytes`.
-// Sets comm->unroll to the matching breakpoint entry.  No-op when:
-//  - the arch table is absent (unknown arch),
-//  - the map pointer for this collective is null (not yet tuned),
-//  - or the user set RCCL_UNROLL_FACTOR explicitly (env override takes priority).
-// Call this at the start of each *_impl() function before the DDA/CE dispatch
-// so that later branches that return early (DDA) still pick up the right unroll.
-void rcclApplyUnrollForSize(ncclComm* comm, ncclFunc_t func, size_t msgBytes) {
-  // Env override (RCCL_UNROLL_FACTOR != -1) wins -- leave comm->unroll alone.
-  if (rcclParamUnrollFactor() != -1) return;
-  const rcclArchThresholds* table = extAlgoArchTable(comm);
-  if (table == nullptr) return;
-  const rcclArchThresholds::rcclUnrollEntry* map = nullptr;
-  switch (func) {
-    case ncclFuncAllReduce:      map = table->unrollMapAR;  break;
-    case ncclFuncAllGather:      map = table->unrollMapAG;  break;
-    case ncclFuncReduceScatter:  map = table->unrollMapRS;  break;
-    case ncclFuncAlltoAll:       map = table->unrollMapA2A; break;
-    default: break;
-  }
-  if (map == nullptr) return;
-  // Walk the breakpoint table; first entry with maxBytes >= msgBytes wins.
-  for (int i = 0; ; ++i) {
-    if (msgBytes <= map[i].maxBytes) {
-      comm->unroll = map[i].unrollIdx;
-      return;
-    }
-    if (map[i].maxBytes == SIZE_MAX) return;  // terminal entry (safety)
-  }
-}
-
 inline bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold) {
   // The environment parameter can be NCCL_CONFIG_UNDEF_INT when launch order
   // is configured per communicator. Use the resolved communicator value:

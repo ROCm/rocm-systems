@@ -20,30 +20,6 @@
 //              SendRecv=5, Send=6, Recv=7, AlltoAll=8]. 0 disables that tier.
 // All collectives compare total message bytes against the table values.
 
-// ---- gfx1250 per-size unroll breakpoints (AICOMRCCL-1756 placeholders) -------
-// Format: {maxBytes, unrollIdx}. First entry where maxBytes >= msgBytes wins.
-// NCCL_UNROLL_1=0, NCCL_UNROLL_2=1, NCCL_UNROLL_4=2, NCCL_UNROLL_8=3,
-// NCCL_UNROLL_16=4, NCCL_UNROLL_32=5. Terminal entry uses SIZE_MAX.
-// Default unroll on gfx1250 is UNROLL_32 (set by commSetUnrollFactor).
-static const rcclArchThresholds::rcclUnrollEntry kUnrollAR_gfx1250[] = {
-  {     32ULL*1024,       0 },
-  {     32ULL*1024*1024,  1 },
-  {    128ULL*1024*1024,  3 },
-  { SIZE_MAX,             5 },
-};
-static const rcclArchThresholds::rcclUnrollEntry kUnrollAG_gfx1250[] = {
-  {     32ULL*1024,       0 },
-  {     32ULL*1024*1024,  1 },
-  {    128ULL*1024*1024,  3 },
-  { SIZE_MAX,             5 },
-};
-static const rcclArchThresholds::rcclUnrollEntry kUnrollRS_gfx1250[] = {
-  {     32ULL*1024,       0 },
-  {     32ULL*1024*1024,  1 },
-  {    128ULL*1024*1024,  3 },
-  { SIZE_MAX,             5 },
-};
-
 // gfx1250 placeholders -- validate against sweep data (AICOMRCCL-1756).
 // Index mapping: [Bcast=0, Reduce=1, AG=2, RS=3, AR=4, SR=5, Send=6, Recv=7, A2A=8]
 static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
@@ -194,12 +170,6 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     kThreshUnlimited,     // [7] Recv            -- not used on gfx1250
     kThreshUnlimited,     // [8] AlltoAll        -- not used on gfx1250
   },
-
-  // Per-size unroll breakpoints for gfx1250 (validate from AICOMRCCL-1756).
-  .unrollMapAR  = kUnrollAR_gfx1250,
-  .unrollMapAG  = kUnrollAG_gfx1250,
-  .unrollMapRS  = kUnrollRS_gfx1250,
-  .unrollMapA2A = nullptr,               // AlltoAll unroll not yet tuned
 };
 
 // gfx950: DDA-IPC cap is 128 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -235,10 +205,6 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
     kThreshUnlimited,     // [8] AlltoAll        -- not used
   },
   .symMinR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
-  .unrollMapAR  = nullptr,
-  .unrollMapAG  = nullptr,
-  .unrollMapRS  = nullptr,
-  .unrollMapA2A = nullptr,
 };
 
 // gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -274,10 +240,6 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
     kThreshUnlimited,     // [8] AlltoAll        -- not used
   },
   .symMinR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
-  .unrollMapAR  = nullptr,
-  .unrollMapAG  = nullptr,
-  .unrollMapRS  = nullptr,
-  .unrollMapA2A = nullptr,
 };
 
 const rcclArchThresholds* rcclGetArchThresholds(const char* gcn) {
