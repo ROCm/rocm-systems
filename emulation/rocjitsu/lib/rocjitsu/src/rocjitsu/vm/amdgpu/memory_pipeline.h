@@ -62,12 +62,16 @@ public:
   /// finishes all writeback work. A timing backend may return Deferred and
   /// release the counters later through finish_completed_access().
   void issue(Instruction *inst, Wavefront &wf) {
-    std::array<WaitCounterType, MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS> issue_counters{};
+    std::array<WaitCounterType, MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS *
+                                    MemoryCounterObligation::MAX_COUNTER_INCREMENT>
+        issue_counters{};
     uint8_t num_issue_counters = 0;
     const auto *issue = inst->amdgpu_memory_issue_info();
     if (issue) {
-      for (const auto obligation : issue->counter_obligations())
-        issue_counters[num_issue_counters++] = obligation.wait_counter_type();
+      for (const auto obligation : issue->counter_obligations()) {
+        for (uint8_t token = 0; token < obligation.counter_increment(); ++token)
+          issue_counters[num_issue_counters++] = obligation.wait_counter_type();
+      }
     }
     if (!issue) {
       WaitCounterType issue_counter = counter_type_;
@@ -89,7 +93,8 @@ public:
     for (uint8_t i = 0; i < num_issue_counters; ++i)
       wf.wait_counters().increment(issue_counters[i]);
     initiate_access(*inst, wf);
-    // The wait counters pin wf/inst ownership until this callback releases them.
+    // The wait-counter obligations pin wf/inst ownership until this callback
+    // releases every token.
     // ComputeUnitCore retires ENDING wavefronts only after wait_counters().empty(),
     // so a deferred backend must invoke this exactly once while that counter is held.
     MemoryAccessDeferredCompletion deferred_completion = [this, inst, &wf, issue_counters,
@@ -117,7 +122,9 @@ protected:
 
   void finish_completed_access(
       Instruction *inst, Wavefront &wf,
-      const std::array<WaitCounterType, MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS> &counters,
+      const std::array<WaitCounterType, MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS *
+                                            MemoryCounterObligation::MAX_COUNTER_INCREMENT>
+          &counters,
       uint8_t num_counters) {
     for (uint8_t i = 0; i < num_counters; ++i)
       wf.release_wait_counter(counters[i]);

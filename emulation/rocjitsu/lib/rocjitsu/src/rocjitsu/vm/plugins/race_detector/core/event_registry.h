@@ -8,7 +8,6 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
-#include <optional>
 #include <ranges>
 #include <span>
 #include <vector>
@@ -81,7 +80,7 @@ public:
     return EventId{id};
   }
 
-  /// Transition ACTIVE → WAVE_COMPLETE (s_waitcnt resolved this event).
+  /// Transition ACTIVE → WAVE_COMPLETE after every counter obligation is satisfied.
   void markComplete(EventId id) {
     assert(entries_[index(id)].status == EventStatus::ACTIVE);
     assert(allWaitCountersSatisfied(id));
@@ -94,15 +93,6 @@ public:
   // -- Typed accessors (all inline) --
 
   MemoryEventType type(EventId id) const { return entries_[index(id)].type; }
-  amdgpu::WaitCounterType waitCounterType(EventId id) const {
-    return entries_[index(id)].counterObligations[0].wait_counter_type();
-  }
-  std::optional<amdgpu::WaitCounterType> additionalWaitCounterType(EventId id) const {
-    const auto obligations = counterObligations(id);
-    if (obligations.size() < 2)
-      return std::nullopt;
-    return obligations[1].wait_counter_type();
-  }
   std::span<const amdgpu::MemoryCounterObligation> counterObligations(EventId id) const {
     const auto &event = entries_[index(id)];
     return {event.counterObligations.data(), event.numCounterObligations};

@@ -3374,8 +3374,8 @@ TEST(ExecutionPluginTest, MemoryPipelineHoldsBothGenericFlatCountersUntilComplet
   auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
   state->wait_counter_type = WaitCounterType::VMCNT;
   CounterObservingPipeline pipeline;
-  pipeline.issue(
-      new TestMemoryInstruction(std::move(state), "test_mem", WaitCounterType::LGKMCNT), *wf);
+  pipeline.issue(new TestMemoryInstruction(std::move(state), "test_mem", WaitCounterType::LGKMCNT),
+                 *wf);
 
   EXPECT_EQ(pipeline.counters_at_access.vmcnt, 1);
   EXPECT_EQ(pipeline.counters_at_access.lgkmcnt, 1);
@@ -3404,6 +3404,23 @@ TEST(ExecutionPluginTest, MemoryPipelineHoldsAllGenericFlatStoreCountersUntilCom
   EXPECT_EQ(wf->wait_counters().vmcnt, 0);
   EXPECT_EQ(wf->wait_counters().lgkmcnt, 0);
   EXPECT_EQ(wf->wait_counters().expcnt, 0);
+}
+
+TEST(ExecutionPluginTest, MemoryPipelineHonorsWideScalarCounterIncrement) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *wf = f.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+
+  auto state = std::make_unique<ScalarMemState>();
+  state->wait_counter_type = WaitCounterType::LGKMCNT;
+  CounterObservingPipeline pipeline;
+  pipeline.issue(new TestMemoryInstruction(
+                     std::move(state),
+                     {{WaitCounterType::LGKMCNT, MemoryCompletionClass::UNORDERED, 2}}, false),
+                 *wf);
+
+  EXPECT_EQ(pipeline.counters_at_access.lgkmcnt, 2);
+  EXPECT_EQ(wf->wait_counters().lgkmcnt, 0);
 }
 
 TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotCrossWaveVgprBlock) {
@@ -3931,6 +3948,152 @@ TEST(RaceDetectorPluginTest, DualOffsetStoreTracksSecondLdsRange) {
   f.plugin_group_->onAmdgpuRouteMemoryInstruction(load, *reader);
 
   EXPECT_NE(sink.str().find("RACE "), std::string::npos);
+}
+
+TEST(RaceDetectorPluginTest, DualOffsetAccessValidatesSecondLdsRange) {
+  const auto second_range_reports_race = [](bool dual_is_load) {
+    PluginFixture f(/*num_wf_slots=*/2);
+    PluginSinkConfig sink_config;
+    StringSink &sink = sink_config.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    EXPECT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+
+    auto *first = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+    auto *second = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+    EXPECT_NE(first, nullptr);
+    EXPECT_NE(second, nullptr);
+    if (!first || !second)
+      return false;
+    first->set_exec(1u);
+    second->set_exec(1u);
+    std::array<amdgpu::Wavefront *, 2> waves{first, second};
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(
+        /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/512,
+        /*physical_sgpr_count=*/208, waves);
+
+    auto first_state = std::make_unique<VectorMemState>(LOCAL_MEM);
+    first_state->elem_size = sizeof(uint32_t);
+    first_state->num_elems = 1;
+    first_state->is_load = !dual_is_load;
+    first_state->wf_size = first->wf_size();
+    first_state->exec_mask = 1;
+    first_state->lane_mask = 1;
+    first_state->dst_reg_base = first->vgpr_alloc().base;
+    first_state->per_lane_addr[0] = 16;
+    TestMemoryInstruction first_access(std::move(first_state));
+    f.plugin_group_->onAmdgpuRouteMemoryInstruction(first_access, *first);
+
+    auto dual_state = std::make_unique<VectorMemState>(LOCAL_MEM);
+    dual_state->elem_size = sizeof(uint32_t);
+    dual_state->num_elems = 1;
+    dual_state->is_load = dual_is_load;
+    dual_state->wf_size = second->wf_size();
+    dual_state->exec_mask = 1;
+    dual_state->lane_mask = 1;
+    dual_state->dst_reg_base = second->vgpr_alloc().base;
+    dual_state->ds2_active = true;
+    dual_state->ds2_dst_reg_base = second->vgpr_alloc().base + 1;
+    dual_state->per_lane_addr[0] = 0;
+    dual_state->ds2_per_lane_addr[0] = 16;
+    TestMemoryInstruction dual_access(std::move(dual_state));
+    f.plugin_group_->onAmdgpuRouteMemoryInstruction(dual_access, *second);
+
+    return sink.str().find("RACE ") != std::string::npos;
+  };
+
+  EXPECT_TRUE(second_range_reports_race(/*dual_is_load=*/true));
+  EXPECT_TRUE(second_range_reports_race(/*dual_is_load=*/false));
+}
+
+TEST(RaceDetectorPluginTest, LocalMemoryUsesEffectiveIssueMask) {
+  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32,
+                  /*sgprs_per_wf=*/128);
+  PluginSinkConfig sink_config;
+  sink_config.emplace<StringSink>();
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  auto *plugin_ptr = plugin.get();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/128, /*vgprs=*/256, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0);
+  wf->set_lds_base(cu->allocate_lds(512));
+  wf->set_lds_size(512);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(
+      /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/256,
+      /*physical_sgpr_count=*/128, waves);
+
+  constexpr uint32_t kAddressVgpr = 4;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    cu->write_vgpr(wf->vgpr_alloc().base + kAddressVgpr, lane, lane * sizeof(uint64_t));
+  const auto words = cdna5::build_vds(cdna5::kDsLoadTr8B64Vds, {.addr = kAddressVgpr, .vdst = 0});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
+  ASSERT_NE(load, nullptr);
+  ASSERT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
+  const auto *state = load->data_as<VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  ASSERT_EQ(state->exec_mask, 0xFFFF'FFFFu);
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(*load, *wf);
+
+  auto *plugin_state =
+      static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+  ASSERT_NE(plugin_state, nullptr);
+  auto &events = plugin_state->race_state->getDetector()->events();
+  ASSERT_EQ(events.totalAllocated(), 1);
+  const EventId event{events.totalAllocated() - 1};
+  EXPECT_EQ(events.execMask(event), 0xFFFF'FFFFu);
+}
+
+TEST(RaceDetectorPluginTest, MixedCounterClassesUseUnorderedEventOrdering) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  PluginSinkConfig sink_config;
+  sink_config.emplace<StringSink>();
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  auto *plugin_ptr = plugin.get();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *wf = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(
+      /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/256,
+      /*physical_sgpr_count=*/104, waves);
+
+  auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+  state->elem_size = sizeof(uint32_t);
+  state->num_elems = 1;
+  state->is_load = true;
+  state->wf_size = wf->wf_size();
+  state->exec_mask = 1;
+  state->lane_mask = 1;
+  state->dst_reg_base = wf->vgpr_alloc().base;
+  state->per_lane_addr[0] = 0;
+  state->wait_counter_type = WaitCounterType::LGKMCNT;
+  TestMemoryInstruction load(std::move(state),
+                             {{WaitCounterType::VMCNT, MemoryCompletionClass::VMEM},
+                              {WaitCounterType::LGKMCNT, MemoryCompletionClass::LDS}});
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(load, *wf);
+
+  auto *plugin_state =
+      static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+  ASSERT_NE(plugin_state, nullptr);
+  auto &events = plugin_state->race_state->getDetector()->events();
+  ASSERT_EQ(events.totalAllocated(), 1);
+  const EventId event{events.totalAllocated() - 1};
+  EXPECT_EQ(events.memoryOrder(event), MemoryOrderClass::UNORDERED);
 }
 
 TEST(RaceDetectorPluginTest, LdsRoutedFlatStoreDwordx2TracksTrailingDword) {
