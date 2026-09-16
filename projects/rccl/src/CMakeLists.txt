@@ -198,6 +198,7 @@ set(SRC_FILES
   include/ibvsymbols.h
   include/ibvwrap.h
   include/info.h
+  include/xtp_wrap.h
   algorithms/dda/ipc/ipc_gpu_barrier.h
   algorithms/dda/ipc/ipc_init.h
   algorithms/dda/ipc/ipc_mem_handler.h
@@ -377,6 +378,7 @@ set(SRC_FILES
 # misc/gdrwrap.cc
   misc/ibvsymbols.cc
   misc/ibvwrap.cc
+  misc/xtp_wrap.cc
   os/linux_ipcsocket.cc
   os/linux_socket_pair.cc
   misc/mlx5dvsymbols.cc
