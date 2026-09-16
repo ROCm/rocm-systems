@@ -23,7 +23,6 @@
 #include "src/cuid_nic.h"
 #include "src/cuid_npu.h"
 #include "src/cuid_platform.h"
-#include "src/cuid_file_utils.h"
 #include "src/cuid_util.h"
 #include "src/hmac.h"
 
@@ -485,11 +484,11 @@ amdcuid_status_t CuidFile::save() {
   std::string temp_path = file_path_ + ".tmp";
   const mode_t temp_mode = is_privileged_ ? (S_IRUSR | S_IWUSR)
                                           : (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-  int temp_fd = CuidCreateExclusiveFile(temp_path.c_str(), temp_mode);
+  int temp_fd = CuidUtilities::CuidCreateExclusiveFile(temp_path.c_str(), temp_mode);
   if (temp_fd < 0) {
     // Clear a stale temp left by a previous run and retry once.
     unlink(temp_path.c_str());
-    temp_fd = CuidCreateExclusiveFile(temp_path.c_str(), temp_mode);
+    temp_fd = CuidUtilities::CuidCreateExclusiveFile(temp_path.c_str(), temp_mode);
   }
   if (temp_fd < 0) {
     return AMDCUID_STATUS_PERMISSION_DENIED;
@@ -625,9 +624,6 @@ amdcuid_status_t CuidFile::save() {
     unlink(temp_path.c_str());
     return AMDCUID_STATUS_PERMISSION_DENIED;
   }
-
-  // Permissions were set at temp-file creation (see temp_mode above) and are
-  // preserved by rename(); no post-rename chmod() on file_path_ is needed.
 
   return AMDCUID_STATUS_SUCCESS;
 }

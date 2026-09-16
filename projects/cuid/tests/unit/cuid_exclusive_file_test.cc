@@ -16,7 +16,7 @@
 
 #include <gtest/gtest.h>
 
-#include "src/cuid_file_utils.h"
+#include "src/cuid_util.h"
 
 namespace {
 
@@ -58,7 +58,7 @@ TEST_F(CuidCreateExclusiveFileTest, CreatesFreshFileWithMode) {
   };
   for (const ModeCase& c : cases) {
     const std::string p = path("f");
-    const int fd = CuidCreateExclusiveFile(p.c_str(), c.mode);
+    const int fd = CuidUtilities::CuidCreateExclusiveFile(p.c_str(), c.mode);
     ASSERT_GE(fd, 0) << c.description;
     ::close(fd);
     EXPECT_EQ(mode_of(p), c.mode) << c.description;
@@ -73,7 +73,7 @@ TEST_F(CuidCreateExclusiveFileTest, RefusesSymlink) {
   const std::string link = path("link");
   ASSERT_EQ(::symlink(decoy.c_str(), link.c_str()), 0) << std::strerror(errno);
 
-  const int fd = CuidCreateExclusiveFile(link.c_str(), 0600);
+  const int fd = CuidUtilities::CuidCreateExclusiveFile(link.c_str(), 0600);
   EXPECT_LT(fd, 0);  // must refuse
   if (fd >= 0) ::close(fd);
 
@@ -88,7 +88,7 @@ TEST_F(CuidCreateExclusiveFileTest, RefusesExistingFile) {
   ASSERT_GE(pre, 0) << std::strerror(errno);
   ::close(pre);
 
-  const int fd = CuidCreateExclusiveFile(p.c_str(), 0600);
+  const int fd = CuidUtilities::CuidCreateExclusiveFile(p.c_str(), 0600);
   EXPECT_LT(fd, 0);  // must refuse
   if (fd >= 0) ::close(fd);
   EXPECT_EQ(mode_of(p), 0644u);  // pre-existing file untouched
