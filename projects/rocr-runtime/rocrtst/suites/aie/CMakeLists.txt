@@ -46,29 +46,51 @@ target_link_libraries(error_callback_test
 )
 gtest_discover_tests(error_callback_test)
 
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
+# ---------------------------------------------------------------------------
+# Everything below builds AIE kernel artifacts and the dispatch tests that need
+# them. It is all conditional on the kernel toolchain being present, because
+# error_callback_test above needs none of it and is expected to configure and
+# run on any machine -- a missing NPU or IRON environment must not fail the
+# configure and take that target down with it.
+#
+# AIE_KERNEL_TOOLCHAIN is set to FALSE by the first missing piece; each probe
+# below is skipped once it is false, so the reason reported is the first thing
+# actually missing rather than the last one checked.
+# ---------------------------------------------------------------------------
+set(AIE_KERNEL_TOOLCHAIN TRUE)
+
+find_package(Python3 QUIET COMPONENTS Interpreter)
+if(NOT Python3_FOUND)
+  message(STATUS "Python3 interpreter not found; AIE kernel artifacts and the dispatch tests "
+                 "will not be built.")
+  set(AIE_KERNEL_TOOLCHAIN FALSE)
+endif()
 
 # ---------------------------------------------------------------------------
 # NPU detection
 # ---------------------------------------------------------------------------
-find_program(XRT_SMI xrt-smi)
-if(XRT_SMI)
-  execute_process(
-    COMMAND "${XRT_SMI}" examine
-    OUTPUT_VARIABLE XRT_SMI_OUTPUT
-    ERROR_QUIET
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
-  if(XRT_SMI_OUTPUT MATCHES "NPU Strix|NPU Strix Halo|NPU Krackan|RyzenAI-npu[456]")
-    set(NPU_TARGET "npu2")
-  elseif(XRT_SMI_OUTPUT MATCHES "NPU Phoenix|RyzenAI-npu1")
-    set(NPU_TARGET "npu")
+if(AIE_KERNEL_TOOLCHAIN)
+  find_program(XRT_SMI xrt-smi)
+  if(XRT_SMI)
+    execute_process(
+      COMMAND "${XRT_SMI}" examine
+      OUTPUT_VARIABLE XRT_SMI_OUTPUT
+      ERROR_QUIET
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(XRT_SMI_OUTPUT MATCHES "NPU Strix|NPU Strix Halo|NPU Krackan|RyzenAI-npu[456]")
+      set(NPU_TARGET "npu2")
+    elseif(XRT_SMI_OUTPUT MATCHES "NPU Phoenix|RyzenAI-npu1")
+      set(NPU_TARGET "npu")
+    endif()
   endif()
-endif()
-if(NOT NPU_TARGET)
-  message(FATAL_ERROR "Could not auto-detect NPU device. Please set NPU_TARGET to either 'npu' or 'npu2'.")
-else()
-  message(STATUS "NPU target: ${NPU_TARGET}")
+  if(NOT NPU_TARGET)
+    message(STATUS "Could not auto-detect an NPU device; AIE kernel artifacts and the dispatch "
+                   "tests will not be built. Set NPU_TARGET to 'npu' or 'npu2' to force it.")
+    set(AIE_KERNEL_TOOLCHAIN FALSE)
+  else()
+    message(STATUS "NPU target: ${NPU_TARGET}")
+  endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -77,17 +99,27 @@ endif()
 # aiecc compiles the AIE cores with Peano, which ships as the llvm-aie wheel
 # installed alongside mlir-aie in the IRON environment.
 # ---------------------------------------------------------------------------
-execute_process(
-  COMMAND "${Python3_EXECUTABLE}" -c
-          "import os, sysconfig; print(os.path.join(sysconfig.get_paths()['purelib'], 'llvm-aie'))"
-  OUTPUT_VARIABLE PEANO_INSTALL_DIR
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-if(NOT EXISTS "${PEANO_INSTALL_DIR}")
-  message(FATAL_ERROR "Could not find Peano (llvm-aie) at '${PEANO_INSTALL_DIR}'. "
-                      "Set up the IRON environment with iron_env_setup.sh first.")
+if(AIE_KERNEL_TOOLCHAIN)
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -c
+            "import os, sysconfig; print(os.path.join(sysconfig.get_paths()['purelib'], 'llvm-aie'))"
+    OUTPUT_VARIABLE PEANO_INSTALL_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  if(NOT EXISTS "${PEANO_INSTALL_DIR}")
+    message(STATUS "Could not find Peano (llvm-aie) at '${PEANO_INSTALL_DIR}'; AIE kernel artifacts "
+                  "and the dispatch tests will not be built. Set up the IRON environment with "
+                  "iron_env_setup.sh to build them.")
+    set(AIE_KERNEL_TOOLCHAIN FALSE)
+  else()
+    message(STATUS "Peano install dir: ${PEANO_INSTALL_DIR}")
+  endif()
 endif()
-message(STATUS "Peano install dir: ${PEANO_INSTALL_DIR}")
+
+if(NOT AIE_KERNEL_TOOLCHAIN)
+  message(STATUS "AIE kernel toolchain incomplete: building error_callback_test only.")
+  return()
+endif()
 
 # ---------------------------------------------------------------------------
 # Full-ELF toolchain detection
