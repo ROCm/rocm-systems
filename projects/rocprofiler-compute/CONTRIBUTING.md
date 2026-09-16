@@ -288,7 +288,7 @@ Profile mode uses only stdlib to:
 - CI uses Python 3.10+ to ensure full enforcement coverage
 
 Enforcement is automatically done for tests which execute profile pipeline using main
-function instead of subprocess (unlike tests using --call-binary and multi mpi rank tests).
+function instead of subprocess (unlike multi mpi rank tests).
 These tests are automatically protected by guards in `tests/conftest.py` when testing with Python 3.10 and above.
 The guard intercepts ALL imports (direct, nested, dynamic) and fails tests immediately if
 non-stdlib packages are imported.

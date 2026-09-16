@@ -46,6 +46,15 @@ _FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
     "ml_api_trace": KNOWN_ML_API_BACKENDS,
 }
 
+# Only the specs classes that can be power-gated carry a perf_level, so seeing
+# AUTO here is enough to warn.
+_PMC_POWER_GATING_WARNING = (
+    "AUTO performance level can gate the perfmon clock, so counters such as "
+    "TCP_REQ may report zero even when the kernel issues global memory traffic. "
+    "See: https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/"
+    "how-to/using-rocprofv3.html#setting-gpu-performance-level-for-pmc-profiling"
+)
+
 
 def _partition_warning_messages(mspec: MachineSpecs) -> list[str]:
     """Return notices on how active partition modes shape analysis metrics."""
@@ -112,9 +121,9 @@ def _prepare_ml_api_trace_injection(
     """Insert the inject_roctx launcher into the workload command.
 
     Modifies the ``remaining`` command list in place. The launcher is run by
-    absolute path, with the selected frameworks passed as ``--frameworks
-    <names>`` followed by ``--`` and the workload command. The rewrite depends
-    on the workload type:
+    absolute path, with the selected frameworks passed as ``--frameworks``
+    followed by each framework name, then ``--`` and the workload command. The
+    rewrite depends on the workload type:
       1. Python interpreter — insert the launcher before the script.
       2. Direct .py script  — prepend ``sys.executable`` and the launcher.
       3. Other executables  — leave the command unchanged and emit a warning.
@@ -131,7 +140,7 @@ def _prepare_ml_api_trace_injection(
     launcher = [
         str(launch_script),
         "--frameworks",
-        ",".join(sorted(frameworks)),
+        *sorted(frameworks),
         "--",
     ]
 
@@ -240,15 +249,15 @@ class RocProfCompute_Base:
                     "these options."
                 )
 
-        # Each --dispatch token must be a positive integer or a range
-        # ('start:end' or 'start-end') with start <= end (1-based indexing).
-        if args.dispatch:
-            for token in args.dispatch:
+        # Each --kernel-iteration-range token must be a positive integer or a
+        # range ('start:end' or 'start-end') with start <= end (1-based).
+        if args.kernel_iteration_range:
+            for token in args.kernel_iteration_range:
                 m = re.fullmatch(r"([1-9]\d*)(?:[-:]([1-9]\d*))?", token)
                 if not m or (m.group(2) and int(m.group(2)) < int(m.group(1))):
                     console_error(
-                        f"Invalid --dispatch value '{token}'. Expected a "
-                        "positive integer or 'start:end'/'start-end' "
+                        f"Invalid --kernel-iteration-range value '{token}'. "
+                        "Expected a positive integer or 'start:end'/'start-end' "
                         "range with start <= end (e.g. 1, 3:5, 3-5)."
                     )
 
@@ -315,6 +324,9 @@ class RocProfCompute_Base:
             args.remaining = ""
 
         self._filter_blocks = self._soc.profiling_setup()
+        # --set and --roof-only resolve to block ids here, so store them back on
+        # the args every later stage reads.
+        self.__args.filter_blocks = self._filter_blocks
 
         # Write profiling configuration as yaml file
         with open(
@@ -323,8 +335,6 @@ class RocProfCompute_Base:
             encoding="utf-8",
         ) as f:
             args_dict = dict(vars(self.__args))
-            # Override filter_blocks when writing profiling config yaml
-            args_dict["filter_blocks"] = self._filter_blocks
             args_dict["config_dir"] = str(args_dict["config_dir"])
             args_dict["format_rocprof_output"] = PROFILE_OUTPUT_FORMAT
             yaml.dump(args_dict, f)
@@ -346,6 +356,10 @@ class RocProfCompute_Base:
 
         for message in _partition_warning_messages(self._soc._mspec):
             console_warning(message)
+
+        perf_level = getattr(self._soc._mspec, "perf_level", None)
+        if perf_level and perf_level.upper().endswith("AUTO"):
+            console_warning(_PMC_POWER_GATING_WARNING)
 
     def profile(
         self,
@@ -421,7 +435,7 @@ class RocProfCompute_Base:
         console_log(f"Target: {self._soc._mspec.gpu_model}")
         console_log(f"Command: {args.remaining}")
         console_log(f"Kernel Selection: {args.kernel}")
-        console_log(f"Dispatch Selection: {args.dispatch}")
+        console_log(f"Kernel Iteration Range: {args.kernel_iteration_range}")
         if self._filter_blocks:
             console_log(f"Filtered sections: {str(self._filter_blocks)}")
         else:
@@ -566,7 +580,7 @@ class RocProfCompute_Base:
             ):
                 compute_root_path = Path(__file__).resolve().parents[1]
                 native_tool_finder = NativeToolFinder(compute_root_path)
-                return str(native_tool_finder.get_collector_library_path())
+                return str(native_tool_finder.get_artifact_path())
             return None
         except Exception:
             console_error(

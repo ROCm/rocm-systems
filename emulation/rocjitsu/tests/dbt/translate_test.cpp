@@ -3858,7 +3858,8 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
 
   const uint32_t workgroup_id_x_prologue =
       build_s_mov_b32(0, kScalarOperandTtmpBase + kTtmpRdna4GridX, ROCJITSU_CODE_ARCH_RDNA4);
-  const uint32_t prologue_delay = build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
+  const uint32_t prologue_delay =
+      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value();
   const auto expect_launch_stub = [&](size_t word_index, int16_t branch_offset) {
     EXPECT_EQ(target_words[word_index], workgroup_id_x_prologue)
         << "the synthesized kernarg-preload launch stub must materialize descriptor ABI SGPRs "
