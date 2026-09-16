@@ -612,7 +612,7 @@ function(rj_add_consan_device_conformance_cases)
                     ENVIRONMENT
                         "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                         "RJ_CONSAN_MODE=${_value_engine}"
-                        "RJ_CONSAN_MOI_ALLOW_UNIFORM_LDS_STORES=${_allow_uniform}"
+                        "RJ_CONSAN_MOI_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES=${_allow_uniform}"
                         "RJ_CONSAN_LOG=3"
                         "RJ_CONSAN_FAIL_CLOSED=1"
                         "RJ_CONSAN_REQUIRE_PATCH=1"

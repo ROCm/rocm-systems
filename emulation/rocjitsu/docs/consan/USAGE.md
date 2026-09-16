@@ -590,7 +590,7 @@ Identical addresses and values do not make concurrent non-atomic writes race-fre
 By default, Sampled and Record/Replay diagnose same-instruction lane collisions,
 including stores whose address and every data word are proven uniform.
 
-`RJ_CONSAN_MOI_ALLOW_UNIFORM_LDS_STORES=1` explicitly opts into suppressing this
+`RJ_CONSAN_MOI_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES=1` explicitly opts into suppressing this
 common pattern. The default is `0`; sampling presets do not enable it. The opt-in
 applies only to one ordinary native LDS store when static analysis proves both
 an identical address and identical data across its participating lanes. The proof

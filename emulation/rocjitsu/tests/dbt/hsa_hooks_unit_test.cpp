@@ -8703,7 +8703,7 @@ TEST(HsaHooksUnitTest, ConSanUniformLdsStoresRequireExplicitOptIn) {
   for (const char *mode : {"sampled", "record-replay"}) {
     ScopedEnvVar selected_mode("RJ_CONSAN_MODE", mode);
     for (const char *value : {static_cast<const char *>(nullptr), "0", "1", "invalid"}) {
-      ScopedEnvVar policy("RJ_CONSAN_MOI_ALLOW_UNIFORM_LDS_STORES", value);
+      ScopedEnvVar policy("RJ_CONSAN_MOI_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES", value);
       reset_code_object_observations();
       testing::internal::CaptureStderr();
       bool installed;
