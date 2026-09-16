@@ -1224,6 +1224,16 @@
           "test_filter": "RcclAllReduceDdaDecision.*"
         },
         {
+          "name": "RcclAlltoAllDdaDecision",
+          "description": "DDA-vs-CE AlltoAll decision unit tests, including the RCCL_DDA_NRANKS_RELAX minRanks floor",
+          "test_filter": "RcclAlltoAllDdaDecision.*"
+        },
+        {
+          "name": "DdaAllReduceIpcTreeEligibleTest",
+          "description": "ncclAllReduceDdaIpcTreeEligible() divisibility/16-byte-alignment predicate, shared by AllReduce IPC eligibility and launch dispatch",
+          "test_filter": "DdaAllReduceIpcTreeEligibleTest.*"
+        },
+        {
           "name": "TransportTest",
           "description": "Transport layer tests",
           "test_filter": "TransportTest.*"
