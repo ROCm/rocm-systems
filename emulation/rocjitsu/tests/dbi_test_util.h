@@ -52,6 +52,8 @@ inline constexpr uint32_t kMovV5V1 = 0x7E0A0301u;   // v_mov_b32 v5, v1 -> reads
 inline constexpr uint32_t kMovV5V2 = 0x7E0A0302u;   // v_mov_b32 v5, v2 -> reads v2 into v5.
 inline constexpr uint32_t kMovV5V3 = 0x7E0A0303u;   // v_mov_b32 v5, v3 -> reads v3 into v5.
 inline constexpr uint32_t kMovV6S8 = 0x7E0C0208u;   // v_mov_b32 v6, s8 -> reads s8 into v6.
+inline constexpr uint32_t kMovV1V0 = 0x7E020300u;   // v_mov_b32 v1, v0 -> reads v0 into v1.
+inline constexpr uint32_t kMovV3V0 = 0x7E060300u;   // v_mov_b32 v3, v0 -> reads v0 into v3.
 
 // v_mov_b32 v{dst}, <inline const K> for K in [0, 64]. vdst occupies bits [24:17];
 // inline constant 0 is encoded as 128, and 1..64 as 129..192, in the src0 field (bits [8:0]).
