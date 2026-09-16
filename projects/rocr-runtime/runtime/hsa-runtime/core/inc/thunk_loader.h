@@ -446,6 +446,10 @@ class ThunkLoader {
     /// @brief Bind the thunk API table, either to a loaded shared thunk or to
     /// the statically linked one.
     ///
+    /// @retval true Every entry point in the table is bound except the five
+    /// marked "Optional" below, which a shared thunk is allowed not to export
+    /// and which stay null. Those five, and only those, have to be null-checked
+    /// at the call site; a true return says nothing about them.
     /// @retval false A shared thunk was loaded but does not export everything
     /// the table needs. Binding stops at the first missing entry point, so the
     /// rest of the table is left null and calling into it would fault - the
@@ -546,6 +550,10 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtMapGraphicHandle) * HSAKMT_PFN(hsaKmtMapGraphicHandle) = nullptr;
     HSAKMT_DEF(hsaKmtUnmapGraphicHandle) * HSAKMT_PFN(hsaKmtUnmapGraphicHandle) = nullptr;
     HSAKMT_DEF(hsaKmtSetTrapHandler) * HSAKMT_PFN(hsaKmtSetTrapHandler) = nullptr;
+    /// Optional. LoadThunkApiTable() binds this without failing the table load,
+    /// so it stays null against a shared thunk that does not export it, and a
+    /// true return does not mean it is callable. Every call must null-check it;
+    /// AMD::KfdDriver::SetSigbusDelay() is the only one today.
     HSAKMT_DEF(hsaKmtSetSigbusDelay) * HSAKMT_PFN(hsaKmtSetSigbusDelay) = nullptr;
     HSAKMT_DEF(hsaKmtGetTileConfig) * HSAKMT_PFN(hsaKmtGetTileConfig) = nullptr;
     HSAKMT_DEF(hsaKmtQueryPointerInfo) * HSAKMT_PFN(hsaKmtQueryPointerInfo) = nullptr;
@@ -590,6 +598,13 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtGetMemoryHandle) * HSAKMT_PFN(hsaKmtGetMemoryHandle) = nullptr;
 #endif
     HSAKMT_DEF(hsaKmtHandleImport) * HSAKMT_PFN(hsaKmtHandleImport) = nullptr;
+    /// Optional, and optional as a set: LoadThunkApiTable() binds all four
+    /// without failing the table load, so each stays null against a shared
+    /// thunk that does not export it and a true return does not mean any of
+    /// them is callable. Every call must null-check its own entry, and the
+    /// import must additionally check the destroy half before taking a
+    /// semaphore it could not give back - AMD::KfdDriver's external-semaphore
+    /// methods are where both rules are applied.
     HSAKMT_DEF(hsaKmtImportExternalSemaphore) * HSAKMT_PFN(hsaKmtImportExternalSemaphore) = nullptr;
     HSAKMT_DEF(hsaKmtDestroyExternalSemaphore) *
         HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) = nullptr;

@@ -306,10 +306,25 @@ void Runtime::DestroyTopology() {
   // its constructor - and every step is idempotent, so running this twice
   // gives nothing back twice.
   //
-  // Tools are the one part of Unload() deliberately missing: LoadTools() runs
-  // below the last failure this unwinds, so there is never anything for
-  // CloseTools() to do here. That needs revisiting if a failure return ever
-  // appears after it.
+  // Within the span of Unload() this reproduces - the agents' ReleaseResources()
+  // through DestroyDrivers() - three steps are deliberately missing, all of
+  // them no-ops on the rollback path:
+  //
+  //  - CloseTools(). LoadTools() and LoadHotswapTool() both run below the last
+  //    failure this unwinds, so tool_libs_ is still empty here. This is also
+  //    why Unload() cannot hand its tail to this method and have the sequence
+  //    written once: CloseTools() has to stay where it is, after
+  //    DestroyAgents(), because LoadTools() puts whatever WrapAgent() returned
+  //    into cpu_agents_ and gpu_agents_, and the destructors DestroyAgents()
+  //    then runs live in the tool libraries CloseTools() unloads.
+  //  - mapped_handle_map_ and memory_handles. Only the VMemory* entry points
+  //    behind hsa_amd_vmem_* fill these, and none of them can have been called
+  //    before hsa_init() returned.
+  //
+  // All three need revisiting if a failure return ever appears below
+  // LoadTools(). Unload()'s last step, DestroyThunkLoader(), is past the end of
+  // that span rather than missing from it: the thunk is not something
+  // AMD::Load() built, and Runtime::Load() unwinds it through its own guard.
   for (auto& node_agents : agents_by_node_) {
     for (auto* agent : node_agents.second) agent->ReleaseResources();
   }
