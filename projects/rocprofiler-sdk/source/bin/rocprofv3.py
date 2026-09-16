@@ -52,6 +52,7 @@ CONST_VERSION_INFO = {
 PERFETTO_BUFFER_SIZE_KB_MIN = 1
 PERFETTO_BUFFER_SIZE_KB_MAX = ((1 << 32) - 1) // 1024
 DEPRECATED_DIRECT_OUTPUT_FORMATS = ("csv", "pftrace", "otf2")
+ATT_RESOURCE_MODES = ("default", "hsa", "code-object")
 
 
 class dotdict(dict):
@@ -1239,6 +1240,13 @@ For attachment profiling of running processes:
     )
 
     att_options.add_argument(
+        "--att-resource-mode",
+        help="When to allocate thread trace resources: profiler-selected, HSA initialization, or the first code object per GPU.",
+        default=None,
+        choices=ATT_RESOURCE_MODES,
+    )
+
+    att_options.add_argument(
         "--att-shader-engine-mask",
         help="Bitmask of shader engines to enable. Default 0x1",
         default=None,
@@ -2379,6 +2387,18 @@ def run(app_args, args, **kwargs):
 
         update_env("ROCPROF_ADVANCED_THREAD_TRACE", True, overwrite=True)
         update_env("ROCPROF_ATT_NO_INTERCEPT", args.att_no_intercept, overwrite=True)
+
+        if args.att_resource_mode is not None:
+            if args.att_resource_mode not in ATT_RESOURCE_MODES:
+                fatal_error(
+                    f"Invalid att_resource_mode: {args.att_resource_mode}. "
+                    f"Valid choices are: {', '.join(ATT_RESOURCE_MODES)}"
+                )
+            update_env(
+                "ROCPROF_ATT_PARAM_RESOURCE_MODE",
+                args.att_resource_mode,
+                overwrite=True,
+            )
 
         if args.att_target_cu is not None:
             update_env(
