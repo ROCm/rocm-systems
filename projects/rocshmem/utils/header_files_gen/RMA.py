@@ -109,7 +109,7 @@ def generate_put_api():
  * @param[in] dest   Destination address. Must be an address on the symmetric
  *                   heap.
  * @param[in] source Source address. Must be an address on the symmetric heap.
- * @param[in] nelems Size of the transfer in number of elements.
+ * @param[in] nelems Size of the transfer in bytes.
  * @param[in] pe     PE of the remote process.
  *
  * @return void.
@@ -127,7 +127,7 @@ __device__ ATTR_NO_INLINE void rocshmem_putmem(void *dest, const void *source,
  * @brief Writes contiguous data of \\p nelems bytes from \\p source on the
  * calling PE to \\p dest at \\p pe. The caller will block until the operation
  * completes locally (it is safe to reuse \\p source). The caller must
- * call into __host__ rocshmem_quiet() if remote completion is required.
+ * call into rocshmem_quiet() if remote completion is required.
  *
  * @param[in] ctx    Context with which to perform this operation.
  * @param[in] dest   Destination address. Must be an address on the symmetric

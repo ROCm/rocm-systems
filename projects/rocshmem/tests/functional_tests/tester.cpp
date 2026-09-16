@@ -238,18 +238,52 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case GetTestType:
       test_name = "Blocking Gets";
       testers.push_back(new PrimitiveTester(args));
+      // PrimitiveTester goes through the byte-oriented getmem path; the typed
+      // entry points come along when the caller selects an element type.
+      #define PUSH_TYPED_RMA(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new TypedRMATester<T>(args));
+      ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
+      if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
+        ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
+      }
+      #undef PUSH_TYPED_RMA
       break;
     case GetNBITestType:
       test_name = "Non-Blocking Gets";
       testers.push_back(new PrimitiveTester(args));
+      #define PUSH_TYPED_RMA(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new TypedRMATester<T>(args));
+      ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
+      if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
+        ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
+      }
+      #undef PUSH_TYPED_RMA
       break;
     case PutTestType:
       test_name = "Blocking Puts";
       testers.push_back(new PrimitiveTester(args));
+      #define PUSH_TYPED_RMA(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new TypedRMATester<T>(args));
+      ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
+      if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
+        ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
+      }
+      #undef PUSH_TYPED_RMA
       break;
     case PutNBITestType:
       test_name = "Non-Blocking Puts";
       testers.push_back(new PrimitiveTester(args));
+      #define PUSH_TYPED_RMA(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new TypedRMATester<T>(args));
+      ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
+      if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
+        ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
+      }
+      #undef PUSH_TYPED_RMA
       break;
     case DefaultCTXGetTestType:
       test_name = "Default context Blocking Gets";
@@ -315,17 +349,36 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case PTestType:
       test_name = "P Test";
       testers.push_back(new PrimitiveTester(args));
+      #define PUSH_TYPED_RMA(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new TypedRMATester<T>(args));
+      ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
+      if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
+        ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
+      }
+      #undef PUSH_TYPED_RMA
       break;
     case GTestType:
       test_name = "G Test";
       testers.push_back(new PrimitiveTester(args));
+      #define PUSH_TYPED_RMA(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new TypedRMATester<T>(args));
+      ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
+      if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
+        ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
+      }
+      #undef PUSH_TYPED_RMA
       break;
     case TeamReductionTestType:
       test_name = "All-to-All Team-based Reduction";
       if (args.type_coverage == TypeCoverage::Minimal) {
         ROCSHMEM_PUSH_REDUCTION_FLOAT(TeamReductionTester, float, args, testers)
       } else {
-        ROCSHMEM_PUSH_REDUCTION_ALL(TeamReductionTester, args, testers)
+        ROCSHMEM_PUSH_REDUCTION_ALWAYS(TeamReductionTester, args, testers)
+        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
+          ROCSHMEM_PUSH_REDUCTION_NONRO(TeamReductionTester, args, testers)
+        }
       }
       break;
     case TeamReduceScatterTestType:
@@ -333,7 +386,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (args.type_coverage == TypeCoverage::Minimal) {
         ROCSHMEM_PUSH_REDUCTION_FLOAT(TeamReduceScatterTester, float, args, testers)
       } else {
-        ROCSHMEM_PUSH_REDUCTION_ALL(TeamReduceScatterTester, args, testers)
+        ROCSHMEM_PUSH_REDUCTION_ALWAYS(TeamReduceScatterTester, args, testers)
+        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
+          ROCSHMEM_PUSH_REDUCTION_NONRO(TeamReduceScatterTester, args, testers)
+        }
       }
       break;
     case ReduceWaveTestType:
@@ -341,7 +397,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (args.type_coverage == TypeCoverage::Minimal) {
         ROCSHMEM_PUSH_REDUCTION_FLOAT(ReduceWaveTester, float, args, testers)
       } else {
-        ROCSHMEM_PUSH_REDUCTION_ALL(ReduceWaveTester, args, testers)
+        ROCSHMEM_PUSH_REDUCTION_ALWAYS(ReduceWaveTester, args, testers)
+        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
+          ROCSHMEM_PUSH_REDUCTION_NONRO(ReduceWaveTester, args, testers)
+        }
       }
       break;
     case TeamReduceScatterWaveTestType:
@@ -349,7 +408,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (args.type_coverage == TypeCoverage::Minimal) {
         ROCSHMEM_PUSH_REDUCTION_FLOAT(TeamReduceScatterWaveTester, float, args, testers)
       } else {
-        ROCSHMEM_PUSH_REDUCTION_ALL(TeamReduceScatterWaveTester, args, testers)
+        ROCSHMEM_PUSH_REDUCTION_ALWAYS(TeamReduceScatterWaveTester, args, testers)
+        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
+          ROCSHMEM_PUSH_REDUCTION_NONRO(TeamReduceScatterWaveTester, args, testers)
+        }
       }
       break;
     case TeamBroadcastTestType: {
@@ -369,7 +431,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
         testers.push_back(new TeamBroadcastTester<char>(args));
         testers.push_back(new TeamBroadcastTester<unsigned char>(args));
       } else {
-        ROCSHMEM_COLL_TYPES_FULL(PUSH_BCAST)
+        ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_BCAST)
+        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
+          ROCSHMEM_COLL_TYPES_NONRO(PUSH_BCAST)
+        }
       }
       #undef PUSH_BCAST
       break;
@@ -385,7 +450,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
         testers.push_back(new BroadcastWaveTester<float>(args));
         testers.push_back(new BroadcastWaveTester<double>(args));
       } else {
-        ROCSHMEM_COLL_TYPES_FULL(PUSH_BWAVE)
+        ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_BWAVE)
+        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
+          ROCSHMEM_COLL_TYPES_NONRO(PUSH_BWAVE)
+        }
       }
       #undef PUSH_BWAVE
       break;
@@ -398,7 +466,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (args.type_coverage == TypeCoverage::Minimal) {
         testers.push_back(new TeamAlltoallTester<float>(args));
       } else {
-        ROCSHMEM_COLL_TYPES_FULL(PUSH_A2A)
+        ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_A2A)
+        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
+          ROCSHMEM_COLL_TYPES_NONRO(PUSH_A2A)
+        }
       }
       #undef PUSH_A2A
       break;
@@ -411,7 +482,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (args.type_coverage == TypeCoverage::Minimal) {
         testers.push_back(new TeamAlltoallvTester<float>(args));
       } else {
-        ROCSHMEM_COLL_TYPES_FULL(PUSH_A2AV)
+        ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_A2AV)
+        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
+          ROCSHMEM_COLL_TYPES_NONRO(PUSH_A2AV)
+        }
       }
       #undef PUSH_A2AV
       break;
@@ -430,7 +504,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
         testers.push_back(new AlltoallWaveTester<char>(args));
         testers.push_back(new AlltoallWaveTester<int>(args));
       } else {
-        ROCSHMEM_COLL_TYPES_FULL(PUSH_A2AWAVE)
+        ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_A2AWAVE)
+        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
+          ROCSHMEM_COLL_TYPES_NONRO(PUSH_A2AWAVE)
+        }
       }
       #undef PUSH_A2AWAVE
       break;
@@ -591,7 +668,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
         testers.push_back(new TeamFcollectTester<char>(args));
         testers.push_back(new TeamFcollectTester<unsigned char>(args));
       } else {
-        ROCSHMEM_COLL_TYPES_FULL(PUSH_FCOL)
+        ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_FCOL)
+        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
+          ROCSHMEM_COLL_TYPES_NONRO(PUSH_FCOL)
+        }
       }
       #undef PUSH_FCOL
       break;
@@ -610,7 +690,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
         testers.push_back(new FcollectWaveTester<char>(args));
         testers.push_back(new FcollectWaveTester<unsigned char>(args));
       } else {
-        ROCSHMEM_COLL_TYPES_FULL(PUSH_FWAVE)
+        ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_FWAVE)
+        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
+          ROCSHMEM_COLL_TYPES_NONRO(PUSH_FWAVE)
+        }
       }
       #undef PUSH_FWAVE
       break;
