@@ -301,6 +301,16 @@ jobs:
             # ConcurrentAsyncEvents teardown race as the HIP clients above.
             "HsaDbiNopAsm.*Sim\.PatchedElfLoadsAndValidatesInHsaExecutable"
             "HsaDbiNopProbe.*Sim\.PatchedElfLoadsAndValidatesInHsaExecutable"
+            # Stopping at a breakpoint has the debugger read queue memory while
+            # the command processor is fetching from it, so these reach the same
+            # MAP_SHARED alias limitation: the race is the CP's atomic load in
+            # GpuMemory::try_read_u64_atomic against the daemon's write through
+            # the client's own mapping of the same page. Both accesses are in
+            # instrumented code, so unlike the rest of this job's reports they
+            # are not a question of what TSan could see. Their gtest assertions
+            # pass.
+            "RocgdbDebug\.KernelBreakpoint"
+            "RocgdbDebug\.Gfx1250KernelBreakpoint"
           )
 
           TEST_REGEX="${{ matrix.test_regex }}"

@@ -12,6 +12,12 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# Tests only, so the binding layer stays as thin for its consumers as it
+# reads. `tests/load.rs` loads a real librocjitsu.so, which a sanitizer
+# build refuses unless its runtime was preloaded; rj_core is where the
+# rule for deciding that lives, and a second copy of it here would be
+# free to disagree with the one the CLI enforces.
+rj_core = { workspace = true }
 
 # `rocjitsu_sys` is the FFI binding layer to `librocjitsu.so`, so it is the
 # one crate in the workspace that is allowed to write `unsafe`. The

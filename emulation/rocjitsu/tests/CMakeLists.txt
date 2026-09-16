@@ -218,15 +218,9 @@ endfunction()
 # with dladdr(&__asan_init); the Rust one forbids unsafe, and the build
 # that computed the path can simply say what it is.
 #
-# Empty on a normal build, which is every build but the sanitizer ones.
-set(RJ_SANITIZER_PRELOAD "")
-if(RJ_ASAN_SHARED_LIBRARY)
-    list(APPEND RJ_SANITIZER_PRELOAD "${RJ_ASAN_SHARED_LIBRARY}")
-endif()
-if(RJ_TSAN_SHARED_LIBRARY)
-    list(APPEND RJ_SANITIZER_PRELOAD "${RJ_TSAN_SHARED_LIBRARY}")
-endif()
-list(JOIN RJ_SANITIZER_PRELOAD ":" RJ_SANITIZER_PRELOAD)
+# The list itself is built by the top-level build, which needs it before
+# this directory is reached; empty on a normal build, which is every
+# build but the sanitizer ones.
 set(RJ_SANITIZER_PRELOAD_PREFIX "")
 if(RJ_SANITIZER_PRELOAD)
     set(RJ_SANITIZER_PRELOAD_PREFIX "${RJ_SANITIZER_PRELOAD}:")
@@ -368,6 +362,35 @@ function(rj_add_test)
         rj_environment_has(_has_preload "LD_PRELOAD" ${ARG_ENVIRONMENT})
         if(NOT _has_preload)
             list(APPEND ARG_ENVIRONMENT "LD_PRELOAD=${RJ_SANITIZER_PRELOAD}")
+        endif()
+    endif()
+
+    # Preloading the TSan runtime into a process whose main binary is not
+    # instrumented is not free: TSan then intercepts that binary's
+    # allocations and memory traffic while seeing none of the
+    # synchronisation that orders it. Rust's channels and locks
+    # synchronise with plain atomics rather than the pthread calls TSan
+    # intercepts, so every ordinary handoff between the CLI's threads —
+    # publishing a health snapshot, building an exec spec, tearing a
+    # session down — looks exactly like an unsynchronised one and is
+    # reported as a race. That is what it did: five thousand reports
+    # across sixty tests, every frame in the CLI binary and not one in
+    # instrumented code.
+    #
+    # This is the option that exists for mixed processes. The C++ under
+    # test is instrumented and its races are still reported; what is
+    # dropped is the part TSan was never in a position to judge.
+    #
+    # The Rust side is not left unchecked by it: `cargo test` runs that
+    # code's own suites, and races there are the business of a build that
+    # instruments Rust, which needs a toolchain this one does not pin.
+    if(RJ_TSAN_SHARED_LIBRARY)
+        rj_environment_has(_has_tsan_options "TSAN_OPTIONS" ${ARG_ENVIRONMENT})
+        if(NOT _has_tsan_options)
+            list(
+                APPEND ARG_ENVIRONMENT
+                "TSAN_OPTIONS=ignore_noninstrumented_modules=1"
+            )
         endif()
     endif()
     # The CLI otherwise searches the ROCm install locations for the two

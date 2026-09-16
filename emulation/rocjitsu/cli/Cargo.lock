@@ -782,6 +782,7 @@ name = "rocjitsu_sys"
 version = "0.2.0"
 dependencies = [
  "libloading",
+ "rj_core",
  "tempfile",
  "tracing",
 ]
