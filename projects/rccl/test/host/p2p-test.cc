@@ -29,6 +29,31 @@
 // to see them, and the shim below would land too late.
 #include "alloc.h"
 
+// Macro shim: replace the header-only ncclCalloc template so a test can force
+// its allocation-failure arm. ncclCalloc's alloc.h template calls libc malloc
+// directly (there is no external symbol or hookable seam to control it), so
+// the failure branch (`if (p == NULL) return ncclSystemError`) is otherwise
+// unreachable in a no-GPU test. Mirrors the ncclCalloc shim in init-test.cc.
+//
+// Armed by exact request size (byte count of `nelem * sizeof(T)`), not a call
+// index, so a test targets one specific allocation without depending on how
+// many callocs the surrounding code happens to make. SetP2pCallocFailSize(0)
+// disarms; the fixture's TearDown resets it. Both statics are TU-local, so
+// this never affects any other test binary.
+static std::size_t g_callocFailSize = 0;  // 0 = never fail
+template <typename T>
+static ncclResult_t MicroCalloc(const char* file, int line, const char* fn,
+                                T** ptr, std::size_t nelem) {
+    if (g_callocFailSize != 0 && nelem * sizeof(T) == g_callocFailSize) {
+        g_callocFailSize = 0;  // fire once, then disarm
+        return ncclSystemError;
+    }
+    return ncclCallocDebug(ptr, nelem, file, line, fn, true);
+}
+static void SetP2pCallocFailSize(std::size_t size) { g_callocFailSize = size; }
+#undef ncclCalloc
+#define ncclCalloc(...) MicroCalloc(__FILE__, __LINE__, __func__, __VA_ARGS__)
+
 // NCCL_PARAM redirector (shared with init-test.cc): routes every generated
 // ncclParamXxx() through g_loadParam on each call so tests can flip a param's
 // value between cases (without this, ncclParamLegacyCudaRegister() and friends
@@ -216,6 +241,7 @@ static void ResetP2pFakes()
     g_fakeCuMemAlloc      = DefaultFakeCuMemAlloc;
     ResetNcclFakes();  // restore the nccl* hooks owned by nccl_fakes.cc
     ResetHipFakes();   // restore the HIP hooks owned by hip_fakes.cc
+    SetP2pCallocFailSize(0);  // disarm any ncclCalloc failure arming
     for (void* p : g_fakeAllocations) std::free(p);
     g_fakeAllocations.clear();
 }
@@ -3767,6 +3793,186 @@ TEST_F(P2pSetupMicrotest, RecvSetupThenConnect_ReadPath_TakesRemoteSimpleBuffer)
     p2pTransport.recv.free(&comm_, &recv);
 }
 
+// recv connect's p2pMap takes the cross-process import arm when the connect
+// info names a peer in a different process; a failing import there propagates
+// out of connect.
+TEST_F(P2pSetupMicrotest, RecvConnect_CrossProcessMapImportFails_Propagates)
+{
+    // Slot 1 is a cross-process peer so p2pMap(comm->peerInfo+rank=0,
+    // comm->peerInfo+info->rank=1) takes the different-PID import branch.
+    peers_[1] = myInfo_;
+    peers_[1].rank    = 1;
+    peers_[1].pidHash = kPid + 1;   // different process
+
+    InstallTopo(/*read=*/0);
+    InstallHappyProxy();
+
+    ncclConnector recv{};
+    ASSERT_EQ(p2pTransport.recv.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &recv, 0, 0),
+              ncclSuccess);
+
+    // Point the exchanged connect info at the cross-process peer and refuse
+    // the legacy IPC import that p2pMap then attempts.
+    reinterpret_cast<p2pConnectInfo*>(connect_info_.data)->rank = 1;
+    ScopedHook open(g_hipIpcOpenMemHandle,
+        [](void**, hipIpcMemHandle_t, unsigned int) -> hipError_t {
+            return hipErrorInvalidValue;
+        });
+
+    EXPECT_NE(p2pTransport.recv.connect(&comm_, &connect_info_, comm_.nRanks,
+                                        /*rank=*/0, &recv),
+              ncclSuccess);
+
+    p2pTransport.recv.free(&comm_, &recv);
+}
+
+// --- setup/connect error propagation -------------------------------------
+// Each of these drives one failure seam on the setup/connect path and asserts
+// the error is propagated (the resource allocation / proxy handshake that
+// failed is the seam under test; setup's own contract here is "stop and
+// return the error", not the downstream bookkeeping).
+
+TEST_F(P2pSetupMicrotest, SendSetup_ResourceAllocFails_Propagates)
+{
+    InstallTopo(/*read=*/0);
+    InstallXgmiLink();
+    InstallHappyProxy();
+    // Starve the first allocation setup makes: the p2pResources block.
+    SetP2pCallocFailSize(sizeof(p2pResources));
+
+    EXPECT_EQ(p2pTransport.send.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &send_, 0, 0),
+              ncclSystemError);
+    // The alloc never succeeded, so there is nothing to free.
+    EXPECT_EQ(send_.transportResources, nullptr);
+}
+
+TEST_F(P2pSetupMicrotest, SendSetup_TopologyQueryFails_Propagates)
+{
+    // p2pGetInfo delegates straight to ncclTopoCheckP2p; a failure there
+    // aborts setup before any proxy handshake.
+    InstallXgmiLink();
+    InstallHappyProxy();
+    topo_.emplace(g_ncclTopoCheckP2p,
+        [](int, int, int*, int*, int*, int*) -> ncclResult_t {
+            return ncclSystemError;
+        });
+
+    EXPECT_EQ(p2pTransport.send.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &send_, 0, 0),
+              ncclSystemError);
+
+    p2pTransport.send.free(&comm_, &send_);
+}
+
+TEST_F(P2pSetupMicrotest, SendSetup_ProxyConnectFails_Propagates)
+{
+    InstallTopo(/*read=*/0);
+    InstallXgmiLink();
+    proxy_.emplace(g_proxyCallBlocking,
+        [](struct ncclComm*, struct ncclProxyConnector*, int, void*, int,
+           void*, int) -> ncclResult_t {
+            ADD_FAILURE() << "proxy call must not run after connect failure";
+            return ncclSystemError;
+        });
+    connect_.emplace(g_proxyConnect,
+        [](struct ncclComm*, int, int, int,
+           struct ncclProxyConnector*) -> ncclResult_t {
+            return ncclSystemError;
+        });
+
+    EXPECT_EQ(p2pTransport.send.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &send_, 0, 0),
+              ncclSystemError);
+
+    p2pTransport.send.free(&comm_, &send_);
+}
+
+TEST_F(P2pSetupMicrotest, SendSetup_ProxySetupCallFails_Propagates)
+{
+    InstallTopo(/*read=*/0);
+    InstallXgmiLink();
+    connect_.emplace(g_proxyConnect, MarkProxyConnInitialized());
+    proxy_.emplace(g_proxyCallBlocking,
+        [](struct ncclComm*, struct ncclProxyConnector*, int, void*, int,
+           void*, int) -> ncclResult_t { return ncclSystemError; });
+
+    EXPECT_EQ(p2pTransport.send.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &send_, 0, 0),
+              ncclSystemError);
+
+    p2pTransport.send.free(&comm_, &send_);
+}
+
+TEST_F(P2pSetupMicrotest, RecvSetup_ResourceAllocFails_Propagates)
+{
+    InstallTopo(/*read=*/0);
+    InstallHappyProxy();
+    SetP2pCallocFailSize(sizeof(p2pResources));
+
+    ncclConnector recv{};
+    EXPECT_EQ(p2pTransport.recv.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &recv, 0, 0),
+              ncclSystemError);
+    EXPECT_EQ(recv.transportResources, nullptr);
+}
+
+TEST_F(P2pSetupMicrotest, RecvSetup_TopologyQueryFails_Propagates)
+{
+    InstallHappyProxy();
+    topo_.emplace(g_ncclTopoCheckP2p,
+        [](int, int, int*, int*, int*, int*) -> ncclResult_t {
+            return ncclSystemError;
+        });
+
+    ncclConnector recv{};
+    EXPECT_EQ(p2pTransport.recv.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &recv, 0, 0),
+              ncclSystemError);
+
+    p2pTransport.recv.free(&comm_, &recv);
+}
+
+TEST_F(P2pSetupMicrotest, RecvSetup_ProxyConnectFails_Propagates)
+{
+    InstallTopo(/*read=*/0);
+    proxy_.emplace(g_proxyCallBlocking,
+        [](struct ncclComm*, struct ncclProxyConnector*, int, void*, int,
+           void*, int) -> ncclResult_t {
+            ADD_FAILURE() << "proxy call must not run after connect failure";
+            return ncclSystemError;
+        });
+    connect_.emplace(g_proxyConnect,
+        [](struct ncclComm*, int, int, int,
+           struct ncclProxyConnector*) -> ncclResult_t {
+            return ncclSystemError;
+        });
+
+    ncclConnector recv{};
+    EXPECT_EQ(p2pTransport.recv.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &recv, 0, 0),
+              ncclSystemError);
+
+    p2pTransport.recv.free(&comm_, &recv);
+}
+
+TEST_F(P2pSetupMicrotest, RecvSetup_ProxySetupCallFails_Propagates)
+{
+    InstallTopo(/*read=*/0);
+    connect_.emplace(g_proxyConnect, MarkProxyConnInitialized());
+    proxy_.emplace(g_proxyCallBlocking,
+        [](struct ncclComm*, struct ncclProxyConnector*, int, void*, int,
+           void*, int) -> ncclResult_t { return ncclSystemError; });
+
+    ncclConnector recv{};
+    EXPECT_EQ(p2pTransport.recv.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &recv, 0, 0),
+              ncclSystemError);
+
+    p2pTransport.recv.free(&comm_, &recv);
+}
+
 // --- free contract -------------------------------------------------------
 
 class P2pFreeMicrotest : public P2pMicrotest {
@@ -3889,6 +4095,77 @@ TEST_F(P2pFreeMicrotest, RecvFree_LegacyIpcResources_ClosesEachRetainedHandle)
 
     EXPECT_EQ(p2pTransport.recv.free(nullptr, &recv), ncclSuccess);
     EXPECT_EQ(closes, 2);
+}
+
+// Legacy close failure propagates: when cudaIpcCloseMemHandle refuses on a
+// retained handle, send/recv free surface the HIP error rather than silently
+// succeeding.
+TEST_F(P2pFreeMicrotest, SendFree_LegacyIpcCloseFails_Propagates)
+{
+    ScopedHook close(g_hipIpcCloseMemHandle,
+        [](void*) -> hipError_t { return hipErrorInvalidValue; });
+
+    ncclConnector send{};
+    auto* res = MakeResources();
+    res->sendMemIpc      = reinterpret_cast<void*>(0x1000);
+    res->sendMemSameProc = 0;
+    send.transportResources = res;
+
+    EXPECT_NE(p2pTransport.send.free(nullptr, &send), ncclSuccess);
+}
+
+// The recv-handle close arm (reached only after the send-handle close
+// succeeds) also propagates its failure.
+TEST_F(P2pFreeMicrotest, SendFree_LegacyIpcRecvCloseFails_Propagates)
+{
+    void* const kRecv = reinterpret_cast<void*>(0x2000);
+    ScopedHook close(g_hipIpcCloseMemHandle,
+        [kRecv](void* p) -> hipError_t {
+            return p == kRecv ? hipErrorInvalidValue : hipSuccess;
+        });
+
+    ncclConnector send{};
+    auto* res = MakeResources();
+    res->sendMemIpc      = reinterpret_cast<void*>(0x1000);
+    res->recvMemIpc      = kRecv;
+    res->sendMemSameProc = 0;
+    res->recvMemSameProc = 0;
+    send.transportResources = res;
+
+    EXPECT_NE(p2pTransport.send.free(nullptr, &send), ncclSuccess);
+}
+
+TEST_F(P2pFreeMicrotest, RecvFree_LegacyIpcCloseFails_Propagates)
+{
+    ScopedHook close(g_hipIpcCloseMemHandle,
+        [](void*) -> hipError_t { return hipErrorInvalidValue; });
+
+    ncclConnector recv{};
+    auto* res = MakeResources();
+    res->sendMemIpc      = reinterpret_cast<void*>(0x3000);
+    res->sendMemSameProc = 0;
+    recv.transportResources = res;
+
+    EXPECT_NE(p2pTransport.recv.free(nullptr, &recv), ncclSuccess);
+}
+
+TEST_F(P2pFreeMicrotest, RecvFree_LegacyIpcRecvCloseFails_Propagates)
+{
+    void* const kRecv = reinterpret_cast<void*>(0x4000);
+    ScopedHook close(g_hipIpcCloseMemHandle,
+        [kRecv](void* p) -> hipError_t {
+            return p == kRecv ? hipErrorInvalidValue : hipSuccess;
+        });
+
+    ncclConnector recv{};
+    auto* res = MakeResources();
+    res->sendMemIpc      = reinterpret_cast<void*>(0x3000);
+    res->recvMemIpc      = kRecv;
+    res->sendMemSameProc = 0;
+    res->recvMemSameProc = 0;
+    recv.transportResources = res;
+
+    EXPECT_NE(p2pTransport.recv.free(nullptr, &recv), ncclSuccess);
 }
 
 // ===========================================================================
@@ -4329,6 +4606,355 @@ TEST_F(P2pShareableBufferMicrotest,
 
     auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
                                           &ipcDesc, &devMem);
+
+    EXPECT_NE(r, ncclSuccess);
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+// cuMem arm, granularity query fails: the first driver call in the import
+// sequence refuses, so control returns the HIP error before importing,
+// reserving, or mapping anything.
+TEST_F(P2pShareableBufferMicrotest,
+       Import_CuMemGranularityQueryFails_Propagates)
+{
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypeFabric;
+
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook gran(g_hipMemGetAllocationGranularity,
+        [](std::size_t*, const hipMemAllocationProp*,
+           hipMemAllocationGranularity_flags) -> hipError_t {
+            return hipErrorInvalidValue;
+        });
+    ScopedHook import(g_hipMemImportFromShareableHandle,
+        [](hipMemGenericAllocationHandle_t*, void*,
+           hipMemAllocationHandleType) -> hipError_t {
+            ADD_FAILURE() << "import must not run after granularity failure";
+            return hipErrorInvalidValue;
+        });
+
+    ncclComm comm{};
+    std::array<ncclPeerInfo, 4> peerInfo{};
+    comm.peerInfo = peerInfo.data();
+    void* devMem = nullptr;
+
+    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
+                                          &ipcDesc, &devMem);
+
+    EXPECT_NE(r, ncclSuccess);
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+// cuMem POSIX_FD arm, fd conversion fails: ncclProxyClientGetFdBlocking
+// refuses, so control returns the error before importing from the fd.
+TEST_F(P2pShareableBufferMicrotest,
+       Import_CuMemPosixFdConversionFails_Propagates)
+{
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook getFd(g_proxyClientGetFdBlocking,
+        [](struct ncclComm*, int, void*, int*) -> ncclResult_t {
+            return ncclSystemError;
+        });
+    ScopedHook import(g_hipMemImportFromShareableHandle,
+        [](hipMemGenericAllocationHandle_t*, void*,
+           hipMemAllocationHandleType) -> hipError_t {
+            ADD_FAILURE() << "import must not run after fd conversion failure";
+            return hipErrorInvalidValue;
+        });
+
+    ncclComm comm{};
+    std::array<ncclPeerInfo, 4> peerInfo{};
+    comm.peerInfo = peerInfo.data();
+    void* devMem = nullptr;
+
+    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
+                                          &ipcDesc, &devMem);
+
+    EXPECT_NE(r, ncclSuccess);
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+// cuMem POSIX_FD arm, import-from-fd fails: the fd is converted, but
+// hipMemImportFromShareableHandle refuses on the fd value, so the error is
+// propagated before reserve/map.
+TEST_F(P2pShareableBufferMicrotest,
+       Import_CuMemPosixFdImportFails_Propagates)
+{
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook getFd(g_proxyClientGetFdBlocking,
+        [](struct ncclComm*, int, void*, int* fd) -> ncclResult_t {
+            if (fd) *fd = dup(STDERR_FILENO);   // a real, closable fd
+            return ncclSuccess;
+        });
+    ScopedHook import(g_hipMemImportFromShareableHandle,
+        [](hipMemGenericAllocationHandle_t*, void*,
+           hipMemAllocationHandleType) -> hipError_t {
+            return hipErrorInvalidValue;
+        });
+
+    ncclComm comm{};
+    std::array<ncclPeerInfo, 4> peerInfo{};
+    comm.peerInfo = peerInfo.data();
+    void* devMem = nullptr;
+
+    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
+                                          &ipcDesc, &devMem);
+
+    EXPECT_NE(r, ncclSuccess);
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+// cuMem POSIX_FD arm, closing the converted fd fails: the import succeeds but
+// the SYSCHECK(close(fd)) refuses because the converted handle is not a valid
+// fd, so the system error is propagated before mapping.
+TEST_F(P2pShareableBufferMicrotest,
+       Import_CuMemPosixFdCloseFails_Propagates)
+{
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook getFd(g_proxyClientGetFdBlocking,
+        [](struct ncclComm*, int, void*, int* fd) -> ncclResult_t {
+            // Hand back a definitely-invalid fd so close() fails with EBADF.
+            if (fd) *fd = 1 << 30;
+            return ncclSuccess;
+        });
+    ScopedHook import(g_hipMemImportFromShareableHandle,
+        [](hipMemGenericAllocationHandle_t* h, void*,
+           hipMemAllocationHandleType) -> hipError_t {
+            if (h) *h = nullptr;
+            return hipSuccess;
+        });
+    ScopedHook reserve(g_hipMemAddressReserve,
+        [](void** p, std::size_t, std::size_t, void*,
+           unsigned long long) -> hipError_t {
+            ADD_FAILURE() << "reserve must not run after close failure";
+            if (p) *p = nullptr;
+            return hipSuccess;
+        });
+
+    ncclComm comm{};
+    std::array<ncclPeerInfo, 4> peerInfo{};
+    comm.peerInfo = peerInfo.data();
+    void* devMem = nullptr;
+
+    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
+                                          &ipcDesc, &devMem);
+
+    EXPECT_NE(r, ncclSuccess);
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+// cuMem arm, address-reserve / map / set-access each fail in turn: the import
+// succeeds but a later mapping-stage driver call refuses, so the HIP error is
+// propagated before the buffer is tracked. Parameterised over the three
+// mapping stages so each CUCHECK error arm is driven.
+enum class ImportMapStage { Reserve, Map, SetAccess };
+class P2pImportMapStageFails
+    : public P2pShareableBufferMicrotest,
+      public ::testing::WithParamInterface<ImportMapStage> {};
+
+TEST_P(P2pImportMapStageFails, CuMem_MappingStageRefuses_Propagates)
+{
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypeFabric;
+    const auto stage = GetParam();
+
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook import(g_hipMemImportFromShareableHandle,
+        [](hipMemGenericAllocationHandle_t* h, void*,
+           hipMemAllocationHandleType) -> hipError_t {
+            if (h) *h = nullptr;
+            return hipSuccess;
+        });
+    ScopedHook reserve(g_hipMemAddressReserve,
+        [stage](void** p, std::size_t, std::size_t, void*,
+                unsigned long long) -> hipError_t {
+            if (stage == ImportMapStage::Reserve) return hipErrorInvalidValue;
+            if (p) *p = reinterpret_cast<void*>(0xE0000);
+            return hipSuccess;
+        });
+    ScopedHook map(g_hipMemMap,
+        [stage](void*, std::size_t, std::size_t, hipMemGenericAllocationHandle_t,
+                unsigned long long) -> hipError_t {
+            return stage == ImportMapStage::Map ? hipErrorInvalidValue : hipSuccess;
+        });
+    ScopedHook access(g_hipMemSetAccess,
+        [stage](void*, std::size_t, const hipMemAccessDesc*,
+                std::size_t) -> hipError_t {
+            return stage == ImportMapStage::SetAccess ? hipErrorInvalidValue
+                                                      : hipSuccess;
+        });
+    ScopedHook track(g_memTrackImportFromPeer,
+        [](struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,
+           hipMemAllocationHandleType, ncclMemType_t, int, int,
+           void*) -> ncclResult_t {
+            ADD_FAILURE() << "buffer must not be tracked after a mapping-stage "
+                             "failure";
+            return ncclSuccess;
+        });
+
+    ncclComm comm{};
+    std::array<ncclPeerInfo, 4> peerInfo{};
+    comm.peerInfo = peerInfo.data();
+    void* devMem = nullptr;
+
+    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
+                                          &ipcDesc, &devMem);
+
+    EXPECT_NE(r, ncclSuccess);
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    MappingStages, P2pImportMapStageFails,
+    ::testing::Values(ImportMapStage::Reserve, ImportMapStage::Map,
+                      ImportMapStage::SetAccess));
+
+// cuMem arm, tracking fails: everything mapped successfully but the final
+// ncclMemTrackImportFromPeer refuses; the error is propagated even though
+// *devMemPtr was already written.
+TEST_F(P2pShareableBufferMicrotest,
+       Import_CuMemTrackImportFails_Propagates)
+{
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypeFabric;
+
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook import(g_hipMemImportFromShareableHandle,
+        [](hipMemGenericAllocationHandle_t* h, void*,
+           hipMemAllocationHandleType) -> hipError_t {
+            if (h) *h = nullptr;
+            return hipSuccess;
+        });
+    ScopedHook reserve(g_hipMemAddressReserve,
+        [](void** p, std::size_t, std::size_t, void*,
+           unsigned long long) -> hipError_t {
+            if (p) *p = reinterpret_cast<void*>(0xE0000);
+            return hipSuccess;
+        });
+    ScopedHook map(g_hipMemMap,
+        [](void*, std::size_t, std::size_t, hipMemGenericAllocationHandle_t,
+           unsigned long long) -> hipError_t { return hipSuccess; });
+    ScopedHook access(g_hipMemSetAccess,
+        [](void*, std::size_t, const hipMemAccessDesc*, std::size_t) -> hipError_t {
+            return hipSuccess;
+        });
+    ScopedHook track(g_memTrackImportFromPeer,
+        [](struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,
+           hipMemAllocationHandleType, ncclMemType_t, int, int,
+           void*) -> ncclResult_t { return ncclSystemError; });
+
+    ncclComm comm{};
+    std::array<ncclPeerInfo, 4> peerInfo{};
+    comm.peerInfo = peerInfo.data();
+    void* devMem = nullptr;
+
+    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
+                                          &ipcDesc, &devMem);
+
+    EXPECT_EQ(r, ncclSystemError);
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+#endif  // ROCM_VERSION >= 70000
+
+// Legacy-IPC alloc arm, buffer allocation fails: ncclCudaCalloc refuses, so
+// the export handle is never queried and the error is propagated.
+TEST_F(P2pShareableBufferMicrotest,
+       Allocate_LegacyIpcBufferAllocFails_Propagates)
+{
+    // cuMemEnable stays 0 -> legacy arm.
+    ScopedHook alloc(g_fakeCudaCallocAsync,
+        [](void**, std::size_t, hipStream_t) -> ncclResult_t {
+            return ncclSystemError;
+        });
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [](hipIpcMemHandle_t*, void*) -> hipError_t {
+            ADD_FAILURE() << "export must not run after buffer alloc failure";
+            return hipErrorInvalidValue;
+        });
+
+    auto r = ncclP2pAllocateShareableBuffer(/*size=*/256, /*refcount=*/0,
+                                            &ipcDesc, &ptr);
+
+    EXPECT_EQ(r, ncclSystemError);
+}
+
+#if ROCM_VERSION >= 70000
+
+// cuMem alloc arm, export-to-peer marking fails: ncclDynMemMarkExportToPeer
+// refuses, so the error is propagated before the handle is exported.
+TEST_F(P2pShareableBufferMicrotest,
+       Allocate_CuMemMarkExportToPeerFails_Propagates)
+{
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook mark(g_dynMemMarkExportToPeer,
+        [](struct ncclMemManager*, void*, int) -> ncclResult_t {
+            return ncclSystemError;
+        });
+
+    ncclMemManager* fakeManager = reinterpret_cast<ncclMemManager*>(0x1234);
+    auto r = ncclP2pAllocateShareableBuffer(/*size=*/256, /*refcount=*/0,
+                                            &ipcDesc, &ptr, /*peerRank=*/3,
+                                            fakeManager, ncclMemScratch);
+
+    EXPECT_EQ(r, ncclSystemError);
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+// cuMem alloc arm, non-POSIX export fails: hipMemExportToShareableHandle
+// refuses, so the HIP error is propagated (no retain work runs).
+TEST_F(P2pShareableBufferMicrotest,
+       Allocate_CuMemExportHandleFails_Propagates)
+{
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypeFabric;  // non-POSIX
+
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook xport(g_hipMemExportToShareableHandle,
+        [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+           unsigned long long) -> hipError_t { return hipErrorInvalidValue; });
+    ScopedHook retain(g_hipMemRetainAllocationHandle,
+        [](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
+            ADD_FAILURE() << "retain must not run after export failure";
+            return hipErrorInvalidValue;
+        });
+
+    auto r = ncclP2pAllocateShareableBuffer(/*size=*/256, /*refcount=*/2,
+                                            &ipcDesc, &ptr);
+
+    EXPECT_NE(r, ncclSuccess);
+    ncclCuMemHandleType = saved_handle_type;
+}
+
+// cuMem alloc arm, handle retain fails: the export succeeds but a
+// hipMemRetainAllocationHandle in the refcount loop refuses, propagating the
+// HIP error.
+TEST_F(P2pShareableBufferMicrotest,
+       Allocate_CuMemRetainHandleFails_Propagates)
+{
+    auto saved_handle_type = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;  // skip export
+
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook retain(g_hipMemRetainAllocationHandle,
+        [](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
+            return hipErrorInvalidValue;
+        });
+
+    auto r = ncclP2pAllocateShareableBuffer(/*size=*/256, /*refcount=*/2,
+                                            &ipcDesc, &ptr);
 
     EXPECT_NE(r, ncclSuccess);
     ncclCuMemHandleType = saved_handle_type;
@@ -4778,6 +5404,36 @@ TEST_F(P2pRegisterFamilyMicrotest, GraphCleanupCallback_WhenDrained_DeregistersH
     EXPECT_EQ(deregArg, &st.reuse.regRecord);
 }
 
+// Scenario 7b: if the deregister the cleanup callback issues fails, the
+// callback propagates that error out of the queue drain.
+TEST_F(P2pRegisterFamilyMicrotest, GraphCleanupCallback_DeregisterFails_Propagates)
+{
+    GraphRegisterState st(/*legacyIpcCap=*/false);
+    CommCallbackQueue cleanupQueue;
+    ncclIntruQueueConstruct(&cleanupQueue);
+    int nCleanupQueueElts = 0;
+
+    int peerRanks[] = {RegFamilyReuseState::kPeerRank};
+    IpcRegOutputs out;
+
+    ASSERT_EQ(ncclIpcGraphRegisterBuffer(&st.reuse.cb.comm(), st.reuse.userbuff(),
+                                         /*buffSize=*/256, peerRanks, /*nPeers=*/1,
+                                         NCCL_IPC_SENDRECV, &out.regBufFlag,
+                                         &out.offsetOut, &out.peerRmtAddrs,
+                                         &cleanupQueue, &nCleanupQueueElts),
+              ncclSuccess);
+    ASSERT_EQ(out.regBufFlag, 1);
+
+    ScopedHook dereg(g_commGraphDeregister,
+        [](struct ncclComm*, struct ncclReg*) -> ncclResult_t {
+            return ncclSystemError;
+        });
+
+    struct ncclCommCallback* cb = ncclIntruQueueDequeue(&cleanupQueue);
+    ASSERT_NE(cb, nullptr);
+    EXPECT_EQ(cb->fn(&st.reuse.cb.comm(), cb), ncclSystemError);  // frees cb
+}
+
 // Scenario 6b: a graph-register failure propagates and the wrapper zeroes
 // its outputs on the fail path.
 TEST_F(P2pRegisterFamilyMicrotest, GraphRegister_GraphRegisterFails_PropagatesAndZeroesOutputs)
@@ -4842,6 +5498,23 @@ TEST_F(P2pRegisterFamilyMicrotest, Deregister_ShipsDeregisterMessageWithImpInfoP
     EXPECT_EQ(msgType, ncclProxyMsgDeregister);
     EXPECT_EQ(msgReq, &regInfo.impInfo);
     EXPECT_EQ(msgReqSize, static_cast<int>(sizeof(struct ncclIpcImpInfo)));
+}
+
+// Scenario 8b: when the deregister proxy message fails, the error is
+// propagated rather than swallowed.
+TEST_F(P2pRegisterFamilyMicrotest, Deregister_ProxyMessageFails_Propagates)
+{
+    ncclComm comm{};
+    ncclProxyConnector proxyConn{};
+    ncclIpcRegInfo regInfo{};
+    regInfo.peerRank     = 3;
+    regInfo.ipcProxyconn = &proxyConn;
+
+    ScopedHook proxy(g_proxyCallBlocking,
+        [](struct ncclComm*, struct ncclProxyConnector*, int, void*, int,
+           void*, int) -> ncclResult_t { return ncclSystemError; });
+
+    EXPECT_EQ(ncclIpcDeregBuffer(&comm, &regInfo), ncclSystemError);
 }
 
 // ===========================================================================
@@ -5155,6 +5828,87 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdBatchQueryFails_ClosesFdsAndRelease
     EXPECT_EQ(numSegments, kNumSegments);
     EXPECT_EQ(seg.releaseCalls, seg.retainCalls);
     EXPECT_EQ(seg.retainCalls, kNumSegments);
+}
+
+// The very first bookkeeping allocation (the ipcInfos array) failing aborts
+// the walk before any segment is retained, propagating the error and leaving
+// no handles outstanding.
+TEST_F(P2pMultiSegmentMicrotest, Walk_IpcInfosAllocFails_PropagatesWithoutRetaining)
+{
+    constexpr std::size_t kSegSize     = 0x1000;
+    constexpr int         kNumSegments = 3;
+    SegmentRangeEmulator seg(kSegSize);
+
+    // capacity starts at 2; the ipcInfos array is the first ncclCalloc.
+    SetP2pCallocFailSize(2 * sizeof(p2pIpcExpInfo));
+
+    const hipDeviceptr_t userBuff = reinterpret_cast<hipDeviceptr_t>(0x100000);
+    const size_t userBuffSize  = kSegSize * kNumSegments;
+    size_t totalMappedBufferSize = 0;
+    int    numSegments           = 0;
+    p2pIpcExpInfo* ipcInfos      = nullptr;
+
+    auto r = ipcHandleMultiSegmentRegistration(userBuff, userBuffSize, &comm_,
+                                               &proxyConn_, &totalMappedBufferSize,
+                                               &numSegments, &ipcInfos);
+
+    EXPECT_EQ(r, ncclSystemError);
+    EXPECT_EQ(seg.retainCalls, 0);   // no segment was ever walked
+}
+
+// On the POSIX-fd path the exported-fd scratch array (expFds) is allocated
+// between ipcInfos and segmentHandles; its failure aborts the walk before any
+// segment is retained.
+TEST_F(P2pMultiSegmentMicrotest, Walk_ExpFdsAllocFails_PropagatesWithoutRetaining)
+{
+    ncclCuMemHandleType    = hipMemHandleTypePosixFileDescriptor;
+    proxyConn_.sameProcess = 0;
+
+    constexpr std::size_t kSegSize     = 0x1000;
+    constexpr int         kNumSegments = 3;
+    SegmentRangeEmulator seg(kSegSize);
+
+    // capacity(2) * sizeof(int) is the expFds array (POSIX-fd path only).
+    SetP2pCallocFailSize(2 * sizeof(int));
+
+    const hipDeviceptr_t userBuff = reinterpret_cast<hipDeviceptr_t>(0x100000);
+    const size_t userBuffSize  = kSegSize * kNumSegments;
+    size_t totalMappedBufferSize = 0;
+    int    numSegments           = 0;
+    p2pIpcExpInfo* ipcInfos      = nullptr;
+
+    auto r = ipcHandleMultiSegmentRegistration(userBuff, userBuffSize, &comm_,
+                                               &proxyConn_, &totalMappedBufferSize,
+                                               &numSegments, &ipcInfos);
+
+    EXPECT_EQ(r, ncclSystemError);
+    EXPECT_EQ(seg.retainCalls, 0);
+}
+
+// The segment-handles scratch array failing (the ipcInfos array already
+// allocated) also aborts before the walk, still leaving no handle retained.
+TEST_F(P2pMultiSegmentMicrotest, Walk_SegmentHandlesAllocFails_PropagatesWithoutRetaining)
+{
+    constexpr std::size_t kSegSize     = 0x1000;
+    constexpr int         kNumSegments = 3;
+    SegmentRangeEmulator seg(kSegSize);
+
+    // Non-POSIX handle type here, so expFds is skipped and segmentHandles is
+    // the second ncclCalloc: capacity(2) * sizeof(handle).
+    SetP2pCallocFailSize(2 * sizeof(hipMemGenericAllocationHandle_t));
+
+    const hipDeviceptr_t userBuff = reinterpret_cast<hipDeviceptr_t>(0x100000);
+    const size_t userBuffSize  = kSegSize * kNumSegments;
+    size_t totalMappedBufferSize = 0;
+    int    numSegments           = 0;
+    p2pIpcExpInfo* ipcInfos      = nullptr;
+
+    auto r = ipcHandleMultiSegmentRegistration(userBuff, userBuffSize, &comm_,
+                                               &proxyConn_, &totalMappedBufferSize,
+                                               &numSegments, &ipcInfos);
+
+    EXPECT_EQ(r, ncclSystemError);
+    EXPECT_EQ(seg.retainCalls, 0);
 }
 
 // ===========================================================================
@@ -5518,7 +6272,114 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CuMemMapFails_ReleasesImportedHa
     EXPECT_EQ(QueueHead(conn_), nullptr);        // nothing recorded
 }
 
+// Cross-process POSIX-fd register whose fd close fails after import takes the
+// fail-cleanup path: the imported handle is released and nothing is recorded.
+TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_PosixFdCloseFails_ReleasesAndRecordsNothing)
+{
+    conn_.sameProcess = 0;
+    auto saved = ncclCuMemHandleType;
+    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+
+    p2pIpcExpInfo req{};
+    req.size  = 0x1000;
+    req.impFd = 1 << 30;   // a definitely-invalid fd => close() fails
+
+    ScopedHook reserve(g_hipMemAddressReserve,
+        [](void** ptr, std::size_t, std::size_t, void*, unsigned long long) -> hipError_t {
+            if (ptr) *ptr = reinterpret_cast<void*>(0x500000);
+            return hipSuccess;
+        });
+    ScopedHook import(g_hipMemImportFromShareableHandle,
+        [](hipMemGenericAllocationHandle_t* h, void*,
+           hipMemAllocationHandleType) -> hipError_t {
+            if (h) *h = nullptr;
+            return hipSuccess;
+        });
+    int releaseCalls = 0;
+    ScopedHook release(g_hipMemRelease,
+        [&releaseCalls](hipMemGenericAllocationHandle_t) -> hipError_t {
+            ++releaseCalls;
+            return hipSuccess;
+        });
+
+    void* resp = reinterpret_cast<void*>(0xDEAD);
+    int   done = 0;
+    auto r = p2pTransport.send.proxyRegister(&conn_, &state_, &req,
+                                             sizeof(p2pIpcExpInfo), &resp,
+                                             sizeof(void*), &done);
+
+    EXPECT_NE(r, ncclSuccess);
+    EXPECT_EQ(resp, nullptr);
+    EXPECT_EQ(done, 1);
+    // The close fails before the segment is marked imported, so cleanup has
+    // nothing to release; the imported handle is released by the cleanup loop
+    // only for segments flagged imported (none here).
+    EXPECT_EQ(releaseCalls, 0);
+    EXPECT_EQ(QueueHead(conn_), nullptr);    // nothing recorded
+    ncclCuMemHandleType = saved;
+}
+
 #endif  // ROCM_VERSION >= 70000
+
+// A successful legacy import whose record bookkeeping allocation fails
+// propagates the error: the mapped address is not recorded (the caller sees
+// the failure rather than a half-built queue entry).
+TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_RecordAllocFails_Propagates)
+{
+    constexpr uintptr_t kBase = 0x8000;
+
+    p2pIpcExpInfo req{};
+    req.legacyIpcCap = true;
+    req.size         = 0x1000;
+
+    ScopedHook open(g_hipIpcOpenMemHandle,
+        [](void** devPtr, hipIpcMemHandle_t, unsigned int) -> hipError_t {
+            if (devPtr) *devPtr = reinterpret_cast<void*>(kBase);
+            return hipSuccess;
+        });
+    // The record wrapper (proxyMemHandle) is the first ncclCalloc in the
+    // exit-bookkeeping block; starve it.
+    SetP2pCallocFailSize(sizeof(proxyMemHandle));
+
+    void* resp = nullptr;
+    int   done = 0;
+    auto r = p2pTransport.send.proxyRegister(&conn_, &state_, &req,
+                                             sizeof(p2pIpcExpInfo), &resp,
+                                             sizeof(void*), &done);
+
+    EXPECT_NE(r, ncclSuccess);
+    EXPECT_EQ(QueueHead(conn_), nullptr);    // no record enqueued
+}
+
+// The impInfo payload allocation (the second ncclCalloc in the bookkeeping
+// block) failing likewise propagates without enqueuing a record.
+TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_ImpInfoAllocFails_Propagates)
+{
+    constexpr uintptr_t kBase = 0x8000;
+
+    p2pIpcExpInfo req{};
+    req.legacyIpcCap = true;
+    req.size         = 0x1000;
+
+    ScopedHook open(g_hipIpcOpenMemHandle,
+        [](void** devPtr, hipIpcMemHandle_t, unsigned int) -> hipError_t {
+            if (devPtr) *devPtr = reinterpret_cast<void*>(kBase);
+            return hipSuccess;
+        });
+    // proxyMemHandle and ncclIpcImpInfo differ in size; starving the latter
+    // reaches the second calloc while the first succeeds.
+    ASSERT_NE(sizeof(proxyMemHandle), sizeof(ncclIpcImpInfo));
+    SetP2pCallocFailSize(sizeof(ncclIpcImpInfo));
+
+    void* resp = nullptr;
+    int   done = 0;
+    auto r = p2pTransport.send.proxyRegister(&conn_, &state_, &req,
+                                             sizeof(p2pIpcExpInfo), &resp,
+                                             sizeof(void*), &done);
+
+    EXPECT_NE(r, ncclSuccess);
+    EXPECT_EQ(QueueHead(conn_), nullptr);
+}
 
 class P2pProxyDeregisterMicrotest : public P2pProxyRegisterMicrotest {};
 
