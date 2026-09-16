@@ -20,8 +20,8 @@ from utils.utils_profile import pc_sampling_unit
 def _resolve_sdk_roctx_library(rocprofiler_sdk_tool_path: str) -> Optional[str]:
     """Locate the rocprofiler-sdk ROCTX library for LD_PRELOAD.
 
-    src/lib/roctx_recordfn links it in CMake, but framework runtimes load the
-    legacy libroctx64 first and win the symbol lookup.
+    src/lib/torch_trace_collector links it in CMake, but framework runtimes load
+    the legacy libroctx64 first and win the symbol lookup.
     """
     return resolve_rocm_library_path(
         str(
@@ -144,20 +144,20 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         if args.kernel:
             options["ROCPROF_KERNEL_FILTER_INCLUDE_REGEX"] = "|".join(args.kernel)
 
-        # Dispatch filtering
-        dispatch = []
-        # rocprof sdk dispatch indexing is inclusive and starts from 1
-        if args.dispatch:
-            for dispatch_id in args.dispatch:
-                if ":" in dispatch_id:
+        # Kernel iteration filtering
+        iterations = []
+        # rocprof sdk iteration indexing is inclusive and starts from 1
+        if args.kernel_iteration_range:
+            for iteration in args.kernel_iteration_range:
+                if ":" in iteration:
                     # 4:7 -> 4-7
-                    start, end = dispatch_id.split(":")
-                    dispatch.append(f"{start}-{end}")
+                    start, end = iteration.split(":")
+                    iterations.append(f"{start}-{end}")
                 else:
                     # 4 -> 4
-                    dispatch.append(f"{dispatch_id}")
-        if dispatch:
-            options["ROCPROF_KERNEL_FILTER_RANGE"] = f"[{','.join(dispatch)}]"
+                    iterations.append(f"{iteration}")
+        if iterations:
+            options["ROCPROF_KERNEL_FILTER_RANGE"] = f"[{','.join(iterations)}]"
         if not args.attach_pid:
             options["APP_CMD"] = app_cmd
         return options
