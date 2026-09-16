@@ -1,4 +1,0 @@
-# Flip `enabled` to false and merge to develop to lift the RCCL subtree freeze.
-# The workflow reads this file from the PR base (develop), not from the PR, so
-# the freeze cannot be disabled in the same change that edits RCCL.
-enabled: true
