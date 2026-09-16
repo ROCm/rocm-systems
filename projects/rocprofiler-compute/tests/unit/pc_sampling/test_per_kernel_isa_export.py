@@ -76,6 +76,7 @@ def test_build_isa_header_places_stall_reasons_between_counts_and_source():
         "Instruction line number",
         "Code object offset",
         "Instruction line",
+        "Instruction type",
         "Total count",
         "Active count",
         "Stall count",
