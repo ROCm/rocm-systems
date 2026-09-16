@@ -877,7 +877,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_arithmetic, int, uns
 }
 
 HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_boolean, int, unsigned int, long long,
-                       unsigned long long, bool)
+                       unsigned long long)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1342,7 +1342,7 @@ HIP_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Standard_Op_Custom_Type)
 }
 
 HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_arithmetic, int, unsigned int, long long,
-                   unsigned long long, float, half, double)
+                       unsigned long long, float, half, double, unsigned char)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1357,7 +1357,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_arithmetic, int, unsig
   }
 }
 
-HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_boolean, int, unsigned int, long long, unsigned long long)
+HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_boolean, int, unsigned int,
+                       long long, unsigned long long, bool)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1493,7 +1494,7 @@ TEST_CASE(Unit_Thread_Block_Tile_Inclusive_Scan_Basic)
   }
 }
 
-TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic, int, half, bool)
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic, int, half, bool, unsigned char)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1532,7 +1533,7 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic, int, half, bool)
 // for all the tile sizes and all input types, using random input values, calculates the scan
 // values. Additionally, randomly make some threads not participate for the coalesced_threads case
 TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_arithmetic,  int, unsigned int, long long,
-                   unsigned long long, float, half, double)
+                   unsigned long long, float, half, double, unsigned char)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1558,7 +1559,7 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_arithmetic,  int, unsigned
 }
 
 TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_boolean, int, unsigned int, long long,
-                   unsigned long long)
+                   unsigned long long, bool)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1620,7 +1621,7 @@ TEST_CASE(Unit_Thread_Block_Tile_2D_3D_Blocks)
 }
 
 TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_arithmetic, int, unsigned int, long long,
-                   unsigned long long, float, half, double)
+                   unsigned long long, float, half, double, unsigned char)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
@@ -1646,7 +1647,7 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_arithmetic, int, unsigned in
 }
 
 TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_boolean, int, unsigned int, long long,
-                   unsigned long long)
+                   unsigned long long, bool)
 {
   CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
