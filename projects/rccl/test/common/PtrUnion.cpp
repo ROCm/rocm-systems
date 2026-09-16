@@ -78,7 +78,9 @@ namespace RcclUnitTesting
                                   size_t         const numElements,
                                   void*          const actualGpu,
                                   void*          const expectedGpu,
-                                  size_t&              mismatches)
+                                  void*          const alternativeExpectedGpu,
+                                  size_t&              mismatches,
+                                  bool           const verbose)
   {
     // Wiring telltale: fire once per process so runs visibly confirm the device
     // validate path is actually exercised (guards against a silent host fallback).
@@ -106,10 +108,10 @@ namespace RcclUnitTesting
 
     // dScratch[0] = mismatch count, dScratch[1] = first (lowest) divergent index.
     unsigned long long* dScratch = nullptr;
-    double*             dVals    = nullptr;   // [expected, actual] float view at first divergent index
+    double*             dVals    = nullptr;   // [stepwise expected, actual, FP32 expected]
     unsigned long long* dBits    = nullptr;   // [expected, actual] exact raw bits (integer dtypes)
     CHECK_HIP(hipMalloc(&dScratch, 2 * sizeof(unsigned long long))); gScratch.p = dScratch;
-    CHECK_HIP(hipMalloc(&dVals,    2 * sizeof(double)));             gVals.p    = dVals;
+    CHECK_HIP(hipMalloc(&dVals,    3 * sizeof(double)));             gVals.p    = dVals;
     CHECK_HIP(hipMalloc(&dBits,    2 * sizeof(unsigned long long))); gBits.p    = dBits;
     unsigned long long hInit[2] = { 0ULL, (unsigned long long)numElements };  // idx init = n (= "none")
     CHECK_HIP(hipMemcpy(dScratch, hInit, sizeof(hInit), hipMemcpyHostToDevice));
@@ -120,7 +122,8 @@ namespace RcclUnitTesting
     if (fp8)
     {
       hipLaunchKernelGGL(MismatchReduceFp8, dim3(blocks), dim3(threads), 0, 0,
-                         (const uint8_t*)actualGpu, (const uint8_t*)expectedGpu, numElements,
+                         (const uint8_t*)actualGpu, (const uint8_t*)expectedGpu,
+                         (const uint8_t*)alternativeExpectedGpu, numElements,
                          dScratch, dScratch + 1, isE5m2);
     }
     else
@@ -138,13 +141,14 @@ namespace RcclUnitTesting
     // Diagnostic: with the host buffering path retired this is the only value dump, so
     // report the first divergent index with its expected/actual (dtype-aware). The test
     // pattern's values are small, so a double captures every dtype exactly.
-    if (hOut[0] != 0 && hOut[1] < (unsigned long long)numElements)
+    if (verbose && hOut[0] != 0 && hOut[1] < (unsigned long long)numElements)
     {
       size_t const fi = (size_t)hOut[1];
       if (fp8)
       {
         hipLaunchKernelGGL(CaptureElemFp8, dim3(1), dim3(1), 0, 0,
-                           (const uint8_t*)actualGpu, (const uint8_t*)expectedGpu, fi, dVals, isE5m2);
+                           (const uint8_t*)actualGpu, (const uint8_t*)expectedGpu,
+                           (const uint8_t*)alternativeExpectedGpu, fi, dVals, isE5m2);
       }
       else
       {
@@ -153,7 +157,7 @@ namespace RcclUnitTesting
                              (const T*)actualGpu, (const T*)expectedGpu, fi, dVals, dBits));
       }
       CHECK_HIP(hipGetLastError());
-      double             hVals[2] = { 0.0, 0.0 };    // float view [expected, actual]
+      double             hVals[3] = { 0.0, 0.0, 0.0 }; // [stepwise expected, actual, FP32 expected]
       unsigned long long hBits[2] = { 0ULL, 0ULL };  // exact raw bits [expected, actual]
       CHECK_HIP(hipMemcpy(hVals, dVals, sizeof(hVals), hipMemcpyDeviceToHost));
       CHECK_HIP(hipMemcpy(hBits, dBits, sizeof(hBits), hipMemcpyDeviceToHost));
@@ -181,8 +185,13 @@ namespace RcclUnitTesting
         TEST_ERROR("Expected output: %llu.  Actual output: %llu at index %zu",
                    (unsigned long long)hBits[0], (unsigned long long)hBits[1], fi); break;
       default:  // floating-point dtypes (fp16/fp32/fp64/bf16/fp8) — exact via double
-        TEST_ERROR("Expected output: %f.  Actual output: %f at index %zu",
-                   hVals[0], hVals[1], fi); break;
+        if (fp8 && alternativeExpectedGpu != nullptr)
+          TEST_ERROR("Expected output: %f or %f.  Actual output: %f at index %zu",
+                     hVals[0], hVals[2], hVals[1], fi);
+        else
+          TEST_ERROR("Expected output: %f.  Actual output: %f at index %zu",
+                     hVals[0], hVals[1], fi);
+        break;
       }
     }
     return TEST_SUCCESS;
@@ -192,7 +201,8 @@ namespace RcclUnitTesting
                                              size_t         const numElements,
                                              int            const totalRanks,
                                              ncclRedOp_t    const op,
-                                             size_t         const startIdx)
+                                             size_t         const startIdx,
+                                             void*          const alternativeExpectedGpu)
   {
     static bool s_redLogged = false;
     if (!s_redLogged)
@@ -209,8 +219,14 @@ namespace RcclUnitTesting
     size_t const threads = kDeviceKernelBlockSize, blocks = (numElements + threads - 1) / threads;
     if (fp8)
     {
+      if (alternativeExpectedGpu == nullptr)
+      {
+        TEST_ERROR("FP8 reduction requires an FP32-accumulation reference buffer");
+        return TEST_FAIL;
+      }
       hipLaunchKernelGGL(ExpectedReduceFp8, dim3(blocks), dim3(threads), 0, 0,
-                         (uint8_t*)this->ptr, numElements, totalRanks, tempOp, isAvg,
+                         (uint8_t*)this->ptr, (uint8_t*)alternativeExpectedGpu,
+                         numElements, totalRanks, tempOp, isAvg,
                          dataType == ncclFloat8e5m2, startIdx);
     }
     else
@@ -552,6 +568,7 @@ namespace RcclUnitTesting
   ErrCode PtrUnion::IsEqual(ncclDataType_t const  dataType,
                             size_t         const  numElements,
                             PtrUnion       const& expected,
+                            PtrUnion       const* alternativeExpected,
                             bool           const  verbose,
                             bool&                 isMatch)
   {
@@ -567,11 +584,19 @@ namespace RcclUnitTesting
       case ncclUint32:  isMatch = (U4[idx] == expected.U4[idx]); break;
       case ncclInt64:   isMatch = (I8[idx] == expected.I8[idx]); break;
       case ncclUint64:  isMatch = (U8[idx] == expected.U8[idx]); break;
-      case ncclFloat8e4m3: isMatch = Matches(F1[idx], expected.F1[idx]); break;
+      case ncclFloat8e4m3:
+        isMatch = Matches(F1[idx], expected.F1[idx])
+                  || (alternativeExpected != nullptr
+                      && Matches(F1[idx], alternativeExpected->F1[idx]));
+        break;
       case ncclFloat16: isMatch = (fabs(__half2float(F2[idx]) - __half2float(expected.F2[idx])) < 9e-2); break;
       case ncclFloat32: isMatch = (fabs(F4[idx] - expected.F4[idx]) < 1e-5); break;
       case ncclFloat64: isMatch = (fabs(F8[idx] - expected.F8[idx]) < 1e-12); break;
-      case ncclFloat8e5m2: isMatch = Matches(B1[idx], expected.B1[idx]); break;
+      case ncclFloat8e5m2:
+        isMatch = Matches(B1[idx], expected.B1[idx])
+                  || (alternativeExpected != nullptr
+                      && Matches(B1[idx], alternativeExpected->B1[idx]));
+        break;
       case ncclBfloat16: isMatch = (fabs((float)B2[idx] - (float)expected.B2[idx]) < 9e-2); break;
       default:
         TEST_ERROR("Unsupported datatype");
@@ -597,7 +622,14 @@ namespace RcclUnitTesting
       case ncclUint64:
         TEST_ERROR("Expected output: %lu.  Actual output: %lu at index %lu", expected.U8[idx], U8[idx], idx); break;
       case ncclFloat8e4m3:
-        TEST_ERROR("Expected output: %f.  Actual output: %f at index %lu", (float)expected.F1[idx], (float)F1[idx], idx); break;
+        if (alternativeExpected != nullptr)
+          TEST_ERROR("Expected output: %f or %f.  Actual output: %f at index %lu",
+                     (float)expected.F1[idx], (float)alternativeExpected->F1[idx],
+                     (float)F1[idx], idx);
+        else
+          TEST_ERROR("Expected output: %f.  Actual output: %f at index %lu",
+                     (float)expected.F1[idx], (float)F1[idx], idx);
+        break;
       case ncclFloat16:
         TEST_ERROR("Expected output: %f.  Actual output: %f at index %lu", __half2float(expected.F2[idx]), __half2float(F2[idx]), idx); break;
       case ncclFloat32:
@@ -605,7 +637,14 @@ namespace RcclUnitTesting
       case ncclFloat64:
         TEST_ERROR("Expected output: %lf.  Actual output: %lf at index %lu", expected.F8[idx], F8[idx], idx); break;
       case ncclFloat8e5m2:
-        TEST_ERROR("Expected output: %f.  Actual output: %f at index %lu", (float)expected.B1[idx], (float)B1[idx], idx); break;
+        if (alternativeExpected != nullptr)
+          TEST_ERROR("Expected output: %f or %f.  Actual output: %f at index %lu",
+                     (float)expected.B1[idx], (float)alternativeExpected->B1[idx],
+                     (float)B1[idx], idx);
+        else
+          TEST_ERROR("Expected output: %f.  Actual output: %f at index %lu",
+                     (float)expected.B1[idx], (float)B1[idx], idx);
+        break;
       case ncclBfloat16:
         TEST_ERROR("Expected output: %f.  Actual output: %f at index %lu", (float)expected.B2[idx], (float)B2[idx], idx); break;
       default:

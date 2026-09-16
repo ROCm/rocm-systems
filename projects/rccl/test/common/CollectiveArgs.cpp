@@ -63,8 +63,8 @@ namespace RcclUnitTesting
   ErrCode CollectiveArgs::AttachMem()
   {
     // Calculate the current active bytes based on this iteration's element count
-     size_t currentInputBytes = this->numInputElements * DataTypeToBytes(this->dataType);
-     size_t currentOutputBytes = this->numOutputElements * DataTypeToBytes(this->dataType);
+    size_t currentInputBytes = this->numInputElements * DataTypeToBytes(this->dataType);
+    size_t currentOutputBytes = this->numOutputElements * DataTypeToBytes(this->dataType);
 
     // For out-of-place, both pointers remain at the start of their respective base allocations.
     // No attachment/offsetting is necessary.
@@ -127,6 +127,13 @@ namespace RcclUnitTesting
     }
     CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
     CHECK_CALL(this->outputCpu.AllocateCpuMem(this->numOutputBytesAllocated));
+    bool const isFp8Reduction =
+      (this->dataType == ncclFloat8e4m3 || this->dataType == ncclFloat8e5m2)
+      && CollectiveArgs::UsesReduce(this->funcType);
+    if (isFp8Reduction)
+    {
+      CHECK_CALL(this->fp8AlternativeExpected.AllocateCpuMem(this->numOutputBytesAllocated));
+    }
 
     // Device-data mode: a device-resident expected buffer for device-side validate.
     // Allocated only for collectives whose prep func builds expected on the GPU
@@ -142,6 +149,11 @@ namespace RcclUnitTesting
       // it is verified that even expected [CPU data] !=  expectedGpu .
       // ncclMemAlloc() +  hipMallocManaged/hipMalloc is not compatible.
       CHECK_CALL(this->expectedGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
+      if (isFp8Reduction)
+      {
+        CHECK_CALL(this->fp8AlternativeExpectedGpu.AllocateGpuMem(
+          this->numOutputBytesAllocated, useManagedMem, userRegistered));
+      }
     }
 
     // Allocate bias buffers if bias is enabled
@@ -164,6 +176,7 @@ namespace RcclUnitTesting
     // sub-case (which would validate against a stale expectedGpu). Device prep funcs set
     // it true only when they actually build expectedGpu.
     this->expectedOnDevice = false;
+    this->hasFp8AlternativeExpected = false;
     CollFuncPtr prepFunc = (prepareDataFunc == nullptr ? DefaultPrepareDataFunc : prepareDataFunc);
     return prepFunc(*this);
   }
@@ -190,6 +203,8 @@ namespace RcclUnitTesting
                                          this->numOutputElements,
                                          this->outputGpu.ptr,
                                          this->expectedGpu.ptr,
+                                         this->hasFp8AlternativeExpected
+                                           ? this->fp8AlternativeExpectedGpu.ptr : nullptr,
                                          mismatches));
       isMatch = (mismatches == 0);
       if (!isMatch)
@@ -204,6 +219,8 @@ namespace RcclUnitTesting
     CHECK_CALL(this->outputCpu.IsEqual(this->dataType,
                                        this->numOutputElements,
                                        this->expected,
+                                       this->hasFp8AlternativeExpected
+                                         ? &this->fp8AlternativeExpected : nullptr,
                                        true,
                                        isMatch));
     if (!isMatch) TEST_ERROR("Mismatch for %s", this->GetDescription().c_str());
@@ -228,9 +245,17 @@ namespace RcclUnitTesting
 
     this->outputCpu.FreeCpuMem();
     this->expected.FreeCpuMem();
+    if (this->fp8AlternativeExpected.ptr != nullptr)
+    {
+      this->fp8AlternativeExpected.FreeCpuMem();
+    }
     if (this->expectedGpu.ptr != nullptr)
     {
       this->expectedGpu.FreeGpuMem(this->userRegistered);
+    }
+    if (this->fp8AlternativeExpectedGpu.ptr != nullptr)
+    {
+      this->fp8AlternativeExpectedGpu.FreeGpuMem(this->userRegistered);
     }
 
     if (this->localScalar.ptr != nullptr)
