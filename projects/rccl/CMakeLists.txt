@@ -100,6 +100,7 @@ if(NOT ENABLE_FULL_COVERAGE MATCHES "^(AUTO|ON|OFF)$")
     "received '${ENABLE_FULL_COVERAGE}'.")
 endif()
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
+option(ENABLE_NET_PROFILING                    "Emit NET_IB/NET_SOCK profiler events"          OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
 option(DISABLE_KERNARG_PRELOAD                 "Disable amdgpu-kernarg-preload-count compile/link flag" OFF)
@@ -926,6 +927,12 @@ rccl_add_nccl_compat_package_targets()
 
 if(GENERATE_SYM_KERNELS)
   target_compile_definitions(rccl PRIVATE GENERATE_SYM_KERNELS)
+endif()
+
+# Off by default: the NET_IB/NET_SOCK profiler events instrument the network
+# data path, so they are opt-in rather than always compiled in.
+if(ENABLE_NET_PROFILING)
+  target_compile_definitions(rccl PRIVATE NCCL_ENABLE_NET_PROFILING)
 endif()
 
 # Keep librccl outputs in the top-level build dir for existing scripts.

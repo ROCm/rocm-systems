@@ -158,6 +158,21 @@ enum class CopyOutcome : uint8_t {
 
 class GpuMemory : public simdojo::SparseMemory {
 public:
+  /// @brief One owner's cached positive instruction-fetch mapping check.
+  /// @details The cache owns only an atomic token, never a page-table pointer.
+  /// It must not be accessed concurrently by multiple owners.
+  class FetchabilityCache {
+  private:
+    friend class GpuMemory;
+
+    std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch_;
+    uint64_t memory_instance_ = 0;
+    uint64_t page_ = 0;
+    uint64_t registry_generation_ = 0;
+    uint64_t mutation_generation_ = 0;
+    uint32_t vmid_ = 0;
+  };
+
   class PageTableRequestGuard {
   public:
     PageTableRequestGuard() = default;
@@ -236,9 +251,12 @@ public:
   ///        Omitting it disables the per-thread fast path for this page table.
   /// @param request_mutex Optional lease that stabilizes batched page-table
   ///        lookups. Omitting it disables cross-chunk MTYPE reuse.
+  /// @param fetchability_epoch Optional retained token invalidated before each
+  ///        page-table mutation. Omitting it keeps fetchability checks uncached.
   void register_process(uint32_t pid, KfdProcess::PageTable *pt, std::shared_mutex *mu,
                         const uint64_t *generation = nullptr,
-                        std::shared_ptr<std::shared_mutex> request_mutex = {}) {
+                        std::shared_ptr<std::shared_mutex> request_mutex = {},
+                        std::shared_ptr<const std::atomic<uint64_t>> fetchability_epoch = {}) {
     util::Logger::cp("VMID_REG pid=", pid, " mem=0x", std::hex, reinterpret_cast<uintptr_t>(this),
                      std::dec, " pt_size=", pt->size());
     update_vmid_registration(pid, [&](auto) {
@@ -249,6 +267,7 @@ public:
           .client_mem_fd = {},
           .generation = generation,
           .request_mutex = std::move(request_mutex),
+          .fetchability_epoch = std::move(fetchability_epoch),
       };
       return true;
     });
@@ -511,6 +530,45 @@ public:
     iovec local{&byte, sizeof(byte)};
     iovec remote{reinterpret_cast<void *>(addr), sizeof(byte)};
     return process_vm_readv(pid, &local, 1, &remote, 1, 0) == sizeof(byte);
+  }
+
+  /// @brief Check fetchability, caching only a registered page-table positive.
+  /// @details Hits validate the VMID binding and retained mutation token with
+  /// atomic loads; they never dereference the table or its mutex. Misses capture
+  /// a positive snapshot under both original locks. Negative results, legacy
+  /// registrations, sparse memory, and client-memory fallbacks remain uncached.
+  /// A successful check is a mapping snapshot; it does not pin backing storage.
+  bool is_fetchable(uint64_t addr, uint32_t vmid, FetchabilityCache &cache) const {
+    const uint64_t page = addr >> PAGE_SHIFT;
+    if (cache.mutation_epoch_ && cache.memory_instance_ == instance_id_ && cache.vmid_ == vmid &&
+        cache.page_ == page &&
+        cache.registry_generation_ ==
+            fetchability_registry_generation_.load(std::memory_order_acquire) &&
+        cache.mutation_generation_ == cache.mutation_epoch_->load(std::memory_order_acquire))
+      return true;
+
+    cache = {};
+    if (vmid != 0) {
+      std::shared_lock vmid_lock(vmid_mutex_);
+      auto it = vmid_table_.find(vmid);
+      if (it != vmid_table_.end()) {
+        const VmidEntry &entry = it->second;
+        std::shared_lock page_table_lock(*entry.mutex);
+        if (entry.page_table->contains(page)) {
+          if (entry.fetchability_epoch) {
+            cache.mutation_epoch_ = entry.fetchability_epoch;
+            cache.memory_instance_ = instance_id_;
+            cache.page_ = page;
+            cache.vmid_ = vmid;
+            cache.registry_generation_ =
+                fetchability_registry_generation_.load(std::memory_order_relaxed);
+            cache.mutation_generation_ = cache.mutation_epoch_->load(std::memory_order_relaxed);
+          }
+          return true;
+        }
+      }
+    }
+    return is_fetchable(addr, vmid);
   }
 
   /// @brief Read a contiguous range from simulated GPU memory.
@@ -1824,6 +1882,8 @@ private:
     return len;
   }
 
+  friend class GpuMemoryFetchabilityTestPeer;
+
   struct VmidEntry {
     KfdProcess::PageTable *page_table = nullptr;
     std::shared_mutex *mutex = nullptr;
@@ -1832,6 +1892,7 @@ private:
     util::UniqueHandle client_mem_fd;
     const uint64_t *generation = nullptr;
     std::shared_ptr<std::shared_mutex> request_mutex;
+    std::shared_ptr<const std::atomic<uint64_t>> fetchability_epoch;
   };
 
   /// @brief Update a VMID binding while excluding an in-progress MTYPE lookup.
@@ -1860,6 +1921,10 @@ private:
       if (current_request_mutex != request_mutex)
         continue;
 
+      // Invalidate lockless fetch checks before changing the binding. A miss
+      // cannot retain the new generation until this exclusive lock is released.
+      // A no-op or throwing update may conservatively invalidate cached checks.
+      fetchability_registry_generation_.fetch_add(1, std::memory_order_release);
       if (update(it))
         ++vmid_registry_generation_;
       return;
@@ -2470,6 +2535,8 @@ private:
   std::unordered_map<uint32_t, VmidEntry> vmid_table_;
   // Version of VMID-to-page-table bindings, accessed only under vmid_mutex_.
   uint64_t vmid_registry_generation_ = 1;
+  // Positive fetch checks read this without retaining a VMID-table entry.
+  std::atomic<uint64_t> fetchability_registry_generation_{1};
 #if defined(RJ_GPU_MEMORY_WITH_ASAN)
   /// @brief Private unit-test seam for deterministic unlocked-query coverage.
   /// @details The pointed-to callback must outlive every concurrent invocation.

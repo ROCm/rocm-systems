@@ -72,12 +72,13 @@ TEST_F(cacheable_test, store_value_string_literal)
     auto value = "Hello World"sv;
     rocprofsys::trace_cache::utility::store_value(value, buffer.data(), position);
 
-    const size_t expected_size = value.size() + sizeof(size_t);
+    const size_t expected_size = value.size() + sizeof(char) + sizeof(size_t);
     EXPECT_EQ(position, expected_size);
 
     const std::string stored_value(
         reinterpret_cast<const char*>(buffer.data() + sizeof(size_t)));
     EXPECT_EQ(stored_value, "Hello World");
+    EXPECT_EQ(buffer[sizeof(size_t) + value.size()], '\0');
 }
 
 TEST_F(cacheable_test, store_value_optional)
@@ -103,8 +104,8 @@ TEST_F(cacheable_test, store_value_empty_string)
     auto value = ""sv;
     rocprofsys::trace_cache::utility::store_value(value, buffer.data(), position);
 
-    EXPECT_EQ(position, sizeof(size_t));
-    EXPECT_EQ(buffer[0], '\0');
+    EXPECT_EQ(position, sizeof(size_t) + sizeof(char));
+    EXPECT_EQ(buffer[sizeof(size_t)], '\0');
 }
 
 TEST_F(cacheable_test, store_value_byte_array)
@@ -146,7 +147,7 @@ TEST_F(cacheable_test, store_multiple_values)
     rocprofsys::trace_cache::utility::store_value(str_val, buffer.data(), position);
 
     const size_t expected_total =
-        sizeof(int) + sizeof(double) + str_val.size() + sizeof(size_t);
+        sizeof(int) + sizeof(double) + str_val.size() + sizeof(char) + sizeof(size_t);
     EXPECT_EQ(position, expected_total);
 }
 
@@ -203,7 +204,8 @@ TEST_F(cacheable_test, parse_value_string)
     rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_value);
 
     EXPECT_EQ(parsed_value, "Parse this string");
-    EXPECT_EQ(data_pos, buffer.data() + original_value.size() + sizeof(size_t));
+    EXPECT_EQ(data_pos,
+              buffer.data() + original_value.size() + sizeof(char) + sizeof(size_t));
 }
 
 TEST_F(cacheable_test, parse_value_empty_string)
@@ -217,7 +219,7 @@ TEST_F(cacheable_test, parse_value_empty_string)
     rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_value);
 
     EXPECT_EQ(parsed_value, "");
-    EXPECT_EQ(data_pos, buffer.data() + sizeof(size_t));
+    EXPECT_EQ(data_pos, buffer.data() + sizeof(char) + sizeof(size_t));
 }
 
 TEST_F(cacheable_test, parse_value_optional)
@@ -426,7 +428,8 @@ TEST_F(cacheable_test, roundtrip_optional_string_view_with_value)
     std::optional<std::string_view> original = "hello optional"sv;
     rocprofsys::trace_cache::utility::store_value(original, buffer.data(), position);
 
-    const size_t expected_size = sizeof(std::uint8_t) + sizeof(size_t) + original->size();
+    const size_t expected_size =
+        sizeof(std::uint8_t) + sizeof(size_t) + original->size() + sizeof(char);
     EXPECT_EQ(position, expected_size);
 
     std::uint8_t*                   data_pos = buffer.data();
@@ -458,7 +461,7 @@ TEST_F(cacheable_test, roundtrip_optional_string_view_empty_string)
     const std::optional<std::string_view> original = ""sv;
     rocprofsys::trace_cache::utility::store_value(original, buffer.data(), position);
 
-    const size_t expected_size = sizeof(std::uint8_t) + sizeof(size_t);
+    const size_t expected_size = sizeof(std::uint8_t) + sizeof(size_t) + sizeof(char);
     EXPECT_EQ(position, expected_size);
 
     std::uint8_t*                   data_pos = buffer.data();
@@ -579,7 +582,7 @@ TEST_F(cacheable_test, get_size_helper_string_literal)
 {
     auto         value = "test string"sv;
     const size_t size  = rocprofsys::trace_cache::utility::get_size(value);
-    EXPECT_EQ(size, value.size() + sizeof(size_t));
+    EXPECT_EQ(size, value.size() + sizeof(char) + sizeof(size_t));
 }
 
 TEST_F(cacheable_test, get_size_helper_optional)
@@ -621,7 +624,7 @@ TEST_F(cacheable_test, get_size_optional_string_view)
 {
     std::optional<std::string_view> val = "test"sv;
     const size_t size                   = rocprofsys::trace_cache::utility::get_size(val);
-    EXPECT_EQ(size, sizeof(std::uint8_t) + sizeof(size_t) + 4);
+    EXPECT_EQ(size, sizeof(std::uint8_t) + sizeof(size_t) + 4 + sizeof(char));
 }
 
 TEST_F(cacheable_test, get_size_optional_string_view_nullopt)

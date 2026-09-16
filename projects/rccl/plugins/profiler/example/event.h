@@ -177,6 +177,7 @@ struct collApi {
   struct context* ctx;              // profiler context
   int collApiId;
   int refCount;
+  int credited;                     // pool credit already returned for this slot
   cudaStream_t stream;
   const char* func;
   size_t count;
@@ -196,6 +197,7 @@ struct p2pApi {
   struct context* ctx;              // profiler context
   int p2pApiId;
   int refCount;
+  int credited;                     // pool credit already returned for this slot
   const char* func;
   cudaStream_t stream;
   size_t count;
@@ -222,6 +224,7 @@ struct kernelLaunch {
 struct ceColl {
   struct taskEventBase base;  // Must be first for task event queue (uses base.next)
   struct collApi* parent;
+  struct context* ctx;        // owning context; parent may be NULL for root CE events
   int ceCollId;
   uint64_t seqNumber;
   size_t count;
@@ -249,12 +252,15 @@ struct ceColl {
   cudaEvent_t stopEvent;
   bool startCompleted;
   bool stopCompleted;
+  bool stopRecorded;  // cudaEventRecord(stopEvent) has run; query is unsafe before this
+  bool pollerLinked;  // on the poller list; relinking would cycle it
   struct ceColl* pollerNext;  // For poller tracking list (separate from base.next)
 };
 
 struct ceSync {
   struct taskEventBase base;  // For parent CeColl's event queue
   struct ceColl* parent;
+  struct context* ctx;        // owning context; parent may be NULL for root CE events
   int ceSyncId;
   bool isComplete;
   uint64_t seqNumber;
@@ -275,12 +281,15 @@ struct ceSync {
   cudaEvent_t stopEvent;
   bool startCompleted;
   bool stopCompleted;
+  bool stopRecorded;  // cudaEventRecord(stopEvent) has run; query is unsafe before this
+  bool pollerLinked;  // on the poller list; relinking would cycle it
   struct ceSync* pollerNext;  // For poller tracking list
 };
 
 struct ceBatch {
   struct taskEventBase base;  // For parent CeColl's event queue
   struct ceColl* parent;
+  struct context* ctx;        // owning context; parent may be NULL for root CE events
   int ceBatchId;
   int numOps;
   size_t totalBytes;
@@ -301,6 +310,8 @@ struct ceBatch {
   cudaEvent_t stopEvent;
   bool startCompleted;
   bool stopCompleted;
+  bool stopRecorded;  // cudaEventRecord(stopEvent) has run; query is unsafe before this
+  bool pollerLinked;  // on the poller list; relinking would cycle it
   struct ceBatch* pollerNext;  // For poller tracking list
 };
 
@@ -397,6 +408,10 @@ struct context {
 
   // Set during communicator teardown to stop accepting new event updates.
   int finalizing;
+
+  // CE events dropped because their ring slot was still held by the poller.
+  // Reported once at finalize so a gap in the trace is not silent.
+  int ceDroppedEvents;
 };
 
 template <typename T>
@@ -423,6 +438,35 @@ inline struct taskEventBase* taskEventQueueDequeue(T* obj) {
   obj->eventHead = obj->eventHead->next;
   if (obj->eventHead == NULL) obj->eventTail = NULL;
   return tmp;
+}
+
+// Unlink a specific child, not just the head: CE children complete out of order
+// and the poller returns the slot to the ring without going through resetTaskEvents.
+template <typename T>
+inline void taskEventQueueUnlink(T* obj, struct taskEventBase* event) {
+  if (obj == NULL || event == NULL) return;
+  struct taskEventBase* prev = NULL;
+  struct taskEventBase* cur = obj->eventHead;
+  while (cur) {
+    if (cur == event) {
+      if (prev) prev->next = cur->next;
+      else obj->eventHead = cur->next;
+      if (obj->eventTail == cur) obj->eventTail = prev;
+      cur->next = NULL;
+      return;
+    }
+    prev = cur;
+    cur = cur->next;
+  }
+}
+
+// updateEvent() and the groupApi wrap both release an API event, so the credit
+// must be idempotent or base outruns index and the ring always allocates.
+template <typename T>
+inline void creditApiPoolOnce(T* obj, int* poolBase) {
+  if (__atomic_exchange_n(&obj->credited, 1, __ATOMIC_RELAXED) == 0) {
+    __atomic_fetch_add(poolBase, 1, __ATOMIC_RELAXED);
+  }
 }
 
 template <typename T>

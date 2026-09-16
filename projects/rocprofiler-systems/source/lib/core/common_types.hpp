@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cstddef>
 #include <cstdint>
 #include <sstream>
 #include <stdexcept>
@@ -123,27 +124,26 @@ get_args_string(const function_args_t& args)
 }
 
 inline function_args_t
-process_arguments_string(const std::string& arg_str)
+process_arguments_string(std::string_view arg_str)
 {
-    function_args_t   args;
-    const std::string delimiter{ ARG_DELIMITER };
+    function_args_t args;
 
-    auto split = [](const std::string& str, const std::string& _delimiter) {
-        std::vector<std::string> tokens;
-        size_t                   start = 0;
-        size_t                   end   = str.find(_delimiter);
+    auto split = [](std::string_view str, std::string_view delimiter) {
+        std::vector<std::string_view> tokens;
+        size_t                        start = 0;
+        size_t                        end   = str.find(delimiter);
 
-        while(end != std::string::npos)
+        while(end != std::string_view::npos)
         {
             tokens.push_back(str.substr(start, end - start));
-            start = end + _delimiter.length();
-            end   = str.find(_delimiter, start);
+            start = end + delimiter.length();
+            end   = str.find(delimiter, start);
         }
 
         return tokens;
     };
 
-    auto tokens = split(arg_str, delimiter);
+    auto tokens = split(arg_str, ARG_DELIMITER);
 
     // Ensure the number of tokens is a whole number of records
     if(tokens.size() % fields_per_record != 0)
@@ -153,9 +153,9 @@ process_arguments_string(const std::string& arg_str)
 
     for(auto it = tokens.begin(); it != tokens.end(); it += fields_per_record)
     {
-        const std::string& number_token = *it;
-        std::uint32_t      arg_number   = 0;
-        auto [ptr, ec]                  = std::from_chars(
+        const auto    number_token = *it;
+        std::uint32_t arg_number   = 0;
+        auto [ptr, ec]             = std::from_chars(
             number_token.data(), number_token.data() + number_token.size(), arg_number);
         if(ec != std::errc{} || ptr != number_token.data() + number_token.size())
         {
