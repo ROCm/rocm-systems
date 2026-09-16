@@ -205,6 +205,43 @@
         "NCCL_DMABUF_ENABLE": "1"
       }
     },
+    "net_ib_multithread_independent": {
+      "extends": "net_ib_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "tests": [
+        {
+          "name": "NetIB_MultiThread_IndependentSimpleSendRecv",
+          "description": "Concurrent workers each transfer on an independent NET/IB context and connection",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "NetIB_MultiThread_IndependentSequentialTransfers",
+          "description": "Concurrent workers each run repeated transfers on an independent connection",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        },
+        {
+          "name": "NetIB_MultiThread_MultipleSizes",
+          "description": "Concurrent workers sweep the size ladder into the shared per-device MR cache",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "NetIB_MultiThread_MemoryRegistrationStorm",
+          "description": "Concurrent register/deregister storms race the per-device MR cache",
+          "test_filter": "NetIbMPITest.MemoryRegistrationStorm"
+        },
+        {
+          "name": "NetIB_MultiThread_MrCacheRefCount",
+          "description": "All workers register the same address, contending on one cache entry's refcount",
+          "test_filter": "NetIbMPITest.MrCacheRefCount"
+        },
+        {
+          "name": "NetIB_MultiThread_LongRunningEndurance",
+          "description": "Sustained concurrent traffic with the RDMA leak check around the whole run",
+          "test_filter": "NetIbMPITest.LongRunningEndurance"
+        }
+      ]
+    },
     "net_ib_gdr_flush": {
       "extends": "net_ib_base",
       "timeout": 120,
@@ -1249,6 +1286,21 @@
           "test_filter": "DdaIpcEligibilityTest.*"
         },
         {
+          "name": "DdaFabricEligibilityTest",
+          "description": "DDA fabric eligibility tests (gfx1250)",
+          "test_filter": "DdaFabricEligibilityTest.*:DdaFabricLL128EligibilityTest.*"
+        },
+        {
+          "name": "DdaFabricMaxBlocksTest",
+          "description": "DDA fabric max blocks tests (gfx1250)",
+          "test_filter": "DdaFabricMaxBlocksTest.*"
+        },
+        {
+          "name": "DdaFabricScratchSizingTest",
+          "description": "DDA fabric scratch sizing tests (gfx1250)",
+          "test_filter": "DdaFabricScratchSizingTest.*"
+        },
+        {
           "name": "CeAlltoAllEligibilityTest",
           "description": "CE AlltoAll eligibility gating tests matching taskAppend (CTA_POLICY_ZERO, sysmem, capture, group depth)",
           "test_filter": "CeAlltoAllEligibilityTest.*"
@@ -2105,7 +2157,7 @@
       "env_variables": {
         "NCCL_MNNVL_ENABLE": "1",
         "NCCL_DEBUG": "INFO",
-        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_DEBUG_SUBSYS": "REG,INIT,TUNING",
         "NCCL_GRAPH_REGISTER": "1",
         "NCCL_LEGACY_CUDA_REGISTER": "1",
         "NCCL_LOCAL_REGISTER": "1",
@@ -2121,6 +2173,30 @@
           "name": "GraphCapture_AllReduce_MultiNode",
           "description": "AllReduce graph capture with buffer registration on multi-node",
           "test_filter": "GraphCapture_AllReduce.MultiNode"
+        },
+        {
+          "name": "GraphCapture_WindowRegister_SymmetricAllReduce_MultiNode",
+          "description": "Graph-captured symmetric AllReduce on two nodes; expects legacy fallback (no multi-node AllReduce symmetric kernel)",
+          "test_filter": "GraphCapture_WindowRegister.SymmetricAllReduce",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1"
+          }
+        },
+        {
+          "name": "GraphCapture_WindowRegister_SymmetricAllGather_MultiNode",
+          "description": "Graph-captured symmetric AllGather on two nodes; expects fallback when LSA store multimem is unavailable",
+          "test_filter": "GraphCapture_WindowRegister.SymmetricAllGather",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1"
+          }
+        },
+        {
+          "name": "GraphCapture_WindowRegister_SymmetricReduceScatter_MultiNode",
+          "description": "Graph-captured symmetric ReduceScatter on two nodes; uses GIN RailA2A when available, otherwise fallback",
+          "test_filter": "GraphCapture_WindowRegister.SymmetricReduceScatter",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1"
+          }
         }
       ]
     },
@@ -3579,6 +3655,12 @@
       "name": "NET Transport - Ethernet (Multi-Node)",
       "description": "Network transport tests over Ethernet",
       "config": "net_transport_eth_multinode",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multithread Independent Connections (4)",
+      "description": "4 worker threads/rank, each on an independent NET/IB context and connection",
+      "config": "net_ib_multithread_independent",
       "enabled": true
     },
     {

@@ -771,6 +771,28 @@ TEST(RdnaDispatchTest, ZeroLdsReservationKeepsWgpBackingUnmaterialized) {
   EXPECT_TRUE(f.se()->spi().release_wgp_workgroup(entry.dispatch_id, /*global_wg_id=*/0));
 }
 
+TEST(RdnaDispatchTest, WgpLdsContentsSurviveWorkgroupAllocationReuse) {
+  VmFixture f("rdna4", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  amdgpu::DispatchEntry entry{};
+  entry.dispatch_id = 1;
+  entry.wgp_mode = true;
+  entry.group_segment_fixed_size = 128 * 1024;
+
+  auto first = f.se()->spi().allocate_workgroup(entry, /*global_wg_id=*/0);
+  ASSERT_TRUE(first.has_value());
+  first->lds->write32(0, 0x12345678u);
+  first->lds->write32(64 * 1024, 0x87654321u);
+  ASSERT_TRUE(f.se()->spi().release_wgp_workgroup(entry.dispatch_id, /*global_wg_id=*/0));
+
+  entry.dispatch_id = 2;
+  auto second = f.se()->spi().allocate_workgroup(entry, /*global_wg_id=*/0);
+  ASSERT_TRUE(second.has_value());
+  ASSERT_EQ(second->lds, first->lds);
+  EXPECT_EQ(second->lds->read32(0), 0x12345678u);
+  EXPECT_EQ(second->lds->read32(64 * 1024), 0x87654321u);
+  EXPECT_TRUE(f.se()->spi().release_wgp_workgroup(entry.dispatch_id, /*global_wg_id=*/0));
+}
+
 TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
   using namespace rocr::llvm::amdhsa;
 
@@ -3828,6 +3850,52 @@ TEST_P(IsaTest, NonKernelBarrierPacketsOrderQueueEntries) {
   }
 }
 
+TEST_P(IsaTest, EmptyCuMaskAllowsNonKernelPackets) {
+  struct PacketCase {
+    uint16_t type;
+    uint16_t format;
+  };
+  constexpr std::array cases{
+      PacketCase{HSA_PACKET_TYPE_BARRIER_AND, 0},
+      PacketCase{HSA_PACKET_TYPE_BARRIER_OR, 0},
+      PacketCase{HSA_PACKET_TYPE_VENDOR_SPECIFIC, amdgpu::kHsaAmdPacketTypeBarrierValue},
+      PacketCase{HSA_PACKET_TYPE_VENDOR_SPECIFIC, amdgpu::kAmdAqlFormatPm4Ib},
+  };
+  for (const PacketCase &test : cases) {
+    SCOPED_TRACE(test.type);
+    SCOPED_TRACE(test.format);
+    VmFixture f(arch());
+    const uint32_t code[] = {SOPP_S_ENDPGM};
+    const uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+    constexpr uint64_t kSignal = 0x7000;
+    f.mem()->write64(kSignal + 8, 1);
+    test::AqlQueue queue(f.mem(), f.cp());
+    f.cp()->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0,
+                                   amdgpu::QueueCuSelection(std::in_place));
+
+    hsa_kernel_dispatch_packet_t packet{};
+    packet.header = test.type;
+    packet.setup = test.format;
+    packet.completion_signal.handle = kSignal;
+    queue.submit(packet);
+    queue.dispatch(ko, 64);
+    queue.submit(packet);
+    (void)f.engine->step();
+
+    EXPECT_EQ(f.mem()->read64(kSignal + 8), 0u);
+    EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 1u);
+    EXPECT_EQ(f.cp()->dispatched_workgroups(), 0u);
+
+    // Enabling the queue resumes the unconsumed kernel before the later packet.
+    f.mem()->write64(kSignal + 8, 1);
+    f.cp()->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0, std::nullopt);
+    f.engine->run();
+    EXPECT_EQ(f.mem()->read64(kSignal + 8), 0u);
+    EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 3u);
+    EXPECT_EQ(f.cp()->dispatched_workgroups(), 1u);
+  }
+}
+
 TEST(AqlDispatchTest, HeaderClearBarrierUnblocksPriorPollingKernelBeforeLaterDispatch) {
   VmFixture f("cdna4", /*num_cus=*/2);
   f.cp()->set_dispatch_threads(2);
@@ -3932,6 +4000,54 @@ TEST(ClusterDispatchTest, ParallelCdna5RetiresClusterAfterWorkersRejoin) {
   ASSERT_NO_THROW(f.engine->run());
   EXPECT_FALSE(f.cu(0)->has_active_wfs());
   EXPECT_FALSE(f.cu(1)->has_active_wfs());
+  EXPECT_TRUE(f.cp()
+                  ->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0,
+                                        /*mcast_mask=*/0x3)
+                  .empty());
+}
+
+TEST(ClusterDispatchTest, CuMaskRestrictsEveryClusterWorkgroup) {
+  VmFixture f("cdna5", /*num_cus=*/4, /*num_wf_slots=*/1, /*lds_size_kb=*/64,
+              /*sgprs_per_wf=*/128);
+  const uint32_t code[] = {0xBFB00000u}; // s_endpgm
+  const uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/128);
+  constexpr uint64_t signal = 0x7000;
+  f.mem()->write64(signal + 8, 1);
+  test::AqlQueue queue(f.mem(), f.cp());
+  amdgpu::QueueCuSelection selected(std::in_place);
+  selected->push_back(f.cu(1));
+  selected->push_back(f.cu(3));
+  f.cp()->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0, selected);
+
+  amdgpu::AmdExtKernelDispatchPacket ext{};
+  ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  ext.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  ext.setup = 1;
+  ext.workgroup_size_x = 32;
+  ext.workgroup_size_y = ext.workgroup_size_z = 1;
+  ext.cluster_count_x = 3;
+  ext.cluster_count_y = ext.cluster_count_z = 1;
+  ext.cluster_size_x = 2;
+  ext.cluster_size_y = ext.cluster_size_z = 1;
+  ext.kernel_object = ko;
+  ext.completion_signal.handle = signal;
+  queue.submit(ext);
+
+  f.cp()->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0,
+                                 amdgpu::QueueCuSelection(std::in_place));
+  ASSERT_NO_THROW((void)f.engine->step());
+  EXPECT_EQ(f.mem()->read64(signal + 8), 1u);
+  EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+  EXPECT_EQ(f.cp()->dispatched_workgroups(), 0u);
+  f.cp()->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0, selected);
+
+  ASSERT_NO_THROW(f.engine->run());
+  EXPECT_EQ(f.mem()->read64(signal + 8), 0u);
+  EXPECT_EQ(f.cp()->dispatched_workgroups(), 6u);
+  for (uint32_t cu = 0; cu < 4; ++cu) {
+    EXPECT_FALSE(f.cu(cu)->has_active_wfs());
+    EXPECT_EQ(f.cu(cu)->cycle_count() > 0, cu == 1 || cu == 3) << "CU=" << cu;
+  }
   EXPECT_TRUE(f.cp()
                   ->cluster_lds_targets(/*dispatch_id=*/1, /*wg_id=*/0,
                                         /*mcast_mask=*/0x3)
@@ -6279,6 +6395,56 @@ TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
   EXPECT_NE(exit.message.find("unimplemented instruction"), std::string::npos);
   EXPECT_TRUE(f.cu(0)->is_idle());
   EXPECT_TRUE(f.cu(1)->is_idle());
+}
+
+class ThrowingIssuePlugin final : public ExecutionPlugin {
+public:
+  enum Hook { Before, After, Halt };
+  explicit ThrowingIssuePlugin(Hook hook) : ExecutionPlugin("throwing_issue"), hook_(hook) {}
+
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
+                                        amdgpu::Wavefront &) override {
+    fail_at(Before);
+  }
+  void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &,
+                                       amdgpu::Wavefront &) override {
+    fail_at(After);
+  }
+  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &) override { fail_at(Halt); }
+
+private:
+  void fail_at(Hook hook) {
+    if (hook == hook_)
+      throw std::runtime_error("injected issue hook failure");
+  }
+  Hook hook_;
+};
+
+TEST(AqlDispatchTest, ThrowingIssueHooksReclaimDecodedInstruction) {
+  for (auto hook :
+       {ThrowingIssuePlugin::Before, ThrowingIssuePlugin::After, ThrowingIssuePlugin::Halt}) {
+    SCOPED_TRACE(hook);
+    VmFixture f("cdna4");
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::make_unique<ThrowingIssuePlugin>(hook)));
+    f.soc_ptr->set_plugin_group(group);
+    // Halt after rejection, so the hook runs outside execute_instruction().
+    const uint32_t code = hook == ThrowingIssuePlugin::Halt ? 0xBF100000u : 0xBE800000u;
+    f.write_kernel(0x1000, &code, sizeof(code));
+    ASSERT_NE(f.dispatch_scratch_wf(), nullptr);
+
+    // Count instruction frees on this thread, including non-sanitized builds.
+    // The guard restores the decoder's allocator hooks before fixture teardown.
+    Instruction::ScopedHeapAllocation heap_allocation;
+    uint32_t deallocations = 0;
+    Instruction::alloc_pool_ = &deallocations;
+    Instruction::dealloc_fn_ = [](void *counter, void *ptr) {
+      ++*static_cast<uint32_t *>(counter);
+      ::operator delete(ptr);
+    };
+    EXPECT_THROW((void)f.cu()->step(), std::runtime_error);
+    EXPECT_EQ(deallocations, 1u);
+  }
 }
 
 TEST(AqlDispatchTest, WorkerYieldReturnsToEventLoopBeforeResuming) {
