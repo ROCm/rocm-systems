@@ -3192,8 +3192,8 @@ def test_run_analysis_isa_file_carries_the_static_instruction_type(tmp_path):
     )
     run_source_export_analysis(analyzer)
 
-    kernel_uuid = pd.read_csv(result_path / "kernel.csv")["kernel_uuid"].iloc[0]
-    header, rows = read_per_kernel_isa_file(result_path, kernel_uuid)
+    kernel_row = pd.read_csv(result_path / "kernel.csv").iloc[0]
+    header, rows = read_per_kernel_isa_file(result_path, kernel_row)
 
     type_column = header.index("Instruction type")
     assert [row[type_column] for row in rows] == ["VALU", ""]
