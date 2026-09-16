@@ -147,10 +147,15 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
     endif()
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
     # FFMPEG multi-version support
-    if(_FFMPEG_AVCODEC_VERSION VERSION_LESS_EQUAL 58.134.100)
+    if(_FFMPEG_AVCODEC_VERSION VERSION_LESS_EQUAL 58.134.100) #FFmpeg version <= 4.4
       target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_58_134=0)
-    else()
+      target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_60_31=0)
+    elseif(_FFMPEG_AVCODEC_VERSION VERSION_GREATER 58.134.100 AND _FFMPEG_AVCODEC_VERSION VERSION_LESS_EQUAL 60.31.100) #FFmpeg version >= 4.4 && version < 6.1
       target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_58_134=1)
+      target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_60_31=0)
+    else()
+      target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_58_134=0) #FFmpeg version >= 6.1
+      target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_60_31=1)
     endif()
 else()
     message("-- ERROR!: ${PROJECT_NAME} excluded! unmet dependencies")
