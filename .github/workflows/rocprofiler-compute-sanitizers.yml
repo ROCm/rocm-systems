@@ -156,18 +156,6 @@ jobs:
       - name: Output TheRock manifest
         run: cat "${ROCM_PATH}/share/therock/therock_manifest.json"
 
-      - name: Locate clang sanitizer runtime
-        id: sanitizer_runtime
-        shell: bash
-        run: |
-          sanitizer_lib_dir="$("${ROCM_PATH}/lib/llvm/bin/clang" -print-runtime-dir)"
-          if [ ! -f "${sanitizer_lib_dir}/libclang_rt.asan.so" ]; then
-            echo "❌ Missing clang sanitizer runtime: ${sanitizer_lib_dir}"
-            exit 1
-          fi
-          echo "sanitizer_lib_dir=${sanitizer_lib_dir}" >> "${GITHUB_OUTPUT}"
-          echo "Clang sanitizer runtime: ${sanitizer_lib_dir}"
-
       - name: Install Python requirements
         working-directory: projects/rocprofiler-compute
         shell: bash
@@ -185,8 +173,6 @@ jobs:
           set -e
           git config --global --add safe.directory "${GITHUB_WORKSPACE}"
           git config --global --add safe.directory "${PWD}"
-
-          export LD_LIBRARY_PATH="${{ steps.sanitizer_runtime.outputs.sanitizer_lib_dir }}:${LD_LIBRARY_PATH}"
 
           c_compiler="$(command -v amdclang)"
           cxx_compiler="$(command -v amdclang++)"

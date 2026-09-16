@@ -129,6 +129,7 @@ function(enable_sanitizer)
 
     # clang defaults to static sanitizer linkage; gcc defaults to shared.
     # Force shared on clang only.
+    # clang records the runtime path in the binaries, so no LD_LIBRARY_PATH.
     add_link_options(
         $<$<LINK_LANGUAGE:C,CXX>:-fsanitize=${_flag}>
         $<$<AND:$<LINK_LANGUAGE:C,CXX>,$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>>:-shared-libsan>
