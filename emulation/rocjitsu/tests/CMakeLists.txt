@@ -704,10 +704,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
 endif()
 
-add_executable(waitcheck_target_test analysis/waitcheck_target_test.cpp)
+add_executable(
+    waitcheck_target_test
+    analysis/waitcheck_target_test.cpp
+    analysis/waitcheck_state_test.cpp
+)
 target_link_libraries(
     waitcheck_target_test
     PRIVATE
+        rocjitsu_waitcheck_state
         rocjitsu_waitcheck_target
         rocjitsu_analysis_internal
         rocjitsu_amdgpu_isa_model_registry
