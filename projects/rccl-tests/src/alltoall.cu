@@ -412,15 +412,21 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
     // (fabricA2APeerScratch / fabricA2ALlEpoch), which the plugin carves out of
     // the tail of ddaScratch, so this path shares neither packet cells nor an
     // epoch counter with host DDA LL.
-    int bpp = ginFabricLlAlltoAllBlocksPerPeer(perChunkBytes);
-    if (llMaxBpp > 0 && bpp > llMaxBpp) bpp = llMaxBpp;
-    if ((int)blockIdx.x >= devComm.nRanks || (int)blockIdx.y >= bpp) return;
-    T* sendPtr = static_cast<T*>(ncclGetLsaPointer(sendwin, sendoffset, devComm.lsaRank));
-    T* recvPtr = static_cast<T*>(ncclGetLsaPointer(recvwin, recvoffset, devComm.lsaRank));
-    dda::common::ddaAllToAllFabricLLBody<T, NRANKS_CT>(
-        reinterpret_cast<T**>(ctx->fabricA2APeerScratch), recvPtr, sendPtr, perChunkBytes, devComm.rank, devComm.nRanks,
-        ctx->fabricA2ALlEpoch, ctx->fabricA2ALlEpochLen, bpp);
-    return;
+    const size_t slotPkts = gin::fabric::ginFabricLlA2ASlotPkts(devComm.nRanks, ctx->fabricA2AScratchBytes);
+    const size_t nPk = perChunkBytes >> 3;
+    // Compact GIN tail is 2*nRanks*slotPkts packets. Indexing the 16 MiB host
+    // DDA stride into that mapping is a GPU page fault (Test#5 hang).
+    if (slotPkts != 0 && nPk <= slotPkts) {
+      int bpp = ginFabricLlAlltoAllBlocksPerPeer(perChunkBytes);
+      if (llMaxBpp > 0 && bpp > llMaxBpp) bpp = llMaxBpp;
+      if ((int)blockIdx.x >= devComm.nRanks || (int)blockIdx.y >= bpp) return;
+      T* sendPtr = static_cast<T*>(ncclGetLsaPointer(sendwin, sendoffset, devComm.lsaRank));
+      T* recvPtr = static_cast<T*>(ncclGetLsaPointer(recvwin, recvoffset, devComm.lsaRank));
+      dda::common::ddaAllToAllFabricLLBody<T, NRANKS_CT>(
+          reinterpret_cast<T**>(ctx->fabricA2APeerScratch), recvPtr, sendPtr, perChunkBytes, devComm.rank, devComm.nRanks,
+          ctx->fabricA2ALlEpoch, ctx->fabricA2ALlEpochLen, bpp, slotPkts);
+      return;
+    }
   }
 
   if (algo == GinFabricA2AAlgo::Lsa) {

@@ -64,6 +64,18 @@ GIN_FABRIC_LL_HD inline size_t ginFabricLlA2AGinRegionBytes(int nRanks, size_t l
   return region < cap ? region : cap;
 }
 
+// Packet-cell stride the LL A2A body must use for a region laid out as
+// 2 banks * nRanks * slotPkts * 16 B. Host DDA's region is
+// ginFabricLlA2AScratchBytes (slot = kGinFabricLlA2ASlotStridePkts). GIN's
+// carved tail is ginFabricLlA2AGinRegionBytes (compact slot). Using the host
+// DDA stride on a GIN tail walks 16 MiB past the mapping and page-faults.
+GIN_FABRIC_LL_HD inline size_t ginFabricLlA2ASlotPkts(int nRanks, size_t regionBytes) {
+  if (nRanks < 2 || nRanks > kGinFabricLlMaxNranks) return 0;
+  const size_t den = (size_t)2 * (size_t)nRanks * kGinFabricLlPacketBytes;
+  if (regionBytes < den || (regionBytes % den) != 0) return 0;
+  return regionBytes / den;
+}
+
 // Host DDA uses [0, alloc - ginRegion); GIN LL uses the tail.
 GIN_FABRIC_LL_HD inline size_t ginFabricLlA2ACarveOffset(size_t allocBytes, size_t ginRegionBytes) {
   return allocBytes >= ginRegionBytes ? allocBytes - ginRegionBytes : 0;

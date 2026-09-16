@@ -21,11 +21,14 @@ constexpr size_t kDdaLLA2ASlotStridePkts = kDdaLLMaxBytes / sizeof(LLPacket16);
 // 2D grid: grid.x == nRanks selects the peer; grid.y == blocksPerPeer splits
 // that peer's packets. The self column copies locally; other columns scatter
 // then poll.
+// slotPkts is the packet stride between rank columns. 0 means the host-DDA
+// default (kDdaLLA2ASlotStridePkts, 16 MiB). GIN's carved tail is much smaller
+// and must pass ginFabricLlA2ASlotPkts(nRanks, fabricA2AScratchBytes).
 template <typename T, int NRANKS_CT>
 __device__ __forceinline__ void ddaAllToAllFabricLLBody(
     T* const* __restrict__ peerScratch, T* __restrict__ recvbuff, const T* __restrict__ sendbuff,
     size_t perChunkBytes, int selfRank, int nRanksRt, uint32_t* __restrict__ epochDev, int epochLen,
-    int nChunksRt = 0) {
+    int nChunksRt = 0, size_t slotPkts = 0) {
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int peer = blockIdx.x;
   if (peer >= nRanks) return;
@@ -35,7 +38,7 @@ __device__ __forceinline__ void ddaAllToAllFabricLLBody(
   const int tid = threadIdx.x;
   const int nthreads = blockDim.x;
   const size_t nPk = perChunkBytes >> 3;
-  const size_t slot = kDdaLLA2ASlotStridePkts;
+  const size_t slot = slotPkts != 0 ? slotPkts : kDdaLLA2ASlotStridePkts;
 
   const int flatBlockId = peer * nChunks + chunk;
   const int total = nRanks * nChunks;

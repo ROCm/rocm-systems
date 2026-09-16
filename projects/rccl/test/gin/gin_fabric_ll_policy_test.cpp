@@ -21,6 +21,9 @@ using gin::fabric::ginFabricLlAlltoAllEligible;
 using gin::fabric::ginFabricLlAlltoAllSizeOk;
 using gin::fabric::ginFabricLlA2AGinRegionBytes;
 using gin::fabric::ginFabricLlA2AScratchBytes;
+using gin::fabric::ginFabricLlA2ASlotPkts;
+using gin::fabric::kGinFabricLlA2ASlotStridePkts;
+using gin::fabric::kGinFabricLlPacketBytes;
 using gin::fabric::ginFabricLlLaneResourcesOk;
 using gin::fabric::kGinFabricLlAgMaxBlocksPerPeer;
 using gin::fabric::kGinFabricLlAlltoAllThresholdDefault;
@@ -151,6 +154,18 @@ TEST(GinFabricLLPolicy, BlocksPerPeerCoversFastDivideAndClamp) {
   EXPECT_EQ(ginFabricLlAlltoAllBlocksPerPeer((kGinFabricLlA2APktsPerBlock + 1) * 8), 2);
   const size_t hugePk = (static_cast<size_t>(kGinFabricLlAgMaxBlocksPerPeer) + 2) * kGinFabricLlA2APktsPerBlock * 8;
   EXPECT_EQ(ginFabricLlAlltoAllBlocksPerPeer(hugePk), kGinFabricLlAgMaxBlocksPerPeer);
+}
+
+TEST(GinFabricLLPolicy, CompactGinRegionSlotIsNotHostDdaStride) {
+  const size_t ginTail = ginFabricLlA2AGinRegionBytes(4, kGinFabricLlAlltoAllThresholdDefault);
+  ASSERT_GT(ginTail, 0u);
+  const size_t slot = ginFabricLlA2ASlotPkts(4, ginTail);
+  ASSERT_GT(slot, 0u);
+  EXPECT_LT(slot, kGinFabricLlA2ASlotStridePkts);
+  EXPECT_EQ(ginTail, (size_t)2 * 4 * slot * kGinFabricLlPacketBytes);
+  EXPECT_EQ(ginFabricLlA2ASlotPkts(4, ginFabricLlA2AScratchBytes(4)), kGinFabricLlA2ASlotStridePkts);
+  EXPECT_EQ(ginFabricLlA2ASlotPkts(4, ginTail - 1), 0u);
+  EXPECT_EQ(ginFabricLlA2ASlotPkts(1, ginTail), 0u);
 }
 
 TEST(GinFabricLLPolicy, CarveOffsetPlacesGinRegionAtScratchTail) {
