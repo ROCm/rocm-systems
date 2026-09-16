@@ -20,6 +20,7 @@ junits/
 /plugins/net/ib_sharp/build/
 /plugins/net/example/*.so
 /plugins/mixed/example/*.so
+/plugins/tuner/model_demo/*.so
 /plugins/net/mock/*.so
 tags
 *.swp

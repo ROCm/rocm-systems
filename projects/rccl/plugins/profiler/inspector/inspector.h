@@ -197,6 +197,8 @@ struct deviceFlushInfo {
 struct inspectorDumpThread {
   bool run{false};
   bool threadStarted{false};
+  // Sticky: stopThread() clears threadStarted before the destructor runs.
+  bool periodicDumpRan{false};
   jsonFileOutput* jfo;
   char* outputRoot;
   int64_t sampleIntervalUsecs;
@@ -347,8 +349,13 @@ inspectorResult_t inspectorLockWr(pthread_rwlock_t* lockRef);
 inspectorResult_t inspectorUnlockRWLock(pthread_rwlock_t* lockRef);
 inspectorResult_t inspectorGlobalInit(int rank);
 inspectorResult_t inspectorGlobalFinalize();
+inspectorResult_t inspectorDumpNow();
 uint64_t inspectorGetTime();
 inspectorResult_t inspectorGetTimeUTC(char* buffer, size_t bufferSize);
+// Scheduler job id for Prometheus slurm_job_id and default dump-dir names.
+const char* inspectorGetJobId();
+// Cluster name for the Prometheus cluster label.
+const char* inspectorGetCluster();
 inspectorResult_t inspectorAddComm(struct inspectorCommInfo **commInfo,
                                    const char* commName, uint64_t commHash,
                                    int nNodes, int nranks, int rank);
