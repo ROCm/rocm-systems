@@ -30,6 +30,7 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/static_tl_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -426,7 +427,7 @@ emplace_client(Tp&                                 data,
     {
         if(itr && *itr == _client_v)
         {
-            ROCP_WARNING << fmt::format(
+            ROCP_INFO << fmt::format(
                 "found matching client library for '{}' :: {}", _name, itr->get_name());
             return itr;
         }
@@ -760,12 +761,12 @@ invoke_client_configure(std::optional<client_library>& itr)
             }
         }
 
-        ROCP_WARNING << fmt::format("initialized tool configure for {} :: {} :: {} :: {} :: {}",
-                                    itr->get_name(),
-                                    sdk::utility::as_hex(itr->configure_func),
-                                    sdk::utility::as_hex(itr->configure_result),
-                                    sdk::utility::as_hex(itr->configure_result->initialize),
-                                    sdk::utility::as_hex(itr->configure_result->finalize));
+        ROCP_INFO << fmt::format("initialized tool configure for {} :: {} :: {} :: {} :: {}",
+                                 itr->get_name(),
+                                 sdk::utility::as_hex(itr->configure_func),
+                                 sdk::utility::as_hex(itr->configure_result),
+                                 sdk::utility::as_hex(itr->configure_result->initialize),
+                                 sdk::utility::as_hex(itr->configure_result->finalize));
     }
     else
     {
@@ -810,12 +811,12 @@ invoke_client_initializer(std::optional<client_library>& itr)
                 invoke_client_finalizer(_id);
         };
 
-        ROCP_WARNING << fmt::format("invoking tool initialize for {} :: {} :: {} :: {} :: {}",
-                                    itr->get_name(),
-                                    sdk::utility::as_hex(itr->configure_func),
-                                    sdk::utility::as_hex(itr->configure_result),
-                                    sdk::utility::as_hex(itr->configure_result->initialize),
-                                    sdk::utility::as_hex(itr->configure_result->finalize));
+        ROCP_INFO << fmt::format("invoking tool initialize for {} :: {} :: {} :: {} :: {}",
+                                 itr->get_name(),
+                                 sdk::utility::as_hex(itr->configure_func),
+                                 sdk::utility::as_hex(itr->configure_result),
+                                 sdk::utility::as_hex(itr->configure_result->initialize),
+                                 sdk::utility::as_hex(itr->configure_result->finalize));
         context::push_client(itr->internal_client_id.handle);
         itr->configure_result->initialize(client_fini_func, itr->configure_result->tool_data);
         context::pop_client(itr->internal_client_id.handle);
@@ -926,7 +927,7 @@ invoke_client_detaches()
 
             hsa::async_copy_sync();
             hsa::queue_controller_sync();
-            // F23 terminal fail-closed fence: client detach frees the tool's callback
+            // Terminal fail-closed fence: client detach frees the tool's callback
             // and buffer machinery next, so no callback-capable signal-less completion
             // may survive. On timeout this abandons+disables signal-less process-wide
             // (correct here -- the client is going away). No-op with the feature off.
@@ -970,12 +971,12 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
             context::stop_client_contexts(itr->internal_client_id);
             if(itr->configure_result && itr->configure_result->finalize)
             {
-                ROCP_WARNING << fmt::format("invoking tool finalize for {} :: {} :: {} :: {} :: {}",
-                                            itr->get_name(),
-                                            sdk::utility::as_hex(itr->configure_func),
-                                            sdk::utility::as_hex(itr->configure_result),
-                                            sdk::utility::as_hex(itr->configure_result->initialize),
-                                            sdk::utility::as_hex(itr->configure_result->finalize));
+                ROCP_INFO << fmt::format("invoking tool finalize for {} :: {} :: {} :: {} :: {}",
+                                         itr->get_name(),
+                                         sdk::utility::as_hex(itr->configure_func),
+                                         sdk::utility::as_hex(itr->configure_result),
+                                         sdk::utility::as_hex(itr->configure_result->initialize),
+                                         sdk::utility::as_hex(itr->configure_result->finalize));
 
                 // set to nullptr so finalize only gets called once
                 rocprofiler_tool_finalize_t _finalize_func = nullptr;
@@ -983,7 +984,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 
                 hsa::async_copy_sync();
                 hsa::queue_controller_sync();
-                // F23 terminal fail-closed fence: the client finalizer frees the
+                // Terminal fail-closed fence: the client finalizer frees the
                 // tool's callback/buffer machinery next, so no callback-capable
                 // signal-less completion may survive. On timeout abandon+disable
                 // process-wide. No-op with the feature off.
@@ -1081,14 +1082,27 @@ initialize()
 
     ROCP_INFO << "rocprofiler initialize called...";
 
-    if(get_init_status() != 0)
+    if(get_init_status() == 1) return;
+
+    // A re-entrant call from the thread that is currently running the call_once
+    // below must return instead of blocking: invoke_client_configures() dlopens
+    // the tool library, whose constructor can call back into initialize(), and
+    // std::call_once on an in-progress once_flag deadlocks the thread executing
+    // it. Any *other* thread falls through and blocks until initialization
+    // completes, rather than proceeding against a partially initialized SDK.
+    static thread_local bool _initializing = false;
+    if(_initializing)
     {
-        ROCP_INFO << "rocprofiler initialize ignored...";
+        ROCP_INFO << "rocprofiler initialize ignored (re-entrant call during "
+                     "initialization)...";
         return;
     }
 
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
+        auto _initializing_scope = common::scope_destructor{[]() { _initializing = false; },
+                                                            []() { _initializing = true; }};
+
         ROCP_INFO << "rocprofiler initialize started...";
         // set the "ROCPROFILER_REGISTER_LIBRARY" env var
         set_rocprofiler_register_library();
@@ -1163,11 +1177,12 @@ finalize()
         auto num_clients = get_num_clients();
         set_fini_status(-1);
 
-        // Signal-less teardown steps 1-6, in the one order that strands no
-        // EOP-proven completion. Must precede the sequence below:
-        // queue_controller_fini joins the task group, and correlation_id_finalize
-        // consults the loss ledger this populates. No-op unless signal-less is
-        // active.
+        // Signal-less teardown steps 1-6, in the one order that strands no EOP-proven
+        // completion. Must precede the sequence below: queue_controller_fini stops the
+        // completion monitor that runs these completions, and correlation_id_finalize
+        // consults the loss ledger this populates. Its drain waits on the in-flight counter,
+        // so it still works when an application hsa_shut_down stopped the monitor first.
+        // No-op unless signal-less is active.
         kfd::signal_less_teardown();
 
         hsa::async_copy_fini();
@@ -1294,10 +1309,20 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
         return status;
     }
 
-    // init status may be -1 (currently initializing) or 1 (already initialized).
-    // if either case, we want to ignore this function call but if this is
-    if(rocprofiler::registration::get_init_status() != 0)
+    // An already initialized SDK (init_status > 0) took the anytime-initialization
+    // path above, so a non-zero status here means init_status < 0: initialization
+    // is in progress and the configuration window is closed. init_status == 0 is
+    // the normal first forced configure and falls through to the code below.
+    if(auto _init_status = rocprofiler::registration::get_init_status(); _init_status != 0)
+    {
+        ROCP_WARNING << "rocprofiler_force_configure() ignored (CONFIGURATION_LOCKED): "
+                        "rocprofiler-sdk initialization is already in progress (init_status="
+                     << _init_status
+                     << "). The configuration window is closed; this commonly occurs when the "
+                        "OpenMP runtime invoked the SDK's ompt_start_tool() before the application "
+                        "called rocprofiler_force_configure().";
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+    }
 
     // ROCPROFILER_REGISTER_FORCE_LOAD=1 forces rocprofiler-register to load rocprofiler-sdk
     rocprofiler::common::set_env("ROCPROFILER_REGISTER_FORCE_LOAD", "1", 1);
@@ -1545,7 +1570,15 @@ rocprofiler_set_api_table(const char* name,
 
         // need to construct agent mappings before initializing the queue controller
         rocprofiler::agent::construct_agent_cache(hsa_api_table);
-        rocprofiler::thread_trace::initialize(hsa_api_table);
+        // An exception must not cross the ROCr C ABI, but a thread-trace failure must not
+        // prevent the rest of the profiler from initializing either.
+        try
+        {
+            rocprofiler::thread_trace::initialize(hsa_api_table);
+        } catch(const std::exception& e)
+        {
+            ROCP_ERROR << "Unable to initialize thread-trace resources: " << e.what();
+        }
         // code_object::initialize must precede queue_controller_init: when the attach library is
         // in use, queue interception is live immediately upon queue_controller_init returning, so
         // any dispatch that arrives before code object hooks are installed would miss load
@@ -1593,16 +1626,23 @@ rocprofiler_set_api_table(const char* name,
                 [](const rocprofiler::context::context* ctx) {
                     return ctx->device_thread_trace != nullptr;
                 });
+            auto registered_contexts = rocprofiler::context::get_registered_contexts();
 
             ROCP_INFO << fmt::format(
-                "[queue-interposition] non-inline contexts found: {}. The presence of "
-                "any of these contexts will prevent inline intercept (for the time being).",
+                "[queue-interposition] {} registered contexts, {} of them non-inline. The presence "
+                "of any non-inline context will prevent inline intercept (for the time being).",
+                registered_contexts.size(),
                 non_queue_interposition_contexts.size());
 
             // if non_queue_interposition_contexts is empty, default to inline intercept.
             // if non_queue_interposition_contexts is not empty, default to non-inline intercept.
             auto enable_queue_interposition = rocprofiler::common::get_env(
                 "ROCPROFILER_QUEUE_INTERPOSITION", non_queue_interposition_contexts.empty());
+
+            // With no registered context there is nothing to intercept for. Installing the inline
+            // path starts the completion monitor and its record emitter, and the SDK creates no
+            // internal threads when no tool is active. This overrides the environment variable.
+            if(registered_contexts.empty()) enable_queue_interposition = false;
 
             if(enable_queue_interposition && !device_thread_trace_contexts.empty() &&
                !rocprofiler::hsa::enable_queue_intercept())

@@ -1512,6 +1512,13 @@ enum class InstructionExecutionId : size_t {
   FlatAtomicXorX2Flat,
   FlatAtomicIncX2Flat,
   FlatAtomicDecX2Flat,
+  GlobalLoadLdsUbyteFlat,
+  GlobalLoadLdsSbyteFlat,
+  GlobalLoadLdsUshortFlat,
+  GlobalLoadLdsSshortFlat,
+  GlobalLoadLdsDwordFlat,
+  GlobalLoadLdsDwordx4Flat,
+  GlobalLoadLdsDwordx3Flat,
   Count,
 };
 
