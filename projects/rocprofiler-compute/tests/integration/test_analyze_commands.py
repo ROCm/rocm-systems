@@ -305,9 +305,7 @@ def test_filter_block_6(binary_handler_analyze_rocprof_compute, capsys):
         pytest.param("sol", id="alias_sol"),
     ],
 )
-def test_filter_block_alias_valid(
-    binary_handler_analyze_rocprof_compute, alias
-):
+def test_filter_block_alias_valid(binary_handler_analyze_rocprof_compute, alias):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         try:
@@ -351,9 +349,7 @@ def test_filter_block_alias_bogus(binary_handler_analyze_rocprof_compute, capsys
         pytest.param(["topstats", "sol"], id="aliases_topstats_sol"),
     ],
 )
-def test_filter_multiple_blocks(
-    binary_handler_analyze_rocprof_compute, blocks
-):
+def test_filter_multiple_blocks(binary_handler_analyze_rocprof_compute, blocks):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         try:
