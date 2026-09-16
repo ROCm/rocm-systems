@@ -116,6 +116,34 @@ def test_config_dir_requires_value(capsys):
     assert "--config-dir" in capsys.readouterr().err
 
 
+# =============================================================================
+# profile -d / --output-directory
+# =============================================================================
+
+
+@pytest.mark.parametrize("flag", ["-d", "--output-directory"])
+def test_profile_output_directory(flag):
+    args = build_args(["profile", flag, "/tmp/out", "--", "./vcopy"])
+    assert args.output_directory == "/tmp/out"
+
+
+# =============================================================================
+# profile --kernel-iteration-range
+# =============================================================================
+
+
+def test_profile_kernel_iteration_range():
+    args = build_args([
+        "profile",
+        "--kernel-iteration-range",
+        "1",
+        "3:5",
+        "--",
+        "./vcopy",
+    ])
+    assert args.kernel_iteration_range == ["1", "3:5"]
+
+
 def test_pc_sampling_analyze_options():
     """Defaults, overrides, and validation for the analyze PC sampling options."""
     defaults = build_args(["analyze"])

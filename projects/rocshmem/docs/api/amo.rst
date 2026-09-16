@@ -236,7 +236,7 @@ SHMEM_ATOMIC_OR
   :param value:   The value to be atomically ``OR``.
   :param pe:      PE of the remote process.
 
-  :return:        None. 
+  :return:        None.
 
 **Description:**
 This function atomically bitwise-or ``value`` to the value at ``dest`` on ``pe``.

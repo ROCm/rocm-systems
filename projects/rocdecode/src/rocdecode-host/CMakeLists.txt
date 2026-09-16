@@ -61,6 +61,10 @@ find_package(HIP QUIET)
 find_package(Threads QUIET)
 if(NOT WIN32)
   find_package(rocprofiler-register QUIET)
+else()
+  # Not available on Windows. Clear any value inherited from an enclosing scope
+  # so the link block below cannot act on a package never searched for here.
+  set(rocprofiler-register_FOUND FALSE)
 endif()
 find_package(FFmpeg QUIET)
 

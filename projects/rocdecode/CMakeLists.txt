@@ -127,6 +127,17 @@ if(NOT WIN32)
       HINTS $ENV{rocprofiler_register_ROOT} $ENV{ROCPROFILER_REGISTER_ROOT} ${CMAKE_INSTALL_PREFIX}
       PATHS ${ROCM_PATH})
   endif()
+else()
+  # Not available on Windows. Clear any value inherited from an enclosing scope
+  # -- a superbuild parent that found the package would otherwise leave
+  # rocprofiler-register_FOUND true here, and the link and compile-definition
+  # blocks below would act on a package this branch never searched for.
+  set(rocprofiler-register_FOUND FALSE)
+  if(ROCDECODE_ENABLE_ROCPROFILER_REGISTER)
+    # The option defaults to ON, so say plainly that it has no effect here
+    # rather than silently producing a build without profiling support.
+    message("-- ${Yellow}NOTE: rocprofiler-register is not available on Windows -- ROCDECODE_ENABLE_ROCPROFILER_REGISTER ignored${ColourReset}")
+  endif()
 endif()
 if(ROCDECODE_ENABLE_HOST_DECODER)
   find_package(FFmpeg QUIET)
@@ -139,7 +150,8 @@ if(NOT WIN32)
     set(_deps_met TRUE)
   endif()
 else()
-  if(HIP_FOUND AND Libva_FOUND AND Threads_FOUND)
+  # Win32 threads are provided by the CRT; no separate thread library is needed.
+  if(HIP_FOUND AND Libva_FOUND)
     set(_deps_met TRUE)
   endif()
 endif()
@@ -157,7 +169,12 @@ if(_deps_met)
   include_directories(${LIBVA_INCLUDE_DIR})
   if(NOT (USING_THE_ROCK AND UNIX))
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
+    if(NOT WIN32)
+      # FindLibva only looks for va-drm on Linux. Referencing the variable on
+      # Windows would pick up a stale LIBVA_DRM_LIBRARY-NOTFOUND left in the
+      # cache by an earlier configure and pass it to the linker.
+      set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
+    endif()
   endif()
 
   if(NOT WIN32)
@@ -166,6 +183,11 @@ if(_deps_met)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBDRM_AMDGPU_LIBRARY})
   else()
     # vaon12: va_win32.lib instead of va-drm; d3d12/dxgi for CreateSharedHandle interop
+    # FindLibva locates va/va_win32.h separately from va/va.h, so a staging
+    # layout that splits them would satisfy Libva_FOUND above and then fail on
+    # the include. Normally both resolve to the same directory and this is a
+    # no-op. Windows-only, for the same stale-cache reason as va-drm above.
+    include_directories(${LIBVA_WIN32_INCLUDE_DIR})
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_WIN32_LIBRARY} d3d12 dxgi)
   endif()
 
@@ -174,18 +196,16 @@ if(_deps_met)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
   endif()
 
-  # Threads library (required for std::thread support)
-  set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} Threads::Threads)
+  if(NOT WIN32)
+    # Threads library (required for std::thread support)
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} Threads::Threads)
+  endif()
 
   # local include files
   include_directories(${CMAKE_CURRENT_SOURCE_DIR}/api ${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode ${CMAKE_CURRENT_SOURCE_DIR}/src/parser ${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode/vaapi)
   # source files
   file(GLOB_RECURSE SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
   list(FILTER SOURCES EXCLUDE REGEX "${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode-host/*.*")
-  if(WIN32)
-    # Exclude PAL backend sources if present (we use vaapi on Windows via vaon12)
-    list(FILTER SOURCES EXCLUDE REGEX "${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode/pal/.*")
-  endif()
   # rocdecode library
   add_library(${PROJECT_NAME} SHARED ${SOURCES})
 
@@ -193,15 +213,19 @@ if(_deps_met)
     # --all-warnings/-Wall       -- Enable most warning messages
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
   else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W3")
     target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
-    # Suppress warnings from pre-existing code and external headers:
-    # C4200: zero-sized array in va.h (vaon12 external header)
-    # C4018: signed/unsigned mismatch in parser files (pre-existing, also on Linux)
-    # C4267: size_t conversion in parser files (pre-existing, also on Linux)
-    # C4244: narrowing conversion in parser files (pre-existing, also on Linux)
-    # C4146: unary minus on unsigned in parser files (pre-existing, also on Linux)
-    target_compile_options(${PROJECT_NAME} PRIVATE /wd4200 /wd4018 /wd4267 /wd4244 /wd4146)
+    # /-prefixed flags are MSVC syntax: a GNU-driver compiler on Windows reads
+    # them as input filenames, so gate on the compiler rather than on WIN32.
+    if(MSVC)
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W3")
+      # Suppress warnings from pre-existing code and external headers:
+      # C4200: zero-sized array in va.h (vaon12 external header)
+      # C4018: signed/unsigned mismatch in parser files (pre-existing, also on Linux)
+      # C4267: size_t conversion in parser files (pre-existing, also on Linux)
+      # C4244: narrowing conversion in parser files (pre-existing, also on Linux)
+      # C4146: unary minus on unsigned in parser files (pre-existing, also on Linux)
+      target_compile_options(${PROJECT_NAME} PRIVATE /wd4200 /wd4018 /wd4267 /wd4244 /wd4146)
+    endif()
   endif()
   target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
 
@@ -272,6 +296,7 @@ if(_deps_met)
   install(FILES samples/videoDecode/CMakeLists.txt samples/videoDecode/README.md samples/videoDecode/videodecode.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecode)
   install(FILES samples/videoDecodeRaw/CMakeLists.txt samples/videoDecodeRaw/README.md samples/videoDecodeRaw/videodecoderaw.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeRaw)
   install(FILES samples/videoDecodeMem/CMakeLists.txt samples/videoDecodeMem/README.md samples/videoDecodeMem/videodecodemem.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeMem)
+  install(FILES samples/videoDecodeCaps/CMakeLists.txt samples/videoDecodeCaps/README.md samples/videoDecodeCaps/videodecodecaps.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeCaps)
   install(FILES samples/videoDecodePerf/CMakeLists.txt samples/videoDecodePerf/README.md samples/videoDecodePerf/videodecodeperf.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodePerf)
   install(FILES samples/videoDecodeRGB/CMakeLists.txt samples/videoDecodeRGB/README.md samples/videoDecodeRGB/videodecrgb.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeRGB)
   install(FILES samples/videoDecodeBatch/CMakeLists.txt samples/videoDecodeBatch/README.md samples/videoDecodeBatch/videodecodebatch.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeBatch)
@@ -442,6 +467,7 @@ if(_deps_met)
     # Samples that do NOT require FFmpeg
     rocdecode_add_test_ext(videodecoderaw    ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeRaw)
     rocdecode_add_test_ext(rocdecdecode      ${CMAKE_CURRENT_SOURCE_DIR}/samples/rocdecDecode)
+    rocdecode_add_test_ext(videodecodecaps   ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeCaps)
     # Negative API test (source under test/)
     rocdecode_add_test_ext(rocdecodenegativetest ${CMAKE_CURRENT_SOURCE_DIR}/test/rocDecodeNegativeApiTests)
 
@@ -472,7 +498,7 @@ else()
   if(NOT WIN32 AND NOT Libdrm_amdgpu_FOUND)
     message(FATAL_ERROR "-- ERROR!: libdrm_amdgpu Not Found!")
   endif()
-  if(NOT Threads_FOUND)
+  if(NOT WIN32 AND NOT Threads_FOUND)
     message(FATAL_ERROR "-- ERROR!: Threads Not Found!")
   endif()
 endif()

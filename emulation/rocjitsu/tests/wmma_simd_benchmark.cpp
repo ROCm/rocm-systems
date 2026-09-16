@@ -494,7 +494,7 @@ TEST(WmmaSimdBenchmark, DecodedScaleF32_16x16x128_fp4) {
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
-  auto run = [&] { fx.cu->execute_instruction(inst.get(), *fx.wf); };
+  auto run = [&] { (void)fx.cu->execute_instruction(inst.get(), *fx.wf); };
   bench("decoded v_wmma_scale_f32_16x16x128_fp4_fp4", fx, run, double(M) * N * K, Cmp::F32Tol);
 }
 
@@ -522,7 +522,7 @@ TEST(WmmaSimdBenchmark, DecodedScaleF32_32x16x128_fp4) {
     const std::array<uint32_t, 4> words = {prefix[0], prefix[1], matrix[0], matrix[1]};
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
-    auto run = [&] { fx.cu->execute_instruction(inst.get(), *fx.wf); };
+    auto run = [&] { (void)fx.cu->execute_instruction(inst.get(), *fx.wf); };
     bench(label, fx, run, double(M) * N * K, Cmp::F32Tol, kM32OutRegs);
   }
 }

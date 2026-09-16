@@ -44,10 +44,14 @@ if(NOT WIN32)
 else()
   # Windows uses the va_win32 D3D12 display backend; va-drm is Linux-only.
   find_library(LIBVA_WIN32_LIBRARY NAMES va_win32 rocm_sysdeps_va_win32 HINTS ${_libva_library_hints} ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
+  # va/va_win32.h is included by the Windows decoder sources, and a staging
+  # prefix can carry va_win32.lib without it. Check it alongside the library so
+  # an incomplete prefix fails here rather than at compile time.
+  find_path(LIBVA_WIN32_INCLUDE_DIR NAMES va/va_win32.h PATHS ${_libva_include_hints} ${ROCM_PATH}/lib/rocm_sysdeps/include NO_DEFAULT_PATH)
 
   include(FindPackageHandleStandardArgs)
-  find_package_handle_standard_args(Libva DEFAULT_MSG LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_WIN32_LIBRARY)
-  mark_as_advanced(LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_WIN32_LIBRARY)
+  find_package_handle_standard_args(Libva DEFAULT_MSG LIBVA_INCLUDE_DIR LIBVA_WIN32_INCLUDE_DIR LIBVA_LIBRARY LIBVA_WIN32_LIBRARY)
+  mark_as_advanced(LIBVA_INCLUDE_DIR LIBVA_WIN32_INCLUDE_DIR LIBVA_LIBRARY LIBVA_WIN32_LIBRARY)
 endif()
 
 
@@ -82,7 +86,7 @@ if(Libva_FOUND)
   else()
     if(NOT TARGET Libva::va_win32)
       add_library(Libva::va_win32 UNKNOWN IMPORTED)
-      set_target_properties(Libva::va_win32 PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${LIBVA_INCLUDE_DIR}"
+      set_target_properties(Libva::va_win32 PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${LIBVA_INCLUDE_DIR};${LIBVA_WIN32_INCLUDE_DIR}"
         IMPORTED_LOCATION "${LIBVA_WIN32_LIBRARY}")
     endif()
     message("-- ${White}Using Libva -- \n\tLibraries:${LIBVA_LIBRARY} \n\tIncludes:${LIBVA_INCLUDE_DIR}${ColourReset}")
