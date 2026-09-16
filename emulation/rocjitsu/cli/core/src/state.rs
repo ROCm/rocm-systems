@@ -169,6 +169,19 @@ mod tests {
         // saving nor anything they could fix.
         use std::os::unix::fs::PermissionsExt;
 
+        // Mode bits do not stop root: `CAP_DAC_OVERRIDE` means the write
+        // below succeeds, there is no permission denial to report, and
+        // the message this test is about is never produced. The suite
+        // runs as root in the container CI builds it in, so this is a
+        // real environment and not a hypothetical one.
+        if nix::unistd::geteuid().is_root() {
+            eprintln!(
+                "SKIP: running as root, which bypasses the directory permissions \
+                 this test needs in order to make a write fail."
+            );
+            return;
+        }
+
         let dir = tempfile::tempdir().unwrap();
         let readonly = dir.path().join("readonly");
         fs::create_dir(&readonly).unwrap();

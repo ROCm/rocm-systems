@@ -177,8 +177,17 @@ pub fn scan(live: &[SessionId]) -> Scan {
     // for each of them is a syscall per process on the machine.
     let ours = owning_runtime();
 
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return Scan::default();
+    let entries = match std::fs::read_dir("/proc") {
+        Ok(entries) => entries,
+        // An empty result here would be indistinguishable from a clean
+        // machine, and the caller acts on that difference: `cleanup`
+        // reports "nothing to reclaim" and goes on to delete the scratch
+        // directories of sessions it never managed to look for. Saying so
+        // is the least this can do, since the return type cannot.
+        Err(e) => {
+            tracing::warn!("could not read /proc, so nothing can be reclaimed: {e}");
+            return Scan::default();
+        }
     };
     let mut out = Scan::default();
     for entry in entries.flatten() {
@@ -370,6 +379,60 @@ mod tests {
         }
     }
 
+    /// Whether `pid` is still a running process, as opposed to gone or a
+    /// zombie awaiting reaping.
+    ///
+    /// `/proc/<pid>` existing is not the question. A killed process whose
+    /// parent has not reaped it keeps its `/proc` entry, and the entry
+    /// outlives the process for as long as nobody calls `wait` — which,
+    /// for a grandchild orphaned by the reap that killed its parent, is
+    /// until pid 1 does it. In a container pid 1 is the job's own command
+    /// rather than an init that reaps what it inherits, so there the
+    /// entry never goes away and a test waiting for it to vanish waits
+    /// forever.
+    fn still_running(pid: u32) -> bool {
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            return false;
+        };
+        // `comm` is arbitrary and may hold spaces and parentheses, so the
+        // state is the field after the *last* ')'.
+        stat.rfind(')')
+            .and_then(|i| stat[i + 1..].split_whitespace().next())
+            .is_some_and(|state| state != "Z")
+    }
+
+    /// Scan until `seen` is satisfied, the child stops running, or ten
+    /// seconds pass.
+    ///
+    /// One scan taken immediately after a spawn is what CI failed on: it
+    /// came back empty, and an empty list says only that nothing was
+    /// seen, never whether there was anything to see. Retrying for as
+    /// long as the process is demonstrably alive separates those two. A
+    /// scan that never reports a running process is still a failure and
+    /// still fails here — with the child's state in the message rather
+    /// than a bare `[]`.
+    fn scan_while_alive(pid: u32, seen: impl Fn(&Scan) -> bool) -> Scan {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let scan = scan(&[]);
+            if seen(&scan) || !still_running(pid) || std::time::Instant::now() >= deadline {
+                return scan;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    /// What a failed scan assertion needs to name the cause: a child that
+    /// is gone was never there to be found, and that is a different fault
+    /// from a scan that cannot see a running one.
+    fn state_of(pid: u32) -> &'static str {
+        if still_running(pid) {
+            "still running"
+        } else {
+            "already dead or a zombie, so it had no readable environment to match"
+        }
+    }
+
     /// A session id no other test or machine will collide with.
     fn unique(name: &str) -> SessionId {
         use std::sync::atomic::{AtomicU32, Ordering};
@@ -406,11 +469,16 @@ mod tests {
         let _runtime = PinnedRuntime::new();
         let session = unique("ours");
         let child = Tagged::owned_by(session.as_str(), Some(&owning_runtime()), "exec sleep 300");
-        let found = stranded_workloads(&[]);
+        let found = scan_while_alive(child.pid(), |s| {
+            s.reclaimable.iter().any(|x| x.pid == child.pid())
+        })
+        .reclaimable;
         assert!(
             found.iter().any(|s| s.pid == child.pid()),
             "a workload of this runtime whose session is not live must be \
-             reclaimable: {found:?}"
+             reclaimable: {found:?} (child {} is {})",
+            child.pid(),
+            state_of(child.pid())
         );
     }
 
@@ -507,6 +575,47 @@ mod tests {
         );
     }
 
+    /// A zombie is not a running process, however much its `/proc` entry
+    /// suggests otherwise.
+    ///
+    /// The reap check above used to ask whether `/proc/<pid>` existed.
+    /// That is true of a zombie and stays true until somebody reaps it,
+    /// which for a grandchild orphaned by the reap that killed its parent
+    /// is pid 1's job — and in a container pid 1 is the job's own command,
+    /// not an init that reaps what it inherits. So the entry never went
+    /// away, and the check waited out its deadline against a process that
+    /// had been dead the whole time.
+    #[test]
+    fn a_zombie_is_not_still_running() {
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", "exec sleep 300"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        assert!(still_running(pid), "a live process is running");
+
+        child.kill().unwrap();
+        // Deliberately not reaped yet: `wait` is what releases the pid,
+        // and the window before that is the whole subject here.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while still_running(pid) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the killed child never became a zombie"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            std::path::Path::new(&format!("/proc/{pid}")).exists(),
+            "the entry the old check trusted is still there, which is the point"
+        );
+
+        child.wait().unwrap();
+    }
+
     #[test]
     fn a_grandchild_that_inherited_the_tag_is_reclaimed_too() {
         // The reason the marker is an environment variable and not a pid
@@ -552,7 +661,7 @@ mod tests {
 
         reap(&found);
         let gone = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while std::path::Path::new(&format!("/proc/{grandchild}")).exists() {
+        while still_running(grandchild) {
             assert!(
                 std::time::Instant::now() < gone,
                 "grandchild {grandchild} survived the reap"
@@ -575,14 +684,19 @@ mod tests {
         let session = unique("unattributable");
         let child = Tagged::owned_by(session.as_str(), None, "exec sleep 300");
 
-        let scan = scan(&[]);
+        let scan = scan_while_alive(child.pid(), |s| {
+            s.unattributable.iter().any(|x| x.pid == child.pid())
+        });
         assert!(
             !scan.reclaimable.iter().any(|s| s.pid == child.pid()),
             "an unattributable process must never be reclaimed: {scan:?}"
         );
         assert!(
             scan.unattributable.iter().any(|s| s.pid == child.pid()),
-            "an unattributable process must still be reported: {scan:?}"
+            "an unattributable process must still be reported: {scan:?} \
+             (child {} is {})",
+            child.pid(),
+            state_of(child.pid())
         );
         assert!(
             scan.unattributable_sessions().contains(session.as_str()),
