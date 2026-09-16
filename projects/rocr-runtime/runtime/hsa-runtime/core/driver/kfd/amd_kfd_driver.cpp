@@ -279,6 +279,8 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     handle->handle = reinterpret_cast<uint64_t>(mem);
     handle->vaddr = mem;
     handle->size = size;
+    handle->owner = this;
+    handle->owns_allocation = true;
   };
 
   kmt_alloc_flags.ui32.ExecuteAccess =
@@ -614,6 +616,9 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     }
     handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
     handle->size = res.alloc_size;
+    handle->owner = this;
+    // hsaKmtHandleImport creates a distinct object per import, so this handle owns it.
+    handle->owns_allocation = true;
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareType::FABRIC_HANDLE: {
@@ -638,6 +643,9 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
     if (rocr::os::DmaBufClose(&res.dmabuf_fd) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
     handle->size = res.alloc_size;
+    handle->owner = this;
+    // hsaKmtHandleImport creates a distinct object per import, so this handle owns it.
+    handle->owns_allocation = true;
     return HSA_STATUS_SUCCESS;
   }
   default:

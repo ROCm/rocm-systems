@@ -47,6 +47,8 @@ concurrency:
 env:
   # TODO(jrmadsen): replace LD_RUNPATH_FLAG, GPU_TARGETS, etc. with internal handling in cmake
   ROCM_PATH: "/opt/rocm"
+  PYTHON_VENV_PATH: ".venv-rocprofiler-sdk"
+  CMAKE_VERSION_DEB: "4.4.3"
   GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
   SUBMODULE_PATHS: "projects/rocprofiler-sdk projects/aqlprofile projects/rocprofiler-register projects/rocr-runtime projects/clr projects/hip"
@@ -140,6 +142,7 @@ jobs:
           projects/rocr-runtime
           projects/clr
           projects/hip
+          projects/hrr
           projects/hipfile
         submodules: false
         set-safe-directory: true
@@ -208,9 +211,12 @@ jobs:
       run: |
         git config --global --add safe.directory '*'
         apt-get update
-        apt-get install -y build-essential ccache cmake python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
-        python3 -m pip install -U --user -r requirements.txt
-        python3 -m pip install -U --user cmake==4.4.3
+        apt-get install -y build-essential ccache cmake python3-pip python3-venv gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
+        python3 -m venv --system-site-packages ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}
+        source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
+        python3 -m pip install --upgrade pip
+        python3 -m pip install --upgrade -r requirements.txt
+        python3 -m pip install --upgrade cmake==${{ env.CMAKE_VERSION_DEB }}
 
     - name: Sync gcov with compilers
       timeout-minutes: 10
@@ -233,6 +239,7 @@ jobs:
       uses: ./.github/actions/rocprofiler-sdk-util
       with:
         rocm-path: ${{ env.ROCM_PATH }}
+        python-venv-path: ${{ env.PYTHON_VENV_PATH }}
         gpu-target: ${{ matrix.system.gpu-target }}
         compiler-launcher: /usr/bin/ccache
         enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
@@ -250,6 +257,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
+        source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate &&
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov
           --build-jobs 16
@@ -271,6 +279,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
+        source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate &&
         find build -type f | egrep '\.gcda$' | xargs rm &&
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-tests
@@ -293,6 +302,7 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       shell: bash
       run:
+        source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate &&
         find build -type f | egrep '\.gcda$' | xargs rm &&
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-samples
@@ -325,6 +335,7 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       shell: bash
       run: |
+        source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
         echo "PWD: ${PWD}"
         ls -la
 
@@ -425,6 +436,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
+        source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
         pushd build
         #
         # if following fails, there is a test that does not have

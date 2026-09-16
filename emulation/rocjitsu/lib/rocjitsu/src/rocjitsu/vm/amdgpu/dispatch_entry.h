@@ -14,15 +14,21 @@
 
 #include "rocjitsu/vm/amdgpu/xcd_shard.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <optional>
+#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+class ComputeUnitCore;
+using QueueCuSelection = std::optional<std::vector<ComputeUnitCore *>>;
 
 struct WorkgroupCoord {
   uint32_t x = 0;
@@ -103,6 +109,12 @@ struct DispatchEntry {
   uint32_t queue_packet_id = 0;
   uint32_t process_id = 0;
 
+  /// Snapshot of the queue's physical CU selection; nullopt means unrestricted.
+  QueueCuSelection enabled_cus = std::nullopt;
+  bool allows_cu(const ComputeUnitCore *cu) const {
+    return !enabled_cus || std::ranges::find(*enabled_cus, cu) != enabled_cus->end();
+  }
+
   /// AQL ring packet id (queue read index at which this dispatch's packet was
   /// fetched). Used only for rocm-dbgapi wave/dispatch correlation.
   uint32_t aql_packet_id = 0;
@@ -175,7 +187,12 @@ struct DispatchEntry {
   /// What this entry carries. Every site that queues an entry must set it.
   DispatchPacketKind kind = DispatchPacketKind::Unset;
   bool host_signal = false;
-  bool barrier_bit = false;
+  /// Header barrier bit: this packet waits for all earlier packets in its queue.
+  bool wait_for_predecessors = false;
+  /// Packet-type ordering: following packets cannot pass this packet.
+  bool blocks_following = false;
+  /// Completion hooks and signal have already been delivered.
+  bool completion_notified = false;
   bool execution_begun = false;
   /// The packet carried an acquire fence of at least agent scope. Recorded on the
   /// entry so that every XCD running part of the grid can invalidate its own caches

@@ -118,7 +118,7 @@ RunResult run_fmac(bool force_scalar, uint64_t exec, uint32_t mode, bool literal
   uint32_t words[4] = {encoded, literal_src0 ? literal_high : 0u, 0u, 0u};
   std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words));
   EXPECT_NE(instruction, nullptr);
-  fixture.cu->execute_instruction(instruction.get(), *fixture.wf);
+  EXPECT_TRUE(fixture.cu->execute_instruction(instruction.get(), *fixture.wf).succeeded());
   for (uint32_t lane = 0; lane < kWaveSize; ++lane)
     result.output[lane] = fixture.read64(4, lane);
   return result;

@@ -7976,8 +7976,9 @@ void VDivFixupF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16(
-      [](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16([](auto p, auto b, auto c) {
+    return ::rocjitsu::amdgpu::div_fixup_f16_promoted_simd(p, b, c);
+  });
   uint64_t exec = wf.exec();
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -8062,8 +8063,9 @@ RJ_NOINLINE void VDivFixupF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) 
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16(
-      [](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16([](auto p, auto b, auto c) {
+    return ::rocjitsu::amdgpu::div_fixup_f16_promoted_simd(p, b, c);
+  });
   uint64_t exec = wf.exec();
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -8992,6 +8994,10 @@ void VDot2F16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
     if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
       raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src0))
+      raw0 = (raw0 & 0xffffu) * 0x10001u;
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src1))
+      raw1 = (raw1 & 0xffffu) * 0x10001u;
     uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
     float a0 = util::f16_to_f32(static_cast<uint16_t>(raw0 & 0xffffu));
     float a1 = util::f16_to_f32(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));
@@ -9018,8 +9024,7 @@ void VDot2F16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       acc = std::fabs(acc);
     if (inst_.neg & (1u << 2))
       acc = -acc;
-    float result = a0 * b0 + a1 * b1 + acc;
-    uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());
+    uint32_t result_bits = amdgpu::fp_mode::dot2_f16(a0, b0, a1, b1, acc, wf.fp16_ovfl());
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
 }
@@ -9051,6 +9056,10 @@ RJ_NOINLINE void VDot2F16F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
       raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
     if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
       raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src0))
+      raw0 = (raw0 & 0xffffu) * 0x10001u;
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src1))
+      raw1 = (raw1 & 0xffffu) * 0x10001u;
     uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
     float a0 = util::f16_to_f32(static_cast<uint16_t>(raw0 & 0xffffu));
     float a1 = util::f16_to_f32(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));
@@ -9077,8 +9086,7 @@ RJ_NOINLINE void VDot2F16F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
       acc = std::fabs(acc);
     if (inst_.neg & (1u << 2))
       acc = -acc;
-    float result = a0 * b0 + a1 * b1 + acc;
-    uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());
+    uint32_t result_bits = amdgpu::fp_mode::dot2_f16(a0, b0, a1, b1, acc, wf.fp16_ovfl());
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
   dpp_write_mask_scope_.restore();
@@ -9100,6 +9108,10 @@ void VDot2Bf16Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       raw0 = util::f32_to_bf16(std::bit_cast<float>(raw0));
     if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
       raw1 = util::f32_to_bf16(std::bit_cast<float>(raw1));
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src0))
+      raw0 = (raw0 & 0xffffu) * 0x10001u;
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src1))
+      raw1 = (raw1 & 0xffffu) * 0x10001u;
     uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
     float a0 = util::bf16_to_f32(static_cast<uint16_t>(raw0 & 0xffffu));
     float a1 = util::bf16_to_f32(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));
@@ -9126,8 +9138,7 @@ void VDot2Bf16Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       acc = std::fabs(acc);
     if (inst_.neg & (1u << 2))
       acc = -acc;
-    float result = a0 * b0 + a1 * b1 + acc;
-    uint32_t result_bits = util::f32_to_bf16(result);
+    uint32_t result_bits = amdgpu::fp_mode::dot2_bf16(a0, b0, a1, b1, acc);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
 }
@@ -9159,6 +9170,10 @@ RJ_NOINLINE void VDot2Bf16Bf16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
       raw0 = util::f32_to_bf16(std::bit_cast<float>(raw0));
     if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
       raw1 = util::f32_to_bf16(std::bit_cast<float>(raw1));
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src0))
+      raw0 = (raw0 & 0xffffu) * 0x10001u;
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src1))
+      raw1 = (raw1 & 0xffffu) * 0x10001u;
     uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
     float a0 = util::bf16_to_f32(static_cast<uint16_t>(raw0 & 0xffffu));
     float a1 = util::bf16_to_f32(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));
@@ -9185,8 +9200,7 @@ RJ_NOINLINE void VDot2Bf16Bf16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
       acc = std::fabs(acc);
     if (inst_.neg & (1u << 2))
       acc = -acc;
-    float result = a0 * b0 + a1 * b1 + acc;
-    uint32_t result_bits = util::f32_to_bf16(result);
+    uint32_t result_bits = amdgpu::fp_mode::dot2_bf16(a0, b0, a1, b1, acc);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
   dpp_write_mask_scope_.restore();
