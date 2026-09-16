@@ -4990,11 +4990,6 @@ namespace
 ompt_start_tool_result_t*
 start_next_ompt_tool(unsigned int omp_version, const char* runtime_version)
 {
-    // never resurrect a tool the user disabled
-    if(const char* _omp_tool = ::getenv("OMP_TOOL");
-       _omp_tool != nullptr && ::strcmp(_omp_tool, "disabled") == 0)
-        return nullptr;
-
     using ompt_start_tool_t = ompt_start_tool_result_t* (*) (unsigned int, const char*);
 
     auto* _next = reinterpret_cast<ompt_start_tool_t>(::dlsym(RTLD_NEXT, "ompt_start_tool"));
@@ -5027,19 +5022,27 @@ ompt_start_tool(unsigned int omp_version, const char* runtime_version)
 
     // The OpenMP runtime discovers tools while holding its initialization lock. Configuring
     // rocprofiler-sdk here loads client tool libraries, and their constructors can call back into
-    // the OpenMP runtime and re-enter that lock on the same thread. Defer instead of configuring,
-    // so no client libraries are loaded on this thread.
+    // the OpenMP runtime and re-enter that lock on the same thread. A status of 0 is "not
+    // started" and -1 is "in progress"; both defer instead of configuring.
     if(int _status = 0;
-       rocprofiler_is_initialized(&_status) != ROCPROFILER_STATUS_SUCCESS || _status == 0)
+       rocprofiler_is_initialized(&_status) != ROCPROFILER_STATUS_SUCCESS || _status <= 0)
     {
-        ROCP_WARNING << "OMPT support is not enabled because the OpenMP runtime initialized "
-                        "before rocprofiler-sdk. Initialize rocprofiler-sdk before the first "
-                        "OpenMP call to enable OMPT.";
+        ROCP_WARNING << "rocprofv3 is not collecting OMPT because the OpenMP runtime initialized "
+                        "before rocprofiler-sdk, and is handing the OMPT tool role to the next "
+                        "tool. Initialize rocprofiler-sdk before the first OpenMP call to collect "
+                        "OMPT with rocprofv3.";
         return start_next_ompt_tool(omp_version, runtime_version);
     }
 
     initialize_rocprofv3();
 
-    return rocprofiler_ompt_start_tool(omp_version, runtime_version);
+    // rocprofiler-sdk returns null when no registered client subscribes to OMPT. Chain that
+    // decline like the two above rather than passing the null on to the runtime.
+    if(auto* _result = rocprofiler_ompt_start_tool(omp_version, runtime_version);
+       _result != nullptr)
+        return _result;
+
+    ROCP_INFO << "rocprofiler-sdk declined the OMPT tool role; deferring it";
+    return start_next_ompt_tool(omp_version, runtime_version);
 }
 }
