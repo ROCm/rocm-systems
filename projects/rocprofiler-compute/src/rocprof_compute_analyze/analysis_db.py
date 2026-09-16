@@ -296,9 +296,6 @@ class SourceFrameCollector:
 
 
 class db_analysis(OmniAnalyze_Base):
-    # NB: membw guided analysis (run_membw_analysis / membw_result) is
-    # CLI; it is not run or stored in the database output path.
-
     # -----------------------
     # Required child methods
     # -----------------------

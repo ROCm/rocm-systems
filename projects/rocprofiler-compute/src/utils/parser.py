@@ -56,7 +56,6 @@ def build_dfs(
     sys_info: pd.Series,
     profiling_config: dict[str, Any],
     arch: Optional[str] = None,
-    membw_analysis: bool = False,
 ) -> None:
     """Build a dataframe template for each table in each panel. Analyze-mode
     filter_metrics overrides profile-mode filter_blocks; tables that fail the
@@ -89,18 +88,6 @@ def build_dfs(
         profile_panel_filter = convert_filter_blocks_to_panel_ids(
             profiling_config.get("filter_blocks", []), arch
         )
-
-    # Block 30 renders alongside block 3 (Memory Chart).  Keep it in
-    # whichever filter is active so panel 3000 is not dropped.
-    membw_collected = profiling_config.get("membw_analysis", False)
-    block_3_visible = (
-        user_metric_filter is not None and "3" in user_metric_filter
-    ) or 300 in profile_panel_filter
-    if membw_analysis or (membw_collected and block_3_visible):
-        if user_metric_filter is not None:
-            user_metric_filter = [*user_metric_filter, "30"]
-        elif profile_panel_filter:
-            profile_panel_filter = {*profile_panel_filter, 3000}
 
     arch_configs.panel_configs = expand_placeholder_ranges(
         arch_configs.panel_configs, sys_info

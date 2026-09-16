@@ -1030,24 +1030,6 @@ Examples:
     # Experimental Features
     ## ----------------------------
     analyze_group.add_argument(
-        "--membw-analysis",
-        dest="membw_analysis",
-        required=False,
-        default=False,
-        base_action="store_const",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="Memory Bandwidth Analysis",
-        nargs=0,
-        const=True,
-        help=(
-            "\t\tEnable memory bandwidth guided analysis."
-            " Automatically detected when the workload"
-            " was profiled with --membw-analysis."
-        ),
-    )
-
-    analyze_group.add_argument(
         "--gui",
         type=int,
         nargs="?",
