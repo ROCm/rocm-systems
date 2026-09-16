@@ -517,6 +517,34 @@ TEST_F(GinAnvilPluginTest, ConnCheck_SkippedWhenSignalSlotTooSmall) {
   plugin_.finalize(ictx);
 }
 
+// Conn-check is an LSA cuMem-VMM probe. Under NCCL_GIN_CONNECTION_RAIL the GIN team
+// indexes rail ranks, not lsaSelf, so skip even when nRanks == lsaSize.
+TEST_F(GinAnvilPluginTest, ConnCheck_SkippedOnRailConnection) {
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+  mockComm_.get()->devrState.lsaSize = 2;
+  mockComm_.get()->devrState.lsaSelf = 0;
+  mockComm_.get()->rank = 1;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 0);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 0);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
 // G21: conn-check inject-fail env aborts bind when nRanks>=2.
 TEST_F(GinAnvilPluginTest, ConnCheck_InjectFailRankAbortsBind) {
   void* rawDevLsa = nullptr;
