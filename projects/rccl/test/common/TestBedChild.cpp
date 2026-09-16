@@ -641,19 +641,162 @@ namespace RcclUnitTesting
     }
     #endif
 
-    // A serial loop needs one group spanning all local communicators to avoid
-    // multi-GPU launch deadlocks. In rank-threaded mode each OpenMP thread owns
-    // one communicator, and NCCL group state is thread-local, so an outer group
-    // started by the master thread must not wrap calls made by worker threads.
-    if (!this->useRankThreading)
-      CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart ExecuteCollectives");
-
-    // Loop over all collectives to be executed in group call
-    for (int collId = 0; collId < this->numCollectivesInGroup[groupId]; ++collId)
+    // Submit one collective without changing NCCL group scope. The caller owns
+    // group start/end so serial execution can group all local communicators,
+    // while rank-threaded execution can keep one thread-local group per rank.
+    auto submitCollective = [&](int const localRank, int const collId) -> ErrCode
     {
-      // Loop over all local ranks
-      if (this->verbose && this->useRankThreading)
-        TEST_INFO("Group %d collective %d running %d threads", groupId, collId, numThreadsToUse);
+      CollectiveArgs& collArg = this->collArgs[groupId][localRank][collId];
+      switch (collArg.funcType)
+      {
+      case ncclCollBroadcast:
+        CHILD_NCCL_CALL(ncclBroadcast(
+                                   collArg.inputGpu.ptr,
+                                   collArg.outputGpu.ptr,
+                                   collArg.numInputElements,
+                                   collArg.dataType,
+                                   collArg.options.root,
+                                   this->comms[localRank],
+                                   this->streams[groupId][localRank][collArg.streamIdx]),
+                        "ncclBroadcast");
+        break;
+      case ncclCollReduce:
+        CHILD_NCCL_CALL(ncclReduce(
+                                collArg.inputGpu.ptr,
+                                collArg.outputGpu.ptr,
+                                collArg.numInputElements,
+                                collArg.dataType,
+                                collArg.options.redOp,
+                                collArg.options.root,
+                                this->comms[localRank],
+                                this->streams[groupId][localRank][collArg.streamIdx]),
+                        "ncclReduce");
+        break;
+      case ncclCollAllGather:
+        CHILD_NCCL_CALL(ncclAllGather(
+                                   collArg.inputGpu.ptr,
+                                   collArg.outputGpu.ptr,
+                                   collArg.numInputElements,
+                                   collArg.dataType,
+                                   this->comms[localRank],
+                                   this->streams[groupId][localRank][collArg.streamIdx]),
+                        "ncclAllGather");
+        break;
+      case ncclCollReduceScatter:
+        CHILD_NCCL_CALL(ncclReduceScatter(
+                                       collArg.inputGpu.ptr,
+                                       collArg.outputGpu.ptr,
+                                       collArg.numOutputElements,
+                                       collArg.dataType,
+                                       collArg.options.redOp,
+                                       this->comms[localRank],
+                                       this->streams[groupId][localRank][collArg.streamIdx]),
+                        "ncclReduceScatter");
+        break;
+      case ncclCollAllReduce:
+        if (collArg.options.useBias)
+        {
+          CHILD_NCCL_CALL(ncclAllReduceWithBias(
+                                     collArg.inputGpu.ptr,
+                                     collArg.outputGpu.ptr,
+                                     collArg.numInputElements,
+                                     collArg.dataType,
+                                     collArg.options.redOp,
+                                     this->comms[localRank],
+                                     this->streams[groupId][localRank][collArg.streamIdx],
+                                     collArg.options.biasPtr),
+                          "ncclAllReduceWithBias");
+        }
+        else
+        {
+          CHILD_NCCL_CALL(ncclAllReduce(
+                                     collArg.inputGpu.ptr,
+                                     collArg.outputGpu.ptr,
+                                     collArg.numInputElements,
+                                     collArg.dataType,
+                                     collArg.options.redOp,
+                                     this->comms[localRank],
+                                     this->streams[groupId][localRank][collArg.streamIdx]),
+                          "ncclAllReduce");
+        }
+        break;
+      case ncclCollGather:
+        CHILD_NCCL_CALL(ncclGather(
+                                collArg.inputGpu.ptr,
+                                collArg.outputGpu.ptr,
+                                collArg.numInputElements,
+                                collArg.dataType,
+                                collArg.options.root,
+                                this->comms[localRank],
+                                this->streams[groupId][localRank][collArg.streamIdx]),
+                        "ncclGather");
+        break;
+      case ncclCollScatter:
+        CHILD_NCCL_CALL(ncclScatter(
+                                 collArg.inputGpu.ptr,
+                                 collArg.outputGpu.ptr,
+                                 collArg.numOutputElements,
+                                 collArg.dataType,
+                                 collArg.options.root,
+                                 this->comms[localRank],
+                                 this->streams[groupId][localRank][collArg.streamIdx]),
+                        "ncclScatter");
+        break;
+      case ncclCollAlltoAll:
+        CHILD_NCCL_CALL(ncclAlltoAll(
+                                  collArg.inputGpu.ptr,
+                                  collArg.outputGpu.ptr,
+                                  collArg.numInputElements / collArg.totalRanks,
+                                  collArg.dataType,
+                                  this->comms[localRank],
+                                  this->streams[groupId][localRank][collArg.streamIdx]),
+                        "ncclAlltoAll");
+        break;
+      case ncclCollAlltoAllv:
+        CHILD_NCCL_CALL(ncclAlltoAllv(
+                                   collArg.inputGpu.ptr,
+                                   collArg.options.sendcounts + (this->rankOffset + localRank)*this->totalRanks,
+                                   collArg.options.sdispls + (this->rankOffset + localRank)*this->totalRanks,
+                                   collArg.outputGpu.ptr,
+                                   collArg.options.recvcounts + (this->rankOffset + localRank)*this->totalRanks,
+                                   collArg.options.rdispls + (this->rankOffset + localRank)*this->totalRanks,
+                                   collArg.dataType,
+                                   this->comms[localRank],
+                                   this->streams[groupId][localRank][collArg.streamIdx]),
+                        "ncclAlltoAllv");
+        break;
+      case ncclCollSend:
+        CHILD_NCCL_CALL(ncclSend(
+                              collArg.inputGpu.ptr,
+                              collArg.numInputElements,
+                              collArg.dataType,
+                              collArg.options.root,
+                              this->comms[localRank],
+                              this->streams[groupId][localRank][collArg.streamIdx]),
+                        "ncclSend");
+        break;
+      case ncclCollRecv:
+        CHILD_NCCL_CALL(ncclRecv(
+                              collArg.outputGpu.ptr,
+                              collArg.numOutputElements,
+                              collArg.dataType,
+                              collArg.options.root,
+                              this->comms[localRank],
+                              this->streams[groupId][localRank][collArg.streamIdx]),
+                        "ncclRecv");
+        break;
+      default:
+        TEST_ERROR("Unknown func type %d", collArg.funcType);
+        return TEST_FAIL;
+      }
+      return TEST_SUCCESS;
+    };
+
+    if (this->useRankThreading)
+    {
+      // NCCL group state is thread-local. Keep each rank on one OpenMP thread
+      // for the complete group so multi-collective and send/recv groups retain
+      // their original boundaries.
       int errCode = TEST_SUCCESS;
       #ifdef ENABLE_OPENMP
       #pragma omp parallel for num_threads(numThreadsToUse) reduction(max : errCode)
@@ -661,209 +804,84 @@ namespace RcclUnitTesting
       for (int rankIdx = 0; rankIdx < numRanksToExecute; ++rankIdx)
       {
         int const localRank = localRanksToExecute[rankIdx];
-        if (this->verbose && this->useRankThreading)
-          TEST_INFO("Group %d collective %d running rank %d on thread %d", groupId, collId, localRank, getThreadId());
+        if (this->verbose)
+          TEST_INFO("Group %d rank %d submitting %d collectives on thread %d",
+                    groupId, localRank, this->numCollectivesInGroup[groupId], getThreadId());
 
         CHECK_HIP_RANK(errCode, hipSetDevice(this->deviceIds[localRank]));
+        CHILD_NCCL_CALL_RANK(
+          errCode, ncclGroupStart(), "ncclGroupStart ExecuteCollectives rank thread");
 
-        CollectiveArgs& collArg = this->collArgs[groupId][localRank][collId];
-
-        if (this->useRankThreading)
-          CHILD_NCCL_CALL_RANK(errCode, ncclGroupStart(), "ncclGroupStart ExecuteCollectives rank thread");
-
-        switch (collArg.funcType)
+        for (int collId = 0; collId < this->numCollectivesInGroup[groupId]; ++collId)
         {
-        case ncclCollBroadcast:
-          CHILD_NCCL_CALL_RANK(errCode, ncclBroadcast(
-                                        collArg.inputGpu.ptr,
-                                        collArg.outputGpu.ptr,
-                                        collArg.numInputElements,
-                                        collArg.dataType,
-                                        collArg.options.root,
-                                        this->comms[localRank],
-                                        this->streams[groupId][localRank][collArg.streamIdx]),
-                          "ncclBroadcast");
-          break;
-        case ncclCollReduce:
-          CHILD_NCCL_CALL_RANK(errCode, ncclReduce(
-                                     collArg.inputGpu.ptr,
-                                     collArg.outputGpu.ptr,
-                                     collArg.numInputElements,
-                                     collArg.dataType,
-                                     collArg.options.redOp,
-                                     collArg.options.root,
-                                     this->comms[localRank],
-                                     this->streams[groupId][localRank][collArg.streamIdx]),
-                          "ncclReduce");
-          break;
-        case ncclCollAllGather:
-          CHILD_NCCL_CALL_RANK(errCode, ncclAllGather(
-                                        collArg.inputGpu.ptr,
-                                        collArg.outputGpu.ptr,
-                                        collArg.numInputElements,
-                                        collArg.dataType,
-                                        this->comms[localRank],
-                                        this->streams[groupId][localRank][collArg.streamIdx]),
-                          "ncclAllGather");
-          break;
-        case ncclCollReduceScatter:
-          CHILD_NCCL_CALL_RANK(errCode, ncclReduceScatter(
-                                            collArg.inputGpu.ptr,
-                                            collArg.outputGpu.ptr,
-                                            collArg.numOutputElements,
-                                            collArg.dataType,
-                                            collArg.options.redOp,
-                                            this->comms[localRank],
-                                            this->streams[groupId][localRank][collArg.streamIdx]),
-                          "ncclReduceScatter");
-          break;
-        case ncclCollAllReduce:
-          // Use ncclAllReduceWithBias if bias is enabled
-          if (collArg.options.useBias)
+          if (this->verbose)
+            TEST_INFO("Group %d collective %d running rank %d on thread %d",
+                      groupId, collId, localRank, getThreadId());
+          ErrCode const collStatus = submitCollective(localRank, collId);
+          if (collStatus != TEST_SUCCESS)
           {
-            CHILD_NCCL_CALL_RANK(errCode, ncclAllReduceWithBias(
-                                          collArg.inputGpu.ptr,
-                                          collArg.outputGpu.ptr,
-                                          collArg.numInputElements,
-                                          collArg.dataType,
-                                          collArg.options.redOp,
-                                          this->comms[localRank],
-                                          this->streams[groupId][localRank][collArg.streamIdx],
-                                          collArg.options.biasPtr),
-                            "ncclAllReduceWithBias");
+            errCode = collStatus;
+            break;
+          }
+        }
+
+        if (this->useBlocking == false)
+        {
+          ncclResult_t const groupEndState = ncclGroupEnd();
+          if (groupEndState != ncclSuccess && groupEndState != ncclInProgress)
+          {
+            TEST_ERROR("Child process %d fails rank-threaded ncclGroupEnd with code %d",
+                       this->childId, groupEndState);
+            errCode = TEST_FAIL;
           }
           else
           {
-            CHILD_NCCL_CALL_RANK(errCode, ncclAllReduce(
-                                          collArg.inputGpu.ptr,
-                                          collArg.outputGpu.ptr,
-                                          collArg.numInputElements,
-                                          collArg.dataType,
-                                          collArg.options.redOp,
-                                          this->comms[localRank],
-                                          this->streams[groupId][localRank][collArg.streamIdx]),
-                            "ncclAllReduce");
-          }
-          break;
-        case ncclCollGather:
-          CHILD_NCCL_CALL_RANK(errCode, ncclGather(
-                                     collArg.inputGpu.ptr,
-                                     collArg.outputGpu.ptr,
-                                     collArg.numInputElements,
-                                     collArg.dataType,
-                                     collArg.options.root,
-                                     this->comms[localRank],
-                                     this->streams[groupId][localRank][collArg.streamIdx]),
-                          "ncclGather");
-          break;
-        case ncclCollScatter:
-          CHILD_NCCL_CALL_RANK(errCode, ncclScatter(
-                                      collArg.inputGpu.ptr,
-                                      collArg.outputGpu.ptr,
-                                      collArg.numOutputElements,
-                                      collArg.dataType,
-                                      collArg.options.root,
-                                      this->comms[localRank],
-                                      this->streams[groupId][localRank][collArg.streamIdx]),
-                          "ncclScatter");
-          break;
-        case ncclCollAlltoAll:
-          CHILD_NCCL_CALL_RANK(errCode, ncclAlltoAll(
-                                       collArg.inputGpu.ptr,
-                                       collArg.outputGpu.ptr,
-                                       collArg.numInputElements / collArg.totalRanks,
-                                       collArg.dataType,
-                                       this->comms[localRank],
-                                       this->streams[groupId][localRank][collArg.streamIdx]),
-                          "ncclAlltoAll");
-          break;
-        case ncclCollAlltoAllv:
-          CHILD_NCCL_CALL_RANK(errCode, ncclAlltoAllv(
-                                        collArg.inputGpu.ptr,
-                                        collArg.options.sendcounts + (this->rankOffset + localRank)*this->totalRanks,
-                                        collArg.options.sdispls + (this->rankOffset + localRank)*this->totalRanks,
-                                        collArg.outputGpu.ptr,
-                                        collArg.options.recvcounts + (this->rankOffset + localRank)*this->totalRanks,
-                                        collArg.options.rdispls + (this->rankOffset + localRank)*this->totalRanks,
-                                        collArg.dataType,
-                                        this->comms[localRank],
-                                        this->streams[groupId][localRank][collArg.streamIdx]),
-                          "ncclAlltoAllv");
-          break;
-        case ncclCollSend:
-          CHILD_NCCL_CALL_RANK(errCode, ncclSend(
-                                   collArg.inputGpu.ptr,
-                                   collArg.numInputElements,
-                                   collArg.dataType,
-                                   collArg.options.root,
-                                   this->comms[localRank],
-                                   this->streams[groupId][localRank][collArg.streamIdx]),
-                          "ncclSend");
-          break;
-        case ncclCollRecv:
-          CHILD_NCCL_CALL_RANK(errCode, ncclRecv(
-                                   collArg.outputGpu.ptr,
-                                   collArg.numOutputElements,
-                                   collArg.dataType,
-                                   collArg.options.root,
-                                   this->comms[localRank],
-                                   this->streams[groupId][localRank][collArg.streamIdx]),
-                          "ncclRecv");
-          break;
-        default:
-          TEST_ERROR("Unknown func type %d", collArg.funcType);
-          RANK_RESULT(errCode, TEST_FAIL);
-        }
-        if (this->useRankThreading)
-        {
-          if (this->useBlocking == false)
-          {
-            ncclResult_t const groupEndState = ncclGroupEnd();
-            if (groupEndState != ncclSuccess && groupEndState != ncclInProgress)
-            {
-              TEST_ERROR("Child process %d fails rank-threaded ncclGroupEnd with code %d",
-                         this->childId, groupEndState);
-              RANK_RESULT(errCode, TEST_FAIL);
-            }
             CHILD_NCCL_CALL_NON_BLOCKING_RANK(
               errCode, "ncclCommGetAsyncErrorExecuteCollectives rank thread", localRank);
           }
-          else
-          {
-            CHILD_NCCL_CALL_RANK(
-              errCode, ncclGroupEnd(), "ncclGroupEnd ExecuteCollectives rank thread");
-          }
         }
-        else if (this->useBlocking == false)
+        else
         {
-          CHILD_NCCL_CALL_NON_BLOCKING_RANK(errCode, "ncclCommGetAsyncErrorExecuteCollectives", localRank);
+          CHILD_NCCL_CALL_RANK(
+            errCode, ncclGroupEnd(), "ncclGroupEnd ExecuteCollectives rank thread");
         }
 
-        if (this->verbose && this->useRankThreading)
-          TEST_INFO("Group %d collective %d done rank %d on thread %d", groupId, collId, localRank, getThreadId());
+        if (this->verbose)
+          TEST_INFO("Group %d done rank %d on thread %d", groupId, localRank, getThreadId());
       }
-
       CHECK_CALL(static_cast<ErrCode>(errCode));
     }
-    // End the group opened for serial rank submission. Rank-threaded calls were
-    // submitted independently and already polled per communicator above.
-    if (!this->useRankThreading && this->useBlocking == false)
+    else
     {
-      // handle the ncclGroupEnd in case of non-blocking communication
-      ncclResult_t Group_End_state = ncclGroupEnd();
-      if (Group_End_state != ncclSuccess)
+      // Serial rank iteration needs one group spanning all local communicators.
+      CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart ExecuteCollectives");
+      for (int collId = 0; collId < this->numCollectivesInGroup[groupId]; ++collId)
       {
-        for (int localRank = 0; localRank < this->comms.size(); ++localRank)
+        for (int localRank : localRanksToExecute)
         {
           CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
-          CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorGroupEnd", localRank);
+          CHECK_CALL(submitCollective(localRank, collId));
+          if (this->useBlocking == false)
+            CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorExecuteCollectives", localRank);
         }
       }
-    }
-    else if (!this->useRankThreading)
-    {
-      // In case of blocking communication just call ncclGroupEnd
-      CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd ExecuteCollectives");
+
+      if (this->useBlocking == false)
+      {
+        ncclResult_t const groupEndState = ncclGroupEnd();
+        if (groupEndState != ncclSuccess)
+        {
+          for (int localRank = 0; localRank < this->comms.size(); ++localRank)
+          {
+            CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
+            CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorGroupEnd", localRank);
+          }
+        }
+      }
+      else
+      {
+        CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd ExecuteCollectives");
+      }
     }
 
     // Instantiate and launch HIP graph if requested
