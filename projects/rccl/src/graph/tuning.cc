@@ -1222,12 +1222,9 @@ static struct tuningModel tuning_model_11{
       // sizePerRank = totalBytes / nRanks (4 ranks default on gfx1250).
       // Breakpoints from 8_29 (Helios) sweep data.
       /*ReduceScatter*/
-      // RS ≤4MB total handled by DDA; Ring kicks in above. For Ring proto selection:
-      // LL  wins 0 – 1MB/rank (=4MB total); LL128 wins 1MB – 64MB/rank (=256MB total); Simple above.
       {/*LL  (min/max/factor/thread_threshold)*/ {0, 1048576,   1, 16},
        /*LL128 (min/max/factor/thread_threshold)*/ {1048576, 4194304, 1, 64}},
       /*AllGather*/
-      // LL  wins 0 – 1MB/rank (=4MB total); LL128 wins 1MB – 32MB/rank (=128MB total); Simple above.
       {/*LL  (min/max/factor/thread_threshold)*/ {0, 1048576,   1, 16},
        /*LL128 (min/max/factor/thread_threshold)*/ {1048576, 16777216, 1, 64}},
       /*AllReduce*/
