@@ -1292,7 +1292,6 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again) {
   hipStream_t stream;
   hipGraphNode_t allocNodeA, freeNodeA;
   hipMemAllocNodeParams allocParam;
-  hipError_t ret;
 
   HIP_CHECK(hipDeviceGraphMemTrim(0));
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -1315,9 +1314,12 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again) {
   HIP_CHECK(hipGraphLaunch(graphExec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  // Free alloc pointer manually again, it should give error
-  ret = hipFree(temp);
+  // ROCM-29915: hipFree() on graph-managed memory is caller error with undefined
+  // behavior, so no specific return value can be required of it.
+#if 0
+  hipError_t ret = hipFree(temp);
   REQUIRE(ret == hipErrorInvalidValue);
+#endif
 
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphExecDestroy(graphExec));
