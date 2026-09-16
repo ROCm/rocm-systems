@@ -284,19 +284,26 @@ ncclConfig_t
 
   (since 2.30)
 
-  Per-communicator override of :ref:`NCCL_GRAPH_STREAM_ORDERING`. ``1`` keeps
+  Per-communicator setting, honored unless
+  :ref:`NCCL_GRAPH_STREAM_ORDERING` is set to ``0`` or ``1``. ``1`` keeps
   NCCL's default capture-time serialization of communication kernels. ``0``
   disables it for this communicator—kernels are placed on the capture stream
   and the application must guarantee correct ordering (see
   :ref:`NCCL_GRAPH_STREAM_ORDERING`).
 
   Defaults to ``NCCL_CONFIG_UNDEF_INT`` (inherits
-  :ref:`NCCL_GRAPH_STREAM_ORDERING`). ``0`` or ``1`` overrides the env var
-  for this communicator.
+  :ref:`NCCL_GRAPH_STREAM_ORDERING`). Setting that environment variable to
+  ``0`` or ``1`` overrides this field.
 
   ``graphStreamOrdering=0`` requires ``graphUsageMode`` ``0`` or ``1``
-  (mixing **off**). Combining it with ``graphUsageMode=2`` is **not
-  supported**; see :ref:`NCCL_GRAPH_STREAM_ORDERING`.
+  (mixing **off**). If it is combined with ``graphUsageMode=2``, NCCL emits a
+  warning and forces ``graphStreamOrdering`` to ``1``; communicator creation
+  still succeeds. See :ref:`NCCL_GRAPH_STREAM_ORDERING`. NCCL enforces this
+  compatibility fallback within a single communicator only. Communicators
+  created by ``ncclCommSplit`` with ``splitShare`` share one internal
+  serialization event with their parent, so ordering ``0`` on one and
+  ``graphUsageMode=2`` on another that shares those resources is equally
+  unsupported and is **not** diagnosed.
 
   **Mixed values on one GPU:** A communicator set to ``1`` still receives
   NCCL's internal serialization for its own kernels, but NCCL does **not**
