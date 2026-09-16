@@ -45,7 +45,11 @@ template <typename Callback>
 decltype(auto)
 with_parsed_simulation_config_json(const std::string &json, const std::string &schema_text,
                                    Callback &&callback, bool skip_unexpected_fields = true) {
-  flatbuffers::Parser parser;
+  flatbuffers::IDLOptions options;
+  // Preserve an explicit scalar default (notably cpu_dispatch_threads=1),
+  // whose meaning differs from an omitted automatic setting in JSON.
+  options.force_defaults = true;
+  flatbuffers::Parser parser(options);
   parser.opts.skip_unexpected_fields_in_json = skip_unexpected_fields;
   if (!parser.Parse(schema_text.c_str()))
     throw std::runtime_error("Failed to parse schema: " + std::string(parser.error_));

@@ -79,8 +79,8 @@ jobs:
       contents: read
       id-token: write
 
-  multi_arch_ci_summary:
-    name: Multi-Arch CI Summary
+  multi_arch_ci_asan_nightly_summary:
+    name: Multi-Arch CI ASAN Nightly Summary
     if: always()
     needs:
       - setup

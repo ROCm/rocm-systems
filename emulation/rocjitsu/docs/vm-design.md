@@ -243,10 +243,13 @@ workload. Hot-hook callback serialization is enforced inside
 budget nor reconstructs the pool.
 
 One pool is shared by all CPs in an SoC, so retained worker counts do not
-multiply with the XCD count. The current pool carries one pool-wide submission
-state, however, and therefore serializes complete batches from same-SoC CPs.
-Simdojo's `num_threads` can still run those CP control paths on separate XCD
-partitions, but it does not multiply the pool's same-SoC CU execution width.
+multiply with the XCD count. Each submission owns its task index, results,
+exception state and worker join. A short pool mutex protects pending assignments
+and worker ownership; it is released before CU execution. Simdojo's `num_threads`
+can therefore drive concurrent submissions from separate XCD partitions. With
+E engine threads and dispatch width D, at most E + D - 1 CU threads can execute
+at once, subject to available work. Each CP keeps its own scratch storage alive
+and applies stateful completion actions only after its submission joins.
 Different SoCs own independent pools.
 
 A functional quantum is a number of CU `step()` iterations rather than a count

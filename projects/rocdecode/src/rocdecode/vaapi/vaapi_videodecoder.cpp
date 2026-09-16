@@ -1083,12 +1083,15 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
             break;
         }
         case rocDecVideoCodec_AV1: {
-#if VA_CHECK_VERSION(1, 23, 0)
             if (dec_cap->bit_depth_minus_8 == 4) {
+                // AV1 12-bit requires AV1 Profile 2 (Professional), which is only expressible with
+                // libva >= 1.23. On older libva it must not fall back to Profile 0 (8/10-bit), which
+                // would falsely report 12-bit as supported; leave va_profile as VAProfileNone so it is
+                // reported unsupported.
+#if VA_CHECK_VERSION(1, 23, 0)
                 va_profile = VAProfileAV1Profile2;
-            } else
 #endif
-            {
+            } else {
                 va_profile = VAProfileAV1Profile0;
             }
             break;
@@ -1098,6 +1101,22 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
             FunctionExitLog(g_rocdec_logger);
             return ROCDEC_SUCCESS;
         }
+    }
+
+    // A codec/bit-depth combination that maps to no VA profile (e.g. HEVC or VP9 12-bit) leaves
+    // va_profile as VAProfileNone. Some drivers advertise VAProfileNone in the profile list (for the
+    // video post-processing entrypoint), so it would pass the profile-list match below and then fail
+    // vaCreateConfig() for VAEntrypointVLD. Treat it as an unsupported codec configuration instead.
+    if (va_profile == VAProfileNone) {
+        dec_cap->is_supported = 0;
+        dec_cap->num_decoders = 0;
+        dec_cap->output_format_mask = 0;
+        dec_cap->max_width = 0;
+        dec_cap->max_height = 0;
+        dec_cap->min_width = 0;
+        dec_cap->min_height = 0;
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_SUCCESS;
     }
 
     int i;

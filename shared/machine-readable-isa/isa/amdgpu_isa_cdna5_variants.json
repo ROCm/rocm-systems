@@ -46,10 +46,6 @@
   ],
   "model_only_instructions": [
     "V_PK_FMA_F64",
-    "V_PK_MUL_F64",
-    "V_PK_ADD_F64",
-    "V_PK_MAX_NUM_F64",
-    "V_PK_MIN_NUM_F64",
     "V_WMMA_F64_16X16X4_F64"
   ],
   "encodings": [

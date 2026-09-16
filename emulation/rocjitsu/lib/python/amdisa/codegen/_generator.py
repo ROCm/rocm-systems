@@ -109,37 +109,39 @@ class _Literal32Widening(Enum):
     F64_HIGH_BITS = 'F64HighBits'
 
 
-# Keep every shipped 64-bit source format explicit. PK_F32 replicates its literal
-# into both DWORDs, while I64 and F64 reinterpret the extension word by type.
-_SIMM32_64BIT_WIDENING = {
-    'FMT_NUM_B32': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_B64': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_BF16': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_BF8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_F16': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_F32': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_FP8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_I8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_M64': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_PK16_U4': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_PK2_B32': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_PK2_F32': _Literal32Widening.REPLICATE_32,
-    'FMT_NUM_PK2_U32': _Literal32Widening.REPLICATE_32,
-    'FMT_NUM_PK4_BF16': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_PK4_F16': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_PK8_BF8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_PK8_FP8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_PK8_I8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_U64': _Literal32Widening.ZERO_EXTEND,
-    'FMT_WMMA_AB_16X16_BF8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_WMMA_AB_16X16_FP8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_WMMA_AB_16X16_IU8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_WMMA_AB_16X32_IU4': _Literal32Widening.ZERO_EXTEND,
-    'FMT_WMMA_AB_16X4_F32': _Literal32Widening.ZERO_EXTEND,
-    'FMT_WMMA_AB_IU4': _Literal32Widening.ZERO_EXTEND,
-    'FMT_WMMA_INDEX_SET2': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_I64': _Literal32Widening.SIGN_EXTEND,
-    'FMT_NUM_F64': _Literal32Widening.F64_HIGH_BITS,
+# Keep every shipped wide-source signature explicit. PK_F32 replicates its
+# literal into both DWORDs, while I64 and F64 reinterpret the extension word by
+# type. Packed F64 is a 128-bit operand containing two broadcast 64-bit values.
+_SIMM32_LITERAL_WIDENING = {
+    (64, 'FMT_NUM_B32'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_B64'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_BF16'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_BF8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_F16'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_F32'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_FP8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_I8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_M64'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_PK16_U4'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_PK2_B32'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_PK2_F32'): _Literal32Widening.REPLICATE_32,
+    (64, 'FMT_NUM_PK2_U32'): _Literal32Widening.REPLICATE_32,
+    (64, 'FMT_NUM_PK4_BF16'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_PK4_F16'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_PK8_BF8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_PK8_FP8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_PK8_I8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_U64'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_WMMA_AB_16X16_BF8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_WMMA_AB_16X16_FP8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_WMMA_AB_16X16_IU8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_WMMA_AB_16X32_IU4'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_WMMA_AB_16X4_F32'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_WMMA_AB_IU4'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_WMMA_INDEX_SET2'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_I64'): _Literal32Widening.SIGN_EXTEND,
+    (64, 'FMT_NUM_F64'): _Literal32Widening.F64_HIGH_BITS,
+    (128, 'FMT_NUM_PK2_F64'): _Literal32Widening.F64_HIGH_BITS,
 }
 
 _LITERAL_ENCODING_OPERANDS = {
@@ -1209,7 +1211,7 @@ class CodeGenerator:
             )
         if operand_type == 'OPR_SIMM16' or opnd.size == 16:
             literal_expr = f'({literal_expr} & 0xFFFFu)'
-        widening = CodeGenerator._literal_operand_64bit_widening(
+        widening = CodeGenerator._literal_operand_simm32_widening(
             opnd, operand_type, arch_name, inst_name, enc_name
         )
         if widening is not None:
@@ -1224,23 +1226,29 @@ class CodeGenerator:
         )
 
     @staticmethod
-    def _literal_operand_64bit_widening(
+    def _literal_operand_simm32_widening(
         opnd: Operand,
         operand_type: str,
         arch_name: str,
         inst_name: str,
         enc_name: str,
     ) -> _Literal32Widening | None:
-        if operand_type != 'OPR_SIMM32' or not opnd.is_input or opnd.size != 64:
+        if operand_type != 'OPR_SIMM32' or not opnd.is_input:
             return None
+        signature = (opnd.size, opnd.data_format_name)
         try:
-            return _SIMM32_64BIT_WIDENING[opnd.data_format_name]
+            return _SIMM32_LITERAL_WIDENING[signature]
         except KeyError as exc:
+            # Every 64-bit SIMM32 input requires an explicit policy. Wider
+            # packed inputs retain the default immediate semantics unless
+            # listed above.
+            if opnd.size != 64:
+                return None
             data_format = opnd.data_format_name or '<missing>'
             raise ValueError(
                 f'architecture {arch_name!r}, instruction {inst_name!r}, encoding '
-                f'{enc_name!r}: 64-bit SIMM32 input operand {opnd.name!r} has '
-                f'unsupported data format {data_format!r}'
+                f'{enc_name!r}: SIMM32 input operand {opnd.name!r} has no widening '
+                f'policy for size {opnd.size} and data format {data_format!r}'
             ) from exc
 
     @staticmethod
@@ -10383,12 +10391,12 @@ class CodeGenerator:
                             f'<< "{inst.name} requires its GLOBAL segment";'
                         )
 
-                    # LLVM's public gfx1251 profiles define the packed U64
-                    # operations without op_sel.  The profile and corresponding
-                    # MC vectors are permanently linked here:
-                    # https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/lib/Target/AMDGPU/VOP3PInstructions.td#L147-L162
-                    # https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s#L257-L403
-                    # https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/SIRegisterInfo.td#L887-L917
+                    # LLVM's public gfx1251 profiles define the packed U64 and
+                    # F64 binary operations without op_sel.  The profile and
+                    # corresponding MC vectors are permanently linked here:
+                    # https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/lib/Target/AMDGPU/VOP3PInstructions.td#L130-L162
+                    # https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s#L1-L403
+                    # https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/SIRegisterInfo.td#L875-L920
                     # https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/Disassembler/AMDGPUDisassembler.cpp#L2133-L2143
                     # These references establish the operand profile and
                     # encoding, not execution ordering for combined modifiers.
@@ -10400,20 +10408,26 @@ class CodeGenerator:
                     # tuple's first selector and its width-independent source
                     # selector set.
                     if inst_sem is not None and inst_sem.semantic_class in {
+                        'pk_binop_f64',
                         'pk_binop_u64',
                         'pk_lshl_add_u64',
                     }:
                         raw_inst = (
                             f'reinterpret_cast<const {factory_op_encoding}*>(inst)'
                         )
+                        layout_name = (
+                            'packed F64'
+                            if inst_sem.semantic_class == 'pk_binop_f64'
+                            else 'packed U64'
+                        )
                         factory_validation_parts.append(
                             f'if ({raw_inst}->opsel != 0u || '
                             f'{raw_inst}->opsel_hi != 3u || '
                             f'{raw_inst}->opsel_hi_2 != 1u) '
                             f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
-                            'packed U64 element layout";'
+                            f'{layout_name} element layout";'
                         )
-                        if inst_sem.semantic_class == 'pk_binop_u64':
+                        if inst_sem.semantic_class in {'pk_binop_f64', 'pk_binop_u64'}:
                             factory_validation_parts.append(
                                 f'if ({raw_inst}->src2 != 128u || '
                                 f'({raw_inst}->neg & 4u) != 0u || '
@@ -10421,7 +10435,7 @@ class CodeGenerator:
                                 f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
                                 'unused src2 encoding";'
                             )
-                        else:
+                        if inst_sem.semantic_class == 'pk_lshl_add_u64':
                             factory_validation_parts.append(
                                 f'if ({raw_inst}->clamp != 0u || '
                                 f'{raw_inst}->neg != 0u || '
@@ -10449,7 +10463,7 @@ class CodeGenerator:
                                 invalid_sgpr_span = f'{raw_value} > {max_sgpr}u'
                                 if opnd.size == 128:
                                     # SGPR104_128 is a named VS_128 member:
-                                    # s104:s105 provide the scalar U64 value,
+                                    # s104:s105 provide the scalar 64-bit value,
                                     # while vcc_lo:vcc_hi complete the tuple.
                                     invalid_sgpr_span = (
                                         f'({invalid_sgpr_span} && {raw_value} != 104u)'
@@ -10509,7 +10523,7 @@ class CodeGenerator:
                                 factory_validation_parts.append(
                                     f'if (!({valid_width_specific})) '
                                     f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
-                                    f'{opnd.name} packed U64 source selector";'
+                                    f'{opnd.name} {layout_name} source selector";'
                                 )
 
                     # Flat segment-aware operands: adjust addr width and add
