@@ -75,7 +75,7 @@ def main():
             args.command,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
+            universal_newlines=True,
             timeout=args.timeout,
             check=False,
         )
