@@ -82,8 +82,9 @@ jobs:
             enable_tsan: 0
             enable_expensive_checks: 0
             sanitizer_runtime: STATIC
-            # The vfio-user transport is Linux-only, so only this leg compiles
-            # and runs its tests; the option defaults to OFF elsewhere.
+            # The vfio-user tests are compiled and run in this leg for now;
+            # the sanitized legs keep the option off until the transport has
+            # been through those runs as well, which is planned separately.
             enable_vfio: 1
             run_simulator_corpus: true
             # Each simulator process can use many host threads. Bound Release
