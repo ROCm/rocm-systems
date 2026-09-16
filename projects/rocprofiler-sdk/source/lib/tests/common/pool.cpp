@@ -335,13 +335,13 @@ TEST(common, pool_clear_races_acquire_release)
 }
 
 // pool<Tp>::acquire(FuncT&&, Args&&...) runs the callable on every acquire, reused objects
-// included, not only on the ones it had to create. hsa::ensure_hsa_signal depends on that: the
+// included, not only on the ones it had to create. hsa::construct_hsa_signal depends on that: the
 // signal pool's batch constructor is a no-op once finalization has started, so a batch grown
 // then holds objects whose handle is null, and this call is what lazily creates their signal.
 // Deleting the call would leave those objects null instead, and would also stop resetting the
 // value of every reused signal.
 //
-// This pins that precondition, not the signal leak it guards: ensure_hsa_signal needs HSA, so
+// This pins that precondition, not the signal leak it guards: construct_hsa_signal needs HSA, so
 // nothing here reaches it.
 TEST(common, pool_acquire_runs_ctor_on_reused_object)
 {

@@ -38,7 +38,7 @@ signal_pool_exists()
     return (common::static_object<common::container::pool<signal_t>>::get() != nullptr);
 }
 
-// the other half of the pooled signal's lifecycle: ensure_hsa_signal creates the handle on
+// the other half of the pooled signal's lifecycle: construct_hsa_signal creates the handle on
 // acquire, this destroys it once pool<Tp>::clear() retires the object.
 void
 destroy_hsa_signal(signal_t& signal)
@@ -48,7 +48,7 @@ destroy_hsa_signal(signal_t& signal)
     // object through packet_data_t::pooled_signal afterwards -- and it exempts the pooled
     // completion signal from destruction by comparing the dispatch-time copy of the handle
     // against this field. Nulling turns that exemption off and destroys the handle a second
-    // time. Nor is that read a data race: the only other writer is ensure_hsa_signal, which
+    // time. Nor is that read a data race: the only other writer is construct_hsa_signal, which
     // pool::acquire() runs on every acquire, and a retired object can never be re-acquired.
     if(get_core_table() && get_core_table()->hsa_signal_destroy_fn)
         get_core_table()->hsa_signal_destroy_fn(signal.value);
@@ -56,11 +56,11 @@ destroy_hsa_signal(signal_t& signal)
 }  // namespace
 
 signal_t&
-ensure_hsa_signal(signal_t&          signal,
-                  hsa_signal_value_t initial_value,
-                  uint32_t           num_consumers,
-                  const hsa_agent_t* consumers,
-                  uint64_t           attributes)
+construct_hsa_signal(signal_t&          signal,
+                     hsa_signal_value_t initial_value,
+                     uint32_t           num_consumers,
+                     const hsa_agent_t* consumers,
+                     uint64_t           attributes)
 {
     // pool<Tp>::acquire(FuncT&&, Args&&...) runs this on every acquire, reused objects
     // included, and nothing in the pool destroys a handle between acquires: release() is
@@ -108,7 +108,7 @@ get_signal_pool()
 
     static auto*& pool = common::static_object<common::container::pool<signal_t>>::construct(
         std::piecewise_construct, default_signal_pool_size, [](signal_t& signal) {
-            if(registration::get_fini_status() == 0) ensure_hsa_signal(signal, 0, 0, nullptr, 0);
+            if(registration::get_fini_status() == 0) construct_hsa_signal(signal, 0, 0, nullptr, 0);
         });
 
     return pool;

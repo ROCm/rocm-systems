@@ -34,9 +34,9 @@ namespace rocprofiler
 namespace hsa
 {
 /**
- * @brief Make @p signal hold a usable HSA signal whose value is @p initial_value.
+ * @brief Construct @p signal's HSA signal if it has none, and set its value to @p initial_value.
  *
- * Creates a signal only when @p signal has none, i.e. when its handle is zero. An existing
+ * Constructs a signal only when @p signal has none, i.e. when its handle is zero. An existing
  * handle is kept and reused rather than replaced, because nothing in the pool destroys a
  * handle between acquires and replacing it would leak the old one. Either way the signal's
  * value is @p initial_value on return, so a reused signal never carries the value its
@@ -53,7 +53,7 @@ namespace hsa
  *
  * Example:
  * @code{.cpp}
- *      pool->acquire(ensure_hsa_signal, 0, 0, nullptr, 0);
+ *      pool->acquire(construct_hsa_signal, 0, 0, nullptr, 0);
  * @endcode
  *
  * @param signal in/out; created when its handle is zero, otherwise reused
@@ -64,11 +64,11 @@ namespace hsa
  * @return signal_t& the same @p signal
  */
 signal_t&
-ensure_hsa_signal(signal_t&          signal,
-                  hsa_signal_value_t initial_value = 0,
-                  uint32_t           num_consumers = 0,
-                  const hsa_agent_t* consumers     = nullptr,
-                  uint64_t           attributes    = 0);
+construct_hsa_signal(signal_t&          signal,
+                     hsa_signal_value_t initial_value = 0,
+                     uint32_t           num_consumers = 0,
+                     const hsa_agent_t* consumers     = nullptr,
+                     uint64_t           attributes    = 0);
 
 /**
  * @brief Get the signal pool object
