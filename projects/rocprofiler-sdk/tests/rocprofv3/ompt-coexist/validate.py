@@ -34,7 +34,9 @@
 #
 # A tool that does hold the role may also hand it back, by calling the public
 # rocprofiler_ompt_start_tool directly. That path bypasses the rocprofv3 entry point
-# altogether, so whether OMPT is collected has to follow the command line there too.
+# altogether, so rocprofiler_ompt_start_tool decides, accepting the role only when a
+# client subscribes to OMPT. The mock records the result it was handed, which is what
+# the accepted/declined validators read.
 #
 # OMPT is a rocpd-only trace, so rocprofv3's side is read from the rocpd database
 # and the other tool's side from the JSON summary it writes at teardown.
@@ -100,10 +102,10 @@ def test_other_tool_got_role(mock_summary):
 
 def test_deferback_rocprofv3_collected_ompt(rocpd_conn):
     """A tool that holds the role may hand it back by calling
-    rocprofiler_ompt_start_tool directly. rocprofv3 was asked to collect OMPT, so
-    accepting the hand-back must produce the same records as holding the role from
-    the start -- even though the hand-back arrives before main(), so neither of the
-    usual rocprofv3 initialization points has run."""
+    rocprofiler_ompt_start_tool directly. rocprofv3 was asked to collect OMPT, so its
+    OMPT contexts are registered, the hand-back is accepted, and the records must match
+    holding the role from the start. The hand-back arrives before main(), with
+    rocprofiler-sdk already initialized by its own library constructor."""
     assert (
         _ompt_record_count(rocpd_conn) > 0
     ), "rocprofv3 was handed the OMPT tool role back but recorded no OMPT records"
@@ -111,8 +113,9 @@ def test_deferback_rocprofv3_collected_ompt(rocpd_conn):
 
 def test_deferback_without_request_collects_no_ompt(rocpd_conn):
     """The hand-back reaches rocprofiler-sdk directly, bypassing the rocprofv3 entry
-    point that consults the command line. It must still decline: another tool cannot
-    switch on collection that was never requested."""
+    point that consults the command line. rocprofv3 registered no OMPT contexts, so
+    rocprofiler_ompt_start_tool must decline the role: another tool cannot switch on
+    collection that was never requested."""
     count = _ompt_record_count(rocpd_conn)
     assert count == 0, (
         f"rocprofv3 recorded {count} OMPT record(s) after a hand-back, without being "
@@ -126,14 +129,42 @@ def test_deferback_other_tool_forwarded(mock_summary):
     assert (
         mock_summary is not None
     ), "the other OMPT tool wrote no summary, so it was never loaded"
+    assert mock_summary[
+        "forwarded"
+    ], "the other OMPT tool never called rocprofiler_ompt_start_tool"
     assert not mock_summary[
         "initialized"
     ], "the other OMPT tool kept the role instead of handing it back"
 
 
+def test_deferback_handback_accepted(mock_summary):
+    """rocprofv3 was asked to collect OMPT, so rocprofiler_ompt_start_tool must accept
+    the hand-back and return a result table to the tool offering it."""
+    assert (
+        mock_summary is not None
+    ), "the other OMPT tool wrote no summary, so it was never loaded"
+    assert mock_summary["forward_accepted"], (
+        "rocprofiler_ompt_start_tool declined the OMPT tool role even though rocprofv3 "
+        "was asked to trace OMPT"
+    )
+
+
+def test_deferback_handback_declined(mock_summary):
+    """rocprofv3 registered no OMPT contexts, so rocprofiler_ompt_start_tool must
+    decline the hand-back and return null: another tool cannot switch on collection
+    that was never requested."""
+    assert (
+        mock_summary is not None
+    ), "the other OMPT tool wrote no summary, so it was never loaded"
+    assert not mock_summary["forward_accepted"], (
+        "rocprofiler_ompt_start_tool took the OMPT tool role from another tool without "
+        "any client subscribing to OMPT"
+    )
+
+
 def test_kernel_dispatch_tracing_intact(rocpd_conn):
-    """Declining the OMPT role costs rocprofv3 nothing else: the tracing it was
-    asked for on the command line must still land in the rocpd database."""
+    """The tracing rocprofv3 was asked for on the command line must land in the rocpd
+    database whether or not it also holds the OMPT tool role."""
     assert (
         _kernel_dispatch_count(rocpd_conn) > 0
     ), "rocprofv3 was run with --kernel-trace but recorded no kernel dispatches"
