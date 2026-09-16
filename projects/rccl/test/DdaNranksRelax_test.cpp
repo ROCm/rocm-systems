@@ -250,12 +250,19 @@ TEST(DdaNranksRelaxIsolatedTest, TreeThresholdDivisibilityAtRelaxedRankCount)
                 mockComm.get(), sendbuff, recvbuff, 196612, ncclFloat32, ncclSum))
                 << "196612 % 3 == 1 must not be eligible for the tree path";
 
-            // 196611 % 3 == 0 (divisible), but the per-rank slice (65537 floats =
-            // 262148 B) is not 16-byte aligned: 262148 % 16 == 4. Divisibility
-            // alone is not sufficient for the tree path.
+            // At nRanks=2, 196612 floats = 786448 B: passes the total-bytes 16-byte
+            // check (786448 % 16 == 0) and is divisible by nRanks (196612 % 2 == 0),
+            // but the per-rank slice (98306 floats = 393224 B) is not itself
+            // 16-byte aligned: 393224 % 16 == 8. Total-bytes alignment and
+            // divisibility are each individually satisfied here; only the
+            // per-rank-slice check (the one specific to the tree path) catches
+            // this, so this case actually exercises it -- unlike a count that
+            // also fails the total-bytes check, which would be rejected earlier
+            // regardless of the tree-specific logic.
+            mockComm.comm.nRanks = 2;
             EXPECT_FALSE(ncclAllReduceDdaIpcEligible(
-                mockComm.get(), sendbuff, recvbuff, 196611, ncclFloat32, ncclSum))
-                << "196611 % 3 == 0 but the per-rank slice is not 16-byte aligned";
+                mockComm.get(), sendbuff, recvbuff, 196612, ncclFloat32, ncclSum))
+                << "196612 % 2 == 0 but the per-rank slice is not 16-byte aligned";
         },
         {{"RCCL_DDA_NRANKS_RELAX", "1"}});
 }
