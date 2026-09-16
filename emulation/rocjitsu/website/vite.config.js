@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => ({
   publicDir: mode === 'fixtures' ? writeDashboardFixtureSite() : false,
   plugins: [react()],
   preview: {
-    port: 4173,
+    port: mode === 'fixtures' ? 4174 : 4173,
     strictPort: true,
   },
   build: {

@@ -136,7 +136,7 @@ export default function ResultsTable({ results, run, baseline, repository, searc
   };
 
   return (
-    <Paper data-testid="latest-results" variant="outlined" sx={{ overflow: 'hidden', borderRadius: 3, boxShadow: 1 }}>
+    <Paper data-testid="latest-results" variant="outlined" sx={{ overflow: 'hidden', boxShadow: 1 }}>
       <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, gap: 1.5, p: { xs: 2, sm: 2.5 } }}>
         <Box>
           <Typography variant="h2">Latest Results</Typography>
@@ -146,6 +146,7 @@ export default function ResultsTable({ results, run, baseline, repository, searc
         </Box>
         <TextField
           size="small"
+          disabled={!run}
           value={search}
           onChange={(event) => {
             setPage(0);
@@ -202,7 +203,11 @@ export default function ResultsTable({ results, run, baseline, repository, searc
               </TableRow>
             ))}
             {rows.length === 0 && (
-              <TableRow><TableCell colSpan={9} align="center" sx={{ py: 6, color: 'text.secondary' }}>No benchmarks match this search.</TableCell></TableRow>
+              <TableRow>
+                <TableCell colSpan={9} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                  {run ? 'No benchmarks match this search.' : '—'}
+                </TableCell>
+              </TableRow>
             )}
           </TableBody>
         </Table>
@@ -218,7 +223,7 @@ export default function ResultsTable({ results, run, baseline, repository, searc
           setRowsPerPage(Number(event.target.value));
           setPage(0);
         }}
-        labelDisplayedRows={({ from, to, count }) => `${from}–${to} of ${count} results`}
+        labelDisplayedRows={({ from, to, count }) => run ? `${from}–${to} of ${count} results` : '—'}
         showFirstButton
         showLastButton
         sx={{

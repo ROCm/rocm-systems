@@ -108,7 +108,7 @@ function ResponsiveTags({ values, getItemProps }) {
   );
 }
 
-function MultiSelect({ label, options, value, onChange }) {
+function MultiSelect({ label, options, value, onChange, disabled = false }) {
   const allSelected = options.length > 0 && value.length === options.length;
   const someSelected = value.length > 0 && !allSelected;
   const groupName = label.toLowerCase();
@@ -117,6 +117,7 @@ function MultiSelect({ label, options, value, onChange }) {
     <Box data-testid={`${groupName}-filter`} sx={{ minWidth: 0 }}>
       <Autocomplete
         multiple
+        disabled={disabled}
         disableCloseOnSelect
         options={[CHECK_ALL, ...options]}
         value={value}
@@ -166,7 +167,7 @@ function MultiSelect({ label, options, value, onChange }) {
   );
 }
 
-export default function FiltersBar({ data, state }) {
+export default function FiltersBar({ data, state, disabled = false }) {
   return (
     <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 3, boxShadow: 1 }}>
       <Stack direction="row" sx={{ alignItems: 'center', gap: 1, mb: 1.5 }}>
@@ -177,8 +178,8 @@ export default function FiltersBar({ data, state }) {
         </Typography>
       </Stack>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'minmax(280px, 360px) minmax(360px, 460px)' }, gap: 1.25 }}>
-        <MultiSelect label="Targets" options={data.targets} value={state.targets} onChange={state.setTargets} />
-        <MultiSelect label="Suites" options={data.suites} value={state.suites} onChange={state.setSuites} />
+        <MultiSelect label="Targets" options={data.targets} value={state.targets} onChange={state.setTargets} disabled={disabled} />
+        <MultiSelect label="Suites" options={data.suites} value={state.suites} onChange={state.setSuites} disabled={disabled} />
       </Box>
     </Paper>
   );

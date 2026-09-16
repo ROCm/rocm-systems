@@ -39,7 +39,9 @@ export default function LargestChanges({ changes, candidate, baseline }) {
         ))}
       </Stack>
       {changes.length === 0 ? (
-        <Typography color="text.secondary" sx={{ py: 8, textAlign: 'center' }}>No comparable results in this selection.</Typography>
+        <Typography color="text.secondary" sx={{ py: 8, textAlign: 'center' }}>
+          {candidate ? 'No comparable results in this selection.' : '—'}
+        </Typography>
       ) : changes.map((item, index) => {
         const changeState = classifyDurationChange(item.delta, NOISE_TOLERANCE);
         const tone = changeTone(changeState);

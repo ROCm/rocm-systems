@@ -474,6 +474,13 @@ async function fetchJsonResource(url, {
     if (!response.ok) {
       throw new Error(`Unable to load ${resourceType} ${url} (${response.status} ${response.statusText})`);
     }
+    const contentType = response.headers?.get?.('content-type');
+    if (contentType && !contentType.toLowerCase().includes('json')) {
+      if (resourceType === 'dashboard metadata' || resourceType === 'dashboard data index') {
+        throw new Error('No available test data');
+      }
+      throw new Error(`Unable to parse ${resourceType} ${url} as JSON: received ${contentType}`);
+    }
     try {
       return await response.json();
     } catch (parseError) {

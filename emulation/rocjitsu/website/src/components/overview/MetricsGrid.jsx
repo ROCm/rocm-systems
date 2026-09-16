@@ -35,9 +35,10 @@ function MetricCard({ label, value, caption, icon, tone = 'primary', badge }) {
 }
 
 export default function MetricsGrid({ metrics, candidate, baseline }) {
+  const hasResults = metrics.total > 0;
   const baselineState = classifyDurationChange(metrics.durationDelta);
   const baselineTone = changeTone(baselineState);
-  const healthy = metrics.failed === 0;
+  const healthy = hasResults && metrics.failed === 0;
   return (
     <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' }, gap: 1.5 }}>
       <MetricCard
@@ -45,6 +46,7 @@ export default function MetricsGrid({ metrics, candidate, baseline }) {
         value={formatDuration(metrics.duration)}
         caption="Selected tests in the overview run"
         icon={<TimerRoundedIcon />}
+        tone={hasResults ? 'primary' : 'neutral'}
       />
       <MetricCard
         label="Perf change"
@@ -67,17 +69,21 @@ export default function MetricsGrid({ metrics, candidate, baseline }) {
       />
       <MetricCard
         label="Overview run coverage"
-        value={`${metrics.completed} / ${metrics.total}`}
+        value={hasResults ? `${metrics.completed} / ${metrics.total}` : '—'}
         caption="Selected tests completed in the overview run"
         icon={<FactCheckRoundedIcon />}
-        tone={metrics.completeness === 100 ? 'success' : 'warning'}
+        tone={!hasResults ? 'neutral' : metrics.completeness === 100 ? 'success' : 'warning'}
       />
       <MetricCard
         label="Run health"
-        value={healthy ? 'Healthy' : `${metrics.failed} issue${metrics.failed === 1 ? '' : 's'}`}
-        caption={healthy ? 'No failures or timeouts in selected tests' : 'Review incomplete cases in selected tests'}
+        value={!hasResults ? '—' : healthy ? 'Healthy' : `${metrics.failed} issue${metrics.failed === 1 ? '' : 's'}`}
+        caption={!hasResults
+          ? 'No run health data is available'
+          : healthy
+            ? 'No failures or timeouts in selected tests'
+            : 'Review incomplete cases in selected tests'}
         icon={<HealthAndSafetyRoundedIcon />}
-        tone={healthy ? 'success' : 'error'}
+        tone={!hasResults ? 'neutral' : healthy ? 'success' : 'error'}
       />
     </Box>
   );

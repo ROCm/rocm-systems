@@ -76,7 +76,7 @@ export function previousCompletedTestResult(runs, candidate, testId) {
 }
 
 export function compareRuns(candidate, baseline, filters) {
-  if (!candidate || !baseline) return [];
+  if (!candidate) return [];
   const baselineTests = resultMap(baseline);
   return candidate.tests.filter((test) => testMatches(test, filters)).map((test) => {
     const previous = baselineTests.get(test.testId);

@@ -58,6 +58,37 @@ test('compares controlled plugins for every target without a target picker', asy
   await expect(dialog.getByText('Problem Details', { exact: true })).toBeVisible();
 });
 
+test('shows neutral copy when only baseline plugin data is published', async ({ page }) => {
+  await page.route('**/data/index.json', async (route) => {
+    const response = await route.fetch();
+    const index = await response.json();
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ...index,
+        runFiles: index.runFiles.filter((runFile) => !/-(?:asan|tsan|ubsan)\.json$/.test(runFile)),
+      }),
+    });
+  });
+
+  await page.goto('/');
+  await page.getByRole('tab', { name: 'Plugin Comparison' }).click();
+
+  const emptyState = page.getByTestId('plugin-comparison-empty');
+  await expect(emptyState.getByText('No sanitizer comparison runs available')).toBeVisible();
+  await expect(emptyState).toContainText('No vanilla baseline or sanitizer comparison runs are available');
+  await expect(emptyState).toContainText('at least one sanitizer run for the same commit');
+  await expect(emptyState).not.toHaveAttribute('role', 'alert');
+  const view = page.getByTestId('plugin-comparison');
+  await expect(view.getByRole('combobox', { name: 'Comparison experiment' })).toHaveText(/ · Vanilla$/);
+  await expect(view.getByTestId('plugin-summary-gfx1250-vanilla')).toContainText('Vanilla');
+  await expect(view.getByTestId('plugin-summary-gfx1250-vanilla')).toContainText('Baseline');
+  await expect(view.getByText('Comparison plugin', { exact: true })).toBeVisible();
+  await expect(view.getByText('Per-Test Runtime Overhead')).toBeVisible();
+  await expect(view.getByRole('heading', { name: 'Test-by-Plugin Results' })).toBeVisible();
+});
+
 test('escapes injected catalog text instead of executing it in a chart tooltip', async ({ page }) => {
   const injectedName = '<img src=x onerror="window.__tooltipInjection = true">';
   await page.route('**/data/test-catalogs/*.json', async (route) => {
@@ -158,6 +189,8 @@ test('run comparison search reaches a historical rerun through a bounded option 
   await page.getByRole('tab', { name: 'Run Comparison' }).click();
 
   const candidateRun = page.getByRole('combobox', { name: 'Candidate run' });
+  await expect(candidateRun).toHaveValue(/8418072e/);
+  await expect(page.getByRole('combobox', { name: 'Baseline run' })).toHaveValue(/31369c4d/);
   await candidateRun.click();
   await expect(page.getByRole('option')).toHaveCount(50);
   await candidateRun.fill('8418072e');
@@ -165,5 +198,5 @@ test('run comparison search reaches a historical rerun through a bounded option 
   await expect(matchingOptions).toHaveCount(2);
   await expect(matchingOptions.first()).not.toContainText(/additional|reference/i);
   await page.getByRole('option', { name: /Test run.*Sep 1.*8418072e.*Commit.*Aug 15/ }).click();
-  await expect(page.getByRole('combobox', { name: 'Baseline run' })).toHaveValue(/784750dd/);
+  await expect(page.getByRole('combobox', { name: 'Baseline run' })).toHaveValue(/31369c4d/);
 });

@@ -216,6 +216,24 @@ test('a failing index is fatal rather than a warning', async () => {
   );
 });
 
+test('treats an HTML fallback for the data index as missing test data', async () => {
+  const parseHtml = vi.fn();
+  const { fetchImpl } = createFetchDouble({
+    behavior: (url) => (url === dataset.indexUrl
+      ? Promise.resolve({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: { get: () => 'text/html; charset=utf-8' },
+        json: parseHtml,
+      })
+      : null),
+  });
+
+  await expect(loadSynthetic(fetchImpl)).rejects.toThrow('No available test data');
+  expect(parseHtml).not.toHaveBeenCalled();
+});
+
 test('matches the result an unbounded loader produces', async () => {
   const { fetchImpl } = createFetchDouble();
 

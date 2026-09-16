@@ -370,6 +370,13 @@ export default function RecentRuns({ data, filters, onCompareRun, onExploreRun }
                 </TableRow>
               );
             })}
+            {rows.length === 0 && (
+              <TableRow>
+                {['actions', 'run-time', 'commit', 'commit-time', 'run-type', 'coverage', 'duration', 'change'].map((column) => (
+                  <TableCell key={column} align={['duration', 'change'].includes(column) ? 'right' : 'left'} sx={{ py: 4, color: 'text.secondary' }}>—</TableCell>
+                ))}
+              </TableRow>
+            )}
           </TableBody>
         </Table>
       </TableContainer>
@@ -383,6 +390,9 @@ export default function RecentRuns({ data, filters, onCompareRun, onExploreRun }
             onExploreRun={onExploreRun}
           />
         ))}
+        {rows.length === 0 && (
+          <Box sx={{ p: 4, border: 1, borderColor: 'divider', borderRadius: 2.25, color: 'text.secondary', textAlign: 'center' }}>—</Box>
+        )}
       </Stack>
     </SectionCard>
   );

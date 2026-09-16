@@ -23,6 +23,7 @@ function SummaryStat({ label, value }) {
 
 export default function RunReliability({ reliability }) {
   const theme = useTheme();
+  const hasRuns = reliability.runCount > 0;
   const rates = reliability.rows.map((row) => row.completionPercent).filter(Number.isFinite);
   const lowestRate = Math.min(...rates, 100);
   const yAxisMinimum = Math.max(0, Math.floor((lowestRate - 2) / 5) * 5);
@@ -55,7 +56,7 @@ export default function RunReliability({ reliability }) {
       type: 'value',
       name: 'Coverage %',
       min: yAxisMinimum,
-      max: 101,
+      max: hasRuns ? 101 : 100,
       axisLabel: { color: theme.palette.text.secondary, fontSize: 10, formatter: '{value}%' },
       splitLine: { lineStyle: { color: theme.palette.divider, type: 'dashed' } },
     },
@@ -83,19 +84,21 @@ export default function RunReliability({ reliability }) {
   };
 
   return (
-    <SectionCard title="Run Reliability" subtitle={`Coverage for the latest ${reliability.runCount} official runs under the current filters.`}>
+    <SectionCard title="Run Reliability" subtitle={`Coverage for the latest ${hasRuns ? reliability.runCount : '—'} official runs under the current filters.`}>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: 'repeat(4, minmax(0, 1fr))' }, gap: 1 }}>
         <SummaryStat label="Case completion" value={Number.isFinite(reliability.completionPercent) ? `${reliability.completionPercent.toFixed(1)}%` : '—'} />
-        <SummaryStat label="Complete runs" value={`${reliability.fullyCompleteRuns}/${reliability.runCount}`} />
-        <SummaryStat label="Failed cases" value={reliability.failed} />
-        <SummaryStat label="Timed out" value={reliability.timeout} />
+        <SummaryStat label="Complete runs" value={hasRuns ? `${reliability.fullyCompleteRuns}/${reliability.runCount}` : '—'} />
+        <SummaryStat label="Failed cases" value={hasRuns ? reliability.failed : '—'} />
+        <SummaryStat label="Timed out" value={hasRuns ? reliability.timeout : '—'} />
       </Box>
       <Box sx={{ mx: -0.75, mt: 1 }}>
         <Chart option={option} height={230} ariaLabel="Run reliability coverage trend" />
       </Box>
       <Divider sx={{ my: 1.5 }} />
       <Typography variant="overline" color="text.secondary">Runs below 100%</Typography>
-      {reliability.issueRuns.length === 0 ? (
+      {!hasRuns ? (
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>—</Typography>
+      ) : reliability.issueRuns.length === 0 ? (
         <Typography variant="body2" color="success.main" sx={{ mt: 1 }}>All official runs in this window reached complete coverage.</Typography>
       ) : (
         <Stack sx={{ mt: 0.75, gap: 1 }}>

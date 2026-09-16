@@ -103,6 +103,13 @@ export default function HistoricalRecords({ data, filters, benchmark, onSelectRe
                 <TableCell><StatusChip status={record.test.status} /></TableCell>
               </TableRow>
             ))}
+            {pageData.records.length === 0 && (
+              <TableRow>
+                {['run-time', 'commit', 'target', 'duration', 'change', 'status'].map((column) => (
+                  <TableCell key={column} align={['duration', 'change'].includes(column) ? 'right' : 'left'} sx={{ py: 4, color: 'text.secondary' }}>—</TableCell>
+                ))}
+              </TableRow>
+            )}
           </TableBody>
         </Table>
       </TableContainer>

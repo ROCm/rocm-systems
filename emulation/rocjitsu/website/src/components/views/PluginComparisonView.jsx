@@ -20,6 +20,7 @@ import {
 } from '@mui/material';
 import BugReportRoundedIcon from '@mui/icons-material/BugReportRounded';
 import ErrorRoundedIcon from '@mui/icons-material/ErrorRounded';
+import ExtensionRoundedIcon from '@mui/icons-material/ExtensionRounded';
 import MemoryRoundedIcon from '@mui/icons-material/MemoryRounded';
 import TimerOffRoundedIcon from '@mui/icons-material/TimerOffRounded';
 import { alpha } from '@mui/material/styles';
@@ -54,6 +55,13 @@ function pluginColor(pluginId) {
   if (PLUGIN_COLORS[pluginId]) return PLUGIN_COLORS[pluginId];
   const hash = [...pluginId].reduce((value, character) => ((value * 31) + character.charCodeAt(0)) >>> 0, 0);
   return FALLBACK_PLUGIN_COLORS[hash % FALLBACK_PLUGIN_COLORS.length];
+}
+
+function comparisonPluginNames(group) {
+  const plugins = group.runs
+    .filter((run) => run.plugin.id !== 'vanilla')
+    .map((run) => run.plugin.name);
+  return plugins.length > 0 ? plugins.join(', ') : 'Vanilla';
 }
 
 function SummaryCard({ summary, baseline, target }) {
@@ -181,6 +189,7 @@ function TargetComparison({ group, target, suites, baselinePluginId, onOpen }) {
     [group, target, suites, baselinePluginId],
   );
   const comparisonRuns = viewModel.pluginRuns.filter((run) => run.runId !== viewModel.baselineRun?.runId);
+  const baselineOnly = comparisonRuns.length === 0;
   const allDeltas = viewModel.rows.flatMap((row) => row.values
     .filter((value) => value.run.runId !== viewModel.baselineRun?.runId && Number.isFinite(value.delta))
     .map((value) => value.delta));
@@ -207,6 +216,7 @@ function TargetComparison({ group, target, suites, baselinePluginId, onOpen }) {
       : { left: 235, right: 54, top: 46, bottom: 44 },
     xAxis: {
       type: 'value',
+      show: !baselineOnly,
       name: `Runtime overhead vs ${viewModel.baselineRun?.plugin.name ?? 'baseline'} (%)`,
       nameLocation: 'middle',
       nameGap: 30,
@@ -217,6 +227,7 @@ function TargetComparison({ group, target, suites, baselinePluginId, onOpen }) {
     },
     yAxis: {
       type: 'category',
+      show: !baselineOnly,
       inverse: true,
       data: viewModel.rows.map((row) => compact ? row.test.name : `${row.test.suite} · ${row.test.name}`),
       axisTick: { show: false },
@@ -335,7 +346,7 @@ function TargetComparison({ group, target, suites, baselinePluginId, onOpen }) {
         <Alert severity="info">No tests match the selected global Suite filters for {target}.</Alert>
       ) : (
         <>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: `repeat(${viewModel.summaries.length}, minmax(0, 1fr))` }, gap: 1.25 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: `repeat(${viewModel.summaries.length + Number(baselineOnly)}, minmax(0, 1fr))` }, gap: 1.25 }}>
             {viewModel.summaries.map((summary) => (
               <SummaryCard
                 key={summary.run.runId}
@@ -344,6 +355,16 @@ function TargetComparison({ group, target, suites, baselinePluginId, onOpen }) {
                 baseline={summary.run.runId === viewModel.baselineRun?.runId}
               />
             ))}
+            {baselineOnly && (
+              <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2.25, borderTopWidth: 3, borderTopColor: 'text.disabled' }}>
+                <Typography fontWeight={780}>Comparison plugin</Typography>
+                <Typography sx={{ mt: 1.2, fontSize: 24, lineHeight: 1.1, fontWeight: 820 }}>—</Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 0.75, mt: 1.3 }}>
+                  <Box><Typography variant="caption" color="text.secondary">Coverage</Typography><Typography variant="body2" fontWeight={720}>—</Typography></Box>
+                  <Box><Typography variant="caption" color="text.secondary">Total duration</Typography><Typography variant="body2" fontWeight={720}>—</Typography></Box>
+                </Box>
+              </Paper>
+            )}
           </Box>
 
           <SectionCard
@@ -376,6 +397,7 @@ function TargetComparison({ group, target, suites, baselinePluginId, onOpen }) {
                     {viewModel.pluginRuns.map((run) => (
                       <TableCell key={run.runId}>{run.plugin.name}</TableCell>
                     ))}
+                    {baselineOnly && <TableCell>Plugin</TableCell>}
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -394,6 +416,7 @@ function TargetComparison({ group, target, suites, baselinePluginId, onOpen }) {
                           />
                         </TableCell>
                       ))}
+                      {baselineOnly && <TableCell sx={{ color: 'text.secondary' }}>—</TableCell>}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -432,8 +455,114 @@ function TargetComparison({ group, target, suites, baselinePluginId, onOpen }) {
   );
 }
 
+function PluginComparisonNotice() {
+  return (
+    <Paper
+      data-testid="plugin-comparison-empty"
+      variant="outlined"
+      sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, bgcolor: 'action.hover' }}
+    >
+      <Stack direction="row" sx={{ alignItems: 'flex-start', gap: 1.5 }}>
+        <Box sx={{ width: 40, height: 40, flex: '0 0 40px', display: 'grid', placeItems: 'center', borderRadius: 2, bgcolor: 'background.paper', color: 'primary.main' }}>
+          <ExtensionRoundedIcon />
+        </Box>
+        <Box>
+          <Typography variant="h3">No sanitizer comparison runs available</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            No vanilla baseline or sanitizer comparison runs are available. To enable comparison, publish a vanilla run and at least one sanitizer run for the same commit.
+          </Typography>
+        </Box>
+      </Stack>
+    </Paper>
+  );
+}
+
+function EmptyPluginComparison() {
+  const emptyChartOption = {
+    xAxis: { show: false },
+    yAxis: { show: false },
+    series: [],
+  };
+
+  return (
+    <Box data-testid="plugin-comparison" sx={{ display: 'grid', gap: 1.75 }}>
+      <PluginComparisonNotice />
+      <SectionCard
+        title="Plugin Comparison"
+        subtitle="Runtime overhead and test health for controlled Vanilla and sanitizer executions"
+      >
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.5fr 1fr' }, gap: 1.25 }}>
+          <TextField disabled size="small" label="Comparison experiment" value="" />
+          <TextField disabled size="small" label="Baseline plugin" value="" />
+        </Box>
+      </SectionCard>
+
+      <Paper variant="outlined" sx={{ px: 1.5, py: 1.25, borderRadius: 2.25, borderLeftWidth: 4, borderLeftColor: 'primary.main' }}>
+        <Stack direction="row" sx={{ alignItems: 'center', gap: 2 }}>
+          <MemoryRoundedIcon color="primary" />
+          {[
+            ['Target', '—'],
+            ['Plugins', '—'],
+            ['Tests', '—'],
+          ].map(([label, value]) => (
+            <Box key={label}>
+              <Typography variant="overline" color="text.secondary">{label}</Typography>
+              <Typography variant="body2" fontWeight={800}>{value}</Typography>
+            </Box>
+          ))}
+        </Stack>
+      </Paper>
+
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
+        {['Baseline plugin', 'Comparison plugin'].map((label) => (
+          <Paper key={label} variant="outlined" sx={{ p: 1.5, borderRadius: 2.25, borderTopWidth: 3, borderTopColor: 'text.disabled' }}>
+            <Typography fontWeight={780}>{label}</Typography>
+            <Typography sx={{ mt: 1.2, fontSize: 24, fontWeight: 820 }}>—</Typography>
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 0.75, mt: 1.3 }}>
+              <Box><Typography variant="caption" color="text.secondary">Coverage</Typography><Typography>—</Typography></Box>
+              <Box><Typography variant="caption" color="text.secondary">Total duration</Typography><Typography>—</Typography></Box>
+            </Box>
+          </Paper>
+        ))}
+      </Box>
+
+      <SectionCard title="Per-Test Runtime Overhead" subtitle={`Lower is better · Values within ±${PLUGIN_NOISE_TOLERANCE}% are treated as measurement noise`}>
+        <Chart option={emptyChartOption} height={340} ariaLabel="Empty plugin runtime overhead chart" />
+      </SectionCard>
+
+      <SectionCard title="Test-by-Plugin Results" subtitle="Select any result to inspect its problem, plugin, environment, and provenance">
+        <TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 2.25 }}>
+          <Table size="small">
+            <TableHead><TableRow><TableCell>Test</TableCell><TableCell>Baseline</TableCell><TableCell>Plugin</TableCell></TableRow></TableHead>
+            <TableBody><TableRow>{['test', 'baseline', 'plugin'].map((column) => <TableCell key={column} sx={{ py: 4, color: 'text.secondary' }}>—</TableCell>)}</TableRow></TableBody>
+          </Table>
+        </TableContainer>
+      </SectionCard>
+
+      <SectionCard
+        title="Plugin Findings"
+        subtitle="Sanitizer diagnostics and incomplete executions for this target"
+        action={<Chip size="small" icon={<BugReportRoundedIcon />} label="—" />}
+      >
+        <Typography color="text.secondary">—</Typography>
+      </SectionCard>
+    </Box>
+  );
+}
+
 export default function PluginComparisonView({ data, filters }) {
-  const groups = useMemo(() => selectPluginComparisonGroups(data), [data]);
+  const comparisonGroups = useMemo(() => selectPluginComparisonGroups(data), [data]);
+  const baselineOnlyGroup = useMemo(() => {
+    if (comparisonGroups.length > 0 || data.runs.length === 0) return null;
+    const run = data.latestCommitRun ?? data.latestRun ?? data.runs.at(-1);
+    return {
+      comparisonId: run.comparisonId,
+      runs: [run],
+      referenceRun: run,
+      targets: run.targets,
+    };
+  }, [comparisonGroups, data]);
+  const groups = baselineOnlyGroup ? [baselineOnlyGroup] : comparisonGroups;
   const [selectedGroupId, setSelectedGroupId] = useState(groups.at(-1)?.comparisonId ?? '');
   const selectedGroup = groups.find((group) => group.comparisonId === selectedGroupId) ?? groups.at(-1);
   const targets = selectedGroup?.targets.filter((target) => filters.targets.includes(target)) ?? [];
@@ -444,11 +573,14 @@ export default function PluginComparisonView({ data, filters }) {
   const [selectedRecord, setSelectedRecord] = useState(null);
 
   if (groups.length === 0) {
-    return <Alert severity="info">At least one comparison containing Vanilla and another plugin is required.</Alert>;
+    return <EmptyPluginComparison />;
   }
 
   return (
     <Box data-testid="plugin-comparison" sx={{ display: 'grid', gap: 1.75 }}>
+      {baselineOnlyGroup && (
+        <PluginComparisonNotice />
+      )}
       <SectionCard
         title="Plugin Comparison"
         subtitle="Runtime overhead and test health for controlled Vanilla and sanitizer executions"
@@ -463,7 +595,7 @@ export default function PluginComparisonView({ data, filters }) {
           >
             {groups.slice().reverse().map((group) => (
               <MenuItem key={group.comparisonId} value={group.comparisonId}>
-                {shortSha(group.referenceRun)} · {formatFullDate(group.referenceRun.timestamp)} · {group.runs.filter((run) => run.plugin.id !== 'vanilla').map((run) => run.plugin.name).join(', ')}
+                {shortSha(group.referenceRun)} · {formatFullDate(group.referenceRun.timestamp)} · {comparisonPluginNames(group)}
               </MenuItem>
             ))}
           </TextField>

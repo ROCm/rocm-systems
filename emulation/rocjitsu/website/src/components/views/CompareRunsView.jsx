@@ -61,10 +61,14 @@ export default function CompareRunsView({
 }) {
   const theme = useTheme();
   const compactChart = useMediaQuery(theme.breakpoints.down('sm'));
-  const candidate = data.runs.find((run) => run.runId === selectedCandidateId) ?? data.latestCompletedRun;
-  const defaultBaseline = previousCompletedRun(data.runs, candidate);
+  const selectedCandidate = data.runs.find((run) => run.runId === selectedCandidateId);
+  const candidate = selectedCandidate ?? data.latestRun;
+  const defaultBaseline = selectedCandidate
+    ? previousCompletedRun(data.runs, candidate)
+    : data.runs.at(-2) ?? null;
   const baseline = data.runs.find((run) => run.runId === selectedBaselineId) ?? defaultBaseline;
   const viewModel = selectRunComparison(candidate, baseline, filters, NOISE_TOLERANCE);
+  const hasRuns = Boolean(candidate);
   const runOptions = data.runs.slice().reverse();
   const maximumDelta = Math.max(...viewModel.comparable.map((item) => Math.abs(item.delta)), 0);
   const axisLimit = Math.max(5, Math.ceil(maximumDelta * 1.25));
@@ -226,22 +230,22 @@ export default function CompareRunsView({
       >
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: '1.15fr repeat(4, minmax(0, 1fr))' }, gap: 1 }}>
           <AggregateChange value={viewModel.aggregateDelta} candidate={candidate} baseline={baseline} />
-          <SummaryStat label="Candidate total" value={formatDuration(viewModel.candidateDuration)} />
-          <SummaryStat label="Baseline total" value={formatDuration(viewModel.baselineDuration)} />
-          <SummaryStat label="Comparable" value={viewModel.comparable.length} />
-          <SummaryStat label="Not comparable" value={viewModel.notComparable.length} />
+          <SummaryStat label="Candidate total" value={hasRuns ? formatDuration(viewModel.candidateDuration) : '—'} />
+          <SummaryStat label="Baseline total" value={hasRuns ? formatDuration(viewModel.baselineDuration) : '—'} />
+          <SummaryStat label="Comparable" value={hasRuns ? viewModel.comparable.length : '—'} />
+          <SummaryStat label="Not comparable" value={hasRuns ? viewModel.notComparable.length : '—'} />
         </Box>
         <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.75, mt: 1.25 }}>
-          <Chip size="small" color="success" variant="outlined" label={`${viewModel.counts.faster} faster`} />
-          <Chip size="small" variant="outlined" label={`${viewModel.counts.neutral} within ±${NOISE_TOLERANCE}%`} />
-          <Chip size="small" color="error" variant="outlined" label={`${viewModel.counts.slower} slower`} />
+          <Chip size="small" color="success" variant="outlined" label={`${hasRuns ? viewModel.counts.faster : '—'} faster`} />
+          <Chip size="small" variant="outlined" label={`${hasRuns ? viewModel.counts.neutral : '—'} within ±${NOISE_TOLERANCE}%`} />
+          <Chip size="small" color="error" variant="outlined" label={`${hasRuns ? viewModel.counts.slower : '—'} slower`} />
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
           Only benchmarks with valid completed durations in both runs are compared.
         </Typography>
         {viewModel.notComparable.length > 0 && (
           <Box sx={{ mt: 1, p: 1.25, borderRadius: 2, border: 1, borderColor: 'divider', bgcolor: 'action.hover' }}>
-            <Typography variant="caption" fontWeight={750} color="text.primary">Not included in this comparison</Typography>
+            <Typography variant="caption" fontWeight={750} color="text.primary">Not included in this comparison: </Typography>
             {viewModel.notComparable.map((item) => (
               <Typography key={item.test.testId} variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.35 }}>
                 {item.test.target} · {item.test.name} — {item.notComparableReason}

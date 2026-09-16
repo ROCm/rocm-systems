@@ -8,6 +8,22 @@ import { formatFullDate, shortSha } from '../../utils/formatters';
 
 const CASES_PER_PAGE = 20;
 
+function EmptyFailureCases() {
+  return (
+    <Paper data-testid="failure-cases" variant="outlined" sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3 }}>
+      <Stack direction="row" sx={{ alignItems: 'center', gap: 1, mb: 2.25 }}>
+        <ErrorOutlineRoundedIcon color="error" />
+        <Box>
+          <Typography variant="h2">Failed and Timed-Out Cases</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.35 }}>Newest first · Current filters</Typography>
+        </Box>
+        <Chip data-testid="failure-total" label="—" color="error" size="small" sx={{ ml: 'auto' }} />
+      </Stack>
+      <Box sx={{ minHeight: 96, display: 'grid', placeItems: 'center', color: 'text.secondary' }}>—</Box>
+    </Paper>
+  );
+}
+
 export default function FailuresView({ data, filters }) {
   const failures = selectFailures(data, filters);
   const reliability = selectRunReliability(data, filters);
@@ -21,7 +37,9 @@ export default function FailuresView({ data, filters }) {
   return (
     <Stack sx={{ gap: 1.75 }}>
       <RunReliability reliability={reliability} />
-      {failures.length === 0 ? (
+      {data.runs.length === 0 ? (
+        <EmptyFailureCases />
+      ) : failures.length === 0 ? (
         <Alert severity="success">No failed or timed-out cases match the current filters.</Alert>
       ) : (
         <Paper data-testid="failure-cases" variant="outlined" sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3 }}>

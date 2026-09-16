@@ -84,21 +84,60 @@ function LoadingDataState({ progress }) {
   );
 }
 
+const emptyDashboardData = {
+  schemaVersion: null,
+  repository: null,
+  generatedAt: null,
+  isBeta: false,
+  runs: [],
+  pluginRuns: [],
+  testCatalog: [],
+  testCatalogs: [],
+  targets: [],
+  suites: [],
+  plugins: [],
+  latestRun: null,
+  latestCommitRun: null,
+  latestCompletedRun: null,
+  backfillRunIds: new Set(),
+};
+
+function emptyOverview(range) {
+  return {
+    candidate: null,
+    baseline: null,
+    latestTests: [],
+    comparisons: [],
+    changes: [],
+    results: [],
+    metrics: {
+      duration: null,
+      durationDelta: null,
+      completed: 0,
+      total: 0,
+      failed: 0,
+      completeness: null,
+    },
+    history: {
+      range,
+      mode: 'daily-by-commit',
+      anchorDay: null,
+      slots: [],
+      runCount: 0,
+      currentDuration: null,
+      firstRun: null,
+      latestRun: null,
+      durationDelta: null,
+      comparisonLabel: '—',
+      summary: '—',
+      description: 'No benchmark history is available',
+      series: [],
+    },
+  };
+}
+
 function EmptyDataState({ error, onRetry }) {
-  return (
-    <Container maxWidth="md" sx={{ py: 8 }}>
-      <Alert
-        data-testid="dashboard-data-error"
-        severity="error"
-        variant="outlined"
-        action={<Button color="inherit" size="small" onClick={onRetry}>Retry</Button>}
-      >
-        <Typography fontWeight={700}>Dashboard data unavailable</Typography>
-        <Typography variant="body2" sx={{ mt: 0.5 }}>{error?.message}</Typography>
-        <Typography variant="body2" sx={{ mt: 1 }}>Benchmark data is unavailable. Check that the site's <code>data/</code> directory has been published.</Typography>
-      </Alert>
-    </Container>
-  );
+  return <Dashboard data={emptyDashboardData} dataError={error} onRetry={onRetry} />;
 }
 
 function DashboardHero({ data = null }) {
@@ -115,10 +154,15 @@ function DashboardHero({ data = null }) {
           <AccessTimeRoundedIcon color="primary" sx={{ fontSize: 18 }} />
           <Box sx={{ flex: 1 }}>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>Latest commit run</Typography>
-            {data ? (
+            {data?.latestCommitRun ? (
               <Stack direction="row" sx={{ gap: 0.8, alignItems: 'center' }}>
                 <Typography variant="caption" fontWeight={700}>{formatFullDate(data.latestCommitRun.timestamp)}</Typography>
                 <Chip label={shortSha(data.latestCommitRun)} size="small" sx={{ height: 20, fontFamily: 'monospace', fontSize: 10 }} />
+              </Stack>
+            ) : data ? (
+              <Stack direction="row" sx={{ gap: 0.8, alignItems: 'center' }}>
+                <Typography variant="caption" color="text.secondary" fontWeight={700}>—</Typography>
+                <Chip label="—" size="small" disabled sx={{ height: 20, fontFamily: 'monospace', fontSize: 10 }} />
               </Stack>
             ) : (
               <Skeleton variant="text" animation="wave" width="88%" sx={{ fontSize: 16 }} />
@@ -130,12 +174,17 @@ function DashboardHero({ data = null }) {
   );
 }
 
-function Dashboard({ data, dataWarnings = [] }) {
+function Dashboard({ data, dataWarnings = [], dataError = null, onRetry = null }) {
   const state = useDashboardState(data);
+  const hasData = data.runs.length > 0;
   // Overview derives the whole history, so it stays uncomputed while another tab owns the view.
   const overview = useMemo(
-    () => (state.tab === 'overview' ? selectOverview(data, state.filters, state.historyRange) : null),
-    [data, state.filters, state.historyRange, state.tab],
+    () => (state.tab === 'overview'
+      ? hasData
+        ? selectOverview(data, state.filters, state.historyRange)
+        : emptyOverview(state.historyRange)
+      : null),
+    [data, hasData, state.filters, state.historyRange, state.tab],
   );
   const failureCount = useMemo(() => selectFailures(data, state.filters).length, [data, state.filters]);
   const openRunComparison = (runIds) => {
@@ -166,6 +215,22 @@ function Dashboard({ data, dataWarnings = [] }) {
         <Container maxWidth={false} sx={{ maxWidth: 1600, px: { xs: 2, sm: 3, xl: 4 }, pt: { xs: 2.5, md: 3.5 }, pb: 6 }}>
           <DashboardHero data={data} />
 
+          {dataError && (
+            <Alert
+              data-testid="dashboard-data-error"
+              severity="warning"
+              variant="outlined"
+              action={<Button color="inherit" size="small" onClick={onRetry}>Retry</Button>}
+              sx={{ mb: 1.75 }}
+            >
+              <Typography fontWeight={700}>No available test data</Typography>
+              {dataError.message !== 'No available test data' && (
+                <Typography variant="body2" sx={{ mt: 0.5 }}>{dataError.message}</Typography>
+              )}
+              <Typography variant="body2" sx={{ mt: 1 }}>Dashboard values will remain empty until benchmark data is published to the site.</Typography>
+            </Alert>
+          )}
+
           {dataWarnings.length > 0 && (
             <Alert data-testid="invalid-run-warning" severity="warning" variant="outlined" sx={{ mb: 1.75 }}>
               <Typography fontWeight={700}>
@@ -182,7 +247,7 @@ function Dashboard({ data, dataWarnings = [] }) {
             </Alert>
           )}
 
-          <FiltersBar data={data} state={state} />
+          <FiltersBar data={data} state={state} disabled={!hasData} />
 
           <Paper data-testid="dashboard-navigation" variant="outlined" sx={{ mt: 1.75, mb: 1.75, borderRadius: 3, overflow: 'hidden' }}>
             <Tabs
@@ -243,7 +308,7 @@ function Dashboard({ data, dataWarnings = [] }) {
       <Box component="footer" sx={{ borderTop: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
         <Container maxWidth={false} sx={{ maxWidth: 1600, px: { xs: 2, sm: 3, xl: 4 }, py: 2.25 }}>
           <Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
-            <Typography variant="caption" color="text.secondary">Data schema v{data.schemaVersion}</Typography>
+            <Typography variant="caption" color="text.secondary">Data schema v{data.schemaVersion ?? '—'}</Typography>
           </Stack>
         </Container>
       </Box>

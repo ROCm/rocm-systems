@@ -50,6 +50,7 @@ function filterRunOptions(options, { inputValue }) {
 export default function RunSelector({ label, options, value, onChange }) {
   return (
     <Autocomplete
+      disabled={options.length === 0}
       disableClearable
       openOnFocus
       autoHighlight

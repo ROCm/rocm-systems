@@ -7,6 +7,7 @@ import {
   IconButton,
   Paper,
   Stack,
+  TextField,
   ToggleButton,
   ToggleButtonGroup,
   Tooltip,
@@ -23,10 +24,61 @@ import BenchmarkResultDialog from '../benchmarks/BenchmarkResultDialog';
 import RunDetailsDialog from '../benchmarks/RunDetailsDialog';
 import HistoricalRecords from '../benchmarks/HistoricalRecords';
 import AggregatePerformanceChart from '../benchmarks/AggregatePerformanceChart';
+import Chart from '../shared/Chart';
 import SectionCard from '../shared/SectionCard';
 import { selectBenchmarkCatalog } from '../../data/selectors';
 
 const MAX_GRID_BENCHMARKS = 8;
+const emptyBenchmark = { id: '' };
+const emptyChartOption = {
+  xAxis: { show: false },
+  yAxis: { show: false },
+  series: [],
+};
+
+function EmptyBenchmarksView({ data, filters }) {
+  const [mode, setMode] = useState('single');
+
+  return (
+    <Box sx={{ display: 'grid', gap: 1.75 }}>
+      <SectionCard
+        title="Benchmark Explorer"
+        subtitle="Benchmark duration history across all official attempts"
+        action={(
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={mode}
+            onChange={(_, nextMode) => nextMode && setMode(nextMode)}
+            aria-label="Benchmark display mode"
+          >
+            <ToggleButton value="single">Single</ToggleButton>
+            <ToggleButton value="grid">Grid</ToggleButton>
+            <ToggleButton value="aggregate">Aggregate</ToggleButton>
+          </ToggleButtonGroup>
+        )}
+      >
+        <TextField
+          disabled
+          fullWidth
+          size="small"
+          label={mode === 'grid' ? 'Benchmarks to graph' : 'Benchmark'}
+          value=""
+          helperText="—"
+        />
+        <Box sx={{ mt: 2 }}>
+          <Chart option={emptyChartOption} height={360} ariaLabel="Empty benchmark history chart" />
+        </Box>
+      </SectionCard>
+      <HistoricalRecords
+        data={data}
+        filters={filters}
+        benchmark={emptyBenchmark}
+        onSelectRecord={() => {}}
+      />
+    </Box>
+  );
+}
 
 function ExplorerToggleButton({ enabled, label, ariaFeature, icon, onClick }) {
   return (
@@ -120,7 +172,7 @@ export default function BenchmarksView({
   };
 
   if (!selectedTest) {
-    return <Paper variant="outlined" sx={{ p: 4 }}><Typography color="text.secondary">No benchmarks are available for the selected suites.</Typography></Paper>;
+    return <EmptyBenchmarksView data={data} filters={filters} />;
   }
 
   const interactionControls = (

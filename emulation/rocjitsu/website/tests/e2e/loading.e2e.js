@@ -93,8 +93,34 @@ test('offers a working Retry after a fatal data failure', async ({ page }) => {
 
   await page.goto('/');
   const failure = page.getByTestId('dashboard-data-error');
-  await expect(failure).toContainText('Dashboard data unavailable');
+  await expect(failure).toContainText('No available test data');
   await expect(failure).toContainText('503');
+  await expect(page.getByTestId('dashboard-navigation')).toBeVisible();
+  await expect(page.getByLabel('Targets')).toBeDisabled();
+  await expect(page.getByLabel('Suites')).toBeDisabled();
+  await expect(page.getByText('Total duration', { exact: true })).toBeVisible();
+  await expect(page.getByText('Run health', { exact: true })).toBeVisible();
+  await expect(page.getByText('Performance Trend')).toBeVisible();
+  await expect(page.getByText('Largest Changes')).toBeVisible();
+  await expect(page.getByText('Latest Results')).toBeVisible();
+  await expect(page.getByText('Recent Runs')).toBeVisible();
+  await expect(page.getByTestId('latest-commit-run').getByText('—', { exact: true })).toHaveCount(2);
+
+  await page.getByRole('tab', { name: 'Benchmarks' }).click();
+  await expect(page.getByText('Benchmark Explorer')).toBeVisible();
+  await expect(page.getByText('Benchmark Run History')).toBeVisible();
+  await expect(page.getByText('Seconds', { exact: true })).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Run Comparison' }).click();
+  await expect(page.getByText('Performance Change by Benchmark')).toBeVisible();
+  await page.getByRole('tab', { name: 'Plugin Comparison' }).click();
+  await expect(page.getByTestId('plugin-comparison-empty')).toContainText('No vanilla baseline or sanitizer comparison runs are available');
+  await expect(page.getByText('Per-Test Runtime Overhead')).toBeVisible();
+  await expect(page.getByText('Plugin Findings')).toBeVisible();
+  await page.getByRole('tab', { name: 'Failures' }).click();
+  await expect(page.getByText('Run Reliability')).toBeVisible();
+  await expect(page.getByText('Failed and Timed-Out Cases')).toBeVisible();
+  await expect(page.getByText('101%', { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('failure-range')).toHaveCount(0);
 
   await failure.getByRole('button', { name: 'Retry' }).click();
 
