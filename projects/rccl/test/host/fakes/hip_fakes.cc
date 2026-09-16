@@ -724,12 +724,13 @@ hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device)
 
 hipError_t hipEventCreate(hipEvent_t* event)
 {
-    if (event) *event = nullptr;
-    return hipErrorInvalidValue;
+    if (event) *event = (g_hipEventCreateResult == hipSuccess)
+                            ? reinterpret_cast<hipEvent_t>(0x1) : nullptr;
+    return g_hipEventCreateResult;
 }
 
 hipError_t hipEventDestroy(hipEvent_t)      { return hipSuccess; }  // benign teardown (commFree)
-hipError_t hipEventQuery(hipEvent_t)        { return hipErrorInvalidValue; }
+hipError_t hipEventQuery(hipEvent_t)        { return g_hipAsyncOpsResult; }
 hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream)
 {
     return g_hipEventRecord(event, stream);

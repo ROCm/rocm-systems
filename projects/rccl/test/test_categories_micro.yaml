@@ -25,6 +25,8 @@ test_categories:
       - "P2pMultiSegmentMicrotest.*"
       - "P2pProxyRegisterMicrotest.*"
       - "P2pProxyDeregisterMicrotest.*"
+      - "P2pProxyLifecycleMicrotest.*"
+      - "P2pProxyCeMicrotestIsolated.*"
       - "GuardOperands/P2pAllocateSkipMarkExport.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
