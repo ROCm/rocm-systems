@@ -46,15 +46,16 @@ TEST(VersionGateTests, CuMemVersionSupported)
     EXPECT_FALSE(NCCL_CUMEM_VERSION_SUPPORTED(ROCM_VER_7_12_0));
 }
 
-TEST(VersionGateTests, CuMemHostIsNativeOnly)
+TEST(VersionGateTests, CuMemHostVersionSupported)
 {
     EXPECT_TRUE (NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_12_60540));
     EXPECT_FALSE(NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_12_60540 - 1));
 
-    // Host allocations are deliberately NOT part of the 7.0.2.x backport
-    // (they rely on hipDeviceAttributeHostNumaId, absent there).
-    EXPECT_FALSE(NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_0_2_2));
-    EXPECT_FALSE(NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_0_3_0 - 1));
+    // 7.0.2.x backport window [70051831, 70060000).
+    EXPECT_TRUE (NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_0_2_2));
+    EXPECT_TRUE (NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_0_3_0 - 1));
+    EXPECT_FALSE(NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_0_2_2 - 1));
+    EXPECT_FALSE(NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_0_3_0));
 }
 
 // The DMA-BUF export gate is a conjunction: the CMake symbol probe alone must not
