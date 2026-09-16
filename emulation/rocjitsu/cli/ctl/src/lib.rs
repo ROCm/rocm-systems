@@ -4394,6 +4394,19 @@ exit 0
     fn purge_fails_when_the_runtime_directory_survives() {
         use std::os::unix::fs::PermissionsExt as _;
 
+        // `chmod 500` below is what makes the directory unremovable, and
+        // it does not apply to root: `CAP_DAC_OVERRIDE` unlinks the file
+        // anyway, the purge succeeds, and there is no surviving directory
+        // for the case to be about. The container CI builds this in runs
+        // as root.
+        if nix::unistd::geteuid().is_root() {
+            eprintln!(
+                "SKIP: running as root, which bypasses the directory permissions \
+                 this test needs in order to make a purge fail."
+            );
+            return;
+        }
+
         let _lock = rj_core::paths::test_env_lock();
         let root = tempfile::tempdir().unwrap();
         rj_core::paths::set_test_root(root.path());
