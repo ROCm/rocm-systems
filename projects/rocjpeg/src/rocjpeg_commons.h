@@ -252,7 +252,7 @@ class RocJpegException : public std::exception {
 // Parse a comma-separated list of device indices, e.g. the value of
 // ROCR_VISIBLE_DEVICES or HIP_VISIBLE_DEVICES. The argument is typically the
 // result of std::getenv(); that pointer aliases the process environment and
-// must not be written through (undefined behaviour, C11 6.22.4.6 / C++
+// must not be written through (undefined behaviour, C11 7.22.4.6 / C++
 // [c.strings]). The input is copied into a stream before tokenising so the
 // caller's buffer is never modified. Comma-delimited tokens are converted with
 // std::atoi; empty tokens (leading/trailing/consecutive commas) are skipped.
