@@ -228,20 +228,12 @@ hidden_for_pc = result.by_pc[pc]
 `HiddenLatency` reports hidden `idle`, `stall`, and `issue` cycles.
 `HiddenLatencyResult.by_scope` retains independent `(shader engine, SIMD)`
 results, keyed by whatever the caller passed for shader engine; `by_pc` is the
-sum over those scopes. Each component is bounded by the window it was measured
-against, so estimate non-hidden cost per component rather than from the totals:
+sum over those scopes. Estimate non-hidden cost as:
 
 ```python
-non_hidden = (entry.latency - hidden.stall - hidden.issue) + (
-    entry.idle - min(hidden.idle, entry.idle)
-)
+hidden_total = hidden.stall + hidden.issue + min(hidden.idle, entry.idle)
+non_hidden = entry.latency + entry.idle - hidden_total
 ```
-
-`hidden.stall` and `hidden.issue` cannot exceed the instruction's own stall and
-issue cycles, so they need no bound. `hidden.idle` is measured from the end of
-the previous instruction while `CodeEntry.idle` is measured from the furthest
-instruction end reached so far, so the two disagree when instructions overlap
-and only that component needs one.
 
 Busy intervals are built per `(shader engine, SIMD)` for four pipe groups,
 highest priority first:
@@ -254,20 +246,15 @@ highest priority first:
 | 4 | SMEM/SALU | `SMEM`, `SALU` |
 | — | no pipe | `NONE`, `JUMP`, `NEXT`, `IMMED`, `CONTEXT`, `MESSAGE`, `BVH` |
 
-Each instruction is scored against its own pipe and against the union of every
-higher-priority pipe; the larger total wins. Categories with no pipe are scored
-once, against the union of all four.
+Idle and stalled cycles are hidden by any busy pipe, including the
+instruction's own. Issue cycles are hidden only by a higher-priority pipe, so an
+instruction never hides behind itself. Categories with no pipe create no busy
+interval of their own, but their cycles can still be hidden.
 
-The own-pipe score zeroes its issue component: an instruction's contribution to
-its own pipe is exactly its issue window, so counting it would let every
-instruction hide behind itself. Idle and stall precede issue, so same-pipe work
-there comes from other waves and does count. Matrix instructions feed both
-MATRIX and VALU, so both of their scores are zeroed.
-
-MATRIX is not a decoder category. Pass a `CodeIndex` so `v_mfma*`, `v_smfma*`,
-`v_wmma*`, and `v_swmma*` instructions are treated as MATRIX instead of the
-`VALU` the decoder reports. Without a `CodeIndex` they stay `VALU`, measurably
-changing results on traces that mix matrix and non-matrix work.
+MATRIX is not a decoder category, so matrix instructions arrive as `VALU`. Pass
+a `CodeIndex` to classify them as MATRIX from their ISA text; without one they
+stay `VALU`, measurably changing results on traces that mix matrix and
+non-matrix work.
 
 ## `rocprof_trace_decoder.analysis.rcv`
 

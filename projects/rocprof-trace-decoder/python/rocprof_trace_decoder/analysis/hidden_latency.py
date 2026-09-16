@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from ..code_index import CodeIndex
-from ..records import InstCategory, OtherSimdInstruction, Pc, TraceRecords, Wave
+from ..records import Instruction, InstCategory, OtherSimdInstruction, Pc, TraceRecords, Wave
 
 __all__ = [
     "HiddenLatency",
@@ -120,6 +120,10 @@ def _compute_union(
     return [(end, cycles) for end, cycles in out]
 
 
+def _instruction_cycles(instruction: Instruction) -> int:
+    return max(instruction.stall, instruction.duration)
+
+
 def _matrix_instruction_pcs(code_index: CodeIndex | None) -> set[Pc]:
     if code_index is None:
         return set()
@@ -207,7 +211,7 @@ def _build_pipe_utilization(
     for wave in waves:
         for instruction in wave.instructions:
             clock = instruction.time + instruction.stall
-            cycles = instruction.duration - instruction.stall
+            cycles = _instruction_cycles(instruction) - instruction.stall
             category = int(instruction.category)
             if instruction.pc in matrix_pcs:
                 wmma.append((clock, cycles))
@@ -255,7 +259,7 @@ def _analyze_scope(
             category = int(instruction.category)
             clock = instruction.time
             stall = instruction.stall
-            cycles = instruction.duration
+            cycles = _instruction_cycles(instruction)
 
             if instruction.pc in matrix_pcs:
                 valu_hidden = _indexed_interval(valu_index, last_time, clock, stall, cycles)
