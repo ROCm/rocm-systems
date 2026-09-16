@@ -82,6 +82,9 @@ jobs:
             enable_tsan: 0
             enable_expensive_checks: 0
             sanitizer_runtime: STATIC
+            # The vfio-user transport is Linux-only, so only this leg compiles
+            # and runs its tests; the option defaults to OFF elsewhere.
+            enable_vfio: 1
             run_simulator_corpus: true
             corpus_soft_timeout: 45
             corpus_hard_timeout: 60
@@ -102,6 +105,7 @@ jobs:
             enable_tsan: 0
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
+            enable_vfio: 0
             run_simulator_corpus: true
             corpus_soft_timeout: 240
             corpus_hard_timeout: 480
@@ -121,6 +125,7 @@ jobs:
             enable_tsan: 1
             enable_expensive_checks: 0
             sanitizer_runtime: SHARED
+            enable_vfio: 0
             run_simulator_corpus: false
             corpus_soft_timeout: 0
             corpus_hard_timeout: 0
@@ -140,6 +145,7 @@ jobs:
             enable_tsan: 0
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
+            enable_vfio: 0
             c_compiler: gcc
             cxx_compiler: g++
             run_simulator_corpus: true
@@ -325,7 +331,8 @@ jobs:
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
             -DRJ_ENABLE_EXPENSIVE_CHECKS=${{ matrix.enable_expensive_checks }} \
             -DROCJITSU_ENABLE_PERFSIM_PLUGIN=ON \
-            -DRJ_SANITIZER_RUNTIME=${{ matrix.sanitizer_runtime }}
+            -DRJ_SANITIZER_RUNTIME=${{ matrix.sanitizer_runtime }} \
+            -DROCJITSU_ENABLE_VFIO=${{ matrix.enable_vfio }}
 
           # Set a conservative number of workers to avoid OOM and excessive system load.
           WORKERS="$(( ($(nproc) + 1) / 2 ))"

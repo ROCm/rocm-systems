@@ -61,7 +61,6 @@ constexpr uint64_t kMsixEntryBytes = 16;
 /// of 64 bits rather than a byte per vector.
 constexpr uint64_t kMsixPendingWordBytes = 8;
 
-
 VfioDeviceHost &host_of(vfu_ctx_t *ctx) {
   return *static_cast<VfioDeviceHost *>(vfu_get_private(ctx));
 }
