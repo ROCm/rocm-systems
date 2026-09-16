@@ -2620,6 +2620,29 @@ TEST(Rcclwrap, AlltoAllDdaDecision_Gfx950_TooFewRanks_NoDda)
     EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/false));
 }
 
+// End-to-end wiring of the relaxed floor for AlltoAll: with RCCL_DDA_NRANKS_RELAX=1
+// a 4-rank comm reaches the DDA AlltoAll path, where the TooFewRanks test above
+// shows it does not by default. Mirrors RcclAllReduceDdaDecision.Gfx950_FourRanks_
+// RelaxOn_TakesDda below. This exercises the real ddaMinRanks argument at
+// rcclAlltoAllShouldTakeDdaPath()'s own call site in collectives.cc directly --
+// unlike the DdaAlltoAllThresholdTests suite, which only goes through the
+// testRcclDdaAlltoAllThresholdEnabled() mirror and would not notice if that
+// argument were dropped or hardcoded back to 8.
+TEST(RcclAlltoAllDdaDecision, Gfx950_FourRanks_RelaxOn_TakesDda)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "Gfx950_FourRanks_RelaxOn_TakesDda",
+        []()
+        {
+            ncclComm comm{};
+            InitDdaDecisionComm(comm, "gfx950", 4, 1, /*symmetricSupport=*/true);
+            size_t totalBytes = 1024ull * 1024;
+            EXPECT_TRUE(ncclDdaNranksRelaxEnabled());
+            EXPECT_TRUE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/false));
+        },
+        {{"RCCL_DDA_NRANKS_RELAX", "1"}});
+}
+
 // gfx942/gfx950 DDA requires the full 8-GPU node; fewer ranks disables it.
 TEST(RcclAllReduceDdaDecision, Gfx950_TooFewRanks_NoDda)
 {
