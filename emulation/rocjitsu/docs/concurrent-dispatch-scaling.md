@@ -49,6 +49,10 @@ do not establish an additional benefit at 64. For these workloads, 48 threads is
 a reasonable stopping point when total wall time matters. Full ranges for this
 fresh pass are in `scaling-summary.csv` in the extension evidence directory.
 
+For a simpler allocation policy, see the follow-up
+[1:2:1 heuristic evaluation](concurrent-dispatch-heuristic.md), including direct
+measurements of 8/16/8 and 8/17/8 and a rule that accounts for the target's XCD count.
+
 ## Why concurrent submissions are feasible
 
 The old pool held `run_mutex_` across an entire batch and its join. Its task spans,
