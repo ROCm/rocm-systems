@@ -35,7 +35,6 @@ using test_device_t = device<MockBackend>;
 namespace rocprofsys::pmc::collectors::nic::testing
 {
 
-constexpr size_t kHwNicDeviceId0 = 0;
 constexpr size_t kHwNicDeviceId1 = 1;
 constexpr size_t kHwNicDeviceId2 = 2;
 constexpr size_t kHwNicDeviceId5 = 5;
