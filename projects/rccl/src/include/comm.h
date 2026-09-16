@@ -884,6 +884,10 @@ struct ncclComm {
   // hipStreamDestroy defers reuse until the stream's work completes, so a matching tag
   // implies the prior kernel already finished.
   uintptr_t lastStreamTag;
+  // doneEvent put up for grabs by rcclAddonLaunchBegin, for the addon collective's last kernel to
+  // carry as its stopEvent instead of paying for a standalone record. Only ever non-null inside
+  // that bracket, and only until rcclTakeAddonStopEvent hands it out.
+  hipEvent_t addonStopEvent;
   latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_WARP_SPEED
@@ -1105,6 +1109,16 @@ static inline ncclRedOp_t ncclUserRedOpMangle(ncclComm* comm, ncclRedOp_t op) {
   int op1 = int(h) ^ int(op);
   // Since builtin values are preserved, we also have to preserve their preimage.
   return op1 < int(ncclNumOps) ? op : ncclRedOp_t(op1);
+}
+
+// Hands the addon stop event to the caller and clears it, so the first kernel to ask carries the
+// done event and any later ask within the same collective gets nullptr. rcclAddonLaunchEnd reads
+// the cleared field as "a kernel took it" and skips the standalone record; a path that returns
+// without launching never asks, and so still gets the record.
+static inline hipEvent_t rcclTakeAddonStopEvent(struct ncclComm* comm) {
+  hipEvent_t stopEvent = comm->addonStopEvent;
+  comm->addonStopEvent = nullptr;
+  return stopEvent;
 }
 
 ncclResult_t ncclCommEnsureReady(ncclComm_t comm);

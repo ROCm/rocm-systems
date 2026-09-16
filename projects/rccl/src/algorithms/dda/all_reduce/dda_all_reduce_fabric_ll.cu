@@ -77,7 +77,7 @@ static inline std::pair<dim3, dim3> ddaAllReduceFabricLLGeom(ncclComm* comm, siz
 
 template <typename T>
 static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
-                                                  cudaStream_t stream, hipEvent_t stopEvent) {
+                                                  cudaStream_t stream) {
   const int nRanks = comm->nRanks;
   const size_t bytes = count * sizeof(T);
   const size_t nPk = bytes >> 3; // 8 payload bytes per packet (for logging)
@@ -103,6 +103,7 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   INFO(NCCL_COLL, "DDA fabric AllReduce LL: nRanks=%d bytes=%zu nPk=%zu grid=%u block=%u", nRanks, bytes, nPk, grid.x,
        block.x);
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback (up to
   // kDdaMaxNranks).
   switch (nRanks) {
@@ -134,8 +135,7 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
 // the loop bound.
 template <typename T>
 static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, void* recvbuff, size_t count,
-                                                         ncclComm* comm, cudaStream_t stream,
-                                                         hipEvent_t stopEvent) {
+                                                         ncclComm* comm, cudaStream_t stream) {
   const int nRanks = comm->nRanks;
   const size_t bytes = count * sizeof(T);
   const size_t nPk = (bytes >> 3 ) / (size_t)nRanks; // 8 payload bytes per packet
@@ -161,6 +161,7 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
   INFO(NCCL_COLL, "DDA fabric AllReduce LL two-shot: nRanks=%d bytes=%zu nPk=%zu grid=%u block=%u", nRanks, bytes, nPk,
        grid.x, block.x);
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback (up to
   // kDdaMaxNranks).
   switch (nRanks) {
@@ -306,7 +307,7 @@ bool ncclAllReduceDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
 }
 
 ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                      ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
+                                      ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   const size_t bytes = count * ncclTypeSize(datatype);
 
   if (ddaLLArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
@@ -315,11 +316,11 @@ ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size
     (void)op;
     switch (datatype) {
     case ncclFloat32:
-      return ncclAllReduceDdaFabricLLTyped<float>(sendbuff, recvbuff, count, comm, stream, stopEvent);
+      return ncclAllReduceDdaFabricLLTyped<float>(sendbuff, recvbuff, count, comm, stream);
     case ncclFloat16:
-      return ncclAllReduceDdaFabricLLTyped<half>(sendbuff, recvbuff, count, comm, stream, stopEvent);
+      return ncclAllReduceDdaFabricLLTyped<half>(sendbuff, recvbuff, count, comm, stream);
     case ncclBfloat16:
-      return ncclAllReduceDdaFabricLLTyped<bf16>(sendbuff, recvbuff, count, comm, stream, stopEvent);
+      return ncclAllReduceDdaFabricLLTyped<bf16>(sendbuff, recvbuff, count, comm, stream);
     default:
       return ncclInvalidArgument;
     }
@@ -330,11 +331,11 @@ ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size
          comm->nRanks, comm->nNodes, count, (int)datatype, bytes);
     switch (datatype) {
     case ncclFloat32:
-      return ncclAllReduceDdaFabricLLTwoShotTyped<float>(sendbuff, recvbuff, count, comm, stream, stopEvent);
+      return ncclAllReduceDdaFabricLLTwoShotTyped<float>(sendbuff, recvbuff, count, comm, stream);
     case ncclFloat16:
-      return ncclAllReduceDdaFabricLLTwoShotTyped<half>(sendbuff, recvbuff, count, comm, stream, stopEvent);
+      return ncclAllReduceDdaFabricLLTwoShotTyped<half>(sendbuff, recvbuff, count, comm, stream);
     case ncclBfloat16:
-      return ncclAllReduceDdaFabricLLTwoShotTyped<bf16>(sendbuff, recvbuff, count, comm, stream, stopEvent);
+      return ncclAllReduceDdaFabricLLTwoShotTyped<bf16>(sendbuff, recvbuff, count, comm, stream);
     default:
       return ncclInvalidArgument;
     }

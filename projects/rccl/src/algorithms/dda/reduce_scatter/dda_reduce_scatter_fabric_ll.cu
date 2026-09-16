@@ -35,7 +35,7 @@ static inline size_t ddaLLRsScratchSize(int nRanks) {
 
 template <typename T>
 static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void* recvbuff, size_t recvcount,
-                                                      ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
+                                                      ncclComm* comm, cudaStream_t stream) {
   const int nRanks = comm->nRanks;
   const size_t bytes = recvcount * sizeof(T); // per-rank shard bytes
   const size_t nPk = bytes >> 3;              // 8 payload bytes per packet
@@ -64,6 +64,7 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
   INFO(NCCL_COLL, "DDA fabric ReduceScatter LL: nRanks=%d shardBytes=%zu nPk=%zu grid=%u block=%u", nRanks, bytes, nPk,
        grid.x, block.x);
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback.
   switch (nRanks) {
   case 4:
@@ -130,16 +131,16 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
 }
 
 ncclResult_t ncclReduceScatterDdaFabricLL(const void* sendbuff, void* recvbuff, size_t recvcount,
-                                          ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream,
-                                          hipEvent_t stopEvent) {
+                                          ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
+                                          cudaStream_t stream) {
   (void)op;
   switch (datatype) {
   case ncclFloat32:
-    return ncclReduceScatterDdaFabricLLTyped<float>(sendbuff, recvbuff, recvcount, comm, stream, stopEvent);
+    return ncclReduceScatterDdaFabricLLTyped<float>(sendbuff, recvbuff, recvcount, comm, stream);
   case ncclFloat16:
-    return ncclReduceScatterDdaFabricLLTyped<half>(sendbuff, recvbuff, recvcount, comm, stream, stopEvent);
+    return ncclReduceScatterDdaFabricLLTyped<half>(sendbuff, recvbuff, recvcount, comm, stream);
   case ncclBfloat16:
-    return ncclReduceScatterDdaFabricLLTyped<bf16>(sendbuff, recvbuff, recvcount, comm, stream, stopEvent);
+    return ncclReduceScatterDdaFabricLLTyped<bf16>(sendbuff, recvbuff, recvcount, comm, stream);
   default:
     return ncclInvalidArgument;
   }

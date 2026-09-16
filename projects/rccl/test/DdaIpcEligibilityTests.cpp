@@ -98,7 +98,7 @@ TEST_F(DdaIpcEligibilityTest, AllGather_EligibleFloat16)
 TEST_F(DdaIpcEligibilityTest, AllGather_InvalidDatatypeDispatch)
 {
     EXPECT_EQ(ncclAllGatherDdaIpc(
-                  sendbuff_, recvbuff_, 4, ncclInt32, mockComm_.get(), nullptr, nullptr),
+                  sendbuff_, recvbuff_, 4, ncclInt32, mockComm_.get(), nullptr),
               ncclInvalidArgument);
 }
 
@@ -124,7 +124,7 @@ TEST_F(DdaIpcEligibilityTest, AllToAll_UnalignedCount)
 TEST_F(DdaIpcEligibilityTest, AllToAll_InvalidDatatypeDispatch)
 {
     EXPECT_EQ(ncclAllToAllDdaIpc(
-                  sendbuff_, recvbuff_, 4, ncclInt32, mockComm_.get(), nullptr, nullptr),
+                  sendbuff_, recvbuff_, 4, ncclInt32, mockComm_.get(), nullptr),
               ncclInvalidArgument);
 }
 
@@ -204,7 +204,6 @@ TEST_F(DdaIpcEligibilityTest, ReduceScatter_InvalidDatatypeDispatch)
                                      ncclInt32,
                                      ncclSum,
                                      mockComm_.get(),
-                                     nullptr,
                                      nullptr),
               ncclInvalidArgument);
 }

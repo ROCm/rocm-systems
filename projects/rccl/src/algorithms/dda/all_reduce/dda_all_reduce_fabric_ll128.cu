@@ -83,7 +83,7 @@ static inline std::pair<dim3, dim3> ddaAllReduceFabricLL128Geom(ncclComm* comm, 
 
 template <typename T>
 static ncclResult_t ncclAllReduceDdaFabricLL128Typed(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
-                                                     cudaStream_t stream, hipEvent_t stopEvent) {
+                                                     cudaStream_t stream) {
   const int nRanks = comm->nRanks;
   const size_t bytes = count * sizeof(T);
   const size_t nWords = bytes >> 3;
@@ -101,6 +101,7 @@ static ncclResult_t ncclAllReduceDdaFabricLL128Typed(const void* sendbuff, void*
   INFO(NCCL_COLL, "DDA fabric AllReduce LL128: nRanks=%d bytes=%zu numLines=%zu grid=%u block=%u", nRanks, bytes,
        numLines, grid.x, block.x);
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback.
   switch (nRanks) {
   case 4:
@@ -177,15 +178,15 @@ uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDat
 }
 
 ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                         ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
+                                         ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   (void)op;
   switch (datatype) {
   case ncclFloat32:
-    return ncclAllReduceDdaFabricLL128Typed<float>(sendbuff, recvbuff, count, comm, stream, stopEvent);
+    return ncclAllReduceDdaFabricLL128Typed<float>(sendbuff, recvbuff, count, comm, stream);
   case ncclFloat16:
-    return ncclAllReduceDdaFabricLL128Typed<half>(sendbuff, recvbuff, count, comm, stream, stopEvent);
+    return ncclAllReduceDdaFabricLL128Typed<half>(sendbuff, recvbuff, count, comm, stream);
   case ncclBfloat16:
-    return ncclAllReduceDdaFabricLL128Typed<bf16>(sendbuff, recvbuff, count, comm, stream, stopEvent);
+    return ncclAllReduceDdaFabricLL128Typed<bf16>(sendbuff, recvbuff, count, comm, stream);
   default:
     return ncclInvalidArgument;
   }

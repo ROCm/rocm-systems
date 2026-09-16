@@ -377,8 +377,8 @@ TEST_F(DdaMPI_AllReduce, StreamAlternationUngrouped)
 
 // AICOMRCCL-2184: work forked off a captured addon collective belongs to the captured graph.
 //
-// rcclAddonLaunchBegin hands a fusable site comm->doneEvent to carry as its last kernel's stop
-// event, but never while the stream is capturing: there it hands out nothing and the epilogue
+// rcclAddonLaunchBegin offers comm->doneEvent for the collective's last kernel to carry as its
+// stop event, but never while the stream is capturing: there it offers nothing and the epilogue
 // records separately. This case covers that carve-out, whose failure mode is silent. A fused stop
 // event is not bound under capture, so a stream joined into the capture through comm->doneEvent
 // never enters the capture at all: its work runs eagerly outside the graph while every call,

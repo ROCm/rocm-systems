@@ -22,7 +22,7 @@ bool ncclReduceScatterDdaIpcEligible(ncclComm* comm, const void* sendbuff, void*
  * Execute DDA reduce-scatter operation using IPC
  */
 ncclResult_t ncclReduceScatterDdaIpc(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
-                                     ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent);
+                                     ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
 /**
  * Check if DDA reduce-scatter is eligible for the fabric/VMM path (runtime
@@ -35,15 +35,14 @@ bool ncclReduceScatterDdaFabricEligible(ncclComm* comm, const void* sendbuff, vo
  * Execute DDA reduce-scatter operation using the fabric/VMM path
  */
 ncclResult_t ncclReduceScatterDdaFabric(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
-                                        ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent);
+                                        ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
 // LL-protocol fabric path (small-shard fast lane, 16B lines, no barrier).
 bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                           ncclDataType_t datatype, ncclRedOp_t op);
 
 ncclResult_t ncclReduceScatterDdaFabricLL(const void* sendbuff, void* recvbuff, size_t recvcount,
-                                          ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream,
-                                          hipEvent_t stopEvent);
+                                          ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
 // LL128-protocol fabric path (mid-shard fast lane, 128B lines, no barrier).
 bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
@@ -51,6 +50,6 @@ bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuf
 
 ncclResult_t ncclReduceScatterDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t recvcount,
                                              ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
-                                             cudaStream_t stream, hipEvent_t stopEvent);
+                                             cudaStream_t stream);
 
 #endif

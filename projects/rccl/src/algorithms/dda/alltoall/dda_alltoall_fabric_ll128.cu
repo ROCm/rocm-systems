@@ -90,7 +90,7 @@ template <typename T>
 static ncclResult_t ncclAllToAllDdaFabricLL128Typed(
   const void* sendbuff, void* recvbuff,
   size_t count, // per-peer element count of T (== bytes when T == int8_t)
-  ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
+  ncclComm* comm, cudaStream_t stream) {
   const int nRanks = comm->nRanks;
   const size_t perChunkBytes = count * sizeof(T);
 
@@ -113,6 +113,7 @@ static ncclResult_t ncclAllToAllDdaFabricLL128Typed(
   INFO(NCCL_COLL, "DDA fabric AllToAll LL128: nRanks=%d perChunkBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
        nRanks, perChunkBytes, grid.x, grid.y, block.x, blocksPerPeer);
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   switch (nRanks) {
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
@@ -173,10 +174,10 @@ bool ncclAllToAllDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, vo
 }
 
 ncclResult_t ncclAllToAllDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                        ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
+                                        ncclComm* comm, cudaStream_t stream) {
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
     return ncclInvalidArgument;
   }
   const int typeSize = ncclTypeSize(datatype);
-  return ncclAllToAllDdaFabricLL128Typed<int8_t>(sendbuff, recvbuff, count * typeSize, comm, stream, stopEvent);
+  return ncclAllToAllDdaFabricLL128Typed<int8_t>(sendbuff, recvbuff, count * typeSize, comm, stream);
 }

@@ -36,7 +36,7 @@ static inline std::pair<dim3, dim3> ddaAllReduceFabricGeom(ncclComm* comm, size_
 
 template <typename T>
 static ncclResult_t ncclAllReduceDdaFabricTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
-                                                cudaStream_t stream, hipEvent_t stopEvent) {
+                                                cudaStream_t stream) {
   if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaFabricBarrierState == nullptr) {
     return ncclInvalidUsage;
@@ -75,6 +75,7 @@ static ncclResult_t ncclAllReduceDdaFabricTyped(const void* sendbuff, void* recv
        treeOk ? "tree (two-shot)" : "flat (one-shot)", nRanks, count, sizeBytes, grid.x, block.x,
        (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   if (treeOk) {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, count * sizeof(T), cudaMemcpyDeviceToDevice, stream));
     // NRANKS_CT 4/8: unrolled CollCommon reduce; 0: runtime fallback.
@@ -183,15 +184,15 @@ uint32_t ncclAllReduceDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType
 }
 
 ncclResult_t ncclAllReduceDdaFabric(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                    ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
+                                    ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   (void)op;
   switch (datatype) {
   case ncclFloat32:
-    return ncclAllReduceDdaFabricTyped<float>(sendbuff, recvbuff, count, comm, stream, stopEvent);
+    return ncclAllReduceDdaFabricTyped<float>(sendbuff, recvbuff, count, comm, stream);
   case ncclFloat16:
-    return ncclAllReduceDdaFabricTyped<half>(sendbuff, recvbuff, count, comm, stream, stopEvent);
+    return ncclAllReduceDdaFabricTyped<half>(sendbuff, recvbuff, count, comm, stream);
   case ncclBfloat16:
-    return ncclAllReduceDdaFabricTyped<bf16>(sendbuff, recvbuff, count, comm, stream, stopEvent);
+    return ncclAllReduceDdaFabricTyped<bf16>(sendbuff, recvbuff, count, comm, stream);
   default:
     return ncclInvalidArgument;
   }

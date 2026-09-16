@@ -32,7 +32,7 @@ static inline std::pair<dim3, dim3> ddaAllGatherFabricGeom(ncclComm* comm, size_
 
 template <typename T>
 static ncclResult_t ncclAllGatherDdaFabricTyped(const void* sendbuff, void* recvbuff, size_t sendcount, ncclComm* comm,
-                                                cudaStream_t stream, hipEvent_t stopEvent) {
+                                                cudaStream_t stream) {
   if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaFabricBarrierState == nullptr) {
     return ncclInvalidUsage;
@@ -61,6 +61,7 @@ static ncclResult_t ncclAllGatherDdaFabricTyped(const void* sendbuff, void* recv
   INFO(NCCL_COLL, "DDA fabric AllGather: launching kernel: nRanks=%d sendcount=%zu grid=%u block=%u%s", nRanks,
        sendcount, grid.x, block.x, (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // Specialize the kernel for common clique sizes (compile-time NRANKS -> the
   // unrolled CollCommon allGather), and fall back to the runtime kernel
   // (NRANKS_CT == 0) for any other size.
@@ -133,10 +134,10 @@ uint32_t ncclAllGatherDdaFabricBlocks(ncclComm* comm, size_t sendcount, ncclData
 }
 
 ncclResult_t ncclAllGatherDdaFabric(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
-                                    ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
+                                    ncclComm* comm, cudaStream_t stream) {
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
     return ncclInvalidArgument;
   }
   int typeSize = ncclTypeSize(datatype);
-  return ncclAllGatherDdaFabricTyped<int8_t>(sendbuff, recvbuff, sendcount * typeSize, comm, stream, stopEvent);
+  return ncclAllGatherDdaFabricTyped<int8_t>(sendbuff, recvbuff, sendcount * typeSize, comm, stream);
 }

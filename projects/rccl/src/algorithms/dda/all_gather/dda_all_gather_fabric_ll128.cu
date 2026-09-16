@@ -83,7 +83,7 @@ template <typename T>
 static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   const void* sendbuff, void* recvbuff,
   size_t sendcount, // per-rank element count of T (== bytes when T == int8_t)
-  ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
+  ncclComm* comm, cudaStream_t stream) {
   const int nRanks = comm->nRanks;
   const size_t perRankBytes = sendcount * sizeof(T);
   const size_t slices = ddaLL128AGSlices(perRankBytes);
@@ -105,6 +105,7 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
        "(warp-per-slice, bpp=%u, slotWords=%zu)",
        nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer, slotWords);
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
   switch (nRanks) {
   case 4:
@@ -180,13 +181,12 @@ uint32_t ncclAllGatherDdaFabricLL128Blocks(ncclComm* comm, size_t sendcount, ncc
 }
 
 ncclResult_t ncclAllGatherDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t sendcount,
-                                         ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream,
-                                         hipEvent_t stopEvent) {
+                                         ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream) {
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
     return ncclInvalidArgument;
   }
   // AllGather is a pure copy, so the payload moves as raw bytes: instantiate the
   // kernel once for int8_t and scale the count, like ncclAllGatherDdaFabricLL.
   const int typeSize = ncclTypeSize(datatype);
-  return ncclAllGatherDdaFabricLL128Typed<int8_t>(sendbuff, recvbuff, sendcount * typeSize, comm, stream, stopEvent);
+  return ncclAllGatherDdaFabricLL128Typed<int8_t>(sendbuff, recvbuff, sendcount * typeSize, comm, stream);
 }

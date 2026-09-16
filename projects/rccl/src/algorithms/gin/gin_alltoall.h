@@ -29,7 +29,7 @@ bool ncclAllToAllGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* rec
                                  ncclDataType_t datatype);
 
 ncclResult_t ncclAllToAllGinSdma(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                 ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent);
+                                 ncclComm* comm, cudaStream_t stream);
 
 ncclResult_t ncclGinA2AFinalize(ncclComm* comm);
 

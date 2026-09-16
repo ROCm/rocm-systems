@@ -56,7 +56,7 @@ bool ncclAllReduceGinSdmaYieldToDda(ncclComm* comm, const void* sendbuff, void* 
                                     ncclDataType_t datatype, ncclRedOp_t op);
 
 ncclResult_t ncclAllReduceGinSdma(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                  ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent);
+                                  ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
 ncclResult_t ncclGinAllReduceFinalize(ncclComm* comm);
 

@@ -24,7 +24,7 @@ bool ncclAllGatherDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
  * Execute DDA allgather operation using IPC
  */
 ncclResult_t ncclAllGatherDdaIpc(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
-                                 ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent);
+                                 ncclComm* comm, cudaStream_t stream);
 
 // Total CTAs (grid blocks) each DDA allgather launcher would use for the given
 // operands. Mirrors the launch grid math so reporting reflects real occupancy.
@@ -44,7 +44,7 @@ bool ncclAllGatherDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* 
  * Execute DDA allgather operation using the fabric/VMM path
  */
 ncclResult_t ncclAllGatherDdaFabric(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
-                                    ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent);
+                                    ncclComm* comm, cudaStream_t stream);
 
 /**
  * Check if the LL-protocol DDA allgather is eligible for the fabric/VMM path.
@@ -56,7 +56,7 @@ bool ncclAllGatherDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
  * Execute the LL-protocol DDA allgather using the fabric/VMM path.
  */
 ncclResult_t ncclAllGatherDdaFabricLL(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
-                                      ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent);
+                                      ncclComm* comm, cudaStream_t stream);
 
 /**
  * Check if the LL128-protocol DDA allgather is eligible for the fabric/VMM path.
@@ -68,7 +68,6 @@ bool ncclAllGatherDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
  * Execute the LL128-protocol DDA allgather using the fabric/VMM path.
  */
 ncclResult_t ncclAllGatherDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t sendcount,
-                                         ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream,
-                                         hipEvent_t stopEvent);
+                                         ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream);
 
 #endif

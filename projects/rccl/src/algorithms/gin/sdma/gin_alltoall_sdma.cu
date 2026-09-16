@@ -211,7 +211,7 @@ bool ncclAllToAllGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* rec
 }
 
 ncclResult_t ncclAllToAllGinSdma(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                 ncclComm* comm, cudaStream_t stream, hipEvent_t stopEvent) {
+                                 ncclComm* comm, cudaStream_t stream) {
   struct ncclDevrWindow* sendWin = nullptr;
   struct ncclDevrWindow* recvWin = nullptr;
   NCCLCHECK(ncclDevrFindWindow(comm, sendbuff, &sendWin));
@@ -226,6 +226,7 @@ ncclResult_t ncclAllToAllGinSdma(const void* sendbuff, void* recvbuff, size_t co
 
   bool useSdma = bytesPerPeer >= (size_t)ncclParamGinA2ASdmaMinBytes();
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   if (useSdma) {
     int sdmaThreads = ginA2ASdmaThreads(comm->nRanks);
     INFO(NCCL_COLL, "AllToAll GIN: transport=sdma bytesPerPeer=%zu threads=%d", bytesPerPeer, sdmaThreads);

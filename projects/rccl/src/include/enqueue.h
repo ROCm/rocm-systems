@@ -30,35 +30,28 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm);
 
 // Addon backends launch onto the user's stream themselves instead of going through doLaunches, which is what
 // makes comm->cudaDev current and installs the cross-stream dependency. Bracket such a launch with these.
+//
+// The prologue also offers comm->doneEvent on the communicator, for the launch's last kernel to carry as its
+// stopEvent via rcclTakeAddonStopEvent() instead of paying for a standalone record. A launch that never takes
+// it, because its last stream operation is not a kernel or because it returned early, gets the record from the
+// epilogue as before.
 struct rcclAddonLaunchState {
   int savedDev;
-  // Non-null means the site must carry it as its kernel's stopEvent and the epilogue will not record.
-  // Null means the epilogue records, which is the case under graph capture and for sites that cannot fuse.
-  hipEvent_t stopEvent;
+  // What the prologue offered, which the epilogue compares against the communicator to tell a taken event
+  // from one that was never on offer. Null while capturing, where a fused stop event is silently dropped.
+  hipEvent_t offeredEvent;
 };
 
-ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, bool fusable,
-                                  struct rcclAddonLaunchState* state);
+ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, struct rcclAddonLaunchState* state);
 ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream,
                                 const struct rcclAddonLaunchState& state, ncclResult_t launchRes);
 
-// For sites whose last stream operation is not a single kernel: the epilogue records.
 template <typename LaunchFn>
 inline ncclResult_t rcclAddonLaunch(struct ncclComm* comm, cudaStream_t stream, LaunchFn&& launch) {
   struct rcclAddonLaunchState state = {-1, nullptr};
-  ncclResult_t result = rcclAddonLaunchBegin(comm, stream, /*fusable=*/false, &state);
+  ncclResult_t result = rcclAddonLaunchBegin(comm, stream, &state);
   if (result != ncclSuccess) return rcclAddonLaunchEnd(comm, stream, state, result);
   return rcclAddonLaunchEnd(comm, stream, state, launch());
-}
-
-// For sites that end in exactly one kernel. The event handed to launch() must ride that kernel as its
-// stopEvent; it is null while capturing, where a fused stop event would be silently dropped.
-template <typename LaunchFn>
-inline ncclResult_t rcclAddonLaunchFused(struct ncclComm* comm, cudaStream_t stream, LaunchFn&& launch) {
-  struct rcclAddonLaunchState state = {-1, nullptr};
-  ncclResult_t result = rcclAddonLaunchBegin(comm, stream, /*fusable=*/true, &state);
-  if (result != ncclSuccess) return rcclAddonLaunchEnd(comm, stream, state, result);
-  return rcclAddonLaunchEnd(comm, stream, state, launch(state.stopEvent));
 }
 
 ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t* simInfo);

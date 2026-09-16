@@ -1994,25 +1994,21 @@ NCCL_PARAM(GraphStreamOrdering, "GRAPH_STREAM_ORDERING", NCCL_CONFIG_UNDEF_INT);
 // sentinel. See ncclComm::lastStreamTag.
 static inline uintptr_t ncclStreamTag(hipStream_t s) { return (uintptr_t)s + 1; }
 
-ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, bool fusable,
-                                  struct rcclAddonLaunchState* state) {
+ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, struct rcclAddonLaunchState* state) {
   state->savedDev = -1;
-  state->stopEvent = nullptr;
+  state->offeredEvent = nullptr;
+  comm->addonStopEvent = nullptr;
 
   CUDACHECK(hipGetDevice(&state->savedDev));
   if (state->savedDev != comm->cudaDev) {
     CUDACHECK(hipSetDevice(comm->cudaDev));
   }
 
-  // Both decisions below need the capture state, and one query serves both. A site that cannot fuse and
-  // launches on the same stream as last time needs neither, and keeps paying nothing.
+  // Both decisions below need the capture state, and one query serves both.
   const bool streamChanged = comm->lastStreamTag != 0 && comm->lastStreamTag != ncclStreamTag(stream);
-  bool capturing = false;
-  if (fusable || streamChanged) {
-    struct ncclCudaGraph graph;
-    NCCLCHECK(ncclCudaGetCapturingGraph(&graph, stream, comm->config.graphUsageMode));
-    capturing = ncclCudaGraphValid(graph);
-  }
+  struct ncclCudaGraph graph;
+  NCCLCHECK(ncclCudaGetCapturingGraph(&graph, stream, comm->config.graphUsageMode));
+  const bool capturing = ncclCudaGraphValid(graph);
 
   if (streamChanged && !capturing) {
     // doneEvent may carry a node from another capture or from outside one, and waiting on such an
@@ -2021,9 +2017,12 @@ ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, bo
     CUDACHECK(hipStreamWaitEvent(stream, comm->doneEvent, 0));
   }
 
-  // Capture never binds a fused stopEvent, so under capture the site gets no event and the epilogue
+  // Capture never binds a fused stopEvent, so under capture nothing is offered and the epilogue
   // records instead, exactly as the native general path does.
-  if (fusable && !capturing) state->stopEvent = comm->doneEvent;
+  if (!capturing) {
+    state->offeredEvent = comm->doneEvent;
+    comm->addonStopEvent = comm->doneEvent;
+  }
 
   return ncclSuccess;
 }
@@ -2031,9 +2030,13 @@ ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, bo
 ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream,
                                 const struct rcclAddonLaunchState& state, ncclResult_t launchRes) {
   ncclResult_t result = launchRes;
+  // A cleared field after something was offered is the one and only sign that a kernel took the
+  // event and will record it. Anything else, capture included, still owes the record.
+  const bool taken = state.offeredEvent != nullptr && comm->addonStopEvent == nullptr;
+  comm->addonStopEvent = nullptr;
 
   if (result == ncclSuccess) {
-    if (state.stopEvent == nullptr) {
+    if (!taken) {
       CUDACHECKGOTO(hipEventRecord(comm->doneEvent, stream), result, restore);
     }
     // The tag advances however the event was recorded: it is what tells the next collective on another
