@@ -1023,7 +1023,7 @@ def test_show_all_view_table_skips_roofline_code_path(
     view,
     expect_roofline_called: bool,
 ) -> None:
-    """--view table bypasses the roofline code path entirely."""
+    """--view table bypasses the roofline plotting code path."""
     roofline_called = False
 
     def _spy(*_a, **_k) -> bool:
