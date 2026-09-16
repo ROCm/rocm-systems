@@ -365,13 +365,8 @@ namespace hip {
   class Stream;
 
   /// State shared by every stream taking part in one capture, created by
-  /// hipStreamBeginCapture. Ownership is shared by every stream that is part of this capture.
-  ///
-  /// A Capture dies when the last stream in it drops its reference. Streams detached by
-  /// ~ExecutionCtx keep theirs so hipStreamIsCapturing can still report that the capture was
-  /// invalidated, which outlives the teardown: such a Capture has no graph and no listed
-  /// participants while those streams still point at it.
-  class Capture : public amd::ReferenceCountedObject {
+  /// hipStreamBeginCapture on the origin, which owns it.
+  class Capture {
    public:
     Capture(hip::Stream* origin, hip::Graph* graph, hipStreamCaptureMode mode, uint64_t id);
 
@@ -407,15 +402,24 @@ namespace hip {
       std::scoped_lock lock(lock_);
       return events_.count(e) != 0;
     }
+    /// Removes s from this capture. If called on the origin it ends the capture. A participant
+    /// leaving takes only itself out, and the capture carries on for the rest.
+    ///
+    /// Returns the graph, which the caller then owns, when the origin ends a capture that is
+    /// still valid.
+    /// endedByDetach marks every stream it resets, so they keep reporting Invalidated.
+    [[nodiscard]] hip::Graph* EndCapture(hip::Stream* s, bool endedByDetach = false);
+
+    ~Capture();
+
+   private:
+    /// Return s's capture bookkeeping to its uncaptured state, marking it first when the
+    /// capture is ending by detach. The caller must hold lock_.
+    void ResetStreamLocked(hip::Stream* s, bool endedByDetach);
+
     /// Clear the back-pointer on every event s captured, and forget them.
     /// The caller must hold lock_.
     void DetachEventsOfStreamLocked(hip::Stream* s);
-
-   private:
-    friend class Stream;
-
-    /// Private so the only way to destroy a Capture is to drop its last reference.
-    ~Capture() = default;
 
     hip::Stream* const origin_;          //!< Stream that called hipStreamBeginCapture
     std::unique_ptr<hip::Graph> graph_;  //!< Graph being recorded, released on a successful end
@@ -483,9 +487,14 @@ namespace hip {
       return ++uid;
     }
 
-    /// Returns capture status of the current stream
+    /// Returns capture status of the current stream. While it is in a capture this is the
+    /// capture's own status, shared with every other stream in it. Afterwards it is None,
+    /// unless a detach ended the capture, which leaves its streams reporting Invalidated.
     hipStreamCaptureStatus GetCaptureStatus() const {
-      return capture_ ? capture_->GetStatus() : hipStreamCaptureStatusNone;
+      if (capture_ != nullptr) {
+        return capture_->GetStatus();
+      }
+      return captureEndedByDetach_ ? hipStreamCaptureStatusInvalidated : hipStreamCaptureStatusNone;
     }
     /// Returns capture mode of the current stream
     hipStreamCaptureMode GetCaptureMode() const {
@@ -506,24 +515,27 @@ namespace hip {
     /// Append captured node via the wait event cross stream
     void AddCrossCapturedNode(const std::vector<hip::GraphNode*>& graphNodes,
                               bool replace = false);
-    /// Start a new capture with this stream as the origin.
+    /// Start a new capture with this stream as the origin, which owns it.
     void StartCapture(hip::Graph* graph, hipStreamCaptureMode mode) {
-      capture_ = new Capture(this, graph, mode, GenerateCaptureID());
+      assert(capture_ == nullptr && "a stream already in a capture cannot start another");
+      ownedCapture_ = std::make_unique<Capture>(this, graph, mode, GenerateCaptureID());
+      capture_ = ownedCapture_.get();
     }
-    /// Retain `capture`, adopt that retain, and enroll this stream.
+    /// Enroll this stream in `capture`
     void JoinCapture(hip::Capture* capture) {
-      capture->retain();
+      assert(capture_ == nullptr && "a stream already in a capture cannot join another");
       capture_ = capture;
       capture->Join(this);
     }
-    /// The single entry point for capture teardown, on the origin and on participants alike.
-    /// keepStatusQueryable leaves every stream pointing at the Capture so its final status
-    /// survives the teardown, for the callers that cannot report that status themselves.
+    /// The entry point for capture teardown, and the only place a Capture is destroyed.
     ///
     /// Returns the captured graph, which the caller then owns, when this stream's teardown
     /// ends a capture that is still valid. Returns null for a participant, whose departure
-    /// leaves the capture running, and for an invalidated capture, whose graph it destroys.
-    [[nodiscard]] hip::Graph* EndCapture(bool keepStatusQueryable = false);
+    /// leaves the capture running.
+    /// Only Detach passes endedByDetach: hipStreamEndCapture rejects a detached stream, so
+    /// nothing can report the outcome afterwards and every stream that was in the capture
+    /// keeps reporting Invalidated rather than None.
+    [[nodiscard]] hip::Graph* EndCapture(bool endedByDetach = false);
     /// Set the status of the capture this stream takes part in. Because the status lives on
     /// the capture, marking any one stream invalidated invalidates all of them.
     void SetCaptureStatus(hipStreamCaptureStatus captureStatus) {
@@ -567,15 +579,9 @@ namespace hip {
     }
 
   private:
-    ~Stream() { DropCapture(); }
-
-    /// Drop this stream's reference, if it holds one.
-    void DropCapture() {
-      if (capture_ != nullptr) {
-        capture_->release();
-        capture_ = nullptr;
-      }
-    }
+    /// Capture::EndCapture resets the streams it tears down, which means clearing capture_,
+    /// lastCapturedNodes_ and recording captureEndedByDetach_.
+    friend class Capture;
 
     Device* device_;                         //!< Device that owns this stream
     Priority priority_;                      //!< Scheduling priority (High / Normal / Low)
@@ -588,7 +594,12 @@ namespace hip {
     std::atomic<hipError_t> async_error_{hipSuccess};
 
     // ----- Stream capture state -----
-    hip::Capture* capture_{nullptr};                      //!< Capture this stream takes part in
+    /// Owns the capture this stream originated, and is set on no other stream.
+    std::unique_ptr<hip::Capture> ownedCapture_;
+    hip::Capture* capture_{nullptr};  //!< Capture this stream takes part in, owned by its origin
+    /// Set when Detach tore down the capture this stream was in, on every stream that was in
+    /// it rather than only the detached one. While set the stream reports Invalidated.
+    bool captureEndedByDetach_{false};
     std::vector<hip::GraphNode*> lastCapturedNodes_;      //!< Last graph node(s) captured
     std::vector<hip::GraphNode*> removedDependencies_;    //!< Deps removed via UpdateCaptureDeps
 
