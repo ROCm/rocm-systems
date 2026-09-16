@@ -42,6 +42,7 @@ namespace rocjitsu::test {
 // inline 1..64 = 129..192).
 inline constexpr uint32_t kMovV3V2 = 0x7E060302u;   // v_mov_b32 v3, v2 -> reads v2.
 inline constexpr uint32_t kMovV2Zero = 0x7E040280u; // v_mov_b32 v2, 0  -> clobbers v2.
+inline constexpr uint32_t kMovV0Zero = 0x7E000280u; // v_mov_b32 v0, 0  -> clobbers v0.
 inline constexpr uint32_t kMovV3S8 = 0x7E060208u;   // v_mov_b32 v3, s8 -> reads s8 (s8 live).
 inline constexpr uint32_t kMovS8Zero = 0xbe880080u; // s_mov_b32 s8, 0  -> clobbers s8.
 inline constexpr uint32_t kMovV4S9 = 0x7E080209u;   // v_mov_b32 v4, s9 -> reads s9 (s9 live).
@@ -51,6 +52,8 @@ inline constexpr uint32_t kMovV5V1 = 0x7E0A0301u;   // v_mov_b32 v5, v1 -> reads
 inline constexpr uint32_t kMovV5V2 = 0x7E0A0302u;   // v_mov_b32 v5, v2 -> reads v2 into v5.
 inline constexpr uint32_t kMovV5V3 = 0x7E0A0303u;   // v_mov_b32 v5, v3 -> reads v3 into v5.
 inline constexpr uint32_t kMovV6S8 = 0x7E0C0208u;   // v_mov_b32 v6, s8 -> reads s8 into v6.
+inline constexpr uint32_t kMovV1V0 = 0x7E020300u;   // v_mov_b32 v1, v0 -> reads v0 into v1.
+inline constexpr uint32_t kMovV3V0 = 0x7E060300u;   // v_mov_b32 v3, v0 -> reads v0 into v3.
 
 // v_mov_b32 v{dst}, <inline const K> for K in [0, 64]. vdst occupies bits [24:17];
 // inline constant 0 is encoded as 128, and 1..64 as 129..192, in the src0 field (bits [8:0]).
@@ -103,6 +106,12 @@ inline constexpr uint32_t kProbeSetpcS30S31 = 0xbe801d1eu;
 // build_probe_callable (which only inspects the final instruction) but must be
 // rejected because it would return through a corrupted PC.
 inline constexpr uint32_t kProbeMovS30_0 = 0xbe9e0080u;
+
+// v_mov_b32 v0, v31 (GFX9 family): reads v31 without defining it first. v31 is
+// where the device-function ABI delivers workitem_id_x, put there by the
+// kernel's own prologue, so a probe body containing this has an implicit
+// live-in that a trampoline at an arbitrary site cannot supply.
+inline constexpr uint32_t kProbeMovV0FromV31 = 0x7e00031fu;
 
 // Distinguishable leading marker words for multi-probe layout tests. Each is a
 // harmless, self-contained op the probe verifier accepts (not a call, scratch

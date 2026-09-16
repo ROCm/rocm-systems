@@ -77,7 +77,7 @@ impl EmulatorBackend for Rocjitsu {
     }
 
     fn options(&self) -> Vec<OptionDef> {
-        Vec::new()
+        describe().options_schema
     }
 
     fn shutdown(&self, _ctx: &SessionContext) {}
@@ -327,7 +327,28 @@ pub fn describe() -> EmulatorDescription {
         name: "rocjitsu".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         description: "ROCm just-in-time GPU emulator (cycle-accurate or functional)".to_string(),
-        options_schema: Vec::new(),
+        options_schema: [
+            (
+                "cpu_thread_budget",
+                "Execution-thread ceiling; 0 uses affinity capped at 32.",
+            ),
+            (
+                "num_threads",
+                "Engine partitions; 0 uses the target default.",
+            ),
+            (
+                "cpu_dispatch_threads",
+                "Inclusive dispatch width per GPU; 0 selects from the target table.",
+            ),
+        ]
+        .into_iter()
+        .map(|(name, description)| OptionDef {
+            name: name.to_owned(),
+            dtype: mirage_core::common::SimpleType::Number,
+            description: description.to_owned(),
+            default: None,
+        })
+        .collect(),
     }
 }
 
@@ -671,6 +692,38 @@ fn plugins_to_json(plugins: &PluginsDef) -> serde_json::Value {
 /// leaves an order of magnitude of headroom above it.
 pub const MAX_GPUS_PER_NODE: u32 = 64;
 
+/// Host tuning owned by this backend, separate from the hardware agent model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecutionThreadChoice {
+    num_threads: u32,
+    cpu_dispatch_threads: u32,
+}
+
+include!(concat!(env!("OUT_DIR"), "/thread_allocations.rs"));
+
+// Preserve each single-GPU granule's total budget while keeping one engine
+// across the VM. Divide its remaining threads among the per-GPU dispatch pools.
+fn spread_thread_allocations_over_gpus(
+    mut choices: Vec<ExecutionThreadChoice>,
+    gpus: u32,
+) -> Vec<ExecutionThreadChoice> {
+    if gpus > 1 {
+        for choice in &mut choices {
+            // Leave invalid entries for the native config validator to reject.
+            if choice.num_threads == 0 || choice.cpu_dispatch_threads == 0 {
+                continue;
+            }
+            let workers =
+                u64::from(choice.num_threads - 1) + u64::from(choice.cpu_dispatch_threads - 1);
+            choice.num_threads = 1;
+            choice.cpu_dispatch_threads = 1 + (workers / u64::from(gpus)) as u32;
+        }
+        choices.dedup();
+    }
+    choices
+}
+
 /// The rocjitsu `SimulationConfig` a profile resolves to, before any of
 /// it reaches the disk.
 #[derive(Debug)]
@@ -749,15 +802,49 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
     // (deriving per-GPU identities from the single `device` template).
     // Each node's host process emulates the GPUs local to that node, so
     // the per-node `gpus_per_node` is what the config requests.
+    let thread_allocations = spread_thread_allocations_over_gpus(
+        target_thread_allocations(agent.vm.gpu.device.gfx_target_version),
+        topology.gpus_per_node,
+    );
     let mut vm = agent.vm;
     vm.gpu.num_gpus = topology.gpus_per_node.max(1);
     let mut sim = serde_json::json!({
         "max_ticks": 100000u64,
-        "num_threads": 1u32,
         "exec_mode": exec_mode,
         "vm": vm,
         "topology": agent.topology,
+        "thread_allocations": thread_allocations,
     });
+    // Multi-partition RCCL collectives currently hang on multi-GPU VMs.
+    // Serial dispatch also avoids the measured small-collective slowdown.
+    // Match the native multi-GPU presets; an explicit option below can override.
+    if topology.gpus_per_node > 1 {
+        sim["num_threads"] = serde_json::Value::from(1);
+        sim["cpu_dispatch_threads"] = serde_json::Value::from(1);
+    }
+    // Leave allocation to the native target-aware policy unless overridden.
+    for (key, min, max) in [
+        ("cpu_thread_budget", 0, i64::from(u32::MAX)),
+        ("num_threads", 0, i64::from(u32::MAX)),
+        ("cpu_dispatch_threads", 0, i64::from(u32::MAX)),
+    ] {
+        if let Some(value) = def.options.get(key) {
+            match value {
+                SimpleValue::Number(n) if (min..=max).contains(n) => {
+                    // Zero asks for the default, including the multi-GPU pin.
+                    if key == "num_threads" && *n == 0 && topology.gpus_per_node > 1 {
+                        continue;
+                    }
+                    sim[key] = serde_json::Value::from(*n);
+                }
+                _ => {
+                    return Err(MirageError::Other(format!(
+                        "rocjitsu {key} must be an integer between {min} and {max}"
+                    )));
+                }
+            }
+        }
+    }
     // Carry the profile's plugin selection into the synthesised rocjitsu
     // config so the interposer (local path) and the per-node daemon both
     // enable them through the rocjitsu plugin loader. `def.plugins` maps a
@@ -1069,6 +1156,153 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&cfg).unwrap()).unwrap();
         assert_eq!(json["vm"]["gpu"]["num_gpus"], 2);
+        assert_eq!(json["num_threads"], 1);
+    }
+
+    #[test]
+    fn thread_overrides_are_registered_as_numeric_options() {
+        let description = describe();
+        assert_eq!(Rocjitsu.options(), description.options_schema);
+        for key in ["cpu_thread_budget", "num_threads", "cpu_dispatch_threads"] {
+            let option = description
+                .options_schema
+                .iter()
+                .find(|option| option.name == key)
+                .unwrap();
+            assert_eq!(option.dtype, mirage_core::common::SimpleType::Number);
+            assert_eq!(option.default, None);
+        }
+    }
+
+    #[test]
+    fn generated_config_spreads_target_budget_over_gpus() {
+        let mut def = def_with_gpus(2);
+        if let MaybeRef::Owned(topology) = &mut def.topology {
+            topology.agent = MaybeRef::Owned(mirage_builtin::agents::mi350x());
+        }
+        let SimConfig::Synthesised(bytes) = resolve_sim_config(&def).unwrap() else {
+            panic!("expected generated config");
+        };
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            json["thread_allocations"],
+            serde_json::json!([
+                {"num_threads":1,"cpu_dispatch_threads":1},
+                {"num_threads":1,"cpu_dispatch_threads":2},
+                {"num_threads":1,"cpu_dispatch_threads":4},
+                {"num_threads":1,"cpu_dispatch_threads":8},
+                {"num_threads":1,"cpu_dispatch_threads":12},
+                {"num_threads":1,"cpu_dispatch_threads":16}
+            ])
+        );
+        assert_eq!(json["vm"]["gpu"]["num_gpus"], 2);
+        assert_eq!(json["num_threads"], 1);
+    }
+
+    #[test]
+    fn unknown_target_has_no_implicit_thread_policy() {
+        let SimConfig::Synthesised(bytes) = resolve_sim_config(&def_with_gpus(1)).unwrap() else {
+            panic!("expected generated config");
+        };
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["thread_allocations"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn multi_gpu_granules_match_native_presets() {
+        let configs =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rocjitsu/configs");
+        for (single, multi, gpus) in [
+            ("gfx950_mi355x.json", "gfx950_mi355x_kmd_2gpu.json", 2),
+            ("gfx1250_mi455x.json", "gfx1250_mi455x_kmd_4gpu.json", 4),
+        ] {
+            let read = |name| {
+                let json: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(configs.join(name)).unwrap()).unwrap();
+                serde_json::from_value::<Vec<ExecutionThreadChoice>>(
+                    json["thread_allocations"].clone(),
+                )
+                .unwrap()
+            };
+            let choices = read(single);
+            assert_eq!(
+                spread_thread_allocations_over_gpus(choices.clone(), 1),
+                choices
+            );
+            assert_eq!(
+                spread_thread_allocations_over_gpus(choices, gpus),
+                read(multi)
+            );
+        }
+    }
+
+    #[test]
+    fn multi_gpu_engine_pin_can_be_overridden() {
+        for (requested, expected) in [(0, 1), (4, 4)] {
+            let mut def = def_with_gpus(2);
+            def.options
+                .insert("num_threads".into(), SimpleValue::Number(requested));
+            let SimConfig::Synthesised(bytes) = resolve_sim_config(&def).unwrap() else {
+                panic!("expected generated config");
+            };
+            let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(json["num_threads"], expected);
+            assert_eq!(json["cpu_dispatch_threads"], 1);
+        }
+    }
+
+    #[test]
+    fn multi_gpu_dispatch_pin_can_be_overridden() {
+        for gpus in [2, 4] {
+            for requested in [0, 4] {
+                let mut def = def_with_gpus(gpus);
+                def.options.insert(
+                    "cpu_dispatch_threads".into(),
+                    SimpleValue::Number(requested),
+                );
+                let SimConfig::Synthesised(bytes) = resolve_sim_config(&def).unwrap() else {
+                    panic!("expected generated config");
+                };
+                let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(json["num_threads"], 1);
+                assert_eq!(json["cpu_dispatch_threads"], requested);
+            }
+        }
+    }
+
+    #[test]
+    fn generated_config_defers_thread_defaults_and_preserves_overrides() {
+        let mut def = def_with_gpus(1);
+        let decode = |def: &EmulatorDef| {
+            let SimConfig::Synthesised(bytes) = resolve_sim_config(def).unwrap() else {
+                panic!("expected generated config");
+            };
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
+        };
+        let default = decode(&def);
+        for key in ["num_threads", "cpu_dispatch_threads", "cpu_thread_budget"] {
+            assert!(default.get(key).is_none());
+        }
+        for (key, value) in [
+            ("cpu_thread_budget", 64),
+            ("num_threads", 8),
+            ("cpu_dispatch_threads", 17),
+        ] {
+            def.options
+                .insert(key.to_owned(), SimpleValue::Number(value));
+        }
+        let explicit = decode(&def);
+        assert_eq!(explicit["cpu_thread_budget"], 64);
+        assert_eq!(explicit["num_threads"], 8);
+        assert_eq!(explicit["cpu_dispatch_threads"], 17);
+        def.options
+            .insert("cpu_dispatch_threads".to_owned(), SimpleValue::Number(-2));
+        assert!(resolve_sim_config(&def).is_err());
+        def.options.insert(
+            "cpu_dispatch_threads".to_owned(),
+            SimpleValue::Boolean(true),
+        );
+        assert!(resolve_sim_config(&def).is_err());
     }
 
     /// A drop-in `--config` is used verbatim, but its runtime directory

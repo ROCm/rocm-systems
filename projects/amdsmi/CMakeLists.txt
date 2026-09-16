@@ -471,6 +471,8 @@ install(
     PATTERN "*.txt"
     PATTERN "build*" EXCLUDE
     PATTERN ".cache*" EXCLUDE
+    # Includes impl headers that are build-only, so it cannot compile against an install tree.
+    PATTERN "amd_smi_cper.cc" EXCLUDE
 )
 
 # Make for goamdsmi_shim library

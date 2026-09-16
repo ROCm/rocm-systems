@@ -173,6 +173,26 @@
           "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
         },
         {
+          "name": "A17_NetIB_MultiThread_SendRecvMultipleSizes",
+          "description": "Concurrent workers each walk the size ladder on an independent connection.",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "A17_NetIB_MultiThread_LongRunningEndurance",
+          "description": "Concurrent workers each run a long transfer loop, so a leak or a slow drift shows up.",
+          "test_filter": "NetIbMPITest.LongRunningEndurance"
+        },
+        {
+          "name": "A17_NetIB_MultiThread_MemoryRegistrationStorm",
+          "description": "Concurrent register/deregister storms contend on the shared per-device MR cache.",
+          "test_filter": "NetIbMPITest.MemoryRegistrationStorm"
+        },
+        {
+          "name": "A17_NetIB_MultiThread_MrCacheRefCount",
+          "description": "All workers register the same address, contending on one cache entry's refcount.",
+          "test_filter": "NetIbMPITest.MrCacheRefCount"
+        },
+        {
           "name": "A17_NetIB_MultiThread_ProgressDoesNotSerialize",
           "description": "Gate: concurrent workers must progress at the same time. Catches a lock held across a progress call, which functional tests pass straight through.",
           "test_filter": "NetIbMPITest.ThreadedProgressDoesNotSerialize"

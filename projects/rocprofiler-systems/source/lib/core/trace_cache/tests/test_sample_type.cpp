@@ -169,8 +169,8 @@ TEST_F(sample_type_test, region_sample_get_size)
     const region_sample sample(789, "test_function", 1100, 1200, 10000, 20000,
                                "frame1\nframe2", "arg1=1, arg2=hello", "hip");
 
-    const size_t expected_size =
-        sizeof(std::uint64_t) * 5 + sizeof(size_t) * 4 + 13 + 13 + 18 + 3;
+    const size_t expected_size = sizeof(std::uint64_t) * 5 + sizeof(size_t) * 4 + 13 +
+                                 13 + 18 + 3 + sizeof(char) * 4;
 
     EXPECT_EQ(get_size(sample), expected_size);
 }
@@ -222,9 +222,10 @@ TEST_F(sample_type_test, in_time_sample_get_size)
     const in_time_sample sample(42, "GPU:0", 50000, "kernel_launch", 100, 99, 1500,
                                 "main\nfoo\nbar", "file.cpp:42");
 
-    const size_t expected_size =
-        sizeof(size_t) + sizeof(size_t) + 5 + sizeof(std::uint64_t) + sizeof(size_t) +
-        13 + sizeof(std::uint64_t) * 3 + sizeof(size_t) + 12 + sizeof(size_t) + 11;
+    const size_t expected_size = sizeof(size_t) + sizeof(size_t) + 5 +
+                                 sizeof(std::uint64_t) + sizeof(size_t) + 13 +
+                                 sizeof(std::uint64_t) * 3 + sizeof(size_t) + 12 +
+                                 sizeof(size_t) + 11 + sizeof(char) * 4;
 
     EXPECT_EQ(get_size(sample), expected_size);
 }
@@ -280,6 +281,7 @@ TEST_F(sample_type_test, pmc_event_with_sample_get_size)
         sizeof(std::uint32_t) +        // device_id
         sizeof(std::uint8_t) +         // device_type
         sizeof(size_t) + 24 +          // pmc_info_name "PERF_COUNT_HW_CPU_CYCLES"
+        sizeof(char) * 5 +             // null terminators for the 5 string_view fields
         sizeof(double) +               // value
         (sizeof(std::uint8_t) +
          sizeof(std::int64_t));  // system_tid (has-value flag + value)
@@ -395,6 +397,7 @@ TEST_F(sample_type_test, pmc_event_with_sample_get_size_nullopt)
         sizeof(std::uint32_t) +        // device_id
         sizeof(std::uint8_t) +         // device_type
         sizeof(size_t) + 24 +          // pmc_info_name "PERF_COUNT_HW_CPU_CYCLES"
+        sizeof(char) * 5 +             // null terminators for the 5 string_view fields
         sizeof(double) +               // value
         sizeof(std::uint8_t);          // system_tid (has-value flag only, nullopt)
 
@@ -437,7 +440,8 @@ TEST_F(sample_type_test, backtrace_region_sample_get_size)
                                          "worker.cpp:256", "{\"extra\":\"data\"}");
 
     const size_t expected_size = sizeof(std::uint32_t) + sizeof(std::uint64_t) * 3 +
-                                 sizeof(size_t) * 6 + 10 + 11 + 4 + 16 + 14 + 16;
+                                 sizeof(size_t) * 6 + 10 + 11 + 4 + 16 + 14 + 16 +
+                                 sizeof(char) * 6;
 
     EXPECT_EQ(get_size(sample), expected_size);
 }

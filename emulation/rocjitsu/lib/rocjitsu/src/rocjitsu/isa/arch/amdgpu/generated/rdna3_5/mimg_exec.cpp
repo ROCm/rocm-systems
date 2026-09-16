@@ -134,8 +134,8 @@ void ImageBvhIntersectRayMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageBvh64IntersectRayMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleMimg::execute_impl(amdgpu::Wavefront &wf) {

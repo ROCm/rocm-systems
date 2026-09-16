@@ -61,7 +61,9 @@ double GetDeviceWallClockRateInKhz(int deviceId) {
   else if (strncmp("gfx1250", gcn, 7) == 0) return 1.0E5;
   else return 2.5E4;
 }
-
+/**
+ * prefix comparison
+ */
 bool IsArchMatch(char const* arch, char const* target) {
   // helper function to reduce clutter in code elsewhere.  Returns true on match.
   return (strncmp(arch, target, strlen(target)) == 0);

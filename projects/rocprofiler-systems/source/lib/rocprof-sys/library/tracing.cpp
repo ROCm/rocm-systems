@@ -151,7 +151,7 @@ record_thread_start_time()
     static thread_local std::once_flag _once{};
     std::call_once(_once, []() {
         thread_info::set_start(comp::wall_clock::record(),
-                               get_mode() != state::process::Mode::Sampling);
+                               get_mode() != state::process::Mode::sampling);
     });
 }
 
