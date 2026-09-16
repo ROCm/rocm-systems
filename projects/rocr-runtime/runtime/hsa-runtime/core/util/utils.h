@@ -427,14 +427,14 @@ static __forceinline std::string& rtrim(std::string& s) {
 static __forceinline std::string& trim(std::string& s) { return ltrim(rtrim(s)); }
 
 static __forceinline void cpu_relax() {
-#if __has_builtin(__builtin_ia32_pause) || defined(__x86_64__) || defined(__i386__)
-  __builtin_ia32_pause();
-#elif defined(_MSC_VER) || defined(__powerpc64__) || defined(__PPC64__)
+#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc__)
   _mm_pause();
 #elif __has_builtin(__builtin_arm_yield)
   __builtin_arm_yield();
 #elif __has_builtin(__builtin_riscv_pause)
   __builtin_riscv_pause();
+#else
+#warning "No cpu_relax() implementation for this processor"
 #endif
 }
 
