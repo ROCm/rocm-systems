@@ -28,11 +28,21 @@
 #include <rocprofiler-sdk/hsa.h>
 
 #include <cstdint>
+#include <memory>
 
 namespace rocprofiler
 {
 namespace hsa
 {
+using signal_pool_t = common::container::pool<signal_t>;
+
+/**
+ * @brief Borrow a signal and retain its pool until the borrower is destroyed.
+ * The caller releases the pool object only after GPU completion or submission cancellation.
+ */
+pooled_signal_ptr_t
+acquire_pooled_signal(hsa_signal_value_t initial_value = 0);
+
 /**
  * @brief Ensure @p signal contains a usable HSA signal with @p initial_value.
  *
@@ -63,11 +73,9 @@ construct_hsa_signal(signal_t&          signal,
                      uint64_t           attributes    = 0);
 
 /**
- * @brief Get the signal pool object
- *
- * @return common::container::pool<signal_t>*
+ * @brief Retain the current signal pool. Returns null after finalization until reinitialized.
  */
-common::container::pool<signal_t>*
+std::shared_ptr<signal_pool_t>
 get_signal_pool();
 
 /**
@@ -78,7 +86,7 @@ void
 signal_pool_init();
 
 /**
- * @brief Finalize the signal pool, destroying any remaining signals and printing a usage report.
+ * @brief Retire the current pool. Outstanding borrowers retain signal storage until completion.
  *
  */
 void

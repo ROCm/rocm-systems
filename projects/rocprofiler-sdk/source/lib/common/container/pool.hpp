@@ -74,6 +74,10 @@ struct pool
     template <typename FuncT = void (*)(pool_object<Tp>&)>
     void clear(FuncT&& func = [](pool_object<Tp>&) {});
 
+    // Visit entries under the storage lock. The callback must not acquire from this pool.
+    template <typename FuncT>
+    void for_each(FuncT&& func);
+
     std::string get_usage_report() const;
 
 private:
@@ -219,6 +223,16 @@ pool<Tp>::clear(FuncT&& func)
     m_released.store(0);
     m_reused.store(0);
     m_new_batch.store(0);
+}
+
+template <typename Tp>
+template <typename FuncT>
+void
+pool<Tp>::for_each(FuncT&& func)
+{
+    auto lock = std::unique_lock<std::mutex>{m_pool_mtx};
+    for(auto& object : m_pool)
+        func(object);
 }
 
 template <typename Tp>

@@ -561,12 +561,16 @@ start_context(rocprofiler_context_id_t context_id)
                 // sets of GPU agents. A context with no agent restriction claims every agent.
                 return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
             }
-            else if(cfg->dispatch_thread_trace && itr->dispatch_thread_trace &&
-                    cfg->dispatch_thread_trace->intersects(*itr->dispatch_thread_trace))
+            else if((cfg->dispatch_thread_trace && itr->dispatch_thread_trace &&
+                     cfg->dispatch_thread_trace->intersects(*itr->dispatch_thread_trace)) ||
+                    (cfg->device_thread_trace && itr->dispatch_thread_trace &&
+                     cfg->device_thread_trace->intersects(*itr->dispatch_thread_trace)) ||
+                    (cfg->dispatch_thread_trace && itr->device_thread_trace &&
+                     itr->device_thread_trace->intersects(*cfg->dispatch_thread_trace)) ||
+                    (cfg->device_thread_trace && itr->device_thread_trace &&
+                     cfg->device_thread_trace->intersects(*itr->device_thread_trace)))
             {
-                // Two dispatch ATT contexts can run concurrently as long as they target disjoint
-                // sets of GPU agents. Overlapping agent sets would cross-talk in
-                // post_kernel_call.
+                // Active ATT contexts must target disjoint GPU agents.
                 return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
             }
         }
@@ -615,6 +619,16 @@ start_context(rocprofiler_context_id_t context_id)
     };
     auto _pending_guard = common::scope_destructor{[&_release_pending]() { _release_pending(); }};
 
+    if(cfg->device_thread_trace)
+    {
+        auto status = cfg->device_thread_trace->reserve_context();
+        if(status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            get_num_active_contexts().fetch_sub(1, std::memory_order_release);
+            return status;
+        }
+    }
+
     rocprofiler::hsa::queue_interposition::notify_queue_interposition_consumer_context_started(cfg);
 
     // atomic swap the pointer into the "active" array used internally
@@ -623,6 +637,7 @@ start_context(rocprofiler_context_id_t context_id)
 
     if(!success)
     {
+        if(cfg->device_thread_trace) cfg->device_thread_trace->stop_context();
         rocprofiler::hsa::queue_interposition::notify_queue_interposition_consumer_context_stopped(
             cfg);
         get_num_active_contexts().fetch_sub(1, std::memory_order_release);

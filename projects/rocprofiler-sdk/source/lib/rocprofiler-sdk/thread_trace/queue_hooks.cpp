@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
@@ -88,6 +89,15 @@ kernel_dispatch_phase_exit_hook(const hsa::Queue& /*queue*/,
         }
     }
     if(!has_thread_trace_packets) return;
+
+    auto retire = common::scope_destructor{[&inst_pkt]() {
+        for(auto& tagged_pkt : inst_pkt)
+        {
+            if(tagged_pkt.second != hsa::queue_hooks::THREAD_TRACE_CLIENT_ID) continue;
+            if(auto* packet = dynamic_cast<hsa::TraceControlAQLPacket*>(tagged_pkt.first.get()))
+                packet->CompleteTrace();
+        }
+    }};
 
     // Route by packet provenance, not current activeness: post_kernel_call self-filters via
     // THREAD_TRACE_CLIENT_ID and the owning tracer's id, so in-flight dispatches still complete

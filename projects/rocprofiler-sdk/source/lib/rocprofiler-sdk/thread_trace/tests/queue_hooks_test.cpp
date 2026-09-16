@@ -352,6 +352,25 @@ TEST(ThreadTraceQueueHooks, CompletionAfterResourceDeinitStillDrains)
     // Tear down the agent map with the dispatch still outstanding.
     tracer.resource_deinit();
     EXPECT_TRUE(tracer.get_agents().empty());
+    auto [busy_status, busy_lease] = thread_trace::acquire_device_trace(
+        att_agent->get_rocp_agent()->id, rocprofiler_context_id_t{123});
+    EXPECT_EQ(busy_status, ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT);
+    EXPECT_EQ(busy_lease, nullptr);
+
+    auto late_ctx = rocprofiler_context_id_t{};
+    ASSERT_EQ(rocprofiler_create_context(&late_ctx), ROCPROFILER_STATUS_SUCCESS);
+    ASSERT_EQ(rocprofiler_configure_device_thread_trace_service(
+                  late_ctx,
+                  att_agent->get_rocp_agent()->id,
+                  nullptr,
+                  0,
+                  [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {},
+                  {}),
+              ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(rocprofiler_start_context(late_ctx), ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT);
+    int active = -1;
+    ASSERT_EQ(rocprofiler_context_is_active(late_ctx, &active), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(active, 0);
 
     auto sess = std::make_shared<hsa::queue_info_session_t>(hsa::queue_info_session_t{.queue = fq});
     auto packet_data      = hsa::packet_data_t{};
@@ -361,6 +380,19 @@ TEST(ThreadTraceQueueHooks, CompletionAfterResourceDeinitStillDrains)
 
     EXPECT_EQ(tracer.pending_post_moves(), 0)
         << "a completion racing resource_deinit() must still drain post_move_data";
+    auto [status, lease] = thread_trace::acquire_device_trace(att_agent->get_rocp_agent()->id,
+                                                              rocprofiler_context_id_t{123});
+    EXPECT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
+    ASSERT_NE(lease, nullptr);
+    lease.reset();
+
+    ASSERT_EQ(rocprofiler_start_context(late_ctx), ROCPROFILER_STATUS_SUCCESS);
+    auto* late = context::get_mutable_registered_context(late_ctx);
+    ASSERT_TRUE(late && late->device_thread_trace);
+    late->device_thread_trace->resource_init();
+    ASSERT_FALSE(late->device_thread_trace->get_agents().empty());
+    EXPECT_EQ(late->device_thread_trace->reserve_context(), ROCPROFILER_STATUS_SUCCESS);
+    ASSERT_EQ(rocprofiler_stop_context(late_ctx), ROCPROFILER_STATUS_SUCCESS);
 
     registration::set_init_status(1);
     registration::finalize();

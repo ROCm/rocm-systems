@@ -33,10 +33,13 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/tests/shared_resources.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/threading.hpp"
 
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <cstddef>
+#include <cstdlib>
 #include <map>
 #include <unordered_set>
 #include <utility>
@@ -53,6 +56,7 @@ test_init()
     auto init = []() -> bool {
         if(hsa_init() != HSA_STATUS_SUCCESS) abort();
 
+        test::register_resource_cleanup();
         table.amd_ext_ = &counters::test_constants::get_ext_table();
         table.core_    = &counters::test_constants::get_api_table();
         rocprofiler::hsa::copy_table(table.core_, 0);
@@ -84,14 +88,6 @@ copy_data_mock(att_queue_t&, void* dst, const void* src, size_t size)
     if(size == 0) return true;
     std::memcpy(dst, src, size);
     return true;
-}
-
-att_queue_ptr_t
-make_mock_queue(rocprofiler_agent_id_t agent_id, size_t num_buffers = MOCK_NUM_BUFFERS)
-{
-    auto q       = make_att_queue(agent_id, MOCK_BUFFER_SIZE, num_buffers);
-    q->submit_fn = mock_submit;
-    return q;
 }
 
 using query_status_t = std::function<std::optional<hsa::sqtt_buffer_status_t>(void)>;
@@ -131,7 +127,8 @@ public:
 
 struct consumer_producer_t
 {
-    att_queue_ptr_t                   mock_queue{};  // destroyed last — must outlive threads
+    // Destroyed last — the shared queue and staging buffers must outlive the threads.
+    agent_trace_resources_ptr_t       resources{};
     std::shared_ptr<std::atomic<int>> flag{};
     std::vector<std::thread>          consumers{};
     std::thread                       producer{};
@@ -152,7 +149,9 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
               drain_t                                         drain_fn            = {},
               query_clock_t                                   clock               = {},
               size_t                                          shader_engine_count = 1,
-              size_t                                          num_buffers = MOCK_NUM_BUFFERS)
+              size_t                                          num_buffers        = MOCK_NUM_BUFFERS,
+              size_t                                          active_buffer_size = MOCK_BUFFER_SIZE,
+              size_t                                          staging_buffer_size = 0)
 {
     // Build a synthetic queue + packet stack that mimics the runtime so we can
     // exercise the producer/consumer pairing without a real GPU.
@@ -179,12 +178,29 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
 
     auto params               = thread_trace_parameter_pack{};
     params.num_buffers        = num_buffers;
-    params.buffer_size        = MOCK_BUFFER_SIZE;
+    params.buffer_size        = active_buffer_size;
     params.shader_cb_fn       = cb_fn;
     params.callback_userdata  = userdata;
     params.shader_engine_mask = (uint64_t{1} << shader_engine_count) - 1;
 
-    auto factory        = std::make_unique<aql::ThreadTraceAQLPacketFactory>(agent_id, params);
+    // The mock submit/copy hooks replace the backend, so pin the agent to ROCr rather
+    // than standing up KFD queues the harness never exercises.
+    auto restore_backend = test::force_hsa_backend();
+
+    // Each harness run wants its own queue, so drop whatever a previous one left behind.
+    free_shared_trace_resources();
+    // Register the wider context first when asked, so the shared staging slots end up
+    // larger than the size this trace actually uses.
+    if(staging_buffer_size > active_buffer_size)
+        register_shared_trace_requirements(
+            agent_id, staging_buffer_size, num_buffers, params.shader_engine_mask);
+    register_shared_trace_requirements(
+        agent_id, params.buffer_size, params.num_buffers, params.shader_engine_mask);
+
+    auto resources               = acquire_shared_trace_resources(agent_id);
+    resources->queue().submit_fn = submit_fn;
+
+    auto factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(agent_id, params, resources);
     auto control_packet = factory->construct_control_packet();
     // Mirror ThreadTracerAgent::start_thread_trace: the producer loop submits the
     // start packets (before_krn_pkt) and, on stop, after_krn_pkt.at(0). Those
@@ -202,31 +218,30 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
         mock_buffer.emplace_back(std::move(buffer_packet));
     }
 
-    auto mock_queue          = make_mock_queue(agent_id, num_buffers);
-    mock_queue->submit_fn    = submit_fn;
     auto worker_data         = std::make_shared<triple_buffer_shared_data_t>();
-    worker_data->queue       = mock_queue.get();
+    worker_data->resources   = resources;
     worker_data->num_buffers = num_buffers;
 
     // Initialize buffer memory pointers from the queue's CPU staging buffers.
     // Slots default to FREE.
     for(size_t i = 0; i < worker_data->num_buffers; i++)
-        worker_data->buffers[i].memory = mock_queue->cpu_buffers.at(i);
+        worker_data->buffers[i].memory = resources->queue().cpu_buffers.at(i);
 
-    auto producer_data             = triple_buffer_producer_data_t{};
-    producer_data.producer_running = running_flag;
-    producer_data.submit_signal    = make_signal(*mock_queue);
-    producer_data.control_packet   = std::move(control_packet);
-    producer_data.copy_data_fn     = copy_data_mock;
-    producer_data.shared           = worker_data;
-    producer_data.buffer_packets   = std::move(mock_buffer);
-    producer_data.restart_trace    = [queue = mock_queue.get()](auto& packet) {
-        return att_queue_submit_packets(*queue, packet->before_krn_pkt);
+    auto producer_data               = triple_buffer_producer_data_t{};
+    producer_data.producer_running   = running_flag;
+    producer_data.submit_signal      = make_signal(resources->queue());
+    producer_data.control_packet     = std::move(control_packet);
+    producer_data.copy_data_fn       = copy_data_mock;
+    producer_data.shared             = worker_data;
+    producer_data.buffer_packets     = std::move(mock_buffer);
+    producer_data.active_buffer_size = params.buffer_size;
+    producer_data.restart_trace      = [resources](auto& packet) {
+        return att_queue_submit_packets(resources->queue(), packet->before_krn_pkt);
     };
 
     consumer_producer_t ret{};
-    ret.mock_queue = std::move(mock_queue);
-    ret.producer   = std::thread{producer_loop, std::move(producer_data)};
+    ret.resources = std::move(resources);
+    ret.producer  = std::thread{producer_loop, std::move(producer_data)};
     // One consumer thread per slot.
     ret.consumers.reserve(num_buffers);
     for(size_t i = 0; i < num_buffers; i++)
@@ -672,6 +687,56 @@ TEST(thread_trace, data_integrity)
     }
 }
 
+// Staging slots are sized for the largest context on the agent, so a trace has to copy
+// and report only the size it requested, not the slot capacity it borrows.
+TEST(thread_trace, active_buffer_size_below_shared_staging_capacity)
+{
+    using namespace rocprofiler::thread_trace;
+    test_init();
+
+    constexpr size_t ACTIVE_SIZE = MOCK_BUFFER_SIZE / 2;
+    constexpr size_t ENGINES     = 2;
+    constexpr auto   ALL_ENGINES = (uint64_t{1} << ENGINES) - 1;
+
+    auto received = std::atomic<uint64_t>{0};
+    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
+                       rocprofiler_user_data_t                userdata) {
+        if(shader_data.data_size == ACTIVE_SIZE)
+            static_cast<std::atomic<uint64_t>*>(userdata.ptr)
+                ->fetch_or(uint64_t{1} << shader_data.shader_engine_id);
+    };
+
+    auto input_buffer = std::vector<std::byte>(ACTIVE_SIZE);
+    auto queries      = std::atomic<size_t>{0};
+    auto query_once   = [&]() -> std::optional<rocprofiler::hsa::sqtt_buffer_status_t> {
+        if(queries.fetch_add(1) >= ENGINES) return std::nullopt;
+        auto status = rocprofiler::hsa::sqtt_buffer_status_t{};
+        status.data = input_buffer.data();
+        status.size = ACTIVE_SIZE;
+        return status;
+    };
+
+    auto userdata = rocprofiler_user_data_t{.ptr = &received};
+    auto threads  = start_threads(fetch_cb,
+                                 query_once,
+                                 userdata,
+                                 mock_submit,
+                                 {},
+                                 {},
+                                 ENGINES,
+                                 MOCK_NUM_BUFFERS,
+                                 ACTIVE_SIZE,
+                                 MOCK_BUFFER_SIZE);
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while(received.load() != ALL_ENGINES && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    threads.flag->store(WORKER_FLAG_STOP);
+    threads.join_all();
+    EXPECT_EQ(received.load(), ALL_ENGINES);
+}
+
 TEST(thread_trace, slow_cpu)
 {
     rocprofiler::thread_trace::test_init();
@@ -740,7 +805,7 @@ TEST(thread_trace, slow_cpu)
         EXPECT_TRUE(state.cpu_full.load());
         EXPECT_EQ(state.gpu_full.load(), drain_status == HSA_STATUS_ERROR_OUT_OF_RESOURCES);
         EXPECT_GT(restart_submissions.load(), 0);
-        EXPECT_TRUE(rocprofiler::thread_trace::att_queue_enabled(*threads.mock_queue));
+        EXPECT_TRUE(rocprofiler::thread_trace::att_queue_enabled(threads.resources->queue()));
     }
 }
 
@@ -928,15 +993,22 @@ TEST(thread_trace, gpu_full_disables_queue)
         // Queries and successful swaps only: no final stop or restart.
         EXPECT_EQ(submissions.load(), 2 * copied_buffers + 1);
         EXPECT_EQ(received.load(), 32 + copied_buffers * MOCK_BUFFER_SIZE);  // Header + CPU data.
-        EXPECT_FALSE(att_queue_enabled(*threads.mock_queue));
+        auto& queue = threads.resources->queue();
+        EXPECT_FALSE(att_queue_enabled(queue));
 
         // Later markers/restarts must not reach the backend or leave an unsignaled wait.
         hsa_ext_amd_aql_pm4_packet_t packet{};
-        auto                         signal = make_signal(*threads.mock_queue);
-        EXPECT_FALSE(att_queue_submit(*threads.mock_queue, &packet, signal.get()));
+        auto                         signal = make_signal(queue);
+        EXPECT_FALSE(att_queue_submit(queue, &packet, signal.get()));
         signal_wait(*signal);
-        EXPECT_EQ(att_queue_submit(*threads.mock_queue, &packet, true), nullptr);
+        EXPECT_EQ(att_queue_submit(queue, &packet, true), nullptr);
         EXPECT_EQ(submissions.load(), 2 * copied_buffers + 1);
+
+        auto params          = thread_trace_parameter_pack{};
+        params.buffer_size   = MOCK_BUFFER_SIZE;
+        params.resource_mode = ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA;
+        ThreadTracerAgent dispatch(params, queue.agent_id);
+        EXPECT_EQ(dispatch.get_start_packet(), nullptr);
     }
 }
 

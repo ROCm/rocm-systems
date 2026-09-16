@@ -67,6 +67,8 @@ typedef rocprofiler_thread_trace_control_flags_t (*rocprofiler_thread_trace_disp
  * @brief Enables the thread trace service for dispatch-based tracing.
  * The tool has an option to enable/disable thread trace on every dispatch callback.
  * This service serializes all traced kernels, and optionally all non-traced kernels.
+ * Contexts targeting the same agent share output buffers and an internal submission queue.
+ * Queued traced dispatches retain their resources until completion, even after the context stops.
  * @param [in] context_id id of the context used for start/stop thread_trace.
  * @param [in] agent_id rocprofiler_agent_id_t to configure thread trace.
  * @param [in] parameters List of ATT-specific parameters.
@@ -82,6 +84,8 @@ typedef rocprofiler_thread_trace_control_flags_t (*rocprofiler_thread_trace_disp
  * @retval ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT for invalid
  * rocprofiler_thread_trace_parameter_t
  * @retval ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED if already configured
+ * @retval ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES if the requested buffers exceed the
+ * capacity of resources already initialized for the agent
  */
 rocprofiler_status_t
 rocprofiler_configure_dispatch_thread_trace_service(

@@ -27,8 +27,10 @@
 
 #include "lib/common/demangle.hpp"
 #include "lib/common/mpl.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 
 #include <gtest/gtest.h>
@@ -332,6 +334,47 @@ TEST(contexts, callback_tracing)
             check_operations(tracer, i, std::false_type{});
         }
     }
+}
+
+TEST(contexts, correlation_retirement)
+{
+    auto* pending = context::correlation_tracing_service::construct(3);
+    ASSERT_NE(pending, nullptr);
+    context::pop_latest_correlation_id(pending);
+    auto cleanup_pending = common::scope_destructor{[pending]() {
+        while(pending->get_kern_count() > 0)
+            pending->sub_kern_count();
+        while(pending->get_ref_count() > 0)
+            pending->sub_ref_count();
+    }};
+
+    auto* idle = context::correlation_tracing_service::construct(1);
+    ASSERT_NE(idle, nullptr);
+    context::pop_latest_correlation_id(idle);
+    auto cleanup_idle = common::scope_destructor{[idle]() {
+        while(idle->get_ref_count() > 0)
+            idle->sub_ref_count();
+    }};
+
+    pending->add_kern_count();
+    pending->add_kern_count();
+    EXPECT_EQ(pending->sub_ref_count(), 3u);
+    context::correlation_id_finalize();
+    ASSERT_EQ(pending->get_ref_count(), 2u);
+    EXPECT_EQ(pending->get_kern_count(), 2u);
+    EXPECT_EQ(idle->get_ref_count(), 0u);
+
+    EXPECT_EQ(pending->sub_kern_count(), 2u);
+    EXPECT_EQ(pending->sub_ref_count(), 2u);
+    context::correlation_id_finalize();
+    ASSERT_EQ(pending->get_ref_count(), 1u);
+    EXPECT_EQ(pending->get_kern_count(), 1u);
+
+    EXPECT_EQ(pending->sub_kern_count(), 1u);
+    EXPECT_EQ(pending->sub_ref_count(), 1u);
+    EXPECT_EQ(pending->get_kern_count(), 0u);
+    EXPECT_EQ(pending->get_ref_count(), 0u);
+    context::correlation_id_finalize();
 }
 
 TEST(contexts, buffer_tracing)

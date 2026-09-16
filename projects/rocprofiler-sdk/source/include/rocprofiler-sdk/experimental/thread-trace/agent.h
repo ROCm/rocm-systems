@@ -38,10 +38,11 @@ ROCPROFILER_EXTERN_C_INIT
  */
 
 /**
- * @brief Configure Thread Trace Service for agent. There may only be one agent profile
- * configured per context and can be only one active context that is profiling a single agent
- * at a time. Multiple agent contexts can be started at the same time if they are profiling
- * different agents.
+ * @brief Configure Thread Trace Service for an agent. Active thread trace contexts must
+ * target disjoint agents, regardless of whether they use device or dispatch tracing.
+ * Starting a device context returns ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT while an
+ * earlier dispatch trace on its agent is still pending. The caller can retry after completion.
+ * Output buffers and the internal submission queue are shared by contexts targeting an agent.
  *
  * @param [in] context_id context id
  * @param [in] parameters List of ATT-specific parameters.
@@ -56,6 +57,8 @@ ROCPROFILER_EXTERN_C_INIT
  * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND for invalid context id
  * @retval ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT for invalid
  * rocprofiler_thread_trace_parameter_t
+ * @retval ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES if the requested buffers exceed the
+ * capacity of resources already initialized for the agent
  */
 rocprofiler_status_t
 rocprofiler_configure_device_thread_trace_service(

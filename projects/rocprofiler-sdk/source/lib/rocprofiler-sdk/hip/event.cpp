@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
@@ -859,12 +860,12 @@ namespace
 // GPU completion handler below.
 struct barrier_data_t
 {
-    tracing::tracing_data                          tracing_data      = {};
-    hsa_signal_t                                   completion_signal = {.handle = 0};
-    rocprofiler_callback_tracing_hip_event_data_t  callback_record   = {};
-    common::container::pool_object<hsa::signal_t>* pooled_signal     = nullptr;
-    rocprofiler_hip_event_operation_t              operation         = ROCPROFILER_HIP_EVENT_NONE;
-    coalesce_group_ptr_t                           coalesce_group    = {};
+    tracing::tracing_data                         tracing_data      = {};
+    hsa_signal_t                                  completion_signal = {.handle = 0};
+    rocprofiler_callback_tracing_hip_event_data_t callback_record   = {};
+    hsa::pooled_signal_ptr_t                      pooled_signal{};
+    rocprofiler_hip_event_operation_t             operation      = ROCPROFILER_HIP_EVENT_NONE;
+    coalesce_group_ptr_t                          coalesce_group = {};
 };
 
 struct barrier_info_session_t
@@ -910,6 +911,8 @@ BarrierAsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
     if(registration::get_fini_status() > 0)
     {
+        for(auto& barrier : (*_session_ptr)->barrier_data)
+            if(barrier.pooled_signal) barrier.pooled_signal->release();
         _session_ptr->reset();
         delete _session_ptr;
         return false;
@@ -1212,10 +1215,10 @@ emit_bound_waits(const hsa::Queue&       queue,
 // piggyback on.
 struct deferred_wait_session_t
 {
-    hsa::Queue*                                    queue             = nullptr;
-    common::container::pool_object<hsa::signal_t>* pooled_signal     = nullptr;
-    hsa_signal_t                                   completion_signal = {.handle = 0};
-    rocprofiler_timestamp_t                        enqueue_ts        = 0;
+    hsa::Queue*              queue = nullptr;
+    hsa::pooled_signal_ptr_t pooled_signal{};
+    hsa_signal_t             completion_signal = {.handle = 0};
+    rocprofiler_timestamp_t  enqueue_ts        = 0;
 };
 
 bool
@@ -1227,6 +1230,7 @@ DeferredWaitAsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
     if(registration::get_fini_status() > 0)
     {
+        if(_session->pooled_signal) _session->pooled_signal->release();
         delete _session;
         return false;
     }
@@ -1303,8 +1307,8 @@ flush_staged_waits(hsa::Queue& queue, rocprofiler_timestamp_t enqueue_ts)
 {
     if(g_staged_waits.empty()) return std::nullopt;
 
-    auto  pooled_sig = hsa_signal_t{.handle = 0};
-    auto* pooled     = queue.create_signal(0, &pooled_sig, true);
+    auto pooled_sig = hsa_signal_t{.handle = 0};
+    auto pooled     = queue.create_signal(0, &pooled_sig, true);
 
     // Reset to 0 so the GPU barrier decrements it to -1, matching the
     // HSA_SIGNAL_CONDITION_EQ -1 condition the handler is registered with.
