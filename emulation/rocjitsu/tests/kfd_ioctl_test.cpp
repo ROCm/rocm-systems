@@ -1677,8 +1677,9 @@ void KfdIoctlCdna5Test::expect_runtime_exception_timeout(
   EXPECT_TRUE(wave->debug_suspended());
   EXPECT_EQ(wave->trap_runtime_exception_status(), 0u);
 
-  if (!reject_overlapping_debug_notification)
+  if (!reject_overlapping_debug_notification) {
     ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+  }
   pollfd ready{notifier, POLLIN, 0};
   ASSERT_EQ(::poll(&ready, 1, 2000), 1);
   kfd_ioctl_dbg_trap_args query{};
