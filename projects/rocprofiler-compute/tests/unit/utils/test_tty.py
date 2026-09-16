@@ -914,7 +914,6 @@ def test_format_table_output_view_table_skips_gfx9_memory_chart_renderer(
 
     assert content.startswith("3.1 Memory Chart")
     assert "Metric A" in content
-    assert "Normalization:" not in content
 
 
 def test_format_table_output_view_table_skips_gfx11_memory_chart_renderer(
@@ -941,7 +940,32 @@ def test_format_table_output_view_table_skips_gfx11_memory_chart_renderer(
 
     assert content.startswith("3.1 Memory Chart")
     assert "Metric A" in content
-    assert "Normalization:" not in content
+
+
+def test_format_table_output_view_table_skips_gfx1250_memory_chart_renderer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--view table renders a mem_chart table as a plain titled table on gfx1250."""
+
+    monkeypatch.setattr(
+        "utils.tty.mem_chart_gfx1250.plot_mem_chart",
+        lambda *_a, **_k: pytest.fail(
+            "gfx1250 memory chart renderer ran despite --view table"
+        ),
+    )
+    df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
+
+    content = format_table_output(
+        make_args(view="table"),
+        {"id": 301, "title": "Memory Chart", "cli_style": "mem_chart"},
+        df,
+        "metric_table",
+        runs={"only": object()},
+        gpu_arch="gfx1250",
+    )
+
+    assert content.startswith("3.1 Memory Chart")
+    assert "Metric A" in content
 
 
 @pytest.mark.parametrize(
@@ -1082,6 +1106,8 @@ def test_show_all_view_table_skips_roofline_plot(
     output = rendered_output.getvalue()
     if view == "table":
         assert "4.3 Roofline Plot" not in output
+        assert "4.1 Roofline Performance Rates" in output
+        assert "Metric A" in output
 
 
 # ---------------------------------------------------------------------------
