@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Evaluate the RCCL subtree freeze for a PR, or re-apply it to open PRs.
+"""RCCL subtree freeze: block develop PRs that touch projects/rccl*.
 
-Used by .github/workflows/rccl-subtree-freeze.yml. Does not check out PR
-code; it only reads PR metadata through the GitHub API.
+Driven by .github/workflows/rccl-subtree-freeze.yml. Reads PR metadata
+through the GitHub API and never checks out PR code.
 """
 
 from __future__ import annotations
@@ -12,220 +12,138 @@ import json
 import os
 import subprocess
 import sys
-from typing import Any, Iterable, List, Sequence
+from typing import Any
 
 FROZEN_PREFIXES = ("projects/rccl", "projects/rccl-tests")
 # GitHub's pull-files REST endpoint returns at most 3000 files.
 MAX_LISTED_FILES = 3000
 CHECK_NAME = "rccl-subtree-freeze"
+SWITCH_ENV = "RCCL_SUBTREE_FREEZE_ENABLED"
 
 
-def freeze_is_enabled(value: str | None) -> bool:
-    switch = (value or "true").strip().lower()
-    return switch not in {"false", "off", "0"}
-
-
-def is_frozen_path(path: str) -> bool:
-    return any(path == prefix or path.startswith(prefix + "/") for prefix in FROZEN_PREFIXES)
-
-
-def gh_json(args: Sequence[str]) -> Any:
-    result = subprocess.run(
-        ["gh", "api", *args],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
+def gh(*args: str, stdin: str | None = None) -> str:
+    proc = subprocess.run(["gh", "api", *args], capture_output=True, text=True, input=stdin)
+    if proc.returncode != 0:
         raise RuntimeError(
-            f"gh api {' '.join(args)} failed ({result.returncode}): "
-            f"{result.stderr.strip() or result.stdout.strip()}"
+            f"gh api {' '.join(args)} failed: {proc.stderr.strip() or proc.stdout.strip()}"
         )
-    if not result.stdout.strip():
-        return None
-    return json.loads(result.stdout)
+    return proc.stdout
 
 
-def gh_paginate_json_arrays(path: str) -> List[Any]:
-    result = subprocess.run(
-        ["gh", "api", "--paginate", path],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"gh api --paginate {path} failed ({result.returncode}): "
-            f"{result.stderr.strip() or result.stdout.strip()}"
-        )
+def gh_paginate(path: str) -> list[Any]:
+    """--paginate emits one JSON array per page; flatten them into one list."""
+    out = gh("--paginate", path)
     decoder = json.JSONDecoder()
-    data = result.stdout.strip()
-    items: List[Any] = []
-    idx = 0
-    while idx < len(data):
-        while idx < len(data) and data[idx].isspace():
-            idx += 1
-        if idx >= len(data):
-            break
-        parsed, offset = decoder.raw_decode(data, idx)
-        idx = offset
-        if isinstance(parsed, list):
-            items.extend(parsed)
-        else:
-            items.append(parsed)
+    items: list[Any] = []
+    while out := out.lstrip():
+        page, end = decoder.raw_decode(out)
+        items.extend(page)
+        out = out[end:]
     return items
 
 
-def collect_paths(files: Iterable[dict[str, Any]]) -> List[str]:
-    paths: List[str] = []
-    for entry in files:
-        filename = entry.get("filename") or ""
-        previous = entry.get("previous_filename") or ""
-        if filename:
-            paths.append(filename)
-        if previous:
-            paths.append(previous)
-    return paths
+def freeze_enabled() -> bool:
+    return (os.environ.get(SWITCH_ENV) or "true").strip().lower() not in {"false", "off", "0"}
 
 
-def evaluate_pr(repo: str, pr_number: int, enabled: bool) -> tuple[bool, str]:
-    if not enabled:
-        return True, (
-            "RCCL subtree freeze is off "
-            f"(RCCL_SUBTREE_FREEZE_ENABLED={os.environ.get('RCCL_SUBTREE_FREEZE_ENABLED')})."
-        )
+def is_frozen(path: str) -> bool:
+    return any(path == prefix or path.startswith(prefix + "/") for prefix in FROZEN_PREFIXES)
 
-    pr = gh_json([f"repos/{repo}/pulls/{pr_number}"])
-    changed_files = pr.get("changed_files")
-    if changed_files is None:
-        return False, "Pull request metadata omitted changed_files; failing closed."
-    if changed_files > MAX_LISTED_FILES:
+
+def evaluate(repo: str, pr: int) -> tuple[bool, str]:
+    """Return (allowed, summary). Anything unverifiable fails closed."""
+    if not freeze_enabled():
+        return True, f"RCCL subtree freeze is off ({SWITCH_ENV}={os.environ.get(SWITCH_ENV)})."
+
+    changed = json.loads(gh(f"repos/{repo}/pulls/{pr}")).get("changed_files")
+    if changed is None:
+        return False, "PR metadata omitted changed_files; failing closed."
+    if changed > MAX_LISTED_FILES:
         return False, (
-            f"PR changes {changed_files} files; GitHub lists at most "
-            f"{MAX_LISTED_FILES}. Failing closed."
+            f"PR changes {changed} files; GitHub lists at most {MAX_LISTED_FILES}. Failing closed."
         )
 
-    files = gh_paginate_json_arrays(f"repos/{repo}/pulls/{pr_number}/files")
-    if len(files) < changed_files:
-        return False, (
-            f"Listed {len(files)} files but PR reports {changed_files}. Failing closed."
-        )
+    files = gh_paginate(f"repos/{repo}/pulls/{pr}/files")
+    if len(files) < changed:
+        return False, f"Listed {len(files)} files but PR reports {changed}. Failing closed."
 
-    blocked = [path for path in collect_paths(files) if is_frozen_path(path)]
+    blocked = [
+        path
+        for entry in files
+        for path in (entry.get("filename"), entry.get("previous_filename"))
+        if path and is_frozen(path)
+    ]
     if blocked:
-        lines = [
-            "This PR cannot land: it modifies frozen trees `projects/rccl` and/or `projects/rccl-tests`.",
-            "",
-            "Blocked paths:",
-            "",
-            *[f"- `{path}`" for path in blocked],
-        ]
-        return False, "\n".join(lines)
-
+        listing = "\n".join(f"- `{path}`" for path in blocked)
+        return False, (
+            "This PR cannot land: it modifies frozen trees `projects/rccl` and/or "
+            f"`projects/rccl-tests`.\n\nBlocked paths:\n\n{listing}"
+        )
     return True, "No frozen RCCL subtree paths were changed."
 
 
-def post_check_run(repo: str, head_sha: str, success: bool, summary: str) -> None:
+def post_check(repo: str, head_sha: str, allowed: bool, summary: str) -> None:
     payload = {
         "name": CHECK_NAME,
         "head_sha": head_sha,
         "status": "completed",
-        "conclusion": "success" if success else "failure",
-        "output": {
-            "title": "RCCL subtree freeze" if not success else "RCCL subtree freeze passed",
-            "summary": summary,
-        },
+        "conclusion": "success" if allowed else "failure",
+        "output": {"title": CHECK_NAME, "summary": summary},
     }
-    result = subprocess.run(
-        [
-            "gh",
-            "api",
-            "--method",
-            "POST",
-            f"repos/{repo}/check-runs",
-            "--input",
-            "-",
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        input=json.dumps(payload),
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"Failed to post check run for {head_sha}: "
-            f"{result.stderr.strip() or result.stdout.strip()}"
-        )
+    gh("--method", "POST", f"repos/{repo}/check-runs", "--input", "-", stdin=json.dumps(payload))
 
 
-def append_step_summary(text: str) -> None:
+def report(text: str) -> None:
+    print(text)
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-    if not summary_path:
-        return
-    with open(summary_path, "a", encoding="utf-8") as handle:
-        handle.write(text.rstrip() + "\n")
+    if summary_path:
+        with open(summary_path, "a", encoding="utf-8") as handle:
+            handle.write(text.rstrip() + "\n")
 
 
-def cmd_evaluate(repo: str, pr_number: int) -> int:
-    enabled = freeze_is_enabled(os.environ.get("RCCL_SUBTREE_FREEZE_ENABLED"))
-    ok, summary = evaluate_pr(repo, pr_number, enabled)
-    print(summary)
-    append_step_summary(summary if ok else f"### RCCL subtree freeze\n\n{summary}")
-    if not ok:
-        print(f"::error::{summary.splitlines()[0]}")
-        return 1
-    return 0
+def cmd_evaluate(repo: str, pr: int) -> int:
+    allowed, summary = evaluate(repo, pr)
+    report(summary)
+    if allowed:
+        return 0
+    print(f"::error::{summary.splitlines()[0]}")
+    return 1
 
 
 def cmd_reevaluate_open(repo: str, base: str) -> int:
-    enabled = freeze_is_enabled(os.environ.get("RCCL_SUBTREE_FREEZE_ENABLED"))
-    pulls = gh_paginate_json_arrays(f"repos/{repo}/pulls?base={base}&state=open&per_page=100")
-    lines = [
-        f"Re-evaluating {len(pulls)} open PR(s) targeting `{base}`.",
-        f"Freeze enabled: {enabled}.",
-        "",
-    ]
-    for pr in pulls:
-        number = pr["number"]
-        head_sha = pr["head"]["sha"]
+    """Re-post the check on open PRs so idle ones follow the current switch."""
+    pulls = gh_paginate(f"repos/{repo}/pulls?base={base}&state=open&per_page=100")
+    lines = [f"Freeze enabled: {freeze_enabled()}. Re-checked {len(pulls)} open `{base}` PR(s)."]
+    for pull in pulls:
+        number, head_sha = pull["number"], pull["head"]["sha"]
         try:
-            ok, summary = evaluate_pr(repo, number, enabled)
-            post_check_run(repo, head_sha, ok, summary)
+            allowed, summary = evaluate(repo, number)
         except Exception as exc:
-            ok = False
-            summary = f"Failed to evaluate PR #{number}; failing closed: {exc}"
-            try:
-                post_check_run(repo, head_sha, False, summary)
-            except Exception as post_exc:
-                lines.append(f"- #{number}: could not post check ({post_exc})")
-        status = "pass" if ok else "FAIL"
-        lines.append(f"- #{number} (`{head_sha[:12]}`): {status}")
-        print(f"PR #{number}: {status}\n{summary}\n")
-
-    report = "\n".join(lines)
-    print(report)
-    append_step_summary(report)
-    # The develop-push job should succeed even when some PRs fail the freeze;
-    # those failures are recorded as check runs on the PR head SHAs.
+            allowed, summary = False, f"Failed to evaluate PR #{number}; failing closed: {exc}"
+        try:
+            post_check(repo, head_sha, allowed, summary)
+        except Exception as exc:
+            lines.append(f"- #{number}: could not post check ({exc})")
+            continue
+        lines.append(f"- #{number} (`{head_sha[:12]}`): {'pass' if allowed else 'FAIL'}")
+    # Blocked PRs carry their own failing check run, so this job still succeeds.
+    report("\n".join(lines))
     return 0
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main() -> int:
     parser = argparse.ArgumentParser()
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument("command", choices=("evaluate", "reevaluate-open"))
+    parser.add_argument("--repo", required=True)
+    parser.add_argument("--pr", type=int)
+    parser.add_argument("--base", default="develop")
+    args = parser.parse_args()
 
-    evaluate = sub.add_parser("evaluate")
-    evaluate.add_argument("--repo", required=True)
-    evaluate.add_argument("--pr", required=True, type=int)
-
-    reevaluate = sub.add_parser("reevaluate-open")
-    reevaluate.add_argument("--repo", required=True)
-    reevaluate.add_argument("--base", default="develop")
-
-    args = parser.parse_args(argv)
-    if args.command == "evaluate":
-        return cmd_evaluate(args.repo, args.pr)
-    return cmd_reevaluate_open(args.repo, args.base)
+    if args.command == "reevaluate-open":
+        return cmd_reevaluate_open(args.repo, args.base)
+    if args.pr is None:
+        parser.error("evaluate requires --pr")
+    return cmd_evaluate(args.repo, args.pr)
 
 
 if __name__ == "__main__":

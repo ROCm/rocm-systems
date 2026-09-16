@@ -1,36 +1,24 @@
 name: Block RCCL subtree PRs
 
-# Fails when a pull request targeting develop changes projects/rccl or
-# projects/rccl-tests. pull_request_target runs this definition from the
-# trusted base branch so a PR cannot rewrite the guard. The job checks
-# out only this workflow's helper script from the PR base / develop and
-# otherwise only reads PR metadata through the GitHub API.
-# Always runs on develop-bound PRs (no path filter) so it can be a
-# required status check without blocking unrelated PRs as "expected
-# checks were not posted".
-# After this lands, add `rccl-subtree-freeze` as a required check on develop.
-#
-# Flipping RCCL_SUBTREE_FREEZE_ENABLED and merging this file to develop
-# re-evaluates every open PR targeting develop and posts an updated
-# rccl-subtree-freeze check on its current head SHA. New PRs pick up
-# the switch from develop; idle PRs pick it up from that push.
+# Fails PRs into develop that touch projects/rccl or projects/rccl-tests.
+# pull_request_target runs this workflow and its helper script from the base
+# branch, so a PR cannot disable its own guard. There is no path filter, so
+# the check posts on every develop PR and can be marked required.
+# Flipping RCCL_SUBTREE_FREEZE_ENABLED and merging to develop re-posts the
+# check on every open develop PR, so idle PRs follow the current setting.
 
 on:
   pull_request_target:
-    branches:
-      - develop
+    branches: [develop]
   push:
-    branches:
-      - develop
+    branches: [develop]
     paths:
       - '.github/workflows/rccl-subtree-freeze.yml'
       - '.github/scripts/rccl_subtree_freeze.py'
   workflow_dispatch:
 
-# On/off switch: set to false and merge this file to develop to lift the
-# freeze. pull_request_target reads this workflow from the PR base, so a
-# PR cannot disable the freeze in the same change that edits RCCL.
 env:
+  # Set to false and merge to develop to lift the freeze.
   RCCL_SUBTREE_FREEZE_ENABLED: true
 
 permissions:
@@ -39,52 +27,30 @@ permissions:
   checks: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.event_name }}-${{ github.sha }}
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
   rccl-subtree-freeze:
-    name: rccl-subtree-freeze
-    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      SCRIPT: .github/scripts/rccl_subtree_freeze.py
     steps:
-      - name: Checkout freeze helper from develop
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
           persist-credentials: false
-          sparse-checkout: |
-            .github/scripts/rccl_subtree_freeze.py
+          sparse-checkout: .github/scripts/rccl_subtree_freeze.py
           sparse-checkout-cone-mode: false
 
-      - name: Reject changes under frozen RCCL trees
+      - name: Check this PR
+        if: github.event_name == 'pull_request_target'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          python3 .github/scripts/rccl_subtree_freeze.py evaluate \
-            --repo "$REPO" \
-            --pr "$PR_NUMBER"
+        run: python3 "$SCRIPT" evaluate --repo "$REPO" --pr "$PR_NUMBER"
 
-  reevaluate-open-prs:
-    name: reevaluate-open-prs
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout freeze helper from develop
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-          sparse-checkout: |
-            .github/scripts/rccl_subtree_freeze.py
-          sparse-checkout-cone-mode: false
-
-      - name: Re-apply freeze to open develop PRs
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          python3 .github/scripts/rccl_subtree_freeze.py reevaluate-open \
-            --repo "$REPO" \
-            --base develop
+      - name: Re-check open develop PRs
+        if: github.event_name != 'pull_request_target'
+        run: python3 "$SCRIPT" reevaluate-open --repo "$REPO" --base develop
