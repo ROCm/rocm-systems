@@ -47,9 +47,6 @@ __device__ void typed_put([[maybe_unused]] rocshmem_ctx_t ctx,
     rocshmem_ctx_##TNAME##_put(ctx, dest, source, nelems, pe);                \
   }
 
-TYPED_PUT_DEF(__half,          half)
-TYPED_PUT_DEF(__hip_bfloat16,  bfloat16)
-
 /* --- put_nbi --- */
 template <typename T>
 __device__ void typed_put_nbi([[maybe_unused]] rocshmem_ctx_t ctx,
@@ -64,9 +61,6 @@ __device__ void typed_put_nbi([[maybe_unused]] rocshmem_ctx_t ctx,
                                     const T *source, size_t nelems, int pe) { \
     rocshmem_ctx_##TNAME##_put_nbi(ctx, dest, source, nelems, pe);            \
   }
-
-TYPED_PUT_NBI_DEF(__half,         half)
-TYPED_PUT_NBI_DEF(__hip_bfloat16, bfloat16)
 
 /* --- get --- */
 template <typename T>
@@ -83,9 +77,6 @@ __device__ void typed_get([[maybe_unused]] rocshmem_ctx_t ctx,
     rocshmem_ctx_##TNAME##_get(ctx, dest, source, nelems, pe);                \
   }
 
-TYPED_GET_DEF(__half,          half)
-TYPED_GET_DEF(__hip_bfloat16,  bfloat16)
-
 /* --- get_nbi --- */
 template <typename T>
 __device__ void typed_get_nbi([[maybe_unused]] rocshmem_ctx_t ctx,
@@ -101,9 +92,6 @@ __device__ void typed_get_nbi([[maybe_unused]] rocshmem_ctx_t ctx,
     rocshmem_ctx_##TNAME##_get_nbi(ctx, dest, source, nelems, pe);            \
   }
 
-TYPED_GET_NBI_DEF(__half,         half)
-TYPED_GET_NBI_DEF(__hip_bfloat16, bfloat16)
-
 /* --- p (scalar put) --- */
 template <typename T>
 __device__ void typed_p([[maybe_unused]] rocshmem_ctx_t ctx,
@@ -118,9 +106,6 @@ __device__ void typed_p([[maybe_unused]] rocshmem_ctx_t ctx,
     rocshmem_ctx_##TNAME##_p(ctx, dest, value, pe);                           \
   }
 
-TYPED_P_DEF(__half,         half)
-TYPED_P_DEF(__hip_bfloat16, bfloat16)
-
 /* --- g (scalar get) --- */
 template <typename T>
 __device__ T typed_g([[maybe_unused]] rocshmem_ctx_t ctx,
@@ -133,8 +118,30 @@ __device__ T typed_g([[maybe_unused]] rocshmem_ctx_t ctx,
     return rocshmem_ctx_##TNAME##_g(ctx, source, pe);                         \
   }
 
-TYPED_G_DEF(__half,         half)
-TYPED_G_DEF(__hip_bfloat16, bfloat16)
+#define TYPED_RMA_DEF_TESTER(T,TNAME) \
+  TYPED_G_DEF(T,TNAME)               \
+  TYPED_P_DEF(T,TNAME)               \
+  TYPED_GET_NBI_DEF(T,TNAME)         \
+  TYPED_GET_DEF(T,TNAME)             \
+  TYPED_PUT_NBI_DEF(T,TNAME)         \
+  TYPED_PUT_DEF(T,TNAME)
+
+TYPED_RMA_DEF_TESTER(float,              float)
+TYPED_RMA_DEF_TESTER(double,             double)
+TYPED_RMA_DEF_TESTER(char,               char)
+TYPED_RMA_DEF_TESTER(signed char,        schar)
+TYPED_RMA_DEF_TESTER(short,              short)
+TYPED_RMA_DEF_TESTER(int,                int)
+TYPED_RMA_DEF_TESTER(long,               long)
+TYPED_RMA_DEF_TESTER(long long,          longlong)
+TYPED_RMA_DEF_TESTER(unsigned char,      uchar)
+TYPED_RMA_DEF_TESTER(unsigned short,     ushort)
+TYPED_RMA_DEF_TESTER(unsigned int,       uint)
+TYPED_RMA_DEF_TESTER(unsigned long,      ulong)
+TYPED_RMA_DEF_TESTER(unsigned long long, ulonglong)
+TYPED_RMA_DEF_TESTER(__half,             half)
+TYPED_RMA_DEF_TESTER(__hip_bfloat16,     bfloat16)
+
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -359,5 +366,18 @@ void TypedRMATester<T>::verifyResults(size_t size) {
 }
 
 // Explicit instantiations for the types used in tester.cpp
+template class TypedRMATester<float>;
+template class TypedRMATester<double>;
+template class TypedRMATester<char>;
+template class TypedRMATester<signed char>;
+template class TypedRMATester<short>;
+template class TypedRMATester<int>;
+template class TypedRMATester<long>;
+template class TypedRMATester<long long>;
+template class TypedRMATester<unsigned char>;
+template class TypedRMATester<unsigned short>;
+template class TypedRMATester<unsigned int>;
+template class TypedRMATester<unsigned long>;
+template class TypedRMATester<unsigned long long>;
 template class TypedRMATester<__half>;
 template class TypedRMATester<__hip_bfloat16>;
