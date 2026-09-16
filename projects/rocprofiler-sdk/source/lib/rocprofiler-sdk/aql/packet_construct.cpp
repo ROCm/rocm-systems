@@ -126,18 +126,22 @@ CounterPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdE
 }
 
 ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(
-    rocprofiler_agent_id_t                  agent_id,
-    const thread_trace_parameter_pack&      params,
-    std::shared_ptr<kfd::kfd_memory_pool_t> kfd_memory,
-    std::shared_ptr<kfd::kfd_copy_queue_t>  copy_queue)
+    rocprofiler_agent_id_t                    agent_id,
+    const thread_trace_parameter_pack&        params,
+    thread_trace::agent_trace_resources_ptr_t resources)
 {
+    CHECK_NOTNULL(resources.get());
+
     this->tracepool           = hsa::TraceMemoryPool{};
     this->tracepool.agent_id  = agent_id;
     this->tracepool.aql_agent = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(agent_id));
-    if(kfd_memory)
+    // Retaining the owner keeps the output slots alive for as long as any packet
+    // built from this factory can reference them.
+    this->tracepool.resources = std::move(resources);
+    if(this->tracepool.resources->kfd_memory())
     {
-        this->tracepool.kfd_memory     = std::move(kfd_memory);
-        this->tracepool.kfd_copy_queue = std::move(copy_queue);
+        this->tracepool.kfd_memory     = this->tracepool.resources->kfd_memory();
+        this->tracepool.kfd_copy_queue = this->tracepool.resources->kfd_copy_queue();
     }
     else
     {

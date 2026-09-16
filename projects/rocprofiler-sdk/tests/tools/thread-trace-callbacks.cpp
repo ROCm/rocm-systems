@@ -49,6 +49,7 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
 {
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT) return;
     if(record.operation != ROCPROFILER_CODE_OBJECT_LOAD) return;
+    if(decoder.handle == 0) return;
 
     auto* data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
     if(data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE) return;
@@ -73,6 +74,8 @@ void
 shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
                      rocprofiler_user_data_t /* userdata */)
 {
+    if(decoder.handle == 0) return;
+
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                     void*                                          trace_events,
                     uint64_t                                       trace_size,

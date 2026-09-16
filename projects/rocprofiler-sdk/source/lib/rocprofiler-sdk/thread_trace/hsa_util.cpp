@@ -151,25 +151,27 @@ make_signal(const att_queue_t& queue)
 
 att_queue_ptr_t
 make_att_queue(rocprofiler_agent_id_t             agent_id,
-               size_t                             buffer_size,
-               size_t                             num_buffers,
+               size_t                             max_copy_size,
+               const std::vector<uint64_t>&       staging_sizes,
                std::shared_ptr<kfd_memory_pool_t> kfd_memory)
 {
-    auto  result      = std::make_unique<att_queue_t>();
-    auto& queue       = *result;
-    queue.agent_id    = agent_id;
-    queue.buffer_size = buffer_size;
-    queue.kfd_memory  = std::move(kfd_memory);
+    const size_t num_buffers = staging_sizes.size();
+
+    auto  result     = std::make_unique<att_queue_t>();
+    auto& queue      = *result;
+    queue.agent_id   = agent_id;
+    queue.kfd_memory = std::move(kfd_memory);
 
     if(queue.kfd_memory)
     {
-        queue.kfd_copy_queue = kfd_copy_queue_t::create(queue.kfd_memory, buffer_size);
+        queue.kfd_copy_queue = kfd_copy_queue_t::create(queue.kfd_memory, max_copy_size);
         if(!queue.kfd_copy_queue) return nullptr;
         queue.submit_fn = kfd_submit;
         queue.cpu_buffers.resize(num_buffers, nullptr);
-        for(auto& memory : queue.cpu_buffers)
+        for(size_t i = 0; i < num_buffers; ++i)
         {
-            memory = queue.kfd_memory->allocate(buffer_size, kfd_memory_kind_t::host);
+            auto& memory = queue.cpu_buffers.at(i);
+            memory = queue.kfd_memory->allocate(staging_sizes.at(i), kfd_memory_kind_t::host);
             if(!memory) return nullptr;
         }
         return result;
@@ -194,9 +196,11 @@ make_att_queue(rocprofiler_agent_id_t             agent_id,
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to create thread trace async queue";
 
     queue.cpu_buffers.resize(num_buffers, nullptr);
-    for(auto& memory : queue.cpu_buffers)
+    for(size_t i = 0; i < num_buffers; ++i)
     {
-        status = ext->hsa_amd_memory_pool_allocate_fn(cache->cpu_pool(), buffer_size, 0, &memory);
+        auto& memory = queue.cpu_buffers.at(i);
+        status       = ext->hsa_amd_memory_pool_allocate_fn(
+            cache->cpu_pool(), staging_sizes.at(i), 0, &memory);
         ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to allocate thread trace memory";
         status = ext->hsa_amd_agents_allow_access_fn(1, &queue.near_cpu, nullptr, memory);
         ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to allow CPU access";
