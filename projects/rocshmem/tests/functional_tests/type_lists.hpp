@@ -63,6 +63,15 @@ template <> inline std::string type_name<__hip_bfloat16>()     { return "bfloat1
  * Every list contains exactly the types the corresponding tester .cpp
  * actually compiles specializations for. Adding a type here without adding
  * the matching device-side specialization will fail to link.
+ *
+ * Lists are suffixed by the backends they are valid on:
+ *   _ALWAYS - dispatched on every backend
+ *   _NONGDA - skipped on GDA (it implements 8-byte atomics only)
+ *   _NONRO  - skipped on RO (__hip_bfloat16 and __half are not implemented on
+ *             the RO backend, so those testers are silently dropped there --
+ *             the rest of the type coverage for the test still runs)
+ * The call site in Tester::create() owns the backend check, so the split lives
+ * here rather than behind a runtime predicate.
  */
 
 // ---------------------------------------------------------------------------
@@ -71,7 +80,7 @@ template <> inline std::string type_name<__hip_bfloat16>()     { return "bfloat1
 
 // team_broadcast, team_fcollect, fcollect_wave, team_alltoall, team_alltoallv
 // Note: int64_t is an alias of long on LP64, so it is covered by X(long, ...).
-#define ROCSHMEM_COLL_TYPES_FULL(X) \
+#define ROCSHMEM_COLL_TYPES_ALWAYS(X) \
   X(float,               "float") \
   X(double,              "double") \
   X(char,                "char") \
@@ -84,9 +93,39 @@ template <> inline std::string type_name<__hip_bfloat16>()     { return "bfloat1
   X(unsigned short,      "unsigned short") \
   X(unsigned int,        "unsigned int") \
   X(unsigned long,       "unsigned long") \
-  X(unsigned long long,  "unsigned long long") \
-  X(__half,  "half") \
-  X(__hip_bfloat16,  "bfloat16")
+  X(unsigned long long,  "unsigned long long")
+
+#define ROCSHMEM_COLL_TYPES_NONRO(X) \
+  X(__half,              "half") \
+  X(__hip_bfloat16,      "bfloat16")
+
+// ---------------------------------------------------------------------------
+// Typed RMA type list
+//
+// Get/GetNBI/Put/PutNBI/P/G are driven by PrimitiveTester, which goes through
+// the byte-oriented putmem/getmem path and so never touches rocshmem_ctx_T_put
+// & co. TypedRMATester covers those entry points, but only for the element
+// types it compiles device-side specializations for in typed_rma_tester.cpp --
+// adding a type here without adding the matching TYPED_*_DEF will fail to link.
+// ---------------------------------------------------------------------------
+#define ROCSHMEM_RMA_TYPES_ALWAYS(X) \
+  X(float,               "float") \
+  X(double,              "double") \
+  X(char,                "char") \
+  X(signed char,         "signed char") \
+  X(short,               "short") \
+  X(int,                 "int") \
+  X(long,                "long") \
+  X(long long,           "long long") \
+  X(unsigned char,       "unsigned char") \
+  X(unsigned short,      "unsigned short") \
+  X(unsigned int,        "unsigned int") \
+  X(unsigned long,       "unsigned long") \
+  X(unsigned long long,  "unsigned long long")
+
+#define ROCSHMEM_RMA_TYPES_NONRO(X) \
+  X(__half,              "half") \
+  X(__hip_bfloat16,      "bfloat16")
 
 // ---------------------------------------------------------------------------
 // AMO type lists
@@ -168,7 +207,7 @@ template <> inline std::string type_name<__hip_bfloat16>()     { return "bfloat1
 
 // All types compiled by team_reduction / team_reduce_scatter / reduce_wave /
 // team_reduce_scatter_wave, each gated the same way the X-macro lists are.
-#define ROCSHMEM_PUSH_REDUCTION_ALL(TESTER, args, testers)                                \
+#define ROCSHMEM_PUSH_REDUCTION_ALWAYS(TESTER, args, testers)                             \
   if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("float"))         \
     { ROCSHMEM_PUSH_REDUCTION_FLOAT(TESTER, float,     args, testers) }                   \
   if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("double"))        \
@@ -180,7 +219,9 @@ template <> inline std::string type_name<__hip_bfloat16>()     { return "bfloat1
   if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("long"))          \
     { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, long,      args, testers) }                   \
   if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("long long"))     \
-    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, long long, args, testers)}                    \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, long long, args, testers)}
+
+#define ROCSHMEM_PUSH_REDUCTION_NONRO(TESTER, args, testers)                              \
   if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("half"))          \
     { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, __half,      args, testers) }                 \
   if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("bfloat16"))      \
