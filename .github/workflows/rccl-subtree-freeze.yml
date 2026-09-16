@@ -2,17 +2,30 @@ name: Block RCCL subtree PRs
 
 # Fails when a pull request targeting develop changes projects/rccl or
 # projects/rccl-tests. pull_request_target runs this definition from the
-# trusted base branch so a PR cannot rewrite the guard. The job does not
-# check out PR code; it only reads PR metadata through the GitHub API.
+# trusted base branch so a PR cannot rewrite the guard. The job checks
+# out only this workflow's helper script from the PR base / develop and
+# otherwise only reads PR metadata through the GitHub API.
 # Always runs on develop-bound PRs (no path filter) so it can be a
 # required status check without blocking unrelated PRs as "expected
 # checks were not posted".
 # After this lands, add `rccl-subtree-freeze` as a required check on develop.
+#
+# Flipping RCCL_SUBTREE_FREEZE_ENABLED and merging this file to develop
+# re-evaluates every open PR targeting develop and posts an updated
+# rccl-subtree-freeze check on its current head SHA. New PRs pick up
+# the switch from develop; idle PRs pick it up from that push.
 
 on:
   pull_request_target:
     branches:
       - develop
+  push:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/rccl-subtree-freeze.yml'
+      - '.github/scripts/rccl_subtree_freeze.py'
+  workflow_dispatch:
 
 # On/off switch: set to false and merge this file to develop to lift the
 # freeze. pull_request_target reads this workflow from the PR base, so a
@@ -23,107 +36,55 @@ env:
 permissions:
   contents: read
   pull-requests: read
+  checks: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event.number || github.event_name }}-${{ github.sha }}
   cancel-in-progress: true
 
 jobs:
   rccl-subtree-freeze:
     name: rccl-subtree-freeze
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-24.04
     steps:
+      - name: Checkout freeze helper from develop
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts/rccl_subtree_freeze.py
+          sparse-checkout-cone-mode: false
+
       - name: Reject changes under frozen RCCL trees
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          set -euo pipefail
+          python3 .github/scripts/rccl_subtree_freeze.py evaluate \
+            --repo "$REPO" \
+            --pr "$PR_NUMBER"
 
-          freeze_switch="${RCCL_SUBTREE_FREEZE_ENABLED:-true}"
-          freeze_switch="${freeze_switch,,}"
-          if [[ "${freeze_switch}" == "false" || "${freeze_switch}" == "off" || "${freeze_switch}" == "0" ]]; then
-            msg="RCCL subtree freeze is off (RCCL_SUBTREE_FREEZE_ENABLED=${RCCL_SUBTREE_FREEZE_ENABLED})."
-            echo "${msg}"
-            echo "${msg}" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
+  reevaluate-open-prs:
+    name: reevaluate-open-prs
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout freeze helper from develop
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts/rccl_subtree_freeze.py
+          sparse-checkout-cone-mode: false
 
-          frozen_prefixes=(
-            "projects/rccl"
-            "projects/rccl-tests"
-          )
-          # GitHub's pull-files REST endpoint returns at most 3000 files.
-          max_listed_files=3000
-
-          is_frozen() {
-            local path="$1"
-            local prefix
-            for prefix in "${frozen_prefixes[@]}"; do
-              if [[ "$path" == "$prefix" || "$path" == "$prefix/"* ]]; then
-                return 0
-              fi
-            done
-            return 1
-          }
-
-          fail_closed() {
-            echo "::error::$1"
-            echo "$1" >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          }
-
-          if [[ -z "${PR_NUMBER}" ]]; then
-            fail_closed "Missing pull request number; failing closed."
-          fi
-
-          if ! changed_files=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '.changed_files'); then
-            fail_closed "Failed to fetch pull request metadata; failing closed."
-          fi
-          if [[ -z "${changed_files}" || "${changed_files}" == "null" ]]; then
-            fail_closed "Pull request metadata omitted changed_files; failing closed."
-          fi
-          if (( changed_files > max_listed_files )); then
-            fail_closed "PR changes ${changed_files} files; GitHub lists at most ${max_listed_files}. Failing closed."
-          fi
-
-          files_json=$(mktemp)
-          paths_out=$(mktemp)
-          # --paginate writes one JSON array per page; jq -s add concatenates them.
-          if ! gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" > "${files_json}"; then
-            fail_closed "Failed to list pull request files; failing closed."
-          fi
-
-          listed_files=$(jq -s 'add // [] | length' "${files_json}")
-          if (( listed_files < changed_files )); then
-            fail_closed "Listed ${listed_files} files but PR reports ${changed_files}. Failing closed."
-          fi
-
-          jq -s -r '(add // [])[] | .filename, (.previous_filename // empty)' "${files_json}" > "${paths_out}"
-          mapfile -t paths < "${paths_out}"
-
-          blocked=()
-          for path in "${paths[@]}"; do
-            [[ -z "$path" ]] && continue
-            if is_frozen "$path"; then
-              blocked+=("$path")
-            fi
-          done
-
-          if ((${#blocked[@]} > 0)); then
-            {
-              echo "### RCCL subtree freeze"
-              echo
-              echo "This PR cannot land: it modifies frozen trees \`projects/rccl\` and/or \`projects/rccl-tests\`."
-              echo
-              echo "Blocked paths:"
-              echo
-              printf -- '- `%s`\n' "${blocked[@]}"
-            } | tee -a "$GITHUB_STEP_SUMMARY"
-            echo "::error::PR touches frozen RCCL subtrees and cannot be merged."
-            exit 1
-          fi
-
-          echo "No frozen RCCL subtree paths were changed."
-          echo "RCCL subtree freeze: no blocked paths." >> "$GITHUB_STEP_SUMMARY"
+      - name: Re-apply freeze to open develop PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 .github/scripts/rccl_subtree_freeze.py reevaluate-open \
+            --repo "$REPO" \
+            --base develop
