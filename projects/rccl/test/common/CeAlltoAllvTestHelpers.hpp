@@ -45,6 +45,11 @@ struct CeAlltoAllvMockComm
         comm.rank              = 0;
         comm.symmetricSupport  = true;
         comm.config.CTAPolicy  = NCCL_CTA_POLICY_ZERO;
+        // Skip computeLsaSize's rankToNode walk; ncclDevrIsOneLsaTeam is now on
+        // the CE eligibility path (same pattern as GinAlltoAllEligibilityTests).
+        comm.devrState.bigSize = 1;
+        comm.devrState.lsaSize = comm.nRanks;
+        comm.devrState.lsaSelf = comm.rank;
     }
 
     // Multi-node local-only LSA so ncclHierCeAvailable can pass (bigSize skips CUDA init).
@@ -59,6 +64,7 @@ struct CeAlltoAllvMockComm
         comm.hostRmaSupport   = true;
         comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         comm.config.numRmaCtx = 1;
+        comm.maxLocalRanks    = localRanks;
         comm.devrState.bigSize = 1;
         comm.devrState.lsaSize = localRanks;
         comm.devrState.lsaSelf = 0;

@@ -350,6 +350,20 @@ TEST_F(CeAlltoAllEligibilityTest, MultiNodeHierAvailable_DoesNotYieldDda)
                                         /*capturing=*/false));
 }
 
+TEST_F(CeAlltoAllEligibilityTest, UnequalRanksPerNode_HierUnavailable)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    mockComm_.configureHierEligible(/*nNodes=*/2, /*localRanks=*/4);
+    mockComm_.comm.maxLocalRanks = mockComm_.comm.devrState.lsaSize + 1;
+    EXPECT_FALSE(ncclHierCeAvailable(mockComm_.get(),
+                                     ncclFuncAlltoAll,
+                                     ncclDevSum,
+                                     ncclFloat32,
+                                     ncclSymSendRegRecvReg));
+}
+
 TEST_F(CeAlltoAllEligibilityTest, NoSymmetricSupportRejected)
 {
     if (!isCeRuntimeDriverSupported())
