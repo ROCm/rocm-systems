@@ -20,6 +20,7 @@ test_categories:
       - "PatAGAlgorithmTests.*"
       - "Rcclwrap.*"
       - "RcclAllReduceDdaDecision.*"
+      - "DdaAllReduceIpcTreeEligibleTest.*"
       - "TransportTest.*"
       - "ArgCheckTest.*"
       - "DdaAlltoAllThresholdTest.*"
