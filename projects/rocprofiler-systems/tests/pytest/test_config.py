@@ -1,13 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""General configuration file tests."""
+"""
+General configuration file tests.
+"""
 
 from __future__ import annotations
 import pytest
 from pathlib import Path
 import shutil
-
 from conftest import RocprofsysTest
 
 pytestmark = [pytest.mark.rocprof_config]
@@ -277,50 +278,6 @@ class TestConfig(RocprofsysTest):
         )
 
     @pytest.mark.timeout(120)
-    def test_export_config_json_via_c_warns_without_abort(
-        self, config_target, test_output_dir: Path
-    ):
-        """Hierarchical JSON from --export-config must not be loaded with -c.
-
-        Reload via --preset instead. Bad -c JSON must warn and continue (rc=0), not SIGABRT.
-        """
-        export_json = test_output_dir / "exported_preset.json"
-        export_result = self.run_test(
-            "baseline",
-            target="rocprof-sys-run",
-            env=MINIMAL_RUNTIME_ENV,
-            run_args=[
-                f"--export-config={export_json}",
-                "--preset=balanced",
-                "--",
-                "true",
-            ],
-            fail_on_not_found=True,
-        )
-        assert (
-            export_json.is_file()
-        ), f"--export-config did not create {export_json}\n{export_result.test_output}"
-
-        result = self.run_test(
-            "sys_run",
-            target=config_target,
-            env=MINIMAL_RUNTIME_ENV,
-            sys_run_args=["-c", str(export_json)],
-        )
-        assert (
-            result.success
-        ), f"expected rc=0 after skipping preset JSON via -c, got {result.returncode}"
-        self.assert_regex(
-            result,
-            pass_regex=[
-                r"[Ww]arning.*missing the expected.*rocprofiler-systems",
-                r"pass it via --preset instead",
-            ],
-            fail_regex=[r"terminate called after throwing"],
-            use_abort_fail_regex=True,
-        )
-
-    @pytest.mark.timeout(120)
     def test_missing(self, test_output_dir: Path, config_target: str):
         """Test that missing config file causes failure."""
         # Use a path to a config file that doesn't exist
@@ -361,3 +318,95 @@ class TestConfig(RocprofsysTest):
                 r"ROCPROFSYS_PERFETTO_\w+\s+=",
             ],
         )
+
+
+CONFIG_READ_ERROR_REGEX = r"Exception reading|Error reading configuration"
+CONFIG_SIGABRT_REGEX = r"terminate called"
+
+BAD_XML_VIA_C_CASES = [
+    pytest.param(
+        "wrong_root.xml",
+        "<wrong-root><settings/></wrong-root>",
+        id="wrong-root",
+    ),
+    pytest.param(
+        "malformed.xml",
+        "<rocprofiler-systems><settings><ROCPROFSYS_TRACE>false</settings></rocprofiler-systems>",
+        id="malformed",
+    ),
+]
+
+
+def _true_cmd() -> str:
+    cmd = shutil.which("true")
+    if cmd is None:
+        pytest.skip("true not found")
+    return cmd
+
+
+@pytest.mark.sys_run
+@pytest.mark.timeout(120)
+@pytest.mark.class_name("config-xml-via-c")
+class TestConfigXmlViaC(RocprofsysTest):
+    """Unreadable XML via -c is logged and skipped without aborting the run."""
+
+    @pytest.mark.parametrize("filename, content", BAD_XML_VIA_C_CASES)
+    def test_unreadable(self, config_target, test_output_dir, filename, content):
+        xml_path = test_output_dir / filename
+        xml_path.write_text(content)
+        result = self.run_test(
+            "sys_run",
+            target=config_target,
+            env=MINIMAL_RUNTIME_ENV,
+            sys_run_args=["-c", str(xml_path)],
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[CONFIG_READ_ERROR_REGEX],
+            fail_regex=[CONFIG_SIGABRT_REGEX],
+            use_abort_fail_regex=False,
+        )
+
+
+@pytest.mark.sys_run
+@pytest.mark.timeout(120)
+@pytest.mark.class_name("json-via-c")
+class TestJsonViaC(RocprofsysTest):
+    """JSON without a rocprofiler-systems root via -c warns and continues."""
+
+    def _assert_missing_root_warns(self, config_target, json_path: Path):
+        result = self.run_test(
+            "sys_run",
+            target=config_target,
+            env=MINIMAL_RUNTIME_ENV,
+            sys_run_args=["-c", str(json_path)],
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"[Ww]arning.*missing the expected.*rocprofiler-systems",
+                r"pass it via --preset instead",
+            ],
+            fail_regex=[CONFIG_SIGABRT_REGEX],
+        )
+
+    def test_missing_root(self, config_target, test_output_dir):
+        json_path = test_output_dir / "wrong_root.json"
+        json_path.write_text('{"not-rocprofiler-systems": {}}')
+        self._assert_missing_root_warns(config_target, json_path)
+
+    def test_exported_preset(self, config_target, test_output_dir):
+        exported = test_output_dir / "cfg.json"
+        self.run_test(
+            "baseline",
+            target="rocprof-sys-run",
+            run_args=[
+                f"--export-config={exported}",
+                "--preset=balanced",
+                "--",
+                _true_cmd(),
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_file_exists(exported, description="exported preset JSON")
+        self._assert_missing_root_warns(config_target, exported)
