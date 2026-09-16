@@ -422,7 +422,7 @@ pub fn describe() -> EmulatorDescription {
         .into_iter()
         .map(|(name, description)| OptionDef {
             name: name.to_owned(),
-            dtype: mirage_core::common::SimpleType::Number,
+            dtype: rj_core::common::SimpleType::Number,
             description: description.to_owned(),
             default: None,
         })
@@ -936,7 +936,7 @@ fn resolve_sim_config(def: &EmulatorDef) -> Result<SimConfig> {
                     sim[key] = serde_json::Value::from(*n);
                 }
                 _ => {
-                    return Err(MirageError::Other(format!(
+                    return Err(RocJITsuError::Other(format!(
                         "rocjitsu {key} must be an integer between {min} and {max}"
                     )));
                 }
@@ -1478,7 +1478,7 @@ mod tests {
                 .iter()
                 .find(|option| option.name == key)
                 .unwrap();
-            assert_eq!(option.dtype, mirage_core::common::SimpleType::Number);
+            assert_eq!(option.dtype, rj_core::common::SimpleType::Number);
             assert_eq!(option.default, None);
         }
     }
@@ -1487,7 +1487,7 @@ mod tests {
     fn generated_config_spreads_target_budget_over_gpus() {
         let mut def = def_with_gpus(2);
         if let MaybeRef::Owned(topology) = &mut def.topology {
-            topology.agent = MaybeRef::Owned(mirage_builtin::agents::mi350x());
+            topology.agent = MaybeRef::Owned(rj_builtin::agents::mi350x());
         }
         let SimConfig::Synthesised(bytes) = resolve_sim_config(&def).unwrap() else {
             panic!("expected generated config");
@@ -1519,8 +1519,9 @@ mod tests {
 
     #[test]
     fn multi_gpu_granules_match_native_presets() {
-        let configs =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rocjitsu/configs");
+        // `../../configs`, not `../../rocjitsu/configs`: this crate sits
+        // one directory deeper than it did under `emulation/mirage`.
+        let configs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs");
         for (single, multi, target, gpus) in [
             (
                 "gfx950_mi355x.json",
