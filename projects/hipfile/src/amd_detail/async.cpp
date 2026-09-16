@@ -120,13 +120,18 @@ async_io_cleanup(void *userargs)
     auto     op                         = static_cast<AsyncOp *>(userargs);
     ssize_t *bytes_transferred          = op->bytes_transferred;
     ssize_t  bytes_transferred_internal = op->bytes_transferred_internal;
+    bool     publish                    = op->write_result && op->committed;
     try {
         Context<AsyncMonitor>::get()->completeOp(op);
     }
     catch (const std::invalid_argument &) {
-        *bytes_transferred = -hipFileInternalError;
+        if (publish) {
+            *bytes_transferred = -hipFileInternalError;
+        }
         return;
     }
-    *bytes_transferred = bytes_transferred_internal;
+    if (publish) {
+        *bytes_transferred = bytes_transferred_internal;
+    }
 }
 }

@@ -346,6 +346,7 @@ if(BUILD_TESTS)
       VersionInfoTests.cpp
       device/TestOp128.cpp
       device/RcclEpTests.cpp
+      device/LlFifoSysScopeTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestAsyncCopy.cpp
@@ -601,6 +602,7 @@ if(BUILD_TESTS)
       AllocTests.cpp
       ParamTests.cpp
       ParameterApiTests.cpp
+      EnvPluginTests.cpp
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
       ChannelDefaultsTests.cpp
@@ -641,6 +643,13 @@ if(BUILD_TESTS)
     )
 
     add_executable(rccl-UnitTestsFixturesDebug ${TEST_FIXTURE_DEBUG_SOURCE_FILES})
+
+    if(TARGET rccl-env-json)
+      add_dependencies(rccl-UnitTestsFixturesDebug rccl-env-json)
+    endif()
+    if(TARGET rccl-env-example)
+      add_dependencies(rccl-UnitTestsFixturesDebug rccl-env-example)
+    endif()
 
     # Hide the test executable's own symbols so it does NOT interpose
     # librccl.so's weak alloc.h template/global symbols (e.g.
@@ -864,6 +873,7 @@ if(BUILD_TESTS)
       CommNetMismatchMPITests.cpp
       test_sparse_send_recv.cpp
       DdaAllReduceMPITests.cpp
+      DdaFabricSimpleMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )
 

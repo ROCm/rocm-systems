@@ -6367,7 +6367,8 @@ def test_generated_execute_shared_calls_have_definitions(
         for path in shared_root.glob('*.h'):
             definitions.update(
                 re.findall(
-                    r'(?:inline\s+)?void\s+(execute_[A-Za-z0-9_]+)\s*\(',
+                    r'(?:inline\s+)?(?:void|util::Result)\s+'
+                    r'(execute_[A-Za-z0-9_]+)\s*\(',
                     path.read_text(),
                 )
             )
@@ -7131,6 +7132,55 @@ def test_gfx1250_flat_u64_atomic_payload_width_uses_two_dwords():
     assert 'd->elem_size = 8;' in body
     assert 'd->store_data.resize(wf.wf_size() * 8);' in body
     assert 'data_base + 1' in body
+
+
+@pytest.mark.parametrize(
+    ('name', 'elem_size', 'num_elems', 'd16_hi', 'expected'),
+    [
+        (
+            'GLOBAL_STORE_DWORDX4',
+            4,
+            4,
+            False,
+            'data.copy_dwords_lane_major(d->store_data, exec);',
+        ),
+        (
+            'GLOBAL_STORE_BYTE',
+            1,
+            1,
+            False,
+            'd->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);',
+        ),
+        (
+            'GLOBAL_STORE_SHORT_D16_HI',
+            2,
+            1,
+            True,
+            'val0 >>= 16;',
+        ),
+    ],
+)
+def test_flat_store_snapshots_one_observed_vgpr_region(
+    name: str, elem_size: int, num_elems: int, d16_hi: bool, expected: str
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='cdna4',
+        profile=Cdna4Profile(),
+    )
+    store = SimpleNamespace(
+        name=name,
+        elem_size=elem_size,
+        num_elems=num_elems,
+        d16_hi=d16_hi,
+    )
+
+    body = codegen._gen_flat_store([], [], store)
+
+    data_regs = num_elems if elem_size == 4 else 1
+    assert f'RegisterAccess(wf).read_vgpr_region(data_base, {data_regs}, exec)' in body
+    assert expected in body
+    assert '.read_vgpr(' not in body
 
 
 def test_gfx1250_cluster_load_generators_force_request_l1_bypass():

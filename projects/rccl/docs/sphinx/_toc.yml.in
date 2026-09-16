@@ -18,6 +18,8 @@ subtrees:
   entries:
   - file: how-to/device-api-gin
     title: Use the device API and GIN
+  - file: how-to/using-rccl-env-plugin-api
+    title: Using the RCCL environment plugin
   - file: how-to/using-rccl-tuner-plugin-api
     title: Using the RCCL Tuner plugin
   - file: how-to/using-nccl
