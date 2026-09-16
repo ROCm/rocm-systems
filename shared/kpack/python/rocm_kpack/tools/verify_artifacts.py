@@ -20,7 +20,9 @@ from typing import Optional
 
 import msgpack
 
+from rocm_kpack.artifact_splitter import base_arch
 from rocm_kpack.binutils import Toolchain
+from rocm_kpack.database_handlers import MIOpenHandler
 from rocm_kpack.coff.kpack_transform import (
     HIPF_MAGIC as COFF_HIPF_MAGIC,
     HIPK_MAGIC as COFF_HIPK_MAGIC,
@@ -275,12 +277,12 @@ class ArtifactVerifier:
         all_passed = True
 
         # Find arch-specific artifacts (not generic, not gfx906 which is minimal)
-        arch_pattern = re.compile(r"gfx(\d+)")
+        arch_pattern = re.compile(r"gfx\d+[a-z]*(?:-strict)?")
         arch_artifacts = []
         for artifact in artifacts:
             match = arch_pattern.search(artifact.name)
             if match and "generic" not in artifact.name:
-                arch_artifacts.append((artifact, match.group(0)))
+                arch_artifacts.append((artifact, base_arch(match.group(0))))
 
         if not arch_artifacts:
             print("⊘ No architecture-specific artifacts found\n")
@@ -294,18 +296,34 @@ class ArtifactVerifier:
             )
             return
 
+        miopen = MIOpenHandler()
         for artifact, expected_arch in arch_artifacts:
-            # Find all files with gfx* in the name
-            all_files = list(artifact.glob("**/*gfx*"))
-            arch_files = [f for f in all_files if f.is_file()]
+            # Target identity can live in a directory rather than the filename.
+            arch_files = [f for f in artifact.rglob("*") if f.is_file()]
 
             contaminated = []
             for file in arch_files:
-                # Extract all gfx architectures mentioned in filename
-                found_archs = arch_pattern.findall(file.name)
+                # MIOpen concatenates CU counts with arch IDs. Use its parser
+                # for filenames so gfx1250-strict256 is not a different target.
+                database_arch = miopen.detect(file, artifact)
+                filename_arches = (
+                    [database_arch]
+                    if database_arch is not None
+                    else arch_pattern.findall(file.name)
+                )
+                directory_arches = arch_pattern.findall(
+                    file.parent.relative_to(artifact).as_posix()
+                )
+                # Handlers may preserve xnack features while filename/directory
+                # matching omits them. Compare canonical architectures using the
+                # same normalization as splitting, retaining variant names such
+                # as gfx1250-strict.
+                found_archs = {
+                    base_arch(arch) for arch in filename_arches + directory_arches
+                }
                 for found_arch in found_archs:
-                    if f"gfx{found_arch}" != expected_arch:
-                        contaminated.append((file, f"gfx{found_arch}"))
+                    if found_arch != expected_arch:
+                        contaminated.append((file, found_arch))
 
             if contaminated:
                 details.append(
@@ -354,19 +372,10 @@ class ArtifactVerifier:
         details = []
         all_passed = True
 
-        # Find artifacts with kpack directories
+        # Split archives retain their component's stage prefix. Generic stages
+        # can also contain .kpack directories holding only host .kpm manifests.
         for artifact in artifacts:
-            kpack_dir = artifact / "kpack" / "stage" / ".kpack"
-            if not kpack_dir.exists():
-                continue
-
-            kpack_files = list(kpack_dir.glob("*.kpack"))
-            if not kpack_files:
-                details.append(
-                    f"  ✗ {artifact.name}: kpack directory exists but no .kpack files"
-                )
-                all_passed = False
-                continue
+            kpack_files = [path for path in artifact.rglob("*.kpack") if path.is_file()]
 
             for kpack_file in kpack_files:
                 # Check file exists and has content
