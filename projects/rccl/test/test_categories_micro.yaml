@@ -21,6 +21,7 @@ test_categories:
       - "P2pSetupMicrotest.*"
       - "P2pFreeMicrotest.*"
       - "P2pShareableBufferMicrotest.*"
+      - "P2pRegisterFamilyMicrotest.*"
       - "GuardOperands/P2pAllocateSkipMarkExport.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"

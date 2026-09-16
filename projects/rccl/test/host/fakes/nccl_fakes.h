@@ -123,6 +123,19 @@ extern std::function<ncclResult_t(int /*rank1*/, int /*rank2*/, int* /*p2p*/,
 extern std::function<ncclResult_t(int /*rank1*/, int /*rank2*/, int* /*net*/)>
     g_ncclTopoCheckNet;
 
+// ncclRegLocalIsValid / ncclCommGraphRegister / ncclCommGraphDeregister:
+// the register-family wrappers (ncclIpcLocalRegisterBuffer /
+// ncclIpcGraphRegisterBuffer / cleanupIpc) drive these. Defaults preserve
+// the old stubs (isValid=false, graph-register fails, graph-deregister
+// succeeds); tests install hooks to reach the delegate/enqueue/cleanup arms.
+extern std::function<ncclResult_t(struct ncclReg*, bool* /*isValid*/)>
+    g_regLocalIsValid;
+extern std::function<ncclResult_t(struct ncclComm*, void* /*buff*/,
+                                  size_t /*size*/, void** /*handle*/)>
+    g_commGraphRegister;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclReg* /*reg*/)>
+    g_commGraphDeregister;
+
 // Restore every NCCL controllable seam in this header to its default.
 // Called by ResetP2pFakes(); exposed for tests that only touch NCCL hooks.
 // Hands back an fd the caller must close. Defaults to ncclSystemError (the
