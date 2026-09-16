@@ -261,6 +261,12 @@ set ( SRCS core/driver/driver.cpp
             libamdhsacode/amd_options.cpp
             libamdhsacode/amd_hsa_code.cpp
             lttng/rocm_hsa_tp.cpp
+            # Out-of-line definitions for the curated emit helpers
+            # (declarations in lttng/rocm_trace_emit_curated.h). Self-guarded
+            # on HSA_ENABLE_LTTNG_UST: real tracepoint bodies when set, no-op
+            # stubs otherwise, so the unguarded call sites always link a body
+            # even in an LTTng-disabled build.
+            lttng/rocm_trace_emit_curated.cpp
             lttng/rocm_trace_init.cpp)
 
 if(UNIX)

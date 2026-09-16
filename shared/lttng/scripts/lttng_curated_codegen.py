@@ -3,7 +3,9 @@
 generated LTTng curated-args headers:
 
   - rocm_<provider>_curated_tp.h        (LTTNG_UST_TRACEPOINT_EVENT defs)
-  - rocm_trace_emit_curated.h           (per-API static-inline emit helpers)
+  - rocm_trace_emit_curated.h           (per-API emit-helper declarations)
+  - rocm_trace_emit_curated.cpp         (out-of-line emit-helper definitions;
+                                         emitted when --emit-cpp-out is given)
 
 Signatures for OUT-handle helper generation come from a live libclang
 parse of the real headers (--header, may repeat; --source for
@@ -528,7 +530,7 @@ def emit_enter_helper(cfg, api, return_kind):
         body_inner = '\n'.join(setups) + '\n' + body_inner
     formal_str = ',\n    '.join(formal_params) if formal_params else 'void'
     return textwrap.dedent(f"""\
-        static inline void rocm_trace_emit_{name}_enter(
+        void rocm_trace_emit_{name}_enter(
             {formal_str}) {{
             if (rocm_trace_disabled()) return;
             if ({_enabled_expr(cfg, name, len(chunks))}) {{
@@ -615,7 +617,7 @@ def emit_exit_helper(cfg, api, return_kind, sigs=None):
         body_inner = '\n'.join(setups) + '\n' + body_inner
     formal_str = ',\n    '.join(formal_params) if formal_params else 'void'
     return textwrap.dedent(f"""\
-        static inline void rocm_trace_emit_{name}_exit(
+        void rocm_trace_emit_{name}_exit(
             {formal_str}) {{
             if (rocm_trace_disabled()) return;
             if ({_enabled_expr(cfg, name, len(chunks))}) {{
@@ -658,17 +660,44 @@ def _exit_formals(cfg, api, return_kind, sigs=None):
 def emit_noop_enter_helper(cfg, api):
     formals = _enter_formals(cfg, api)
     formal_str = ', '.join(formals)
-    return f"static inline void rocm_trace_emit_{api['api']}_enter({formal_str}) {{}}\n"
+    return f"void rocm_trace_emit_{api['api']}_enter({formal_str}) {{}}\n"
 
 
 def emit_noop_exit_helper(cfg, api, return_kind, sigs=None):
     formals = _exit_formals(cfg, api, return_kind, sigs=sigs)
     formal_str = ', '.join(formals)
-    return f"static inline void rocm_trace_emit_{api['api']}_exit({formal_str}) {{}}\n"
+    return f"void rocm_trace_emit_{api['api']}_exit({formal_str}) {{}}\n"
+
+
+def emit_decl_enter_helper(cfg, api):
+    """Ordinary (non-static, non-inline) forward declaration for the enter
+    helper, emitted into the thin declarations-only header. The parameter
+    types match the active-mode helper's named formals exactly (declarations
+    carry types only, so they are valid for both the real-body and no-op
+    definitions in the .cpp)."""
+    formals = _enter_formals(cfg, api)
+    formal_str = ', '.join(formals) if formals else 'void'
+    return f"void rocm_trace_emit_{api['api']}_enter({formal_str});\n"
+
+
+def emit_decl_exit_helper(cfg, api, return_kind, sigs=None):
+    """Ordinary forward declaration for the exit helper (see
+    emit_decl_enter_helper)."""
+    formals = _exit_formals(cfg, api, return_kind, sigs=sigs)
+    formal_str = ', '.join(formals) if formals else 'void'
+    return f"void rocm_trace_emit_{api['api']}_exit({formal_str});\n"
 
 
 def emit_emit_h(cfg, apis, banner, return_kinds, sigs_by_api=None):
-    enable_macro = 'HIP_ENABLE_LTTNG_UST' if cfg.key == 'hip' else 'HSA_ENABLE_LTTNG_UST'
+    """The thin declarations-only emit header.
+
+    Every curated API's enter/exit helper is an ordinary (non-static,
+    non-inline) forward declaration. The definitions — real bodies gated
+    on the enable macro, no-op stubs otherwise — live out-of-line in the
+    companion rocm_trace_emit_curated.cpp (see emit_emit_cpp). Call sites
+    include only this header and call the helpers unconditionally; a body
+    is always linked in from the .cpp in both LTTng-enabled and disabled
+    builds."""
     macro_guard = f"ROCM_{cfg.key.upper()}_TRACE_EMIT_CURATED_H_"
 
     out = [banner]
@@ -679,6 +708,31 @@ def emit_emit_h(cfg, apis, banner, return_kinds, sigs_by_api=None):
     needs_dim3 = any(a['type'] in ('dim3', 'dim3_packed') for api in apis for a in api['args'])
     if needs_dim3:
         out.append('#include "rocm_dim3_pack.h"\n')
+
+    out.append('\n')
+    for api in apis:
+        sigs = (sigs_by_api or {}).get(api['api'])
+        return_kind = return_kinds[api['api']]
+        out.append(emit_decl_enter_helper(cfg, api))
+        out.append(emit_decl_exit_helper(cfg, api, return_kind, sigs=sigs))
+
+    out.append(f"\n#endif  /* {macro_guard} */\n")
+    return ''.join(out)
+
+
+def emit_emit_cpp(cfg, apis, banner, return_kinds, emit_header_basename,
+                  sigs_by_api=None):
+    """The out-of-line definitions TU for the curated emit helpers.
+
+    Carries the same #if enable-macro / #else structure the header used to,
+    but with ordinary (non-inline) function definitions inside each branch:
+    the real tracepoint bodies when the enable macro is set, no-op stubs
+    otherwise. Compiled unconditionally (self-guarded) so the no-op stubs
+    are always available to link against in an LTTng-disabled build."""
+    enable_macro = 'HIP_ENABLE_LTTNG_UST' if cfg.key == 'hip' else 'HSA_ENABLE_LTTNG_UST'
+
+    out = [banner]
+    out.append(f'#include "{emit_header_basename}"\n')
 
     out.append(f"\n#if defined({enable_macro}) && {enable_macro}\n\n"
                f"#include <atomic>\n#include \"{cfg.tp_provider}_curated_tp.h\"\n")
@@ -709,14 +763,15 @@ static inline bool rocm_trace_disabled(void) {{
         out.append(emit_noop_enter_helper(cfg, api))
         out.append(emit_noop_exit_helper(cfg, api, return_kind, sigs=sigs))
 
-    out.append(f"\n#endif  /* {enable_macro} */\n\n#endif  /* {macro_guard} */\n")
+    out.append(f"\n#endif  /* {enable_macro} */\n")
     return ''.join(out)
 
 
 # ---------------------------------------------------------------------------
 # Banners
 # ---------------------------------------------------------------------------
-def _regen_cmd(cfg, yaml_path, tp_out, emit_out, sigs_path=None,
+def _regen_cmd(cfg, yaml_path, tp_out, emit_out, emit_cpp_out=None,
+                sigs_path=None,
                 header_paths=None, source_paths=None, extra_args=None):
     """Render the exact regeneration command with paths relative to the
     repo root. Normalizing here (rather than echoing back whatever the
@@ -754,6 +809,8 @@ def _regen_cmd(cfg, yaml_path, tp_out, emit_out, sigs_path=None,
             parts.append(f"--extra-arg={rel_extra_arg(e)}")
     parts.append(f"--tp-out {rel(tp_out)}")
     parts.append(f"--emit-out {rel(emit_out)}")
+    if emit_cpp_out is not None:
+        parts.append(f"--emit-cpp-out {rel(emit_cpp_out)}")
     lines = ["python3 shared/lttng/scripts/lttng_curated_codegen.py \\"]
     for i, p in enumerate(parts):
         lines.append(f"    {p}" + (" \\" if i < len(parts) - 1 else ""))
@@ -786,21 +843,35 @@ def tp_banner(cfg, apis, yaml_path, sha256, regen_cmd):
     ])
 
 
-def emit_banner(cfg, yaml_path, sha256, regen_cmd):
+def emit_banner(cfg, yaml_path, sha256, regen_cmd, role_lines):
     return _comment_block([
         f"AUTO-GENERATED by lttng_curated_codegen.py from {os.path.basename(yaml_path)}.",
         "Do not edit by hand — regenerate instead (see command below).",
         "",
         f"SHA256({os.path.basename(yaml_path)}) at generation: {sha256}",
         "",
-        "Per-API typed emit helpers for curated parameter capture. Every",
-        "helper takes (<captured-args...>, <status_type> status); status is",
-        "the call's success result, used to gate OUT-param deref. All-IN",
-        "APIs accept it but mark it unused.",
+        *role_lines,
         "",
         "Regenerate with:",
         *(f"  {l}" for l in regen_cmd),
     ])
+
+
+_EMIT_H_ROLE_LINES = [
+    "Per-API typed emit-helper DECLARATIONS for curated parameter capture.",
+    "The out-of-line definitions (real tracepoint bodies when LTTng is",
+    "enabled, no-op stubs otherwise) live in the companion",
+    "rocm_trace_emit_curated.cpp. Every helper takes (<captured-args...>,",
+    "<status_type> status); status is the call's success result, used to",
+    "gate OUT-param deref. All-IN APIs accept it but mark it unused.",
+]
+
+_EMIT_CPP_ROLE_LINES = [
+    "Out-of-line definitions for the per-API typed emit helpers declared in",
+    "rocm_trace_emit_curated.h. Both the real tracepoint bodies (enable",
+    "macro set) and the no-op stubs (enable macro unset) are compiled here,",
+    "chosen by the same #if as before; the header is now declarations only.",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -902,21 +973,30 @@ def resolve_apis(yaml_path, sigs_path, header_paths, source_paths, extra_args):
 # ---------------------------------------------------------------------------
 def generate(cfg, apis, yaml_path, tp_out_path, emit_out_path, sigs_by_api,
              return_kinds, regen_cmd):
-    """Return (tp_text, emit_text). `apis` must already be the fully-
-    expanded/resolved representation (see resolve_apis())."""
+    """Return (tp_text, emit_text, emit_cpp_text). `apis` must already be
+    the fully-expanded/resolved representation (see resolve_apis())."""
     with open(yaml_path, 'rb') as f:
         sha256 = hashlib.sha256(f.read()).hexdigest()
 
+    emit_header_basename = os.path.basename(emit_out_path)
+
     tp_text = emit_tp_h(cfg, apis, tp_banner(cfg, apis, yaml_path, sha256, regen_cmd),
                         return_kinds)
-    emit_text = emit_emit_h(cfg, apis, emit_banner(cfg, yaml_path, sha256, regen_cmd),
-                             return_kinds, sigs_by_api=sigs_by_api)
+    emit_text = emit_emit_h(
+        cfg, apis,
+        emit_banner(cfg, yaml_path, sha256, regen_cmd, _EMIT_H_ROLE_LINES),
+        return_kinds, sigs_by_api=sigs_by_api)
+    emit_cpp_text = emit_emit_cpp(
+        cfg, apis,
+        emit_banner(cfg, yaml_path, sha256, regen_cmd, _EMIT_CPP_ROLE_LINES),
+        return_kinds, emit_header_basename, sigs_by_api=sigs_by_api)
 
     if cfg.clang_format_emit:
         style_file = os.path.join(REPO_ROOT, 'projects', 'clr', '.clang-format')
         emit_text = _clang_format(emit_text, style_file)
+        emit_cpp_text = _clang_format(emit_cpp_text, style_file)
 
-    return tp_text, emit_text
+    return tp_text, emit_text, emit_cpp_text
 
 
 def _diff(a_text, b_text, a_name, b_name):
@@ -955,10 +1035,19 @@ def main():
                          'Requires --yaml and --header (not --sigs).')
     ap.add_argument('--tp-out')
     ap.add_argument('--emit-out')
+    ap.add_argument('--emit-cpp-out', default=None,
+                    help='Also emit the out-of-line emit-helper definitions '
+                         'to this .cpp path. The --emit-out header becomes '
+                         'declarations only; this .cpp carries the real '
+                         'tracepoint bodies and the no-op stubs (same #if '
+                         'gating as before). Compiled unconditionally into '
+                         'the runtime. Optional (omit for legacy '
+                         'header-only fixture generation).')
     ap.add_argument('--check', action='store_true',
                     help='Do not write output. Generate to memory, diff '
-                         'against the existing --tp-out/--emit-out files, '
-                         'print a unified diff and exit 1 on any mismatch.')
+                         'against the existing --tp-out/--emit-out (and '
+                         '--emit-cpp-out, if given) files, print a unified '
+                         'diff and exit 1 on any mismatch.')
     args = ap.parse_args()
 
     if args.sigs and (args.header or args.source):
@@ -998,14 +1087,20 @@ def main():
             UnsupportedReturnTypeError) as e:
         sys.exit(f"ERROR: {e}")
     regen_cmd = _regen_cmd(cfg, args.yaml, args.tp_out, args.emit_out,
+                            emit_cpp_out=args.emit_cpp_out,
                             sigs_path=args.sigs, header_paths=args.header,
                             source_paths=args.source, extra_args=args.extra_arg)
-    tp_text, emit_text = generate(cfg, apis, args.yaml, args.tp_out, args.emit_out,
-                                  sigs_by_api, return_kinds, regen_cmd)
+    tp_text, emit_text, emit_cpp_text = generate(
+        cfg, apis, args.yaml, args.tp_out, args.emit_out,
+        sigs_by_api, return_kinds, regen_cmd)
+
+    outputs = [(args.tp_out, tp_text), (args.emit_out, emit_text)]
+    if args.emit_cpp_out:
+        outputs.append((args.emit_cpp_out, emit_cpp_text))
 
     if args.check:
         rc = 0
-        for out_path, new_text in ((args.tp_out, tp_text), (args.emit_out, emit_text)):
+        for out_path, new_text in outputs:
             old_text = ''
             if os.path.exists(out_path):
                 with open(out_path) as f:
@@ -1016,18 +1111,15 @@ def main():
                 print(_diff(old_text, new_text, out_path, f"{out_path} (generated)"),
                       file=sys.stderr)
         if rc == 0:
-            print(f"OK: {args.tp_out} and {args.emit_out} match generator output",
-                  file=sys.stderr)
+            print("OK: " + " and ".join(p for p, _ in outputs)
+                  + " match generator output", file=sys.stderr)
         sys.exit(rc)
 
-    os.makedirs(os.path.dirname(args.tp_out) or '.', exist_ok=True)
-    os.makedirs(os.path.dirname(args.emit_out) or '.', exist_ok=True)
-    with open(args.tp_out, 'w') as f:
-        f.write(tp_text)
-    with open(args.emit_out, 'w') as f:
-        f.write(emit_text)
-    print(f"wrote {args.tp_out} ({len(tp_text)} B), "
-          f"{args.emit_out} ({len(emit_text)} B)", file=sys.stderr)
+    for out_path, new_text in outputs:
+        os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
+        with open(out_path, 'w') as f:
+            f.write(new_text)
+    print(", ".join(f"wrote {p} ({len(t)} B)" for p, t in outputs), file=sys.stderr)
 
 
 if __name__ == '__main__':

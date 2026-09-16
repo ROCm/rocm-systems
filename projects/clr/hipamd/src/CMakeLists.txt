@@ -127,6 +127,13 @@ target_sources(amdhip64 PRIVATE
   hip_table_interface_c.cpp
   hip_comgr_helper.cpp
   hip_library.cpp
+  # Out-of-line definitions for the curated emit helpers (declarations in
+  # lttng/rocm_trace_emit_curated.h). Self-guarded on HIP_ENABLE_LTTNG_UST:
+  # real tracepoint bodies when set, no-op stubs otherwise. Compiled
+  # unconditionally (unlike the LTTng-only provider TU added under
+  # if(HIP_ENABLE_LTTNG_UST) below) so the no-op stubs the unguarded call
+  # sites need are always linked in an LTTng-disabled build.
+  lttng/rocm_trace_emit_curated.cpp
   profiler/hip_clr_profiler.cpp
   profiler/hip_clr_dispatch_wrappers.cpp)
 

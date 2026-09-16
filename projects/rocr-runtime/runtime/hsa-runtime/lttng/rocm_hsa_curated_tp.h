@@ -16,7 +16,8 @@
  *       --extra-arg=-Iprojects/rocr-runtime/runtime/hsa-runtime/inc \
  *       --extra-arg=-Iprojects/rocr-runtime/runtime/hsa-runtime \
  *       --tp-out projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h \
- *       --emit-out projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h
+ *       --emit-out projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h \
+ *       --emit-cpp-out projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.cpp
  */
 #if !defined(_ROCM_HSA_CURATED_TP_H) || defined(LTTNG_UST_TRACEPOINT_HEADER_MULTI_READ)
 #define _ROCM_HSA_CURATED_TP_H

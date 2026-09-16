@@ -22,7 +22,8 @@
  *       --extra-arg=-Iprojects/clr/rocclr \
  *       --extra-arg=-Iprojects/rocr-runtime/runtime/hsa-runtime/inc \
  *       --tp-out projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \
- *       --emit-out projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h
+ *       --emit-out projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h \
+ *       --emit-cpp-out projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.cpp
  */
 #if !defined(_ROCM_HIP_CURATED_TP_H) || defined(LTTNG_UST_TRACEPOINT_HEADER_MULTI_READ)
 #define _ROCM_HIP_CURATED_TP_H

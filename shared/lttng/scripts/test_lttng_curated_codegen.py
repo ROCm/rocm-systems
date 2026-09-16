@@ -44,6 +44,7 @@ COVERAGE_CHECK = os.path.join(HERE, 'lttng_coverage_check.py')
 HIP_YAML = os.path.join(REPO_ROOT, 'projects/clr/hipamd/scripts/curated_apis.yaml')
 HIP_TP_OUT = os.path.join(REPO_ROOT, 'projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h')
 HIP_EMIT_OUT = os.path.join(REPO_ROOT, 'projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h')
+HIP_EMIT_CPP_OUT = os.path.join(REPO_ROOT, 'projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.cpp')
 # Same real header + flags used to (re)generate the checked-in HIP headers
 # (see the regen command embedded in their banners).
 HIP_HEADERS = [
@@ -69,6 +70,8 @@ HSA_TP_OUT = os.path.join(
     REPO_ROOT, 'projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h')
 HSA_EMIT_OUT = os.path.join(
     REPO_ROOT, 'projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h')
+HSA_EMIT_CPP_OUT = os.path.join(
+    REPO_ROOT, 'projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.cpp')
 _HSA_INC = os.path.join(REPO_ROOT, 'projects/rocr-runtime/runtime/hsa-runtime/inc')
 _HSA_RUNTIME = os.path.dirname(_HSA_INC)
 HSA_HEADERS = [os.path.join(_HSA_INC, h)
@@ -85,10 +88,12 @@ HSA_EXTRA_ARGS = [f'-I{_HSA_INC}', f'-I{_HSA_RUNTIME}']
 # need to change once those patches land -- only the skip condition flips.
 HIP_CURATED_ARTIFACTS_EXIST = (os.path.exists(HIP_YAML)
                                and os.path.exists(HIP_TP_OUT)
-                               and os.path.exists(HIP_EMIT_OUT))
+                               and os.path.exists(HIP_EMIT_OUT)
+                               and os.path.exists(HIP_EMIT_CPP_OUT))
 HSA_CURATED_ARTIFACTS_EXIST = (os.path.exists(HSA_YAML)
                                and os.path.exists(HSA_TP_OUT)
-                               and os.path.exists(HSA_EMIT_OUT))
+                               and os.path.exists(HSA_EMIT_OUT)
+                               and os.path.exists(HSA_EMIT_CPP_OUT))
 _HIP_CURATED_SKIP_REASON = ('real HIP curated artifacts (curated_apis.yaml, '
                             'rocm_hip_curated_tp.h, rocm_trace_emit_curated.h) '
                             'not present yet in this patch series stage')
@@ -109,9 +114,18 @@ def _run(args):
 
 
 def _generate(provider, yaml_path, tp_out, emit_out, sigs_path=None,
-              header_paths=None, source_paths=None, extra_args=None):
+              header_paths=None, source_paths=None, extra_args=None,
+              emit_cpp_out=None):
+    """Run the generator and return (tp_text, emit_text, emit_cpp_text).
+
+    `emit_cpp_out` defaults to a sibling <emit_out>.cpp so tests always
+    exercise the header+cpp split; callers that only care about the header
+    or tp.h can ignore the third element."""
+    if emit_cpp_out is None:
+        emit_cpp_out = os.path.splitext(emit_out)[0] + '.cpp'
     args = ['--provider', provider, '--yaml', yaml_path,
-            '--tp-out', tp_out, '--emit-out', emit_out]
+            '--tp-out', tp_out, '--emit-out', emit_out,
+            '--emit-cpp-out', emit_cpp_out]
     if sigs_path is not None:
         args += ['--sigs', sigs_path]
     else:
@@ -127,7 +141,9 @@ def _generate(provider, yaml_path, tp_out, emit_out, sigs_path=None,
         tp_text = f.read()
     with open(emit_out) as f:
         emit_text = f.read()
-    return tp_text, emit_text
+    with open(emit_cpp_out) as f:
+        emit_cpp_text = f.read()
+    return tp_text, emit_text, emit_cpp_text
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +162,8 @@ def test_hip_check_mode_matches_checked_in_headers():
                *sum((['--header', h] for h in HIP_HEADERS), []),
                *sum((['--source', s] for s in HIP_SOURCES), []),
               *[f'--extra-arg={a}' for a in HIP_EXTRA_ARGS],
-              '--tp-out', HIP_TP_OUT, '--emit-out', HIP_EMIT_OUT])
+              '--tp-out', HIP_TP_OUT, '--emit-out', HIP_EMIT_OUT,
+              '--emit-cpp-out', HIP_EMIT_CPP_OUT])
     assert r.returncode == 0, f"HIP headers drifted from generator output:\n{r.stderr}"
 
 
@@ -157,7 +174,8 @@ def test_hsa_check_mode_matches_checked_in_headers():
     for h in HSA_HEADERS:
         args += ['--header', h]
     args += [f'--extra-arg={a}' for a in HSA_EXTRA_ARGS]
-    args += ['--tp-out', HSA_TP_OUT, '--emit-out', HSA_EMIT_OUT]
+    args += ['--tp-out', HSA_TP_OUT, '--emit-out', HSA_EMIT_OUT,
+             '--emit-cpp-out', HSA_EMIT_CPP_OUT]
     r = _run(args)
     assert r.returncode == 0, f"HSA headers drifted from generator output:\n{r.stderr}"
 
@@ -200,9 +218,10 @@ def test_check_mode_detects_injected_drift():
     with tempfile.TemporaryDirectory() as d:
         tp_out = os.path.join(d, 'rocm_hip_curated_tp.h')
         emit_out = os.path.join(d, 'rocm_trace_emit_curated.h')
+        emit_cpp_out = os.path.join(d, 'rocm_trace_emit_curated.cpp')
         _generate('hip', HIP_YAML, tp_out, emit_out,
                    header_paths=HIP_HEADERS, source_paths=HIP_SOURCES,
-                   extra_args=HIP_EXTRA_ARGS)
+                   extra_args=HIP_EXTRA_ARGS, emit_cpp_out=emit_cpp_out)
         # Hand-corrupt the tp.h the generator just wrote.
         with open(tp_out, 'a') as f:
             f.write("\n/* hand edit that must be detected as drift */\n")
@@ -211,7 +230,8 @@ def test_check_mode_detects_injected_drift():
                    *sum((['--header', h] for h in HIP_HEADERS), []),
                    *sum((['--source', s] for s in HIP_SOURCES), []),
                   *[f'--extra-arg={a}' for a in HIP_EXTRA_ARGS],
-                  '--tp-out', tp_out, '--emit-out', emit_out])
+                  '--tp-out', tp_out, '--emit-out', emit_out,
+                  '--emit-cpp-out', emit_cpp_out])
         assert r.returncode == 1
         assert 'DRIFT' in r.stderr
 
@@ -340,7 +360,7 @@ def test_curated_minimal_fixture_generates():
     yaml_path = os.path.join(HERE, 'testdata', 'curated_minimal.yaml')
     sigs_path = os.path.join(HERE, 'testdata', 'curated_minimal_sigs.json')
     with tempfile.TemporaryDirectory() as d:
-        tp_text, emit_text = _generate(
+        tp_text, emit_text, cpp_text = _generate(
             'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
             sigs_path=sigs_path)
 
@@ -359,28 +379,36 @@ def test_curated_minimal_fixture_generates():
     # combined event is phase + ptr + size + retstatus.
     assert 'LTTNG_UST_TP_ARGS(int32_t, phase, uint64_t, ptr, uint64_t, size, int32_t, retstatus)' \
         in tp_text
-    # enter takes only the IN size; exit takes the OUT ptr pointer + status.
-    assert 'rocm_trace_emit_hipMalloc_enter(' in emit_text
-    assert 'void** ptr_out_ptr' in emit_text
-    assert '(uint64_t)(uintptr_t)(*ptr_out_ptr)' in emit_text
+    # The header declares the helpers (no bodies); the OUT-ptr deref body
+    # lives in the .cpp. enter takes only the IN size; exit takes the OUT
+    # ptr pointer + status.
+    assert 'void rocm_trace_emit_hipMalloc_enter(size_t);' in emit_text
+    assert 'void rocm_trace_emit_hipMalloc_exit(void**, hipError_t);' in emit_text
+    assert 'void** ptr_out_ptr' in cpp_text
+    assert '(uint64_t)(uintptr_t)(*ptr_out_ptr)' in cpp_text
 
     # hipDeviceSynchronize: zero-arg (phase + retstatus only) event; the
-    # enter fires with phase=ENTER and a zero return field.
+    # enter body fires with phase=ENTER and a zero return field (in .cpp).
     assert 'LTTNG_UST_TP_ARGS(int32_t, phase, int32_t, retstatus)' in tp_text
-    assert 'lttng_ust_do_tracepoint(rocm_hip, hipDeviceSynchronize,' in emit_text
+    assert 'lttng_ust_do_tracepoint(rocm_hip, hipDeviceSynchronize,' in cpp_text
 
-    # Per-API enter/exit helper pair; no shared lifecycle helpers/events.
-    assert 'static inline void rocm_trace_emit_hipDeviceSynchronize_enter(void)' in emit_text
-    assert 'static inline void rocm_trace_emit_hipDeviceSynchronize_exit(' in emit_text
+    # Per-API enter/exit helper DECLARATIONS in the header (non-static,
+    # non-inline, no body); no shared lifecycle helpers/events anywhere.
+    assert 'void rocm_trace_emit_hipDeviceSynchronize_enter(void);' in emit_text
+    assert 'void rocm_trace_emit_hipDeviceSynchronize_exit(' in emit_text
+    assert 'static' not in emit_text
+    assert 'inline' not in emit_text
     assert '_args' not in emit_text
+    assert '_args' not in cpp_text
     assert 'hip_api_enter' not in tp_text
     assert 'hip_api_exit_status' not in tp_text
-    assert 'rocm_trace_emit_hip_api_enter' not in emit_text
-    assert 'rocm_trace_emit_hip_api_exit' not in emit_text
+    assert 'rocm_trace_emit_hip_api_enter' not in cpp_text
+    assert 'rocm_trace_emit_hip_api_exit' not in cpp_text
 
-    # No-op stub section: enter takes the IN size, exit the OUT ptr + status.
-    assert 'static inline void rocm_trace_emit_hipMalloc_enter(size_t) {}' in emit_text
-    assert 'static inline void rocm_trace_emit_hipMalloc_exit(void**, hipError_t) {}' in emit_text
+    # No-op stub section (in the .cpp, non-inline): enter takes the IN size,
+    # exit the OUT ptr + status.
+    assert 'void rocm_trace_emit_hipMalloc_enter(size_t) {}' in cpp_text
+    assert 'void rocm_trace_emit_hipMalloc_exit(void**, hipError_t) {}' in cpp_text
 
 
 def test_high_arity_api_generates_ordered_event_chunks():
@@ -399,7 +427,7 @@ def test_high_arity_api_generates_ordered_event_chunks():
         sigs_path = os.path.join(d, 's.json')
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
-        tp_text, emit_text = _generate(
+        tp_text, emit_text, cpp_text = _generate(
             'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
             sigs_path=sigs_path)
     # Schema v1: event name drops the _args suffix; phase leads each chunk,
@@ -411,8 +439,8 @@ def test_high_arity_api_generates_ordered_event_chunks():
     assert 'uint32_t, a8)' in tp_text
     assert ('LTTNG_UST_TP_ARGS(int32_t, phase, uint32_t, a9, uint32_t, a10, '
             'int32_t, retstatus)') in tp_text
-    assert 'lttng_ust_do_tracepoint(rocm_hip, fakeHighArityApi,' in emit_text
-    assert 'lttng_ust_do_tracepoint(rocm_hip, fakeHighArityApi_2,' in emit_text
+    assert 'lttng_ust_do_tracepoint(rocm_hip, fakeHighArityApi,' in cpp_text
+    assert 'lttng_ust_do_tracepoint(rocm_hip, fakeHighArityApi_2,' in cpp_text
 
 
 def test_bool_maps_to_uint32_not_uint64():
@@ -433,12 +461,12 @@ def test_bool_maps_to_uint32_not_uint64():
         sigs_path = os.path.join(d, 's.json')
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
-        tp_text, emit_text = _generate(
+        tp_text, emit_text, cpp_text = _generate(
             'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
             sigs_path=sigs_path)
     assert 'LTTNG_UST_TP_ARGS(int32_t, phase, uint32_t, flag, int32_t, retstatus)' in tp_text
     assert 'lttng_ust_field_integer(uint32_t, flag, flag)' in tp_text
-    assert '(uint32_t)(!!(flag))' in emit_text
+    assert '(uint32_t)(!!(flag))' in cpp_text
 
 
 def test_dim3_expands_to_three_fields():
@@ -457,7 +485,7 @@ def test_dim3_expands_to_three_fields():
         sigs_path = os.path.join(d, 's.json')
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
-        tp_text, emit_text = _generate(
+        tp_text, emit_text, cpp_text = _generate(
             'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
             sigs_path=sigs_path)
     assert ('LTTNG_UST_TP_ARGS(int32_t, phase, uint32_t, blockDim_x, uint32_t, blockDim_y, '
@@ -465,9 +493,9 @@ def test_dim3_expands_to_three_fields():
     assert 'lttng_ust_field_integer(uint32_t, blockDim_x, blockDim_x)' in tp_text
     assert 'lttng_ust_field_integer(uint32_t, blockDim_y, blockDim_y)' in tp_text
     assert 'lttng_ust_field_integer(uint32_t, blockDim_z, blockDim_z)' in tp_text
-    assert '(uint32_t)blockDim.x' in emit_text
-    assert '(uint32_t)blockDim.y' in emit_text
-    assert '(uint32_t)blockDim.z' in emit_text
+    assert '(uint32_t)blockDim.x' in cpp_text
+    assert '(uint32_t)blockDim.y' in cpp_text
+    assert '(uint32_t)blockDim.z' in cpp_text
 
 
 def test_cstring_uses_field_string_macro():
@@ -485,11 +513,11 @@ def test_cstring_uses_field_string_macro():
         sigs_path = os.path.join(d, 's.json')
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
-        tp_text, emit_text = _generate(
+        tp_text, emit_text, cpp_text = _generate(
             'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
             sigs_path=sigs_path)
     assert 'lttng_ust_field_string(name, name)' in tp_text
-    assert '(name ? name : "")' in emit_text
+    assert '(name ? name : "")' in cpp_text
 
 
 def test_hsa_out_handle_uses_struct_field_deref():
@@ -508,12 +536,12 @@ def test_hsa_out_handle_uses_struct_field_deref():
         sigs_path = os.path.join(d, 's.json')
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
-        tp_text, emit_text = _generate(
+        tp_text, emit_text, cpp_text = _generate(
             'hsa', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
             sigs_path=sigs_path)
-    assert 'hsa_signal_t * signal_out_ptr' in emit_text
-    assert '(signal_out_ptr->handle)' in emit_text
-    assert '*signal_out_ptr' not in emit_text
+    assert 'hsa_signal_t * signal_out_ptr' in cpp_text
+    assert '(signal_out_ptr->handle)' in cpp_text
+    assert '*signal_out_ptr' not in cpp_text
 
 
 def test_hsa_out_double_pointer_derefs_one_level():
@@ -532,12 +560,12 @@ def test_hsa_out_double_pointer_derefs_one_level():
         sigs_path = os.path.join(d, 's.json')
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
-        tp_text, emit_text = _generate(
+        tp_text, emit_text, cpp_text = _generate(
             'hsa', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
             sigs_path=sigs_path)
-    assert 'hsa_queue_t ** queue_out_ptr' in emit_text
-    assert '(uint64_t)(uintptr_t)(*queue_out_ptr)' in emit_text
-    assert '->handle' not in emit_text
+    assert 'hsa_queue_t ** queue_out_ptr' in cpp_text
+    assert '(uint64_t)(uintptr_t)(*queue_out_ptr)' in cpp_text
+    assert '->handle' not in cpp_text
 
 
 def test_hsa_combined_event_no_shared_lifecycle():
@@ -555,7 +583,7 @@ def test_hsa_combined_event_no_shared_lifecycle():
         sigs_path = os.path.join(d, 's.json')
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
-        tp_text, emit_text = _generate(
+        tp_text, emit_text, cpp_text = _generate(
             'hsa', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
             sigs_path=sigs_path)
     # Combined event with phase + arg + retstatus (defaults to STATUS kind).
@@ -567,11 +595,16 @@ def test_hsa_combined_event_no_shared_lifecycle():
     assert 'hsa_api_exit_u64' not in tp_text
     assert 'rocm_trace_emit_hsa_api_enter' not in emit_text
     assert 'rocm_trace_emit_hsa_api_exit' not in emit_text
+    assert 'rocm_trace_emit_hsa_api_enter' not in cpp_text
+    assert 'rocm_trace_emit_hsa_api_exit' not in cpp_text
     assert '_args' not in tp_text
     assert '_args' not in emit_text
-    # The combined event's enter/exit helper pair IS generated.
+    assert '_args' not in cpp_text
+    # The combined event's enter/exit helper pair IS declared and defined.
     assert 'rocm_trace_emit_fakeHsaLifecycle_enter(' in emit_text
     assert 'rocm_trace_emit_fakeHsaLifecycle_exit(' in emit_text
+    assert 'rocm_trace_emit_fakeHsaLifecycle_enter(' in cpp_text
+    assert 'rocm_trace_emit_fakeHsaLifecycle_exit(' in cpp_text
 
 
 def test_hip_out_handle_derefs_typedef_pointer():
@@ -590,11 +623,11 @@ def test_hip_out_handle_derefs_typedef_pointer():
         sigs_path = os.path.join(d, 's.json')
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
-        tp_text, emit_text = _generate(
+        tp_text, emit_text, cpp_text = _generate(
             'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
             sigs_path=sigs_path)
-    assert 'hipStream_t* stream_out_ptr' in emit_text
-    assert '(uint64_t)(uintptr_t)(*stream_out_ptr)' in emit_text
+    assert 'hipStream_t* stream_out_ptr' in cpp_text
+    assert '(uint64_t)(uintptr_t)(*stream_out_ptr)' in cpp_text
 
 
 def test_all_in_api_enter_takes_in_exit_takes_status():
@@ -613,13 +646,17 @@ def test_all_in_api_enter_takes_in_exit_takes_status():
         sigs_path = os.path.join(d, 's.json')
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
-        tp_text, emit_text = _generate(
+        tp_text, emit_text, cpp_text = _generate(
             'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
             sigs_path=sigs_path)
-    assert 'rocm_trace_emit_fakeAllInApi_enter(uint32_t x)' in emit_text
-    assert 'rocm_trace_emit_fakeAllInApi_exit(hipError_t status)' in emit_text
+    # Header declares (unnamed) params; the named-param definition is in .cpp.
+    assert 'void rocm_trace_emit_fakeAllInApi_enter(uint32_t);' in emit_text
+    assert 'void rocm_trace_emit_fakeAllInApi_exit(hipError_t);' in emit_text
+    assert 'rocm_trace_emit_fakeAllInApi_enter(uint32_t x)' in cpp_text
+    assert 'rocm_trace_emit_fakeAllInApi_exit(hipError_t status)' in cpp_text
     assert 'corr_id' not in tp_text
     assert 'corr_id' not in emit_text
+    assert 'corr_id' not in cpp_text
 
 
 def test_v5_ptr_return_field_and_helpers():
@@ -639,13 +676,15 @@ def test_v5_ptr_return_field_and_helpers():
         sigs_path = os.path.join(d, 's.json')
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
-        tp_text, emit_text = _generate(
+        tp_text, emit_text, cpp_text = _generate(
             'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
             sigs_path=sigs_path)
     assert 'lttng_ust_field_integer_hex(uint64_t, retptr, retptr)' in tp_text
     assert 'LTTNG_UST_TP_ARGS(int32_t, phase, uint32_t, id, uint64_t, retptr)' in tp_text
-    assert 'rocm_trace_emit_fakePtrApi_enter(uint32_t id)' in emit_text
-    assert 'rocm_trace_emit_fakePtrApi_exit(uint64_t retptr)' in emit_text
+    assert 'void rocm_trace_emit_fakePtrApi_enter(uint32_t);' in emit_text
+    assert 'void rocm_trace_emit_fakePtrApi_exit(uint64_t);' in emit_text
+    assert 'rocm_trace_emit_fakePtrApi_enter(uint32_t id)' in cpp_text
+    assert 'rocm_trace_emit_fakePtrApi_exit(uint64_t retptr)' in cpp_text
 
 
 def test_v5_void_api_has_no_return_field_and_no_exit_param():
@@ -663,15 +702,17 @@ def test_v5_void_api_has_no_return_field_and_no_exit_param():
         sigs_path = os.path.join(d, 's.json')
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
-        tp_text, emit_text = _generate(
+        tp_text, emit_text, cpp_text = _generate(
             'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
             sigs_path=sigs_path)
     assert 'LTTNG_UST_TP_ARGS(int32_t, phase, uint32_t, id)' in tp_text
     assert 'retstatus' not in tp_text
     assert 'retval' not in tp_text
     assert 'retptr' not in tp_text
-    assert 'rocm_trace_emit_fakeVoidApi_enter(uint32_t id)' in emit_text
-    assert 'rocm_trace_emit_fakeVoidApi_exit(void)' in emit_text
+    assert 'void rocm_trace_emit_fakeVoidApi_enter(uint32_t);' in emit_text
+    assert 'void rocm_trace_emit_fakeVoidApi_exit(void);' in emit_text
+    assert 'rocm_trace_emit_fakeVoidApi_enter(uint32_t id)' in cpp_text
+    assert 'rocm_trace_emit_fakeVoidApi_exit(void)' in cpp_text
 
 
 def test_v5_enter_and_exit_use_phase_discriminator():
@@ -689,11 +730,11 @@ def test_v5_enter_and_exit_use_phase_discriminator():
         sigs_path = os.path.join(d, 's.json')
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
-        _tp, emit_text = _generate(
+        _tp, _emit, cpp_text = _generate(
             'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
             sigs_path=sigs_path)
-    enter = emit_text.split('rocm_trace_emit_fakePhaseApi_enter')[1].split('}')[0]
-    exit_ = emit_text.split('rocm_trace_emit_fakePhaseApi_exit')[1].split('}')[0]
+    enter = cpp_text.split('rocm_trace_emit_fakePhaseApi_enter')[1].split('}')[0]
+    exit_ = cpp_text.split('rocm_trace_emit_fakePhaseApi_exit')[1].split('}')[0]
     # ENTER: phase 0, IN populated, return 0.
     assert '(int32_t)0' in enter
     assert '(uint32_t)(x)' in enter
@@ -712,14 +753,17 @@ def test_banner_has_correct_sha256_and_regen_command():
     with open(yaml_path, 'rb') as f:
         real_sha256 = hashlib.sha256(f.read()).hexdigest()
     with tempfile.TemporaryDirectory() as d:
-        tp_text, emit_text = _generate(
+        tp_text, emit_text, cpp_text = _generate(
             'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
             sigs_path=sigs_path)
     assert real_sha256 in tp_text
     assert real_sha256 in emit_text
+    assert real_sha256 in cpp_text
     assert 'lttng_curated_codegen.py' in tp_text
     assert 'lttng_curated_codegen.py' in emit_text
+    assert 'lttng_curated_codegen.py' in cpp_text
     assert '--provider hip' in tp_text
+    assert '--emit-cpp-out' in cpp_text
 
 
 if __name__ == '__main__':
