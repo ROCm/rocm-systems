@@ -500,6 +500,35 @@ rocprofiler_add_integration_validate_test(
     ARGS --att-no-intercept-out-dir ${ATT_NO_INTERCEPT_OUT_DIR}
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
+set(ATT_CODE_OBJECT_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-code-object-out")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-code-object-resources
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_CODE_OBJECT_OUT_DIR} --att
+        --att-resource-mode code-object --output-format json -o out --
+        $<TARGET_FILE:thread-trace-test-app>
+    DEPENDS thread-trace-test-app
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-code-object-resources)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-code-object-resources
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_shaderdata
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-code-object-resources
+    ARGS --att-shaderdata-out-dir ${ATT_CODE_OBJECT_OUT_DIR}
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
 set(ATT_HSA_FALLBACK_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-hsa-fallback-out")
 
 # End-to-end rocprofv3 run on the HSA queue/signal backend instead of KFD.

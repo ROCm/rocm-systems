@@ -90,6 +90,26 @@ build_pack_from_array(parameter_pack&                             pack,
             case ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL:
                 pack.no_detail_simd = param.value != 0;
                 break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE:
+            {
+                switch(param.value)
+                {
+                    case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT:
+                    case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA:
+                        pack.resource_mode = ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA;
+                        break;
+                    case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT:
+                        pack.resource_mode =
+                            ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT;
+                        break;
+                    case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HIP:
+                    case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_ALL:
+                    case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DISPATCH:
+                        return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+                    default: return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+                }
+                break;
+            }
             case ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS:
             {
                 // CPU staging buffer count. 0 (default) and 1 = single buffer (sync path).

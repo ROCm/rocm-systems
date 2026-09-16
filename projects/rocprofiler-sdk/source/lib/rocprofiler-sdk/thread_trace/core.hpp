@@ -79,6 +79,9 @@ struct thread_trace_parameter_pack
     /// Values >= 3 enable the async copy pipeline. 2 is rejected at the API layer.
     size_t num_buffers = 1;
 
+    rocprofiler_thread_trace_resource_mode_t resource_mode =
+        ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA;
+
     bool bSerialize = false;
 
     // GFX9 Only
@@ -124,6 +127,11 @@ public:
     signal_ptr_t stop_thread_trace();
 
 private:
+    /// Allocate GPU resources once the configured initialization event occurs.
+    void initialize_resources();
+    /// Start with trace_resources_mut held and resources already initialized.
+    signal_ptr_t start_thread_trace_locked();
+
     /// Acquire a copy of the control packet, with optional increment to active_traces
     std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart = false);
 

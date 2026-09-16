@@ -89,8 +89,32 @@ The configuration parameters are described here:
 
 - ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE: Configures the buffer size. This buffer is shared among all SEs specified in ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK. There is a minimal side effect to specifying a larger buffer size, except for increased VRAM usage.
 
+- ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE: Controls when the profiler allocates thread trace queues, signals, and memory for each configured GPU. See `Resource initialization modes`_ below.
+
 
 The thread trace can be configured in two primary modes: device-wide or per-dispatch, as described in the following sections.
+
+Resource initialization modes
++++++++++++++++++++++++++++++
+
+``ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE`` applies to both device and dispatch thread trace services. The following modes are currently supported:
+
+- ``ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT``: Currently equivalent to ``ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA``. Omitting the parameter has the same behavior.
+
+- ``ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA``: Allocates resources during HSA initialization for configured GPUs visible to ROCr, respecting ``ROCR_VISIBLE_DEVICES``.
+
+- ``ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT``: Defers allocation until the first code object is registered for each configured GPU visible to ROCr. GPUs that never load a code object do not allocate thread trace resources, even when ``ROCR_VISIBLE_DEVICES`` is unset. Code objects already loaded when the service initializes also trigger allocation.
+
+The ``HIP``, ``ALL``, and ``DISPATCH`` resource modes currently return ``ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED`` from either configuration API. Invalid resource mode values return ``ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT``.
+
+To defer resource allocation until a GPU loads a code object, add:
+
+.. code-block:: cpp
+
+    params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE,
+                      {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT}});
+
+In code-object mode, starting a device thread trace context before a GPU has loaded a code object records a pending start without allocating GPU resources. Tracing starts for that GPU when its first code object is registered, provided the context is still active. Stopping the context before that load cancels the pending start. Once allocated, resources are reused across subsequent code-object loads and context starts; unloading code objects does not release them.
 
 Device thread trace
 +++++++++++++++++++
@@ -156,7 +180,7 @@ To enable selective thread trace based on specific kernel dispatches, use the di
             "thread trace service configure");
     }
 
-For device-wide thread trace, starting the context automatically begins data capture. Some application warmup is recommended before starting the device thread trace. For the dispatch thread trace, this step is not necessary as tracing doesn't start automatically.
+For device-wide thread trace, starting the context begins data capture once resources are initialized. Some application warmup is recommended before starting the device thread trace. For the dispatch thread trace, this step is not necessary as tracing doesn't start automatically.
 
 To start the context after all services are configured, use:
 
