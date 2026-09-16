@@ -8,6 +8,11 @@ name: Block RCCL subtree PRs
 # required status check without blocking unrelated PRs as "expected
 # checks were not posted".
 # After this lands, add `rccl-subtree-freeze` as a required check on develop.
+#
+# On/off switch: repository variable RCCL_SUBTREE_FREEZE
+# (Settings → Secrets and variables → Actions → Variables).
+# Unset or true/on/1 keeps the freeze active. false/off/0 disables it;
+# the job still runs and succeeds so a required check is not left pending.
 
 on:
   pull_request_target:
@@ -32,8 +37,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          RCCL_SUBTREE_FREEZE: ${{ vars.RCCL_SUBTREE_FREEZE }}
         run: |
           set -euo pipefail
+
+          freeze_switch="${RCCL_SUBTREE_FREEZE:-true}"
+          freeze_switch="${freeze_switch,,}"
+          if [[ "${freeze_switch}" == "false" || "${freeze_switch}" == "off" || "${freeze_switch}" == "0" ]]; then
+            msg="RCCL subtree freeze is off (RCCL_SUBTREE_FREEZE=${RCCL_SUBTREE_FREEZE:-unset})."
+            echo "${msg}"
+            echo "${msg}" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
 
           frozen_prefixes=(
             "projects/rccl"
