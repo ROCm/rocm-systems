@@ -1,4 +1,4 @@
-name: Path freeze tests
+name: ROCm Merge Gate tests
 
 # Unit tests for the path-freeze merge gate. This is a plain pull_request
 # workflow with a read-only token, kept separate from path-freeze.yml so PR

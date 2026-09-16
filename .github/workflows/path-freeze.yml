@@ -1,4 +1,4 @@
-name: Path freeze
+name: ROCm Merge Gate
 
 # Fails PRs into develop that change a frozen tree. pull_request_target runs
 # this workflow and its helper from the base branch, so a PR cannot disable its
