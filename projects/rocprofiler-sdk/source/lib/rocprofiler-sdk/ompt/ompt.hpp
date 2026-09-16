@@ -203,9 +203,9 @@ iterate_args(uint32_t                                         id,
 using ompt_update_func = void (*)(const char* cbname, ompt_callback_t* cbf, int cbnum);
 void update_table(ompt_update_func);
 
-// True iff some registered client subscribes to the OMPT tracing domain (call
-// only after registration::initialize()). Drives the ompt_start_tool()
-// keep-vs-defer decision.
+// True iff some registered client subscribes to the OMPT tracing domain. Valid
+// only once client tool_init callbacks have run. Drives the keep-vs-defer
+// decision in rocprofiler_ompt_start_tool().
 bool
 ompt_service_requested();
 
