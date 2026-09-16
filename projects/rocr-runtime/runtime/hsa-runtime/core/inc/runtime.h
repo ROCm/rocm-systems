@@ -576,8 +576,15 @@ class Runtime {
   bool VirtualMemApiSupported() const { return virtual_mem_api_supported_; }
   bool XnackEnabled() const { return xnack_enabled_; }
   void XnackEnabled(bool enable) { xnack_enabled_ = enable; }
+#ifdef ROCR_STATIC_AQLPROFILE
+  // aqlprofile is linked into this binary, so it is unconditionally present and there is no
+  // library handle to hand out (see hsa_system_get_major_extension_table, which takes the
+  // function addresses directly in this configuration).
+  bool AqlProfileAvailable() const { return true; }
+#else
   bool AqlProfileAvailable() const { return (aqlprofile_lib_ != nullptr); }
   os::LibHandle AqlProfileLib() const { return aqlprofile_lib_; }
+#endif
 
   Driver& AgentDriver(DriverType drv_type) {
     auto is_drv_type = [&](const std::unique_ptr<Driver>& d) {

@@ -2149,7 +2149,14 @@ bool VirtualGPU::dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet,
     case PerfCounter::ROC_GFX9:
     case PerfCounter::ROC_GFX10: {
       uint16_t hdr = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
-      return dispatchGenericAqlPacket(packet, hdr, 0, blocking);
+      // dispatchGenericAqlPacket commits dword0 atomically as (header | (rest << 16)) in
+      // packet_store_release(), which overwrites bytes 2-3 of the slot. For a vendor PM4-IB
+      // packet those bytes are pm4_command[0] (= amd_format / AMD_AQL_PM4_IB_FORMAT, set by
+      // aqlprofile's PopulateAql). Passing rest=0 zeroed the format byte, so the CP saw
+      // amd_format=0 and faulted the queue with EC_QUEUE_PACKET_VENDOR_UNSUPPORTED (0x1009).
+      // Carry the format word from the packet so the atomic commit preserves it.
+      uint16_t rest = packet->pm4_command[0];
+      return dispatchGenericAqlPacket(packet, hdr, rest, blocking);
     } break;
   }
 
@@ -5239,6 +5246,16 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
   } else {
     // Make sure VirtualGPU has an exclusive access to the resources
     std::scoped_lock lock(execution());
+
+    // While an RGP/SQTT capture is active, force per-dispatch profiling so a Timestamp
+    // (and thus a timing-enabled ProfilingSignal) is created in profilingBegin. Without
+    // this, plain HIP launches have profilingInfo().enabled_ == false and the capture has
+    // no GPU begin/end ticks to place command-buffer bars on the RGP timeline.
+    if (auto* captureMgr = dev().GetCaptureMgr()) {
+      if (captureMgr->IsCaptureActive()) {
+        vcmd.EnableProfilingForCapture();
+      }
+    }
 
     profilingBegin(vcmd);
 

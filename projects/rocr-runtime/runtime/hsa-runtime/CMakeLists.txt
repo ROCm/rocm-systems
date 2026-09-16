@@ -307,6 +307,43 @@ if (${AMDCUID_FOUND})
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSA_ENABLE_AMDCUID_SUPPORT)
 endif()
 
+## Optionally link aqlprofile directly into the runtime instead of loading
+## hsa-amd-aqlprofile64.dll/.so at runtime (see ROCR_STATIC_AQLPROFILE in
+## core/runtime/runtime.cpp and core/runtime/hsa.cpp).
+##
+## Why: aqlprofile calls ~30 hsa_* APIs.  As a shared library on Windows it must import them
+## by name from a runtime DLL, which bakes one specific DLL name into its import table --
+## forcing a separate aqlprofile build per runtime (amdhip64 vs amdocl64) and letting the
+## driver's copy in System32 shadow ours.  Linked statically those calls bind here, so there
+## is no import table, no re-exported HSA surface, and no risk of binding a second ROCr
+## instance than the one that owns the agent/queue handles.
+option ( ROCR_STATIC_AQLPROFILE "Statically link aqlprofile into the HSA runtime" OFF )
+if ( ROCR_STATIC_AQLPROFILE )
+  set ( AQLPROFILE_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../aqlprofile" )
+  if ( NOT EXISTS "${AQLPROFILE_SRC_DIR}/CMakeLists.txt" )
+    message ( FATAL_ERROR "ROCR_STATIC_AQLPROFILE=ON but aqlprofile sources were not found at ${AQLPROFILE_SRC_DIR}" )
+  endif ()
+  set ( AQLPROFILE_BUILD_STATIC ON CACHE BOOL "Build aqlprofile as a static library for in-runtime linking" FORCE )
+  if ( NOT TARGET aqlprofile::aqlprofile-lib )
+    # Both projects ship a cmake module named "utils", and ROCr's is already on
+    # CMAKE_MODULE_PATH.  aqlprofile only does list(APPEND ...), so ROCr's would shadow it
+    # and its include(utils) would resolve to the wrong file (no get_git_rev).  Prepend
+    # aqlprofile's module dir for the subdirectory scope, then restore.
+    set ( _rocr_saved_module_path "${CMAKE_MODULE_PATH}" )
+    list ( INSERT CMAKE_MODULE_PATH 0 "${AQLPROFILE_SRC_DIR}/cmake_modules" )
+    add_subdirectory ( "${AQLPROFILE_SRC_DIR}" aqlprofile-static )
+    set ( CMAKE_MODULE_PATH "${_rocr_saved_module_path}" )
+  endif ()
+  # Consume the objects directly so they end up inside this binary, with no link-library
+  # dependency to propagate or export (see the OBJECT-vs-STATIC note in aqlprofile).
+  # NB: aqlprofile's own target-name variables live in its subdirectory scope, so refer to
+  # the alias rather than ${AQLPROFILE_TARGET} (which is empty here).
+  target_sources ( ${CORE_RUNTIME_TARGET} PRIVATE $<TARGET_OBJECTS:aqlprofile::aqlprofile-lib> )
+  target_include_directories ( ${CORE_RUNTIME_TARGET} PRIVATE "${AQLPROFILE_SRC_DIR}/src/core/include" )
+  target_compile_definitions ( ${CORE_RUNTIME_TARGET} PRIVATE ROCR_STATIC_AQLPROFILE )
+  message ( STATUS "-- aqlprofile: STATIC (linked into ${CORE_RUNTIME_TARGET})" )
+endif ()
+
 if (NOT DEFINED IMAGE_SUPPORT AND CMAKE_SYSTEM_PROCESSOR MATCHES "i?86|x86_64|amd64|AMD64|loongarch64")
   set (IMAGE_SUPPORT ON)
 endif()

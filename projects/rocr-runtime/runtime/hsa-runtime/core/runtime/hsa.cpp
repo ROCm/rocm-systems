@@ -500,6 +500,13 @@ hsa_status_t hsa_system_get_major_extension_table(uint16_t extension, uint16_t v
       return HSA_STATUS_ERROR;
     }
 
+#ifdef ROCR_STATIC_AQLPROFILE
+    // aqlprofile is linked into this binary: bind straight to the symbols.  There is no
+    // library handle, no name lookup, and -- crucially -- no way to end up bound to a
+    // different ROCr instance than the one that owns the agent/queue handles the caller
+    // will pass back in.
+#define ROCR_AQLPROFILE_FN(name) (&::name)
+#else
     // Use the cached aqlprofile library handle from Runtime instead of
     // opening a new one.  The handle is loaded once during Runtime::Load()
     // and closed in Runtime::Unload(), avoiding a dlopen handle leak.
@@ -508,47 +515,37 @@ hsa_status_t hsa_system_get_major_extension_table(uint16_t extension, uint16_t v
       debug_print("AQL profile library '%s' is unavailable.\n", kAqlProfileLib);
       return HSA_STATUS_ERROR;
     }
+#define ROCR_AQLPROFILE_FN(name) ((decltype(::name)*)os::GetExportAddress(lib, #name))
+#endif
 
     hsa_ven_amd_aqlprofile_pfn_t ext_table;
     ext_table.hsa_ven_amd_aqlprofile_version_major =
-        (decltype(::hsa_ven_amd_aqlprofile_version_major)*)os::GetExportAddress(
-            lib, "hsa_ven_amd_aqlprofile_version_major");
+        ROCR_AQLPROFILE_FN(hsa_ven_amd_aqlprofile_version_major);
     ext_table.hsa_ven_amd_aqlprofile_version_minor =
-        (decltype(::hsa_ven_amd_aqlprofile_version_minor)*)os::GetExportAddress(
-            lib, "hsa_ven_amd_aqlprofile_version_minor");
+        ROCR_AQLPROFILE_FN(hsa_ven_amd_aqlprofile_version_minor);
     ext_table.hsa_ven_amd_aqlprofile_error_string =
-        (decltype(::hsa_ven_amd_aqlprofile_error_string)*)os::GetExportAddress(
-            lib, "hsa_ven_amd_aqlprofile_error_string");
+        ROCR_AQLPROFILE_FN(hsa_ven_amd_aqlprofile_error_string);
     ext_table.hsa_ven_amd_aqlprofile_validate_event =
-        (decltype(::hsa_ven_amd_aqlprofile_validate_event)*)os::GetExportAddress(
-            lib, "hsa_ven_amd_aqlprofile_validate_event");
+        ROCR_AQLPROFILE_FN(hsa_ven_amd_aqlprofile_validate_event);
     ext_table.hsa_ven_amd_aqlprofile_start =
-        (decltype(::hsa_ven_amd_aqlprofile_start)*)os::GetExportAddress(
-            lib, "hsa_ven_amd_aqlprofile_start");
+        ROCR_AQLPROFILE_FN(hsa_ven_amd_aqlprofile_start);
     ext_table.hsa_ven_amd_aqlprofile_stop =
-        (decltype(::hsa_ven_amd_aqlprofile_stop)*)os::GetExportAddress(
-            lib, "hsa_ven_amd_aqlprofile_stop");
+        ROCR_AQLPROFILE_FN(hsa_ven_amd_aqlprofile_stop);
     ext_table.hsa_ven_amd_aqlprofile_read =
-        (decltype(::hsa_ven_amd_aqlprofile_read)*)os::GetExportAddress(
-            lib, "hsa_ven_amd_aqlprofile_read");
+        ROCR_AQLPROFILE_FN(hsa_ven_amd_aqlprofile_read);
     ext_table.hsa_ven_amd_aqlprofile_legacy_get_pm4 =
-        (decltype(::hsa_ven_amd_aqlprofile_legacy_get_pm4)*)os::GetExportAddress(
-            lib, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
+        ROCR_AQLPROFILE_FN(hsa_ven_amd_aqlprofile_legacy_get_pm4);
     ext_table.hsa_ven_amd_aqlprofile_get_info =
-        (decltype(::hsa_ven_amd_aqlprofile_get_info)*)os::GetExportAddress(
-            lib, "hsa_ven_amd_aqlprofile_get_info");
+        ROCR_AQLPROFILE_FN(hsa_ven_amd_aqlprofile_get_info);
     ext_table.hsa_ven_amd_aqlprofile_iterate_data =
-        (decltype(::hsa_ven_amd_aqlprofile_iterate_data)*)os::GetExportAddress(
-            lib, "hsa_ven_amd_aqlprofile_iterate_data");
+        ROCR_AQLPROFILE_FN(hsa_ven_amd_aqlprofile_iterate_data);
     ext_table.hsa_ven_amd_aqlprofile_iterate_event_ids =
-        (decltype(::hsa_ven_amd_aqlprofile_iterate_event_ids)*)os::GetExportAddress(
-            lib, "hsa_ven_amd_aqlprofile_iterate_event_ids");
+        ROCR_AQLPROFILE_FN(hsa_ven_amd_aqlprofile_iterate_event_ids);
     ext_table.hsa_ven_amd_aqlprofile_iterate_event_coord =
-        (decltype(::hsa_ven_amd_aqlprofile_iterate_event_coord)*)os::GetExportAddress(
-            lib, "hsa_ven_amd_aqlprofile_iterate_event_coord");
+        ROCR_AQLPROFILE_FN(hsa_ven_amd_aqlprofile_iterate_event_coord);
     ext_table.hsa_ven_amd_aqlprofile_att_marker =
-        (decltype(::hsa_ven_amd_aqlprofile_att_marker)*)os::GetExportAddress(
-            lib, "hsa_ven_amd_aqlprofile_att_marker");
+        ROCR_AQLPROFILE_FN(hsa_ven_amd_aqlprofile_att_marker);
+#undef ROCR_AQLPROFILE_FN
 
     bool version_incompatible = true;
     uint32_t version_curr = 0;

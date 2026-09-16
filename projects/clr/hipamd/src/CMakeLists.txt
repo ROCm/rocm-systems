@@ -142,7 +142,9 @@ if(BUILD_SHARED_LIBS)
     # ROCCLR_ENABLE_HSA is known at configure time; use configure_file to
     # conditionally include the HSA export block instead of invoking the C
     # preprocessor at build time (cl.exe does not support GCC-style -E -P -o).
-    if(ROCCLR_ENABLE_HSA)
+    # With ROCR_STATIC_AQLPROFILE the only consumer of these re-exports is gone: aqlprofile
+    # is linked inside the runtime and resolves the HSA API at link time.
+    if(ROCCLR_ENABLE_HSA AND NOT ROCR_STATIC_AQLPROFILE)
       set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_LIST_DIR}/hsa_exports.def")
       file(READ "${CMAKE_CURRENT_LIST_DIR}/hsa_exports.def" HSA_EXPORTS)

@@ -32,6 +32,7 @@ namespace amd::roc {
 class Device;
 class VirtualGPU;
 class Kernel;
+class ProfilingSignal;
 
 // ================================================================================================
 // RGP SQTT instrumentation marker identifier codes (Table 1, RGP SQTT Instrumentation Spec).
@@ -280,6 +281,10 @@ class ICaptureMgr {
                            size_t z) = 0;
   virtual void PostDispatch(VirtualGPU* gpu) = 0;
 
+  // True while an SQTT capture is in flight (Preparing or Running). Used by the dispatch
+  // path to force per-command profiling so GPU begin/end ticks are collected.
+  virtual bool IsCaptureActive() const = 0;
+
   virtual void FinishRGPTrace(VirtualGPU* gpu, bool aborted) = 0;
 
   virtual void WriteBarrierStartMarker(const VirtualGPU* gpu, uint32_t reason) const = 0;
@@ -372,6 +377,15 @@ class RocUberTraceCaptureMgr final : public ICaptureMgr,
   void WaitForDriverResume();
   bool IsTraceRunning() const { return trace_running_; }
 
+ public:
+  // True while a capture is Preparing or Running — drives forced per-dispatch profiling
+  // so GPU timestamps are available for the QueueEvent / ClockCalibration RDF chunks.
+  bool IsCaptureActive() const override {
+    return sqtt_state_ == SqttState::Running || sqtt_state_ == SqttState::Preparing;
+  }
+
+ private:
+
   // SQTT hardware capture via aqlprofile extension (HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE).
   // Uses the same aqlprofile API table as PerfCounterProfile — start/stop/read populate AQL
   // packets which are submitted via dispatchCounterAqlPacket, letting the HSA runtime/KFD
@@ -414,6 +428,12 @@ class RocUberTraceCaptureMgr final : public ICaptureMgr,
     uint32_t sqttCmdBufId;
     uint32_t submitSubIndex;
     uint64_t apiEventId;
+    // Retained (refcounted) dispatch signal carrying GPU begin/end ticks; harvested and
+    // released in CollectSqttResults (or FreeSqttResources on abort). Null when no timing
+    // signal was attached to the dispatch.
+    ProfilingSignal* profilingSignal = nullptr;
+    uint64_t gpuTimestamp1 = 0;  //!< GPU begin tick (system domain), 0 if unavailable
+    uint64_t gpuTimestamp2 = 0;  //!< GPU end tick (system domain), 0 if unavailable
   };
 
   std::vector<PendingElfData>    pending_elfs_;
@@ -474,6 +494,17 @@ class RocUberTraceCaptureMgr final : public ICaptureMgr,
   bool     sqtt_instruction_tokens_;     //!< true = full instruction-level tokens
   bool     sqtt_capture_code_objects_;   //!< true = include ELF binaries as RDF chunks
 
+  //! Compute the effective aqlprofile capture SE_MASK.
+  //!
+  //! aqlprofile's gfx12 path has no per-SE detail selector (occupancy_mode is global), unlike
+  //! PAL's sqtt.seDetailedMask.  Detailed (instruction-timing) tokens are therefore captured on
+  //! every SE in the capture mask, multiplying trace size by the SE count.  PAL only gathers
+  //! detailed tokens on a single SE (seDetailedMask = 0x1); to match that behaviour and file size
+  //! we restrict the capture mask to the tool-supplied seMask when instruction tokens are enabled.
+  //! Without instruction tokens every SE is captured (mask = all present SEs) as before.
+  //! @return The SE bitmask to pass as HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK.
+  uint32_t EffectiveCaptureSeMask() const;
+
   // Dispatch-index capture window (CaptureTriggerMode::Index).
   // When captureMode == Index the tool specifies an inclusive [start, stop] dispatch range.
   // captureStartIndex is compared against global_disp_count_ to decide when to begin SQTT;
@@ -510,6 +541,7 @@ class RocUberTraceCaptureMgr : public ICaptureMgr {
   void FinishDeviceInit() override {}
   void PreDispatch(VirtualGPU*, const Kernel&, size_t, size_t, size_t) override {}
   void PostDispatch(VirtualGPU*) override {}
+  bool IsCaptureActive() const override { return false; }
   void FinishRGPTrace(VirtualGPU*, bool) override {}
   void WriteBarrierStartMarker(const VirtualGPU*, uint32_t) const override {}
   void WriteBarrierEndMarker(const VirtualGPU*) const override {}
