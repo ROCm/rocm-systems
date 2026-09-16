@@ -193,13 +193,17 @@ public:
   /// @brief Set the execution plugin group and distribute to CPs/CUs.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
 
-  /// @brief Set the shared host-thread budget for functional CU execution.
+  /// @brief Set the requested shared CPU pool width for functional CU execution.
   ///
   /// @details This controls host acceleration rather than modeled GPU
   /// resources or timing. The count includes the command-processor thread that
-  /// calls the pool. One pool is shared across the SoC, and its current
-  /// single-submission implementation serializes batches from different CPs.
+  /// calls the pool. The effective width is clamped to the largest CU count of
+  /// any command processor in the SoC. One pool retains width-1 workers shared
+  /// across the SoC. CPs can submit and execute concurrently; each submission
+  /// uses its caller and at most width-1 workers, and joins only its own work.
+  /// With E engine threads, the total CU execution capacity is E + width - 1.
   void set_dispatch_threads(uint32_t threads);
+  /// @returns The effective functional dispatch width after mode and CU-capacity clamps.
   uint32_t dispatch_threads() const { return dispatch_threads_; }
 
   const std::vector<amdgpu::ComputeUnitCore *> &all_cus();

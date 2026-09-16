@@ -175,6 +175,8 @@ bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_l
     for (size_t attempt = 0; attempt < cus.size(); ++attempt) {
       size_t cu_idx = (next_cu + rank + attempt) % cus.size();
       auto *cu = cus[cu_idx];
+      if (!entry.allows_cu(cu))
+        continue;
 
       uint32_t reserved_wgs = planned_per_cu[cu_idx] + 1;
       uint64_t reserved_wfs = static_cast<uint64_t>(entry.wfs_per_workgroup) * reserved_wgs;
@@ -590,7 +592,7 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     }
     uint64_t wave_scratch = scratch_pool + scratch_slot * per_wave_size;
 
-    if (memory_ && memory_->resolve_host_ptr(wave_scratch, pkt.process_id) == nullptr &&
+    if (memory_ && !memory_->has_host_backing(wave_scratch, pkt.process_id, per_wave_size) &&
         scratch_allocator_) {
       // Size against the whole grid, not this XCD's share: every XCD of a
       // fanned-out dispatch shares the allocation. CDNA5 uses the complete
@@ -620,10 +622,10 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     util::Logger::cp([&](auto &os) {
       os << std::format(
           "SCRATCH wf{} pool={:#x} wave_scratch={:#x} per_wave={} priv_size={} "
-          "backing_addr={:#x} mapped={}",
+          "backing_addr={:#x} host_backed={}",
           wf->wf_id(), scratch_pool, wave_scratch, per_wave_size, pkt.private_segment_fixed_size,
           pkt.scratch_backing_addr,
-          memory_ ? (memory_->resolve_host_ptr(wave_scratch, pkt.process_id) != nullptr) : false);
+          memory_ ? memory_->has_host_backing(wave_scratch, pkt.process_id, per_wave_size) : false);
     });
 
     if (flat_scratch_init_sgpr >= 0) {
@@ -761,12 +763,41 @@ void CommandProcessor::fan_out_dispatch(DispatchEntry &dp) {
   if (num_xcds <= 1)
     return;
 
+  // A masked queue may have no usable CU on its owning XCD. Only eligible
+  // XCDs receive work; the owner still tracks whole-grid completion.
+  std::vector<uint32_t> participants;
+  if (dp.enabled_cus) {
+    for (uint32_t rank = 0; rank < num_xcds; ++rank) {
+      if (std::ranges::any_of(xcd_peers_[rank]->cus_,
+                              [&](const auto *cu) { return dp.allows_cu(cu); }))
+        participants.push_back(rank);
+    }
+  }
+  const uint32_t participant_count =
+      dp.enabled_cus ? static_cast<uint32_t>(participants.size()) : num_xcds;
+  assert(participant_count != 0);
+
   const uint32_t grid_wgs = dp.total_wgs;
   auto grid = std::make_shared<GridCompletion>();
   grid->grid_wgs = grid_wgs;
 
-  for (uint32_t rank = 0; rank < num_xcds; ++rank) {
-    if (rank == xcd_rank_)
+  const auto apply_share = [&](DispatchEntry &entry, uint32_t physical_rank) {
+    if (!entry.enabled_cus) {
+      entry.apply_shard(XcdShard(physical_rank, num_xcds));
+      return;
+    }
+    const auto participant = std::ranges::find(participants, physical_rank);
+    if (participant == participants.end())
+      entry.total_wgs = 0;
+    else
+      entry.apply_shard(
+          XcdShard(static_cast<uint32_t>(participant - participants.begin()), participant_count));
+  };
+
+  // Excluded XCDs need empty shares too: a later CU-mask change can route work
+  // to them, and barriers must still wait for the same predecessors everywhere.
+  for (uint32_t physical_rank = 0; physical_rank < num_xcds; ++physical_rank) {
+    if (physical_rank == xcd_rank_)
       continue;
     DispatchEntry shard = dp;
     shard.grid_completion = grid;
@@ -774,12 +805,12 @@ void CommandProcessor::fan_out_dispatch(DispatchEntry &dp) {
     // The peer must not fire the dispatch's completion signal; the owning XCD
     // does that once the grid counter shows every share retired.
     shard.completion_signal = 0;
-    shard.apply_shard(XcdShard(rank, num_xcds));
-    xcd_peers_[rank]->accept_fanout_shard(std::move(shard));
+    apply_share(shard, physical_rank);
+    xcd_peers_[physical_rank]->accept_fanout_shard(std::move(shard));
   }
 
   dp.grid_completion = std::move(grid);
-  dp.apply_shard(XcdShard(xcd_rank_, num_xcds));
+  apply_share(dp, xcd_rank_);
 }
 
 void CommandProcessor::replicate_non_kernel_entry(const DispatchEntry &dp) {
@@ -974,6 +1005,19 @@ void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) 
   // helper rechecks the queue set while holding the lifecycle mutex, so a concurrent
   // registration either keeps this monitor alive or starts a new one after the join.
   stop_doorbell_monitor_if_idle();
+}
+
+void CommandProcessor::set_queue_cu_selection(uint32_t queue_id, uint32_t process_id,
+                                              const QueueCuSelection &enabled_cus) {
+  {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    for (auto &queue : hw_queues_) {
+      if (queue.queue_id == queue_id && queue.process_id == process_id)
+        queue.enabled_cus = enabled_cus;
+    }
+  }
+  if (engine())
+    engine()->schedule_event_now(doorbell_event());
 }
 
 void CommandProcessor::update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
@@ -1798,6 +1842,8 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     } else if (!entry.wgp_mode) {
       for (size_t attempt = 0; attempt < cus_.size(); ++attempt) {
         size_t cu_idx = (next_cu_ + attempt) % cus_.size();
+        if (!entry.allows_cu(cus_[cu_idx]))
+          continue;
         if (cus_[cu_idx]->can_accept_workgroup(entry.wfs_per_workgroup,
                                                entry.group_segment_fixed_size)) {
           auto *cu = cus_[cu_idx];
@@ -1925,8 +1971,11 @@ void CommandProcessor::on_cu_pool_ready(ComputeUnitCore *cu) {
 
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
   const simdojo::Tick now = engine()->context(partition_id()).current_tick();
-  pooled_due_ticks_[cu] = now + 1;
-  arm_dispatch_continuation(now + 1);
+  // schedule_work() also runs when a new wave joins an already-active CU. Keep
+  // that CU's established due tick, just as the serial driver keeps its queued
+  // tick while executing_, rather than pulling resident work forward.
+  auto due = pooled_due_ticks_.try_emplace(cu, now + 1).first;
+  arm_dispatch_continuation(due->second);
 }
 
 bool CommandProcessor::step() {
@@ -2101,6 +2150,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.dispatch_id = allocate_dispatch_id();
   dp.profiling_start_timestamp = hsa_system_timestamp();
   dp.queue_id = queue.queue_id;
+  dp.enabled_cus = queue.enabled_cus;
   dp.queue_packet_id = queue_packet_id;
   dp.process_id = queue.process_id;
   dp.aql_packet_id = static_cast<uint32_t>(aql_packet_id);
@@ -2533,6 +2583,12 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
     }
 
     if (pkt_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
+      // Leave shader packets in the ring until a CU is enabled. The mask does
+      // not prevent the CP from processing barriers or PM4 IB packets.
+      if (queue.enabled_cus && queue.enabled_cus->empty()) {
+        process_limit = read_idx;
+        break;
+      }
       process_aql_packet(pkt, queue, pkt_addr, slot, qs, read_idx);
     } else if (pkt_type == HSA_PACKET_TYPE_BARRIER_AND || pkt_type == HSA_PACKET_TYPE_BARRIER_OR) {
       constexpr uint32_t DEP_OFF = 8;
@@ -2663,6 +2719,10 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
           replicate_non_kernel_entry(dp);
         qs.push_entry(std::move(dp));
       } else if (ext.amd_format == kHsaAmdPacketTypeExtKernelDispatch) {
+        if (queue.enabled_cus && queue.enabled_cus->empty()) {
+          process_limit = read_idx;
+          break;
+        }
         if (ext.dep_signal.handle != 0) {
           constexpr uint32_t SIG_VAL_OFF = 8;
           auto v = static_cast<int64_t>(

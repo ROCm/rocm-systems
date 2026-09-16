@@ -41,6 +41,7 @@
 #include "library/components/exit_gotcha.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/components/mpi_gotcha.hpp"
+#include "library/components/mpip.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/shmem_gotcha_policy.hpp"
@@ -268,15 +269,16 @@ struct fini_bundle
     template <typename... Args>
     void start(Args&&... _args)
     {
-        ROCPROFSYS_FOLD_EXPRESSION(tim::operation::start<Tp>{}(
-            std::get<Tp>(m_data), std::forward<Args>(_args)...));
+        ((tim::operation::start<Tp>{}(std::get<Tp>(m_data),
+                                      std::forward<Args>(_args)...)),
+         ...);
     }
 
     template <typename... Args>
     void stop(Args&&... _args)
     {
-        ROCPROFSYS_FOLD_EXPRESSION(tim::operation::stop<Tp>{}(
-            std::get<Tp>(m_data), std::forward<Args>(_args)...));
+        ((tim::operation::stop<Tp>{}(std::get<Tp>(m_data), std::forward<Args>(_args)...)),
+         ...);
     }
 
     std::string as_string(bool _print_prefix = true) const
@@ -678,7 +680,7 @@ rocprofsys_init_tooling_hidden(void)
                 LOG_DEBUG("Pause callback...");
                 rocprofiler_sdk::pause();
                 sampling::pause();
-                component::mpi_gotcha::pause();
+                component::pause_mpip();
                 component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::pause();
                 component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause();
                 component::vaapi_gotcha::pause();
@@ -692,7 +694,7 @@ rocprofsys_init_tooling_hidden(void)
                 LOG_DEBUG("Resume callback...");
                 rocprofiler_sdk::resume();
                 sampling::resume();
-                component::mpi_gotcha::resume();
+                component::resume_mpip();
                 component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::resume();
                 component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume();
                 component::vaapi_gotcha::resume();
@@ -895,8 +897,10 @@ rocprofsys_reset_preload_hidden(void)
             if(itr.find("librocprof-sys") != std::string::npos) continue;
             _modified_preload += fmt::format(":{}", itr);
         }
-        if(!_modified_preload.empty() && _modified_preload.find(':') == 0)
+        if(!_modified_preload.empty() && _modified_preload.starts_with(':'))
+        {
             _modified_preload = _modified_preload.substr(1);
+        }
 
         rocprofsys::set_env("LD_PRELOAD", _modified_preload, 1);
     }

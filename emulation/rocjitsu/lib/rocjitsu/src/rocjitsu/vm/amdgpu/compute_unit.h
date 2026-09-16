@@ -28,6 +28,7 @@
 #include "simdojo/components/vector_reg.h"
 #include "util/bit.h"
 #include "util/log.h"
+#include "util/result.h"
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
@@ -199,6 +200,9 @@ public:
   uint32_t functional_quantum() const {
     return config_.functional_quantum == 0 ? UINT32_MAX : config_.functional_quantum;
   }
+
+  /// @brief Restore the raw configured functional quantum (0 = unbounded).
+  void set_functional_quantum(uint32_t quantum) { config_.functional_quantum = quantum; }
 
   /// @brief Select whether the CP continuation event owns functional execution.
   void set_pool_driven(bool value) { pool_driven_ = value; }
@@ -450,7 +454,9 @@ public:
   uint32_t allocate_lds(uint32_t size_bytes) {
     uint32_t base = next_lds_alloc_;
     uint32_t aligned = util::align_up(size_bytes, 256u);
-    lds_.zero_range(base, aligned);
+    // Reusing a physical LDS region does not initialize its contents. Keep the
+    // bytes written by prior workgroups until another instruction overwrites them.
+    lds_.materialize_range(base, aligned);
     next_lds_alloc_ += aligned;
     return base;
   }
@@ -920,7 +926,17 @@ public:
   /// thread or from single-threaded test contexts only.
   /// @param inst The decoded instruction.
   /// @param wf The wavefront executing the instruction.
-  virtual void execute_instruction(Instruction *inst, Wavefront &wf) = 0;
+  /// @returns Failure for an unimplemented instruction stub or a reported operand
+  /// failure. The wavefront retains the reason for caller-owned diagnostics.
+  /// Each call clears the previous error; a failed call does not halt the wavefront.
+  /// Validation inside implemented instructions can still raise exceptions.
+  util::Result execute_instruction(Instruction *inst, Wavefront &wf) {
+    assert(inst->execute && "instruction execution backend is not linked");
+    wf.clear_instruction_execution_error();
+    // The decoded instruction already selects its ISA execution callback.
+    inst->execute(*inst, &wf);
+    return wf.instruction_execution_failed() ? util::Result::failure() : util::Result::success();
+  }
 
 protected:
   ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory, L2Cache *l2,
@@ -1033,6 +1049,7 @@ protected:
   L1ScalarCache l1_scalar_;
   L1VectorCache l1_vector_;
   InstructionCache inst_cache_;
+  GpuMemory::FetchabilityCache fetchability_cache_;
   /// @brief Debug attach/detach transitions seen by set_debug_active().
   std::atomic<uint64_t> inst_cache_debug_epoch_{0};
   /// @brief The epoch this CU's thread has already invalidated the I$ for.
@@ -1210,6 +1227,10 @@ public:
     // resumes it.
     if (!this->engine())
       return;
+    if (this->pool_driven()) {
+      this->notify_pool_ready();
+      return;
+    }
     auto now = this->engine()->context(this->partition_id()).current_tick();
     schedule_work_at(now + 1);
   }
@@ -1424,16 +1445,6 @@ protected:
 public:
   uint32_t vgpr_allocation_block_size() const override { return vgprs_per_block_; }
   uint32_t vgpr_storage_lane_count() const override { return Isa::WF_SIZE_MAX; }
-
-protected:
-  /// @brief Execute one instruction on the given wavefront.
-  ///
-  /// @brief Execute one instruction on the given wavefront via direct dispatch.
-  void execute_instruction(Instruction *inst, Wavefront &wf) override {
-    assert(inst->execute && "instruction execution backend is not linked");
-    wf.clear_instruction_execution_error();
-    inst->execute(*inst, &wf);
-  }
 
 private:
   VgprFile vgpr_file_{"vgpr"};

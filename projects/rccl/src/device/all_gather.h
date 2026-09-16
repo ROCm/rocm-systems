@@ -195,7 +195,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
       while (1) {
         struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
         int* poll = &ps->flags;
-        while (__hip_atomic_load(poll, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != 0) {
+        while (__scoped_atomic_load_n(poll, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) != 0) {
           pollCount++;// Wait for workers to be done with step 'step-NCCL_SHMEM_PAT_STEPS'
         }
         patAlgo.getNextOp(ps);
@@ -224,14 +224,14 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
       while (1) {
         struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
         int* poll = &ps->flags;
-        while (__hip_atomic_load(poll, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) == 0) {
+        while (__scoped_atomic_load_n(poll, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) == 0) {
           pollCount++; // Wait for compute thread
         }
         int last = ps->last;
         prims.patCopy(ps, shmem);
         if (tidInGroup == 0)
-          __hip_atomic_store(poll, 0, __ATOMIC_RELEASE,
-                             __HIP_MEMORY_SCOPE_WORKGROUP); // Return element to compute thread
+          __scoped_atomic_store_n(poll, 0, __ATOMIC_RELEASE,
+                                  __MEMORY_SCOPE_WRKGRP); // Return element to compute thread
         if (last) break;
         step += nGroups;
       }

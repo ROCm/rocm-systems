@@ -1,0 +1,135 @@
+HRR Archive: /captures/qwen06b_offline_v4.hrr/pid-1
+========================================
+Complete:     yes (clean shutdown)
+Recovered:    185469 events
+Events:       185469
+Kernels:      13233
+Blobs:        4458
+Code Objects: 33
+Threads:      2
+
+Event Type Breakdown:
+  Type                   Count
+  ----                   -----
+  __hipPopCallConfiguration 12945
+  __hipPushCallConfiguration 12945
+  __hipRegisterFatBinary 4083
+  hipDeviceGetAttribute  2827
+  hipDeviceGetStreamPriorityRange 1
+  hipDevicePrimaryCtxGetState 44
+  hipDeviceSynchronize   1
+  hipDriverGetVersion    1
+  hipEventCreateWithFlags 66
+  hipEventDestroy        64
+  hipEventQuery          31
+  hipEventRecord         131
+  hipEventSynchronize    66
+  hipFree                11
+  hipFuncGetAttribute    12
+  hipGetDevice           81383
+  hipGetDeviceCount      4
+  hipGetDevicePropertiesR0600 3295
+  hipGetLastError        1241
+  hipHostMalloc          29
+  hipMalloc              107
+  hipMemGetInfo          5
+  hipMemcpyAsync         354
+  hipMemcpyWithStream    509
+  hipMemset              1
+  hipMemsetAsync         32
+  hipModuleLaunchKernel  13233
+  hipModuleLoad          2
+  hipModuleLoadDataEx    4
+  hipModuleUnload        2
+  hipPointerGetAttribute 448
+  hipRuntimeGetVersion   2827
+  hipSetDevice           48075
+  hipStreamCreateWithPriority 1
+  hipStreamGetCaptureInfo 509
+  hipStreamIsCapturing   118
+  hipStreamWaitEvent     32
+  hipGetProcAddress      30
+
+Kernel Summary (first 20):
+  ID   Kernel                                             Grid            Block           SharedMem
+  --   ------                                             ----            -----           ---------
+  0    _ZN2at6native29vectorized_elementwise_kernelILi... [1,1,1]         [256,1,1]       0
+  1    _ZN2at6native29vectorized_elementwise_kernelILi... [1,1,1]         [256,1,1]       0
+  2    _ZN2at6native29vectorized_elementwise_kernelILi... [128,1,1]       [256,1,1]       0
+  3    _ZN2at6native29vectorized_elementwise_kernelILi... [16,1,1]        [256,1,1]       0
+  4    _ZN2at6native29vectorized_elementwise_kernelILi... [16,1,1]        [256,1,1]       0
+  5    _ZN2at6native29vectorized_elementwise_kernelILi... [16,1,1]        [256,1,1]       0
+  6    _ZN2at6native29vectorized_elementwise_kernelILi... [2,1,1]         [256,1,1]       0
+  7    _ZN2at6native29vectorized_elementwise_kernelILi... [1,1,1]         [256,1,1]       0
+  8    _ZN2at6native29vectorized_elementwise_kernelILi... [1,1,1]         [256,1,1]       0
+  9    _ZN2at6native29vectorized_elementwise_kernelILi... [1,1,1]         [256,1,1]       0
+  10   _ZN2at6native29vectorized_elementwise_kernelILi... [16,1,1]        [256,1,1]       0
+  11   _ZN2at6native29vectorized_elementwise_kernelILi... [1,1,1]         [256,1,1]       0
+  12   _ZN2at6native29vectorized_elementwise_kernelILi... [1,1,1]         [256,1,1]       0
+  13   _ZN2at6native29vectorized_elementwise_kernelILi... [1,1,1]         [256,1,1]       0
+  14   _ZN2at6native29vectorized_elementwise_kernelILi... [8192,1,1]      [256,1,1]       0
+  15   _ZN2at6native29vectorized_elementwise_kernelILi... [4,1,1]         [256,1,1]       0
+  16   _ZN2at6native29vectorized_elementwise_kernelILi... [1,1,1]         [256,1,1]       0
+  17   _ZN2at6native29vectorized_elementwise_kernelILi... [1,1,1]         [256,1,1]       0
+  18   _ZN2at6native29vectorized_elementwise_kernelILi... [1,1,1]         [256,1,1]       0
+  19   _ZN2at6native29vectorized_elementwise_kernelILi... [16,1,1]        [256,1,1]       0
+  ... and 13213 more
+
+Kernel Call Counts:
+  Kernel                                                       Calls
+  ------                                                       -----
+  Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT128x128x12... 28
+  Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT192x128x12... 28
+  Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64... 114
+  Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT64x64x256_... 56
+  _Z11wvSplitKrc_I14__hip_bfloat16Li64ELi16ELi4ELi8ELi1ELi1... 112
+  _Z16wvSplitK_hf_sml_I14__hip_bfloat16Li64ELi1ELi16ELi8ELi... 1736
+  _Z16wvSplitK_hf_sml_I14__hip_bfloat16Li64ELi2ELi16ELi8ELi... 1768
+  _Z35paged_attention_ll4mi_reduce_kernelI14__hip_bfloat16S... 896
+  _Z38paged_attention_ll4mi_QKV_mfma4_kernelI14__hip_bfloat... 896
+  _ZN12_GLOBAL__N_129elementwise_kernel_with_indexIiZZZN2at... 2
+  _ZN2at6native12_GLOBAL__N_121indexSelectSmallIndexIN3c108... 32
+  _ZN2at6native12_GLOBAL__N_123cunn_SoftMaxForwardGmemILi4E... 2
+  _ZN2at6native12_GLOBAL__N_126CatArrayBatchedCopy_contigIN... 1
+  _ZN2at6native12_GLOBAL__N_143distribution_elementwise_gri... 2
+  _ZN2at6native12_GLOBAL__N_143distribution_elementwise_gri... 2
+  _ZN2at6native13reduce_kernelILi512ELi1ENS0_8ReduceOpIfNS0... 36
+  _ZN2at6native24index_elementwise_kernelILi128ELi4EZNS0_16... 32
+  _ZN2at6native24index_elementwise_kernelILi128ELi4EZNS0_16... 32
+  _ZN2at6native24vectorized_gather_kernelILi16ElEEvPcS2_PT0... 4
+  _ZN2at6native27unrolled_elementwise_kernelINS0_11FillFunc... 32
+  _ZN2at6native27unrolled_elementwise_kernelINS0_21CUDAFunc... 32
+  _ZN2at6native29vectorized_elementwise_kernelILi16ENS0_11F... 56
+  _ZN2at6native29vectorized_elementwise_kernelILi16ENS0_11F... 3
+  _ZN2at6native29vectorized_elementwise_kernelILi4ENS0_11Fi... 125
+  _ZN2at6native29vectorized_elementwise_kernelILi4ENS0_11Fi... 43
+  _ZN2at6native29vectorized_elementwise_kernelILi4ENS0_11Fi... 9
+  _ZN2at6native29vectorized_elementwise_kernelILi4ENS0_13AU... 1
+  _ZN2at6native29vectorized_elementwise_kernelILi4ENS0_13BU... 1
+  _ZN2at6native29vectorized_elementwise_kernelILi4ENS0_13Bi... 2
+  _ZN2at6native29vectorized_elementwise_kernelILi4ENS0_15CU... 32
+  _ZN2at6native29vectorized_elementwise_kernelILi4ENS0_15CU... 32
+  _ZN2at6native29vectorized_elementwise_kernelILi4EZNS0_21c... 4
+  _ZN2at6native29vectorized_elementwise_kernelILi4EZNS0_25b... 1
+  _ZN2at6native29vectorized_elementwise_kernelILi4EZNS0_34b... 34
+  _ZN2at6native29vectorized_elementwise_kernelILi4EZZZNS0_1... 2
+  _ZN2at6native29vectorized_elementwise_kernelILi4EZZZNS0_1... 1
+  _ZN2at6native29vectorized_elementwise_kernelILi4EZZZNS0_1... 1
+  _ZN2at6native29vectorized_elementwise_kernelILi4EZZZNS0_2... 1
+  _ZN2at6native29vectorized_elementwise_kernelILi8ENS0_11Fi... 170
+  _ZN2at6native32elementwise_kernel_manual_unrollILi128ELi4... 1
+  _ZN2at6native32elementwise_kernel_manual_unrollILi128ELi4... 36
+  _ZN2at6native32elementwise_kernel_manual_unrollILi128ELi4... 98
+  _ZN2at6native32elementwise_kernel_manual_unrollILi128ELi4... 2
+  _ZN2at6native32elementwise_kernel_manual_unrollILi128ELi4... 1
+  _ZN2at6native32elementwise_kernel_manual_unrollILi128ELi4... 2
+  _ZN4vllm15rms_norm_kernelIN3c108BFloat16ELi8ELi2EEEvPT_PK... 34
+  _ZN4vllm15rms_norm_kernelIN3c108BFloat16ELi8ELi3EEEvPT_PK... 1904
+  _ZN4vllm18act_and_mul_kernelIN3c108BFloat16E15__hip_bfloa... 952
+  _ZN4vllm23rotary_embedding_kernelIN3c108BFloat16ELb1EEEvP... 952
+  _ZN4vllm24reshape_and_cache_kernelI14__hip_bfloat16S1_LNS... 924
+  _ZN4vllm25fused_add_rms_norm_kernelIN3c108BFloat16ELi8EEE... 1904
+  _compute_slot_mapping_kernel                                 32
+  _fwd_kernel                                                  28
+  _topk_topp_kernel                                            2
+
