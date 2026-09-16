@@ -1,0 +1,65 @@
+name: Path freeze
+
+# Fails PRs into develop that change a frozen tree. pull_request_target runs
+# this workflow and its helper from the base branch, so a PR cannot disable its
+# own guard. There is no path filter, so the check posts on every develop PR
+# and can be marked required.
+# Merging a change to the freeze list below also re-posts the check on every
+# open develop PR, so idle PRs follow the current configuration.
+
+on:
+  pull_request_target:
+    branches: [develop]
+  push:
+    branches: [develop]
+    paths:
+      - '.github/workflows/path-freeze.yml'
+      - '.github/scripts/path_freeze.py'
+  workflow_dispatch:
+
+env:
+  # Freeze the whole repository. This workflow and its helper stay exempt so
+  # the freeze can still be lifted by a PR.
+  FREEZE_ENTIRE_REPO: false
+
+  # One entry per frozen tree. Set "enabled" to false to lift a single freeze,
+  # or add an entry to freeze more trees. Paths are directory prefixes;
+  # fnmatch globs (*, ?, []) also work. Changes apply once merged to develop.
+  FREEZES: |
+    [
+      {"name": "rccl", "enabled": true, "paths": ["projects/rccl", "projects/rccl-tests"]}
+    ]
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  path-freeze:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      SCRIPT: .github/scripts/path_freeze.py
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts/path_freeze.py
+          sparse-checkout-cone-mode: false
+
+      - name: Check this PR
+        if: github.event_name == 'pull_request_target'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python3 "$SCRIPT" evaluate --repo "$REPO" --pr "$PR_NUMBER"
+
+      - name: Re-check open develop PRs
+        if: github.event_name != 'pull_request_target'
+        run: python3 "$SCRIPT" reevaluate-open --repo "$REPO" --base develop
