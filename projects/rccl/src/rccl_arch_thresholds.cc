@@ -137,7 +137,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [1] Reduce          -- not used on gfx1250
     2ULL*1024*1024,       // [2] AllGather
     kThreshUnlimited,     // [3] ReduceScatter
-    kThreshUnlimited,     // [4] AllReduce
+    0,                    // [4] AllReduce
     0,                    // [5] SendRecv        -- not used on gfx1250
     0,                    // [6] Send            -- not used on gfx1250
     0,                    // [7] Recv            -- not used on gfx1250
@@ -151,7 +151,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [1] Reduce          -- not used on gfx1250
     2ULL*1024*1024,       // [2] AllGather
     kThreshUnlimited,     // [3] ReduceScatter
-    kThreshUnlimited,     // [4] AllReduce
+    0,                    // [4] AllReduce
     0,                    // [5] SendRecv        -- not used on gfx1250
     0,                    // [6] Send            -- not used on gfx1250
     0,                    // [7] Recv            -- not used on gfx1250
