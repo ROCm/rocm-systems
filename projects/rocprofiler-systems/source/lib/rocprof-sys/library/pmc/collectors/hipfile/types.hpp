@@ -297,15 +297,9 @@ track_name(std::size_t gpu_id, const char* suffix)
 [[nodiscard]] inline std::string
 pmc_name(const char* suffix)
 {
-    std::string out = "device_storage_";
-    for(const char* character = suffix; *character != '\0'; ++character)
-    {
-        out +=
-            (*character == ' ')
-                ? '_'
-                : static_cast<char>(std::tolower(static_cast<unsigned char>(*character)));
-    }
-    return out;
+    auto normalized = utility::string::to_lower(suffix);
+    std::ranges::replace(normalized, ' ', '_');
+    return "device_storage_" + normalized;
 }
 
 }  // namespace rocprofsys::pmc::collectors::hipfile
