@@ -21,6 +21,8 @@ set(rocprofiler_sdk_headers
     ${CMAKE_CURRENT_LIST_DIR}/types.hpp
     ${CMAKE_CURRENT_LIST_DIR}/buffered_domain.hpp
     ${CMAKE_CURRENT_LIST_DIR}/callback_domain.hpp
+    ${buffered_domains_headers}
+    ${callback_domains_headers}
 )
 
 target_sources(

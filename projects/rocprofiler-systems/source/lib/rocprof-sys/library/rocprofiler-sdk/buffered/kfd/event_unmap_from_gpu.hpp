@@ -17,9 +17,7 @@
 #include <optional>
 #include <string>
 
-namespace rocprofsys::domains::buffered
-{
-namespace kfd
+namespace rocprofsys::domains::buffered::kfd
 {
 
 template <policies::domain_service::externals Externals>
@@ -32,7 +30,7 @@ on_kfd_event_unmap_from_gpu_configure()
     auto  gpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_gpu);
     if(gpu_agents.empty())
     {
-        LOG_DEBUG("kfd_event_unmap_from_gpu: no GPU agents found; no PMC info will be "
+        LOG_DEBUG("no GPU agents found; no PMC info will be "
                   "registered");
     }
     for(const auto& gpu : gpu_agents)
@@ -91,8 +89,8 @@ on_kfd_event_unmap_from_gpu(typename SdkBackend::kfd_event_unmap_record* record,
             &Externals::get_agent_manager().get_agent_by_handle(record->agent_id.handle);
     } catch(const std::exception& e)
     {
-        LOG_DEBUG("kfd_event_unmap_from_gpu: agent lookup failed for handle {} ({})",
-                  record->agent_id.handle, e.what());
+        LOG_DEBUG("agent lookup failed for handle {} ({})", record->agent_id.handle,
+                  e.what());
     }
 
     Externals::add_thread_info(typename Externals::thread_info_t{
@@ -151,6 +149,4 @@ inline constexpr auto k_event_unmap_from_gpu = buffered_domain_definition<SdkBac
     .on_configure = on_kfd_event_unmap_from_gpu_configure<Externals>
 };
 
-}  // namespace kfd
-
-}  // namespace rocprofsys::domains::buffered
+}  // namespace rocprofsys::domains::buffered::kfd

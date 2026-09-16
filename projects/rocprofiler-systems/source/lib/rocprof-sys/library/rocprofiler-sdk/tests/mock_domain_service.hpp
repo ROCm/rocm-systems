@@ -5,10 +5,13 @@
 
 #include <gmock/gmock.h>
 
+#include <fmt/format.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -460,8 +463,18 @@ struct externals
             return k_placeholder;
         }
 
-        [[nodiscard]] const agent_t& get_agent_by_handle(std::uint64_t /*handle*/) const
+        // Opt-in sentinel handle a test can pass to exercise the not-found path, since
+        // production get_agent_by_handle() implementations throw std::out_of_range when
+        // the agent isn't registered.
+        static constexpr std::uint64_t k_unknown_agent_handle = 0xDEAD;
+
+        [[nodiscard]] const agent_t& get_agent_by_handle(std::uint64_t handle) const
         {
+            if(handle == k_unknown_agent_handle)
+            {
+                throw std::out_of_range(
+                    fmt::format("Agent not found for device handle: {}", handle));
+            }
             static const agent_t k_placeholder{};
             return k_placeholder;
         }

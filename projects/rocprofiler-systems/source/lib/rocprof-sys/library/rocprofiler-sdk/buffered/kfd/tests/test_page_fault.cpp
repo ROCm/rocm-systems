@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -64,6 +65,23 @@ TEST(kfd_page_fault_test, on_kfd_page_fault_handles_empty_record_batch_without_c
     mock_sdk::kfd_page_fault_record record{};
 
     on_kfd_page_fault<mock_sdk, externals>(&record, nullptr);
+}
+
+TEST(kfd_page_fault_test, agent_manager_throws_out_of_range_for_unknown_handle)
+{
+    const externals::agent_manager_t agent_mgr;
+
+    EXPECT_THROW((void) agent_mgr.get_agent_by_handle(
+                     externals::agent_manager_t::k_unknown_agent_handle),
+                 std::out_of_range);
+}
+
+TEST(kfd_page_fault_test, on_kfd_page_fault_survives_agent_lookup_failure)
+{
+    mock_sdk::kfd_page_fault_record record{};
+    record.agent_id.handle = externals::agent_manager_t::k_unknown_agent_handle;
+
+    EXPECT_NO_THROW((on_kfd_page_fault<mock_sdk, externals>(&record, nullptr)));
 }
 
 TEST(kfd_page_fault_test,

@@ -16,10 +16,9 @@
 #include <optional>
 #include <string>
 
-namespace rocprofsys::domains::buffered
+namespace rocprofsys::domains::buffered::kfd
 {
-namespace kfd
-{
+
 template <policies::domain_service::externals Externals>
 inline void
 on_kfd_event_page_migrate_configure()
@@ -31,7 +30,7 @@ on_kfd_event_page_migrate_configure()
     auto  cpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_cpu);
     if(gpu_agents.empty() && cpu_agents.empty())
     {
-        LOG_DEBUG("kfd_event_page_migrate: no GPU or CPU agents found; no PMC info will "
+        LOG_DEBUG("no GPU or CPU agents found; no PMC info will "
                   "be registered");
     }
 
@@ -116,8 +115,8 @@ on_kfd_event_page_migrate(typename SdkBackend::kfd_event_page_migrate_record* re
             &Externals::get_agent_manager().get_agent_by_handle(record->src_agent.handle);
     } catch(const std::exception& e)
     {
-        LOG_DEBUG("kfd_event_page_migrate: src_agent lookup failed for handle {} ({})",
-                  record->src_agent.handle, e.what());
+        LOG_DEBUG("src_agent lookup failed for handle {} ({})", record->src_agent.handle,
+                  e.what());
     }
 
     const typename Externals::agent_t* dst_agent = nullptr;
@@ -127,8 +126,8 @@ on_kfd_event_page_migrate(typename SdkBackend::kfd_event_page_migrate_record* re
             &Externals::get_agent_manager().get_agent_by_handle(record->dst_agent.handle);
     } catch(const std::exception& e)
     {
-        LOG_DEBUG("kfd_event_page_migrate: dst_agent lookup failed for handle {} ({})",
-                  record->dst_agent.handle, e.what());
+        LOG_DEBUG("dst_agent lookup failed for handle {} ({})", record->dst_agent.handle,
+                  e.what());
     }
 
     Externals::add_thread_info(typename Externals::thread_info_t{
@@ -186,6 +185,4 @@ inline constexpr auto k_event_page_migrate = buffered_domain_definition<SdkBacke
     .on_configure = on_kfd_event_page_migrate_configure<Externals>
 };
 
-}  // namespace kfd
-
-}  // namespace rocprofsys::domains::buffered
+}  // namespace rocprofsys::domains::buffered::kfd
