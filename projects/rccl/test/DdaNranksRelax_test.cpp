@@ -26,6 +26,18 @@
 #include "common/DdaIpcTestHelpers.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 
+#include <rccl/rccl.h>
+
+#include <atomic>
+#include <cstdio>
+#include <cstring>
+#include <new>
+#include <vector>
+
+#include <sys/mman.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "gtest/gtest.h"
@@ -277,6 +289,280 @@ TEST(DdaAllReduceIpcTreeEligibleTest, AcceptsDivisibleAndAlignedSlice)
 {
     // 196608 % 3 == 0, and (196608 / 3) * 4 == 262144, which is 16-byte aligned.
     EXPECT_TRUE(ncclAllReduceDdaIpcTreeEligible(/*count=*/196608, /*nRanks=*/3, /*typeSize=*/4));
+}
+
+// ---------------------------------------------------------------------------
+// Real-GPU comm-init engagement
+// ---------------------------------------------------------------------------
+//
+// Everything above uses DdaIpcMockComm, which fabricates comm->ddaIpcMemHandler
+// and comm->ddaScratch directly. None of it reaches the gate in init.cc:
+//
+//     } else if (comm->nNodes == 1 && ncclDdaIpcNranksSupported(comm->nRanks)) {
+//       NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
+//
+// Reverting that condition to the pre-feature `comm->nRanks == kDdaNranks`
+// would leave the low-rank path dead at runtime with every test above still
+// passing. The pair below closes that: a real 4-rank ncclCommInitRank, then an
+// assertion on whether ncclDdaIpcCommInit() actually stamped the communicator.
+//
+// The negative control (relax off -> no resources) is what makes the positive
+// case meaningful: without it, "the gate opened for 4 ranks" and "comm init
+// always allocates these" are indistinguishable.
+//
+// --- Why fork() one process per rank, and not ncclCommInitAll ---
+//
+// comm->directMode is set whenever a single process drives more than one local
+// rank, and ncclDdaIpcCommInit() bails out on it before allocating anything.
+// ncclCommInitAll runs every rank in one process, so directMode is always true
+// and the DDA IPC pointers stay null no matter what the gate decides -- the
+// assertion would hold identically on a reverted build, proving nothing. One
+// process per rank keeps directMode false and the gate observable. This mirrors
+// P2pThenCollective_SameBuffer in RegisterTests.cpp, which forks for the same
+// reason. The HIP runtime is not fork-safe, so the parent makes no HIP or RCCL
+// call: rank 0's child performs the preconditions and publishes the unique ID.
+
+namespace
+{
+
+enum class DdaInitState : int
+{
+    NotReady = 0,
+    Ready    = 1,
+    Skip     = -1,
+};
+
+struct DdaInitShared
+{
+    ncclUniqueId              id;
+    std::atomic<DdaInitState> state;
+};
+
+enum DdaInitChildExit
+{
+    kDdaInitChildOk   = 0,
+    kDdaInitChildFail = 1,
+    kDdaInitChildSkip = 2,
+};
+
+// GTest assertions do not propagate across fork(); children report via exit code.
+#define DDA_INIT_CHILD_HC(x)                                                              \
+    do                                                                                    \
+    {                                                                                     \
+        hipError_t _e = (x);                                                              \
+        if (_e != hipSuccess)                                                             \
+        {                                                                                 \
+            printf("[rank %d] HIP error %d (%s) @ %s:%d\n", rank, _e,                     \
+                   hipGetErrorString(_e), __FILE__, __LINE__);                            \
+            return kDdaInitChildFail;                                                     \
+        }                                                                                 \
+    } while (0)
+
+#define DDA_INIT_CHILD_NC(x)                                                              \
+    do                                                                                    \
+    {                                                                                     \
+        ncclResult_t _e = (x);                                                            \
+        if (_e != ncclSuccess)                                                             \
+        {                                                                                 \
+            printf("[rank %d] RCCL error %d (%s) @ %s:%d\n", rank, _e,                    \
+                   ncclGetErrorString(_e), __FILE__, __LINE__);                           \
+            return kDdaInitChildFail;                                                     \
+        }                                                                                 \
+    } while (0)
+
+// ncclDdaIpcCommInit() only runs on the architectures the DDA IPC kernels
+// support; elsewhere it bails before allocating and the test cannot observe the
+// gate either way.
+bool ddaInitArchSupported(const char* gcnArchName)
+{
+    return strncmp(gcnArchName, "gfx942", 6) == 0 || strncmp(gcnArchName, "gfx950", 6) == 0;
+}
+
+bool allDevicesSupportDdaInit(int numDevices, char* unsupportedArchOut, size_t outLen)
+{
+    for (int dev = 0; dev < numDevices; dev++)
+    {
+        hipDeviceProp_t prop;
+        if (hipGetDeviceProperties(&prop, dev) != hipSuccess)
+        {
+            return false;
+        }
+        if (!ddaInitArchSupported(prop.gcnArchName))
+        {
+            if (unsupportedArchOut && outLen > 0)
+            {
+                strncpy(unsupportedArchOut, prop.gcnArchName, outLen - 1);
+                unsupportedArchOut[outLen - 1] = '\0';
+            }
+            return false;
+        }
+    }
+    return true;
+}
+
+// Runs entirely inside a forked child: the first HIP/RCCL call happens here.
+int ddaInitRunRank(int rank, int nranks, DdaInitShared* shared, bool expectResources)
+{
+    if (rank == 0)
+    {
+        int numDevices = 0;
+        DDA_INIT_CHILD_HC(hipGetDeviceCount(&numDevices));
+        if (numDevices < nranks)
+        {
+            printf("Requires %d GPUs (detected %d).\n", nranks, numDevices);
+            shared->state.store(DdaInitState::Skip, std::memory_order_release);
+            return kDdaInitChildSkip;
+        }
+
+        char unsupportedArch[256] = {0};
+        if (!allDevicesSupportDdaInit(nranks, unsupportedArch, sizeof(unsupportedArch)))
+        {
+            printf("Unsupported GPU architecture '%s' for DDA IPC (requires gfx942 or gfx950).\n",
+                   unsupportedArch);
+            shared->state.store(DdaInitState::Skip, std::memory_order_release);
+            return kDdaInitChildSkip;
+        }
+
+        // ncclDdaIpcCommInit() requires direct GPU-to-GPU P2P across the whole
+        // clique; without it the resources stay null regardless of the gate.
+        for (int i = 0; i < nranks; i++)
+        {
+            for (int j = i + 1; j < nranks; j++)
+            {
+                int canAccess = 0;
+                DDA_INIT_CHILD_HC(hipDeviceCanAccessPeer(&canAccess, i, j));
+                if (!canAccess)
+                {
+                    printf("No direct P2P between GPU %d and %d; DDA IPC would not engage.\n", i, j);
+                    shared->state.store(DdaInitState::Skip, std::memory_order_release);
+                    return kDdaInitChildSkip;
+                }
+            }
+        }
+
+        DDA_INIT_CHILD_NC(ncclGetUniqueId(&shared->id));
+        shared->state.store(DdaInitState::Ready, std::memory_order_release);
+    }
+    else
+    {
+        DdaInitState st;
+        while ((st = shared->state.load(std::memory_order_acquire)) == DdaInitState::NotReady)
+        {
+            /* spin until rank 0 publishes the id or reports a skip */
+        }
+        if (st == DdaInitState::Skip)
+        {
+            return kDdaInitChildSkip;
+        }
+    }
+
+    ncclUniqueId id = shared->id;
+
+    DDA_INIT_CHILD_HC(hipSetDevice(rank));
+
+    ncclComm_t commHandle{};
+    DDA_INIT_CHILD_NC(ncclCommInitRank(&commHandle, nranks, id, rank));
+
+    // Cast to the internal struct to observe what comm init actually did.
+    ncclComm*  c       = commHandle;
+    const bool haveDda = (c->ddaIpcMemHandler != nullptr) && (c->ddaScratch != nullptr) &&
+                         (c->ddaPeerPtrsDev != nullptr);
+
+    int rc = kDdaInitChildOk;
+    if (haveDda != expectResources)
+    {
+        printf("[rank %d] nranks=%d relax=%d: expected DDA IPC resources %s, but "
+               "ddaIpcMemHandler=%p ddaScratch=%p ddaPeerPtrsDev=%p\n",
+               rank, nranks, expectResources ? 1 : 0, expectResources ? "present" : "absent",
+               c->ddaIpcMemHandler, c->ddaScratch, c->ddaPeerPtrsDev);
+        rc = kDdaInitChildFail;
+    }
+
+    DDA_INIT_CHILD_NC(ncclCommDestroy(commHandle));
+    return rc;
+}
+
+// Forks nranks children, each initialising one rank of a real communicator, and
+// checks whether comm init engaged the DDA IPC path.
+void runDdaIpcCommInitEngagementTest(int nranks, bool expectResources)
+{
+    // Shared region set up before any fork and before any HIP/RCCL call.
+    DdaInitShared* shared = static_cast<DdaInitShared*>(
+        mmap(nullptr, sizeof(DdaInitShared), PROT_READ | PROT_WRITE,
+             MAP_SHARED | MAP_ANONYMOUS, -1, 0));
+    ASSERT_NE(shared, MAP_FAILED) << "mmap for shared bootstrap failed";
+    new (&shared->state) std::atomic<DdaInitState>(DdaInitState::NotReady);
+
+    std::vector<pid_t> pids(nranks, -1);
+    for (int r = 0; r < nranks; r++)
+    {
+        pids[r] = fork();
+        ASSERT_GE(pids[r], 0) << "fork() failed for rank " << r;
+        if (pids[r] == 0)
+        {
+            _exit(ddaInitRunRank(r, nranks, shared, expectResources));
+        }
+    }
+
+    bool anySkip = false;
+    bool anyFail = false;
+    for (int r = 0; r < nranks; r++)
+    {
+        int status = 0;
+        waitpid(pids[r], &status, 0);
+        if (WIFEXITED(status))
+        {
+            int code = WEXITSTATUS(status);
+            if (code == kDdaInitChildSkip)
+            {
+                anySkip = true;
+            }
+            else if (code != kDdaInitChildOk)
+            {
+                anyFail = true;
+                ADD_FAILURE() << "Rank " << r << " child exited with failure code " << code << ".";
+            }
+        }
+        else
+        {
+            anyFail = true;
+            ADD_FAILURE() << "Rank " << r << " child terminated abnormally (status " << status
+                          << ").";
+        }
+    }
+
+    munmap(shared, sizeof(DdaInitShared));
+
+    if (anySkip && !anyFail)
+    {
+        GTEST_SKIP() << "Requires " << nranks
+                     << " P2P-capable gfx942/gfx950 GPUs; preconditions not met.";
+    }
+}
+
+}  // namespace
+
+// With the knob on, a 4-rank communicator must come out of ncclCommInitRank with
+// the DDA IPC resources allocated -- i.e. init.cc's gate admitted a non-8 rank
+// count and ncclDdaIpcCommInit() ran to completion. Reverting that gate to
+// `comm->nRanks == kDdaNranks` makes this fail.
+TEST(DdaNranksRelaxIsolatedTest, FourRankCommInitAllocatesDdaIpcResources)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "FourRankCommInitAllocatesDdaIpcResources",
+        []() { runDdaIpcCommInitEngagementTest(/*nranks=*/4, /*expectResources=*/true); },
+        {{"RCCL_DDA_NRANKS_RELAX", "1"}});
+}
+
+// Negative control for the test above: with the knob off, the same 4-rank
+// communicator must NOT get DDA IPC resources. Without this, the positive test
+// cannot distinguish "the gate opened" from "comm init always allocates these".
+TEST(DdaNranksRelaxIsolatedTest, FourRankCommInitSkipsDdaIpcWhenRelaxOff)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "FourRankCommInitSkipsDdaIpcWhenRelaxOff",
+        []() { runDdaIpcCommInitEngagementTest(/*nranks=*/4, /*expectResources=*/false); },
+        {{"RCCL_DDA_NRANKS_RELAX", "0"}});
 }
 
 }  // namespace RcclUnitTesting
