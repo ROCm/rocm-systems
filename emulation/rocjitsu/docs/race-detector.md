@@ -24,6 +24,15 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
+The CLI is built by cargo, so where it lands depends on
+`$CARGO_TARGET_DIR`. CMake records the path; the examples below use it:
+
+```bash
+ROCJITSU=$(cmake -LA -N build | sed -n 's/^RJ_CLI_BIN:FILEPATH=//p')
+```
+
+An installed rocjitsu is on `PATH`, in which case `ROCJITSU=rocjitsu`.
+
 ### Example: detecting a missing barrier
 
 Here's a small HIP kernel with a missing `__syncthreads()`. Each thread writes
@@ -77,7 +86,7 @@ rocjitsu config file (`my_config.json`):
 Run it under the emulator:
 
 ```bash
-$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
+"$ROCJITSU" run --in-process --config my_config.json -- /tmp/race_example
 ```
 
 You should see output:
@@ -105,8 +114,8 @@ Replace the binary path with your application. This works with any ROCm workload
 launchers like `torchrun`, etc.
 
 ```bash
-$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
-$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- python my_script.py
+"$ROCJITSU" run --in-process --config my_config.json -- ./my_app
+"$ROCJITSU" run --in-process --config my_config.json -- python my_script.py
 ```
 
 To capture reports to a file instead of stderr (useful for CI or
@@ -120,7 +129,7 @@ scripted workflows), add a `sinks` section to your config:
 ```
 
 ```bash
-$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
+"$ROCJITSU" run --in-process --config my_config.json -- ./my_app
 # Reports are written to /tmp/output/race.log
 ```
 

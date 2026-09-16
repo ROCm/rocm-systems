@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # Hotswap.cmake — build HotSwap from source as part of the rocjitsu build.
 #
 # Gated behind ROCJITSU_BUILD_HOTSWAP (OFF by default; this is a full LLVM +

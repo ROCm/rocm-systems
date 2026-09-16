@@ -55,6 +55,72 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+/// Names the sanitizer runtime a sanitizer build of the emulator has to
+/// be loaded behind, as an `LD_PRELOAD`-ordered list.
+///
+/// Empty or unset on every ordinary build. A shared-sanitizer build of
+/// `librocjitsu.so` cannot be loaded on its own: the runtime has to be
+/// the *first* object in the process's initial library list, or it
+/// refuses the process outright with "ASan runtime does not come first
+/// in initial library list".
+///
+/// Set by the build that computed the path, and read by two different
+/// consumers for two different reasons — the workload needs it ahead of
+/// the interposer it is launched with, and the launcher needs it in its
+/// own image before it can `dlopen` the emulator at all. See
+/// [`sanitizer_preload_missing`].
+pub const ENV_SANITIZER_PRELOAD: &str = "ROCJITSU_SANITIZER_PRELOAD";
+
+/// Why this process cannot load a sanitizer-instrumented emulator, if it
+/// cannot.
+///
+/// The launcher loads `librocjitsu.so` itself for several things — the
+/// version banner, the DBT guest handoff, the daemon, the vfio-user
+/// server. Against a sanitizer build every one of those aborts the
+/// process, because the Rust CLI is not itself instrumented and so the
+/// sanitizer runtime is not in its initial library list. The C++ CLI
+/// this replaced was built with the same `-fsanitize` flags as the
+/// library and had no such problem.
+///
+/// Checked rather than discovered from the failure: the runtime's own
+/// message names neither rocjitsu nor the variable that fixes it, and it
+/// arrives as a process abort that no caller can catch.
+#[must_use]
+pub fn sanitizer_preload_missing() -> Option<String> {
+    sanitizer_preload_missing_in(
+        std::env::var(ENV_SANITIZER_PRELOAD).ok().as_deref(),
+        std::env::var("LD_PRELOAD").ok().as_deref(),
+    )
+}
+
+/// [`sanitizer_preload_missing`] against a stated environment.
+///
+/// The ambient read is the wrapper's, kept next to the pure function it
+/// consumes so a caller with the values in hand — a test, or anything
+/// composing an environment rather than living in one — is the normal
+/// case rather than a workaround.
+#[must_use]
+pub fn sanitizer_preload_missing_in(wanted: Option<&str>, loaded: Option<&str>) -> Option<String> {
+    let wanted = wanted.map(str::trim).filter(|w| !w.is_empty())?;
+    let loaded = loaded.unwrap_or_default();
+    // Each entry, not the joined string: a caller that prepended its own
+    // preload has still loaded the runtime, and order beyond "before the
+    // emulator" is not this check's to police.
+    if wanted
+        .split(':')
+        .filter(|entry| !entry.is_empty())
+        .all(|entry| loaded.split(':').any(|have| have == entry))
+    {
+        return None;
+    }
+    Some(format!(
+        "this build of the emulator is sanitizer-instrumented, and its runtime has to be \
+         loaded before it. Re-run with LD_PRELOAD={wanted} (prepended to any you already \
+         set). {ENV_SANITIZER_PRELOAD} names it because the build that produced the \
+         library computed the path."
+    ))
+}
+
 /// Standard system / ROCm library directories probed as a last resort.
 pub const STANDARD_LIB_DIRS: &[&str] = &[
     "/opt/rocm/lib",
@@ -766,5 +832,45 @@ mod tests {
         assert!(RuntimeLocation::Unknown.report().is_empty());
         assert!(!RuntimeLocation::Unknown.is_found());
         assert!(RuntimeLocation::Unknown.searched().is_empty());
+    }
+
+    /// An ordinary build is not asked to preload anything.
+    #[test]
+    fn a_build_with_no_sanitizer_never_complains() {
+        assert!(sanitizer_preload_missing_in(None, None).is_none());
+        assert!(sanitizer_preload_missing_in(Some(""), None).is_none());
+        assert!(sanitizer_preload_missing_in(Some("  "), Some("/other.so")).is_none());
+    }
+
+    /// A sanitizer build refuses only when its runtime is absent, and
+    /// says which variable to set.
+    #[test]
+    fn a_sanitizer_build_asks_for_its_runtime_by_name() {
+        let asan = "/lib/libclang_rt.asan.so";
+        let why = sanitizer_preload_missing_in(Some(asan), None).expect("nothing preloaded");
+        assert!(why.contains(asan), "{why}");
+        assert!(why.contains("LD_PRELOAD"), "{why}");
+
+        // Present is enough; it does not have to be alone or first here.
+        // Being *first* is `ld.so`'s rule about the initial library
+        // list, and a caller that put it in the list has satisfied it.
+        assert!(sanitizer_preload_missing_in(Some(asan), Some(asan)).is_none());
+        assert!(
+            sanitizer_preload_missing_in(Some(asan), Some(&format!("{asan}:/mine.so"))).is_none()
+        );
+        assert!(
+            sanitizer_preload_missing_in(Some(asan), Some(&format!("/mine.so:{asan}"))).is_none()
+        );
+        // A different runtime is not this one.
+        assert!(sanitizer_preload_missing_in(Some(asan), Some("/lib/libtsan.so")).is_some());
+    }
+
+    /// Every runtime it names, not just the first: an ASan+UBSan build
+    /// hands over two, and loading one of them is not loading both.
+    #[test]
+    fn every_named_runtime_has_to_be_loaded() {
+        let both = "/lib/libasan.so:/lib/libubsan.so";
+        assert!(sanitizer_preload_missing_in(Some(both), Some("/lib/libasan.so")).is_some());
+        assert!(sanitizer_preload_missing_in(Some(both), Some(both)).is_none());
     }
 }

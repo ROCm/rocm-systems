@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # hotswap_copy_glob.cmake — stage glob-matched artifacts into a directory.
 #
 # Invoked via `cmake -P` from the HotSwap ExternalProject install steps in

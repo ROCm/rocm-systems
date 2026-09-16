@@ -107,6 +107,11 @@ impl Env {
             .env_remove("ROCJITSU_CLI_LOG")
             .env_remove("ROCJITSU_CLI_CONFIG_DIR")
             .env_remove("ROCJITSU_CLI_RUNTIME_DIR")
+            // Honoured for compatibility with the name this CLI shipped
+            // under, and so just as capable of pointing a test at a
+            // developer's own directories.
+            .env_remove("MIRAGE_CONFIG")
+            .env_remove("MIRAGE_RUNTIME")
             // `run` takes this as the default for `--config`, so a
             // developer who has one exported would otherwise have every
             // profile-driven case here run against their config file.

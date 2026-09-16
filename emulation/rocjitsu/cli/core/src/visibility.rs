@@ -241,6 +241,19 @@ pub fn filter_client_visible_gpus(gpus: &[VisibleGpu], selector: Option<&str>) -
     filtered
 }
 
+/// Every environment variable that decides which GPUs a workload sees,
+/// in the order the runtimes apply them.
+///
+/// Named as a set because they have to be reasoned about as one: a
+/// caller that rewrites the ROCR selection and leaves the client one
+/// alone has changed which ordinals the client selector refers to, and
+/// the two together are what the workload actually gets.
+pub const VISIBILITY_SELECTORS: [&str; 3] = [
+    "ROCR_VISIBLE_DEVICES",
+    "HIP_VISIBLE_DEVICES",
+    "CUDA_VISIBLE_DEVICES",
+];
+
 /// The client selector in effect: `HIP_VISIBLE_DEVICES` when set and
 /// non-empty, otherwise `CUDA_VISIBLE_DEVICES` on the same terms.
 fn client_selector<'a>(

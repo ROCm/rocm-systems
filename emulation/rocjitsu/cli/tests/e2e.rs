@@ -3204,6 +3204,118 @@ fn the_harness_removes_its_runtime_root_even_when_a_test_panics() {
     );
 }
 
+/// `rocjitsu session stop` stops the session, workload and all.
+///
+/// The reply to a stop request was recorded and answered — "stopping" —
+/// by a run that then went on supervising its workload to its natural
+/// end. Only a session held open with no workload of its own ever
+/// watched the flag, so against `rocjitsu run -- <app>` the request was
+/// acknowledged and ignored: the caller was told the session was
+/// stopping and the machine it named kept running.
+#[test]
+fn stopping_a_session_ends_the_workload_it_is_running() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+    let tag = marker("stopped-workload");
+
+    // Long enough that the workload cannot plausibly have ended on its
+    // own: if it is gone at the end of this test, the stop is what did it.
+    let mut run = env.spawn_run(&["--profile", "p"], &["/bin/sh", "-c", &tagged_sleep(&tag)]);
+    let id = run.await_ready(Duration::from_secs(90));
+    wait_for("the workload to start", Duration::from_secs(30), || {
+        count_processes(&tag) > 0
+    });
+
+    env.ok(&["session", "stop", &id]);
+
+    // The run returns, rather than waiting out the sleep.
+    let out = run.wait(Duration::from_secs(60));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("asked to stop"),
+        "the run should say what ended it:\n{stderr}"
+    );
+    // And the workload is gone, not merely detached from a torn-down
+    // session — which is the failure this is written against.
+    assert_no_leaks(&tag);
+}
+
+/// And a stop that arrives while the session is still coming up is not
+/// deferred until it has.
+///
+/// Bring-up can take minutes behind an image pull, and the control
+/// socket answers throughout it — so this request was already being
+/// accepted, and already being ignored, at exactly the point a user is
+/// most likely to change their mind. Sent as early as the session id can
+/// be learned; whether bring-up or the workload observes it is a race,
+/// and either is a correct answer. What must not happen is that neither
+/// does and the run sits out the sleep.
+#[test]
+fn a_stop_during_bring_up_is_not_deferred_until_the_session_is_ready() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+    let tag = marker("stopped-early");
+
+    let mut run = env.spawn_run(&["--profile", "p"], &["/bin/sh", "-c", &tagged_sleep(&tag)]);
+    let id = run.await_ready(Duration::from_secs(90));
+    env.ok(&["session", "stop", &id]);
+
+    run.wait(Duration::from_secs(60));
+    assert_no_leaks(&tag);
+    assert!(
+        env.live_runs().is_empty(),
+        "a stopped session left its socket behind: {:?}",
+        env.live_runs()
+    );
+}
+
+/// `$MIRAGE_CONFIG` still names the config directory.
+///
+/// Tested through a spawned process because the workspace forbids
+/// `unsafe` and `std::env::set_var` is `unsafe` in Rust 2024; a child's
+/// environment is the only one a test here can set. See the note on
+/// `harness::Env::rocjitsu`, which removes these for every other case.
+#[test]
+fn the_old_config_environment_variable_is_still_honoured() {
+    let env = Env::new();
+    let elsewhere = tempfile::tempdir().unwrap();
+
+    // A profile written with the variable set lands under it, not under
+    // the XDG directory the rest of the suite uses.
+    let out = std::process::Command::new(env.bin())
+        .args(["profile", "create", "from-the-old-variable"])
+        .envs(env.child_env())
+        .env("MIRAGE_CONFIG", elsewhere.path())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        elsewhere
+            .path()
+            .join("profile/from-the-old-variable.json")
+            .exists(),
+        "MIRAGE_CONFIG did not name the config directory: {:?}",
+        std::fs::read_dir(elsewhere.path())
+            .map(|d| d.flatten().map(|e| e.path()).collect::<Vec<_>>())
+    );
+    // And the variable rocjitsu declares for itself still wins over it.
+    assert!(
+        !env.profile_dir()
+            .join("from-the-old-variable.json")
+            .exists()
+    );
+}
+
 #[test]
 fn the_suite_can_actually_run() {
     // Guards against the e2e suite going green while every test in it skipped

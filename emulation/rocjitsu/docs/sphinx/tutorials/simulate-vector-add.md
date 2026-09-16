@@ -26,7 +26,16 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-This produces the `rocjitsu` CLI at `build/tools/rocjitsu/rocjitsu`.
+This produces the `rocjitsu` CLI. It is built by cargo, so where it
+lands depends on `$CARGO_TARGET_DIR`; the build prints the path, and
+CMake records it:
+
+``` bash
+ROCJITSU=$(cmake -LA -N build | sed -n 's/^RJ_CLI_BIN:FILEPATH=//p')
+```
+
+An installed rocjitsu puts it on `PATH` as `rocjitsu`, in which case
+`ROCJITSU=rocjitsu` will do.
 
 ## Compile the HIP kernel
 
@@ -43,14 +52,14 @@ JSON configuration file you use to create the virtual machine. The
 pre-built `configs/gfx950_mi355x_kmd.json` targets CDNA4 (gfx950).
 ```
 
-## Run the kernel in local mode
+## Run the kernel in in-process mode
 
-Local mode sets `LD_PRELOAD` on the target binary so that every call the
-HIP runtime makes to `/dev/kfd` is intercepted and routed to the
-in-process simulation engine:
+In-process mode sets `LD_PRELOAD` on the target binary so that every call
+the HIP runtime makes to `/dev/kfd` is intercepted and routed to the
+simulation engine inside the workload's own process:
 
 ``` bash
-build/tools/rocjitsu/rocjitsu \
+"$ROCJITSU" run --in-process \
   --config configs/gfx950_mi355x_kmd.json \
   -- /tmp/vector_add
 ```
@@ -97,7 +106,7 @@ To observe simulation activity, set the `RJ_LOG_GROUPS` environment
 variable before launching:
 
 ``` bash
-RJ_LOG_GROUPS=vm,cp build/tools/rocjitsu/rocjitsu \
+RJ_LOG_GROUPS=vm,cp "$ROCJITSU" run --in-process \
   --config configs/gfx950_mi355x_kmd.json \
   -- /tmp/vector_add
 ```

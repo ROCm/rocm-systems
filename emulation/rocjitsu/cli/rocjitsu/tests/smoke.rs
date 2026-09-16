@@ -79,6 +79,78 @@ fn gpus_per_node_drives_num_gpus() {
     assert_eq!(json["vm"]["gpu"]["num_gpus"], 3);
 }
 
+/// Every builtin profile generates a config the emulator will accept.
+///
+/// The field-by-field tests beside this one cannot answer this. The
+/// loader enforces relationships *between* fields — the rule that
+/// `num_sdma_queues_per_engine` must be nonzero when `num_sdma_engines`
+/// is shipped in all three profiles, failing every session at daemon
+/// start, while each field on its own looked reasonable. So this asks
+/// the loader rather than the document, which is the only thing that
+/// settles it.
+///
+/// Every builtin, not a representative one: they are hand-written, and
+/// what is wrong with one is exactly what the others can be right about.
+/// Skipped when rocjitsu is not installed, since there is no loader to
+/// ask.
+#[test]
+fn every_builtin_generates_a_config_the_emulator_accepts() {
+    let _g = rj_core::paths::test_env_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    rj_core::paths::set_test_root(tmp.path());
+
+    let Some(lib) = kmd_preload() else {
+        return;
+    };
+    let agents = rj_builtin::ensure_agents(false).unwrap();
+    assert!(
+        !agents.documents.is_empty(),
+        "there are builtin agents to check"
+    );
+
+    for (name, _) in &agents.documents {
+        let def = EmulatorDef {
+            emulator: "rocjitsu".to_string(),
+            plugins: Default::default(),
+            exec_mode: ExecMode::Functional,
+            options: Default::default(),
+            topology: MaybeRef::Owned(rj_core::topology::TopologyDef {
+                num_nodes: 1,
+                gpus_per_node: 1,
+                agent: MaybeRef::Ref(name.clone()),
+            }),
+        };
+        let session = tmp.path().join(format!("session-{name}"));
+        let cfg = kmd_config(&def, &session).expect("sim config should materialise");
+        let json = std::fs::read(&cfg).unwrap();
+        let json = std::ffi::CString::new(json).expect("a config has no interior NUL");
+        rocjitsu_sys::config_is_loadable(&lib, &json).unwrap_or_else(|e| {
+            panic!(
+                "the `{name}` builtin generates a config rocjitsu \
+                                        refuses, so every session on it fails at start: {e}"
+            )
+        });
+
+        // And the check is a check. Take the same config, put back the
+        // exact mistake all three shipped with — SDMA engines and no
+        // queue depth — and the loader must refuse it. Without this the
+        // assertion above would still pass against a loader that had
+        // stopped validating anything.
+        let mut doc: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&cfg).unwrap()).unwrap();
+        let device = &mut doc["vm"]["gpu"]["device"];
+        assert_ne!(
+            device["num_sdma_engines"], 0,
+            "`{name}` must declare SDMA engines for this to mean anything"
+        );
+        device["num_sdma_queues_per_engine"] = serde_json::json!(0);
+        let broken = std::ffi::CString::new(serde_json::to_vec(&doc).unwrap()).unwrap();
+        rocjitsu_sys::config_is_loadable(&lib, &broken).expect_err(
+            "a config with SDMA engines and no queue depth is the one rocjitsu refuses",
+        );
+    }
+}
+
 /// When rocjitsu is installed, the injected workload environment carries
 /// the overridable RCCL/HSA defaults the upstream RCCL collective tests
 /// rely on. Skipped when the KMD library is not discoverable.

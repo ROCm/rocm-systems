@@ -113,7 +113,7 @@ that library from the active venv — no `LD_LIBRARY_PATH` wiring needed.
 
 ### 2. Launch the training
 
-From the workspace (so rocjitsu's own rocjitsu discovery works), run:
+From the workspace (so the CLI's emulator-library discovery works), run:
 
 ```sh
 cargo run --quiet -- run \

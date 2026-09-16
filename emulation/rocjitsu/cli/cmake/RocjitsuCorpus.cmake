@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # RocjitsuCorpus.cmake — run the rocjitsu-corpus gfx1250 regression through
 # rocjitsu + an emulator (HotSwap by default) as part of `ctest`.
 #

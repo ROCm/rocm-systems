@@ -130,16 +130,9 @@ pub fn load(config: &Path) -> Result<Option<GuestConfig>> {
             config.display()
         ))
     })?;
-    let Some(guest) = json.get("dbt_guest") else {
+    let Some(guest) = rj_core::config::enabled_dbt_guest(&json) else {
         return Ok(None);
     };
-    if !guest
-        .get("enabled")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-    {
-        return Ok(None);
-    }
 
     let string = |key: &str| -> String {
         guest
@@ -188,7 +181,7 @@ pub fn load(config: &Path) -> Result<Option<GuestConfig>> {
 /// single file can carry both the guest block and the host VM. A
 /// relative path is resolved beside the guest config rather than against
 /// the working directory, so a config remains movable as a unit.
-fn simulator_config_path(config: &Path, simulator_config: &str) -> PathBuf {
+pub(crate) fn simulator_config_path(config: &Path, simulator_config: &str) -> PathBuf {
     if simulator_config.is_empty() {
         return config.to_path_buf();
     }
@@ -389,6 +382,9 @@ pub fn write_handoff(
     config: &Path,
     host_gpu_id: u32,
 ) -> Result<()> {
+    // Written by the library, so writing it loads the library — into the
+    // launcher, which a sanitizer build will not tolerate uninstrumented.
+    crate::check_sanitizer_preload()?;
     rocjitsu_sys::write_dbt_handoff(library, runtime_dir, config, host_gpu_id)
         .map_err(|e| RocJITsuError::Other(format!("rocjitsu: dbt_guest handoff: {e}")))
 }

@@ -6,6 +6,7 @@
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
 #include "rocjitsu/vm/amdgpu/pci/register_symbols.h"
 #include "rocjitsu/vm/amdgpu/pci/scratch_pci_device.h"
+#include "rocjitsu/vmm/rj_vfio.h"
 #include "rocjitsu/vmm/vfu/vfio_device_host.h"
 #include "rocjitsu/vmm/vfu/vfio_server.h"
 #include "vfio_user_client.h"
@@ -676,4 +677,18 @@ TEST(VfioDeviceHost, DiscardsAskedWorkWhenServingHasStopped) {
   (void)served.host().ask_serving_thread([&ran] { ran = true; });
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
   EXPECT_FALSE(ran) << "work ran with no serving thread to run it";
+}
+
+// The C entry point the CLI resolves out of librocjitsu.so. It is the only way
+// in from another language -- run_vfio_server() takes std::string and cannot be
+// named by one -- so its argument handling is its own, and returns before
+// anything is stood up.
+//
+// Not a test of the server: standing one up needs a socket and a config, and
+// VfioDeviceHost above covers what happens after. This covers the boundary.
+TEST(RjRunVfioServer, RefusesAMissingConfigOrSocketWithoutStartingAnything) {
+  EXPECT_NE(rj_run_vfio_server(nullptr, "/tmp/unused.sock"), 0);
+  EXPECT_NE(rj_run_vfio_server("", "/tmp/unused.sock"), 0);
+  EXPECT_NE(rj_run_vfio_server("/nonexistent/config.json", nullptr), 0);
+  EXPECT_NE(rj_run_vfio_server("/nonexistent/config.json", ""), 0);
 }
