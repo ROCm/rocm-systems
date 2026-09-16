@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include "roc_video_dec.h"
-#include "surface_format_utils.h"
 
 RocVideoDecoder::RocVideoDecoder(int device_id, OutputSurfaceMemoryType out_mem_type, rocDecVideoCodec codec, bool force_zero_latency,
               const Rect *p_crop_rect, bool extract_user_sei_Message, uint32_t disp_delay, int max_width, int max_height, uint32_t clk_rate, bool skip_init) :
@@ -309,8 +308,10 @@ int RocVideoDecoder::HandleVideoSequence(RocdecVideoFormat *p_video_format) {
     // Set the output surface format same as chroma format
     video_surface_format_ = SelectSurfaceFormat(video_chroma_format_, bitdepth_minus_8_);
 
-    // Check if output format supported. If not, check fallback options
-    if (!(decode_caps.output_format_mask & (1 << video_surface_format_))){
+    // Check if output format supported. If not, check fallback options.
+    // Native is a sentinel, not a bit position (rocdecode.h): treat as unsupported.
+    if (video_surface_format_ == rocDecVideoSurfaceFormat_Native ||
+        !(decode_caps.output_format_mask & (1 << video_surface_format_))){
         if (decode_caps.output_format_mask & (1 << rocDecVideoSurfaceFormat_NV12))
             video_surface_format_ = rocDecVideoSurfaceFormat_NV12;
         else if (decode_caps.output_format_mask & (1 << rocDecVideoSurfaceFormat_P016))

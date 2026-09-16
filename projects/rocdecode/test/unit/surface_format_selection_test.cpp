@@ -21,15 +21,15 @@ THE SOFTWARE.
 */
 
 // Table-driven unit test for the chroma-format -> surface-format selection in
-// RocVideoDecoder (roc_video_dec.cpp). Builds host-only (no HIP / no GPU) against
-// the mirror in surface_format_utils.h.
+// RocVideoDecoder. Exercises the production SelectSurfaceFormat() declared in
+// roc_video_dec.h (needs the ROCm/HIP headers to compile, see CMakeLists.txt).
 
 #include <cctype>
 #include <string>
 
 #include <gtest/gtest.h>
 
-#include "surface_format_utils.h"
+#include "roc_video_dec.h"
 
 struct SurfaceFormatCase {
     const char*              description;       // what this row exercises

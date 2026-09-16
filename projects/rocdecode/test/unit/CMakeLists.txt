@@ -21,10 +21,11 @@
 #
 # ##############################################################################
 
-# Host-only unit tests (no HIP / no GPU required). They compile the production
-# surface_format_utils.h in ROCDECODE_SURFACE_FORMAT_UTILS_STANDALONE mode, so
-# the same SelectSurfaceFormat() the decoder uses is exercised directly. Wired
-# into the rocdecode test build (see ../CMakeLists.txt) and buildable standalone:
+# CPU-only unit tests: they run without a GPU, but compile the production
+# SelectSurfaceFormat() from roc_video_dec.h, which pulls in the rocdecode API
+# and HIP headers -- so the ROCm toolchain is required to build them. Wired into
+# the rocdecode test build (see ../CMakeLists.txt) and buildable standalone
+# (with ROCM_PATH on CMAKE_PREFIX_PATH):
 #   cmake -S . -B build && cmake --build build && ctest --test-dir build
 cmake_minimum_required(VERSION 3.18)
 project(rocdecode_unit_tests LANGUAGES CXX)
@@ -33,13 +34,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(GTest REQUIRED)
+find_package(HIP REQUIRED)
 include(GoogleTest)
 enable_testing()
 
 add_executable(surface_format_selection_test surface_format_selection_test.cpp)
 target_include_directories(surface_format_selection_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode)
-target_compile_definitions(surface_format_selection_test PRIVATE
-    ROCDECODE_SURFACE_FORMAT_UTILS_STANDALONE)
-target_link_libraries(surface_format_selection_test PRIVATE GTest::gtest_main)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../api)
+target_link_libraries(surface_format_selection_test PRIVATE GTest::gtest_main hip::host)
 gtest_discover_tests(surface_format_selection_test)
