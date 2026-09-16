@@ -66,6 +66,8 @@ std::function<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>
     g_hipMemGetAddressRange = DefaultHipMemGetAddressRange;
 std::function<hipError_t(hipIpcMemHandle_t*, void*)>
     g_hipIpcGetMemHandle = DefaultHipIpcGetMemHandle;
+static hipError_t DefaultHipIpcCloseMemHandle(void*) { return hipErrorInvalidValue; }
+std::function<hipError_t(void*)> g_hipIpcCloseMemHandle = DefaultHipIpcCloseMemHandle;
 
 // --- hipMemRetainAllocationHandle / hipMemExportToShareableHandle /
 //     hipMemRelease (the cuMem*-export arm) ------------------------------
@@ -495,6 +497,7 @@ void ResetHipFakes()
 {
     g_hipMemGetAddressRange         = DefaultHipMemGetAddressRange;
     g_hipIpcGetMemHandle            = DefaultHipIpcGetMemHandle;
+    g_hipIpcCloseMemHandle          = DefaultHipIpcCloseMemHandle;
     g_hipMemRetainAllocationHandle  = DefaultHipMemRetainAllocationHandle;
     g_hipMemExportToShareableHandle = DefaultHipMemExportToShareableHandle;
     g_hipMemRelease                 = DefaultHipMemRelease;
