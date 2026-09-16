@@ -1,13 +1,16 @@
 name: Block RCCL subtree PRs
 
 # Fails when a pull request targeting develop changes projects/rccl or
-# projects/rccl-tests. The job always runs on develop-bound PRs (no path
-# filter) so it can be a required status check without blocking unrelated
-# PRs as "expected checks were not posted".
+# projects/rccl-tests. pull_request_target runs this definition from the
+# trusted base branch so a PR cannot rewrite the guard. The job never
+# checks out PR code; it only reads PR metadata through the GitHub API.
+# Always runs on develop-bound PRs (no path filter) so it can be a
+# required status check without blocking unrelated PRs as "expected
+# checks were not posted".
 # After this lands, add `rccl-subtree-freeze` as a required check on develop.
 
 on:
-  pull_request:
+  pull_request_target:
     branches:
       - develop
 
@@ -36,6 +39,8 @@ jobs:
             "projects/rccl"
             "projects/rccl-tests"
           )
+          # GitHub's pull-files REST endpoint returns at most 3000 files.
+          max_listed_files=3000
 
           is_frozen() {
             local path="$1"
@@ -48,10 +53,40 @@ jobs:
             return 1
           }
 
-          mapfile -t paths < <(
-            gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" \
-              --jq '.[] | .filename, (.previous_filename // empty)'
-          )
+          fail_closed() {
+            echo "::error::$1"
+            echo "$1" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+
+          if [[ -z "${PR_NUMBER}" ]]; then
+            fail_closed "Missing pull request number; failing closed."
+          fi
+
+          if ! changed_files=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '.changed_files'); then
+            fail_closed "Failed to fetch pull request metadata; failing closed."
+          fi
+          if [[ -z "${changed_files}" || "${changed_files}" == "null" ]]; then
+            fail_closed "Pull request metadata omitted changed_files; failing closed."
+          fi
+          if (( changed_files > max_listed_files )); then
+            fail_closed "PR changes ${changed_files} files; GitHub lists at most ${max_listed_files}. Failing closed."
+          fi
+
+          files_json=$(mktemp)
+          paths_out=$(mktemp)
+          # --paginate writes one JSON array per page; jq -s add concatenates them.
+          if ! gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" > "${files_json}"; then
+            fail_closed "Failed to list pull request files; failing closed."
+          fi
+
+          listed_files=$(jq -s 'add // [] | length' "${files_json}")
+          if (( listed_files < changed_files )); then
+            fail_closed "Listed ${listed_files} files but PR reports ${changed_files}. Failing closed."
+          fi
+
+          jq -s -r '(add // [])[] | .filename, (.previous_filename // empty)' "${files_json}" > "${paths_out}"
+          mapfile -t paths < "${paths_out}"
 
           blocked=()
           for path in "${paths[@]}"; do
