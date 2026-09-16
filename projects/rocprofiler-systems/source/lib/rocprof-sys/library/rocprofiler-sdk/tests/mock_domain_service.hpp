@@ -53,9 +53,12 @@ struct user_data_t
     std::uint64_t value = 0;
 };
 
+using callback_phase_t = int;
+
 struct callback_tracing_record_t
 {
-    std::uint64_t kind = 0;
+    std::uint64_t    kind  = 0;
+    callback_phase_t phase = 0;
 };
 
 using tracing_operation_t     = std::size_t;
@@ -231,6 +234,7 @@ struct mock_sdk
     using record_header_t           = test_support::record_header_t;
     using user_data_t               = test_support::user_data_t;
     using callback_tracing_record_t = test_support::callback_tracing_record_t;
+    using callback_phase_t          = test_support::callback_phase_t;
     using tracing_operation_t       = test_support::tracing_operation_t;
     using buffer_tracing_kind_t     = test_support::buffer_tracing_kind_t;
     using callback_tracing_kind_t   = test_support::callback_tracing_kind_t;
@@ -241,23 +245,26 @@ struct mock_sdk
     using agent_id_t                = test_support::agent_id_t;
 
     // NOLINTBEGIN(readability-identifier-naming)
-    static constexpr std::size_t     compile_time_version                    = 90909;
-    static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS                  = 1;
-    static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS = 20;
-    static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_PAGE_FAULT     = 21;
-    static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE   = 22;
-    static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_QUEUE          = 23;
-    static constexpr std::size_t     BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU = 24;
-    static constexpr std::size_t     BUFFER_TRACING_KFD_PAGE_FAULT           = 25;
-    static constexpr std::size_t     BUFFER_TRACING_KFD_PAGE_MIGRATE         = 26;
-    static constexpr std::size_t     BUFFER_TRACING_KFD_QUEUE                = 27;
-    static constexpr std::size_t     CALLBACK_TRACING_CODE_OBJECT            = 1;
-    static constexpr std::size_t     CALLBACK_TRACING_HSA_CORE_API           = 2;
-    static constexpr std::size_t     CALLBACK_TRACING_HSA_AMD_EXT_API        = 3;
-    static constexpr std::size_t     CALLBACK_TRACING_HSA_IMAGE_EXT_API      = 4;
-    static constexpr std::size_t     CALLBACK_TRACING_HSA_FINALIZE_EXT_API   = 5;
-    static constexpr std::size_t     CALLBACK_TRACING_HIP_RUNTIME_API        = 6;
-    static constexpr std::size_t     CALLBACK_TRACING_HIP_COMPILER_API       = 7;
+    static constexpr std::size_t      compile_time_version                    = 90909;
+    static constexpr buffer_policy_t  BUFFER_POLICY_LOSSLESS                  = 1;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS = 20;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_PAGE_FAULT     = 21;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE   = 22;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_QUEUE          = 23;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU = 24;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_PAGE_FAULT           = 25;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_PAGE_MIGRATE         = 26;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_QUEUE                = 27;
+    static constexpr std::size_t      CALLBACK_TRACING_CODE_OBJECT            = 1;
+    static constexpr std::size_t      CALLBACK_TRACING_HSA_CORE_API           = 2;
+    static constexpr std::size_t      CALLBACK_TRACING_HSA_AMD_EXT_API        = 3;
+    static constexpr std::size_t      CALLBACK_TRACING_HSA_IMAGE_EXT_API      = 4;
+    static constexpr std::size_t      CALLBACK_TRACING_HSA_FINALIZE_EXT_API   = 5;
+    static constexpr std::size_t      CALLBACK_TRACING_HIP_RUNTIME_API        = 6;
+    static constexpr std::size_t      CALLBACK_TRACING_HIP_COMPILER_API       = 7;
+    static constexpr callback_phase_t CALLBACK_PHASE_ENTER                    = 0;
+    static constexpr callback_phase_t CALLBACK_PHASE_EXIT                     = 1;
+    static constexpr callback_phase_t CALLBACK_PHASE_NONE                     = 2;
     // NOLINTEND(readability-identifier-naming)
 
     using kfd_event_dropped_record      = test_support::kfd_event_dropped_record;
