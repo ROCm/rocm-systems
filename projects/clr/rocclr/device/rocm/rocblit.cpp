@@ -361,13 +361,12 @@ bool DmaBlitManager::copyBufferRectBatch(const std::vector<device::Memory*>& src
     return true;
   }
 
-  // A single submission carries one direction and one completion signal, so the whole
-  // batch has to be same-direction host<->device DWORD-aligned rects.  Anything else
-  // (D2D/P2P, which the kernel blit handles, unaligned pitches, a mixed batch, or a ROCR
-  // that predates the batched entry point) drops back to issuing the operands one at a
-  // time.
+  // One LINEAR_RECT op carries a single agent pair and a single completion signal, so the
+  // whole batch has to be same-direction host<->device DWORD-aligned rects.  Anything else
+  // (D2D/P2P, which the kernel blit handles, unaligned pitches, or a mixed batch) drops
+  // back to issuing the operands one at a time.
   hsa_amd_copy_direction_t direction = hsaHostToHost;
-  bool fusable = !setup_.disableCopyBufferRect_ && Hsa::memory_async_batch_copy_rect_available();
+  bool fusable = !setup_.disableCopyBufferRect_;
 
   for (size_t i = 0; i < copyOps.size() && fusable; ++i) {
     const amd::BatchCopyRectOp& op = copyOps[i];
@@ -417,19 +416,19 @@ bool DmaBlitManager::copyBufferRectBatch(const std::vector<device::Memory*>& src
 
   gpu().releaseGpuMemoryFence(kSkipCpuWait);
 
-  std::vector<hsa_amd_memory_copy_rect_op_t> rectOps(copyOps.size());
+  std::vector<hsa_amd_memory_copy_rect_entry_t> entries(copyOps.size());
   for (size_t i = 0; i < copyOps.size(); ++i) {
     const amd::BatchCopyRectOp& op = copyOps[i];
     address src = reinterpret_cast<address>(gpuMem(*srcMemories[i]).getDeviceMemory());
     address dst = reinterpret_cast<address>(gpuMem(*dstMemories[i]).getDeviceMemory());
 
-    rectOps[i].src = {src + op.srcRect.offset(0, 0, 0), op.srcRect.rowPitch_,
+    entries[i].src = {src + op.srcRect.offset(0, 0, 0), op.srcRect.rowPitch_,
                       op.srcRect.slicePitch_};
-    rectOps[i].dst = {dst + op.dstRect.offset(0, 0, 0), op.dstRect.rowPitch_,
+    entries[i].dst = {dst + op.dstRect.offset(0, 0, 0), op.dstRect.rowPitch_,
                       op.dstRect.slicePitch_};
-    rectOps[i].src_offset = {0, 0, 0};
-    rectOps[i].dst_offset = {0, 0, 0};
-    rectOps[i].range = {static_cast<uint32_t>(op.size[0]), static_cast<uint32_t>(op.size[1]),
+    entries[i].src_offset = {0, 0, 0};
+    entries[i].dst_offset = {0, 0, 0};
+    entries[i].range = {static_cast<uint32_t>(op.size[0]), static_cast<uint32_t>(op.size[1]),
                         static_cast<uint32_t>(op.size[2])};
   }
 
@@ -438,17 +437,33 @@ bool DmaBlitManager::copyBufferRectBatch(const std::vector<device::Memory*>& src
   auto wait_events = gpu().Barriers().WaitingSignal(engine);
   hsa_signal_t active = gpu().Barriers().ActiveSignal(kInitSignalValueOne, gpu().timestamp());
 
-  ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
-          "HSA Async Batch Copy Rect ops=%zu, wait_event=0x%zx, completion_signal=0x%zx",
-          rectOps.size(), (wait_events.size() != 0) ? wait_events[0].handle : 0, active.handle);
+  // One op with one signal: ROCR fuses the entries into a single submission and decrements
+  // the signal once, after the last entry retires.
+  hsa_amd_memory_copy_op_t rectOp = {};
+  rectOp.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+  rectOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT;
+  rectOp.num_entries = static_cast<uint16_t>(entries.size());
+  rectOp.completion_signal = active;
+  rectOp.rect_list = entries.data();
+  rectOp.src_agent =
+      (direction == hsaHostToDevice) ? dev().getCpuAgent() : dev().getBackendDevice();
+  rectOp.dst_agent =
+      (direction == hsaHostToDevice) ? dev().getBackendDevice() : dev().getCpuAgent();
 
-  hsa_status_t status = Hsa::memory_async_batch_copy_rect(
-      rectOps.data(), rectOps.size(), dev().getBackendDevice(), direction, wait_events.size(),
-      wait_events.data(), active);
+  ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
+          "HSA BatchCopy Rect entries=%zu, engineOp=%s, wait_event=0x%zx, "
+          "completion_signal=0x%zx",
+          entries.size(), EngineOpName(engine),
+          (wait_events.size() != 0) ? wait_events[0].handle : 0, active.handle);
+
+  hsa_status_t status =
+      Hsa::memory_async_batch_copy(&rectOp, 1, wait_events.size(), wait_events.data());
   if (status != HSA_STATUS_SUCCESS) {
     // ROCR rejects the fused submission whenever SDMA is not usable for the direction
-    // (HSA_ENABLE_SDMA=0, engines exhausted), so the batch must be reissued one operand
-    // at a time instead of being dropped. Same recovery as a failed single rect copy.
+    // (HSA_ENABLE_SDMA=0, engines exhausted), and a ROCR that predates LINEAR_RECT rejects
+    // the op type outright, both before anything is submitted. Either way the batch must be
+    // reissued one operand at a time instead of being dropped. Same recovery as a failed
+    // single rect copy.
     gpu().Barriers().ResetCurrentSignal();
     LogPrintfError("DMA batch rect copy failed with code %d, falling back to per-op copies",
                    status);
