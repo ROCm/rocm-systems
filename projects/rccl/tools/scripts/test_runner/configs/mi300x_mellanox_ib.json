@@ -441,6 +441,43 @@
         "NCCL_DMABUF_ENABLE": "1"
       }
     },
+    "net_ib_multithread_independent": {
+      "extends": "net_ib_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "tests": [
+        {
+          "name": "NetIB_MultiThread_IndependentSimpleSendRecv",
+          "description": "Concurrent workers each transfer on an independent NET/IB context and connection",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "NetIB_MultiThread_IndependentSequentialTransfers",
+          "description": "Concurrent workers each run repeated transfers on an independent connection",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        },
+        {
+          "name": "NetIB_MultiThread_MultipleSizes",
+          "description": "Concurrent workers sweep the size ladder into the shared per-device MR cache",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "NetIB_MultiThread_MemoryRegistrationStorm",
+          "description": "Concurrent register/deregister storms race the per-device MR cache",
+          "test_filter": "NetIbMPITest.MemoryRegistrationStorm"
+        },
+        {
+          "name": "NetIB_MultiThread_MrCacheRefCount",
+          "description": "All workers register the same address, contending on one cache entry's refcount",
+          "test_filter": "NetIbMPITest.MrCacheRefCount"
+        },
+        {
+          "name": "NetIB_MultiThread_LongRunningEndurance",
+          "description": "Sustained concurrent traffic with the RDMA leak check around the whole run",
+          "test_filter": "NetIbMPITest.LongRunningEndurance"
+        }
+      ]
+    },
     "net_ib_initialization": {
       "extends": "net_ib_base",
       "timeout": 60,
@@ -847,8 +884,8 @@
         },
         {
           "name": "DdaFabricEligibilityTest",
-          "description": "Dda Fabric eligibility tests",
-          "test_filter": "DdaFabricEligibilityTest.*"
+          "description": "Dda Fabric eligibility and block-cap tests",
+          "test_filter": "DdaFabricEligibilityTest.*:DdaFabricMaxBlocksTest.*:DdaFabricScratchSizingTest.*"
         },
         {
           "name": "CeAlltoAllvEligibilityTest",
@@ -1947,10 +1984,10 @@
       "extends": "default",
       "is_gtest": true,
       "binary": "rccl-UnitTestsMPI",
-      "num_ranks": 2,
+      "num_ranks": 8,
       "num_nodes": 1,
-      "num_gpus": 2,
-      "timeout": 180,
+      "num_gpus": 8,
+      "timeout": 360,
       "env_variables": {
         "NCCL_DEBUG": "INFO",
         "NCCL_DEBUG_SUBSYS": "INIT,TUNING",
@@ -2029,6 +2066,96 @@
           "test_filter": "SymWin_WindowLifecycle.RepeatedRegisterDeregister"
         },
         {
+          "name": "SymWin_WindowLifecycle_MultipleAsymmetric",
+          "description": "Several windows registered at once with different asymmetric size patterns",
+          "test_filter": "SymWin_WindowLifecycle.MultipleAsymmetricWindows"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_RepeatedAsymmetric",
+          "description": "Repeated register/deregister cycles at asymmetric sizes",
+          "test_filter": "SymWin_WindowLifecycle.RepeatedRegisterDeregister_AsymmetricSizes"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_ReregisterAsymmetricPattern",
+          "description": "Re-registration of one allocation at a different size, where a different rank registers the most",
+          "test_filter": "SymWin_WindowLifecycle.ReregisterWithDifferentAsymmetricPattern"
+        },
+        {
+          "name": "SymWin_AsymRegister_AscendingSizes",
+          "description": "Collective registration where the window size grows with rank",
+          "test_filter": "SymWin_AsymRegister.AscendingSizes"
+        },
+        {
+          "name": "SymWin_AsymRegister_DescendingSizes",
+          "description": "Collective registration where the largest window is on rank 0",
+          "test_filter": "SymWin_AsymRegister.DescendingSizes"
+        },
+        {
+          "name": "SymWin_AsymRegister_SingleRankLarger",
+          "description": "One rank registers a much larger window than the others",
+          "test_filter": "SymWin_AsymRegister.SingleRankLarger"
+        },
+        {
+          "name": "SymWin_AsymRegister_ExtremeSizeRatio",
+          "description": "One rank registers a much smaller window than the others",
+          "test_filter": "SymWin_AsymRegister.ExtremeSizeRatio"
+        },
+        {
+          "name": "SymWin_AsymRegister_SubRangeOfEqualAllocations",
+          "description": "Equal allocations registered with unequal sizes",
+          "test_filter": "SymWin_AsymRegister.SubRangeOfEqualAllocations"
+        },
+        {
+          "name": "SymWin_AsymCollective_AllReduce_OutOfPlace",
+          "description": "AllReduce on asymmetric windows over the range valid on every rank",
+          "test_filter": "SymWin_AsymCollective.AllReduce_OutOfPlace"
+        },
+        {
+          "name": "SymWin_AsymCollective_AllReduce_InPlace",
+          "description": "In-place AllReduce on a single asymmetric window",
+          "test_filter": "SymWin_AsymCollective.AllReduce_InPlace_SingleWindow"
+        },
+        {
+          "name": "SymWin_AsymCollective_AllReduce_OnlySendWindow",
+          "description": "AllReduce with only the send window registered (relaxed one-buffer path)",
+          "test_filter": "SymWin_AsymCollective.AllReduce_OnlySendWindow"
+        },
+        {
+          "name": "SymWin_AsymCollective_AllReduce_SubRange",
+          "description": "AllReduce over unequal registered sizes of equal allocations",
+          "test_filter": "SymWin_AsymCollective.AllReduce_SubRangeOfEqualAllocations"
+        },
+        {
+          "name": "SymWin_AsymCollective_AllGather_Padded",
+          "description": "AllGather with rank-dependent window padding",
+          "test_filter": "SymWin_AsymCollective.AllGather_PaddedWindows"
+        },
+        {
+          "name": "SymWin_AsymCollective_ReduceScatter_Padded",
+          "description": "ReduceScatter with rank-dependent window padding",
+          "test_filter": "SymWin_AsymCollective.ReduceScatter_PaddedWindows"
+        },
+        {
+          "name": "SymWin_AsymCollective_AllReduce_Repeated",
+          "description": "Repeated AllReduce iterations on one asymmetric window",
+          "test_filter": "SymWin_AsymCollective.AllReduce_RepeatedIterations"
+        },
+        {
+          "name": "SymWin_AsymLsa_PeerContent",
+          "description": "Peer window contents sampled up to each peer's own registered size",
+          "test_filter": "SymWin_AsymLsa.PeerContent_UpToEachPeerSize"
+        },
+        {
+          "name": "SymWin_AsymLsa_PeerPointerStride",
+          "description": "Peer pointer stride fixed at init and window slots sized from the LSA team maximum, not a rank's own size",
+          "test_filter": "SymWin_AsymLsa.PeerPointerStride_IndependentOfRankSizes"
+        },
+        {
+          "name": "SymWin_AsymLsa_OffsetBound",
+          "description": "Peer pointer offset past the local window end is rejected, while a smaller peer's end is not bounds-checked",
+          "test_filter": "SymWin_AsymLsa.PointerOffsetAtLocalWindowEnd_Rejected"
+        },
+        {
           "name": "SymWin_GraphCapture_SymmetricAllReduce",
           "description": "Symmetric window registration during HIP graph capture with captured AllReduce replay",
           "test_filter": "GraphCapture_WindowRegister.SymmetricAllReduce"
@@ -2045,6 +2172,19 @@
         }
       ]
     },
+
+    "symmetric_window_tests_multinode": {
+      "extends": "symmetric_window_tests",
+      "num_ranks": 16,
+      "num_nodes": 2,
+      "num_gpus": 8,
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2"
+      }
+    },
+
     "symmetric_abort_checkmode_tests": {
       "extends": "default",
       "is_gtest": true,
@@ -4059,6 +4199,12 @@
       "enabled": true
     },
     {
+      "name": "NET IB - Multithread Independent Connections (4)",
+      "description": "4 worker threads/rank, each on an independent NET/IB context and connection",
+      "config": "net_ib_multithread_independent",
+      "enabled": true
+    },
+    {
       "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank)",
       "description": "Whitebox coverage of the NET/IB GDR flush: dma-buf and peermem RO=0 scratchpad fence, feature-disabled fallback, and repeated-flush burst",
       "config": "net_ib_gdr_flush",
@@ -4766,8 +4912,14 @@
     },
     {
       "name": "Symmetric Window Tests - Single Node",
-      "description": "Symmetric window registration tests for relaxed one-buffer path validation",
+      "description": "Symmetric window registration tests for relaxed one-buffer path and asymmetric per-rank window size validation",
       "config": "symmetric_window_tests",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric Window Tests - Two Node",
+      "description": "Symmetric window tests on two nodes (two LSA teams)",
+      "config": "symmetric_window_tests_multinode",
       "enabled": true
     },
     {

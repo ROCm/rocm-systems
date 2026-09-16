@@ -26,6 +26,8 @@ test_categories:
       - "DdaAlltoAllThreshold.*"
       - "DdaIpcEligibilityTest.*"
       - "DdaFabricEligibilityTest.*"
+      - "DdaFabricMaxBlocksTest.*"
+      - "DdaFabricScratchSizingTest.*"
       - "CeAllReduceEligibilityTest.*"
       - "RcclCeAllReduceEligibility.*"
       - "CeAlltoAllvEligibilityTest.*"
