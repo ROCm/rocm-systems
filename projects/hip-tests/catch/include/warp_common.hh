@@ -726,6 +726,12 @@ struct TestRange<T, std::enable_if_t<std::is_same_v<T, bool>>> {
 };
 
 template <typename T>
+struct TestRange<T, std::enable_if_t<std::is_same_v<T, unsigned char>>> {
+  static inline unsigned char minimum = 0;
+  static inline unsigned char maximum = 255;
+};
+
+template <typename T>
 struct TestRange<T, std::enable_if_t<std::is_signed_v<T> && sizeof(T) >= 4>> {
   static inline T minimum = -1023;
   static inline T maximum = 1023;
