@@ -1566,8 +1566,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType, sendWin, recvWin);
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
   // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
-  const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
-                                  rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr) && (force || symReg);
+  const bool ceUsable = rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr);
+  const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed && ceUsable && (force || symReg);
 
     // (3) Eager CE 2-shot (staging buffer). Requires !symkRequested and an
     // initialized ceARTmpBuf (first call, before init, falls through to enqueue).
@@ -1651,6 +1651,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // Reproduce taskAppend()'s AllReduce CE decision exactly so both agree.
   // Under ZERO (ceRegZero) CE wins over an eligible symk at any size; ceRegForce (force without ZERO) yields to symk and ceRegMax.
   // ceAvailable is the conjunction of the sub-conditions below; split out so the disqualification log can name the blocker.
+  // Forced CE on unregistered buffers also uses this path before ceARTmpBuf has
+  // been initialized (ceStagedUnregistered).
   const bool ceBufferOk          = !ceCapturing && ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype, winRegType, sendWin, recvWin);
   const bool ceAllReduceOpSupported = (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
   const bool ceCountDivisible    = (count % (size_t)comm->nRanks == 0);
@@ -1668,7 +1670,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceRegEnvCapOk = rcclParamCeArRegMaxMsgBytes() < 0 || ceRegInWindow;
   const bool ceRegZero = ceZeroPolicy && ceArRegMax != 0 && ceRegEnvCapOk;
   const bool ceRegForce = force && !symEligible && ceRegInWindow;
-  if (ceAvailable && !hasSysmemSegment && (ceRegZero || ceRegForce)) {
+  const bool ceStagedUnregistered = force && ceArGraphAllowed && ceUsable;
+  if (!hasSysmemSegment && ((ceAvailable && (ceRegZero || ceRegForce)) || ceStagedUnregistered)) {
     decision->algo = RCCL_CE_REGISTERED;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     return ncclSuccess;
