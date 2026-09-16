@@ -199,6 +199,10 @@ make_buffer_name_info()
                   "KFD_EVENT_UNMAP_FROM_GPU");
     table.emplace(mock_backend::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
                   "KFD_EVENT_DROPPED_EVENTS");
+    table.emplace(mock_backend::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
+                  "KFD_EVENT_PAGE_FAULT");
+    table.emplace(mock_backend::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
+                  "KFD_EVENT_PAGE_MIGRATE");
     return table;
 }
 
@@ -821,6 +825,8 @@ TEST_F(tracing_config_domains_test,
         gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_KFD_PAGE_FAULT,
                                     backend_t::BUFFER_TRACING_KFD_PAGE_MIGRATE,
                                     backend_t::BUFFER_TRACING_KFD_QUEUE,
+                                    backend_t::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
+                                    backend_t::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
                                     backend_t::BUFFER_TRACING_KFD_EVENT_QUEUE,
                                     backend_t::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
                                     backend_t::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS));
@@ -841,9 +847,10 @@ TEST_F(tracing_config_domains_test,
 
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
-        .WillOnce(gtest::Return(
-            std::string{ "kfd_page_fault, kfd_page_migrate, kfd_queue, kfd_event_queue, "
-                         "kfd_event_unmap_from_gpu, kfd_event_dropped_events" }));
+        .WillOnce(gtest::Return(std::string{
+            "kfd_page_fault, kfd_page_migrate, kfd_queue, kfd_event_page_fault, "
+            "kfd_event_page_migrate, kfd_event_queue, kfd_event_unmap_from_gpu, "
+            "kfd_event_dropped_events" }));
     EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
         .Times(1)
         .WillOnce(gtest::Return(false));
@@ -853,6 +860,8 @@ TEST_F(tracing_config_domains_test,
         gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_KFD_PAGE_FAULT,
                                     backend_t::BUFFER_TRACING_KFD_PAGE_MIGRATE,
                                     backend_t::BUFFER_TRACING_KFD_QUEUE,
+                                    backend_t::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
+                                    backend_t::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
                                     backend_t::BUFFER_TRACING_KFD_EVENT_QUEUE,
                                     backend_t::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
                                     backend_t::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS));
@@ -1095,6 +1104,8 @@ TEST_F(tracing_config_domains_test,
         gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_KFD_PAGE_FAULT,
                                     backend_t::BUFFER_TRACING_KFD_PAGE_MIGRATE,
                                     backend_t::BUFFER_TRACING_KFD_QUEUE,
+                                    backend_t::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
+                                    backend_t::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
                                     backend_t::BUFFER_TRACING_KFD_EVENT_QUEUE,
                                     backend_t::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
                                     backend_t::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS));
