@@ -16,6 +16,18 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - Individual kernels can be traced without serialization, and the path is independent of the ROCm runtime version.
     - Experimental: intended to validate the new collection path and to enable out-of-process thread trace and long-kernel tracing in future releases.
 
+**rocprofv3 (CLI):**
+
+  - `rocprofv3-doctor` self-diagnostic tool:
+    - New standalone command (`rocprofv3-doctor`) and integrated flag (`rocprofv3 --doctor`) that inspects the ROCprofiler-SDK installation and system configuration and reports what would prevent profiling from working.
+    - Covers 10 check groups: installation, driver/device, runtime stack, counter collection, environment variables, container/virtualization, Python environment, filesystem, companion tools, and optional live smoke tests.
+    - Verifies that the ROCm libraries actually load (missing dependencies, mixed ROCm versions, old `libstdc++`), not only that they exist, and explains failed or crashed commands by matching their output against known error messages. Each diagnosis separates what the output shows from the candidate cause, and rates the cause `likely` only when facts on the machine corroborate it.
+    - Every check declares what it does to the machine (`passive`, `process`, or `gpu`); child processes are time-limited and their whole process tree is killed on timeout, Python package imports run in a child process, and the only file written is an exclusively-created temporary probe.
+    - Human-readable grouped text output with color-coded status and a copy-pasteable remediation section; machine-readable JSON output with a versioned schema for CI consumption.
+    - Extensible check framework with decorator-based registration; prerequisites run first and are pulled into `--only` selections, and skip propagation keeps one root cause from cascading. A check that breaks is reported as `error` (a doctor bug), never as a system failure.
+    - Exit code 0 (warnings only), 1 (at least one failure), 2 (tool error, an `--only` pattern matching no check, or a broken check with no failures).
+    - Works with every ROCm installation layout, not only `/opt/rocm`: legacy system packages, TheRock system packages (`/opt/rocm/core-X.Y`), TheRock Python packages, tarballs, and custom prefixes. The inspected root, how it was found, and the installation type are reported, and remediation commands match the installation type.
+
 **rocprof-trace-decoder:**
 
   - Python API for decoding Advanced Thread Trace (ATT) / SQTT data directly from Python, without writing a C++ consumer:

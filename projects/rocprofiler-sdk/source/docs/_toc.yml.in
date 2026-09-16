@@ -24,6 +24,7 @@ subtrees:
     - file: how-to/kernel-naming-filtering
     - file: how-to/rocprofv3-io-options
     - file: how-to/using-rocprofv3-avail
+    - file: how-to/using-rocprofv3-doctor
     - file: how-to/using-rocprofv3-process-attachment
     - file: how-to/using-rocpd-output-format
     - file: how-to/using-rocprofiler-sdk-roctx

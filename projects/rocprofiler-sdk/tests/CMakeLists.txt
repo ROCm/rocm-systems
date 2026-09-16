@@ -118,3 +118,6 @@ add_subdirectory(anytime-tool-config)
 # python bindings
 add_subdirectory(python-bindings)
 add_subdirectory(rocprofv3-avail)
+
+# rocprofv3-doctor diagnostic tool tests
+add_subdirectory(rocprofv3-doctor)

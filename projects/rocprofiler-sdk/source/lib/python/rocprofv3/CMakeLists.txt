@@ -20,7 +20,28 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(rocprofv3_PYTHON_SOURCES __init__.py avail.py)
+# NOTE: rocprofiler_rocprofv3_python() installs to a flat destination, so every source
+# listed here must live directly in this directory. The rocprofv3-doctor modules therefore
+# use a doctor_ filename prefix rather than a subpackage.
+set(rocprofv3_PYTHON_SOURCES
+    __init__.py
+    avail.py
+    doctor.py
+    doctor_diagnose.py
+    doctor_env.py
+    doctor_layout.py
+    doctor_registry.py
+    doctor_result.py
+    doctor_checks_container.py
+    doctor_checks_counters.py
+    doctor_checks_driver.py
+    doctor_checks_environ.py
+    doctor_checks_filesystem.py
+    doctor_checks_install.py
+    doctor_checks_python_env.py
+    doctor_checks_runtime.py
+    doctor_checks_smoke.py
+    doctor_checks_tools.py)
 rocprofiler_rocprofv3_python(${rocprofv3_PYTHON_SOURCES})
 
 rocprofiler_reset_python3_cache()

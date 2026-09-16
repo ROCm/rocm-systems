@@ -24,6 +24,19 @@ install(
                 WORLD_EXECUTE
     COMPONENT tools)
 
+# @ONLY (not COPYONLY): rocprofv3-doctor.py carries @FULL_VERSION_STRING@ and friends in
+# CONST_VERSION_INFO. The version-consistency check and the JSON report depend on those
+# being substituted, exactly as for rocprofv3.py above.
+configure_file(rocprofv3-doctor.py
+               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3-doctor @ONLY)
+
+install(
+    FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3-doctor
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ
+                WORLD_EXECUTE
+    COMPONENT tools)
+
 configure_file(rocprof-attach.py
                ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprof-attach COPYONLY)
 
