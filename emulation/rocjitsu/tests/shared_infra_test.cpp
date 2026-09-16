@@ -2587,6 +2587,32 @@ TEST_P(CuFactoryTest, CreatesSuccessfully) {
   EXPECT_EQ(cu->arch(), arch);
 }
 
+TEST_P(CuFactoryTest, LdsContentsSurviveWorkgroupAllocationReuse) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = GetParam();
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 102;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("test_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  // Two adjacent allocations retain independent contents, including alignment
+  // padding. Retiring the workgroups releases space, not the physical bytes.
+  ASSERT_EQ(cu->allocate_lds(257), 0u);
+  cu->lds().write32(0, 0x12345678u);
+  cu->lds().write32(508, 0xAABBCCDDu);
+  ASSERT_EQ(cu->allocate_lds(256), 512u);
+  cu->lds().write32(512, 0x87654321u);
+  cu->maybe_reset_lds_alloc();
+  ASSERT_EQ(cu->allocate_lds(768), 0u);
+  EXPECT_EQ(cu->lds().read32(0), 0x12345678u);
+  EXPECT_EQ(cu->lds().read32(508), 0xAABBCCDDu);
+  EXPECT_EQ(cu->lds().read32(512), 0x87654321u);
+}
+
 TEST(CuFactoryTest, CdnaAccVgprsDoNotAliasNextWaveSlot) {
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
