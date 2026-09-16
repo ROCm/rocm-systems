@@ -18,10 +18,10 @@
 
 using aie_test::dispatch_error;
 
-// Shared fixture: initializes the HSA runtime once for the suite (always tearing it down, even when
-// individual tests skip) and resolves the first AIE agent per test, skipping when no NPU is present.
-// Unlike the dispatch and memory fixtures, this one skips rather than fails when there is no
-// NPU: these tests need no kernel artifacts, so the binary is expected to run anywhere.
+// Shared fixture: AieTestBase initializes the HSA runtime per test and tears it down again in
+// TearDown, including when the test skips; this fixture resolves the first AIE agent on top of
+// that. Unlike the dispatch fixtures, it skips rather than fails when there is no NPU: these tests
+// need no kernel artifacts, so the binary is expected to run anywhere.
 class ErrorCallback : public aie_test::AieTestBase {
  protected:
   hsa_agent_t agent_{};
