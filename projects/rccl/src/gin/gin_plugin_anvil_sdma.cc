@@ -449,6 +449,7 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
   struct ncclComm* comm = ctx->comm;
   struct ncclDevrState* devr = &comm->devrState;
   const int nRanks = ctx->nRanks;
+  const int lsaTeamSize = devr->lsaSize;
   const int rank = ctx->rank;
   constexpr int kMaxConnCheckRanks = NCCL_GIN_ANVIL_IPC_MAX_RANKS;
   if (nRanks < 2) return ncclSuccess;
@@ -503,9 +504,10 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
   // not the GIN team's ctx->rank/nRanks on comm->bootstrap. Under
   // NCCL_GIN_CONNECTION_RAIL those spaces differ: bootstrapAllGather writes
   // comm->nRanks entries and bootstrapBarrier addresses world ranks 0..nRanks-1.
-  if (devr->lsaRankList == nullptr || devr->lsaSelf < 0 || devr->lsaSelf >= nRanks) {
-    WARN("GIN anvil-sdma: conn-check setup has invalid LSA team (rank %d, lsaSelf=%d, lsaRankList=%p)",
-         rank, devr->lsaSelf, (void*)devr->lsaRankList);
+  if (lsaTeamSize < 1 || lsaTeamSize > kMaxConnCheckRanks || devr->lsaRankList == nullptr || devr->lsaSelf < 0 ||
+      devr->lsaSelf >= lsaTeamSize) {
+    WARN("GIN anvil-sdma: conn-check setup has invalid LSA team (rank %d, lsaSelf=%d, lsaSize=%d, lsaRankList=%p)",
+         rank, devr->lsaSelf, lsaTeamSize, (void*)devr->lsaRankList);
     ret = ncclSystemError;
     goto cleanup;
   }
@@ -513,16 +515,16 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
   {
   const int lsaTeamRank = devr->lsaSelf;
   auto lsaAllgatherInts = [&](int* buf) -> int {
-    return (bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, lsaTeamRank, nRanks, buf,
+    return (bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, lsaTeamRank, lsaTeamSize, buf,
                                         sizeof(int)) == ncclSuccess)
                ? 0
                : -1;
   };
   auto lsaBarrier = [&](int tag) -> ncclResult_t {
-    return bootstrapIntraNodeBarrier(comm->bootstrap, devr->lsaRankList, lsaTeamRank, nRanks, tag);
+    return bootstrapIntraNodeBarrier(comm->bootstrap, devr->lsaRankList, lsaTeamRank, lsaTeamSize, tag);
   };
 
-  std::fill_n(gathered, nRanks, -1);
+  std::fill_n(gathered, lsaTeamSize, -1);
   gathered[lsaTeamRank] = setupState;
   if (lsaAllgatherInts(gathered) != 0) {
     WARN("GIN anvil-sdma: conn-check setup allgather failed (rank %d)", rank);
@@ -532,7 +534,7 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
   {
     int bypassRanks = 0;
     int failedRanks = 0;
-    for (int r = 0; r < nRanks; r++) {
+    for (int r = 0; r < lsaTeamSize; r++) {
       bypassRanks += gathered[r] == kSetupBypass;
       failedRanks += gathered[r] == kSetupFailed;
     }
@@ -542,8 +544,8 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
       goto cleanup;
     }
     if (bypassRanks != 0) {
-      if (bypassRanks != nRanks) {
-        WARN("GIN anvil-sdma: conn-check bypass differs across ranks (%d/%d disabled)", bypassRanks, nRanks);
+      if (bypassRanks != lsaTeamSize) {
+        WARN("GIN anvil-sdma: conn-check bypass differs across ranks (%d/%d disabled)", bypassRanks, lsaTeamSize);
         ret = ncclSystemError;
       } else {
         INFO(NCCL_INIT,
@@ -552,10 +554,10 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
       goto cleanup;
     }
     int skipRanks = 0;
-    for (int r = 0; r < nRanks; r++) skipRanks += gathered[r] == kSetupSkip;
+    for (int r = 0; r < lsaTeamSize; r++) skipRanks += gathered[r] == kSetupSkip;
     if (skipRanks != 0) {
-      if (skipRanks != nRanks) {
-        WARN("GIN anvil-sdma: conn-check skip differs across ranks (%d/%d ineligible)", skipRanks, nRanks);
+      if (skipRanks != lsaTeamSize) {
+        WARN("GIN anvil-sdma: conn-check skip differs across ranks (%d/%d ineligible)", skipRanks, lsaTeamSize);
         ret = ncclSystemError;
         goto cleanup;
       }
@@ -630,8 +632,8 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
       }
     }
 
-    if (localFail) localMissing = nRanks;
-    std::fill_n(gathered, nRanks, -1);
+    if (localFail) localMissing = lsaTeamSize;
+    std::fill_n(gathered, lsaTeamSize, -1);
     gathered[lsaTeamRank] = localMissing;
     if (lsaAllgatherInts(gathered) != 0) {
       WARN("GIN anvil-sdma: conn-check step '%s' failed (rank %d, attempt %d/%d)",
@@ -644,7 +646,7 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
            ginAnvilConnCheckStepName(failedStep), rank, attempt + 1, MAX_ATTEMPTS);
     }
     int globalMissing = 0;
-    for (int r = 0; r < nRanks; r++) globalMissing += gathered[r];
+    for (int r = 0; r < lsaTeamSize; r++) globalMissing += gathered[r];
     ret = lsaBarrier(0x51612);
     if (ret != ncclSuccess) {
       WARN("GIN anvil-sdma: conn-check step '%s' failed (rank %d, attempt %d/%d)",
