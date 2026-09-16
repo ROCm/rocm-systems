@@ -175,15 +175,18 @@ template <> inline std::string type_name<__hip_bfloat16>()     { return "bfloat1
 // Reduction push helpers
 //
 // Reduction testers take two typed lambdas, so they cannot be dispatched with
-// the plain "new Tester<T>(args)" shape the other lists use. Two variants:
+// the plain "Tester<T>(args)" shape the other lists use. Like PUSH_TESTER in
+// tester.cpp, these queue a factory rather than a constructed tester. Two
+// variants:
 //   ARITH - integer types; casts through long long to format the error string
 //   FLOAT - floating-point types; formats directly
 // Only ROCSHMEM_SUM is exercised; operation coverage is a separate concern.
 // ---------------------------------------------------------------------------
 
 #define ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, T, args, testers)                 \
-  (testers).push_back(new TESTER<T, ROCSHMEM_SUM>(                              \
-      args,                                                                     \
+  (testers).push_back([a = (args)]() -> Tester* {                               \
+    return new TESTER<T, ROCSHMEM_SUM>(                                         \
+      a,                                                                        \
       [](T& f1, T& f2) { f1 = static_cast<T>(1); f2 = static_cast<T>(1); },     \
       [](T v, T n_pes) {                                                        \
         return (v == n_pes)                                                     \
@@ -191,11 +194,13 @@ template <> inline std::string type_name<__hip_bfloat16>()     { return "bfloat1
             : std::make_pair(false,                                             \
                   "Got " + std::to_string(static_cast<long long>(v)) +          \
                   ", Expect " + std::to_string(static_cast<long long>(n_pes))); \
-      }));
+      });                                                                       \
+  });
 
 #define ROCSHMEM_PUSH_REDUCTION_FLOAT(TESTER, T, args, testers)                 \
-  (testers).push_back(new TESTER<T, ROCSHMEM_SUM>(                              \
-      args,                                                                     \
+  (testers).push_back([a = (args)]() -> Tester* {                               \
+    return new TESTER<T, ROCSHMEM_SUM>(                                         \
+      a,                                                                        \
       [](T& f1, T& f2) { f1 = static_cast<T>(1); f2 = static_cast<T>(1); },     \
       [](T v, T n_pes) {                                                        \
         return (v == n_pes)                                                     \
@@ -203,7 +208,8 @@ template <> inline std::string type_name<__hip_bfloat16>()     { return "bfloat1
             : std::make_pair(false,                                             \
                   "Got " + std::to_string(v) +                                  \
                   ", Expect " + std::to_string(n_pes));                         \
-      }));
+      });                                                                       \
+  });
 
 // All types compiled by team_reduction / team_reduce_scatter / reduce_wave /
 // team_reduce_scatter_wave, each gated the same way the X-macro lists are.
