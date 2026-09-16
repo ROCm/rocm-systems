@@ -105,7 +105,14 @@ class _Stream:
             os.makedirs(regions, exist_ok=True)
             self._fh = open(os.path.join(regions, "pytorch.hrrr"), "ab", buffering=0)
             self._pid = os.getpid()
-            self._fh.write(_FILE_HEADER)
+            # Only on a fresh file. The stream is opened for append, and DESIGN.md
+            # explicitly supports a process re-opening its own writer on resume, so
+            # writing unconditionally would splice a second file header into the
+            # middle of the record stream. The reader parses those 8 bytes as an
+            # event header, reads a garbage payload length, and discards every
+            # record from that point on as a torn tail.
+            if self._fh.tell() == 0:
+                self._fh.write(_FILE_HEADER)
 
         now = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
         buf = bytearray()
