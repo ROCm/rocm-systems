@@ -6,8 +6,7 @@
 #
 
 # Include common build rules
-include ../../../../../makefiles/common.mk
-include ../../../../../makefiles/examples.mk
+include ../../../makefiles/rccl_examples.mk
 
 # Target executable
 TARGET = allreduce_lsa
@@ -19,10 +18,10 @@ COMMON_SRC = ../../../common/src
 # Build configuration
 INCLUDES += -I$(COMMON_INC)
 
-# Source files
+# Source files (.cu is hipified into $(HIPIFY_DIR) at build time)
 SOURCES = main.cu $(COMMON_SRC)/utils.cc
-OBJECTS = $(SOURCES:.cu=.o)
-OBJECTS := $(OBJECTS:.cc=.o)
+OBJECTS = $(patsubst %.cu,$(HIPIFY_DIR)/%.cu.o,$(filter %.cu,$(SOURCES))) \
+          $(patsubst %.cc,%.o,$(filter %.cc,$(SOURCES)))
 
 # Default target
 all: $(TARGET)
@@ -37,9 +36,6 @@ endif
 	@echo "Built target $@"
 
 # Compile source files
-%.o: %.cu
-	$(NVCC) $(NVCUFLAGS) $(INCLUDES) -c $< -o $@
-
 %.o: %.cc
 ifeq ($(MPI),1)
 	$(MPICXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
@@ -60,7 +56,7 @@ endif
 
 # Clean build artifacts
 clean:
-	rm -f $(OBJECTS) $(TARGET)
+	rm -rf $(OBJECTS) $(TARGET) $(HIPIFY_DIR)
 
 # Install target
 install: $(TARGET)
