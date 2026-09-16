@@ -144,3 +144,6 @@ add_test(
     COMMAND ${Python3_EXECUTABLE} -m unittest spm_runner_preflight_test
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 set_tests_properties(rocprofiler-sdk-spm-runner-preflight PROPERTIES LABELS "unittests")
+
+# rocprofv3-doctor diagnostic tool tests
+add_subdirectory(rocprofv3-doctor)

@@ -348,7 +348,6 @@ def resolve_library_path(val, args, is_sdk_lib=True):
 
 
 def get_att_paths(args):
-
     ROCPROFV3_DIR = os.path.dirname(os.path.realpath(__file__))
     ROCM_DIR = os.path.dirname(ROCPROFV3_DIR)
     if args.rocm_root is not None:
@@ -377,7 +376,6 @@ def get_att_paths(args):
 
 
 def check_att_capability(args, att_lib_name="librocprof-trace-decoder.so"):
-
     library_paths = get_att_paths(args)
 
     for path in library_paths:
@@ -478,7 +476,6 @@ class omptTraceArgAction(argparse.Action):
 
 
 def parse_arguments(args=None):
-
     usage_examples = """
 
 %(prog)s requires double-hyphen (--) before the application to be executed, e.g.
@@ -1177,6 +1174,18 @@ For attachment profiling of running processes:
         default=True,
     )
 
+    # NOTE: --doctor is intercepted in main() before parse_arguments() runs, so
+    # this entry exists only to document the flag in --help. Any remaining
+    # arguments are forwarded verbatim to rocprofv3-doctor, which is why the
+    # interception cannot be deferred to argparse: flags such as --format have
+    # incompatible meanings in the two tools.
+    advanced_options.add_argument(
+        "--doctor",
+        action="store_true",
+        help="""Run the rocprofv3-doctor self-diagnostic tool and exit. Any remaining arguments are passed to rocprofv3-doctor (for example: rocprofv3 --doctor --format json).""",
+        default=False,
+    )
+
     add_parser_bool_argument(
         advanced_options,
         "--attach-sync-output",
@@ -1392,10 +1401,10 @@ def parse_text(text_file):
 
 
 def parse_input(input_file):
-
     _, extension = os.path.splitext(input_file)
     if extension == ".txt" or extension == ".text":
-        warning("""
+        warning(
+            """
             Text file format for counter collection is deprecated and will be removed in a future release.
             Please use JSON or YAML format instead.
 
@@ -1412,7 +1421,8 @@ def parse_input(input_file):
 
             JSON file (recommended):
                 {"jobs":[{"pmc": ["SQ_WAVES"]},{ "pmc":["GRBM_COUNT"]}]}
-            """)
+            """
+        )
         text_input = parse_text(input_file)
         text_input_lst = [{"pmc": itr, "sub_directory": "pmc_"} for itr in text_input]
         return [dotdict(itr) for itr in text_input_lst]
@@ -1608,7 +1618,6 @@ def int_auto(num_str):
 
 
 def run(app_args, args, **kwargs):
-
     app_env = dict(os.environ)
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
@@ -2120,7 +2129,6 @@ def run(app_args, args, **kwargs):
             update_env(f"ROCPROF_{env_val}", val, overwrite=True)
 
     def log_config(_env):
-
         cfg_init_message = "\n- rocprofv3 configuration{}:\n".format(
             "" if app_pass is None else f" (pass {app_pass})"
         )
@@ -2309,7 +2317,6 @@ def run(app_args, args, **kwargs):
             )
 
     if args.pc_sampling_unit or args.pc_sampling_method or args.pc_sampling_interval:
-
         if (
             not args.pc_sampling_beta_enabled
             and os.environ.get("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", None) is None
@@ -2339,7 +2346,6 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_PC_SAMPLING_INTERVAL", args.pc_sampling_interval)
 
     if args.spm or args.spm_sample_interval or args.spm_sample_interval_unit:
-
         if (
             not args.spm_beta_enabled
             and os.environ.get("ROCPROFILER_SPM_BETA_ENABLED", None) is None
@@ -2392,7 +2398,6 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_MINIMUM_OUTPUT_BYTES", args.minimum_output_data * 1024)
 
     if args.advanced_thread_trace:
-
         update_env("ROCPROF_ADVANCED_THREAD_TRACE", True, overwrite=True)
         update_env("ROCPROF_ATT_NO_INTERCEPT", args.att_no_intercept, overwrite=True)
 
@@ -2537,7 +2542,34 @@ def run(app_args, args, **kwargs):
         return exit_code
 
 
+def dispatch_doctor(raw_args):
+    """Run rocprofv3-doctor with the remaining arguments; return its exit code.
+
+    Intercepted before parse_arguments() because rocprofv3 and rocprofv3-doctor
+    both define --format and --output with different meanings; letting argparse
+    see the doctor's flags would be an error rather than a passthrough.
+    """
+    args = [itr for itr in raw_args if itr != "--doctor"]
+    bin_dir = os.path.dirname(os.path.realpath(__file__))
+
+    # installed next to this script; fall back to the source-tree name so the
+    # passthrough also works from an uninstalled checkout
+    for name in ("rocprofv3-doctor", "rocprofv3-doctor.py"):
+        candidate = os.path.join(bin_dir, name)
+        if os.path.exists(candidate):
+            return subprocess.call([sys.executable, candidate] + args)
+
+    sys.stderr.write("rocprofv3: rocprofv3-doctor was not found in {}\n".format(bin_dir))
+    return 2
+
+
 def main(argv=None):
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    # only rocprofv3's own options count: everything after "--" belongs to the
+    # application and must reach it verbatim, "--doctor" included
+    profiler_args = raw_args[: raw_args.index("--")] if "--" in raw_args else raw_args
+    if "--doctor" in profiler_args:
+        return dispatch_doctor(profiler_args)
 
     cmd_args, app_args = parse_arguments(argv)
 
