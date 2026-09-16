@@ -613,6 +613,8 @@ __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t re
                 "ScalarUnroll must remain unchanged when the bias path is disabled.");
   static_assert(useAcc || CopyUnroll == Unroll,
                 "CopyUnroll must remain unchanged when the bias path is disabled.");
+  static_assert(CopyUnroll * (16 / sizeof(T)) / 2 == ScalarUnroll,
+                "CopyUnroll must reproduce ScalarUnroll.");
 
   if NCCL_IF_CONSTEXPR (BigPackSize > sizeof(T)) {
     // Check that all pointers are AlignedPathPackSize aligned.
