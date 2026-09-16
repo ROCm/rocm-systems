@@ -43,3 +43,4 @@ set(OPENMP_GPU_TARGETS
 add_subdirectory(target)
 add_subdirectory(host)
 add_subdirectory(init-deadlock)
+add_subdirectory(openmp-tools-coexist)
