@@ -3474,8 +3474,7 @@ def test_both_instruction_line_paths_share_one_instruction_type(db_session):
 
 
 def test_calc_roofline_data_includes_all_kernels(monkeypatch):
-    """calc_roofline_data computes roofline for all kernels, not just top N.
-    """
+    """calc_roofline_data computes roofline for all kernels, not just top N."""
     kernel_names = ["kernel_a", "kernel_b", "kernel_c", "kernel_d", "kernel_e"]
 
     # Two dispatches per kernel, staggered timestamps
@@ -3522,8 +3521,12 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
     assert list(df["kernel_name"]) == kernel_names
 
     expected_columns = [
-        "total_flops", "l0_cache_data", "l1_cache_data",
-        "l2_cache_data", "hbm_cache_data", "lds_cache_data",
+        "total_flops",
+        "l0_cache_data",
+        "l1_cache_data",
+        "l2_cache_data",
+        "hbm_cache_data",
+        "lds_cache_data",
     ]
     for col in expected_columns:
         assert col in df.columns
