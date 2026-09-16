@@ -56,6 +56,7 @@ hipFile is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
 
       * :doc:`Troubleshooting <troubleshooting/troubleshooting>`
       * :doc:`Known issues <troubleshooting/known-issues>`
+      * :doc:`Disable AIS <troubleshooting/disable-ais>`
       * :doc:`Limitations <troubleshooting/limitations>`
 
 Licensing information is in the `LICENSE.md <https://github.com/ROCm/rocm-systems/blob/develop/projects/hipfile/LICENSE.md>`_ file in the repository.

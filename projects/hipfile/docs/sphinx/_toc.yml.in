@@ -67,6 +67,8 @@ subtrees:
         title: Troubleshooting
       - file: troubleshooting/known-issues
         title: Known issues
+      - file: troubleshooting/disable-ais
+        title: Disable AIS
       - file: troubleshooting/limitations
         title: Limitations
   - caption: About
