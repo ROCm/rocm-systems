@@ -96,6 +96,12 @@ extern int g_ncclTopoGetLinkTypeCalls;
 
 // Restore every NCCL controllable seam in this header to its default.
 // Called by ResetP2pFakes(); exposed for tests that only touch NCCL hooks.
+// Hands back an fd the caller must close. Defaults to ncclSystemError (the
+// historical fixed return); the dev_runtime suite installs one that opens
+// /dev/null so its symmetric-memory export path can run.
+extern std::function<ncclResult_t(struct ncclComm*, int, void*, int*)>
+    g_ncclProxyClientGetFdBlocking;
+
 void ResetNcclFakes();
 
 #endif  // RCCL_TEST_HOST_NCCL_FAKES_H_

@@ -46,11 +46,12 @@ ncclResult_t ncclLaunchRma(struct ncclComm*, struct ncclKernelPlan*) { ::abort()
 ncclResult_t ncclRmaCeInit(struct ncclComm*) { ::abort(); }
 
 // dev_runtime.h
-ncclResult_t ncclDevrCommCreateInternal(struct ncclComm*, struct ncclDevCommRequirements*,
-                                        struct ncclDevComm*, bool, struct ncclDevCommCompat*) { ::abort(); }
-ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm*, void*, size_t, int,
-                                           struct ncclWindow_vidmem**) { ::abort(); }
-void freeDevCommRequirements(struct ncclDevCommRequirements*) { ::abort(); }
+// ncclDevrCommCreateInternal, ncclDevrWindowRegisterInGroup and
+// freeDevCommRequirements used to be ::abort() stubs here. dev_runtime.cc is
+// now compiled into this binary (dev-runtime-test.cc) and defines all three for
+// real, so the stubs would be duplicate symbols. Nothing regressed by dropping
+// them: an ::abort() stub is only ever reached by a test that should not have
+// called it, and no suite in this binary did.
 
 // mem_manager.h
 ncclResult_t ncclCommMemSuspend(struct ncclComm*) { ::abort(); }

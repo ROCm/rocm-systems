@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # Build and run the RCCL CPU-only host unit tests: rccl-HostUnitTests plus the
-# host-only microtests (rccl-UnitTestsMicro, rccl-UnitTestsMicroInit[-uncached|-faultinj],
-# rccl-UnitTestsMicroEnqueue[-devlinker]).
+# host-only microtests. The authoritative list is the `binaries` array in the
+# run phase below -- it is not duplicated here, so the two cannot drift.
 #
 # Single source of truth for every command the host-test pipeline needs, so the
 # same steps run locally and in CI and nothing is scattered in the workflow YAML.
