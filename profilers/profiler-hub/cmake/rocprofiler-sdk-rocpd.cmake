@@ -150,10 +150,8 @@ else()
         endif()
     endif()
 
-    # A sparse-checkout of a path the branch does not carry succeeds and produces
-    # nothing, so the clone result above cannot catch it. Reported here because the
-    # per-file check in rocpd_configure_rocpd_schema_files names the missing file
-    # but neither the version nor the branch that caused it to be missing.
+    # A sparse checkout of an absent path succeeds and produces nothing, so the
+    # clone result cannot catch it and the per-file check names no branch.
     if(NOT EXISTS "${_ROCPD_SCHEMA_DIR}")
         message(
             FATAL_ERROR

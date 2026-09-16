@@ -50,12 +50,8 @@ else()
     message(STATUS "Using system spdlog (version ${spdlog_VERSION})")
 endif()
 
-# A system spdlog is only safe to reuse if it was built with external fmt.
-# If it was built against its bundled fmt, its public headers pull in
-# <spdlog/fmt/bundled/...> and libspdlog exports bundled-fmt symbols, which
-# would coexist with the external fmt that profiler-hub links - two fmt
-# copies in one binary. Detect this via the interface compile definition
-# that spdlog's exported target carries when SPDLOG_FMT_EXTERNAL was set.
+# The exported target's interface definitions are the only reliable record
+# of which fmt a prebuilt spdlog was compiled against.
 get_target_property(
     _spdlog_iface_defs
     spdlog::spdlog
