@@ -7382,12 +7382,38 @@ def test_generated_memory_paths_use_decoded_issue_metadata(
     total_states = 0
     for path in amdgpu_generated_root.rglob('*_exec*.cpp'):
         source = path.read_text()
-        states = len(
-            re.findall(r'std::make_unique<amdgpu::(?:Scalar|Vector)MemState>', source)
-        )
+        state_pattern = r'std::make_unique<amdgpu::(?:Scalar|Vector)MemState>'
+        states = len(re.findall(state_pattern, source))
         counter_initializers = source.count('d->wait_counter_type =')
         assert 'before_memory_instruction' not in source, path
         assert counter_initializers == states, path
+
+        # Check the independently generated model constructors as well as the
+        # execution bodies.  Iterating _MEMORY_ISSUE_KINDS alone cannot detect a
+        # new memory-pipeline semantic that was omitted from that mapping.
+        execution_classes = set()
+        current_class = None
+        for line in source.splitlines():
+            if match := re.match(r'void (\w+)::execute_impl\(', line):
+                current_class = match.group(1)
+            if re.search(state_pattern, line):
+                assert current_class is not None, path
+                execution_classes.add(current_class)
+
+        if execution_classes:
+            model_path = path.with_name(path.name.replace('_exec.cpp', '.cpp'))
+            assert model_path.exists(), path
+            model_source = model_path.read_text()
+            metadata_classes = set()
+            current_class = None
+            for line in model_source.splitlines():
+                if match := re.match(r'(\w+)::\1\(const MachineInst \*inst\)', line):
+                    current_class = match.group(1)
+                if 'set_memory_issue_info(' in line:
+                    assert current_class is not None, model_path
+                    metadata_classes.add(current_class)
+            assert execution_classes <= metadata_classes, path
+
         total_states += states
     assert total_states > 0
 

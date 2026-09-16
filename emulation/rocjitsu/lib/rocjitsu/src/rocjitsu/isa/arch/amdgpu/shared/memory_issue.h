@@ -33,15 +33,13 @@ enum class MemoryCompletionClass : uint8_t {
 /// than depend on the encoding.
 class MemoryCounterObligation {
 public:
+  static constexpr uint8_t MAX_COUNTER_INCREMENT = 2;
+
   constexpr MemoryCounterObligation() = default;
   constexpr MemoryCounterObligation(WaitCounterType wait_counter_type,
                                     MemoryCompletionClass completion_class,
                                     uint8_t counter_increment = 1)
-      : encoded_(((counter_increment - 1) << 7) | (static_cast<uint8_t>(completion_class) << 4) |
-                 static_cast<uint8_t>(wait_counter_type)) {
-    assert(counter_increment == 1 || counter_increment == 2);
-    assert(completion_class != MemoryCompletionClass::UNCLASSIFIED);
-  }
+      : encoded_(encode(wait_counter_type, completion_class, counter_increment)) {}
 
   [[nodiscard]] constexpr bool valid() const {
     return completion_class() != MemoryCompletionClass::UNCLASSIFIED;
@@ -55,6 +53,17 @@ public:
   [[nodiscard]] constexpr uint8_t counter_increment() const { return 1 + (encoded_ >> 7); }
 
 private:
+  static constexpr uint8_t encode(WaitCounterType wait_counter_type,
+                                  MemoryCompletionClass completion_class,
+                                  uint8_t counter_increment) {
+    assert(counter_increment >= 1 && counter_increment <= MAX_COUNTER_INCREMENT);
+    assert(completion_class != MemoryCompletionClass::UNCLASSIFIED);
+    assert(static_cast<uint8_t>(wait_counter_type) < 16);
+    return static_cast<uint8_t>(((counter_increment - 1) << 7) |
+                                (static_cast<uint8_t>(completion_class) << 4) |
+                                static_cast<uint8_t>(wait_counter_type));
+  }
+
   static_assert(static_cast<uint8_t>(WaitCounterType::ASYNCCNT) < 16);
   static_assert(static_cast<uint8_t>(MemoryCompletionClass::UNORDERED) < 8);
   uint8_t encoded_ = 0;
