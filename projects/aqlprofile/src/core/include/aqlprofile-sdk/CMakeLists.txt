@@ -1,5 +1,6 @@
 set(AQLPROFILE_HEADER_FILES
     aql_profile_v2.h
+    aql_profile_static.h
     ${CMAKE_CURRENT_BINARY_DIR}/version.h)
 
 add_library(aqlprofile-headers INTERFACE)
