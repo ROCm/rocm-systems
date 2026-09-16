@@ -5,26 +5,7 @@ include_guard(DIRECTORY)
 
 set(FMT_VERSION "11.1.3" CACHE STRING "Minimum fmt version")
 
-find_package(fmt QUIET)
-
-set(_fmt_reason "")
-if(NOT fmt_FOUND)
-    set(_fmt_reason "no package was found on CMAKE_PREFIX_PATH")
-elseif(fmt_VERSION VERSION_LESS FMT_VERSION)
-    set(_fmt_reason
-        "version ${fmt_VERSION} was found, but ${FMT_VERSION} or newer is required"
-    )
-endif()
-
-if(_fmt_reason STREQUAL "")
-    message(STATUS "Using system fmt (version ${fmt_VERSION})")
-elseif(NOT PROFILER_HUB_FETCH_DEPENDENCIES)
-    message(
-        FATAL_ERROR
-        "profiler-hub requires fmt: ${_fmt_reason}. Provide it on CMAKE_PREFIX_PATH, or configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it."
-    )
-else()
-    message(STATUS "Fetching fmt ${FMT_VERSION}: ${_fmt_reason}")
+if(PROFILER_HUB_FETCH_DEPENDENCIES)
     include(FetchContent)
 
     FetchContent_Declare(
@@ -32,6 +13,7 @@ else()
         GIT_REPOSITORY https://github.com/fmtlib/fmt.git
         GIT_TAG ${FMT_VERSION}
         GIT_SHALLOW TRUE
+        FIND_PACKAGE_ARGS ${FMT_VERSION}
     )
 
     set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
@@ -57,6 +39,15 @@ else()
     if(NOT TARGET fmt::fmt)
         add_library(fmt::fmt ALIAS fmt)
     endif()
-endif()
+else()
+    find_package(fmt ${FMT_VERSION})
 
-unset(_fmt_reason)
+    if(NOT fmt_FOUND)
+        message(
+            FATAL_ERROR
+            "profiler-hub requires fmt ${FMT_VERSION} or newer on CMAKE_PREFIX_PATH. Configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it instead."
+        )
+    endif()
+
+    message(STATUS "Using system fmt (version ${fmt_VERSION})")
+endif()
