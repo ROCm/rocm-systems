@@ -78,7 +78,7 @@ namespace rocshmem
                 mistakeCount, numPages, targetId);
       return -1;
     }
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   // Allocate memory
@@ -124,7 +124,7 @@ namespace rocshmem
       LOG_ERROR("Unsupported memory type (%d)", memType);
       return -1;
     }
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   // Deallocate memory
@@ -151,7 +151,7 @@ namespace rocshmem
       LOG_ERROR("Attempting to deallocate unrecognized memory type (%d)", memType);
       return -1;
     }
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
 
@@ -215,7 +215,7 @@ namespace rocshmem
              exeDevice.exeType);
       return -1;
     }
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   // Get the hsa_agent_t associated with a MemDevice
@@ -286,7 +286,7 @@ namespace rocshmem
         version = 2;
       }
     }
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   static bool IsIPv4MappedIPv6(const union ibv_gid &gid)
@@ -309,7 +309,7 @@ namespace rocshmem
                          int const&                   portNum,
                          std::pair<int, std::string>& gidInfo)
   {
-    if(gidInfo.first >= 0) return ROCSHMEM_SUCCESS; // honor user choice
+    if(gidInfo.first >= 0) return 0; // honor user choice
     union ibv_gid gid;
 
     GidPriority highestPriority = GidPriority::UNKNOWN;
@@ -319,7 +319,7 @@ namespace rocshmem
       IBV_CALL(ibv.query_gid, context, portNum, i, &gid);
       if (!IsConfiguredGid(gid)) continue;
       int gidCurrRoceVersion;
-      if(GetRoceVersionNumber(context, portNum, i, gidCurrRoceVersion) != ROCSHMEM_SUCCESS) continue;
+      if(GetRoceVersionNumber(context, portNum, i, gidCurrRoceVersion) != 0) continue;
       GidPriority currPriority;
       if (IsIPv4MappedIPv6(gid)) {
         currPriority = (gidCurrRoceVersion == 2) ? GidPriority::ROCEV2_IPV4 : GidPriority::ROCEV1_IPV4;
@@ -341,7 +341,7 @@ namespace rocshmem
     }
     gidInfo.first = gidIndex;
     gidInfo.second = GidPriorityStr[highestPriority];
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   vector<IbvDevice> const& GetIbvDeviceList()
@@ -387,7 +387,7 @@ namespace rocshmem
                       ibvDevice.isRoce = true;
                       std::pair<int, std::string> gidInfo (-1, "");
                       auto res = GetGidIndex(context, portAttr.gid_tbl_len, activePort, gidInfo);
-                      if (res == ROCSHMEM_SUCCESS) {
+                      if (res == 0) {
                         ibvDevice.gidIndex = gidInfo.first;
                         ibvDevice.gidDescriptor = gidInfo.second;
                       }
@@ -587,7 +587,7 @@ namespace rocshmem
     }
     currNode->description = description;
 
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   // Returns root node for PCIe tree.  Constructed on first use

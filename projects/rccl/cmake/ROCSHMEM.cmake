@@ -29,13 +29,6 @@ set(ROCSHMEM_MONO_HASH "33d980d7ca1f0bf90cfe4ff9106310abcf47b550" CACHE STRING
 
 function(add_rocshmem_targets)
 
-    # Common dependency: libibverbs is required for all rocSHMEM paths
-    find_library(_IBVERBS ibverbs)
-    if(NOT _IBVERBS)
-        message(FATAL_ERROR "libibverbs not found (install rdma-core/libibverbs-dev)")
-    endif()
-    set(IBVERBS ${_IBVERBS} PARENT_SCOPE)
-
     # -----------------------------------------------------------------
     # Auto-detect ROCSHMEM_SOURCE_DIR if not provided.
     # Runs first so source headers are available regardless of whether

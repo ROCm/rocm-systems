@@ -828,6 +828,17 @@ rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl.h
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device/
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device)
+# Install SDMA device headers so consumers can compile GIN SDMA device templates
+# without depending on ROCSHMEM_SOURCE_DIR.
+if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR)
+  rocm_install(FILES
+    ${ROCSHMEM_SOURCE_DIR}/src/sdma/anvil_device.hpp
+    ${ROCSHMEM_SOURCE_DIR}/src/sdma/sdma_opcodes.h
+    ${ROCSHMEM_SOURCE_DIR}/src/sdma/sdma_pkt_struct.h
+    ${ROCSHMEM_SOURCE_DIR}/src/sdma/sdma_pkt_struct_mi4.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/gin/log.hpp
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device/gin/anvil_sdma/sdma)
+endif()
 ## Optional: install LLVM bitcode artifacts when EMIT_LLVM_IR is enabled.
 ## librccl_device.bc, nccl_device_wrapper.h, hipified nccl_device headers,
 ## and nccl.h (same as rccl.h; nccl_device #includes <nccl.h>) are produced

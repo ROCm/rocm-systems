@@ -19,7 +19,8 @@
 #      rccl-UnitTestsFixtures and rccl-UnitTestsGinSdmaBroadcastPolicy
 #      (GIN_ANVIL_UNIT_TESTS=ON) -> rccl.env
 #   5. projects/rccl-tests        build rccl-tests (DEVICE_API + ROCSHMEM)
-#   6. run-gin-ci.sh              run the GIN/rocSHMEM tests (non-gating)
+#   6. rccl-UnitTestsGinAnvilSdmaFactory  SDMA factory gtest (single-node)
+#   7. run-gin-ci.sh              run the GIN/rocSHMEM tests (non-gating)
 #
 # Required env (from the workflow via `sbatch --export=ALL,...`):
 #   RCCL_DEVICE_API_WORKDIR   GHA workspace (rocm-systems root)
@@ -60,7 +61,7 @@ build_rc=0
 (
 # 1) ROCm: provisioned on the head node from TheRock CI artifacts; consume the
 # workspace tree via rocm.env.
-echo "==> [1/6] use ROCm (provisioned from TheRock artifacts on head node)"
+echo "==> [1/7] use ROCm (provisioned from TheRock artifacts on head node)"
 rocm_env="${workdir}/.ci-out/rocm.env"
 if [[ ! -f "${rocm_env}" ]]; then
   echo "ERROR: ${rocm_env} not found. The workflow must run 'Provision ROCm" >&2
@@ -85,7 +86,7 @@ export CMAKE_PREFIX_PATH="${ROCM_PATH}/lib/cmake:${ROCM_PATH}${CMAKE_PREFIX_PATH
 
 # 2) OpenMPI: built here against ROCM_PATH into the per-job workspace cache
 # (no shared cache), then ompi.env (MPI_HOME) is sourced below.
-echo "==> [2/6] build OpenMPI"
+echo "==> [2/7] build OpenMPI"
 "${ci_dir}/lib/build-ompi.sh"
 set -a
 # shellcheck source=/dev/null
@@ -98,7 +99,7 @@ export PATH="${MPI_HOME}/bin:${PATH}"
 source "${ci_dir}/lib/ensure-python-yaml.sh"
 
 # 3) rocSHMEM (in-tree, IPC+SDMA) -> rocshmem.env (ROCSHMEM_INSTALL_DIR)
-echo "==> [3/6] build rocSHMEM"
+echo "==> [3/7] build rocSHMEM"
 GPU_TARGETS="${gpu_targets}" "${ci_dir}/lib/build-rocshmem.sh"
 set -a
 # shellcheck source=/dev/null
@@ -112,7 +113,7 @@ set +a
 # that builds every test executable and pulls in rccl-UnitTestsGinAnvilPlugin,
 # which can compile before hipify headers exist under parallel -j and aborts
 # before librccl.so is installed.
-echo "==> [4/6] build RCCL (GIN, targets=${gpu_targets})"
+echo "==> [4/7] build RCCL (GIN, targets=${gpu_targets})"
 rccl_src="${workdir}/projects/rccl"
 rccl_prefix="${workdir}/.ci-out/rccl-install"
 rccl_build="${rccl_src}/build/release"
@@ -124,7 +125,7 @@ rm -rf "${rccl_prefix}"
   MPI_PATH="${MPI_HOME}" ./install.sh -j "${build_jobs}" \
     --amdgpu_targets="${gpu_targets}" \
     --prefix="${rccl_prefix}" \
-    --rocshmem-gin --no_clean \
+    --rocshmem-gin --no_clean --tests_build \
     --cmake-options "-DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
 )
 if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.so.1" ]]; then
@@ -133,7 +134,7 @@ if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.s
   exit 1
 fi
 
-echo "==> [4/6] build rccl-UnitTestsFixtures + GinSdmaBroadcastPolicy (GIN_ANVIL_UNIT_TESTS=ON)"
+echo "==> [4/7] build rccl-UnitTestsFixtures + GinSdmaBroadcastPolicy (GIN_ANVIL_UNIT_TESTS=ON)"
 (
   cd "${rccl_build}"
   cmake . \
@@ -169,7 +170,7 @@ echo "    in-tree RCCL cmake config: ${rccl_cmake_dir}"
 
 # 5) rccl-tests (DEVICE_API + ROCSHMEM). allreduce fails to build; -k keeps going
 # so alltoall_perf still lands (matches the Dockerfile's `make -k || true`).
-echo "==> [5/6] build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN)"
+echo "==> [5/7] build rccl-tests (ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN)"
 rccl_tests_src="${workdir}/projects/rccl-tests"
 rccl_tests_build="${workdir}/.ci-out/rccl-tests-build"
 
@@ -227,12 +228,29 @@ if [[ "${build_rc}" -ne 0 ]]; then
   exit "${build_rc}"
 fi
 
+# --- unit test: SDMA factory gtest (single-node, no MPI needed). ---
+# Runs against the real librccl.so; HW-dependent tests auto-skip if probe fails.
+# Source rccl.env to get RCCL_INSTALL_PREFIX (set inside the build subshell).
+set -a
+# shellcheck source=/dev/null
+source "${workdir}/.ci-out/rccl.env"
+set +a
+echo "==> [6/7] run SDMA factory unit tests"
+sdma_factory_test="${workdir}/projects/rccl/build/test/rccl-UnitTestsGinAnvilSdmaFactory"
+if [[ -x "${sdma_factory_test}" ]]; then
+  export LD_LIBRARY_PATH="${RCCL_INSTALL_PREFIX}/lib:${ROCSHMEM_INSTALL_DIR}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
+  "${sdma_factory_test}" --gtest_output="xml:${logs_dir}/sdma-factory-test.xml" \
+    || echo "WARNING: SDMA factory unit tests failed (non-gating)" >&2
+else
+  echo "  SKIP: ${sdma_factory_test} not found (BUILD_TESTS may be off)"
+fi
+
 # --- test phase -> test-%j.{out,err}. Don't fail the sbatch on test failures
 # (that would look like a build/infra failure); drop a `tests-failed` sentinel
 # instead, which the workflow turns into a red (non-gating for gin) result. ---
 test_rc=0
 {
-echo "==> [6/6] run GIN tests"
+echo "==> [7/7] run GIN tests"
 "${ci_dir}/run-gin-ci.sh"
 } > "${test_out}" 2> "${test_err}" || test_rc=$?
 echo "==> test phase logs: ${test_out} / ${test_err}"

@@ -18,7 +18,7 @@
 #include "bootstrap.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
-#include <gin_anvil/sdma_factory.h>
+#include "gin/gin_anvil_sdma_factory.h"
 #include <hip/hip_runtime.h>
 #include <cstdint>
 #include <cstdlib>

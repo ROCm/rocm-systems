@@ -329,8 +329,6 @@ namespace rocshmem
 //==========================================================================================
 
 // Error check macros
-#define ROCSHMEM_SUCCESS 0
-
 #define ERR_CHECK(cmd)            \
   do {                            \
     int error = cmd;                                                      \

@@ -468,6 +468,23 @@ if(BUILD_TESTS)
     # No rccl link below, so the implicit ordering after hipify has to be explicit.
     add_dependencies(rccl-UnitTestsGinAnvilPlugin hipify_all)
   endif()
+
+  # rccl-UnitTestsGinAnvilSdmaFactory: exercises the real gin_anvil_sdma_factory
+  # (probe/create/destroy) compiled into librccl.so. HW-dependent tests skip
+  # via GTEST_SKIP when probe() fails. Links librccl.so (factory symbols live there).
+  if(ENABLE_ROCSHMEM_GIN)
+    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsGinAnvilSdmaFactory)
+
+    add_executable(rccl-UnitTestsGinAnvilSdmaFactory
+      gin/GinAnvilSdmaFactory_test.cpp
+      common/main_fixtures.cpp
+    )
+
+    target_include_directories(rccl-UnitTestsGinAnvilSdmaFactory PRIVATE
+      ${PROJECT_BINARY_DIR}/hipify/src/include
+    )
+    target_compile_definitions(rccl-UnitTestsGinAnvilSdmaFactory PRIVATE ENABLE_ROCSHMEM_GIN)
+  endif()
   endif()
 
   # rccl-UnitTestsDevRuntime: self-contained host micro-test that #includes the

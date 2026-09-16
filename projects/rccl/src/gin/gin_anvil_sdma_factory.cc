@@ -1,20 +1,21 @@
-/******************************************************************************
+/*************************************************************************
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
- * SPDX-License-Identifier: MIT
- *****************************************************************************/
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
-#include <gin_anvil/sdma_factory.h>
+#ifdef ENABLE_ROCSHMEM_GIN
 
-#include "anvil.hpp"
-#include "util.hpp"
+#include "gin/gin_anvil_sdma_factory.h"
+
+#include "sdma/anvil.hpp"
 #include <hip/hip_runtime.h>
 #include <cstdlib>
 #include <vector>
 #include <cstring>
 #include <algorithm>
 
-#include "log.hpp"
+#include "debug.h"
 
 struct gin_anvil_sdma_opaque {
   int nRanks;
@@ -34,7 +35,7 @@ extern "C" int gin_anvil_sdma_probe(void) {
 
 static int checkHip(hipError_t e, const char* what) {
   if (e != hipSuccess) {
-    LOG_ERROR("gin_anvil_sdma: %s: %s", what, hipGetErrorString(e));
+    WARN("GIN anvil-sdma: %s: %s", what, hipGetErrorString(e));
     return -1;
   }
   return 0;
@@ -61,13 +62,13 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
   std::vector<int> devs(static_cast<size_t>(nRanks), -1);
   devs[static_cast<size_t>(myRank)] = my_device_id;
   if (allgather(allgather_ctx, devs.data(), sizeof(int)) != 0) {
-    LOG_ERROR("gin_anvil_sdma: allgather(device ids) failed");
+    WARN("GIN anvil-sdma: allgather(device ids) failed");
     return -1;
   }
 
   for (int i = 0; i < nRanks; ++i) {
     if (devs[static_cast<size_t>(i)] < 0) {
-      LOG_ERROR("gin_anvil_sdma: invalid device id for rank %d", i);
+      WARN("GIN anvil-sdma: invalid device id for rank %d", i);
       return -1;
     }
   }
@@ -75,7 +76,7 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
   const int myDev = devs[static_cast<size_t>(myRank)];
 
   if (!sdma_anvil::initEndpoint()) {
-    LOG_ERROR("gin_anvil_sdma: Anvil SDMA init failed");
+    WARN("GIN anvil-sdma: Anvil SDMA init failed");
     return -1;
   }
 
@@ -85,12 +86,12 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
       if (sdma_anvil::anvil.getSdmaQueue(myDev, remoteDev, 0) != nullptr) continue;
       if (myDev != remoteDev) sdma_anvil::EnablePeerAccess(myDev, remoteDev);
       if (!sdma_anvil::anvil.connect(myDev, remoteDev, numChannels)) {
-        LOG_ERROR("gin_anvil_sdma: connect(%d -> %d) failed", myDev, remoteDev);
+        WARN("GIN anvil-sdma: connect(%d -> %d) failed", myDev, remoteDev);
         return -1;
       }
     }
   } catch (const std::exception& e) {
-    LOG_ERROR("gin_anvil_sdma: SDMA connect failed: %s", e.what());
+    WARN("GIN anvil-sdma: SDMA connect failed: %s", e.what());
     return -1;
   }
 
@@ -108,7 +109,7 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
     }
   }
   if (validHandles == 0) {
-    LOG_ERROR("gin_anvil_sdma: no SDMA queue handles for device %d", myDev);
+    WARN("GIN anvil-sdma: no SDMA queue handles for device %d", myDev);
     return -1;
   }
 
@@ -118,19 +119,19 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
   if (checkHip(hipMemcpy(dev_row, host_handles.data(), static_cast<size_t>(total) * sizeof(void*),
                          hipMemcpyHostToDevice),
                "hipMemcpy handles") != 0) {
-    CHECK_HIP(hipFree(dev_row));
+    (void)hipFree(dev_row);
     return -1;
   }
 
   uint64_t* dirty = nullptr;
   if (checkHip(hipExtMallocWithFlags((void**)&dirty, sizeof(uint64_t), hipDeviceMallocFinegrained),
                "hipExtMallocWithFlags sdmaDirty") != 0) {
-    CHECK_HIP(hipFree(dev_row));
+    (void)hipFree(dev_row);
     return -1;
   }
   if (checkHip(hipMemset(dirty, 0, sizeof(uint64_t)), "hipMemset sdmaDirty") != 0) {
-    CHECK_HIP(hipFree(dev_row));
-    CHECK_HIP(hipFree(dirty));
+    (void)hipFree(dev_row);
+    (void)hipFree(dirty);
     return -1;
   }
 
@@ -152,8 +153,8 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
 extern "C" void gin_anvil_sdma_destroy(gin_anvil_sdma_handle_t handle) {
   if (!handle) return;
   auto* impl = handle;
-  if (impl->deviceHandles_d) CHECK_HIP(hipFree(impl->deviceHandles_d));
-  if (impl->sdmaDirty_d) CHECK_HIP(hipFree(impl->sdmaDirty_d));
+  if (impl->deviceHandles_d) (void)hipFree(impl->deviceHandles_d);
+  if (impl->sdmaDirty_d) (void)hipFree(impl->sdmaDirty_d);
   delete impl;
 }
 
@@ -168,3 +169,5 @@ extern "C" int gin_anvil_sdma_get_num_channels(gin_anvil_sdma_handle_t handle) {
 extern "C" int gin_anvil_sdma_get_channel_stride(gin_anvil_sdma_handle_t handle) {
   return handle ? handle->sdmaChannelStride : 0;
 }
+
+#endif // ENABLE_ROCSHMEM_GIN

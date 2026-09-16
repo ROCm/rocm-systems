@@ -193,6 +193,7 @@ set(SRC_FILES
   include/gin/gin_host_rocshmem_gda.h
   include/gin/gin_rocshmem_gda_factory.h
   include/gin/gin_host_anvil_sdma.h
+  include/gin/gin_anvil_sdma_factory.h
   include/hip_rocm_version_info.h
   include/ibvcore.h
   include/ibvsymbols.h
@@ -528,8 +529,11 @@ if(ENABLE_ROCSHMEM_GIN)
     src/gin/gin_plugin_anvil_sdma.cc
     src/gin/gin_anvil_ipc_table_host.cc
     src/algorithms/gin/sdma/gin_alltoall_sdma.cu
-    src/algorithms/gin/sdma/gin_all_reduce_sdma.cu 
+    src/algorithms/gin/sdma/gin_all_reduce_sdma.cu
+    src/gin/gin_anvil_sdma_factory.cc
   )
+  # anvil.cpp is compiled from rocshmem source via target_sources after
+  # add_library (bypasses SRC_FILES/hipify). See block after add_library.
 endif()
 
 if(USE_AMDSMI)
@@ -866,6 +870,15 @@ list(APPEND HIP_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/git_version.cpp)
 ## Set RCCL source files
 add_library(rccl ${HIP_SOURCES})
 
+# Compile anvil.cpp from rocshmem source tree into librccl.so (host-only).
+# src/gin/log.hpp shim shadows rocshmem's log.hpp via include path ordering,
+# redirecting LOG_* macros to RCCL native logging (WARN/INFO/TRACE).
+if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR)
+  target_sources(rccl PRIVATE "${ROCSHMEM_SOURCE_DIR}/src/sdma/anvil.cpp")
+  set_source_files_properties("${ROCSHMEM_SOURCE_DIR}/src/sdma/anvil.cpp" PROPERTIES
+    INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/src/gin;${ROCSHMEM_SOURCE_DIR}/src/sdma;${ROCSHMEM_SOURCE_DIR}/src;${ROCSHMEM_SOURCE_DIR}/include;${ROCM_PATH}/include")
+endif()
+
 ## Set RCCL dependencies
 ## Ensure git version is updated before building rccl
 add_dependencies(rccl update_git_version copy_nccl_device_headers net_ib_header_symlinks rma_header_symlinks)
@@ -964,9 +977,6 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
       target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/build/include ${ROCSHMEM_SOURCE_DIR}/build/include/rocshmem)
     endif()
   endif()
-endif()
-if (ENABLE_ROCSHMEM)
-  target_link_libraries(rccl PRIVATE ${IBVERBS})
 endif()
 
 if(ROCTX_ENABLE)
@@ -1366,7 +1376,6 @@ if(ENABLE_ROCSHMEM)
   # of the final librccl.so link.
   target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
   target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
-  target_link_libraries(rccl PRIVATE ${IBVERBS})
   set(_rocshmem_offload_arch_flags "")
   foreach(_gpu_raw ${GPU_TARGETS})
     string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")

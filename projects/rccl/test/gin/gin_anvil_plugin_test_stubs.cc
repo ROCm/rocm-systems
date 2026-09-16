@@ -8,7 +8,7 @@
 
 #include "gin_anvil_plugin_test_stubs.h"
 
-#include <gin_anvil/sdma_factory.h>
+#include "gin/gin_anvil_sdma_factory.h"
 
 #include "bootstrap.h"
 #include "debug.h"

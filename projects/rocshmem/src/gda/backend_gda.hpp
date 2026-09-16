@@ -52,10 +52,6 @@ class GDAHostContext;
 class QueuePair;
 class HostInterface;
 
-inline constexpr uint32_t GDA_IONIC_VENDOR_ID = 0x1DD8;
-inline constexpr uint32_t GDA_MLX5_VENDOR_ID  = 0x02c9; //PCI-ID is 15b3
-inline constexpr uint32_t GDA_BNXT_VENDOR_ID  = 0x14E4;
-
 struct NicDevice {
   std::string nic_name;
   struct ibv_device *device = nullptr;
