@@ -102,13 +102,15 @@ __global__ void SdmaPingPongTest(int loop, int skip,
         int val = i + 1;
         if (pe == 0) {
           *s_int = val;
-          __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+          atomic::threadfence<atomic::memory_scope::device,
+                              atomic::memory_order::release>();
           sdma_anvil::put(*handle, remote_r_buf, my_s, sizeof(int));
           while (uncached_load(r_int) != val) {}
         } else {
           while (uncached_load(r_int) != val) {}
           *s_int = val;
-          __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+          atomic::threadfence<atomic::memory_scope::device,
+                              atomic::memory_order::release>();
           sdma_anvil::put(*handle, remote_r_buf, my_s, sizeof(int));
         }
       } else {

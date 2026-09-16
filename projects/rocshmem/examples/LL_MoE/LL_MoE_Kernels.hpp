@@ -45,9 +45,11 @@ __host__ __device__ T cell_div(T a, T b) {
 
 // Warp synchronization function
 __forceinline__ __device__ void warp_sync() {
-  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
+  detail::atomic::threadfence<detail::atomic::memory_scope::wavefront,
+                              detail::atomic::memory_order::release>();
   __builtin_amdgcn_wave_barrier();
-  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
+  detail::atomic::threadfence<detail::atomic::memory_scope::wavefront,
+                              detail::atomic::memory_order::acquire>();
 }
 
 /**
