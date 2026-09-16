@@ -1333,9 +1333,9 @@ function(add_tile_tests)
         # Thread-level allgather - test with 2 and 4 PEs
         add_rocshmem_functional_test(NAME tile_allgather RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_allgather RANKS 4 WORKGROUPS 1 THREADS 1)
-        # Wave-level allgather
-        add_rocshmem_functional_test(NAME tile_allgather_wave RANKS 2 WORKGROUPS 1 NUM_WF 1)
-        add_rocshmem_functional_test(NAME tile_allgather_wave RANKS 4 WORKGROUPS 1 NUM_WF 1)
+        # Wave-level allgather - each wave uses its own context; MAX_NUM_CONTEXTS = WGs * NUM_WF
+        add_rocshmem_functional_test(NAME tile_allgather_wave RANKS 2 WORKGROUPS 1 NUM_WF 4)
+        add_rocshmem_functional_test(NAME tile_allgather_wave RANKS 4 WORKGROUPS 4 NUM_WF 4)
         # Workgroup-level allgather
         add_rocshmem_functional_test(NAME tile_allgather_wg RANKS 2 WORKGROUPS 4 NUM_WF 1)
         add_rocshmem_functional_test(NAME tile_allgather_wg RANKS 4 WORKGROUPS 4 NUM_WF 1)
