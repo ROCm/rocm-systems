@@ -1057,8 +1057,13 @@ TestTiles() {
   ExecTest  "tile_allgather_wg"         4       4            $WAVE_SIZE
   ExecTest  "tile_reduce"               2       1            1
   ExecTest  "tile_reduce"               4       1            1
-  ExecTest  "tile_reduce_wave"          2       1            $WAVE_SIZE
-  ExecTest  "tile_reduce_wave"          4       1            $WAVE_SIZE
+  # tile_reduce_wave: each wave uses its own context; set MAX_NUM_CONTEXTS = NUM_WGS * NUM_WF
+  #       | Name                      | Ranks | Workgroups | Threads    | Max Msg | NUM_WF #
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((1 * 4))
+  ExecTest  "tile_reduce_wave"          2       1            $WAVE_SIZE   ""       4
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((4 * 4))
+  ExecTest  "tile_reduce_wave"          4       4            $WAVE_SIZE   ""       4
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
   ExecTest  "tile_reduce_wg"            2       4            $WAVE_SIZE
   ExecTest  "tile_reduce_wg"            4       4            $WAVE_SIZE
 }
