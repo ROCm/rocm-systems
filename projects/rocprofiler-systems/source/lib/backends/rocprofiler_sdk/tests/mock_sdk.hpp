@@ -137,9 +137,12 @@ using device_counting_agent_cb_t = void*;
 using device_counting_svc_cb_t   = void*;
 using dispatch_counting_svc_cb   = void*;
 using dispatch_counting_rec_cb   = void*;
+using callback_phase             = int;
 
 struct callback_tracing_record_t
-{};
+{
+    callback_phase phase = 0;
+};
 
 // record_header_t mirrors rocprofiler_record_header_t: buffered_callback_dispatcher
 // dereferences ->payload on every element of the header array it iterates.
@@ -384,6 +387,7 @@ struct mock_sdk
     using external_correlation_id_request_cb_t = testing::ext_correlation_req_cb_t;
     using internal_thread_library_cb_t         = testing::internal_thread_cb_t;
     using callback_tracing_record              = testing::callback_tracing_record_t;
+    using callback_phase_t                     = testing::callback_phase;
     using callback_tracing_operation_args_cb_t = testing::tracing_op_args_cb_t;
     using available_dimensions_cb_t            = testing::available_dimensions_cb_t;
     using counter_info_version_id_t            = testing::counter_info_ver;
@@ -418,6 +422,11 @@ struct mock_sdk
     static constexpr counter_flag_t            COUNTER_FLAG_NONE      = 0;
     static constexpr counter_info_version_id_t COUNTER_INFO_VERSION_0 = 0;
     static constexpr counter_info_version_id_t COUNTER_INFO_VERSION_1 = 1;
+
+    // ── Callback phase constants ──────────────────────────────────────────────
+    static constexpr callback_phase_t CALLBACK_PHASE_ENTER = 0;
+    static constexpr callback_phase_t CALLBACK_PHASE_EXIT  = 1;
+    static constexpr callback_phase_t CALLBACK_PHASE_NONE  = 2;
 
     // ── Callback/buffer tracing kind constants ────────────────────────────────
     // Only backend<Sdk>'s unconditional constants — ROCPROFILER_VERSION is

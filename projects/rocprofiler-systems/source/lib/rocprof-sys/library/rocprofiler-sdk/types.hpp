@@ -139,6 +139,50 @@ struct buffered_callback_dispatcher
     }
 };
 
+template <typename SdkBackend>
+using tracing_phase_cb_t = void (*)(typename SdkBackend::callback_tracing_record_t,
+                                    typename SdkBackend::user_data_t*, void*);
+
+template <typename SdkBackend, tracing_phase_cb_t<SdkBackend> OnEnter = nullptr,
+          tracing_phase_cb_t<SdkBackend> OnExit = nullptr,
+          tracing_phase_cb_t<SdkBackend> OnNone = nullptr>
+struct tracing_callback_dispatcher
+{
+    // NOLINTNEXTLINE (readability-function-size)
+    static void callback(SdkBackend::callback_tracing_record_t record,
+                         SdkBackend::user_data_t* user_data, void* callback_data)
+    {
+        switch(record.phase)
+        {
+            case SdkBackend::CALLBACK_PHASE_ENTER:
+            {
+                if constexpr(OnEnter != nullptr)
+                {
+                    OnEnter(record, user_data, callback_data);
+                }
+                break;
+            }
+            case SdkBackend::CALLBACK_PHASE_EXIT:
+            {
+                if constexpr(OnExit != nullptr)
+                {
+                    OnExit(record, user_data, callback_data);
+                }
+                break;
+            }
+            case SdkBackend::CALLBACK_PHASE_NONE:
+            {
+                if constexpr(OnNone != nullptr)
+                {
+                    OnNone(record, user_data, callback_data);
+                }
+                break;
+            }
+            default: break;
+        }
+    }
+};
+
 }  // namespace rocprofsys::domains
 
 template <>

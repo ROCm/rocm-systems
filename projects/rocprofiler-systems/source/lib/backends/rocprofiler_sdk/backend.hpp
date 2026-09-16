@@ -73,6 +73,7 @@ struct backend
         Wrapper::external_correlation_id_request_cb_t;
     using internal_thread_library_cb_t = Wrapper::internal_thread_library_cb_t;
     using callback_tracing_record_t    = Wrapper::callback_tracing_record;
+    using callback_phase_t             = Wrapper::callback_phase_t;
     using callback_tracing_operation_args_cb_t =
         Wrapper::callback_tracing_operation_args_cb_t;
     using available_dimensions_cb_t      = Wrapper::available_dimensions_cb_t;
@@ -94,6 +95,12 @@ struct backend
     // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS =
         Wrapper::BUFFER_POLICY_LOSSLESS;
+
+    // ─── Callback phase constants ────────────────────────────────────────────────
+    static constexpr callback_phase_t CALLBACK_PHASE_ENTER =
+        Wrapper::CALLBACK_PHASE_ENTER;
+    static constexpr callback_phase_t CALLBACK_PHASE_EXIT = Wrapper::CALLBACK_PHASE_EXIT;
+    static constexpr callback_phase_t CALLBACK_PHASE_NONE = Wrapper::CALLBACK_PHASE_NONE;
 
     // ─── Callback tracing kind constants ─────────────────────────────────────────
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_HSA_CORE_API =
