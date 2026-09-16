@@ -176,9 +176,14 @@ jobs:
             exit 1
           fi
 
-      # The official Debian images have no python3 to launch the build script.
-      - name: Bootstrap python3
-        run: command -v python3 || (apt-get update && apt-get install -y --no-install-recommends python3)
+      # The official Debian images carry neither git, which actions/checkout
+      # needs to clone rather than fall back to a tarball, nor python3, which
+      # launches the build script.
+      - name: Bootstrap git and python3
+        run: |
+          command -v git >/dev/null && command -v python3 >/dev/null && exit 0
+          apt-get update
+          apt-get install -y --no-install-recommends git python3 ca-certificates
 
       # rocm-systems is a large monorepo; only the amdsmi project and this
       # workflow are needed, so sparse-checkout keeps the fetch cheap.
