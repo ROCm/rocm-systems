@@ -57,6 +57,24 @@ namespace RcclUnitTesting
   template <> __host__ __device__ inline bool Matches<uint32_t>(uint32_t a,uint32_t b){ return a == b; }
   template <> __host__ __device__ inline bool Matches<int64_t> (int64_t a, int64_t b) { return a == b; }
   template <> __host__ __device__ inline bool Matches<uint64_t>(uint64_t a,uint64_t b){ return a == b; }
+  // FP8 has very few mantissa bits, so its spacing grows with magnitude.
+  // Collective backends can also use different valid accumulation precision:
+  // standard kernels may round intermediate sums back to FP8, while symmetric
+  // kernels accumulate in FP32 and round once when storing the FP8 result.
+  // Allow two representable steps for these reduction-order and accumulation
+  // differences instead of using a magnitude-blind absolute tolerance.
+  __host__ __device__ inline bool MatchesFp8(float a, float b, float ulpFraction)
+  {
+    if (a == b) return true;
+    float const absA = a < 0.0f ? -a : a;
+    float const absB = b < 0.0f ? -b : b;
+    float const diff = a > b ? a - b : b - a;
+    // Reject NaN/infinity mismatches before computing a relative tolerance.
+    if (!(diff <= 3.402823466e+38F)) return false;
+    float const magnitude = absA > absB ? absA : absB;
+    float const scale = magnitude > 0.0625f ? magnitude : 0.0625f;
+    return diff <= 2.0f * ulpFraction * scale;
+  }
   // Tolerances use the SAME double literals as the host IsEqual (PtrUnion.cpp), not
   // float literals: 9e-2/1e-5 aren't exactly representable, so a float-literal bound
   // differs from the host's double bound by ~1e-9 and could flip a verdict at the
@@ -65,8 +83,8 @@ namespace RcclUnitTesting
   template <> __host__ __device__ inline bool Matches<double>  (double a, double b)  { return fabs(a - b) < 1e-12; }
   template <> __host__ __device__ inline bool Matches<__half>       (__half a, __half b)             { return fabs((double)(__half2float(a) - __half2float(b))) < 9e-2; }
   template <> __host__ __device__ inline bool Matches<hip_bfloat16> (hip_bfloat16 a, hip_bfloat16 b) { return fabs((double)((float)a - (float)b)) < 9e-2; }
-  template <> __host__ __device__ inline bool Matches<rccl_float8>  (rccl_float8 a, rccl_float8 b)   { return fabs((double)((float)a - (float)b)) < 9e-2; }
-  template <> __host__ __device__ inline bool Matches<rccl_bfloat8> (rccl_bfloat8 a, rccl_bfloat8 b) { return fabs((double)((float)a - (float)b)) < 9e-2; }
+  template <> __host__ __device__ inline bool Matches<rccl_float8>  (rccl_float8 a, rccl_float8 b)   { return MatchesFp8((float)a, (float)b, 0.125f); }
+  template <> __host__ __device__ inline bool Matches<rccl_bfloat8> (rccl_bfloat8 a, rccl_bfloat8 b) { return MatchesFp8((float)a, (float)b, 0.25f); }
 
   // ---- per-type -> double (for the first-mismatch diagnostic) -----------------
   // Test-pattern values are small (mod 256, reduced over a handful of ranks), so a
