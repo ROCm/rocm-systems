@@ -1680,6 +1680,9 @@ hipError_t ihipGraphInstantiate(hip::GraphExecBase** pGraphExec, hip::Graph* gra
   // DEBUG_HIP_GRAPH_CLASSIC_PATH=1 forces this path on Linux for testing without
   // enabling the full PAL backend.
   if (GPU_ENABLE_PAL != 0 || DEBUG_HIP_GRAPH_CLASSIC_PATH) {
+    if ((flags & hipGraphInstantiateFlagUseNodePriority) != 0) {
+      return hipErrorNotSupported;
+    }
     auto* classicExec = new hip::GraphExecClassic(flags);
     graph->clone(classicExec, true);
     hipError_t initStatus = validateClonedKernelNodes(static_cast<const hip::Graph*>(classicExec));
@@ -1734,10 +1737,7 @@ hipError_t hipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,
   HIP_RETURN(status, ReturnPtrValue(pGraphExec));
 }
 
-// The instantiate flags each entry point accepts. Deliberately not all four
-// declared flags: hipGraphInstantiateWithFlags has never accepted Upload or
-// DeviceLaunch, and widening it here would make the existing negative test
-// (which passes the literal 10 = Upload | UseNodePriority) start succeeding.
+// Accepted flag bitmasks per entry point; intentionally narrower than all declared flags.
 static constexpr unsigned long long kValidInstantiateFlags =
     hipGraphInstantiateFlagAutoFreeOnLaunch | hipGraphInstantiateFlagUseNodePriority;
 static constexpr unsigned long long kValidInstantiateParamsFlags =
@@ -1751,9 +1751,6 @@ hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t g
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  // invalid flag check. flags is a bitmask, so test the bits rather than the
-  // whole word: an equality chain accepts each flag alone and rejects every
-  // combination of two, which is not what the parameter means.
   if ((flags & ~kValidInstantiateFlags) != 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }

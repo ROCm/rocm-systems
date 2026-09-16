@@ -931,9 +931,7 @@ hipError_t Graph::CreateSegmentsFromPaths(
       segment.child_graph_ptr = childGraphNode->GetChildGraph();
     }
 
-    // Cache the segment's declared priority from its nodes. For child graph
-    // nodes, read the most urgent priority across the child's already-created
-    // segments rather than re-walking the child graph's nodes.
+    // Cache declared priority from kernel nodes and child graph segments.
     for (const auto& node : segment.nodes) {
       if (node == nullptr) continue;
       int node_priority = hip::Stream::Priority::Normal;
@@ -944,11 +942,15 @@ hipError_t Graph::CreateSegmentsFromPaths(
       } else if (node->GetType() == hipGraphNodeTypeGraph) {
         Graph* child = node->GetChildGraph();
         if (child == nullptr) continue;
+        bool child_priority_found = false;
         for (const auto& child_seg : child->segments_) {
-          if (child_seg.priority_set)
-            node_priority = std::min(node_priority, child_seg.declared_priority);
+          if (!child_seg.priority_set) continue;
+          node_priority = child_priority_found
+              ? std::min(node_priority, child_seg.declared_priority)
+              : child_seg.declared_priority;
+          child_priority_found = true;
         }
-        if (node_priority == hip::Stream::Priority::Normal) continue;
+        if (!child_priority_found) continue;
       } else {
         continue;
       }
@@ -1318,24 +1320,10 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
                ? static_cast<size_t>(it->second) : 1;
   };
 
-  // Slots are handed out in the order segments appear in segments_per_level_,
-  // which is capture order. Slot 0 of the capture device is the launch stream
-  // (UpdateStreams() puts it there), so the segment holding slot 0 reaches a join
-  // in program order and pays no cross-stream barrier, while its siblings do.
-  // Which branch of a fork wins that slot is therefore worth a lot on a graph
-  // that forks and joins every layer, and capture order is not something the
-  // application always controls.
-  //
-  // hipLaunchAttributePriority lets it say so explicitly: segments are ordered by
-  // declared priority before slots are handed out, so a segment whose priority is
-  // Priority::High takes slot 0.
-  //
-  // This is empty, and nothing below reorders anything, unless a non-Normal
-  // priority is actually present or the flag was passed.
-  const bool priority_declared =
-      (flags_ & hipGraphInstantiateFlagUseNodePriority) != 0 ||
-      std::any_of(segments_.begin(), segments_.end(),
-                  [](const Segment& s) { return s.priority_set; });
+  // Sort segments by declared priority so high-priority segments get slot 0 (the launch stream).
+  // Only reorder when the caller opts in via hipGraphInstantiateFlagUseNodePriority; recorded
+  // priorities remain available for the flagged path regardless.
+  const bool priority_declared = (flags_ & hipGraphInstantiateFlagUseNodePriority) != 0;
   auto priority_of = [&](int seg_id) -> int {
     if (seg_id >= 0 && seg_id < static_cast<int>(segments_.size()))
       return segments_[seg_id].declared_priority;
@@ -1354,8 +1342,6 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
     std::vector<int> by_priority;
     if (priority_declared) {
       by_priority = it->second;
-      // stable_sort keeps capture order among equally urgent segments, so this
-      // stays a deterministic total order and equal priorities never permute.
       std::stable_sort(by_priority.begin(), by_priority.end(),
                        [&](int lhs, int rhs) { return priority_of(lhs) < priority_of(rhs); });
       assignment_order = &by_priority;
