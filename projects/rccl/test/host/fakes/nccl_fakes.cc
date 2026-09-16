@@ -32,6 +32,8 @@
 
 #include <functional>
 
+#include <functional>
+
 #include "nccl_fakes.h"   // controllable seam hooks
 
 #include <type_traits>

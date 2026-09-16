@@ -5,12 +5,14 @@ gen_hrr_api_args.py — Generate hrr_api_args.h, hip_capture_generated.cpp,
 
 Usage:
     python gen_hrr_api_args.py [--input HIP_API_TRACE_HPP]
+                               [--public-header HIP_RUNTIME_API_H]
                                [--output-header HRR_API_ARGS_H]
                                [--output-capture HIP_CAPTURE_GENERATED_CPP]
                                [--output-playback HIP_PLAYBACK_GENERATED_CPP]
 
 Defaults (paths relative to this script at projects/hrr/tools/):
     input            : ../../clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp
+    public-header    : ../../hip/include/hip/hip_runtime_api.h
     output-header    : ../include/hrr/hrr_api_args.h
     output-capture   : ../../clr/hipamd/src/hrr/hip_capture_generated.cpp
     output-playback  : ../playback/hip_playback_generated.cpp
@@ -965,6 +967,9 @@ class ApiEntry:
     ret_type: str
     params:   List[Param]
     table:    str   # "runtime" | "compiler"
+    # Retired or unparsable dispatch-table slot. Occupies an hrr_api_id_t so
+    # later members keep their IDs; no capture shim is installed.
+    reserved: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -1140,48 +1145,104 @@ _COMPILER_APIS = [
 ]
 
 
+def _dispatch_table_slots(text: str, struct_name: str) -> List[Tuple[str, bool]]:
+    """(func_name, reserved) in dispatch-table member declaration order.
+
+    hip_api_trace.hpp mandates that new members are appended to the end of a
+    dispatch table and that existing ones are never re-ordered or removed (a
+    retired slot becomes a nulled void*), because anything else breaks the ABI.
+    That makes member order append-only, which is what hrr_api_id_t needs: the
+    IDs are written into every captured event, so an ID that shifts silently
+    re-interprets existing archives. Typedef declaration order carries no such
+    guarantee — it is maintained roughly alphabetically, so a new API lands in
+    the middle and pushes every later ID up by one.
+
+    A member may span two lines when the typedef name is long, so the type and
+    the member name are matched across whitespace rather than within one line.
+    Both `t_hipFoo hipFoo_fn;` and a retired `void* hipFoo_fn;` occupy a slot;
+    the latter is returned with reserved=True.
+    """
+    m = re.search(r'struct\s+' + struct_name + r'\s*\{(.*?)\n\}\s*;', text, re.S)
+    if not m:
+        return []
+    slots: List[Tuple[str, bool]] = []
+    # t_hipFoo hipFoo_fn;  or  void* hipFoo_fn;  (possibly split across lines)
+    for tm in re.finditer(
+            r'^\s*(?:t_(\w+)\s+(\w+)|void\s*\*\s*(\w+))\s*;', m.group(1), re.M):
+        if tm.group(1) is not None:
+            slots.append((tm.group(1), False))
+        else:
+            member = tm.group(3)
+            name = member[:-3] if member.endswith('_fn') else member
+            slots.append((name, True))
+    return slots
+
+
 def parse_hip_api_trace(path: Path) -> List[ApiEntry]:
     text = path.read_text(encoding='utf-8')
     text = _strip_comments(text)
 
     entries: List[ApiEntry] = []
 
-    # ---- Compiler stubs (fixed list, specific typedef name) ----
-    for func_name in _COMPILER_APIS:
+    def reserve(func_name: str, table: str, why: str) -> None:
+        print(f"WARNING: {why} for {func_name}; reserving ID so later slots "
+              f"do not shift", file=sys.stderr)
+        entries.append(ApiEntry(name=func_name, ret_type="void", params=[],
+                                table=table, reserved=True))
+
+    def add_entry(func_name: str, table: str, reserved: bool = False) -> None:
+        if reserved:
+            reserve(func_name, table, "retired void* dispatch slot")
+            return
         typedef_name = "t_" + func_name   # e.g. t___hipRegisterFatBinary
         full = find_typedef_for(text, typedef_name)
         if not full:
-            print(f"WARNING: typedef not found for {func_name}", file=sys.stderr)
-            continue
-        # For parsing, strip the leading underscores from func_name for the needle match
+            reserve(func_name, table, "typedef not found")
+            return
         entry = _parse_typedef_text(full, func_name)
         if not entry:
-            print(f"WARNING: failed to parse typedef for {func_name}", file=sys.stderr)
-            continue
-        entry.table = "compiler"
+            reserve(func_name, table, "failed to parse typedef")
+            return
+        entry.table = table
         entries.append(entry)
 
-    # ---- Runtime APIs — find all t_hipXxx typedefs ----
-    # Locate every  (*t_hipXxx)  occurrence, then extract the full typedef
-    runtime_name_pattern = re.compile(r'\(\s*\*\s*t_(hip\w+)\s*\)')
+    # Runtime first. Compiler-first put every runtime ID at a
+    # compiler-table-size offset, so one new HipCompilerDispatchTable member
+    # renumbered all 500+ runtime IDs — the opposite of the append-only scheme
+    # this function exists to implement. A new HipDispatchTable member still
+    # shifts the compiler-ID tail (playback no-ops); that is cheaper than
+    # shifting the IDs written into every captured event.
+    runtime_slots = _dispatch_table_slots(text, "HipDispatchTable")
+    if not runtime_slots:
+        sys.exit("ERROR: HipDispatchTable missing or has no dispatch slots in "
+                 "hip_api_trace.hpp; refusing to invent hrr_api_id_t order")
+
+    compiler_slots = _dispatch_table_slots(text, "HipCompilerDispatchTable")
+    if not compiler_slots:
+        print("WARNING: HipCompilerDispatchTable missing or empty; "
+              "using built-in compiler API list", file=sys.stderr)
+        compiler_slots = [(n, False) for n in _COMPILER_APIS]
+
+    for func_name, reserved in runtime_slots:
+        add_entry(func_name, "runtime", reserved=reserved)
+    for func_name, reserved in compiler_slots:
+        add_entry(func_name, "compiler", reserved=reserved)
+
+    # A t_hipXxx typedef with no member in HipDispatchTable has no append-only
+    # position to take an ID from. None exist today; if one appears, it is still
+    # captured rather than dropped, and it goes last so the table-ordered IDs
+    # ahead of it keep their values.
+    in_table = {n for n, _ in runtime_slots} | {n for n, _ in compiler_slots}
+    stray_pattern = re.compile(r'\(\s*\*\s*t_(hip\w+)\s*\)')
     seen = set()
-    for m in runtime_name_pattern.finditer(text):
-        func_name = m.group(1)  # e.g. "hipMalloc"
-        if func_name in seen:
+    for m in stray_pattern.finditer(text):
+        func_name = m.group(1)
+        if func_name in in_table or func_name in seen:
             continue
         seen.add(func_name)
-
-        typedef_name = "t_" + func_name
-        full = find_typedef_for(text, typedef_name)
-        if not full:
-            print(f"WARNING: typedef not found for {func_name}", file=sys.stderr)
-            continue
-        entry = _parse_typedef_text(full, func_name)
-        if not entry:
-            print(f"WARNING: failed to parse typedef for {func_name}", file=sys.stderr)
-            continue
-        entry.table = "runtime"
-        entries.append(entry)
+        print(f"WARNING: {func_name} has no HipDispatchTable member; "
+              f"appending it after the table-ordered APIs", file=sys.stderr)
+        add_entry(func_name, "runtime")
 
     return entries
 
@@ -1243,8 +1304,17 @@ _HEADER_PREAMBLE = """\
 #define HRR_MAGIC   ((uint32_t)0x52524845u)  /* "HRRE" */
 /* v4: payload_length widened from uint16_t to uint32_t so kernel-launch events
  * larger than 65535 bytes (many args / long mangled names / large by-value
- * structs) are no longer dropped. */
-#define HRR_VERSION ((uint16_t)4u)
+ * structs) are no longer dropped.
+ * v5: hrr_api_id_t is assigned from HipDispatchTable member order, then
+ * HipCompilerDispatchTable member order, instead of typedef declaration
+ * order, which renumbered 496 of the 552 IDs once. Runtime IDs occupy 0..N-1
+ * so a new compiler-table member cannot shift them. Every event stores its
+ * ID, so a pre-v5 archive names the wrong API when decoded against this
+ * table and needs an ID translation to be read back. From v5 on a new API
+ * takes the next free ID in its table and no existing runtime ID moves, so
+ * adding APIs no longer needs a version bump. A retired dispatch-table slot
+ * (nulled void*) still occupies an ID. */
+#define HRR_VERSION ((uint16_t)5u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -1333,11 +1403,14 @@ def generate_struct(entry: ApiEntry) -> str:
     sname = f"hrr_args_{entry.name}"
 
     # Comment showing original signature
-    param_sig = ', '.join(
-        (p.raw_type + ' ' + p.name).strip()
-        for p in entry.params
-    )
-    lines.append(f"/* {entry.ret_type} {entry.name}({param_sig}) */")
+    if entry.reserved:
+        lines.append(f"/* retired/unparsable dispatch slot {entry.name}; ID placeholder */")
+    else:
+        param_sig = ', '.join(
+            (p.raw_type + ' ' + p.name).strip()
+            for p in entry.params
+        )
+        lines.append(f"/* {entry.ret_type} {entry.name}({param_sig}) */")
     lines.append("typedef struct {")
     lines.append("    hrr_event_header hdr;")
 
@@ -1686,6 +1759,8 @@ def generate_shim(entry: ApiEntry) -> str:
     """Generate a single capture shim function.
     MANUAL_CAPTURE_APIS: returns empty string — hand-written in hip_capture.cpp.
     """
+    if entry.reserved:
+        return ""
     if entry.name in CUSTOM_CAPTURE_SHIMS:
         return CUSTOM_CAPTURE_SHIMS[entry.name]
     is_manual   = entry.name in MANUAL_CAPTURE_APIS
@@ -1818,6 +1893,13 @@ def generate_build_table(entries: List[ApiEntry]) -> str:
     lines.append("")
     lines.append("  // Override every runtime slot with its capture shim")
     for e in runtime_entries:
+        if e.reserved:
+            # No shim is generated for a reserved slot, so leave whatever the
+            # real table holds. reserved covers three cases: a retired void*
+            # slot, where that is a nullptr, and a typedef that could not be
+            # found or parsed, where the slot is a live function pointer and
+            # keeping it preserves pass-through.
+            continue
         lines.append(f"  g_cap_table.{e.name}_fn = capture_{e.name};")
     lines.append("}")
     lines.append("")
@@ -1830,6 +1912,8 @@ def generate_build_table(entries: List[ApiEntry]) -> str:
     lines.append("  g_real_compiler_table = *hip::GetHipCompilerDispatchTable();")
     lines.append("  HipCompilerDispatchTable cap = g_real_compiler_table;")
     for e in compiler_entries:
+        if e.reserved:
+            continue
         lines.append(f"  cap.{e.name}_fn = capture_{e.name};")
     lines.append("  std::memcpy(const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable()),")
     lines.append("              &cap, sizeof(HipCompilerDispatchTable));")
@@ -1848,6 +1932,8 @@ def generate_capture_cpp(entries: List[ApiEntry]) -> str:
     parts.append("")
 
     for e in entries:
+        if e.reserved:
+            continue
         parts.append(generate_shim(e))
 
     parts.append("// ============================================================")
@@ -1978,6 +2064,58 @@ _HANDLE_CREATE_APIS: Dict[str, List[Tuple[str, str]]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Playback argument bridges
+# ---------------------------------------------------------------------------
+# Playback calls the PUBLIC HIP API by name; capture goes through the dispatch
+# table. Those are two different declarations, and they are allowed to diverge:
+# hip_api_trace.hpp is append-only ABI, while hip_runtime_api.h re-declares an
+# API with a new signature under a HIP_FORCE_API_VERSION guard.
+#
+# validate_playback_signatures() refuses to generate when the two disagree, so
+# a divergence cannot silently produce a wrong cast. An entry here is the
+# explicit, reviewed resolution for one such API: it supplies the code that
+# converts the RECORDED (dispatch-table) field into the type the public API
+# expects, emitted under the same guard the public header uses.
+#
+#   guard : the #if expression under which the public API takes the NEW type
+#   param : dispatch-table parameter name being bridged
+#   pre   : lines emitted inside the guard ({name} -> param name)
+#   expr  : expression substituted for that argument inside the guard
+_PLAYBACK_ARG_BRIDGES: Dict[str, Dict[str, object]] = {
+    # HIP 8.0 replaced `int device` with a `hipMemLocation` struct. The table
+    # (and therefore the recorded field) keeps the int device ordinal, so the
+    # bridge rebuilds a hipMemLocation from it rather than passing a zeroed
+    # struct — the recorded device is preserved on both sides of the guard.
+    'hipMemAdvise': {
+        'guard': 'HIP_FORCE_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)',
+        'param': 'device',
+        'pre': [
+            '  hipMemLocation _loc_{name}{{}};',
+            '  _loc_{name}.type = hipMemLocationTypeDevice;',
+            '  _loc_{name}.id   = (int)a->{name};',
+        ],
+        'expr': '_loc_{name}',
+    },
+}
+
+
+def _apply_arg_bridge(bridge: Dict[str, object],
+                      entry: 'ApiEntry',
+                      call_args: List[str]) -> Tuple[List[str], List[str]]:
+    """Return (pre_lines, call_args) with the bridged argument substituted."""
+    pname = str(bridge['param'])
+    idx = next((i for i, p in enumerate(entry.params) if p.name == pname), None)
+    if idx is None:
+        sys.exit(f"ERROR: _PLAYBACK_ARG_BRIDGES[{entry.name!r}] names parameter "
+                 f"{pname!r}, which is not a parameter of the dispatch-table "
+                 f"typedef. Fix the bridge or remove it.")
+    pre = [ln.format(name=pname) for ln in bridge['pre']]      # type: ignore[index]
+    args = list(call_args)
+    args[idx] = str(bridge['expr']).format(name=pname)
+    return pre, args
+
+
 def _playback_arg(p: Param, name: str, pre_lines: List[str]) -> str:
     """Return the expression to pass to the real HIP API during playback."""
     t = p.raw_type.strip()
@@ -2056,6 +2194,13 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     sname = f"hrr_args_{entry.name}"
     fname = f"playback_{entry.name}"
     sig   = f"static hipError_t {fname}(PlaybackContext& ctx, const uint8_t* payload)"
+
+    if entry.reserved:
+        return (f"static hipError_t {fname}"
+                f"(PlaybackContext& ctx, const uint8_t* payload) {{\n"
+                f"  (void)ctx; (void)payload;\n"
+                f"  return hipSuccess;\n"
+                f"}}\n")
 
     # Error-stub playback APIs: explicit graph construction that HRR cannot
     # replay. Emit a loud, attributable (per-API) warning, but return hipSuccess
@@ -2210,12 +2355,27 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     # Build the call
     args_str = ", ".join(call_args)
     void_ret = _is_void_return(entry.ret_type)
-    if void_ret:
-        lines.append(f"  {entry.name}({args_str});")
-        ret_expr = "hipSuccess"
+
+    def _emit_call(target_lines: List[str], a_str: str) -> None:
+        if void_ret:
+            target_lines.append(f"  {entry.name}({a_str});")
+        else:
+            target_lines.append(f"  hipError_t _r = (hipError_t){entry.name}({a_str});")
+
+    bridge = _PLAYBACK_ARG_BRIDGES.get(entry.name)
+    if bridge:
+        # The public API changes signature under a version guard. Emit both
+        # forms so the generated call matches whichever declaration is visible.
+        b_pre, b_args = _apply_arg_bridge(bridge, entry, call_args)
+        lines.append(f"#if {bridge['guard']}")
+        lines.extend(b_pre)
+        _emit_call(lines, ", ".join(b_args))
+        lines.append("#else")
+        _emit_call(lines, args_str)
+        lines.append("#endif")
     else:
-        lines.append(f"  hipError_t _r = (hipError_t){entry.name}({args_str});")
-        ret_expr = "_r"
+        _emit_call(lines, args_str)
+    ret_expr = "hipSuccess" if void_ret else "_r"
 
     # Post-call: register/unregister allocs and handles
     success_cond = "true" if void_ret else "_r == hipSuccess"
@@ -2306,6 +2466,201 @@ def generate_playback_cpp(entries: List[ApiEntry]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Public API signature validation
+# ---------------------------------------------------------------------------
+# Capture goes through the dispatch table, so hip_api_trace.hpp is the correct
+# source for capture casts. Playback does NOT call the table — it calls the
+# public API by name. Deriving playback casts from the table is therefore only
+# sound while the two declarations agree, and they are not required to: the
+# table is append-only ABI, while hip_runtime_api.h may re-declare an API with
+# a different signature under a HIP_FORCE_API_VERSION guard (hipMemAdvise gained
+# a hipMemLocation parameter in HIP 8.0 this way).
+#
+# This pass parses the public header and refuses to generate when a playback
+# cast would disagree with the function it is passed to.
+
+
+@dataclass
+class PublicDecl:
+    """One non-template declaration of a public HIP API."""
+    types:   Tuple[str, ...]
+    guarded: bool          # inside a HIP_FORCE_API_VERSION / HIP_ABI_IMPL #if
+    line:    int
+
+
+def _strip_comments_keep_lines(text: str) -> str:
+    """Strip comments while preserving line numbering."""
+    def blank(m: 're.Match[str]') -> str:
+        return re.sub(r'[^\n]', ' ', m.group(0))
+    text = re.sub(r'/\*.*?\*/', blank, text, flags=re.DOTALL)
+    text = re.sub(r'//[^\n]*', blank, text)
+    return text
+
+
+def _collect_typedef_aliases(text: str) -> Dict[str, str]:
+    """Simple `typedef <existing> <alias>;` pairs, resolved transitively.
+
+    Lets hipDeviceProp_tR0600 (dispatch table) compare equal to
+    hipDeviceProp_t (public header) while they remain the same type.
+    """
+    alias: Dict[str, str] = {}
+    for m in re.finditer(r'\btypedef\s+([A-Za-z_][A-Za-z0-9_]*)\s+'
+                         r'([A-Za-z_][A-Za-z0-9_]*)\s*;', text):
+        existing, name = m.group(1), m.group(2)
+        if existing != name:
+            alias[name] = existing
+    resolved: Dict[str, str] = {}
+    for name in alias:
+        seen, cur = {name}, alias[name]
+        while cur in alias and cur not in seen:
+            seen.add(cur)
+            cur = alias[cur]
+        resolved[name] = cur
+    return resolved
+
+
+def _norm_type(raw: str, aliases: Dict[str, str]) -> str:
+    """Canonical spelling of a parameter type, names and defaults removed."""
+    t = re.sub(r'__dparm\s*\([^)]*\)', '', raw).split('=')[0]
+    t = re.sub(r'\s+', ' ', t).strip()
+    t = t.replace('*', ' * ').replace('&', ' & ')
+    t = re.sub(r'\s+', ' ', t).strip()
+    return ' '.join(aliases.get(tok, tok) for tok in t.split())
+
+
+def _param_types(inner: str, aliases: Dict[str, str]) -> Optional[Tuple[str, ...]]:
+    inner = inner.strip()
+    if not inner or inner == 'void':
+        return ()
+    out: List[str] = []
+    for raw in _split_params(inner):
+        prm = _parse_param(re.sub(r'__dparm\s*\([^)]*\)', '', raw).split('=')[0])
+        if prm is None:
+            return None
+        out.append(_norm_type(prm.raw_type, aliases))
+    return tuple(out)
+
+
+def _version_guard_stack(text: str) -> Dict[int, List[str]]:
+    """line number -> enclosing version/ABI-dependent #if conditions."""
+    stack: List[str] = []
+    per_line: Dict[int, List[str]] = {}
+    for lineno, line in enumerate(text.splitlines(), 1):
+        s = line.strip()
+        if re.match(r'#\s*if', s):
+            stack.append(s)
+        elif re.match(r'#\s*el(se|if)', s):
+            if stack:
+                stack[-1] = s
+        elif re.match(r'#\s*endif', s):
+            if stack:
+                stack.pop()
+        per_line[lineno] = [g for g in stack
+                            if 'API_VERSION' in g or 'ABI_IMPL' in g]
+    return per_line
+
+
+def parse_public_api_signatures(path: Path) -> Dict[str, List[PublicDecl]]:
+    """Parse hip_runtime_api.h for the public declaration of each hip* API.
+
+    Template overloads are skipped: they coexist with the C declaration rather
+    than replacing it, so they never change which function a C-typed call
+    resolves to.
+    """
+    text    = _strip_comments_keep_lines(path.read_text(errors='replace'))
+    aliases = _collect_typedef_aliases(text)
+    guards  = _version_guard_stack(text)
+
+    def line_of(pos: int) -> int:
+        return text.count('\n', 0, pos) + 1
+
+    decls: Dict[str, List[PublicDecl]] = {}
+    pattern = (r'\b(?:hipError_t|void|int|unsigned|hip[A-Za-z0-9_]+_t)'
+               r'\s+\*?\s*(hip[A-Za-z0-9_]+)\s*\(')
+    for m in re.finditer(pattern, text):
+        name = m.group(1)
+        # Skip template overloads: look back to the end of the previous
+        # statement / preprocessor line for a `template` introducer.
+        back = text[max(0, m.start() - 400):m.start()]
+        cut  = max(back.rfind(';'), back.rfind('}'), back.rfind('#'))
+        if 'template' in back[cut + 1:]:
+            continue
+        try:
+            _end, inner = _extract_balanced_parens(text, text.index('(', m.start(1)))
+        except ValueError:
+            continue
+        types = _param_types(inner, aliases)
+        if types is None:
+            continue
+        ln = line_of(m.start())
+        decls.setdefault(name, []).append(
+            PublicDecl(types=types, guarded=bool(guards.get(ln)), line=ln))
+    return decls
+
+
+def validate_playback_signatures(entries: List[ApiEntry],
+                                 public: Dict[str, List[PublicDecl]],
+                                 public_path: Path) -> None:
+    """Fail generation if a playback cast would disagree with its callee.
+
+    An API is safe when the public header offers a declaration that both
+    matches the dispatch-table signature and is unconditionally visible, so
+    the generated call resolves to it in every build configuration.
+    """
+    aliases  = _collect_typedef_aliases(_strip_comments_keep_lines(
+        public_path.read_text(errors='replace')))
+    problems: List[str] = []
+    checked  = skipped = 0
+
+    for e in entries:
+        # Only APIs whose call is generated from table types can be wrong here.
+        if (e.reserved or e.table == "compiler"
+                or e.name in MANUAL_PLAYBACK_APIS
+                or e.name in NOOP_PLAYBACK_APIS
+                or e.name in ERROR_STUB_PLAYBACK_APIS
+                or e.name in CUSTOM_PLAYBACK_BODIES):
+            continue
+        variants = public.get(e.name)
+        if not variants:
+            # Declared in another header (hip_gl_interop.h, _spt wrappers, ...).
+            skipped += 1
+            continue
+        table_types = tuple(_norm_type(p.raw_type, aliases) for p in e.params)
+        checked += 1
+
+        exact = [d for d in variants if d.types == table_types]
+        if any(not d.guarded for d in exact):
+            continue                      # always resolvable — safe
+        if len(exact) == len(variants) and exact:
+            continue                      # only spelling/guard, one signature
+
+        if e.name in _PLAYBACK_ARG_BRIDGES:
+            continue                      # explicitly bridged, see the table
+
+        detail = [f"    dispatch table : ({', '.join(table_types) or 'void'})"]
+        for d in sorted(variants, key=lambda x: x.line):
+            tag = "guarded" if d.guarded else "unconditional"
+            detail.append(f"    public L{d.line:<6} ({', '.join(d.types) or 'void'})"
+                          f"   [{tag}]")
+        problems.append(f"  {e.name}\n" + "\n".join(detail))
+
+    if problems:
+        sys.exit(
+            "ERROR: playback would cast arguments using the dispatch-table\n"
+            "signature, but the public HIP API it calls is declared differently\n"
+            f"in {public_path}.\n"
+            "Playback calls the public API, not the table, so these casts would\n"
+            "be wrong (or silently pick the wrong overload) in some build\n"
+            "configuration.\n\n"
+            + "\n\n".join(problems) +
+            "\n\nResolve each by adding an entry to _PLAYBACK_ARG_BRIDGES with the\n"
+            "guard and conversion the public header requires.")
+
+    print(f"  Public API signatures: {checked} verified against "
+          f"{public_path.name}, {skipped} declared elsewhere (skipped)")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -2319,6 +2674,8 @@ def main() -> None:
     clr_root        = projects_dir / "clr"              # projects/clr/
     clr_hrr_dir     = clr_root / "hipamd" / "src" / "hrr"  # capture stays in CLR
     default_input    = clr_root / "hipamd/include/hip/amd_detail/hip_api_trace.hpp"
+    # Playback calls the PUBLIC API, so its declarations are validated too.
+    default_public   = projects_dir / "hip/include/hip/hip_runtime_api.h"
     default_header   = hrr_project_dir / "include" / "hrr" / "hrr_api_args.h"
     default_capture  = clr_hrr_dir / "hip_capture_generated.cpp"
     default_playback = hrr_project_dir / "playback" / "hip_playback_generated.cpp"
@@ -2326,6 +2683,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input",           default=str(default_input),
                         help="Path to hip_api_trace.hpp")
+    parser.add_argument("--public-header",   default=str(default_public),
+                        help="Path to hip_runtime_api.h (public API declarations)")
+    parser.add_argument("--skip-public-api-check", action="store_true",
+                        help="Skip playback/public-API signature validation. "
+                             "Unsafe: a playback cast may disagree with the "
+                             "API it is passed to.")
     parser.add_argument("--output-header",   default=str(default_header),
                         help="Path to generated hrr_api_args.h")
     parser.add_argument("--output-capture",  default=str(default_capture),
@@ -2335,6 +2698,7 @@ def main() -> None:
     args = parser.parse_args()
 
     in_path       = Path(args.input)
+    public_path   = Path(args.public_header)
     header_path   = Path(args.output_header)
     capture_path  = Path(args.output_capture)
     playback_path = Path(args.output_playback)
@@ -2346,10 +2710,12 @@ def main() -> None:
     entries = parse_hip_api_trace(in_path)
     n_compiler       = sum(1 for e in entries if e.table == "compiler")
     n_runtime        = sum(1 for e in entries if e.table == "runtime")
+    n_reserved       = sum(1 for e in entries if e.reserved)
     n_manual_cap     = sum(1 for e in entries if e.name in MANUAL_CAPTURE_APIS)
     n_manual_play    = sum(1 for e in entries if e.name in MANUAL_PLAYBACK_APIS)
     n_noop_play      = sum(1 for e in entries if e.name in NOOP_PLAYBACK_APIS)
-    print(f"  Found {n_compiler} compiler + {n_runtime} runtime = {len(entries)} total")
+    print(f"  Found {n_compiler} compiler + {n_runtime} runtime = {len(entries)} total"
+          f" ({n_reserved} reserved slots)")
 
     # -------------------------------------------------------------------------
     # Cross-validate classification sets against parsed API names.
@@ -2396,6 +2762,23 @@ def main() -> None:
     print(f"  No-op playback (inline hipSuccess stubs):           {n_noop_play}")
     print(f"  Generated capture shims:  {len(entries) - n_manual_cap}")
     print(f"  Generated playback shims: {len(entries) - n_manual_play - n_noop_play}")
+
+    # -------------------------------------------------------------------------
+    # Playback calls the public API, not the dispatch table. Refuse to generate
+    # if a playback cast would disagree with the declaration it is passed to.
+    # -------------------------------------------------------------------------
+    if args.skip_public_api_check:
+        print("  WARNING: --skip-public-api-check — playback casts are NOT "
+              "validated against the public API")
+    elif not public_path.exists():
+        sys.exit(f"ERROR: public header not found: {public_path}\n"
+                 f"       Playback casts cannot be validated against the API "
+                 f"they are passed to.\n"
+                 f"       Pass --public-header, or --skip-public-api-check to "
+                 f"generate anyway (unsafe).")
+    else:
+        public_decls = parse_public_api_signatures(public_path)
+        validate_playback_signatures(entries, public_decls, public_path)
 
     header_path.parent.mkdir(parents=True, exist_ok=True)
     header = generate_header(entries)
