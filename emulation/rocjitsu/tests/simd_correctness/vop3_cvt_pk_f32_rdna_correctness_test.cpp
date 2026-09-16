@@ -177,7 +177,7 @@ struct Fixture {
 
   std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint64_t exec) {
     seed(exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -265,7 +265,7 @@ TEST(Vop3CvtPkF32RdnaCorrectness, BugMarker_40000) {
       rdna3_vop3_encode(opcode, kDstVgpr, 256, 257, words);
       Instruction *inst = decode_valid(*fx.decoder, words);
       EXPECT_NE(inst, nullptr);
-      fx.cu->execute_instruction(inst, *fx.wf);
+      EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
       uint32_t r = fx.cu->read_vgpr(vb + kDstVgpr, 0);
       delete inst;
       return r;
@@ -302,7 +302,7 @@ void check_cvt_pk_norm_i16(uint64_t exec) {
     rdna3_vop3_encode(kOpCvtPkNormI16F32, kDstVgpr, /*src0=*/256, /*src1=*/257, words);
     Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << name << " decode failed";
-    fx.cu->execute_instruction(inst, *fx.wf);
+    EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
       out[lane] = fx.cu->read_vgpr(vb + kDstVgpr, lane);
@@ -355,7 +355,7 @@ TEST(Vop3CvtPkF32RdnaCorrectness, NormI16_SignedMarker) {
     rdna3_vop3_encode(kOpCvtPkNormI16F32, kDstVgpr, 256, 257, words);
     Instruction *inst = decode_valid(*fx.decoder, words);
     ASSERT_NE(inst, nullptr);
-    fx.cu->execute_instruction(inst, *fx.wf);
+    EXPECT_TRUE(fx.cu->execute_instruction(inst, *fx.wf).succeeded());
     const uint32_t lane0 = fx.cu->read_vgpr(vb + kDstVgpr, 0);
     const uint32_t lane1 = fx.cu->read_vgpr(vb + kDstVgpr, 1);
     delete inst;

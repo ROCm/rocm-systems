@@ -6,7 +6,9 @@ import struct
 
 import pytest
 
+from elf_test_utils import patch_hip_fatbin_to_nobits
 from rocm_kpack import binutils
+from rocm_kpack.elf.surgery import ElfSurgery
 from rocm_kpack.tools import bulk_unbundle
 
 
@@ -197,3 +199,43 @@ def test_bulk_unbundle_output_dir_requires_one_input(
 
     assert exc.value.code == 2
     assert "--output-dir requires exactly one input file" in capsys.readouterr().err
+
+
+def test_has_fatbin_section_rejects_nobits(test_assets_dir: Path, tmp_path: Path):
+    """ElfSurgery.has_fatbin_section() must ignore a SHT_NOBITS .hip_fatbin.
+
+    Separated debug files (`objcopy --only-keep-debug`) keep the section
+    header but hold no section content.
+    """
+    source = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_single.exe"
+    assert ElfSurgery.has_fatbin_section(source) is True
+
+    debug_copy = patch_hip_fatbin_to_nobits(
+        source, tmp_path / "test_kernel_single.exe.debug"
+    )
+    assert ElfSurgery.has_fatbin_section(debug_copy) is False
+
+
+def test_bundled_binary_nobits_is_standalone(
+    test_assets_dir: Path, tmp_path: Path, toolchain: binutils.Toolchain
+):
+    """A separated debug file must not be classified as BUNDLED.
+
+    Regression test: it previously was, and the subsequent
+    `objcopy --dump-section .hip_fatbin=<tmp>/fatbin.o` exited 0 without
+    writing anything (GNU objcopy only warns for a section with no contents),
+    so unbundling died with `FileNotFoundError: .../fatbin.o`.
+    """
+    source = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_single.exe"
+    assert (
+        binutils.BundledBinary(source, toolchain=toolchain).binary_type
+        == binutils.BinaryType.BUNDLED
+    )
+
+    debug_copy = patch_hip_fatbin_to_nobits(
+        source, tmp_path / "test_kernel_single.exe.debug"
+    )
+    assert (
+        binutils.BundledBinary(debug_copy, toolchain=toolchain).binary_type
+        == binutils.BinaryType.STANDALONE
+    )
