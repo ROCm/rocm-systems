@@ -404,13 +404,21 @@ mod tests {
     /// Scan until `seen` is satisfied, the child stops running, or ten
     /// seconds pass.
     ///
-    /// One scan taken immediately after a spawn is what CI failed on: it
-    /// came back empty, and an empty list says only that nothing was
-    /// seen, never whether there was anything to see. Retrying for as
-    /// long as the process is demonstrably alive separates those two. A
-    /// scan that never reports a running process is still a failure and
-    /// still fails here — with the child's state in the message rather
-    /// than a bare `[]`.
+    /// One pass over `/proc` is not a census. Reading a directory whose
+    /// contents are changing can skip entries that were there throughout,
+    /// and `/proc` on a CI machine running a few thousand tests at once
+    /// changes constantly — so a scan can miss a process that has been
+    /// running the whole time. That is what these cases hit: an empty
+    /// list, from a child that never went anywhere.
+    ///
+    /// It is a property of the scan and not only of the test. `rocjitsu
+    /// cleanup` can likewise miss a stranded workload on a busy machine,
+    /// and the answer there is the same as here — look again.
+    ///
+    /// Retrying while the process is demonstrably alive also separates
+    /// the two things an empty list could mean. A scan that never reports
+    /// a running process is still a failure and still fails here, with
+    /// the child's state in the message rather than a bare `[]`.
     fn scan_while_alive(pid: u32, seen: impl Fn(&Scan) -> bool) -> Scan {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
@@ -547,7 +555,7 @@ mod tests {
         // Only this test's own process. `reap_stranded(&[])` would be
         // machine-wide, and the rest of this module's tests hold tagged
         // children of their own while running in parallel with it.
-        let mine = mine(&session);
+        let mine = mine(&session, &[pid]);
         assert_eq!(
             mine.len(),
             1,
@@ -649,14 +657,16 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(20));
         };
 
-        let found = mine(&session);
+        let found = mine(&session, &[child.pid(), grandchild]);
         assert!(
             found.iter().any(|s| s.pid == child.pid()),
-            "the workload itself was not found: {found:?}"
+            "the workload itself was not found: {found:?} (it is {})",
+            state_of(child.pid())
         );
         assert!(
             found.iter().any(|s| s.pid == grandchild),
-            "a forked grandchild was not found: {found:?}"
+            "a forked grandchild was not found: {found:?} (it is {})",
+            state_of(grandchild)
         );
 
         reap(&found);
@@ -761,23 +771,37 @@ mod tests {
             .stderr(std::process::Stdio::null());
         let child = Tagged(command.spawn().unwrap());
 
-        let found = mine(&session);
+        let found = mine(&session, &[child.pid()]);
         assert!(
             found.iter().any(|s| s.pid == child.pid()),
             "a workload was hidden by an unrelated variable that is not \
-             UTF-8: {found:?}"
+             UTF-8: {found:?} (the child is {})",
+            state_of(child.pid())
         );
     }
 
-    /// The stranded processes belonging to one test's session.
+    /// The stranded processes belonging to one test's session, once every
+    /// pid in `wanted` is among them.
     ///
     /// These tests run alongside each other and alongside whatever else
     /// is on the machine, so nothing here may act on an unfiltered scan.
-    fn mine(session: &SessionId) -> Vec<Stranded> {
-        stranded_workloads(&[])
-            .into_iter()
-            .filter(|s| &s.session == session)
-            .collect()
+    ///
+    /// Waited for rather than taken once, for the reason given on
+    /// [`scan_while_alive`], and it gives up on the same two conditions.
+    fn mine(session: &SessionId, wanted: &[u32]) -> Vec<Stranded> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let found: Vec<Stranded> = stranded_workloads(&[])
+                .into_iter()
+                .filter(|s| &s.session == session)
+                .collect();
+            let all_seen = wanted.iter().all(|pid| found.iter().any(|s| s.pid == *pid));
+            let any_gone = wanted.iter().any(|pid| !still_running(*pid));
+            if all_seen || any_gone || std::time::Instant::now() >= deadline {
+                return found;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
     }
 
     #[test]
