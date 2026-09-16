@@ -669,6 +669,7 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
           {"RJ_CONSAN_MOI_TRACK_ATOMICS", ordinary_moi_defaults, &config.moi_track_atomics},
           {"RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", false, &config.moi_dynamic_access_records},
           {"RJ_CONSAN_MOI_SAMPLED_CHECK", false, &config.moi_sampled_check},
+          {"RJ_CONSAN_MOI_ALLOW_UNIFORM_LDS_STORES", false, &config.moi_allow_uniform_lds_stores},
           // Deliberately test-only: these are not part of the public ConSan knob set.
           {"RJ_CONSAN_TEST_FORCE_VGPR_SPILL", false, &config.test_force_vgpr_spill},
           {"RJ_CONSAN_TEST_FORCE_PRIVATE_EPOCH", false, &config.test_force_private_epoch},

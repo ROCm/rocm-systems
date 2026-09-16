@@ -27,14 +27,16 @@ bool same_sampled_access(const AutoMoiSampledEvidence &a, const AutoMoiSampledEv
 
 AutoMoiSampledConflictAnalysis
 analyze_auto_moi_sampled_conflicts(std::span<const AutoMoiSampledEvidence> evidence,
-                                   bool synchronization_evidence_complete, uint32_t example_limit) {
+                                   bool synchronization_evidence_complete, uint32_t example_limit,
+                                   bool allow_uniform_lds_stores) {
   AutoMoiSampledConflictAnalysis result;
   // Keep the linear exact-group pass outside the quadratic cross-wave scan.
   for (const auto &current : evidence) {
     if (current.entry.valid && !current.entry.consumed &&
         consan_moi_shadow_kind_conflicts(current.entry.kind, current.entry.kind) &&
         std::popcount(current.exact_lane_mask) > 1 &&
-        !(current.static_mapping && current.static_mapping->uniform_lds_store)) {
+        !(allow_uniform_lds_stores && current.static_mapping &&
+          current.static_mapping->uniform_lds_store)) {
       if (result.conflict_count != std::numeric_limits<uint32_t>::max())
         ++result.conflict_count;
       if (result.conflicts.size() < example_limit) {

@@ -8698,6 +8698,34 @@ TEST(HsaHooksUnitTest, ConSanSampledResolvesIndependentSelectorsAndRejectsAmbigu
   }
 }
 
+TEST(HsaHooksUnitTest, ConSanUniformLdsStoresRequireExplicitOptIn) {
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  for (const char *mode : {"sampled", "record-replay"}) {
+    ScopedEnvVar selected_mode("RJ_CONSAN_MODE", mode);
+    for (const char *value : {static_cast<const char *>(nullptr), "0", "1", "invalid"}) {
+      ScopedEnvVar policy("RJ_CONSAN_MOI_ALLOW_UNIFORM_LDS_STORES", value);
+      reset_code_object_observations();
+      testing::internal::CaptureStderr();
+      bool installed;
+      {
+        FakeApiTable api;
+        InstalledDbiHook hook(api);
+        installed = hook.installed();
+      }
+      const std::string log = testing::internal::GetCapturedStderr();
+      const bool invalid = value && std::string_view(value) == "invalid";
+      EXPECT_EQ(installed, !invalid) << log;
+      if (!invalid) {
+        const bool enabled = value && std::string_view(value) == "1";
+        EXPECT_NE(
+            log.find(enabled ? "allow_uniform_lds_stores=true" : "allow_uniform_lds_stores=false"),
+            std::string::npos)
+            << log;
+      }
+    }
+  }
+}
+
 TEST(HsaHooksUnitTest, ConSanSampledPresetsResolveAndAllowExplicitOverrides) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", nullptr);
   ScopedEnvVar legacy_stride("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", nullptr);

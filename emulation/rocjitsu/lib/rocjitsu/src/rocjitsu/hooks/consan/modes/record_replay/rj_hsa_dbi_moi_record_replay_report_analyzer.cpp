@@ -114,7 +114,7 @@ analyze_auto_moi_record_replay(const ConSanMoiReportHeader &header,
                                std::span<const ConSanMoiFenceRecord> fence_records,
                                std::span<const AutoMoiRecordReplayStaticMapping> static_mappings,
                                bool static_mapping_malformed, uint32_t logical_access_range_count,
-                               uint32_t address_group_headroom) {
+                               uint32_t address_group_headroom, bool allow_uniform_lds_stores) {
   AutoMoiRecordReplayAnalysis result;
   result.pressure = record_replay_pressure_telemetry(
       header, access_records, logical_access_range_count, address_group_headroom);
@@ -146,7 +146,7 @@ analyze_auto_moi_record_replay(const ConSanMoiReportHeader &header,
   result.diagnostics.resize(result.replay_header.diagnostic_capacity);
   std::vector<uint64_t> exact_shadow_entries(static_cast<size_t>(result.replay_shadow_entry_count));
   std::vector<uint32_t> uniform_store_offsets;
-  if (!static_mapping_malformed) {
+  if (allow_uniform_lds_stores && !static_mapping_malformed) {
     for (const auto &mapping : static_mappings)
       if (mapping.uniform_lds_store)
         uniform_store_offsets.push_back(mapping.instruction_offset);

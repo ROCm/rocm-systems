@@ -2228,7 +2228,10 @@ public:
     moi_runtime_sample_stride_ = config.moi_runtime_sample_stride;
     moi_runtime_sample_offset_ = config.moi_runtime_sample_offset;
     configure_auto_moi_epoch_analysis(config.moi_epoch_analysis, config.moi_sampled_conflict_limit,
-                                      config.moi_sampled_total_conflict_limit);
+                                      config.moi_sampled_total_conflict_limit,
+                                      config.moi_allow_uniform_lds_stores);
+    log_message(kLogInfo, "ConSan MOI allow_uniform_lds_stores=%s",
+                config.moi_allow_uniform_lds_stores ? "true" : "false");
     if (config.flavor == ConSanFlavor::Moi && config.moi_engine == ConSanMoiEngine::Sampled) {
       const auto cell = config.sampled_cell_selection();
       log_message(kLogInfo,

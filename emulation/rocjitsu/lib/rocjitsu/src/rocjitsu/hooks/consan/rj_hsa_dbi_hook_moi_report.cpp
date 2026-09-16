@@ -49,9 +49,11 @@ public:
 
   void configure_epoch_analysis(HookConfig::MoiEpochAnalysisPolicy policy,
                                 uint32_t sampled_conflict_limit,
-                                uint32_t sampled_total_conflict_limit) {
+                                uint32_t sampled_total_conflict_limit,
+                                bool allow_uniform_lds_stores) {
     std::lock_guard lock(mutex_);
     epoch_analysis_policy_ = policy;
+    allow_uniform_lds_stores_ = allow_uniform_lds_stores;
     sampled_conflict_limit_ = sampled_conflict_limit;
     sampled_conflict_examples_remaining_ = sampled_total_conflict_limit;
     automatic_epoch_ = 0;
@@ -728,7 +730,8 @@ private:
                                  .fine_grained = entry.fine_grained,
                                  .input_fingerprint = entry.input_fingerprint,
                                  .static_metadata = &entry.static_metadata,
-                                 .sampled_conflict_example_limit = limit},
+                                 .sampled_conflict_example_limit = limit,
+                                 .allow_uniform_lds_stores = allow_uniform_lds_stores_},
                                 snapshot, summary);
     sampled_conflict_examples_remaining_ -=
         std::min(sampled_conflict_examples_remaining_, result.sampled_conflict_example_count);
@@ -778,6 +781,7 @@ private:
   uint64_t cleanup_failure_count_ = 0;
   Summary completed_summary_;
   HookConfig::MoiEpochAnalysisPolicy epoch_analysis_policy_;
+  bool allow_uniform_lds_stores_ = false;
   uint32_t sampled_conflict_limit_ = 8;
   uint32_t sampled_conflict_examples_remaining_ = 64;
   uint64_t automatic_epoch_ = 0;
@@ -825,9 +829,10 @@ void retire_auto_moi_report_buffers(CoreApiTable *core, hsa_executable_t executa
 
 void configure_auto_moi_epoch_analysis(HookConfig::MoiEpochAnalysisPolicy policy,
                                        uint32_t sampled_conflict_limit,
-                                       uint32_t sampled_total_conflict_limit) {
-  AutoMoiReportBufferRegistry::instance().configure_epoch_analysis(policy, sampled_conflict_limit,
-                                                                   sampled_total_conflict_limit);
+                                       uint32_t sampled_total_conflict_limit,
+                                       bool allow_uniform_lds_stores) {
+  AutoMoiReportBufferRegistry::instance().configure_epoch_analysis(
+      policy, sampled_conflict_limit, sampled_total_conflict_limit, allow_uniform_lds_stores);
 }
 
 bool begin_auto_moi_epoch_analysis_window() {

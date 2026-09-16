@@ -54,15 +54,14 @@ struct AutoMoiRecordReplayAnalysis {
   std::vector<ConSanMoiDiagnosticRecord> diagnostics;
 };
 
-[[nodiscard]] AutoMoiRecordReplayAnalysis
-analyze_auto_moi_record_replay(const ConSanMoiReportHeader &header,
-                               std::span<const ConSanMoiAccessRecord> access_records,
-                               std::span<const ConSanMoiBarrierRecord> barrier_records,
-                               std::span<const ConSanMoiAtomicRecord> atomic_records,
-                               std::span<const ConSanMoiFenceRecord> fence_records,
-                               std::span<const AutoMoiRecordReplayStaticMapping> static_mappings,
-                               bool static_mapping_malformed, uint32_t logical_access_range_count,
-                               uint32_t address_group_headroom);
+[[nodiscard]] AutoMoiRecordReplayAnalysis analyze_auto_moi_record_replay(
+    const ConSanMoiReportHeader &header, std::span<const ConSanMoiAccessRecord> access_records,
+    std::span<const ConSanMoiBarrierRecord> barrier_records,
+    std::span<const ConSanMoiAtomicRecord> atomic_records,
+    std::span<const ConSanMoiFenceRecord> fence_records,
+    std::span<const AutoMoiRecordReplayStaticMapping> static_mappings,
+    bool static_mapping_malformed, uint32_t logical_access_range_count,
+    uint32_t address_group_headroom, bool allow_uniform_lds_stores = false);
 
 void accumulate_auto_moi_record_replay_analysis(AutoMoiReportSummary &summary,
                                                 const AutoMoiRecordReplayAnalysis &analysis);

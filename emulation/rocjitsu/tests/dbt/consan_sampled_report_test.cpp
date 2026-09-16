@@ -108,7 +108,7 @@ TEST(ConSanSampledReportTest, MaskIsAcceptedOnlyWithItsCommittedCurrentWindow) {
     details.malformed = malformed;
     summary = {};
     auto proof = decode_auto_moi_sampled_report(input, header, bytes, summary);
-    EXPECT_EQ(analyze_auto_moi_sampled_conflicts(proof.evidence, true).conflict_count,
+    EXPECT_EQ(analyze_auto_moi_sampled_conflicts(proof.evidence, true, 8, true).conflict_count,
               malformed ? 1u : 0u);
   }
   auto &details = std::get<AutoMoiSampledStaticMetadata>(metadata);
@@ -116,7 +116,8 @@ TEST(ConSanSampledReportTest, MaskIsAcceptedOnlyWithItsCommittedCurrentWindow) {
   details.mappings.push_back(mapping); // Even agreeing overlapping maps are ambiguous.
   summary = {};
   auto ambiguous = decode_auto_moi_sampled_report(input, header, bytes, summary);
-  EXPECT_EQ(analyze_auto_moi_sampled_conflicts(ambiguous.evidence, true).conflict_count, 1u);
+  EXPECT_EQ(analyze_auto_moi_sampled_conflicts(ambiguous.evidence, true, 8, true).conflict_count,
+            1u);
   input.static_metadata = nullptr;
   for (auto state : {ConSanMoiSampledCausalPublicationState::Empty,
                      ConSanMoiSampledCausalPublicationState::Publishing}) {
@@ -159,14 +160,23 @@ TEST(ConSanSampledReportTest, UniformStoreSuppressesOnlyItsOwnLaneCollision) {
   auto first = access(0, 0, 16, ConSanMoiShadowAccessKind::Write);
   first.exact_lane_mask = 3;
   first.static_mapping = &mapping;
-  EXPECT_EQ(analyze_auto_moi_sampled_conflicts(std::array{first}, true).conflict_count, 0u);
+  EXPECT_EQ(analyze_auto_moi_sampled_conflicts(std::array{first}, true).conflict_count, 1u);
+  EXPECT_EQ(analyze_auto_moi_sampled_conflicts(std::array{first}, true, 8, false).conflict_count,
+            1u);
+  EXPECT_EQ(analyze_auto_moi_sampled_conflicts(std::array{first}, true, 8, true).conflict_count,
+            0u);
   auto second = first;
   second.entry.owner_id = 1;
-  EXPECT_EQ(analyze_auto_moi_sampled_conflicts(std::array{first, second}, true).conflict_count, 1u);
+  EXPECT_EQ(
+      analyze_auto_moi_sampled_conflicts(std::array{first, second}, true, 8, true).conflict_count,
+      1u);
   second.entry.kind = ConSanMoiShadowAccessKind::Read;
-  EXPECT_EQ(analyze_auto_moi_sampled_conflicts(std::array{first, second}, true).conflict_count, 1u);
+  EXPECT_EQ(
+      analyze_auto_moi_sampled_conflicts(std::array{first, second}, true, 8, true).conflict_count,
+      1u);
   first.static_mapping = nullptr;
-  EXPECT_EQ(analyze_auto_moi_sampled_conflicts(std::array{first}, true).conflict_count, 1u);
+  EXPECT_EQ(analyze_auto_moi_sampled_conflicts(std::array{first}, true, 8, true).conflict_count,
+            1u);
 }
 
 TEST(ConSanSampledReportTest, ExactGroupDoesNotInventReadAtomicOrSingleLaneRaces) {

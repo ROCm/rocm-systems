@@ -586,13 +586,18 @@ participating masks. Otherwise that side prints `unavailable`. A single-group
 write diagnostic splits one mask into its first lane and remaining lanes; it
 counts one conflict example rather than enumerating every lane pair. Read-only
 and atomic groups do not create these ordinary write/write diagnostics.
-Uniform addresses alone do not suppress races. Sampled and Record/Replay suppress
-only the lane collision within one ordinary native LDS store when static analysis
-proves both an identical address and identical data across its participating lanes.
-The proof checks every stored data register using local scalar/constant broadcasts
-and copies, and is discarded on clobbers, EXEC changes, or CFG boundaries. Unknown
-values retain the diagnostic. This is a narrow benign-machine-instruction policy,
-not a general rule that equal-value writes are synchronized.
+Identical addresses and values do not make concurrent non-atomic writes race-free.
+By default, Sampled and Record/Replay diagnose same-instruction lane collisions,
+including stores whose address and every data word are proven uniform.
+
+`RJ_CONSAN_MOI_ALLOW_UNIFORM_LDS_STORES=1` explicitly opts into suppressing this
+common pattern. The default is `0`; sampling presets do not enable it. The opt-in
+applies only to one ordinary native LDS store when static analysis proves both
+an identical address and identical data across its participating lanes. The proof
+checks every stored data register using local scalar/constant broadcasts and
+copies, and is discarded on clobbers, EXEC changes, or CFG boundaries. Unknown or
+differing values retain the diagnostic. This is a diagnostic suppression policy,
+not a claim that equal-value writes are synchronized.
 
 The store evidence remains available for cross-wave checking, including conflicts
 with reads and identical-valued writes from other waves. The proof adds no GPU

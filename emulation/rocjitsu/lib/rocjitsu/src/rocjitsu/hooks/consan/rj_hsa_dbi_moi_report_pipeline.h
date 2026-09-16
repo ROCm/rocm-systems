@@ -61,6 +61,8 @@ struct AutoMoiReportPipelineInput {
   std::string_view input_fingerprint;
   const AutoMoiRuntimeStaticMetadata *static_metadata = nullptr;
   uint32_t sampled_conflict_example_limit = 8;
+  /// Opt-in suppression of statically proven same-instruction uniform LDS writes.
+  bool allow_uniform_lds_stores = false;
 };
 
 struct AutoMoiReportPipelineResult {

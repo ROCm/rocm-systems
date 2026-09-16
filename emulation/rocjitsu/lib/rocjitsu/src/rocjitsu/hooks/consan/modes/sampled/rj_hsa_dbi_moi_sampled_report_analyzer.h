@@ -19,10 +19,9 @@ struct AutoMoiSampledConflictAnalysis {
   std::vector<std::pair<AutoMoiSampledEvidence, AutoMoiSampledEvidence>> conflicts;
 };
 
-[[nodiscard]] AutoMoiSampledConflictAnalysis
-analyze_auto_moi_sampled_conflicts(std::span<const AutoMoiSampledEvidence> evidence,
-                                   bool synchronization_evidence_complete,
-                                   uint32_t example_limit = 8);
+[[nodiscard]] AutoMoiSampledConflictAnalysis analyze_auto_moi_sampled_conflicts(
+    std::span<const AutoMoiSampledEvidence> evidence, bool synchronization_evidence_complete,
+    uint32_t example_limit = 8, bool allow_uniform_lds_stores = false);
 
 void accumulate_auto_moi_sampled_analysis(AutoMoiReportSummary &summary,
                                           const AutoMoiSampledConflictAnalysis &analysis);
