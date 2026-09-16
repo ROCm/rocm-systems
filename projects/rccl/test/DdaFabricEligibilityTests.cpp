@@ -6,6 +6,7 @@
 
 #include "common/DdaFabricTestHelpers.hpp"
 
+#include "param.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
@@ -23,6 +24,129 @@ protected:
     void*             sendbuff_{reinterpret_cast<void*>(0x1000)};
     void*             recvbuff_{reinterpret_cast<void*>(0x2000)};
 };
+
+// LL128 eligibility tests: skip when RCCL_DDA_LL is disabled.
+// LL128 paths are gated by rcclParamDdaLL() (not rcclParamDdaLL128()).
+class DdaFabricLL128EligibilityTest : public DdaFabricEligibilityTest
+{
+protected:
+    void SetUp() override
+    {
+        DdaFabricEligibilityTest::SetUp();
+        if (!rcclParamDdaLL())
+            GTEST_SKIP() << "LL disabled (RCCL_DDA_LL=0); set RCCL_DDA_LL=1 to run";
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Fabric block cap
+// ---------------------------------------------------------------------------
+
+TEST(DdaFabricMaxBlocksTest, Uses96CuDefault)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, nullptr), 96);
+}
+
+TEST(DdaFabricMaxBlocksTest, Uses128CuDefault)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(128, nullptr), 128);
+}
+
+TEST(DdaFabricMaxBlocksTest, Uses192CuDefault)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(192, nullptr), 192);
+}
+
+TEST(DdaFabricMaxBlocksTest, ClampsCuCountToHardLimit)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(512, nullptr), 256);
+}
+
+TEST(DdaFabricMaxBlocksTest, InvalidCuCountUsesOneBlock)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(0, nullptr), 1);
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(-1, nullptr), 1);
+}
+
+TEST(DdaFabricMaxBlocksTest, OverrideCanLowerCuCap)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(192, "96"), 96);
+}
+
+TEST(DdaFabricMaxBlocksTest, OverrideCannotExceedCuCap)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "192"), 96);
+}
+
+TEST(DdaFabricMaxBlocksTest, ZeroOverrideUsesOneBlock)
+{
+    nccl_dda_detail::DdaFabricMaxBlocksOverride parsed;
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "0", &parsed), 1);
+    EXPECT_TRUE(parsed.specified);
+    EXPECT_TRUE(parsed.valid);
+    EXPECT_EQ(parsed.requested, 0);
+}
+
+TEST(DdaFabricMaxBlocksTest, MinimumValidCuCount)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(1, nullptr), 1);
+}
+
+TEST(DdaFabricMaxBlocksTest, ExactHardLimitCuCount)
+{
+    // cuCount exactly at DDA_FABRIC_MAXBLOCKS (256) should not be clamped
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(256, nullptr), 256);
+    // cuCount at 257 should clamp to 256
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(257, nullptr), 256);
+}
+
+TEST(DdaFabricMaxBlocksTest, OverrideAboveHardLimitIgnored)
+{
+    // Override "512" with cuCount=256 should still cap at 256 (cuCount)
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(256, "512"), 256);
+}
+
+TEST(DdaFabricMaxBlocksTest, InvalidOverrideIgnored)
+{
+    // Non-numeric override should be ignored, using cuCount-derived cap
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "garbage"), 96);
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, ""), 96);
+    // "12abc" has trailing non-numeric chars, so it's rejected as invalid
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "12abc"), 96);
+}
+
+TEST(DdaFabricMaxBlocksTest, NegativeOverrideUsesOneBlock)
+{
+    nccl_dda_detail::DdaFabricMaxBlocksOverride parsed;
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "-5", &parsed), 1);
+    EXPECT_TRUE(parsed.specified);
+    EXPECT_TRUE(parsed.valid);
+    EXPECT_EQ(parsed.requested, -5);
+}
+
+TEST(DdaFabricMaxBlocksTest, LargeOverrideDoesNotOverflow)
+{
+    // Values beyond INT_MAX should not overflow and incorrectly lower maxBlocks
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "3000000000"), 96);
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "9999999999"), 96);
+}
+
+TEST(DdaFabricMaxBlocksTest, ReportsParsedOverride)
+{
+    nccl_dda_detail::DdaFabricMaxBlocksOverride parsed;
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "48", &parsed), 48);
+    EXPECT_TRUE(parsed.specified);
+    EXPECT_TRUE(parsed.valid);
+    EXPECT_EQ(parsed.requested, 48);
+}
+
+TEST(DdaFabricMaxBlocksTest, ReportsInvalidOverride)
+{
+    nccl_dda_detail::DdaFabricMaxBlocksOverride parsed;
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "96 ", &parsed), 96);
+    EXPECT_TRUE(parsed.specified);
+    EXPECT_FALSE(parsed.valid);
+}
 
 // ---------------------------------------------------------------------------
 // Scratch sizing
@@ -204,7 +328,7 @@ TEST_F(DdaFabricEligibilityTest, AllToAll_DerivedScratchRejectsOversizedMessage)
 
 // LL128 AllReduce uses compact layout (scratch scales with message size).
 // Small message needs less scratch than the fixed floor.
-TEST_F(DdaFabricEligibilityTest, AllReduce_LL128CompactLayoutSmallMessageFits)
+TEST_F(DdaFabricLL128EligibilityTest, AllReduce_LL128CompactLayoutSmallMessageFits)
 {
     // Give scratch smaller than LL128 fixed floor but enough for a small message.
     // LL128 floor at 8 ranks = 2 * 8 * 4370 * 128 = ~8.5 MiB.
