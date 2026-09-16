@@ -109,38 +109,39 @@ class _Literal32Widening(Enum):
     F64_HIGH_BITS = 'F64HighBits'
 
 
-# Keep every shipped 64-bit source format explicit. PK_F32 replicates its literal
-# into both DWORDs, while I64 and F64 reinterpret the extension word by type.
-_SIMM32_64BIT_WIDENING = {
-    'FMT_NUM_B32': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_B64': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_BF16': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_BF8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_F16': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_F32': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_FP8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_I8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_M64': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_PK16_U4': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_PK2_B32': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_PK2_F32': _Literal32Widening.REPLICATE_32,
-    'FMT_NUM_PK2_F64': _Literal32Widening.F64_HIGH_BITS,
-    'FMT_NUM_PK2_U32': _Literal32Widening.REPLICATE_32,
-    'FMT_NUM_PK4_BF16': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_PK4_F16': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_PK8_BF8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_PK8_FP8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_PK8_I8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_U64': _Literal32Widening.ZERO_EXTEND,
-    'FMT_WMMA_AB_16X16_BF8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_WMMA_AB_16X16_FP8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_WMMA_AB_16X16_IU8': _Literal32Widening.ZERO_EXTEND,
-    'FMT_WMMA_AB_16X32_IU4': _Literal32Widening.ZERO_EXTEND,
-    'FMT_WMMA_AB_16X4_F32': _Literal32Widening.ZERO_EXTEND,
-    'FMT_WMMA_AB_IU4': _Literal32Widening.ZERO_EXTEND,
-    'FMT_WMMA_INDEX_SET2': _Literal32Widening.ZERO_EXTEND,
-    'FMT_NUM_I64': _Literal32Widening.SIGN_EXTEND,
-    'FMT_NUM_F64': _Literal32Widening.F64_HIGH_BITS,
+# Keep every shipped wide-source signature explicit. PK_F32 replicates its
+# literal into both DWORDs, while I64 and F64 reinterpret the extension word by
+# type. Packed F64 is a 128-bit operand containing two broadcast 64-bit values.
+_SIMM32_LITERAL_WIDENING = {
+    (64, 'FMT_NUM_B32'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_B64'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_BF16'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_BF8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_F16'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_F32'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_FP8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_I8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_M64'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_PK16_U4'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_PK2_B32'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_PK2_F32'): _Literal32Widening.REPLICATE_32,
+    (64, 'FMT_NUM_PK2_U32'): _Literal32Widening.REPLICATE_32,
+    (64, 'FMT_NUM_PK4_BF16'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_PK4_F16'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_PK8_BF8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_PK8_FP8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_PK8_I8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_U64'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_WMMA_AB_16X16_BF8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_WMMA_AB_16X16_FP8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_WMMA_AB_16X16_IU8'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_WMMA_AB_16X32_IU4'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_WMMA_AB_16X4_F32'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_WMMA_AB_IU4'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_WMMA_INDEX_SET2'): _Literal32Widening.ZERO_EXTEND,
+    (64, 'FMT_NUM_I64'): _Literal32Widening.SIGN_EXTEND,
+    (64, 'FMT_NUM_F64'): _Literal32Widening.F64_HIGH_BITS,
+    (128, 'FMT_NUM_PK2_F64'): _Literal32Widening.F64_HIGH_BITS,
 }
 
 _LITERAL_ENCODING_OPERANDS = {
@@ -1210,7 +1211,7 @@ class CodeGenerator:
             )
         if operand_type == 'OPR_SIMM16' or opnd.size == 16:
             literal_expr = f'({literal_expr} & 0xFFFFu)'
-        widening = CodeGenerator._literal_operand_64bit_widening(
+        widening = CodeGenerator._literal_operand_simm32_widening(
             opnd, operand_type, arch_name, inst_name, enc_name
         )
         if widening is not None:
@@ -1225,26 +1226,29 @@ class CodeGenerator:
         )
 
     @staticmethod
-    def _literal_operand_64bit_widening(
+    def _literal_operand_simm32_widening(
         opnd: Operand,
         operand_type: str,
         arch_name: str,
         inst_name: str,
         enc_name: str,
     ) -> _Literal32Widening | None:
-        is_64bit_value = opnd.size == 64 or (
-            opnd.size == 128 and opnd.data_format_name == 'FMT_NUM_PK2_F64'
-        )
-        if operand_type != 'OPR_SIMM32' or not opnd.is_input or not is_64bit_value:
+        if operand_type != 'OPR_SIMM32' or not opnd.is_input:
             return None
+        signature = (opnd.size, opnd.data_format_name)
         try:
-            return _SIMM32_64BIT_WIDENING[opnd.data_format_name]
+            return _SIMM32_LITERAL_WIDENING[signature]
         except KeyError as exc:
+            # Every 64-bit SIMM32 input requires an explicit policy. Wider
+            # packed inputs retain the default immediate semantics unless
+            # listed above.
+            if opnd.size != 64:
+                return None
             data_format = opnd.data_format_name or '<missing>'
             raise ValueError(
                 f'architecture {arch_name!r}, instruction {inst_name!r}, encoding '
-                f'{enc_name!r}: 64-bit SIMM32 input operand {opnd.name!r} has '
-                f'unsupported data format {data_format!r}'
+                f'{enc_name!r}: SIMM32 input operand {opnd.name!r} has no widening '
+                f'policy for size {opnd.size} and data format {data_format!r}'
             ) from exc
 
     @staticmethod
