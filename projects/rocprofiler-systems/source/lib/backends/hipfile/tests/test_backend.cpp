@@ -177,9 +177,9 @@ TEST_F(HipFileBackendTest, snapshot_is_memoized_per_timestamp)
     gpu(0).read_bytes = bytes::kb1;
 
     mock_backend backend{};
-    backend.get_stats(TS_1);
-    backend.get_stats(TS_1);
-    backend.get_stats(TS_1);
+    static_cast<void>(backend.get_stats(TS_1));
+    static_cast<void>(backend.get_stats(TS_1));
+    static_cast<void>(backend.get_stats(TS_1));
 
     // One sampling interval must cost exactly one hipFile query no matter how many
     // GPU devices read from the shared backend.
@@ -233,7 +233,7 @@ TEST_F(HipFileBackendTest, failed_query_reports_unavailable_and_zeros)
 TEST_F(HipFileBackendTest, successful_query_reports_available)
 {
     mock_backend backend{};
-    backend.get_stats(TS_1);
+    static_cast<void>(backend.get_stats(TS_1));
 
     EXPECT_TRUE(backend.is_available());
 }
@@ -243,7 +243,7 @@ TEST_F(HipFileBackendTest, availability_recovers_after_failure)
     mock_backend backend{};
 
     mock_wrapper::query_succeeds = false;
-    backend.get_stats(TS_1);
+    static_cast<void>(backend.get_stats(TS_1));
     EXPECT_FALSE(backend.is_available());
 
     // hipFile stats become readable once the target initializes them, which happens
