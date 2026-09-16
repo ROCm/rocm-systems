@@ -709,10 +709,8 @@ void aggregateForTypeAndOp(AggregationType aggType,
   std::mt19937_64 gen(Catch::rngSeed());
   dim3 gridDim = { 1 };
   hipError_t status;
-  typename distribution::result_type a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() :
-                                         (std::is_signed<T>::value? -1023 : 0);
-  typename distribution::result_type b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() :
-                                         1023;
+  typename distribution::result_type a = TestRange<T>::minimum;
+  typename distribution::result_type b = TestRange<T>::maximum;
   distribution distInput {a, b};
   int numAggregation = 0;
   void* kernelPtr;
