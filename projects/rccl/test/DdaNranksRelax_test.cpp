@@ -249,8 +249,43 @@ TEST(DdaNranksRelaxIsolatedTest, TreeThresholdDivisibilityAtRelaxedRankCount)
             EXPECT_FALSE(ncclAllReduceDdaIpcEligible(
                 mockComm.get(), sendbuff, recvbuff, 196612, ncclFloat32, ncclSum))
                 << "196612 % 3 == 1 must not be eligible for the tree path";
+
+            // 196611 % 3 == 0 (divisible), but the per-rank slice (65537 floats =
+            // 262148 B) is not 16-byte aligned: 262148 % 16 == 4. Divisibility
+            // alone is not sufficient for the tree path.
+            EXPECT_FALSE(ncclAllReduceDdaIpcEligible(
+                mockComm.get(), sendbuff, recvbuff, 196611, ncclFloat32, ncclSum))
+                << "196611 % 3 == 0 but the per-rank slice is not 16-byte aligned";
         },
         {{"RCCL_DDA_NRANKS_RELAX", "1"}});
+}
+
+// ncclAllReduceDdaIpcTreeEligible() directly: the pure predicate both
+// ncclAllReduceDdaIpcEligible() and the IPC launch path call, so a mutation
+// or drift between them shows up here as well as at the call sites above.
+// No GPU, no comm, no relaxed-rank env var needed.
+TEST(DdaAllReduceIpcTreeEligibleTest, RejectsNonPositiveRanks)
+{
+    EXPECT_FALSE(ncclAllReduceDdaIpcTreeEligible(/*count=*/1024, /*nRanks=*/0, /*typeSize=*/4));
+    EXPECT_FALSE(ncclAllReduceDdaIpcTreeEligible(/*count=*/1024, /*nRanks=*/-1, /*typeSize=*/4));
+}
+
+TEST(DdaAllReduceIpcTreeEligibleTest, RejectsNonDivisibleCount)
+{
+    // 196612 % 3 == 1.
+    EXPECT_FALSE(ncclAllReduceDdaIpcTreeEligible(/*count=*/196612, /*nRanks=*/3, /*typeSize=*/4));
+}
+
+TEST(DdaAllReduceIpcTreeEligibleTest, RejectsDivisibleButUnalignedSlice)
+{
+    // 196611 % 3 == 0, but (196611 / 3) * 4 == 262148, and 262148 % 16 == 4.
+    EXPECT_FALSE(ncclAllReduceDdaIpcTreeEligible(/*count=*/196611, /*nRanks=*/3, /*typeSize=*/4));
+}
+
+TEST(DdaAllReduceIpcTreeEligibleTest, AcceptsDivisibleAndAlignedSlice)
+{
+    // 196608 % 3 == 0, and (196608 / 3) * 4 == 262144, which is 16-byte aligned.
+    EXPECT_TRUE(ncclAllReduceDdaIpcTreeEligible(/*count=*/196608, /*nRanks=*/3, /*typeSize=*/4));
 }
 
 }  // namespace RcclUnitTesting

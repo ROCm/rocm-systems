@@ -72,11 +72,17 @@ static ncclResult_t ncclAllReduceDdaIpcLaunch(const void* sendbuff, void* recvbu
 
   const size_t sizeBytes = count * sizeof(T);
   const bool wantTree = sizeBytes > kDdaFlatTreeThresholdBytes;
-  const bool treeOk = wantTree && (count % static_cast<size_t>(nRanks) == 0);
+  // ncclAllReduceDdaIpcEligible() already gates every reachable caller on
+  // ncclAllReduceDdaIpcTreeEligible(), but Launch is templated on a
+  // compile-time NRANKS and reads a runtime nRanks/count independently of
+  // that gate, so it re-derives the same answer here rather than trusting
+  // the caller -- see the function for why both call it instead of each
+  // keeping their own copy of the condition.
+  const bool treeOk = wantTree && ncclAllReduceDdaIpcTreeEligible(count, nRanks, sizeof(T));
 
   if (wantTree && !treeOk) {
-    INFO(NCCL_ALL, "DDA IPC: size %zu B > 256KB but count %zu not divisible by %d; using flat kernel", sizeBytes, count,
-         nRanks);
+    INFO(NCCL_ALL, "DDA IPC: size %zu B > 256KB but count %zu with %d ranks is not tree-eligible; using flat kernel",
+         sizeBytes, count, nRanks);
   }
 
   auto gridBlock = ddaAllReduceIpcGeom(count, sizeof(T));
@@ -130,6 +136,19 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuf
 
 } // namespace
 
+bool ncclAllReduceDdaIpcTreeEligible(size_t count, int nRanks, size_t typeSize) {
+  if (nRanks <= 0) {
+    return false;
+  }
+  if (count % static_cast<size_t>(nRanks) != 0) {
+    return false;
+  }
+  // Two-shot/tree path: each rank reduces count/nRanks elements, so that
+  // per-rank slice must also be 16-byte aligned for the tree kernel's
+  // vectorized (uint4) loads.
+  return ((count / static_cast<size_t>(nRanks)) * typeSize) % 16 == 0;
+}
+
 bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op) {
   (void)sendbuff;
@@ -174,12 +193,8 @@ bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
     // 16-byte alignment: the DDA kernels do 16-byte vectorized loads.
     return false;
   }
-  if (bytes > kDdaFlatTreeThresholdBytes) {
-    if (count % comm->nRanks || ((count / comm->nRanks) * ncclTypeSize(datatype)) % 16) {
-      // Two-shot/tree path: each rank reduces count/nRanks elements, so that
-      // per-rank slice must also be 16-byte aligned.
-      return false;
-    }
+  if (bytes > kDdaFlatTreeThresholdBytes && !ncclAllReduceDdaIpcTreeEligible(count, comm->nRanks, ncclTypeSize(datatype))) {
+    return false;
   }
   return true;
 }
