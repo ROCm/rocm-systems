@@ -125,8 +125,10 @@ jobs:
             exit 1
           fi
           ls -l "${bin[0]}"
+          # Per-test durations here too, so both suites read the same way.
           "${bin[0]}" \
             --reporter console \
+            --durations yes \
             --reporter junit::out=unit-${{ matrix.os }}.xml
 
       - name: Upload results
@@ -428,8 +430,14 @@ jobs:
           if [ -n "${DEVICES}" ]; then
             export HIP_VISIBLE_DEVICES="${DEVICES}"
           fi
+          # --durations yes makes the console reporter emit one
+          # "<seconds> s: <name>" line per test case and per section, which is
+          # the per-test view the log otherwise lacks: Catch2's console reporter
+          # is silent about passing cases. Failures are unaffected and still
+          # print in full.
           ./build/hrr/tests/integration/hrr-integration-tests \
             --reporter console \
+            --durations yes \
             --reporter junit::out=integration-${{ matrix.family }}.xml
 
       # Unit_HRR_StreamWriteValueRoundtrip fails on every RDNA family:
