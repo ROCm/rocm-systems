@@ -192,10 +192,21 @@ ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm*           comm,
     return g_proxyClientQueryFdBlocking(comm, proxyConn, localFd, rmtFd);
 }
 
-ncclResult_t ncclRegLocalIsValid(struct ncclReg* /*reg*/, bool* isValid)
+// --- Controllable seam: ncclRegLocalIsValid -----------------------------
+// Default preserves the old stub: report the record as not locally valid
+// (so the register-family no-op arm is the default). Tests that drive the
+// delegate-when-valid arm install a hook returning true.
+static ncclResult_t DefaultRegLocalIsValid(struct ncclReg*, bool* isValid)
 {
     if (isValid) *isValid = false;
     return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclReg*, bool*)>
+    g_regLocalIsValid = DefaultRegLocalIsValid;
+
+ncclResult_t ncclRegLocalIsValid(struct ncclReg* reg, bool* isValid)
+{
+    return g_regLocalIsValid(reg, isValid);
 }
 
 ncclResult_t ncclShmImportShareableBuffer(struct ncclComm*  /*comm*/,
@@ -271,19 +282,41 @@ ncclResult_t ncclTopoCheckNet(struct ncclTopoSystem* /*system*/,
     return g_ncclTopoCheckNet(rank1, rank2, net);
 }
 
-ncclResult_t ncclCommGraphRegister(struct ncclComm* /*comm*/,
-                                   void*            /*buff*/,
-                                   size_t           /*size*/,
-                                   void**           handle)
+// --- Controllable seam: ncclCommGraphRegister ---------------------------
+// Default preserves the old stub: fail with a null handle. Graph-register
+// tests install a hook that succeeds and hands back a canned ncclReg*.
+static ncclResult_t DefaultCommGraphRegister(struct ncclComm*, void*, size_t,
+                                             void** handle)
 {
     if (handle) *handle = nullptr;
     return ncclSystemError;
 }
+std::function<ncclResult_t(struct ncclComm*, void*, size_t, void**)>
+    g_commGraphRegister = DefaultCommGraphRegister;
 
-ncclResult_t ncclCommGraphDeregister(struct ncclComm* /*comm*/,
-                                     struct ncclReg*  /*reg*/)
+ncclResult_t ncclCommGraphRegister(struct ncclComm* comm,
+                                   void*            buff,
+                                   size_t           size,
+                                   void**           handle)
+{
+    return g_commGraphRegister(comm, buff, size, handle);
+}
+
+// --- Controllable seam: ncclCommGraphDeregister -------------------------
+// Default preserves the old stub: succeed. The graph-register-failure and
+// cleanup-callback tests install a hook to observe that the deregister ran
+// against the expected comm/record.
+static ncclResult_t DefaultCommGraphDeregister(struct ncclComm*, struct ncclReg*)
 {
     return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclReg*)>
+    g_commGraphDeregister = DefaultCommGraphDeregister;
+
+ncclResult_t ncclCommGraphDeregister(struct ncclComm* comm,
+                                     struct ncclReg*  reg)
+{
+    return g_commGraphDeregister(comm, reg);
 }
 
 ncclResult_t ncclShmAllocateShareableBuffer(size_t            /*size*/,
@@ -491,4 +524,7 @@ void ResetNcclFakes()
     g_ncclTopoGetLinkTypeCalls     = 0;
     g_ncclTopoCheckP2p             = DefaultTopoCheckP2p;
     g_ncclTopoCheckNet             = DefaultTopoCheckNet;
+    g_regLocalIsValid              = DefaultRegLocalIsValid;
+    g_commGraphRegister            = DefaultCommGraphRegister;
+    g_commGraphDeregister          = DefaultCommGraphDeregister;
 }

@@ -4335,3 +4335,511 @@ TEST_F(P2pShareableBufferMicrotest,
 }
 
 #endif  // ROCM_VERSION >= 70000
+
+// ===========================================================================
+// Registration family: the public wrappers around ipcRegisterBuffer, the
+// deferred graph-cleanup callback they enqueue, and the deregister wrapper.
+//
+//   ncclIpcLocalRegisterBuffer  -- validate args + record, delegate on valid.
+//   ncclIpcGraphRegisterBuffer  -- delegate, then either enqueue a cleanup
+//                                  callback (legacy vs plan queue) on success
+//                                  or graph-deregister the record on failure.
+//   cleanupIpc                  -- reached by draining the queue a successful
+//                                  graph register populated (deregisters).
+//   ncclIpcDeregBuffer          -- ship a deregister proxy message.
+//
+// Scenario list (each -> one test below):
+//   1. Local: invalid args               -> no-op, outputs zeroed.
+//   2. Local: record not locally valid   -> no-op, outputs zeroed.
+//   3. Local: valid record               -> delegates; outputs are the reuse
+//                                            arm's (offset + raw remote addr).
+//   4. Graph: success, non-legacy        -> enqueues onto the plan queue and
+//                                            bumps nCleanupQueueElts.
+//   5. Graph: success, legacy IPC        -> enqueues onto legacyRegCleanupQueue,
+//                                            leaves nCleanupQueueElts untouched.
+//   6. Graph: register produced no reg    -> graph-deregisters the record.
+//   7. Cleanup callback (via queue drain) -> graph-deregisters the record.
+//   8. Deregister                         -> ships ncclProxyMsgDeregister with
+//                                            the registration's impInfo payload.
+//
+// The reuse arm of ipcRegisterBuffer is the cheapest way to make a *successful*
+// registration observable without the whole fresh-registration proxy dance:
+// a record whose ipcInfos[peerIndex] is already populated returns regBufFlag=1
+// with no driver/proxy traffic (see IpcRegisterBuffer_SendrecvReusesExistingIpcInfo).
+// These tests reuse that to focus each assertion on the *wrapper's* own
+// contract (arg gating, queue choice, dereg dispatch) rather than
+// ipcRegisterBuffer's internals.
+// ===========================================================================
+
+namespace {
+
+using CommCallbackQueue =
+    ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>;
+
+// RegFamilyReuseState -- a comm + reg record wired so ipcRegisterBuffer's
+// reuse arm succeeds for a single peer. Owns the backing storage the wrappers
+// and ipcRegisterBuffer read; must outlive the call.
+struct RegFamilyReuseState {
+    static constexpr int       kPeerRank      = 2;
+    static constexpr int       kPeerLocalRank = 1;
+    static constexpr uintptr_t kBegAddr       = 0x20000;
+    static constexpr uintptr_t kBuffOffset    = 0x40;
+    static constexpr uintptr_t kRmtRegAddr    = 0xB00000ull;
+
+    CommBuilder cb;
+    ncclReg regRecord{};
+    IpcInfosBacking ipcInfosBacking{regRecord};
+    ReusableIpcInfo reuse;
+    std::array<ncclReg*, 1> cacheSlots{};
+
+    const void* userbuff() const {
+        return reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    }
+
+    explicit RegFamilyReuseState(bool legacyIpcCap)
+        : reuse(kPeerRank, kPeerLocalRank, kRmtRegAddr, legacyIpcCap)
+    {
+        cb.WithLocalRank(kPeerRank, kPeerLocalRank);
+        regRecord.begAddr = kBegAddr;
+        regRecord.endAddr = kBegAddr + 0x1000;
+        reuse.InstallInto(regRecord);
+        // ncclRegFind walks comm->regCache.slots; a single populated slot
+        // whose [begAddr,endAddr) spans the buffer resolves to regRecord.
+        cacheSlots[0] = &regRecord;
+        cb.comm().regCache.slots      = cacheSlots.data();
+        cb.comm().regCache.population = 1;
+    }
+
+    RegFamilyReuseState(const RegFamilyReuseState&)            = delete;
+    RegFamilyReuseState& operator=(const RegFamilyReuseState&) = delete;
+};
+
+}  // namespace
+
+class P2pRegisterFamilyMicrotest : public P2pMicrotest {};
+
+// Scenario 1: each way the argument guard can fail (null comm, null userbuff,
+// zero size, zero peers) makes the wrapper a no-op that never touches
+// ncclRegFind / ipcRegisterBuffer and leaves the outputs zeroed.
+TEST_F(P2pRegisterFamilyMicrotest, LocalRegister_InvalidArgs_IsNoopWithZeroedOutputs)
+{
+    RegFamilyReuseState st(/*legacyIpcCap=*/false);
+    // Prove the guard short-circuits ahead of the delegate: a valid-record
+    // hook that would otherwise steer into ipcRegisterBuffer must not run.
+    ScopedHook valid(g_regLocalIsValid,
+        [](struct ncclReg*, bool*) -> ncclResult_t {
+            ADD_FAILURE() << "arg guard must short-circuit before ncclRegLocalIsValid";
+            return ncclSystemError;
+        });
+
+    int peerRanks[] = {RegFamilyReuseState::kPeerRank};
+    ncclComm* const comm = &st.cb.comm();
+    const void* const buff = st.userbuff();
+
+    struct Case { ncclComm* comm; const void* buff; size_t size; int nPeers; };
+    const Case cases[] = {
+        {nullptr, buff,    256, 1},   // null comm
+        {comm,    nullptr, 256, 1},   // null userbuff
+        {comm,    buff,      0, 1},   // zero buffSize
+        {comm,    buff,    256, 0},   // zero nPeers
+    };
+    for (const auto& c : cases) {
+        IpcRegOutputs out;
+        auto r = ncclIpcLocalRegisterBuffer(c.comm, c.buff, c.size, peerRanks,
+                                            c.nPeers, NCCL_IPC_SENDRECV,
+                                            &out.regBufFlag, &out.offsetOut,
+                                            &out.peerRmtAddrs);
+        EXPECT_EQ(r, ncclSuccess);
+        out.ExpectZeroed();
+    }
+}
+
+// Scenario 2: the record is found but reports not-locally-valid, so the
+// wrapper skips the delegate and leaves the outputs zeroed.
+TEST_F(P2pRegisterFamilyMicrotest, LocalRegister_RecordNotValid_IsNoopWithZeroedOutputs)
+{
+    RegFamilyReuseState st(/*legacyIpcCap=*/false);
+    // Default g_regLocalIsValid already reports false; make it explicit and
+    // assert ipcRegisterBuffer is never reached by failing loudly if the
+    // reuse arm's remote address surfaces.
+    int peerRanks[] = {RegFamilyReuseState::kPeerRank};
+    IpcRegOutputs out;
+
+    auto r = ncclIpcLocalRegisterBuffer(&st.cb.comm(), st.userbuff(),
+                                        /*buffSize=*/256, peerRanks, /*nPeers=*/1,
+                                        NCCL_IPC_SENDRECV, &out.regBufFlag,
+                                        &out.offsetOut, &out.peerRmtAddrs);
+
+    EXPECT_EQ(r, ncclSuccess);
+    out.ExpectZeroed();
+}
+
+// Scenario 3: a valid record delegates to ipcRegisterBuffer; the wrapper
+// returns that call's outputs -- the buffer offset and the peer's raw remote
+// address from the reuse arm.
+TEST_F(P2pRegisterFamilyMicrotest, LocalRegister_ValidRecord_DelegatesAndReturnsRemoteAddr)
+{
+    RegFamilyReuseState st(/*legacyIpcCap=*/true);
+    ScopedHook valid(g_regLocalIsValid,
+        [](struct ncclReg*, bool* isValid) -> ncclResult_t {
+            if (isValid) *isValid = true;
+            return ncclSuccess;
+        });
+
+    int peerRanks[] = {RegFamilyReuseState::kPeerRank};
+    IpcRegOutputs out;
+
+    auto r = ncclIpcLocalRegisterBuffer(&st.cb.comm(), st.userbuff(),
+                                        /*buffSize=*/256, peerRanks, /*nPeers=*/1,
+                                        NCCL_IPC_SENDRECV, &out.regBufFlag,
+                                        &out.offsetOut, &out.peerRmtAddrs);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(out.regBufFlag, 1);
+    EXPECT_EQ(out.offsetOut,  RegFamilyReuseState::kBuffOffset);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(out.peerRmtAddrs),
+              RegFamilyReuseState::kRmtRegAddr);
+}
+
+// Scenario 3b: a delegate failure propagates and the wrapper zeroes its
+// outputs on the fail path (the sentinel-seeded outputs must not survive).
+TEST_F(P2pRegisterFamilyMicrotest, LocalRegister_DelegateFails_PropagatesAndZeroesOutputs)
+{
+    RegFamilyReuseState st(/*legacyIpcCap=*/false);
+    // ncclRegLocalIsValid failing is the cheapest way to make the delegate
+    // arm return an error before ipcRegisterBuffer.
+    ScopedHook valid(g_regLocalIsValid,
+        [](struct ncclReg*, bool*) -> ncclResult_t { return ncclSystemError; });
+
+    int peerRanks[] = {RegFamilyReuseState::kPeerRank};
+    IpcRegOutputs out;
+
+    auto r = ncclIpcLocalRegisterBuffer(&st.cb.comm(), st.userbuff(),
+                                        /*buffSize=*/256, peerRanks, /*nPeers=*/1,
+                                        NCCL_IPC_SENDRECV, &out.regBufFlag,
+                                        &out.offsetOut, &out.peerRmtAddrs);
+
+    EXPECT_EQ(r, ncclSystemError);
+    out.ExpectZeroed();
+}
+
+// GraphRegisterState -- drives ncclIpcGraphRegisterBuffer's success path. It
+// wires ncclCuMemGetAddressRange (via the hipMemGetAddressRange seam) to a
+// single-segment range and ncclCommGraphRegister to hand back a reuse-armed
+// record, so the delegate returns regBufFlag=1 and the wrapper's own
+// queue-bookkeeping is what's left to observe.
+namespace {
+struct GraphRegisterState {
+    RegFamilyReuseState reuse;
+    std::unique_ptr<ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>> memGet;
+    std::unique_ptr<ScopedHook<ncclResult_t(struct ncclComm*, void*, size_t, void**)>> graphReg;
+
+    explicit GraphRegisterState(bool legacyIpcCap) : reuse(legacyIpcCap) {
+        // ncclCuMemGetAddressRange loops until it spans the buffer; one
+        // segment starting at userbuff and sized to the request covers it.
+        memGet = std::make_unique<ScopedHook<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>>(
+            g_hipMemGetAddressRange,
+            [](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t dptr) -> hipError_t {
+                if (pbase) *pbase = dptr;
+                if (psize) *psize = 256;
+                return hipSuccess;
+            });
+        // ncclCommGraphRegister hands back the reuse-armed record so the
+        // delegate's reuse arm succeeds.
+        ncclReg* rec = &reuse.regRecord;
+        graphReg = std::make_unique<ScopedHook<ncclResult_t(struct ncclComm*, void*, size_t, void**)>>(
+            g_commGraphRegister,
+            [rec](struct ncclComm*, void*, size_t, void** handle) -> ncclResult_t {
+                if (handle) *handle = rec;
+                return ncclSuccess;
+            });
+    }
+};
+}  // namespace
+
+// Scenario 4: a successful non-legacy registration enqueues the cleanup
+// callback onto the caller's plan queue and bumps the element count.
+TEST_F(P2pRegisterFamilyMicrotest, GraphRegister_NonLegacySuccess_EnqueuesPlanCleanupAndCountsIt)
+{
+    GraphRegisterState st(/*legacyIpcCap=*/false);
+    CommCallbackQueue cleanupQueue;
+    ncclIntruQueueConstruct(&cleanupQueue);
+    int nCleanupQueueElts = 0;
+
+    int peerRanks[] = {RegFamilyReuseState::kPeerRank};
+    IpcRegOutputs out;
+
+    auto r = ncclIpcGraphRegisterBuffer(&st.reuse.cb.comm(), st.reuse.userbuff(),
+                                        /*buffSize=*/256, peerRanks, /*nPeers=*/1,
+                                        NCCL_IPC_SENDRECV, &out.regBufFlag,
+                                        &out.offsetOut, &out.peerRmtAddrs,
+                                        &cleanupQueue, &nCleanupQueueElts);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(out.regBufFlag, 1);
+    // The plan queue received exactly one callback; the legacy queue stayed empty.
+    ASSERT_FALSE(ncclIntruQueueEmpty(&cleanupQueue));
+    EXPECT_TRUE(ncclIntruQueueEmpty(&st.reuse.cb.comm().legacyRegCleanupQueue));
+    EXPECT_EQ(nCleanupQueueElts, 1);
+
+    // Drain and free the callback so it doesn't leak (its fn is cleanupIpc,
+    // which frees the record; here we just release the malloc'd wrapper).
+    std::free(ncclIntruQueueDequeue(&cleanupQueue));
+}
+
+// Scenario 4b: the same non-legacy success path is safe when the caller
+// passes a null nCleanupQueueElts -- the callback still lands on the plan
+// queue and the count-bump is simply skipped.
+TEST_F(P2pRegisterFamilyMicrotest, GraphRegister_NonLegacySuccessNullCount_EnqueuesWithoutCounting)
+{
+    GraphRegisterState st(/*legacyIpcCap=*/false);
+    CommCallbackQueue cleanupQueue;
+    ncclIntruQueueConstruct(&cleanupQueue);
+
+    int peerRanks[] = {RegFamilyReuseState::kPeerRank};
+    IpcRegOutputs out;
+
+    auto r = ncclIpcGraphRegisterBuffer(&st.reuse.cb.comm(), st.reuse.userbuff(),
+                                        /*buffSize=*/256, peerRanks, /*nPeers=*/1,
+                                        NCCL_IPC_SENDRECV, &out.regBufFlag,
+                                        &out.offsetOut, &out.peerRmtAddrs,
+                                        &cleanupQueue, /*nCleanupQueueElts=*/nullptr);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(out.regBufFlag, 1);
+    ASSERT_FALSE(ncclIntruQueueEmpty(&cleanupQueue));
+    std::free(ncclIntruQueueDequeue(&cleanupQueue));
+}
+
+// Scenario 4c: the same argument guard as the local wrapper -- null comm,
+// null userbuff, zero size, or zero peers make graph-register a no-op that
+// never reaches the address-range / graph-register seams.
+TEST_F(P2pRegisterFamilyMicrotest, GraphRegister_InvalidArgs_IsNoopWithZeroedOutputs)
+{
+    GraphRegisterState st(/*legacyIpcCap=*/false);
+    CommCallbackQueue cleanupQueue;
+    ncclIntruQueueConstruct(&cleanupQueue);
+    int nCleanupQueueElts = 0;
+
+    int peerRanks[] = {RegFamilyReuseState::kPeerRank};
+    ncclComm* const comm = &st.reuse.cb.comm();
+    const void* const buff = st.reuse.userbuff();
+
+    struct Case { ncclComm* comm; const void* buff; size_t size; int nPeers; };
+    const Case cases[] = {
+        {nullptr, buff,    256, 1},
+        {comm,    nullptr, 256, 1},
+        {comm,    buff,      0, 1},
+        {comm,    buff,    256, 0},
+    };
+    for (const auto& c : cases) {
+        IpcRegOutputs out;
+        auto r = ncclIpcGraphRegisterBuffer(c.comm, c.buff, c.size, peerRanks,
+                                            c.nPeers, NCCL_IPC_SENDRECV,
+                                            &out.regBufFlag, &out.offsetOut,
+                                            &out.peerRmtAddrs, &cleanupQueue,
+                                            &nCleanupQueueElts);
+        EXPECT_EQ(r, ncclSuccess);
+        out.ExpectZeroed();
+    }
+    EXPECT_TRUE(ncclIntruQueueEmpty(&cleanupQueue));
+    EXPECT_EQ(nCleanupQueueElts, 0);
+}
+
+// Scenario 5: a successful legacy-IPC registration routes the cleanup callback
+// onto comm->legacyRegCleanupQueue and leaves the plan-queue count untouched.
+TEST_F(P2pRegisterFamilyMicrotest, GraphRegister_LegacySuccess_EnqueuesLegacyCleanupWithoutCounting)
+{
+    GraphRegisterState st(/*legacyIpcCap=*/true);
+    CommCallbackQueue cleanupQueue;
+    ncclIntruQueueConstruct(&cleanupQueue);
+    int nCleanupQueueElts = 0;
+
+    int peerRanks[] = {RegFamilyReuseState::kPeerRank};
+    IpcRegOutputs out;
+
+    auto r = ncclIpcGraphRegisterBuffer(&st.reuse.cb.comm(), st.reuse.userbuff(),
+                                        /*buffSize=*/256, peerRanks, /*nPeers=*/1,
+                                        NCCL_IPC_SENDRECV, &out.regBufFlag,
+                                        &out.offsetOut, &out.peerRmtAddrs,
+                                        &cleanupQueue, &nCleanupQueueElts);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(out.regBufFlag, 1);
+    ASSERT_FALSE(ncclIntruQueueEmpty(&st.reuse.cb.comm().legacyRegCleanupQueue));
+    EXPECT_TRUE(ncclIntruQueueEmpty(&cleanupQueue));
+    EXPECT_EQ(nCleanupQueueElts, 0);
+
+    std::free(ncclIntruQueueDequeue(&st.reuse.cb.comm().legacyRegCleanupQueue));
+}
+
+// Scenario 6: when the delegate registers nothing (regBufFlag stays 0), the
+// wrapper graph-deregisters the record it just created rather than enqueuing
+// a cleanup callback.
+TEST_F(P2pRegisterFamilyMicrotest, GraphRegister_NoRegistration_DeregistersRecord)
+{
+    // A fresh (not reuse-armed) record: ipcRegisterBuffer walks its
+    // fresh-registration arm, and with every driver/proxy seam at its
+    // fail-loud default it produces no registration (regBufFlag == 0)
+    // without reaching them (the cuMem/legacy arms are gated off).
+    CommBuilder cb;
+    cb.WithLocalRank(RegFamilyReuseState::kPeerRank,
+                     RegFamilyReuseState::kPeerLocalRank)
+      .WithMaxLocalRanks()
+      .WithSharedRes()
+      .WithProxyConnArray(RegFamilyReuseState::kPeerRank + 1);
+    cb.comm().gproxyConn[RegFamilyReuseState::kPeerRank].initialized = true;
+    ncclReg regRecord{};
+    IpcInfosBacking ipcInfosBacking{regRecord};
+    regRecord.begAddr = RegFamilyReuseState::kBegAddr;
+    regRecord.endAddr = RegFamilyReuseState::kBegAddr + 0x1000;
+
+    ncclReg* rec = &regRecord;
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t dptr) -> hipError_t {
+            if (pbase) *pbase = dptr;
+            if (psize) *psize = 256;
+            return hipSuccess;
+        });
+    ScopedHook graphReg(g_commGraphRegister,
+        [rec](struct ncclComm*, void*, size_t, void** handle) -> ncclResult_t {
+            if (handle) *handle = rec;
+            return ncclSuccess;
+        });
+    // The failure branch deregisters exactly the record graph-register handed back.
+    int deregCalls = 0;
+    const ncclReg* deregArg = nullptr;
+    ScopedHook dereg(g_commGraphDeregister,
+        [&](struct ncclComm*, struct ncclReg* reg) -> ncclResult_t {
+            ++deregCalls;
+            deregArg = reg;
+            return ncclSuccess;
+        });
+
+    CommCallbackQueue cleanupQueue;
+    ncclIntruQueueConstruct(&cleanupQueue);
+    int nCleanupQueueElts = 0;
+
+    int peerRanks[] = {RegFamilyReuseState::kPeerRank};
+    IpcRegOutputs out;
+
+    auto r = ncclIpcGraphRegisterBuffer(&cb.comm(),
+                                        reinterpret_cast<const void*>(
+                                            RegFamilyReuseState::kBegAddr +
+                                            RegFamilyReuseState::kBuffOffset),
+                                        /*buffSize=*/256, peerRanks, /*nPeers=*/1,
+                                        NCCL_IPC_SENDRECV, &out.regBufFlag,
+                                        &out.offsetOut, &out.peerRmtAddrs,
+                                        &cleanupQueue, &nCleanupQueueElts);
+
+    EXPECT_EQ(r, ncclSuccess);
+    out.ExpectZeroed();
+    EXPECT_EQ(deregCalls, 1);
+    EXPECT_EQ(deregArg, rec);
+    EXPECT_TRUE(ncclIntruQueueEmpty(&cleanupQueue));
+    EXPECT_EQ(nCleanupQueueElts, 0);
+}
+
+// Scenario 7: the cleanup callback a successful graph register enqueues,
+// invoked as the queue drain would, graph-deregisters the record it holds.
+TEST_F(P2pRegisterFamilyMicrotest, GraphCleanupCallback_WhenDrained_DeregistersHeldRecord)
+{
+    GraphRegisterState st(/*legacyIpcCap=*/false);
+    CommCallbackQueue cleanupQueue;
+    ncclIntruQueueConstruct(&cleanupQueue);
+    int nCleanupQueueElts = 0;
+
+    int peerRanks[] = {RegFamilyReuseState::kPeerRank};
+    IpcRegOutputs out;
+
+    ASSERT_EQ(ncclIpcGraphRegisterBuffer(&st.reuse.cb.comm(), st.reuse.userbuff(),
+                                         /*buffSize=*/256, peerRanks, /*nPeers=*/1,
+                                         NCCL_IPC_SENDRECV, &out.regBufFlag,
+                                         &out.offsetOut, &out.peerRmtAddrs,
+                                         &cleanupQueue, &nCleanupQueueElts),
+              ncclSuccess);
+    ASSERT_EQ(out.regBufFlag, 1);
+
+    // Observe the deregister the callback issues when the queue is drained.
+    int deregCalls = 0;
+    const ncclReg* deregArg = nullptr;
+    ScopedHook dereg(g_commGraphDeregister,
+        [&](struct ncclComm*, struct ncclReg* reg) -> ncclResult_t {
+            ++deregCalls;
+            deregArg = reg;
+            return ncclSuccess;
+        });
+
+    struct ncclCommCallback* cb = ncclIntruQueueDequeue(&cleanupQueue);
+    ASSERT_NE(cb, nullptr);
+    EXPECT_EQ(cb->fn(&st.reuse.cb.comm(), cb), ncclSuccess);  // frees cb
+
+    EXPECT_EQ(deregCalls, 1);
+    EXPECT_EQ(deregArg, &st.reuse.regRecord);
+}
+
+// Scenario 6b: a graph-register failure propagates and the wrapper zeroes
+// its outputs on the fail path.
+TEST_F(P2pRegisterFamilyMicrotest, GraphRegister_GraphRegisterFails_PropagatesAndZeroesOutputs)
+{
+    GraphRegisterState st(/*legacyIpcCap=*/false);
+    // Override the success graph-register hook with a failing one.
+    ScopedHook graphReg(g_commGraphRegister,
+        [](struct ncclComm*, void*, size_t, void** handle) -> ncclResult_t {
+            if (handle) *handle = nullptr;
+            return ncclSystemError;
+        });
+
+    CommCallbackQueue cleanupQueue;
+    ncclIntruQueueConstruct(&cleanupQueue);
+    int nCleanupQueueElts = 0;
+
+    int peerRanks[] = {RegFamilyReuseState::kPeerRank};
+    IpcRegOutputs out;
+
+    auto r = ncclIpcGraphRegisterBuffer(&st.reuse.cb.comm(), st.reuse.userbuff(),
+                                        /*buffSize=*/256, peerRanks, /*nPeers=*/1,
+                                        NCCL_IPC_SENDRECV, &out.regBufFlag,
+                                        &out.offsetOut, &out.peerRmtAddrs,
+                                        &cleanupQueue, &nCleanupQueueElts);
+
+    EXPECT_EQ(r, ncclSystemError);
+    out.ExpectZeroed();
+    EXPECT_TRUE(ncclIntruQueueEmpty(&cleanupQueue));
+    EXPECT_EQ(nCleanupQueueElts, 0);
+}
+
+// Scenario 8: deregister ships a blocking ncclProxyMsgDeregister carrying the
+// registration's impInfo payload to the record's proxy connector.
+TEST_F(P2pRegisterFamilyMicrotest, Deregister_ShipsDeregisterMessageWithImpInfoPayload)
+{
+    ncclComm comm{};
+    ncclProxyConnector proxyConn{};
+    ncclIpcRegInfo regInfo{};
+    regInfo.peerRank                = 3;
+    regInfo.baseAddr                = reinterpret_cast<void*>(0x50000);
+    regInfo.ipcProxyconn            = &proxyConn;
+    regInfo.impInfo.rmtRegAddr      = reinterpret_cast<void*>(0xABCD0000ull);
+
+    int   msgType     = -1;
+    void* msgReq      = nullptr;
+    int   msgReqSize  = -1;
+    const ncclProxyConnector* msgConn = nullptr;
+    ScopedHook proxy(g_proxyCallBlocking,
+        [&](struct ncclComm*, struct ncclProxyConnector* pc, int type,
+            void* req, int reqSize, void*, int) -> ncclResult_t {
+            msgConn    = pc;
+            msgType    = type;
+            msgReq     = req;
+            msgReqSize = reqSize;
+            return ncclSuccess;
+        });
+
+    auto r = ncclIpcDeregBuffer(&comm, &regInfo);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(msgConn, &proxyConn);
+    EXPECT_EQ(msgType, ncclProxyMsgDeregister);
+    EXPECT_EQ(msgReq, &regInfo.impInfo);
+    EXPECT_EQ(msgReqSize, static_cast<int>(sizeof(struct ncclIpcImpInfo)));
+}
