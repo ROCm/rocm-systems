@@ -192,6 +192,19 @@ class TestGpuEvents(unittest.TestCase):
                     }
 
         self.common.print("gpu counter results", results)
+
+        # Checked outside the sweep so the per-call failures above are still reported.
+        # A counter only reads back when it opened, so accepting NOT_SUPPORTED on START
+        # would otherwise hide a group that claims support while none of it works.
+        for gpu_idx, groups in results.items():
+            for group_name, group_result in groups.items():
+                if not group_result["supported"]:
+                    continue
+                any_read = any(c is not None for c in group_result["events"].values())
+                self.assertTrue(
+                    any_read,
+                    f"gpu {gpu_idx}: {group_name} reports supported but no counter was read",
+                )
         return
 
     def test_gpu_event(self):
