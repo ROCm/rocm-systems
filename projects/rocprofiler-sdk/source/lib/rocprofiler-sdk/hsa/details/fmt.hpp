@@ -284,6 +284,10 @@ struct formatter<hsa_amd_memory_copy_op_type_t>
                 return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST");
             case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
                 return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST");
+#if HSA_AMD_INTERFACE_VERSION_MINOR >= 33
+            case HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT:
+                return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT");
+#endif
         }
 
         auto value = static_cast<std::underlying_type_t<hsa_amd_memory_copy_op_type_t>>(op);
@@ -450,6 +454,24 @@ struct formatter<hsa_amd_memory_copy_op_t>
                     wait,
                     signal,
                     reserved);
+#if HSA_AMD_INTERFACE_VERSION_MINOR >= 33
+            case HSA_AMD_MEMORY_COPY_OP_LINEAR_RECT:
+                return fmt::format_to(
+                    ctx.out(),
+                    "[MEMORY_COPY_OP type={}, version={}, num_entries={}, traffic_class={}, "
+                    "completion_signal={}, rect_list={}, src_agent={}, dst_agent={}{}{}{}]",
+                    type,
+                    op.version,
+                    op.num_entries,
+                    op.traffic_class,
+                    op.completion_signal.handle,
+                    fmt::ptr(op.rect_list),
+                    op.src_agent.handle,
+                    op.dst_agent.handle,
+                    wait,
+                    signal,
+                    reserved);
+#endif
         }
 
         auto value = static_cast<std::underlying_type_t<hsa_amd_memory_copy_op_type_t>>(op.type);
