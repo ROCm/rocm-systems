@@ -37,7 +37,6 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
-#include <optional>
 #include <queue>
 #include <stdexcept>
 #include <utility>
@@ -68,7 +67,7 @@ struct pool
     // get an object from the pool. if all objects are in use, a new one will be created and added
     // to the pool
     pool_object<Tp>& acquire();
-    void             release(size_type idx);
+    bool             release(pool_object<Tp>& obj);
 
     template <typename FuncT, typename... Args>
     pool_object<Tp>& acquire(FuncT&& ctor, Args&&... args);
@@ -118,76 +117,60 @@ template <typename Tp>
 pool_object<Tp>&
 pool<Tp>::acquire()
 {
-    auto _idx = std::optional<size_type>{};
+    // m_pool_mtx is taken before the free-list pop rather than after it, so the pop and the
+    // lookup that consumes the popped index are one critical section. clear() retires m_pool
+    // under this lock, so it can no longer land between the two and strand the popped index:
+    // a stale index is never produced, and there is nothing here left to validate. A bounds
+    // check could not have done that job -- it cannot tell an index stranded by a clear()
+    // from an in-range index belonging to a later generation -- and this is why no
+    // epoch/generation counter is needed to tell those apart.
+    auto _pool_lk  = std::unique_lock<std::mutex>{m_pool_mtx};
+    auto _avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
+
+    // m_function() appends a batch to m_pool and pushes its indices onto the free list, so it
+    // needs both locks, exactly as it already did on the growth path
+    while(m_available.empty())
     {
-        auto _avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
-        if(!m_available.empty())
-        {
-            _idx = m_available.front();
-            m_available.pop();
-            if(m_released > 0)
-            {
-                m_reused++;
-            }
-        }
+        ROCP_INFO << fmt::format(
+            "Pool of type {} exhausted. Creating new batch of {} objects. New pool size: {}",
+            cxx_demangle(typeid(Tp).name()),
+            m_count,
+            m_pool.size() + m_count);
+        m_new_batch++;
+        m_function();
     }
 
-    if(_idx.has_value())
+    auto _idx = m_available.front();
+    m_available.pop();
+    if(m_released > 0)
     {
-        auto _read_lk = std::unique_lock<std::mutex>{m_pool_mtx};
-        // the free list is unlocked between the pop above and this lock, so clear() can retire
-        // m_pool in between and strand the popped index. Drop it and take the growth path
-        // rather than indexing past the end of the repopulated pool.
-        //
-        // TODO(ihhuang): the check below narrows that window, it does not close it, and what
-        // is left is a known gap rather than a caveat: a bounds check cannot tell a
-        // stale generation from a new one. An index stranded by a clear() that another thread
-        // has since regrown past is back in range here, so it passes the check and aliases
-        // the new generation's object while still sitting on the free list. release() carries
-        // the same residual. Closing it needs an epoch/generation counter stamped on the
-        // index and compared here, which is deliberately out of scope for this change.
-        if(_idx.value() < m_pool.size())
-        {
-            auto& _obj = m_pool.at(_idx.value());
-            ROCP_FATAL_IF(!_obj.acquire()) << fmt::format(
-                "Pool object at index {} was expected to be available but was not", _idx.value());
-            return _obj;
-        }
+        m_reused++;
     }
 
-    // add a new batch
-    {
-        auto _write_pool_lk  = std::unique_lock<std::mutex>{m_pool_mtx};
-        auto _write_avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
-        if(m_available.empty())
-        {
-            ROCP_INFO << fmt::format(
-                "Pool of type {} exhausted. Creating new batch of {} objects. New pool size: {}",
-                cxx_demangle(typeid(Tp).name()),
-                m_count,
-                m_pool.size() + m_count);
-            m_new_batch++;
-            m_function();
-        }
-    }
-
-    return acquire();
+    auto& _obj = m_pool.at(_idx);
+    ROCP_FATAL_IF(!_obj.acquire()) << fmt::format(
+        "Pool object at index {} was expected to be available but was not", _idx);
+    return _obj;
 }
 
 template <typename Tp>
-void
-pool<Tp>::release(size_type idx)
+bool
+pool<Tp>::release(pool_object<Tp>& obj)
 {
-    // m_pool_mtx is held across both the bounds check and the push: clear() holds it while it
-    // retires m_pool and drains the free list, so neither can interleave here and leave a
-    // retired index queued for a later acquire() to pop. Same residual as acquire(), see the
-    // TODO there.
-    auto _read_pool_lk = std::unique_lock<std::mutex>{m_pool_mtx};
-    if(idx >= m_pool.size()) return;
+    // the in-use exchange happens here, under m_pool_mtx, and not in the caller before it
+    // arrives. clear() clears that flag on every object it retires while holding this same
+    // lock, so a successful exchange is itself proof that no clear() has intervened since the
+    // object was acquired: the flag does the work a generation counter would, and a retired
+    // object can never queue its index for a later acquire() to pop. An object is taken by
+    // reference rather than by index for the same reason -- an identity can be validated this
+    // way, a bare index cannot.
+    auto _pool_lk = std::unique_lock<std::mutex>{m_pool_mtx};
+    if(!obj.clear_in_use()) return false;
 
     auto _write_avail_lk = std::unique_lock<std::mutex>{m_available_mtx};
-    m_available.push(idx);
+    m_available.push(obj.index());
     m_released++;
+    return true;
 }
 
 // get an object from the pool. if all objects are in use, a new one will be created and added to
@@ -239,11 +222,10 @@ pool<Tp>::clear(FuncT&& func)
 
     // The storage is retired, not freed. A pool_object<Tp>* handed out before this call can
     // outlive it -- the HSA async signal handler holds one per dispatch, and finalization
-    // reaches here without waiting for those handlers -- and pool_object::release() exchanges
-    // m_in_use on itself before it ever reaches this pool, so freeing here is a use-after-free
-    // on the object that no bounds check in release() can prevent. The loop above already
-    // cleared m_in_use on every object, so that exchange fails and no retired index re-enters
-    // the free list.
+    // reaches here without waiting for those handlers -- and a late release() on such an
+    // object reaches pool<Tp>::release(), which exchanges m_in_use on it, so freeing here
+    // would be a use-after-free on the object. The loop above already cleared m_in_use on
+    // every object, so that exchange fails and no retired index re-enters the free list.
     // Moving a stable_vector moves only its chunk index, so the objects keep their addresses.
     // Bounded: clear() is a teardown operation, and the storage is freed with the pool.
     //

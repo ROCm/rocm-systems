@@ -48,7 +48,7 @@ struct payload
 };
 
 // equal to stable_vector's chunk size so that every batch appends a chunk to the outer
-// chunk index, i.e. the allocation that release() must not read
+// chunk index, i.e. the allocation that acquire() must not read while another thread grows it
 constexpr size_t batch_size    = 32;
 constexpr size_t burst_rounds  = 32;
 constexpr size_t burst_base    = 8;
@@ -113,9 +113,10 @@ worker_count()
 }
 }  // namespace
 
-// Growth mutates m_pool under m_pool_mtx while release() reads it under the same lock, so the
-// two must be driven concurrently rather than in separate phases: the burst threads keep
-// raising peak demand to force batch growth while the churn threads keep releasing.
+// Growth mutates m_pool under m_pool_mtx while acquire() pops and indexes it under that same
+// lock, so the two must be driven concurrently rather than in separate phases: the burst
+// threads keep raising peak demand to force batch growth while the churn threads keep
+// releasing.
 TEST(common, pool_concurrent_acquire_release)
 {
     container::pool<payload> _pool{std::piecewise_construct, batch_size, init_payload};
@@ -260,20 +261,13 @@ TEST(common, pool_release_after_clear)
     EXPECT_EQ(_held->index(), _idx);
     EXPECT_EQ(_held->get().value, payload_sentinel);
 
-    // clear() cleared the in-use flag on every object it retired, so the late release finds
-    // m_in_use already false, fails its exchange and never reaches pool<Tp>::release()
+    // clear() cleared the in-use flag on every object it retired, so the late release reaches
+    // pool<Tp>::release(), fails its exchange under m_pool_mtx and queues nothing
     EXPECT_FALSE(_held->in_use());
     EXPECT_FALSE(_held->release());
     EXPECT_EQ(_held->get().value, payload_sentinel);
 
     auto _report = _pool.get_usage_report();
-    EXPECT_EQ(usage_field(_report, "size"), 0) << _report;
-    EXPECT_EQ(usage_field(_report, "available"), 0) << _report;
-
-    // and a retired index handed straight to release(), the route the failed exchange above
-    // skips, is dropped rather than queued
-    _pool.release(_idx);
-    _report = _pool.get_usage_report();
     EXPECT_EQ(usage_field(_report, "size"), 0) << _report;
     EXPECT_EQ(usage_field(_report, "available"), 0) << _report;
 
@@ -285,15 +279,16 @@ TEST(common, pool_release_after_clear)
     EXPECT_TRUE(_fresh.release());
 }
 
-// clear() can land between the free-list pop in acquire() and the m_pool_mtx acquisition that
-// follows it, so acquire() re-checks the popped index under that lock. Drop the re-check and
-// the stranded index reaches stable_vector::at(), which throws std::out_of_range.
+// acquire() takes m_pool_mtx before the free-list pop, so the pop and the stable_vector::at()
+// that consumes the popped index are one critical section and a clear() cannot land between
+// them. Take the lock after the pop instead and clear() strands the popped index, which then
+// reaches at() and throws std::out_of_range.
 //
-// One churn thread, and a main thread that only clears, is deliberate. The re-check is a bounds
-// check, so it cannot tell a stranded index apart from an in-range index belonging to a later
-// generation; reaching that residual takes a second thread to regrow the pool while the first is
-// blocked on m_pool_mtx. With a single grower the pool is always empty when the stranded index
-// is re-checked, so this test cannot trip it.
+// A bounds check on the popped index is not a substitute, and this test cannot show why: it
+// cannot tell a stranded index apart from an in-range index belonging to a later generation,
+// and reaching that case needs a second thread to regrow the pool while the first is blocked
+// on m_pool_mtx. Holding the lock across the pop removes the stranded index instead of
+// detecting it, so neither case is left to test.
 TEST(common, pool_clear_races_acquire_release)
 {
     container::pool<payload> _pool{std::piecewise_construct, batch_size, init_payload};
