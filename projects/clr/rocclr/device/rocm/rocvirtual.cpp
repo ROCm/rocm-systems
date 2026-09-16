@@ -8,6 +8,7 @@
 #include "device/rocm/rocdevice.hpp"
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rockernel.hpp"
+#include "device/rocm/rocaqldump.hpp"
 #include "utils/nontemporal.hpp"
 #include "device/rocm/rocmemory.hpp"
 #include "device/rocm/rocblit.hpp"
@@ -1539,6 +1540,8 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   CompleteAqlSubmission(reservation);
 
   bool attachSignal = timestamp_ != nullptr || attach_signal;
+  // Local only: the dumper needs a signal to time the packet, attach_signal still drives doorbell
+  attachSignal |= AqlDispatchDumper::Enabled();
   // Get active signal for current dispatch if profiling is necessary
   packet->completion_signal =
       Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, attachSignal);
@@ -1572,6 +1575,18 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
 
   AqlPacket* aql_loc = &((AqlPacket*)(gpu_queue_->base_address))[index & queueMask];
   writePacketToRingBuffer(aql_loc, packet, header, rest, index & queueMask);
+
+  if (AqlDispatchDumper::Enabled()) {
+    // Keyed on the template type: cluster launches are ext packets even when the setting is off.
+    if constexpr (std::is_same_v<AqlPacket, hsa_kernel_dispatch_packet_t> ||
+                  std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
+      AqlDispatchDumper::Record(
+          dev(), gpu_queue_, index, packet,
+          std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>, header, rest,
+          AqlDispatchDumper::Origin::kEager,
+          packet->completion_signal.handle != 0 ? Barriers().GetLastSignal() : nullptr);
+    }
+  }
 
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
     if constexpr (std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
@@ -1853,6 +1868,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     }
   }
 
+  const bool dumpBatch = AqlDispatchDumper::Enabled();
+
   // Attach profiling / completion signals to one packet and return the signal
   // that times it when this is a kernel dispatch. Used by the MOVDIR64B path,
   // which assembles the full packet (body + signal + valid header) in a host
@@ -1870,18 +1887,24 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         isBaseKernelDispatch ||
         (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
          amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
-    if (timestamp_ != nullptr) {
-      // Read the pre-patched completion signal from the host-side flat buffer, not
-      // from |pkt|: on the NT path |pkt| is the write-combining ring slot, which
-      // cannot be read back reliably.
-      const auto* hostPkt = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
-          flatPacketData.data() + i * kPacketSize);
-      const uint64_t prePatchedHandle = pre_patched ? hostPkt->completion_signal.handle : 0;
+    // Read the pre-patched completion signal from the host-side flat buffer, not
+    // from |pkt|: on the NT path |pkt| is the write-combining ring slot, which
+    // cannot be read back reliably.
+    const auto* hostPkt = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
+        flatPacketData.data() + i * kPacketSize);
+    // Profiling signals every packet; the dumper only needs the kernel dispatches.
+    const bool wantSignal = (timestamp_ != nullptr) || (dumpBatch && isKernelDispatch);
+    bool attached = false;
+    if (wantSignal) {
+      const uint64_t prePatchedHandle =
+          (pre_patched && timestamp_ != nullptr) ? hostPkt->completion_signal.handle : 0;
       if (prePatchedHandle == 0) {
         pkt->completion_signal =
             Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, true);
+        attached = true;
         if (isKernelDispatch) {
-          if (isBaseKernelDispatch && amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
+          if (timestamp_ != nullptr && isBaseKernelDispatch &&
+              amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
             pkt->reserved2 = timestamp_->command().profilingInfo().correlation_id_;
           }
           ProfilingSignal* signal = Barriers().GetLastSignal();
@@ -1900,7 +1923,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
           return isKernelDispatch ? it->second : nullptr;
         }
       }
-    } else if (isLast && (attach_signal || blocking)) {
+    }
+    if (timestamp_ == nullptr && isLast && (attach_signal || blocking) && !attached) {
       pkt->completion_signal = Barriers().ActiveSignal();
     }
     return nullptr;
@@ -1939,6 +1963,11 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       const char* kname = kit != dev().KernelMap().end()
                               ? kit->second.getDemangledName().c_str()
                               : "<unknown>";
+      if (dumpBatch) {
+        AqlDispatchDumper::Record(dev(), gpu_queue_, startIndex + i, hostPkt, !isBaseKernelDispatch,
+                                  hdr, static_cast<uint16_t>(validFullHeaders[i] >> 16),
+                                  AqlDispatchDumper::Origin::kGraph, packetSignal);
+      }
       if (needKernelNamesReported) {
         // index() is this vGPU's slot, i.e. the stream this batch was dispatched
         // on — a segmented graph spreads its packets over several of them.
@@ -2036,21 +2065,22 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       // Attach signal to the last packet when requested (before per-packet logging).
       auto* lastSlotPtr = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
           queueBase + ((startIndex + chunkEnd - 1) & queueMask) * kPacketSize);
-      if (isLastChunk && (attach_signal || blocking) && timestamp_ == nullptr) {
+      // With the dumper on, the per-packet loop below attaches this signal instead
+      if (isLastChunk && (attach_signal || blocking) && timestamp_ == nullptr && !dumpBatch) {
         lastSlotPtr->completion_signal = Barriers().ActiveSignal();
       }
 
       // Per-packet fixups: profiling signals, kernel-name printing, inline barrier logging.
-      if (timestamp_ != nullptr || needKernelNamesReported || kLogBatch) {
+      if (timestamp_ != nullptr || needKernelNamesReported || kLogBatch || dumpBatch) {
         for (size_t i = chunkStart; i < chunkEnd; ++i) {
           const uint64_t slotIdx = (startIndex + i) & queueMask;
           auto* slot = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
               queueBase + slotIdx * kPacketSize);
           ProfilingSignal* packetSignal = nullptr;
-          if (timestamp_ != nullptr) {
+          if (timestamp_ != nullptr || dumpBatch) {
             packetSignal = attachPacketSignal(slot, i, i == numPackets - 1);
           }
-          if (needKernelNamesReported || kLogBatch) {
+          if (needKernelNamesReported || kLogBatch || dumpBatch) {
             reportBatchPacket(i, slotIdx, packetSignal);
           }
         }
@@ -2096,7 +2126,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         *reinterpret_cast<uint32_t*>(&stg) = hdr | (static_cast<uint32_t>(setup) << 16);
         auto* dst = queueBase + slotIdx * kPacketSize;
         amd::movdir64b_copy64(dst, &stg);
-        if (needKernelNamesReported || kLogBatch) {
+        if (needKernelNamesReported || kLogBatch || dumpBatch) {
           reportBatchPacket(i, slotIdx, packetSignal);
         }
       }

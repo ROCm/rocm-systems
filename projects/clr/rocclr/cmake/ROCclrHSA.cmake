@@ -103,6 +103,7 @@ find_package(OpenGL REQUIRED)
 
 target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/rocm/rocappprofile.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/rocaqldump.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocrctx.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocblit.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocblitcl.cpp

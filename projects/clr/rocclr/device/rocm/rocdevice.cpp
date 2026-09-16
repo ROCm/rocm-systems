@@ -23,6 +23,7 @@
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rocprogram.hpp"
 #include "device/rocm/rockernel.hpp"
+#include "device/rocm/rocaqldump.hpp"
 #include "device/rocm/rocmemory.hpp"
 #include "device/rocm/rocglinterop.hpp"
 #include "device/rocm/rocsignal.hpp"
@@ -574,6 +575,8 @@ bool Device::init() {
 extern const char* SchedulerSourceCode;
 
 void Device::tearDown() {
+  // Drops the retained dispatch signals while HSA is still up
+  AqlDispatchDumper::Shutdown();
   NullDevice::tearDown();
   Hsa::shut_down();
 }

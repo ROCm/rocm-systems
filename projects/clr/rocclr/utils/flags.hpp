@@ -294,6 +294,8 @@ release(uint, DEBUG_CLR_USE_MOVDIR64B, 1,                                     \
         "(1=enabled (default), 0=non-temporal store path)")                   \
 release(bool, DEBUG_CLR_ENABLE_KDQ, true,                                     \
         "Kernel dispatch metadata (prefetch) queue, 0 = disable")             \
+release(cstring, GPU_DUMP_AQL_DISPATCH, "",                                   \
+        "Dump every AQL kernel dispatch packet as JSON Lines to this directory") \
 
 namespace amd {
 
