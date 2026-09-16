@@ -1197,10 +1197,15 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
-    // Branch #3: CE via registered symmetric windows.
+    // Branch #3: CE via registered symmetric windows. Same gates as taskAppend:
+    // single-node ncclCeAvailable or multi-node ncclHierCeAvailable. Without the
+    // hier arm, rccl-tests -A 1 labels a live hierarchical CE AllGather as
+    // Hier/Direct/RING because ncclCeAvailable requires nNodes == 1.
     const bool ceAvailable =
       !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
-    if (ceAvailable && !hasSysmemSegment && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
+    const bool hierCeAvailable =
+      !ceCapturing && ncclHierCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
+    if ((ceAvailable || hierCeAvailable) && !hasSysmemSegment && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }

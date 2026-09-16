@@ -19,6 +19,8 @@
 #include "ce_coll.h"
 // For the ncclHierCeAvailable prerequisite fields the scale-out cases gate on.
 #include <comm.h>
+// rcclGetCollImplInfo / RCCL_CE_REGISTERED: -A 1 must name the CE path that ran.
+#include "rccl_common.h"
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -418,6 +420,18 @@ protected:
         assertCEPathTaken(testId);
         if(requireScaleOut)
             assertHierarchicalCEPathTaken(rank, testId);
+        if(isCeExpected())
+        {
+            int algo = 0, proto = 0, nChannels = 0;
+            ASSERT_EQ(ncclSuccess,
+                      rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllGather, count, ncclFloat32,
+                                          ncclSum, sendSym.ptr, recvSym.ptr, /*graphCapturing=*/0, &algo,
+                                          &proto, &nChannels))
+                << testId << ": rcclGetCollImplInfo failed";
+            EXPECT_EQ(algo, static_cast<int>(RCCL_CE_REGISTERED))
+                << testId << ": -A 1 / rcclGetCollImplInfo must report CE when the CE path ran"
+                << " (algo=" << algo << ")";
+        }
         // The hierarchical path leaves intraBatchSync at its initialized false, so its
         // batch always logs the without-sync line. Predicting from the thresholds
         // instead would mispredict on a node with more than kCeIntraBatchSyncFreq
