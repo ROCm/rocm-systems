@@ -113,8 +113,8 @@ Set `NCCL_TUNER_PLUGIN` to either the plugin name, or the absolute path to the p
 
 ```bash
 export NCCL_TUNER_PLUGIN=example
-export NCCL_TUNER_PLUGIN=libnccl-tuner-example.so
-export NCCL_TUNER_PLUGIN=/path/to/your/plugin/libnccl-tuner-example.so
+export NCCL_TUNER_PLUGIN=librccl-tuner-example.so
+export NCCL_TUNER_PLUGIN=/path/to/your/plugin/librccl-tuner-example.so
 ```
 
 NCCL will automatically discover and load the plugin based on the exported symbol names.

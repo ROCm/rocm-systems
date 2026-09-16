@@ -13,7 +13,7 @@ panels:
 - file: system_info.yaml
   panel_id: 1
   panel_title: System Info
-  panel_alias:
+  panel_alias: sysinfo
   data_sources:
   - type: raw_csv_table
     id: 1
@@ -21,7 +21,7 @@ panels:
 - file: system_speed_of_light.yaml
   panel_id: 2
   panel_title: System Speed-of-Light
-  panel_alias:
+  panel_alias: sol
   data_sources:
   - type: metric_table
     id: 1
@@ -29,7 +29,7 @@ panels:
 - file: memory_chart.yaml
   panel_id: 3
   panel_title: Memory Chart
-  panel_alias:
+  panel_alias: memchart
   data_sources:
   - type: metric_table
     id: 1
@@ -58,7 +58,7 @@ panels:
 - file: roofline.yaml
   panel_id: 4
   panel_title: Roofline
-  panel_alias:
+  panel_alias: roof
   data_sources:
   - type: metric_table
     id: 1
@@ -69,7 +69,7 @@ panels:
 - file: command_processor_cpc.yaml
   panel_id: 5
   panel_title: CPC (Command Processor - Compute)
-  panel_alias:
+  panel_alias: cpc
   data_sources:
   - type: metric_table
     id: 1
@@ -77,7 +77,7 @@ panels:
 - file: workgroup_manager_spi.yaml
   panel_id: 6
   panel_title: Workgroup Manager (SPI)
-  panel_alias:
+  panel_alias: spi
   data_sources:
   - type: metric_table
     id: 1
@@ -94,7 +94,7 @@ panels:
 - file: workgroup_processor_wgp.yaml
   panel_id: 7
   panel_title: Workgroup Processor (WGP)
-  panel_alias:
+  panel_alias: wgp
   data_sources:
   - type: metric_table
     id: 1
@@ -153,7 +153,7 @@ panels:
 - file: gl0_texture_addresser_txa.yaml
   panel_id: 8
   panel_title: GL0 Texture Addresser (TXA)
-  panel_alias:
+  panel_alias: txa
   data_sources:
   - type: metric_table
     id: 1
@@ -185,7 +185,7 @@ panels:
 - file: gl0_cache_and_lds.yaml
   panel_id: 9
   panel_title: GL0 Cache and LDS
-  panel_alias:
+  panel_alias: gl0
   data_sources:
   - type: metric_table
     id: 1
@@ -223,7 +223,7 @@ panels:
 - file: gl0_texture_data_txd.yaml
   panel_id: 10
   panel_title: GL0 Texture Data (TXD)
-  panel_alias:
+  panel_alias: txd
   data_sources:
   - type: metric_table
     id: 1
@@ -231,7 +231,7 @@ panels:
 - file: gl1_cache.yaml
   panel_id: 11
   panel_title: GL1 Cache
-  panel_alias:
+  panel_alias: gl1
   data_sources:
   - type: metric_table
     id: 1
@@ -254,7 +254,7 @@ panels:
 - file: graphics_level_arbiter_glarb.yaml
   panel_id: 12
   panel_title: GLARB (Graphics Level Arbiter)
-  panel_alias:
+  panel_alias: glarb
   data_sources:
   - type: metric_table
     id: 1
@@ -274,7 +274,7 @@ panels:
 - file: gl2_cache.yaml
   panel_id: 13
   panel_title: GL2 Cache
-  panel_alias:
+  panel_alias: gl2
   data_sources:
   - type: metric_table
     id: 1
@@ -309,7 +309,7 @@ panels:
 - file: efficiency_arbiter_ea.yaml
   panel_id: 14
   panel_title: Efficiency Arbiter (EA)
-  panel_alias:
+  panel_alias: ea
   data_sources:
   - type: metric_table
     id: 1
@@ -326,7 +326,7 @@ panels:
 - file: central_hub_ch.yaml
   panel_id: 15
   panel_title: Central Hub (CH)
-  panel_alias:
+  panel_alias: ch
   data_sources:
   - type: metric_table
     id: 1
@@ -346,7 +346,7 @@ panels:
 - file: translation_cache_l1_utcl1.yaml
   panel_id: 16
   panel_title: UTCL1 (Translation Cache L1)
-  panel_alias:
+  panel_alias: utcl1
   data_sources:
   - type: metric_table
     id: 1
@@ -354,7 +354,7 @@ panels:
 - file: graphics_register_bus_manager_grbm.yaml
   panel_id: 17
   panel_title: GRBM (Graphics Register Bus Manager)
-  panel_alias:
+  panel_alias: grbm
   data_sources:
   - type: metric_table
     id: 1
@@ -362,7 +362,7 @@ panels:
 - file: pc_sampling.yaml
   panel_id: 21
   panel_title: PC Sampling
-  panel_alias:
+  panel_alias: pc_sampling
   data_sources:
   - type: pc_sampling_table
     id: 1
