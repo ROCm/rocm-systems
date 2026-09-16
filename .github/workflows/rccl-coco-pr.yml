@@ -6,10 +6,10 @@ name: RCCL coco PR smoke
 # fork-triggered runs); a maintainer must run this workflow manually via
 # workflow_dispatch, supplying pr_number and pr_sha from the fork PR.
 #
-# Set COCO_PR_BLOCKING=true to fail the workflow on errors once gating is enabled.
+# ruby-smoke/oci-smoke are gating: a coco failure fails the PR check.
 on:
   pull_request:
-    branches: [develop, main]
+    branches: [develop, main, rccl-develop, rccl_develop]
     paths:
       - 'projects/rccl/**'
       - '.github/workflows/rccl-coco-pr.yml'
@@ -163,7 +163,6 @@ jobs:
       coco_args: ${{ needs.ruby-setup.outputs.coco_args }}
       timeout_minutes: 360
       concurrency_group: rccl-coco-pr-${{ needs.ruby-setup.outputs.pr_number }}-ruby
-      non_gating: ${{ vars.COCO_PR_BLOCKING != 'true' }}
 
   oci-smoke:
     name: OCI smoke (oci-rccl-pr-smoke)
@@ -189,4 +188,3 @@ jobs:
       coco_args: ${{ needs.oci-setup.outputs.coco_args }}
       timeout_minutes: 360
       concurrency_group: rccl-coco-pr-${{ needs.oci-setup.outputs.pr_number }}-oci
-      non_gating: ${{ vars.COCO_PR_BLOCKING != 'true' }}

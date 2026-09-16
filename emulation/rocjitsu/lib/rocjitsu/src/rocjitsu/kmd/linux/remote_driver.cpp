@@ -52,6 +52,7 @@ namespace {
 constexpr bool has_embedded_pointers(unsigned long request) {
   switch (canonical_ioctl_request(request)) {
   case AMDKFD_IOC_WAIT_EVENTS:
+  case AMDKFD_IOC_SET_CU_MASK:
   case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
   case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU:
   case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW:
@@ -741,6 +742,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   // these to point at its own buffer; we must restore the client-side originals
   // before copying inline response data back.
   uint64_t saved_events_ptr = 0;
+  uint64_t saved_cu_mask_ptr = 0;
   uint64_t saved_apertures_ptr = 0;
   uint64_t saved_device_ids_ptr = 0;
   uint64_t saved_dbg_rinfo_ptr = 0;
@@ -763,6 +765,15 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   uint32_t saved_dbg_queue_count = 0;
   if (has_embedded_pointers(request)) {
     switch (request) {
+    case AMDKFD_IOC_SET_CU_MASK: {
+      const auto *mask = static_cast<const kfd_ioctl_set_cu_mask_args *>(arg);
+      if (mask->num_cu_mask == 0 || mask->num_cu_mask % 32 != 0)
+        return -EINVAL;
+      if (mask->cu_mask_ptr == 0)
+        return -EFAULT;
+      saved_cu_mask_ptr = mask->cu_mask_ptr;
+      break;
+    }
     case AMDKFD_IOC_WAIT_EVENTS:
       saved_events_ptr = static_cast<kfd_ioctl_wait_events_args *>(arg)->events_ptr;
       break;
@@ -841,6 +852,15 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   if (has_embedded_pointers(request)) {
     auto *args_base = buf.data() + prefix;
     switch (request) {
+    case AMDKFD_IOC_SET_CU_MASK: {
+      const auto *mask = reinterpret_cast<const kfd_ioctl_set_cu_mask_args *>(args_base);
+      const size_t bytes = (std::min(mask->num_cu_mask, 1024u) / 32) * sizeof(uint32_t);
+      const size_t offset = buf.size();
+      buf.resize(offset + bytes);
+      if (copy_ioctl_user_buffer(buf.data() + offset, saved_cu_mask_ptr, bytes) != 0)
+        return -EFAULT;
+      break;
+    }
     case AMDKFD_IOC_WAIT_EVENTS: {
       auto *wait_args = reinterpret_cast<kfd_ioctl_wait_events_args *>(args_base);
       const auto *events = reinterpret_cast<const void *>(wait_args->events_ptr);
@@ -1077,6 +1097,9 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     // daemon's response (daemon rewrites them to point at its own buffer).
     if (has_embedded_pointers(request)) {
       switch (request) {
+      case AMDKFD_IOC_SET_CU_MASK:
+        static_cast<kfd_ioctl_set_cu_mask_args *>(arg)->cu_mask_ptr = saved_cu_mask_ptr;
+        break;
       case AMDKFD_IOC_WAIT_EVENTS:
         static_cast<kfd_ioctl_wait_events_args *>(arg)->events_ptr = saved_events_ptr;
         break;

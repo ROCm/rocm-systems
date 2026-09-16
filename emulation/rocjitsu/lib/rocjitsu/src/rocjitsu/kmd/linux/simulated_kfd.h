@@ -341,6 +341,7 @@ private:
   int unmap_memory_ioctl(KfdProcess &proc, void *arg);
   int create_queue_ioctl(KfdProcess &proc, void *arg);
   int update_queue_ioctl(KfdProcess &proc, void *arg);
+  int set_cu_mask_ioctl(KfdProcess &proc, void *arg);
   int destroy_queue_ioctl(KfdProcess &proc, void *arg);
   int create_event_ioctl(KfdProcess &proc, void *arg);
   int set_memory_policy_ioctl(KfdProcess &proc, void *arg);

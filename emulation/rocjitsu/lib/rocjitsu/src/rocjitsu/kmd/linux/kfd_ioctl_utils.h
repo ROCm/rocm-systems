@@ -10,11 +10,27 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <sys/uio.h>
+#include <unistd.h>
 
 namespace rocjitsu {
+
+/// Copy an embedded userspace buffer without turning an invalid pointer into
+/// a simulator fault. Both the local driver and daemon client read their own
+/// address space here; the server receives a reconstructed inline buffer.
+inline int copy_ioctl_user_buffer(void *destination, uint64_t source, size_t bytes) {
+  iovec local{destination, bytes};
+  iovec remote{reinterpret_cast<void *>(static_cast<uintptr_t>(source)), bytes};
+  ssize_t copied;
+  do {
+    copied = process_vm_readv(getpid(), &local, 1, &remote, 1, 0);
+  } while (copied < 0 && errno == EINTR);
+  return copied == static_cast<ssize_t>(bytes) ? 0 : -EFAULT;
+}
 
 constexpr size_t ioctl_arg_size(unsigned long request) { return _IOC_SIZE(request); }
 

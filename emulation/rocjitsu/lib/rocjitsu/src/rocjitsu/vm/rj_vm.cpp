@@ -164,6 +164,14 @@ bool reconstruct_embedded_pointers(uint32_t cmd, void *arg, size_t arg_size, siz
     return entry_size == 0 || count <= inline_size / entry_size;
   };
   switch (cmd) {
+  case AMDKFD_IOC_SET_CU_MASK: {
+    auto *args = static_cast<kfd_ioctl_set_cu_mask_args *>(arg);
+    if (args->num_cu_mask == 0 || args->num_cu_mask % 32 != 0 ||
+        !has_entries(std::min(args->num_cu_mask, 1024u) / 32, sizeof(uint32_t)))
+      return false;
+    args->cu_mask_ptr = reinterpret_cast<uint64_t>(extra);
+    break;
+  }
   case AMDKFD_IOC_WAIT_EVENTS: {
     auto *args = static_cast<kfd_ioctl_wait_events_args *>(arg);
     if (!has_entries(args->num_events, sizeof(kfd_event_data)))
