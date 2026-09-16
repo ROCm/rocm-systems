@@ -22,37 +22,18 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#cmakedefine PROFILE
-#cmakedefine BUILD_DEBUG_TRACE_HOST
-#cmakedefine BUILD_DEBUG_TRACE_DEVICE
-#cmakedefine BUILD_DEBUG_DEVICE
-#cmakedefine USE_RO
-#cmakedefine USE_IPC
-#cmakedefine USE_GDA
-#cmakedefine USE_SDMA
-#cmakedefine USE_THREADS
-#cmakedefine USE_SHARED_CTX
-#cmakedefine USE_WF_COAL
-#cmakedefine HAVE_AMDSMI_GPU_FABRIC_INFO
-#cmakedefine USE_FUNC_CALL
-#cmakedefine USE_SINGLE_NODE
-#cmakedefine USE_HDP_FLUSH
-#cmakedefine USE_HDP_FLUSH_HOST_SIDE
-#cmakedefine GDA_IONIC
-#cmakedefine GDA_BNXT
-#cmakedefine GDA_MLX5
-#cmakedefine GDA_MUX
-#cmakedefine HAVE_EXTERNAL_MPI
-#cmakedefine HAVE_DEVICE_MALLOC_UNCACHED
+#ifndef LIBRARY_INCLUDE_ROCSHMEM_COMMON_HPP
+#define LIBRARY_INCLUDE_ROCSHMEM_COMMON_HPP
 
-#define ROCSHMEM_VENDOR_MAJOR_VERSION @PROJECT_VERSION_MAJOR@
-#define ROCSHMEM_VENDOR_MINOR_VERSION @PROJECT_VERSION_MINOR@
-#define ROCSHMEM_VENDOR_PATCH_VERSION @PROJECT_VERSION_PATCH@
-#define ROCSHMEM_VERSION              "@PROJECT_VERSION@"
+namespace rocshmem {
 
-#define ROCSHMEM_VENDOR_STRING   "@ROCSHMEM_VENDOR_STRING@"
+enum ROCSHMEM_STATUS {
+  ROCSHMEM_SUCCESS = 0,
+  ROCSHMEM_ERROR = 1,
+};
 
-#define ROCSHMEM_GIT_HASH        "@ROCSHMEM_GIT_HASH@"
-#define ROCSHMEM_INSTALL_PREFIX  "@CMAKE_INSTALL_PREFIX@"
-#define ROCSHMEM_OFFLOAD_TARGETS "@ROCSHMEM_OFFLOAD_TARGETS@"
-#define ROCSHMEM_BUILD_TYPE      "@CMAKE_BUILD_TYPE@"
+enum class BackendType { GDA_BACKEND, };
+
+}  // namespace rocshmem
+
+#endif  // LIBRARY_INCLUDE_ROCSHMEM_COMMON_HPP

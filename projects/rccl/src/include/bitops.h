@@ -47,7 +47,10 @@ constexpr static __host__ __device__ Int maxval(Int a, Int b, More... more) {
 #endif
 }
 
+#ifndef BIT
 #define BIT(x) (1UL << (x))
+#endif
+
 #define MASK(x) ((1UL << x) - 1UL)
 
 #define DIVUP(x, y) (((x) + (y) - 1) / (y))
