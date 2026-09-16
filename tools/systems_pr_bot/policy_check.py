@@ -281,10 +281,17 @@ def get_check_runs(owner: str, repo: str, sha: str, token: str) -> List[Dict[str
         if not isinstance(data, dict):
             raise RuntimeError("Unexpected check-runs payload")
         batch = data.get("check_runs", [])
+        total = data.get("total_count")
         if not isinstance(batch, list) or not batch:
+            # An empty page is only a clean end if total_count agrees nothing is missing;
+            # otherwise this is the same partial-list-as-complete failure raised below.
+            if isinstance(total, int) and len(runs) < total:
+                raise RuntimeError(
+                    f"check-runs pagination for {sha} got an empty page with only "
+                    f"{len(runs)}/{total} runs collected; refusing to report it as complete"
+                )
             return runs
         runs.extend(item for item in batch if isinstance(item, dict))
-        total = data.get("total_count")
         if isinstance(total, int) and len(runs) >= total:
             return runs
 
@@ -573,6 +580,13 @@ def summarize_required_checks(
             failing.append(f"{n}={conc}")
 
     return missing, failing, conc_by_name
+
+
+def all_required_checks_concluded(policy: Policy, conc_by_name: Dict[str, str]) -> bool:
+    """True once every required check has *some* conclusion (pass or fail), from the
+    conc_by_name a summarize_required_checks call already produced -- "null" covers both
+    missing and still-running, so this also implies "present"."""
+    return all(conc_by_name.get(n, "null") != "null" for n in policy.required_checks)
 
 
 def upsert_comment(
@@ -1163,13 +1177,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         ci_start = time.time()
         while True:
             poll_runs = get_check_runs(owner=owner, repo=repo, sha=sha, token=token)  # type: ignore[arg-type]
-            by_name = effective_run_by_name(poll_runs)
-            # Worst-wins: a failed duplicate short-circuits the wait, a pending one keeps us polling.
-            all_concluded = all(
-                by_name.get(n) is not None and by_name[n].get("conclusion") is not None
-                for n in policy.required_checks
-            )
-            if all_concluded:
+            _, _, poll_conc_by_name = summarize_required_checks(policy, poll_runs)
+            if all_required_checks_concluded(policy, poll_conc_by_name):
                 final_combined = results + build_check_results(policy, poll_runs)
                 upsert_comment(
                     owner,
@@ -1227,23 +1236,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"- {f}")
             return 1
 
-        # If any required checks are missing or still running, keep waiting.
-        all_present = not missing
-        all_ok = True
-        # Decides "ready for review", so it MUST agree with summarize_required_checks above.
-        by_name = effective_run_by_name(runs)
-        for name in policy.required_checks:
-            r = by_name.get(name)
-            if not r:
-                all_ok = False
-                continue
-            conc = r.get("conclusion")
-            if conc is None:
-                all_ok = False
-            elif str(conc) not in OK_CONCLUSIONS:
-                all_ok = False
-
-        if all_present and all_ok:
+        # If any required check is missing or still running, keep waiting. failing is
+        # already known empty here (the `if failing:` above would have returned), so this
+        # is exactly "every required check is present and concluded" -- no need to re-walk
+        # `runs` and re-derive what conc_by_name, from the summarize_required_checks call
+        # above, already says.
+        if all_required_checks_concluded(policy, conc_by_name):
             final_results = results + build_check_results(
                 policy,
                 runs,

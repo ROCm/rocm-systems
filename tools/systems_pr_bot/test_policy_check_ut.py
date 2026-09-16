@@ -25,7 +25,6 @@ sys.path.insert(0, str(THIS_DIR))
 
 import policy_check as pc  # noqa: E402
 
-
 # ----------------------------- helpers ---------------------------------------
 
 _ISSUE_PATTERNS = [
@@ -607,8 +606,10 @@ class CheckRunPaginationTests(unittest.TestCase):
         # Assert the actual requests, not just their count: dropping per_page
         # from the URL construction would still satisfy every check above.
         self.assertIn(f"per_page={pc.CHECK_RUNS_PER_PAGE}", calls[0])
-        self.assertIn("page=1", calls[0])
-        self.assertIn("page=2", calls[1])
+        # "&" prefix: "page=1" is also a substring of "per_page=100" and would
+        # pass even with &page= missing entirely.
+        self.assertIn("&page=1", calls[0])
+        self.assertIn("&page=2", calls[1])
 
     def test_stops_once_total_count_is_reached(self) -> None:
         page1 = {
@@ -632,6 +633,22 @@ class CheckRunPaginationTests(unittest.TestCase):
             runs = pc.get_check_runs("o", "r", "sha", "tok")
 
         self.assertEqual(len(runs), 1)
+
+    def test_empty_page_that_contradicts_total_count_raises(self) -> None:
+        # A truncated/glitchy response: total_count still says 308 remain, but
+        # this page came back empty. Returning the 100 collected so far would
+        # look identical to a genuinely complete, 100-run result.
+        page1 = {
+            "total_count": 308,
+            "check_runs": [
+                {"name": f"job-{i}", "conclusion": "success"} for i in range(100)
+            ],
+        }
+        page2 = {"total_count": 308, "check_runs": []}
+        fake, _ = self._fake_gh_get([page1, page2])
+        with unittest.mock.patch.object(pc, "gh_get", fake):
+            with self.assertRaises(RuntimeError):
+                pc.get_check_runs("o", "r", "sha", "tok")
 
     def test_a_server_that_ignores_page_raises_instead_of_looping(self) -> None:
         # Never empty, total_count always out of reach: the pre-cap loop spun
@@ -661,33 +678,25 @@ class DuplicateCheckRunNameTests(unittest.TestCase):
         return make_policy()
 
     def test_a_failing_duplicate_is_not_masked_by_a_passing_one(self) -> None:
-        runs = [
-            {"name": "pre-commit", "conclusion": "failure"},
-            {"name": "pre-commit", "conclusion": "success"},
-        ]
-        missing, failing, _ = pc.summarize_required_checks(self._policy(), runs)
-        self.assertEqual(missing, [])
-        self.assertEqual(failing, ["pre-commit=failure"])
-
-    def test_order_does_not_matter(self) -> None:
-        runs = [
-            {"name": "pre-commit", "conclusion": "success"},
-            {"name": "pre-commit", "conclusion": "failure"},
-        ]
-        _, failing, _ = pc.summarize_required_checks(self._policy(), runs)
-        self.assertEqual(failing, ["pre-commit=failure"])
+        failing_run = {"name": "pre-commit", "conclusion": "failure"}
+        passing_run = {"name": "pre-commit", "conclusion": "success"}
+        for runs in ([failing_run, passing_run], [passing_run, failing_run]):
+            with self.subTest(order=[r["conclusion"] for r in runs]):
+                missing, failing, _ = pc.summarize_required_checks(self._policy(), runs)
+                self.assertEqual(missing, [])
+                self.assertEqual(failing, ["pre-commit=failure"])
 
     def test_failure_wins_over_a_still_running_duplicate(self) -> None:
-        runs = [
-            {"name": "pre-commit", "conclusion": None},
-            {"name": "pre-commit", "conclusion": "failure"},
-        ]
-        _, failing, _ = pc.summarize_required_checks(self._policy(), runs)
-        self.assertEqual(
-            failing,
-            ["pre-commit=failure"],
-            "a known failure should report now, not wait out the poll window",
-        )
+        pending_run = {"name": "pre-commit", "conclusion": None}
+        failing_run = {"name": "pre-commit", "conclusion": "failure"}
+        for runs in ([pending_run, failing_run], [failing_run, pending_run]):
+            with self.subTest(order=[r["conclusion"] for r in runs]):
+                _, failing, _ = pc.summarize_required_checks(self._policy(), runs)
+                self.assertEqual(
+                    failing,
+                    ["pre-commit=failure"],
+                    "a known failure should report now, not wait out the poll window",
+                )
 
     def test_pending_wins_over_success(self) -> None:
         runs = [
@@ -741,6 +750,34 @@ class DuplicateCheckRunNameTests(unittest.TestCase):
                 rows = pc.build_check_results(self._policy(), runs)
                 row = next(r for r in rows if r.name == "pre-commit")
                 self.assertFalse(row.passed)
+
+
+class AllRequiredChecksConcludedTests(unittest.TestCase):
+    """The one true source both poll loops in main() must share."""
+
+    def _policy(self) -> pc.Policy:
+        return make_policy()
+
+    def test_missing_check_is_not_concluded(self) -> None:
+        _, _, conc = pc.summarize_required_checks(self._policy(), [])
+        self.assertFalse(pc.all_required_checks_concluded(self._policy(), conc))
+
+    def test_still_running_check_is_not_concluded(self) -> None:
+        runs = [{"name": "pre-commit", "conclusion": None}]
+        _, _, conc = pc.summarize_required_checks(self._policy(), runs)
+        self.assertFalse(pc.all_required_checks_concluded(self._policy(), conc))
+
+    def test_failed_check_is_concluded(self) -> None:
+        # Concluded is not the same as passed: main() checks `failing` first
+        # and only reaches this helper once it already knows nothing failed.
+        runs = [{"name": "pre-commit", "conclusion": "failure"}]
+        _, _, conc = pc.summarize_required_checks(self._policy(), runs)
+        self.assertTrue(pc.all_required_checks_concluded(self._policy(), conc))
+
+    def test_passed_check_is_concluded(self) -> None:
+        runs = [{"name": "pre-commit", "conclusion": "success"}]
+        _, _, conc = pc.summarize_required_checks(self._policy(), runs)
+        self.assertTrue(pc.all_required_checks_concluded(self._policy(), conc))
 
 
 class PrecommitHelpCommentTests(unittest.TestCase):
