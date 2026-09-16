@@ -28,10 +28,14 @@
 # (with ROCM_PATH on CMAKE_PREFIX_PATH):
 #   cmake -S . -B build && cmake --build build && ctest --test-dir build
 cmake_minimum_required(VERSION 3.18)
-project(rocdecode_unit_tests LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# Only declare our own project() when configured standalone; when pulled in via
+# add_subdirectory() from the rocdecode test build we inherit the parent's, and
+# the C++ standard is set on the target (below) rather than via directory-wide
+# variables to avoid affecting the parent configuration.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  project(rocdecode_unit_tests LANGUAGES CXX)
+endif()
 
 find_package(GTest REQUIRED)
 find_package(HIP REQUIRED)
@@ -39,6 +43,7 @@ include(GoogleTest)
 enable_testing()
 
 add_executable(surface_format_selection_test surface_format_selection_test.cpp)
+target_compile_features(surface_format_selection_test PRIVATE cxx_std_17)
 target_include_directories(surface_format_selection_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode
     ${CMAKE_CURRENT_SOURCE_DIR}/../../api)
