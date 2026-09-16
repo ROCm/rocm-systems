@@ -715,8 +715,8 @@ template <typename T>
 struct TestRange<T, std::enable_if_t<std::is_same_v<T, half>>> {
   // for float16, we generate any random unsigned short, but cap the exponent later on
   // On the rest of the types, just use a bigger reduced range of numbers to avoid overflows too
-  static inline half minimum = std::numeric_limits<unsigned short>::lowest();
-  static inline half maximum = std::numeric_limits<unsigned short>::max();
+  static inline unsigned short minimum = std::numeric_limits<unsigned short>::lowest();
+  static inline unsigned short maximum = std::numeric_limits<unsigned short>::max();
 };
 
 template <typename T>
