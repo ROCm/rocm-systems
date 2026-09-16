@@ -25,7 +25,7 @@ MAX_LISTED_FILES = 3000
 PR_PAGE_SIZE = 50
 FILE_PAGE_SIZE = 100
 CHECK_NAME = "rocm-merge-gate"
-# Never frozen, so a repository-wide freeze can still be lifted by a PR.
+# Never frozen, so a freeze covering .github cannot block the PR that lifts it.
 EXEMPT_PATHS = (
     ".github/workflows/rocm-merge-gate.yml",
     ".github/scripts/rocm_merge_gate.py",
@@ -100,10 +100,9 @@ def truthy(value: str | None, default: bool) -> bool:
 
 def load_freezes(
     env: Mapping[str, str] | None = None, include_disabled: bool = False
-) -> tuple[bool, list[Freeze]]:
-    """Return (repo-wide freeze, freezes) from the workflow's env."""
+) -> list[Freeze]:
+    """Return the freezes configured in the workflow's env."""
     env = os.environ if env is None else env
-    freeze_all = truthy(env.get("FREEZE_ENTIRE_REPO"), default=False)
     try:
         entries = json.loads(env.get("FREEZES", "").strip() or "[]")
     except json.JSONDecodeError as exc:
@@ -128,7 +127,7 @@ def load_freezes(
                 f"Freeze `{name}` needs a non-empty list of string paths."
             )
         freezes.append(Freeze(name=name, paths=tuple(paths)))
-    return freeze_all, freezes
+    return freezes
 
 
 def load_workflow_env(workflow: Path) -> dict[str, str]:
@@ -173,14 +172,8 @@ def validate_config(workflow: Path, repo_root: Path) -> list[str]:
     env = load_workflow_env(workflow)
     known_words = sorted(TRUE_WORDS | FALSE_WORDS)
 
-    switch = env.get("FREEZE_ENTIRE_REPO", "").strip().lower()
-    if switch not in TRUE_WORDS | FALSE_WORDS:
-        problems.append(
-            f"FREEZE_ENTIRE_REPO must be one of {known_words}, got {switch!r}."
-        )
-
     try:
-        _, freezes = load_freezes(env, include_disabled=True)
+        freezes = load_freezes(env, include_disabled=True)
         entries = json.loads(env.get("FREEZES", "").strip() or "[]")
     except ConfigError as exc:
         return problems + [str(exc)]
@@ -222,8 +215,8 @@ def validate_config(workflow: Path, repo_root: Path) -> list[str]:
     for path in EXEMPT_PATHS:
         if not path_in_repo(repo_root, path):
             problems.append(
-                f"Exempt path `{path}` is missing, so a repository-wide "
-                "freeze could not be lifted."
+                f"Exempt path `{path}` is missing, so a freeze covering "
+                "`.github` could not be lifted."
             )
     return problems
 
@@ -321,16 +314,12 @@ def open_prs(repo: str, base: str) -> Iterator[OpenPR]:
         cursor = page["pageInfo"]["endCursor"]
 
 
-def verdict(
-    paths: Iterable[str], freeze_all: bool, freezes: list[Freeze]
-) -> tuple[bool, str]:
-    if not freeze_all and not freezes:
+def verdict(paths: Iterable[str], freezes: list[Freeze]) -> tuple[bool, str]:
+    if not freezes:
         return True, "No freezes are active."
 
     paths = list(paths)
     blocked: list[str] = []
-    if freeze_all:
-        blocked += [f"- repository-wide freeze: `{path}`" for path in paths]
     for freeze in freezes:
         blocked += [
             f"- freeze `{freeze.name}`: `{path}`"
@@ -339,11 +328,7 @@ def verdict(
         ]
 
     if not blocked:
-        active = (
-            "the repository-wide freeze"
-            if freeze_all
-            else ", ".join(f.name for f in freezes)
-        )
+        active = ", ".join(freeze.name for freeze in freezes)
         return True, f"No frozen paths were changed (active: {active})."
 
     listing = "\n".join(dict.fromkeys(blocked))
@@ -355,10 +340,9 @@ def verdict(
 
 def evaluate(repo: str, pr: int) -> tuple[bool, str]:
     """Return (allowed, summary). Anything unverifiable fails closed."""
-    freeze_all, freezes = load_freezes()
-    if not freeze_all and not freezes:
-        return True, "No freezes are active."
-    return verdict(changed_paths(repo, pr), freeze_all, freezes)
+    freezes = load_freezes()
+    paths = changed_paths(repo, pr) if freezes else ()
+    return verdict(paths, freezes)
 
 
 def post_check(repo: str, head_sha: str, allowed: bool, summary: str) -> None:
@@ -398,18 +382,15 @@ def cmd_evaluate(repo: str, pr: int) -> int:
 
 def cmd_reevaluate_open(repo: str, base: str) -> int:
     """Re-post the check on open PRs so idle ones follow the current config."""
-    freeze_all, freezes = load_freezes()
-    lines = [
-        f"Repository-wide freeze: {freeze_all}. "
-        f"Active freezes: {', '.join(f.name for f in freezes) or 'none'}."
-    ]
+    freezes = load_freezes()
+    lines = [f"Active freezes: {', '.join(f.name for f in freezes) or 'none'}."]
     checked = blocked = 0
     for pull in open_prs(repo, base):
         try:
             if pull.needs_rest:
                 allowed, summary = evaluate(repo, pull.number)
             else:
-                allowed, summary = verdict(pull.paths, freeze_all, freezes)
+                allowed, summary = verdict(pull.paths, freezes)
         except Exception as exc:
             allowed, summary = (
                 False,

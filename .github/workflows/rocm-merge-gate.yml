@@ -18,10 +18,6 @@ on:
   workflow_dispatch:
 
 env:
-  # Freeze the whole repository. This workflow and its helper stay exempt so
-  # the freeze can still be lifted by a PR.
-  FREEZE_ENTIRE_REPO: false
-
   # One entry per frozen tree. Set "enabled" to false to lift a single freeze,
   # or add an entry to freeze more trees. Paths are directory prefixes;
   # fnmatch globs (*, ?, []) also work. Changes apply once merged to develop.

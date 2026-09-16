@@ -29,10 +29,10 @@ WORKFLOW = Path(__file__).parents[1].parent / "workflows" / "rocm-merge-gate.yml
 RCCL_FREEZE = [{"name": "rccl", "enabled": True, "paths": ["projects/rccl"]}]
 
 
-def env(freezes, freeze_all=False):
+def env(freezes):
     """Environment as the workflow hands it to the script (values are strings)."""
     raw = freezes if isinstance(freezes, str) else json.dumps(freezes)
-    return {"FREEZES": raw, "FREEZE_ENTIRE_REPO": str(freeze_all).lower()}
+    return {"FREEZES": raw}
 
 
 def rest_stub(files, changed_files=None):
@@ -47,8 +47,8 @@ def rest_stub(files, changed_files=None):
     return fake_gh
 
 
-def evaluate(files, freezes=RCCL_FREEZE, freeze_all=False, changed_files=None):
-    with patch.dict(os.environ, env(freezes, freeze_all), clear=False):
+def evaluate(files, freezes=RCCL_FREEZE, changed_files=None):
+    with patch.dict(os.environ, env(freezes), clear=False):
         with patch.object(gate, "gh", rest_stub(files, changed_files)):
             return gate.evaluate("owner/repo", 1)
 
@@ -69,16 +69,16 @@ class TruthyTest(unittest.TestCase):
 
 
 class LoadFreezesTest(unittest.TestCase):
-    def load(self, freezes, freeze_all=False):
-        with patch.dict(os.environ, env(freezes, freeze_all), clear=False):
+    def load(self, freezes):
+        with patch.dict(os.environ, env(freezes), clear=False):
             return gate.load_freezes()
 
     def test_entries_are_enabled_by_default(self):
-        _, freezes = self.load([{"name": "rccl", "paths": ["projects/rccl"]}])
+        freezes = self.load([{"name": "rccl", "paths": ["projects/rccl"]}])
         self.assertEqual([f.name for f in freezes], ["rccl"])
 
     def test_disabled_entries_are_dropped(self):
-        _, freezes = self.load(
+        freezes = self.load(
             [
                 {"name": "rccl", "enabled": False, "paths": ["projects/rccl"]},
                 {"name": "shmem", "enabled": True, "paths": ["projects/rocshmem"]},
@@ -86,17 +86,13 @@ class LoadFreezesTest(unittest.TestCase):
         )
         self.assertEqual([f.name for f in freezes], ["shmem"])
 
-    def test_repo_wide_switch(self):
-        self.assertFalse(self.load([])[0])
-        self.assertTrue(self.load([], freeze_all=True)[0])
-
     def test_unnamed_entry_gets_a_placeholder_name(self):
-        _, freezes = self.load([{"paths": ["projects/rccl"]}])
+        freezes = self.load([{"paths": ["projects/rccl"]}])
         self.assertEqual(freezes[0].name, "freeze-0")
 
     def test_missing_config_means_no_freezes(self):
         with patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(gate.load_freezes(), (False, []))
+            self.assertEqual(gate.load_freezes(), [])
 
     def test_unusable_config_raises(self):
         # A typo must not silently unfreeze the repository.
@@ -134,44 +130,39 @@ class MatchTest(unittest.TestCase):
 
 class VerdictTest(unittest.TestCase):
     def test_no_active_freeze_passes(self):
-        allowed, summary = gate.verdict(["projects/rccl/a"], False, [])
+        allowed, summary = gate.verdict(["projects/rccl/a"], [])
         self.assertTrue(allowed)
         self.assertEqual(summary, "No freezes are active.")
 
     def test_blocked_summary_names_the_freeze_and_path(self):
         freezes = [gate.Freeze("rccl", ("projects/rccl",))]
-        allowed, summary = gate.verdict(["projects/rccl/a"], False, freezes)
+        allowed, summary = gate.verdict(["projects/rccl/a"], freezes)
         self.assertFalse(allowed)
         self.assertIn("freeze `rccl`: `projects/rccl/a`", summary)
         self.assertIn("rocm-merge-gate.yml", summary)
 
     def test_unfrozen_paths_pass_and_name_the_active_freezes(self):
         freezes = [gate.Freeze("rccl", ("projects/rccl",))]
-        allowed, summary = gate.verdict(["docs/x.md"], False, freezes)
+        allowed, summary = gate.verdict(["docs/x.md"], freezes)
         self.assertTrue(allowed)
         self.assertIn("active: rccl", summary)
 
-    def test_repo_wide_freeze_blocks_any_path(self):
-        allowed, summary = gate.verdict(["docs/x.md"], True, [])
-        self.assertFalse(allowed)
-        self.assertIn("repository-wide freeze: `docs/x.md`", summary)
-
-    def test_overlapping_freezes_list_each_path_once_per_freeze(self):
-        freezes = [gate.Freeze("rccl", ("projects/rccl",))]
-        _, summary = gate.verdict(["projects/rccl/a", "projects/rccl/a"], True, freezes)
-        self.assertEqual(
-            summary.count("- repository-wide freeze: `projects/rccl/a`"), 1
-        )
+    def test_a_path_is_listed_once_per_freeze_that_holds_it(self):
+        freezes = [
+            gate.Freeze("rccl", ("projects/rccl",)),
+            gate.Freeze("everything", ("projects",)),
+        ]
+        _, summary = gate.verdict(["projects/rccl/a", "projects/rccl/a"], freezes)
         self.assertEqual(summary.count("- freeze `rccl`: `projects/rccl/a`"), 1)
+        self.assertEqual(summary.count("- freeze `everything`: `projects/rccl/a`"), 1)
 
 
 class ExemptPathTest(unittest.TestCase):
     def test_the_freeze_can_always_be_lifted(self):
-        # Without this, FREEZE_ENTIRE_REPO would block the PR that turns it off.
+        # Without this, freezing `.github` would block the PR that lifts it.
         allowed, _ = evaluate(
             [{"filename": path} for path in gate.EXEMPT_PATHS],
-            freezes=[],
-            freeze_all=True,
+            freezes=[{"name": "infra", "paths": [".github"]}],
         )
         self.assertTrue(allowed)
 
@@ -353,8 +344,8 @@ class SweepTest(unittest.TestCase):
             return json.dumps([{"filename": f"docs/f{n}.md"} for n in range(250)])
         return json.dumps({"changed_files": self.nodes[number - 1]["changedFiles"]})
 
-    def sweep(self, freezes=RCCL_FREEZE, freeze_all=False):
-        with patch.dict(os.environ, env(freezes, freeze_all), clear=False):
+    def sweep(self, freezes=RCCL_FREEZE):
+        with patch.dict(os.environ, env(freezes), clear=False):
             with patch.object(gate, "gh", self.fake_gh):
                 with patch.object(gate, "report", self.reports.append):
                     return gate.cmd_reevaluate_open("owner/repo", "develop")
@@ -392,10 +383,6 @@ class SweepTest(unittest.TestCase):
         self.assertEqual(self.calls["posted"], self.TOTAL)
         self.assertEqual(self.failures(), set())
         self.assertEqual(self.calls["rest"], 0)
-
-    def test_repo_wide_freeze_blocks_everything(self):
-        self.sweep(freezes=[], freeze_all=True)
-        self.assertEqual(len(self.failures()), self.TOTAL)
 
     def test_a_broken_pr_evaluation_posts_a_failure(self):
         original = gate.evaluate
@@ -503,22 +490,18 @@ class ValidateConfigTest(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
 
-    def workflow(self, freezes, freeze_all="false"):
+    def workflow(self, freezes):
         raw = freezes if isinstance(freezes, str) else json.dumps(freezes)
         path = self.root / f"wf{len(list(self.root.iterdir()))}.yml"
-        path.write_text(
-            yaml.safe_dump({"env": {"FREEZE_ENTIRE_REPO": freeze_all, "FREEZES": raw}})
-        )
+        path.write_text(yaml.safe_dump({"env": {"FREEZES": raw}}))
         return path
 
-    def problems(self, freezes, freeze_all="false", tracked=(), existing=()):
+    def problems(self, freezes, tracked=(), existing=()):
         """Validate against a stubbed repository containing only `existing`."""
         known = set(existing) | set(gate.EXEMPT_PATHS)
         with patch.object(gate, "path_in_repo", lambda _root, path: path in known):
             with patch.object(gate, "tracked_paths", lambda _root: list(tracked)):
-                return gate.validate_config(
-                    self.workflow(freezes, freeze_all), self.root
-                )
+                return gate.validate_config(self.workflow(freezes), self.root)
 
     def test_clean_config_has_no_problems(self):
         self.assertEqual(
@@ -583,12 +566,7 @@ class ValidateConfigTest(unittest.TestCase):
         )
         self.assertIn("Duplicate freeze names: dup.", problems)
 
-    def test_unrecognized_switch_values_are_reported(self):
-        problems = self.problems(
-            RCCL_FREEZE, freeze_all="maybe", existing=["projects/rccl"]
-        )
-        self.assertTrue(any("FREEZE_ENTIRE_REPO must be one of" in p for p in problems))
-
+    def test_unrecognized_enabled_value_is_reported(self):
         problems = self.problems(
             [{"name": "x", "enabled": "flase", "paths": ["projects/rccl"]}],
             existing=["projects/rccl"],
@@ -626,11 +604,7 @@ class ShippedConfigTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.workflow_env = yaml.safe_load(WORKFLOW.read_text())["env"]
-        cls.env = {
-            "FREEZES": cls.workflow_env["FREEZES"],
-            "FREEZE_ENTIRE_REPO": str(cls.workflow_env["FREEZE_ENTIRE_REPO"]).lower(),
-        }
+        cls.env = {"FREEZES": yaml.safe_load(WORKFLOW.read_text())["env"]["FREEZES"]}
 
     def verdict_for(self, path):
         with patch.dict(os.environ, self.env, clear=False):
@@ -640,9 +614,6 @@ class ShippedConfigTest(unittest.TestCase):
     def test_config_is_parseable(self):
         with patch.dict(os.environ, self.env, clear=False):
             gate.load_freezes()
-
-    def test_repo_is_not_globally_frozen_by_default(self):
-        self.assertFalse(gate.truthy(self.env["FREEZE_ENTIRE_REPO"], default=False))
 
     def test_frozen_trees(self):
         for path in ("projects/rccl/src/a.cc", "projects/rccl-tests/a.cc"):
