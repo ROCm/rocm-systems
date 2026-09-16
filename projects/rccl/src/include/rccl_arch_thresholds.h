@@ -79,17 +79,6 @@ struct rcclArchThresholds {
   // 0 means no suppression (symk may win at any size for that collective).
   size_t symMinR2[RCCL_DDA_FUNC_COUNT];
 
-  // Per-size unroll factor breakpoints for gfx1250.  Each entry is a
-  // (maxBytes, unrollIdx) pair: the first entry whose maxBytes >= msgBytes
-  // wins.  A terminal entry with maxBytes == SIZE_MAX covers everything larger.
-  // unrollIdx values: NCCL_UNROLL_1=0, NCCL_UNROLL_2=1, NCCL_UNROLL_4=2,
-  //                   NCCL_UNROLL_8=3, NCCL_UNROLL_16=4, NCCL_UNROLL_32=5.
-  // Null pointer means "keep the comm-level default (gfx1250 default = UNROLL_32)".
-  struct rcclUnrollEntry { size_t maxBytes; int unrollIdx; };
-  const rcclUnrollEntry* unrollMapAR;   // AllReduce per-size unroll breakpoints
-  const rcclUnrollEntry* unrollMapAG;   // AllGather per-size unroll breakpoints
-  const rcclUnrollEntry* unrollMapRS;   // ReduceScatter per-size unroll breakpoints
-  const rcclUnrollEntry* unrollMapA2A;  // AlltoAll per-size unroll breakpoints
 };
 
 const rcclArchThresholds* rcclGetArchThresholds(const char* gcn);
