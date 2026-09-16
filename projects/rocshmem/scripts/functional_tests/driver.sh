@@ -1035,8 +1035,13 @@ TestTiles() {
   ExecTest  "tile_get_wave_contiguous"  2       1            $WAVE_SIZE
   ExecTest  "tile_broadcast"            2       1            1
   ExecTest  "tile_broadcast"            4       1            1
-  ExecTest  "tile_broadcast_wave"       2       1            $WAVE_SIZE
-  ExecTest  "tile_broadcast_wave"       4       1            $WAVE_SIZE
+  # tile_broadcast_wave: each wave uses its own context; set MAX_NUM_CONTEXTS = NUM_WGS * NUM_WF
+  #       | Name                      | Ranks | Workgroups | Threads    | Max Msg | NUM_WF #
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((1 * 4))
+  ExecTest  "tile_broadcast_wave"       2       1            $WAVE_SIZE   ""       4
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((4 * 4))
+  ExecTest  "tile_broadcast_wave"       4       4            $WAVE_SIZE   ""       4
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
   ExecTest  "tile_broadcast_wg"         2       4            $WAVE_SIZE
   ExecTest  "tile_broadcast_wg"         4       4            $WAVE_SIZE
   ExecTest  "tile_allgather"            2       1            1

@@ -638,13 +638,21 @@ function(_add_single_rocshmem_test)
         set(TEST_TIMEOUT 300)  # 5 minutes
     endif()
 
+    # Compute MAX_NUM_CONTEXTS: wave tests need one context per wave (WGs * waves-per-WG);
+    # all other tests need one context per WG.
+    if(DEFINED TEST_NUM_WF)
+        math(EXPR TEST_MAX_NUM_CONTEXTS "${TEST_WORKGROUPS} * ${TEST_NUM_WF}")
+    else()
+        set(TEST_MAX_NUM_CONTEXTS "${TEST_WORKGROUPS}")
+    endif()
+
     # Build test command - choose launcher based on MPI availability
     if(USE_SLR_LAUNCHER)
         # SLR mode: Direct execution with ROCSHMEM_SLR_NP environment variable
         # Use system env instead of cmake -E env for portability (build-host cmake path doesn't leak into install)
         set(TEST_COMMAND
             env "ROCSHMEM_SLR_NP=${TEST_RANKS}"
-            "ROCSHMEM_MAX_NUM_CONTEXTS=${TEST_WORKGROUPS}"
+            "ROCSHMEM_MAX_NUM_CONTEXTS=${TEST_MAX_NUM_CONTEXTS}"
             "ROCSHMEM_HEAP_SIZE=6442450944"
         )
 
@@ -678,7 +686,7 @@ function(_add_single_rocshmem_test)
 
         # Export environment variables to MPI ranks via -x flags
         list(APPEND TEST_COMMAND
-            -x "ROCSHMEM_MAX_NUM_CONTEXTS=${TEST_WORKGROUPS}"
+            -x "ROCSHMEM_MAX_NUM_CONTEXTS=${TEST_MAX_NUM_CONTEXTS}"
             -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
             -x "ROCSHMEM_HEAP_SIZE=6442450944"
         )
@@ -1313,9 +1321,9 @@ function(add_tile_tests)
         # Thread-level broadcast - test with 2 and 4 PEs
         add_rocshmem_functional_test(NAME tile_broadcast RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_broadcast RANKS 4 WORKGROUPS 1 THREADS 1)
-        # Wave-level broadcast
-        add_rocshmem_functional_test(NAME tile_broadcast_wave RANKS 2 WORKGROUPS 1 NUM_WF 1)
-        add_rocshmem_functional_test(NAME tile_broadcast_wave RANKS 4 WORKGROUPS 1 NUM_WF 1)
+        # Wave-level broadcast - each wave uses its own context; MAX_NUM_CONTEXTS = WGs * NUM_WF
+        add_rocshmem_functional_test(NAME tile_broadcast_wave RANKS 2 WORKGROUPS 1 NUM_WF 4)
+        add_rocshmem_functional_test(NAME tile_broadcast_wave RANKS 4 WORKGROUPS 4 NUM_WF 4)
         # Workgroup-level broadcast
         add_rocshmem_functional_test(NAME tile_broadcast_wg RANKS 2 WORKGROUPS 4 NUM_WF 1)
         add_rocshmem_functional_test(NAME tile_broadcast_wg RANKS 4 WORKGROUPS 4 NUM_WF 1)
