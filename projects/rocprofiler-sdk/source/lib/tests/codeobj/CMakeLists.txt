@@ -8,6 +8,10 @@ add_executable(codeobj-library-tests)
 
 set(CODEOBJ_LIB_TEST_SOURCES "codeobj_library_test.cpp" "funcmap_test.cpp")
 
+if(ROCPROFILER_MEMCHECK STREQUAL "ThreadSanitizer")
+    list(APPEND CODEOBJ_LIB_TEST_SOURCES "finalize_destroy_tsan.cpp")
+endif()
+
 target_sources(codeobj-library-tests PRIVATE ${CODEOBJ_LIB_TEST_SOURCES})
 
 set(PKG_TEST_BIN_DIR "${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/bin")
