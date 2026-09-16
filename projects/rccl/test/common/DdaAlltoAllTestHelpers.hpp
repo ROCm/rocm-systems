@@ -32,7 +32,8 @@ inline size_t testAlltoAllTotalBytes(size_t count, int nRanks, ncclDataType_t da
 // to exercise the relaxed floor rcclAlltoAllShouldTakeDdaPath() applies in
 // collectives.cc when RCCL_DDA_NRANKS_RELAX=1 -- otherwise this mirror always
 // tracked the unconditional 8-rank floor regardless of what that call site
-// actually passed.
+// actually passed. RcclAlltoAllDdaDecision.Gfx950_FourRanks_RelaxOn_TakesDda
+// (RcclWrapTests.cpp) additionally exercises that real call site directly.
 inline bool testRcclDdaAlltoAllThresholdEnabled(
     const ncclComm* comm,
     size_t count,

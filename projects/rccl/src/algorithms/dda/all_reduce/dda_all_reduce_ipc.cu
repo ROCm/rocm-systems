@@ -136,6 +136,9 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuf
 
 } // namespace
 
+// Consolidates what used to be two independent copies of this condition (one
+// here, one in the eligibility gate below) that could silently drift apart;
+// see the declaration in dda_all_reduce.h for the full rationale.
 bool ncclAllReduceDdaIpcTreeEligible(size_t count, int nRanks, size_t typeSize) {
   if (nRanks <= 0) {
     return false;
