@@ -93,6 +93,11 @@ protected:
         return m_device->get_metrics(m_enabled, timestamp);
     }
 
+    /// Sample for the side effect alone. Several tests need a reading already on
+    /// record - to seed the bandwidth delta or the counter baseline - and never
+    /// inspect it.
+    void discard_sample(std::uint64_t timestamp) { static_cast<void>(sample(timestamp)); }
+
     std::shared_ptr<mock_backend> m_backend;
     std::shared_ptr<device_t>     m_device;
     enabled_metrics               m_enabled{};
@@ -195,7 +200,7 @@ TEST_F(HipFileDeviceTest, all_counters_pass_through_unmodified)
 TEST_F(HipFileDeviceTest, counter_reset_is_not_clamped)
 {
     m_backend->gpu(0).read_bytes = slot_bytes::kb5;
-    sample(TS_1);
+    discard_sample(TS_1);
 
     // hipFile reset its stats. The counter reports what hipFile reports; only the
     // derived bandwidth needs to defend against the backwards step.
@@ -249,7 +254,7 @@ TEST_F(HipFileDeviceTest, bandwidth_first_sample_is_zero)
 TEST_F(HipFileDeviceTest, bandwidth_normalised_to_wall_clock)
 {
     m_backend->gpu(0).read_bytes = slot_bytes::kb1;
-    sample(TS_1);
+    discard_sample(TS_1);
 
     // 1000 more bytes across a one-second interval.
     m_backend->gpu(0).read_bytes = slot_bytes::kb2;
@@ -260,7 +265,7 @@ TEST_F(HipFileDeviceTest, bandwidth_normalised_to_wall_clock)
 TEST_F(HipFileDeviceTest, bandwidth_halves_when_interval_doubles)
 {
     m_backend->gpu(0).read_bytes = 0;
-    sample(TS_1);
+    discard_sample(TS_1);
 
     m_backend->gpu(0).read_bytes = slot_bytes::kb1;
     const auto one_second        = sample(TS_2).read_bandwidth;
@@ -274,7 +279,7 @@ TEST_F(HipFileDeviceTest, bandwidth_halves_when_interval_doubles)
     // Same bytes over a two-second interval must read half the rate.
     device_t slow{ m_backend, 0 };
     m_backend->gpu(0).read_bytes = 0;
-    slow.get_metrics(m_enabled, TS_1);
+    static_cast<void>(slow.get_metrics(m_enabled, TS_1));
     m_backend->gpu(0).read_bytes = slot_bytes::kb1;
     EXPECT_DOUBLE_EQ(slow.get_metrics(m_enabled, TS_3).read_bandwidth,
                      k_half_second_bandwidth);
@@ -284,7 +289,7 @@ TEST_F(HipFileDeviceTest, write_bandwidth_uses_write_bytes)
 {
     m_backend->gpu(0).read_bytes  = 0;
     m_backend->gpu(0).write_bytes = 0;
-    sample(TS_1);
+    discard_sample(TS_1);
 
     m_backend->gpu(0).read_bytes  = slot_bytes::kb9;
     m_backend->gpu(0).write_bytes = slot_bytes::kb4w;
@@ -299,7 +304,7 @@ TEST_F(HipFileDeviceTest, write_bandwidth_uses_write_bytes)
 TEST_F(HipFileDeviceTest, bandwidth_is_zero_when_no_io_occurred)
 {
     m_backend->gpu(0).read_bytes = slot_bytes::kb4;
-    sample(TS_1);
+    discard_sample(TS_1);
 
     // Bytes unchanged: an idle interval reads as zero bandwidth, not as a repeat of
     // the previous rate.
@@ -309,7 +314,7 @@ TEST_F(HipFileDeviceTest, bandwidth_is_zero_when_no_io_occurred)
 TEST_F(HipFileDeviceTest, bandwidth_zero_elapsed_returns_zero)
 {
     m_backend->gpu(0).read_bytes = slot_bytes::kb1;
-    sample(TS_1);
+    discard_sample(TS_1);
 
     m_backend->gpu(0).read_bytes = slot_bytes::kb2;
 
@@ -320,7 +325,7 @@ TEST_F(HipFileDeviceTest, bandwidth_zero_elapsed_returns_zero)
 TEST_F(HipFileDeviceTest, bandwidth_survives_counter_reset)
 {
     m_backend->gpu(0).read_bytes = slot_bytes::kb10;
-    sample(TS_1);
+    discard_sample(TS_1);
 
     m_backend->gpu(0).read_bytes = slot_bytes::b500;
 
@@ -335,7 +340,7 @@ TEST_F(HipFileDeviceTest, bandwidth_ignores_io_duration)
     // reintroduced to gpu_stats, this pairing of a 1-second wall interval with a large
     // byte count keeps the expected value pinned to the wall-clock answer.
     m_backend->gpu(0).read_bytes = 0;
-    sample(TS_1);
+    discard_sample(TS_1);
 
     m_backend->gpu(0).read_bytes = slot_bytes::mb2;
 
@@ -392,8 +397,8 @@ TEST_F(HipFileDeviceTest, bandwidth_state_is_per_device)
 
     m_backend->gpu(0).read_bytes = 0;
     m_backend->gpu(1).read_bytes = 0;
-    sample(TS_1);
-    gpu1.get_metrics(m_enabled, TS_1);
+    discard_sample(TS_1);
+    static_cast<void>(gpu1.get_metrics(m_enabled, TS_1));
 
     m_backend->gpu(0).read_bytes = slot_bytes::kb1;
     m_backend->gpu(1).read_bytes = slot_bytes::kb5;
@@ -419,8 +424,8 @@ TEST_F(HipFileDeviceTest, both_devices_forward_the_same_timestamp)
 {
     device_t gpu1{ m_backend, 1 };
 
-    sample(TS_1);
-    gpu1.get_metrics(m_enabled, TS_1);
+    discard_sample(TS_1);
+    static_cast<void>(gpu1.get_metrics(m_enabled, TS_1));
 
     // This mock records every get_stats; it does not memoize. One hipFileGetStatsL3
     // per interval is the real backend's job (snapshot_is_memoized_per_timestamp).

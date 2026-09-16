@@ -228,7 +228,7 @@ TEST_F(HipFileCollectorTest, sample_emits_every_metric_for_every_gpu)
 
     m_collector->sample(static_cast<std::int64_t>(TS_1));
 
-    EXPECT_EQ(stub_cache::samples.size(), 2U * HIPFILE_METRICS_COUNT);
+    EXPECT_EQ(stub_cache::samples.size(), 2U * METRIC_TABLE.size());
 }
 
 TEST_F(HipFileCollectorTest, shutdown_propagates_to_provider)
@@ -336,7 +336,7 @@ TEST(HipFileMetricGroups, groups_partition_the_metric_table)
     }
 
     EXPECT_EQ(combined, ALL_HIPFILE_METRICS);
-    EXPECT_EQ(bits, static_cast<int>(HIPFILE_METRICS_COUNT));
+    EXPECT_EQ(bits, static_cast<int>(METRIC_TABLE.size()));
 }
 
 TEST(HipFileMetricGroups, unknown_group_selects_nothing)
@@ -442,7 +442,7 @@ TEST_F(HipFileCollectorTest, enabling_perfetto_does_not_change_pmc_output)
     // reach Perfetto as PMC records; a real writer would put two producers on every
     // track. What must hold either way is that the PMC output is unchanged.
     EXPECT_EQ(stub_perfetto::store_count, 1U);
-    EXPECT_EQ(stub_cache::samples.size(), HIPFILE_METRICS_COUNT);
+    EXPECT_EQ(stub_cache::samples.size(), METRIC_TABLE.size());
 }
 
 // ── Pause ───────────────────────────────────────────────────────────────────
@@ -458,7 +458,7 @@ TEST_F(HipFileCollectorTest, pause_emits_zeros_for_every_track)
 
     m_collector->pause(static_cast<std::int64_t>(TS_2));
 
-    ASSERT_EQ(stub_cache::samples.size(), HIPFILE_METRICS_COUNT);
+    ASSERT_EQ(stub_cache::samples.size(), METRIC_TABLE.size());
     for(const auto& sample : stub_cache::samples)
     {
         EXPECT_DOUBLE_EQ(sample.value, 0.0) << sample.metric;
