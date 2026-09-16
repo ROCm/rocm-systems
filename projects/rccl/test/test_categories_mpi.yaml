@@ -214,6 +214,9 @@ test_categories:
       - "GraphCapture_AllReduce.*"
       - "PatLazyInitMPITest.*"
       - "PatSharedConnectionMPITest.*"
+      - "DdaFabricSimple.*"
+      - "DdaFabricBlockCap.*"
+      - "DdaFabricBarrierStress.*"
     exclude_windows: *mpi_exclude_windows
     labels:
       - "rccl"

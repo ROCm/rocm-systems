@@ -437,9 +437,13 @@ hipError_t hipMalloc(void** p, size_t) { if (p) *p = nullptr; return hipErrorInv
 hipError_t hipMemcpy(void*, const void*, size_t, hipMemcpyKind) { return hipErrorInvalidValue; }
 hipError_t hipMemset(void*, int, size_t) { return hipErrorInvalidValue; }
 hipError_t hipDeviceSynchronize(void) { return hipErrorInvalidValue; }
-// init.cc's hipGetDeviceProperties call binds to hipGetDevicePropertiesR0600
-// after hipify; the ROCm header remaps the unversioned name to this symbol.
-hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device)
+// We define hipGetDevicePropertiesR0600, the versioned public HIP ABI symbol,
+// rather than the unversioned hipGetDeviceProperties. Callers write
+// hipGetDeviceProperties in source, but the HIP header (post rocm-systems
+// #10358) provides a `static inline hipGetDeviceProperties` wrapper that
+// delegates to hipGetDevicePropertiesR0600, so every call site inlines down to
+// a reference to that R0600 symbol -- which is what our fake must supply.
+hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_t* prop, int device)
 {
     return g_hipGetDeviceProperties(prop, device);
 }
