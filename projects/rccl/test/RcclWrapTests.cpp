@@ -3100,11 +3100,12 @@ TEST(RcclAllGatherCeRegisteredWindow, RecvNotRegistered_ReturnsFalse)
 {
     constexpr size_t kRegMax = 8ull * 1024 * 1024 * 1024;
     rcclArchThresholds tbl   = MakeAgCeRegTable(kRegMax);
+    ncclComm mockComm{}; mockComm.archThresholds = &tbl;
     constexpr size_t kMid    = 4ull * 1024 * 1024;
 
-    EXPECT_FALSE(rcclAllGatherCeRegisteredWindowTab(&tbl, kMid,
+    EXPECT_FALSE(rcclAllGatherCeRegisteredWindow(&mockComm, kMid,
                  ncclSymSendRegRecvNonreg, /*graphMode=*/false));
-    EXPECT_FALSE(rcclAllGatherCeRegisteredWindowTab(&tbl, kMid,
+    EXPECT_FALSE(rcclAllGatherCeRegisteredWindow(&mockComm, kMid,
                  ncclSymSendNonregRecvNonreg, /*graphMode=*/false));
 }
 
@@ -3113,10 +3114,11 @@ TEST(RcclAllGatherCeRegisteredWindow, AboveCeRegMax_ReturnsFalse)
 {
     constexpr size_t kRegMax = 8ull * 1024 * 1024 * 1024;
     rcclArchThresholds tbl   = MakeAgCeRegTable(kRegMax);
+    ncclComm mockComm{}; mockComm.archThresholds = &tbl;
 
-    EXPECT_FALSE(rcclAllGatherCeRegisteredWindowTab(&tbl, kRegMax + 1,
+    EXPECT_FALSE(rcclAllGatherCeRegisteredWindow(&mockComm, kRegMax + 1,
                  ncclSymSendNonregRecvReg, /*graphMode=*/false));
-    EXPECT_FALSE(rcclAllGatherCeRegisteredWindowTab(&tbl, kRegMax + 1,
+    EXPECT_FALSE(rcclAllGatherCeRegisteredWindow(&mockComm, kRegMax + 1,
                  ncclSymSendRegRecvReg, /*graphMode=*/false));
 }
 
@@ -3126,11 +3128,12 @@ TEST(RcclAllGatherCeRegisteredWindow, BelowCeRegMax_RecvRegistered_ReturnsTrue)
 {
     constexpr size_t kRegMax = 8ull * 1024 * 1024 * 1024;
     rcclArchThresholds tbl   = MakeAgCeRegTable(kRegMax);
+    ncclComm mockComm{}; mockComm.archThresholds = &tbl;
     constexpr size_t kSmall  = 2ull * 1024 * 1024;  // 2 MiB -- below symMaxR2 crossover
 
-    EXPECT_TRUE(rcclAllGatherCeRegisteredWindowTab(&tbl, kSmall,
+    EXPECT_TRUE(rcclAllGatherCeRegisteredWindow(&mockComm, kSmall,
                 ncclSymSendNonregRecvReg, /*graphMode=*/false));
-    EXPECT_TRUE(rcclAllGatherCeRegisteredWindowTab(&tbl, kSmall,
+    EXPECT_TRUE(rcclAllGatherCeRegisteredWindow(&mockComm, kSmall,
                 ncclSymSendRegRecvReg, /*graphMode=*/false));
 }
 
@@ -3139,10 +3142,11 @@ TEST(RcclAllGatherCeRegisteredWindow, AtCeRegMax_RecvRegistered_ReturnsTrue)
 {
     constexpr size_t kRegMax = 8ull * 1024 * 1024 * 1024;
     rcclArchThresholds tbl   = MakeAgCeRegTable(kRegMax);
+    ncclComm mockComm{}; mockComm.archThresholds = &tbl;
 
-    EXPECT_TRUE(rcclAllGatherCeRegisteredWindowTab(&tbl, kRegMax,
+    EXPECT_TRUE(rcclAllGatherCeRegisteredWindow(&mockComm, kRegMax,
                 ncclSymSendNonregRecvReg, /*graphMode=*/false));
-    EXPECT_TRUE(rcclAllGatherCeRegisteredWindowTab(&tbl, kRegMax,
+    EXPECT_TRUE(rcclAllGatherCeRegisteredWindow(&mockComm, kRegMax,
                 ncclSymSendRegRecvReg, /*graphMode=*/false));
 }
 
