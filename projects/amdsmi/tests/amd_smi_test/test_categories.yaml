@@ -90,10 +90,9 @@ test_categories:
 # uses to scope the run to the current GPU. Read/write excludes are listed for
 # standard as well (harmless no-ops there, since standard omits *ReadWrite*).
 #
-# NOTE: amdsmitst.exclude also defines a `virtualization` (SRIOV/VF) filter that
-# detect_asic_filter.sh applies via runtime detection. The ctest label path keys
-# on GPU arch only and cannot detect SRIOV, so those excludes are intentionally
-# not represented here; the runtime script still applies them.
+# NOTE: SR-IOV/virtualization-only failures are handled by the separate
+# `exclude_SRIOV` section below (arch-agnostic, applied only on VF systems),
+# not by the per-arch blocks here. See that section for details.
 exclude_gpu:
   # gfx906 (Vega20): frequency / process-info reads unreliable.
   exclude_gpu_gfx906:
@@ -144,10 +143,9 @@ exclude_gpu:
   # arch here. TheRock's gfx94X-dcgpu lane currently runs on SR-IOV MI300X
   # (MI300X_HW_SRIOV_CVS_1VF), where a few write/perf tests return
   # AMDSMI_STATUS_NO_PERM, but those APIs are supported on bare-metal MI3x, so
-  # excluding them by arch would drop bare-metal coverage. detect_asic_filter.sh
-  # already skips them via runtime SR-IOV detection on the legacy path; the
-  # proper ctest-path fix (runtime virtualization detection) is tracked as a
-  # follow-up.
+  # excluding them by arch would drop bare-metal coverage. Those SR-IOV-only
+  # excludes live in the arch-agnostic `exclude_SRIOV` section below and are
+  # applied only when test_runner.py detects a VF at runtime.
   exclude_gpu_gfx94X:
     test_patterns:
       - "GpuFunctionalReadOnly.TestVoltCurvRead"
@@ -197,6 +195,37 @@ exclude_gpu:
       - "comprehensive"
       - "full"
       - "ex_gpu_gfx115X"
+
+# SR-IOV / virtualization-only known failures.
+#
+# Unlike exclude_gpu (which keys on GPU arch), these apply to SR-IOV virtual
+# functions REGARDLESS of arch: the underlying APIs return
+# AMDSMI_STATUS_NO_PERM under SR-IOV but work on bare metal, so excluding them
+# by arch would wrongly drop bare-metal coverage. test_runner.py detects a VF
+# at runtime (the current_virtualization_mode sysfs node == SRIOV/VF, mirroring
+# detect_asic_filter.sh) and adds the `ex_sriov` label; the parser cross-
+# products this set with each arch block, so on a VF the run excludes
+# arch + SR-IOV failures together, and on bare metal only the arch failures.
+#
+# KEEP IN SYNC with the `virtualization` FILTER in amdsmitst.exclude.
+exclude_SRIOV:
+  test_patterns:
+    - "GpuFunctionalReadOnly.TestOverdriveRead"
+    - "GpuFunctionalReadOnly.TestGPUBusyRead"
+    - "GpuFunctionalReadWrite.FanReadWrite"
+    - "GpuFunctionalReadWrite.TestOverdriveReadWrite"
+    - "GpuFunctionalReadWrite.TestPowerReadWrite"
+    - "GpuFunctionalReadWrite.TestPowerCapReadWrite"
+    # gfx94X SR-IOV MI300X (MI300X_HW_SRIOV_CVS_1VF) additionally returns
+    # NO_PERM for these perf write tests; supported on bare-metal MI3x.
+    - "GpuFunctionalReadWrite.TestPerfLevelReadWrite"
+    - "GpuFunctionalReadWrite.TestPerfDeterminism"
+  labels:
+    - "quick"
+    - "standard"
+    - "comprehensive"
+    - "full"
+    - "ex_sriov"
 
 execution_settings:
   default_timeout: 300
