@@ -26,95 +26,234 @@ permissions:
   contents: read
 
 jobs:
-  debug-prefetch-gfx942:
-    name: "prefetch-flake | gfx94X-dcgpu | run ${{ matrix.run_index }}"
-    runs-on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
-    strategy:
-      fail-fast: false
-      matrix:
-        run_index: ${{ fromJSON(inputs.repeat_count == '5' && '[1,2,3,4,5]' ||
-                               inputs.repeat_count == '10' && '[1,2,3,4,5,6,7,8,9,10]' ||
-                               inputs.repeat_count == '20' && '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]' ||
-                               '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30]') }}
-    container:
-      image: "ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98"
-      options: "--ipc host --user 0:0 --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576 --security-opt seccomp=unconfined --group-add video --device /dev/kfd --device /dev/dri -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST"
-    defaults:
-      run:
-        shell: bash
-    env:
-      VENV_DIR: ${{ github.workspace }}/.venv
-      ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
-      OUTPUT_ARTIFACTS_DIR: "./build"
-      THEROCK_BIN_DIR: "./build/bin"
-      AMDGPU_FAMILIES: gfx94X-dcgpu
-      HIP_TESTS_REGEX: "Unit_hipMemPrefetchAsync_Basic_AllDevices|Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation"
-      SHARD_INDEX: "1"
-      TOTAL_SHARDS: "1"
-      # HIP/ROCclr runtime logging
-      # AMD_LOG_LEVEL: 0=off 1=error 2=warning 3=info 4=debug
-      AMD_LOG_LEVEL: "3"
-      # AMD_LOG_MASK selects subsystems (OR of flags):
-      #   LOG_API=0x1  LOG_CMD=0x2  LOG_COPY=0x100  LOG_SIG=0x20  LOG_INIT=0x800
-      # Enable API + CMD + COPY + SIG to trace prefetch dispatch and signal lifecycle
-      AMD_LOG_MASK: "0x123"
+  # Repeat the test N times in parallel using matrix, reusing the standard
+  # therock-test-component infrastructure so container/runner setup is identical
+  # to the CI runs where the flake is observed.
+  debug-run-1:
+    uses: ./.github/workflows/therock-test-component.yml
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      amdgpu_families: gfx94X-dcgpu
+      test_runs_on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+      platform: linux
+      component: >-
+        {
+          "job_name": "hip-tests prefetch flake debug",
+          "fetch_artifact_args": "--tests",
+          "timeout_minutes": 30,
+          "test_script": "AMD_LOG_LEVEL=3 AMD_LOG_MASK=0x7FFFFFFF HIP_TESTS_REGEX='Unit_hipMemPrefetchAsync_Basic_AllDevices|Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation' SHARD_INDEX=1 TOTAL_SHARDS=1 python projects/hip-tests/catch/packaging/run_hiptests.py",
+          "platform": ["linux"],
+          "total_shards_dict": {"linux": 1},
+          "test_type": "standard",
+          "shard_arr": [1],
+          "total_shards": 1,
+          "test_runner": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
+          "container_options": "--ipc host --user 0:0 --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576 --security-opt seccomp=unconfined --group-add video --device /dev/kfd --device /dev/dri --group-add 993 --group-add 992 --group-add 110 --env-file /etc/podinfo/gha-gpu-isolation-settings -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST"
+        }
 
-    steps:
-      - name: Fetch build_tools from TheRock
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          repository: ROCm/TheRock
-          ref: 648a501e56a1e0919976d6f540b7853e63d44998 # 2026-09-02
-          sparse-checkout: build_tools
-          path: prejob
+  debug-run-2:
+    if: ${{ fromJSON(inputs.repeat_count) >= 2 }}
+    uses: ./.github/workflows/therock-test-component.yml
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      amdgpu_families: gfx94X-dcgpu
+      test_runs_on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+      platform: linux
+      component: >-
+        {
+          "job_name": "hip-tests prefetch flake debug",
+          "fetch_artifact_args": "--tests",
+          "timeout_minutes": 30,
+          "test_script": "AMD_LOG_LEVEL=3 AMD_LOG_MASK=0x7FFFFFFF HIP_TESTS_REGEX='Unit_hipMemPrefetchAsync_Basic_AllDevices|Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation' SHARD_INDEX=1 TOTAL_SHARDS=1 python projects/hip-tests/catch/packaging/run_hiptests.py",
+          "platform": ["linux"],
+          "total_shards_dict": {"linux": 1},
+          "test_type": "standard",
+          "shard_arr": [1],
+          "total_shards": 1,
+          "test_runner": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
+          "container_options": "--ipc host --user 0:0 --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576 --security-opt seccomp=unconfined --group-add video --device /dev/kfd --device /dev/dri --group-add 993 --group-add 992 --group-add 110 --env-file /etc/podinfo/gha-gpu-isolation-settings -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST"
+        }
 
-      - name: Pre-job cleanup GPU processes
-        timeout-minutes: 5
-        run: bash ./prejob/build_tools/github_actions/cleanup_processes.sh
+  debug-run-3:
+    if: ${{ fromJSON(inputs.repeat_count) >= 3 }}
+    uses: ./.github/workflows/therock-test-component.yml
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      amdgpu_families: gfx94X-dcgpu
+      test_runs_on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+      platform: linux
+      component: >-
+        {
+          "job_name": "hip-tests prefetch flake debug",
+          "fetch_artifact_args": "--tests",
+          "timeout_minutes": 30,
+          "test_script": "AMD_LOG_LEVEL=3 AMD_LOG_MASK=0x7FFFFFFF HIP_TESTS_REGEX='Unit_hipMemPrefetchAsync_Basic_AllDevices|Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation' SHARD_INDEX=1 TOTAL_SHARDS=1 python projects/hip-tests/catch/packaging/run_hiptests.py",
+          "platform": ["linux"],
+          "total_shards_dict": {"linux": 1},
+          "test_type": "standard",
+          "shard_arr": [1],
+          "total_shards": 1,
+          "test_runner": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
+          "container_options": "--ipc host --user 0:0 --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576 --security-opt seccomp=unconfined --group-add video --device /dev/kfd --device /dev/dri --group-add 993 --group-add 992 --group-add 110 --env-file /etc/podinfo/gha-gpu-isolation-settings -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST"
+        }
 
-      - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+  debug-run-4:
+    if: ${{ fromJSON(inputs.repeat_count) >= 4 }}
+    uses: ./.github/workflows/therock-test-component.yml
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      amdgpu_families: gfx94X-dcgpu
+      test_runs_on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+      platform: linux
+      component: >-
+        {
+          "job_name": "hip-tests prefetch flake debug",
+          "fetch_artifact_args": "--tests",
+          "timeout_minutes": 30,
+          "test_script": "AMD_LOG_LEVEL=3 AMD_LOG_MASK=0x7FFFFFFF HIP_TESTS_REGEX='Unit_hipMemPrefetchAsync_Basic_AllDevices|Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation' SHARD_INDEX=1 TOTAL_SHARDS=1 python projects/hip-tests/catch/packaging/run_hiptests.py",
+          "platform": ["linux"],
+          "total_shards_dict": {"linux": 1},
+          "test_type": "standard",
+          "shard_arr": [1],
+          "total_shards": 1,
+          "test_runner": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
+          "container_options": "--ipc host --user 0:0 --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576 --security-opt seccomp=unconfined --group-add video --device /dev/kfd --device /dev/dri --group-add 993 --group-add 992 --group-add 110 --env-file /etc/podinfo/gha-gpu-isolation-settings -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST"
+        }
 
-      - name: Setup test environment
-        uses: './.github/actions/setup_test_environment'
-        with:
-          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
-          ARTIFACT_GROUP: ${{ env.AMDGPU_FAMILIES }}
-          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
-          VENV_DIR: ${{ env.VENV_DIR }}
-          IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
+  debug-run-5:
+    if: ${{ fromJSON(inputs.repeat_count) >= 5 }}
+    uses: ./.github/workflows/therock-test-component.yml
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      amdgpu_families: gfx94X-dcgpu
+      test_runs_on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+      platform: linux
+      component: >-
+        {
+          "job_name": "hip-tests prefetch flake debug",
+          "fetch_artifact_args": "--tests",
+          "timeout_minutes": 30,
+          "test_script": "AMD_LOG_LEVEL=3 AMD_LOG_MASK=0x7FFFFFFF HIP_TESTS_REGEX='Unit_hipMemPrefetchAsync_Basic_AllDevices|Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation' SHARD_INDEX=1 TOTAL_SHARDS=1 python projects/hip-tests/catch/packaging/run_hiptests.py",
+          "platform": ["linux"],
+          "total_shards_dict": {"linux": 1},
+          "test_type": "standard",
+          "shard_arr": [1],
+          "total_shards": 1,
+          "test_runner": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
+          "container_options": "--ipc host --user 0:0 --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576 --security-opt seccomp=unconfined --group-add video --device /dev/kfd --device /dev/dri --group-add 993 --group-add 992 --group-add 110 --env-file /etc/podinfo/gha-gpu-isolation-settings -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST"
+        }
 
-      - name: Driver and GPU info
-        timeout-minutes: 3
-        run: |
-          echo "=== rocminfo ==="
-          build/bin/rocminfo
-          echo ""
-          echo "=== XNACK ==="
-          build/bin/rocminfo | grep -i xnack || true
-          echo ""
-          echo "=== KFD noretry ==="
-          cat /sys/module/amdgpu/parameters/noretry 2>/dev/null || true
-          echo ""
-          echo "=== Large BAR (BAR0 size per GPU) ==="
-          for f in /sys/class/drm/card*/device/resource; do
-            awk 'NR==1{s=strtonum($1);e=strtonum($2);if(e>s)printf "  %s BAR0: %d MB\n",FILENAME,(e-s+1)/1024/1024}' "$f"
-          done
-          echo ""
-          echo "=== SVM_DIRECT_HOST_ACCESS ==="
-          python3 - <<'PYEOF'
-          import ctypes, ctypes.util
-          hsa = ctypes.CDLL("libhsa-runtime64.so.1", use_errno=True)
-          print("(query skipped - check rocminfo output above)")
-          PYEOF
+  debug-run-6:
+    if: ${{ fromJSON(inputs.repeat_count) >= 6 }}
+    uses: ./.github/workflows/therock-test-component.yml
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      amdgpu_families: gfx94X-dcgpu
+      test_runs_on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+      platform: linux
+      component: >-
+        {
+          "job_name": "hip-tests prefetch flake debug",
+          "fetch_artifact_args": "--tests",
+          "timeout_minutes": 30,
+          "test_script": "AMD_LOG_LEVEL=3 AMD_LOG_MASK=0x7FFFFFFF HIP_TESTS_REGEX='Unit_hipMemPrefetchAsync_Basic_AllDevices|Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation' SHARD_INDEX=1 TOTAL_SHARDS=1 python projects/hip-tests/catch/packaging/run_hiptests.py",
+          "platform": ["linux"],
+          "total_shards_dict": {"linux": 1},
+          "test_type": "standard",
+          "shard_arr": [1],
+          "total_shards": 1,
+          "test_runner": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
+          "container_options": "--ipc host --user 0:0 --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576 --security-opt seccomp=unconfined --group-add video --device /dev/kfd --device /dev/dri --group-add 993 --group-add 992 --group-add 110 --env-file /etc/podinfo/gha-gpu-isolation-settings -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST"
+        }
 
-      - name: Run prefetch flake tests (run ${{ matrix.run_index }})
-        timeout-minutes: 10
-        run: |
-          echo "=== Run ${{ matrix.run_index }} of ${{ inputs.repeat_count }} ==="
-          python projects/hip-tests/catch/packaging/run_hiptests.py
+  debug-run-7:
+    if: ${{ fromJSON(inputs.repeat_count) >= 7 }}
+    uses: ./.github/workflows/therock-test-component.yml
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      amdgpu_families: gfx94X-dcgpu
+      test_runs_on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+      platform: linux
+      component: >-
+        {
+          "job_name": "hip-tests prefetch flake debug",
+          "fetch_artifact_args": "--tests",
+          "timeout_minutes": 30,
+          "test_script": "AMD_LOG_LEVEL=3 AMD_LOG_MASK=0x7FFFFFFF HIP_TESTS_REGEX='Unit_hipMemPrefetchAsync_Basic_AllDevices|Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation' SHARD_INDEX=1 TOTAL_SHARDS=1 python projects/hip-tests/catch/packaging/run_hiptests.py",
+          "platform": ["linux"],
+          "total_shards_dict": {"linux": 1},
+          "test_type": "standard",
+          "shard_arr": [1],
+          "total_shards": 1,
+          "test_runner": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
+          "container_options": "--ipc host --user 0:0 --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576 --security-opt seccomp=unconfined --group-add video --device /dev/kfd --device /dev/dri --group-add 993 --group-add 992 --group-add 110 --env-file /etc/podinfo/gha-gpu-isolation-settings -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST"
+        }
 
-      - name: Post-job cleanup GPU processes
-        if: always()
-        timeout-minutes: 5
-        run: bash ./build_tools/github_actions/cleanup_processes.sh
+  debug-run-8:
+    if: ${{ fromJSON(inputs.repeat_count) >= 8 }}
+    uses: ./.github/workflows/therock-test-component.yml
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      amdgpu_families: gfx94X-dcgpu
+      test_runs_on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+      platform: linux
+      component: >-
+        {
+          "job_name": "hip-tests prefetch flake debug",
+          "fetch_artifact_args": "--tests",
+          "timeout_minutes": 30,
+          "test_script": "AMD_LOG_LEVEL=3 AMD_LOG_MASK=0x7FFFFFFF HIP_TESTS_REGEX='Unit_hipMemPrefetchAsync_Basic_AllDevices|Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation' SHARD_INDEX=1 TOTAL_SHARDS=1 python projects/hip-tests/catch/packaging/run_hiptests.py",
+          "platform": ["linux"],
+          "total_shards_dict": {"linux": 1},
+          "test_type": "standard",
+          "shard_arr": [1],
+          "total_shards": 1,
+          "test_runner": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
+          "container_options": "--ipc host --user 0:0 --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576 --security-opt seccomp=unconfined --group-add video --device /dev/kfd --device /dev/dri --group-add 993 --group-add 992 --group-add 110 --env-file /etc/podinfo/gha-gpu-isolation-settings -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST"
+        }
+
+  debug-run-9:
+    if: ${{ fromJSON(inputs.repeat_count) >= 9 }}
+    uses: ./.github/workflows/therock-test-component.yml
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      amdgpu_families: gfx94X-dcgpu
+      test_runs_on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+      platform: linux
+      component: >-
+        {
+          "job_name": "hip-tests prefetch flake debug",
+          "fetch_artifact_args": "--tests",
+          "timeout_minutes": 30,
+          "test_script": "AMD_LOG_LEVEL=3 AMD_LOG_MASK=0x7FFFFFFF HIP_TESTS_REGEX='Unit_hipMemPrefetchAsync_Basic_AllDevices|Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation' SHARD_INDEX=1 TOTAL_SHARDS=1 python projects/hip-tests/catch/packaging/run_hiptests.py",
+          "platform": ["linux"],
+          "total_shards_dict": {"linux": 1},
+          "test_type": "standard",
+          "shard_arr": [1],
+          "total_shards": 1,
+          "test_runner": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
+          "container_options": "--ipc host --user 0:0 --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576 --security-opt seccomp=unconfined --group-add video --device /dev/kfd --device /dev/dri --group-add 993 --group-add 992 --group-add 110 --env-file /etc/podinfo/gha-gpu-isolation-settings -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST"
+        }
+
+  debug-run-10:
+    if: ${{ fromJSON(inputs.repeat_count) >= 10 }}
+    uses: ./.github/workflows/therock-test-component.yml
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      amdgpu_families: gfx94X-dcgpu
+      test_runs_on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+      platform: linux
+      component: >-
+        {
+          "job_name": "hip-tests prefetch flake debug",
+          "fetch_artifact_args": "--tests",
+          "timeout_minutes": 30,
+          "test_script": "AMD_LOG_LEVEL=3 AMD_LOG_MASK=0x7FFFFFFF HIP_TESTS_REGEX='Unit_hipMemPrefetchAsync_Basic_AllDevices|Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation' SHARD_INDEX=1 TOTAL_SHARDS=1 python projects/hip-tests/catch/packaging/run_hiptests.py",
+          "platform": ["linux"],
+          "total_shards_dict": {"linux": 1},
+          "test_type": "standard",
+          "shard_arr": [1],
+          "total_shards": 1,
+          "test_runner": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
+          "container_options": "--ipc host --user 0:0 --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576 --security-opt seccomp=unconfined --group-add video --device /dev/kfd --device /dev/dri --group-add 993 --group-add 992 --group-add 110 --env-file /etc/podinfo/gha-gpu-isolation-settings -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST"
+        }
