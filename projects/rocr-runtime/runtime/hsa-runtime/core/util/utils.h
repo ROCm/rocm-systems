@@ -470,6 +470,7 @@ static __forceinline void cacheline_flush(const void* p) {
 #elif __has_builtin(__builtin_arm_dcimvac)
   __builtin_arm_dcimvac(const_cast<void*>(p));
 #else
+#warning "No cacheline_flush() implementation for this processor"
   (void)p;
 #endif
 }
