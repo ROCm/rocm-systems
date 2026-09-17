@@ -25,7 +25,7 @@
 
 #include "libhsakmt.h"
 #include "fmm.h"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -359,8 +359,8 @@ static void *allocate_exec_aligned_memory_cpu(uint32_t size)
 	 *
 	 * MAP_ANONYMOUS initializes the memory to zero.
 	 */
-	ptr = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC,
-				MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	ptr = mmap(NULL, size, PROT_READ | PROT_WRITE,
+			MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 
 	if (ptr == MAP_FAILED)
 		return NULL;

@@ -1,4 +1,4 @@
-"""Shared utilities for RCCL CI test scripts (JAX, PyTorch)."""
+"""Shared utilities for RCCL CI test scripts (JAX, PyTorch, MADEngine)."""
 
 import json
 import logging

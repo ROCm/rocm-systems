@@ -339,6 +339,17 @@ private:
   /// updates current_time_, runs service callbacks, and checks termination.
   void barrier_completion();
 
+  /// @brief Sleep out an epoch in which every partition published TICK_MAX.
+  ///
+  /// @details Called from @ref barrier_completion, so every other worker is
+  /// parked in the barrier for its duration. Returns as soon as an async event
+  /// is pending or the run is done, and in any case within a millisecond so
+  /// termination keeps being re-checked.
+  void idle_wait_quiescent();
+
+  /// @brief Whether any partition has undrained async events.
+  bool any_async_pending() const;
+
   /// @brief Call initialize() on all components across all partitions.
   void initialize_components();
 

@@ -4,10 +4,38 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
-## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
+## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 
 ### Changed
 
+- Minimum supported GCC raised from 10 to **GCC 11**, the first release with the
+  C++20 support this project relies on. GCC 10 is no longer tested; configuring
+  with an older GCC now emits a CMake warning. The RHEL 8 CI and release
+  containers moved from `gcc-toolset-10` to `gcc-toolset-11`.
+- `ROCPROFSYS_MONOCHROME` and `MONOCHROME` now treat any value other than a recognized
+  false token (`off`/`false`/`no`/`n`/`f`/`0`) as `true`, instead of only recognizing a
+  fixed set of true tokens.
+
+### Resolved issues
+
+- Fixed per-link XGMI and device-level JPEG AMD SMI metrics missing from rocpd output
+  because PMC metadata names did not match the sample insertion path.
+
+## ROCm Systems Profiler 1.9.0 for ROCm 10.1
+
+### Changed
+
+- **rocpd is now the default output format.** When no output format is specified,
+  profiling data is emitted as a rocpd SQLite database (`rocpd.db`). Perfetto (`.proto`)
+  output must now be explicitly enabled via `--output-format proto`. Requires
+  ROCProfiler-SDK 1.0.0 or later (ROCm 7.0.0+).
+- `ROCPROFSYS_PROFILE` (timemory backend) now defaults to `false`, since rocpd
+  replaces Perfetto as the primary trace output.
+- All built-in presets that perform tracing (`--balanced`, `--detailed`, `--sys-trace`,
+  `--runtime-trace`, `--trace-gpu`, `--trace-hpc`, `--trace-hw-counters`, `--trace-openmp`,
+  `--workload-trace`) now produce a rocpd database by default, because rocpd is the new
+  library default. The `--profile-only` and `--profile-mpi` presets explicitly disable
+  rocpd output to preserve their lightweight, flat-profile-only character.
 - `ROCPROFSYS_SAMPLING_GPUS` is now restricted by the GPUs the ROCm runtime exposes
   via `ROCR_VISIBLE_DEVICES` / `HIP_VISIBLE_DEVICES`.
 - The `trace-hpc` preset now enables flat profiling (`ROCPROFSYS_FLAT_PROFILE`) by
@@ -23,12 +51,43 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   `ROCPROFSYS_CONFIG_FILE` is preserved, and the one given on the command line is
   appended to it.
 
+- Pausing sampling now stops the underlying per-thread timers instead of only
+  discarding the samples they produce. Previously a paused sampler kept delivering
+  timer signals, so the profiled application's sleeps were still interrupted
+  throughout a window in which no data was being collected.
+
+### Fixed
+
+- `ROCPROFSYS_TRACE_DELAY`/`ROCPROFSYS_TRACE_DURATION` now actually gate GPU context
+  startup, producing a real gap in cached GPU/RocPD data. Previously they only
+  suppressed downstream category emission. For GPU-only tracing with no marker
+  domain or trace region configured, the configured delay had no effect at all on
+  when GPU data collection actually began.
+
 ### Removed
 
 - Removed the `ROCPROFSYS_BUILD_SQLITE3` CMake option and the in-tree SQLite3/rocpd
   storage backend. This is now handled by profiler-hub.
 
-## ROCm Systems Profiler 1.8.0 for ROCm 10.0 (unreleased)
+- Removed the deprecated `rocprof-sys-user` library and its C API
+  (`rocprofsys_user_*`, `<rocprofiler-systems/user.h>`), including the `user`
+  find_package component, the `examples/user-api` example, the Python
+  `rocprofsys.user` submodule, and the associated pytest coverage. Use
+  ROCTx (`rocprofiler-sdk-roctx`) for general-purpose manual instrumentation
+  (starting/stopping tracing, named regions) instead; see `examples/roctx`
+  for usage.
+
+  - Causal profiling's `ROCPROFSYS_CAUSAL_PROGRESS`/`ROCPROFSYS_CAUSAL_BEGIN`/
+    `ROCPROFSYS_CAUSAL_END` macros are unaffected at the source level: they now
+    run on a new, minimal `rocprof-sys-causal-api` library instead of the removed
+    general-purpose user API. Existing causal profiling code does not need to be
+    edited, but it must be rebuilt against the new headers and library, and
+    projects that requested the old component via
+    `find_package(rocprofiler-systems COMPONENTS user)` must change that to
+    `COMPONENTS causal-api`. The `user` component no longer exists, so requesting
+    it now fails at configure time.
+
+## ROCm Systems Profiler 1.8.0 for ROCm 10.0
 
 ### Added
 

@@ -10,6 +10,7 @@ Pre-built simulator configs are in `configs/`:
 
 | File | Description |
 |---|---|
+| `gfx90a_mi210_kmd.json` | Single CDNA2 GPU (daemon/KFD mode) |
 | `gfx942_cdna3.json` | Single CDNA3 GPU (standalone simulation) |
 | `gfx942_cdna3_kmd.json` | Single CDNA3 GPU (daemon/KFD mode) |
 | `gfx950_mi355x.json` | Single CDNA4 GPU (standalone simulation) |
@@ -39,7 +40,7 @@ The remaining sections describe simulator topology configs.
 ```json
 {
   "max_ticks": 100000,
-  "num_threads": 1,
+  "cpu_dispatch_threads": 1,
   "exec_mode": "functional",
   "vm": { "arch": "cdna4" },
   "topology": {
@@ -65,14 +66,17 @@ The remaining sections describe simulator topology configs.
 }
 ```
 
-The example above is intentionally minimal and single-threaded.
+The example above is intentionally minimal.
 
 ### Top-level fields
 
 | Field | Type | Description |
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
-| `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned) |
+| `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned). Omit for the default. |
+| `cpu_dispatch_threads` | int | Inclusive functional dispatch width per SoC. Omitted/0 selects a preferred allocation; 1 forces serial dispatch. Clamped to per-CP CU capacity. |
+| `cpu_thread_budget` | int | Automatic selection ceiling. Omitted/0 uses `min(process CPU affinity, 32)`; a positive value overrides that ceiling. |
+| `thread_allocations` | array | Preferred `num_threads` / `cpu_dispatch_threads` pairs, selected by total execution-thread cost. |
 | `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
 
@@ -89,11 +93,49 @@ The value is clamped to the number of XCDs visible to the VM. With
 round-robin to four partitions; with `num_threads: 8`, each XCD gets its own
 partition. A single XCD is never split across partitions.
 
-For multi-GPU VMs, clamping uses the aggregate XCD count across all SoCs.
-Partition assignment follows one global XCD ordering across the SoCs and is
-deliberately locality-agnostic. For example, two 8-XCD GPUs permit up to 16
-partitions, while `num_threads: 4` assigns XCDs from both GPUs to each
-partition.
+**Default.** Functional mode chooses an allocation from the target config's
+`thread_allocations` table. The pure `resolve_execution_threads()` function
+selects the largest effective allocation fitting the budget, after applying
+explicit knob overrides and topology limits. A budget between table entries
+uses the lower entry; it does not create workers merely to exhaust the budget.
+Later entries break ties. The automatic ceiling is `min(process CPU affinity,
+32)`, with a minimum of one. Set `cpu_thread_budget` explicitly to allow a
+larger entry. A config without a table uses serial defaults for unspecified
+knobs. Clocked mode uses only engines, capped by affinity/budget and XCD count.
+
+Explicit engine and dispatch values take precedence and may exceed the automatic
+ceiling. Engines are clamped to aggregate XCD count, and dispatch width to each
+SoC's largest per-CP CU count. No workload inspection is involved.
+
+Two separate contracts constrain consumers, and only the first is about the
+config file.
+
+**Stepping requires a single partition.** `rj_vm_step()` and
+`SimulationEngine::step()` both reject a multi-partition engine. Either pin
+`"num_threads": 1` in the config, or set `loaded.engine_config.num_threads = 1`
+on the `LoadedConfig` after `load_config()` returns and before constructing the
+engine — the loader resolves the default, it does not enforce it.
+
+**A multi-partition engine needs a partition policy.** Code that builds an
+engine by hand must call `partition_topology_by_xcds()` after `set_root()` and
+before `create()`, or `create()` throws "multi-threaded SimulationEngine
+requires an explicit topology partition policy". `rj_vm_create()` already does
+this, so this only affects direct `SimulationEngine` users.
+
+For multi-GPU VMs, both the default and the clamp use the aggregate XCD count
+across all SoCs. Partition assignment follows one global XCD ordering across
+the SoCs and is deliberately locality-agnostic. For example, two 8-XCD GPUs
+permit up to 16 partitions, while `num_threads: 4` assigns XCDs from both GPUs
+to each partition.
+
+`gfx950_mi355x_kmd_2gpu.json` and `gfx1250_mi455x_kmd_4gpu.json` are the
+shipped configs that still pin `num_threads: 1`. Any multi-partition setting on
+the 2-GPU config hangs RCCL collectives (`AllReduce`, `Broadcast`, `AllGather`,
+`ReduceScatter`) with the engine workers spinning and the simulation making no
+progress; point-to-point `SendRecv` is unaffected. The hang predates the default
+and reproduces with as few as two partitions. The 4-GPU config keeps the pin for
+the same reason, though the hang has only been characterised on the 2-GPU
+config. Remove the pins once it is fixed.
 
 Raising `num_threads` only pays off if the work reaches more than one XCD, which
 is decided by `HwQueue::xcd_fanout` rather than by how the queue was created (see
@@ -111,18 +153,110 @@ an empty share and run nothing. Fan-out also reaches only the XCDs of the SoC
 that owns the queue -- so in the two-GPU example above, one dispatch occupies at
 most the partitions covering its own GPU.
 
+#### Thread accounting and preferred allocations
+
+For E engine threads and per-SoC inclusive dispatch widths D, the retained
+execution allocation is **E + sum(D - 1)**. Each XCD submission runs on its
+engine caller and can share the SoC's D-1 persistent workers. Callers progress
+concurrently and join only their own submission. Runtime, doorbell and daemon
+threads are outside this execution budget.
+
+The initial single-GPU tables use these engine/dispatch pairs:
+
+| Budget | gfx950 E/D | gfx1250 E/D | gfx1100/gfx1151/gfx1201 E/D |
+|---:|---:|---:|---:|
+| 1 | 1/1 | 1/1 | 1/1 |
+| 2 | 1/2 | 1/2 | 1/2 |
+| 4 | 2/3 | 1/4 | 1/4 |
+| 8 | 2/7 | 2/7 | 1/8 |
+| 16 | 8/9 | 8/9 | 1/16 |
+| 24 | 8/17 | 8/17 | 1/16 |
+| 32 | 8/25 | 8/25 | 1/32 |
+
+A budget of 12 selects the eight-thread row. These initial tables stop at 32;
+a larger explicit budget permits larger entries in a custom table, and explicit
+engine/dispatch settings can exceed the budget. MI210 uses one engine and
+dispatch widths 1/2/4/8/16/32. CDNA3 uses the gfx950 allocations above.
+See [the design and evidence](concurrent-dispatch.md).
+
+Print allocations for any target without constructing a simulated GPU:
+
+```sh
+rocjitsu --config configs/gfx950_mi355x.json --thread-budget-table
+```
+
+The configured row reflects the file's budget and current affinity. Remaining
+rows show explicit budget ceilings while retaining the file's knob overrides.
+The total column reports actual allocation, which may be below the ceiling or
+above it when explicitly overridden.
+
+For multiple GPUs, selection counts every retained dispatch pool, so the same
+pair costs more than on a single GPU. Useful parallelism depends on work reaching
+those GPUs/XCDs and enough runnable CUs being available. Multi-GPU presets pin
+both `num_threads: 1` and `cpu_dispatch_threads: 1` for RCCL: multiple engine
+partitions hang, and extra dispatch workers slow the measured small collectives.
+Increasing the budget alone retains these serial defaults.
+
+Set `cpu_dispatch_threads: 0` to opt into the parallel granules below, or set a
+positive dispatch width explicitly. The engine stays at one unless overridden.
+
+| Budget | MI355X, 2 GPUs E/D | Retained threads | MI455X, 4 GPUs E/D | Retained threads |
+|---:|---:|---:|---:|---:|
+| 1 | 1/1 | 1 | 1/1 | 1 |
+| 2 | 1/1 | 1 | 1/1 | 1 |
+| 4 | 1/2 | 3 | 1/1 | 1 |
+| 8 | 1/4 | 7 | 1/2 | 5 |
+| 16 | 1/8 | 15 | 1/4 | 13 |
+| 24 | 1/12 | 23 | 1/6 | 21 |
+| 32 | 1/16 | 31 | 1/8 | 29 |
+
+D is inclusive dispatch width per GPU. The one engine submits synchronously,
+so these retained pools do not imply simultaneous execution on every GPU.
+Dispatch workers can accelerate compute batches. The E=1 pin addresses the
+documented RCCL hang; the D=1 default preserves small-collective performance.
+
+Mirage embeds the single-GPU tables in its RocJITsu backend at build time and
+selects them by the agent's GPU target. The hardware agent format carries no
+host scheduling policy. Unknown targets use the serial fallback. For multiple
+GPUs, it converts each granule's budget B to E=1 and D=1+floor((B-1)/GPUs),
+matching the native multi-GPU presets, then leaves selection to rocjitsu.
+Its multi-GPU configurations default to E=1/D=1 for the same reasons. A positive
+engine override can change that pin;
+`num_threads: 0` retains it. Profile options may override `cpu_thread_budget`,
+`num_threads` and `cpu_dispatch_threads`. A supplied config file is used verbatim.
+Checkpoints retain the configured requests and tables, including custom tables,
+so restore re-evaluates that policy for the receiving process's affinity. They
+preserve the user's configuration, rather than an exact host allocation or a
+reference to a runtime preset that may change. Updating a runtime therefore does
+not replace a checkpoint's custom policy with new builtin tuning.
+
+**Migration.** New functional JSON configurations without a table use serial
+values for automatic knobs. Previously, automatic engine sizing followed the
+XCD count and explicit `cpu_dispatch_threads: 0` selected a host-wide dispatch
+budget. Add a `thread_allocations` table or positive knob overrides to enable
+parallel execution. Shipped presets already encode their preferred tables.
+Legacy checkpoints with explicit zero dispatch and no allocation metadata retain
+the old dispatch-only host sizing, including when saved again. An absent legacy
+dispatch field remains serial; a present empty allocation table uses the new
+serial fallback.
+
+
 ### Topology
 
 Components are defined hierarchically under `topology.root`. Range
 expansion (`xcd[0:8]`) creates multiple instances. Links connect
 component ports using pattern expressions with loop variables.
 
-### KFD device section
+### KFD device sections
 
-KFD-mode configs include a `vm.gpu.device` section that defines the
-properties reported through the simulated sysfs topology (GPU ID,
-vendor/device IDs, CU counts, memory sizes, etc.). These must match
-the component hierarchy defined in `topology`.
+KFD device identity can be defined by `vm.gpu.device` for a simulated GPU and
+by `dbt_guest.guest_device` for a DBT guest. These sections define properties
+reported through the simulated sysfs topology (GPU ID, vendor/device IDs, CU
+counts, memory sizes, etc.). A simulated device's properties must match the
+component hierarchy defined in `topology`.
+
+In either device section, a device with one or more regular SDMA engines must
+explicitly set a nonzero `num_sdma_queues_per_engine` value.
 
 ## FlatBuffers schema
 

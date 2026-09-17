@@ -61,6 +61,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
+          ref: eec5e9375e2d60fb4598108f7db2565b620ed5c5 # 2026-09-15 commit
           sparse-checkout: build_tools
           path: "prejob"
 
@@ -78,7 +79,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: b014dba9f285f6d510624cbe1a1d20251c99c0f4 # 2026-08-21
+          ref: eec5e9375e2d60fb4598108f7db2565b620ed5c5 # 2026-09-15 commit
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
@@ -91,6 +92,7 @@ jobs:
           IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
 
       - name: Driver / GPU sanity check
+        if: ${{ !fromJSON(inputs.component).linux_cpu_runner }}
         timeout-minutes: 3
         run: |
           python ./build_tools/print_driver_gpu_info.py
@@ -124,7 +126,12 @@ jobs:
           # components leave it empty. See: https://github.com/ROCm/TheRock/issues/3587
           GPU_ENABLE_PAL: ${{ fromJSON(inputs.component).gpu_enable_pal }}
         run: |
-          ${{ fromJSON(inputs.component).test_script }}
+          if [[ "${{ inputs.amdgpu_families }}" == "gfx125X-dcgpu" ]]; then
+            python ./build_tools/memory_monitor.py --phase "Test ${{ fromJSON(inputs.component).job_name }}" -- \
+              bash -c '${{ fromJSON(inputs.component).test_script }}'
+          else
+            ${{ fromJSON(inputs.component).test_script }}
+          fi
 
       # GitHub's 'Complete job' step is unaware of launched executables
       # and will fail to clean up orphan processes.

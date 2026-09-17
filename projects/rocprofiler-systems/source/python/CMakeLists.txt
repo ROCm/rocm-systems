@@ -93,8 +93,8 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-compile-options
         rocprofiler-systems::rocprofiler-systems-static-libgcc-optional
         rocprofiler-systems::rocprofiler-systems-lto
+        rocprofiler-systems::rocprofiler-systems-common-api-library
         rocprofiler-systems::rocprofiler-systems-dl-library
-        rocprofiler-systems::rocprofiler-systems-user-library
         rocprofiler-systems::rocprofiler-systems-python
         rocprofiler-systems::rocprofiler-systems-python-compile-options
 )

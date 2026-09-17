@@ -125,6 +125,7 @@ target_sources(amdhip64 PRIVATE
   hip_api_trace.cpp
   hip_table_interface.cpp
   hip_table_interface_c.cpp
+  hip_deprecated_abi.cpp
   hip_comgr_helper.cpp
   hip_library.cpp
   profiler/hip_clr_profiler.cpp
@@ -173,13 +174,15 @@ target_include_directories(amdhip64
     ${PROJECT_BINARY_DIR}/include)
 
 target_compile_definitions(amdhip64 PRIVATE __HIP_PLATFORM_AMD__)
+
+target_compile_definitions(amdhip64 PRIVATE HIP_ABI_IMPL)
 target_link_libraries(amdhip64 PRIVATE ${OPENGL_LIBRARIES})
 target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
 # Add link to comgr, hsa-runtime and other required libraries in target files
 # This is required for static libraries
 if(NOT BUILD_SHARED_LIBS)
   find_package(hsa-runtime64)
-  find_package(amd_comgr)
+  find_package(amd_comgr 3.2 REQUIRED)
   target_link_libraries(amdhip64 PRIVATE
     pthread numa rt c amd_comgr hsa-runtime64::hsa-runtime64)
 endif()
@@ -264,16 +267,21 @@ if(USE_PROF_API)
   ")
   endif()
 
+
+  if(MSVC)
+    set(pp_out /P /Fi:${PROF_API_NEWHDR}.i)
+  else()
+    set(pp_out -E -o ${PROF_API_NEWHDR}.i)  # note: -E before input
+  endif()
+
   add_custom_command(OUTPUT ${PROF_API_NEWHDR}.i
     COMMAND ${CMAKE_COMMAND} -E cat ${PROF_API_HDR} ${PROF_GL_HDR} > ${PROF_API_NEWHDR}
     COMMAND ${CMAKE_C_COMPILER}
         "-D$<JOIN:$<TARGET_PROPERTY:amdhip64,COMPILE_DEFINITIONS>,;-D>"
-        "-I$<JOIN:$<TARGET_PROPERTY:amdhip64,INCLUDE_DIRECTORIES>,;-I>"
+        "$<LIST:TRANSFORM,$<TARGET_PROPERTY:amdhip64,INCLUDE_DIRECTORIES>,PREPEND,-I>" # Directory name may contain spaces.
         "-DHIP_INCLUDE_HIP_HIP_RUNTIME_PT_API_H=1"
-        ${c_flags}
         $<TARGET_PROPERTY:amdhip64,COMPILE_OPTIONS>
-        ${CPP_EXTRA_C_FLAGS}
-        -E ${PROF_API_NEWHDR} -o ${PROF_API_NEWHDR}.i
+        ${pp_out} ${PROF_API_NEWHDR}
     COMMAND_EXPAND_LISTS VERBATIM
     IMPLICIT_DEPENDS C ${PROF_API_HDR} ${PROF_GL_HDR} ${PROF_API_DEPRECATED}
     DEPENDS ${PROF_API_HDR} ${PROF_GL_HDR} ${PROF_API_DEPRECATED}

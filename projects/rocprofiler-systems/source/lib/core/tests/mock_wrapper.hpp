@@ -62,7 +62,9 @@ enum kind_buffer_tracing
     BUFFER_TRACING_KFD_PAGE_MIGRATE         = 29,
     BUFFER_TRACING_KFD_PAGE_FAULT           = 30,
     BUFFER_TRACING_KFD_QUEUE                = 31,
-    BUFFER_TRACING_PAGE_MIGRATION           = 50,
+    BUFFER_TRACING_KFD_EVENT_PAGE_FAULT   = 32,  // NOLINT(readability-identifier-naming)
+    BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE = 33,  // NOLINT(readability-identifier-naming)
+    BUFFER_TRACING_PAGE_MIGRATION         = 50,
 };
 
 using callback_tracing_kind = kind_callback_tracing;
@@ -604,7 +606,7 @@ using device_counting_service_cb_t = void*;
 // Minimal name_info stub for mock testing.
 // name_info_impl and name_info mirror rocprofiler::sdk::utility::name_info so that
 // Wrapper::callback_name_info_t / buffer_name_info_t are interchangeable in library_sdk
-// templates. items()/emplace() are functional (not no-op) since sdk_tracing_config's
+// templates. items()/emplace() are functional (not no-op) since tracing_config's
 // get_operations()/get_backtrace_operations() rely on items() for regex-based
 // operation filtering.
 
@@ -1121,6 +1123,12 @@ struct wrapper
         buffer_tracing_kind::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU;
     static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS =
         buffer_tracing_kind::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS;
+    static constexpr buffer_tracing_kind
+        BUFFER_TRACING_KFD_EVENT_PAGE_FAULT =  // NOLINT(readability-identifier-naming)
+        buffer_tracing_kind::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT;
+    static constexpr buffer_tracing_kind
+        BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE =  // NOLINT(readability-identifier-naming)
+        buffer_tracing_kind::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE;
 
     // ─── Counter flag constants ───────────────────────────────────────────────
     static constexpr counter_flag_t COUNTER_FLAG_NONE = 0;

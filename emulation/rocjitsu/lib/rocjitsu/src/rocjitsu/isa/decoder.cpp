@@ -6,17 +6,44 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
 
+#include <algorithm>
+#include <vector>
+
 namespace rocjitsu {
 
 std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry,
                                          std::string_view target_id) {
   const IsaTargetDescriptor *target = registry.find(target_id);
-  return target == nullptr ? nullptr : target->decoder_factory();
+  if (target == nullptr)
+    return nullptr;
+  const IsaGpuTargetDescription *binding = registry.find_gpu_target_by_code_object_id(target_id);
+  if (binding != nullptr && target->variant_decoder_factory != nullptr)
+    return target->variant_decoder_factory(*binding);
+  if (target->variant_decoder_factory != nullptr) {
+    binding = registry.find_default_gpu_target(*target);
+    return binding == nullptr ? nullptr : target->variant_decoder_factory(*binding);
+  }
+  return target->decoder_factory();
+}
+
+std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry,
+                                         rj_code_target_id_t target_id) {
+  const IsaTargetDescriptor *target = registry.find(target_id);
+  const IsaGpuTargetDescription *binding = registry.find_gpu_target(target_id);
+  if (target == nullptr || binding == nullptr)
+    return nullptr;
+  return target->variant_decoder_factory == nullptr ? target->decoder_factory()
+                                                    : target->variant_decoder_factory(*binding);
 }
 
 std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry, rj_code_arch_t arch) {
   const IsaTargetDescriptor *target = registry.find(arch);
-  return target == nullptr ? nullptr : target->decoder_factory();
+  if (target == nullptr)
+    return nullptr;
+  if (target->variant_decoder_factory == nullptr)
+    return target->decoder_factory();
+  const IsaGpuTargetDescription *binding = registry.find_default_gpu_target(*target);
+  return binding == nullptr ? nullptr : target->variant_decoder_factory(*binding);
 }
 
 Decoder::~Decoder() {
@@ -33,6 +60,42 @@ DecodeResult Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc
   if (decoded.succeeded())
     decoded.value()->src_loc_ = src_loc;
   return decoded;
+}
+
+DecodeResult Decoder::decode_window(std::span<const rj_code_binary_inst_t> words, uint64_t src_loc,
+                                    const DecodeErrorEmitter &emit_error) {
+  if (words.empty())
+    return emit_error.emit() << "empty decode window";
+  const std::size_t maximum_words = max_instruction_words();
+  if (maximum_words == 0)
+    return emit_error.emit() << "decoder reported a zero-width decode window";
+
+  // Allocate only at the tail; full windows keep the raw-pointer decode path.
+  std::vector<rj_code_binary_inst_t> window;
+  const bool needs_padding = words.size() < maximum_words;
+  const rj_code_binary_inst_t *decode_words = words.data();
+  if (needs_padding) {
+    window.resize(maximum_words, 0);
+    std::copy(words.begin(), words.end(), window.begin());
+    decode_words = window.data();
+  }
+
+  DecodeResult result = decode(decode_words, src_loc, emit_error);
+  if (result.failed())
+    return Result::failure();
+  Instruction &decoded = *result.value();
+  const int decoded_size = decoded.size();
+  if (decoded_size <= 0 || decoded_size % sizeof(rj_code_binary_inst_t) != 0 ||
+      static_cast<std::size_t>(decoded_size) / sizeof(rj_code_binary_inst_t) > maximum_words)
+    return emit_error.emit() << "decoder exceeded the maximum instruction size";
+  if (static_cast<std::size_t>(decoded_size) > words.size_bytes())
+    return emit_error.emit() << "truncated instruction encoding";
+
+  // Combined encodings and external decoders can retain the input pointer.
+  // Preserve that contract instead of returning a pointer into the tail buffer.
+  if (needs_padding && decoded.raw_encoding_ == window.data())
+    decoded.raw_encoding_ = words.data();
+  return result;
 }
 
 void Decoder::activate_pool(AllocFn alloc, DeallocFn dealloc, void *pool) {

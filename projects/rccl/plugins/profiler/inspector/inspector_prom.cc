@@ -238,17 +238,19 @@ static inspectorResult_t inspectorPromGetLabelsColl(char* labels,
                                                     ncclFunc_t func,
                                                     const char* algoProto,
                                                     size_t msgSizeRangeBytes) {
-  const char* jobId = getenv("SLURM_JOB_ID");
+  const char* jobId = inspectorGetJobId();
+  const char* cluster = inspectorGetCluster();
   char msgSizeStr[32];
   inspectorPromFormatMessageSizeRange(msgSizeRangeBytes,
                                       msgSizeStr,
                                       sizeof(msgSizeStr));
 
   int ret = snprintf(labels, labelSize,
-                     "version=\"%s\",slurm_job_id=\"%s\",node=\"%s\",gpu=\"%s\","
+                     "version=\"%s\",cluster=\"%s\",slurm_job_id=\"%s\",node=\"%s\",gpu=\"%s\","
                      "comm_name=\"%s\",n_nodes=\"%d\",nranks=\"%d\","
                      "collective=\"%s\",message_size=\"%s\",algo_proto=\"%s\"",
                      (version && version[0]) ? version : "unknown",
+                     cluster ? cluster : "unknown",
                      jobId ? jobId : "unknown",
                      (nodeName && nodeName[0]) ? nodeName : "unknown",
                      (gpuName && gpuName[0]) ? gpuName : "unknown",
@@ -297,7 +299,8 @@ static inspectorResult_t inspectorPromGetLabelsP2p(char* labels,
                                                    int nnodes,
                                                    ncclFunc_t func,
                                                    size_t msgSizeRangeBytes) {
-  const char* jobId = getenv("SLURM_JOB_ID");
+  const char* jobId = inspectorGetJobId();
+  const char* cluster = inspectorGetCluster();
   char msgSizeStr[32];
   inspectorPromFormatMessageSizeRange(msgSizeRangeBytes,
                                       msgSizeStr,
@@ -305,10 +308,11 @@ static inspectorResult_t inspectorPromGetLabelsP2p(char* labels,
 
   int ret = snprintf(labels,
                      labelSize,
-                     "version=\"%s\",slurm_job_id=\"%s\",node=\"%s\",gpu=\"%s\","
+                     "version=\"%s\",cluster=\"%s\",slurm_job_id=\"%s\",node=\"%s\",gpu=\"%s\","
                      "comm_name=\"%s\",n_nodes=\"%d\",nranks=\"%d\","
                      "p2p_operation=\"%s\",message_size=\"%s\"",
                      (version && version[0]) ? version : "unknown",
+                     cluster ? cluster : "unknown",
                      jobId ? jobId : "unknown",
                      (nodeName && nodeName[0]) ? nodeName : "unknown",
                      (gpuName && gpuName[0]) ? gpuName : "unknown",
@@ -409,6 +413,31 @@ static inspectorResult_t inspectorPromGetDeviceFile(inspectorPromDevice& device,
 
   device.file = file;
   *fileOut = file;
+  return inspectorSuccess;
+}
+
+static inspectorResult_t inspectorPromWriteFileHeader(FILE* file) {
+  if (!file) {
+    return inspectorFileOpenError;
+  }
+  if (ftell(file) != 0) {
+    return inspectorSuccess;
+  }
+
+  static const char header[] =
+    "# HELP nccl_bus_bandwidth_gbs RCCL collective bus bandwidth in GB/s\n"
+    "# TYPE nccl_bus_bandwidth_gbs gauge\n"
+    "# HELP nccl_collective_exec_time_microseconds RCCL collective execution time in microseconds\n"
+    "# TYPE nccl_collective_exec_time_microseconds gauge\n"
+    "# HELP nccl_p2p_bus_bandwidth_gbs RCCL point-to-point bus bandwidth in GB/s\n"
+    "# TYPE nccl_p2p_bus_bandwidth_gbs gauge\n"
+    "# HELP nccl_p2p_exec_time_microseconds RCCL point-to-point execution time in microseconds\n"
+    "# TYPE nccl_p2p_exec_time_microseconds gauge\n";
+
+  size_t len = sizeof(header) - 1;
+  if (fwrite(header, 1, len, file) != len) {
+    return inspectorFileOpenError;
+  }
   return inspectorSuccess;
 }
 
@@ -547,7 +576,7 @@ static inspectorResult_t inspectorPromWriteP2pBucket(FILE* file,
  *   inspectorResult_t - success or error code.
  */
 static inspectorResult_t inspectorPromCommInfoDumpColl(struct inspectorCommInfo* commInfo,
-                                                       inspectorPromCollBucketMap& buckets,
+                                                       inspectorPromDevice& device,
                                                        bool* needs_writing) {
   if (commInfo == nullptr) {
     return inspectorSuccess;
@@ -587,7 +616,7 @@ static inspectorResult_t inspectorPromCommInfoDumpColl(struct inspectorCommInfo*
         commName,
         algoProto
       };
-      inspectorPromAggUpdate(buckets[key],
+      inspectorPromAggUpdate(device.collBuckets[key],
                              collInfo.algoBwGbs,
                              collInfo.busBwGbs,
                              collInfo.execTimeUsecs);
@@ -598,7 +627,7 @@ static inspectorResult_t inspectorPromCommInfoDumpColl(struct inspectorCommInfo*
 }
 
 static inspectorResult_t inspectorPromCommInfoDumpP2p(struct inspectorCommInfo* commInfo,
-                                                      inspectorPromP2pBucketMap& buckets,
+                                                      inspectorPromDevice& device,
                                                       bool* needs_writing) {
   if (commInfo == nullptr) {
     return inspectorSuccess;
@@ -634,7 +663,7 @@ static inspectorResult_t inspectorPromCommInfoDumpP2p(struct inspectorCommInfo* 
         msgSizeRangeBytes,
         commName
       };
-      inspectorPromAggUpdate(buckets[key],
+      inspectorPromAggUpdate(device.p2pBuckets[key],
                              p2pInfo.algoBwGbs,
                              p2pInfo.busBwGbs,
                              p2pInfo.execTimeUsecs);
@@ -645,13 +674,16 @@ static inspectorResult_t inspectorPromCommInfoDumpP2p(struct inspectorCommInfo* 
 }
 
 static inspectorResult_t inspectorPromCommInfoDump(struct inspectorCommInfo* commInfo,
-                                                   inspectorPromCollBucketMap& collBuckets,
-                                                   inspectorPromP2pBucketMap& p2pBuckets,
+                                                   inspectorPromDevice& device,
                                                    bool* needs_writing) {
   *needs_writing = false;
 
-  INS_CHK(inspectorPromCommInfoDumpColl(commInfo, collBuckets, needs_writing));
-  INS_CHK(inspectorPromCommInfoDumpP2p(commInfo, p2pBuckets, needs_writing));
+  INS_CHK(inspectorPromCommInfoDumpColl(commInfo,
+                                        device,
+                                        needs_writing));
+  INS_CHK(inspectorPromCommInfoDumpP2p(commInfo,
+                                       device,
+                                       needs_writing));
 
   return inspectorSuccess;
 }
@@ -693,8 +725,7 @@ static inspectorResult_t inspectorPromFillDeviceBuckets(struct inspectorCommInfo
     }
 
     INS_CHK(inspectorPromCommInfoDump(itr,
-                                      device.collBuckets,
-                                      device.p2pBuckets,
+                                      device,
                                       &needs_writing));
 
     if (needs_writing) {
@@ -735,6 +766,7 @@ static inspectorResult_t inspectorPromWriteDeviceBuckets(std::map<std::string,
     if (!file) {
       continue;
     }
+    INS_CHK(inspectorPromWriteFileHeader(file));
     for (const auto& collEntry : device.collBuckets) {
       INS_CHK(inspectorPromWriteCollBucket(file,
                                            device,
@@ -750,7 +782,6 @@ static inspectorResult_t inspectorPromWriteDeviceBuckets(std::map<std::string,
   }
   return inspectorSuccess;
 }
-
 
 /*
  * Description:
