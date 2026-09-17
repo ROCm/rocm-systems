@@ -331,8 +331,8 @@ ncclConfig_t
 
   Defaults to ``NCCL_CONFIG_UNDEF_INT``, which resolves to the number of ranks in
   the communicator. Values greater than the number of ranks are capped to the
-  communicator size, with a message logged at ``NCCL_DEBUG=INFO``. Values less
-  than one are rejected: ``ncclCommInitRankConfig`` returns
+  communicator size, with a message logged at ``NCCL_DEBUG=INFO``. Any other value
+  less than one is rejected: ``ncclCommInitRankConfig`` returns
   ``ncclInvalidArgument``. The field is ignored when ``config.version`` is below
   ``2.30``.
 

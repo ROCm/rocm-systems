@@ -1272,9 +1272,9 @@ int ncclP2pChannelsUpperBound(struct ncclComm* comm, bool* userOptedHigherOut) {
 NCCL_PARAM(P2pCuReduceScaleEnable, "P2P_CU_REDUCE_SCALE_ENABLE", 0);
 // When set, pick p2pnChannelsPerPeer so that a P2P plan touches every channel
 // in the pool: ppp = pow2Down(p2pnChannels / maxP2pPeers), where maxP2pPeers is
-// the configured peer limit and defaults to nRanks. The pow2 step matters --
-// ncclP2pChannelForPart mods channel ids by the pool, so ppp*maxP2pPeers > pool
-// causes round bases to wrap and channels to collide.
+// the configured peer limit and defaults to nRanks. The pow2 step keeps the
+// per-peer tile a divisor of the pool. Declaring fewer peers than a job actually
+// uses deliberately oversubscribes channels across rounds.
 // Unset defaults to on for gfx1250, off elsewhere.
 RCCL_PARAM(SaturateP2pNChannels, "SATURATE_P2P_NCHANNELS", RCCL_VALUE_UNSET);
 extern int64_t ncclParamWorkArgsBytes();
@@ -1389,9 +1389,9 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
   if (saturateP2p == RCCL_VALUE_UNSET) {
     saturateP2p = isGfx1250 ? 1 : 0;
   }
-  // Divisor for both per-peer heuristics below. Falls back to nRanks, matching what
-  // ncclTopoComputeP2pChannelsPerPeer resolves an UNDEF maxP2pPeers to.
-  const int maxP2pPeers = comm->p2pMaxPeers > 0 ? comm->p2pMaxPeers : comm->nRanks;
+  // Divisor for both per-peer heuristics below, resolved from config.maxP2pPeers (or
+  // nRanks when unset) by ncclTopoComputeP2pChannelsPerPeer, which init.cc runs first.
+  const int maxP2pPeers = comm->p2pMaxPeers;
   if (saturateP2p && maxP2pPeers > 0) {
     int target = std::max(1, comm->p2pnChannels / maxP2pPeers);
     int newPpp = std::min(pow2Down(target), (int)MAXCHANNELS);

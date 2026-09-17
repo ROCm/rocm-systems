@@ -4133,6 +4133,12 @@
       "enabled": true
     },
     {
+      "name": "MaxP2pPeers MPI Tests - Multi-Node (4-rank, 2-node)",
+      "description": "ncclConfig_t::maxP2pPeers and NCCL_P2P_MAX_PEERS: resolution across ranks, cap, rejection, and the per-peer channel divisor",
+      "config": "maxp2ppeers_multinode",
+      "enabled": true
+    },
+    {
       "name": "NET Transport - Ethernet (Multi-Node)",
       "description": "Network transport tests over Ethernet",
       "config": "net_transport_eth_multinode",

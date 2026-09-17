@@ -19,8 +19,8 @@
 #ifdef MPI_TESTS_ENABLED
 
 #include "MPITestBase.hpp"
-#include "TestChecks.hpp"
 #include "ResourceGuards.hpp"
+#include "TestChecks.hpp"
 
 #include "comm.h" // internal: struct ncclComm::config, p2pMaxPeers, p2pnChannelsPerPeer
 
@@ -136,6 +136,18 @@ protected:
         ASSERT_MPI_EQ(min_value, max_value);
     }
 
+    // The pair every resolution test checks: what the user asked for, what paths.cc will
+    // divide by, and that the ranks agree on it. The two differ only when the field is
+    // left UNDEF, where the divisor resolves to the communicator size.
+    void expectResolvedMaxP2pPeers(int expectedConfig, int expectedResolved)
+    {
+        ASSERT_MPI_EQ(getActiveCommunicator()->config.maxP2pPeers, expectedConfig);
+        ASSERT_MPI_EQ(getActiveCommunicator()->p2pMaxPeers, expectedResolved);
+        expectAllRanksAgree(getActiveCommunicator()->p2pMaxPeers);
+    }
+
+    void expectResolvedMaxP2pPeers(int expected) { expectResolvedMaxP2pPeers(expected, expected); }
+
     // Rank r sends its index to every peer, so it must receive [0..world_size-1].
     // The per-peer count feeds ncclP2pChannelForPart/ToPart, whose inverse breaks if
     // it exceeds the pool: wrong data or a hang here means the mapping aliased.
@@ -149,18 +161,18 @@ protected:
 
         float* send_dev = nullptr;
         float* recv_dev = nullptr;
-        HIP_CHECK(hipMalloc(&send_dev, world_size * sizeof(float)));
+        ASSERT_MPI_EQ(hipMalloc(&send_dev, world_size * sizeof(float)), hipSuccess);
         auto send_guard = makeScopeGuard([&]() { (void)hipFree(send_dev); });
-        HIP_CHECK(hipMalloc(&recv_dev, world_size * sizeof(float)));
+        ASSERT_MPI_EQ(hipMalloc(&recv_dev, world_size * sizeof(float)), hipSuccess);
         auto recv_guard = makeScopeGuard([&]() { (void)hipFree(recv_dev); });
 
         std::vector<float> host(world_size, static_cast<float>(world_rank));
-        HIP_CHECK(
-            hipMemcpy(send_dev, host.data(), world_size * sizeof(float), hipMemcpyHostToDevice));
+        ASSERT_MPI_EQ(
+            hipMemcpy(send_dev, host.data(), world_size * sizeof(float), hipMemcpyHostToDevice),
+            hipSuccess);
 
-        // Accumulate rather than FAIL() inside the group: a bare return here would leave
-        // the group open on this rank while the others block in ncclGroupEnd, turning a
-        // reportable failure into a hang. Every rank reaches the same collective calls.
+        // Every check in this function must be collective: a rank returning early would
+        // strand the others in ncclGroupEnd or in the allreduces below.
         ncclResult_t op_res = ncclGroupStart();
         for(int peer = 0; peer < world_size; ++peer)
         {
@@ -175,8 +187,9 @@ protected:
         ASSERT_MPI_EQ(hipStreamSynchronize(stream), hipSuccess);
 
         std::vector<float> result(world_size, -1.0f);
-        HIP_CHECK(
-            hipMemcpy(result.data(), recv_dev, world_size * sizeof(float), hipMemcpyDeviceToHost));
+        ASSERT_MPI_EQ(
+            hipMemcpy(result.data(), recv_dev, world_size * sizeof(float), hipMemcpyDeviceToHost),
+            hipSuccess);
 
         bool local_ok = true;
         for(int i = 0; i < world_size; ++i)
@@ -206,10 +219,7 @@ TEST_F(MaxP2pPeersMPITest, ConfigField_HonoredAcrossRanks)
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
-    ASSERT_MPI_EQ(getActiveCommunicator()->config.maxP2pPeers, kRequested);
-    // The resolved value paths.cc actually divides by.
-    ASSERT_MPI_EQ(getActiveCommunicator()->p2pMaxPeers, kRequested);
-    expectAllRanksAgree(getActiveCommunicator()->p2pMaxPeers);
+    expectResolvedMaxP2pPeers(kRequested);
 }
 
 // ---------------------------------------------------------------------------
@@ -223,7 +233,7 @@ TEST_F(MaxP2pPeersMPITest, Env_HonoredAcrossRanks)
     constexpr int kEnvValue = 4;
     if(MPIEnvironment::world_size < kEnvValue)
         GTEST_SKIP() << "Needs at least " << kEnvValue << " ranks to be distinguishable";
-    setenv("NCCL_P2P_MAX_PEERS", "4", /*overwrite=*/1);
+    setenv("NCCL_P2P_MAX_PEERS", std::to_string(kEnvValue).c_str(), /*overwrite=*/1);
     configured_value_ = kLeaveConfigUnset; // env alone drives the value
 
     if(ncclParamMaxP2pPeers() != kEnvValue)
@@ -232,9 +242,7 @@ TEST_F(MaxP2pPeersMPITest, Env_HonoredAcrossRanks)
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
-    ASSERT_MPI_EQ(getActiveCommunicator()->config.maxP2pPeers, kEnvValue);
-    ASSERT_MPI_EQ(getActiveCommunicator()->p2pMaxPeers, kEnvValue);
-    expectAllRanksAgree(getActiveCommunicator()->p2pMaxPeers);
+    expectResolvedMaxP2pPeers(kEnvValue);
 }
 
 // ---------------------------------------------------------------------------
@@ -247,7 +255,7 @@ TEST_F(MaxP2pPeersMPITest, Env_OverridesConfig_AcrossRanks)
     constexpr int kEnvValue = 4;
     if(MPIEnvironment::world_size < kEnvValue)
         GTEST_SKIP() << "Needs at least " << kEnvValue << " ranks to be distinguishable";
-    setenv("NCCL_P2P_MAX_PEERS", "4", /*overwrite=*/1);
+    setenv("NCCL_P2P_MAX_PEERS", std::to_string(kEnvValue).c_str(), /*overwrite=*/1);
     configured_value_ = 2; // must lose to the env
 
     if(ncclParamMaxP2pPeers() != kEnvValue)
@@ -256,9 +264,7 @@ TEST_F(MaxP2pPeersMPITest, Env_OverridesConfig_AcrossRanks)
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
-    ASSERT_MPI_EQ(getActiveCommunicator()->config.maxP2pPeers, kEnvValue);
-    ASSERT_MPI_EQ(getActiveCommunicator()->p2pMaxPeers, kEnvValue);
-    expectAllRanksAgree(getActiveCommunicator()->p2pMaxPeers);
+    expectResolvedMaxP2pPeers(kEnvValue);
 }
 
 // ---------------------------------------------------------------------------
@@ -278,9 +284,7 @@ TEST_F(MaxP2pPeersMPITest, Default_LeavesUndefAndP2pMaxPeersEqualsNRanks)
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
-    ASSERT_MPI_EQ(getActiveCommunicator()->config.maxP2pPeers, NCCL_CONFIG_UNDEF_INT);
-    ASSERT_MPI_EQ(getActiveCommunicator()->p2pMaxPeers, MPIEnvironment::world_size);
-    expectAllRanksAgree(getActiveCommunicator()->p2pMaxPeers);
+    expectResolvedMaxP2pPeers(NCCL_CONFIG_UNDEF_INT, MPIEnvironment::world_size);
 }
 
 // ---------------------------------------------------------------------------
@@ -295,9 +299,7 @@ TEST_F(MaxP2pPeersMPITest, AboveRankCount_CappedToNRanks)
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
-    ASSERT_MPI_EQ(getActiveCommunicator()->config.maxP2pPeers, world_size);
-    ASSERT_MPI_EQ(getActiveCommunicator()->p2pMaxPeers, world_size);
-    expectAllRanksAgree(getActiveCommunicator()->p2pMaxPeers);
+    expectResolvedMaxP2pPeers(world_size);
 }
 
 // ---------------------------------------------------------------------------
@@ -385,11 +387,15 @@ TEST_F(MaxP2pPeersMPITest, MultiNode_SaturateDividesByMaxP2pPeers)
     configured_value_ = 2;
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
     const int perpeer = getActiveCommunicator()->p2pnChannelsPerPeer;
-    const int pool    = getActiveCommunicator()->p2pnChannels;
+    int       pool    = getActiveCommunicator()->p2pnChannels;
 
     TEST_INFO("saturate on, maxP2pPeers=2: pool=%d p2pnChannelsPerPeer=%d", pool, perpeer);
 
-    if(pool < 4) GTEST_SKIP() << "Pool too small for the halves to differ";
+    // Reduce before deciding: a per-rank skip here would leave the others in the
+    // ASSERT_MPI_* allreduces below.
+    int min_pool = 0;
+    ASSERT_MPI_SUCCESS(MPI_Allreduce(&pool, &min_pool, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+    if(min_pool < 4) GTEST_SKIP() << "Pool too small for the halves to differ";
 
     ASSERT_MPI_EQ(getActiveCommunicator()->p2pMaxPeers, 2);
     // pow2Down(pool / 2) == pool / 2, the pool being a power of two by this point.

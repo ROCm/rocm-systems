@@ -401,8 +401,9 @@ in the following table.
         | means the number of ranks in the communicator)
         | Values ``<= 0`` are ignored and a message is logged.
         | Values greater than the communicator size are capped to it.
-        | Values ``<= 0`` set through ``ncclConfig_t`` are rejected with
-        | ``ncclInvalidArgument`` at communicator initialization.
+        | Values ``<= 0`` other than ``NCCL_CONFIG_UNDEF_INT`` set through
+        | ``ncclConfig_t`` are rejected with ``ncclInvalidArgument`` at
+        | communicator initialization.
 
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.
