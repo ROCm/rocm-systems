@@ -66,14 +66,14 @@ flush_worker_t::start(const pid_t& current_pid)
         while(!stoken.stop_requested())
         {
             m_worker_function(m_ofs, false);
-            std::unique_lock _lock{ wait_mutex };
+            std::unique_lock wait_lock{ wait_mutex };
             // Avoid condition_variable_any's stop-token overload here. Its
             // internal stop callback can still be executing notify_all() on
             // the requesting thread while the worker destroys the callback's
             // heap-backed condition-variable state. Polling at the existing
             // 10 ms flush interval bounds shutdown latency without that
             // callback lifetime race.
-            wait_condition.wait_for(_lock, CACHE_FILE_FLUSH_TIMEOUT,
+            wait_condition.wait_for(wait_lock, CACHE_FILE_FLUSH_TIMEOUT,
                                     [&]() { return stoken.stop_requested(); });
         }
 
