@@ -24,9 +24,12 @@
 
 #include <new>
 
-#include "gda/backend_gda.hpp"
 #include "log.hpp"
 #include "util.hpp"
+#include "gda/backend_gda.hpp"
+#include "gda/ionic/provider_gda_ionic.hpp"
+#include "gda/ionic/queue_pair_ionic.hpp"
+#include "gda/queue_pair_provider.hpp"
 
 namespace rocshmem {
 
