@@ -8,6 +8,7 @@ import platform
 import shlex
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Dict, List
 
@@ -169,6 +170,45 @@ def build_ctest_command(catch_tests_path: Path) -> List[str]:
     return cmd
 
 
+_HIP_LOG_SHIM_SRC = """\
+// LD_PRELOAD shim: enables HIP debug logging (level 4, all masks) before
+// any test code runs. Built and injected automatically when HIP_TESTS_REGEX
+// is set, so targeted debug runs capture full prefetch/signal/copy traces.
+#include <hip/hip_runtime.h>
+#include <hip/hip_ext.h>
+__attribute__((constructor)) static void enable_hip_logging() {
+    hipExtSetLoggingParams(4, 64 * 1024, 0x7FFFFFFF);
+    hipExtEnableLogging();
+}
+"""
+
+
+def build_hip_log_shim(rocm_path: Path) -> Path:
+    """Compile the HIP logging shim as a shared library; return its path."""
+    tmp = Path(tempfile.mkdtemp(prefix="hip_log_shim_"))
+    src = tmp / "enable_hip_log.cc"
+    out = tmp / "enable_hip_log.so"
+    src.write_text(_HIP_LOG_SHIM_SRC)
+
+    compiler = rocm_path / "bin" / "amdclang++"
+    cmd = [
+        str(compiler),
+        "-shared", "-fPIC",
+        "-x", "hip",
+        str(src),
+        "-o", str(out),
+        f"-L{rocm_path / 'lib'}",
+        "-lamdhip64",
+    ]
+    logging.info(f"++ Building HIP log shim: {shlex.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        logging.warning(f"HIP log shim build failed (logging disabled):\n{result.stderr}")
+        return None
+    logging.info(f"++ HIP log shim built: {out}")
+    return out
+
+
 def main() -> None:
     script_dir = Path(__file__).resolve().parent
     rocm_path_env = os.getenv("ROCM_PATH")
@@ -179,6 +219,15 @@ def main() -> None:
 
     env = os.environ.copy()
     setup_env(env, rocm_path, catch_tests_path)
+
+    # When running a targeted subset (HIP_TESTS_REGEX), build and inject the
+    # HIP logging shim so prefetch dispatch and signal traces appear in output.
+    if os.getenv("HIP_TESTS_REGEX") and platform.system() == "Linux":
+        shim = build_hip_log_shim(rocm_path)
+        if shim:
+            existing = env.get("LD_PRELOAD", "")
+            env["LD_PRELOAD"] = f"{shim}:{existing}" if existing else str(shim)
+            logging.info(f"++ LD_PRELOAD={env['LD_PRELOAD']}")
 
     cmd = build_ctest_command(catch_tests_path)
     logging.info(f"++ Exec [{rocm_path}]$ {shlex.join(cmd)}")
