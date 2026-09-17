@@ -70,8 +70,10 @@ endif()
 # NPU detection
 # ---------------------------------------------------------------------------
 if(AIE_KERNEL_TOOLCHAIN)
+  # Only probe when the caller has not already said which target to build for; -DNPU_TARGET=...
+  # is how you build kernels on a machine whose NPU is not the one you are targeting.
   find_program(XRT_SMI xrt-smi)
-  if(XRT_SMI)
+  if(XRT_SMI AND NOT NPU_TARGET)
     execute_process(
       COMMAND "${XRT_SMI}" examine
       OUTPUT_VARIABLE XRT_SMI_OUTPUT
