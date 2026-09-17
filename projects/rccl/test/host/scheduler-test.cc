@@ -896,6 +896,69 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_PartBytes_RoundsCountUpNotDo
   EXPECT_EQ(items[1]->bytes, 1u);
 }
 
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_AddProxyOpIfNeededFails_PropagatesError) {
+  // nRanks must be >= 2: with nRanks==1, ringDepth(0)==nRanks-1(0) zeroes both sendSlices and recvSlices,
+  // so sendSlices+recvSlices is always 0 and the proxyOp call is skipped regardless of task bytes.
+  ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/2);
+  scene.comm->buffSizes[NCCL_PROTO_SIMPLE] = 4096;
+  ncclTaskBcast task{};
+  task.count = 100;  // ringDepth 0 (rankToIndex[0] defaults to 0): sendSlices > 0, recvSlices stays 0
+  scene.peers[0].bcastQueue.head = &task;
+
+  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                             ncclSimInfo_t*) {
+    task->protocol = NCCL_PROTO_SIMPLE;
+    task->nMaxChannels = 1;
+    task->nWarps = 1;
+    return ncclSuccess;
+  });
+  ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_SIMPLE)] = 0;
+  ScopedHook proxyOpHook(g_addProxyOpIfNeeded,
+                         [](struct ncclComm*, struct ncclKernelPlan*, struct ncclProxyOp*) {
+                           return ncclInternalError;
+                         });
+
+  EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclInternalError);
+  EXPECT_EQ(proxyOpHook.calls, 1);
+}
+
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_WarpSpeedMultiplierAbove1_HalvesChannelsAtRealCallSite) {
+  ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/1);
+  scene.comm->channels[1].ring.rankToIndex = scene.rankToIndex.get();
+  scene.comm->buffSizes[NCCL_PROTO_SIMPLE] = 4096;
+  scene.comm->warpSpeedChannelMultiplier = 2;  // agvChannelCount must halve nMaxChannels(4) to 2 right here
+
+  ncclTaskBcast task{};
+  task.count = 512;
+  task.recvbuff = reinterpret_cast<void*>(0x4000);
+  scene.peers[0].bcastQueue.head = &task;
+
+  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                             ncclSimInfo_t*) {
+    task->protocol = NCCL_PROTO_SIMPLE;
+    task->nMaxChannels = 4;  // agvChannelCount(comm, 4) with multiplier 2 must yield 2, not 4
+    task->nWarps = 1;
+    return ncclSuccess;
+  });
+  ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_SIMPLE)] = 0;
+  std::vector<int> workBatchChannelIds;
+  ScopedHook workBatchHook(g_addWorkBatchToPlan,
+                           [&](struct ncclComm*, struct ncclKernelPlan*, int channelId, enum ncclDevWorkType, int,
+                               uint32_t, int, int, bool) { workBatchChannelIds.push_back(channelId); });
+
+  RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_COLL);
+  ncclResult_t result = ncclInternalError;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { result = ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr); });
+
+  EXPECT_EQ(result, ncclSuccess);
+  // Mutating the real call site to nChannels=tcoll.nMaxChannels (bypassing agvChannelCount) would still touch
+  // channels 0-3 and would never print this message, so both lines together kill that mutant.
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "AllGatherV: WarpSpeed not supported; channels 4 -> 2"));
+  EXPECT_EQ(workBatchChannelIds, (std::vector<int>{0, 1}));  // only 2 of the 4 tuned channels used, per the halving
+  EXPECT_EQ(scene.plan->channelMask.masks[0] & 0b1111u, 0b0011u);  // channels 0,1 set; 2,3 never touched
+}
+
 TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_TailLoop_DrainsSkippedPeerAndFillsPlanQueueInOrder) {
   ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/3);
   scene.comm->planner.nTasksBcast = 10;  // distinct from batchTasks(2), so a wrong-subtrahend mutant is observable
@@ -1088,6 +1151,16 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_WindowRejection_DefaultRegType_
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
   EXPECT_EQ(remainTasksHead, &task);
   EXPECT_EQ(task.next, nullptr);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_GetSymRegTypeFails_PropagatesError) {
+  MakeSymmetricTaskList_Scene scene;
+  g_getSymRegTypeResult = ncclInternalError;  // symAvailable/cfgAllowsSymk default true, so this seam is reached
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_AllReduceForcedOutDespiteGoodWindows_GoesToRemainder) {
@@ -1677,6 +1750,49 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_CollNetSupportAndRe
   EXPECT_EQ(capturedRegBuff, 13);
 }
 
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_GetCollNetSupportFails_PropagatesErrorBeforeRegBuffOrTuning) {
+  MakeSymmetricTaskList_Scene scene;
+  g_symRegType = ncclSymSendRegRecvReg;
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+  task.datatype = ncclInt8;
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
+
+  ScopedHook collNetHook(g_getCollNetSupport,
+                         [](struct ncclComm*, struct ncclTaskColl*, int*) { return ncclInternalError; });
+  ScopedHook regBuffHook(g_getRegBuff, [](struct ncclComm*, struct ncclTaskColl*, int* out) {
+    *out = 0;
+    return ncclSuccess;
+  });
+  ScopedHook tuningHook(g_tuningCompute,
+                        [](struct ncclTuningInput_t*, struct ncclTuningResult_t*) { return ncclSuccess; });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
+  EXPECT_EQ(collNetHook.calls, 1);
+  EXPECT_EQ(regBuffHook.calls, 0);  // NCCLCHECK returns immediately: regBuff is never reached
+  EXPECT_EQ(tuningHook.calls, 0);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_GetRegBuffFails_PropagatesErrorBeforeTuning) {
+  MakeSymmetricTaskList_Scene scene;
+  g_symRegType = ncclSymSendRegRecvReg;
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+  task.datatype = ncclInt8;
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
+
+  ScopedHook regBuffHook(g_getRegBuff,
+                         [](struct ncclComm*, struct ncclTaskColl*, int*) { return ncclInternalError; });
+  ScopedHook tuningHook(g_tuningCompute,
+                        [](struct ncclTuningInput_t*, struct ncclTuningResult_t*) { return ncclSuccess; });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
+  EXPECT_EQ(regBuffHook.calls, 1);
+  EXPECT_EQ(tuningHook.calls, 0);  // NCCLCHECK returns immediately: tuning is never reached
+}
+
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_SymAligned16B_TrueWhenBuffersAlign) {
   MakeSymmetricTaskList_Scene scene;
   g_symRegType = ncclSymSendRegRecvReg;
@@ -1763,22 +1879,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_EffAlgMaskZero_
   EXPECT_EQ(scene.comm->planner.nTasksColl, 5);
 }
 
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_NoSymkBitsInMask_SkipsAndFallsBack) {
-  MakeSymmetricTaskList_Scene scene;
-  scene.comm->planner.nTasksColl = 5;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  task.datatype = ncclInt8;
-  task.algMask = NCCL_TUNING_MASK_GENERAL_KERNELS;  // nonzero, but (effAlgMask & SYM_MASK) == 0
-  task.forceAlgSelection = 1;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
-  struct ncclTaskColl* remainTasksHead = nullptr;
-
-  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
-  EXPECT_EQ(remainTasksHead, &task);
-  EXPECT_EQ(scene.comm->planner.nTasksColl, 5);
-}
+// No hard-error "no sym bits" test: cfgAllowsSymk (symmetric_sched.cc) keeps such a task from reaching headTask.
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_HasGeneralBitsInMask_SkipsAndFallsBack) {
   MakeSymmetricTaskList_Scene scene;

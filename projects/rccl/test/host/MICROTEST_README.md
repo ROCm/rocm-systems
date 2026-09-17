@@ -63,10 +63,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     it is a duplicate-symbol error against that TU. `p2p_fakes.cc`'s
     former hardcoded-false stub was removed for exactly this reason.
     Every function is now covered; see `wrap-test.cc`'s header comment for
-    the per-function breakdown. One deliberate, permanent exclusion: the
-    `#ifdef ENABLE_WARP_SPEED` cluster (~10 functions) is compiled out of
-    this binary entirely, so no seam can reach it without changing the
-    binary's own build configuration.
+    the per-function breakdown. Documented residual: the `#ifdef
+    ENABLE_WARP_SPEED` branches ARE compiled into this binary (the flag is
+    forced binary-wide across the whole `rccl-UnitTestsMicro` target so
+    `dev-runtime-test.cc`'s real `dev_runtime.cc` agrees on `struct
+    ncclComm`'s layout with every other TU), but no seam here drives any of
+    those branches, so they stay untested rather than out of scope.
   - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
     `RasClientMicrotest.*`. With
     `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
