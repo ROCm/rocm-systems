@@ -1,0 +1,169 @@
+name: TheRock RCCL ACCL profiler decomposition
+
+on:
+  workflow_call:
+    inputs:
+      amdgpu_families:
+        type: string
+        required: true
+      artifact_group:
+        type: string
+        required: true
+      test_runs_on:
+        type: string
+        required: true
+      artifact_run_id:
+        type: string
+        required: true
+      nodes:
+        description: 'Number of Slurm nodes to allocate'
+        type: string
+        default: '2'
+  workflow_dispatch:
+    inputs:
+      amdgpu_families:
+        type: string
+        default: 'gfx950-dcgpu'
+      artifact_group:
+        type: string
+        default: 'gfx950-dcgpu'
+      test_runs_on:
+        type: string
+        default: 'ruby-linux-slurm-scale-runner'
+      artifact_run_id:
+        description: 'Run ID of a completed RCCL build to fetch artifacts from'
+        type: string
+        required: true
+      nodes:
+        description: 'Number of Slurm nodes to allocate'
+        type: string
+        default: '2'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rccl-accl-profiler-ruby
+  cancel-in-progress: false
+
+jobs:
+  test_accl_profiler:
+    name: 'ACCL profiler (${{ inputs.nodes }}N)'
+    runs-on: ${{ inputs.test_runs_on }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARTIFACT_RUN_ID: '${{ inputs.artifact_run_id }}'
+      WORK_DIR: '/apps/rccl-ci/accl-profiler/workdir/${{ github.run_id }}-${{ github.run_attempt }}'
+      OUTPUT_ARTIFACTS_DIR: '/apps/rccl-ci/accl-profiler/workdir/${{ github.run_id }}-${{ github.run_attempt }}/rocm'
+      VENV_DIR: '/apps/rccl-ci/accl-profiler/workdir/${{ github.run_id }}-${{ github.run_attempt }}/venv'
+    steps:
+      - name: Checkout TheRock repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: 'ROCm/TheRock'
+          ref: eec5e9375e2d60fb4598108f7db2565b620ed5c5 # 2026-09-15 commit
+
+      - name: Checkout rocm-systems scripts
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: projects/rccl/ci/scripts
+          path: rocm-systems
+
+      - name: Validate Ruby configuration
+        run: |
+          if [ '${{ inputs.amdgpu_families }}' != 'gfx950-dcgpu' ]; then
+            echo '::error::ACCL profiler nightly currently supports only gfx950-dcgpu on Ruby'
+            exit 1
+          fi
+          if ! [[ '${{ inputs.nodes }}' =~ ^[1-9][0-9]*$ ]]; then
+            echo '::error::nodes must be a positive integer'
+            exit 1
+          fi
+          mkdir -p "${WORK_DIR}"
+          probe="${WORK_DIR}/.write-probe.$$"
+          touch "${probe}"
+          rm -f "${probe}"
+
+      - name: Fetch RCCL, rccl-tests, and MPI artifacts
+        uses: './.github/actions/setup_test_environment'
+        with:
+          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
+          ARTIFACT_GROUP: ${{ inputs.artifact_group }}
+          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
+          VENV_DIR: ${{ env.VENV_DIR }}
+          FETCH_ARTIFACT_ARGS: '--rccl --tests --mpi'
+
+      - name: Verify packaged ACCL profiler assets
+        run: |
+          test -s "${OUTPUT_ARTIFACTS_DIR}/lib/librccl-profiler-accl.so"
+          test -x "${OUTPUT_ARTIFACTS_DIR}/share/rccl/accl/accl_report.py"
+          readelf -Ws "${OUTPUT_ARTIFACTS_DIR}/lib/librccl-profiler-accl.so" \
+            | grep -q ' ncclProfiler_v5$'
+
+      - name: Run two-node decomposition sweep
+        timeout-minutes: 105
+        run: |
+          python3 rocm-systems/projects/rccl/ci/scripts/test_accl_profiler.py \
+            --artifact-dir "${OUTPUT_ARTIFACTS_DIR}" \
+            --work-dir "${WORK_DIR}" \
+            --nodes '${{ inputs.nodes }}' \
+            --gpus-per-node 8 \
+            --partition meta64 \
+            --timeout-minutes 90 \
+            --min-bytes 1K \
+            --max-bytes 256M \
+            --step-factor 2 \
+            --iterations 20 \
+            --warmup-iterations 5
+
+      - name: Upload ACCL profiler summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: accl-profiler-summary-${{ inputs.nodes }}N-${{ inputs.amdgpu_families }}
+          path: |
+            ${{ env.WORK_DIR }}/manifest.json
+            ${{ env.WORK_DIR }}/accl_report.txt
+            ${{ env.WORK_DIR }}/reports/*.txt
+            ${{ env.WORK_DIR }}/collective-status.tsv
+            ${{ env.WORK_DIR }}/preflight.log
+            ${{ env.WORK_DIR }}/rccl-tests/*.log
+            ${{ env.WORK_DIR }}/slurm/*
+            ${{ env.WORK_DIR }}/run-accl-profiler.sbatch
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload raw ACCL profiler JSONL
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: accl-profiler-raw-${{ inputs.nodes }}N-${{ inputs.amdgpu_families }}
+          path: ${{ env.WORK_DIR }}/raw/**/*.jsonl
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 6
+
+      - name: Cancel Slurm job and clean work directory
+        if: always()
+        run: |
+          if [ -f "${WORK_DIR}/slurm/job_id.txt" ]; then
+            job_id="$(< "${WORK_DIR}/slurm/job_id.txt")"
+            if [[ "${job_id}" =~ ^[0-9]+$ ]]; then
+              scancel "${job_id}" 2>/dev/null || true
+            fi
+          fi
+          case "${WORK_DIR}" in
+            /apps/rccl-ci/accl-profiler/workdir/*)
+              rm -rf -- "${WORK_DIR}"
+              ;;
+            *)
+              echo "::error::refusing to remove unexpected WORK_DIR=${WORK_DIR}"
+              exit 1
+              ;;
+          esac
