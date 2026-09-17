@@ -91,6 +91,9 @@ extern std::function<size_t(const void*, size_t, size_t, FILE*)> g_fwrite;
 extern std::function<int(FILE*)> g_fflush;
 extern std::function<void(const char*)> g_perror;
 extern std::function<void(int)> g_exit;
+// Defaults to nullptr for every name, so ras_param.cc's NCCL_RAS_TIMEOUT_FACTOR read never leaks the real
+// environment into a test's expected values; install a hook to exercise the "env var set" branch.
+extern std::function<const char*(const char*)> g_getenv;
 
 // ---------------------------------------------------------------------------
 // Observation points fed by the default seams. A test that installs its own

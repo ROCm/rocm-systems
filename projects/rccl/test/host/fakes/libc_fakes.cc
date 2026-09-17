@@ -197,6 +197,8 @@ static void DefaultPerror(const char* prefix) {
 
 static void DefaultExit(int status) { throw MicroExit{status}; }
 
+static const char* DefaultGetenv(const char*) { return nullptr; }
+
 // ---------------------------------------------------------------------------
 
 std::function<ssize_t(int, const void*, size_t)> g_write = DefaultWrite;
@@ -215,6 +217,7 @@ std::function<size_t(const void*, size_t, size_t, FILE*)> g_fwrite = DefaultFwri
 std::function<int(FILE*)> g_fflush = DefaultFflush;
 std::function<void(const char*)> g_perror = DefaultPerror;
 std::function<void(int)> g_exit = DefaultExit;
+std::function<const char*(const char*)> g_getenv = DefaultGetenv;
 
 void ScriptRead(ssize_t ret, int err, std::string data) {
   g_readScript.push_back(MicroReadStep{ret, err, std::move(data)});
@@ -240,6 +243,7 @@ void ResetLibcFakes() {
   g_fflush = DefaultFflush;
   g_perror = DefaultPerror;
   g_exit = DefaultExit;
+  g_getenv = DefaultGetenv;
 
   g_writtenData.clear();
   g_stdoutData.clear();
@@ -315,5 +319,7 @@ __attribute__((noreturn)) void micro_exit(int status) {
   g_exit(status);
   std::abort();
 }
+
+const char* micro_getenv(const char* name) { return g_getenv(name); }
 
 }  // extern "C"

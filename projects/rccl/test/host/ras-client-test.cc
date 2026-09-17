@@ -334,7 +334,7 @@ TEST_F(RasClientMicrotest, ParseArgsTimeout_AcceptedValues_StoreTheParsedSeconds
       {{"-t", "0"}, 0.0},            // 0 is valid and disables the timeout
       {{"-t", "010"}, 10.0},         // strtod, unlike strtol, never treats a leading 0 as octal
       {{"-t", "3.5"}, 3.5},          // timeout is a double; fractional seconds are accepted
-      {{"--timeout="}, 0.0},         // empty optarg: strtod parses nothing, endPtr sits on the NUL, timeout stays 0
+      {{"--timeout="}, 0.0},         // empty optarg: no end==str clause at client.cc:129, so this disables the timeout
       {{"-t", "0x10"}, 16.0},        // strtod parses C99 hex floats; this is accepted as 16, not rejected
   };
   for (const auto& c : cases) {
@@ -356,7 +356,7 @@ TEST_F(RasClientMicrotest, ParseArgsTimeout_RejectedValues_ExitOneAfterStoringWh
       {{"-t", "-5"}, -5.0},          // negative
       {{"-t", "5x"}, 5.0},           // trailing garbage
       {{"--timeout=abc"}, 0.0},      // strtod consumed nothing
-      {{"-t", "1e400"}, HUGE_VAL},   // out of double range: errno == ERANGE and the result is not finite
+      {{"-t", "inf"}, HUGE_VAL},     // errno stays 0 and endPtr reaches the NUL; only !isfinite rejects this one
   };
   for (const auto& c : cases) {
     ResetLibcFakes();

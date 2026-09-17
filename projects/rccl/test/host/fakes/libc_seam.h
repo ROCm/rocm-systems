@@ -55,6 +55,7 @@ int micro_fflush(FILE*);
 void micro_perror(const char*);
 void micro_exit(int) __attribute__((noreturn));
 int micro_fprintf(FILE*, const char*, ...) __attribute__((format(printf, 2, 3)));
+const char* micro_getenv(const char*);
 }  // extern "C"
 
 #define write micro_write
@@ -72,3 +73,4 @@ int micro_fprintf(FILE*, const char*, ...) __attribute__((format(printf, 2, 3)))
 #define perror micro_perror
 #define exit micro_exit
 #define fprintf micro_fprintf
+#define getenv micro_getenv
