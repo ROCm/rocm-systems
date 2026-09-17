@@ -17,7 +17,6 @@
 #include "tuning.h"
 #include "config/algorithm_registry.h"
 
-#include "fail_loud.h"
 #include "scheduler_fakes.h"
 
 // Generous default: a deny-everything default would make even a single small task look over budget.
@@ -89,6 +88,27 @@ std::function<ncclResult_t(struct ncclTuningInput_t*, struct ncclTuningResult_t*
 static int DefaultSymkLLKernelMask() { return 0; }
 std::function<int()> g_symkLLKernelMask = DefaultSymkLLKernelMask;
 
+// Matches nccl_stubs.cc's own hardcoded false: no profiler plugin loaded in this binary by default.
+static bool DefaultProfilerPluginLoaded() { return false; }
+std::function<bool()> g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
+
+// Index 0 always: the kernel-table arrays below are 1-element placeholders, so any other index overruns them.
+static int DefaultSymkGetKernelIndex(ncclSymkKernelId, int, ncclDataType_t) { return 0; }
+std::function<int(ncclSymkKernelId, int, ncclDataType_t)> g_symkGetKernelIndex = DefaultSymkGetKernelIndex;
+
+static const char* DefaultSymkKernelIdToString(int) { return "fake-sym-kernel"; }
+std::function<const char*(int)> g_symkKernelIdToString = DefaultSymkKernelIdToString;
+
+static int DefaultSymkDynamicSmemKernelMask() { return 0; }
+std::function<int()> g_symkDynamicSmemKernelMask = DefaultSymkDynamicSmemKernelMask;
+
+// Trivial success, doesn't touch *outDevWork: the channel-packing loop that reads it is Block 12's territory.
+static ncclResult_t DefaultSymkMakeDevWork(struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*) {
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*)> g_symkMakeDevWork =
+    DefaultSymkMakeDevWork;
+
 void ResetSchedulerFakes() {
   g_testBudget = DefaultTestBudget;
   g_testBudgetCalls = 0;
@@ -101,6 +121,14 @@ void ResetSchedulerFakes() {
   g_getRegBuff = DefaultGetRegBuff;
   g_tuningCompute = DefaultTuningCompute;
   g_symkLLKernelMask = DefaultSymkLLKernelMask;
+  g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
+  g_symkGetKernelIndex = DefaultSymkGetKernelIndex;
+  g_symkKernelIdToString = DefaultSymkKernelIdToString;
+  g_symkDynamicSmemKernelMask = DefaultSymkDynamicSmemKernelMask;
+  g_symkMakeDevWork = DefaultSymkMakeDevWork;
+  ncclSymkKernelList[0] = nullptr;  // raw globals, not std::function seams: reset here to avoid cross-test leaks
+  ncclSymkKernelListProfile[0] = nullptr;
+  ncclSymkKernelMaxDynamicSmem[0] = 0;
   ncclDevFuncNameToId.clear();
 }
 
@@ -135,16 +163,16 @@ bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int red, ncclData
   return g_symkAvailable(comm, coll, red, ty, count);
 }
 int ncclSymkLLKernelMask() { return g_symkLLKernelMask(); }
-int ncclSymkDynamicSmemKernelMask() { FailLoudUnfaked("scheduler_fakes", "ncclSymkDynamicSmemKernelMask"); }
-int ncclSymkGetKernelIndex(ncclSymkKernelId, int, ncclDataType_t) {
-  FailLoudUnfaked("scheduler_fakes", "ncclSymkGetKernelIndex");
+int ncclSymkDynamicSmemKernelMask() { return g_symkDynamicSmemKernelMask(); }
+int ncclSymkGetKernelIndex(ncclSymkKernelId kernelId, int red, ncclDataType_t ty) {
+  return g_symkGetKernelIndex(kernelId, red, ty);
 }
-const char* ncclSymkKernelIdToString(int) { FailLoudUnfaked("scheduler_fakes", "ncclSymkKernelIdToString"); }
-ncclResult_t ncclSymkMakeDevWork(struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*) {
-  FailLoudUnfaked("scheduler_fakes", "ncclSymkMakeDevWork");
+const char* ncclSymkKernelIdToString(int kernelId) { return g_symkKernelIdToString(kernelId); }
+ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* task, struct ncclSymkDevWork* outDevWork) {
+  return g_symkMakeDevWork(comm, task, outDevWork);
 }
 
-// Generated kernel tables; one-element placeholders since nothing here calls ncclSymmetricTaskScheduler.
+// Generated kernel tables; one-element placeholders since g_symkGetKernelIndex's default always selects index 0.
 void* ncclSymkKernelList[1] = {nullptr};
 void* ncclSymkKernelListProfile[1] = {nullptr};
 int ncclSymkKernelMaxDynamicSmem[1] = {0};
@@ -159,5 +187,5 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* input, struct ncclTunin
   return g_tuningCompute(input, result);
 }
 
-// src/plugin/profiler.cc; not fail-loud since "no plugin loaded" is simply true here (matches nccl_stubs.cc).
-bool ncclProfilerPluginLoaded(void) { return false; }
+// src/plugin/profiler.cc
+bool ncclProfilerPluginLoaded(void) { return g_profilerPluginLoaded(); }

@@ -8,10 +8,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "../common/LogCapture.hpp"
@@ -92,6 +94,53 @@ class MakeSymmetricTaskList_Scene {
   }
   std::unique_ptr<ncclComm> comm;
 };
+
+// Unlike ncclMakeSymmetricTaskList (raw list + output param), this takes an already-populated queue directly.
+class SymmetricTaskScheduler_Scene {
+ public:
+  SymmetricTaskScheduler_Scene() : comm(new ncclComm{}), plan(new ncclKernelPlan{}) {
+    comm->nRanks = 1;
+    comm->rank = 0;
+  }
+  std::unique_ptr<ncclComm> comm;
+  std::unique_ptr<ncclKernelPlan> plan;
+  struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next> symTaskQueue{};
+};
+
+// Safe default: fields chosen so the whole function, including the packing loop past this scope, completes.
+ncclTaskColl SymmetricTaskScheduler_MakeTask() {
+  ncclTaskColl task{};
+  task.func = ncclFuncAllGather;
+  task.datatype = ncclInt8;
+  task.devFuncId = ncclSymkKernelId_AllGather_LL;
+  task.nMaxChannels = 2;
+  task.nWarps = 4;
+  task.opDev.op = ncclDevSum;
+  task.count = 1024;  // exactly 1 cell for ncclInt8 (cellCount = 1024 / ncclTypeSize(ncclInt8) = 1024)
+  task.cgaClusterSize = NCCL_CONFIG_UNDEF_INT;
+  task.isSymLast = 1;
+  return task;
+}
+
+// calcArgsSize() floors at sizeof(ncclSymkDevWorkArgs4K)=4096; kSymSchedBigBatchTasks alone clears it (64*64B).
+constexpr int kSymSchedBigBatchTasks = 64;
+// Headroom above kSymSchedBigBatchTasks so a 1-cell-per-task batch never exhausts the channel budget mid-loop.
+constexpr int kSymSchedBigBatchChannels = 100;
+
+// Builds n tasks (1 cell each, one channel apiece); only the last gets isSymLast. Caller must keep it alive.
+std::vector<ncclTaskColl> SymmetricTaskScheduler_EnqueueBatch(
+    struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next>* queue, int n, uint32_t devFuncId,
+    uint8_t lastIsSymLast) {
+  std::vector<ncclTaskColl> tasks(n);
+  for (int i = 0; i < n; ++i) {
+    tasks[i] = SymmetricTaskScheduler_MakeTask();
+    tasks[i].devFuncId = devFuncId;
+    tasks[i].nMaxChannels = kSymSchedBigBatchChannels;
+    tasks[i].isSymLast = (i == n - 1) ? lastIsSymLast : 0;
+    ncclIntruQueueEnqueue(queue, &tasks[i]);
+  }
+  return tasks;
+}
 
 // Mirrors ncclDevFuncId's general-collective key (device.h); AllGatherV never takes the special-cased branches.
 uint64_t ScheduleBcastTasksToPlan_DevFuncKey(int proto) {
@@ -2053,5 +2102,315 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_StopsAtIsSy
   ASSERT_NE(first->next->next, nullptr);
   EXPECT_EQ(first->next->next, &taskThird);
   EXPECT_EQ(first->next->next->next, nullptr);
+}
+
+// ncclSymmetricTaskScheduler setup + work-counting loop (symmetric_sched.cc:299-352); packing's own fields unasserted.
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_IsSymColl_SetTrue) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  scene.plan->isSymColl = false;
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_TRUE(scene.plan->isSymColl);
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_HasProxyOps_SetFalse) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  scene.plan->hasProxyOps = true;
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_FALSE(scene.plan->hasProxyOps);
+}
+
+// Block 6 __HIPCC__ discipline: assert a value only the HIP/AMD arm (comm->WarpSize) produces, not WARP_SIZE.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ThreadPerBlock_UsesCommWarpSizeField_HipArmCompiles) {
+  SymmetricTaskScheduler_Scene scene;
+  scene.comm->WarpSize = 77;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.nWarps = 3;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->threadPerBlock, 3 * 77);
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_KernelIdToString_CallSiteWiresHeadTaskDevFuncId) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  int captured = -1;
+  ScopedHook idToStringHook(g_symkKernelIdToString, [&](int kernelId) {
+    captured = kernelId;
+    return "captured-kernel";
+  });
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(idToStringHook.calls, 1);
+  EXPECT_EQ(captured, static_cast<int>(task.devFuncId));
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_KernelIndex_CallSiteWiresHeadTaskFields) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  // Non-zero, mutually distinct op/datatype: ncclDevSum==0 and ncclInt8==0 would let a dropped-arg mutant survive.
+  task.opDev.op = ncclDevProd;
+  task.datatype = ncclFloat32;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  ncclSymkKernelId capturedId = ncclSymkKernelId_Count;
+  int capturedOp = -1;
+  ncclDataType_t capturedTy = ncclNumTypes;
+  ScopedHook kernelIndexHook(g_symkGetKernelIndex, [&](ncclSymkKernelId id, int op, ncclDataType_t ty) {
+    capturedId = id;
+    capturedOp = op;
+    capturedTy = ty;
+    return 0;
+  });
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(kernelIndexHook.calls, 1);
+  EXPECT_EQ(capturedId, static_cast<ncclSymkKernelId>(task.devFuncId));
+  EXPECT_EQ(capturedOp, task.opDev.op);
+  EXPECT_EQ(capturedTy, task.datatype);
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ProfilingRequested_FalseWhenPluginNotLoaded) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.eActivationMask = ncclProfileKernelCh;  // bit set, but plugin-not-loaded (default) must still gate it off
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_FALSE(scene.plan->hasProfilerOps);
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ProfilingRequested_FalseWhenActivationMaskMissingBit) {
+  SymmetricTaskScheduler_Scene scene;
+  ScopedHook pluginHook(g_profilerPluginLoaded, []() { return true; });
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.eActivationMask = 0;  // plugin loaded, but the bit itself is missing
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_FALSE(scene.plan->hasProfilerOps);
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ProfilingRequested_TrueWhenPluginLoadedAndBitSet) {
+  SymmetricTaskScheduler_Scene scene;
+  ScopedHook pluginHook(g_profilerPluginLoaded, []() { return true; });
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.eActivationMask = ncclProfileKernelCh;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_TRUE(scene.plan->hasProfilerOps);
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ProfilerEnabled_FalseWhenPersistentEvenThoughRequested) {
+  SymmetricTaskScheduler_Scene scene;
+  static int profileVariant = 0, baseVariant = 0;
+  ncclSymkKernelListProfile[0] = &profileVariant;
+  ncclSymkKernelList[0] = &baseVariant;
+  ScopedHook pluginHook(g_profilerPluginLoaded, []() { return true; });
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.eActivationMask = ncclProfileKernelCh;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  scene.plan->persistent = true;  // requested but persistent: profilerEnabled must still be false
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_TRUE(scene.plan->hasProfilerOps);  // hasProfilerOps mirrors profilingRequested, not profilerEnabled
+  EXPECT_EQ(scene.plan->kernelFn, static_cast<void*>(&baseVariant));
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_KernelFn_SelectsProfileVariant_WhenEnabledAndNonNull) {
+  SymmetricTaskScheduler_Scene scene;
+  static int profileVariant = 0, baseVariant = 0;
+  ncclSymkKernelListProfile[0] = &profileVariant;
+  ncclSymkKernelList[0] = &baseVariant;
+  ScopedHook pluginHook(g_profilerPluginLoaded, []() { return true; });
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.eActivationMask = ncclProfileKernelCh;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  scene.plan->persistent = false;
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->kernelFn, static_cast<void*>(&profileVariant));
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_KernelFn_FallsBackToBase_WhenProfileVariantNull) {
+  SymmetricTaskScheduler_Scene scene;
+  static int baseVariant = 0;
+  ncclSymkKernelListProfile[0] = nullptr;
+  ncclSymkKernelList[0] = &baseVariant;
+  ScopedHook pluginHook(g_profilerPluginLoaded, []() { return true; });
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.eActivationMask = ncclProfileKernelCh;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  scene.plan->persistent = false;  // profilerEnabled is true, but the profile variant itself is absent
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->kernelFn, static_cast<void*>(&baseVariant));
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_KernelFn_FallsBackToBase_WhenProfilingNotRequested) {
+  SymmetricTaskScheduler_Scene scene;
+  static int profileVariant = 0, baseVariant = 0;
+  ncclSymkKernelListProfile[0] = &profileVariant;
+  ncclSymkKernelList[0] = &baseVariant;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();  // eActivationMask left at 0: profiling never requested
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->kernelFn, static_cast<void*>(&baseVariant));
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_KernelDynSmem_TrueWhenBitSetForKernelId) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclSymkKernelMaxDynamicSmem[0] = 12345;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();  // devFuncId == ncclSymkKernelId_AllGather_LL
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  ScopedHook smemMaskHook(g_symkDynamicSmemKernelMask,
+                          []() { return 1 << (int)ncclSymkKernelId_AllGather_LL; });
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->kernelDynSmem, 12345);
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_KernelDynSmem_FalseWhenBitNotSetForKernelId) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclSymkKernelMaxDynamicSmem[0] = 12345;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();  // devFuncId == ncclSymkKernelId_AllGather_LL
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  ScopedHook smemMaskHook(g_symkDynamicSmemKernelMask,
+                          []() { return 1 << (int)ncclSymkKernelId_AllGather_LLMC; });  // a different kernel's bit
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->kernelDynSmem, 0);
+}
+
+// Big batch (see kSymSchedBigBatchTasks): a single task never clears the 4096 floor, masking a wrong nMaxChannels.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_NMaxChannels_DerivedFromHeadTask_FeedsArgsSize) {
+  SymmetricTaskScheduler_Scene scene;
+  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
+                                                    ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/1);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->kernelArgsSize,
+            std::max(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, false),
+                     sizeof(ncclSymkDevWorkArgs4K)));
+}
+
+// A hardcoded cellCount would give alignUp(1,1024)=1024 here, not the correct alignUp(1,256)=256 for float32.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_CellCount_ScalesWithTypeSize_NotHardcoded) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.datatype = ncclFloat32;  // cellCount = 1024 / ncclTypeSize(ncclFloat32) = 256
+  task.count = 1;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->workBytes, 256u * 4u);  // totalCount(256) * ncclTypeSize(ncclFloat32)(4)
+}
+
+// A non-floored sanity signal; workCount's own mutants need the packing loop's separate checks (big-batch tests below).
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_SingleTask_ProcessesExactlyOnce) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  int makeDevWorkCalls = 0;
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork,
+                             [&](struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*) {
+                               ++makeDevWorkCalls;
+                               return ncclSuccess;
+                             });
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(makeDevWorkCalls, 1);
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_ManySameDevFuncIdTasks_AggregateWorkCount) {
+  SymmetricTaskScheduler_Scene scene;
+  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
+                                                    ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/1);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->kernelArgsSize,
+            std::max(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, false),
+                     sizeof(ncclSymkDevWorkArgs4K)));
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_StopsAtDevFuncIdMismatch_ExcludesTrailingTask) {
+  SymmetricTaskScheduler_Scene scene;
+  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
+                                                    ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/0);
+  ncclTaskColl mismatchTask = SymmetricTaskScheduler_MakeTask();
+  mismatchTask.devFuncId = ncclSymkKernelId_AllGather_LLMC;  // different batch, appended after the big one
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &mismatchTask);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->kernelArgsSize,
+            std::max(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, false),
+                     sizeof(ncclSymkDevWorkArgs4K)));
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_IsSymLastBreak_ExcludesLaterSameBatchTask) {
+  SymmetricTaskScheduler_Scene scene;
+  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
+                                                    ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/1);
+  ncclTaskColl trailingTask = SymmetricTaskScheduler_MakeTask();  // same devFuncId as the batch, appended after
+  trailingTask.isSymLast = 0;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &trailingTask);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->kernelArgsSize,
+            std::max(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, false),
+                     sizeof(ncclSymkDevWorkArgs4K)));
+}
+
+// Exercises task != nullptr alone: the chain ends before isSymLast ever fires, so only the null check stops it.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_TerminatesAtChainEnd_WithoutIsSymLast) {
+  SymmetricTaskScheduler_Scene scene;
+  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
+                                                    ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/0);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->kernelArgsSize,
+            std::max(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, false),
+                     sizeof(ncclSymkDevWorkArgs4K)));
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_TotalCount_AlignsEachTaskUpToCellCount) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task1 = SymmetricTaskScheduler_MakeTask();
+  task1.count = 1;  // alignUp(1, 1024) = 1024
+  task1.isSymLast = 0;
+  ncclTaskColl task2 = SymmetricTaskScheduler_MakeTask();
+  task2.count = 1025;  // alignUp(1025, 1024) = 2048
+  task2.isSymLast = 1;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task1);
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task2);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->workBytes, (1024u + 2048u) * 1u);  // totalCount * ncclTypeSize(ncclInt8)
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_CgaClusterSize_PropagatedWhenNotUndef) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.cgaClusterSize = 77;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  scene.plan->cgaClusterSize = -999;  // sentinel: must be overwritten, not already 77 by chance
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->cgaClusterSize, 77);
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_CgaClusterSize_NotPropagatedWhenUndef) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();  // cgaClusterSize == NCCL_CONFIG_UNDEF_INT
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  scene.plan->cgaClusterSize = 555;
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->cgaClusterSize, 555);  // guard correctly skipped the write
+}
+
+// logCount uses each task's raw count (1 + 1025 = 1026 Bytes), not the cell-aligned totalCount (3072) above.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_LogCount_UsesRawCountsNotAligned) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task1 = SymmetricTaskScheduler_MakeTask();
+  task1.count = 1;
+  task1.isSymLast = 0;
+  ncclTaskColl task2 = SymmetricTaskScheduler_MakeTask();
+  task2.count = 1025;
+  task2.isSymLast = 1;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task1);
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task2);
+  RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_TUNING);
+  ncclResult_t result = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&]() {
+    result = ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get());
+  });
+  EXPECT_EQ(result, ncclSuccess);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "1026 Bytes"));
 }
 
