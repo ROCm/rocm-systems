@@ -207,7 +207,11 @@
   X(TilePutWaveRowMajor,       162)  \
   X(TilePutWaveColumnMajor,    163)  \
   X(TileGetWaveRowMajor,       164)  \
-  X(TileGetWaveColumnMajor,    165)
+  X(TileGetWaveColumnMajor,    165)  \
+  X(TilePutWGRowMajor,         166)  \
+  X(TilePutWGColumnMajor,      167)  \
+  X(TileGetWGRowMajor,         168)  \
+  X(TileGetWGColumnMajor,      169)
 
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
