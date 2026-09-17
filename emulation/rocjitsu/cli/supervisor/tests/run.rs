@@ -30,6 +30,10 @@ use rj_core::plugin::PluginsDef;
 use rj_core::profile::ProfileDef;
 use rj_core::session::{CreateSessionRequest, SessionContext, SessionHealth};
 use rj_supervisor::Run;
+// The supervisor's own, rather than a `kill(pid, 0)` spelled again here:
+// that probe answers the same for a zombie as for a running process, and
+// this file also calls `wait_gone`, which does not.
+use rj_supervisor::process::process_alive;
 
 /// A caller whose streams are redirected, which is what a test process
 /// has. Stated rather than probed so spec-building stays a function of
@@ -1587,11 +1591,6 @@ async fn naming_a_node_that_does_not_exist_is_refused() {
         .expect_err("a node outside the topology must be refused");
     assert!(err.to_string().contains("no node 9"), "{err}");
     run.destroy().await;
-}
-
-/// Whether `pid` still exists. `kill(pid, 0)` is the standard probe.
-fn process_alive(pid: u32) -> bool {
-    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None).is_ok()
 }
 
 /// The parent of `pid`, for asserting that a workload really did leave
