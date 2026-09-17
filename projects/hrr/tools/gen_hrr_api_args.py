@@ -2145,8 +2145,14 @@ _CPP_PREAMBLE = """\
 #include "hrr/hrr_api_args.h"
 
 #include "hip/amd_detail/hip_api_trace.hpp"
-#include "utils/debug.hpp"     // LogPrintfWarning — capture diagnostics go through
-                               // amd's log-level machinery, never raw stderr.
+// LogPrintfWarning — capture diagnostics go through amd's log-level machinery,
+// never raw stderr. debug.hpp's ClPrint macro reads the AMD_LOG_LEVEL and
+// AMD_LOG_MASK flag variables but does not declare them, so flags.hpp must come
+// with it, and flags.hpp spells its defaults with top.hpp's unit suffixes (Mi)
+// and typedefs (uint). All three, in this order.
+#include "top.hpp"
+#include "utils/flags.hpp"
+#include "utils/debug.hpp"
 
 #include <atomic>
 #include <cstdint>
