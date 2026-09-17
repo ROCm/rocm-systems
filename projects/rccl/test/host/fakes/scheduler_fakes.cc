@@ -84,6 +84,11 @@ static ncclResult_t DefaultTuningCompute(struct ncclTuningInput_t*, struct ncclT
 std::function<ncclResult_t(struct ncclTuningInput_t*, struct ncclTuningResult_t*)> g_tuningCompute =
     DefaultTuningCompute;
 
+// No bits set: a "kernel found" test never touches the LL-kernel-init-once check (Block 10's territory, not
+// designed here) regardless of which kernelId g_tuningCompute reports.
+static int DefaultSymkLLKernelMask() { return 0; }
+std::function<int()> g_symkLLKernelMask = DefaultSymkLLKernelMask;
+
 void ResetSchedulerFakes() {
   g_testBudget = DefaultTestBudget;
   g_testBudgetCalls = 0;
@@ -95,6 +100,7 @@ void ResetSchedulerFakes() {
   g_getCollNetSupport = DefaultGetCollNetSupport;
   g_getRegBuff = DefaultGetRegBuff;
   g_tuningCompute = DefaultTuningCompute;
+  g_symkLLKernelMask = DefaultSymkLLKernelMask;
   ncclDevFuncNameToId.clear();
 }
 
@@ -128,7 +134,7 @@ std::unordered_map<uint64_t, int> ncclDevFuncNameToId;
 bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int red, ncclDataType_t ty, size_t count) {
   return g_symkAvailable(comm, coll, red, ty, count);
 }
-int ncclSymkLLKernelMask() { FailLoudUnfaked("scheduler_fakes", "ncclSymkLLKernelMask"); }
+int ncclSymkLLKernelMask() { return g_symkLLKernelMask(); }
 int ncclSymkDynamicSmemKernelMask() { FailLoudUnfaked("scheduler_fakes", "ncclSymkDynamicSmemKernelMask"); }
 int ncclSymkGetKernelIndex(ncclSymkKernelId, int, ncclDataType_t) {
   FailLoudUnfaked("scheduler_fakes", "ncclSymkGetKernelIndex");
@@ -144,7 +150,9 @@ void* ncclSymkKernelListProfile[1] = {nullptr};
 int ncclSymkKernelMaxDynamicSmem[1] = {0};
 
 // src/config/algorithm_registry.cc
-const char* ncclAlgNameForSymk(int) { FailLoudUnfaked("scheduler_fakes", "ncclAlgNameForSymk"); }
+// INFO()'s macro guard only evaluates this when logging is actually enabled, so it's reachable from a test
+// that turns on NCCL_LOG_INFO to verify the INFO call fires; a fixed name is all that call site ever needs.
+const char* ncclAlgNameForSymk(int) { return "sym-kernel"; }
 
 // src/tuning/tuning.cc
 ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* input, struct ncclTuningResult_t* result) {

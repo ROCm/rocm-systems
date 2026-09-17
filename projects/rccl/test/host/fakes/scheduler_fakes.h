@@ -54,6 +54,9 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)>
 // tuning.cc's ncclTuningCompute: default leaves *result untouched (caller's ncclSymkKernelId_Count init stands).
 extern std::function<ncclResult_t(struct ncclTuningInput_t*, struct ncclTuningResult_t*)> g_tuningCompute;
 
+// sym_kernels.cc's ncclSymkLLKernelMask: default has no bits set (Block 10's LL-kernel-init check never fires).
+extern std::function<int()> g_symkLLKernelMask;
+
 void ResetSchedulerFakes();
 
 #endif  // RCCL_TEST_HOST_FAKES_SCHEDULER_FAKES_H_
