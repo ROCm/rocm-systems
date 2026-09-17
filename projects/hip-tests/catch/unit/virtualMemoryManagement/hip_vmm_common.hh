@@ -112,7 +112,7 @@ class ipcSocketCom {
 
     size_t len = strlen(name);
     if (len > (sizeof(servaddr.sun_path) - 1)) {
-      perror("Socket failure: Cannot bind provided name to socket. Name too large");
+      fprintf(stderr, "Socket failure: Cannot bind provided name to socket. Name too large\n");
       return -1;
     }
 
@@ -152,7 +152,7 @@ class ipcSocketCom {
     const char *name = nameStr.c_str();
 
     if (strlen(name) > (sizeof(cliaddr.sun_path) - 1)) {
-      perror("Socket failure: Cannot bind provided name to socket. Name too large");
+      fprintf(stderr, "Socket failure: Cannot bind provided name to socket. Name too large\n");
       return -1;
     }
     strcpy(cliaddr.sun_path, name);
@@ -254,7 +254,7 @@ public:
     cliaddr.sun_family = AF_UNIX;
     std::string destPath = ipcSocketPath(process);
     if (destPath.size() > (sizeof(cliaddr.sun_path) - 1)) {
-      perror("Socket failure: Cannot address socket. Name too large");
+      fprintf(stderr, "Socket failure: Cannot address socket. Name too large\n");
       return -1;
     }
     strcpy(cliaddr.sun_path, destPath.c_str());
