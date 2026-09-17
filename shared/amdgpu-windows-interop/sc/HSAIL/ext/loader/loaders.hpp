@@ -62,7 +62,7 @@ namespace loader {
     hsa_isa_t gfx1030;
     hsa_isa_t gfx4000;
 #if defined(GFX11_BUILD)
-    hsa_isa_t gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151;
+    hsa_isa_t gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1170, gfx1171;
 #endif // GFX11_BUILD
     std::ostream& out;
     typedef std::set<void*> PointerSet;
