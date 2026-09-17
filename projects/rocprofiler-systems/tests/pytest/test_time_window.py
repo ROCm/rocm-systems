@@ -105,3 +105,24 @@ class TestTraceTimeWindow(RocprofsysTest):
             counts=[1, 1],
             depths=[0, 0],
         )
+
+    def test_delay_cputime_clock(self, mode, time_window_env):
+        """Regression test: --trace-clock-id used to crash the profiled process
+        for every value (numeric clock id written to the settings string that
+        only ever matched "realtime"/"cputime")."""
+        env = time_window_env.copy()
+        env.update(
+            {
+                "ROCPROFSYS_TRACE_DELAY": "0.75",
+                "ROCPROFSYS_TRACE_DURATION": "0.85",
+                "ROCPROFSYS_TRACE_PERIOD_CLOCK_ID": "cputime",
+            }
+        )
+        result = self.run_test(
+            mode,
+            "trace-time-window",
+            env=env,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
+        )
+        self.assert_regex(result)
