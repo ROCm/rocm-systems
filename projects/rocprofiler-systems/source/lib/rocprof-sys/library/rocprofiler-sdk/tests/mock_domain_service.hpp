@@ -280,6 +280,10 @@ struct mock_sdk
     static constexpr std::size_t      CALLBACK_TRACING_HSA_FINALIZE_EXT_API   = 5;
     static constexpr std::size_t      CALLBACK_TRACING_HIP_RUNTIME_API        = 6;
     static constexpr std::size_t      CALLBACK_TRACING_HIP_COMPILER_API       = 7;
+    static constexpr std::size_t      CALLBACK_TRACING_ROCJPEG_API            = 8;
+    static constexpr std::size_t      CALLBACK_TRACING_ROCDECODE_API          = 9;
+    static constexpr std::size_t      CALLBACK_TRACING_ROCSHMEM_API           = 10;
+    static constexpr std::size_t      CALLBACK_TRACING_HIPFILE_API            = 11;
     static constexpr callback_phase_t CALLBACK_PHASE_ENTER                    = 0;
     static constexpr callback_phase_t CALLBACK_PHASE_EXIT                     = 1;
     static constexpr callback_phase_t CALLBACK_PHASE_NONE                     = 2;
@@ -590,6 +594,30 @@ struct externals
     {};
 
     static constexpr std::string_view rocm_hsa_api_category_name = "rocm_hsa_api";
+
+    // ─── Members required by domains::callback::{rocjpeg,rocdecode,rocshmem,
+    // hipfile}_api ──────────────────────────────────────────────────────────────
+    struct rocm_rocjpeg_api_category
+    {};
+
+    static constexpr std::string_view rocm_rocjpeg_api_category_name = "rocm_rocjpeg_api";
+
+    struct rocm_rocdecode_api_category
+    {};
+
+    static constexpr std::string_view rocm_rocdecode_api_category_name =
+        "rocm_rocdecode_api";
+
+    struct rocm_rocshmem_api_category
+    {};
+
+    static constexpr std::string_view rocm_rocshmem_api_category_name =
+        "rocm_rocshmem_api";
+
+    struct rocm_hipfile_api_category
+    {};
+
+    static constexpr std::string_view rocm_hipfile_api_category_name = "rocm_hipfile_api";
 
     struct region_sample
     {
