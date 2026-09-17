@@ -219,7 +219,7 @@ main(int argc, char** argv)
         if(retry_failed_attach)
         {
             setenv("ROCPROFILER_TEST_EXPECT_ATTACH_COUNT", "2", true);
-            setenv("ROCPROFILER_TEST_EXPECT_DETACH_COUNT", "1", true);
+            setenv("ROCPROFILER_TEST_EXPECT_DETACH_COUNT", "2", true);
             setenv("ROCPROFILER_TEST_FAIL_ATTACH", "1", true);
 
             auto expect_attach_failure = [](pid_t pid) {

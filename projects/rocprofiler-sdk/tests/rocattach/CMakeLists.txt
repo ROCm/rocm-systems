@@ -5,12 +5,13 @@ cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-rocattach
-    LANGUAGES CXX
+    LANGUAGES C CXX
     VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
 find_package(rocprofiler-sdk-rocattach REQUIRED)
 find_package(rocprofiler-register QUIET)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -59,6 +60,25 @@ target_sources(rocattach-attachment-lifecycle-tool PRIVATE attachment_lifecycle_
 target_link_libraries(
     rocattach-attachment-lifecycle-tool PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
                                                 rocprofiler-sdk::tests-build-flags)
+
+add_library(rocattach-c-attachment-tool SHARED)
+target_sources(rocattach-c-attachment-tool PRIVATE c_attachment_tool.c)
+target_link_libraries(
+    rocattach-c-attachment-tool PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
+                                        rocprofiler-sdk::tests-build-flags)
+
+add_library(rocattach-record-startup-tool SHARED)
+target_sources(rocattach-record-startup-tool PRIVATE record_coexistence_tool.cpp)
+target_link_libraries(
+    rocattach-record-startup-tool PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
+                                          rocprofiler-sdk::tests-build-flags)
+
+add_library(rocattach-record-attachment-tool SHARED)
+target_sources(rocattach-record-attachment-tool PRIVATE record_coexistence_tool.cpp)
+target_link_libraries(
+    rocattach-record-attachment-tool
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
+            rocprofiler-sdk::tests-build-flags)
 
 add_library(rocattach-startup-lifecycle-tool SHARED)
 target_sources(rocattach-startup-lifecycle-tool PRIVATE attachment_lifecycle_tool.cpp)
@@ -193,18 +213,19 @@ else()
         )
 endif()
 
-# Utilize rocattach to use a generic C tool in a basic app
+# Utilize rocattach to use a valid C attachment tool in a basic app
 rocprofiler_add_integration_execute_test(
     rocattach-parallel-attach-test-execute
     COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
-            $<TARGET_FILE:rocprofiler-sdk-c-tool>
-    DEPENDS rocattach-parallel-attach-test
+            $<TARGET_FILE:rocattach-c-attachment-tool>
+    DEPENDS rocattach-parallel-attach-test rocattach-c-attachment-tool
     TIMEOUT 45
     LABELS "attachment"
     ENVIRONMENT "${rocattach-test-env}"
     DISABLED ${IS_DISABLED}
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
-    PASS_REGULAR_EXPRESSION "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
+    PASS_REGULAR_EXPRESSION
+        "Test C attachment tool \\(priority=0\\) is using rocprofiler-sdk"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 rocprofiler_add_integration_execute_test(
@@ -283,6 +304,26 @@ rocprofiler_add_integration_execute_test(
     FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Attachment lifecycle test FAILED")
 
+rocprofiler_add_integration_execute_test(
+    rocattach-record-coexistence-test-execute
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/record_coexistence_test.py
+        --rocattach
+        $<TARGET_FILE:rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library> --kernels
+        $<TARGET_FILE:python-hip-kernels> --startup-tool
+        $<TARGET_FILE:rocattach-record-startup-tool> --attachment-tool
+        $<TARGET_FILE:rocattach-record-attachment-tool> --sync-dir
+        ${CMAKE_CURRENT_BINARY_DIR}/record-coexistence
+    DEPENDS rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library python-hip-kernels
+            rocattach-record-startup-tool rocattach-record-attachment-tool
+    TIMEOUT 120
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PASS_REGULAR_EXPRESSION "Attachment record coexistence test PASSED"
+    SKIP_REGULAR_EXPRESSION "no ROCm-capable device is detected"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 # Verify a framework-owned rocprofiler_configure client can initialize normally while the
 # attachment listener remains available. Standalone SDK builds skip this cross-component
 # test when using an older rocprofiler-register package.
@@ -331,18 +372,46 @@ if(rocprofiler-register_FOUND AND rocprofiler-register_HAS_ANYTIME_ATTACHMENT)
         )
 
     rocprofiler_add_integration_execute_test(
+        rocattach-direct-declined-client-test-execute
+        TARGET rocattach-direct-attachment-lifecycle-test
+        ARGS --expect-decline $<TARGET_FILE:rocprofiler-sdk-c-tool>
+        DEPENDS rocattach-direct-attachment-lifecycle-test rocprofiler-sdk-c-tool
+        TIMEOUT 15
+        LABELS "attachment"
+        ENVIRONMENT "${rocattach-test-env}"
+        PASS_REGULAR_EXPRESSION "Declined attachment client test PASSED"
+        FAIL_REGULAR_EXPRESSION
+            "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Direct attachment lifecycle test FAILED")
+
+    rocprofiler_add_integration_execute_test(
+        rocattach-direct-declined-client-recovery-test-execute
+        TARGET rocattach-direct-attachment-lifecycle-test
+        ARGS --decline-then-attach $<TARGET_FILE:rocprofiler-sdk-c-tool>
+             $<TARGET_FILE:rocattach-attachment-lifecycle-tool>
+        DEPENDS rocattach-direct-attachment-lifecycle-test rocprofiler-sdk-c-tool
+                rocattach-attachment-lifecycle-tool
+        TIMEOUT 15
+        LABELS "attachment"
+        ENVIRONMENT "${rocattach-test-env}"
+        PASS_REGULAR_EXPRESSION "Attachment lifecycle test PASSED: 1 session"
+        FAIL_REGULAR_EXPRESSION
+            "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Direct attachment lifecycle test FAILED|Attachment lifecycle test FAILED"
+        )
+
+    rocprofiler_add_integration_execute_test(
         rocattach-implicit-configure-test-execute
         COMMAND
             $<TARGET_FILE:rocattach-parallel-attach-test>
             $<TARGET_FILE:attachment-test-implicit-configure>
-            $<TARGET_FILE:rocprofiler-sdk-c-tool>
-        DEPENDS rocattach-parallel-attach-test
+            $<TARGET_FILE:rocattach-c-attachment-tool>
+        DEPENDS rocattach-parallel-attach-test rocattach-c-attachment-tool
         TIMEOUT 45
         LABELS "attachment"
         ENVIRONMENT "${rocattach-test-env}"
         DISABLED ${IS_DISABLED}
         PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
-        PASS_REGULAR_EXPRESSION "Test C tool \\(priority=1\\) is using rocprofiler-sdk v"
+        PASS_REGULAR_EXPRESSION
+            "Test C attachment tool \\(priority=1\\) is using rocprofiler-sdk"
         FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
     # Runtime attachment explicitly loads the SDK and is independent of startup FORCE_LOAD
@@ -352,14 +421,15 @@ if(rocprofiler-register_FOUND AND rocprofiler-register_HAS_ANYTIME_ATTACHMENT)
         COMMAND
             $<TARGET_FILE:rocattach-parallel-attach-test>
             $<TARGET_FILE:attachment-test-implicit-configure>
-            $<TARGET_FILE:rocprofiler-sdk-c-tool>
-        DEPENDS rocattach-parallel-attach-test
+            $<TARGET_FILE:rocattach-c-attachment-tool>
+        DEPENDS rocattach-parallel-attach-test rocattach-c-attachment-tool
         TIMEOUT 45
         LABELS "attachment"
         ENVIRONMENT "${rocattach-test-env}" "ROCPROFILER_REGISTER_FORCE_LOAD=0"
         DISABLED ${IS_DISABLED}
         PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
-        PASS_REGULAR_EXPRESSION "Test C tool \\(priority=1\\) is using rocprofiler-sdk v"
+        PASS_REGULAR_EXPRESSION
+            "Test C attachment tool \\(priority=1\\) is using rocprofiler-sdk"
         FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
     rocprofiler_add_integration_execute_test(
@@ -389,8 +459,8 @@ endif()
 rocprofiler_add_integration_execute_test(
     rocattach-stale-register-library-test-execute
     COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
-            $<TARGET_FILE:rocprofiler-sdk-c-tool> --stale-register-library
-    DEPENDS rocattach-parallel-attach-test
+            $<TARGET_FILE:rocattach-c-attachment-tool> --stale-register-library
+    DEPENDS rocattach-parallel-attach-test rocattach-c-attachment-tool
     TIMEOUT 45
     LABELS "attachment"
     ENVIRONMENT "${rocattach-test-env}"
@@ -472,8 +542,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocattach-parallel-attach-test-signal-execute
     COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
-            $<TARGET_FILE:rocprofiler-sdk-c-tool> --send-signal
-    DEPENDS rocattach-parallel-attach-test
+            $<TARGET_FILE:rocattach-c-attachment-tool> --send-signal
+    DEPENDS rocattach-parallel-attach-test rocattach-c-attachment-tool
     TIMEOUT 45
     LABELS "attachment"
     ENVIRONMENT "${rocattach-test-env}"
@@ -493,7 +563,8 @@ target_link_libraries(
 rocprofiler_add_integration_execute_test(
     rocattach-attach-tree-test-execute
     TARGET rocattach-attach-tree-test
-    ARGS $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk-c-tool>
+    ARGS $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocattach-c-attachment-tool>
+    DEPENDS rocattach-c-attachment-tool
     TIMEOUT 45
     LABELS "attachment"
     ENVIRONMENT "${rocattach-test-env}"
