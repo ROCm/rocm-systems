@@ -145,7 +145,9 @@ TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_LsaTeamSmallerThanCommRejected)
                                  ncclFuncAlltoAllv,
                                  ncclDevSum,
                                  ncclFloat32,
-                                 ncclSymSendRegRecvReg));
+                                 ncclSymSendRegRecvReg,
+                                 /*sendWin=*/nullptr,
+                                 /*recvWin=*/nullptr));
 
     // Restoring only the team size flips the verdict, so no other clause is
     // responsible for the rejection above.

@@ -709,6 +709,12 @@ void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
     free(params->sizes);
     params->sizes = nullptr;
   }
+  // Reset the counters and the sync flag too, not just the pointers. The
+  // hierarchical collectives release the same params twice (once per chunk
+  // batch, once at exit), and a stale numOps would make the second release look
+  // like it still describes a populated batch.
+  params->numOps = 0;
+  params->intraBatchSync = false;
 #ifdef CE_BATCH_ASYNC_SUPPORTED
   if (params->attrs) {
     free(params->attrs);
@@ -718,6 +724,7 @@ void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
     free(params->attrIdxs);
     params->attrIdxs = nullptr;
   }
+  params->numAttrs = 0;
 #endif
 }
 
