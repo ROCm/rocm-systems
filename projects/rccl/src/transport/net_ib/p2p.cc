@@ -324,6 +324,7 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
     comm->wrs[w - 1].next = NULL;
 
     struct ibv_send_wr* bad_wr;
+    if (ncclIbWqeLatEnabled) ncclIbWqeLatMonStampSend(qp, comm->wrs);
     ret = wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr);
     if (ret != ncclSuccess) {
       ncclIbStatsFatalError(&comm->base.stats);
