@@ -168,6 +168,9 @@ void push_client(uint32_t);
 // remove the client index
 void pop_client(uint32_t);
 
+std::optional<uint32_t>
+get_current_client();
+
 /// @brief creates a context struct and returns a handle for locating the context struct
 ///
 std::optional<rocprofiler_context_id_t>

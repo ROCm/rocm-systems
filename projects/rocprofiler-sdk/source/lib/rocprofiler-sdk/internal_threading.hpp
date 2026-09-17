@@ -94,6 +94,8 @@ initialize();
 void
 finalize();
 
+void deregister_client_callbacks(uint64_t);
+
 // creates a new thread
 rocprofiler_callback_thread_t
 create_callback_thread();
