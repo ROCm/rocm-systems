@@ -52,7 +52,7 @@ make_test_agent(agent_type type, size_t device_type_idx)
 
 TEST(make_agent_uid_test, gpu_agent_returns_gpu_string)
 {
-    auto uid = make_agent_uid(make_test_agent(agent_type::GPU, 2));
+    auto uid = make_agent_uid(make_test_agent(agent_type::gpu, 2));
 
     ASSERT_TRUE(uid.agent_type.has_value());
     EXPECT_EQ(uid.agent_type.value(), "GPU");
@@ -61,7 +61,7 @@ TEST(make_agent_uid_test, gpu_agent_returns_gpu_string)
 
 TEST(make_agent_uid_test, cpu_agent_returns_cpu_string)
 {
-    auto uid = make_agent_uid(make_test_agent(agent_type::CPU, 0));
+    auto uid = make_agent_uid(make_test_agent(agent_type::cpu, 0));
 
     ASSERT_TRUE(uid.agent_type.has_value());
     EXPECT_EQ(uid.agent_type.value(), "CPU");
@@ -70,7 +70,7 @@ TEST(make_agent_uid_test, cpu_agent_returns_cpu_string)
 
 TEST(make_agent_uid_test, nic_agent_returns_nic_string)
 {
-    auto uid = make_agent_uid(make_test_agent(agent_type::NIC, 1));
+    auto uid = make_agent_uid(make_test_agent(agent_type::nic, 1));
 
     ASSERT_TRUE(uid.agent_type.has_value())
         << "NIC agent_type must not be nullopt — this was a known bug";
@@ -80,22 +80,22 @@ TEST(make_agent_uid_test, nic_agent_returns_nic_string)
 
 TEST(make_agent_uid_test, equality_same_agents)
 {
-    auto uid_a = make_agent_uid(make_test_agent(agent_type::GPU, 3));
-    auto uid_b = make_agent_uid(make_test_agent(agent_type::GPU, 3));
+    auto uid_a = make_agent_uid(make_test_agent(agent_type::gpu, 3));
+    auto uid_b = make_agent_uid(make_test_agent(agent_type::gpu, 3));
     EXPECT_EQ(uid_a, uid_b);
 }
 
 TEST(make_agent_uid_test, inequality_different_type)
 {
-    auto gpu = make_agent_uid(make_test_agent(agent_type::GPU, 0));
-    auto cpu = make_agent_uid(make_test_agent(agent_type::CPU, 0));
+    auto gpu = make_agent_uid(make_test_agent(agent_type::gpu, 0));
+    auto cpu = make_agent_uid(make_test_agent(agent_type::cpu, 0));
     EXPECT_FALSE(gpu == cpu);
 }
 
 TEST(make_agent_uid_test, inequality_different_index)
 {
-    auto idx0 = make_agent_uid(make_test_agent(agent_type::GPU, 0));
-    auto idx1 = make_agent_uid(make_test_agent(agent_type::GPU, 1));
+    auto idx0 = make_agent_uid(make_test_agent(agent_type::gpu, 0));
+    auto idx1 = make_agent_uid(make_test_agent(agent_type::gpu, 1));
     EXPECT_FALSE(idx0 == idx1);
 }
 
@@ -122,7 +122,7 @@ TEST(make_trace_env_test, basic_fields)
 
 TEST(make_trace_env_test, with_agent_populates_agent_id)
 {
-    auto env = make_trace_env_with_agent(1, 2, 3, make_test_agent(agent_type::GPU, 5));
+    auto env = make_trace_env_with_agent(1, 2, 3, make_test_agent(agent_type::gpu, 5));
 
     ASSERT_TRUE(env.agent_id.has_value());
     ASSERT_TRUE(env.agent_id->agent_type.has_value());
@@ -136,7 +136,7 @@ TEST(make_trace_env_test, with_agent_populates_agent_id)
 TEST(make_trace_env_test, with_queue_stream_populates_all)
 {
     auto env = make_trace_env_with_agent_queue_stream(
-        1, 2, 3, make_test_agent(agent_type::GPU, 0), 100, 200);
+        1, 2, 3, make_test_agent(agent_type::gpu, 0), 100, 200);
 
     ASSERT_TRUE(env.queue_id.has_value());
     ASSERT_TRUE(env.stream_id.has_value());
@@ -337,7 +337,7 @@ protected:
     static agent gpu_agent()
     {
         agent result{};
-        result.type              = agent_type::GPU;
+        result.type              = agent_type::gpu;
         result.device_type_index = 0;
         result.name              = "gfx90a";
         result.model_name        = "MI210";
@@ -349,7 +349,7 @@ protected:
     static agent cpu_agent()
     {
         agent result{};
-        result.type              = agent_type::CPU;
+        result.type              = agent_type::cpu;
         result.device_type_index = 0;
         result.name              = "CPU0";
         result.model_name        = "EPYC";
@@ -361,7 +361,7 @@ protected:
     static agent nic_agent()
     {
         agent result{};
-        result.type              = agent_type::NIC;
+        result.type              = agent_type::nic;
         result.device_type_index = 0;
         result.name              = "NIC0";
         result.model_name        = "CX7";
@@ -403,16 +403,14 @@ TEST_F(rocpd_write_read_test, agents_round_trip_all_types)
 
     register_agent(gpu_agent());
     register_agent(cpu_agent());
-
-    // profiler-hub only supports CPU and GPU agent types; NIC is rejected
-    EXPECT_THROW(register_agent(nic_agent()), std::invalid_argument);
+    register_agent(nic_agent());
 
     flush_and_open_reader();
     auto agents = m_reader->get_all_agents();
 
-    ASSERT_EQ(agents.size(), 2U);
+    ASSERT_EQ(agents.size(), 3U);
 
-    bool found_gpu = false, found_cpu = false;
+    bool found_gpu = false, found_cpu = false, found_nic = false;
     for(const auto& agent_ptr : agents)
     {
         if(agent_ptr->agent_type == "GPU")
@@ -427,9 +425,16 @@ TEST_F(rocpd_write_read_test, agents_round_trip_all_types)
             EXPECT_EQ(agent_ptr->name, "CPU0");
             EXPECT_EQ(agent_ptr->model_name, "EPYC");
         }
+        else if(agent_ptr->agent_type == "NIC")
+        {
+            found_nic = true;
+            EXPECT_EQ(agent_ptr->name, "NIC0");
+            EXPECT_EQ(agent_ptr->model_name, "CX7");
+        }
     }
     EXPECT_TRUE(found_gpu) << "GPU agent not found in read-back";
     EXPECT_TRUE(found_cpu) << "CPU agent not found in read-back";
+    EXPECT_TRUE(found_nic) << "NIC agent not found in read-back";
 }
 
 // ---------------------------------------------------------------------------

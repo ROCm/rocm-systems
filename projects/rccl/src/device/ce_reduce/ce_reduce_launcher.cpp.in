@@ -22,10 +22,9 @@ ncclResult_t ncclCeLocalReduceLaunch_${tag}_${redname}(const void* in, void* out
   using T = $ctype;
   constexpr int UnrollFactor = VecTrait<T>::GpuUnroll;
   const int threads = 256;
-  // Cap blocks for CE DMA headroom.
-  const int blocks = (int)std::clamp<size_t>((baseChunkElems / VecTrait<T>::W + (size_t)threads * UnrollFactor - 1) /
-                                               ((size_t)threads * UnrollFactor),
-                                             (size_t)1, (size_t)NCCL_CE_REDUCE_MAX_BLOCKS);
+  // Single source of the block geometry, shared with the host-side reporting
+  // wrapper (ncclCeLocalReduceBlocks_${tag}) so live dispatch and rcclGetCollImplInfo never drift.
+  const int blocks = ncclCeLocalReduceBlocksT<T>(baseChunkElems);
 
   // hipLaunchCooperativeKernel takes an array of pointers to the arguments,
   // so every kernel argument needs a stable host lvalue to point at.
@@ -54,3 +53,4 @@ ncclResult_t ncclCeLocalReduceLaunch_${tag}_${redname}(const void* in, void* out
   }
   return ncclSuccess;
 }
+$blocks_fn

@@ -7,7 +7,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/smem.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -24,17 +23,24 @@ SLoadB32Smem::SLoadB32Smem(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SLoadB32Smem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSLoadB32Smem(const MachineInst *opcode) {
+DecodeResult decodeSLoadB32Smem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_load_b32", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SLoadB32Smem>(opcode);
 }
 } // namespace detail
@@ -44,17 +50,24 @@ SLoadB64Smem::SLoadB64Smem(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SLoadB64Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSLoadB64Smem(const MachineInst *opcode) {
+DecodeResult decodeSLoadB64Smem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_load_b64", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SLoadB64Smem>(opcode);
 }
 } // namespace detail
@@ -64,17 +77,24 @@ SLoadB128Smem::SLoadB128Smem(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SLoadB128Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSLoadB128Smem(const MachineInst *opcode) {
+DecodeResult decodeSLoadB128Smem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_load_b128", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SLoadB128Smem>(opcode);
 }
 } // namespace detail
@@ -84,17 +104,24 @@ SLoadB256Smem::SLoadB256Smem(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SLoadB256Smem)),
       sdata(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(256, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSLoadB256Smem(const MachineInst *opcode) {
+DecodeResult decodeSLoadB256Smem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_load_b256", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SLoadB256Smem>(opcode);
 }
 } // namespace detail
@@ -104,17 +131,24 @@ SLoadB512Smem::SLoadB512Smem(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SLoadB512Smem)),
       sdata(512, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(512, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSLoadB512Smem(const MachineInst *opcode) {
+DecodeResult decodeSLoadB512Smem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_load_b512", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SLoadB512Smem>(opcode);
 }
 } // namespace detail
@@ -124,17 +158,25 @@ SBufferLoadB32Smem::SBufferLoadB32Smem(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SBufferLoadB32Smem)),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBufferLoadB32Smem(const MachineInst *opcode) {
+DecodeResult decodeSBufferLoadB32Smem(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_load_b32", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBufferLoadB32Smem>(opcode);
 }
 } // namespace detail
@@ -144,17 +186,25 @@ SBufferLoadB64Smem::SBufferLoadB64Smem(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SBufferLoadB64Smem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(64, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBufferLoadB64Smem(const MachineInst *opcode) {
+DecodeResult decodeSBufferLoadB64Smem(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_load_b64", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBufferLoadB64Smem>(opcode);
 }
 } // namespace detail
@@ -164,17 +214,25 @@ SBufferLoadB128Smem::SBufferLoadB128Smem(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SBufferLoadB128Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(128, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBufferLoadB128Smem(const MachineInst *opcode) {
+DecodeResult decodeSBufferLoadB128Smem(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_load_b128", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBufferLoadB128Smem>(opcode);
 }
 } // namespace detail
@@ -184,17 +242,25 @@ SBufferLoadB256Smem::SBufferLoadB256Smem(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SBufferLoadB256Smem)),
       sdata(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(256, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBufferLoadB256Smem(const MachineInst *opcode) {
+DecodeResult decodeSBufferLoadB256Smem(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_load_b256", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBufferLoadB256Smem>(opcode);
 }
 } // namespace detail
@@ -204,17 +270,25 @@ SBufferLoadB512Smem::SBufferLoadB512Smem(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SBufferLoadB512Smem)),
       sdata(512, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
-      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))),
+      gpumem(512, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &sdata;
   src_operands_[0] = &sbase;
   src_operands_[1] = &soffset;
-  num_src_ = 2;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBufferLoadB512Smem(const MachineInst *opcode) {
+DecodeResult decodeSBufferLoadB512Smem(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_buffer_load_b512", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBufferLoadB512Smem>(opcode);
 }
 } // namespace detail
@@ -227,7 +301,11 @@ SGl1InvSmem::SGl1InvSmem(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSGl1InvSmem(const MachineInst *opcode) {
+DecodeResult decodeSGl1InvSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_gl1_inv", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SGl1InvSmem>(opcode);
 }
 } // namespace detail
@@ -240,7 +318,11 @@ SDcacheInvSmem::SDcacheInvSmem(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSDcacheInvSmem(const MachineInst *opcode) {
+DecodeResult decodeSDcacheInvSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_dcache_inv", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SDcacheInvSmem>(opcode);
 }
 } // namespace detail

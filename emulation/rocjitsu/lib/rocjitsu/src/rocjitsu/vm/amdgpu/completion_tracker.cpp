@@ -6,6 +6,7 @@
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/amd_hsa_queue.h"
@@ -17,6 +18,7 @@ RJ_DIAGNOSTIC_POP
 #include <atomic>
 #include <cstring>
 #include <format>
+#include <set>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -31,7 +33,9 @@ void CompletionTracker::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id,
           os << std::format("CT: wg_complete d={} wg={} completed={}/{}", dispatch_id, wg_id,
                             entry.completed_wgs, entry.total_wgs);
         });
-        drain_completions(queues);
+        // Completion callbacks can run from CU worker threads. The CP drains
+        // completions after dispatch fan-out rejoins, keeping cache flushes and
+        // signal firing on the CP path.
         return;
       }
     }
@@ -51,11 +55,9 @@ void CompletionTracker::drain_completions(std::vector<HwQueueState> &queues) {
                           entry.completed_wgs, entry.total_wgs, entry.completion_signal);
       });
 
-      flush_caches(entry.process_id);
-      plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
-      if (entry.completion_signal != 0) {
-        fire_signal(entry);
-      }
+      deliver_completion(entry);
+      if (!entry.completion_notified)
+        break;
       if (dispatch_retired_cb_)
         dispatch_retired_cb_(entry);
 
@@ -67,13 +69,49 @@ void CompletionTracker::drain_completions(std::vector<HwQueueState> &queues) {
     // HQD idle: write the queue's inactive signal and fire the interrupt.
     // On real hardware the CP writes the HQD status to amd_signal_t::value
     // and kfd_signal_event_interrupt broadcasts to all type-0 events.
-    if (had_entries && qs.entries.empty() && last_process_id != 0) {
+    // A fan-out replica does not own the queue and must not report it idle: its
+    // shards drain ahead of the owning XCD's, so it would signal idle while the
+    // dispatch is still running elsewhere.
+    if (had_entries && qs.entries.empty() && last_process_id != 0 && !qs.fanout_replica) {
       if (qs.queue_desc_va != 0)
         fire_queue_idle_signal(qs.queue_desc_va, last_process_id);
       if (interrupt_cb_)
         interrupt_cb_(last_process_id, 0);
     }
   }
+}
+
+void CompletionTracker::complete_non_kernel(DispatchEntry &entry) {
+  if (entry.is_non_kernel())
+    deliver_completion(entry);
+}
+
+void CompletionTracker::deliver_completion(DispatchEntry &entry) {
+  if (entry.completion_notified)
+    return;
+
+  // Publish this XCD's share only after its own caches are flushed. The release
+  // in publish_share() pairs with the acquire in grid_retired(), so the signal
+  // cannot fire while another XCD's results remain in its caches.
+  if (!entry.grid_share_published) {
+    flush_caches(entry.process_id);
+    entry.grid_share_published = true;
+    if (entry.grid_completion && entry.grid_completion->publish_share(entry.total_wgs) &&
+        grid_retired_cb_)
+      grid_retired_cb_(entry);
+  }
+
+  // A completed local shard remains queued until all peer XCD shares retire.
+  if (!entry.grid_fully_completed())
+    return;
+
+  // Only the XCD that read the packet reports completion and fires its signal.
+  if (!entry.fanout_peer) {
+    plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
+    if (entry.completion_signal != 0)
+      fire_signal(entry);
+  }
+  entry.completion_notified = true;
 }
 
 void CompletionTracker::fire_queue_idle_signal(uint64_t queue_desc_va, uint32_t process_id) {
@@ -133,8 +171,16 @@ void CompletionTracker::fire_queue_idle_signal(uint64_t queue_desc_va, uint32_t 
 }
 
 void CompletionTracker::flush_caches(uint32_t vmid) {
-  for (auto *cu : cus_)
-    cu->flush_all(vmid);
+  std::set<L2Cache *> flushed_l2s;
+  for (auto *cu : cus_) {
+    cu->flush_l1(vmid);
+    if (auto *l2 = cu->l2(); l2 && flushed_l2s.insert(l2).second)
+      l2->flush_all(vmid);
+  }
+  for (auto *l2 : l2_caches_) {
+    if (l2 && flushed_l2s.insert(l2).second)
+      l2->flush_all(vmid);
+  }
 }
 
 bool CompletionTracker::all_complete(const std::vector<HwQueueState> &queues) const {

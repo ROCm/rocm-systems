@@ -19,8 +19,9 @@
 ///
 /// The encoding format of a family is stable across generations, but the opcodes
 /// are not. For example, s_branch is opcode 2 on GFX9 (CDNA1-4) and 32 on GFX12
-/// (RDNA4). Every build_* therefore takes rj_code_arch_t and throws
-/// util::UnimplementedInst for an arch it does not model. Scalar-operand codes
+/// (RDNA4). Every build_* therefore takes rj_code_arch_t. The s_delay_alu builder
+/// returns failure for an unsupported arch; other builders currently throw
+/// util::UnimplementedInst. Scalar-operand codes
 /// (VCC, EXEC, M0) and inline constants come from the generated operand tables
 /// (operand_types.h); see scalar_operand_m0 / scalar_operand_vcc_lo /
 /// scalar_operand_exec_lo.
@@ -73,6 +74,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
+#include "util/diagnostic.h"
 #include "util/except.h"
 
 namespace rocjitsu {
@@ -136,7 +138,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
     return rdna3_5::build_sopp(op, {.simm16 = simm16})[0];
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::build_sopp(op, {.simm16 = simm16})[0];
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::build_sopp(op, {.simm16 = simm16})[0];
   default:
     throw util::UnimplementedInst("SOPP builder for target architecture");
@@ -174,7 +176,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::build_sop1(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::build_sop1(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
   default:
@@ -223,7 +225,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
     return rdna4::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
                                   .ssrc1 = static_cast<uint8_t>(ssrc1),
                                   .sdst = static_cast<uint8_t>(sdst)})[0];
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
                                   .ssrc1 = static_cast<uint8_t>(ssrc1),
                                   .sdst = static_cast<uint8_t>(sdst)})[0];
@@ -271,7 +273,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::build_sopc(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .ssrc1 = static_cast<uint8_t>(ssrc1)})[0];
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::build_sopc(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .ssrc1 = static_cast<uint8_t>(ssrc1)})[0];
   default:
@@ -308,7 +310,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
     ROCJITSU_BUILD_SOPK(rdna3_5);
   case ROCJITSU_CODE_ARCH_RDNA4:
     ROCJITSU_BUILD_SOPK(rdna4);
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     ROCJITSU_BUILD_SOPK(cdna5);
   default:
     throw util::UnimplementedInst("SOPK builder for target architecture");
@@ -346,7 +348,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
     return rdna3_5::OPR_SDST_M0;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::OPR_SDST_M0;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::OPR_SDST_M0;
   default:
     throw util::UnimplementedInst("M0 operand code for target architecture");
@@ -378,7 +380,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
     return rdna3_5::OPR_SDST_VCC_LO;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::OPR_SDST_VCC_LO;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::OPR_SDST_VCC_LO;
   default:
     throw util::UnimplementedInst("VCC_LO operand code for target architecture");
@@ -410,7 +412,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
     return rdna3_5::OPR_SDST_EXEC_LO;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::OPR_SDST_EXEC_LO;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::OPR_SDST_EXEC_LO;
   default:
     throw util::UnimplementedInst("EXEC_LO operand code for target architecture");
@@ -442,7 +444,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
     return rdna3_5::OPR_SRC_NEG_INT_MIN;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::OPR_SRC_NEG_INT_MIN;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::OPR_SRC_NEG_INT_MIN;
   default:
     throw util::UnimplementedInst("inline -1 source code for target architecture");
@@ -505,7 +507,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
     return rdna3_5::opcode;                                                                        \
   case ROCJITSU_CODE_ARCH_RDNA4:                                                                   \
     return rdna4::opcode;                                                                          \
-  case ROCJITSU_CODE_ARCH_GFX1250:                                                                 \
+  case ROCJITSU_CODE_ARCH_CDNA5:                                                                   \
     return cdna5::opcode
 
 /// @brief Get the s_branch opcode for a target ISA.
@@ -565,7 +567,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
     return rdna3_5::kSGetPcB64Sop1;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::kSGetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::kSGetPcI64Sop1;
   default:
     throw util::UnimplementedInst("s_getpc for target architecture");
@@ -593,7 +595,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
     return rdna3_5::kSSetPcB64Sop1;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::kSSetPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::kSSetPcI64Sop1;
   default:
     throw util::UnimplementedInst("s_setpc for target architecture");
@@ -621,7 +623,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
     return rdna3_5::kSSwapPcB64Sop1;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::kSSwapPcB64Sop1;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::kSSwapPcI64Sop1;
   default:
     throw util::UnimplementedInst("s_swappc for target architecture");
@@ -649,7 +651,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
     return rdna3_5::kSCallB64Sopk;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::kSCallB64Sopk;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::kSCallI64Sopk;
   default:
     throw util::UnimplementedInst("s_call_b64 for target architecture");
@@ -675,7 +677,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 }
 
 /// @brief Get the s_delay_alu opcode for a target ISA.
-[[nodiscard]] inline constexpr uint32_t sopp_op_delay_alu(rj_code_arch_t arch) {
+[[nodiscard]] inline constexpr util::FailureOr<uint32_t> sopp_op_delay_alu(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_RDNA3:
     return rdna3::kSDelayAluSopp;
@@ -683,10 +685,10 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
     return rdna3_5::kSDelayAluSopp;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::kSDelayAluSopp;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::kSDelayAluSopp;
   default:
-    throw util::UnimplementedInst("s_delay_alu for target architecture");
+    return util::Result::failure();
   }
 }
 
@@ -815,8 +817,18 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 }
 
 /// @brief Encode s_delay_alu for the given target ISA.
-[[nodiscard]] inline constexpr uint32_t build_s_delay_alu(uint16_t simm16, rj_code_arch_t arch) {
-  return build_sopp_encoding(arch, sopp_op_delay_alu(arch), simm16);
+/// @returns Failure when the target ISA has no s_delay_alu encoding.
+/// @param error Optional caller-owned diagnostic emitter, used only on failure.
+[[nodiscard]] inline constexpr util::FailureOr<uint32_t>
+build_s_delay_alu(uint16_t simm16, rj_code_arch_t arch,
+                  const util::DiagnosticEmitter *error = nullptr) {
+  const auto op = sopp_op_delay_alu(arch);
+  if (op.failed()) {
+    if (error != nullptr)
+      return error->emit() << "s_delay_alu for target architecture";
+    return util::Result::failure();
+  }
+  return pack_sopp(op.value(), simm16);
 }
 
 /// @brief Encode `s_wait_xcnt 0` for the given target ISA.
@@ -824,7 +836,7 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 /// @returns std::nullopt on an ISA that has no XCNT counter, where nothing can
 /// have required the drain in the first place.
 [[nodiscard]] inline constexpr std::optional<uint32_t> build_s_wait_xcnt(rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5)
     return std::nullopt;
   return build_sopp_encoding(arch, cdna5::kSWaitXcntSopp, 0);
 }

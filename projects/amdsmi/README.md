@@ -8,8 +8,7 @@ For information on available features, installation steps, API reference materia
 documentation at [rocm.docs.amd.com/projects/amdsmi](https://rocm.docs.amd.com/projects/amdsmi/en/latest/)
 
 >[!NOTE]
->This project is a successor to [rocm-smi-lib](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocm-smi-lib)
->and [esmi_ib_library](https://github.com/amd/esmi_ib_library).
+>This project is a successor to [rocm-smi-lib](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocm-smi-lib) and [esmi_ib_library](https://github.com/amd/esmi_ib_library).
 >This project is applicable to Linux Baremetal and Linux VM(Guest). To use AMD SMI for Virtualization, please refer to [AMD-SMI Virtualization](https://github.com/amd/MxGPU-Virtualization/tree/mainline/smi-lib).
 
 ## Supported platforms
@@ -31,6 +30,8 @@ for more information.
 The following are required to install and use the AMD SMI library through its language interfaces and CLI.
 
 * `amdgpu` driver must be loaded for [`amdsmi_init()`](./docs/how-to/amdsmi-cpp-lib#hello-amd-smi) to work. Refer to the [Instinct documentation](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/install/detailed-install/prerequisites.html) for installation instructions.
+
+* AMD EPYC™ CPU support additionally requires the `amd_hsmp` (or `hsmp_acpi`) kernel module with the HSMP interface enabled in BIOS. Without it, CPU discovery is skipped (non-fatal). See the [installation requirements](https://rocm.docs.amd.com/projects/amdsmi/en/latest/install/install.html).
 * Export `LD_LIBRARY_PATH` to the `amdsmi` installation directory.
 
   ```bash

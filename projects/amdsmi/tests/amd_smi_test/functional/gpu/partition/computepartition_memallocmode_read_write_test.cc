@@ -1,24 +1,6 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include "computepartition_memallocmode_read_write.h"
 
 #include <gtest/gtest.h>
@@ -90,8 +72,10 @@ void TestComputePartitionMemAllocModeReadWrite::Run(void) {
       processor_handles_[0], AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_INVALID);
   EXPECT_EQ(ret, AMDSMI_STATUS_INVAL);
 
+  // 3 is outside the enumerator set but inside the enum's representable range;
+  // a larger value would make the conversion unspecified.
   ret = amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
-      processor_handles_[0], static_cast<amdsmi_accelerator_partition_mem_alloc_mode_t>(99));
+      processor_handles_[0], static_cast<amdsmi_accelerator_partition_mem_alloc_mode_t>(3));
   EXPECT_EQ(ret, AMDSMI_STATUS_INVAL);
 
   const bool isVerbose = (verbosity() > 0);

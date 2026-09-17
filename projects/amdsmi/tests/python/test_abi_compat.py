@@ -1,23 +1,6 @@
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # ABI compatibility.
 #
 # When a user pins amdsmi_interface.py from one ROCm version against a
@@ -36,6 +19,7 @@
 # library surface.
 
 import ast
+import builtins
 import ctypes
 import importlib
 import importlib.util
@@ -43,6 +27,7 @@ import os
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import unittest
 from pathlib import Path
@@ -188,21 +173,30 @@ class _Patch:
         ctypes.CDLL = self._orig
 
 
-class AbiCompatTest(unittest.TestCase):
-    """Wrapper handles old-.so / missing-symbol scenarios without surprises."""
+class _LibOverrideEnvMixin:
+    """Pin AMDSMI_LIB_OVERRIDE for the test, then restore the prior env.
+
+    Snapshots the variable so a test can never leak it into the rest of the
+    suite, and drops the cached wrapper module so the next import re-runs the
+    loader.
+    """
+
+    OVERRIDE_PATH = "/tmp/amdsmi-fake-libamd_smi.so"
 
     def setUp(self):
-        # Snapshot env so we never leak AMDSMI_LIB_OVERRIDE into other tests.
-        self._saved_env = {k: os.environ.get(k) for k in ("AMDSMI_LIB_OVERRIDE",)}
-        os.environ["AMDSMI_LIB_OVERRIDE"] = "/tmp/amdsmi-fake-libamd_smi.so"
+        self._saved_override = os.environ.get("AMDSMI_LIB_OVERRIDE")
+        os.environ["AMDSMI_LIB_OVERRIDE"] = self.OVERRIDE_PATH
 
     def tearDown(self):
-        for k, v in self._saved_env.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
+        if self._saved_override is None:
+            os.environ.pop("AMDSMI_LIB_OVERRIDE", None)
+        else:
+            os.environ["AMDSMI_LIB_OVERRIDE"] = self._saved_override
         sys.modules.pop("amdsmi_wrapper", None)
+
+
+class AbiCompatTest(_LibOverrideEnvMixin, unittest.TestCase):
+    """Wrapper handles old-.so / missing-symbol scenarios without surprises."""
 
     def test_override_routes_through_loader(self):
         # AMDSMI_LIB_OVERRIDE must be honoured so the rest of these tests
@@ -211,7 +205,7 @@ class AbiCompatTest(unittest.TestCase):
             w = _import_fresh_wrapper()
         self.assertEqual(
             w._loaded_lib_path,
-            "/tmp/amdsmi-fake-libamd_smi.so",
+            self.OVERRIDE_PATH,
             "AMDSMI_LIB_OVERRIDE was ignored: %r" % w._loaded_lib_path,
         )
 
@@ -448,6 +442,138 @@ class DisableSystemFallbackToolTest(unittest.TestCase):
             rc = subprocess.call([sys.executable, str(DISABLE_SYSTEM_FALLBACK_TOOL), str(wrapper)])
             self.assertNotEqual(rc, 0)
         finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _stdlib_top_level_names() -> frozenset:
+    """Top-level stdlib module names, computed without sys.stdlib_module_names.
+
+    That attribute is 3.10+, but pyproject declares ``requires-python >=3.6``
+    and CI runs a 3.6-3.14 matrix, so deriving the set from ``sysconfig`` keeps
+    the guard test running on every leg instead of skipping the older half.
+    """
+    names = set(sys.builtin_module_names)
+    stdlib = sysconfig.get_paths().get("stdlib")
+    if stdlib:
+        for base in (stdlib, os.path.join(stdlib, "lib-dynload")):
+            try:
+                entries = os.listdir(base)
+            except OSError:
+                continue
+            for entry in entries:
+                top = entry.split(".")[0]
+                if top.isidentifier():
+                    names.add(top)
+    return frozenset(names)
+
+
+STDLIB_TOP_LEVEL = _stdlib_top_level_names()
+
+
+class _ProfileModeLikeGuard:
+    """Minimal clone of rocprofiler-compute's profile-mode import guard.
+
+    Allows stdlib plus a small ROCm whitelist; every other top-level package
+    raises ImportError (the parent class, not ModuleNotFoundError) from both
+    the meta_path finder and the builtins.__import__ hook. rocm_sdk is
+    deliberately left off the whitelist so a stray third-party import in the
+    loader is caught here.
+    """
+
+    _ALLOWED = frozenset({"amdsmi", "amdsmi_wrapper", "amdsmi_interface", "hip", "rocprofv3"})
+
+    def __enter__(self):
+        sys.meta_path.insert(0, self)
+        self._real_import = builtins.__import__
+        builtins.__import__ = self._guarded_import
+        return self
+
+    def __exit__(self, *exc):
+        builtins.__import__ = self._real_import
+        if self in sys.meta_path:
+            sys.meta_path.remove(self)
+
+    def _forbid(self, fullname):
+        top = fullname.split(".")[0]
+        if top in STDLIB_TOP_LEVEL or top in self._ALLOWED:
+            return
+        raise ImportError("forbidden package in profile mode: %s" % top)
+
+    def find_spec(self, fullname, path, target=None):
+        self._forbid(fullname)
+        return None
+
+    def _guarded_import(self, name, *args, **kwargs):
+        # An already-imported module needs no load path, so re-importing it
+        # must not trip the guard: the window is process-wide and any tracer,
+        # plugin or background thread may re-import something benign.
+        if name not in sys.modules:
+            level = args[3] if len(args) > 3 else kwargs.get("level", 0)
+            if level == 0:
+                self._forbid(name)
+        return self._real_import(name, *args, **kwargs)
+
+
+class RestrictiveImportGuardTest(_LibOverrideEnvMixin, unittest.TestCase):
+    """Importing the wrapper must survive a hostile import environment.
+
+    Reproduces the downstream break where the loader did ``import rocm_sdk`` in
+    its search path but caught only ``(ModuleNotFoundError, FileNotFoundError)``;
+    a profile-mode guard raised a bare ImportError that escaped and aborted
+    ``import amdsmi``. rocm_sdk is kept off the whitelist so such an import is
+    rejected here rather than in downstream TheRock CI.
+
+    Coverage is split deliberately. AMDSMI_LIB_OVERRIDE short-circuits
+    ``_load_library()`` at step 1, so an override-based test only exercises
+    module-level statements and step 1 -- it can never reach step 3, the
+    relocatable-ROCm-tree branch, which is exactly where a rocm_sdk import
+    would live (rocm_sdk *is* TheRock's relocatable-tree package). The second
+    test therefore runs with no override so the loader walks steps 2-4.
+    """
+
+    def test_module_scope_survives_restrictive_import_guard(self):
+        # Scope: module-level statements plus _load_library() step 1 only.
+        with _ProfileModeLikeGuard(), _Patch(STABLE_SYMBOLS):
+            w = _import_fresh_wrapper()
+        self.assertEqual(
+            w._loaded_lib_path,
+            self.OVERRIDE_PATH,
+            "wrapper module scope or the AMDSMI_LIB_OVERRIDE branch failed "
+            "under a restrictive import guard -- an unguarded third-party "
+            "import likely crept in above the loader",
+        )
+
+    @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
+    def test_relocatable_branch_survives_restrictive_import_guard(self):
+        # TheRock relocatable layout: wrapper at <root>/share/amd_smi/amdsmi,
+        # library at <root>/lib. With no override the loader walks steps 2-4
+        # and must resolve the relocatable .so under the guard.
+        import re as _re
+
+        del os.environ["AMDSMI_LIB_OVERRIDE"]
+        soname = _re.search(r'_AMDSMI_LIB_SONAME = "([^"]+)"', WRAPPER_SRC.read_text()).group(1)
+        tmp = Path(tempfile.mkdtemp(prefix="amdsmi-guard-"))
+        modname = "amdsmi_wrapper_guard_%d" % id(self)
+        try:
+            pkg = tmp / "share" / "amd_smi" / "amdsmi"
+            pkg.mkdir(parents=True)
+            shutil.copy(WRAPPER_SRC, pkg / "amdsmi_wrapper.py")
+            reloc = tmp / "lib" / soname
+            reloc.parent.mkdir()
+            reloc.write_bytes(b"")  # presence is all the loader checks
+            with _ProfileModeLikeGuard(), _Patch(STABLE_SYMBOLS):
+                mod = _import_wrapper_from(str(pkg), modname)
+            # Resolving to the relocatable path (not the bare SONAME, not the
+            # _MissingLibrary sentinel) proves step 3 both ran and completed.
+            self.assertEqual(
+                mod._loaded_lib_path,
+                str(reloc),
+                "the relocatable-tree branch of _load_library() did not resolve "
+                "under a restrictive import guard -- an unguarded third-party "
+                "import likely crept back into the load path",
+            )
+        finally:
+            sys.modules.pop(modname, None)
             shutil.rmtree(tmp, ignore_errors=True)
 
 

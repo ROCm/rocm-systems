@@ -1,7 +1,7 @@
 #
 # rocprofv3 tool test
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-rocprofv3-avail
@@ -46,7 +46,7 @@ rocprofiler_add_integration_execute_test(
             --spm
     DEPENDS rocprofiler-sdk::rocprofv3-avail
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;spm"
     PRELOAD "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION
         "GPU:[0-9]*\\n*;Name:\\t[a-zA-Z_]*\\n;Counter_Name:\\t[a-zA-Z_]*\\n;Description:\\t(.*)\\n*;Expression:\\t(.)*\\n*;Block:\\t[a-zA-Z]*\\n*;Dimensions:\\t([A-Z_]*)\\t([[0-9]*:[0-9]*\\])*\\n*"

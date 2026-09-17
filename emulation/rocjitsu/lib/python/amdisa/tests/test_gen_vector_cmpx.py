@@ -29,6 +29,7 @@ from amdisa.codegen import CodeGenerator
 from amdisa.isa_profile import (
     Cdna1Profile,
     Cdna2Profile,
+    Cdna4Profile,
     CdnaProfile,
     Rdna1Profile,
     Rdna2Profile,
@@ -41,7 +42,7 @@ from amdisa.isa_profile import (
 # Layer 1: profile contract
 # ---------------------------------------------------------------------------
 
-_CDNA_PROFILES = [CdnaProfile, Cdna1Profile, Cdna2Profile]
+_CDNA_PROFILES = [CdnaProfile, Cdna1Profile, Cdna2Profile, Cdna4Profile]
 _RDNA_PROFILES = [
     Rdna1Profile,
     Rdna2Profile,

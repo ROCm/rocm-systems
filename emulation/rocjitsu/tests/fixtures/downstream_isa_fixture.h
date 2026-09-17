@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <cstddef>
@@ -28,7 +29,7 @@ public:
   public:
     // Source-integrated decoders publish their maximum encoded width and raw lookahead.
     static constexpr std::size_t kMaxInstructionWords = 1;
-    static std::unique_ptr<Instruction> decode(const rj_code_binary_inst_t *raw) {
+    static DecodeResult decode(const rj_code_binary_inst_t *raw, const DecodeErrorEmitter &) {
       return std::make_unique<DownstreamInstruction>(raw);
     }
   };

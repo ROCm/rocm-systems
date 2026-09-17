@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/analysis/exec_state.h"
-#include "rocjitsu/analysis/liveness.h"
+#include "decode_test_util.h"
+#include "rocjitsu/code/analysis/exec_state.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_scratch.h"
@@ -65,7 +66,7 @@ std::vector<std::unique_ptr<BasicBlock>> build_scratch_test_blocks() {
   constexpr std::array words = {move[0], end[0]};
   ScratchTestCodeObject code(words);
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
-  return BasicBlock::build(code, *decoder, ROCJITSU_CODE_ARCH_CDNA3);
+  return build_valid_blocks(code, *decoder, ROCJITSU_CODE_ARCH_CDNA3);
 }
 
 std::vector<BasicBlock *>
@@ -221,7 +222,7 @@ TEST(SemanticScratchAllocator, GprIndexModeWriteBypassesKernelUnusedTier) {
   ScratchTestCodeObject code(words);
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = BasicBlock::build(code, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+  auto blocks = build_valid_blocks(code, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = scratch_test_scope(blocks);
 

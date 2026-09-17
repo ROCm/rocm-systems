@@ -12,6 +12,8 @@
 
 #pragma once
 
+#include "rocjitsu/isa/decode_result.h"
+
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -29,6 +31,7 @@ namespace internal {
 enum class RewriteDischargeDecodeStatus : uint8_t {
   Success,
   InvalidLookaheadBound,
+  InvalidEncoding,
   InvalidInstructionSize,
   TruncatedInstruction,
 };
@@ -46,7 +49,8 @@ public:
 
   [[nodiscard]] RewriteDischargeDecodeStatus decode(std::span<const uint8_t> remaining_bytes,
                                                     uint64_t source_offset,
-                                                    std::unique_ptr<Instruction> &instruction);
+                                                    std::unique_ptr<Instruction> &instruction,
+                                                    const DecodeErrorEmitter &emit_error = {});
 
 private:
   Decoder &decoder_;

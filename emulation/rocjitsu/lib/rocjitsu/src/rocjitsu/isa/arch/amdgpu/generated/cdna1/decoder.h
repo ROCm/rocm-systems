@@ -8,6 +8,7 @@
 #define ROCJITSU_ISA_ARCH_AMDGPU_CDNA1_DECODER_H_
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/machine_insts.h"
+#include "rocjitsu/isa/decode_result.h"
 #include <array>
 #include <cstddef>
 #include <memory>
@@ -20,8 +21,8 @@ namespace cdna1 {
 
 class Decoder {
 public:
-  static constexpr std::size_t kMaxInstructionWords = 4;
-  static std::unique_ptr<Instruction> decode(const MachineInst *opcode);
+  static constexpr std::size_t kMaxInstructionWords = 2;
+  static DecodeResult decode(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 };
 
 } // namespace cdna1
