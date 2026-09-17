@@ -535,14 +535,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     ROCPROFILER_CALL(rocprofiler_create_context(&client_ctx), "context creation");
 
-    auto code_object_ops = std::vector<rocprofiler_tracing_operation_t>{
-        ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER};
+    constexpr auto code_object_op =
+        rocprofiler_tracing_operation_t{ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER};
 
     ROCPROFILER_CALL(
         rocprofiler_configure_callback_tracing_service(client_ctx,
                                                        ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
-                                                       code_object_ops.data(),
-                                                       code_object_ops.size(),
+                                                       &code_object_op,
+                                                       1,
                                                        tool_code_object_callback,
                                                        nullptr),
         "code object tracing service configure");
@@ -560,14 +560,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     // Kernel dispatch completions, so that the barriers can be read against the kernels they
     // order. Restricted to COMPLETE: the ENQUEUE operation would add a callback pair around
     // every launch, which is noise here.
-    auto kernel_dispatch_ops =
-        std::vector<rocprofiler_tracing_operation_t>{ROCPROFILER_KERNEL_DISPATCH_COMPLETE};
+    constexpr auto kernel_dispatch_op =
+        rocprofiler_tracing_operation_t{ROCPROFILER_KERNEL_DISPATCH_COMPLETE};
 
     ROCPROFILER_CALL(
         rocprofiler_configure_callback_tracing_service(client_ctx,
                                                        ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
-                                                       kernel_dispatch_ops.data(),
-                                                       kernel_dispatch_ops.size(),
+                                                       &kernel_dispatch_op,
+                                                       1,
                                                        tool_kernel_dispatch_callback,
                                                        nullptr),
         "kernel dispatch callback tracing service configure");
