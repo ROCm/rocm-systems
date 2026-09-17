@@ -12,6 +12,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -237,7 +238,7 @@ static_assert([]() constexpr {
     });
 }());
 
-static_assert(k_metric_table.size() < 32,
+static_assert(k_metric_table.size() < std::numeric_limits<std::uint32_t>::digits,
               "enabled_metrics addresses k_metric_table through a 32-bit mask");
 
 // k_all_hipfile_metrics assumes the bits run 0..size()-1 with no gaps, so a metric's bit
@@ -246,7 +247,10 @@ static_assert(k_metric_table.size() < 32,
 static_assert([]() constexpr {
     for(std::size_t index = 0; index < k_metric_table.size(); ++index)
     {
-        if(k_metric_table[index].bit != index) return false;
+        if(k_metric_table[index].bit != index)
+        {
+            return false;
+        }
     }
     return true;
 }());
