@@ -89,6 +89,12 @@ if(NOT GPU_TARGETS AND NOT AMDGPU_TARGETS)
         set(OPTIONAL_GPU_TARGETS_AVAILABLE "${OPTIONAL_GPU_TARGETS}")
     endif()
     set(DEFAULT_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1031;gfx1032;gfx1100;gfx1101;gfx1102;${OPTIONAL_GPU_TARGETS_AVAILABLE}")
+    if(WIN32)
+        # gfx1103 (Phoenix / Hawk Point APUs, e.g. Radeon 780M) is absent from the
+        # shared default list. These integrated parts are common Windows dev machines,
+        # and the HIP kernels below abort at launch without a matching code object.
+        list(APPEND DEFAULT_GPU_TARGETS gfx1103)
+    endif()
 endif()
 
 # Set AMD GPU_TARGETS
