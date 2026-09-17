@@ -36,6 +36,7 @@
 #include <signal.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -109,6 +110,13 @@ get_background_thread()
     static auto*& _v = rocprofiler::common::static_object<BackgroundThread>::construct();
     return _v;
 }
+
+auto&
+get_hsa_interception_active()
+{
+    static auto value = std::atomic<bool>{false};
+    return value;
+}
 }  // namespace
 
 ROCPROFILER_EXTERN_C_INIT
@@ -155,6 +163,21 @@ rocprofiler_attach_initialize(rocprofiler_register_library_api_table_func_t regi
 }
 
 int
+rocprofiler_attach_initialize_hsa_interception(HsaApiTable* hsa_api_table)
+{
+    if(hsa_api_table == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    static auto hsa_init_once = std::once_flag{};
+    std::call_once(hsa_init_once, [hsa_api_table]() {
+        rocprofiler::attach::queue_registration_init(hsa_api_table);
+        rocprofiler::attach::code_object_registration_init(hsa_api_table);
+        get_hsa_interception_active().store(true, std::memory_order_release);
+    });
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+int
 rocprofiler_attach_set_api_table(const char* name,
                                  uint64_t /*lib_version*/,
                                  uint64_t /*lib_instance*/,
@@ -173,25 +196,26 @@ rocprofiler_attach_set_api_table(const char* name,
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
-    ROCP_ERROR_IF(num_tables > 1) << "rocprofiler expected HSA library to pass 1 API table, not "
-                                  << num_tables;
+    if(tables == nullptr || num_tables != 1 || tables[0] == nullptr)
+    {
+        ROCP_ERROR << "rocprofiler expected HSA library to pass exactly 1 API table, not "
+                   << num_tables;
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
 
-    static auto hsa_init_once = std::once_flag{};
-    std::call_once(hsa_init_once, [tables]() {
-        auto* hsa_api_table = static_cast<HsaApiTable*>(tables[0]);
-
-        // Initialize all HSA-dependent registration services in attach.
-        rocprofiler::attach::queue_registration_init(hsa_api_table);
-        rocprofiler::attach::code_object_registration_init(hsa_api_table);
-    });
-
-    return ROCPROFILER_STATUS_SUCCESS;
+    return rocprofiler_attach_initialize_hsa_interception(static_cast<HsaApiTable*>(tables[0]));
 }
 
 int
 rocprofiler_attach_get_version()
 {
     return ROCPROFILER_VERSION;
+}
+
+int
+rocprofiler_attach_is_hsa_interception_active()
+{
+    return get_hsa_interception_active().load(std::memory_order_acquire) ? 1 : 0;
 }
 
 ROCPROFILER_EXTERN_C_FINI

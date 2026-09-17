@@ -1391,7 +1391,7 @@ initialize(HsaApiTable* table)
 
     if(_status == HSA_STATUS_SUCCESS)
     {
-        if(*(get_attach_table()))
+        if(rocprofiler_attach_table_owns_hsa_interception(*(get_attach_table())))
         {
             load_attach_code_objects();
         }
