@@ -156,13 +156,19 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
             ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/colorspace_kernels.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/resize_kernels.cpp)
         set(KERNEL_OBJS)
+        # hipcc needs one --offload-arch= per target; GPU_TARGETS is a list and
+        # would otherwise expand into bare arguments that clang reads as inputs
+        set(HIPCC_OFFLOAD_ARCH_FLAGS)
+        foreach(GPU_TARGET ${GPU_TARGETS})
+            list(APPEND HIPCC_OFFLOAD_ARCH_FLAGS --offload-arch=${GPU_TARGET})
+        endforeach()
         foreach(KSRC ${KERNEL_SOURCES})
             get_filename_component(KNAME ${KSRC} NAME_WE)
             set(KOBJ ${CMAKE_CURRENT_BINARY_DIR}/${KNAME}.obj)
             add_custom_command(
                 OUTPUT ${KOBJ}
                 COMMAND ${HIPCC} -c ${KSRC} -o ${KOBJ}
-                    --offload-arch=${GPU_TARGETS}
+                    ${HIPCC_OFFLOAD_ARCH_FLAGS}
                     --rocm-path=${ROCM_PATH}
                     --rocm-device-lib-path=${ROCM_PATH}/lib/llvm/amdgcn/bitcode
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../utils
@@ -170,9 +176,12 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
                     -I${rocdecode_INCLUDE_DIR}
                     -I${ROCM_PATH}/include
                     -DNOMINMAX -D_CRT_SECURE_NO_WARNINGS
-                    -fms-runtime-lib=dll
-                    -O2
-                DEPENDS ${KSRC}
+                    # must track the MSVC config, or the kernel objects link
+                    # against a different CRT than the rest of the sample
+                    -fms-runtime-lib=$<IF:$<CONFIG:Debug>,dll_dbg,dll>
+                    $<IF:$<CONFIG:Debug>,-O0,-O2>
+                # depend on this file too, so changing the flags above rebuilds
+                DEPENDS ${KSRC} ${CMAKE_CURRENT_LIST_FILE}
                 COMMENT "Compiling HIP kernel ${KNAME}"
             )
             list(APPEND KERNEL_OBJS ${KOBJ})
