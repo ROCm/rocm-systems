@@ -79,6 +79,7 @@ void Stream::ResetCaptureStateLocked(bool preserveInvalidated) {
   originStream_ = false;
   captureOwner_ = nullptr;
   lastCapturedNodes_.clear();
+  removedDependencies_.clear();
 
   SetCaptureStatus(preserveInvalidated ? hipStreamCaptureStatusInvalidated
                                        : hipStreamCaptureStatusNone);

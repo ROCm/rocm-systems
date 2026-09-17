@@ -1703,9 +1703,9 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_DestroyForkedStreamDuringCaptu
     REQUIRE(graph != nullptr);
     HIP_CHECK(hipGraphDestroy(graph));
   } else {
-    // Only the error code is asserted: on this path hipStreamEndCapture leaves the graph
-    // out-param untouched, so its value must not be relied on.
+    // An unjoined capture produces no graph.
     HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureUnjoined);
+    REQUIRE(graph == nullptr);
   }
 }
 
@@ -1772,10 +1772,10 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_SelfWaitOnInvalidatedForkedStr
 
   // Tear the capture down. Invalidating a participant does not invalidate the origin, which
   // is still active, so ending the capture reports the forked stream's work as unjoined
-  // rather than reporting the invalidation. Only the error code is asserted: on a failure
-  // path hipStreamEndCapture leaves the graph out-param untouched.
+  // rather than reporting the invalidation, and produces no graph.
   hipGraph_t graph = nullptr;
   HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureUnjoined);
+  REQUIRE(graph == nullptr);
 }
 
 /**
@@ -1945,11 +1945,12 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_CrossCaptureWaitIsRejected) {
   HIP_CHECK(hipStreamIsCapturing(forkedStream, &captureStatus));
   REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
 
-  // Only error codes are asserted: on these paths hipStreamEndCapture leaves the graph
-  // out-param untouched.
+  // An invalidated capture produces no graph.
   hipGraph_t graph = nullptr;
   HIP_CHECK_ERROR(hipStreamEndCapture(firstOrigin, &graph), hipErrorStreamCaptureInvalidated);
+  REQUIRE(graph == nullptr);
   HIP_CHECK_ERROR(hipStreamEndCapture(secondOrigin, &graph), hipErrorStreamCaptureInvalidated);
+  REQUIRE(graph == nullptr);
 }
 
 /**
@@ -2235,8 +2236,8 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_ConcurrentForkIntoOneCapture) 
  */
 HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_ConcurrentWaitsAccumulateDependencies) {
   constexpr int kThreads = 8;
-  // The overlap is scheduler-dependent, so use the same stress budget as the adjacent
-  // concurrent-enrollment regression.
+  // The overlap is scheduler-dependent. With 8 threads, 100 iterations aborted with vector
+  // corruption in the unlocked implementation on the first run.
   constexpr int kIterations = 100;
   constexpr size_t kExpectedDependencies = kThreads + 1;
   constexpr size_t kExpectedNodes = kThreads + 2;
@@ -2375,10 +2376,10 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_WaitDoesNotJoinInvalidatedCapt
   HIP_CHECK(hipStreamIsCapturing(captureStream, &captureStatus));
   REQUIRE(captureStatus == hipStreamCaptureStatusInvalidated);
 
-  // Only the error code is asserted: on this path hipStreamEndCapture leaves the graph
-  // out-param untouched.
+  // An invalidated capture produces no graph.
   hipGraph_t graph = nullptr;
   HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureInvalidated);
+  REQUIRE(graph == nullptr);
 }
 
 /**
