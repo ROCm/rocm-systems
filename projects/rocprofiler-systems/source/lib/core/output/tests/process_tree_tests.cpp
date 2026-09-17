@@ -103,12 +103,16 @@ TEST(process_tree, deep_parent_chain_does_not_overflow_stack)
     std::vector<process_metadata> processes;
     processes.reserve(CHAIN_DEPTH);
     for(pid_t pid = 1; pid <= CHAIN_DEPTH; ++pid)
+    {
         processes.push_back(make_meta(pid, pid == 1 ? -1 : pid - 1));
+    }
 
     std::vector<artifact> rows;
     rows.reserve(CHAIN_DEPTH);
     for(pid_t pid = 1; pid <= CHAIN_DEPTH; ++pid)
+    {
         rows.push_back(make_row(std::to_string(pid), pid));
+    }
 
     process_tree tree{ rows, processes };
     ASSERT_EQ(tree.roots().size(), 1u);

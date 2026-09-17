@@ -70,7 +70,9 @@ run_metadata::capture(std::chrono::steady_clock::time_point load_baseline)
     {
         std::array<char, ISO_8601_BUFFER_BYTES> buf{};
         if(std::strftime(buf.data(), buf.size(), "%Y-%m-%dT%H:%M:%SZ", &utc) > 0)
+        {
             meta.run_label = buf.data();
+        }
     }
 
     meta.duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -96,7 +98,9 @@ repeat_glyph(std::string_view glyph, std::size_t count)
     std::string out;
     out.reserve(glyph.size() * count);
     for(std::size_t index = 0; index < count; ++index)
+    {
         out.append(glyph);
+    }
     return out;
 }
 
@@ -143,14 +147,20 @@ std::string
 summarize_command(std::string_view command)
 {
     const std::string cleaned = strip_terminal_control_chars(command);
-    if(cleaned.empty()) return {};
+    if(cleaned.empty())
+    {
+        return {};
+    }
 
     const auto  token_end = cleaned.find_first_of(" \t");
     std::string program =
         (token_end == std::string::npos) ? cleaned : cleaned.substr(0, token_end);
 
     const auto slash = program.find_last_of('/');
-    if(slash != std::string::npos) program = program.substr(slash + 1);
+    if(slash != std::string::npos)
+    {
+        program = program.substr(slash + 1);
+    }
     return program;
 }
 
@@ -159,7 +169,10 @@ namespace
 std::string
 format_duration(std::chrono::nanoseconds dur)
 {
-    if(dur.count() <= 0) return std::string{ UNKNOWN_VALUE_PLACEHOLDER };
+    if(dur.count() <= 0)
+    {
+        return std::string{ UNKNOWN_VALUE_PLACEHOLDER };
+    }
     const double seconds = std::chrono::duration<double>(dur).count();
     return fmt::format("{:.2f}s", seconds);
 }
@@ -167,13 +180,20 @@ format_duration(std::chrono::nanoseconds dur)
 std::string
 datasize_to_string(std::uint64_t size_bytes)
 {
-    if(size_bytes < BYTES_PER_KILOBYTE) return fmt::format("{} B", size_bytes);
+    if(size_bytes < BYTES_PER_KILOBYTE)
+    {
+        return fmt::format("{} B", size_bytes);
+    }
     if(size_bytes < BYTES_PER_MEGABYTE)
+    {
         return fmt::format("{:.2f} KB",
                            static_cast<double>(size_bytes) / BYTES_PER_KILOBYTE);
+    }
     if(size_bytes < BYTES_PER_GIGABYTE)
+    {
         return fmt::format("{:.2f} MB",
                            static_cast<double>(size_bytes) / BYTES_PER_MEGABYTE);
+    }
     return fmt::format("{:.2f} GB", static_cast<double>(size_bytes) / BYTES_PER_GIGABYTE);
 }
 
@@ -229,7 +249,10 @@ process_label(const process_node& node, pid_t main_pid)
     const std::string program = summarize_command(node.meta.command);
     std::string       label   = program.empty() ? fmt::format("[{}]", node.meta.pid)
                                                 : fmt::format("[{}] {}", node.meta.pid, program);
-    if(node.meta.pid == main_pid) label += "  main";
+    if(node.meta.pid == main_pid)
+    {
+        label += "  main";
+    }
     return label;
 }
 
@@ -237,7 +260,10 @@ process_label(const process_node& node, pid_t main_pid)
 display_path(const std::string& path, const std::filesystem::path& cwd)
 {
     std::filesystem::path p{ path };
-    if(!p.is_absolute()) p = cwd / p;
+    if(!p.is_absolute())
+    {
+        p = cwd / p;
+    }
     return strip_terminal_control_chars(p.string());
 }
 
@@ -265,14 +291,18 @@ count_nodes(const std::vector<process_node>& roots)
     std::vector<const process_node*> stack;
     stack.reserve(roots.size());
     for(const auto& root : roots)
+    {
         stack.push_back(&root);
+    }
     while(!stack.empty())
     {
         const process_node* node = stack.back();
         stack.pop_back();
         ++count;
         for(const auto& child : node->children)
+        {
             stack.push_back(&child);
+        }
     }
     return count;
 }
@@ -280,8 +310,14 @@ count_nodes(const std::vector<process_node>& roots)
 [[nodiscard]] std::string
 derive_output_dir(const run_metadata& meta, std::span<const artifact> rows)
 {
-    if(!meta.output_dir_abs.empty()) return meta.output_dir_abs;
-    if(rows.empty()) return std::string{ UNKNOWN_VALUE_PLACEHOLDER };
+    if(!meta.output_dir_abs.empty())
+    {
+        return meta.output_dir_abs;
+    }
+    if(rows.empty())
+    {
+        return std::string{ UNKNOWN_VALUE_PLACEHOLDER };
+    }
     auto parent = std::filesystem::path{ rows.front().path }.parent_path().string();
     return parent.empty() ? std::string{ UNKNOWN_VALUE_PLACEHOLDER } : parent;
 }
@@ -290,7 +326,9 @@ void
 push_root_tasks(std::vector<render_task>& stack, const process_tree& tree)
 {
     for(auto it = tree.roots().rbegin(); it != tree.roots().rend(); ++it)
+    {
         stack.push_back({ &*it, std::string{}, std::string{ GLYPH_ROOT_INDENT } });
+    }
 }
 
 void
@@ -308,7 +346,9 @@ emit_file_rows(std::vector<std::string>& lines, const render_task& task,
         lines.push_back(file_row_line(branch, node.rows[index], cwd));
     }
     if(file_count > 0 && child_count > 0)
+    {
         lines.push_back(task.child_prefix + std::string{ GLYPH_SEPARATOR });
+    }
 }
 
 // Pushes a node's children directly onto the DFS stack in reverse order (so
@@ -330,7 +370,10 @@ push_child_tasks(std::vector<render_task>& stack, const render_task& task,
             std::string{ last_child ? GLYPH_CHILD_INDENT_LAST : GLYPH_CHILD_INDENT_MID };
         stack.push_back(
             { &node.children[ri], std::move(child_conn), std::move(next_prefix) });
-        if(ri > 0) stack.push_back({ nullptr, {}, task.child_prefix });
+        if(ri > 0)
+        {
+            stack.push_back({ nullptr, {}, task.child_prefix });
+        }
     }
 }
 
@@ -389,9 +432,13 @@ box_width(std::span<const std::string> header_lines,
 {
     std::size_t width = MIN_BOX_WIDTH;
     for(const auto& line : header_lines)
+    {
         width = std::max(width, display_width(line) + 2);  // + 2 for the "│ " rail
+    }
     for(const auto& line : tree_lines)
+    {
         width = std::max(width, display_width(line) + 2);
+    }
     return width;
 }
 
@@ -412,10 +459,15 @@ append_box(std::string& out, std::string_view title, std::span<const std::string
     out.reserve(reserve_hint);
 
     out += head;
-    if(width > head_cols) out += repeat_glyph(GLYPH_BOX_LINE, width - head_cols);
+    if(width > head_cols)
+    {
+        out += repeat_glyph(GLYPH_BOX_LINE, width - head_cols);
+    }
     out += "\n";
     for(const auto& line : lines)
+    {
         fmt::format_to(std::back_inserter(out), "{}{}\n", GLYPH_BOX_LEFT_RAIL, line);
+    }
     out += GLYPH_BOX_BOTTOM_LEFT;
     out += repeat_glyph(GLYPH_BOX_LINE, width - 1);
     out += "\n";
@@ -426,14 +478,22 @@ build_legend(std::span<const artifact> rows)
 {
     std::set<output_format> formats;
     for(const auto& row : rows)
+    {
         formats.insert(row.format);
+    }
 
     std::string legend;
     for(output_format format : formats)
     {
         const auto badge = badge_for(format);
-        if(badge.viewer_hint.empty()) continue;
-        if(!legend.empty()) legend += "    ";
+        if(badge.viewer_hint.empty())
+        {
+            continue;
+        }
+        if(!legend.empty())
+        {
+            legend += "    ";
+        }
         legend += fmt::format("{} → {}", badge.name, badge.viewer_hint);
     }
     return legend;
@@ -444,7 +504,10 @@ void
 write_summary(std::ostream& os, const process_tree& tree, const run_metadata& meta,
               std::span<const artifact> rows)
 {
-    if(rows.empty()) return;
+    if(rows.empty())
+    {
+        return;
+    }
 
     report_diagnostics(tree.diagnostics());
 
@@ -457,7 +520,10 @@ write_summary(std::ostream& os, const process_tree& tree, const run_metadata& me
     append_box(out, "Output Summary", header_lines, width);
     out += "\n";
     append_box(out, "Process tree", tree_lines, width);
-    if(!legend.empty()) out += fmt::format("\n  {}\n", legend);
+    if(!legend.empty())
+    {
+        out += fmt::format("\n  {}\n", legend);
+    }
 
     os << out;
 }

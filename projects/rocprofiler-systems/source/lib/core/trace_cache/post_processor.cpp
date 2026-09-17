@@ -56,7 +56,10 @@ sum_storage_bytes(const std::vector<std::shared_ptr<data::processor_config_t>>& 
 void
 publish_process_metadata(const std::shared_ptr<data::processor_config_t>& _config)
 {
-    if(!_config->_metadata_registry) return;
+    if(!_config->_metadata_registry)
+    {
+        return;
+    }
 
     auto process_info = _config->_metadata_registry->get_process_info();
     output::process_metadata proc_meta{};

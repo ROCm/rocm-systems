@@ -46,7 +46,10 @@ void
 filter_fn(::perfetto::base::LogMessageCallbackArgs args)
 {
     std::shared_lock lock(g_mutex);
-    if(!g_registered) return;
+    if(!g_registered)
+    {
+        return;
+    }
 
     const char* file = (args.filename != nullptr) ? args.filename : "<unknown>";
     const char* msg  = (args.message != nullptr) ? args.message : "";
@@ -72,7 +75,10 @@ void
 register_with_perfetto_logger()
 {
     std::unique_lock lock(g_mutex);
-    if(g_registered) return;
+    if(g_registered)
+    {
+        return;
+    }
     g_registered = true;
     ::perfetto::base::SetLogMessageCallback(&filter_fn);
 }
