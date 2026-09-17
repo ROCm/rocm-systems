@@ -440,8 +440,6 @@ static __forceinline void cpu_relax() {
 
 static __forceinline void store_fence() {
 #if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
-  __builtin_ia32_sfence();
-#elif defined(_MSC_VER) || defined(__powerpc64__) || defined(__PPC64__)
   _mm_sfence();
 #elif __has_builtin(__builtin_arm_dmb)
   __builtin_arm_dmb(0x2);  // oshst
@@ -452,8 +450,6 @@ static __forceinline void store_fence() {
 
 static __forceinline void memory_fence() {
 #if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
-  __builtin_ia32_mfence();
-#elif defined(_MSC_VER) || defined(__powerpc64__) || defined(__PPC64__)
   _mm_mfence();
 #elif __has_builtin(__builtin_arm_dsb)
   __builtin_arm_dsb(0xf);  // sy
@@ -464,8 +460,6 @@ static __forceinline void memory_fence() {
 
 static __forceinline void cacheline_flush(const void* p) {
 #if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
-  __builtin_ia32_clflush(p);
-#elif defined(_MSC_VER) || defined(__powerpc64__) || defined(__PPC64__)
   _mm_clflush(p);
 #elif __has_builtin(__builtin_arm_dcimvac)
   __builtin_arm_dcimvac(const_cast<void*>(p));
