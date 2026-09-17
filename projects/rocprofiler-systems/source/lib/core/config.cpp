@@ -148,18 +148,25 @@ struct config_value_validation
 // unconditional and available before constructor parsing, the explicit env and
 // config-file validation paths can be removed.
 const auto k_strict_config_value_validations = std::array<config_value_validation, 6>{ {
-    { env_vars::MODE, config_value_rule::choice, "one of the registered choices" },
-    { env_vars::PERFETTO_BACKEND, config_value_rule::choice,
-      "one of the registered choices" },
-    { env_vars::TRACE, config_value_rule::boolean,
-      "a boolean value (0, non-zero integer, true, false, on, off, yes, no, "
-      "y, n, t, f)" },
-    { env_vars::TRACE_DURATION, config_value_rule::floating_point,
-      "a finite floating-point value" },
+    { .name        = env_vars::MODE,
+      .rule        = config_value_rule::choice,
+      .expectation = "one of the registered choices" },
+    { .name        = env_vars::PERFETTO_BACKEND,
+      .rule        = config_value_rule::choice,
+      .expectation = "one of the registered choices" },
+    { .name = env_vars::TRACE,
+      .rule = config_value_rule::boolean,
+      .expectation =
+          "a boolean value (0, non-zero integer, true, false, on, off, yes, no, "
+          "y, n, t, f)" },
+    { .name        = env_vars::TRACE_DURATION,
+      .rule        = config_value_rule::floating_point,
+      .expectation = "a finite floating-point value" },
     // Only validate positive ranges for settings without sentinel values.
     // CPUTIME/REALTIME sampling frequencies intentionally default to -1.0.
-    { env_vars::SAMPLING_FREQ, config_value_rule::positive_floating_point,
-      "a positive finite floating-point value" },
+    { .name        = env_vars::SAMPLING_FREQ,
+      .rule        = config_value_rule::positive_floating_point,
+      .expectation = "a positive finite floating-point value" },
     { .name        = env_vars::TRACE_PERIOD_CLOCK_ID,
       .rule        = config_value_rule::choice,
       .expectation = "one of the registered choices" },
