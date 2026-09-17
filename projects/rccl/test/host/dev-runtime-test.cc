@@ -163,28 +163,22 @@ static const hipMemLocationType kLocHost = hipMemLocationTypeHost;
 #endif
 
 // ---------------------------------------------------------------------------
-// ncclSymIsHostSegment: true for host-NUMA, and on AMD from ROCm 7.12 also for
-// plain host. The second arm is #if-gated, so the guard is mirrored below to
-// keep the suite passing on either toolchain.
+// ncclSymIsHostSegment: true for host-NUMA, and on AMD inside
+// NCCL_CUMEM_HOST_VERSION_SUPPORTED also for plain host. The second arm is
+// #if-gated, so the guard is mirrored below.
 
 // Branch: the unconditional host-NUMA check.
 TEST(SymIsHostSegment, HostNuma_ReturnsTrue) {
   EXPECT_TRUE(ncclSymIsHostSegment(kLocHostNuma));
 }
 
-#if defined(__HIP_PLATFORM_AMD__) && ROCM_VERSION >= 71200
+#if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
 // Branch: AMD allocates host segments as plain host, so they count as sysmem.
 TEST(SymIsHostSegment, Host_ReturnsTrue) {
   EXPECT_TRUE(ncclSymIsHostSegment(kLocHost));
 }
 #else
-// Without the AMD arm compiled in, plain host is not a sysmem segment.
-//
-// Spelled as its numeric value: hipMemLocationTypeHost only exists from ROCm
-// 7.12 (hip/driver_types.h), which is exactly why production names it only
-// inside this same guard (ncclSymIsHostSegment's ROCM_VERSION >= 71200 arm).
-// The 7.0.2 compatibility build
-// compiles this arm, so the enumerator cannot appear here.
+// Without the AMD host-VMM arm compiled in, plain host is not a sysmem segment.
 TEST(SymIsHostSegment, Host_ReturnsFalse) {
   EXPECT_FALSE(ncclSymIsHostSegment(kLocHost));
 }
@@ -1348,6 +1342,89 @@ TEST_F(SymMemoryMapLsaTeamTest, BarrierFails_ReturnsError) {
   ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSystemError; });
 
   EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(barrier.calls, 1);
+}
+
+// Reuse-param path: a genuine 2-rank host/device split must reject rather than
+// stamp host onto the device owner's message (nHost==1 used to skip the check).
+TEST_F(SymMemoryMapLsaTeamTest, MixedHostAndDeviceOwners_ReturnsInvalidUsage) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = kLocHost;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = hipMemLocationTypeDevice;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclInvalidUsage);
+  EXPECT_EQ(barrier.calls, 0);
+}
+
+// Same reject must fire on a segment index this rank does not own, otherwise
+// the wider ranks fail while this one waits at the closing barrier.
+TEST_F(SymMemoryMapLsaTeamTest, MixedOwnersOnPeerOnlySegment_ReturnsInvalidUsage) {
+  lsaRankList.assign({0, 1, 2});
+  comm->devrState.lsaRankList = lsaRankList.data();
+  comm->devrState.lsaSize = 3;
+  lsaNumSegments.assign({1, 2, 2});
+  mem.lsaNumSegments = lsaNumSegments.data();
+  mem.numSegments = 1;
+
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      const int maxSegments = 2;
+                      msgs[1 * maxSegments + 1].type = kLocHost;
+                      msgs[1 * maxSegments + 1].segmentSize = 4096;
+                      msgs[2 * maxSegments + 1].type = hipMemLocationTypeDevice;
+                      msgs[2 * maxSegments + 1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclInvalidUsage);
+  EXPECT_EQ(barrier.calls, 0);
+}
+
+// All-host LSA with the reuse param on is accepted; mixed-owner reject must
+// not fire when every exported type is host.
+TEST_F(SymMemoryMapLsaTeamTest, AllHostOwnersWithReuseParam_Succeeds) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = kLocHost;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = kLocHost;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
   EXPECT_EQ(barrier.calls, 1);
 }
 
