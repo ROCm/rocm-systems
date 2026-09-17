@@ -18,6 +18,8 @@
 
 namespace
 {
+// NOLINTNEXTLINE(readability-identifier-naming) - GTest fixture convention is
+// PascalCase; the AbstractClassCase "_interface" naming rule doesn't apply here.
 class RegistryTest : public ::testing::Test
 {
 protected:
@@ -43,12 +45,12 @@ TEST_F(RegistryTest, default_pid_resolves_to_getpid)
 
 TEST_F(RegistryTest, explicit_pid_is_preserved)
 {
-    constexpr pid_t CHILD_PID = 4242;
+    constexpr pid_t k_child_pid = 4242;
     registry::instance().register_file("/tmp/rocprofsys-test/perfetto-trace.proto",
-                                       output_format::perfetto, CHILD_PID);
+                                       output_format::perfetto, k_child_pid);
     const auto rows = registry::instance().rows();
     ASSERT_EQ(rows.size(), 1u);
-    EXPECT_EQ(rows.front().pid, CHILD_PID);
+    EXPECT_EQ(rows.front().pid, k_child_pid);
 }
 
 TEST_F(RegistryTest, start_new_session_filters_prior_rows_from_view)
@@ -92,8 +94,8 @@ TEST_F(RegistryTest, start_new_session_compacts_entries_older_than_the_ended_ses
 
 TEST_F(RegistryTest, start_new_session_is_race_safe_with_concurrent_register)
 {
-    constexpr int WRITES_PER_ROUND = 50;
-    constexpr int SESSION_ROUNDS   = 5;
+    constexpr int k_writes_per_round = 50;
+    constexpr int k_session_rounds   = 5;
 
     std::atomic<bool> stop{ false };
     std::thread       writer([&]() {
@@ -106,9 +108,9 @@ TEST_F(RegistryTest, start_new_session_is_race_safe_with_concurrent_register)
         }
     });
 
-    for(int round = 0; round < SESSION_ROUNDS; ++round)
+    for(int round = 0; round < k_session_rounds; ++round)
     {
-        for(int i = 0; i < WRITES_PER_ROUND; ++i)
+        for(int i = 0; i < k_writes_per_round; ++i)
         {
             std::this_thread::yield();
         }
@@ -160,15 +162,15 @@ TEST_F(RegistryTest, existing_file_size_is_captured)
 
 TEST_F(RegistryTest, concurrent_register_is_thread_safe)
 {
-    constexpr int THREAD_COUNT = 4;
-    constexpr int PER_THREAD   = 25;
+    constexpr int k_thread_count = 4;
+    constexpr int k_per_thread   = 25;
 
     std::vector<std::thread> threads;
-    threads.reserve(THREAD_COUNT);
-    for(int thread_index = 0; thread_index < THREAD_COUNT; ++thread_index)
+    threads.reserve(k_thread_count);
+    for(int thread_index = 0; thread_index < k_thread_count; ++thread_index)
     {
         threads.emplace_back([thread_index]() {
-            for(int i = 0; i < PER_THREAD; ++i)
+            for(int i = 0; i < k_per_thread; ++i)
             {
                 registry::instance().register_file(
                     "/tmp/rocprofsys-test/concurrent-" + std::to_string(thread_index) +
@@ -183,21 +185,21 @@ TEST_F(RegistryTest, concurrent_register_is_thread_safe)
     }
 
     EXPECT_EQ(registry::instance().rows().size(),
-              static_cast<std::size_t>(THREAD_COUNT * PER_THREAD));
+              static_cast<std::size_t>(k_thread_count * k_per_thread));
 }
 
 TEST_F(RegistryTest, record_process_sparse_upsert_preserves_ppid)
 {
-    constexpr pid_t MAIN_PID = 1000;
+    constexpr pid_t k_main_pid = 1000;
 
     process_metadata rich;
-    rich.pid     = MAIN_PID;
+    rich.pid     = k_main_pid;
     rich.ppid    = 1;
     rich.command = "worker";
     registry::instance().record_process(rich);
 
     process_metadata sparse;
-    sparse.pid     = MAIN_PID;
+    sparse.pid     = k_main_pid;
     sparse.ppid    = -1;  // sentinel: must not overwrite existing ppid
     sparse.command = "worker";
     registry::instance().record_process(sparse);
@@ -209,23 +211,23 @@ TEST_F(RegistryTest, record_process_sparse_upsert_preserves_ppid)
 
 TEST_F(RegistryTest, record_process_non_empty_fields_win_on_upsert)
 {
-    constexpr pid_t MAIN_PID     = 1001;
-    constexpr pid_t RESOLVED_PPID = 7;
+    constexpr pid_t k_main_pid     = 1001;
+    constexpr pid_t k_resolved_ppid = 7;
 
     process_metadata sparse;
-    sparse.pid     = MAIN_PID;
+    sparse.pid     = k_main_pid;
     sparse.ppid    = 1;
     sparse.command = "main";
     registry::instance().record_process(sparse);
 
     process_metadata rich;
-    rich.pid     = MAIN_PID;
-    rich.ppid    = RESOLVED_PPID;
+    rich.pid     = k_main_pid;
+    rich.ppid    = k_resolved_ppid;
     rich.command = "main-resolved";
     registry::instance().record_process(rich);
 
     const auto procs = registry::instance().processes();
     ASSERT_EQ(procs.size(), 1u);
-    EXPECT_EQ(procs.front().ppid, RESOLVED_PPID);
+    EXPECT_EQ(procs.front().ppid, k_resolved_ppid);
     EXPECT_EQ(procs.front().command, "main-resolved");
 }

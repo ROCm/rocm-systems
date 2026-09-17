@@ -122,17 +122,17 @@ TEST(process_tree, ppid_cycle_excludes_members_and_is_diagnosed)
 
 TEST(process_tree, deep_parent_chain_does_not_overflow_stack)
 {
-    constexpr int                 CHAIN_DEPTH = 1000;
+    constexpr int                 k_chain_depth = 1000;
     std::vector<process_metadata> processes;
-    processes.reserve(CHAIN_DEPTH);
-    for(pid_t pid = 1; pid <= CHAIN_DEPTH; ++pid)
+    processes.reserve(k_chain_depth);
+    for(pid_t pid = 1; pid <= k_chain_depth; ++pid)
     {
         processes.push_back(make_meta(pid, pid == 1 ? -1 : pid - 1));
     }
 
     std::vector<artifact> rows;
-    rows.reserve(CHAIN_DEPTH);
-    for(pid_t pid = 1; pid <= CHAIN_DEPTH; ++pid)
+    rows.reserve(k_chain_depth);
+    for(pid_t pid = 1; pid <= k_chain_depth; ++pid)
     {
         rows.push_back(make_row(std::to_string(pid), pid));
     }
@@ -149,7 +149,7 @@ TEST(process_tree, deep_parent_chain_does_not_overflow_stack)
         cur = &cur->children.front();
         ++depth;
     }
-    EXPECT_EQ(depth, CHAIN_DEPTH);
+    EXPECT_EQ(depth, k_chain_depth);
 }
 
 TEST(process_tree, rows_sorted_descending_by_size)

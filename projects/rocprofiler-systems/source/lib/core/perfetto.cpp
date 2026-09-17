@@ -169,7 +169,7 @@ stop()
 }
 
 void
-post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
+post_process(tim::manager* timemory_manager, bool& perfetto_output_error)
 {
     using char_vec_t = std::vector<char>;
 
@@ -276,15 +276,15 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
                    ofs, _filename, std::ios::out | std::ios::binary))
             {
                 _fom.append("Error opening '%s'...", _filename.c_str());
-                _perfetto_output_error = true;
+                perfetto_output_error = true;
             }
             else
             {
                 // Write the trace into a file.
                 ofs.write(trace_data.data(), trace_data.size());
                 if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
-                if(_timemory_manager)
-                    _timemory_manager->add_file_output("protobuf", "perfetto", _filename);
+                if(timemory_manager)
+                    timemory_manager->add_file_output("protobuf", "perfetto", _filename);
                 output::registry::instance().register_file(
                     _filename, output::output_format::perfetto);
             }

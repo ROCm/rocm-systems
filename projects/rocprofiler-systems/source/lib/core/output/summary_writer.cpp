@@ -28,42 +28,42 @@ namespace rocprofsys::output
 
 namespace
 {
-inline constexpr std::size_t ISO_8601_BUFFER_BYTES = 32;
+inline constexpr std::size_t k_iso8601_buffer_bytes = 32;
 
-inline constexpr unsigned char UTF8_CONTINUATION_MASK = 0xC0;
-inline constexpr unsigned char UTF8_CONTINUATION_BITS = 0x80;
+inline constexpr unsigned char k_utf8_continuation_mask = 0xC0;
+inline constexpr unsigned char k_utf8_continuation_bits = 0x80;
 
-inline constexpr std::string_view UNKNOWN_VALUE_PLACEHOLDER = "?";
+inline constexpr std::string_view k_unknown_value_placeholder = "?";
 
-inline constexpr double BYTES_PER_KILOBYTE = 1000.0;
-inline constexpr double BYTES_PER_MEGABYTE = 1000.0 * BYTES_PER_KILOBYTE;
-inline constexpr double BYTES_PER_GIGABYTE = 1000.0 * BYTES_PER_MEGABYTE;
+inline constexpr double k_bytes_per_kilobyte = 1000.0;
+inline constexpr double k_bytes_per_megabyte = 1000.0 * k_bytes_per_kilobyte;
+inline constexpr double k_bytes_per_gigabyte = 1000.0 * k_bytes_per_megabyte;
 
-inline constexpr std::size_t FORMAT_NAME_WIDTH = 9;
-inline constexpr std::size_t FILE_SIZE_WIDTH   = 10;
-inline constexpr std::size_t MIN_BOX_WIDTH     = 40;
+inline constexpr std::size_t k_format_name_width = 9;
+inline constexpr std::size_t k_file_size_width   = 10;
+inline constexpr std::size_t k_min_box_width     = 40;
 
-inline constexpr std::string_view GLYPH_NODE_MARKER       = "● ";
-inline constexpr std::string_view GLYPH_SEPARATOR         = "│";
-inline constexpr std::string_view GLYPH_FILE_BRANCH_LAST  = "└─ ";
-inline constexpr std::string_view GLYPH_FILE_BRANCH_MID   = "├─ ";
-inline constexpr std::string_view GLYPH_CHILD_CONN_LAST   = "└─";
-inline constexpr std::string_view GLYPH_CHILD_CONN_MID    = "├─";
-inline constexpr std::string_view GLYPH_CHILD_INDENT_LAST = "    ";
-inline constexpr std::string_view GLYPH_CHILD_INDENT_MID  = "│   ";
-inline constexpr std::string_view GLYPH_ROOT_INDENT       = "  ";
-inline constexpr std::string_view GLYPH_BOX_TOP_LEFT      = "╭─ ";
-inline constexpr std::string_view GLYPH_BOX_BOTTOM_LEFT   = "╰";
-inline constexpr std::string_view GLYPH_BOX_LINE          = "─";
-inline constexpr std::string_view GLYPH_BOX_LEFT_RAIL     = "│ ";
+inline constexpr std::string_view k_glyph_node_marker       = "● ";
+inline constexpr std::string_view k_glyph_separator         = "│";
+inline constexpr std::string_view k_glyph_file_branch_last  = "└─ ";
+inline constexpr std::string_view k_glyph_file_branch_mid   = "├─ ";
+inline constexpr std::string_view k_glyph_child_conn_last   = "└─";
+inline constexpr std::string_view k_glyph_child_conn_mid    = "├─";
+inline constexpr std::string_view k_glyph_child_indent_last = "    ";
+inline constexpr std::string_view k_glyph_child_indent_mid  = "│   ";
+inline constexpr std::string_view k_glyph_root_indent       = "  ";
+inline constexpr std::string_view k_glyph_box_top_left      = "╭─ ";
+inline constexpr std::string_view k_glyph_box_bottom_left   = "╰";
+inline constexpr std::string_view k_glyph_box_line          = "─";
+inline constexpr std::string_view k_glyph_box_left_rail     = "│ ";
 
-inline constexpr unsigned char ESCAPE_BYTE          = 0x1B;
-inline constexpr unsigned char CSI_FINAL_BYTE_MIN   = 0x40;
-inline constexpr unsigned char CSI_FINAL_BYTE_MAX   = 0x7E;
-inline constexpr unsigned char C0_CONTROL_MAX       = 0x20;
-inline constexpr unsigned char TAB_BYTE             = 0x09;
-inline constexpr unsigned char LINE_FEED_BYTE       = 0x0A;
-inline constexpr unsigned char DEL_BYTE             = 0x7F;
+inline constexpr unsigned char k_escape_byte          = 0x1B;
+inline constexpr unsigned char k_csi_final_byte_min   = 0x40;
+inline constexpr unsigned char k_csi_final_byte_max   = 0x7E;
+inline constexpr unsigned char k_c0_control_max       = 0x20;
+inline constexpr unsigned char k_tab_byte             = 0x09;
+inline constexpr unsigned char k_line_feed_byte       = 0x0A;
+inline constexpr unsigned char k_del_byte             = 0x7F;
 }  // namespace
 
 run_metadata
@@ -76,7 +76,7 @@ run_metadata::capture(std::chrono::steady_clock::time_point load_baseline)
     std::tm    utc{};
     if(::gmtime_r(&time_t_value, &utc) != nullptr)
     {
-        std::array<char, ISO_8601_BUFFER_BYTES> buf{};
+        std::array<char, k_iso8601_buffer_bytes> buf{};
         if(std::strftime(buf.data(), buf.size(), "%Y-%m-%dT%H:%M:%SZ", &utc) > 0)
         {
             meta.run_label = buf.data();
@@ -93,8 +93,8 @@ std::size_t
 display_width(std::string_view text)
 {
     return static_cast<std::size_t>(std::ranges::count_if(text, [](char byte) {
-        return (static_cast<unsigned char>(byte) & UTF8_CONTINUATION_MASK) !=
-               UTF8_CONTINUATION_BITS;
+        return (static_cast<unsigned char>(byte) & k_utf8_continuation_mask) !=
+               k_utf8_continuation_bits;
     }));
 }
 
@@ -120,14 +120,14 @@ strip_terminal_control_chars(std::string_view text)
     for(std::size_t i = 0; i < text.size();)
     {
         const auto byte = static_cast<unsigned char>(text[i]);
-        // CSI sequence: ESC [ ... <final byte in CSI_FINAL_BYTE_MIN..CSI_FINAL_BYTE_MAX>
-        if(byte == ESCAPE_BYTE && i + 1 < text.size() && text[i + 1] == '[')
+        // CSI sequence: ESC [ ... <final byte in k_csi_final_byte_min..k_csi_final_byte_max>
+        if(byte == k_escape_byte && i + 1 < text.size() && text[i + 1] == '[')
         {
             std::size_t scan_index = i + 2;
             while(scan_index < text.size())
             {
                 const auto final_byte = static_cast<unsigned char>(text[scan_index]);
-                if(final_byte >= CSI_FINAL_BYTE_MIN && final_byte <= CSI_FINAL_BYTE_MAX)
+                if(final_byte >= k_csi_final_byte_min && final_byte <= k_csi_final_byte_max)
                 {
                     ++scan_index;
                     break;
@@ -139,8 +139,8 @@ strip_terminal_control_chars(std::string_view text)
         }
         // Drop other C0 controls + DEL; keep tab and newline so downstream
         // layout still sees structure.
-        if((byte < C0_CONTROL_MAX && byte != TAB_BYTE && byte != LINE_FEED_BYTE) ||
-           byte == DEL_BYTE)
+        if((byte < k_c0_control_max && byte != k_tab_byte && byte != k_line_feed_byte) ||
+           byte == k_del_byte)
         {
             ++i;
             continue;
@@ -180,7 +180,7 @@ format_duration(std::chrono::nanoseconds dur)
 {
     if(dur.count() <= 0)
     {
-        return std::string{ UNKNOWN_VALUE_PLACEHOLDER };
+        return std::string{ k_unknown_value_placeholder };
     }
     const double seconds = std::chrono::duration<double>(dur).count();
     return fmt::format("{:.2f}s", seconds);
@@ -189,21 +189,21 @@ format_duration(std::chrono::nanoseconds dur)
 std::string
 datasize_to_string(std::uint64_t size_bytes)
 {
-    if(size_bytes < BYTES_PER_KILOBYTE)
+    if(size_bytes < k_bytes_per_kilobyte)
     {
         return fmt::format("{} B", size_bytes);
     }
-    if(size_bytes < BYTES_PER_MEGABYTE)
+    if(size_bytes < k_bytes_per_megabyte)
     {
         return fmt::format("{:.2f} KB",
-                           static_cast<double>(size_bytes) / BYTES_PER_KILOBYTE);
+                           static_cast<double>(size_bytes) / k_bytes_per_kilobyte);
     }
-    if(size_bytes < BYTES_PER_GIGABYTE)
+    if(size_bytes < k_bytes_per_gigabyte)
     {
         return fmt::format("{:.2f} MB",
-                           static_cast<double>(size_bytes) / BYTES_PER_MEGABYTE);
+                           static_cast<double>(size_bytes) / k_bytes_per_megabyte);
     }
-    return fmt::format("{:.2f} GB", static_cast<double>(size_bytes) / BYTES_PER_GIGABYTE);
+    return fmt::format("{:.2f} GB", static_cast<double>(size_bytes) / k_bytes_per_gigabyte);
 }
 
 struct format_badge
@@ -282,8 +282,8 @@ file_row_line(std::string_view branch, const artifact& file,
 {
     const auto badge = badge_for(file.format);
     return fmt::format("{}{} {:<{}} {:>{}}  {}", branch, badge.glyph, badge.name,
-                       FORMAT_NAME_WIDTH, datasize_to_string(file.size_bytes),
-                       FILE_SIZE_WIDTH, display_path(file.path, cwd));
+                       k_format_name_width, datasize_to_string(file.size_bytes),
+                       k_file_size_width, display_path(file.path, cwd));
 }
 
 struct render_task
@@ -325,10 +325,10 @@ derive_output_dir(const run_metadata& meta, std::span<const artifact> rows)
     }
     if(rows.empty())
     {
-        return std::string{ UNKNOWN_VALUE_PLACEHOLDER };
+        return std::string{ k_unknown_value_placeholder };
     }
     auto parent = std::filesystem::path{ rows.front().path }.parent_path().string();
-    return parent.empty() ? std::string{ UNKNOWN_VALUE_PLACEHOLDER } : parent;
+    return parent.empty() ? std::string{ k_unknown_value_placeholder } : parent;
 }
 
 void
@@ -338,7 +338,7 @@ push_root_tasks(std::vector<render_task>& stack, const process_tree& tree)
     {
         stack.push_back({ .node         = &*root_it,
                          .connector    = std::string{},
-                         .child_prefix = std::string{ GLYPH_ROOT_INDENT } });
+                         .child_prefix = std::string{ k_glyph_root_indent } });
     }
 }
 
@@ -353,12 +353,12 @@ emit_file_rows(std::vector<std::string>& lines, const render_task& task,
         const bool last_entry = (index + 1 == file_count) && child_count == 0;
         const auto branch =
             task.child_prefix +
-            std::string{ last_entry ? GLYPH_FILE_BRANCH_LAST : GLYPH_FILE_BRANCH_MID };
+            std::string{ last_entry ? k_glyph_file_branch_last : k_glyph_file_branch_mid };
         lines.push_back(file_row_line(branch, node.rows[index], cwd));
     }
     if(file_count > 0 && child_count > 0)
     {
-        lines.push_back(task.child_prefix + std::string{ GLYPH_SEPARATOR });
+        lines.push_back(task.child_prefix + std::string{ k_glyph_separator });
     }
 }
 
@@ -375,10 +375,10 @@ push_child_tasks(std::vector<render_task>& stack, const render_task& task,
         const bool  last_child = (reverse_index + 1 == child_count);
         std::string child_conn =
             task.child_prefix +
-            std::string{ last_child ? GLYPH_CHILD_CONN_LAST : GLYPH_CHILD_CONN_MID };
+            std::string{ last_child ? k_glyph_child_conn_last : k_glyph_child_conn_mid };
         std::string next_prefix =
             task.child_prefix +
-            std::string{ last_child ? GLYPH_CHILD_INDENT_LAST : GLYPH_CHILD_INDENT_MID };
+            std::string{ last_child ? k_glyph_child_indent_last : k_glyph_child_indent_mid };
         stack.push_back({ .node         = &node.children[reverse_index],
                          .connector    = std::move(child_conn),
                          .child_prefix = std::move(next_prefix) });
@@ -396,7 +396,7 @@ render_header(const run_metadata& meta, const process_tree& tree,
 {
     std::string run_line =
         fmt::format("Run: {}   Duration: {}   Processes: {}",
-                    meta.run_label.empty() ? std::string{ UNKNOWN_VALUE_PLACEHOLDER }
+                    meta.run_label.empty() ? std::string{ k_unknown_value_placeholder }
                                            : meta.run_label,
                     format_duration(meta.duration), count_nodes(tree.roots()));
     run_line += fmt::format("   Total output: {}", datasize_to_string(sum_sizes(rows)));
@@ -424,12 +424,12 @@ render_tree(const process_tree& tree, pid_t main_pid)
 
         if(task.node == nullptr)
         {
-            lines.push_back(task.child_prefix + std::string{ GLYPH_SEPARATOR });
+            lines.push_back(task.child_prefix + std::string{ k_glyph_separator });
             continue;
         }
 
         const process_node& node = *task.node;
-        lines.push_back(task.connector + std::string{ GLYPH_NODE_MARKER } +
+        lines.push_back(task.connector + std::string{ k_glyph_node_marker } +
                         process_label(node, main_pid));
         emit_file_rows(lines, task, node, cwd);
         push_child_tasks(stack, task, node);
@@ -443,7 +443,7 @@ std::size_t
 box_width(std::span<const std::string> header_lines,
           std::span<const std::string> tree_lines)
 {
-    std::size_t width = MIN_BOX_WIDTH;
+    std::size_t width = k_min_box_width;
     for(const auto& line : header_lines)
     {
         width = std::max(width, display_width(line) + 2);  // + 2 for the "│ " rail
@@ -461,28 +461,28 @@ void
 append_box(std::string& out, std::string_view title, std::span<const std::string> lines,
            std::size_t width)
 {
-    const std::string head      = fmt::format("{}{} ", GLYPH_BOX_TOP_LEFT, title);
+    const std::string head      = fmt::format("{}{} ", k_glyph_box_top_left, title);
     const std::size_t head_cols = display_width(head);
 
     const std::size_t reserve_hint =
         std::accumulate(lines.begin(), lines.end(), out.size() + head_cols + width + 4,
                         [](std::size_t acc, const std::string& line) {
-                            return acc + line.size() + GLYPH_BOX_LEFT_RAIL.size() + 1;
+                            return acc + line.size() + k_glyph_box_left_rail.size() + 1;
                         });
     out.reserve(reserve_hint);
 
     out += head;
     if(width > head_cols)
     {
-        out += repeat_glyph(GLYPH_BOX_LINE, width - head_cols);
+        out += repeat_glyph(k_glyph_box_line, width - head_cols);
     }
     out += "\n";
     for(const auto& line : lines)
     {
-        fmt::format_to(std::back_inserter(out), "{}{}\n", GLYPH_BOX_LEFT_RAIL, line);
+        fmt::format_to(std::back_inserter(out), "{}{}\n", k_glyph_box_left_rail, line);
     }
-    out += GLYPH_BOX_BOTTOM_LEFT;
-    out += repeat_glyph(GLYPH_BOX_LINE, width - 1);
+    out += k_glyph_box_bottom_left;
+    out += repeat_glyph(k_glyph_box_line, width - 1);
     out += "\n";
 }
 

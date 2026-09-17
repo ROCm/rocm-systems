@@ -112,7 +112,7 @@ setup() ROCPROFSYS_INTERNAL_API;
 
 namespace
 {
-const auto         library_load_time = std::chrono::steady_clock::now();
+const auto         k_library_load_time = std::chrono::steady_clock::now();
 std::atomic<bool>  rocprofsys_init_library_done{ false };
 std::atomic<pid_t> rocprofsys_init_tooling_done{ 0 };
 std::atomic<bool>  rocprofsys_finalization_done{ false };
@@ -1311,7 +1311,7 @@ rocprofsys_finalize_hidden(void)
         const auto rows = output::registry::instance().rows();
         const auto tree =
             output::process_tree{ rows, output::registry::instance().processes() };
-        const auto meta = output::run_metadata::capture(library_load_time);
+        const auto meta = output::run_metadata::capture(k_library_load_time);
         output::write_summary(std::cout, tree, meta, rows);
     }
 

@@ -35,8 +35,8 @@ get_file_size(const std::string& path)
 registry&
 registry::instance()
 {
-    static registry inst{};
-    return inst;
+    static registry s_inst{};
+    return s_inst;
 }
 
 void
@@ -69,7 +69,7 @@ registry::record_process(process_metadata meta)
         return;
     }
 
-    if(meta.ppid != NO_PID)
+    if(meta.ppid != k_no_pid)
     {
         found->second.value.ppid = meta.ppid;
     }

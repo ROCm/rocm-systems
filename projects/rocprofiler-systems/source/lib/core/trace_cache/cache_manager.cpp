@@ -29,7 +29,7 @@ cache_manager::get_instance()
 }
 
 void
-cache_manager::post_process_bulk(progress::tracker& _tracker)
+cache_manager::post_process_bulk(progress::tracker& tracker)
 {
     LOG_TRACE("Starting trace cache bulk post-processing");
 
@@ -69,7 +69,7 @@ cache_manager::post_process_bulk(progress::tracker& _tracker)
             std::make_shared<agent_manager>(get_agent_manager_instance().get_agents())));
 
         LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
-        post_processor processor{ _tracker };
+        post_processor processor{ tracker };
 
         const auto combine_traces = config::get_perfetto_combined_traces();
 
