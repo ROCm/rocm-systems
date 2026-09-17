@@ -81,7 +81,8 @@ RCCL build & installation helper script
        --verbose               Show compile commands
 
   Available RCCL-specific CMake options for --cmake-options:
-    -DBUILD_PLUGIN_EXAMPLES=ON             Build plugin example libraries: net, tuner, profiler, env, gin, mixed, proxytrace, accl (default: OFF)
+    -DBUILD_PROFILER_ACCL=OFF              Omit the ACCL timing-decomposition profiler (default: ON on Linux)
+    -DBUILD_PLUGIN_EXAMPLES=ON             Build plugin example libraries: net, tuner, profiler, env, gin, mixed, proxytrace (default: OFF)
     -DDWORDX4_INTRINSICS=OFF              Disable dwordx4 intrinsics (default: ON)
     -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)
     -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)

@@ -76,9 +76,17 @@ The last line of every file is a summary, written on every clean finalize:
 # CMake (standalone)
 cmake -S . -B build && cmake --build build
 
-# CMake (as part of RCCL build — automatic when BUILD_PLUGIN_EXAMPLES=ON)
-cmake -DBUILD_PLUGIN_EXAMPLES=ON ...
+# CMake (as part of a Linux RCCL build — enabled by default)
+cmake ...
+
+# Optional: omit the plugin from an RCCL build/package
+cmake -DBUILD_PROFILER_ACCL=OFF ...
 ```
+
+An installed RCCL build places the plugin at `lib/librccl-profiler-accl.so`
+and the report utility at `share/rccl/accl/accl_report.py`. The plugin is a
+separate host-only shared library and is not linked into `librccl.so`; it is
+loaded only when selected with `NCCL_PROFILER_PLUGIN`.
 
 ## Usage
 

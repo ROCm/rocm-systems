@@ -85,8 +85,9 @@ option(BUILD_BFD                               "Enable custom backtrace (if bfd.
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
 option(BUILD_TESTS                             "Build unit test programs"                      OFF)
+option(BUILD_PROFILER_ACCL                     "Build the ACCL timing-decomposition profiler"  ${NCCL_OS_LINUX})
 option(BUILD_PROFILER_INSPECTOR                "Build the NCCL Inspector profiler plugin"      ${BUILD_TESTS})
-option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example libraries (net, tuner, profiler, env, gin, mixed, proxytrace, accl)" OFF)
+option(BUILD_PLUGIN_EXAMPLES                   "Build plugin example libraries (net, tuner, profiler, env, gin, mixed, proxytrace)" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
 set(ENABLE_FULL_COVERAGE "OFF" CACHE STRING
@@ -797,6 +798,14 @@ endif()
 option(ENABLE_MPI_TESTS "Enable MPI-based tests" OFF)
 add_subdirectory(src)
 
+# ACCL timing-decomposition profiler plugin. This is a separately loaded,
+# host-only shared library, so building it for every RCCL package does not add
+# instrumentation or runtime overhead to librccl.so. Set BUILD_PROFILER_ACCL=OFF
+# for installations that do not want to ship the optional plugin.
+if(BUILD_PROFILER_ACCL)
+  add_subdirectory(plugins/profiler/accl)
+endif()
+
 # NCCL Inspector profiler plugin. Built as its own .so and loaded at runtime via
 # NCCL_PROFILER_PLUGIN; the MPI tests pick up the in-tree build automatically.
 if(BUILD_PROFILER_INSPECTOR)
@@ -927,7 +936,6 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/tuner/example)
     add_subdirectory(plugins/profiler/example)
     add_subdirectory(plugins/profiler/proxytrace)
-    add_subdirectory(plugins/profiler/accl)
     add_subdirectory(plugins/env/example)
     add_subdirectory(plugins/env/json)
     add_subdirectory(plugins/gin/example)
