@@ -2474,7 +2474,14 @@ public:
     const bool moi_forbid_overflow = moi_forbid_overflow_;
     const uint32_t moi_runtime_sample_stride = moi_runtime_sample_stride_;
     const uint32_t moi_runtime_sample_offset = moi_runtime_sample_offset_;
-    const auto moi_cell_selection = config_ ? config_->moi_sampled_cell_selection : std::nullopt;
+    // Snapshot initialized scalars before clear_unlocked() resets config_.
+    // GCC 13 otherwise loses the optional engagement proof across this function.
+    bool moi_cell_selection_configured = false;
+    rocjitsu::ConSanSampleSelector moi_cell_selection;
+    if (config_ && config_->moi_sampled_cell_selection) {
+      moi_cell_selection_configured = true;
+      moi_cell_selection = *config_->moi_sampled_cell_selection;
+    }
     const KernelPrivateDispatchRegistry::DispatchSummary dispatch_summary =
         KernelPrivateDispatchRegistry::instance().dispatch_summary();
     const std::vector<KernelPrivateDispatchRegistry::AllowlistEntrySummary> allowlist_summary =
@@ -2746,8 +2753,8 @@ public:
                      "kernel object\n",
                      static_cast<unsigned long long>(moi_report_summary.buffer_count),
                      static_cast<unsigned long long>(dispatch_summary.packet_count));
-      } else if (moi_cell_selection &&
-                 (moi_runtime_sample_stride > 1u || moi_cell_selection->stride > 1u)) {
+      } else if (moi_cell_selection_configured &&
+                 (moi_runtime_sample_stride > 1u || moi_cell_selection.stride > 1u)) {
         std::fprintf(stderr,
                      "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_REQUIRE_RECORDS requested, but %llu auto "
                      "MOI report buffer(s) contained zero visible records after %llu "
@@ -2759,7 +2766,7 @@ public:
                      static_cast<unsigned long long>(moi_report_summary.buffer_count),
                      static_cast<unsigned long long>(dispatch_summary.instrumented_packet_count),
                      moi_runtime_sample_stride, moi_runtime_sample_offset,
-                     moi_cell_selection->stride, moi_cell_selection->offset);
+                     moi_cell_selection.stride, moi_cell_selection.offset);
       } else if (moi_runtime_sample_stride > 1u) {
         std::fprintf(stderr,
                      "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_REQUIRE_RECORDS requested, but %llu auto "
