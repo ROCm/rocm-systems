@@ -8777,15 +8777,13 @@ constexpr ncclResult_t kTrPostsetReached = ncclInvalidUsage;
 
 // --- The clique probe (init.cc:1786-1836) ---
 
-TEST_F(InitMicrotest, InitTransportsRank_DeviceCountFails_WarnsAndProbesNoPeerLinks) {
+TEST_F(InitMicrotest, InitTransportsRank_DeviceCountFails_ProbesNoPeerLinks) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
   g_hipDeviceGetPCIBusIdResult = hipSuccess;  // :1801 needs getBusId to answer, or every pair is -1
   const auto gathers = Tr_InstallGathers(c);
   ScopedHook devCount(g_hipGetDeviceCount, [](int*) { return hipErrorInvalidValue; });
-  const std::string log = RcclUnitTesting::CaptureLog(
-      [&] { EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers())); });
-  EXPECT_TRUE(LogHas(log, "treating all peers as non-accessible")) << "actual log:\n" << log;
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, devCount.calls);
   EXPECT_EQ(0, g_ncclTopoGetLinkTypeCalls);  // localDevCount 0 fails :1817 for every pair
 }

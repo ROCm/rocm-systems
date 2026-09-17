@@ -109,6 +109,8 @@ private:
 #include <unistd.h>
 #include <vector>
 
+#include "fakes/sym_kernels_fakes.h"
+
 // The host location types, chosen per ROCm version.
 //
 // hipMemLocationTypeHost / ...HostNuma only exist from ROCm 7.12
@@ -3553,7 +3555,7 @@ TEST_F(DevrWindowRegisterInGroupSymTest, CollSymmetricFlag_InitialisesSymKernels
   // winFlags alone does not pin this: symWindowCreate stores it unconditionally,
   // so the whole symk block could be deleted and the flag assertion would still
   // hold. The init call is the behaviour the name claims.
-  ScopedHook symk(g_devrSymkInitOnce, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook symk(g_symkInitOnce, [](ncclComm*) { return ncclSuccess; });
 
   ncclWindow_t out = nullptr;
   ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, NCCL_WIN_COLL_SYMMETRIC, &out), ncclSuccess);
@@ -3565,7 +3567,7 @@ TEST_F(DevrWindowRegisterInGroupSymTest, CollSymmetricFlag_InitialisesSymKernels
 // must not pay for it. The counterpart to the case above.
 TEST_F(DevrWindowRegisterInGroupSymTest, WithoutCollSymmetricFlag_SkipsSymKernelInit) {
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
-  ScopedHook symk(g_devrSymkInitOnce, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook symk(g_symkInitOnce, [](ncclComm*) { return ncclSuccess; });
 
   ncclWindow_t out = nullptr;
   ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);

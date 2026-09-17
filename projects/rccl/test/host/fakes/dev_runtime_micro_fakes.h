@@ -43,7 +43,6 @@
 extern std::function<ncclTeam_t(ncclComm_t)> g_devrTeamWorld;
 
 extern std::function<ncclResult_t(void*, int, int, int)> g_devrBootstrapBarrier;
-extern std::function<ncclResult_t(struct ncclComm*)> g_devrSymkInitOnce;
 extern std::function<ncclResult_t(struct ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void*)>
     g_devrIntruAddressMapInsert;
 

@@ -21,21 +21,18 @@
 struct ncclComm;
 struct ncclTaskColl;
 
-// LINK FLOOR ONLY: a seam marked `// UNDRIVEN` is declared so the binary links
-// and so an accidental call is visible, NOT because its path is covered.
-
 // -------------------------------------------------------------------------
 // Tuning-override seams (rccl_wrap.cc:109-1751). All default to no-ops so a test
 // sees the *unmodified* selection, then overrides exactly one.
 // -------------------------------------------------------------------------
 extern std::function<void(struct ncclComm*, size_t const&, struct ncclTaskColl*)>
-    g_rcclUpdateCollectiveProtocol;  // UNDRIVEN
+    g_rcclUpdateCollectiveProtocol;
 extern std::function<void(struct ncclComm*, size_t const&, struct ncclTaskColl*)>
-    g_rcclSetPipelining;  // UNDRIVEN
+    g_rcclSetPipelining;
 extern std::function<ncclResult_t(struct ncclComm*, ncclFunc_t, size_t, int&)>
     g_rcclOverrideChannels;
 extern int g_rcclOverrideChannelsCalls;
-extern bool g_rcclIsArchSupportedForFunc;  // UNDRIVEN
+extern bool g_rcclIsArchSupportedForFunc;
 
 // RCCL_PARAM(DirectReduceScatterThreshold). Only referenced once a test hooks
 // ncclRegisterCollBuffers: the aborting stub makes the rest of the loop unreachable.
@@ -46,15 +43,15 @@ extern int g_rcclUpdateCollectiveProtocolCalls;
 extern int g_rcclSetPipeliningCalls;
 extern int g_rcclUpdateThreadThresholdCalls;
 extern int g_rcclOptThreadBlockSizeCalls;
-extern ncclResult_t g_rcclOverrideAlgorithmResult;  // UNDRIVEN
-extern ncclResult_t g_rcclOverrideProtocolResult;  // UNDRIVEN
+extern ncclResult_t g_rcclOverrideAlgorithmResult;
+extern ncclResult_t g_rcclOverrideProtocolResult;
 extern int g_rcclOverrideAlgorithmCalls;
 extern int g_rcclOverrideProtocolCalls;
 
 // CE (copy-engine) allreduce gates (rccl_wrap.cc:834-855).
-extern bool g_rcclCeAllReduceAllowed;  // UNDRIVEN
-extern int g_rcclCeAllReduceGraphLatchTickCalls;  // UNDRIVEN
-extern bool g_rcclCeAllReduceGraphLatchTickLastCapturing;  // UNDRIVEN
+extern bool g_rcclCeAllReduceAllowed;
+extern int g_rcclCeAllReduceGraphLatchTickCalls;
+extern bool g_rcclCeAllReduceGraphLatchTickLastCapturing;
 
 // -------------------------------------------------------------------------
 // WARP_SPEED seams (rccl_wrap.cc:1448+). enqueue.cc calls these from five sites
@@ -74,15 +71,15 @@ extern bool g_rcclCeAllReduceGraphLatchTickLastCapturing;  // UNDRIVEN
 // one: report unsupported, return the channel count unchanged, succeed, no-op.
 // That keeps every test written against the OFF configuration honest on both.
 // -------------------------------------------------------------------------
-extern bool g_rcclWarpSpeedSupported;  // UNDRIVEN
-extern int g_rcclWarpSpeedSupportedCalls;  // UNDRIVEN
-extern ncclResult_t g_rcclSetWarpSpeedAutoResult;  // UNDRIVEN
-extern int g_rcclSetWarpSpeedAutoCalls;  // UNDRIVEN
-extern int g_rcclSetWarpSpeedCUsCalls;  // UNDRIVEN
+extern bool g_rcclWarpSpeedSupported;
+extern int g_rcclWarpSpeedSupportedCalls;
+extern ncclResult_t g_rcclSetWarpSpeedAutoResult;
+extern int g_rcclSetWarpSpeedAutoCalls;
+extern int g_rcclSetWarpSpeedCUsCalls;
 // Applied to the caller's nc by rcclWarpSpeedAdjustChannels. Identity by
 // default; production may shrink the count.
 extern std::function<int(struct ncclComm*, struct ncclTaskColl*, int)>
-    g_rcclWarpSpeedAdjustChannels;  // UNDRIVEN
+    g_rcclWarpSpeedAdjustChannels;
 // RCCL_PARAM(WarpSpeedForceEnable, "WARP_SPEED_FORCE_ENABLE", 0) -- 0 matches
 // the env var unset, so willEnableWarpSpeed falls through to the auto check below.
 extern int64_t g_rcclParamWarpSpeedForceEnable;

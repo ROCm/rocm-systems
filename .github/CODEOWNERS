@@ -132,3 +132,6 @@
 /projects/hipfile/docs/                                               @ROCm/hipfile-docs-reviewers @ROCm/hipfile-reviewers
 
 /projects/rocprof-trace-decoder/**/*.md                               @ROCm/rocm-devtools-team @ROCm/rocm-documentation
+
+# Runtimes
+/runtimes/                                                            @atgutier @saleelk

@@ -50,10 +50,13 @@ struct allocationTracker allocTracker[32 /* MAX_ALLOC_TRACK_NGPU */] = {};
 // Arch / topology / busId helpers
 // ---------------------------------------------------------------------------
 
-bool IsArchMatch(char const* /*arch*/, char const* /*target*/)
-{
-    return false;
-}
+// IsArchMatch is NOT faked here: wrap-test.cc (also part of this binary,
+// since rccl_wrap.cc's tests need the real prefix-match behaviour for
+// rcclIsArchSupportedForFunc et al.) compiles the real archinfo.cc, which
+// defines it. p2p.cc's only IsArchMatch call is inside p2pSendSetup, which no
+// p2p-test.cc case reaches, so replacing the former hardcoded-false fake does
+// not change existing P2P-test behavior. A future test that reaches that path
+// must install a real topology rather than relying on this historical stub.
 
 ncclResult_t busIdToInt64(const char* /*busId*/, int64_t* id)
 {

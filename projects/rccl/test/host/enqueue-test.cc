@@ -1954,14 +1954,14 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeGfx950_IsEnabled) {
 }
 
 TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_Gfx950WithAinic_IsDisabled) {
-  // The `!rcclUseAinic()` conjunct -- the reason g_rcclUseAinic is a seam in
+  // The `!rcclUseAinic()` conjunct -- the reason g_rcclUseAinicValue is a seam in
   // fakes/transport_stubs.cc rather than the fail-loud stub it used to be.
   // Without it the flag stays false in every test and dropping the conjunct
   // survives. Differential with MultiNodeGfx950_IsEnabled, which is identical
   // but for the AINIC flag.
   BatchComm bc(/*nNodes=*/2, "gfx950");
   SetBatchParam(-1);
-  g_rcclUseAinic = true;
+  g_rcclUseAinicValue = true;
   EXPECT_EQ(0, rcclEffectiveP2pBatchEnable(bc.get()))
       << "gfx950 with AINIC must not enable p2p batching";
 }
@@ -3227,6 +3227,34 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_MinNchannelsIsAFloorOnTheShrink) {
                                          /*simInfo=*/nullptr));
   EXPECT_EQ(4, task2.nMaxChannels)
       << "NCCL_MIN_NCHANNELS must floor the shrink; unclamped was " << unclamped;
+}
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_PatMaxNchannelsClampsTheChannelCount) {
+  AlgoInfoComm cc;
+  cc.get()->nChannels = 8;
+  auto task = CostTask(ncclFuncAllGather);
+  CostTable tbl;
+  tbl.t[NCCL_ALGO_PAT][NCCL_PROTO_SIMPLE] = 0.5f;
+  g_paramMaxNchannels = 3;
+
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, /*nBytes=*/2 << 20, tbl.ptr(),
+                                         /*simInfo=*/nullptr));
+  EXPECT_EQ(NCCL_ALGO_PAT, task.algorithm);
+  EXPECT_EQ(3, task.nMaxChannels) << "positive NCCL_MAX_NCHANNELS must clamp PAT's channel count";
+}
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_PatUnsetMaxNchannelsDoesNotClamp) {
+  AlgoInfoComm cc;
+  cc.get()->nChannels = 8;
+  auto task = CostTask(ncclFuncAllGather);
+  CostTable tbl;
+  tbl.t[NCCL_ALGO_PAT][NCCL_PROTO_SIMPLE] = 0.5f;
+  g_paramMaxNchannels = -2;
+
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, /*nBytes=*/2 << 20, tbl.ptr(),
+                                         /*simInfo=*/nullptr));
+  EXPECT_EQ(NCCL_ALGO_PAT, task.algorithm);
+  EXPECT_EQ(8, task.nMaxChannels) << "the production -2 sentinel must leave PAT's channel count alone";
 }
 
 // Guards the fix for the &tablePtr defect: topoGetAlgoInfo must read the cost
