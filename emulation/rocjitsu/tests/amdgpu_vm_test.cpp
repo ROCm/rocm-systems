@@ -2284,8 +2284,7 @@ TEST(GpuMemoryTest, ClientCopyBypassesDaemonIdentityTranslation) {
   close(address_pipe[1]);
   close(release_pipe[0]);
   uint64_t source_address = 0;
-  ASSERT_EQ(read(address_pipe[0], &source_address, sizeof(source_address)),
-            sizeof(source_address));
+  ASSERT_EQ(read(address_pipe[0], &source_address, sizeof(source_address)), sizeof(source_address));
 
   amdgpu::GpuMemory memory("memory");
   memory.set_passthrough(true);
