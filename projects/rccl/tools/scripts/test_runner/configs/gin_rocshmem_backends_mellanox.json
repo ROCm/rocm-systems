@@ -212,6 +212,7 @@
       },
       "tests": [
         { "name": "BarrierSession_LsaOnly",      "num_gpus": 4 },
+        { "name": "WindowRegister_AfterDevCommCreate" },
         { "name": "BarrierSession_Hybrid",       "num_gpus": 4 },
         { "name": "BarrierPools_NoCrossTalk",    "num_gpus": 4 },
         { "name": "AlltoallHybrid_Reference",    "num_gpus": 4 },
