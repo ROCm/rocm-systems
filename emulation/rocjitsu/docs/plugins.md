@@ -11,7 +11,7 @@ wavefront dispatches, memory instructions, register reads, barriers, etc.
 | `RaceDetectorPlugin` | `race_detector/` | Hooks memory instructions, register reads, barriers, and `s_waitcnt` to detect data races. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
 | `KernelLoggingPlugin` | `logging/` | Logs kernel dispatches and detects MMA instruction usage. |
 | `ThroughputPlugin` | `throughput/` | Reports per-dispatch and aggregate wave-instruction MIPS with an exclusive instruction-family breakdown. |
-| `PerfsimPlugin` | `perfsim/` | Adapts gfx1250 execution observations to an external Perfsim FFM-v8 backend. Built only when explicitly enabled. See the [Perfsim adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md). |
+| `PerfsimPlugin` | `perfsim/` | Adapts gfx1250 execution observations to an external Perfsim FFM-v13 backend. Built only when explicitly enabled. See the [Perfsim adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md). |
 
 The race detector plugin contains both the core detection algorithm
 (`race_detector/core/`) and the rocjitsu adapter (`race_detector/plugin.h`).

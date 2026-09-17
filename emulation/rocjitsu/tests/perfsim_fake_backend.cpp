@@ -12,12 +12,12 @@
 #include <string>
 #include <type_traits>
 
-// Keep this fixture independent from observer_abi_v8.h. These declarations
-// model the native C++ surface consumed by an external FFM v8 backend, so the
+// Keep this fixture independent from observer_abi_v13.h. These declarations
+// model the native C++ surface consumed by an external FFM v13 backend, so the
 // adapter and its test backend cannot accidentally agree on the same bad ABI
 // mirror. In particular, use FFM's bitfields rather than the adapter's raw-byte
 // representation.
-namespace foreign_ffm_v8 {
+namespace foreign_ffm_v13 {
 
 using EntityId = std::uint64_t;
 using FfmResourceType = std::uint32_t;
@@ -26,7 +26,7 @@ using FfmWaitName = std::uint32_t;
 
 inline constexpr std::uint32_t FFM_MAX_WAVE_SIZE = 64;
 inline constexpr std::uint32_t FFM_OBSERVER_PLUGIN_OLDEST_SUPPORTED_API_VERSION = 5;
-inline constexpr std::uint32_t FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION = 8;
+inline constexpr std::uint32_t FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION = 13;
 
 struct FfmObserverInstruction {
   std::uint64_t pc;
@@ -46,6 +46,7 @@ struct FfmDispatchMetadata {
   std::uint32_t num_waves_per_wg;
   std::uint32_t grid_size[3];
   std::uint32_t workgroup_size[3];
+  const char *dispatch_name;
 };
 
 struct FfmClusterInfo {
@@ -115,13 +116,25 @@ struct FfmTdmMemoryAccess {
   std::uint32_t data_size_bytes;
   std::uint8_t is_read : 1;
   std::uint8_t is_write : 1;
+  std::uint32_t tile_dim0;
+  std::uint32_t tile_dim1;
+  std::uint32_t data_size;
+  std::int64_t tensor_dim0_stride;
+  std::int64_t tensor_dim1_stride;
 };
 
 struct FfmResourceAccess;
 struct FfmBarrier;
 
+using FfmLogLevel = std::uint32_t;
+inline constexpr FfmLogLevel FFM_LOG_DEBUG = 0;
+inline constexpr FfmLogLevel FFM_LOG_INFO = 1;
+inline constexpr FfmLogLevel FFM_LOG_WARN = 2;
+inline constexpr FfmLogLevel FFM_LOG_ERROR = 3;
+
 struct FfmHostApi {
   std::uint32_t api_version;
+  void (*log)(FfmLogLevel level, const char *msg);
 };
 
 struct FfmObserverPluginApi {
@@ -152,21 +165,28 @@ static_assert(std::is_standard_layout_v<FfmMemoryAccess>);
 static_assert(std::is_trivially_copyable_v<FfmMemoryAccess>);
 static_assert(sizeof(FfmMemoryAccess) == 592);
 static_assert(offsetof(FfmMemoryAccess, resource_type) == 580);
-static_assert(sizeof(FfmTdmMemoryAccess) == 72);
+static_assert(sizeof(FfmDispatchMetadata) == 64);
+static_assert(offsetof(FfmDispatchMetadata, dispatch_name) == 56);
+static_assert(sizeof(FfmTdmMemoryAccess) == 104);
 static_assert(offsetof(FfmTdmMemoryAccess, data_size_bytes) == 64);
+static_assert(offsetof(FfmTdmMemoryAccess, tile_dim0) == 72);
+static_assert(offsetof(FfmTdmMemoryAccess, tensor_dim0_stride) == 88);
+static_assert(sizeof(FfmHostApi) == 16);
+static_assert(offsetof(FfmHostApi, log) == 8);
 static_assert(sizeof(FfmObserverPluginApi) == 168);
 static_assert(offsetof(FfmObserverPluginApi, on_instruction) == 104);
 static_assert(offsetof(FfmObserverPluginApi, on_shutdown) == 144);
 static_assert(offsetof(FfmObserverPluginApi, on_memory_access) == 152);
 static_assert(offsetof(FfmObserverPluginApi, on_tdm_memory_access) == 160);
 
-} // namespace foreign_ffm_v8
+} // namespace foreign_ffm_v13
 
 namespace {
 
-using namespace foreign_ffm_v8;
+using namespace foreign_ffm_v13;
 
 std::mutex trace_mutex;
+void (*host_log)(FfmLogLevel, const char *) = nullptr;
 
 std::uint8_t memory_flag_byte(bool is_atomic, bool is_read, bool is_write) {
   FfmMemoryAccess access{};
@@ -217,6 +237,9 @@ void on_init(const FfmHostApi *host) {
     trace("init_rejected " + std::to_string(version));
     return;
   }
+  host_log = host->log;
+  if (mode_is("host_log") && host_log)
+    host_log(FFM_LOG_WARN, "fake backend initialized");
   trace("init " + std::to_string(version));
 }
 
@@ -232,6 +255,7 @@ void append_dispatch(std::ostringstream &out, const FfmDispatchMetadata *dispatc
     out << ' ' << value;
   for (uint32_t value : dispatch->workgroup_size)
     out << ' ' << value;
+  out << ' ' << (dispatch->dispatch_name ? dispatch->dispatch_name : "<null>");
 }
 
 void on_dispatch_begin(const FfmDispatchMetadata *dispatch) {
@@ -309,13 +333,20 @@ void on_tdm_memory_access(const FfmTdmMemoryAccess *access) {
   append_wave(out, access->wave_info);
   out << ' ' << access->instruction_id << ' ' << access->num_addresses << ' '
       << access->data_size_bytes << ' ' << static_cast<int>(access->is_read) << ' '
-      << static_cast<int>(access->is_write);
+      << static_cast<int>(access->is_write) << ' ' << access->tile_dim0 << ' ' << access->tile_dim1
+      << ' ' << access->data_size << ' ' << access->tensor_dim0_stride << ' '
+      << access->tensor_dim1_stride;
   for (uint32_t i = 0; i < access->num_addresses; ++i)
     out << ' ' << access->addresses[i];
   trace(out.str());
 }
 
-void on_shutdown() { trace("shutdown"); }
+void on_shutdown() {
+  if (mode_is("host_log") && host_log)
+    host_log(FFM_LOG_ERROR, "fake backend shutting down");
+  host_log = nullptr;
+  trace("shutdown");
+}
 
 FfmObserverPluginApi api{};
 
@@ -324,9 +355,16 @@ template <typename Callback> void maybe_remove(Callback &callback, const char *n
     callback = nullptr;
 }
 
-FfmObserverPluginApi *configure_api(std::uint32_t api_version) {
+} // namespace
+
+extern "C" __attribute__((visibility("default"))) foreign_ffm_v13::FfmObserverPluginApi *
+ffm_observer_plugin_get_api(uint32_t host_api_version) {
+  trace("get_api " + std::to_string(host_api_version));
+  if (mode_is("reject_all") || !has_expected_native_bitfield_layout() || host_api_version != 13)
+    return nullptr;
+
   api = {};
-  api.api_version = api_version;
+  api.api_version = mode_is("old_version") ? 12 : (mode_is("bad_version") ? 14 : 13);
   api.name = "rocjitsu-perfsim-fake";
   api.on_init = on_init;
   api.on_dispatch_begin = on_dispatch_begin;
@@ -344,21 +382,6 @@ FfmObserverPluginApi *configure_api(std::uint32_t api_version) {
   maybe_remove(api.on_tdm_memory_access, "missing_on_tdm_memory_access");
   maybe_remove(api.on_shutdown, "missing_on_shutdown");
   return &api;
-}
-
-} // namespace
-
-extern "C" __attribute__((visibility("default"))) foreign_ffm_v8::FfmObserverPluginApi *
-ffm_observer_plugin_get_api(uint32_t host_api_version) {
-  trace("get_api " + std::to_string(host_api_version));
-  if (mode_is("reject_all") || !has_expected_native_bitfield_layout())
-    return nullptr;
-  if (mode_is("newer_backend") && host_api_version >= 13)
-    return configure_api(13);
-  if (host_api_version != 8)
-    return nullptr;
-
-  return configure_api(mode_is("old_version") ? 7 : (mode_is("bad_version") ? 9 : 8));
 }
 
 __attribute__((destructor)) static void on_unload() { trace("unload"); }

@@ -2,8 +2,8 @@
 
 ## What is it
 
-This optional Linux plugin forwards supported RocJITsu execution events
-to a separately supplied performance-simulation backend.
+This optional Linux plugin forwards supported gfx1250 RocJITsu execution events
+to a separately supplied Perfsim FFM-v13 backend.
 
 ## How to install
 
@@ -66,6 +66,24 @@ Configure Perfsim through its own environment, then launch the workload:
 /absolute/path/to/install/bin/rocjitsu \
   --config /absolute/path/to/gfx1250-config.json -- ./application
 ```
+
+## Backend ABI
+
+The adapter contains a private, non-installed declaration of only the FFM
+observer API-v13 binary prefix that it consumes. The declaration is limited to
+the validated little-endian Linux LP64 GCC/Clang ABI. The separately built
+Perfsim library must export `ffm_observer_plugin_get_api`, accept an API-v13
+request, return an API-v13 table, and provide the required lifecycle,
+instruction, regular-memory, and tensor-DMA callbacks.
+
+The adapter forwards the v9 dispatch name from dispatch-owned storage, provides
+the v12 host logger through the configured RocJITsu sink, and forwards the v13
+tensor-DMA descriptor geometry. Tensor-DMA descriptor strides are converted
+from element units to the byte units required by the v13 callback.
+
+FFM v13 does not expose a table size or ABI fingerprint, and `on_init` returns
+no status. Qualify the exact Perfsim build with a known dispatch and require a
+nonempty report containing that dispatch.
 
 ## Real-world example: GPT-OSS kernels
 

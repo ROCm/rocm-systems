@@ -10,7 +10,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
-#include "rocjitsu/vm/plugins/perfsim/observer_abi_v8.h"
+#include "rocjitsu/vm/plugins/perfsim/observer_abi_v13.h"
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 #include "scoped_temp.h"
@@ -44,7 +44,7 @@ namespace {
 
 using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
-using namespace rocjitsu::plugins::perfsim::observer_abi_v8;
+using namespace rocjitsu::plugins::perfsim::observer_abi_v13;
 using rocjitsu::plugins::perfsim::PerfsimPlugin;
 
 FfmWaveInfo make_wave_info(EntityId dispatch_id, EntityId cluster_id, EntityId workgroup_id,
@@ -143,6 +143,7 @@ struct WaveFixture {
 KernelDispatchInfo dispatch_info(uint32_t id) {
   KernelDispatchInfo info;
   info.dispatch_id = id;
+  info.kernel_name = "test_kernel_" + std::to_string(id);
   info.lds_size_bytes = 4096;
   info.wave_size = 32;
   info.code_target = ROCJITSU_CODE_TARGET_GFX1250;
@@ -269,8 +270,7 @@ TEST(PerfsimPluginConfigTest, RejectsInvalidStagingBudgets) {
   }
 }
 
-TEST_F(PerfsimPluginTest, RequestsV8AndForwardsOwnedFieldsInOrder) {
-  setenv("ROCJITSU_PERFSIM_FAKE_MODE", "newer_backend", 1);
+TEST_F(PerfsimPluginTest, RequestsV13AndForwardsOwnedFieldsInOrder) {
   WaveFixture fixture;
   const std::string config = plugin_config();
   {
@@ -279,8 +279,10 @@ TEST_F(PerfsimPluginTest, RequestsV8AndForwardsOwnedFieldsInOrder) {
     plugin.onInit();
 
     KernelDispatchInfo info = dispatch_info(7);
+    info.kernel_name = "v13_owned_kernel";
     info.lds_size_bytes = 1025;
     plugin.onAmdgpuDispatchPacketProcessed(info);
+    info.kernel_name = "mutated_after_callback";
     plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
     Wavefront &wave = fixture.wave(info.dispatch_id, 99, {2, 3, 4}, 5);
     plugin.onAmdgpuWavefrontDispatched(wave);
@@ -329,6 +331,11 @@ TEST_F(PerfsimPluginTest, RequestsV8AndForwardsOwnedFieldsInOrder) {
     tensor_access.wavefront_id = wave.wf_id();
     tensor_access.process_id = wave.process_id();
     tensor_access.element_size_bytes = 4;
+    tensor_access.tile_dim0 = 11;
+    tensor_access.tile_dim1 = 12;
+    tensor_access.data_size = 2;
+    tensor_access.tensor_dim0_stride = 52;
+    tensor_access.tensor_dim1_stride = 104;
     tensor_access.is_load = true;
     tensor_access.addresses = std::span<const uint64_t>(tensor_addresses);
     plugin.onAmdgpuTensorDmaMemoryAccess(tensor_access);
@@ -345,24 +352,26 @@ TEST_F(PerfsimPluginTest, RequestsV8AndForwardsOwnedFieldsInOrder) {
 
   const auto trace = lines(read_file(trace_.path()));
   ASSERT_GE(trace.size(), 10u);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 8"), 1);
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "get_api 13"), 1);
   EXPECT_EQ(std::count_if(trace.begin(), trace.end(),
                           [](const std::string &line) { return line.starts_with("get_api "); }),
             1);
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 8"), 1);
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 13"), 1);
   EXPECT_EQ(line_with_prefix(trace, "init_rejected "), trace.size());
   EXPECT_EQ(std::count(trace.begin(), trace.end(), "shutdown"), 1);
   const size_t shutdown = line_with_prefix(trace, "shutdown");
   ASSERT_LT(shutdown, trace.size());
   EXPECT_EQ(line_with_prefix(trace, "unload"), trace.size());
 
-  const size_t begin = line_with_prefix(trace, "begin 7 96 128 1025 32 1 32 2 3 32 1 1");
+  const size_t begin =
+      line_with_prefix(trace, "begin 7 96 128 1025 32 1 32 2 3 32 1 1 v13_owned_kernel");
   const size_t first_instruction = line_with_prefix(trace, "instruction 7 4003002 0 1 5 0 ");
   const size_t memory = line_with_prefix(trace, "memory 7 4003002 0 1 5 0 9 32 8 5 0 1 0 1048576");
   const size_t tensor_instruction =
       line_with_prefix(trace, "instruction 7 4003002 0 1 5 1 ", first_instruction + 1);
   const size_t tensor =
-      line_with_prefix(trace, "tdm 7 4003002 0 1 5 1 3 4 1 0 3145728 3145732 3145732");
+      line_with_prefix(trace, "tdm 7 4003002 0 1 5 1 3 4 1 0 11 12 2 52 104 3145728 3145732 "
+                              "3145732");
   const size_t end_instruction =
       line_with_prefix(trace, "instruction 7 4003002 0 1 5 2 ", tensor_instruction + 1);
   const size_t end = line_with_prefix(trace, "end 7 ");
@@ -409,6 +418,8 @@ TEST_F(PerfsimPluginTest, RejectsMalformedTensorDmaElementSize) {
     access.wavefront_id = wave.wf_id();
     access.process_id = wave.process_id();
     access.element_size_bytes = 3;
+    access.tile_dim0 = 1;
+    access.data_size = 2;
     access.is_load = true;
     access.addresses = std::span<const uint64_t>(addresses);
     plugin.onAmdgpuTensorDmaMemoryAccess(access);
@@ -1416,6 +1427,11 @@ TEST_F(PerfsimPluginTest, RejectsTensorDmaBeforeMaterializingAddressesOverBudget
     access.wavefront_id = wave.wf_id();
     access.process_id = wave.process_id();
     access.element_size_bytes = 4;
+    access.tile_dim0 = 32;
+    access.tile_dim1 = 32;
+    access.data_size = 2;
+    access.tensor_dim0_stride = 128;
+    access.tensor_dim1_stride = 4096;
     access.is_load = true;
     access.addresses = TensorDmaAddressView::deferred(
         1024, &source, [](const void *context, std::span<uint64_t> destination) {
@@ -1630,7 +1646,7 @@ TEST_F(PerfsimPluginTest, SequentialInstancesShutdownOnceWithoutUnloadingBackend
   }
 
   const auto trace = lines(read_file(trace_.path()));
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 8"), 2);
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 13"), 2);
   EXPECT_EQ(std::count(trace.begin(), trace.end(), "shutdown"), 2);
   EXPECT_EQ(line_with_prefix(trace, "unload"), trace.size());
 }
@@ -1647,7 +1663,21 @@ TEST_F(PerfsimPluginTest, LoadsAsRocjitsuPluginWithStagingBudgetSchema) {
   ASSERT_EQ(group.num_plugins(), 1u);
   group.onInit();
   group.onShutdown();
-  EXPECT_NE(read_file(trace_.path()).find("init 8\nshutdown\n"), std::string::npos);
+  EXPECT_NE(read_file(trace_.path()).find("init 13\nshutdown\n"), std::string::npos);
+}
+
+TEST_F(PerfsimPluginTest, RoutesV13HostLogThroughConfiguredSink) {
+  const std::string config = std::string{"{\"plugins\":{\"perfsim\":"} + plugin_config() + "}}";
+  setenv("ROCJITSU_PERFSIM_FAKE_MODE", "host_log", 1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  ExecutionPluginGroup group(std::move(sink_config));
+  ASSERT_EQ(PluginLoader::load_from_config(config, group, PERFSIM_PLUGIN_DIR), 1);
+  group.onInit();
+  group.onShutdown();
+
+  EXPECT_NE(sink.str().find("[perfsim:warn] fake backend initialized\n"), std::string::npos);
+  EXPECT_NE(sink.str().find("[perfsim:error] fake backend shutting down\n"), std::string::npos);
 }
 
 TEST_F(PerfsimPluginTest, RequiredLoaderRetriesAfterBackendFactoryFailure) {
@@ -1667,7 +1697,7 @@ TEST_F(PerfsimPluginTest, RequiredLoaderRetriesAfterBackendFactoryFailure) {
   group->onShutdown();
 
   const auto trace = lines(read_file(trace_.path()));
-  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 8"), 1);
+  EXPECT_EQ(std::count(trace.begin(), trace.end(), "init 13"), 1);
   EXPECT_EQ(std::count(trace.begin(), trace.end(), "shutdown"), 1);
   EXPECT_EQ(line_with_prefix(trace, "unload"), trace.size());
 }
@@ -1678,7 +1708,7 @@ TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
     GTEST_SKIP() << "set ROCJITSU_PERFSIM_REAL_BACKEND to libgpucsim_ffm_plugin.so";
   const std::string backend_path{backend_path_env};
 
-  static_assert(FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION == 8);
+  static_assert(FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION == 13);
   rocjitsu::test::ScopedTempFile direct_report{"rocjitsu-perfsim-direct-"};
   rocjitsu::test::ScopedTempFile bridge_report{"rocjitsu-perfsim-bridge-"};
   rocjitsu::test::ScopedEnvironmentVariable report_path{"GPUCSIM_REPORT_PATH",
@@ -1751,8 +1781,10 @@ TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
   metadata.workgroup_size[0] = info.workgroup_size_x;
   metadata.workgroup_size[1] = info.workgroup_size_y;
   metadata.workgroup_size[2] = info.workgroup_size_z;
+  metadata.dispatch_name = info.kernel_name.c_str();
 
-  const FfmHostApi direct_host{FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION};
+  const FfmHostApi direct_host{FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION,
+                               [](FfmLogLevel, const char *) {}};
   invoke_foreign_abi(api.on_init, &direct_host);
   invoke_foreign_abi(api.on_dispatch_begin, &metadata);
   const FfmWaveInfo direct_wave = make_wave_info(kDispatchId, kClusterId, 0, 0, 0);
@@ -1789,6 +1821,11 @@ TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
   direct_tdm.addresses = kTensorAddresses.data();
   direct_tdm.data_size_bytes = 4;
   direct_tdm.flags = encode_tdm_flags(true, false);
+  direct_tdm.tile_dim0 = 2;
+  direct_tdm.tile_dim1 = 1;
+  direct_tdm.data_size = 2;
+  direct_tdm.tensor_dim0_stride = 8;
+  direct_tdm.tensor_dim1_stride = 16;
   invoke_foreign_abi(api.on_tdm_memory_access, &direct_tdm);
   invoke_foreign_abi(api.on_instruction, &direct_wait);
   invoke_foreign_abi(api.on_instruction, &direct_end);
@@ -1849,6 +1886,11 @@ TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
     tensor_access.wavefront_id = wave.wf_id();
     tensor_access.process_id = wave.process_id();
     tensor_access.element_size_bytes = 4;
+    tensor_access.tile_dim0 = 2;
+    tensor_access.tile_dim1 = 1;
+    tensor_access.data_size = 2;
+    tensor_access.tensor_dim0_stride = 8;
+    tensor_access.tensor_dim1_stride = 16;
     tensor_access.is_load = true;
     tensor_access.addresses = std::span<const uint64_t>(kTensorAddresses);
     plugin.onAmdgpuTensorDmaMemoryAccess(tensor_access);
