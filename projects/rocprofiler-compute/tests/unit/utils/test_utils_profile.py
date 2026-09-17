@@ -22,6 +22,28 @@ COUNTER_CSV_HEADER = (
     "Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value\n"
 )
 
+# Verbatim rocprofiler-sdk warning from a CI runner with outdated CP firmware.
+OUTDATED_FIRMWARE_WARNING = (
+    "Agent 2 (gfx942) has CP firmware version 180 which is below minimum "
+    "required version 186. Reason: CP firmware below version 186 can cause "
+    "device resets and VM Page Faults on MI3XX devices."
+)
+
+# Trailing (message, exit, exit_code) calls run_prof makes on each failure it
+# diagnoses. The duplicate-ROCm hint is printed before the generic abort; the
+# firmware message aborts on its own with the code the integration suite skips on.
+DUPLICATE_ROCM_TAIL = [
+    (utils_profile._DUPLICATE_ROCM_MESSAGE, False, 1),
+    ("Profiling execution failed.", True, 1),
+]
+OUTDATED_FIRMWARE_TAIL = [
+    (
+        utils_profile._OUTDATED_FIRMWARE_MESSAGE,
+        True,
+        utils_profile.EXIT_CODE_OUTDATED_GPU_FIRMWARE,
+    ),
+]
+
 
 # =============================================================================
 # RUN_PROF TESTS
@@ -323,8 +345,8 @@ def test_run_prof_failure_subprocess(
 
     errors = []
 
-    def mock_console_error(msg, exit=True):
-        errors.append((msg, exit))
+    def mock_console_error(msg, exit=True, exit_code=1):
+        errors.append((msg, exit, exit_code))
         if exit:
             raise RuntimeError("console_error called")
 
@@ -333,16 +355,26 @@ def test_run_prof_failure_subprocess(
     with pytest.raises(RuntimeError, match="console_error called"):
         utils_profile.run_prof(str(fname), profiler_options, workload_dir)
 
-    assert all(msg != utils_profile._DUPLICATE_ROCM_MESSAGE for msg, _ in errors)
+    messages = [msg for msg, *_ in errors]
+    assert utils_profile._DUPLICATE_ROCM_MESSAGE not in messages
+    assert errors[-1] == ("Profiling execution failed.", True, 1)
 
 
 @pytest.mark.parametrize(
-    "abort_line",
+    "abort_line, expected_tail",
     [
-        "Option 'spirv-expand-step' registered more than once!",
-        "ROCPROFILER_REGISTER_LIBRARY is already set to '/opt/rocm/lib/lib.so'",
+        ("Option 'spirv-expand-step' registered more than once!", DUPLICATE_ROCM_TAIL),
+        (
+            "ROCPROFILER_REGISTER_LIBRARY is already set to '/opt/rocm/lib/lib.so'",
+            DUPLICATE_ROCM_TAIL,
+        ),
+        (OUTDATED_FIRMWARE_WARNING, OUTDATED_FIRMWARE_TAIL),
     ],
-    ids=["llvm-duplicate-option", "rocprofiler-register-conflict"],
+    ids=[
+        "llvm-duplicate-option",
+        "rocprofiler-register-conflict",
+        "outdated-firmware",
+    ],
 )
 @pytest.mark.parametrize(
     "rocprof_cmd, profiler_options",
@@ -352,8 +384,8 @@ def test_run_prof_failure_subprocess(
     ],
     ids=["rocprofv3", "rocprofiler-sdk"],
 )
-def test_run_prof_failure_prints_duplicate_rocm_install_message(
-    tmp_path, monkeypatch, rocprof_cmd, profiler_options, abort_line
+def test_run_prof_failure_prints_diagnostic_message(
+    tmp_path, monkeypatch, rocprof_cmd, profiler_options, abort_line, expected_tail
 ):
     fname = tmp_path / "pmc_perf_test.yaml"
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
@@ -375,8 +407,8 @@ def test_run_prof_failure_prints_duplicate_rocm_install_message(
 
     errors = []
 
-    def mock_console_error(msg, exit=True):
-        errors.append((msg, exit))
+    def mock_console_error(msg, exit=True, exit_code=1):
+        errors.append((msg, exit, exit_code))
         if exit:
             raise RuntimeError("console_error called")
 
@@ -385,12 +417,47 @@ def test_run_prof_failure_prints_duplicate_rocm_install_message(
     with pytest.raises(RuntimeError, match="console_error called"):
         utils_profile.run_prof(str(fname), profiler_options, workload_dir)
 
-    # The raw failure output stays visible; the hint follows it, then the abort.
-    assert (abort_line, False) in errors
-    assert errors[-2:] == [
-        (utils_profile._DUPLICATE_ROCM_MESSAGE, False),
-        ("Profiling execution failed.", True),
-    ]
+    # The raw failure output stays visible; the diagnosis follows it.
+    assert (abort_line, False, 1) in errors
+    assert errors[-len(expected_tail) :] == expected_tail
+
+
+def test_run_prof_success_ignores_outdated_firmware_warning(tmp_path, monkeypatch):
+    """The warning also shows up on runs that succeed, where it must stay quiet."""
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
+    workload_dir = str(tmp_path / "workload")
+
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
+    monkeypatch.setattr(
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (True, OUTDATED_FIRMWARE_WARNING),
+    )
+    monkeypatch.setattr("utils.utils_profile.parse_pmc_perf", lambda f: ["SQ_WAVES"])
+    monkeypatch.setattr(
+        "utils.utils_profile.rocpd_data.convert_dbs_to_csv", lambda *a, **k: None
+    )
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
+
+    errors = []
+    monkeypatch.setattr(
+        "utils.utils_profile.console_error",
+        lambda msg, exit=True, exit_code=1: errors.append(msg),
+    )
+
+    utils_profile.run_prof(
+        str(fname),
+        {
+            "APP_CMD": ["./test_app"],
+            "ROCPROF_OUTPUT_PATH": workload_dir,
+            "ROCPROF_COUNTER_COLLECTION": "1",
+        },
+        workload_dir,
+    )
+
+    assert errors == []
 
 
 def test_run_prof_rocprofv3_builds_command_and_env(tmp_path, monkeypatch):
