@@ -446,6 +446,9 @@ public:
 // AieLoadedCodeObjectImpl.                                                   //
 //===----------------------------------------------------------------------===//
 
+/// @brief LoadedCodeObject for an AIE hsaco. Unlike the GPU path (one contiguous
+/// load segment), an AIE object is placed as N independent XDNA BOs (per-kernel
+/// insts/PDI blobs), so this has no single ELF segment layout to track.
 class AieLoadedCodeObjectImpl : public LoadedCodeObject, public ExecutableObject {
   friend class AmdHsaCodeLoader;
 
@@ -457,6 +460,8 @@ class AieLoadedCodeObjectImpl : public LoadedCodeObject, public ExecutableObject
   size_t elf_size;
 
  public:
+  /// @brief Construct from the original hsaco bytes; ownership of elf_data_ stays
+  /// with the caller for the lifetime of this object.
   AieLoadedCodeObjectImpl(ExecutableImpl* owner_, hsa_agent_t agent_, const void* elf_data_,
                           size_t elf_size_)
       : ExecutableObject(owner_, agent_), elf_data(elf_data_), elf_size(elf_size_) {}
@@ -466,24 +471,41 @@ class AieLoadedCodeObjectImpl : public LoadedCodeObject, public ExecutableObject
   /// @brief Device buffers backing the blobs: (host ptr from SegmentAlloc, size).
   std::vector<std::pair<void*, size_t>> device_buffers;
 
+  /// @brief Reports the original hsaco ELF image and its size; all other
+  /// attributes are unsupported for AIE code objects.
   bool GetInfo(amd_loaded_code_object_info_t attribute, void* value) override;
 
+  /// @brief AIE code objects don't have traditional (GPU-style) segments, so this
+  /// is a no-op that reports success without invoking the callback.
   hsa_status_t IterateLoadedSegments(hsa_status_t (*callback)(amd_loaded_segment_t loaded_segment,
                                                               void* data),
                                      void* data) override;
 
+  /// @brief Dump a human-readable summary (ELF size, kernel and device buffer
+  /// counts) for debugging.
   void Print(std::ostream& out) override;
 
+  /// @brief Free every device buffer placed by LoadAieCodeObject and drop the
+  /// host-owned kernel descriptors.
   void Destroy() override;
 
+  /// @brief Returns the agent this object was loaded onto.
   hsa_agent_t getAgent() const override;
+  /// @brief Returns the owning executable's handle.
   hsa_executable_t getExecutable() const override;
+  /// @brief Returns the original hsaco ELF image pointer.
   uint64_t getElfData() const override;
+  /// @brief Returns the original hsaco ELF image size.
   uint64_t getElfSize() const override;
+  /// @brief AIE code objects are not read from a storage container; always 0.
   uint64_t getStorageOffset() const override;
+  /// @brief No single load base exists (see class comment); always 0.
   uint64_t getLoadBase() const override;
+  /// @brief No single load size exists (see class comment); always 0.
   uint64_t getLoadSize() const override;
+  /// @brief No single load delta exists (see class comment); always 0.
   int64_t getDelta() const override;
+  /// @brief AIE code objects carry no URI; always the empty string.
   std::string getUri() const override;
 };
 

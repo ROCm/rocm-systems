@@ -58,9 +58,7 @@
 namespace rocr {
 namespace AMD {
 
-/**
- * @brief Creates a string_view of the agent's architecture name from the node properties.
- */
+/// @brief Creates a string_view of the agent's architecture name from the node properties.
 static std::string_view GetArchName(const HsaNodeProperties& node_props) {
   const char* name = reinterpret_cast<const char*>(node_props.AMDName);
   return std::string_view(name, ::strnlen(name, sizeof(node_props.AMDName)));

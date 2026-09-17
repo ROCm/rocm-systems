@@ -332,6 +332,10 @@ target_compile_options(dispatch
     -Wextra
     -Wpedantic
 )
+# core/inc is not installed alongside the runtime; needed for amd_aie_section.h, a header-only
+# dependency used to locate and corrupt the AIE `kind` field in AieKindIsValidated.
+target_include_directories(dispatch PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime)
 target_compile_definitions(dispatch
   PRIVATE
     DEFAULT_PDI_PATH=${vsadd_DESIGN_PDI}
@@ -394,3 +398,31 @@ if(vsadd_FULL_ELF_TARGET)
   add_dependencies(elf_parse_test ${vsadd_FULL_ELF_TARGET})
 endif()
 add_test(NAME elf_parse_test COMMAND elf_parse_test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+# ---------------------------------------------------------------------------
+# aie_code_test: exercises the in-tree unified-hsaco reader (core/inc/amd_aie_code.hpp)
+# against vsadd.hsaco, plus garbage/truncated inputs. Host-side only: needs neither hardware
+# nor an AIE agent, unlike dispatch's HsacoKernelObjectIsPublished/AieKindIsValidated. The parser
+# and its amd::elf::Image dependency are compiled directly into the test for the same reason as
+# elf_parse_test's amd_aie_elf.cpp: core/inc is not installed, and amd::elf::Image is built with
+# hidden visibility inside libhsa-runtime64.so, so it cannot be linked against from outside it.
+add_executable(aie_code_test
+  aie_code_test.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime/core/runtime/amd_aie_code.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime/libamdhsacode/amd_elf_image.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime/libamdhsacode/amd_hsa_code_util.cpp)
+set_target_properties(aie_code_test
+  PROPERTIES
+    CXX_STANDARD                17
+    CXX_EXTENSIONS              OFF
+    CXX_VISIBILITY_PRESET       hidden
+    VISIBILITY_INLINES_HIDDEN   ON
+    POSITION_INDEPENDENT_CODE   ON
+)
+target_include_directories(aie_code_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime/inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime/libamdhsacode)
+target_link_libraries(aie_code_test PRIVATE GTest::gtest_main elf)
+add_dependencies(aie_code_test vsadd_hsaco_artifact)
+add_test(NAME aie_code_test COMMAND aie_code_test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})

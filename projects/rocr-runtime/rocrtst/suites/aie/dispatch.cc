@@ -27,6 +27,10 @@
 #include "hsa/hsa_ext_amd.h"
 #include "hsa/hsa_ext_amd_aie.h"
 
+// Only the on-disk struct layout is needed (to locate and corrupt the `kind` field for
+// AieKindIsValidated below); pure header, no core/inc source file is linked into this binary.
+#include "core/inc/amd_aie_section.h"
+
 #define STRINGIFY2(x) #x
 #define STRINGIFY(x) STRINGIFY2(x)
 
@@ -1590,6 +1594,17 @@ TEST_F(DispatchTest, HsacoKernelObjectIsPublished) {
             HSA_STATUS_SUCCESS);
   EXPECT_EQ(kernel_object, 0u) << "kernel object must be zero before freeze";
 
+  // Pins the hardcoded kernarg size aie_hsaco.py packaged this hsaco with (see the --kernel
+  // argument in CMakeLists.txt) as a checked invariant, rather than trusting it silently.
+  // num_cols=1 is packaged the same way but is not asserted here: unlike kernarg size, it has
+  // no HSA_EXECUTABLE_SYMBOL_INFO_* accessor to check it against.
+  std::uint32_t kernarg_segment_size = 0;
+  ASSERT_EQ(hsa_executable_symbol_get_info(
+                symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE,
+                &kernarg_segment_size),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(kernarg_segment_size, aie_vector_scalar_kernel::kernarg_bytes);
+
   ASSERT_EQ(hsa_executable_freeze(executable, nullptr), HSA_STATUS_SUCCESS);
 
   ASSERT_EQ(hsa_executable_get_symbol_by_name(executable, kernel_name(), &aie_agents.front(),
@@ -1603,6 +1618,74 @@ TEST_F(DispatchTest, HsacoKernelObjectIsPublished) {
 
   EXPECT_EQ(hsa_executable_destroy(executable), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_code_object_reader_destroy(reader), HSA_STATUS_SUCCESS);
+}
+
+// Returns the absolute file offset of the first kernel table entry's `kind` field (offset 28
+// within aie_kernel_entry -- see core/inc/amd_aie_section.h) in an AIE hsaco, by walking the raw
+// ELF section headers to find the section whose contents start with kAieSectionMagic. Returns 0
+// (never a valid offset -- it always falls inside the ELF header) if no such section is found.
+//
+// This is a minimal, header-only re-scan (not a use of AieCode: that parser is internal to
+// hsa-runtime64 and not exported, see amd_aie_code.cpp) good enough to corrupt one field for the
+// negative test below; it does not need to be a general-purpose reader.
+std::size_t FindKindFieldOffset(const std::vector<std::uint8_t>& hsaco) {
+  if (hsaco.size() < sizeof(Elf64_Ehdr)) return 0;
+  const auto* base = hsaco.data();
+  const auto* ehdr = reinterpret_cast<const Elf64_Ehdr*>(base);
+  for (Elf64_Half i = 0; i < ehdr->e_shnum; ++i) {
+    const std::uint64_t shdr_off =
+        ehdr->e_shoff + static_cast<std::uint64_t>(i) * ehdr->e_shentsize;
+    if (shdr_off + sizeof(Elf64_Shdr) > hsaco.size()) break;
+    const auto* shdr = reinterpret_cast<const Elf64_Shdr*>(base + shdr_off);
+    if (shdr->sh_size < sizeof(rocr::AMD::aie_section_header)) continue;
+    if (shdr->sh_offset + shdr->sh_size > hsaco.size()) continue;
+    const auto* sec_hdr =
+        reinterpret_cast<const rocr::AMD::aie_section_header*>(base + shdr->sh_offset);
+    if (sec_hdr->magic != rocr::AMD::kAieSectionMagic) continue;
+    return shdr->sh_offset + sec_hdr->header_size + offsetof(rocr::AMD::aie_kernel_entry, kind);
+  }
+  return 0;
+}
+
+// Closes I-4/Concern-2: the kind-validation switch in LoadAieCodeObject (executable.cpp) is
+// otherwise unreachable in this suite, since aie_hsaco.py always packages kind=PdiInsts and
+// refuses to emit anything else. Reaching kind=FullElf (unsupported until Task 5) and an unknown
+// kind therefore requires corrupting an already-built hsaco's bytes directly; no toolchain
+// support for either value is needed to do that.
+TEST_F(DispatchTest, AieKindIsValidated) {
+  if (!hsaco_available()) {
+    GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+  }
+
+  const auto hsaco = hsaco_bytes();
+  ASSERT_FALSE(hsaco.empty()) << "failed to read " << kHsacoPath;
+
+  const std::size_t kind_offset = FindKindFieldOffset(hsaco);
+  ASSERT_NE(kind_offset, 0u) << "could not locate the AIE section in " << kHsacoPath;
+  ASSERT_LE(kind_offset + sizeof(rocr::AMD::AieKernelKind), hsaco.size());
+
+  for (const std::uint32_t bad_kind :
+       {static_cast<std::uint32_t>(rocr::AMD::AieKernelKind::FullElf), std::uint32_t{99}}) {
+    auto patched = hsaco;
+    std::memcpy(patched.data() + kind_offset, &bad_kind, sizeof(bad_kind));
+
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(hsa_code_object_reader_create_from_memory(patched.data(), patched.size(), &reader),
+              HSA_STATUS_SUCCESS);
+
+    hsa_executable_t executable{};
+    ASSERT_EQ(hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
+                                        nullptr, &executable),
+              HSA_STATUS_SUCCESS);
+
+    EXPECT_EQ(hsa_executable_load_agent_code_object(executable, aie_agents.front(), reader,
+                                                     nullptr, nullptr),
+              HSA_STATUS_ERROR_INVALID_CODE_OBJECT)
+        << "kind=" << bad_kind << " must be rejected";
+
+    EXPECT_EQ(hsa_executable_destroy(executable), HSA_STATUS_SUCCESS);
+    EXPECT_EQ(hsa_code_object_reader_destroy(reader), HSA_STATUS_SUCCESS);
+  }
 }
 
 // The full-ELF build of the same vector-scalar-add kernel used above.

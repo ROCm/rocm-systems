@@ -1404,11 +1404,18 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
 
   // AIE code objects take a separate loading path. The AIE loader (AMD::AieCode,
   // amd_aie_code.cpp) is Linux-only (SRC_XDNA), so gate the sniff+dispatch to match.
+  // IsAieCodeObject() parses the ELF (GElfImage + a GElfSection per section) just to
+  // rule the object out, so restrict the sniff to AIE agents: every non-AIE (e.g. GPU)
+  // code object load would otherwise pay that cost for nothing.
 #if defined(__linux__)
-  if (AMD::AieCode::IsAieCodeObject(reinterpret_cast<const void*>(code_object.handle),
-                                    code_object_size)) {
-    return LoadAieCodeObject(agent, reinterpret_cast<const void*>(code_object.handle),
-                             code_object_size, uri, loaded_code_object);
+  {
+    core::Agent* aie_probe_agent = core::Agent::Convert(agent);
+    if (aie_probe_agent && aie_probe_agent->device_type() == core::Agent::DeviceType::kAmdAieDevice &&
+        AMD::AieCode::IsAieCodeObject(reinterpret_cast<const void*>(code_object.handle),
+                                      code_object_size)) {
+      return LoadAieCodeObject(agent, reinterpret_cast<const void*>(code_object.handle),
+                               code_object_size, uri, loaded_code_object);
+    }
   }
 #endif
 
@@ -1632,7 +1639,10 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       context_->SegmentFree(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, buf, len);
       return HSA_STATUS_ERROR;
     }
-    context_->SegmentFreeze(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, buf, len);
+    if (!context_->SegmentFreeze(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, buf, len)) {
+      context_->SegmentFree(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, buf, len);
+      return HSA_STATUS_ERROR;
+    }
     void* dev = context_->SegmentAddress(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, buf, 0);
     // The blob is immutable after load; flush it from the CPU cache once here so
     // the NPU sees the freshly copied bytes. Per-dispatch flushing in the driver
