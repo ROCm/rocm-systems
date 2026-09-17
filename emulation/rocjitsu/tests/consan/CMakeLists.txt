@@ -1121,6 +1121,24 @@ function(rj_add_consan_device_conformance_cases)
             )
             set(_correct_environment ${_common_environment})
             set(_incorrect_environment ${_common_environment})
+            if(
+                _mode_value STREQUAL "default"
+                AND _workload_target STREQUAL "gfx1250_cluster"
+            )
+                # These fixtures require a retained within-workgroup witness.
+                # Cluster-local IDs occupy hash bits 3..4: eight banks alias
+                # them, allowing different workgroups to win at each site.
+                # 32 banks distinguish all identities in these fixtures (up
+                # to four workgroups per cluster, or two clusters of two).
+                list(
+                    APPEND _correct_environment
+                    "RJ_CONSAN_WATCHPOINT_BANKS=32"
+                )
+                list(
+                    APPEND _incorrect_environment
+                    "RJ_CONSAN_WATCHPOINT_BANKS=32"
+                )
+            endif()
             set(_correct_pass_regex_args)
             set(_incorrect_pass_regex_args)
             if(NOT _mode_value STREQUAL "supercollider")

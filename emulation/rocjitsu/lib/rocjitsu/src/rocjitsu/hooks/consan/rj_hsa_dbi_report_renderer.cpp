@@ -172,31 +172,32 @@ std::vector<ReportDiagnostic> render_report(const ReportRenderInput &render_inpu
                            : std::numeric_limits<uint16_t>::max();
     rendered.push_back(
         {kDetail,
-         format_report_text("ConSan access reader=%llu index=%u kind=%u owner=%u epoch=%u "
-                            "generation=%u bytes=[%u,%u) consumed=%s dispatch=0x%llx "
-                            "workgroup=(%u,%u,%u) instruction=0x%llx trampoline=0x%llx "
-                            "relocated_guest=0x%llx scratch_vgpr=%u range=%u bank=%u mapped=%s "
-                            "sync_class=%u sync_kind=%u sync_role=%u sync_scope=%u sync_outcome=%u "
-                            "sync_address=0x%llx sync_bytes=%u sync_epochs=%u/%u",
-                            static_cast<unsigned long long>(input.reader), entry.index,
-                            static_cast<uint32_t>(entry.entry.kind), entry.entry.owner_id,
-                            entry.entry.epoch, entry.entry.generation, entry.entry.start_byte,
-                            entry.entry.start_byte + entry.entry.byte_count,
-                            entry.entry.consumed ? "true" : "false",
-                            static_cast<unsigned long long>(entry.dispatch_id), entry.workgroup_x,
-                            entry.workgroup_y, entry.workgroup_z,
-                            static_cast<unsigned long long>(instruction_offset),
-                            static_cast<unsigned long long>(emitted_probe_offset),
-                            static_cast<unsigned long long>(relocated_guest_offset), scratch_vgpr,
-                            range, bank, mapping != nullptr ? "true" : "false",
-                            static_cast<uint32_t>(entry.sync.classification),
-                            static_cast<uint32_t>(entry.sync.metadata.kind),
-                            static_cast<uint32_t>(entry.sync.metadata.role),
-                            static_cast<uint32_t>(entry.sync.metadata.scope),
-                            static_cast<uint32_t>(entry.sync.metadata.outcome),
-                            static_cast<unsigned long long>(entry.sync.metadata.address),
-                            entry.sync.metadata.byte_count, entry.sync.metadata.epoch_before,
-                            entry.sync.metadata.epoch_after)});
+         format_report_text(
+             "ConSan access reader=%llu index=%u kind=%u owner=%u epoch=%u "
+             "generation=%u bytes=[%u,%u) consumed=%s dispatch=0x%llx "
+             "workgroup=(%u,%u,%u) cluster_workgroup=%u instruction=0x%llx trampoline=0x%llx "
+             "relocated_guest=0x%llx scratch_vgpr=%u range=%u bank=%u mapped=%s "
+             "sync_class=%u sync_kind=%u sync_role=%u sync_scope=%u sync_outcome=%u "
+             "sync_address=0x%llx sync_bytes=%u sync_epochs=%u/%u",
+             static_cast<unsigned long long>(input.reader), entry.index,
+             static_cast<uint32_t>(entry.entry.kind), entry.entry.owner_id, entry.entry.epoch,
+             entry.entry.generation, entry.entry.start_byte,
+             entry.entry.start_byte + entry.entry.byte_count,
+             entry.entry.consumed ? "true" : "false",
+             static_cast<unsigned long long>(entry.dispatch_id), entry.workgroup_x,
+             entry.workgroup_y, entry.workgroup_z, entry.cluster_workgroup_id,
+             static_cast<unsigned long long>(instruction_offset),
+             static_cast<unsigned long long>(emitted_probe_offset),
+             static_cast<unsigned long long>(relocated_guest_offset), scratch_vgpr, range, bank,
+             mapping != nullptr ? "true" : "false",
+             static_cast<uint32_t>(entry.sync.classification),
+             static_cast<uint32_t>(entry.sync.metadata.kind),
+             static_cast<uint32_t>(entry.sync.metadata.role),
+             static_cast<uint32_t>(entry.sync.metadata.scope),
+             static_cast<uint32_t>(entry.sync.metadata.outcome),
+             static_cast<unsigned long long>(entry.sync.metadata.address),
+             entry.sync.metadata.byte_count, entry.sync.metadata.epoch_before,
+             entry.sync.metadata.epoch_after)});
   }
   if (records.evidence.size() > kLogLimit) {
     rendered.push_back(
