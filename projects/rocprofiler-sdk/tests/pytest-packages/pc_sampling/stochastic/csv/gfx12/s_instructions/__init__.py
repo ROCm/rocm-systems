@@ -36,6 +36,7 @@ from .barrier_instructions import validate_barrier_instructions
 from .delay_alu_instructions import validate_delay_alu_instructions
 from .clause_instructions import validate_clause_instructions
 from .wakeup_instructions import validate_wakeup_instructions
+from .endpgm_instructions import validate_endpgm_instructions
 
 # Using Prefix Tree to classify the instruction type
 # I did this instead of the regex becuase I wanted to try if we could
@@ -99,6 +100,7 @@ instructions_with_types = [
     ("s_sleep", "INTERNAL"),  # INTERNAL
     ("s_clause", "CLAUSE"),  # CLAUSE (specific)
     ("s_delay_alu", "DELAY_ALU"),  # DELAY_ALU (specific)
+    ("s_endpgm", "ENDPGM"),  # ENDPGM (specific)
 ]
 
 
@@ -114,6 +116,7 @@ inst_type_verify_functions = {
     "CLAUSE": validate_clause_instructions,
     "DELAY_ALU": validate_delay_alu_instructions,
     "S_WAKEUP": validate_wakeup_instructions,
+    "ENDPGM": validate_endpgm_instructions,
 }
 
 

@@ -47,6 +47,7 @@ from .s_instructions import (
     validate_s_wakeup,
     validate_delay_alu_instructions,
     validate_clause_instructions,
+    validate_endpgm_instructions,
 )
 
 # Using Prefix Tree to classify the instruction type
@@ -115,6 +116,7 @@ instructions_with_types = [
     ("s_sleep", "INTERNAL"),  # INTERNAL
     ("s_clause", "CLAUSE"),  # CLAUSE (specific)
     ("s_delay_alu", "DELAY_ALU"),  # DELAY_ALU (specific)
+    ("s_endpgm", "ENDPGM"),  # ENDPGM (specific)
     ("v_", "VALU"),  # VALU
     ("v_wmma", "MATRIX"),  # MATRIX (GFX12 uses v_wmma)
     ("v_dual_", "DUAL_VALU"),  # DUAL_VALU (GFX12 specific)
@@ -137,6 +139,7 @@ inst_type_verify_functions = {
     "BARRIER": validate_barrier_instructions,
     "CLAUSE": validate_clause_instructions,
     "DELAY_ALU": validate_delay_alu_instructions,
+    "ENDPGM": validate_endpgm_instructions,
     "VALU": validate_valu_instructions,
     "MATRIX": validate_matrix_instructions,
     "DUAL_VALU": validate_dual_valu_instructions,
@@ -201,6 +204,10 @@ def validate_stochastic_samples_json(data_json):
             f"sampling_lock_error rate {lck_err_rate:.1%} exceeds 30% "
             f"({lck_err_count}/{total_count} samples) — sampling frequency is too high"
         )
+        print("******************** vlaindic: ")
+        print(lck_err_rate)
+        print("******************** vlaindic: ")
+
 
     # Check now the instruction type and arb state correlation.
     # We do that for all samples of a single instruction type all at once

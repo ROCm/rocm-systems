@@ -20,28 +20,33 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-#
 
-set(PACKAGE_OUTPUT_DIR
-    ${ROCPROFILER_SDK_TESTS_BINARY_DIR}/pytest-packages/rocprofiler_sdk/pc_sampling/stochastic/csv/gfx12/s_instructions
+from __future__ import absolute_import
+
+
+def validate_endpgm_instructions(all_samples, endpgm_samples):
+    """
+    Validate s_endpgm instructions.
+    """
+    total = len(endpgm_samples)
+    if total == 0:
+        return
+
+    # s_endpgm is never issued
+    assert (endpgm_samples["Wave_Issued_Instruction"] == False).all(), (
+        f"s_endpgm should never be issued, but "
+        f"{(endpgm_samples['Wave_Issued_Instruction'] == True).sum()}/{total} "
+        f"samples have Wave_Issued_Instruction == True"
     )
 
-set(PC_SAMPLING_PYTHON_SOURCES
-    __init__.py
-    branch_instructions.py
-    waitcnt.py
-    other_instructions.py
-    scalar_instructions.py
-    internal_instructions.py
-    jump_instructions.py
-    message_instructions.py
-    barrier_instructions.py
-    clause_instructions.py
-    delay_alu_instructions.py
-    wakeup_instructions.py
-    endpgm_instructions.py)
-
-foreach(_FILE ${PC_SAMPLING_PYTHON_SOURCES})
-    configure_file(${CMAKE_CURRENT_LIST_DIR}/${_FILE} ${PACKAGE_OUTPUT_DIR}/${_FILE}
-                   COPYONLY)
-endforeach()
+    # Stall reason must be NO_INSTRUCTION_AVAILABLE, OTHER_WAIT, or BARRIER_WAIT
+    allowed_stall_reasons = {
+        "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE",
+        "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_OTHER_WAIT",
+        "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_BARRIER_WAIT",
+    }
+    invalid = ~endpgm_samples["Stall_Reason"].isin(allowed_stall_reasons)
+    assert not invalid.any(), (
+        f"Unexpected stall reasons for s_endpgm: "
+        f"{set(endpgm_samples.loc[invalid, 'Stall_Reason'].unique())}"
+    )

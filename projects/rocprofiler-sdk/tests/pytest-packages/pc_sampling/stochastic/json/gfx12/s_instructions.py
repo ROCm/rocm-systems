@@ -55,6 +55,7 @@ def validate_waitcnt(sample_records):
         [
             "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_WAITCNT",
             "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE",
+            "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_OTHER_WAIT",
         ]
     )
 
@@ -456,3 +457,28 @@ def validate_clause_instructions(sample_records):
         assert (
             stall_reason in allowed_stall_reasons
         ), f"Invalid stall reason for s_clause: {stall_reason}"
+
+
+def validate_endpgm_instructions(sample_records):
+    """Validate s_endpgm instructions.
+
+    s_endpgm is never issued.
+    Allowed stall reasons: NO_INSTRUCTION_AVAILABLE, OTHER_WAIT, BARRIER_WAIT.
+    """
+    allowed_stall_reasons = set(
+        [
+            "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE",
+            "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_OTHER_WAIT",
+            "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_BARRIER_WAIT",
+        ]
+    )
+
+    for record in sample_records:
+        assert record["inst"].startswith(
+            "s_endpgm"
+        ), "ENDPGM instruction must start with s_endpgm"
+        assert record["wave_issued"] == 0, "s_endpgm should never be issued"
+        stall_reason = record["snapshot"]["stall_reason"]
+        assert (
+            stall_reason in allowed_stall_reasons
+        ), f"Invalid stall reason for s_endpgm: {stall_reason}"

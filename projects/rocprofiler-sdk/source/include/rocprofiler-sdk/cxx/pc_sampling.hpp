@@ -102,7 +102,8 @@ classify_instruction(std::string_view instruction)
 inline rocprofiler_status_t
 verify_issued_instruction_type(rocprofiler_pc_sampling_instruction_type_t expected_inst_type,
                                 bool                                        is_conditional_branch_,
-                                rocprofiler_pc_sampling_instruction_type_t actual_inst_type)
+                                rocprofiler_pc_sampling_instruction_type_t actual_inst_type,
+                                std::string_view                           instruction)
 {
     if(is_conditional_branch_)
     {
@@ -110,6 +111,12 @@ verify_issued_instruction_type(rocprofiler_pc_sampling_instruction_type_t expect
                 actual_inst_type == ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_BRANCH_NOT_TAKEN)
                    ? ROCPROFILER_STATUS_SUCCESS
                    : ROCPROFILER_STATUS_ERROR;
+    }
+
+    if(expected_inst_type == ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_NO_INST &&
+       !has_prefix(instruction, "s_wakeup"))
+    {
+        return ROCPROFILER_STATUS_ERROR;
     }
 
     return actual_inst_type == expected_inst_type ? ROCPROFILER_STATUS_SUCCESS
@@ -173,7 +180,8 @@ verify_sample(const rocprofiler_pc_sampling_record_stochastic_v0_t& record,
         return verify_issued_instruction_type(
             expected_inst_type,
             is_conditional_branch(instruction),
-            static_cast<rocprofiler_pc_sampling_instruction_type_t>(record.inst_type));
+            static_cast<rocprofiler_pc_sampling_instruction_type_t>(record.inst_type),
+            instruction);
     }
 
     return verify_not_issued_reason(
