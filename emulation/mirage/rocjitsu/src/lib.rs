@@ -40,8 +40,8 @@ pub mod dbt;
 /// model and stay on a single loopback socket, while ROCr must use SDMA
 /// copies and skip scratch reclaim. rocprofiler-register is disabled
 /// since the simulated GPU does not back it. Applied as defaults in
-/// [`Rocjitsu::injection_def`]; the per-exec environment overrides any
-/// of them.
+/// [`Rocjitsu::injection_def_with`]; the per-exec environment overrides
+/// any of them.
 const RCCL_ENV_DEFAULTS: &[(&str, &str)] = &[
     ("HSA_ENABLE_SDMA", "1"),
     ("ROCPROFILER_REGISTER_ENABLED", "0"),
@@ -178,6 +178,63 @@ impl EmulatorBackend for Rocjitsu {
     }
 
     fn injection_def(&self, ctx: &SessionContext) -> Result<InjectionDef> {
+        self.injection_def_with(ctx, kmd_preload())
+    }
+
+    fn daemon_capability(&self) -> Result<()> {
+        // Answered once per process; see `located_daemon_capability`.
+        located_daemon_capability()
+            .as_ref()
+            .map_or_else(|e| Err(MirageError::Other(e.to_string())), |()| Ok(()))
+    }
+
+    fn start_daemon(&self, ctx: &SessionContext) -> Result<Option<Box<dyn EmulatorDaemon>>> {
+        // One rocjitsu daemon per session. If the KMD library cannot be
+        // located there is nothing to host the emulated device with;
+        // return `None` rather than erroring, since the per-exec
+        // `injection_def` already fails loudly in that case.
+        let Some(lib) = kmd_preload() else {
+            tracing::warn!(
+                "rocjitsu: KMD library ({LIB_NAME}) not found; \
+                 not starting daemon"
+            );
+            return Ok(None);
+        };
+        let config = kmd_config(ctx.emulator(), &ctx.runtime_dir)?;
+        // The daemon binds its socket under the same runtime directory the
+        // workload's interposer probes (`$ROCJITSU_RUNTIME_DIR`), which is
+        // exactly what `injection_def` exports — so the workload connects
+        // to *this* daemon with no extra wiring. Both live in the
+        // session's scratch directory and go away with it.
+        let runtime_dir = write_config_discovery(&ctx.runtime_dir, &config)?;
+        let daemon = rocjitsu_sys::daemon::Daemon::start(&lib, &config, &runtime_dir)
+            .map_err(|e| MirageError::Other(format!("rocjitsu daemon: {e}")))?;
+        Ok(Some(Box::new(RocjitsuDaemon(daemon))))
+    }
+}
+
+impl Rocjitsu {
+    /// [`EmulatorBackend::injection_def`] against an explicit KMD
+    /// interposer, as [`kmd_preload`] located it.
+    ///
+    /// Threaded in for the reason `hotswap` and `rocjitsu-dbt` thread
+    /// theirs: whether rocjitsu is installed is a fact about the host,
+    /// Rust 2024 makes `set_var` `unsafe` and this workspace forbids
+    /// `unsafe`, so a test that could not supply the library could only
+    /// assert about the machine it happened to run on. With it as a
+    /// parameter, the injection this backend really hands the supervisor
+    /// — `emulated_isa` included — is what the tests check.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the profile does not describe a machine
+    /// rocjitsu can stand up, when `preload` is `None`, or when the
+    /// session's config or discovery file cannot be written.
+    pub fn injection_def_with(
+        &self,
+        ctx: &SessionContext,
+        preload: Option<PathBuf>,
+    ) -> Result<InjectionDef> {
         let def = ctx.emulator();
         let config = kmd_config(def, &ctx.runtime_dir)?;
         let emulated_isa = std::fs::read(&config)
@@ -186,7 +243,7 @@ impl EmulatorBackend for Rocjitsu {
         // Refuse to run unemulated: if the KMD interposer can't be
         // located there is nothing to emulate the workload, so fail
         // loudly rather than silently running on real hardware.
-        let ld_preload = kmd_preload().ok_or_else(|| {
+        let ld_preload = preload.ok_or_else(|| {
             // The search itself says where it looked, so this cannot
             // drift from it the way the hand-written list did.
             let detail = runtime_location()
@@ -289,37 +346,6 @@ impl EmulatorBackend for Rocjitsu {
             libraries,
             host_gpus: false,
         })
-    }
-
-    fn daemon_capability(&self) -> Result<()> {
-        // Answered once per process; see `located_daemon_capability`.
-        located_daemon_capability()
-            .as_ref()
-            .map_or_else(|e| Err(MirageError::Other(e.to_string())), |()| Ok(()))
-    }
-
-    fn start_daemon(&self, ctx: &SessionContext) -> Result<Option<Box<dyn EmulatorDaemon>>> {
-        // One rocjitsu daemon per session. If the KMD library cannot be
-        // located there is nothing to host the emulated device with;
-        // return `None` rather than erroring, since the per-exec
-        // `injection_def` already fails loudly in that case.
-        let Some(lib) = kmd_preload() else {
-            tracing::warn!(
-                "rocjitsu: KMD library ({LIB_NAME}) not found; \
-                 not starting daemon"
-            );
-            return Ok(None);
-        };
-        let config = kmd_config(ctx.emulator(), &ctx.runtime_dir)?;
-        // The daemon binds its socket under the same runtime directory the
-        // workload's interposer probes (`$ROCJITSU_RUNTIME_DIR`), which is
-        // exactly what `injection_def` exports — so the workload connects
-        // to *this* daemon with no extra wiring. Both live in the
-        // session's scratch directory and go away with it.
-        let runtime_dir = write_config_discovery(&ctx.runtime_dir, &config)?;
-        let daemon = rocjitsu_sys::daemon::Daemon::start(&lib, &config, &runtime_dir)
-            .map_err(|e| MirageError::Other(format!("rocjitsu daemon: {e}")))?;
-        Ok(Some(Box::new(RocjitsuDaemon(daemon))))
     }
 }
 
@@ -917,31 +943,18 @@ pub fn kmd_config(def: &EmulatorDef, session_dir: &std::path::Path) -> Result<Pa
     }
 }
 
-/// The gfx name of the device `def` makes appear, as the workload's
-/// ROCm runtime will see it — `gfx1250` for the `mi450x` builtin.
+/// The gfx name of the device a rocjitsu `SimulationConfig` describes,
+/// as the workload's ROCm runtime will see it — `gfx1250` for the
+/// `mi450x` builtin.
 ///
-/// Read out of the very `SimulationConfig` the KMD interposer will load,
-/// rather than out of the profile's agent, because those are not always
-/// the same document: a drop-in `--config` hands rocjitsu a file of the
-/// user's own and the profile's agent then describes nothing that will
-/// exist. Going through [`resolve_sim_config`] is what makes the answer
-/// the emulated device rather than a guess at it.
+/// Read out of the very config the KMD interposer will load, and read at
+/// the moment [`Rocjitsu::injection_def_with`] materialises it, because
+/// the profile's agent is not always the document that will exist: a
+/// drop-in `--config` hands rocjitsu a file of the user's own.
 ///
-/// `None` when there is nothing to say: an unresolvable profile, a
-/// config that cannot be read or parsed, or a device with no
-/// `gfx_target_version`. Every caller is a diagnostic, and none of them
-/// is worth failing a run over — the errors here are the ones bring-up
-/// is about to report properly anyway.
-#[must_use]
-pub fn emulated_isa(def: &EmulatorDef) -> Option<String> {
-    let config = match resolve_sim_config(def).ok()? {
-        SimConfig::Supplied(path) => std::fs::read(path).ok()?,
-        SimConfig::Synthesised(bytes) => bytes,
-    };
-    isa_of_config(&config)
-}
-
-/// The gfx name of the device a rocjitsu `SimulationConfig` describes.
+/// `None` when there is nothing to say: a config that cannot be read or
+/// parsed, or a device with no `gfx_target_version`. The only caller is
+/// a diagnostic, and none of those is worth failing a run over.
 fn isa_of_config(config: &[u8]) -> Option<String> {
     let config: serde_json::Value = serde_json::from_slice(config).ok()?;
     let version = config
@@ -1433,13 +1446,44 @@ mod tests {
         assert!(resolve_sim_config(&def).is_err());
     }
 
-    /// The ISA mirage checks the host's ROCm against is the one the
-    /// emulated device will actually present.
+    /// The session context a backend is handed for `emulator`, with its
+    /// scratch directory under `root`.
+    fn ctx_for(emulator: EmulatorDef, root: &std::path::Path) -> SessionContext {
+        SessionContext {
+            id: mirage_core::session::SessionId::new("isa-test").unwrap(),
+            profile: ProfileDef {
+                name: "isa-test".to_string(),
+                description: None,
+                emulator,
+                containerize: None,
+            },
+            runtime_dir: root.join("session"),
+            daemon: false,
+        }
+    }
+
+    /// The interposer this backend would preload, stood in for by a file
+    /// that merely exists.
+    ///
+    /// Whether rocjitsu is installed is a fact about the host, so the
+    /// library is supplied rather than searched for — see
+    /// [`Rocjitsu::injection_def_with`]. Nothing here loads it: a
+    /// non-containerised injection only records its path.
+    fn stand_in_interposer(root: &std::path::Path) -> Option<PathBuf> {
+        let lib = root.join(LIB_NAME);
+        std::fs::write(&lib, b"").unwrap();
+        Some(lib)
+    }
+
+    /// The ISA a live session reports is the one its own prepared
+    /// injection emulates.
     ///
     /// This is the fact the whole of issue #11361 turns on: a ROCm that
     /// does not know the target skips the emulated agent, so the
-    /// workload sees no GPU and exits 0 with nothing said. The check
-    /// mirage prints that warning from is only as good as this answer.
+    /// workload sees no GPU and exits 0 with nothing said. The warning
+    /// mirage prints is only as good as this answer, and the answer
+    /// travels on the `InjectionDef` — so that is what is asserted on,
+    /// rather than a second lookup no caller uses.
     #[test]
     fn the_emulated_isa_is_the_agents_gfx_target() {
         let _g = mirage_core::paths::test_env_lock();
@@ -1450,25 +1494,23 @@ mod tests {
         // never heard of; gfx942 is one the same host does support, so a
         // passing test cannot be one that answers `gfx1250` to
         // everything.
-        assert_eq!(
-            emulated_isa(&def_for_target(120500)).as_deref(),
-            Some("gfx1250")
-        );
-        assert_eq!(
-            emulated_isa(&def_for_target(90402)).as_deref(),
-            Some("gfx942")
-        );
+        for (version, isa) in [(120500, "gfx1250"), (90402, "gfx942")] {
+            let ctx = ctx_for(def_for_target(version), tmp.path());
+            let injection = Rocjitsu
+                .injection_def_with(&ctx, stand_in_interposer(tmp.path()))
+                .unwrap();
+            assert_eq!(injection.emulated_isa.as_deref(), Some(isa));
+        }
     }
 
     /// A drop-in `--config` names a device of its own, and that is the
-    /// device the interposer will stand up — so it is the one the check
-    /// has to be about.
+    /// device the interposer will stand up — so it is the one the
+    /// injection has to report.
     ///
     /// Reading the profile's agent instead would be wrong in both
     /// directions here: silent about a config whose target this ROCm
     /// cannot see, and warning about a profile agent that is not going
-    /// to exist. Which is why this goes through `resolve_sim_config`
-    /// rather than the agent store.
+    /// to exist.
     #[test]
     fn a_supplied_config_names_the_device_that_will_exist() {
         let _g = mirage_core::paths::test_env_lock();
@@ -1489,24 +1531,43 @@ mod tests {
             SimpleValue::String(config.display().to_string()),
         );
 
-        assert_eq!(emulated_isa(&def).as_deref(), Some("gfx950"));
+        let ctx = ctx_for(def, tmp.path());
+        let injection = Rocjitsu
+            .injection_def_with(&ctx, stand_in_interposer(tmp.path()))
+            .unwrap();
+        assert_eq!(injection.emulated_isa.as_deref(), Some("gfx950"));
     }
 
-    /// Nothing to say is said as nothing. Every caller is a diagnostic,
-    /// and a profile that cannot be resolved, a config that is not
-    /// there, or a device with no gfx target are all problems bring-up
-    /// reports properly a moment later — guessing at an ISA for them
-    /// would only add a wrong warning in front of the right error.
+    /// A device with no ISA is not a device to check a runtime against,
+    /// and nothing to say is said as nothing: the injection is still the
+    /// one bring-up wants, just with no target to warn about.
+    ///
+    /// A profile that cannot be resolved at all is a different answer.
+    /// It fails here, as it always did, because that is the error the
+    /// user needs — inventing an ISA for it would only put a wrong
+    /// warning in front of the right failure.
     #[test]
-    fn an_unanswerable_profile_names_no_isa() {
+    fn a_device_without_a_gfx_target_names_no_isa() {
         let _g = mirage_core::paths::test_env_lock();
         let tmp = tempfile::tempdir().unwrap();
         mirage_core::paths::set_test_root(tmp.path());
 
+        // A default agent's `gfx_target_version` is 0.
+        let ctx = ctx_for(def_with_gpus(1), tmp.path());
+        let injection = Rocjitsu
+            .injection_def_with(&ctx, stand_in_interposer(tmp.path()))
+            .unwrap();
+        assert_eq!(injection.emulated_isa, None);
+
         // An unresolvable topology reference.
         let mut def = def_with_gpus(1);
         def.topology = MaybeRef::Ref("does-not-exist".to_string());
-        assert_eq!(emulated_isa(&def), None);
+        let ctx = ctx_for(def, tmp.path());
+        assert!(
+            Rocjitsu
+                .injection_def_with(&ctx, stand_in_interposer(tmp.path()))
+                .is_err()
+        );
 
         // A `--config` that is not there.
         let mut def = def_with_gpus(1);
@@ -1514,11 +1575,29 @@ mod tests {
             "config".to_string(),
             SimpleValue::String("/no/such/config.json".to_string()),
         );
-        assert_eq!(emulated_isa(&def), None);
+        let ctx = ctx_for(def, tmp.path());
+        assert!(
+            Rocjitsu
+                .injection_def_with(&ctx, stand_in_interposer(tmp.path()))
+                .is_err()
+        );
+    }
 
-        // A default agent, whose `gfx_target_version` is 0: a device
-        // with no ISA is not a device to check a runtime against.
-        assert_eq!(emulated_isa(&def_with_gpus(1)), None);
+    /// Without the interposer there is nothing to emulate the workload,
+    /// so the injection fails rather than quietly describing a run on
+    /// real hardware — and it says which library and where to get it.
+    #[test]
+    fn a_missing_interposer_refuses_the_injection() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        let ctx = ctx_for(def_for_target(120500), tmp.path());
+        let err = Rocjitsu.injection_def_with(&ctx, None).unwrap_err();
+
+        let msg = err.to_string();
+        assert!(msg.contains(LIB_NAME), "{msg}");
+        assert!(msg.contains("docs/building.md"), "{msg}");
     }
 
     /// A drop-in `--config` is used verbatim, but its runtime directory

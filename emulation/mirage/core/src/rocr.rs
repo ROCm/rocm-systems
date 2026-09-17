@@ -177,8 +177,11 @@ pub fn check_target_for_process(
 }
 
 /// Whether one already-resolved ROCm runtime rules out `target`.
-#[must_use]
-pub fn check_target_at(target: &str, runtime: &Path) -> TargetSupport {
+///
+/// Private: the size cap that makes reading the image safe is applied
+/// while the loader trace selects it, so this is the second half of
+/// [`check_target_for_process`] rather than an entry point of its own.
+fn check_target_at(target: &str, runtime: &Path) -> TargetSupport {
     let Ok(image) = std::fs::read(runtime) else {
         return TargetSupport::Unknown;
     };
@@ -203,13 +206,21 @@ fn merged_environment(
 /// changing the loader's ordinary SONAME answer.
 fn loader_state_is_ambiguous(env: &std::collections::BTreeMap<OsString, OsString>) -> bool {
     env.iter().any(|(key, value)| {
-        if value.is_empty() {
-            return false;
-        }
         let Some(key) = key.to_str() else {
             return false;
         };
-        ambiguous_probe_env_var(key) || loader_resolution_env_var(key)
+        // A search-list variable is ambiguous as soon as it is set at
+        // all, empty or not. An empty *element* of a search list means
+        // the current directory to glibc, so the meaning of an empty
+        // whole value is a question about one loader's parsing rather
+        // than about the workload — and this module answers questions it
+        // is sure of or stays quiet.
+        if loader_resolution_env_var(key) {
+            return true;
+        }
+        // The rest name something to load or a version to report, so an
+        // empty value asks for nothing.
+        !value.is_empty() && ambiguous_probe_env_var(key)
     })
 }
 
@@ -493,10 +504,10 @@ fn verdict(target: &str, runtime: &Path, version: Option<String>, image: &[u8]) 
 /// Every plausible gfx target name in `image`.
 ///
 /// Used for the count in the report and for the sanity floor. This is
-/// the strict half of the scan: a name is only counted when it starts a
-/// word and is `gfx` followed by nothing but lowercase hex digits, so
-/// the fragments a binary scan inevitably turns up cannot inflate the
-/// image it is judged against.
+/// the strict half of the scan: a name is only counted when the whole
+/// word it sits in is `gfx` followed by nothing but lowercase hex
+/// digits, so the fragments a binary scan inevitably turns up cannot
+/// inflate the image it is judged against.
 fn target_names(image: &[u8]) -> BTreeSet<String> {
     const TAG: &[u8] = b"gfx";
     let mut out = BTreeSet::new();
@@ -506,8 +517,12 @@ fn target_names(image: &[u8]) -> BTreeSet<String> {
             at += 1;
             continue;
         }
+        // The whole word, `_` included: stopping at `_` would read
+        // `gfx942_helper` as a gfx942 reference, and enough identifiers
+        // shaped like that would clear the floor below and condemn a
+        // target the runtime supports.
         let mut end = at + TAG.len();
-        while end < image.len() && image[end].is_ascii_alphanumeric() {
+        while end < image.len() && is_word_byte(image[end]) {
             end += 1;
         }
         // `gfx` inside a longer word is somebody else's identifier, not
@@ -542,7 +557,10 @@ fn plausible_target(digits: &[u8]) -> Option<String> {
 /// result inconclusive, because a binary string does not say whether it
 /// belongs to the ISA registry. The only thing insisted on is that the
 /// match is not the prefix of a longer target: `gfx1200` must not answer
-/// for `gfx120`.
+/// for `gfx120`. The word boundaries [`target_names`] insists on are
+/// deliberately not insisted on here — `gfx942_helper` counts as a
+/// mention of `gfx942` — because accepting more of them only produces
+/// more silence.
 fn mentions(image: &[u8], target: &str) -> bool {
     let needle = target.as_bytes();
     if needle.is_empty() {
@@ -755,12 +773,33 @@ mod tests {
         );
     }
 
-    /// A name is only a name when it starts a word: `libgfx1250stuff` is
-    /// somebody's symbol, not a supported target.
+    /// A name is only a name when it is a whole word: `libgfx1250stuff`
+    /// and `gfx942_helper` are somebody's symbols, not supported targets.
     #[test]
     fn a_gfx_inside_a_longer_identifier_is_not_a_target() {
         assert!(target_names(b"\0libgfx1250_handler\0").is_empty());
         assert_eq!(target_names(b"\0-gfx1250\0").len(), 1);
+        assert!(target_names(b"\0gfx942_helper\0").is_empty());
+        assert!(target_names(b"\0gfx942helper\0").is_empty());
+    }
+
+    /// Identifiers that merely begin with a target name cannot pass for
+    /// a target table.
+    ///
+    /// The floor in [`MIN_PLAUSIBLE_TARGET_REFERENCES`] is the whole
+    /// defence against condemning a target on the strength of a scan
+    /// that never found ROCr's names. Ending a token at `_` would let
+    /// ten identifiers like `gfx900_helper` clear it, and an arbitrary
+    /// image would then report every target as unsupported.
+    #[test]
+    fn suffixed_identifiers_cannot_clear_the_confidence_floor() {
+        let mut image: Vec<u8> = b"\x7fELF\0".to_vec();
+        for n in 0..MIN_PLAUSIBLE_TARGET_REFERENCES + 5 {
+            image.extend_from_slice(format!("gfx{}_helper\0", 900 + n).as_bytes());
+        }
+
+        assert!(target_names(&image).is_empty());
+        assert_eq!(check("gfx1250", &image), TargetSupport::Unknown);
     }
 
     /// The membership test must not let a longer target answer for a
@@ -1050,6 +1089,51 @@ mod tests {
             .into_iter()
             .collect();
         assert!(!loader_state_is_ambiguous(&unrelated));
+    }
+
+    /// Setting a loader search list to nothing is still setting it.
+    ///
+    /// glibc gives an empty *element* of a search list the meaning
+    /// "the current directory", so what an empty whole value means is a
+    /// question about one loader's parsing of one variable. This module
+    /// does not answer those: the workload and the probe have to resolve
+    /// the same file, and an explicitly emptied search list is not
+    /// evidence that they will. The variables that name something to
+    /// load or a version to report are different — empty asks for
+    /// nothing — and must stay harmless, or a workload environment that
+    /// merely mentions `LD_PRELOAD` would silence the diagnostic.
+    #[test]
+    fn an_emptied_search_list_is_ambiguous_but_an_empty_preload_is_not() {
+        for key in [
+            "LD_LIBRARY_PATH",
+            "LD_ORIGIN_PATH",
+            "LD_HWCAP_MASK",
+            "LD_ASSUME_KERNEL",
+            "GLIBC_TUNABLES",
+        ] {
+            let env = [(OsString::from(key), OsString::new())]
+                .into_iter()
+                .collect();
+            assert!(
+                loader_state_is_ambiguous(&env),
+                "an emptied {key} is still a loader instruction"
+            );
+        }
+
+        for key in [
+            "LD_PRELOAD",
+            "LD_AUDIT",
+            "HSA_OVERRIDE_GFX_VERSION",
+            "HSA_OVERRIDE_GFX_VERSION_0",
+        ] {
+            let env = [(OsString::from(key), OsString::new())]
+                .into_iter()
+                .collect();
+            assert!(
+                !loader_state_is_ambiguous(&env),
+                "an empty {key} loads nothing and overrides nothing"
+            );
+        }
     }
 
     #[test]

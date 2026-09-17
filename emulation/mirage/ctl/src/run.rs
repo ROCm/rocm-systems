@@ -522,13 +522,23 @@ pub async fn exec_cmd(a: ExecArgsCli) -> anyhow::Result<ExitCode> {
 
     // `mirage exec` spawns its ranks as its own children in its own
     // terminal, so the streams to ask about are this process's; see
-    // [`mirage_supervisor::CallerStreams`].
-    let specs = mirage_supervisor::build_specs(
-        &desc,
-        &def,
-        &id,
-        mirage_supervisor::CallerStreams::probe(),
-    )?;
+    // [`mirage_supervisor::CallerStreams`]. Asked here rather than
+    // inside the blocking task so the one ambient read stays at the
+    // edge, where that type puts it.
+    let caller = mirage_supervisor::CallerStreams::probe();
+    // On a blocking thread, for the reason `Session::start_exec` puts
+    // its own `build_specs` on one: it blocks. The containerised
+    // `--workdir` probe is a provider round trip, and the ROCr preflight
+    // reads and parses the workload's executable and the runtime it
+    // resolves. Left on a runtime worker, either one stalls the
+    // `select!` below it, and this task is the one holding the lease and
+    // the signal relays.
+    let (def, id, specs) = tokio::task::spawn_blocking(move || {
+        let specs = mirage_supervisor::build_specs(&desc, &def, &id, caller)?;
+        anyhow::Ok((def, id, specs))
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("building the exec's process specs: {e}"))??;
     // The same headroom, in the process that will actually hold the
     // pipes: an exec spawns its ranks as its own children. Asked after
     // `build_specs` because that is what settles how many there are —
