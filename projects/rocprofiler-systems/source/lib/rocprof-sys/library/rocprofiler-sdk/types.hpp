@@ -143,6 +143,17 @@ template <typename SdkBackend>
 using tracing_phase_cb_t = void (*)(typename SdkBackend::callback_tracing_record_t,
                                     typename SdkBackend::user_data_t*, void*);
 
+// Indirects the null-check through a function parameter so GCC's -Waddress
+// heuristic (which pattern-matches "function-name != nullptr" and assumes a
+// missing call) does not misfire on a non-type template parameter that is
+// legitimately nullptr for other instantiations.
+template <typename CallbackT>
+constexpr bool
+is_callback_set(CallbackT callback)
+{
+    return callback != nullptr;
+}
+
 template <typename SdkBackend, tracing_phase_cb_t<SdkBackend> OnEnter = nullptr,
           tracing_phase_cb_t<SdkBackend> OnExit = nullptr,
           tracing_phase_cb_t<SdkBackend> OnNone = nullptr>
@@ -156,7 +167,7 @@ struct tracing_callback_dispatcher
         {
             case SdkBackend::CALLBACK_PHASE_ENTER:
             {
-                if constexpr(OnEnter != nullptr)
+                if constexpr(is_callback_set(OnEnter))
                 {
                     OnEnter(record, user_data, callback_data);
                 }
@@ -164,7 +175,7 @@ struct tracing_callback_dispatcher
             }
             case SdkBackend::CALLBACK_PHASE_EXIT:
             {
-                if constexpr(OnExit != nullptr)
+                if constexpr(is_callback_set(OnExit))
                 {
                     OnExit(record, user_data, callback_data);
                 }
@@ -172,7 +183,7 @@ struct tracing_callback_dispatcher
             }
             case SdkBackend::CALLBACK_PHASE_NONE:
             {
-                if constexpr(OnNone != nullptr)
+                if constexpr(is_callback_set(OnNone))
                 {
                     OnNone(record, user_data, callback_data);
                 }
