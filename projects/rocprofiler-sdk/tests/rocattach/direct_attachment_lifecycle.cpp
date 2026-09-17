@@ -26,6 +26,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <string_view>
 
 extern "C" rocprofiler_status_t
 rocprofiler_load_attachment_tool(const char*);
@@ -80,22 +81,43 @@ configure_anytime_client(const char* tool_path)
 int
 main(int argc, char** argv)
 {
-    if(argc != 2 && argc != 3)
+    if(argc != 2 && argc != 3 && argc != 4)
     {
-        std::cerr << "usage: direct-attachment-lifecycle [ANYTIME_TOOL] "
-                     "ATTACHMENT_TOOL\n";
+        std::cerr << "usage: direct-attachment-lifecycle [ANYTIME_TOOL] ATTACHMENT_TOOL\n";
         return 1;
     }
 
     if(!load_register()) return 1;
 
+    const auto expect_decline = (argc == 3 && std::string_view{argv[1]} == "--expect-decline");
+    const auto decline_then_attach =
+        (argc == 4 && std::string_view{argv[1]} == "--decline-then-attach");
+    if(argc == 4 && !decline_then_attach) return 1;
     const auto* attachment_tool = argv[argc - 1];
     setenv("ROCPROFILER_TEST_EXPECT_ATTACH_COUNT", "1", 1);
     setenv("ROCPROFILER_TEST_EXPECT_CLIENT_PRIORITY", "0", 1);
 
-    if(argc == 3 && !configure_anytime_client(argv[1])) return 1;
+    if(argc == 3 && !expect_decline && !configure_anytime_client(argv[1])) return 1;
 
-    if(rocprofiler_load_attachment_tool(attachment_tool) != ROCPROFILER_STATUS_SUCCESS)
+    if(expect_decline || decline_then_attach)
+    {
+        auto load_status = rocprofiler_load_attachment_tool(argv[2]);
+        if(load_status == ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE)
+        {
+            std::cout << "Declined attachment client test PASSED\n";
+            if(expect_decline) return 0;
+            setenv("ROCPROFILER_TEST_EXPECT_CLIENT_PRIORITY", "1", 1);
+        }
+        else
+        {
+            std::cerr << "Direct attachment lifecycle test FAILED: declined tool returned "
+                      << load_status << '\n';
+            return 1;
+        }
+    }
+
+    auto load_status = rocprofiler_load_attachment_tool(attachment_tool);
+    if(load_status != ROCPROFILER_STATUS_SUCCESS)
     {
         std::cerr << "Direct attachment lifecycle test FAILED: attachment tool "
                      "load failed\n";
