@@ -26,6 +26,11 @@
 #define NCCL_RMA_MAX_FLUSH_WRS NCCL_RMA_MAX_SEGMENTS
 // Multi-segment sender QP depth, NCCL_IB_MAX_SEND_WRS, spelled without common.h; connect.cc asserts they match.
 #define NCCL_RMA_SEND_QP_WRS (2 * 256 + 8 * 2 * NCCL_RMA_MAX_SEGMENTS + 1)
+// Equals NET_IB_MAX_REQUESTS (NCCL_NET_MAX_REQUESTS * NCCL_NET_IB_MAX_RECVS).
+// common_cast.h static_asserts the production macros against this.
+#define NCCL_RMA_MAX_INFLIGHT_REQUESTS 256
+#define NCCL_RMA_MAX_SEND_QP_WRS (2 * NCCL_RMA_MAX_INFLIGHT_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS - 2)
+#define NCCL_RMA_MAX_FLUSH_QP_WRS (NCCL_RMA_MAX_INFLIGHT_REQUESTS + NCCL_RMA_MAX_FLUSH_WRS - 1)
 
 static inline size_t ncclRmaSegmentSliceBytes(size_t remaining, size_t localRemaining, size_t remoteRemaining) {
   size_t chunk = remaining;
@@ -246,6 +251,12 @@ static inline int ncclRmaDevSlotOf(const int* ibDevNs, int rank, int ibDevN, int
     if (slots[d] == ibDevN) return d;
   }
   return -1;
+}
+
+// Data WRs look up the remote QP's physical device. Flush RDMA_READs look up
+// the local QP's physical device in the same remote handle.
+static inline int ncclRmaRkeyIbDevN(int localIbDevN, int remoteIbDevN, int flushMode) {
+  return flushMode ? localIbDevN : remoteIbDevN;
 }
 
 #endif
