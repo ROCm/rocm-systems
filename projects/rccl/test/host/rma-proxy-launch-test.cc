@@ -972,4 +972,125 @@ TEST_F(RmaProxyParamsTest, Wait_NonWaitDescriptorIsRejected) {
   EXPECT_EQ(ncclInternalError, ncclRmaProxyWaitParams(ctx_.get(), &desc, &params));
 }
 
+// ---------------------------------------------------------------------------
+// Persistent-descriptor reclaim.
+// ---------------------------------------------------------------------------
+
+class RmaProxyReclaimTest : public ::testing::Test {
+protected:
+  static constexpr int kNRanks = 3;
+  static constexpr int kContexts = 3;
+
+  struct ContextStorage {
+    ncclRmaProxyCtx ctx{};
+    std::array<ncclIntruQueue<ncclRmaProxyDesc, &ncclRmaProxyDesc::next>, kNRanks>
+        persistent{};
+
+    void Init(ncclComm* comm) {
+      ctx.comm = comm;
+      ctx.persistentQueues = persistent.data();
+      for (auto& queue : persistent) ncclIntruQueueConstruct(&queue);
+    }
+  };
+
+  std::unique_ptr<ncclComm> comm_;
+  std::unique_ptr<ncclKernelPlan> targetPlan_;
+  std::unique_ptr<ncclKernelPlan> otherPlan_;
+  std::array<ContextStorage, kContexts> contexts_;
+  std::array<void*, kContexts> contextPtrs_{};
+
+  void SetUp() override {
+    comm_ = std::make_unique<ncclComm>();
+    comm_->nRanks = kNRanks;
+    targetPlan_ = std::make_unique<ncclKernelPlan>();
+    otherPlan_ = std::make_unique<ncclKernelPlan>();
+
+    for (int i = 0; i < kContexts; i++) {
+      contexts_[i].Init(comm_.get());
+      contextPtrs_[i] = &contexts_[i].ctx;
+    }
+    comm_->rmaState.rmaProxyState.comm = comm_.get();
+    comm_->rmaState.rmaProxyState.rmaProxyCtxCount = kContexts;
+    comm_->rmaState.rmaProxyState.rmaProxyCtxs = contextPtrs_.data();
+  }
+
+  void TearDown() override {
+    for (auto& storage : contexts_) {
+      for (auto& queue : storage.persistent) {
+        while (!ncclIntruQueueEmpty(&queue)) {
+          ncclRmaProxyDesc* desc = ncclIntruQueueDequeue(&queue);
+          std::free(desc);
+        }
+      }
+    }
+  }
+
+  ncclRmaProxyDesc* Append(int context, int peer, ncclKernelPlan* plan) {
+    auto* desc = static_cast<ncclRmaProxyDesc*>(std::calloc(1, sizeof(ncclRmaProxyDesc)));
+    EXPECT_NE(nullptr, desc);
+    if (desc == nullptr) return nullptr;
+    desc->rmaDescType = ncclRmaDescTypePutSignal;
+    desc->persistPlan = plan;
+    ncclIntruQueueEnqueue(&contexts_[context].persistent[peer], desc);
+    return desc;
+  }
+};
+
+TEST_F(RmaProxyReclaimTest, ReclaimPersistDescs_RemovesOnlyTheRequestedPlansDescriptors) {
+  ncclRmaProxyDesc* firstTarget = Append(0, 1, targetPlan_.get());
+  ncclRmaProxyDesc* firstOther = Append(0, 1, otherPlan_.get());
+  ncclRmaProxyDesc* middleTarget = Append(0, 1, targetPlan_.get());
+  ncclRmaProxyDesc* secondOther = Append(0, 1, otherPlan_.get());
+  ncclRmaProxyDesc* lastTarget = Append(0, 1, targetPlan_.get());
+  ncclRmaProxyDesc* otherContextTarget = Append(2, 2, targetPlan_.get());
+  ASSERT_NE(nullptr, firstTarget);
+  ASSERT_NE(nullptr, firstOther);
+  ASSERT_NE(nullptr, middleTarget);
+  ASSERT_NE(nullptr, secondOther);
+  ASSERT_NE(nullptr, lastTarget);
+  ASSERT_NE(nullptr, otherContextTarget);
+  contextPtrs_[1] = nullptr;
+
+  ASSERT_EQ(ncclSuccess,
+            ncclRmaProxyReclaimPersistDescs(&comm_->rmaState.rmaProxyState,
+                                            targetPlan_.get()));
+
+  EXPECT_EQ(firstOther, ncclIntruQueueHead(&contexts_[0].persistent[1]));
+  EXPECT_EQ(secondOther, firstOther->next);
+  EXPECT_EQ(nullptr, secondOther->next);
+  EXPECT_EQ(secondOther, contexts_[0].persistent[1].tail);
+  EXPECT_EQ(nullptr, ncclIntruQueueHead(&contexts_[2].persistent[2]));
+  EXPECT_EQ(nullptr, contexts_[2].persistent[2].tail);
+}
+
+TEST_F(RmaProxyReclaimTest, ReclaimPlan_DisconnectedProxyReturnsWithoutPausing) {
+  comm_->rmaState.rmaProxyState.connected = false;
+  comm_->rmaState.rmaProxyState.rmaProgress = 7;
+
+  EXPECT_EQ(ncclSuccess,
+            ncclRmaProxyReclaimPlanUut(comm_.get(), targetPlan_.get()));
+  EXPECT_EQ(7, comm_->rmaState.rmaProxyState.rmaProgress);
+}
+
+TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) {
+  ncclRmaProxyState* state = &comm_->rmaState.rmaProxyState;
+  state->connected = true;
+  state->rmaProgress = 1;
+  ASSERT_NE(nullptr, Append(0, 2, targetPlan_.get()));
+
+  std::thread proxy([&] {
+    std::unique_lock<std::mutex> lock(state->mutex);
+    state->cond.wait(lock, [&] { return state->rmaProgress == 2; });
+    state->rmaProgress = 0;
+    state->cond.notify_one();
+    state->cond.wait(lock, [&] { return state->rmaProgress == 1; });
+  });
+
+  EXPECT_EQ(ncclSuccess, ncclRmaProxyReclaimPlanUut(comm_.get(), targetPlan_.get()));
+  proxy.join();
+
+  EXPECT_EQ(1, state->rmaProgress);
+  EXPECT_EQ(nullptr, ncclIntruQueueHead(&contexts_[0].persistent[2]));
+}
+
 }  // namespace
