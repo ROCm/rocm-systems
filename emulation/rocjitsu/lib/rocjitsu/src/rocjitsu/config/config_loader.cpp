@@ -4,6 +4,7 @@
 #include "rocjitsu/config/config_loader.h"
 
 #include "rocjitsu/config/config_common.h"
+#include "rocjitsu/config/rj_threads.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
@@ -19,6 +20,7 @@
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/soc.h"
 
+#include "embedded_schema.h"
 #include "flatbuffers/idl.h"
 #include "simdojo/sim/exec_mode.h"
 #include "simdojo/sim/topology.h"
@@ -28,6 +30,7 @@
 #include <cassert>
 #include <cctype>
 #include <limits>
+#include <ranges>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
@@ -1063,3 +1066,53 @@ LoadedConfig load_config_from_string(const std::string &json, const std::string 
 
 } // namespace config
 } // namespace rocjitsu
+
+extern "C" rj_status_t rj_config_available_host_threads(uint32_t *out_host_threads) {
+  if (out_host_threads == nullptr)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  // Nothing on this path is expected to throw -- it reads an affinity mask --
+  // but the caller across the frame is Rust, on a non-unwind ABI, and "expected
+  // not to" is not a guarantee the ABI makes. Cheaper to close than to argue
+  // about, and it keeps the three config entry points the same shape.
+  try {
+    *out_host_threads = rocjitsu::amdgpu::available_host_threads();
+    return ROCJITSU_STATUS_SUCCESS;
+  } catch (...) {
+    return ROCJITSU_STATUS_ERROR;
+  }
+}
+
+extern "C" rj_status_t rj_config_resolve_execution_threads(const char *config_path, uint32_t budget,
+                                                           uint32_t host_threads,
+                                                           uint32_t *out_engines,
+                                                           uint32_t *out_dispatch,
+                                                           size_t *inout_dispatch_count) {
+  if (config_path == nullptr || *config_path == '\0' || out_engines == nullptr ||
+      inout_dispatch_count == nullptr)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+
+  const size_t capacity = out_dispatch == nullptr ? 0 : *inout_dispatch_count;
+  try {
+    auto settings =
+        rocjitsu::config::load_execution_thread_settings(config_path, rocjitsu::kEmbeddedSchema);
+    if (budget != 0)
+      settings.request.budget = budget;
+    const auto plan = settings.resolve(
+        host_threads == 0 ? rocjitsu::amdgpu::available_host_threads() : host_threads);
+
+    *out_engines = plan.engines;
+    *inout_dispatch_count = plan.dispatch.size();
+    if (out_dispatch == nullptr)
+      return ROCJITSU_STATUS_SUCCESS;
+    if (capacity < plan.dispatch.size())
+      return ROCJITSU_STATUS_OUT_OF_RESOURCES;
+
+    std::ranges::copy(plan.dispatch, out_dispatch);
+    return ROCJITSU_STATUS_SUCCESS;
+  } catch (const std::exception &) {
+    return ROCJITSU_STATUS_INVALID_FILE;
+  } catch (...) {
+    // Not every throw is a std::exception, and this frame's caller is Rust.
+    return ROCJITSU_STATUS_ERROR;
+  }
+}

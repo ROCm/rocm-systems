@@ -42,3 +42,10 @@ __pycache__
 .claude
 .codex
 .agents
+
+# cargo (cli/)
+target
+debug
+**/*.rs.bk
+**/mutants.out*/
+rustc-ice-*.txt

@@ -312,6 +312,23 @@ endif()
 unset(_rj_sanitizer_count)
 unset(_rj_sanitizer_kinds)
 
+# The sanitizer runtime(s) a shared-sanitizer build has to load ahead of
+# everything else, as an LD_PRELOAD-ordered list. Empty on a normal
+# build, which is every build but the sanitizer ones.
+#
+# Here rather than beside its first use because both `cli/` and `tests/`
+# need it and `cli/` is configured first: the Rust workspace's own
+# `cargo test` loads librocjitsu.so exactly as the CLI does, and needs
+# the runtime in its image for the same reason.
+set(RJ_SANITIZER_PRELOAD "")
+if(RJ_ASAN_SHARED_LIBRARY)
+    list(APPEND RJ_SANITIZER_PRELOAD "${RJ_ASAN_SHARED_LIBRARY}")
+endif()
+if(RJ_TSAN_SHARED_LIBRARY)
+    list(APPEND RJ_SANITIZER_PRELOAD "${RJ_TSAN_SHARED_LIBRARY}")
+endif()
+list(JOIN RJ_SANITIZER_PRELOAD ":" RJ_SANITIZER_PRELOAD)
+
 if(RJ_CLANG_TIDY)
     find_program(CLANG_TIDY_EXE NAMES clang-tidy)
     if(CLANG_TIDY_EXE)
@@ -421,6 +438,22 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(rocjitsu_shared PRIVATE dl)
 endif()
 
+# The vfio-user front end, when it is built at all.
+#
+# It used to be linked into the C++ CLI, which was the only thing that
+# called it. That CLI is gone and its replacement is not C++: it resolves
+# `rj_run_vfio_server` out of this library at runtime, so the code has to
+# be in the library rather than in a binary beside it. Still inside the
+# option, so an ordinary build neither compiles it nor acquires a
+# dependency on libvfio-user; `rocjitsu_vmm_vfu` does not even exist
+# otherwise (see lib/rocjitsu/src/rocjitsu/vmm/CMakeLists.txt).
+if(ROCJITSU_ENABLE_VFIO)
+    target_link_libraries(
+        rocjitsu_shared
+        PRIVATE rocjitsu_pci rocjitsu_vmm_vfu libvfio-user::libvfio-user
+    )
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(rocjitsu_shared PRIVATE "LINKER:--exclude-libs,ALL")
 endif()
@@ -432,9 +465,25 @@ add_subdirectory(tools)
 add_subdirectory(tools/rj-ip-discovery)
 add_subdirectory(fuzz/decode)
 
+# The rocjitsu CLI, which is a Rust workspace with its own cargo wrapper.
+#
+# Brought into this build rather than left to a developer to build by
+# hand because the test suite launches almost everything through it: the
+# `${RJ_CLI_LOCAL} --config <cfg> -- <app>` form is how a test gets a
+# workload in front of the emulator at all. It sets `RJ_CLI_BIN` and
+# `RJ_CLI_TARGET`, or leaves both unset when cargo is missing, which is
+# what `tests/` gates on.
+#
+# Linux-only, as the C++ front end it replaced was. The workspace is not
+# portable and does not pretend to be: POSIX process groups, Unix domain
+# sockets and `tokio::signal::unix` are in its production types, not
+# behind `cfg(unix)`. Without this guard a Windows host that happens to
+# have cargo would start a build that cannot finish, and one without
+# cargo would skip the CLI for the wrong reason.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_subdirectory(tools/rocjitsu)
+    add_subdirectory(cli)
 endif()
+
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()
@@ -469,10 +518,7 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # rj_pretranslate ships because the tier it fills is only worth having if an
     # image build or a post-install step can fill it.
-    install(
-        TARGETS rocjitsu_bin rj_pretranslate
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    )
+    install(TARGETS rj_pretranslate RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     # And the wrapper ships with it. rj_pretranslate takes standalone code
     # objects; the script is the only piece that knows how to find them inside
     # fat binaries, offload bundles and KPACK archives, and the tool's own help

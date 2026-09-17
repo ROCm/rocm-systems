@@ -153,7 +153,7 @@ build/tests/rocjitsu_tests --gtest_filter=CpuDispatchPoolBenchmark.SparseConcurr
 Inspect a preset's effective allocations without constructing the simulated GPU:
 
 ```sh
-build/tools/rocjitsu/rocjitsu --config configs/gfx950_mi355x.json --thread-budget-table
+rocjitsu thread-budget-table --config configs/gfx950_mi355x.json
 ```
 
 The [configuration reference](configuration.md#thread-accounting-and-preferred-allocations)

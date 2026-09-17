@@ -44,6 +44,43 @@ void drain_and_restore(const sigset_t &handled, const sigset_t &previous) {
   pthread_sigmask(SIG_SETMASK, &previous, nullptr);
 }
 
+/// @brief Blocks the signals this server consumes for as long as it is in
+/// scope, and drains and restores the caller's mask on the way out.
+///
+/// @details A guard rather than a call at each exit because one of the exits is
+/// not a `return`. The server is reached through an `extern "C"` entry point, so
+/// its caller is not necessarily C++ and is certainly not expecting our mask: a
+/// throw between blocking and restoring -- allocation, `std::jthread`, anything
+/// `std::format` does -- would otherwise hand that caller a process with SIGINT
+/// and SIGTERM blocked and no way to know why.
+class BlockedSignals {
+public:
+  /// @param[in] handled The signals to block until this goes out of scope.
+  explicit BlockedSignals(const sigset_t &handled) : handled_(handled) {
+    blocked_ = pthread_sigmask(SIG_BLOCK, &handled_, &previous_) == 0;
+  }
+
+  BlockedSignals(const BlockedSignals &) = delete;
+  BlockedSignals &operator=(const BlockedSignals &) = delete;
+  BlockedSignals(BlockedSignals &&) = delete;
+  BlockedSignals &operator=(BlockedSignals &&) = delete;
+
+  ~BlockedSignals() {
+    if (blocked_) {
+      drain_and_restore(handled_, previous_);
+    }
+  }
+
+  /// @returns Whether the mask was actually installed. A caller that gets
+  /// `false` has the mask it started with and nothing to undo.
+  [[nodiscard]] bool blocked() const { return blocked_; }
+
+private:
+  sigset_t handled_;
+  sigset_t previous_{};
+  bool blocked_ = false;
+};
+
 /// @brief How often the waiting thread rechecks for a signal.
 constexpr long kSignalPollNanoseconds = 100'000'000;
 
@@ -110,8 +147,10 @@ int run_vfio_server(const std::string &config_path, const std::string &socket_pa
   // anything: the device has no event source yet, so the only way to show that
   // the interrupt path works end to end is for something outside to ask.
   sigaddset(&handled_signals, SIGUSR1);
-  sigset_t previous_signals;
-  if (pthread_sigmask(SIG_BLOCK, &handled_signals, &previous_signals) != 0) {
+  // Restored by the guard on every exit, including the ones that are not
+  // returns; see BlockedSignals.
+  BlockedSignals blocked_signals(handled_signals);
+  if (!blocked_signals.blocked()) {
     util::Logger::warn("vfu: cannot block the signals this server waits on");
     return 1;
   }
@@ -120,10 +159,6 @@ int run_vfio_server(const std::string &config_path, const std::string &socket_pa
   {
     VfioDeviceHost host(socket_path, device);
     if (!host.build()) {
-      // Drained on this path too: a request signal queued while the mask was on
-      // is still pending, and unmasking with one outstanding kills the process
-      // on the way out of a failure it has already reported.
-      drain_and_restore(handled_signals, previous_signals);
       return 1;
     }
 
@@ -191,8 +226,6 @@ int run_vfio_server(const std::string &config_path, const std::string &socket_pa
       status = 1;
     }
   }
-
-  drain_and_restore(handled_signals, previous_signals);
 
   // What the driver said about its interrupt ring. Reported next to the
   // unmodelled registers because it answers the same question -- how far the

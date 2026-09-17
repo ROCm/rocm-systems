@@ -6,6 +6,7 @@
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
 #include "rocjitsu/vm/amdgpu/pci/register_symbols.h"
 #include "rocjitsu/vm/amdgpu/pci/scratch_pci_device.h"
+#include "rocjitsu/vmm/rj_vfio.h"
 #include "rocjitsu/vmm/vfu/vfio_device_host.h"
 #include "rocjitsu/vmm/vfu/vfio_server.h"
 #include "vfio_user_client.h"
@@ -21,6 +22,7 @@
 // them itself, which makes this nest harmlessly, but releases before it do not,
 // and a consumer building against one of those otherwise has to work around the
 // name mangling from outside the project.
+#include <csignal>
 #include <cstdint>
 
 #include <sys/queue.h>
@@ -676,4 +678,51 @@ TEST(VfioDeviceHost, DiscardsAskedWorkWhenServingHasStopped) {
   (void)served.host().ask_serving_thread([&ran] { ran = true; });
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
   EXPECT_FALSE(ran) << "work ran with no serving thread to run it";
+}
+
+// The C entry point the CLI resolves out of librocjitsu.so. It is the only way
+// in from another language -- run_vfio_server() takes std::string and cannot be
+// named by one -- so its argument handling is its own, and returns before
+// anything is stood up.
+//
+// Not a test of the server: standing one up needs a socket and a config, and
+// VfioDeviceHost above covers what happens after. This covers the boundary.
+TEST(RjRunVfioServer, RefusesAMissingConfigOrSocketWithoutStartingAnything) {
+  EXPECT_NE(rj_run_vfio_server(nullptr, "/tmp/unused.sock"), 0);
+  EXPECT_NE(rj_run_vfio_server("", "/tmp/unused.sock"), 0);
+  EXPECT_NE(rj_run_vfio_server("/nonexistent/config.json", nullptr), 0);
+  EXPECT_NE(rj_run_vfio_server("/nonexistent/config.json", ""), 0);
+}
+
+// The signal mask belongs to the caller, on every path out of here.
+//
+// The server blocks SIGINT, SIGTERM and SIGUSR1 to consume them synchronously,
+// and has to put back what it found. That restore is a scope guard rather than
+// a call at each exit, because one of the exits is a throw: this is an
+// `extern "C"` boundary, and handing a caller in another language a process
+// with SIGTERM blocked -- and no way to learn why -- is worse than the failure
+// that caused it.
+//
+// The failures reachable from here return before the mask is touched, so what
+// this pins is the invariant rather than the guard: a future early return added
+// after the block that forgot to restore would land in exactly this gap. The
+// mask is deliberately not the default one, so the check is "unchanged" and not
+// merely "unblocked".
+TEST(RjRunVfioServer, LeavesTheCallersSignalMaskAsItFoundIt) {
+  sigset_t ours;
+  sigemptyset(&ours);
+  sigaddset(&ours, SIGUSR2);
+  sigset_t before;
+  ASSERT_EQ(pthread_sigmask(SIG_BLOCK, &ours, &before), 0);
+
+  EXPECT_NE(rj_run_vfio_server("/nonexistent/config.json", "/tmp/unused.sock"), 0);
+
+  sigset_t after;
+  ASSERT_EQ(pthread_sigmask(SIG_SETMASK, nullptr, &after), 0);
+  for (const int signal : {SIGINT, SIGTERM, SIGUSR1, SIGUSR2}) {
+    EXPECT_EQ(sigismember(&after, signal), sigismember(&ours, signal))
+        << "signal " << signal << " came back with a different disposition";
+  }
+
+  ASSERT_EQ(pthread_sigmask(SIG_SETMASK, &before, nullptr), 0);
 }

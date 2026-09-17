@@ -12,6 +12,8 @@
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/config/pci_device_config.h"
+#include "rocjitsu/config/rj_dbt.h"
+#include "rocjitsu/config/rj_threads.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
@@ -1111,6 +1113,85 @@ TEST(ConfigLoaderTest, RuntimeConfigHandoffReportsDirectoryCreationFailure) {
   dbt.host.gpu_id = 28851;
 
   EXPECT_FALSE(config::write_dbt_runtime_config_handoff("/tmp/config.json", dbt, getpid()));
+}
+
+TEST(ConfigLoaderTest, PublicHandoffEntryPointRoundTripsThroughGivenDirectory) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-public-");
+  const std::string runtime_dir = std::filesystem::path(runtime.path()) / "session" / "runtime";
+
+  ASSERT_EQ(ROCJITSU_STATUS_SUCCESS,
+            rj_dbt_write_handoff(runtime_dir.c_str(), "/tmp/config.json", 28851));
+  std::ifstream handoff(runtime_dir + "/config_path");
+  const std::string contents((std::istreambuf_iterator<char>(handoff)),
+                             std::istreambuf_iterator<char>());
+  const auto parsed = config::parse_dbt_runtime_config_handoff(contents);
+
+  ASSERT_TRUE(parsed);
+  EXPECT_EQ(parsed->config_path, "/tmp/config.json");
+  ASSERT_TRUE(parsed->resolved_gpu_id);
+  EXPECT_EQ(*parsed->resolved_gpu_id, "28851");
+}
+
+TEST(ConfigLoaderTest, PublicHandoffEntryPointOmitsGpuLineForNonDbtInvocation) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-public-non-dbt-");
+
+  ASSERT_EQ(ROCJITSU_STATUS_SUCCESS,
+            rj_dbt_write_handoff(runtime.path().c_str(), "/tmp/config.json", 0));
+  std::ifstream handoff(std::filesystem::path(runtime.path()) / "config_path");
+  const std::string contents((std::istreambuf_iterator<char>(handoff)),
+                             std::istreambuf_iterator<char>());
+
+  EXPECT_EQ(contents, "/tmp/config.json\n");
+  const auto parsed = config::parse_dbt_runtime_config_handoff(contents);
+  ASSERT_TRUE(parsed);
+  EXPECT_FALSE(parsed->resolved_gpu_id);
+}
+
+TEST(ConfigLoaderTest, PublicHandoffEntryPointRejectsMissingArguments) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-public-invalid-");
+
+  EXPECT_EQ(ROCJITSU_STATUS_INVALID_ARGUMENT, rj_dbt_write_handoff(nullptr, "/tmp/config.json", 0));
+  EXPECT_EQ(ROCJITSU_STATUS_INVALID_ARGUMENT, rj_dbt_write_handoff("", "/tmp/config.json", 0));
+  EXPECT_EQ(ROCJITSU_STATUS_INVALID_ARGUMENT,
+            rj_dbt_write_handoff(runtime.path().c_str(), nullptr, 0));
+  EXPECT_EQ(ROCJITSU_STATUS_INVALID_ARGUMENT, rj_dbt_write_handoff(runtime.path().c_str(), "", 0));
+}
+
+TEST(ConfigLoaderTest, PublicHandoffEntryPointReportsARenameFailureAndLeavesNoScratchFile) {
+  // The write lands in a temporary beside the destination and is renamed into
+  // place. Here the destination is a directory, so the rename cannot happen and
+  // the temporary has to be cleaned up -- with the `error_code` overload, not
+  // the throwing one. This entry point is called from Rust across a non-unwind
+  // ABI, so a `filesystem_error` raised while tidying up after a failure it has
+  // already decided to report would take the process with it instead.
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-public-rename-");
+  const std::filesystem::path handoff = std::filesystem::path(runtime.path()) / "config_path";
+  std::filesystem::create_directories(handoff / "occupied");
+
+  EXPECT_EQ(ROCJITSU_STATUS_ERROR,
+            rj_dbt_write_handoff(runtime.path().c_str(), "/tmp/config.json", 28851));
+  EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(runtime.path()) / "config_path.tmp"))
+      << "the scratch file outlived the write it belonged to";
+}
+
+TEST(ConfigLoaderTest, AvailableHostThreadsReportsAWidthOrRefusesTheArgument) {
+  // The other half of the pair the thread-budget table is built from, and the
+  // one with no other coverage. Never zero: a host whose affinity cannot be
+  // read reports one, because every later division is by this.
+  uint32_t host_threads = 0;
+  ASSERT_EQ(ROCJITSU_STATUS_SUCCESS, rj_config_available_host_threads(&host_threads));
+  EXPECT_GE(host_threads, 1u);
+
+  EXPECT_EQ(ROCJITSU_STATUS_INVALID_ARGUMENT, rj_config_available_host_threads(nullptr));
+}
+
+TEST(ConfigLoaderTest, PublicHandoffEntryPointReportsDirectoryCreationFailure) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-public-blocked-");
+  const std::filesystem::path blocked = std::filesystem::path(runtime.path()) / "blocked";
+  std::ofstream(blocked) << "not a directory";
+  const std::string nested = (blocked / "runtime").string();
+
+  EXPECT_EQ(ROCJITSU_STATUS_ERROR, rj_dbt_write_handoff(nested.c_str(), "/tmp/config.json", 28851));
 }
 
 TEST(ConfigLoaderTest, RejectsEmptyResolvedGpuIdLineForEnabledDbt) {

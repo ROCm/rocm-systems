@@ -8,7 +8,7 @@ From bottom up:
 │  HIP / ROCR / RCCL  (unmodified binaries)   │
 ├─────────────────────────────────────────────┤
 │  KMD Layer (kmd/linux/)                     │  ┌──────────────────────────┐
-│    Interposer ── RemoteDriver ── RPC ───────┼──┤  Daemon (tools/rocjitsu) │
+│    Interposer ── RemoteDriver ── RPC ───────┼──┤  Daemon (daemon/)        │
 │    SimulatedDriver ── EventState            │  │  Unix socket RPC         │
 ├─────────────────────────────────────────────┤  └──────────────────────────┘
 │  VM Layer (vm/amdgpu/)                      │
@@ -176,12 +176,20 @@ CUs, caches, memory) from a single JSON file.
 
 See [configuration.md](configuration.md) for the config format.
 
-### CLI (`tools/rocjitsu/`)
+### CLI (`cli/`)
 
-Three execution modes:
+A Rust workspace, built with the rest of rocjitsu. Two execution modes:
 
-- **Local** — In-process simulation via LD_PRELOAD
-- **Daemon** — Fork a daemon server, then exec the application
-- **Attach** — Connect to a running daemon
+- **In-process** (`--in-process`) — the emulator runs inside the
+  workload's own process, reached through LD_PRELOAD. Cannot share GPU
+  memory across processes.
+- **Daemon** (`--daemon`) — the emulator runs in a process of its own,
+  which several workloads can share over a Unix socket. Required for
+  multi-GPU RCCL collectives.
 
-See [rocjitsu-cli.md](rocjitsu-cli.md) for the daemon RPC protocol.
+Each daemon belongs to the `rocjitsu run` that started it and is torn
+down with it; to put a second workload on a running one, use `rocjitsu
+exec --session <id>`.
+
+See [rocjitsu-cli.md](rocjitsu-cli.md) for the command surface and the
+daemon RPC protocol.

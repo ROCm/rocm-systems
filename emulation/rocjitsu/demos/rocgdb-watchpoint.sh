@@ -6,13 +6,13 @@
 # Demo: catch which GPU wave writes a buffer with a hardware data watchpoint,
 # entirely in software with no AMD GPU. See rocgdb-watchpoint.md. Regenerate the
 # .cast with:
-#   emulation/mirage/scripts/record_demo.sh emulation/rocjitsu/demos/rocgdb-watchpoint.sh
+#   emulation/rocjitsu/cli/scripts/record_demo.sh emulation/rocjitsu/demos/rocgdb-watchpoint.sh
 
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 kernel="$here/../tests/rocgdb/add_one.hip"
-mirage="${MIRAGE_BIN:-mirage}"
+rocjitsu="${ROCJITSU_BIN:-rocjitsu}"
 
 say() { printf '\n\033[1;36m# %s\033[0m\n' "$*"; }
 
@@ -31,7 +31,7 @@ launch_line="$(grep -nE 'add_one<<<' "$kernel" | head -1 | cut -d: -f1)"
 
 say "Set a hardware watchpoint on the device buffer and catch the GPU store:"
 ( set -x
-  "$mirage" run --profile mi350x --gdb \
+  "$rocjitsu" run --profile mi350x --gdb \
     --gdb-ex "break add_one.hip:${launch_line}" \
     --gdb-ex 'break add_one' \
     --gdb-ex 'run' \

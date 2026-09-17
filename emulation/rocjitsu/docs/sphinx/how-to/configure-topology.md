@@ -73,7 +73,7 @@ entry in `thread_allocations`; it leaves unused budget between granules.
 Explicit E/D knobs take priority and may exceed the automatic budget. A config
 without a table uses serial defaults for unspecified knobs.
 
-Use `rocjitsu --config <path> --thread-budget-table` to show expected allocations
+Use `rocjitsu thread-budget-table --config <path>` to show expected allocations
 without starting a VM. Mirage carries the same table from its agent config.
 
 ### `exec_mode`

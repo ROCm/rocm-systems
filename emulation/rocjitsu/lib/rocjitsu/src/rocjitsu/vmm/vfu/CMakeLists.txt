@@ -10,6 +10,7 @@ rj_add_object_library(
     guest_region_map.cpp
     vfio_device_host.cpp
     vfio_server.cpp
+    rj_vfio.cpp
 )
 target_link_libraries(
     rocjitsu_vmm_vfu

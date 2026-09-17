@@ -182,7 +182,7 @@ See [the design and evidence](concurrent-dispatch.md).
 Print allocations for any target without constructing a simulated GPU:
 
 ```sh
-rocjitsu --config configs/gfx950_mi355x.json --thread-budget-table
+rocjitsu thread-budget-table --config configs/gfx950_mi355x.json
 ```
 
 The configured row reflects the file's budget and current affinity. Remaining
