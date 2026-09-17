@@ -3764,6 +3764,7 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
   struct ncclCommFinalizeAsyncJob* job = (struct ncclCommFinalizeAsyncJob*)job_;
   ncclComm_t comm = job->comm;
   ncclResult_t ret = ncclSuccess;
+  ncclResult_t proxyStopResult = ncclSuccess;
 
   CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
 
@@ -3794,10 +3795,12 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
   }
 
   // Finalization is null-safe and also releases partially initialized state.
-  NCCLCHECKGOTO(ncclRmaCeFinalize(comm), ret, fail);
+  NCCLCHECKIGNORE(ncclRmaCeFinalize(comm), ret);
 
-  if ((ret = ncclProxyStop(comm)) != ncclSuccess) {
-    WARN("ncclProxyStop: comm %p (rank = %d) destroys proxy resource error %d", comm, comm->rank, ret);
+  proxyStopResult = ncclProxyStop(comm);
+  if (proxyStopResult != ncclSuccess) {
+    WARN("ncclProxyStop: comm %p (rank = %d) destroys proxy resource error %d", comm, comm->rank, proxyStopResult);
+    if (ret == ncclSuccess) ret = proxyStopResult;
   }
 
 exit:
