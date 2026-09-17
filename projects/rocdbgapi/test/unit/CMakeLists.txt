@@ -219,6 +219,18 @@ add_dbgapi_unit_test(dbgapi_displaced_stepping_api_test
   SOURCES displaced_stepping_api_test.cpp
   LIBS amd-dbgapi-internal)
 
+# watchpoint.cpp C API entry points (amd_dbgapi_set_watchpoint,
+# amd_dbgapi_remove_watchpoint) at the argument-validation layer that
+# does not need a real process or agent: NOT_INITIALIZED before
+# initialize, INVALID_PROCESS_ID / INVALID_WATCHPOINT_ID for arbitrary
+# handles, INVALID_ARGUMENT for size=0 or invalid kind enum.  The happy
+# paths and validation of process state (PROCESS_FROZEN, NOT_SUPPORTED,
+# NO_WATCHPOINT_AVAILABLE) need a real process with agents and live in
+# feature tests or are covered by watchpoint_test.cpp via the C++ API.
+add_dbgapi_unit_test(dbgapi_watchpoint_api_test
+  SOURCES watchpoint_api_test.cpp
+  LIBS amd-dbgapi-internal)
+
 # displaced_stepping.{h,cpp} at the object level (no real wave): construction
 # with std::nullopt destination, retain/release refcounting through the process
 # handle set, get_info(PROCESS) round-trip, and get_info(unknown) throw.  Uses
