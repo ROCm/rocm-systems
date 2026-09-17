@@ -1307,6 +1307,12 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
 
   // comm->p2pnChannelsPerPeer was set by ncclTopoComputeP2pChannelsPerPeer().
   int minChannels = comm->p2pnChannelsPerPeer;
+  // On AINIC a single NIC already saturates the GPU's host path, but we need two communicators to utilise it completely
+  // depending on scale/p2pnChannels values rise minimal number of net-p2p-channels
+  if (rcclUseAinic() && comm->nNodes > 1 && comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT) {
+    int nChannelsMax = (2 * comm->nRanks > comm->p2pnChannels) ? 1 : 2;
+    minChannels = std::min(minChannels, std::max(comm->minNetCount, nChannelsMax));
+  }
   const bool isGfx1250 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
 
   int arch, vendor, model;
