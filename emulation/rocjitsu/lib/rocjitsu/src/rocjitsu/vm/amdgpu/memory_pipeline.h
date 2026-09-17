@@ -13,9 +13,7 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <cstdint>
-#include <functional>
 #include <queue>
-#include <utility>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -24,13 +22,6 @@ class L1ScalarCache;
 class L1VectorCache;
 class L2Cache;
 class Lds;
-
-enum class [[nodiscard]] MemoryAccessCompletion {
-  Complete,
-  Deferred,
-};
-
-using MemoryAccessDeferredCompletion = std::function<void()>;
 
 /// @brief Base class for a memory pipeline stage (scalar, global, or local).
 ///
@@ -55,11 +46,8 @@ public:
 protected:
   /// @brief Issue a memory instruction through its concrete pipeline.
   ///
-  /// In functional mode, memory accesses normally complete synchronously:
-  /// the load or store is initiated and completed within this call, and the
-  /// wait counter is released only after complete_access() finishes all
-  /// writeback work. A timing backend may return Deferred and release the
-  /// counter later through finish_completed_access().
+  /// Memory accesses complete synchronously: initiate the access, perform
+  /// architectural writeback, then release the wait counter and instruction.
   template <typename Pipeline>
   void issue_impl(Pipeline &pipeline, Instruction *inst, Wavefront &wf) {
     WaitCounterType issue_counter = counter_type_;
@@ -78,16 +66,8 @@ protected:
     }
     wf.wait_counters().increment(issue_counter);
     pipeline.initiate_access(*inst, wf);
-    // The wait counter pins wf/inst ownership until this callback releases it.
-    // ComputeUnitCore retires ENDING wavefronts only after wait_counters().empty(),
-    // so a deferred backend must invoke this exactly once while that counter is held.
-    MemoryAccessDeferredCompletion deferred_completion = [this, inst, &wf, issue_counter]() {
-      finish_completed_access(inst, wf, issue_counter);
-    };
-    MemoryAccessCompletion completion =
-        pipeline.complete_access(*inst, wf, std::move(deferred_completion));
-    if (completion == MemoryAccessCompletion::Complete)
-      finish_completed_access(inst, wf, issue_counter);
+    pipeline.complete_access(*inst, wf);
+    finish_completed_access(inst, wf, issue_counter);
   }
 
 public:
@@ -125,8 +105,7 @@ protected:
   friend class MemoryPipeline;
 
   void initiate_access(Instruction &inst, Wavefront &wf);
-  MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
-                                         MemoryAccessDeferredCompletion complete);
+  void complete_access(Instruction &inst, Wavefront &wf);
 
 private:
   L1ScalarCache *l1_;
@@ -146,8 +125,7 @@ protected:
   friend class MemoryPipeline;
 
   void initiate_access(Instruction &inst, Wavefront &wf);
-  MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
-                                         MemoryAccessDeferredCompletion complete);
+  void complete_access(Instruction &inst, Wavefront &wf);
 
 private:
   L1VectorCache *l1_;
@@ -165,8 +143,7 @@ protected:
   friend class MemoryPipeline;
 
   void initiate_access(Instruction &inst, Wavefront &wf);
-  MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
-                                         MemoryAccessDeferredCompletion complete);
+  void complete_access(Instruction &inst, Wavefront &wf);
 };
 
 } // namespace amdgpu

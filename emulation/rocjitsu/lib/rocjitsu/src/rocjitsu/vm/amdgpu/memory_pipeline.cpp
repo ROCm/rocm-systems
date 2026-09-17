@@ -80,8 +80,7 @@ void write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_l
   }
 }
 
-MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, ComputeUnitCore &cu,
-                                             MemoryAccessDeferredCompletion complete) {
+void complete_lds_dst_load(VectorMemState &d, Wavefront &wf, ComputeUnitCore &cu) {
   uint32_t per_lane_bytes = d.num_elems * d.elem_size;
   std::vector<ClusterLdsTarget> targets;
   size_t target_count = 1;
@@ -119,25 +118,23 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
     // GFX9/CDNA: out-of-range lanes return zeros, and those zeros are written to LDS.
     const uint64_t write_mask = arch_is_cdna_4_or_lower(cu.arch()) ? d.exec_mask : d.lane_mask;
     write_lds_dst_load_direct(d, wf.lds(), per_lane_bytes, write_mask);
-    return MemoryAccessCompletion::Complete;
+    return;
   }
 
   auto txn = make_cluster_lds_multicast_transaction(d, wf, std::move(targets));
-  auto result = cu.cluster_lds_multicast_engine().submit(std::move(txn), std::move(complete));
-
-  return result == ClusterLdsMulticastResult::Deferred ? MemoryAccessCompletion::Deferred
-                                                       : MemoryAccessCompletion::Complete;
+  write_cluster_lds_multicast(txn);
 }
 
-MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, ComputeUnitCore &cu,
-                                       MemoryAccessDeferredCompletion complete) {
+void vector_complete(VectorMemState &d, Wavefront &wf, ComputeUnitCore &cu) {
   if (!d.is_load)
-    return MemoryAccessCompletion::Complete;
+    return;
 
   // Buffer load with LDS bit: scatter loaded data into LDS instead of VGPRs.
   // Each lane writes num_elems * elem_size bytes to LDS at lds_base + lane_offset.
-  if (d.lds_dst)
-    return complete_lds_dst_load(d, wf, cu, std::move(complete));
+  if (d.lds_dst) {
+    complete_lds_dst_load(d, wf, cu);
+    return;
+  }
 
   // Atomics: response layout is [lane * elem_size], regular loads are
   // [lane * (num_elems * elem_size) + elem * elem_size].
@@ -150,7 +147,7 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   uint32_t vgpr_count =
       is_atomic ? std::max(1u, (d.elem_size + 3u) / 4u) : std::max(1u, (total_bytes + 3u) / 4u);
   if (!cu.owns_vgpr_range(wf, d.dst_reg_base, vgpr_count))
-    return MemoryAccessCompletion::Complete;
+    return;
 
   // Zero destination VGPRs for OOB lanes. Per AMD ISA spec, out-of-bounds
   // buffer loads return 0. exec_mask is the effective issue mask; ordinary OOB
@@ -196,7 +193,7 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
                     sizeof(uint32_t));
       }
     }
-    return MemoryAccessCompletion::Complete;
+    return;
   }
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
     if (!(d.lane_mask & (1ULL << lane)))
@@ -230,7 +227,6 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       cu.write_vgpr(d.dst_reg_base + i, lane, val);
     }
   }
-  return MemoryAccessCompletion::Complete;
 }
 
 } // namespace
@@ -250,14 +246,12 @@ void ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   }
 }
 
-MemoryAccessCompletion
-ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
-                                   MemoryAccessDeferredCompletion /*complete*/) {
+void ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<ScalarMemState>();
   if (!d.is_load)
-    return MemoryAccessCompletion::Complete;
+    return;
   if (d.dst_register.width != d.num_dwords)
-    return MemoryAccessCompletion::Complete;
+    return;
   RegisterAccess registers(wf);
   for (uint32_t i = 0; i < d.num_dwords; ++i)
     registers.write_scalar_unobserved(d.dst_register, i, d.response_data[i]);
@@ -274,7 +268,6 @@ ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
       }
     }
   });
-  return MemoryAccessCompletion::Complete;
 }
 
 namespace {
@@ -601,12 +594,11 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   }
 }
 
-MemoryAccessCompletion GlobalMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
-                                                          MemoryAccessDeferredCompletion complete) {
+void GlobalMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
   if (d.transpose != 0)
     transpose_response(d);
-  return vector_complete(d, wf, wf.raw_cu(), std::move(complete));
+  vector_complete(d, wf, wf.raw_cu());
 }
 
 void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
@@ -702,12 +694,11 @@ void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   }
 }
 
-MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
-                                                         MemoryAccessDeferredCompletion complete) {
+void LocalMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
   if (d.transpose != 0)
     transpose_response(d);
-  MemoryAccessCompletion completion = vector_complete(d, wf, wf.raw_cu(), std::move(complete));
+  vector_complete(d, wf, wf.raw_cu());
 
   // DS dual-access: write the second load or returning-atomic result.
   if (d.ds2_active && d.is_load) {
@@ -740,7 +731,6 @@ MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wave
       }
     });
   }
-  return completion;
 }
 
 } // namespace amdgpu

@@ -81,17 +81,14 @@ make_cluster_lds_multicast_transaction(VectorMemState &state, const Wavefront &w
   assert(state.lds_base == wf.lds_base() &&
          "cluster LDS multicast source base must be the source WG allocation base");
   ClusterLdsMulticastTransaction txn{};
-  txn.dispatch_id = wf.dispatch_id();
   txn.source_wg_id = wf.wg_id();
   txn.source_cluster_rank = wf.cluster_rank();
   txn.source_lds_base = state.lds_base;
   txn.mcast_mask = state.cluster_mcast_mask;
-  txn.wait_counter_type = state.wait_counter_type;
   txn.bytes_per_lane = state.num_elems * state.elem_size;
   txn.wf_size = state.wf_size;
   txn.lane_mask = state.lane_mask;
   txn.per_lane_addr = state.lds_per_lane_addr;
-  txn.per_lane_global_addr = state.per_lane_addr;
   txn.per_lane_lds_addr = state.per_lane_lds_addr;
   txn.payload = std::move(state.response_data);
   txn.targets = std::move(targets);
@@ -103,11 +100,9 @@ bool cluster_lds_source_rank_selected(const ClusterLdsMulticastTransaction &txn)
          (txn.mcast_mask & cluster_multicast_rank_mask(txn.source_cluster_rank)) != 0;
 }
 
-ClusterLdsMulticastResult
-ImmediateClusterLdsMulticastEngine::submit(ClusterLdsMulticastTransaction txn,
-                                           ClusterLdsMulticastCompletion /*complete*/) {
+void write_cluster_lds_multicast(const ClusterLdsMulticastTransaction &txn) {
   if (!cluster_lds_source_rank_selected(txn))
-    return ClusterLdsMulticastResult::Complete;
+    return;
 
   auto target_it = std::find_if(txn.targets.begin(), txn.targets.end(), [&](const auto &target) {
     return target.wg_id == txn.source_wg_id && target.cluster_rank == txn.source_cluster_rank;
@@ -115,7 +110,6 @@ ImmediateClusterLdsMulticastEngine::submit(ClusterLdsMulticastTransaction txn,
 
   if (target_it != txn.targets.end())
     write_cluster_lds_target(txn, *target_it);
-  return ClusterLdsMulticastResult::Complete;
 }
 
 } // namespace amdgpu

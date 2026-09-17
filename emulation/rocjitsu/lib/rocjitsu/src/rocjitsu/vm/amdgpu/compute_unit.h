@@ -11,7 +11,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
-#include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
@@ -338,20 +337,6 @@ public:
 
   /// @brief Return the command processor that owns this CU's dispatch stream.
   CommandProcessor *command_processor() { return cp_; }
-
-  /// @brief Override the cluster LDS multicast backend.
-  ///
-  /// @details Passing nullptr restores the immediate functional backend. Timed
-  /// models can install a shared fabric object here without changing the ISA
-  /// execution path that produces multicast transactions.
-  void set_cluster_lds_multicast_engine(ClusterLdsMulticastEngine *engine) {
-    cluster_lds_multicast_engine_ = engine ? engine : &default_cluster_lds_multicast_engine_;
-  }
-
-  /// @brief Return the active cluster LDS multicast backend.
-  ClusterLdsMulticastEngine &cluster_lds_multicast_engine() {
-    return *cluster_lds_multicast_engine_;
-  }
 
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
@@ -1109,8 +1094,6 @@ protected:
   /// invalidates.
   uint64_t inst_cache_dispatch_id_ = ~uint64_t{0};
   Lds lds_;
-  ImmediateClusterLdsMulticastEngine default_cluster_lds_multicast_engine_;
-  ClusterLdsMulticastEngine *cluster_lds_multicast_engine_ = &default_cluster_lds_multicast_engine_;
   uint32_t next_lds_alloc_ = 0; ///< Next free LDS offset for per-WG allocation.
   std::unordered_set<uint64_t> lds_pinned_clusters_;
   ScalarMemPipeline scalar_mem_pipeline_;
