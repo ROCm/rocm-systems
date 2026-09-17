@@ -275,6 +275,12 @@ main(int argc, char** argv)
         std::cout << "Attachment test observed ROCPROFILER_TEST_FORWARDING=" << forwarding_test
                   << "\n";
     }
+    if(std::getenv("ROCPROFILER_REGISTER_TOOL_ATTACHED") != nullptr)
+    {
+        std::cerr << "Attachment test FAILED: internal attachment marker leaked into "
+                     "the target environment\n";
+        return 1;
+    }
     std::cout << "Attachment test app finished" << std::endl;
 
     if(child_pid > 0)

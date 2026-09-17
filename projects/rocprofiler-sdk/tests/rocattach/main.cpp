@@ -88,6 +88,8 @@ main(int argc, char** argv)
         return 1;
     }
 
+    bool reattach                    = false;
+    bool retry_failed_attach         = false;
     bool send_signal                 = false;
     bool poison_register_library_env = false;
     for(int i = 3; i < argc; ++i)
@@ -100,6 +102,14 @@ main(int argc, char** argv)
         else if(arg == "--stale-register-library")
         {
             poison_register_library_env = true;
+        }
+        else if(arg == "--reattach")
+        {
+            reattach = true;
+        }
+        else if(arg == "--retry-failed-attach")
+        {
+            retry_failed_attach = true;
         }
         else
         {
@@ -136,6 +146,7 @@ main(int argc, char** argv)
             // These values should reach the target only through rocattach's injected
             // environment buffer, not through normal fork/exec inheritance.
             unsetenv("ROCPROFILER_REGISTER_LIBRARY");
+            unsetenv("ROCP_TOOL_LIBRARIES");
             unsetenv("ROCPROFILER_TEST_FORWARDING");
         }
         std::cout << "child executing " << argv[1] << std::endl;
@@ -175,32 +186,66 @@ main(int argc, char** argv)
             setenv("ROCPROFILER_REGISTER_LIBRARY",
                    "/tmp/rocattach-missing-librocprofiler-sdk.so.999.999.999",
                    true);
+            setenv("ROCP_TOOL_LIBRARIES", "/tmp/rocattach-missing-startup-tool.so", true);
             setenv("ROCPROFILER_TEST_FORWARDING", "preserved", true);
         }
 
-        {
-            std::cout << "starting call to rocattach_attach(pid1)" << std::endl;
-            rocattach_status_t status = rocattach_attach(pid1);
+        auto attach_process = [](pid_t pid) {
+            std::cout << "starting call to rocattach_attach(" << pid << ")" << std::endl;
+            rocattach_status_t status = rocattach_attach(pid);
             if(status != ROCATTACH_STATUS_SUCCESS)
             {
-                std::cout << "error: call to rocattach_attach(pid1) returned non zero status "
-                          << status << std::endl;
+                std::cout << "error: call to rocattach_attach(" << pid
+                          << ") returned non zero status " << status << std::endl;
+                return false;
+            }
+            std::cout << "call to rocattach_attach(" << pid << ") successful" << std::endl;
+            return true;
+        };
+
+        auto detach_process = [](pid_t pid) {
+            std::cout << "starting call to rocattach_detach(" << pid << ")" << std::endl;
+            rocattach_status_t status = rocattach_detach(pid);
+            if(status != ROCATTACH_STATUS_SUCCESS)
+            {
+                std::cout << "error: call to rocattach_detach(" << pid
+                          << ") returned non zero status " << status << std::endl;
+                return false;
+            }
+            std::cout << "call to rocattach_detach(" << pid << ") successful" << std::endl;
+            return true;
+        };
+
+        if(retry_failed_attach)
+        {
+            setenv("ROCPROFILER_TEST_EXPECT_ATTACH_COUNT", "2", true);
+            setenv("ROCPROFILER_TEST_EXPECT_DETACH_COUNT", "1", true);
+            setenv("ROCPROFILER_TEST_FAIL_ATTACH", "1", true);
+
+            auto expect_attach_failure = [](pid_t pid) {
+                auto status = rocattach_attach(pid);
+                if(status != ROCATTACH_STATUS_SUCCESS)
+                {
+                    std::cout << "Expected initial attachment failure for PID " << pid << std::endl;
+                    return true;
+                }
+                std::cout << "error: initial attachment unexpectedly succeeded for PID " << pid
+                          << std::endl;
+                return false;
+            };
+
+            if(!expect_attach_failure(pid1) || !expect_attach_failure(pid2))
+            {
                 kill_children();
                 return 1;
             }
-            std::cout << "call to rocattach_attach(pid1) successful" << std::endl;
+            setenv("ROCPROFILER_TEST_FAIL_ATTACH", "0", true);
         }
+
+        if(!attach_process(pid1) || !attach_process(pid2))
         {
-            std::cout << "starting call to rocattach_attach(pid2)" << std::endl;
-            rocattach_status_t status = rocattach_attach(pid2);
-            if(status != ROCATTACH_STATUS_SUCCESS)
-            {
-                std::cout << "error: call to rocattach_attach(pid2) returned non zero status "
-                          << status << std::endl;
-                kill_children();
-                return 1;
-            }
-            std::cout << "call to rocattach_attach(pid2) successful" << std::endl;
+            kill_children();
+            return 1;
         }
 
         // Send signal to child processes after attaching
@@ -221,29 +266,25 @@ main(int argc, char** argv)
         // Wait for child processes to continue executing
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
+        if(!detach_process(pid1) || !detach_process(pid2))
         {
-            std::cout << "starting call to rocattach_detach(pid1)" << std::endl;
-            rocattach_status_t status = rocattach_detach(pid1);
-            if(status != ROCATTACH_STATUS_SUCCESS)
-            {
-                std::cout << "error: call to rocattach_detach(pid1) returned non zero status "
-                          << status << std::endl;
-                kill_children();
-                return 1;
-            }
-            std::cout << "call to rocattach_detach(pid1) successful" << std::endl;
+            kill_children();
+            return 1;
         }
+
+        if(reattach)
         {
-            std::cout << "starting call to rocattach_detach(pid2)" << std::endl;
-            rocattach_status_t status = rocattach_detach(pid2);
-            if(status != ROCATTACH_STATUS_SUCCESS)
+            if(!attach_process(pid1) || !attach_process(pid2))
             {
-                std::cout << "error: call to rocattach_detach(pid2) returned non zero status "
-                          << status << std::endl;
                 kill_children();
                 return 1;
             }
-            std::cout << "call to rocattach_detach(pid2) successful" << std::endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            if(!detach_process(pid1) || !detach_process(pid2))
+            {
+                kill_children();
+                return 1;
+            }
         }
 
         if(kill(pid1, SIGINT) == -1)
