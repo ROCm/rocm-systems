@@ -741,19 +741,16 @@ bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
 }
 
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
-  // Check if user explicitly disabled direct AllGather
-  static int userDirectAllGatherInput = rcclParamDirectAllGatherDisable();
+  // RCCL_DIRECT_ALLGATHER_DISABLE: negative selects the automatic policy,
+  // 0 forces the algorithm on, any other value - forces it off.
+  static const int userDirectAllGatherInput = rcclParamDirectAllGatherDisable();
   if (userDirectAllGatherInput < 0) {
-    // DIRECT ALLGATHER disabled on AINIC by default on scale >8 nodes...
+    // DIRECT ALLGATHER disabled on AINIC by default on scale >8 nodes, and enabled otherwise.
     if (rcclUseAinic() && (comm->nNodes > 8)) {
       INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled on AINIC by default for 8+ nodes. ");
       return false;
     }
-    // and enabled by default otherwise
-    userDirectAllGatherInput = 0;
-  }
-
-  if (userDirectAllGatherInput != 0) {
+  } else if (userDirectAllGatherInput != 0) {
     INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER has been disabled by environment variable.");
     return false;
   }
