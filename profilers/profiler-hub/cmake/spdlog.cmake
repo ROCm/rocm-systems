@@ -61,7 +61,7 @@ get_target_property(
 if(NOT _spdlog_iface_defs MATCHES "SPDLOG_FMT_EXTERNAL")
     message(
         FATAL_ERROR
-        "profiler-hub requires an spdlog built with SPDLOG_FMT_EXTERNAL. The one provided is built against its bundled fmt, which would put two fmt copies in one binary. Provide a suitable spdlog on CMAKE_PREFIX_PATH."
+        "profiler-hub requires an spdlog built with SPDLOG_FMT_EXTERNAL. The one provided is built against its bundled fmt, which would put two fmt copies in one binary. Provide a suitable spdlog on CMAKE_PREFIX_PATH, or configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON -DCMAKE_DISABLE_FIND_PACKAGE_spdlog=ON to bypass it and download one."
     )
 endif()
 
