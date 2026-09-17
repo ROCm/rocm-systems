@@ -66,11 +66,11 @@ def _arch_to_bundle_key(arch: str) -> str:
     The individual kpack files preserve the full arch name.
 
     Examples:
-        gfx942:xnack+ → gfx942
-        gfx90a:xnack- → gfx90a
+        gfx942:xnack+  → gfx942
+        gfx90a:xnack-  → gfx90a
         gfx1250-strict → gfx1250
-        gfx1100       → gfx1100
-        gfx11         → gfx11
+        gfx1100        → gfx1100
+        gfx11          → gfx11
     """
     return package_owner(arch)
 
