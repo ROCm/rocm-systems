@@ -21,6 +21,9 @@
 #include <memory>
 #include <new>
 #include <string>
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
 #include <sys/resource.h>
 #include <utility>
 #include <vector>
@@ -184,9 +187,17 @@ class DeleteWatch {
 
 // These tests deliberately raise fatal signals. Some CI environments enable core dumps, and a
 // shuffled death test can inherit a large address space from an earlier test. Dumping that address
-// space turns a millisecond assertion into a multi-second test. Apply the limit inside the death
-// statement so only gtest's child is affected and unexpected parent-process crashes remain dumpable.
+// space turns a millisecond assertion into a multi-second test. PR_SET_DUMPABLE covers both regular
+// core files and piped collectors (for which Linux ignores RLIMIT_CORE); retain the limit as defense
+// in depth. Apply both inside the death statement so only gtest's child is affected and unexpected
+// parent-process crashes remain dumpable.
 static void DisableCoreDumpsForExpectedCrash() {
+#if defined(__linux__)
+  if (prctl(PR_SET_DUMPABLE, 0) != 0) {
+    std::perror("prctl(PR_SET_DUMPABLE) failed");
+    _exit(1);
+  }
+#endif
   const struct rlimit noCore = {0, 0};
   if (setrlimit(RLIMIT_CORE, &noCore) != 0) {
     std::perror("setrlimit(RLIMIT_CORE) failed");
