@@ -292,9 +292,13 @@ get_status()
 
 struct attach_status
 {
-    std::atomic<bool> has_attach_table{false};
-    std::atomic<bool> has_attachment_client{false};
-    std::atomic<bool> is_attached{false};
+    // Process-wide infrastructure state.
+    std::atomic<bool> table_available{false};
+    std::atomic<bool> hsa_interception_active{false};
+
+    // Retained-client state (temporary) and per-attach session state.
+    std::atomic<bool> client_loaded{false};
+    std::atomic<bool> session_active{false};
 };
 
 auto*
@@ -907,7 +911,7 @@ invoke_client_finalizers()
 }
 
 void
-stop_attachment_client(std::optional<client_library>& client, bool invoke_tool_detach)
+stop_attachment_session(std::optional<client_library>& client, bool invoke_tool_detach)
 {
     context::stop_client_contexts(client->internal_client_id);
 
@@ -942,14 +946,14 @@ invoke_client_attaches()
         return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
     }
 
-    if(get_attach_status() && get_attach_status()->is_attached.load(std::memory_order_acquire))
+    if(get_attach_status() && get_attach_status()->session_active.load(std::memory_order_acquire))
         return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
 
-    auto ret                   = ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-    auto has_attachment_client = false;
+    auto ret                     = ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    auto found_attachment_client = false;
     for(auto& itr : *get_clients())
     {
-        if(itr && itr->role == client_role::attachment) has_attachment_client = true;
+        if(itr && itr->role == client_role::attachment) found_attachment_client = true;
 
         if(!itr || itr->role != client_role::attachment) continue;
 
@@ -964,7 +968,7 @@ invoke_client_attaches()
 
             if(status != 0)
             {
-                stop_attachment_client(itr, true);
+                stop_attachment_session(itr, true);
                 return ROCPROFILER_STATUS_ERROR;
             }
             ret = ROCPROFILER_STATUS_SUCCESS;
@@ -980,18 +984,18 @@ invoke_client_attaches()
                 auto status = context::start_context(context_id);
                 if(status != ROCPROFILER_STATUS_SUCCESS)
                 {
-                    stop_attachment_client(itr, false);
+                    stop_attachment_session(itr, false);
                     return status;
                 }
             }
         }
     }
 
-    if(has_attachment_client && ret == ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED)
+    if(found_attachment_client && ret == ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED)
         ret = ROCPROFILER_STATUS_SUCCESS;
 
     if(ret == ROCPROFILER_STATUS_SUCCESS && get_attach_status())
-        get_attach_status()->is_attached.store(true, std::memory_order_release);
+        get_attach_status()->session_active.store(true, std::memory_order_release);
 
     return ret;
 }
@@ -1008,20 +1012,20 @@ invoke_client_detaches()
         return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
     }
 
-    if(get_attach_status() && !get_attach_status()->is_attached.load(std::memory_order_acquire))
+    if(get_attach_status() && !get_attach_status()->session_active.load(std::memory_order_acquire))
         return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
 
-    auto ret                   = ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-    auto has_attachment_client = false;
+    auto ret                     = ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    auto found_attachment_client = false;
     for(auto& itr : *get_clients())
     {
-        if(itr && itr->role == client_role::attachment) has_attachment_client = true;
+        if(itr && itr->role == client_role::attachment) found_attachment_client = true;
 
         if(!itr || itr->role != client_role::attachment) continue;
 
         const auto has_tool_detach =
             (itr->configure_attach_result && itr->configure_attach_result->tool_detach);
-        stop_attachment_client(itr, true);
+        stop_attachment_session(itr, true);
         if(!has_tool_detach)
             ROCP_INFO << "Client " << itr->name
                       << " does not have tool_detach; its contexts were stopped by the SDK";
@@ -1029,11 +1033,11 @@ invoke_client_detaches()
         ret = ROCPROFILER_STATUS_SUCCESS;
     }
 
-    if(has_attachment_client && ret == ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED)
+    if(found_attachment_client && ret == ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED)
         ret = ROCPROFILER_STATUS_SUCCESS;
 
     if(get_attach_status())
-        get_attach_status()->is_attached.store(false, std::memory_order_release);
+        get_attach_status()->session_active.store(false, std::memory_order_release);
 
     return ret;
 }
@@ -1094,18 +1098,19 @@ is_initializing_attachment_client()
 }
 
 bool
-is_attached()
+is_attachment_session_active()
 {
-    return (get_attach_status()) ? get_attach_status()->is_attached.load(std::memory_order_acquire)
-                                 : false;
+    return (get_attach_status())
+               ? get_attach_status()->session_active.load(std::memory_order_acquire)
+               : false;
 }
 
 bool
-supports_attachment()
+uses_rocattach_hsa_interception()
 {
     return (get_attach_status())
-               ? (get_attach_status()->has_attach_table.load(std::memory_order_acquire) &&
-                  get_attach_status()->has_attachment_client.load(std::memory_order_acquire))
+               ? (get_attach_status()->table_available.load(std::memory_order_acquire) &&
+                  get_attach_status()->hsa_interception_active.load(std::memory_order_acquire))
                : false;
 }
 
@@ -1334,11 +1339,8 @@ load_attachment_tool(const char* tool_path)
     context::stop_client_contexts(*attachment_client_id);
     context::deactivate_client_contexts(*attachment_client_id);
 
-    get_attach_status()->has_attachment_client.store(true, std::memory_order_release);
-    auto status = late::invoke_register_propagation();
-    if(status != ROCPROFILER_STATUS_SUCCESS)
-        get_attach_status()->has_attachment_client.store(false, std::memory_order_release);
-    return status;
+    get_attach_status()->client_loaded.store(true, std::memory_order_release);
+    return late::invoke_register_propagation();
 }
 
 void
@@ -1661,9 +1663,8 @@ rocprofiler_set_api_table(const char* name,
     const auto is_rocattach = (std::string_view{name} == "rocattach");
     if(is_rocattach)
     {
-        // Record infrastructure availability before client initialization. Runtime
-        // behavior switches when an attachment client is loaded through the anytime path.
-        rocprofiler::registration::get_attach_status()->has_attach_table.store(
+        // Record process-wide infrastructure availability before client initialization.
+        rocprofiler::registration::get_attach_status()->table_available.store(
             true, std::memory_order_release);
     }
 
@@ -1832,15 +1833,20 @@ rocprofiler_set_api_table(const char* name,
             rocprofiler::hsa::restore_table(hsa_api_table->pc_sampling_ext_, lib_instance);
 #endif
 
-        auto* attach_api = rocprofiler::registration::get_attach_api_table();
-        if(rocprofiler::registration::get_attach_status()->has_attachment_client.load(
-               std::memory_order_acquire) &&
-           attach_api != nullptr && !rocprofiler_attach_table_owns_hsa_interception(attach_api))
+        auto* attach_api   = rocprofiler::registration::get_attach_api_table();
+        auto* attach_state = rocprofiler::registration::get_attach_status();
+        auto  hsa_interception_active =
+            (attach_api != nullptr && rocprofiler_attach_table_owns_hsa_interception(attach_api));
+        attach_state->hsa_interception_active.store(hsa_interception_active,
+                                                    std::memory_order_release);
+        if(attach_state->client_loaded.load(std::memory_order_acquire) && attach_api != nullptr &&
+           !hsa_interception_active)
         {
             auto attach_status =
                 rocprofiler_attach_table_initialize_hsa_interception(attach_api, hsa_api_table);
             if(attach_status == 0)
             {
+                attach_state->hsa_interception_active.store(true, std::memory_order_release);
                 ROCP_INFO << "Transferred HSA queue and code-object interception ownership "
                              "to rocattach";
             }
@@ -2319,9 +2325,12 @@ rocprofiler_set_api_table(const char* name,
 
         auto* rocattach_api = static_cast<RocAttachDispatchTable*>(tables[0]);
         rocprofiler::registration::get_attach_api_table() = rocattach_api;
+        auto* attach_state = rocprofiler::registration::get_attach_status();
+        attach_state->hsa_interception_active.store(
+            rocprofiler_attach_table_owns_hsa_interception(rocattach_api),
+            std::memory_order_release);
 
-        if(rocprofiler::registration::get_attach_status()->has_attachment_client.load(
-               std::memory_order_acquire))
+        if(attach_state->client_loaded.load(std::memory_order_acquire))
         {
             // Unlike other APIs, we do not offer tracing for our own attach library.
             // Integrate it only when an attachment client exists; early propagation

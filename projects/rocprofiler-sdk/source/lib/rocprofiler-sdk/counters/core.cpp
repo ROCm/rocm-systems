@@ -226,7 +226,7 @@ stop_context(const context::context* ctx)
         // new dispatches during detach drain can pass through without incrementing
         // _active_kernels. In normal profiling, keep callbacks registered to avoid
         // dropping counter data for in-flight dispatches.
-        if(registration::is_attached())
+        if(registration::is_attachment_session_active())
         {
             for(auto& cb : ctx->dispatch_counter_collection->callbacks)
             {

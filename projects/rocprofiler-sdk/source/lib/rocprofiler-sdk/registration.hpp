@@ -74,16 +74,17 @@ void
 set_fini_status(int);
 
 bool
-is_attached();
+is_attachment_session_active();
 
 bool
 is_initializing_attachment_client();
 
 bool
-supports_attachment();
+uses_rocattach_hsa_interception();
 
-// Load and initialize the tool used by runtime attachment. This is separate from
-// session start so detach/reattach does not configure the client more than once.
+// Load and initialize the currently retained runtime-attachment client. Client
+// loading is separate from session start so infrastructure, client, and session
+// lifecycles can evolve independently; reuse across reattach is temporary.
 rocprofiler_status_t
 load_attachment_tool(const char*);
 

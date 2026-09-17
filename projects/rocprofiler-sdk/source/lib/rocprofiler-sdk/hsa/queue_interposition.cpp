@@ -435,8 +435,9 @@ should_bypass_inline_intercept()
             // queue_controller_fini and to 1 only after it returns. That keeps a producer
             // arriving mid-teardown off the instrumented path while the pool is being destroyed.
             registration::get_fini_status() != 0 ||
-            // TODO: debug and enable queue interposition for attachment
-            registration::supports_attachment() || !has_active_queue_interposition_consumers() ||
+            // TODO: debug and enable queue interposition with rocattach HSA interception
+            registration::uses_rocattach_hsa_interception() ||
+            !has_active_queue_interposition_consumers() ||
             // Last, and the order matters: this is the only term that names a static_object whose
             // destructor nulls it. interposition_fini stores s_intercept_active false during
             // finalize, which runs ahead of destroy_static_objects.
@@ -2048,9 +2049,10 @@ interposition_init(CoreApiTable* core_table, bool enabled)
 
     // Dynamic queue discovery: when enabled, the write-index wrappers create QueueState on
     // first encounter for queues we did not observe at hsa_queue_create. Enabled only when
-    // attachment is not supported; in attachment mode this has been observed to deadlock.
+    // rocattach HSA interception is inactive; combining the two has been observed to deadlock.
     // TODO(rocprofiler-sdk): root-cause the attachment-mode deadlock so it can be enabled there.
-    s_intercept_dynamic.store(!registration::supports_attachment(), std::memory_order_release);
+    s_intercept_dynamic.store(!registration::uses_rocattach_hsa_interception(),
+                              std::memory_order_release);
 
     // mark that intercept has been installed
     s_intercept_installed.store(true, std::memory_order_release);
