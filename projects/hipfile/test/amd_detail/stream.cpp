@@ -49,6 +49,9 @@ expectStreamBuffer(StrictMock<MConfiguration> &mconfig, StrictMock<MHip> &mhip)
         .Times(::testing::AnyNumber())
         .WillRepeatedly(::testing::Return(reinterpret_cast<void *>(0x5678)));
     EXPECT_CALL(mhip, hipHostFree).Times(::testing::AnyNumber());
+    EXPECT_CALL(mhip, hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, ::testing::_))
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Return(1));
 }
 
 struct HipFileStream : public ::testing::Test {
@@ -150,6 +153,9 @@ TEST(HipFileStreamDestructor, buffer_free_failure_logs)
     EXPECT_CALL(mhip, hipHostFree)
         .Times(::testing::AnyNumber())
         .WillRepeatedly(::testing::Throw(Hip::RuntimeError(hipErrorInvalidValue)));
+    EXPECT_CALL(mhip, hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, ::testing::_))
+        .Times(::testing::AnyNumber())
+        .WillRepeatedly(::testing::Return(1));
     EXPECT_CALL(msys, syslog);
     {
         StreamMap stream_map;

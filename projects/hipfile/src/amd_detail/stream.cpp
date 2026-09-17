@@ -33,8 +33,8 @@ Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<Stre
     : hip_stream{_hip_stream}, device_id{0}, fixed_buf_offset{(flags & HIPFILE_STREAM_FIXED_BUF_OFFSET) != 0},
       fixed_file_offset{(flags & HIPFILE_STREAM_FIXED_FILE_OFFSET) != 0},
       fixed_io_size{(flags & HIPFILE_STREAM_FIXED_FILE_SIZE) != 0},
-      page_aligned{(flags & HIPFILE_STREAM_PAGE_ALIGNED_INPUTS) != 0}, async_buffer{nullptr, hipHostDeleter},
-      async_buffer_dev_ptr{nullptr}, async_buffer_size{0}
+      page_aligned{(flags & HIPFILE_STREAM_PAGE_ALIGNED_INPUTS) != 0}, can_use_stream_wait_value{false},
+      async_buffer{nullptr, hipHostDeleter}, async_buffer_dev_ptr{nullptr}, async_buffer_size{0}
 
 {
     if ((flags & HIPFILE_STREAM_FLAGS_MASK) != flags) {
@@ -42,6 +42,9 @@ Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<Stre
     }
 
     device_id = Context<Hip>::get()->hipStreamGetDevice(hip_stream);
+
+    can_use_stream_wait_value =
+        Context<Hip>::get()->hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, device_id) != 0;
 
     size_t buffer_size = Context<Configuration>::get()->asyncBufferSize();
     void  *host_ptr    = Context<Hip>::get()->hipHostMalloc(buffer_size, 0);
@@ -138,6 +141,12 @@ size_t
 Stream::asyncBufferSize() const
 {
     return async_buffer_size;
+}
+
+bool
+Stream::canUseStreamWaitValue() const
+{
+    return can_use_stream_wait_value;
 }
 
 StreamMap::~StreamMap()

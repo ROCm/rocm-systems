@@ -22,6 +22,7 @@ public:
     MOCK_METHOD(void *, asyncBufferHostPtr, (), (const, override));
     MOCK_METHOD(void *, asyncBufferDevPtr, (), (const, override));
     MOCK_METHOD(size_t, asyncBufferSize, (), (const, override));
+    MOCK_METHOD(bool, canUseStreamWaitValue, (), (const, override));
 };
 
 }
