@@ -77,7 +77,15 @@ bool
 is_attached();
 
 bool
+is_initializing_attachment_client();
+
+bool
 supports_attachment();
+
+// Load and initialize the tool used by runtime attachment. This is separate from
+// session start so detach/reattach does not configure the client more than once.
+rocprofiler_status_t
+load_attachment_tool(const char*);
 
 // call tool_attach function for all registered clients
 rocprofiler_status_t

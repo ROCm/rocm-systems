@@ -138,6 +138,9 @@ namespace fs     = ::rocprofiler::common::filesystem;
 extern "C" {
 void
 rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
+
+int
+rocprofiler_is_current_client_attachment(void);
 }
 
 namespace
@@ -2888,12 +2891,21 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     auto code_obj_ctx = null_context_id;
     ROCPROFILER_CALL(rocprofiler_create_context(&code_obj_ctx), "failed to create context");
 
-    auto start_context = [](rocprofiler_context_id_t ctx_id, std::string_view msg) {
+    const auto defer_context_start_for_attachment =
+        (rocprofiler_is_current_client_attachment() != 0 ||
+         tool::get_env("ROCPROFILER_REGISTER_TOOL_ATTACHED", false));
+    auto start_context = [defer_context_start_for_attachment](rocprofiler_context_id_t ctx_id,
+                                                              std::string_view         msg) {
         using benchmark = tool::config::benchmark;
         // do not start context if we are benchmarking the overhead of a service
         // being available but unused by any contexts
-        if(tool::get_config().benchmark_mode != benchmark::disabled_contexts_overhead &&
-           ctx_id != null_context_id)
+        if(defer_context_start_for_attachment)
+        {
+            ROCP_INFO << fmt::format(
+                "deferring {} context start until the attachment session begins", msg);
+        }
+        else if(tool::get_config().benchmark_mode != benchmark::disabled_contexts_overhead &&
+                ctx_id != null_context_id)
         {
             if(tool::get_config().benchmark_mode == benchmark::execution_profile)
             {
