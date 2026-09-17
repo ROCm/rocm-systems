@@ -8,15 +8,8 @@ import struct
 import subprocess
 import sys
 
-MAGIC = 0x4B454941
-VERSION_MAJOR = 1
-VERSION_MINOR = 0
-ARCHES = ("aie2", "aie2p")
-
-_HDR = "<IHHIIIIII" + "IIII"          # header + reserved[4]
-_HDR_SIZE = struct.calcsize(_HDR)
-_ENTRY = "<IIIIIII" + "IIII"          # 7 fields + reserved[4]
-_ENTRY_SIZE = struct.calcsize(_ENTRY)
+from aie_hsaco_format import (MAGIC, VERSION_MAJOR, VERSION_MINOR, ARCHES,
+                              _HDR, _HDR_SIZE, _ENTRY, _ENTRY_SIZE)
 
 
 def build_section(arch, kernels):

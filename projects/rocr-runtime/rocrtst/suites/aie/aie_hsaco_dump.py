@@ -5,19 +5,11 @@ import argparse
 import struct
 import sys
 
-MAGIC = 0x4B454941
-_HDR = "<IHHIIIIII" + "IIII"
-_HDR_SIZE = struct.calcsize(_HDR)
-_ENTRY = "<IIIIIII" + "IIII"
-
-KIND_COUNT = 2
-KIND_NAMES = {0: "PdiInsts", 1: "FullElf"}
+from aie_hsaco_format import (MAGIC, _HDR, _HDR_SIZE, _ENTRY, KIND_COUNT, KIND_NAMES,
+                              header_fields)
 
 
-def header_fields(section):
-    """Returns (hdr_size, kernel_entry_size) from a section's header."""
-    (_magic, _vmaj, _vmin, hdr_size, _kcount, kentry, *_rest) = struct.unpack_from(_HDR, section, 0)
-    return hdr_size, kentry
+
 
 
 def parse_section(section):

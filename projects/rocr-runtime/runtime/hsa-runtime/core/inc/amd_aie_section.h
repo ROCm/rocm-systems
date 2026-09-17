@@ -124,13 +124,13 @@ struct AieKernelDescriptor {
   void* ctrl_code;
   /// @brief Size of @ref ctrl_code in bytes; 0 for PdiInsts.
   uint64_t ctrl_code_size;
-  /// @brief Number of arguments the control code references. FullElf only.
-  uint32_t num_args;
-  /// @brief Argument patch sites, flattened; sites for argument @c i are
-  /// [arg_site_offset[i], arg_site_offset[i + 1]).
-  std::vector<aie_elf::PatchSite> arg_sites;
-  /// @brief Index into @ref arg_sites per argument; size is @ref num_args + 1.
-  std::vector<uint32_t> arg_site_offset;
+  /// @brief Patch sites per argument the control code references; FullElf only, empty otherwise.
+  ///
+  /// Nested rather than flattened with a separate index: this is built once at load and read once
+  /// per dispatch, so the flattening bought nothing, while the index it needed could disagree with
+  /// the sites it indexed and so had to be re-validated on every dispatch. The outer size is the
+  /// argument count.
+  std::vector<std::vector<aie_elf::PatchSite>> arg_sites;
 };
 
 /// @brief Current AieKernelDescriptor::version value.

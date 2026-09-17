@@ -362,11 +362,13 @@ static hsa_status_t GetBOInfo(int fd, uint32_t bo_handle, amdxdna_drm_get_bo_inf
 /// @param[out] bo_handle pointer to store the BO handle associated with the allocation
 /// @param[out] base pointer to store the base address of the allocation (optional)
 /// @param[out] size pointer to store the size of the allocation (optional)
+/// @param[out] dev_addr pointer to store the allocation's cached device address (optional). Zero
+/// when the allocating driver did not record one; the caller must then query the kernel.
 ///
 /// @return @c HSA_STATUS_SUCCESS on success, or an error status if the address does not belong to
 /// an allocation accessible to the agent
 static hsa_status_t ResolveBOHandle(void* mem, const core::Agent& agent, uint32_t* bo_handle,
-                                    void** base, size_t* size) {
+                                    void** base, size_t* size, uint64_t* dev_addr = nullptr) {
   void* local_base = nullptr;
   core::DriverMemoryHandle handle{};
   if (core::Runtime::runtime_singleton_->FindDriverMemoryHandle(mem, &agent, &local_base,
@@ -375,6 +377,7 @@ static hsa_status_t ResolveBOHandle(void* mem, const core::Agent& agent, uint32_
   }
   if (base != nullptr) *base = local_base;
   if (size != nullptr) *size = handle.size;
+  if (dev_addr != nullptr) *dev_addr = handle.dev_addr;
   *bo_handle = static_cast<uint32_t>(handle.handle);
   return HSA_STATUS_SUCCESS;
 }
@@ -412,14 +415,20 @@ static hsa_status_t ResolveDeviceBuffer(int fd, void* ptr, const core::Agent& ag
                                         size_t* bytes_from_ptr) {
   void* base = nullptr;
   size_t alloc_size = 0;
-  hsa_status_t err = ResolveBOHandle(ptr, agent, bo_handle, &base, &alloc_size);
+  hsa_status_t err = ResolveBOHandle(ptr, agent, bo_handle, &base, &alloc_size, dev_addr);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
 
-  err = GetBODevAddr(fd, *bo_handle, dev_addr);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
+  // AllocateMemory already paid for a GET_BO_INFO ioctl and recorded the device address, so the
+  // cached value stands in for one here -- this runs per dispatch, on the path whose whole case is
+  // dispatch latency. Zero means no driver recorded one (a foreign or host-shared allocation), so
+  // fall back to asking the kernel rather than reporting "no device address" on its behalf.
+  if (*dev_addr == 0) {
+    err = GetBODevAddr(fd, *bo_handle, dev_addr);
+    if (err != HSA_STATUS_SUCCESS) {
+      return err;
+    }
   }
 
   // ResolveBOHandle reports the allocation; the packet may point part-way into it.
@@ -724,6 +733,24 @@ static const AieKernelDescriptor* PacketDescriptor(
 /// @param[in] desc descriptor to check
 static bool ValidDescriptor(const AieKernelDescriptor* desc) {
   return desc != nullptr && desc->version == kAieKernelDescriptorVersion;
+}
+
+/// @brief Returns the descriptor @p pkt names if it is valid and of @p expected kind, else nullptr.
+///
+/// @ref PacketMode already classified the batch from this handle, but nothing between there and a
+/// command builder re-reads it, so each builder re-checks rather than dereferencing on trust.
+///
+/// @param[in] pkt packet to read the kernel object from
+/// @param[in] expected kind the calling builder can dispatch
+/// @param[in] kind_name name of @p expected, for the diagnostic
+static const AieKernelDescriptor* DescriptorOfKind(const hsa_amd_aie_kernel_dispatch_packet_t* pkt,
+                                                   AieKernelKind expected, const char* kind_name) {
+  const AieKernelDescriptor* desc = PacketDescriptor(pkt);
+  if (!ValidDescriptor(desc) || desc->kind != expected) {
+    log_warning_n(10, "AIE: the packet does not name a %s kernel.\n", kind_name);
+    return nullptr;
+  }
+  return desc;
 }
 
 /// @brief Returns the dispatch kind @p pkt is asking for, from its kernel descriptor.
@@ -1759,11 +1786,9 @@ static hsa_status_t BuildPdiInstsCommand(const hsa_amd_aie_kernel_dispatch_packe
                                          const core::Agent& agent, KmqMetadata* kmq_metadata,
                                          std::vector<uint32_t>* bo_handles, bool* reconfigure,
                                          BOHandle* cmd_bo, uint32_t* arg_cnt) {
-  const AieKernelDescriptor* desc = PacketDescriptor(pkt);
-  // PacketMode already classified the batch from this handle, but nothing between there and here
-  // re-reads it, so a null or mismatched descriptor must be refused rather than dereferenced.
-  if (!ValidDescriptor(desc) || desc->kind != AieKernelKind::PdiInsts) {
-    log_warning_n(10, "AIE: the packet does not name a PDI + instruction sequence kernel.\n");
+  const AieKernelDescriptor* desc =
+      DescriptorOfKind(pkt, AieKernelKind::PdiInsts, "PDI + instruction sequence");
+  if (desc == nullptr) {
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
   if (desc->insts_bo_va == nullptr || desc->insts_size == 0 || desc->pdi_size == 0) {
@@ -1852,11 +1877,8 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
                                         std::vector<uint32_t>* bo_handles,
                                         std::vector<DeviceBuffer>* ctrl_buffers, BOHandle* cmd_bo,
                                         uint32_t* arg_cnt) {
-  const AieKernelDescriptor* desc = PacketDescriptor(pkt);
-  // PacketMode already classified the batch from this handle, but nothing between there and here
-  // re-reads it, so a null or mismatched descriptor must be refused rather than dereferenced.
-  if (!ValidDescriptor(desc) || desc->kind != AieKernelKind::FullElf) {
-    log_warning_n(10, "AIE: the packet does not name a full-ELF kernel.\n");
+  const AieKernelDescriptor* desc = DescriptorOfKind(pkt, AieKernelKind::FullElf, "full-ELF");
+  if (desc == nullptr) {
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
   if (desc->ctrl_code == nullptr || desc->ctrl_code_size == 0) {
@@ -1866,32 +1888,19 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
   // The loader bounds every patch site against the control code it parsed, but the descriptor
   // arrives through a handle the application supplies, so the write below is bounded here too
   // rather than on the loader's word. PatchShimDma48 touches three dwords from the site.
-  if (desc->arg_site_offset.size() != static_cast<size_t>(desc->num_args) + 1 ||
-      desc->arg_site_offset.back() != desc->arg_sites.size()) {
-    log_warning_n(10, "AIE: the kernel's argument patch table is inconsistent.\n");
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-  }
-  // Size and endpoint alone don't rule out a non-monotonic table (e.g. {0, 100, 3} with
-  // num_args=2, arg_sites.size()=3): the loader always builds this monotonically, but the
-  // descriptor arrives through an application-supplied handle, and the patch loop below indexes
-  // arg_sites[arg_site_offset[arg] .. arg_site_offset[arg+1]) without further checks.
-  for (size_t i = 1; i < desc->arg_site_offset.size(); ++i) {
-    if (desc->arg_site_offset[i] < desc->arg_site_offset[i - 1]) {
-      log_warning_n(10, "AIE: the kernel's argument patch table is not monotonic.\n");
-      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-    }
-  }
-  for (const aie_elf::PatchSite& site : desc->arg_sites) {
-    if ((site.offset % sizeof(uint32_t)) != 0 ||
-        site.offset + 3 * sizeof(uint32_t) > desc->ctrl_code_size) {
-      log_warning_n(10, "AIE: an argument patch site does not fit the kernel's control code.\n");
-      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  for (const auto& sites : desc->arg_sites) {
+    for (const aie_elf::PatchSite& site : sites) {
+      if ((site.offset % sizeof(uint32_t)) != 0 ||
+          site.offset + 3 * sizeof(uint32_t) > desc->ctrl_code_size) {
+        log_warning_n(10, "AIE: an argument patch site does not fit the kernel's control code.\n");
+        return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+      }
     }
   }
   // The arguments are patched into the control code rather than handed to the hardware, so
   // nothing downstream would notice a short list: the dispatch would run against whatever the
   // ELF's placeholder happened to be.
-  if (pkt->num_kernargs != desc->num_args) {
+  if (pkt->num_kernargs != desc->arg_sites.size()) {
     log_warning_n(10, "AIE: the packet's kernarg count does not match the kernel's.\n");
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
@@ -1927,9 +1936,8 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
   std::memcpy(ctrl.ptr, desc->ctrl_code, desc->ctrl_code_size);
 
   const auto* kernarg_address = static_cast<const uint64_t*>(pkt->kernarg_address);
-  for (uint32_t arg = 0; arg < desc->num_args; ++arg) {
-    for (uint32_t i = desc->arg_site_offset[arg]; i < desc->arg_site_offset[arg + 1]; ++i) {
-      const aie_elf::PatchSite& site = desc->arg_sites[i];
+  for (size_t arg = 0; arg < desc->arg_sites.size(); ++arg) {
+    for (const aie_elf::PatchSite& site : desc->arg_sites[arg]) {
       aie_elf::PatchShimDma48(
           reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ctrl.ptr) + site.offset),
           kernarg_address[arg] + site.addend);

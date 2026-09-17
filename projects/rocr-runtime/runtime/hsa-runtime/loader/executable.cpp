@@ -1624,6 +1624,10 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
   }
 
   auto loaded_obj = std::make_shared<AieLoadedCodeObjectImpl>(this, agent, data, size);
+  // Every failure below has to release the device buffers and host control-code copies recorded on
+  // loaded_obj so far. Guarding it once makes that structural: a later early return cannot forget.
+  // Dismissed only once the object is handed to `objects`, which owns it from then on.
+  MAKE_NAMED_SCOPE_GUARD(loaded_obj_guard, [&] { loaded_obj->Destroy(); });
 
   // Copy each unique blob to memory once, keyed on (host source, size).
   std::map<std::pair<const uint8_t*, uint64_t>, void*> blob_addr;
@@ -1711,7 +1715,6 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
     const auto* ki = aie_code->GetKernel(kernel_name);
     if (ki->kind >= AMD::AieKernelKind::Count) {
       log_warning_n(10, "AIE: code object declares an unsupported payload kind.\n");
-      loaded_obj->Destroy();
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
 
@@ -1723,31 +1726,26 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
     desc->num_cols = ki->num_cols;
     desc->ctrl_code = nullptr;
     desc->ctrl_code_size = 0;
-    desc->num_args = 0;
 
     if (ki->kind == AMD::AieKernelKind::PdiInsts) {
       void* insts_dev = nullptr;
       void* pdi_dev = nullptr;
       if (auto s = place_blob(ki->insts_data, ki->insts_size, &insts_dev);
           s != HSA_STATUS_SUCCESS) {
-        loaded_obj->Destroy();
         return s;
       }
       if (auto s = place_blob(ki->pdi_data, ki->pdi_size, &pdi_dev); s != HSA_STATUS_SUCCESS) {
-        loaded_obj->Destroy();
         return s;
       }
 
       desc->insts_bo_va = insts_dev;
       desc->insts_size = ki->insts_size;
       if (auto s = resolve_handle(insts_dev, &desc->insts_bo_handle); s != HSA_STATUS_SUCCESS) {
-        loaded_obj->Destroy();
         return s;
       }
       desc->pdi_bo_handle = 0;
       if (pdi_dev != nullptr) {
         if (auto s = resolve_handle(pdi_dev, &desc->pdi_bo_handle); s != HSA_STATUS_SUCCESS) {
-          loaded_obj->Destroy();
           return s;
         }
       }
@@ -1769,7 +1767,6 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
             AMD::aie_elf::Parse(ki->insts_data, ki->insts_size, &kernels, &error);
         if (err != HSA_STATUS_SUCCESS) {
           log_warning_n(10, "AIE: cannot parse the nested full ELF: %s\n", error.c_str());
-          loaded_obj->Destroy();
           return err;
         }
         it = parsed_elfs.emplace(ki->insts_data, std::move(kernels)).first;
@@ -1779,7 +1776,6 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       if (kernel_it == it->second.end()) {
         log_warning_n(10, "AIE: the nested ELF has no kernel named '%s'.\n",
                       kernel_name.c_str());
-        loaded_obj->Destroy();
         return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
       }
       const AMD::aie_elf::Kernel& kernel = kernel_it->second;
@@ -1798,7 +1794,6 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
                       "AIE: kernarg size mismatch for '%s': hsaco says %u bytes, the ELF wants "
                       "%u bytes.\n",
                       kernel_name.c_str(), ki->kernarg_size, elf_kernarg_size);
-        loaded_obj->Destroy();
         return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
       }
       desc->kernarg_size = elf_kernarg_size;
@@ -1807,7 +1802,6 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       if (!kernel.has_pdi_patch) {
         log_warning_n(10, "AIE: kernel '%s' has no PDI patch site in its control code.\n",
                       kernel_name.c_str());
-        loaded_obj->Destroy();
         return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
       }
 
@@ -1821,7 +1815,6 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       if (auto s = place_blob(kernel.pdi.data(), kernel.pdi.size(), &pdi_dev);
           s != HSA_STATUS_SUCCESS) {
         delete[] ctrl_code_host;
-        loaded_obj->Destroy();
         return s;
       }
       // The PDI's *device* address is what the NPU needs, not its CPU-visible VA (pdi_dev):
@@ -1832,13 +1825,11 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       if (auto s = resolve_handle(pdi_dev, &desc->pdi_bo_handle, &pdi_dev_addr);
           s != HSA_STATUS_SUCCESS) {
         delete[] ctrl_code_host;
-        loaded_obj->Destroy();
         return s;
       }
       if (pdi_dev_addr == 0) {
         log_warning_n(10, "AIE: full-ELF PDI must be allocated from device memory.\n");
         delete[] ctrl_code_host;
-        loaded_obj->Destroy();
         return HSA_STATUS_ERROR_INVALID_ALLOCATION;
       }
       desc->pdi_size = kernel.pdi.size();
@@ -1854,13 +1845,7 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
 
       desc->ctrl_code = ctrl_code_host;
       desc->ctrl_code_size = kernel.ctrl_code.size();
-      desc->num_args = kernel.num_args();
-      desc->arg_site_offset.reserve(desc->num_args + 1);
-      desc->arg_site_offset.push_back(0);
-      for (const auto& sites : kernel.arg_sites) {
-        desc->arg_sites.insert(desc->arg_sites.end(), sites.begin(), sites.end());
-        desc->arg_site_offset.push_back(static_cast<uint32_t>(desc->arg_sites.size()));
-      }
+      desc->arg_sites = kernel.arg_sites;
     }
 
     uint64_t desc_ptr = reinterpret_cast<uint64_t>(desc.get());
@@ -1887,6 +1872,7 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
   // AIE objects are not enumerated by hsa_ven_amd_loader_executable_iterate_loaded_code_objects
   // and have no r_debug link-map entry.
   // Revisit if we need to discover AIE code objects generically.
+  loaded_obj_guard.Dismiss();
   auto loaded_obj_ptr = loaded_obj.get();
   objects.push_back(std::move(loaded_obj));
   if (loaded_code_object) {
