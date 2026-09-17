@@ -107,6 +107,27 @@ function(get_default_python_versions _VAR)
         endif()
     endforeach()
 
+    # If find package doesn't find the version, but PYTHON_EXECUTABLES is passed in, add
+    # it to version list
+    if(DEFINED ROCPROFILER_PYTHON_EXECUTABLES)
+        foreach(_EXE IN LISTS ROCPROFILER_PYTHON_EXECUTABLES)
+            execute_process(
+                COMMAND
+                    "${_EXE}" -c
+                    "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+                OUTPUT_VARIABLE _EXE_VER
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                RESULT_VARIABLE _EXE_RESULT
+                ERROR_QUIET)
+            if(_EXE_RESULT EQUAL 0 AND NOT "${_EXE_VER}" IN_LIST _PYTHON_FOUND_VERSIONS)
+                list(APPEND _PYTHON_FOUND_VERSIONS "${_EXE_VER}")
+            endif()
+        endforeach()
+        unset(_EXE)
+        unset(_EXE_VER)
+        unset(_EXE_RESULT)
+    endif()
+
     # If none found, do one last check for 3.6 (no EXACT)
     if(NOT _PYTHON_FOUND_VERSIONS)
         find_package(Python3 3.6 COMPONENTS ${ROCPROFILER_BUILD_Find_Python3_COMPONENTS})
