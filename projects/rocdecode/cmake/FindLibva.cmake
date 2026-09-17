@@ -21,19 +21,39 @@
 #
 ################################################################################
 
-# Search super-project (e.g. amd-mesa) sysdeps first when building in TheRock
+# libva is provided by TheRock's amd-mesa sysdeps, staged under
+# ${ROCM_PATH}/lib/rocm_sysdeps. ROCM_PATH is the only knob needed.
+# Depending on how the sysdeps were staged the libraries may be unprefixed
+# (va, va-drm) or carry a rocm_sysdeps_ prefix, so accept either; unprefixed
+# is searched first to preserve existing Linux behaviour.
+# Search super-project (e.g. amd-mesa) sysdeps first when building in TheRock.
 if(DEFINED THEROCK_SUPERPROJECT_INCLUDE_DIRS)
   list(APPEND _libva_include_hints ${THEROCK_SUPERPROJECT_INCLUDE_DIRS})
   list(APPEND _libva_library_hints ${CMAKE_LIBRARY_PATH})
 endif()
 
-find_library(LIBVA_LIBRARY NAMES va HINTS ${_libva_library_hints} ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
-find_library(LIBVA_DRM_LIBRARY NAMES va-drm HINTS ${_libva_library_hints} ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
 find_path(LIBVA_INCLUDE_DIR NAMES va/va.h PATHS ${_libva_include_hints} ${ROCM_PATH}/lib/rocm_sysdeps/include NO_DEFAULT_PATH)
+find_library(LIBVA_LIBRARY NAMES va rocm_sysdeps_va HINTS ${_libva_library_hints} ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
 
-include(FindPackageHandleStandardArgs)
-find_package_handle_standard_args(Libva DEFAULT_MSG LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_DRM_LIBRARY)
-mark_as_advanced(LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_DRM_LIBRARY)
+if(NOT WIN32)
+  find_library(LIBVA_DRM_LIBRARY NAMES va-drm rocm_sysdeps_va-drm HINTS ${_libva_library_hints} ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
+
+  include(FindPackageHandleStandardArgs)
+  find_package_handle_standard_args(Libva DEFAULT_MSG LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_DRM_LIBRARY)
+  mark_as_advanced(LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_DRM_LIBRARY)
+else()
+  # Windows uses the va_win32 D3D12 display backend; va-drm is Linux-only.
+  find_library(LIBVA_WIN32_LIBRARY NAMES va_win32 rocm_sysdeps_va_win32 HINTS ${_libva_library_hints} ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
+  # va/va_win32.h is included by the Windows decoder sources, and a staging
+  # prefix can carry va_win32.lib without it. Check it alongside the library so
+  # an incomplete prefix fails here rather than at compile time.
+  find_path(LIBVA_WIN32_INCLUDE_DIR NAMES va/va_win32.h PATHS ${_libva_include_hints} ${ROCM_PATH}/lib/rocm_sysdeps/include NO_DEFAULT_PATH)
+
+  include(FindPackageHandleStandardArgs)
+  find_package_handle_standard_args(Libva DEFAULT_MSG LIBVA_INCLUDE_DIR LIBVA_WIN32_INCLUDE_DIR LIBVA_LIBRARY LIBVA_WIN32_LIBRARY)
+  mark_as_advanced(LIBVA_INCLUDE_DIR LIBVA_WIN32_INCLUDE_DIR LIBVA_LIBRARY LIBVA_WIN32_LIBRARY)
+endif()
+
 
 if(Libva_FOUND)
   # Find VA Version
@@ -55,13 +75,23 @@ if(Libva_FOUND)
     set_target_properties(Libva::va PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${LIBVA_INCLUDE_DIR}"
         IMPORTED_LOCATION "${LIBVA_LIBRARY}")
   endif()
-  if(NOT TARGET Libva::va_drm)
-    add_library(Libva::va_drm UNKNOWN IMPORTED)
-    set_target_properties(Libva::va_drm PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${LIBVA_INCLUDE_DIR}"
-      IMPORTED_LOCATION "${LIBVA_DRM_LIBRARY}")
+  if(NOT WIN32)
+    if(NOT TARGET Libva::va_drm)
+      add_library(Libva::va_drm UNKNOWN IMPORTED)
+      set_target_properties(Libva::va_drm PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${LIBVA_INCLUDE_DIR}"
+        IMPORTED_LOCATION "${LIBVA_DRM_LIBRARY}")
+    endif()
+    message("-- ${White}Using Libva -- \n\tLibraries:${LIBVA_LIBRARY} \n\tIncludes:${LIBVA_INCLUDE_DIR}${ColourReset}")
+    message("-- ${White}Using Libva-drm -- \n\tLibraries:${LIBVA_DRM_LIBRARY}${ColourReset}")
+  else()
+    if(NOT TARGET Libva::va_win32)
+      add_library(Libva::va_win32 UNKNOWN IMPORTED)
+      set_target_properties(Libva::va_win32 PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${LIBVA_INCLUDE_DIR};${LIBVA_WIN32_INCLUDE_DIR}"
+        IMPORTED_LOCATION "${LIBVA_WIN32_LIBRARY}")
+    endif()
+    message("-- ${White}Using Libva -- \n\tLibraries:${LIBVA_LIBRARY} \n\tIncludes:${LIBVA_INCLUDE_DIR}${ColourReset}")
+    message("-- ${White}Using Libva-win32 -- \n\tLibraries:${LIBVA_WIN32_LIBRARY}${ColourReset}")
   endif()
-  message("-- ${White}Using Libva -- \n\tLibraries:${LIBVA_LIBRARY} \n\tIncludes:${LIBVA_INCLUDE_DIR}${ColourReset}")
-  message("-- ${White}Using Libva-drm -- \n\tLibraries:${LIBVA_DRM_LIBRARY}${ColourReset}")
 else()
   if(Libva_FIND_REQUIRED)
     message(FATAL_ERROR "{Red}FindLibva -- Libva NOT FOUND${ColourReset}")
