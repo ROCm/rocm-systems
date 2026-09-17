@@ -3,9 +3,9 @@
 
 #include "library/rocprofiler-sdk/roctx_client.hpp"
 #include "library/rocprofiler-sdk/marker_writer.hpp"
-#include "library/rocprofiler-sdk/trace_control.hpp"
 
 #include "core/common_types.hpp"
+#include "core/control/triggers/roctx.hpp"
 #include "core/demangler.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
@@ -115,7 +115,6 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_enter(
 {
     auto* data =
         static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
-    const bool write_enabled = m_controller->should_write_markers();
 
     switch(record.operation)
     {
@@ -124,8 +123,8 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_enter(
             const char*         name = data->args.roctxRangePushA.message;
             const std::uint64_t range_id =
                 s_push_range_id.fetch_sub(1, std::memory_order_relaxed);
-            m_controller->handle_range_start(range_id, name);
-            const bool pushed_write_enabled = m_controller->should_write_markers();
+            m_trigger->on_range_start(range_id, name);
+            const bool pushed_write_enabled = should_write();
             m_pushed_ranges.push_back(
                 { tim::add_hash_id(name), ts, pushed_write_enabled, range_id });
             if(pushed_write_enabled)
@@ -143,7 +142,7 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_enter(
         {
             const char* name = data->args.roctxMarkA.message;
             tim::add_hash_id(name);
-            if(write_enabled)
+            if(should_write())
             {
                 m_writer.write_begin(name);
             }
@@ -161,7 +160,7 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_enter(
         }
         default:
         {
-            if(write_enabled)
+            if(should_write())
             {
                 const auto& name =
                     trace_cache::get_metadata_registry().get_callback_tracing_info().at(
@@ -210,7 +209,7 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
 
             const auto range_id = m_pushed_ranges.back().range_id;
             pop_and_write(m_pushed_ranges);
-            m_controller->handle_range_stop(range_id);
+            m_trigger->on_range_stop(range_id);
             break;
         }
         case ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStop:
@@ -223,12 +222,12 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
             }
 
             pop_and_write(m_started_ranges);
-            m_controller->handle_range_stop(data->args.roctxRangeStop.id);
+            m_trigger->on_range_stop(data->args.roctxRangeStop.id);
             break;
         }
         case ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA:
         {
-            if(m_controller->should_write_markers())
+            if(should_write())
             {
                 m_writer.write_end(data->args.roctxMarkA.message, begin_ts, ts, args_str,
                                    record);
@@ -244,9 +243,9 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
             const char* name     = data->args.roctxRangeStartA.message;
             auto        range_id = data->retval.roctx_range_id_t_retval;
 
-            m_controller->handle_range_start(range_id, name);
+            m_trigger->on_range_start(range_id, name);
 
-            const bool write_enabled = m_controller->should_write_markers();
+            const bool write_enabled = should_write();
             m_started_ranges.push_back(
                 { tim::get_hash_id(name), begin_ts, write_enabled });
             if(write_enabled)
@@ -257,7 +256,7 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
         }
         default:
         {
-            if(m_controller->should_write_markers())
+            if(should_write())
             {
                 const auto& name =
                     trace_cache::get_metadata_registry().get_callback_tracing_info().at(
@@ -274,15 +273,27 @@ void
 roctx_client<MarkerWriterPolicy>::handle_marker_control(
     rocprofiler_callback_tracing_record_t record)
 {
-    if(record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause &&
-       record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+    using user_action_fn = void (control::triggers::roctx::*)();
+    struct control_op
     {
-        m_controller->handle_pause(record.thread_id);
-    }
-    else if(record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume &&
-            record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+        rocprofiler_marker_control_api_id_t op;
+        rocprofiler_callback_phase_t        phase;
+        user_action_fn                      action;
+    };
+    static constexpr auto k_dispatch = std::array<control_op, 2>{
+        { { ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause,
+            ROCPROFILER_CALLBACK_PHASE_ENTER, &control::triggers::roctx::on_pause },
+          { ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume,
+            ROCPROFILER_CALLBACK_PHASE_EXIT, &control::triggers::roctx::on_resume } }
+    };
+
+    for(const auto& entry : k_dispatch)
     {
-        m_controller->handle_resume(record.thread_id);
+        if(record.operation == entry.op && record.phase == entry.phase)
+        {
+            (m_trigger.get()->*entry.action)();
+            return;
+        }
     }
 }
 

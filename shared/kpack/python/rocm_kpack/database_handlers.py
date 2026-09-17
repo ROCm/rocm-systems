@@ -15,7 +15,7 @@ from typing import Optional, List
 # Compile regex patterns once at module level
 # Matches architecture IDs like gfx908, gfx90a, gfx942-xnack+, gfx90a-xnack-
 # Note: Tensile filenames use hyphens (gfx90a-xnack+), not colons (gfx90a:xnack+)
-_GFX_ARCH_PATTERN = re.compile(r"gfx\d+[a-z]*(?:-xnack[+-])?")
+_GFX_ARCH_PATTERN = re.compile(r"gfx\d+[a-z]*(?:-strict)?(?:-xnack[+-])?")
 
 # MIOpen-specific arch pattern. MIOpen filenames concatenate arch ID + CU count
 # without a separator (e.g., gfx90878 = gfx908 + 78 CUs, gfx942130 = gfx942 + 130).
@@ -27,7 +27,7 @@ _GFX_ARCH_PATTERN = re.compile(r"gfx\d+[a-z]*(?:-xnack[+-])?")
 _MIOPEN_ARCH_PATTERN = re.compile(
     r"gfx(?:"
     r"90a|900|906|908|940|941|942|950"
-    r"|1010|1030|1100|1101|1102|1150|1151|1200|1201"
+    r"|1010|1030|1100|1101|1102|1150|1151|1200|1201|1250(?:-strict)?"
     r")"
 )
 

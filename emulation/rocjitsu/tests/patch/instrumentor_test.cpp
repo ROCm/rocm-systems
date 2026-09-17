@@ -253,7 +253,8 @@ TEST(Validator, AcceptsProbeObjWithSymbol) {
       << err;
 }
 
-TEST(Validator, RejectsForceFullExec) {
+// The inline nop has no call envelope, so there is no mask to widen around one.
+TEST(Validator, RejectsForceFullExecWithoutAProbe) {
   static constexpr uint32_t kRaw = 0xDEADBEEFu;
   TestInstruction anchor("v_add_f32_e32", 4, 0, std::nullopt, &kRaw);
   auto text = dummy_text();
@@ -262,7 +263,7 @@ TEST(Validator, RejectsForceFullExec) {
 
   std::string err;
   EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value());
-  EXPECT_FALSE(err.empty());
+  EXPECT_NE(err.find("force_full_exec"), std::string::npos) << err;
 }
 
 TEST(Validator, RejectsDenylistedMnemonic) {
@@ -1913,10 +1914,10 @@ TEST(InstrumentorProbePatch, CopiesProbeBodyOnceAndCallTargetsIt) {
   EXPECT_EQ(va_after_getpc + delta, p.probe_target_offset); // wraps mod 2^64.
 }
 
-// Two sites naming one symbol with different counts were verified against
-// different conventions, so they must not share a ProbeCallable. Checks the
-// registry split; the values themselves are not materialized yet.
-TEST(InstrumentorProbePatch, SitesDifferingOnlyInArgumentCountDoNotShareABody) {
+// Two points naming one symbol with different counts are describing one probe
+// two ways. The framework cannot tell which count the body wants, so it refuses
+// the second declaration instead of resolving a second probe.
+TEST(InstrumentorProbePatch, PointsDisagreeingOnArgumentCountAreRejected) {
   auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
   AmdGpuCodeObject obj(target.data(), target.size());
@@ -1929,7 +1930,82 @@ TEST(InstrumentorProbePatch, SitesDifferingOnlyInArgumentCountDoNotShareABody) {
     pt.probe_obj = &probe_obj;
     pt.probe_symbol = "rj_test_probe";
     if (anchor != 0)
-      pt.probe_args = {0xAAAAAAAAu};
+      pt.probe_args = {probe_arg_imm(0xAAAAAAAAu)};
+    instr.add_point(pt);
+  }
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("already declared with 0 argument dwords"),
+            std::string::npos)
+      << result.errors.front();
+}
+
+// Arity is not the only fact the probe owns. One point asking for a constant and
+// another for the anchor mask disagree about what the body receives, and the
+// body cannot arbitrate.
+TEST(InstrumentorProbePatch, PointsDisagreeingOnArgumentSourceAreRejected) {
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  for (uint64_t anchor : {uint64_t{0}, uint64_t{4}}) {
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    pt.probe_args = anchor == 0 ? std::vector<ProbeArgValue>{probe_arg_imm(0xAAAAAAAAu)}
+                                : std::vector<ProbeArgValue>{{ProbeArgSource::AnchorExecLo, 0}};
+    instr.add_point(pt);
+  }
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("different argument sources"), std::string::npos)
+      << result.errors.front();
+}
+
+// Mask policy is the same class of fact: which lanes the body runs on follows
+// from what the body computes, so one probe cannot be masked at one point and
+// full-exec at another.
+TEST(InstrumentorProbePatch, PointsDisagreeingOnMaskPolicyAreRejected) {
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  for (uint64_t anchor : {uint64_t{0}, uint64_t{4}}) {
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    pt.force_full_exec = anchor != 0;
+    instr.add_point(pt);
+  }
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("already declared with the anchor mask"), std::string::npos)
+      << result.errors.front();
+}
+
+TEST(InstrumentorProbePatch, PointsAgreeingOnPolicyAndSourcesShareOneBody) {
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  for (uint64_t anchor : {uint64_t{0}, uint64_t{4}}) {
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    pt.probe_args = {{ProbeArgSource::AnchorExecLo, 0}, {ProbeArgSource::AnchorExecHi, 0}};
+    pt.force_full_exec = true;
     instr.add_point(pt);
   }
 
@@ -1937,7 +2013,7 @@ TEST(InstrumentorProbePatch, SitesDifferingOnlyInArgumentCountDoNotShareABody) {
   ASSERT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
   ASSERT_EQ(result.patches.size(), 2u);
-  EXPECT_NE(result.patches[0].probe_target_offset, result.patches[1].probe_target_offset);
+  EXPECT_EQ(result.patches[0].probe_target_offset, result.patches[1].probe_target_offset);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -1945,7 +2021,94 @@ TEST(InstrumentorProbePatch, SitesDifferingOnlyInArgumentCountDoNotShareABody) {
   constexpr size_t kOriginalTextWords = 2;
   ASSERT_GT(text.size(), kOriginalTextWords);
   const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
-  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 2);
+  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 1);
+}
+
+// An immediate's value is the one part of an argument the probe declaration
+// deliberately excludes: the body reveals nothing about which constant it wants,
+// and each trampoline materializes its own. Two sites agreeing on the source but
+// not the payload are therefore one probe, not two.
+TEST(InstrumentorProbePatch, PointsDifferingOnlyInImmediateValuesShareOneBody) {
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // anchors at offsets 0 and 4.
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeMarkerMovS5, kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  constexpr uint32_t kFirstValue = 0xAAAAAAAAu;
+  constexpr uint32_t kSecondValue = 0xBBBBBBBBu;
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  for (uint64_t anchor : {uint64_t{0}, uint64_t{4}}) {
+    InstrumentationPoint pt;
+    pt.anchor_offset = anchor;
+    pt.probe_obj = &probe_obj;
+    pt.probe_symbol = "rj_test_probe";
+    pt.probe_args = {probe_arg_imm(anchor == 0 ? kFirstValue : kSecondValue)};
+    instr.add_point(pt);
+  }
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 2u);
+  EXPECT_EQ(result.patches[0].probe_target_offset, result.patches[1].probe_target_offset);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  constexpr size_t kOriginalTextWords = 2;
+  ASSERT_GT(text.size(), kOriginalTextWords);
+  const std::vector<uint32_t> cave(text.begin() + kOriginalTextWords, text.end());
+  EXPECT_EQ(std::count(cave.begin(), cave.end(), kProbeMarkerMovS5), 1);
+  // One shared body, but each trampoline still materializes its own constant.
+  EXPECT_EQ(std::count(cave.begin(), cave.end(), kFirstValue), 1);
+  EXPECT_EQ(std::count(cave.begin(), cave.end(), kSecondValue), 1);
+}
+
+// A Wave32 kernel's EXEC is one dword. Passing the high half would hand the
+// probe a register the kernel's wave size gives no meaning, so the site is
+// rejected rather than delivering it.
+TEST(InstrumentorProbePatch, AnchorExecHighDwordOnAWave32KernelFailsClosed) {
+  auto target = make_gfx1200_wave32_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
+  auto probe = make_gfx1200_probe_elf(
+      "rj_test_probe", {build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4)});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_RDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args = {{ProbeArgSource::AnchorExecLo, 0}, {ProbeArgSource::AnchorExecHi, 0}};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("Wave32"), std::string::npos) << result.errors.front();
+}
+
+// The same request on a Wave64 kernel is accepted: the gate is the wave size,
+// not the source.
+TEST(InstrumentorProbePatch, AnchorExecHighDwordOnAWave64KernelIsAccepted) {
+  auto target = make_gfx1200_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
+  auto probe = make_gfx1200_probe_elf(
+      "rj_test_probe", {build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4)});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_RDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args = {{ProbeArgSource::AnchorExecLo, 0}, {ProbeArgSource::AnchorExecHi, 0}};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.patches.size(), 1u);
 }
 
 // The ABI fixes the argument VGPRs at v0 upward, so unlike the envelope's SGPR
@@ -1963,7 +2126,7 @@ TEST(InstrumentorProbePatch, ArgumentsPastTheKernelVgprAllocationFailClosed) {
   pt.anchor_offset = 0;
   pt.probe_obj = &probe_obj;
   pt.probe_symbol = "rj_test_probe";
-  pt.probe_args.assign(5, 0u);
+  pt.probe_args.assign(5, probe_arg_imm(0));
   instr.add_point(pt);
 
   auto result = instr.patch_with_debug_summaries();
@@ -1986,7 +2149,7 @@ TEST(InstrumentorProbePatch, ArgumentsFillingTheOrdinaryVgprWindowAreAccepted) {
   pt.anchor_offset = 0;
   pt.probe_obj = &probe_obj;
   pt.probe_symbol = "rj_test_probe";
-  pt.probe_args = {1u, 2u, 3u, 4u};
+  pt.probe_args = {probe_arg_imm(1), probe_arg_imm(2), probe_arg_imm(3), probe_arg_imm(4)};
   instr.add_point(pt);
 
   auto result = instr.patch_with_debug_summaries();
@@ -2009,7 +2172,7 @@ TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) 
   pt.anchor_offset = 0;
   pt.probe_obj = &probe_obj;
   pt.probe_symbol = "rj_test_probe";
-  pt.probe_args = {1u};
+  pt.probe_args = {probe_arg_imm(1)};
   instr.add_point(pt);
 
   auto result = instr.patch_with_debug_summaries();
@@ -2026,7 +2189,7 @@ TEST(InstrumentorProbePatch, RejectsArgumentsWithoutAProbe) {
   Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
   InstrumentationPoint pt;
   pt.anchor_offset = 0;
-  pt.probe_args = {1u};
+  pt.probe_args = {probe_arg_imm(1)};
   instr.add_point(pt);
 
   auto result = instr.patch_with_debug_summaries();
@@ -2048,7 +2211,7 @@ TEST(InstrumentorProbePatch, RejectsMoreArgumentsThanFitInRegisters) {
   pt.anchor_offset = 0;
   pt.probe_obj = &probe_obj;
   pt.probe_symbol = "rj_test_probe";
-  pt.probe_args.assign(kMaxProbeArgVgprs + 1, 0u);
+  pt.probe_args.assign(kMaxProbeArgVgprs + 1, probe_arg_imm(0));
   instr.add_point(pt);
 
   auto result = instr.patch_with_debug_summaries();

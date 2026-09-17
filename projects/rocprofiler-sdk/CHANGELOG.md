@@ -35,6 +35,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
   - Fixed `rocprofv3` crashing during output generation when a second tool subscribed to code object tracing in the same process, which blocked profiling PyTorch and Triton workloads through rocprofiler-compute.
   - Fixed `rocprofv3` hanging instead of exiting when a fatal signal arrives while it is already handling one, for example when output generation aborts. It previously left GPU child processes running and required killing the process manually.
+  - Fixed memory write-bandwidth telemetry reporting N/A on gfx1250 (MI455X) by adding the missing `WRITE_SIZE` derived counter, computed from the `GL2C_WRITE_SECTORS` hardware counter. The read-side `FETCH_SIZE` counter was already defined for gfx1250 while the write side was not, so downstream consumers such as the memory write-bandwidth field exposed through RDC reported N/A.
 
 ### Known issues
 

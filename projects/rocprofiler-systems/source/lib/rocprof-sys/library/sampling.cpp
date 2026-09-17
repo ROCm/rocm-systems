@@ -59,8 +59,7 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
-#include <condition_variable>
+#include <atomic>
 #include <csignal>
 #include <cstring>
 #include <ctime>
@@ -459,136 +458,21 @@ get_sampler_running(std::int64_t _tid)
     return sampler_running_instances::instance(construct_on_thread{ _tid }, false);
 }
 
-auto&
-get_duration_disabled()
-{
-    static auto _v = std::atomic<bool>{ false };
-    return _v;
-}
+// Hoisted ahead of configure() so the new-sampler guard can consult it.
+// pause_intervals / pause_mutex / pending_pause_ts stay near the pause/resume
+// implementation below since only those touch them.
+auto g_sampling_paused = std::atomic<bool>{ false };
 
-auto&
-get_is_duration_thread()
-{
-    static thread_local auto _v = false;
-    return _v;
-}
-
-auto&
-get_duration_cv()
-{
-    static auto _v = std::condition_variable{};
-    return _v;
-}
-
-auto&
-get_duration_mutex()
-{
-    static auto _v = std::mutex{};
-    return _v;
-}
-
-auto&
-get_duration_thread()
-{
-    static auto _v = std::unique_ptr<std::thread>{};
-    return _v;
-}
-
-auto
-notify_duration_thread()
-{
-    if(get_duration_thread() && !get_is_duration_thread())
-    {
-        std::unique_lock<std::mutex> _lk{ get_duration_mutex(), std::defer_lock };
-        if(!_lk.owns_lock()) _lk.lock();
-        get_duration_cv().notify_all();
-    }
-}
-
-void
-stop_duration_thread()
-{
-    if(get_duration_thread() && !get_is_duration_thread())
-    {
-        notify_duration_thread();
-        get_duration_thread()->join();
-        get_duration_thread().reset();
-    }
-}
-
-void
-start_duration_thread()
-{
-    static std::mutex            _start_mutex{};
-    std::unique_lock<std::mutex> _start_lk{ _start_mutex, std::defer_lock };
-    if(!_start_lk.owns_lock()) _start_lk.lock();
-
-    if(!get_duration_thread() && config::get_sampling_duration() > 0.0)
-    {
-        // we may need to protect against recursion bc of pthread wrapper
-        static bool _protect = false;
-        if(_protect) return;
-        _protect       = true;
-        const auto now = std::chrono::steady_clock::now();
-        const auto end =
-            now + std::chrono::duration_cast<std::chrono::nanoseconds>(
-                      std::chrono::duration<double>{ config::get_sampling_duration() });
-        const auto func = [end]() {
-            thread_info::init(true);
-            threading::set_thread_name("omni.samp.dur");
-            get_is_duration_thread() = true;
-            bool _wait               = true;
-            while(_wait)
-            {
-                _wait = false;
-                std::unique_lock<std::mutex> _lk{ get_duration_mutex(), std::defer_lock };
-                if(!_lk.owns_lock()) _lk.lock();
-                get_duration_cv().wait_until(_lk, end);
-                const auto premature = (std::chrono::steady_clock::now() < end);
-                const auto finalized =
-                    (state::process::get() >= state::process::Finalized);
-                if(premature && !finalized)
-                {
-                    // protect against spurious wakeups
-                    LOG_WARNING("Spurious wakeup of sampling duration thread...");
-                    _wait = true;
-                }
-                else if(finalized)
-                {
-                    if(premature)
-                    {
-                        LOG_INFO("Sampling duration of {:.6f} seconds was "
-                                 "interrupted by finalization. Shutting down "
-                                 "sampling...",
-                                 config::get_sampling_duration());
-                    }
-                    else
-                    {
-                        LOG_INFO("Sampling duration of {:.6f} seconds has "
-                                 "elapsed. Shutting down sampling...",
-                                 config::get_sampling_duration());
-                    }
-                    break;
-                }
-                else
-                {
-                    get_duration_disabled().store(true);
-                    LOG_INFO("Sampling duration of {:.6f} seconds has elapsed. "
-                             "Shutting down sampling...",
-                             config::get_sampling_duration());
-                    configure(false, 0);
-                }
-            }
-        };
-
-        LOG_INFO("Sampling will be disabled after {:.6f} seconds",
-                 config::get_sampling_duration());
-
-        ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-        get_duration_thread() = std::make_unique<std::thread>(func);
-        _protect              = false;
-    }
-}
+// Makes the paused flag and the timer state one transition. Without it
+// configure() can read "not paused", pause() can complete, and configure() then
+// arms timers inside the pause window.
+//
+// Held by configure() and by pause()/resume(). The latter run as control-session
+// subscriber callbacks, i.e. already under the session's notify mutex, so the
+// order is always session-mutex then this one - never the reverse. A subscriber
+// callback that transitively created a thread would re-enter configure() and
+// self-deadlock; none does today.
+auto g_timer_state_mutex = std::mutex{};
 
 auto&
 get_offload_file()
@@ -775,8 +659,6 @@ configure(bool _setup, std::int64_t _tid)
 
     if(_setup && !_sampler && !_is_running && !_signal_types->empty())
     {
-        if(get_duration_disabled()) return std::set<int>{};
-
         // if this thread has an offset ID, that means it was created internally
         // and is probably here bc it called a function which was instrumented.
         // thus we should not start a sampler for it
@@ -870,23 +752,34 @@ configure(bool _setup, std::int64_t _tid)
             }
 
             _perf_sampler->set_ready_signal(get_sampling_overflow_signal());
-            _sampler->configure(overflow{
-                get_sampling_overflow_signal(),
-                [](int _sig, pid_t, long, std::int64_t _idx) {
-                    perf::get_instance(_idx)->set_ready_signal(_sig);
-                    return true;
-                },
-                [](int, pid_t, long, std::int64_t _idx) {
-                    return perf::get_instance(_idx)->start();
-                },
-                [](int, pid_t, long, std::int64_t _idx) {
-                    if(!perf::get_instance(_idx) || !perf::get_instance(_idx)->is_open())
-                        return true;
-                    auto _stopped = perf::get_instance(_idx)->stop();
-                    if(_stopped) perf::get_instance(_idx)->close();
-                    return _stopped;
-                },
-                _tid, threading::get_sys_tid() });
+            _sampler->configure(overflow{ get_sampling_overflow_signal(),
+                                          [](int, pid_t, long, std::int64_t) {
+                                              // set_ready_signal() already ran once on
+                                              // the owning thread at the explicit call
+                                              // above. overflow::start() re-invokes this
+                                              // initer on every start() including resume,
+                                              // which runs on the time_window worker
+                                              // thread - redoing F_SETOWN there would
+                                              // rebind signal delivery to a thread that
+                                              // exits right after.
+                                              return true;
+                                          },
+                                          [](int, pid_t, long, std::int64_t idx) {
+                                              return perf::get_instance(idx)->start();
+                                          },
+                                          [](int, pid_t, long, std::int64_t idx) {
+                                              if(!perf::get_instance(idx) ||
+                                                 !perf::get_instance(idx)->is_open())
+                                              {
+                                                  return true;
+                                              }
+                                              // Disable only - keep the fd open so a
+                                              // later start() can re-enable it. Closing
+                                              // here would leave overflow sampling
+                                              // permanently dead after the first pause.
+                                              return perf::get_instance(idx)->stop();
+                                          },
+                                          _tid, threading::get_sys_tid() });
         }
 
         if(get_use_tmp_files())
@@ -952,10 +845,23 @@ configure(bool _setup, std::int64_t _tid)
         metadata_initialize_thread_info(_tid);
         metadata_initialize_track(_tid);
 
-        *_running = true;
-        sampling::get_sampler_init(_tid)->sample();
-        start_duration_thread();
-        _sampler->start();
+        {
+            // Publishing *_running and deciding whether to arm must be one step
+            // with respect to pause()/resume(); see g_timer_state_mutex. The flag
+            // also gates set_sampler_timers(), so a sampler is never visible to
+            // it before this point.
+            const std::scoped_lock timer_lk{ g_timer_state_mutex };
+            *_running = true;
+            sampling::get_sampler_init(_tid)->sample();
+            // If sampling is currently paused, leave the sampler configured but
+            // unarmed - set_sampler_timers() will start it on the next resume().
+            // Starting it now would immediately begin delivering signals for a
+            // pause window this thread was created inside of.
+            if(!g_sampling_paused.load(std::memory_order_relaxed))
+            {
+                _sampler->start();
+            }
+        }
     }
     else if(!_setup && _sampler && _is_running)
     {
@@ -967,8 +873,6 @@ configure(bool _setup, std::int64_t _tid)
             sampling::block_signals(*_signal_types);
         }
 
-        notify_duration_thread();
-
         if(_tid == 0)
         {
             // this propagates to all threads
@@ -979,14 +883,28 @@ configure(bool _setup, std::int64_t _tid)
         _sampler->stop();
         _sampler->reset();
         *_running = false;
-        if(_perf_sampler) _perf_sampler->stop();
+        // close(), not stop(): pausing only disables the perf event so a later
+        // resume can re-enable it, but this is permanent teardown. The
+        // instances live in thread_data with static storage, so ~perf_event()
+        // effectively never runs and the fd and mmap would leak for the rest of
+        // the process.
+        if(_perf_sampler)
+        {
+            _perf_sampler->close();
+        }
 
         if(_tid == 0)
         {
             for(std::int64_t i = 1; i < ROCPROFSYS_MAX_THREADS; ++i)
             {
-                if(sampling::get_sampler(i)) sampling::get_sampler(i)->stop();
-                if(perf::get_instance(i)) perf::get_instance(i)->stop();
+                if(sampling::get_sampler(i))
+                {
+                    sampling::get_sampler(i)->stop();
+                }
+                if(perf::get_instance(i))
+                {
+                    perf::get_instance(i)->close();
+                }
             }
 
             for(std::int64_t i = 1; i < ROCPROFSYS_MAX_THREADS; ++i)
@@ -1001,8 +919,6 @@ configure(bool _setup, std::int64_t _tid)
             // wait for the samples to finish
             for(auto& itr : get_sampler_allocators())
                 if(itr) itr->flush();
-
-            stop_duration_thread();
         }
 
         if(trait::runtime_enabled<backtrace_metrics>::get())
@@ -1041,7 +957,6 @@ struct pause_interval_t
     std::uint64_t resume_ts = 0;
 };
 
-auto sampling_paused  = std::atomic<bool>{ false };
 auto pause_mutex      = std::mutex{};
 auto pause_intervals  = std::vector<pause_interval_t>{};
 auto pending_pause_ts = std::atomic<std::uint64_t>{ 0 };
@@ -1118,9 +1033,7 @@ shutdown()
         return std::set<int>{};
     }
 
-    auto configured_signals = configure(false, tid);
-    if(utility::get_thread_index() == 0) stop_duration_thread();
-    return configured_signals;
+    return configure(false, tid);
 }
 
 void
@@ -1135,6 +1048,59 @@ unblock_samples()
 {
     LOG_DEBUG("Unblocking sampling...");
     trait::runtime_enabled<sampler_t>::set(true);
+}
+
+enum class timer_state
+{
+    stopped,
+    running
+};
+
+// Blocking samples only makes the handler discard them; the OS timer keeps
+// firing and its signal keeps interrupting the target's sleeps. Stop the
+// timers themselves so a paused sampler is unobservable to the application.
+//
+// Pausing is asymmetric for the CPU-time trigger. timer::stop() deletes the
+// POSIX timer, so the matching start() would call timer_create() again from
+// whichever thread ran resume() - and CLOCK_THREAD_CPUTIME_ID binds to that
+// caller, silently reattributing the timer. It is never stopped: a CPU-time
+// timer cannot advance while its thread is blocked in a syscall, so it cannot
+// cut the target's sleeps short the way a wall-clock timer does, and
+// parse_timer_data() already drops any sample landing inside a pause interval.
+//
+// Resuming still starts it, because a thread created during a pause window has
+// a timer that configure() created but never armed. start() is a no-op once
+// active, and for an unarmed timer it only calls timer_settime() on a handle
+// timer_create()'d on the owning thread, which does not rebind it.
+void
+set_sampler_timers(timer_state state)
+{
+    for(std::int64_t i = 0; i < ROCPROFSYS_MAX_THREADS; ++i)
+    {
+        auto& sampler = get_sampler(i);
+        if(!sampler)
+        {
+            continue;
+        }
+
+        const auto& running = get_sampler_running(i);
+        if(!running || !*running)
+        {
+            continue;
+        }
+
+        for(const auto& trigger : sampler->get_triggers())
+        {
+            if(state == timer_state::running)
+            {
+                trigger->start();
+            }
+            else if(trigger->signal() != get_sampling_cputime_signal())
+            {
+                trigger->stop();
+            }
+        }
+    }
 }
 
 void
@@ -2008,8 +1974,10 @@ postfork_child_reset_pmc_sampler_lock()
 void
 pause()
 {
+    const std::scoped_lock timer_lk{ g_timer_state_mutex };
+
     bool _expected = false;
-    if(!sampling_paused.compare_exchange_strong(_expected, true))
+    if(!g_sampling_paused.compare_exchange_strong(_expected, true))
     {
         LOG_WARNING("sampling::pause() called but sampling is already paused");
         return;
@@ -2018,13 +1986,16 @@ pause()
     LOG_DEBUG("Pausing sampling...");
     pending_pause_ts.store(tim::get_clock_real_now<std::uint64_t, std::nano>());
     block_samples();
+    set_sampler_timers(timer_state::stopped);
 }
 
 void
 resume()
 {
+    const std::scoped_lock timer_lk{ g_timer_state_mutex };
+
     bool _expected = true;
-    if(!sampling_paused.compare_exchange_strong(_expected, false))
+    if(!g_sampling_paused.compare_exchange_strong(_expected, false))
     {
         LOG_WARNING("sampling::resume() called but sampling is not paused");
         return;
@@ -2039,6 +2010,7 @@ resume()
         pause_intervals.push_back(pause_interval_t{ _pause_ts, _resume_ts });
     }
 
+    set_sampler_timers(timer_state::running);
     unblock_samples();
 }
 
