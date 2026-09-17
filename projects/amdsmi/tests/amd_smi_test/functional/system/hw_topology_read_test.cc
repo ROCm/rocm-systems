@@ -66,6 +66,8 @@ void TestHWTopologyRead::Run(void) {
 
   // Null output pointers must be rejected regardless of topology.
   if (num_devices > 0) {
+    EXPECT_EQ(amdsmi_get_link_topology(processor_handles_[0], processor_handles_[0], nullptr),
+              AMDSMI_STATUS_INVAL);
     amdsmi_link_type_t null_type;
     amdsmi_p2p_capability_t null_cap;
     uint64_t null_hops;
@@ -124,7 +126,8 @@ void TestHWTopologyRead::Run(void) {
         DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
         if (err != AMDSMI_STATUS_SUCCESS) {
           if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-            return;
+            // Keep the existing component topology coverage running.
+            continue;
           } else {
             CHK_ERR_ASRT(err)
           }
@@ -233,7 +236,8 @@ void TestHWTopologyRead::Run(void) {
         DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
         if (err != AMDSMI_STATUS_SUCCESS) {
           if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-            return;
+            // Skip only this unified query, not the remaining topology tests.
+            continue;
           } else {
             CHK_ERR_ASRT(err)
           }
