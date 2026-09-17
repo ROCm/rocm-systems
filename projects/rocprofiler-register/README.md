@@ -7,22 +7,30 @@ runtime libraries by the ROCprofiler (v2) library. The purpose of this library i
 of enabling performance analysis in the ROCm runtimes which does not rely on environment variables or unique methods for each runtime
 library.
 
-When a runtime is initialized (either explicitly and lazily) and the intercept API table is constructed, it passes this API table to
-rocprofiler-register. Rocprofiler-register scans the symbols in the address space and if it detects there is at least one visible symbol named
-`rocprofiler_configure` (which is a function provided by tools), it passes the intercept API table to the rocprofiler library (dlopening
-the rocprofiler library if it is not already loaded). The rocprofiler library then does an extensive scan for _all_ the instances of
-the `rocprofiler_configure` symbols and invokes each of them. The `rocprofiler_configure` function (again, provided by a tool) returns
-effectively tells rocprofiler which behaviors it wants to be notified about, features it wants to use (e.g. API tracing, kernel dispatch timing),
-etc.
+When a runtime is initialized (either explicitly or lazily) and constructs its intercept API table,
+it passes the table to rocprofiler-register. Rocprofiler-register scans the process for
+`rocprofiler_configure` symbols and, when one is present or startup loading was explicitly
+requested, passes the table to rocprofiler-sdk. Rocprofiler-sdk discovers and invokes the
+tool-provided configuration functions, which specify requested services such as API tracing or
+kernel dispatch timing.
+
+Attachment capability is independent of startup profiling. When attachment is enabled through
+`ROCP_TOOL_ATTACH=1` or the corresponding build default, rocprofiler-register initializes the
+attachment helper before propagating the first supported runtime, even if rocprofiler-sdk already
+has startup or anytime clients. HSA-dependent queue setup is completed when HSA registers. A later
+runtime attachment explicitly loads its tool as an additional rocprofiler-sdk client through
+anytime initialization. Detaching that client does not stop existing clients.
 
 ## Environment Variables
 
-| Environment Variable              | Description                                                               | Default Value  |
-|-----------------------------------|---------------------------------------------------------------------------|----------------|
-| `ROCP_TOOL_LIBRARIES`             | List of rocprofiler-sdk tool libraries (space, comma, or colon separated) | Empty (string) |
-| `ROCPROFILER_REGISTER_ENABLED`    | Set to 0/false/no to disable rocprofiler-register                         | true (bool)    |
-| `ROCPROFILER_REGISTER_SECURE`     | Additional checks to ensure authenticity of runtime libraries             | false (bool)   |
-| `ROCPROFILER_REGISTER_FORCE_LOAD` | Load rocprofiler-sdk library regardless of whether there is a tool or not | false (bool)   |
+| Environment Variable              | Description                                                               | Default Value                            |
+|-----------------------------------|---------------------------------------------------------------------------|------------------------------------------|
+| `ROCP_TOOL_LIBRARIES`             | List of rocprofiler-sdk tool libraries (space, comma, or colon separated) | Empty (string)                           |
+| `ROCP_TOOL_ATTACH`                | Initialize runtime-attachment support during runtime registration         | Build-dependent                          |
+| `ROCPROFILER_REGISTER_LIBRARY`    | Explicit rocprofiler-sdk library to load                                  | Empty (string)                           |
+| `ROCPROFILER_REGISTER_ENABLED`    | Set to 0/false/no to disable rocprofiler-register                         | true (bool)                              |
+| `ROCPROFILER_REGISTER_SECURE`     | Additional checks to ensure authenticity of runtime libraries             | false (bool)                             |
+| `ROCPROFILER_REGISTER_FORCE_LOAD` | Load rocprofiler-sdk at startup regardless of visible tools               | false (bool)                             |
 
 ## Contributing
 

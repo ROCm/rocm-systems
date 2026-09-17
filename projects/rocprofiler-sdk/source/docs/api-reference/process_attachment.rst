@@ -158,6 +158,23 @@ The target process must have ``ROCP_TOOL_ATTACH=1`` set, or be using a version o
    OR
    cmake /path/to/rocprofiler-register -DROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON
 
+Attachment capability and startup profiling can coexist. Enabling attachment
+initializes the attachment listener even when the process exposes
+``rocprofiler_configure`` or already has an active startup or anytime client.
+On the first attachment, the requested tool is registered as an additional
+client using anytime initialization. Detach and reattach affect only that
+attachment client.
+
+``ROCPROFILER_REGISTER_FORCE_LOAD`` continues to control startup SDK loading;
+it does not enable or disable the attachment listener. Reattachment reuses the
+tool configured by the first attachment. Attaching a different tool, or
+attaching a tool DSO that is already active as a non-attachment client, is not
+currently supported.
+
+Use ``rocprofiler-register``, ``rocprofiler-sdk``, and
+``rocprofiler-sdk-attach`` packages from the same ROCm release. Attachment uses
+private cross-library entry points that are versioned together.
+
 Tool library configuration
 ---------------------------
 
