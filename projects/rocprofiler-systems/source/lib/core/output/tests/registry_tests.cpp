@@ -169,6 +169,21 @@ TEST_F(RegistryTest, existing_file_size_is_captured)
     fs::remove(path);
 }
 
+namespace
+{
+void
+write_concurrent_files(int thread_index, int file_count)
+{
+    for(int i = 0; i < file_count; ++i)
+    {
+        registry::instance().register_file("/tmp/rocprofsys-test/concurrent-" +
+                                               std::to_string(thread_index) + "-" +
+                                               std::to_string(i) + ".proto",
+                                           output_format::perfetto);
+    }
+}
+}  // namespace
+
 TEST_F(RegistryTest, concurrent_register_is_thread_safe)
 {
     constexpr int k_thread_count = 4;
@@ -178,15 +193,8 @@ TEST_F(RegistryTest, concurrent_register_is_thread_safe)
     threads.reserve(k_thread_count);
     for(int thread_index = 0; thread_index < k_thread_count; ++thread_index)
     {
-        threads.emplace_back([thread_index]() {
-            for(int i = 0; i < k_per_thread; ++i)
-            {
-                registry::instance().register_file("/tmp/rocprofsys-test/concurrent-" +
-                                                       std::to_string(thread_index) +
-                                                       "-" + std::to_string(i) + ".proto",
-                                                   output_format::perfetto);
-            }
-        });
+        threads.emplace_back(
+            [thread_index]() { write_concurrent_files(thread_index, k_per_thread); });
     }
     for(auto& thread : threads)
     {
