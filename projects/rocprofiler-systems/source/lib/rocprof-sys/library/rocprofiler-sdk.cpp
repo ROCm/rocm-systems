@@ -1598,24 +1598,6 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         user_data->value = ts;
         switch(record.kind)
         {
-            // case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
-            // case ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API:
-            // case ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API:
-            // case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
-            // {
-            //     tool_tracing_callback_start(category::rocm_hsa_api{}, record,
-            //     user_data,
-            //                                 ts);
-            //     break;
-            // }
-            // case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
-            // case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
-            // {
-            //     tool_tracing_callback_start(category::rocm_hip_api{}, record,
-            //     user_data,
-            //                                 ts);
-            //     break;
-            // }
 #if(ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
@@ -1623,40 +1605,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 ompt_push_standard_callback(record, ts);
                 break;
             }
-            // case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
-            // {
-            //     tool_tracing_callback_start(category::rocm_rocdecode_api{}, record,
-            //                                 user_data, ts);
-            //     break;
-            // }
 #endif
-                // #if (ROCPROFILER_VERSION >= 700)
-                //             case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
-                //             {
-                //                 tool_tracing_callback_start(category::rocm_rocjpeg_api{},
-                //                 record,
-                //                                             user_data, ts);
-                //                 break;
-                //             }
-                // #endif
-                // #if (ROCPROFILER_VERSION >= 10304)
-                //             case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
-                //             {
-                //                 tool_tracing_callback_start(category::rocm_rocshmem_api{},
-                //                 record,
-                //                                             user_data, ts);
-                //                 break;
-                //             }
-                // #endif
-                // #if (ROCPROFILER_VERSION >= 10305)
-                //             case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
-                //             {
-                //                 tool_tracing_callback_start(category::rocm_hipfile_api{},
-                //                 record,
-                //                                             user_data, ts);
-                //                 break;
-                //             }
-                // #endif
             case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
             {
                 tool_tracing_callback_start(category::rocm_rccl_api{}, record, user_data,
@@ -1708,22 +1657,6 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
         switch(record.kind)
         {
-            // case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
-            // case ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API:
-            // case ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API:
-            // case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
-            // {
-            //     tool_tracing_callback_stop(category::rocm_hsa_api{}, record, user_data,
-            //                                ts, _bt_data);
-            //     break;
-            // }
-            // case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
-            // case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
-            // {
-            //     tool_tracing_callback_stop(category::rocm_hip_api{}, record, user_data,
-            //                                ts, _bt_data);
-            //     break;
-            // }
 #if(ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
@@ -1731,40 +1664,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 ompt_pop_standard_callback(record, ts, _bt_data);
                 break;
             }
-            // case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
-            // {
-            //     tool_tracing_callback_stop(category::rocm_rocdecode_api{}, record,
-            //                                user_data, ts, _bt_data);
-            //     break;
-            // }
 #endif
-                // #if (ROCPROFILER_VERSION >= 700)
-                //             case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
-                //             {
-                //                 tool_tracing_callback_stop(category::rocm_rocjpeg_api{},
-                //                 record,
-                //                                            user_data, ts, _bt_data);
-                //                 break;
-                //             }
-                // #endif
-                // #if (ROCPROFILER_VERSION >= 10304)
-                //             case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
-                //             {
-                //                 tool_tracing_callback_stop(category::rocm_rocshmem_api{},
-                //                 record,
-                //                                            user_data, ts, _bt_data);
-                //                 break;
-                //             }
-                // #endif
-                // #if (ROCPROFILER_VERSION >= 10305)
-                //             case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
-                //             {
-                //                 tool_tracing_callback_stop(category::rocm_hipfile_api{},
-                //                 record,
-                //                                            user_data, ts, _bt_data);
-                //                 break;
-                //             }
-                // #endif
             case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
             {
                 auto* rccl_payload =
