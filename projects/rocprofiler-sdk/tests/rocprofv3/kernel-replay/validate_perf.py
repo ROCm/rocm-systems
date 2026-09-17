@@ -8,10 +8,11 @@
 #   - Per-pass kernel intervals stable (no pass-index blow-up).
 #   - Replay overhead vs single-pass baseline within scaling ratio.
 
-import argparse
 import json
 import sys
 from collections import defaultdict
+
+import pytest
 
 MIN_GBPS = 8.0
 # Footprint heuristic for the kernel-replay test app: n floats * 4 bytes per buffer, ~3 buffers
@@ -71,18 +72,11 @@ def model_tool_ceiling_seconds(passes: int, n_elems: int, dispatches: int) -> fl
     return dispatches * dma * OVERHEAD_MARGIN + 5.0  # fixed startup allowance
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--json-input", required=True)
-    ap.add_argument("--passes", type=int, required=True)
-    ap.add_argument("--n-elems", type=int, default=1048576)
-    ap.add_argument("--baseline-json", help="optional 1-pass baseline JSON for scaling")
-    ap.add_argument("--max-scaling-ratio", type=float, default=10.0)
-    args = ap.parse_args()
-
-    with open(args.json_input, encoding="utf-8") as f:
-        data = json.load(f)
-    sdk = _sdk(data)
+def test_kernel_replay_performance(json_data, expected_passes, request):
+    n_elems = request.config.getoption("--n-elems")
+    baseline_json = request.config.getoption("--baseline-json")
+    max_scaling_ratio = request.config.getoption("--max-scaling-ratio")
+    sdk = _sdk(json_data)
     records = _counter_records(sdk)
 
     duration = tool_duration_seconds(sdk)
@@ -93,14 +87,14 @@ def main() -> int:
     dispatches = len(
         {r["dispatch_data"]["dispatch_info"]["dispatch_id"] for r in records}
     )
-    ceiling = model_tool_ceiling_seconds(args.passes, args.n_elems, dispatches)
+    ceiling = model_tool_ceiling_seconds(expected_passes, n_elems, dispatches)
     assert duration <= ceiling, (
         f"tool duration {duration:.1f}s exceeds cost-model ceiling {ceiling:.1f}s "
-        f"(P={args.passes} dispatches={dispatches})"
+        f"(P={expected_passes} dispatches={dispatches})"
     )
     print(
         f"[kr-perf-json] PASS duration={duration:.2f}s <= ceiling={ceiling:.1f}s "
-        f"(P={args.passes})"
+        f"(P={expected_passes})"
     )
 
     spans = per_pass_spans_ns(records)
@@ -116,23 +110,21 @@ def main() -> int:
     else:
         print("[kr-perf-json] SKIP per-pass span check (replay_pass not in JSON records)")
 
-    if args.baseline_json:
-        with open(args.baseline_json, encoding="utf-8") as f:
+    if baseline_json:
+        with open(baseline_json, encoding="utf-8") as f:
             base_data = json.load(f)
         base_dur = tool_duration_seconds(_sdk(base_data))
         if base_dur > 0:
             scale = duration / base_dur
-            assert scale <= args.max_scaling_ratio, (
-                f"duration scaling {scale:.2f} > {args.max_scaling_ratio} "
-                f"(P={args.passes} {duration:.1f}s vs baseline {base_dur:.1f}s)"
+            assert scale <= max_scaling_ratio, (
+                f"duration scaling {scale:.2f} > {max_scaling_ratio} "
+                f"(P={expected_passes} {duration:.1f}s vs baseline {base_dur:.1f}s)"
             )
             print(
                 f"[kr-perf-json] PASS duration scaling ratio={scale:.2f} "
-                f"(P={args.passes} vs baseline)"
+                f"(P={expected_passes} vs baseline)"
             )
-
-    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(pytest.main(["-x", __file__] + sys.argv[1:]))
