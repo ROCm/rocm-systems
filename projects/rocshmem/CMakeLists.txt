@@ -60,6 +60,7 @@ option(USE_ROCPROFILER_REGISTER "Register rocSHMEM API tables with rocprofiler-r
 option(BUILD_FUNCTIONAL_TESTS "Build the functional tests (uses MPI if available, otherwise SLR)" OFF)
 option(BUILD_EXAMPLES "Build the examples" OFF)
 option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
+option(BUILD_HOST_TESTS "Build CPU-only host unit tests" OFF)
 option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
 option(BUILD_CTESTS "Register tests with CTest for tier-based execution" ON)
