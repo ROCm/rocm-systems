@@ -1415,10 +1415,6 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_SelfWaitOnCaptureStream) {
   constexpr size_t kExpectedEdges = 1;
   constexpr int kExpectedIncrements = 2;
 
-  // Running the whole binary in one process, an earlier test can leave a stale error in this
-  // thread's last-error slot. Consume it so the checks below only report this test's launches.
-  (void)hipGetLastError();
-
   LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
   StreamsGuard streams(1);
   EventsGuard events(1);
@@ -1568,8 +1564,6 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_SelfWaitWithInterveningWork) {
   constexpr size_t kExpectedEdges = 4;
   constexpr int kExpectedIncrements = 4;
 
-  (void)hipGetLastError();
-
   LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
   StreamsGuard streams(2);
   EventsGuard events(3);
@@ -1653,8 +1647,6 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_SelfWaitWithInterveningWork) {
 HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_DestroyForkedStreamDuringCapture) {
   const bool joinBeforeDestroy = GENERATE(true, false);
 
-  (void)hipGetLastError();
-
   LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
   StreamsGuard streams(1);
   EventsGuard events(2);
@@ -1726,7 +1718,6 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_DestroyForkedStreamDuringCaptu
  *    - HIP_VERSION >= 5.6
  */
 HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_SelfWaitOnInvalidatedForkedStream) {
-  (void)hipGetLastError();
 
   LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
   StreamsGuard streams(2);
@@ -1809,8 +1800,6 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_CycleAmongForkedStreams) {
   // a length of 1 degenerates into an adjacent self-wait, which is a no-op, and so comes out
   // one edge lower. Keep this test away from that case.
   const size_t expectedEdges = static_cast<size_t>(cycleLength) + 4;
-
-  (void)hipGetLastError();
 
   LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
   StreamsGuard streams(cycleLength + 1);
@@ -1899,7 +1888,6 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_CycleAmongForkedStreams) {
  *    - HIP_VERSION >= 5.6
  */
 HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_CrossCaptureWaitIsRejected) {
-  (void)hipGetLastError();
 
   LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
   StreamsGuard streams(3);
@@ -1973,8 +1961,6 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_CrossCaptureWaitIsRejected) {
 HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_BeginCaptureOnInvalidatedStream) {
   const bool targetParticipant = GENERATE(false, true);
 
-  (void)hipGetLastError();
-
   LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
   StreamsGuard streams(2);
   EventsGuard events(2);
@@ -2042,8 +2028,6 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_BeginCaptureOnInvalidatedStrea
 HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_DestroyNestedForkDuringCapture) {
   constexpr size_t kExpectedNodes = 4;
   constexpr int kExpectedIncrements = 4;
-
-  (void)hipGetLastError();
 
   LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
   StreamsGuard streams(2);
@@ -2143,8 +2127,6 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_ConcurrentForkIntoOneCapture) 
   // genuinely run at once and the figures above come from a 256-core host.
   constexpr int kIterations = 100;
 
-  (void)hipGetLastError();
-
   LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
   int* devMem = devMem_g.ptr();
   HIP_CHECK(hipMemset(devMem, 0, sizeof(int)));
@@ -2243,8 +2225,6 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_ConcurrentWaitsAccumulateDepen
   constexpr size_t kExpectedNodes = kThreads + 2;
   constexpr size_t kExpectedEdges = 2 * kThreads + 1;
 
-  (void)hipGetLastError();
-
   int waitFailures = 0;
   for (int iter = 0; iter < kIterations; ++iter) {
     StreamsGuard streams(kThreads + 1);
@@ -2334,7 +2314,6 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_ConcurrentWaitsAccumulateDepen
  *    - HIP_VERSION >= 5.6
  */
 HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_WaitDoesNotJoinInvalidatedCapture) {
-  (void)hipGetLastError();
 
   LinearAllocGuard<int> devMem_g(LinearAllocs::hipMalloc, sizeof(int));
   StreamsGuard streams(3);
