@@ -357,10 +357,10 @@ struct mock_sdk
         return 0;
     }
 
-    template <typename ArgCallbackT>
     static void iterate_callback_tracing_kind_operation_args(
-        const callback_tracing_record_t& /*record*/, ArgCallbackT /*callback*/,
-        std::int32_t /*max_deref*/, void* /*data*/)
+        const callback_tracing_record_t& /*record*/,
+        callback_tracing_operation_args_cb_t /*callback*/, std::int32_t /*max_deref*/,
+        void* /*data*/)
     {}
 };
 
@@ -689,7 +689,14 @@ struct gmock_tracing_backend
     MOCK_METHOD(std::uint64_t, get_timestamp, ());
     MOCK_METHOD(tracing_names_t, get_callback_tracing_names, ());
     MOCK_METHOD(std::uint64_t, get_parent_stack_id, (const correlation_id_t&) );
-    MOCK_METHOD(void, iterate_args, (std::uint64_t kind, std::uint32_t operation));
+    // Forwards the real callback function pointer and user-data blob through the mock
+    // so a test can WillOnce(Invoke(...)) it to actually call back into
+    // production's iterate_args_callback (library/rocprofiler-sdk/callback/
+    // common_tracing_callbacks.hpp) -- otherwise that function has zero coverage,
+    // since the default (no WillOnce) StrictMock action never invokes it.
+    MOCK_METHOD(void, iterate_args,
+                (std::uint64_t kind, std::uint32_t operation,
+                 mock_sdk::callback_tracing_operation_args_cb_t callback, void* data));
 };
 
 inline std::unique_ptr<::testing::StrictMock<gmock_tracing_backend>>
@@ -716,12 +723,13 @@ struct mock_sdk_with_tracing : mock_sdk
         return g_tracing_backend_mock->get_parent_stack_id(correlation_id);
     }
 
-    template <typename ArgCallbackT>
     static void iterate_callback_tracing_kind_operation_args(
-        const callback_tracing_record_t& record, ArgCallbackT /*callback*/,
-        std::int32_t /*max_deref*/, void* /*data*/)
+        const callback_tracing_record_t&     record,
+        callback_tracing_operation_args_cb_t callback, std::int32_t /*max_deref*/,
+        void*                                data)
     {
-        g_tracing_backend_mock->iterate_args(record.kind, record.operation);
+        g_tracing_backend_mock->iterate_args(record.kind, record.operation, callback,
+                                             data);
     }
 };
 
@@ -786,5 +794,77 @@ struct externals_with_tracing : externals
             sample.category != nullptr ? sample.category : "");
     }
 };
+
+// Drives a hip/hsa callback domain's k_domain.on_record() through one ENTER phase and
+// one EXIT phase (against mock_sdk_with_tracing/externals_with_tracing), and asserts
+// the given category name is exactly what reaches every SdkBackend/Externals call that
+// surfaces it as a string: metadata_add_string and the category field of
+// region_sample_buffer_storage_store. (tracing_push_timemory/tracing_pop_timemory are
+// NOT checked against the category name here: their std::string_view argument is the
+// per-call *operation* name from get_callback_tracing_names() -- always "operation" in
+// this mock -- the category itself is conveyed only through their first argument's
+// *type*, Category<Externals>::type, which externals_with_tracing's templated
+// overload discards.) This is a regression guard for domain files: every domain wires
+// its own per-file Category trait (e.g. hip::runtime_api_category,
+// hsa::core_api_category), which is easy to copy-paste from the wrong sibling (an
+// hsa::* file left wired to rocm_hip_api_category, or vice versa) without any other
+// test catching it.
+template <typename Domain>
+inline void
+expect_domain_uses_category(const Domain& domain, std::string_view expected_category_name)
+{
+    using ::testing::_;
+    using ::testing::Return;
+    using ::testing::StrictMock;
+
+    g_tracing_backend_mock = std::make_unique<StrictMock<gmock_tracing_backend>>();
+    g_externals_mock       = std::make_unique<StrictMock<gmock_externals>>();
+
+    mock_sdk_with_tracing::user_data_t user_data{};
+
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+    EXPECT_CALL(*g_tracing_backend_mock, get_timestamp())
+        .WillOnce(Return(std::uint64_t{ 1 }));
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(true));
+    EXPECT_CALL(*g_externals_mock, tracing_push_timemory("operation"));
+
+    auto enter_record  = mock_sdk_with_tracing::callback_tracing_record_t{};
+    enter_record.phase = mock_sdk_with_tracing::CALLBACK_PHASE_ENTER;
+    domain.on_record(enter_record, &user_data, nullptr);
+
+    g_tracing_backend_mock = std::make_unique<StrictMock<gmock_tracing_backend>>();
+    g_externals_mock       = std::make_unique<StrictMock<gmock_externals>>();
+
+    EXPECT_CALL(*g_tracing_backend_mock, get_timestamp())
+        .WillOnce(Return(std::uint64_t{ 2 }));
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+    EXPECT_CALL(*g_externals_mock, check_backtrace_operations(_, _))
+        .WillOnce(Return(false));
+    EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
+        .WillOnce(Return(std::nullopt));
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(true));
+    EXPECT_CALL(*g_externals_mock, tracing_pop_timemory("operation"));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
+    EXPECT_CALL(*g_externals_mock, metadata_add_string(expected_category_name));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, metadata_add_thread_info(_, _, _));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_))
+        .WillOnce(Return(std::uint64_t{ 0 }));
+    EXPECT_CALL(*g_externals_mock,
+                region_sample_buffer_storage_store(
+                    _, _, _, _, _, _, _, std::string{ expected_category_name }));
+
+    auto exit_record  = mock_sdk_with_tracing::callback_tracing_record_t{};
+    exit_record.phase = mock_sdk_with_tracing::CALLBACK_PHASE_EXIT;
+    domain.on_record(exit_record, &user_data, nullptr);
+
+    g_tracing_backend_mock.reset();
+    g_externals_mock.reset();
+}
 
 }  // namespace rocprofsys::domains::test_support

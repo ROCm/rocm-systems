@@ -13,6 +13,27 @@
 
 namespace rocprofsys::domains::callback
 {
+namespace
+{
+inline auto
+iterate_args_callback(auto /*kind*/, std::int32_t /*operation*/, std::uint32_t arg_number,
+                      const void* const /*arg_value_addr*/,
+                      std::int32_t /*arg_indirection_count*/, const char* arg_type,
+                      const char* arg_name, const char*             arg_value_str,
+                      std::int32_t /*arg_dereference_count*/, void* data)
+{
+    auto* func_args = static_cast<function_args_t*>(data);
+    if(arg_type && arg_name && arg_value_str)
+    {
+        func_args->emplace_back(
+            argument_info{ .arg_number = arg_number,
+                           .arg_type   = rocprofsys::utility::demangle(arg_type),
+                           .arg_name   = arg_name,
+                           .arg_value  = arg_value_str });
+    }
+    return 0;
+}
+}  // namespace
 
 template <policies::domain_service::externals Externals>
 inline void
@@ -79,25 +100,7 @@ on_tracing_api_exit(typename SdkBackend::callback_tracing_record_t record,
         Externals::tracing_pop_timemory(typename Category<Externals>::type{}, name);
     }
 
-    // Insert callback trace into database
     auto args = function_args_t{};
-
-    auto iterate_args_callback =
-        [](auto /*kind*/, std::int32_t /*operation*/, std::uint32_t arg_number,
-           const void* const /*arg_value_addr*/, std::int32_t /*arg_indirection_count*/,
-           const char* arg_type, const char* arg_name, const char* arg_value_str,
-           std::int32_t /*arg_dereference_count*/, void* data) {
-            auto* func_args = static_cast<function_args_t*>(data);
-            if(arg_type && arg_name && arg_value_str)
-            {
-                func_args->emplace_back(
-                    argument_info{ .arg_number = arg_number,
-                                   .arg_type   = rocprofsys::utility::demangle(arg_type),
-                                   .arg_name   = arg_name,
-                                   .arg_value  = arg_value_str });
-            }
-            return 0;
-        };
 
     SdkBackend::iterate_callback_tracing_kind_operation_args(
         record, iterate_args_callback, 2, &args);

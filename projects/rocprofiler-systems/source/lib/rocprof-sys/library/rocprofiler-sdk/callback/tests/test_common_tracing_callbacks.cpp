@@ -164,7 +164,7 @@ TEST_F(common_tracing_callbacks_test,
         .WillOnce(Return(tracing_names_t{}));
     EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(true));
     EXPECT_CALL(*g_externals_mock, tracing_pop_timemory("operation"));
-    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(k_kind, k_operation));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(k_kind, k_operation, _, _));
     EXPECT_CALL(*g_externals_mock, metadata_add_string("rocm_hip_api"));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(k_ppid));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(k_pid));
@@ -176,6 +176,52 @@ TEST_F(common_tracing_callbacks_test,
                     k_thread_id, std::string{ "operation" }, k_correlation_id,
                     k_parent_stack_id, k_begin_timestamp, k_end_timestamp, std::string{},
                     std::string{ "rocm_hip_api" }));
+
+    on_tracing_api_exit<mock_sdk_with_tracing, externals_with_tracing, test_category>(
+        record, &user_data, nullptr);
+}
+
+// on_tracing_api_exit() never invokes iterate_args_callback itself: it hands the
+// callback function pointer to SdkBackend::iterate_callback_tracing_kind_operation_args
+// and lets the SDK invoke it per argument. Every other test in this file leaves
+// iterate_args() as a no-op (matching how the shared mock behaves everywhere else),
+// so iterate_args_callback's body never runs. This test invokes the real callback
+// pointer via WillOnce(Invoke(...)) to exercise both its branches: a fully-populated
+// argument (arg_type/arg_name/arg_value_str all non-null) that gets serialized into
+// args_str, and one with a null field that must be skipped.
+TEST_F(common_tracing_callbacks_test, exit_serializes_args_populated_via_iterate_callback)
+{
+    const test_support::callback_tracing_record_t record{};
+    test_support::user_data_t                     user_data{};
+
+    EXPECT_CALL(*g_tracing_backend_mock, get_timestamp()).WillOnce(Return(1));
+    EXPECT_CALL(*g_externals_mock, is_active()).WillOnce(Return(true));
+    EXPECT_CALL(*g_externals_mock, check_backtrace_operations(_, _))
+        .WillOnce(Return(false));
+    EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
+        .WillOnce(Return(std::nullopt));
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(false));
+    EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _))
+        .WillOnce([](std::uint64_t kind, std::uint32_t operation,
+                     mock_sdk_with_tracing::callback_tracing_operation_args_cb_t callback,
+                     void*                                                       data) {
+            // Populated argument: exercises the "record it" branch.
+            callback(kind, static_cast<std::int32_t>(operation), 0, nullptr, 0, "int",
+                     "x", "42", 0, data);
+            // A null field: exercises the "skip it" branch.
+            callback(kind, static_cast<std::int32_t>(operation), 1, nullptr, 0, nullptr,
+                     nullptr, nullptr, 0, data);
+        });
+    EXPECT_CALL(*g_externals_mock, metadata_add_string("rocm_hip_api"));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, metadata_add_thread_info(_, _, _));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock,
+                region_sample_buffer_storage_store(_, _, _, _, _, _,
+                                                   std::string{ "0;;int;;x;;42;;" }, _));
 
     on_tracing_api_exit<mock_sdk_with_tracing, externals_with_tracing, test_category>(
         record, &user_data, nullptr);
