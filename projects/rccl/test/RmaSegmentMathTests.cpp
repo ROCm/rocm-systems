@@ -211,3 +211,90 @@ TEST(RmaSegmentMathTest, LayoutsMatchRequiresEqualBoundaries)
     EXPECT_FALSE(ncclRmaLayoutsMatch(0, lhs, 0, lhs));
     EXPECT_FALSE(ncclRmaLayoutsMatch(NCCL_RMA_MAX_SEGMENTS + 1, lhs, NCCL_RMA_MAX_SEGMENTS + 1, lhs));
 }
+
+namespace {
+
+// Matches NCCL_IB_MAX_DEVS_PER_NIC / NCCL_NET_MAX_DEVS_PER_NIC_V12.
+constexpr int kMaxDevsPerNic = 8;
+
+void FillUnusedSlots(int* slots, int filled)
+{
+    for (int d = filled; d < kMaxDevsPerNic; ++d)
+        slots[d] = -1;
+}
+
+} // namespace
+
+// Registration is recvComm slot order {physical 7, physical 3}. The QP used
+// for the post has remDevIdx=1, but remDevs[1] is physical 7. Indexing rkeys
+// by remDevIdx would select the MR for physical 3.
+TEST(RmaSegmentMathTest, DevSlotFollowsPhysicalIbDevNNotQpRemDevIdx)
+{
+    int ibDevNs[kMaxDevsPerNic];
+    ibDevNs[0] = 7;
+    ibDevNs[1] = 3;
+    FillUnusedSlots(ibDevNs, 2);
+
+    constexpr int remDevIdx = 1;
+    constexpr int remoteIbDevN = 7;
+    EXPECT_EQ(ncclRmaDevSlotOf(ibDevNs, /*rank=*/0, remoteIbDevN, kMaxDevsPerNic), 0);
+    EXPECT_NE(ncclRmaDevSlotOf(ibDevNs, /*rank=*/0, remoteIbDevN, kMaxDevsPerNic), remDevIdx);
+}
+
+// Data WRs look up the remote QP's physical device. Flush RDMA_READs look up
+// the local QP's physical device in the same remote handle.
+TEST(RmaSegmentMathTest, FlushLooksUpLocalIbDevNInRemoteRegistration)
+{
+    int remoteIbDevNs[kMaxDevsPerNic];
+    remoteIbDevNs[0] = 7;
+    remoteIbDevNs[1] = 3;
+    FillUnusedSlots(remoteIbDevNs, 2);
+
+    constexpr int remoteRank = 0;
+    constexpr int remoteIbDevN = 3;
+    constexpr int localIbDevN = 7;
+    EXPECT_EQ(ncclRmaDevSlotOf(remoteIbDevNs, remoteRank, remoteIbDevN, kMaxDevsPerNic), 1);
+    EXPECT_EQ(ncclRmaDevSlotOf(remoteIbDevNs, remoteRank, localIbDevN, kMaxDevsPerNic), 0);
+}
+
+// Signal atomics use remDevs[qp->remDevIdx].ibv_dev_index, not remDevIdx.
+TEST(RmaSegmentMathTest, SignalLooksUpRemotePhysicalDeviceOnHandle)
+{
+    int signalIbDevNs[kMaxDevsPerNic];
+    signalIbDevNs[0] = 4;
+    FillUnusedSlots(signalIbDevNs, 1);
+
+    constexpr int remDevIdx = 1;
+    constexpr int remDevPhysical = 4;
+    EXPECT_EQ(ncclRmaDevSlotOf(signalIbDevNs, /*rank=*/0, remDevPhysical, kMaxDevsPerNic), 0);
+    EXPECT_EQ(ncclRmaDevSlotOf(signalIbDevNs, /*rank=*/0, remDevIdx, kMaxDevsPerNic), -1);
+}
+
+TEST(RmaSegmentMathTest, DevSlotIsRankStrided)
+{
+    int ibDevNs[2 * kMaxDevsPerNic];
+    for (int i = 0; i < 2 * kMaxDevsPerNic; ++i)
+        ibDevNs[i] = -1;
+    ibDevNs[0] = 2;
+    ibDevNs[kMaxDevsPerNic] = 9;
+    ibDevNs[kMaxDevsPerNic + 1] = 2;
+
+    EXPECT_EQ(ncclRmaDevSlotOf(ibDevNs, /*rank=*/0, /*ibDevN=*/2, kMaxDevsPerNic), 0);
+    EXPECT_EQ(ncclRmaDevSlotOf(ibDevNs, /*rank=*/1, /*ibDevN=*/2, kMaxDevsPerNic), 1);
+    EXPECT_EQ(ncclRmaDevSlotOf(ibDevNs, /*rank=*/1, /*ibDevN=*/9, kMaxDevsPerNic), 0);
+    EXPECT_EQ(ncclRmaDevSlotOf(ibDevNs, /*rank=*/0, /*ibDevN=*/9, kMaxDevsPerNic), -1);
+}
+
+TEST(RmaSegmentMathTest, DevSlotRejectsMissingAndInvalidDevices)
+{
+    int ibDevNs[kMaxDevsPerNic];
+    ibDevNs[0] = 0;
+    FillUnusedSlots(ibDevNs, 1);
+
+    EXPECT_EQ(ncclRmaDevSlotOf(ibDevNs, /*rank=*/0, /*ibDevN=*/0, kMaxDevsPerNic), 0);
+    EXPECT_EQ(ncclRmaDevSlotOf(ibDevNs, /*rank=*/0, /*ibDevN=*/1, kMaxDevsPerNic), -1);
+    EXPECT_EQ(ncclRmaDevSlotOf(ibDevNs, /*rank=*/0, /*ibDevN=*/-1, kMaxDevsPerNic), -1);
+    EXPECT_EQ(ncclRmaDevSlotOf(nullptr, /*rank=*/0, /*ibDevN=*/0, kMaxDevsPerNic), -1);
+    EXPECT_EQ(ncclRmaDevSlotOf(ibDevNs, /*rank=*/-1, /*ibDevN=*/0, kMaxDevsPerNic), -1);
+    EXPECT_EQ(ncclRmaDevSlotOf(ibDevNs, /*rank=*/0, /*ibDevN=*/0, /*maxDevsPerNic=*/0), -1);
+}

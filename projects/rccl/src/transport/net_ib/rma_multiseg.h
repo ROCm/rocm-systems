@@ -148,4 +148,16 @@ static inline void* ncclRmaCompactConsensusRecv(void* heapRegs, void* stackRegs,
   return stackRegs;
 }
 
+// Registration stores MRs/rkeys in recvComm device-slot order. Posts use a
+// peer QP whose remDevIdx/devIndex may name a different physical HCA.
+// Translate physical ibDevN to that registration slot. Unused slots are -1.
+static inline int ncclRmaDevSlotOf(const int* ibDevNs, int rank, int ibDevN, int maxDevsPerNic) {
+  if (ibDevNs == NULL || ibDevN < 0 || rank < 0 || maxDevsPerNic < 1) return -1;
+  const int* slots = ibDevNs + (size_t)rank * (size_t)maxDevsPerNic;
+  for (int d = 0; d < maxDevsPerNic; d++) {
+    if (slots[d] == ibDevN) return d;
+  }
+  return -1;
+}
+
 #endif // NCCL_NET_IB_RMA_MULTISEG_H_
