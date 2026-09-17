@@ -18,6 +18,16 @@
 // per segment up to this limit.
 #ifndef NCCL_RMA_MAX_SEGMENTS
 #define NCCL_RMA_MAX_SEGMENTS 16
+
+static inline int ncclRmaDevSlotOf(const int* ibDevNs, int rank, int ibDevN, int maxDevsPerNic) {
+  if (ibDevNs == NULL || ibDevN < 0 || rank < 0 || maxDevsPerNic < 1) return -1;
+  const int* slots = ibDevNs + (size_t)rank * (size_t)maxDevsPerNic;
+  for (int d = 0; d < maxDevsPerNic; d++) {
+    if (slots[d] == ibDevN) return d;
+  }
+  return -1;
+}
+
 #endif
 
 // 32 WRs cover aligned 4/8-GPU 8 GiB windows; 16x8 GiB needs 48. Fail closed past 64.
