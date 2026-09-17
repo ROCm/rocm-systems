@@ -16,6 +16,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
@@ -1463,18 +1464,20 @@ std::string functional_quantum_checkpoint_config(uint32_t first, uint32_t second
     ]}}})";
 }
 
-test::ScopedTempFile write_legacy_quantum_checkpoint() {
+test::ScopedTempFile write_legacy_quantum_checkpoint(uint32_t dispatch_threads = 1,
+                                                     uint32_t num_cus = 1) {
   flatbuffers::FlatBufferBuilder builder;
   auto arch = builder.CreateString("cdna3");
   // The legacy writer supplied only the first four values. With the original
   // wire default of zero, functional_quantum was absent from the table.
   auto cu_config = fb::CreateComputeUnitConfig(builder, 1, 104, 256, 64);
-  auto se_config = fb::CreateShaderEngineConfig(builder, 1, cu_config);
+  auto se_config = fb::CreateShaderEngineConfig(builder, num_cus, cu_config);
   auto xcd_config = fb::CreateXcdConfig(builder, 1, se_config);
   auto gpu_config = fb::CreateAmdgpuConfig(builder, 1, 0, xcd_config);
   auto vm_config = fb::CreateVirtualMachineConfig(builder, arch, gpu_config);
   auto exec_mode = builder.CreateString("functional");
-  auto simulation_config = fb::CreateSimulationConfig(builder, 10000, 1, exec_mode, vm_config);
+  auto simulation_config =
+      fb::CreateSimulationConfig(builder, 10000, 1, exec_mode, vm_config, 0, 0, dispatch_threads);
 
   auto cu_name = builder.CreateString("gpu_soc.xcd0.se0.cu0");
   std::vector<flatbuffers::Offset<fb::WavefrontState>> no_wavefronts;
@@ -1528,6 +1531,49 @@ TEST(CheckpointTest, LegacyAbsentCpuDispatchThreadsStaysSerial) {
 
   auto restored = config::restore_checkpoint(checkpoint_file.path());
   EXPECT_EQ(restored.cpu_dispatch_threads, 1u);
+}
+
+TEST(CheckpointTest, LegacyAutomaticDispatchKeepsHostSizingAcrossResaves) {
+  auto checkpoint_file = write_legacy_quantum_checkpoint(/*dispatch_threads=*/0, /*num_cus=*/8);
+  auto bytes = read_binary_file(checkpoint_file.path());
+  const auto *stored = fb::GetSimulationCheckpoint(bytes.data())->config();
+  ASSERT_TRUE(flatbuffers::IsFieldPresent(stored, fb::SimulationConfig::VT_CPU_DISPATCH_THREADS));
+  ASSERT_EQ(stored->cpu_dispatch_threads(), 0u);
+  ASSERT_EQ(stored->thread_allocations(), nullptr);
+
+  const uint32_t expected = std::min(std::max(amdgpu::available_host_threads(), 1u), 8u);
+  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  EXPECT_EQ(restored.cpu_dispatch_threads, 0u);
+  restored.apply_cpu_dispatch_threads();
+  EXPECT_EQ(restored.soc()->dispatch_threads(), expected);
+  EXPECT_EQ(restored.execution_threads.dispatch, (std::vector<uint32_t>{expected}));
+
+  rj_vm_t *raw_vm = nullptr;
+  ASSERT_EQ(rj_vm_restore_checkpoint(checkpoint_file.path().c_str(), &raw_vm),
+            ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
+  test::ScopedTempFile resaved_file("rocjitsu-legacy-auto-resaved-");
+  ASSERT_EQ(rj_vm_save_checkpoint(vm.get(), resaved_file.path().c_str(), 0),
+            ROCJITSU_STATUS_SUCCESS);
+  auto resaved = config::restore_checkpoint(resaved_file.path());
+  resaved.apply_cpu_dispatch_threads();
+  EXPECT_EQ(resaved.cpu_dispatch_threads, 0u);
+  EXPECT_EQ(resaved.soc()->dispatch_threads(), expected);
+}
+
+TEST(CheckpointTest, PresentEmptyAllocationTableKeepsSerialFallback) {
+  auto source = config::load_config_from_string(functional_quantum_checkpoint_config(0, 0),
+                                                rocjitsu::kEmbeddedSchema);
+  test::ScopedTempFile checkpoint_file("rocjitsu-empty-allocations-");
+  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
+                          /*cpu_dispatch_threads=*/0);
+  auto bytes = read_binary_file(checkpoint_file.path());
+  const auto *stored = fb::GetSimulationCheckpoint(bytes.data())->config();
+  ASSERT_NE(stored->thread_allocations(), nullptr);
+  EXPECT_EQ(stored->thread_allocations()->size(), 0u);
+  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  restored.apply_cpu_dispatch_threads();
+  EXPECT_EQ(restored.soc()->dispatch_threads(), 1u);
 }
 
 TEST(CheckpointTest, RoundTripsExplicitUnboundedFunctionalQuantum) {
@@ -2073,10 +2119,9 @@ TEST(CApiTest, FunctionalDispatchThreadsPropagateExplicitAndAutoValues) {
   };
 
   run_case(/*configured=*/7, /*expected=*/7);
-  const auto auto_budget = config::resolve_cpu_dispatch_thread_budgets(
-      /*requested_threads=*/0, std::thread::hardware_concurrency(), /*soc_count=*/1);
-  ASSERT_EQ(auto_budget.size(), 1u);
-  run_case(/*configured=*/0, /*expected=*/std::min(auto_budget.front(), 7u));
+  const auto loaded = config::load_config_from_string(functional_dispatch_threads_config(0),
+                                                      rocjitsu::kEmbeddedSchema);
+  run_case(/*configured=*/0, /*expected=*/loaded.execution_threads.dispatch.front());
 }
 
 TEST(CApiTest, ExplicitFunctionalDispatchThreadsClampToSingleCuCapacity) {
@@ -2115,10 +2160,10 @@ TEST(CApiTest, AutoFunctionalDispatchBudgetAppliesToEveryGpu) {
   std::ifstream base(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json");
   ASSERT_TRUE(base.is_open());
   std::string json((std::istreambuf_iterator<char>(base)), std::istreambuf_iterator<char>());
-  const size_t insert_pos = json.find('{');
-  ASSERT_NE(insert_pos, std::string::npos);
-  json.insert(insert_pos + 1, R"(
-    "cpu_dispatch_threads": 0,)");
+  const std::string serial = "\n  \"cpu_dispatch_threads\": 1";
+  const size_t dispatch_pos = json.find(serial);
+  ASSERT_NE(dispatch_pos, std::string::npos);
+  json.replace(dispatch_pos, serial.size(), "\n  \"cpu_dispatch_threads\": 0");
 
   rj_vm_t *raw = nullptr;
   ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
@@ -2128,8 +2173,8 @@ TEST(CApiTest, AutoFunctionalDispatchBudgetAppliesToEveryGpu) {
 
   ASSERT_NE(handle->vm, nullptr);
   ASSERT_EQ(handle->vm->num_socs(), 4u);
-  const auto expected = config::resolve_cpu_dispatch_thread_budgets(
-      /*requested_threads=*/0, std::thread::hardware_concurrency(), handle->vm->num_socs());
+  const auto expected =
+      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema).execution_threads.dispatch;
   ASSERT_EQ(expected.size(), handle->vm->num_socs());
   for (uint32_t i = 0; i < handle->vm->num_socs(); ++i)
     EXPECT_EQ(handle->vm->soc(i)->dispatch_threads(), expected[i]) << "SoC " << i;
@@ -2276,7 +2321,12 @@ TEST(CApiTest, CheckpointRoundTrip) {
 }
 
 TEST(CApiTest, CheckpointRoundTripPreservesAutomaticFunctionalDispatch) {
-  const std::string json = functional_dispatch_threads_config(/*threads=*/0);
+  std::string json = functional_dispatch_threads_config(/*threads=*/0);
+  json.replace(json.find("\"num_threads\":1"), std::string("\"num_threads\":1").size(),
+               "\"num_threads\":0");
+  json.insert(json.find('{') + 1, R"("cpu_thread_budget":8,"thread_allocations":[
+    {"num_threads":1,"cpu_dispatch_threads":1},
+    {"num_threads":2,"cpu_dispatch_threads":7}],)");
   rj_vm_t *raw_source = nullptr;
   ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_source),
             ROCJITSU_STATUS_SUCCESS);
@@ -2284,6 +2334,8 @@ TEST(CApiTest, CheckpointRoundTripPreservesAutomaticFunctionalDispatch) {
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw_source, &rj_vm_destroy);
   ASSERT_EQ(source->loaded.cpu_dispatch_threads, 0u);
   const uint32_t effective_threads = source->soc->dispatch_threads();
+  ASSERT_EQ(effective_threads, 7u);
+  ASSERT_EQ(source->engine_config.num_threads, 2u);
 
   test::ScopedTempFile checkpoint_file("rocjitsu-auto-dispatch-checkpoint-");
   ASSERT_EQ(rj_vm_save_checkpoint(source.get(), checkpoint_file.path().c_str(), 42),
@@ -2296,22 +2348,26 @@ TEST(CApiTest, CheckpointRoundTripPreservesAutomaticFunctionalDispatch) {
   EXPECT_TRUE(flatbuffers::IsFieldPresent(checkpoint->config(),
                                           fb::SimulationConfig::VT_CPU_DISPATCH_THREADS));
   EXPECT_EQ(checkpoint->config()->cpu_dispatch_threads(), 0u);
+  EXPECT_EQ(checkpoint->config()->cpu_thread_budget(), 8u);
+  EXPECT_EQ(checkpoint->config()->num_threads(), 0u);
+  ASSERT_NE(checkpoint->config()->thread_allocations(), nullptr);
+  EXPECT_EQ(checkpoint->config()->thread_allocations()->size(), 2u);
 
   // The checkpoint retains the automatic request rather than freezing the
-  // source host's effective width. Reapplying the restored policy against a
-  // smaller host or cap must therefore produce the corresponding new width.
+  // source host's effective width. The legacy dispatch-only override must
+  // still honor a smaller host or cap independently of the restored table.
   {
     auto restored_for_host = config::restore_checkpoint(checkpoint_file.path());
     ASSERT_EQ(restored_for_host.cpu_dispatch_threads, 0u);
-    restored_for_host.apply_cpu_dispatch_threads(/*hardware_threads=*/2);
+    restored_for_host.override_cpu_dispatch_threads(/*hardware_threads=*/2);
     ASSERT_NE(restored_for_host.soc(), nullptr);
     EXPECT_EQ(restored_for_host.soc()->dispatch_threads(), 2u);
   }
   {
     auto restored_for_cap = config::restore_checkpoint(checkpoint_file.path());
     ASSERT_EQ(restored_for_cap.cpu_dispatch_threads, 0u);
-    restored_for_cap.apply_cpu_dispatch_threads(/*hardware_threads=*/128,
-                                                /*automatic_thread_cap=*/5);
+    restored_for_cap.override_cpu_dispatch_threads(/*hardware_threads=*/128,
+                                                   /*automatic_thread_cap=*/5);
     ASSERT_NE(restored_for_cap.soc(), nullptr);
     EXPECT_EQ(restored_for_cap.soc()->dispatch_threads(), 5u);
   }
@@ -2322,6 +2378,7 @@ TEST(CApiTest, CheckpointRoundTripPreservesAutomaticFunctionalDispatch) {
   ASSERT_NE(raw_restored, nullptr);
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> restored(raw_restored, &rj_vm_destroy);
   EXPECT_EQ(restored->loaded.cpu_dispatch_threads, 0u);
+  EXPECT_EQ(restored->engine_config.num_threads, 2u);
   EXPECT_EQ(restored->soc->dispatch_threads(), effective_threads);
 }
 
