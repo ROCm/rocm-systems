@@ -936,6 +936,22 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Tile Get Arbitrary Strides";
       testers.push_back(new TileRMATester(args));
       break;
+    case TilePutWaveRowMajorTestType:
+      test_name = "Tile Put Wave Row-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWaveColumnMajorTestType:
+      test_name = "Tile Put Wave Column-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWaveRowMajorTestType:
+      test_name = "Tile Get Wave Row-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWaveColumnMajorTestType:
+      test_name = "Tile Get Wave Column-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
     case HostTeamSyncBarrierTestType:
       test_name = "Host Team Sync/Barrier";
       testers.push_back(new HostTeamSyncBarrierTester(args));

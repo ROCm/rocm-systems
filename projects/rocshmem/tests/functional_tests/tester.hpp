@@ -203,7 +203,11 @@
   X(QpPingPong,                158)  \
   X(QpPutNbi,                  159)  \
   X(SdmaPingPong,              160)  \
-  X(SdmaPutNbi,                161)
+  X(SdmaPutNbi,                161)  \
+  X(TilePutWaveRowMajor,       162)  \
+  X(TilePutWaveColumnMajor,    163)  \
+  X(TileGetWaveRowMajor,       164)  \
+  X(TileGetWaveColumnMajor,    165)
 
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
