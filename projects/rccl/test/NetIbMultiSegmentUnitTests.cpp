@@ -108,15 +108,11 @@ TEST(NetIbMultiSeg, RmaSliceIsCappedAtVerbsLengthLimit) {
 }
 
 TEST(NetIbMultiSeg, RmaFixedChainRejectsMoreThanMaximumSlices) {
-    size_t remaining = static_cast<size_t>(UINT32_MAX) * NCCL_RMA_MAX_DATA_WRS + 1;
-    int slices = 0;
-    while (remaining > 0) {
-        const size_t chunk = ncclRmaSegmentSliceBytes(remaining, remaining, remaining);
-        remaining -= chunk;
-        slices++;
-    }
-    EXPECT_EQ(slices, NCCL_RMA_MAX_DATA_WRS + 1);
-    EXPECT_GT(slices, NCCL_RMA_MAX_DATA_WRS);
+    ASSERT_GT(SIZE_MAX, static_cast<size_t>(UINT32_MAX));
+    const size_t oversize =
+        static_cast<size_t>(UINT32_MAX) * (NCCL_RMA_MAX_DATA_WRS + 1ULL);
+    EXPECT_EQ(ncclRmaCountPairedDataWrs(oversize, NCCL_RMA_MAX_DATA_WRS),
+              NCCL_RMA_MAX_DATA_WRS + 1);
 }
 
 TEST(NetIbMultiSeg, RmaCompletionIsOnlyOnFinalWorkRequest) {
@@ -130,9 +126,9 @@ TEST(NetIbMultiSeg, RmaCompletionIsOnlyOnFinalWorkRequest) {
 }
 
 TEST(NetIbMultiSeg, RmaQueueCreditsBoundSegmentedChains) {
-    constexpr int requests = 256;
-    constexpr int sendDepth = 2 * requests + NCCL_RMA_MAX_SIGNAL_WRS - 2;
-    constexpr int flushDepth = requests + NCCL_RMA_MAX_FLUSH_WRS - 1;
+    constexpr int sendDepth = NCCL_RMA_MAX_SEND_QP_WRS;
+    constexpr int flushDepth = NCCL_RMA_MAX_FLUSH_QP_WRS;
+    constexpr int requests = NCCL_RMA_MAX_INFLIGHT_REQUESTS;
     EXPECT_TRUE(ncclRmaWrCreditsAvailable(2 * requests, 0, sendDepth));
     EXPECT_TRUE(ncclRmaWrCreditsAvailable(2 * (requests - 1), NCCL_RMA_MAX_SIGNAL_WRS, sendDepth));
     EXPECT_FALSE(ncclRmaWrCreditsAvailable(2 * requests, NCCL_RMA_MAX_SIGNAL_WRS, sendDepth));
