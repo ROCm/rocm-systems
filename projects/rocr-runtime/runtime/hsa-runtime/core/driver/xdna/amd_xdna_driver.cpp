@@ -1779,8 +1779,11 @@ static hsa_status_t BuildPdiInstsCommand(const hsa_amd_aie_kernel_dispatch_packe
   if (desc == nullptr) {
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
+  // The loader already refuses a code object whose kernels lack these, so this is not where an
+  // incomplete kernel is discovered -- it is the trust boundary. The handle came off the packet,
+  // so it can be stale or forged, and everything below dereferences what it points at.
   if (desc->insts_bo_va == nullptr || desc->insts_size == 0 || desc->pdi_size == 0) {
-    log_warning_n(10, "AIE: the kernel has no instruction sequence or no PDI to dispatch.\n");
+    log_warning_n(10, "AIE: the kernel object does not describe a dispatchable kernel.\n");
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
 
@@ -1869,8 +1872,10 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
   if (desc == nullptr) {
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
+  // As in BuildPdiInstsCommand: the loader guarantees these, so this is the trust boundary on an
+  // application-supplied handle, not completeness discovery. ctrl_code is a memcpy source below.
   if (desc->ctrl_code == nullptr || desc->ctrl_code_size == 0) {
-    log_warning_n(10, "AIE: the full-ELF kernel has no control code to dispatch.\n");
+    log_warning_n(10, "AIE: the kernel object does not describe a dispatchable kernel.\n");
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
   // The loader bounds every patch site against the control code it parsed, but the descriptor
@@ -1967,10 +1972,10 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
 
   bo_handles->push_back(ctrl.handle);
   // The PDI is reached only through the address written into the control code above, so the
-  // command still has to list it for the driver to keep it resident.
-  if (desc->pdi_size != 0) {
-    bo_handles->push_back(desc->pdi_bo_handle);
-  }
+  // command still has to list it for the driver to keep it resident. Unconditional: the loader
+  // refuses a full-ELF kernel whose control code has no PDI patch site, and the resolve above
+  // has already used the handle.
+  bo_handles->push_back(desc->pdi_bo_handle);
 
   const uint32_t cmd_dwords = 1 +  // CU mask
       sizeof(ert_npu_preempt_data) / sizeof(uint32_t) + ELF_CMD_ARG_DWORDS;

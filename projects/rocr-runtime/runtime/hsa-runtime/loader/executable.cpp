@@ -1714,6 +1714,17 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
     desc->pdi_patch_offset = 0;
 
     if (ki->kind == AMD::AieKernelKind::PdiInsts) {
+      // The section format allows an entry to carry no PDI, but a PDI is what configures the
+      // array for the instruction sequence, so this runtime cannot dispatch one without it.
+      // Refuse here rather than at submit: it is a property of the code object, so discovering
+      // it at dispatch would fail every dispatch of a kernel that should never have loaded.
+      // (The parser already rejects insts_size == 0, so only the PDI needs saying.)
+      if (ki->pdi_size == 0) {
+        log_warning_n(10, "AIE: kernel '%s' has no PDI to configure the array with.\n",
+                      kernel_name.c_str());
+        return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+      }
+
       void* insts_dev = nullptr;
       void* pdi_dev = nullptr;
       if (auto s = place_blob(ki->insts_data, ki->insts_size, &insts_dev);
@@ -1729,11 +1740,8 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
       if (auto s = resolve_handle(insts_dev, &desc->insts_bo_handle); s != HSA_STATUS_SUCCESS) {
         return s;
       }
-      desc->pdi_bo_handle = 0;
-      if (pdi_dev != nullptr) {
-        if (auto s = resolve_handle(pdi_dev, &desc->pdi_bo_handle); s != HSA_STATUS_SUCCESS) {
-          return s;
-        }
+      if (auto s = resolve_handle(pdi_dev, &desc->pdi_bo_handle); s != HSA_STATUS_SUCCESS) {
+        return s;
       }
       desc->pdi_size = ki->pdi_size;
     } else {
