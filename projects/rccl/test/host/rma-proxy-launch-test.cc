@@ -714,6 +714,49 @@ TEST_F(RmaProxyLaunchTest, PutLaunch_PersistentTaskQueuesAReplayableDescriptor) 
   EXPECT_EQ(1u, desc->opSeq);
 }
 
+TEST_F(RmaProxyLaunchTest, PutLaunch_LaterFullQueueFlushesEarlierTaskBeforeRetrying) {
+  PushPut(1, 2, 64);
+  PushPut(0, 3, 128);
+  contexts_[0].pis[3] = kQueueSize;
+  contexts_[0].cis[3] = 0;
+  std::vector<BatchCall> calls;
+  ScopedHook batch(g_hipStreamBatchMemOp,
+                   [&](hipStream_t stream, unsigned int count,
+                       hipStreamBatchMemOpParams* params, unsigned int) {
+                     calls.push_back({stream, {params, params + count}});
+                     if (calls.size() == 2) contexts_[0].cis[3] = 1;
+                     return hipSuccess;
+                   });
+
+  ASSERT_EQ(ncclSuccess, ncclRmaProxyPutLaunchUut(comm_.get(), plan_.get(), nullptr));
+
+  ASSERT_EQ(4u, calls.size());
+  EXPECT_EQ(4, batch.calls);
+  ASSERT_EQ(1u, calls[0].params.size());
+  ASSERT_EQ(1u, calls[1].params.size());
+  ASSERT_EQ(1u, calls[2].params.size());
+  ASSERT_EQ(1u, calls[3].params.size());
+  EXPECT_EQ(hipStreamMemOpWriteValue64, calls[0].params[0].operation);
+  EXPECT_EQ(hipStreamMemOpWaitValue64, calls[1].params[0].operation);
+  EXPECT_EQ(hipStreamMemOpWriteValue64, calls[2].params[0].operation);
+  EXPECT_EQ(hipStreamMemOpWaitValue64, calls[3].params[0].operation);
+  EXPECT_NE(nullptr, contexts_[1].circular[2 * kQueueSize]);
+  EXPECT_NE(nullptr, contexts_[0].circular[3 * kQueueSize]);
+}
+
+TEST_F(RmaProxyLaunchTest, PutLaunch_BatchSubmissionFailurePropagates) {
+  PushPut(0, 2, 64);
+  ScopedHook batch(g_hipStreamBatchMemOp,
+                   [](hipStream_t, unsigned int, hipStreamBatchMemOpParams*, unsigned int) {
+                     return hipErrorInvalidValue;
+                   });
+
+  EXPECT_EQ(ncclUnhandledCudaError,
+            ncclRmaProxyPutLaunchUut(comm_.get(), plan_.get(), nullptr));
+  EXPECT_EQ(1, batch.calls);
+  EXPECT_NE(nullptr, contexts_[0].circular[2 * kQueueSize]);
+}
+
 TEST_F(RmaProxyLaunchTest, WaitLaunch_NonWaitTaskIsRejectedAndReturnedToThePool) {
   ncclTaskRma* task = PushWait(ncclFuncPutSignal, NCCL_SIGNAL_NONE);
 
@@ -723,12 +766,13 @@ TEST_F(RmaProxyLaunchTest, WaitLaunch_NonWaitTaskIsRejectedAndReturnedToThePool)
 }
 
 TEST_F(RmaProxyLaunchTest, WaitLaunch_MoreThanOneTaskIsRejected) {
-  ncclTaskRma* task = PushWait(ncclFuncWaitSignal, NCCL_SIGNAL_NONE);
-  args_.nRmaTasksProxy = 2;
+  ncclTaskRma* first = PushWait(ncclFuncWaitSignal, NCCL_SIGNAL_NONE);
+  ncclTaskRma* second = PushWait(ncclFuncWaitSignal, NCCL_SIGNAL_NONE);
 
   EXPECT_EQ(ncclInternalError,
             ncclRmaProxyWaitLaunchUut(comm_.get(), plan_.get(), nullptr));
-  EXPECT_EQ(task, reinterpret_cast<ncclTaskRma*>(comm_->memPool_ncclTaskRma.head));
+  EXPECT_EQ(first, reinterpret_cast<ncclTaskRma*>(comm_->memPool_ncclTaskRma.head));
+  EXPECT_EQ(second, ncclIntruQueueHead(&plan_->rmaTaskQueueProxy));
 }
 
 TEST_F(RmaProxyLaunchTest, WaitLaunch_NoSignalReturnsTheTaskWithoutSubmittingMemops) {
@@ -797,6 +841,19 @@ TEST_F(RmaProxyLaunchTest, WaitLaunch_PersistentTaskQueuesAReplayableDescriptor)
   EXPECT_EQ(nullptr, task->peers);
   EXPECT_EQ(nullptr, task->nsignals);
   EXPECT_EQ(nullptr, task->signalIdxs);
+}
+
+TEST_F(RmaProxyLaunchTest, WaitLaunch_BatchSubmissionFailurePropagatesAfterConsumingTheTask) {
+  ncclTaskRma* task = PushWait(ncclFuncWaitSignal, NCCL_SIGNAL, {2}, {5}, {1});
+  ScopedHook batch(g_hipStreamBatchMemOp,
+                   [](hipStream_t, unsigned int, hipStreamBatchMemOpParams*, unsigned int) {
+                     return hipErrorInvalidValue;
+                   });
+
+  EXPECT_EQ(ncclUnhandledCudaError,
+            ncclRmaProxyWaitLaunchUut(comm_.get(), plan_.get(), nullptr));
+  EXPECT_EQ(1, batch.calls);
+  EXPECT_EQ(task, reinterpret_cast<ncclTaskRma*>(comm_->memPool_ncclTaskRma.head));
 }
 
 // ---------------------------------------------------------------------------
@@ -907,6 +964,25 @@ TEST_F(RmaProxyQueueTest, EnqueueFull_WaitAndPersistentDescriptorsAreUnbounded) 
   EXPECT_FALSE(ncclRmaProxyEnqueueFull(ctx_.get(), &wait));
   EXPECT_FALSE(ncclRmaProxyEnqueueFull(ctx_.get(), &persistentPut));
   EXPECT_FALSE(ncclRmaProxyEnqueueFull(ctx_.get(), &capturedPut));
+}
+
+TEST_F(RmaProxyQueueTest, EnqueueFull_UnknownDescriptorTypeIsTreatedAsUnbounded) {
+  ncclRmaProxyDesc desc{};
+  desc.rmaDescType = static_cast<ncclRmaDescType_t>(99);
+
+  EXPECT_FALSE(ncclRmaProxyEnqueueFull(ctx_.get(), &desc));
+}
+
+TEST_F(RmaProxyQueueTest, EnqueueNonPersistent_FullQueueIsRejectedWithoutPublishing) {
+  ncclRmaProxyDesc desc{};
+  desc.rmaDescType = ncclRmaDescTypePutSignal;
+  desc.putSignal.targetRank = 2;
+  pis_[2] = kQueueSize;
+
+  EXPECT_EQ(ncclInternalError,
+            ncclRmaProxyEnqueueNonPersistentDesc(ctx_.get(), 2, &desc));
+  EXPECT_EQ(nullptr, circular_[2 * kQueueSize]);
+  EXPECT_EQ(kQueueSize, pis_[2]);
 }
 
 TEST_F(RmaProxyQueueTest, EnqueueDesc_NonPersistentPutPublishesAtProducerSlot) {
