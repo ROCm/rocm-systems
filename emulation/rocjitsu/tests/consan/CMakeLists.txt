@@ -947,6 +947,8 @@ function(rj_add_consan_device_conformance_cases)
             "TwoQueueDispatchIdentity|two_queue_dispatch_identity|ConSanDeviceTwoQueueDispatchIdentityTest|default-only"
             "CdnaTransposePublication|cdna_transpose_publication|ConSanDeviceCdnaTransposePublicationTest"
             "Gfx950LargeLdsPipeline|gfx950_large_lds_pipeline|ConSanDeviceGfx950LargeLdsPipelineTest"
+            "HighLdsByteAddress|high_lds_byte_address|ConSanDeviceHighLdsByteAddressTest"
+            "HighLdsGenerationRollover|high_lds_byte_address|ConSanDeviceHighLdsGenerationRolloverTest|default-only"
         )
     endif()
     if(
@@ -982,6 +984,8 @@ function(rj_add_consan_device_conformance_cases)
             "Gfx1250GlobalAsyncFromLds|gfx1250_global_async_from_lds|ConSanDeviceGfx1250GlobalAsyncFromLdsTest"
             "Gfx1250TensorDescriptorPipeline|gfx1250_tensor_descriptor_pipeline|ConSanDeviceGfx1250TensorDescriptorPipelineTest"
             "Gfx1250LargeLdsPipeline|gfx950_large_lds_pipeline|ConSanDeviceGfx950LargeLdsPipelineTest"
+            "HighLdsByteAddress|high_lds_byte_address|ConSanDeviceHighLdsByteAddressTest"
+            "HighLdsGenerationRollover|high_lds_byte_address|ConSanDeviceHighLdsGenerationRolloverTest|default-only"
         )
     endif()
     if(_device_TARGET STREQUAL "gfx1201")
@@ -1592,6 +1596,7 @@ function(rj_add_consan_device_fixture_targets target)
             "dispatch_id_sgpr_pressure|cdna_dispatch_id_sgpr_pressure_test.hip"
             "cdna_transpose_publication|cdna_transpose_publication_test.hip"
             "gfx950_large_lds_pipeline|gfx950_large_lds_pipeline_test.hip"
+            "high_lds_byte_address|high_lds_byte_address_test.hip"
         )
     endif()
     if(
@@ -1622,6 +1627,7 @@ function(rj_add_consan_device_fixture_targets target)
             "gfx1250_global_async_from_lds|gfx1250_global_async_from_lds_test.hip"
             "gfx1250_tensor_descriptor_pipeline|gfx1250_tensor_descriptor_pipeline_test.hip"
             "gfx950_large_lds_pipeline|gfx950_large_lds_pipeline_test.hip"
+            "high_lds_byte_address|high_lds_byte_address_test.hip"
         )
     endif()
     if(target STREQUAL "gfx1201")

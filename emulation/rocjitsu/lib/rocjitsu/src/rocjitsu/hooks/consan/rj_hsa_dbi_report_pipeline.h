@@ -47,6 +47,8 @@ struct ReportPipelineInput {
   uint32_t conflict_example_limit = 8;
   /// Opt-in suppression of statically proven same-instruction uniform LDS writes.
   bool allow_uniform_lds_stores = false;
+  /// Allocation identity from host-owned registry state, not captured bytes.
+  std::optional<uint64_t> expected_generation = std::nullopt;
 };
 
 struct ReportPipelineResult {

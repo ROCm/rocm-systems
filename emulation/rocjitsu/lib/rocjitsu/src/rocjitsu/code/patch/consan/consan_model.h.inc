@@ -12,16 +12,20 @@ inline constexpr uint32_t owner_bits = 10;
 inline constexpr uint32_t epoch_shift = 15;
 inline constexpr uint32_t epoch_bits = 10;
 inline constexpr uint32_t generation_shift = 25;
-// A sampled entry is published with one 64-bit atomic exchange. Eighteen
-// generation bits still distinguish 262,144 report generations in one
-// process, while leaving enough space to retain an exact LDS byte range.
+// Keep publication a single 64-bit atomic exchange, but retain the full
+// 20-bit LDS byte address (including gfx1250's LDS above 256 KiB). The compact
+// generation is only a tag: causal windows and atomic attachments validate
+// the full 64-bit generation before accepting evidence. Never use this tag
+// alone to establish identity across report allocations.
 // Four-byte cells are insufficient here: cooperative kernels commonly assign
 // adjacent FP16 halves of one dword to different waves.
-inline constexpr uint32_t generation_bits = 18;
-inline constexpr uint32_t start_byte_shift = 43;
-inline constexpr uint32_t start_byte_bits = 16;
+inline constexpr uint32_t generation_bits = 14;
+inline constexpr uint32_t start_byte_shift = generation_shift + generation_bits;
+inline constexpr uint32_t start_byte_bits = 20;
 inline constexpr uint32_t count_shift = 59;
 inline constexpr uint32_t count_bits = 5;
+static_assert(start_byte_shift + start_byte_bits == count_shift);
+static_assert(count_shift + count_bits == 64);
 
 inline constexpr uint64_t valid_mask = uint64_t{1} << valid_shift;
 inline constexpr uint64_t consumed_mask = uint64_t{1} << consumed_shift;

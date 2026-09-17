@@ -27,6 +27,7 @@ struct ReportSummary {
   uint64_t visible_watchpoint_count = 0;
   uint64_t visible_sync_metadata_count = 0;
   uint64_t conflict_count = 0;
+  uint64_t suppressed_uniform_write_conflict_count = 0;
   uint64_t immediate_conflict_count = 0;
   uint64_t claimed_window_count = 0;
   uint64_t dropped_window_count = 0;

@@ -348,6 +348,8 @@ inline constexpr auto kCheckTrapModes = make_enum_vocabulary(
 }
 void reject_report_plan(uint64_t reader, uint64_t required_size, uint64_t configured_cap,
                         std::string_view reason);
+[[nodiscard]] bool advance_report_generation_for_test(uint64_t generation);
+
 [[nodiscard]] bool allocate_report_buffer(CoreApiTable *core, hsa_agent_t agent, uint64_t reader,
                                           uint64_t required_size, uint64_t requested_size,
                                           uint64_t configured_cap, const ReportBufferLayout &layout,
