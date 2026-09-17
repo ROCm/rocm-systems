@@ -328,3 +328,33 @@ if(vsadd_FULL_ELF_TARGET OR vsmul_FULL_ELF_TARGET)
 endif()
 
 gtest_discover_tests(dispatch)
+
+# ---------------------------------------------------------------------------
+# elf_parse_test: exercises the in-tree full-ELF reader (core/inc/amd_aie_elf.h)
+# against the vsadd full-ELF artifact. The parser source is compiled directly
+# into the test because core/inc is not installed alongside the runtime.
+# ---------------------------------------------------------------------------
+add_executable(elf_parse_test
+  elf_parse_test.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime/core/runtime/amd_aie_elf.cpp)
+set_target_properties(elf_parse_test
+  PROPERTIES
+    CXX_STANDARD                17
+    CXX_EXTENSIONS              OFF
+    CXX_VISIBILITY_PRESET       hidden
+    VISIBILITY_INLINES_HIDDEN   ON
+    POSITION_INDEPENDENT_CODE   ON
+)
+target_compile_options(elf_parse_test
+  PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+)
+target_include_directories(elf_parse_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime)
+target_link_libraries(elf_parse_test PRIVATE GTest::gtest_main hsa-runtime64::hsa-runtime64)
+if(vsadd_FULL_ELF_TARGET)
+  add_dependencies(elf_parse_test ${vsadd_FULL_ELF_TARGET})
+endif()
+add_test(NAME elf_parse_test COMMAND elf_parse_test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
