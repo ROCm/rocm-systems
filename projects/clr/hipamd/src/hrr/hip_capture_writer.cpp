@@ -776,10 +776,14 @@ void note_unreplayable(const char* api, const char* reason) {
     std::lock_guard<std::mutex> lk(g_unreplayable_mu);
     if (!g_unreplayable_apis.insert(api).second) return;
   }
-  fprintf(stderr,
-          "[HRR capture] %s cannot be replayed: %s. The call is recorded, but "
-          "replay will report it as unreplayable rather than reproduce it.\n",
-          api, reason ? reason : "(unspecified)");
+  // Warning, not Error: unlike mark_incomplete() the archive is well-formed and
+  // every event is present — only the ability to re-execute this one call is
+  // lost. That is a degradation, not a failure.
+  // log_printf appends its own newline, so the format string omits it.
+  LogPrintfWarning(
+      "[HRR capture] %s cannot be replayed: %s. The call is recorded, but "
+      "replay will report it as unreplayable rather than reproduce it",
+      api, reason ? reason : "(unspecified)");
 }
 
 void flush(const char* /*output_dir*/) {
