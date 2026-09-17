@@ -148,6 +148,11 @@ protected:
 
     void expectResolvedMaxP2pPeers(int expected) { expectResolvedMaxP2pPeers(expected, expected); }
 
+    // NCCL_PARAM caches per process, so an earlier test that set the variable pins it for
+    // the rest of the binary and unsetenv cannot undo that. Tests needing a particular
+    // cached state skip rather than report a failure that is really test ordering.
+    bool maxP2pPeersEnvCachedAs(int expected) { return ncclParamMaxP2pPeers() == expected; }
+
     // Rank r sends its index to every peer, so it must receive [0..world_size-1].
     // The per-peer count feeds ncclP2pChannelForPart/ToPart, whose inverse breaks if
     // it exceeds the pool: wrong data or a hang here means the mapping aliased.
@@ -278,7 +283,7 @@ TEST_F(MaxP2pPeersMPITest, Default_LeavesUndefAndP2pMaxPeersEqualsNRanks)
     unsetenv("NCCL_P2P_MAX_PEERS");
     configured_value_ = kLeaveConfigUnset;
 
-    if(ncclParamMaxP2pPeers() != NCCL_CONFIG_UNDEF_INT)
+    if(!maxP2pPeersEnvCachedAs(NCCL_CONFIG_UNDEF_INT))
         GTEST_SKIP() << "NCCL_P2P_MAX_PEERS already cached this process; "
                         "run this test in its own mpirun invocation.";
 
@@ -293,6 +298,11 @@ TEST_F(MaxP2pPeersMPITest, Default_LeavesUndefAndP2pMaxPeersEqualsNRanks)
 TEST_F(MaxP2pPeersMPITest, AboveRankCount_CappedToNRanks)
 {
     ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    unsetenv("NCCL_P2P_MAX_PEERS");
+    if(!maxP2pPeersEnvCachedAs(NCCL_CONFIG_UNDEF_INT))
+        GTEST_SKIP() << "NCCL_P2P_MAX_PEERS already cached this process; "
+                        "run this test in its own mpirun invocation.";
 
     const int world_size = MPIEnvironment::world_size;
     configured_value_    = world_size * 4;
@@ -336,6 +346,9 @@ TEST_F(MaxP2pPeersMPITest, MultiNode_PerPeerChannelsRespondToMaxP2pPeers)
     }
 
     unsetenv("NCCL_P2P_MAX_PEERS");
+    if(!maxP2pPeersEnvCachedAs(NCCL_CONFIG_UNDEF_INT))
+        GTEST_SKIP() << "NCCL_P2P_MAX_PEERS already cached this process; "
+                        "run this test in its own mpirun invocation.";
 
     configured_value_ = kLeaveConfigUnset;
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
@@ -379,6 +392,9 @@ TEST_F(MaxP2pPeersMPITest, MultiNode_SaturateDividesByMaxP2pPeers)
         GTEST_SKIP() << "Needs > 2 ranks for the nRanks divisor to differ from 2";
 
     unsetenv("NCCL_P2P_MAX_PEERS");
+    if(!maxP2pPeersEnvCachedAs(NCCL_CONFIG_UNDEF_INT))
+        GTEST_SKIP() << "NCCL_P2P_MAX_PEERS already cached this process; "
+                        "run this test in its own mpirun invocation.";
     setenv("RCCL_SATURATE_P2P_NCHANNELS", "1", /*overwrite=*/1);
     if(rcclParamSaturateP2pNChannels() != 1)
         GTEST_SKIP() << "RCCL_SATURATE_P2P_NCHANNELS already cached this process; "
