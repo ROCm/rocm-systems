@@ -1558,6 +1558,32 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_arithmetic,  int, unsigned
   }
 }
 
+// checks scans that use bool values and cg::less and greater as operators which are completely
+// defined e.g. false < true
+TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_Bool_Less_Greater)
+{
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
+
+  std::tuple<cooperative_groups::less<bool>,
+             cooperative_groups::greater<bool>> types;
+
+  SECTION("inclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<false, bool, 32>(AggregationType::InclusiveScan, types);
+    } else {
+      runAggregationRandomForOps<false, bool, 64>(AggregationType::InclusiveScan, types);
+    }
+  }
+
+  SECTION("exclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<false, bool, 32>(AggregationType::ExclusiveScan, types);
+    } else {
+      runAggregationRandomForOps<false, bool, 64>(AggregationType::ExclusiveScan, types);
+    }
+  }
+}
+
 TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_boolean, int, unsigned int, long long,
                    unsigned long long, bool)
 {
