@@ -160,11 +160,8 @@ set(SRC_FILES
   algorithms/gin/gin_all_reduce.h
   algorithms/gin/gin_all_reduce_policy.h
   algorithms/gin/sdma/all_reduce_gin_sdma.h
-<<<<<<< HEAD
   include/alloc.h
   include/allocator.h
-=======
->>>>>>> 7f4da953342 (style(rccl): drop trailing whitespace in GIN SDMA source list)
   include/alltoallv_meta.h
   include/alt_rsmi.h
   include/api_trace.h
