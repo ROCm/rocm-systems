@@ -57,6 +57,18 @@ public:
     manual_analysis_window_open_ = false;
   }
 
+  bool advance_generation_for_test(uint64_t generation) {
+    std::lock_guard lock(mutex_);
+    // Device tests can reach rollover without thousands of compilations.
+    // Never rewind identities or change a live/in-flight allocation.
+    if (entry_count_ != 0 || reserved_entry_count_ != 0 ||
+        generation < next_generation_.load(std::memory_order_relaxed) ||
+        generation == std::numeric_limits<uint64_t>::max())
+      return false;
+    next_generation_.store(generation, std::memory_order_relaxed);
+    return true;
+  }
+
   [[nodiscard]] bool begin_epoch_analysis_window() {
     std::lock_guard lock(mutex_);
     if (manual_analysis_window_open_)
@@ -326,6 +338,7 @@ public:
       for (const Entry &entry : std::span(entries_).first(entry_count_)) {
         const auto *header = static_cast<const ReportHeader *>(entry.ptr);
         if (header == nullptr || !report_header_is_current(*header) ||
+            header->generation != entry.generation ||
             !report_layout_matches_header(*header, entry.layout, entry.size)) {
           log_message(kLogInfo,
                       "ConSan epoch checkpoint outcome=discard-failed reader=%llu "
@@ -368,7 +381,7 @@ public:
                 .report_count = entry_count_};
       }
       const auto *header = reinterpret_cast<const ReportHeader *>(snapshot.bytes.data());
-      if (!report_header_is_current(*header) ||
+      if (!report_header_is_current(*header) || header->generation != entry.generation ||
           !report_layout_matches_header(*header, entry.layout, entry.size)) {
         log_message(kLogInfo,
                     "ConSan epoch checkpoint outcome=snapshot-failed reader=%llu "
@@ -607,7 +620,8 @@ private:
          .input_fingerprint = entry.input_fingerprint,
          .static_metadata = entry.static_metadata ? &*entry.static_metadata : nullptr,
          .conflict_example_limit = limit,
-         .allow_uniform_lds_stores = allow_uniform_lds_stores_},
+         .allow_uniform_lds_stores = allow_uniform_lds_stores_,
+         .expected_generation = entry.generation},
         snapshot, summary);
     conflict_examples_remaining_ -=
         std::min(conflict_examples_remaining_, result.conflict_example_count);
@@ -668,6 +682,10 @@ private:
 void reject_report_plan(uint64_t reader, uint64_t required_size, uint64_t configured_cap,
                         std::string_view reason) {
   AutoReportBufferRegistry::instance().reject_plan(reader, required_size, configured_cap, reason);
+}
+
+bool advance_report_generation_for_test(uint64_t generation) {
+  return AutoReportBufferRegistry::instance().advance_generation_for_test(generation);
 }
 
 bool allocate_report_buffer(CoreApiTable *core, hsa_agent_t agent, uint64_t reader,

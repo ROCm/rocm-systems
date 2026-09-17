@@ -478,6 +478,11 @@ int g_core_memory_runtime_reclaim_calls = 0;
 std::vector<size_t> g_core_memory_allocation_sizes;
 std::vector<uint64_t> g_core_memory_allocation_regions;
 std::vector<void *> g_core_memory_allocations;
+// Used only by the rollover integration test to force exact-address reuse
+// with dirty contents rather than relying on the system allocator's policy.
+bool g_reuse_core_memory = false;
+void *g_recycled_core_memory = nullptr;
+size_t g_recycled_core_memory_size = 0;
 std::vector<ReportHeader> g_core_memory_headers_at_free;
 std::vector<uint32_t> g_sc_markers_at_free;
 std::vector<std::vector<uint8_t>> g_code_object_reader_inputs;
@@ -1015,7 +1020,12 @@ hsa_status_t HSA_API fake_core_memory_allocate(hsa_region_t region, size_t size,
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   if (g_fail_core_memory_allocate)
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  void *allocation = std::malloc(size);
+  void *allocation = nullptr;
+  if (g_reuse_core_memory && g_recycled_core_memory != nullptr &&
+      g_recycled_core_memory_size == size)
+    allocation = std::exchange(g_recycled_core_memory, nullptr);
+  else
+    allocation = std::malloc(size);
   if (allocation == nullptr)
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   *ptr = allocation;
@@ -1033,13 +1043,21 @@ hsa_status_t HSA_API fake_core_memory_free(void *ptr) {
   if (it == g_core_memory_allocations.end())
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   const size_t index = static_cast<size_t>(it - g_core_memory_allocations.begin());
+  const size_t freed_size = g_core_memory_allocation_sizes[index];
   if (g_core_memory_allocation_sizes[index] >= sizeof(ReportHeader))
     g_core_memory_headers_at_free.push_back(*static_cast<const ReportHeader *>(ptr));
   else
     g_sc_markers_at_free.push_back(*static_cast<const uint32_t *>(ptr));
   g_core_memory_allocation_sizes.erase(g_core_memory_allocation_sizes.begin() + index);
   g_core_memory_allocations.erase(it);
-  std::free(ptr);
+  if (g_reuse_core_memory) {
+    std::free(g_recycled_core_memory);
+    g_recycled_core_memory = ptr;
+    g_recycled_core_memory_size = freed_size;
+    std::memset(ptr, 0xa5, freed_size);
+  } else {
+    std::free(ptr);
+  }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -2851,6 +2869,9 @@ TEST(HsaHooksUnitTest, ConSanPreservesLiveTransformReservationAcrossUnloadAndRel
 
   hook.unload();
   const bool reloaded = hook.reload(api);
+  if (reloaded) {
+    EXPECT_GT(hook.instrumentation_nanoseconds(), 0u);
+  }
   hsa_status_t second_reader_status = HSA_STATUS_ERROR;
   hsa_status_t third_reader_status = HSA_STATUS_ERROR;
   if (reloaded) {
@@ -3536,6 +3557,62 @@ TEST(HsaHooksUnitTest, AutoReportSnapshotOwnsVisibilityAndCopyFailures) {
       rocjitsu::consan::hook::capture_report_snapshot(coarse_request, failing_copy, nullptr);
   EXPECT_EQ(failed.failure, rocjitsu::consan::hook::ReportSnapshotFailure::CopyFailed);
   EXPECT_EQ(failed.copy_status, 17);
+}
+
+TEST(HsaHooksUnitTest, AutoReportDecoderRejectsStaleFullGenerationAcrossTagRollover) {
+  AutoReportInventory inventory;
+  inventory.access_range_count = inventory.range_bank_count = inventory.watchpoint_count = 1;
+  const auto report = plan_auto_report(inventory);
+  ASSERT_TRUE(report.complete());
+  constexpr uint64_t old_generation = 7;
+  constexpr uint64_t generation = old_generation + (uint64_t{1} << watchpoint::generation_bits);
+  ReportPipelineInput input{.size = static_cast<size_t>(report.required_bytes),
+                            .layout = report.layout,
+                            .input_fingerprint = {},
+                            .expected_generation = generation};
+  ReportSnapshot snapshot;
+  snapshot.bytes.resize(report.required_bytes);
+  auto header = make_report_header_for_layout(old_generation, 11, report.layout);
+  header.causal_window_count = 1;
+  CausalWindow window{.generation = old_generation,
+                      .dispatch_id = 11,
+                      .first_entry = 0,
+                      .entry_count = 1,
+                      .publication_state = static_cast<uint32_t>(CausalPublicationState::Ready)};
+  const uint64_t packed =
+      pack_watchpoint_entry(ShadowAccessKind::Write, 0, 0, old_generation, 0x10800, 2);
+  const auto store = [&] {
+    std::memcpy(snapshot.bytes.data(), &header, sizeof(header));
+    std::memcpy(snapshot.bytes.data() + report.layout.causal_windows_offset, &window,
+                sizeof(window));
+    std::memcpy(snapshot.bytes.data() + report.layout.watchpoints_offset, &packed, sizeof(packed));
+  };
+  store();
+  EXPECT_EQ(decode_report(input, snapshot, {}).failure, ReportDecodeFailure::GenerationMismatch);
+  header.generation = generation;
+  store();
+  auto decoded = decode_report(input, snapshot, {});
+  EXPECT_TRUE(decoded.complete());
+  EXPECT_TRUE(decoded.records.evidence.empty());
+  EXPECT_EQ(decoded.summary.malformed_snapshot_count, 1u);
+  window.generation = generation;
+  window.publication_state = static_cast<uint32_t>(CausalPublicationState::Publishing);
+  store();
+  decoded = decode_report(input, snapshot, {});
+  EXPECT_TRUE(decoded.records.evidence.empty());
+  EXPECT_EQ(decoded.summary.incomplete_snapshot_count, 1u);
+  window.publication_state = static_cast<uint32_t>(CausalPublicationState::Ready);
+  store();
+  decoded = decode_report(input, snapshot, {});
+  ASSERT_EQ(decoded.records.evidence.size(), 1u);
+  EXPECT_EQ(decoded.records.evidence[0].generation, generation);
+  EXPECT_EQ(decoded.records.evidence[0].entry.start_byte, 0x10800u);
+  EXPECT_EQ(decoded.records.evidence[0].entry.byte_count, 2u);
+  // Atomic metadata must not attach to an old window with an aliased tag.
+  const AtomicAttachmentKey key{.generation = generation, .dispatch_id = 11};
+  EXPECT_TRUE(atomic_attachment_matches(window, packed, 0, key));
+  window.generation = old_generation;
+  EXPECT_FALSE(atomic_attachment_matches(window, packed, 0, key));
 }
 
 TEST(HsaHooksUnitTest, AutoReportDecoderProducesTypedEventsFailuresAndLoss) {
@@ -6353,6 +6430,157 @@ TEST(HsaHooksUnitTest, ConSanAutoReportReclaimsEveryExecutableAcrossProcessBudge
     }
     EXPECT_TRUE(g_core_memory_allocations.empty());
   }
+}
+
+TEST(HsaHooksUnitTest, ConSanConcurrentReportLoadsRetainIndependentAllocationIdentities) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
+  ScopedEnvVar policy("RJ_CONSAN_POLICY", "default");
+  ScopedEnvVar logging("RJ_CONSAN_LOG", "0");
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", nullptr);
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_transform_result();
+  g_block_first_loader_call = true;
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+  auto pending = std::async(std::launch::async, [&] {
+    return api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                             reader, nullptr, nullptr);
+  });
+  struct ReleaseLoader {
+    static void release() {
+      {
+        std::lock_guard lock(g_loader_block_mutex);
+        g_release_first_loader_call = true;
+      }
+      g_loader_block_cv.notify_all();
+    }
+    ~ReleaseLoader() { release(); }
+  } release_loader;
+  {
+    std::unique_lock lock(g_loader_block_mutex);
+    ASSERT_TRUE(g_loader_block_cv.wait_for(lock, std::chrono::seconds(2),
+                                           [] { return g_first_loader_call_entered; }));
+  }
+  ASSERT_EQ(g_core_memory_allocations.size(), 1u);
+  auto *const first = static_cast<ReportHeader *>(g_core_memory_allocations.front());
+  const uint64_t generation = first->generation;
+  ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{8}, kHostAgent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(g_core_memory_allocations.size(), 2u);
+  auto *const second = static_cast<ReportHeader *>(g_core_memory_allocations.back());
+  EXPECT_NE(first, second);
+  EXPECT_EQ(second->generation, generation + 1u);
+  ReleaseLoader::release();
+  EXPECT_EQ(pending.get(), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(first->generation, generation);
+  EXPECT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{8}), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(g_core_memory_allocations.size(), 1u);
+  EXPECT_EQ(g_core_memory_allocations.front(), first);
+  EXPECT_EQ(first->generation, generation);
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
+  EXPECT_TRUE(g_core_memory_allocations.empty());
+}
+
+TEST(HsaHooksUnitTest, ConSanReportGenerationRolloverWithLiveReportsAndDirtyAddressReuse) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "default");
+  ScopedEnvVar policy("RJ_CONSAN_POLICY", "default");
+  ScopedEnvVar logging("RJ_CONSAN_LOG", "0");
+  ScopedEnvVar require_records("RJ_CONSAN_REQUIRE_RECORDS", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE", nullptr);
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_transform_result();
+  struct ReuseGuard {
+    ReuseGuard() { g_reuse_core_memory = true; }
+    ~ReuseGuard() {
+      g_reuse_core_memory = false;
+      std::free(std::exchange(g_recycled_core_memory, nullptr));
+      g_recycled_core_memory_size = 0;
+    }
+  } reuse_guard;
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+  const auto load = [&](uint64_t executable) {
+    return api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{executable},
+                                                             kHostAgent, reader, nullptr, nullptr);
+  };
+  ASSERT_EQ(load(7), HSA_STATUS_SUCCESS);
+  auto *const first = static_cast<ReportHeader *>(g_core_memory_allocations.front());
+  const uint64_t first_generation = first->generation;
+  void *reused_address = nullptr;
+  constexpr uint64_t period = uint64_t{1} << watchpoint::generation_bits;
+  // Actual production allocations, not a counter setter. Transform work is
+  // mocked, so a full tag cycle is inexpensive. Keep generation G alive
+  // while creating G+period, whose compact tag is identical.
+  for (uint64_t index = 1; index <= period; ++index) {
+    ASSERT_EQ(load(8), HSA_STATUS_SUCCESS) << index;
+    ASSERT_EQ(g_core_memory_allocations.size(), 2u);
+    auto *const current = static_cast<ReportHeader *>(g_core_memory_allocations.back());
+    if (reused_address) {
+      ASSERT_EQ(current, reused_address);
+    }
+    reused_address = current;
+    ASSERT_NE(current, first);
+    ASSERT_EQ(current->generation, first_generation + index);
+    const size_t size = g_core_memory_allocation_sizes.back();
+    const auto *bytes = reinterpret_cast<const uint8_t *>(current);
+    ASSERT_TRUE(std::ranges::all_of(std::span(bytes + sizeof(*current), size - sizeof(*current)),
+                                    [](uint8_t byte) { return byte == 0; }));
+    if (index == period) {
+      EXPECT_EQ(current->generation & watchpoint::max_generation,
+                first_generation & watchpoint::max_generation);
+      // Even an internally consistent stale header must not override the
+      // allocation identity held in the host registry.
+      current->generation = first_generation;
+      EXPECT_NE(hook.checkpoint_after_device_synchronize(), 0u);
+      EXPECT_EQ(current->generation, first_generation); // failure is transactional
+      current->generation = first_generation + index;
+      EXPECT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
+      EXPECT_EQ(first->generation, first_generation);
+      EXPECT_EQ(current->generation, first_generation + index);
+    }
+    ASSERT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{8}), HSA_STATUS_SUCCESS);
+    ASSERT_EQ(g_core_memory_allocations.size(), 1u);
+    // The fake loader keeps history for other tests' lifetime assertions.
+    // Retired transient readers are irrelevant here; retaining them makes
+    // repeated destruction of handle 8 scan dangling historical pointers.
+    // Preserve only the original reader and the still-live executable 7.
+    g_loaded_executable_readers.resize(1);
+    g_memory_code_object_readers.resize(2);
+    g_code_object_reader_inputs.resize(2);
+  }
+  ASSERT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
+  EXPECT_TRUE(g_core_memory_allocations.empty());
+  hook.unload();
+  ASSERT_TRUE(hook.reload(api));
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(load(9), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(static_cast<ReportHeader *>(g_core_memory_allocations.front())->generation,
+            first_generation + period + 1u);
+  EXPECT_EQ(hook.checkpoint_after_device_synchronize(), 0u);
+  EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{9}), HSA_STATUS_SUCCESS);
 }
 
 TEST(HsaHooksUnitTest, ConSanAutoReportAllocationFailureFailsClosedWithoutLeakingBudget) {

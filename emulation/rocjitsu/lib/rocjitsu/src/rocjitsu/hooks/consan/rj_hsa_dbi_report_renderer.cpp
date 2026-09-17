@@ -48,6 +48,13 @@ std::vector<ReportDiagnostic> render_report(const ReportRenderInput &render_inpu
              "abi=%u header_size=%u",
              static_cast<unsigned long long>(input.reader), invalid_header.magic,
              invalid_header.abi_version, invalid_header.header_size);
+    } else if (decoded.failure == ReportDecodeFailure::GenerationMismatch) {
+      append(kFailure,
+             "ConSan auto report reader=%llu has mismatched allocation generation "
+             "expected=%llu observed=%llu",
+             static_cast<unsigned long long>(input.reader),
+             static_cast<unsigned long long>(input.expected_generation.value_or(0)),
+             static_cast<unsigned long long>(invalid_header.generation));
     } else if (decoded.failure == ReportDecodeFailure::LayoutMismatch) {
       append(kFailure, "ConSan auto report reader=%llu has inconsistent ABI-v%u layout",
              static_cast<unsigned long long>(input.reader), kReportAbiVersion);
@@ -114,7 +121,8 @@ std::vector<ReportDiagnostic> render_report(const ReportRenderInput &render_inpu
          "pending_acquire_capacity=%u pending_acquires=%u "
          "pending_acquire_contention=%u pending_acquire_collisions=%u "
          "pending_acquire_malformed=%u pending_release_slots_examined=%llu "
-         "conflicts=%u immediate_conflicts=%llu claimed_windows=%llu "
+         "conflicts=%u suppressed_uniform_write_conflicts=%u "
+         "immediate_conflicts=%llu claimed_windows=%llu "
          "dropped_windows=%llu saturated_windows=%llu "
          "stale_snapshots=%llu incomplete_snapshots=%llu "
          "changed_snapshots=%llu malformed_snapshots=%llu "
@@ -134,7 +142,8 @@ std::vector<ReportDiagnostic> render_report(const ReportRenderInput &render_inpu
          header.pending_acquire_contention_count, header.pending_acquire_collision_count,
          header.pending_acquire_malformed_count,
          static_cast<unsigned long long>(records.pending_release_slots_examined),
-         analysis.conflict_count, static_cast<unsigned long long>(summary.immediate_conflict_count),
+         analysis.conflict_count, analysis.suppressed_uniform_write_conflict_count,
+         static_cast<unsigned long long>(summary.immediate_conflict_count),
          static_cast<unsigned long long>(summary.claimed_window_count),
          static_cast<unsigned long long>(summary.dropped_window_count),
          static_cast<unsigned long long>(summary.saturated_window_count),

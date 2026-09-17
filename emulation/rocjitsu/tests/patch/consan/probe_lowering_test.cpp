@@ -8885,7 +8885,7 @@ TEST(ConSan, WatchpointRoundTripsRangeFields) {
   EXPECT_EQ(decoded.kind, ShadowAccessKind::Read);
   EXPECT_EQ(decoded.owner_id, 0x112u);
   EXPECT_EQ(decoded.epoch, 0xaau);
-  EXPECT_EQ(decoded.generation, 0x2bcdeu);
+  EXPECT_EQ(decoded.generation, 0x3cdeu);
   EXPECT_EQ(decoded.start_byte, 0x4567u);
   EXPECT_EQ(decoded.byte_count, 32u);
 }

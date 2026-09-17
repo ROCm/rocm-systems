@@ -14,6 +14,36 @@
 namespace rocjitsu::consan::hook {
 namespace {
 
+TEST(ConSanReportTest, FullLdsByteAddressDoesNotAliasOrCorruptWidth) {
+  for (uint32_t address :
+       {0u, 0x800u, 0xffe0u, 0xffffu, 0x10000u, 0x10800u, 0x20000u, 0x40000u, 0x4ffe0u, 0xfffe0u}) {
+    for (uint32_t width : {1u, 2u, 4u, 8u, 12u, 16u, 32u}) {
+      for (uint32_t generation :
+           {0u, 1u, watchpoint::max_generation, watchpoint::max_generation + 1u}) {
+        SCOPED_TRACE(testing::Message() << address << ":" << width << ":" << generation);
+        // Mirror the probe's shift plus addition, not a masked host packer:
+        // the old layout let address bit 16 spill into the width field.
+        const uint64_t packed =
+            (uint64_t{address} << watchpoint::start_byte_shift) +
+            (uint64_t{encode_byte_count(width)} << watchpoint::count_shift) +
+            (uint64_t{generation & watchpoint::max_generation} << watchpoint::generation_shift);
+        const auto entry = decode_watchpoint_entry(packed);
+        EXPECT_EQ(entry.start_byte, address);
+        EXPECT_EQ(entry.byte_count, width);
+        EXPECT_EQ(entry.generation, generation & watchpoint::max_generation);
+      }
+    }
+  }
+  const auto low =
+      decode_watchpoint_entry(pack_watchpoint_entry(ShadowAccessKind::Write, 1, 0, 7, 0x800, 16));
+  const auto high =
+      decode_watchpoint_entry(pack_watchpoint_entry(ShadowAccessKind::Write, 6, 0, 7, 0x10800, 2));
+  EXPECT_FALSE(watchpoints_conflict(low, high));
+  const auto overlapping =
+      decode_watchpoint_entry(pack_watchpoint_entry(ShadowAccessKind::Write, 1, 0, 7, 0x10800, 16));
+  EXPECT_TRUE(watchpoints_conflict(overlapping, high));
+}
+
 TEST(ConSanReportTest, CompactEvidencePreservesClassificationAcrossMetadataCopies) {
   static_assert(sizeof(Evidence) == 128);
   static_assert(alignof(Evidence) == alignof(uint64_t));
@@ -57,6 +87,15 @@ Evidence access(uint32_t index, uint32_t owner, uint32_t byte, ShadowAccessKind 
                   .start_byte = byte,
                   .byte_count = 4};
   return result;
+}
+
+TEST(ConSanReportTest, DistinctFullGenerationsCannotConflictDespiteMatchingCompactTags) {
+  std::array records{access(0, 0, 0x10800, ShadowAccessKind::Write),
+                     access(1, 1, 0x10800, ShadowAccessKind::Write)};
+  EXPECT_EQ(analyze_conflicts(records, false).conflict_count, 1u);
+  records[1].generation += uint64_t{1} << watchpoint::generation_bits;
+  EXPECT_EQ(records[0].entry.generation, records[1].entry.generation);
+  EXPECT_EQ(analyze_conflicts(records, false).conflict_count, 0u);
 }
 
 std::vector<ReportDiagnostic> render_evidence(const ReportPipelineInput &input,
@@ -136,6 +175,15 @@ TEST(ConSanReportTest, MaskIsAcceptedOnlyWithItsCommittedCurrentWindow) {
   summary = {};
   EXPECT_TRUE(decode_evidence(input, header, bytes, summary).evidence.empty());
   EXPECT_EQ(summary.malformed_snapshot_count, 1u);
+  // A wrapped compact tag is valid when the full window/header identity
+  // agrees; it must neither admit the stale window above nor reject this one.
+  header.generation = window->generation;
+  summary = {};
+  const auto wrapped = decode_evidence(input, header, bytes, summary);
+  ASSERT_EQ(wrapped.evidence.size(), 1u);
+  EXPECT_EQ(wrapped.evidence[0].generation, header.generation);
+  EXPECT_EQ(wrapped.evidence[0].entry.generation, 7u);
+  EXPECT_EQ(summary.malformed_snapshot_count, 0u);
 }
 
 TEST(ConSanReportTest, ExactSingleGroupWriteReportsParticipatingLanes) {
@@ -166,7 +214,9 @@ TEST(ConSanReportTest, UniformStoreSuppressesOnlyItsOwnLaneCollision) {
   first.static_mapping = &mapping;
   EXPECT_EQ(analyze_conflicts(std::array{first}, true).conflict_count, 1u);
   EXPECT_EQ(analyze_conflicts(std::array{first}, true, 8, false).conflict_count, 1u);
-  EXPECT_EQ(analyze_conflicts(std::array{first}, true, 8, true).conflict_count, 0u);
+  const auto suppressed = analyze_conflicts(std::array{first}, true, 8, true);
+  EXPECT_EQ(suppressed.conflict_count, 0u);
+  EXPECT_EQ(suppressed.suppressed_uniform_write_conflict_count, 1u);
   auto second = first;
   second.entry.owner_id = 1;
   EXPECT_EQ(analyze_conflicts(std::array{first, second}, true, 8, true).conflict_count, 1u);
@@ -174,6 +224,23 @@ TEST(ConSanReportTest, UniformStoreSuppressesOnlyItsOwnLaneCollision) {
   EXPECT_EQ(analyze_conflicts(std::array{first, second}, true, 8, true).conflict_count, 1u);
   first.static_mapping = nullptr;
   EXPECT_EQ(analyze_conflicts(std::array{first}, true, 8, true).conflict_count, 1u);
+}
+
+TEST(ConSanReportTest, UniformStoreSuppressionIsVisibleInSummary) {
+  DecodedEvidence records;
+  AccessStaticMapping mapping;
+  mapping.range_count = mapping.bank_count = 1;
+  mapping.uniform_lds_store = true;
+  records.evidence.push_back(access(0, 0, 16, ShadowAccessKind::Write));
+  records.evidence.back().exact_lane_mask = 3;
+  records.evidence.back().static_mapping = &mapping;
+  const auto analysis = analyze_conflicts(records.evidence, true, 8, true);
+  ReportSummary summary;
+  accumulate_analysis(summary, analysis);
+  EXPECT_EQ(summary.conflict_count, 0u);
+  EXPECT_EQ(summary.suppressed_uniform_write_conflict_count, 1u);
+  const auto rendered = render_evidence({}, records, analysis);
+  EXPECT_NE(summary_line(rendered).find("suppressed_uniform_write_conflicts=1"), std::string::npos);
 }
 
 TEST(ConSanReportTest, ExactGroupDoesNotInventReadAtomicOrSingleLaneRaces) {

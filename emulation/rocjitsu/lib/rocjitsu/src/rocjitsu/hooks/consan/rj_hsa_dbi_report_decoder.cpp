@@ -25,6 +25,11 @@ DecodedReport decode_report(const ReportPipelineInput &input, const ReportSnapsh
     result.failure = ReportDecodeFailure::InvalidHeader;
     return result;
   }
+  if (input.expected_generation && header->generation != *input.expected_generation) {
+    result.header = *header;
+    result.failure = ReportDecodeFailure::GenerationMismatch;
+    return result;
+  }
   const ReportBufferLayout &expected_layout = input.layout;
   if (!report_layout_matches_header(*header, expected_layout, input.size)) {
     result.header = *header;

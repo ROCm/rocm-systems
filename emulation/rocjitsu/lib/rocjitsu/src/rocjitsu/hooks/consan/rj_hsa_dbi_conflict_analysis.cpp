@@ -33,9 +33,13 @@ ConflictAnalysis analyze_conflicts(std::span<const Evidence> evidence,
   for (const auto &current : evidence) {
     if (current.entry.valid && !current.entry.consumed &&
         shadow_kind_conflicts(current.entry.kind, current.entry.kind) &&
-        std::popcount(current.exact_lane_mask) > 1 &&
-        !(allow_uniform_lds_stores && current.static_mapping &&
-          current.static_mapping->uniform_lds_store)) {
+        std::popcount(current.exact_lane_mask) > 1) {
+      if (allow_uniform_lds_stores && current.static_mapping &&
+          current.static_mapping->uniform_lds_store) {
+        if (result.suppressed_uniform_write_conflict_count != std::numeric_limits<uint32_t>::max())
+          ++result.suppressed_uniform_write_conflict_count;
+        continue;
+      }
       if (result.conflict_count != std::numeric_limits<uint32_t>::max())
         ++result.conflict_count;
       if (result.examples.size() < example_limit) {
@@ -54,8 +58,9 @@ ConflictAnalysis analyze_conflicts(std::span<const Evidence> evidence,
     const Evidence &current = evidence[index];
     for (size_t prior_index = 0; prior_index < index; ++prior_index) {
       const Evidence &prior = evidence[prior_index];
-      if (current.dispatch_id != prior.dispatch_id || current.workgroup_x != prior.workgroup_x ||
-          current.workgroup_y != prior.workgroup_y || current.workgroup_z != prior.workgroup_z ||
+      if (current.generation != prior.generation || current.dispatch_id != prior.dispatch_id ||
+          current.workgroup_x != prior.workgroup_x || current.workgroup_y != prior.workgroup_y ||
+          current.workgroup_z != prior.workgroup_z ||
           current.cluster_workgroup_id != prior.cluster_workgroup_id ||
           current.epoch != prior.epoch)
         continue;
@@ -89,6 +94,8 @@ ConflictAnalysis analyze_conflicts(std::span<const Evidence> evidence,
 
 void accumulate_analysis(ReportSummary &summary, const ConflictAnalysis &analysis) {
   summary.conflict_count = analysis.conflict_count;
+  summary.suppressed_uniform_write_conflict_count =
+      analysis.suppressed_uniform_write_conflict_count;
 }
 
 } // namespace rocjitsu::consan::hook

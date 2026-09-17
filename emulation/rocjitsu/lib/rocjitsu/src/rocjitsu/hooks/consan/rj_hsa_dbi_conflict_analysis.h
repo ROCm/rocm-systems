@@ -15,6 +15,7 @@ namespace rocjitsu::consan::hook {
 /// The complete host-side semantic analysis product for a ConSan report.
 struct ConflictAnalysis {
   uint32_t conflict_count = 0;
+  uint32_t suppressed_uniform_write_conflict_count = 0;
   // Examples are deduplicated and bounded independently from the pair count.
   std::vector<std::pair<Evidence, Evidence>> examples;
 };

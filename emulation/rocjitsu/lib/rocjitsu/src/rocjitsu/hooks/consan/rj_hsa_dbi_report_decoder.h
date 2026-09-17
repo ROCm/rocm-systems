@@ -14,6 +14,7 @@ enum class ReportDecodeFailure : uint8_t {
   None,
   SnapshotTooSmall,
   InvalidHeader,
+  GenerationMismatch,
   LayoutMismatch,
 };
 

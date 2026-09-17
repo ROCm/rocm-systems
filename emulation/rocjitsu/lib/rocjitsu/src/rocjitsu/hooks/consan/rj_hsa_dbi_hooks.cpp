@@ -134,7 +134,11 @@ public:
 
   void reset() {
     std::lock_guard lock(mutex_);
-    assert(active_ == 0u);
+    // Reload may overlap an old transform or replacement load. Its RAII
+    // timer must still be able to end(), but only post-reset time belongs
+    // to the new measurement interval.
+    if (active_ != 0u)
+      interval_begin_ = std::chrono::steady_clock::now();
     elapsed_ = {};
   }
 
@@ -5078,6 +5082,10 @@ extern "C" RJ_HOOK_EXPORT size_t rj_dbi_test_consan_retry_count() {
 
 extern "C" RJ_HOOK_EXPORT uint64_t rj_dbi_consan_instrumentation_nanoseconds() {
   return InstrumentationClock::instance().elapsed_nanoseconds();
+}
+
+extern "C" RJ_HOOK_EXPORT bool rj_dbi_test_advance_report_generation(uint64_t generation) {
+  return advance_report_generation_for_test(generation);
 }
 
 extern "C" RJ_HOOK_EXPORT uint32_t rj_dbi_consan_checkpoint_after_device_synchronize() {
