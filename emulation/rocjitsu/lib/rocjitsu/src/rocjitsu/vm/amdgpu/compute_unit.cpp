@@ -84,6 +84,8 @@ std::string_view instruction_execution_error_name(InstructionExecutionError erro
     return "none";
   case InstructionExecutionError::UnsupportedOperandValue:
     return "unsupported operand value";
+  case InstructionExecutionError::UnimplementedInstruction:
+    return "unimplemented instruction";
   }
   return "unknown instruction execution error";
 }
@@ -793,6 +795,7 @@ void ComputeUnitCore::tick_pipelines() {
 }
 
 void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
+  std::unique_ptr<Instruction> owned_inst(inst);
   plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
 
   if (inst->data()->tag() == GLOBAL_MEM && shared_aperture_base_ != 0) {
@@ -813,7 +816,7 @@ void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
       }
       inst->data()->set_tag(LOCAL_MEM);
       d.wait_counter_type = WaitCounterType::LGKMCNT;
-      local_mem_pipeline_.issue(inst, wf);
+      local_mem_pipeline_.issue(owned_inst.release(), wf);
       return;
     }
   }
@@ -821,13 +824,13 @@ void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
   const uint8_t route_tag = inst->data()->tag();
   switch (route_tag) {
   case SCALAR_MEM:
-    scalar_mem_pipeline_.issue(inst, wf);
+    scalar_mem_pipeline_.issue(owned_inst.release(), wf);
     break;
   case LOCAL_MEM:
-    local_mem_pipeline_.issue(inst, wf);
+    local_mem_pipeline_.issue(owned_inst.release(), wf);
     break;
   case GLOBAL_MEM:
-    global_mem_pipeline_.issue(inst, wf);
+    global_mem_pipeline_.issue(owned_inst.release(), wf);
     break;
   default:
     break;
@@ -880,9 +883,12 @@ bool ComputeUnitCore::handle_unfetchable_pc(Wavefront &wave) {
   // Deliberately not gated on debug_active_, unlike the data-side probe below.
   // An unfetchable PC reads back as zeros, and zeros decode to a valid
   // instruction, so an undebugged wave that branches into unmapped memory would
-  // otherwise execute zeros forever. Stopping it matters more than the one
-  // extra page-table lookup, which is a fraction of the per-issue decode cost.
-  if (vmid == 0 || memory_->is_fetchable(wave.pc, vmid))
+  // otherwise execute zeros forever. Positive registered mappings are cached
+  // with mutation/VMID epoch validation; debugger and fallback probes stay fresh.
+  const bool fetchable =
+      vmid == 0 || (debug_active() ? memory_->is_fetchable(wave.pc, vmid)
+                                   : memory_->is_fetchable(wave.pc, vmid, fetchability_cache_));
+  if (fetchable)
     return false;
   if (memory_violation_handler_ && memory_violation_handler_(wave, wave.pc, false))
     return true;
@@ -913,7 +919,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active, const FetchedInstruct
     active->halt();
     return;
   }
-  Instruction *inst = decoded.value().release();
+  Instruction *inst = decoded.value().get();
   ++decoded_instruction_count_;
 
   int inst_size_signed = inst->size();
@@ -1020,7 +1026,6 @@ void ComputeUnitCore::issue_instruction(Wavefront *active, const FetchedInstruct
         if (uses_split_wave_state)
           active->set_status_raw(saved_status | kPrivilegedStatusBit);
         active->pc = config->tba;
-        delete inst;
         return;
       }
     }
@@ -1028,7 +1033,6 @@ void ComputeUnitCore::issue_instruction(Wavefront *active, const FetchedInstruct
     // With no configured TBA, or for a parked s_trap executed by TBA code,
     // retire the instruction without inventing a host-side trap handler.
     active->pc += inst_size;
-    delete inst;
     return;
   }
 
@@ -1041,7 +1045,6 @@ void ComputeUnitCore::issue_instruction(Wavefront *active, const FetchedInstruct
       uint64_t target = RegisterAccess(*active).read_scalar64(*target_operand);
       if (target == 0) {
         active->halt();
-        delete inst;
         return;
       }
     }
@@ -1051,14 +1054,9 @@ void ComputeUnitCore::issue_instruction(Wavefront *active, const FetchedInstruct
   // transition rather than a per-ISA mnemonic list. See its use.
   const bool was_in_trap_handler = active->in_trap_handler();
 
-  try {
-    execute_instruction(inst, *active);
-  } catch (...) {
-    delete inst;
-    throw;
-  }
+  const util::Result execution_result = execute_instruction(inst, *active);
 
-  if (active->instruction_execution_failed()) {
+  if (execution_result.failed()) [[unlikely]] {
     const InstructionExecutionError error = active->instruction_execution_error();
     const std::string failure = std::format("CU {}: wf{} could not execute {} at pc={:#x}: {}",
                                             this->name(), active->wf_id(), inst->mnemonic(),
@@ -1067,7 +1065,6 @@ void ComputeUnitCore::issue_instruction(Wavefront *active, const FetchedInstruct
     if (auto *sim_engine = this->engine())
       sim_engine->request_exit(failure, /*code=*/1);
     active->halt();
-    delete inst;
     return;
   }
 
@@ -1084,7 +1081,6 @@ void ComputeUnitCore::issue_instruction(Wavefront *active, const FetchedInstruct
   // authoritative terminal hook and fires in both cases — consumers should observe
   // termination there, not via the after-execute hook.
   if (active->is_halted()) {
-    delete inst;
     return;
   }
 
@@ -1201,25 +1197,20 @@ void ComputeUnitCore::issue_instruction(Wavefront *active, const FetchedInstruct
   }
 
   if (fault_claimed) {
-    delete inst;
     return;
   }
-  if (inst->is_memory_op()) {
-    if (!inst->data()) {
-      // A memory execute path can intentionally reject an invalid complete
-      // register operand before constructing pipeline state. Treat that as a
-      // fully suppressed instruction: no route callback, wait-counter update,
-      // or memory transaction is permitted.
-      delete inst;
-    } else {
-      if (inst->data()->tag() == GLOBAL_MEM) {
-        auto *d = inst->data_as<VectorMemState>();
-        d->issue_pc = active->pc;
-      }
-      route_memory_inst(inst, *active);
+  // A memory execute path can reject an invalid complete register operand
+  // before constructing pipeline state. Suppress routing and memory effects
+  // for such instructions.
+  if (inst->is_memory_op() && inst->data()) {
+    if (inst->data()->tag() == GLOBAL_MEM) {
+      auto *d = inst->data_as<VectorMemState>();
+      d->issue_pc = active->pc;
     }
-  } else
-    delete inst;
+    route_memory_inst(decoded.value().release(), *active);
+  } else {
+    decoded.value().reset();
+  }
 
   active->pc += inst_size;
 

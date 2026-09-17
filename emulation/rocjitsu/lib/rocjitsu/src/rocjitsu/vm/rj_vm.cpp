@@ -164,6 +164,14 @@ bool reconstruct_embedded_pointers(uint32_t cmd, void *arg, size_t arg_size, siz
     return entry_size == 0 || count <= inline_size / entry_size;
   };
   switch (cmd) {
+  case AMDKFD_IOC_SET_CU_MASK: {
+    auto *args = static_cast<kfd_ioctl_set_cu_mask_args *>(arg);
+    if (args->num_cu_mask == 0 || args->num_cu_mask % 32 != 0 ||
+        !has_entries(std::min(args->num_cu_mask, 1024u) / 32, sizeof(uint32_t)))
+      return false;
+    args->cu_mask_ptr = reinterpret_cast<uint64_t>(extra);
+    break;
+  }
   case AMDKFD_IOC_WAIT_EVENTS: {
     auto *args = static_cast<kfd_ioctl_wait_events_args *>(arg);
     if (!has_entries(args->num_events, sizeof(kfd_event_data)))
@@ -351,8 +359,12 @@ rj_status_t rj_vm_save_checkpoint(const rj_vm_t *vm, const char *path, uint64_t 
   if (!vm->soc)
     return ROCJITSU_STATUS_ERROR;
   try {
-    config::save_checkpoint(path, *vm->soc, tick, vm->engine_config,
-                            vm->loaded.cpu_dispatch_threads);
+    auto engine_config = vm->engine_config;
+    if (engine_config.num_threads == vm->loaded.execution_threads.engines)
+      engine_config.num_threads = vm->loaded.requested_engine_threads;
+    config::save_checkpoint(path, *vm->soc, tick, engine_config, vm->loaded.cpu_dispatch_threads,
+                            vm->loaded.cpu_thread_budget, vm->loaded.thread_allocations,
+                            vm->loaded.legacy_auto_dispatch);
     return ROCJITSU_STATUS_SUCCESS;
   } catch (const std::exception &) {
     return ROCJITSU_STATUS_ERROR;

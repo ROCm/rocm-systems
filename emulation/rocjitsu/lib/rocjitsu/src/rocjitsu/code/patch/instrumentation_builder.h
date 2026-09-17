@@ -476,10 +476,10 @@ build_salu_dependency_delay(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
     return build_s_nop(0, arch);
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return rocjitsu::build_s_delay_alu(kDelayAluSaluDep1, arch);
+    return rocjitsu::build_s_delay_alu(kDelayAluSaluDep1, arch).value();
   if (!is_rdna4_family_arch(arch))
     return std::nullopt;
-  return rocjitsu::build_s_delay_alu(kDelayAluSaluDep1, arch);
+  return rocjitsu::build_s_delay_alu(kDelayAluSaluDep1, arch).value();
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t>
@@ -489,7 +489,7 @@ build_s_wait_indirect_pc0(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
     return build_s_nop(0, arch);
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return rocjitsu::build_s_delay_alu(kDelayAluSaluDep1, arch);
+    return rocjitsu::build_s_delay_alu(kDelayAluSaluDep1, arch).value();
   return rocjitsu::build_s_wait_alu_sa_sdst0(arch);
 }
 
@@ -507,7 +507,7 @@ build_salu_to_valu_dependency_wait(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
     return build_s_nop(0, arch);
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return rocjitsu::build_s_delay_alu(kDelayAluSaluDep1, arch);
+    return rocjitsu::build_s_delay_alu(kDelayAluSaluDep1, arch).value();
   if (!is_rdna4_family_arch(arch))
     return std::nullopt;
   return rocjitsu::build_s_wait_alu_sa_sdst0(arch);
@@ -526,7 +526,7 @@ build_valu_to_salu_dependency_wait(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
     return build_s_nop(0, arch);
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return rocjitsu::build_s_delay_alu(kDelayAluSaluDep1, arch);
+    return rocjitsu::build_s_delay_alu(kDelayAluSaluDep1, arch).value();
   if (!is_rdna4_family_arch(arch))
     return std::nullopt;
   return rocjitsu::build_s_wait_alu_va_sdst0(arch);
@@ -540,7 +540,7 @@ build_valu_vcc_to_salu_dependency_wait(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3)
     return build_s_nop(0, arch);
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return rocjitsu::build_s_delay_alu(kDelayAluSaluDep1, arch);
+    return rocjitsu::build_s_delay_alu(kDelayAluSaluDep1, arch).value();
   if (!is_rdna4_family_arch(arch))
     return std::nullopt;
   return rocjitsu::build_s_wait_alu_va_vcc0(arch);

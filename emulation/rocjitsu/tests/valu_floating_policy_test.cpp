@@ -76,7 +76,7 @@ public:
     if (decoded.failed())
       throw std::runtime_error("Instruction encoding rejected by decoder_");
     std::unique_ptr<Instruction> instruction(std::move(decoded).value());
-    compute_unit_->execute_instruction(instruction.get(), *wave_);
+    EXPECT_TRUE(compute_unit_->execute_instruction(instruction.get(), *wave_).succeeded());
     return compute_unit_->read_vgpr(base_ + 6, 0);
   }
 

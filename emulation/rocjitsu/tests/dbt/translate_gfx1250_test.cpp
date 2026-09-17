@@ -3076,7 +3076,7 @@ TEST(BinaryTranslatorE2E, Gfx1250CompactsNegativeLongJumpWithInterleavedPrefetch
       cdna5::build_sop2(cdna5::kSAddCoI32Sop2,
                         {.ssrc0 = kLiteralOperand, .ssrc1 = kInlineInt4, .sdst = kTmpSreg})[0],
       0xfffffff4u,
-      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_CDNA5),
+      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_CDNA5).value(),
       cdna5::build_sop1(cdna5::kSAbsI32Sop1, {.ssrc0 = kTmpSreg, .sdst = kTmpSreg})[0],
       cdna5::build_sop2(cdna5::kSSubCoU32Sop2,
                         {.ssrc0 = kPcSreg, .ssrc1 = kTmpSreg, .sdst = kPcSreg})[0],
@@ -8010,7 +8010,7 @@ run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t opsel, Gfx1250E5m3Operand 
     }
     borrowed_a_carrier =
         borrowed_a_carrier || std::string_view(inst->mnemonic()) == "v_readfirstlane_b32_e32";
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     index += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
   }
   // A caller that walled off the SGPRs asked for the carrier path. Without this
@@ -9792,7 +9792,7 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaLoweringMatchesUnloweredExecution) {
     std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, words.data()));
     EXPECT_NE(inst, nullptr);
     EXPECT_EQ(std::string_view(inst->mnemonic()), "v_wmma_f16_16x16x128_fp8_fp8");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   };
 
   auto run_lowered = [&] {
@@ -9800,7 +9800,7 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaLoweringMatchesUnloweredExecution) {
       std::unique_ptr<rocjitsu::Instruction> inst(
           decode_valid(*decoder, body_words.data() + offset));
       ASSERT_NE(inst, nullptr);
-      cu->execute_instruction(inst.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
       offset += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
     }
   };
@@ -13325,7 +13325,7 @@ TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4SplitMatchesUnsplitExecution)
     std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_wmma_f32_32x16x128_f4");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   }
   const std::vector<uint32_t> run_a = snapshot_destination();
 
@@ -13346,7 +13346,7 @@ TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4SplitMatchesUnsplitExecution)
   for (size_t offset = 0; offset < body_words.size();) {
     std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, body_words.data() + offset));
     ASSERT_NE(inst, nullptr);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     offset += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
     ++executed;
   }
@@ -14844,7 +14844,7 @@ TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingExecutesInMatchingNonzeroBank
     ASSERT_NE(inst, nullptr) << "translated word " << offset << " failed to decode";
     if (std::string_view(inst->mnemonic()) == "s_endpgm")
       break;
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     offset += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
   }
 

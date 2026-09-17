@@ -573,6 +573,7 @@ add_executable(
     patch/instruction_sequence_test.cpp
     patch/rdna3_instrumentation_builder_test.cpp
     patch/rdna4_instrumentation_builder_test.cpp
+    patch/vector_builder_test.cpp
     patch/kernarg_extension_test.cpp
     patch/sidecar_metadata_test.cpp
     patch/trampoline_builder_test.cpp
@@ -583,6 +584,7 @@ add_executable(
     patch/probe_live_in_test.cpp
     patch/error_report_test.cpp
     dbi/dbi_spill_sim_test.cpp
+    dbi/dbi_arg_sim_test.cpp
     code/code_object_target_id_test.cpp
     code/major_image_ownership_test.cpp
     code/code_object_patcher_ownership_test.cpp
@@ -604,6 +606,8 @@ add_executable(
     simd_correctness/mfma_lazy_storage_test.cpp
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
+    division_test.cpp
+    division_macro_test.cpp
     valu_floating_policy_test.cpp
     atomic_semantics_and_decode_test.cpp
     isa_target_registry_test.cpp
@@ -614,6 +618,7 @@ add_executable(
     wave_debug_test.cpp
     decode_execute_benchmark.cpp
     util_observable_shared_mutex_test.cpp
+    host_mapping_lock_test.cpp
     util_result_test.cpp
     util_unique_handle_test.cpp
     util_simd_test.cpp
@@ -673,6 +678,7 @@ add_executable(
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
     race-detector/race_log_expectation_test.cpp
+    big_int_test.cpp
     data_types_test.cpp
     drm_info_layout_test.cpp
     pci/bar_access_trace_test.cpp
@@ -875,6 +881,23 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${CMAKE_CURRENT_SOURCE_DIR}/check_static_analysis_symbols.cmake
     )
 endif()
+
+add_executable(
+    waitcheck_target_test
+    analysis/waitcheck_target_test.cpp
+    analysis/waitcheck_state_test.cpp
+)
+target_link_libraries(
+    waitcheck_target_test
+    PRIVATE
+        rocjitsu_waitcheck_state
+        rocjitsu_waitcheck_target
+        rocjitsu_analysis_internal
+        rocjitsu_amdgpu_isa_model_registry
+        GTest::gtest_main
+)
+rj_configure_target(waitcheck_target_test WARNINGS)
+rj_add_gtest_tests(waitcheck_target_test)
 
 # Exercise the Linux-only model ISA contract in a decoder-only final link.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -1083,6 +1106,7 @@ if(HAS_DEVICE_KERNELS AND HAS_PROBE_FIXTURES)
     add_dependencies(
         probe_fixture_test
         probe_rj_nop_probe_gfx90a
+        probe_rj_arg_probe_gfx90a
         probe_callable_sgpr_probe_gfx950
     )
     rj_configure_target(probe_fixture_test TEST)
@@ -1094,6 +1118,16 @@ if(HAS_DEVICE_KERNELS AND HAS_PROBE_FIXTURES)
         COMMAND probe_fixture_test
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         INSTALL_COMMAND "bin/probe_fixture_test"
+    )
+    rj_add_test(
+        NAME "ProbeFixture.ArgProbeReceivesItsArgumentInV0"
+        COMMAND
+            probe_fixture_test
+            --gtest_filter=ProbeFixture.ArgProbeReceivesItsArgumentInV0
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        INSTALL_COMMAND
+            "bin/probe_fixture_test"
+            "--gtest_filter=ProbeFixture.ArgProbeReceivesItsArgumentInV0"
     )
     rj_add_test(
         NAME "ProbeFixture.CallableSgprUseExceedsKernelDescriptor"
@@ -1888,6 +1922,22 @@ rj_add_interposer_test_suite(
     InterposerDrmTest
     DeviceInfoReportsActiveCuCount
 )
+
+rj_add_interposer_test_suite(
+    InterposerFreshForkTest
+    ChildAndGrandchildInitializeIndependentBackends
+    ChildFopenPreservesLibcModeSemantics
+)
+
+# TSan cannot start backend threads after a multithreaded fork. Keep the
+# single-threaded nested-fork case above in TSan, and run concurrent mappings in
+# regular and ASan/UBSan builds without disabling TSan's post-fork checks.
+if(NOT RJ_ENABLE_TSAN)
+    rj_add_interposer_test_suite(
+        InterposerFreshForkTest
+        ConcurrentMappingsPreserveIndependentChildBackends
+    )
+endif()
 
 rj_add_interposer_test_suite(
     InterposerForkTest
@@ -3540,7 +3590,7 @@ if(RJ_ENABLE_HIP_TESTS)
             "HipMemcpyTest.RoundTripInt"
             CONFIG ${RJ_HIP_TEST_CONFIG}
         )
-        # The only case that reaches ROCr's pinned SDMA blit, and both sanitizers
+        # These cases reach ROCr's pinned SDMA blit, and both sanitizers
         # report that library rather than rocjitsu. TSan sees the blit's memcpy
         # into the ring but not the release store on the doorbell that follows
         # it, because libhsa-runtime64 is not instrumented; the pair it forms
@@ -3548,10 +3598,15 @@ if(RJ_ENABLE_HIP_TESTS)
         # the fetch looks unordered. LSan reports ~5.7 KB allocated entirely
         # within that library, in frames with no rocjitsu caller. Neither is
         # actionable from here, and suppressing them by file would hide the same
-        # classes of defect on the paths rocjitsu does own. The case still runs
-        # in regular builds, in both local and daemon mode, which is where it
-        # regression-tests the transfer.
+        # classes of defect on the paths rocjitsu does own. The cases still run
+        # in regular builds, in both local and daemon mode, to cover transfers
+        # and LDS reuse.
         if(NOT RJ_ENABLE_ASAN AND NOT RJ_ENABLE_TSAN)
+            rj_add_hip_test_case(
+                hip_memcpy_test
+                "HipMemcpyTest.MaskedStreamLdsReuse"
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+            )
             rj_add_hip_test_case(
                 hip_memcpy_test
                 "HipMemcpyTest.RoundTripPageableAbovePinThreshold"
@@ -3715,6 +3770,7 @@ if(RJ_ENABLE_HIP_TESTS)
         set(RJ_DAEMON_TESTS
             RocjitsuCliDaemon.LaunchesApplicationAfterDaemonIsReady
             DaemonTest.HipVectorAdd
+            DaemonTest.ForkserverChildrenInitializeIndependentBackends
             DaemonTest.AttachExecFailurePreservesDaemonSocket
             DaemonTest.HipMemcpyRoundTripFloat
             DaemonTest.HipMemcpyRoundTripInt
@@ -3726,6 +3782,11 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.InterposerDup2OverPrimaryInvalidatesRemote
             DaemonTest.InterposerProcMapsNamesRemoteKfdMarker
         )
+        # ROCr leaks also affect masked LDS reuse in daemon mode. Its TSan
+        # case passes, so keep that coverage as well as regular builds.
+        if(NOT RJ_ENABLE_ASAN)
+            list(APPEND RJ_DAEMON_TESTS DaemonTest.HipMaskedStreamLdsReuse)
+        endif()
         # Excluded under sanitizers for the reason given at its local-mode
         # registration above: the pinned SDMA path this case exists to cover
         # runs inside an uninstrumented libhsa-runtime64, and both the race TSan

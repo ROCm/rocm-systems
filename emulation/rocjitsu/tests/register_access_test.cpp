@@ -309,6 +309,53 @@ TEST(RegisterAccessTest, ReadRegionObservesAllRegistersAndReturnsLaneSpans) {
   EXPECT_EQ(region.lanes(1)[5], 0x4444u);
 }
 
+TEST(RegisterAccessTest, ReadRegionCopiesDwordsToLaneMajorStorage) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  const uint32_t base = fx.vgpr_base() + 3;
+  constexpr uint64_t lane_mask = (uint64_t{1} << 1) | (uint64_t{1} << 5);
+  for (uint32_t reg = 0; reg < 4; ++reg) {
+    fx.cu->write_vgpr(base + reg, 1, 0x1000u + reg);
+    fx.cu->write_vgpr(base + reg, 5, 0x5000u + reg);
+  }
+
+  std::array<uint8_t, 64 * 4 * sizeof(uint32_t)> bytes{};
+  bytes.fill(0xAA);
+  auto region = RegisterAccess(*fx.wf).read_vgpr_region(base, 4, lane_mask);
+  region.copy_dwords_lane_major(bytes, lane_mask);
+
+  ASSERT_EQ(fx.plugin->reads.size(), 4u);
+  for (uint32_t reg = 0; reg < 4; ++reg) {
+    EXPECT_EQ(fx.plugin->reads[reg].physical_reg, base + reg);
+    EXPECT_EQ(fx.plugin->reads[reg].lane_mask, lane_mask);
+    uint32_t lane1 = 0;
+    uint32_t lane5 = 0;
+    std::memcpy(&lane1, bytes.data() + (1 * 4 + reg) * sizeof(uint32_t), sizeof(lane1));
+    std::memcpy(&lane5, bytes.data() + (5 * 4 + reg) * sizeof(uint32_t), sizeof(lane5));
+    EXPECT_EQ(lane1, 0x1000u + reg);
+    EXPECT_EQ(lane5, 0x5000u + reg);
+  }
+  const std::span<const uint8_t> masked_lane(bytes.data() + 3 * 4 * sizeof(uint32_t),
+                                             4 * sizeof(uint32_t));
+  EXPECT_TRUE(std::ranges::all_of(masked_lane, [](uint8_t byte) { return byte == 0xAA; }));
+}
+
+TEST(RegisterAccessTest, ReadRegionRejectsInvalidLaneMajorCopyBounds) {
+  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
+             /*wave_size=*/32);
+  ASSERT_NE(fx.wf, nullptr);
+  ASSERT_EQ(fx.wf->wf_size(), 32u);
+
+  constexpr uint32_t reg_count = 4;
+  constexpr uint64_t lane_mask = uint64_t{1} << 1;
+  auto region = RegisterAccess(*fx.wf).read_vgpr_region(fx.vgpr_base(), reg_count, lane_mask);
+  std::vector<uint8_t> bytes(fx.wf->wf_size() * reg_count * sizeof(uint32_t));
+
+  EXPECT_THROW(region.copy_dwords_lane_major(std::span(bytes).first(bytes.size() - 1), lane_mask),
+               std::invalid_argument);
+  EXPECT_THROW(region.copy_dwords_lane_major(bytes, uint64_t{1} << 32), std::invalid_argument);
+}
+
 TEST(RegisterAccessTest, ReadRegionTraversesAndCopiesLogicalRegisterRange) {
   for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     Fixture fx(arch);
@@ -516,7 +563,7 @@ TEST(RegisterAccessTest, Sgpr64ReadObservesBothRegisters) {
   EXPECT_EQ(fx.cu->read_sgpr(base + 20), 0xABCDEF01u);
 }
 
-TEST(ScalarOperandSelectorsTest, ClassifiesRegisterPairLowWords) {
+TEST(ScalarOperandSelectorsTest, Classifies64BitRegisterSources) {
   EXPECT_TRUE(is_src_scalar_register_pair(0));
   EXPECT_TRUE(is_src_scalar_register_pair(kVccSelectorFirst));
   EXPECT_TRUE(is_src_scalar_register_pair(kTtmpSelectorFirst));

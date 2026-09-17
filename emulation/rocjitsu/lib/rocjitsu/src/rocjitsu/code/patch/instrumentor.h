@@ -98,6 +98,12 @@ struct InstrumentationPoint {
   // trampoline, or leave both empty for the inline nop.
   const AmdGpuCodeObject *probe_obj = nullptr;
   std::string probe_symbol;
+  // Immediate argument dwords to hand the probe, one per VGPR from the ABI's
+  // arg_vgpr_base. The size is the declared argument count and is part of what
+  // the probe body is verified against, so two sites calling one probe with
+  // different counts do not share a ProbeCallable. Empty means a probe called
+  // with no arguments. Only meaningful alongside probe_obj / probe_symbol.
+  std::vector<uint32_t> probe_args;
   bool force_full_exec = false;
   // TODO: SCC will eventually need a per-point knob mirroring force_full_exec
   // (e.g. probe_consumes_scc) since the probe call clobbers it
@@ -114,6 +120,11 @@ struct ResolvedInstrumentationSite {
   // Index into the probe registry produced by resolve_points()
   // (ResolvedPoints::probes); nullopt if no probes
   std::optional<size_t> probe_index;
+
+  // Argument values for this site, copied from the request. Per-site, unlike the
+  // ProbeCallable the probe_index names: two sites can call one probe body with
+  // different values, and only the count is shared.
+  std::vector<uint32_t> probe_args;
 
   [[nodiscard]] bool is_probe_call() const { return probe_index.has_value(); }
 };
@@ -265,14 +276,22 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                                     std::string *error_out = nullptr);
 
 /// @brief Reserve a scratch slot per SGPR in @p spill_set, pick a bridge VGPR
-///        (lowest of the @p kernel_vgpr_count allocated VGPRs that is neither
-///        live at the anchor nor in @p vgpr_spills), and fill @p out and
+///        (lowest of the @p kernel_vgpr_count allocated VGPRs that is in neither
+///        @p bridge_unavailable nor @p vgpr_spills), and fill @p out and
 ///        @p out_bridge.
+///
+/// @p bridge_unavailable is the set the bridge must avoid, and it **must include
+/// everything live at the anchor**. The prologue's `v_writelane` destroys the
+/// bridge's incoming value, and the epilogue reloads the *spilled SGPR's* slot
+/// into it, not its own -- so a bridge that was live and is not itself in
+/// @p vgpr_spills is never restored. Callers may pass a superset (registers the
+/// envelope will write, say), never a subset.
 ///
 /// Fails closed (returns false, @p out empty) on a non-SGPR register, no free
 /// bridge VGPR within the kernel's allocation, an arch with no scratch emitter, a
 /// slot past the scratch limit, or an offset that does not fit the offset field.
-[[nodiscard]] bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &live_at_anchor,
+[[nodiscard]] bool plan_sgpr_spills(const RegisterSet &spill_set,
+                                    const RegisterSet &bridge_unavailable,
                                     const std::vector<SpillSlot> &vgpr_spills,
                                     uint32_t kernel_vgpr_count, SpillManager &spills,
                                     rj_code_arch_t arch, std::vector<SpillSlot> &out,
@@ -307,6 +326,23 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 [[nodiscard]] constexpr bool probe_link_pair_fits_in_kernel(uint32_t kernel_sgpr_count,
                                                             uint16_t link_base) {
   return kernel_sgpr_count >= static_cast<uint32_t>(link_base) + 2;
+}
+
+/// @brief Does a kernel whose ordinary VGPRs end at @p ordinary_vgpr_bound own
+///        the argument VGPRs @p abi names?
+///
+/// The same coarse ownership question as probe_link_pair_fits_in_kernel, for the
+/// other set of registers the ABI fixes rather than picks. An index at or past
+/// the bound is either unallocated or aliases an AGPR, and the envelope would
+/// write it before the call. Renaming the probe's argument registers would mean
+/// rewriting the probe body, and growing the allocation is deferred, so a site
+/// that does not fit fails closed.
+///
+/// An @p abi passing no arguments always fits.
+[[nodiscard]] constexpr bool probe_args_fit_in_kernel(uint32_t ordinary_vgpr_bound,
+                                                      const ProbeAbi &abi) {
+  return ordinary_vgpr_bound >=
+         static_cast<uint32_t>(abi.arg_vgpr_base) + static_cast<uint32_t>(abi.num_arg_vgprs);
 }
 
 /// @brief DBI orchestrator. Collects InstrumentationPoints, validates each

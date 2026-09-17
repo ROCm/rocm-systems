@@ -513,6 +513,7 @@ public:
                  HostExtentOwner owner = HostExtentOwner::Application) {
     std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
+    invalidate_fetchability_locked();
     auto *base = static_cast<uint8_t *>(host_ptr);
     uint64_t mapped_va = gpu_va;
     size_t host_offset = 0;
@@ -541,6 +542,7 @@ public:
   void unmap_pages(uint64_t gpu_va, size_t size) {
     std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
+    invalidate_fetchability_locked();
     uint64_t mapped_va = gpu_va;
     size_t unmapped_bytes = 0;
     while (unmapped_bytes < size) {
@@ -567,6 +569,7 @@ public:
   void remap_page_host_ptrs(uint64_t gpu_va, void *old_host_ptr, void *new_host_ptr, size_t size) {
     std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
+    invalidate_fetchability_locked();
     auto *old_base = static_cast<uint8_t *>(old_host_ptr);
     auto *new_base = static_cast<uint8_t *>(new_host_ptr);
     bool changed = false;
@@ -601,6 +604,7 @@ public:
   void set_page_mtype(uint64_t gpu_va, size_t size, amdgpu::Mtype mtype) {
     std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
+    invalidate_fetchability_locked();
     bool changed = false;
     uint64_t mapped_va = gpu_va;
     size_t updated_bytes = 0;
@@ -621,6 +625,13 @@ public:
 
   /// @brief Return the mutation counter used by GpuMemory translation caches.
   const uint64_t *page_table_generation() const { return &page_table_generation_; }
+
+  /// @brief Retained mutation token for positive instruction-fetch checks.
+  /// @details Unlike the translation generation, this token can be read without
+  /// holding the page-table lock and can outlive the process that owns the table.
+  std::shared_ptr<const std::atomic<uint64_t>> page_table_fetchability_epoch() const {
+    return page_table_fetchability_epoch_;
+  }
 
   /// @brief Return the lease shared by page-table readers and mutations.
   std::shared_ptr<std::shared_mutex> page_table_request_mutex() const {
@@ -784,6 +795,13 @@ private:
 
   void publish_page_table_mutation_locked() { ++page_table_generation_; }
 
+  void invalidate_fetchability_locked() {
+    // Publish before touching the table, with its exclusive lock held. A cache
+    // miss cannot save the new epoch until the mutation releases that lock.
+    // Invalidating first also covers a partially completed mutation that throws.
+    page_table_fetchability_epoch_->fetch_add(1, std::memory_order_release);
+  }
+
   /// @brief Page table version counter, bumped on every PTE mutation.
   /// @details GpuMemory keeps per-thread TLB-like translation caches keyed by
   ///          this generation. Mutations hold both page_table_request_mutex_
@@ -792,6 +810,8 @@ private:
   std::shared_ptr<std::shared_mutex> page_table_request_mutex_ =
       std::make_shared<std::shared_mutex>();
   uint64_t page_table_generation_{1};
+  std::shared_ptr<std::atomic<uint64_t>> page_table_fetchability_epoch_ =
+      std::make_shared<std::atomic<uint64_t>>(1);
 };
 
 } // namespace rocjitsu

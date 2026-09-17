@@ -96,8 +96,16 @@ struct TrampolinePlan {
   /// the patched kernel's actual count.
   uint32_t kernel_sgpr_count = REGISTER_SET_ALLOCATABLE_SGPRS;
 
+  /// Immediate argument dwords to materialize into the ABI's argument VGPRs
+  /// before the call, in order from arg_vgpr_base. An emit-time input rather
+  /// than a resource decision: plan_probe_call only counts the words it takes
+  /// and reserves the registers, and requires the size to match the ABI's
+  /// declared count. Empty for a probe called with no arguments.
+  std::vector<uint32_t> probe_args;
+
   bool is_probe_call = false;    ///< True once plan_probe_call() populated these.
   uint16_t link_pair_base = 30;  ///< Return-link pair, derived from the probe cc.
+  uint16_t arg_vgpr_base = 0;    ///< First argument VGPR, derived from the probe ABI.
   uint16_t target_pair_base = 0; ///< Dead even SGPR pair holding the probe address.
   bool preserve_scc = true;      ///< v0 preserves SCC across target materialization.
   uint16_t scc_temp = 0;         ///< Dead SGPR holding saved SCC across the call.
@@ -109,7 +117,10 @@ struct TrampolinePlan {
   bool preserve_vcc = false;
   bool preserve_m0 = false;
   std::vector<SpecialStateSlot> special_state_saves; ///< Filled by plan_probe_call.
-  RegisterSet builder_clobbers;     ///< {link} | {target pair} | {scc/special temps}; feeds spill.
+  /// {link} | {target pair} | {scc/special temps} | {argument VGPRs}; feeds spill.
+  /// The argument VGPRs are the only member not chosen dead -- the ABI fixes them
+  /// -- so they are the only one that can intersect the live set.
+  RegisterSet builder_clobbers;
   uint32_t before_word_count = 0;   ///< Envelope words emitted before the relocated original.
   uint64_t probe_target_offset = 0; ///< .text-relative byte offset of the copied probe body.
 
@@ -160,8 +171,8 @@ public:
   /// returns true. (`preserve_scc`/`preserve_*` are inputs, read but not written.)
   ///
   /// Policy:
-  ///   - Link pair is derived from @p cc via link_pair_for(); an unknown
-  ///     convention fails. If either lane of the derived pair is live at the
+  ///   - Link pair is read off @p abi; one that fails is_valid_probe_abi()
+  ///     fails here. If either lane of the pair is live at the
   ///     anchor, fail. Extending the supported conventions is deferred.
   ///   - Target-address pair is a dead, even-aligned SGPR pair (excluding the
   ///     link pair). It is consumed by s_swappc before the probe body runs, so it
@@ -180,15 +191,15 @@ public:
   ///     plan.special_state_saves, drawn from the same dead pool as the SCC temp.
   ///
   /// Returns false and writes a diagnostic naming the unavailable resource to
-  /// @p error_out (if non-null) when @p cc is unknown, the link pair is live, or
-  /// no dead target pair / SCC temp can be found. The plan is left unmodified on
-  /// failure.
+  /// @p error_out (if non-null) when @p abi is unusable, the link pair is live,
+  /// or no dead target pair / SCC temp can be found. The plan is left unmodified
+  /// on failure.
   ///
   /// @param plan                Trampoline plan whose resource fields are filled.
-  /// @param cc                  Probe calling convention; sets the link pair.
+  /// @param abi                 Probe ABI; supplies the link pair.
   /// @param live_at_anchor      Registers live immediately before the anchor.
   /// @param probe_body_clobbers Ordinary registers the copied probe body writes.
-  [[nodiscard]] static bool plan_probe_call(TrampolinePlan &plan, ProbeCallingConvention cc,
+  [[nodiscard]] static bool plan_probe_call(TrampolinePlan &plan, const ProbeAbi &abi,
                                             const RegisterSet &live_at_anchor,
                                             const RegisterSet &probe_body_clobbers,
                                             std::string *error_out = nullptr);

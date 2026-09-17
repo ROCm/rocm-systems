@@ -15,15 +15,21 @@
 #include "rocjitsu/vm/amdgpu/physical_register_resources.h"
 #include "rocjitsu/vm/amdgpu/xcd_shard.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <optional>
+#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+class ComputeUnitCore;
+using QueueCuSelection = std::optional<std::vector<ComputeUnitCore *>>;
 
 struct WorkgroupCoord {
   uint32_t x = 0;
@@ -103,6 +109,12 @@ struct DispatchEntry {
   uint32_t queue_id = 0;
   uint32_t queue_packet_id = 0;
   uint32_t process_id = 0;
+
+  /// Snapshot of the queue's physical CU selection; nullopt means unrestricted.
+  QueueCuSelection enabled_cus = std::nullopt;
+  bool allows_cu(const ComputeUnitCore *cu) const {
+    return !enabled_cus || std::ranges::find(*enabled_cus, cu) != enabled_cus->end();
+  }
 
   /// Absolute AQL packet id (queue read index at which this dispatch's packet
   /// was fetched). This is the AMDHSA dispatch-ID preload and is also narrowed
