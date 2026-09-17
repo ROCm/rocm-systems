@@ -8,6 +8,7 @@
 #include <hip/hip_runtime.h>
 
 #include "race_test_support.hpp"
+#include "vgpr_waitcnt_cases.hpp"
 
 #include <cstdint>
 #include <vector>
@@ -23,33 +24,15 @@ namespace {
 
 using rocjitsu::test::FindingCount;
 using rocjitsu::test::RaceExpectation;
+using rocjitsu::test::runVgprWaitcntHazard;
+using rocjitsu::test::runVgprWaitcntSafe;
 
 using Gfx1151RaceTest = rocjitsu::test::RaceTestBase;
-
-__global__ void vgpr_no_race_kernel(const float *src, float *dst) {
-  int tid = threadIdx.x;
-  float val;
-  asm volatile("global_load_dword %0, %1, off\n"
-               "s_waitcnt vmcnt(0)\n"
-               : "=v"(val)
-               : "v"(&src[tid]));
-  dst[tid] = val;
-}
 
 static constexpr RaceExpectation kVgprWaitcntRaceExpectation{
     .findings = FindingCount::OneOrMore,
     .type = "VGPR",
 };
-
-__global__ void vgpr_race_kernel(const float *src, float *dst) {
-  int tid = threadIdx.x;
-  float val;
-  asm volatile("global_load_dword %0, %1, off\n"
-               "s_nop 0\n"
-               : "=v"(val)
-               : "v"(&src[tid]));
-  dst[tid] = val;
-}
 
 // D16 loads write only one half of the destination dword on RDNA. This kernel
 // initializes the high half, performs a low-half global_load_d16_u8, waits for
@@ -147,18 +130,12 @@ lds_wave32_cross_wave_race_kernel(int *out) {
 }
 
 TEST_F(Gfx1151RaceTest, vgpr_waitcnt) {
-  auto *src = allocWithData<float>(32);
-  auto *dst = alloc<float>(32);
-  vgpr_no_race_kernel<<<1, 32>>>(src, dst);
-  sync();
+  runVgprWaitcntSafe(*this, 32);
   ExpectNoRace();
 }
 
 TEST_F(Gfx1151RaceTest, vgpr_waitcnt_race) {
-  auto *src = allocWithData<float>(32);
-  auto *dst = alloc<float>(32);
-  vgpr_race_kernel<<<1, 32>>>(src, dst);
-  sync();
+  runVgprWaitcntHazard(*this, 32);
   ExpectRace(kVgprWaitcntRaceExpectation);
 }
 

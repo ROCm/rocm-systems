@@ -2987,7 +2987,7 @@ if(RJ_ENABLE_HIP_TESTS)
             ARG
             ""
             "ARCH;SOURCE"
-            "DEPENDENCIES;EXTRA_LIBS"
+            "DEPENDENCIES;EXTRA_LIBS;INCLUDE_DIRS;PLUGIN_TARGETS"
             ${ARGN}
         )
         if(NOT ARG_ARCH)
@@ -3003,16 +3003,20 @@ if(RJ_ENABLE_HIP_TESTS)
         if(ARG_EXTRA_LIBS)
             set(HIP_EXTRA_LIBS -x none ${ARG_EXTRA_LIBS})
         endif()
+        set(HIP_INCLUDE_DIRS)
+        foreach(_include_dir IN LISTS ARG_INCLUDE_DIRS)
+            list(APPEND HIP_INCLUDE_DIRS -I${_include_dir})
+        endforeach()
         add_custom_command(
             OUTPUT ${HIP_TEST_BIN}
             COMMAND
                 ${AMDCXX} -x hip --offload-arch=${ARG_ARCH}
                 --rocm-path=${ROCM_PATH} -std=c++20 -O2
                 ${RJ_HIP_SANITIZER_FLAGS} -isystem ${GTEST_INC}
-                -I${CMAKE_CURRENT_SOURCE_DIR} -o ${HIP_TEST_BIN} ${HIP_TEST_SRC}
-                ${HIP_EXTRA_LIBS} -L${GTEST_LIB_DIR} -lgtest -lpthread
-                -Wl,-rpath,${GTEST_LIB_DIR} -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
-                ${RJ_HIP_SANITIZER_LINK_FLAGS}
+                -I${CMAKE_CURRENT_SOURCE_DIR} ${HIP_INCLUDE_DIRS} -o
+                ${HIP_TEST_BIN} ${HIP_TEST_SRC} ${HIP_EXTRA_LIBS}
+                -L${GTEST_LIB_DIR} -lgtest -lpthread -Wl,-rpath,${GTEST_LIB_DIR}
+                -Wl,-rpath,${RJ_HSA_LIBRARY_DIR} ${RJ_HIP_SANITIZER_LINK_FLAGS}
             DEPENDS
                 ${HIP_TEST_SRC}
                 ${AMDCXX}
@@ -3024,9 +3028,44 @@ if(RJ_ENABLE_HIP_TESTS)
         )
         add_custom_target(${TEST_NAME}_target ALL DEPENDS ${HIP_TEST_BIN})
         add_dependencies(${TEST_NAME}_target rocjitsu_bin rocjitsu_shared)
+        foreach(_plugin_target IN LISTS ARG_PLUGIN_TARGETS)
+            if(TARGET ${_plugin_target})
+                add_dependencies(${TEST_NAME}_target ${_plugin_target})
+            endif()
+        endforeach()
         if(RJ_INSTALL_TESTS)
             rj_install_test_program(${HIP_TEST_BIN})
         endif()
+    endfunction()
+
+    # Derive a per-case plugin configuration from a base topology. Tests pass a
+    # private sink directory so parallel cases never share report files.
+    function(
+        rj_write_plugin_test_config
+        BASE_CONFIG
+        PLUGIN_NAME
+        SINK_DIR
+        OUT_CONFIG
+    )
+        file(READ ${BASE_CONFIG} _plugin_json)
+        string(
+            JSON _plugin_json
+            SET "${_plugin_json}"
+            "plugins"
+            "{\"${PLUGIN_NAME}\": {}}"
+        )
+        string(
+            JSON _plugin_json
+            SET "${_plugin_json}"
+            "sinks"
+            "{\"types\": [\"file\"], \"dir\": \"${SINK_DIR}\"}"
+        )
+        file(WRITE ${OUT_CONFIG} "${_plugin_json}")
+        set_property(
+            DIRECTORY
+            APPEND
+            PROPERTY CMAKE_CONFIGURE_DEPENDS ${BASE_CONFIG}
+        )
     endfunction()
 
     # Helper: register a HIP test case run through the CLI launcher.
