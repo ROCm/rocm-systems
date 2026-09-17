@@ -1287,18 +1287,41 @@ namespace RcclUnitTesting
   {
     if (this->verbose) TEST_INFO("Child %d begins DestroyComms", this->childId);
 
-    // 1. Release NCCL communicators
-    for (int i = 0; i < this->comms.size(); ++i)
+    // Release comms.  Finalize waits on an intra-node barrier with the other
+    // host-local ranks, so when this child owns several ranks they must be
+    // finalized inside one group call: finalizing them one at a time blocks the
+    // first rank in the barrier before any of the others can enter it.
+    bool hasActiveComm = false;
+    for (ncclComm_t comm : this->comms)
+      hasActiveComm |= comm != nullptr;
+
+    if (hasActiveComm)
     {
-      if (this->comms[i] == nullptr) continue;
+      CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart");
+      for (int i = 0; i < this->comms.size(); ++i)
+      {
+        if (this->comms[i] == nullptr) continue;
+        CHILD_NCCL_CALL(ncclCommFinalize(this->comms[i]), "ncclCommFinalize");
+      }
+
       if (this->useBlocking == false)
       {
-        ncclCommFinalize(this->comms[i]);
-        CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorCommFinalize", i);
+        ncclResult_t const groupEndState = ncclGroupEnd();
+        if (groupEndState != ncclSuccess && groupEndState != ncclInProgress)
+        {
+          TEST_ERROR("Child %d ncclGroupEnd failed during communicator finalization with error %d",
+                     this->childId, groupEndState);
+          return TEST_FAIL;
+        }
+        for (int i = 0; i < this->comms.size(); ++i)
+        {
+          if (this->comms[i] == nullptr) continue;
+          CHILD_NCCL_CALL_NON_BLOCKING("ncclCommGetAsyncErrorCommFinalize", i);
+        }
       }
       else
       {
-        CHILD_NCCL_CALL(ncclCommFinalize(this->comms[i]), "ncclCommFinalize");
+        CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd");
       }
     }
 
