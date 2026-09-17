@@ -134,7 +134,8 @@ make_access_runtime_mapping(StaticAccessAttribution access, LdsAccessKind access
                             const PatchLoweringProduct &patch) {
   if (range_count == 0u || bank_count == 0u)
     return std::nullopt;
-  return StaticAccessMappings{{
+  StaticAccessMappings mappings;
+  mappings.push_back({
       .access = std::move(access),
       .access_kind = access_kind,
       .first_slot = first_slot,
@@ -143,7 +144,8 @@ make_access_runtime_mapping(StaticAccessAttribution access, LdsAccessKind access
       .emitted_probe_text_offset = patch.trampoline_offset,
       .relocated_guest_text_offset = patch.relocated_guest_instruction_offset,
       .scratch_vgpr = patch.scratch_vgpr,
-  }};
+  });
+  return mappings;
 }
 
 [[nodiscard]] StaticAccessMappings
