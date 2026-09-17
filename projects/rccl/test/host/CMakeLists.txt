@@ -58,7 +58,6 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/libc_fakes.cc                  # libc seams (sockets/stdio/exit) for libc-only units
   fakes/ras_param_fakes.cc             # src/ras/ras_param.cc timeout scaling
   fakes/rma_fakes.cc                   # rma_proxy_progress externals (circular-buf / destroy)
-  fakes/ras_fakes.cc                   # ras_param.cc is not in this binary (client.cc RAS timeouts)
   fakes/comm_fakes.cc                  # comm-lifecycle seams (real in init.cc; faked here)
   fakes/recorder_fakes.cc              # src/recorder.cc
   fakes/utils_fakes.cc                 # src/misc/utils.cc (targets without the real utils.cc)
