@@ -20,6 +20,7 @@ test_categories:
       - "RasMicrotest.*"
       - "RasClientMicrotest.*"
       - "RmaProxyProgressTest.*"
+      - "TuningGeneralMicrotest.*"
       - "GroupEndInternalTest.*"
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"

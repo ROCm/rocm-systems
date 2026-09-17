@@ -86,6 +86,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     every header declaring a renamed name must precede it and the undef half
     must immediately follow the unit -- see `fakes/libc_seam.h:9-19`) instead
     of the shared `fakes/nccl_fakes.cc` the other units in this binary use.
+  - `tuning/tuning_general.cc` (`TUNING_GENERAL_CC_PATH`, from
+    `tuning-general-test.cc`); suite `TuningGeneralMicrotest.*`. Covers the
+    shared step-count, hardware-index, time-estimation, thread-threshold,
+    channel/warp-selection, and tuning-ID helpers without a GPU.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file
