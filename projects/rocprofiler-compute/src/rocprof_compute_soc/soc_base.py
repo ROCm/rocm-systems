@@ -44,6 +44,15 @@ from utils.utils_counter_defs import (
 from vendored import yaml
 
 
+def _coalesce_refill_enabled_from_env() -> bool:
+    """Second-pass metric coalesce refill (default on).
+
+    Set ROCPROF_COMPUTE_COALESCE_REFILL=0 to disable.
+    """
+    raw = os.environ.get("ROCPROF_COMPUTE_COALESCE_REFILL", "1").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
 def _same_bucket_priority_ids_from_policy_value(
     arch_name: str,
     ids: object,
@@ -600,7 +609,7 @@ class OmniSoC_Base:
                 file_count += 1
                 output_files[-1].add(ctr)
 
-        if apply_refill:
+        if apply_refill and _coalesce_refill_enabled_from_env():
             from rocprof_compute_soc.counter_grouping_refill import (
                 apply_metric_coalesce_refill_pass,
             )
