@@ -62,7 +62,9 @@ RJ_DIAGNOSTIC_POP
 #include <string>
 #include <string_view>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/resource.h>
+#include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -2309,6 +2311,74 @@ TEST(GpuMemoryTest, ClientCopyFailureFaultsInsteadOfStayingRetryable) {
         << "a refused client destination stayed retryable";
     memory.unregister_process(kPid);
   }
+}
+
+/// @brief Daemon passthrough must not fault a valid address owned only by its client.
+/// @details A remote pageable allocation has a userspace-looking VA but no mapping in
+/// the daemon. Identity probing that VA before process_vm_readv both rejects the
+/// daemon's hole and reports a spurious VM fault, even though the client read succeeds.
+TEST(GpuMemoryTest, ClientCopyBypassesDaemonIdentityTranslation) {
+  constexpr uint32_t kPid = 7;
+  constexpr size_t kBytes = 64;
+  int address_pipe[2] = {-1, -1};
+  int release_pipe[2] = {-1, -1};
+  ASSERT_EQ(pipe(address_pipe), 0);
+  ASSERT_EQ(pipe(release_pipe), 0);
+
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    close(address_pipe[0]);
+    close(release_pipe[1]);
+    if (prctl(PR_SET_DUMPABLE, 1) != 0 || prctl(PR_SET_PTRACER, getppid()) != 0)
+      _exit(5);
+    IdentityHostPage source;
+    if (source.data == nullptr)
+      _exit(2);
+    std::memset(source.data, 0x5a, kBytes);
+    const uint64_t address = source.addr();
+    if (write(address_pipe[1], &address, sizeof(address)) != sizeof(address))
+      _exit(3);
+    uint8_t release = 0;
+    if (read(release_pipe[0], &release, sizeof(release)) != sizeof(release))
+      _exit(4);
+    _exit(0);
+  }
+
+  close(address_pipe[1]);
+  close(release_pipe[0]);
+  uint64_t source_address = 0;
+  ASSERT_EQ(read(address_pipe[0], &source_address, sizeof(source_address)),
+            sizeof(source_address));
+
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  memory.set_process_client_pid(kPid, child);
+  IdentityHostPage destination;
+  ASSERT_NE(destination.data, nullptr);
+  process.map_pages(0x400000, destination.data, KfdProcess::kPageSize);
+
+  std::array<uint8_t, kBytes> direct_read{};
+  EXPECT_EQ(memory.read_block(source_address, direct_read, kPid), amdgpu::AccessOutcome::Complete);
+  EXPECT_TRUE(std::ranges::all_of(direct_read, [](uint8_t byte) { return byte == 0x5a; }));
+  EXPECT_EQ(memory.copy_block(0x400000, source_address, kBytes, kPid),
+            amdgpu::CopyOutcome::Complete);
+  EXPECT_TRUE(std::all_of(destination.data, destination.data + kBytes,
+                          [](uint8_t byte) { return byte == 0x5a; }));
+  EXPECT_EQ(amdgpu::GpuMemoryTestAccess::rejected_identity_accesses(memory), 0u);
+
+  memory.unregister_process(kPid);
+  const uint8_t release = 1;
+  EXPECT_EQ(write(release_pipe[1], &release, sizeof(release)), sizeof(release));
+  close(address_pipe[0]);
+  close(release_pipe[1]);
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  EXPECT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0);
 }
 
 /// @brief A copy fault must reach the process before copy_block() returns.
