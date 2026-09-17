@@ -60,12 +60,12 @@ collect_subtree_order(
         const pid_t pid = stack.back();
         stack.pop_back();
         walk.order.push_back(pid);
-        auto children_it = children_by_ppid.find(pid);
+        const auto children_it = children_by_ppid.find(pid);
         if(children_it == children_by_ppid.end())
         {
             continue;
         }
-        for(pid_t child_pid : children_it->second)
+        for(const pid_t child_pid : children_it->second)
         {
             walk.parent_of[child_pid] = pid;
             stack.push_back(child_pid);
@@ -102,7 +102,7 @@ extract_subtree(std::unordered_map<pid_t, process_node>&             nodes,
 
     std::unordered_map<pid_t, process_node> built;
     built.reserve(walk.order.size());
-    for(pid_t pid : walk.order)
+    for(const pid_t pid : walk.order)
     {
         built.insert(nodes.extract(pid));
     }
@@ -148,12 +148,12 @@ build_all_nodes(std::span<const artifact>                          rows,
 
     std::unordered_map<pid_t, process_node> nodes;
     nodes.reserve(pids_in_rows.size());
-    for(pid_t pid : pids_in_rows)
+    for(const pid_t pid : pids_in_rows)
     {
-        auto meta_it      = meta_by_pid.find(pid);
-        auto rows_it      = rows_by_pid.find(pid);
-        auto rows_for_pid = (rows_it != rows_by_pid.end()) ? std::move(rows_it->second)
-                                                           : std::vector<artifact>{};
+        const auto meta_it = meta_by_pid.find(pid);
+        const auto rows_it = rows_by_pid.find(pid);
+        auto rows_for_pid  = (rows_it != rows_by_pid.end()) ? std::move(rows_it->second)
+                                                            : std::vector<artifact>{};
 
         if(meta_it == meta_by_pid.end())
         {
@@ -186,7 +186,7 @@ build_children_index(std::span<const pid_t>                         sorted_pids,
 {
     std::unordered_map<pid_t, std::vector<pid_t>> children_by_ppid;
     children_by_ppid.reserve(nodes.size());
-    for(pid_t pid : sorted_pids)
+    for(const pid_t pid : sorted_pids)
     {
         const auto& meta = nodes.at(pid).meta;
         if(meta.ppid != k_no_pid && nodes.contains(meta.ppid))
@@ -206,7 +206,7 @@ find_root_pids(std::span<const pid_t>                         sorted_pids,
                const std::unordered_map<pid_t, process_node>& nodes)
 {
     std::vector<pid_t> root_pids;
-    for(pid_t pid : sorted_pids)
+    for(const pid_t pid : sorted_pids)
     {
         const auto& meta = nodes.at(pid).meta;
         if(meta.ppid == k_no_pid || !nodes.contains(meta.ppid))
@@ -241,7 +241,7 @@ process_tree::process_tree(std::span<const artifact>         rows,
     const auto root_pids        = find_root_pids(sorted_pids, nodes);
 
     m_roots.reserve(root_pids.size());
-    for(pid_t pid : root_pids)
+    for(const pid_t pid : root_pids)
     {
         m_roots.push_back(extract_subtree(nodes, children_by_ppid, pid));
     }

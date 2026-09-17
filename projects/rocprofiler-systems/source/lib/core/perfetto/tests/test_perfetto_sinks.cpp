@@ -21,8 +21,9 @@
 
 namespace
 {
-// NOLINTNEXTLINE(readability-identifier-naming) - GTest fixture convention is
-// PascalCase; the AbstractClassCase "_interface" naming rule doesn't apply here.
+// GTest fixture convention is PascalCase; the AbstractClassCase "_interface"
+// naming rule doesn't apply here.
+// NOLINTNEXTLINE(readability-identifier-naming)
 class PerfettoSinkTest : public ::testing::Test
 {
 protected:

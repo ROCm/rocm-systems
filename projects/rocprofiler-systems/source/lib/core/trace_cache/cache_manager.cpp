@@ -5,6 +5,7 @@
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
 #include "core/perfetto/cached_perfetto_session.hpp"
+#include "core/progress/tracker.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/data_types.hpp"
 #include "core/trace_cache/discovery.hpp"
@@ -12,9 +13,10 @@
 #include "library/runtime.hpp"
 #include "logger/debug.hpp"
 
+#include <unistd.h>
+
 #include <exception>
 #include <memory>
-#include <unistd.h>
 #include <vector>
 
 namespace rocprofsys

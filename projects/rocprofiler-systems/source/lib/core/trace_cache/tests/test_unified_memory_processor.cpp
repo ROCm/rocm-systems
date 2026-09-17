@@ -8,6 +8,7 @@
 #include "common/env_vars.hpp"
 #include "common/tests/filesystem.hpp"
 #include "core/categories.hpp"
+#include "core/output/artifact.hpp"
 #include "core/output/registry.hpp"
 #include "core/trace_cache/unified_memory_processor.hpp"
 #include "unified_memory_test_helpers.hpp"

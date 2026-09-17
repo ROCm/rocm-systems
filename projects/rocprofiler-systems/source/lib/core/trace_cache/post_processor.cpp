@@ -8,7 +8,10 @@
 #include "core/output/process_metadata.hpp"
 #include "core/output/registry.hpp"
 #include "core/perfetto/engine.hpp"
+#include "core/progress/callback.hpp"
+#include "core/progress/tracker.hpp"
 #include "core/trace_cache/cacheable.hpp"
+#include "core/trace_cache/data_types.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/perfetto_processor.hpp"
 #include "core/trace_cache/rocpd_processor.hpp"
@@ -121,7 +124,7 @@ process_buffered_storage(
     // RAII lifetime guard: configure_processors registers raw references to the
     // returned processors as handlers on _coordinator. Holding processors in scope
     // keeps those processors alive until the parse + finalize is done.
-    [[maybe_unused]] auto processors =
+    [[maybe_unused]] const auto processors =
         configure_processors(_coordinator, _config, _formats, _engine, tracks);
     storage_parser_t parser(_storage_filename);
 

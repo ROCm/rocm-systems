@@ -7,10 +7,15 @@
 #include "core/output/process_metadata.hpp"
 #include "core/output/process_tree.hpp"
 
+// Directly provides pid_t used below; clang-tidy's Include Cleaner flags this
+// header as both redundant and required (a known false-positive with glibc's
+// sys/types.h).
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include <sys/types.h>
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -21,6 +26,7 @@ using rocprofsys::output::process_metadata;
 using rocprofsys::output::process_tree;
 
 artifact
+// NOLINTNEXTLINE(misc-include-cleaner)
 make_row(std::string path, pid_t pid, std::uint64_t size_bytes = 0)
 {
     artifact row{};
@@ -63,8 +69,7 @@ TEST(process_tree, parent_with_two_children_nests_under_parent)
     constexpr pid_t k_child1_pid = 200;
     constexpr pid_t k_child2_pid = 201;
 
-    std::vector<artifact>         rows{ make_row("p", k_parent_pid),
-                                make_row("c1", k_child1_pid),
+    std::vector<artifact> rows{ make_row("p", k_parent_pid), make_row("c1", k_child1_pid),
                                 make_row("c2", k_child2_pid) };
     std::vector<process_metadata> processes{ make_meta(k_parent_pid, -1),
                                              make_meta(k_child1_pid, k_parent_pid),
@@ -78,8 +83,8 @@ TEST(process_tree, parent_with_two_children_nests_under_parent)
 
 TEST(process_tree, orphan_with_missing_ppid_attaches_at_root)
 {
-    constexpr pid_t k_root_pid    = 100;
-    constexpr pid_t k_orphan_pid  = 999;
+    constexpr pid_t k_root_pid     = 100;
+    constexpr pid_t k_orphan_pid   = 999;
     constexpr pid_t k_unknown_ppid = 12345;
 
     std::vector<artifact>         rows{ make_row("p", k_root_pid),
@@ -102,7 +107,7 @@ TEST(process_tree, missing_metadata_pid_is_diagnosed)
     std::vector<process_metadata> processes{ make_meta(k_known_pid, -1) };
     process_tree                  tree{ rows, processes };
     EXPECT_EQ(tree.diagnostics().missing_metadata_pids,
-             (std::vector<pid_t>{ k_ghost_pid }));
+              (std::vector<pid_t>{ k_ghost_pid }));
     ASSERT_EQ(tree.roots().size(), 2u);
 }
 
@@ -117,7 +122,7 @@ TEST(process_tree, ppid_cycle_excludes_members_and_is_diagnosed)
     process_tree                  tree{ rows, processes };
     EXPECT_TRUE(tree.roots().empty());
     EXPECT_EQ(tree.diagnostics().cyclic_ppid_pids,
-             (std::vector<pid_t>{ k_pid_a, k_pid_b }));
+              (std::vector<pid_t>{ k_pid_a, k_pid_b }));
 }
 
 TEST(process_tree, deep_parent_chain_does_not_overflow_stack)
@@ -154,10 +159,10 @@ TEST(process_tree, deep_parent_chain_does_not_overflow_stack)
 
 TEST(process_tree, rows_sorted_descending_by_size)
 {
-    constexpr pid_t          k_pid         = 100;
-    constexpr std::uint64_t  k_small_size  = 1024;
-    constexpr std::uint64_t  k_large_size  = 1024ULL * 1024;
-    constexpr std::uint64_t  k_medium_size = 4096;
+    constexpr pid_t         k_pid         = 100;
+    constexpr std::uint64_t k_small_size  = 1024;
+    constexpr std::uint64_t k_large_size  = 1024ULL * 1024;
+    constexpr std::uint64_t k_medium_size = 4096;
 
     std::vector<artifact>         rows{ make_row("small", k_pid, k_small_size),
                                 make_row("large", k_pid, k_large_size),
@@ -174,12 +179,12 @@ TEST(process_tree, rows_sorted_descending_by_size)
 
 TEST(process_tree, size_rollup_computed_during_construction)
 {
-    constexpr pid_t          k_parent_pid   = 100;
-    constexpr std::uint64_t  k_parent_size  = 1000;
-    constexpr pid_t          k_child1_pid   = 200;
-    constexpr std::uint64_t  k_child1_size  = 4096;
-    constexpr pid_t          k_child2_pid   = 201;
-    constexpr std::uint64_t  k_child2_size  = 2048;
+    constexpr pid_t         k_parent_pid  = 100;
+    constexpr std::uint64_t k_parent_size = 1000;
+    constexpr pid_t         k_child1_pid  = 200;
+    constexpr std::uint64_t k_child1_size = 4096;
+    constexpr pid_t         k_child2_pid  = 201;
+    constexpr std::uint64_t k_child2_size = 2048;
 
     std::vector<artifact>         rows{ make_row("p", k_parent_pid, k_parent_size),
                                 make_row("c1", k_child1_pid, k_child1_size),

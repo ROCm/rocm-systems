@@ -15,6 +15,7 @@
 #include "core/track_registry.hpp"
 #include "logger/debug.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <filesystem>

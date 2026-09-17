@@ -6,6 +6,7 @@
 #include "common/path.hpp"
 #include "common/units/data_size.hpp"
 #include "config.hpp"
+#include "core/output/artifact.hpp"
 #include "core/output/registry.hpp"
 #include "core/perfetto/log_filter.hpp"
 #include "library/runtime.hpp"
@@ -284,7 +285,9 @@ post_process(tim::manager* timemory_manager, bool& perfetto_output_error)
                 ofs.write(trace_data.data(), trace_data.size());
                 if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
                 if(timemory_manager)
+                {
                     timemory_manager->add_file_output("protobuf", "perfetto", _filename);
+                }
                 output::registry::instance().register_file(
                     _filename, output::output_format::perfetto);
             }

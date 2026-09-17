@@ -3061,7 +3061,9 @@ tool_attach_fini(void* /* tool_data */)
         bool perfetto_output_error = false;
         ::rocprofsys::perfetto::post_process(nullptr, perfetto_output_error);
         if(perfetto_output_error)
+        {
             LOG_ERROR("Perfetto output error occurred during attach finalization");
+        }
     }
 
     rocprofsys_finalize_hidden();

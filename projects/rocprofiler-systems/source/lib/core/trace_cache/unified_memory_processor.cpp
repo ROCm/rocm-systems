@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/unified_memory_processor.hpp"
+#include "core/agent_manager.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
+#include "core/output/artifact.hpp"
 #include "core/output/registry.hpp"
 #include "logger/debug.hpp"
 #include <cstdint>
@@ -16,6 +18,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <system_error>

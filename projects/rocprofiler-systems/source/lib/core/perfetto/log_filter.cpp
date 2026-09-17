@@ -8,6 +8,7 @@
 #include <perfetto.h>
 
 #include <cstdint>
+#include <mutex>
 #include <shared_mutex>
 
 namespace rocprofsys::core::log_filter
@@ -45,7 +46,7 @@ classify(::perfetto::base::LogLev level)
 void
 filter_fn(::perfetto::base::LogMessageCallbackArgs args)
 {
-    std::shared_lock lock(g_mutex);
+    const std::shared_lock lock(g_mutex);
     if(!g_registered)
     {
         return;
@@ -74,7 +75,7 @@ filter_fn(::perfetto::base::LogMessageCallbackArgs args)
 void
 register_with_perfetto_logger()
 {
-    std::unique_lock lock(g_mutex);
+    const std::unique_lock lock(g_mutex);
     if(g_registered)
     {
         return;
@@ -86,7 +87,7 @@ register_with_perfetto_logger()
 void
 unregister_from_perfetto_logger()
 {
-    std::unique_lock lock(g_mutex);
+    const std::unique_lock lock(g_mutex);
     ::perfetto::base::SetLogMessageCallback(nullptr);
     g_registered = false;
 }
