@@ -243,6 +243,12 @@ struct WaitcheckTarget {
   [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
   embedded_wait_fields(const Instruction &inst, rj_code_arch_t arch);
 
+  [[nodiscard]] static bool vm_vsrc_event_implied_by_wait(WaitEventKind kind,
+                                                          WaitCounterKind counter);
+
+  [[nodiscard]] static std::optional<WaitEventKind>
+  normalized_hardware_event_kind(WaitCounterKind counter, WaitEventKind kind, WaitcntModel model);
+
   [[nodiscard]] static bool is_xcnt_vmem_kind(WaitEventKind kind);
 
   [[nodiscard]] static uint32_t depctr_field(uint32_t value, uint32_t shift, uint32_t width);

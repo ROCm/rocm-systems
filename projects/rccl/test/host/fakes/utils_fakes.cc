@@ -16,3 +16,17 @@
 // Per-thread wait signal referenced by the inline MPSC-callback drain helpers
 // in utils.h.
 thread_local struct ncclThreadSignal ncclThreadSignalLocalInstance = {};
+
+// busId helpers referenced by transports (e.g. p2p.cc) but only faked here for
+// microtest binaries that do not link the real utils.cc. Sensible defaults.
+ncclResult_t busIdToInt64(const char* /*busId*/, int64_t* id)
+{
+    if (id) *id = 0;
+    return ncclSuccess;
+}
+
+ncclResult_t getBusId(int /*cudaDev*/, int64_t* busId)
+{
+    if (busId) *busId = 0;
+    return ncclSuccess;
+}

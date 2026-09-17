@@ -43,6 +43,75 @@ std::string_view wait_counter_name(WaitCounterKind counter) {
 
 namespace waitcheck_detail {
 
+bool WaitcheckTarget::vm_vsrc_event_implied_by_wait(WaitEventKind kind, WaitCounterKind counter) {
+  switch (counter) {
+  case WaitCounterKind::Load:
+    return kind == WaitEventKind::VmemNoSamplerLoad || kind == WaitEventKind::FlatLoad;
+  case WaitCounterKind::Store:
+    return kind == WaitEventKind::VmemStore || kind == WaitEventKind::FlatStore;
+  case WaitCounterKind::Ds:
+    return kind == WaitEventKind::Ds || kind == WaitEventKind::FlatLoad ||
+           kind == WaitEventKind::FlatStore;
+  case WaitCounterKind::Sample:
+    return kind == WaitEventKind::Sample;
+  case WaitCounterKind::Bvh:
+    return kind == WaitEventKind::Bvh;
+  default:
+    return false;
+  }
+}
+
+std::optional<WaitEventKind>
+WaitcheckTarget::normalized_hardware_event_kind(WaitCounterKind counter, WaitEventKind kind,
+                                                WaitcntModel model) {
+  switch (counter) {
+  case WaitCounterKind::Load:
+    // Generic FLAT and ordinary VMEM loads both raise VMEM_READ_ACCESS.
+    // GLOBAL_INV is explicitly ignored by LLVM's LOAD_CNT out-of-order
+    // test. Pre-gfx12 image event kinds share that same hardware event.
+    if (kind == WaitEventKind::GlobalInv)
+      return std::nullopt;
+    if (kind == WaitEventKind::FlatLoad || kind == WaitEventKind::LdsDirect ||
+        (uses_legacy_waitcnt(model) &&
+         (kind == WaitEventKind::Sample || kind == WaitEventKind::Bvh))) {
+      return WaitEventKind::VmemNoSamplerLoad;
+    }
+    return kind;
+  case WaitCounterKind::Ds:
+    // A generic FLAT access raises the same LDS_ACCESS event as native DS.
+    if (kind == WaitEventKind::FlatLoad || kind == WaitEventKind::FlatStore)
+      return WaitEventKind::Ds;
+    return kind;
+  case WaitCounterKind::Store:
+    if (kind == WaitEventKind::GlobalWb)
+      return WaitEventKind::VmemStore;
+    return kind;
+  case WaitCounterKind::X:
+    // X_CNT distinguishes VMEM_GROUP from SMEM_GROUP, not the underlying
+    // load/store/image operation.
+    if (kind == WaitEventKind::Smem)
+      return WaitEventKind::Smem;
+    if (is_xcnt_vmem_kind(kind))
+      return WaitEventKind::VmemNoSamplerLoad;
+    return kind;
+  case WaitCounterKind::VmVsrc:
+    if (kind == WaitEventKind::Ds)
+      return WaitEventKind::Ds;
+    if (kind == WaitEventKind::FlatLoad || kind == WaitEventKind::FlatStore)
+      return WaitEventKind::FlatLoad;
+    if (is_xcnt_vmem_kind(kind))
+      return WaitEventKind::VmemNoSamplerLoad;
+    return kind;
+  case WaitCounterKind::Async:
+    // Load, store, and barrier forms all raise ASYNC_ACCESS.
+    return WaitEventKind::AsyncLdsLoad;
+  case WaitCounterKind::Tensor:
+    return WaitEventKind::TensorLdsLoad;
+  default:
+    return kind;
+  }
+}
+
 [[nodiscard]] size_t WaitcheckTarget::counter_index(WaitCounterKind counter) {
   return static_cast<size_t>(counter);
 }

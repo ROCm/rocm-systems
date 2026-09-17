@@ -286,24 +286,6 @@ util::Result WaitcheckStateOps::apply_kmcnt_wait(PendingState &state, uint32_t c
   return util::Result::success();
 }
 
-bool WaitcheckStateOps::vm_vsrc_event_implied_by_wait(WaitEventKind kind, WaitCounterKind counter) {
-  switch (counter) {
-  case WaitCounterKind::Load:
-    return kind == WaitEventKind::VmemNoSamplerLoad || kind == WaitEventKind::FlatLoad;
-  case WaitCounterKind::Store:
-    return kind == WaitEventKind::VmemStore || kind == WaitEventKind::FlatStore;
-  case WaitCounterKind::Ds:
-    return kind == WaitEventKind::Ds || kind == WaitEventKind::FlatLoad ||
-           kind == WaitEventKind::FlatStore;
-  case WaitCounterKind::Sample:
-    return kind == WaitEventKind::Sample;
-  case WaitCounterKind::Bvh:
-    return kind == WaitEventKind::Bvh;
-  default:
-    return false;
-  }
-}
-
 template <typename Predicate>
 void WaitcheckStateOps::retire_event_kind_ages(PendingState &state, WaitCounterKind counter,
                                                Predicate belongs_to_group, uint32_t minimum_age) {
@@ -453,57 +435,6 @@ bool WaitcheckStateOps::counter_has_event_kind(const PendingState &state, WaitCo
                                                WaitEventKind kind) {
   return state.pending_event_ages[counter_index(counter)].values[static_cast<size_t>(kind)] !=
          kNoPendingEventAge;
-}
-
-std::optional<WaitEventKind>
-WaitcheckStateOps::normalized_hardware_event_kind(WaitCounterKind counter, WaitEventKind kind,
-                                                  WaitcntModel model) {
-  switch (counter) {
-  case WaitCounterKind::Load:
-    // Generic FLAT and ordinary VMEM loads both raise VMEM_READ_ACCESS.
-    // GLOBAL_INV is explicitly ignored by LLVM's LOAD_CNT out-of-order
-    // test. Pre-gfx12 image event kinds share that same hardware event.
-    if (kind == WaitEventKind::GlobalInv)
-      return std::nullopt;
-    if (kind == WaitEventKind::FlatLoad || kind == WaitEventKind::LdsDirect ||
-        (uses_legacy_waitcnt(model) &&
-         (kind == WaitEventKind::Sample || kind == WaitEventKind::Bvh))) {
-      return WaitEventKind::VmemNoSamplerLoad;
-    }
-    return kind;
-  case WaitCounterKind::Ds:
-    // A generic FLAT access raises the same LDS_ACCESS event as native DS.
-    if (kind == WaitEventKind::FlatLoad || kind == WaitEventKind::FlatStore)
-      return WaitEventKind::Ds;
-    return kind;
-  case WaitCounterKind::Store:
-    if (kind == WaitEventKind::GlobalWb)
-      return WaitEventKind::VmemStore;
-    return kind;
-  case WaitCounterKind::X:
-    // X_CNT distinguishes VMEM_GROUP from SMEM_GROUP, not the underlying
-    // load/store/image operation.
-    if (kind == WaitEventKind::Smem)
-      return WaitEventKind::Smem;
-    if (is_xcnt_vmem_kind(kind))
-      return WaitEventKind::VmemNoSamplerLoad;
-    return kind;
-  case WaitCounterKind::VmVsrc:
-    if (kind == WaitEventKind::Ds)
-      return WaitEventKind::Ds;
-    if (kind == WaitEventKind::FlatLoad || kind == WaitEventKind::FlatStore)
-      return WaitEventKind::FlatLoad;
-    if (is_xcnt_vmem_kind(kind))
-      return WaitEventKind::VmemNoSamplerLoad;
-    return kind;
-  case WaitCounterKind::Async:
-    // Load, store, and barrier forms all raise ASYNC_ACCESS.
-    return WaitEventKind::AsyncLdsLoad;
-  case WaitCounterKind::Tensor:
-    return WaitEventKind::TensorLdsLoad;
-  default:
-    return kind;
-  }
 }
 
 bool WaitcheckStateOps::flat_memory_makes_counter_out_of_order(const PendingState &state,
@@ -755,7 +686,7 @@ util::Result WaitcheckStateOps::apply_waitcnt(PendingState &state, const Instruc
     state.expert_scheduling = expert_scheduling;
     return util::Result::success();
   }
-  if (inst.mnemonic() == "s_wait_alu")
+  if (inst.mnemonic() == "s_wait_alu" || inst.mnemonic() == "s_waitcnt_depctr")
     apply_sgpr_hazard_wait(state.sgpr_hazards,
                            static_cast<uint32_t>(inst.src_operand(0)->encoding_value()));
   return apply_wait_fields(state, *fields.value(), arch);

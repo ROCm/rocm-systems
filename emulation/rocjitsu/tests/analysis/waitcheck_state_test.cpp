@@ -40,6 +40,90 @@ TEST(WaitcheckState, PartialWaitRetiresOnlySufficientlyOldEvents) {
   EXPECT_TRUE(state.ready_regs.contains({RegClass::VGPR, 1, 1}));
 }
 
+TEST(WaitcheckState, StoreCounterOrderingControlsPartialRetirement) {
+  struct Case {
+    rj_code_arch_t arch;
+    WaitCounterKind counter;
+    WaitEventKind older;
+    WaitEventKind younger;
+    bool out_of_order;
+  };
+  const Case cases[] = {
+      // Before VScnt, ordinary loads and stores are ordered on the shared counter.
+      {ROCJITSU_CODE_ARCH_CDNA3, WaitCounterKind::Load, WaitEventKind::VmemStore,
+       WaitEventKind::VmemNoSamplerLoad, false},
+      {ROCJITSU_CODE_ARCH_CDNA4, WaitCounterKind::Load, WaitEventKind::VmemStore,
+       WaitEventKind::VmemNoSamplerLoad, false},
+      // Stores and writebacks share the same hardware event.
+      {ROCJITSU_CODE_ARCH_RDNA3, WaitCounterKind::Store, WaitEventKind::VmemStore,
+       WaitEventKind::GlobalWb, false},
+      {ROCJITSU_CODE_ARCH_RDNA4, WaitCounterKind::Store, WaitEventKind::VmemStore,
+       WaitEventKind::GlobalWb, false},
+      // Generic FLAT stores prevent partial DS retirement on CDNA3/4, but
+      // normalize to the same event as native DS accesses on RDNA.
+      {ROCJITSU_CODE_ARCH_CDNA3, WaitCounterKind::Ds, WaitEventKind::FlatStore, WaitEventKind::Ds,
+       true},
+      {ROCJITSU_CODE_ARCH_CDNA4, WaitCounterKind::Ds, WaitEventKind::FlatStore, WaitEventKind::Ds,
+       true},
+      {ROCJITSU_CODE_ARCH_RDNA3, WaitCounterKind::Ds, WaitEventKind::FlatStore, WaitEventKind::Ds,
+       false},
+      {ROCJITSU_CODE_ARCH_RDNA4, WaitCounterKind::Ds, WaitEventKind::FlatStore, WaitEventKind::Ds,
+       false},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.arch);
+    SCOPED_TRACE(static_cast<int>(test.counter));
+    PendingState state;
+    const size_t idx = Ops::counter_index(test.counter);
+    PendingEvent store;
+    store.counter = test.counter;
+    store.kind = test.older;
+    store.check_memory_order = true;
+    store.min_younger = 1;
+    PendingEvent younger = store;
+    younger.kind = test.younger;
+    younger.section_offset = 4;
+    younger.min_younger = 0;
+    state.pending[idx] = {store, younger};
+    auto &ages = state.pending_event_ages[idx].values;
+    ages[static_cast<size_t>(test.older)] = 1;
+    ages[static_cast<size_t>(test.younger)] = 0;
+    auto out_of_order = Ops::counter_out_of_order(state, test.counter, test.arch);
+    ASSERT_TRUE(out_of_order.succeeded());
+    EXPECT_EQ(out_of_order.value(), test.out_of_order);
+    auto required = Ops::dependency_required_count(state, store, test.arch);
+    ASSERT_TRUE(required.succeeded());
+    EXPECT_EQ(required.value(), test.out_of_order ? 0u : 1u);
+    ASSERT_TRUE(Ops::apply_counter_wait(state, test.counter, 1, test.arch).succeeded());
+    EXPECT_EQ(state.pending[idx], test.out_of_order ? (std::vector<PendingEvent>{store, younger})
+                                                    : (std::vector<PendingEvent>{younger}));
+    EXPECT_TRUE(state.ready_regs.none());
+    ASSERT_TRUE(Ops::apply_counter_wait(state, test.counter, 0, test.arch).succeeded());
+    EXPECT_TRUE(state.pending[idx].empty());
+    EXPECT_EQ(state.pending_event_ages[idx], PendingEventAges{});
+  }
+}
+
+TEST(WaitcheckState, LoadWaitDoesNotReleaseXcntSourcesWhileAStoreIsPending) {
+  for (WaitEventKind kind : {WaitEventKind::VmemStore, WaitEventKind::FlatStore}) {
+    SCOPED_TRACE(static_cast<int>(kind));
+    PendingState state;
+    const size_t x = Ops::counter_index(WaitCounterKind::X);
+    auto source = load(0, 1);
+    source.counter = WaitCounterKind::X;
+    source.produces_regs = false;
+    state.pending[x] = {source};
+    // A store may be represented by the per-kind summary alone.
+    state.pending_event_ages[x].values[static_cast<size_t>(kind)] = 0;
+    const auto before = state;
+    Ops::apply_xcnt_wait_implied_by_loadcnt(state, 0);
+    EXPECT_EQ(state, before);
+    Ops::apply_xcnt_wait(state, 0);
+    EXPECT_TRUE(state.pending[x].empty());
+    EXPECT_EQ(state.pending_event_ages[x], PendingEventAges{});
+  }
+}
+
 TEST(WaitcheckState, SharedGenerationBecomesReadyAfterAllCountersRetire) {
   PendingState state;
   auto event = load(0, 0);
@@ -333,6 +417,65 @@ std::unique_ptr<Instruction> decode_wait(uint32_t word, rj_code_arch_t arch) {
     return nullptr;
   }
   return std::move(result).value();
+}
+
+TEST(WaitcheckState, DependencyWaitsRetireOnlySelectedScalarHazards) {
+  struct Case {
+    uint32_t immediate;
+    bool salu;
+    bool valu_sgpr;
+    bool valu_vcc;
+  };
+  // Leave both vector fields at their no-wait sentinels. A nonzero VA_SDST
+  // field must retain the hazard, even when it is below the no-wait value.
+  const Case cases[] = {{0xffff, false, false, false}, {0xfffe, true, false, false},
+                        {0xfffd, false, false, true},  {0xf1ff, false, true, false},
+                        {0xf3ff, false, false, false}, {0xf1fc, true, true, true}};
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                              ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    for (const auto &test : cases) {
+      SCOPED_TRACE(test.immediate);
+      PendingState state;
+      auto &hazards = state.sgpr_hazards;
+      hazards.tracked_pairs.set(0);
+      hazards.tracked_vcc = true;
+      hazards.salu_hazards.set(0);
+      hazards.valu_hazards.set(1);
+      hazards.vcc_hazard = kSgprHazardSalu | kSgprHazardValu;
+      hazards.salu_producers[0] = {};
+      hazards.valu_producers[1] = {};
+      hazards.salu_vcc_producer = SgprHazardProducer{};
+      hazards.valu_vcc_producer = SgprHazardProducer{};
+      hazards.consecutive_ds_nops = 2;
+      auto source = load(0, 0);
+      source.counter = WaitCounterKind::VmVsrc;
+      source.produces_regs = false;
+      state.pending[Ops::counter_index(WaitCounterKind::VmVsrc)].push_back(source);
+      state.va_vdst_hazards.hazards[0] = {};
+
+      auto expected = state;
+      auto &remaining = expected.sgpr_hazards;
+      if (test.salu) {
+        remaining.salu_hazards.reset();
+        remaining.salu_producers.clear();
+        remaining.salu_vcc_producer.reset();
+        remaining.vcc_hazard &= ~kSgprHazardSalu;
+      }
+      if (test.valu_sgpr) {
+        remaining.valu_hazards.reset();
+        remaining.valu_producers.clear();
+      }
+      if (test.valu_vcc) {
+        remaining.valu_vcc_producer.reset();
+        remaining.vcc_hazard &= ~kSgprHazardValu;
+      }
+      auto wait = decode_wait(0xbf880000u | test.immediate, arch);
+      ASSERT_NE(wait, nullptr);
+      ASSERT_TRUE(Ops::apply_waitcnt(state, *wait, arch).succeeded());
+      EXPECT_EQ(state, expected);
+    }
+  }
 }
 
 TEST(WaitcheckState, InstructionWaitsRespectSentinelsAndArchitecture) {
