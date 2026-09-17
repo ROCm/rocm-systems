@@ -190,6 +190,7 @@ set(TEST_SRC
     hipMemcpySync.cc
     hipMemsetSync.cc
     hipMemsetAsync.cc
+    hipMemsetAsyncPatternScaling.cc
     hipMemAdvise_old.cc
     hipMemAdvise.cc
     hipMemRangeGetAttributes.cc
