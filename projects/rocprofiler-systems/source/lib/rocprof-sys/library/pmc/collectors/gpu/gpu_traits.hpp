@@ -40,7 +40,7 @@ using ::rocprofsys::pmc::device_type;
 [[nodiscard]] inline bool
 is_runtime_visible(const std::string& bdf, const std::set<std::string>& visible_bdfs)
 {
-    return !bdf.empty() && visible_bdfs.count(bdf) > 0;
+    return !bdf.empty() && visible_bdfs.contains(bdf);
 }
 
 /**
@@ -207,7 +207,10 @@ struct gpu_traits
                                   (filter.mode == device_selection_mode::specific &&
                                    filter.indices.count(index) > 0);
 
-            if(should_include) ++selected_count;
+            if(should_include)
+            {
+                ++selected_count;
+            }
 
             if(should_include && visible_bdfs.has_value())
             {
@@ -244,7 +247,10 @@ struct gpu_traits
         const std::vector<std::pair<size_t, std::string>>& excluded)
     {
         static std::atomic<bool> s_reported{ false };
-        if(s_reported.exchange(true)) return;
+        if(s_reported.exchange(true))
+        {
+            return;
+        }
 
         // Visibility unknown (the ROCm runtime reported no GPU agents at all) is not the
         // same as "nothing is visible". Stay quiet when AMD SMI found no GPUs either,
@@ -262,7 +268,10 @@ struct gpu_traits
             return;
         }
 
-        if(excluded.empty()) return;
+        if(excluded.empty())
+        {
+            return;
+        }
 
         // Losing every selected device is either a deliberate mask or a failure to
         // correlate AMD SMI devices with ROCm agents. The runtime's own visible-BDF list
@@ -280,7 +289,9 @@ struct gpu_traits
         }
 
         for(const auto& [index, bdf] : excluded)
+        {
             log_visibility_exclusion(filter, index, bdf);
+        }
     }
 
     /**

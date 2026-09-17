@@ -46,7 +46,10 @@ void
 rccl_metadata_initialize_categories()
 {
     static bool _is_initialized = false;
-    if(_is_initialized) return;
+    if(_is_initialized)
+    {
+        return;
+    }
 
     trace_cache::get_metadata_registry().add_string(
         trait::name<category::comm_data>::value);
@@ -240,9 +243,9 @@ cache_rccl_comm_data_events(std::uint32_t rccl_device_idx, size_t bytes,
 
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
         static_cast<size_t>(category_enum_id<category::comm_data>::value), Track::label,
-        timestamp_ns, event_metadata.c_str(), stack_id, parent_stack_id, correlation_id,
+        timestamp_ns, event_metadata, stack_id, parent_stack_id, correlation_id,
         call_stack, line_info, rccl_device_idx,
-        static_cast<std::uint8_t>(agent_type::gpu), pmc_label.c_str(),
+        static_cast<std::uint8_t>(agent_type::gpu), pmc_label,
         static_cast<double>(cumulative), std::nullopt });
 }
 
@@ -273,7 +276,10 @@ rccl_get_device_id(ncclComm_t comm) noexcept
 {
     constexpr std::uint32_t DEFAULT_DEVICE_ID = 0;
 
-    if(comm == nullptr) return DEFAULT_DEVICE_ID;
+    if(comm == nullptr)
+    {
+        return DEFAULT_DEVICE_ID;
+    }
 
     using ncclCommCuDevice_fn = ncclResult_t (*)(ncclComm_t, int*);
 
@@ -292,7 +298,10 @@ rccl_get_device_id(ncclComm_t comm) noexcept
         }
     });
 
-    if(ncclCommCuDevice_ptr == nullptr) return DEFAULT_DEVICE_ID;
+    if(ncclCommCuDevice_ptr == nullptr)
+    {
+        return DEFAULT_DEVICE_ID;
+    }
 
     int          device_id = DEFAULT_DEVICE_ID;
     ncclResult_t result    = ncclCommCuDevice_ptr(comm, &device_id);

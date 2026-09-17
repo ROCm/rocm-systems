@@ -188,7 +188,10 @@ void
 metadata_initialize_sampling_category()
 {
     static bool _is_initialized = false;
-    if(_is_initialized) return;
+    if(_is_initialized)
+    {
+        return;
+    }
 
     trace_cache::get_metadata_registry().add_string(
         trait::name<category::sampling>::value);
@@ -208,7 +211,10 @@ metadata_initialize_thread_info(size_t tid)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", tid));
     }
-    if(!_thread_info) return;
+    if(!_thread_info)
+    {
+        return;
+    }
 
     trace_cache::get_metadata_registry().add_thread_info(
         { getppid(), getpid(),
@@ -225,7 +231,10 @@ metadata_initialize_track(std::int64_t tid)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", tid));
     }
-    if(!_thread_info) return;
+    if(!_thread_info)
+    {
+        return;
+    }
 
     size_t thread_id = _thread_info->index_data->system_value;
 
@@ -283,12 +292,18 @@ cache_sampling_data(std::int64_t                               _tid,
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", _tid));
     }
-    if(!_thread_info) return;
+    if(!_thread_info)
+    {
+        return;
+    }
 
     // Store timer sampling data
     for(const auto& itr : _timer_data)
     {
-        if(!_thread_info->is_valid_lifetime({ itr.m_beg, itr.m_end })) continue;
+        if(!_thread_info->is_valid_lifetime({ itr.m_beg, itr.m_end }))
+        {
+            continue;
+        }
 
         for(const auto& iitr : itr.m_stack)
         {
@@ -300,9 +315,9 @@ cache_sampling_data(std::int64_t                               _tid,
             trace_cache::get_buffer_storage().store(trace_cache::backtrace_region_sample{
                 static_cast<std::uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING),
                 static_cast<std::uint64_t>(_thread_info->index_data->system_value),
-                _track_name.c_str(), _name.c_str(), itr.m_beg, itr.m_end,
-                trait::name<category::timer_sampling>::value, _call_stack.c_str(),
-                _line_info.c_str(), "{}" });
+                _track_name, _name, itr.m_beg, itr.m_end,
+                trait::name<category::timer_sampling>::value, _call_stack, _line_info,
+                "{}" });
         }
     }
 
@@ -315,13 +330,18 @@ cache_sampling_data(std::int64_t                               _tid,
         const auto _overflow_prefix = std::string_view{ "PERF_COUNT_" };
         const auto _overflow_pos    = _overflow_event.find(_overflow_prefix);
         if(_overflow_pos != std::string::npos)
+        {
             _overflow_event =
                 _overflow_event.substr(_overflow_pos + _overflow_prefix.length());
+        }
     }
 
     for(const auto& itr : _overflow_data)
     {
-        if(!_thread_info->is_valid_lifetime({ itr.m_beg, itr.m_end })) continue;
+        if(!_thread_info->is_valid_lifetime({ itr.m_beg, itr.m_end }))
+        {
+            continue;
+        }
 
         for(const auto& iitr : itr.m_stack)
         {
@@ -333,9 +353,9 @@ cache_sampling_data(std::int64_t                               _tid,
             trace_cache::get_buffer_storage().store(trace_cache::backtrace_region_sample{
                 static_cast<std::uint32_t>(ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING),
                 static_cast<std::uint64_t>(_thread_info->index_data->system_value),
-                _track_name.c_str(), _name.c_str(), itr.m_beg, itr.m_end,
-                trait::name<category::overflow_sampling>::value, _call_stack.c_str(),
-                _line_info.c_str(), "{}" });
+                _track_name, _name, itr.m_beg, itr.m_end,
+                trait::name<category::overflow_sampling>::value, _call_stack, _line_info,
+                "{}" });
         }
     }
 }
@@ -353,7 +373,10 @@ configure(bool _setup, std::int64_t _tid = threading::get_id());
 void
 configure_sampler_allocator(std::shared_ptr<sampler_allocator_t>& _v)
 {
-    if(_v) return;
+    if(_v)
+    {
+        return;
+    }
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
     auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
@@ -375,7 +398,9 @@ configure_sampler_allocators()
             _allocators.resize(std::ceil(config::get_num_threads_hint() /
                                          config::get_sampling_allocator_size()));
             for(auto& itr : _allocators)
+            {
                 configure_sampler_allocator(itr);
+            }
         }
     }
 }
@@ -393,8 +418,14 @@ get_sampler_allocator()
 
     for(auto& itr : _allocators)
     {
-        if(!itr) configure_sampler_allocator(itr);
-        if(itr->size() < config::get_sampling_allocator_size()) return itr;
+        if(!itr)
+        {
+            configure_sampler_allocator(itr);
+        }
+        if(itr->size() < config::get_sampling_allocator_size())
+        {
+            return itr;
+        }
     }
 
     auto& _v = _allocators.emplace_back();
@@ -422,7 +453,9 @@ get_signal_set(Tp&& _v)
     sigset_t _sigset;
     sigemptyset(&_sigset);
     for(auto itr : _v)
+    {
         sigaddset(&_sigset, itr);
+    }
     return _sigset;
 }
 
@@ -432,9 +465,11 @@ get_signal_names(Tp&& _v)
 {
     std::string _sig_names{};
     for(auto&& itr : _v)
+    {
         _sig_names += std::get<0>(tim::signals::signal_settings::get_info(
                           static_cast<tim::signals::sys_signal>(itr))) +
                       " ";
+    }
     return (_sig_names.empty()) ? _sig_names
                                 : _sig_names.substr(0, _sig_names.length() - 1);
 }
@@ -579,7 +614,10 @@ load_offload_buffer(std::int64_t _thread_idx)
 
     auto& _fs = _file->stream;
 
-    if(_fs.is_open()) _fs.close();
+    if(_fs.is_open())
+    {
+        _fs.close();
+    }
 
     if(!_file->open(std::ios::binary | std::ios::in))
     {
@@ -587,7 +625,10 @@ load_offload_buffer(std::int64_t _thread_idx)
         return _data;
     }
 
-    if(offload_seq_data.count(_thread_idx) == 0) return _data;
+    if(!offload_seq_data.contains(_thread_idx))
+    {
+        return _data;
+    }
 
     size_t _count = 0;
     for(auto itr : offload_seq_data.at(_thread_idx))
@@ -596,7 +637,10 @@ load_offload_buffer(std::int64_t _thread_idx)
 
         std::int64_t _seq = 0;
         _fs.read(reinterpret_cast<char*>(&_seq), sizeof(_seq));
-        if(_fs.eof()) break;
+        if(_fs.eof())
+        {
+            break;
+        }
 
         sampler_buffer_t _buffer{};
         _buffer.load(_fs);
@@ -662,23 +706,33 @@ configure(bool _setup, std::int64_t _tid)
         // if this thread has an offset ID, that means it was created internally
         // and is probably here bc it called a function which was instrumented.
         // thus we should not start a sampler for it
-        if(_tid > 0 && _info && _info->is_offset) return std::set<int>{};
+        if(_tid > 0 && _info && _info->is_offset)
+        {
+            return std::set<int>{};
+        }
         // if the thread state is disabled or completed, return
         if(_info && _info->index_data->sequent_value == _tid &&
            state::thread::get() == state::thread::Disabled)
+        {
             return std::set<int>{};
+        }
 
         (void) get_debug_sampling();  // make sure query in sampler does not allocate
         assert(_tid == threading::get_id());
 
         if(trait::runtime_enabled<backtrace_metrics>::get())
+        {
             backtrace_metrics::configure(_setup, _tid);
+        }
 
         // NOTE: signals need to be unblocked by calling function
         sampling::block_signals(*_signal_types);
 
         auto _verbose = std::min<int>(get_verbose() - 2, 2);
-        if(get_debug_sampling()) _verbose = 2;
+        if(get_debug_sampling())
+        {
+            _verbose = 2;
+        }
 
         LOG_DEBUG("Requesting allocator for sampler on thread {}", _tid);
         auto _alloc = get_sampler_allocator();
@@ -690,7 +744,7 @@ configure(bool _setup, std::int64_t _tid)
         _sampler->set_flags(SA_RESTART);
         _sampler->set_verbose(_verbose);
 
-        if(_signal_types->count(get_sampling_realtime_signal()) > 0)
+        if(_signal_types->contains(get_sampling_realtime_signal()))
         {
             _sampler->configure(timer{ get_sampling_realtime_signal(), CLOCK_REALTIME,
                                        SIGEV_THREAD_ID, get_sampling_realtime_freq(),
@@ -698,7 +752,7 @@ configure(bool _setup, std::int64_t _tid)
                                        threading::get_sys_tid() });
         }
 
-        if(_signal_types->count(get_sampling_cputime_signal()) > 0)
+        if(_signal_types->contains(get_sampling_cputime_signal()))
         {
             _sampler->configure(
                 timer{ get_sampling_cputime_signal(), CLOCK_THREAD_CPUTIME_ID,
@@ -706,10 +760,12 @@ configure(bool _setup, std::int64_t _tid)
                        get_sampling_cputime_delay(), _tid, threading::get_sys_tid() });
         }
 
-        if(_signal_types->count(get_sampling_overflow_signal()) > 0)
+        if(_signal_types->contains(get_sampling_overflow_signal()))
         {
             if(_signal_types->size() == 1)
+            {
                 trait::runtime_enabled<backtrace_metrics>::set(false);
+            }
 
             _perf_sampler = std::make_unique<perf::perf_event>();
 
@@ -785,7 +841,10 @@ configure(bool _setup, std::int64_t _tid)
         if(get_use_tmp_files())
         {
             auto _file = get_offload_file();
-            if(_file && *_file) _sampler->set_offload(&offload_buffer);
+            if(_file && *_file)
+            {
+                _sampler->set_offload(&offload_buffer);
+            }
         }
 
         static_assert(tim::trait::buffer_size<sampling::sampler_t>::value > 0,
@@ -918,11 +977,18 @@ configure(bool _setup, std::int64_t _tid)
 
             // wait for the samples to finish
             for(auto& itr : get_sampler_allocators())
-                if(itr) itr->flush();
+            {
+                if(itr)
+                {
+                    itr->flush();
+                }
+            }
         }
 
         if(trait::runtime_enabled<backtrace_metrics>::get())
+        {
             backtrace_metrics::configure(_setup, _tid);
+        }
 
         LOG_DEBUG("Sampler destroyed for thread {}...", _tid);
     }
@@ -964,7 +1030,10 @@ auto pending_pause_ts = std::atomic<std::uint64_t>{ 0 };
 bool
 spans_pause_interval(std::uint64_t _beg, std::uint64_t _end)
 {
-    if(pause_intervals.empty()) return false;
+    if(pause_intervals.empty())
+    {
+        return false;
+    }
 
     const auto _it =
         std::lower_bound(pause_intervals.cbegin(), pause_intervals.cend(), _beg,
@@ -986,7 +1055,10 @@ get_signal_types(std::int64_t _tid)
 std::set<int>
 setup()
 {
-    if(!get_use_sampling()) return std::set<int>{};
+    if(!get_use_sampling())
+    {
+        return std::set<int>{};
+    }
     return configure(true);
 }
 
@@ -1106,7 +1178,10 @@ set_sampler_timers(timer_state state)
 void
 block_signals(std::set<int> _signals)
 {
-    if(_signals.empty()) _signals = *get_signal_types(threading::get_id());
+    if(_signals.empty())
+    {
+        _signals = *get_signal_types(threading::get_id());
+    }
     if(_signals.empty())
     {
         LOG_DEBUG("No signals to block...");
@@ -1123,7 +1198,10 @@ block_signals(std::set<int> _signals)
 void
 unblock_signals(std::set<int> _signals)
 {
-    if(_signals.empty()) _signals = *get_signal_types(threading::get_id());
+    if(_signals.empty())
+    {
+        _signals = *get_signal_types(threading::get_id());
+    }
     if(_signals.empty())
     {
         LOG_DEBUG("No signals to unblock...");
@@ -1156,7 +1234,12 @@ post_process()
     configure(false, 0);
 
     for(auto& itr : get_sampler_allocators())
-        if(itr) itr->flush();
+    {
+        if(itr)
+        {
+            itr->flush();
+        }
+    }
 
     for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
     {
@@ -1214,7 +1297,10 @@ post_process()
                 _sampler->get_sample_count(), _raw_data.size()));
         }
         // single sample that is useless (backtrace to unblocking signals)
-        if(_raw_data.size() == 1 && _raw_data.front().size() <= 1) _raw_data.clear();
+        if(_raw_data.size() == 1 && _raw_data.front().size() <= 1)
+        {
+            _raw_data.clear();
+        }
 
         std::vector<sampling::bundle_t*> _data{};
         for(auto& itr : _raw_data)
@@ -1243,8 +1329,14 @@ post_process()
             auto _timer_data    = parse_timer_data(i, _init, _data);
             auto _overflow_data = parse_overflow_data(i, _init, _data);
 
-            if(get_use_perfetto()) post_process_perfetto(i, _timer_data, _overflow_data);
-            if(get_use_timemory()) post_process_timemory(i, _timer_data, _overflow_data);
+            if(get_use_perfetto())
+            {
+                post_process_perfetto(i, _timer_data, _overflow_data);
+            }
+            if(get_use_timemory())
+            {
+                post_process_timemory(i, _timer_data, _overflow_data);
+            }
             store_sampling_data_in_cache(i, _timer_data, _overflow_data);
         }
         else
@@ -1266,11 +1358,16 @@ post_process()
     get_offload_file().reset();  // remove the temporary file
 
     for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
+    {
         get_sampler(i).reset();
+    }
 
     for(auto& itr : get_sampler_allocators())
     {
-        if(itr) itr.reset();
+        if(itr)
+        {
+            itr.reset();
+        }
     }
 
     if(get_use_tmp_files() && get_offload_file())
@@ -1305,7 +1402,9 @@ parse_timer_data(std::int64_t _tid, const bundle_t* _init,
         const auto* _last_metrics = _last->get<backtrace_metrics>();
 
         if(!_bt_data || !_bt_time || _bt_data->empty() || _bt_time->get_tid() != _tid)
+        {
             continue;
+        }
 
         auto _ret  = timer_sampling_data{};
         _ret.m_tid = _bt_time->get_tid();
@@ -1355,7 +1454,9 @@ parse_overflow_data(std::int64_t                  _tid, const bundle_t*,
         auto* _bt_time = itr->get<backtrace_timestamp>();
 
         if(!_bt_call || !_bt_time || _bt_call->empty() || _bt_time->get_tid() != _tid)
+        {
             continue;
+        }
 
         for(const auto& pitr : callchain::filter_and_patch(_bt_call->get()))
         {
@@ -1406,7 +1507,9 @@ post_process_perfetto(std::int64_t                               _tid,
         }
         backtrace_metrics::init_perfetto(_tid, _valid_metrics);
         for(const auto& itr : _timer_data)
+        {
             itr.m_metrics.post_process_perfetto(_tid, 0.5 * (itr.m_beg + itr.m_end));
+        }
         backtrace_metrics::fini_perfetto(_tid, _valid_metrics);
     }
 
@@ -1420,7 +1523,10 @@ post_process_perfetto(std::int64_t                               _tid,
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", _tid));
     }
-    if(!_thread_info) return;
+    if(!_thread_info)
+    {
+        return;
+    }
 
     auto _overflow_event =
         get_setting_value<std::string>(std::string{ env_vars::SAMPLING_OVERFLOW_EVENT })
@@ -1434,8 +1540,10 @@ post_process_perfetto(std::int64_t                               _tid,
         const auto _overflow_prefix = std::string_view{ "PERF_COUNT_" };
         const auto _overflow_pos    = _overflow_event.find(_overflow_prefix);
         if(_overflow_pos != std::string::npos)
+        {
             _overflow_event =
                 _overflow_event.substr(_overflow_pos + _overflow_prefix.length());
+        }
 
         const auto* _main_name =
             static_strings
@@ -1464,7 +1572,10 @@ post_process_perfetto(std::int64_t                               _tid,
             auto _beg = itr.m_beg;
             auto _end = itr.m_end;
 
-            if(!_thread_info->is_valid_lifetime({ _beg, _end })) continue;
+            if(!_thread_info->is_valid_lifetime({ _beg, _end }))
+            {
+                continue;
+            }
 
             for(const auto& iitr : itr.m_stack)
             {
@@ -1543,7 +1654,10 @@ post_process_perfetto(std::int64_t                               _tid,
             size_t        _ncount = 0;
             std::uint64_t _beg    = itr.m_beg;
             std::uint64_t _end    = itr.m_end;
-            if(!_thread_info->is_valid_lifetime({ _beg, _end })) continue;
+            if(!_thread_info->is_valid_lifetime({ _beg, _end }))
+            {
+                continue;
+            }
 
             for(const auto& iitr : itr.m_stack)
             {
@@ -1572,8 +1686,10 @@ post_process_perfetto(std::int64_t                               _tid,
                         // current values when read
                         auto _hw_cnt_vals = itr.m_metrics.get_hw_counters();
                         for(size_t i = 0; i < _labels.size(); ++i)
+                        {
                             tracing::add_perfetto_annotation(ctx, _labels.at(i),
                                                              _hw_cnt_vals.at(i));
+                        }
                     }
                 };
 
@@ -1673,9 +1789,13 @@ post_process_timemory(std::int64_t                               _tid,
     // compute the total number of entries
     std::int64_t _sum = 0;
     for(const auto& itr : _overflow_data)
+    {
         _sum += itr.m_stack.size();
+    }
     for(const auto& itr : _timer_data)
+    {
         _sum += itr.m_stack.size();
+    }
 
     for(const auto& itr : _overflow_data)
     {
@@ -1851,7 +1971,9 @@ cache_backtrace_metrics(std::int64_t                            _tid,
         }
         backtrace_metrics::init_cache(_tid, _valid_metrics);  // move to setup
         for(const auto& itr : _timer_data)
+        {
             itr.m_metrics.cache_backtrace_data(_tid, 0.5 * (itr.m_beg + itr.m_end));
+        }
     }
 }
 
@@ -1954,21 +2076,27 @@ void
 prefork_lock_pmc_sampler()
 {
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    {
         pmc::prefork_lock_sampler();
+    }
 }
 
 void
 postfork_parent_unlock_pmc_sampler()
 {
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    {
         pmc::postfork_parent_unlock_sampler();
+    }
 }
 
 void
 postfork_child_reset_pmc_sampler_lock()
 {
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    {
         pmc::postfork_child_reset_sampler_lock();
+    }
 }
 
 void

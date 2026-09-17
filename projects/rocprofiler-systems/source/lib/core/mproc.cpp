@@ -36,8 +36,14 @@ get_concurrent_processes(int _ppid)
         {
             int _v = -1;
             _ifs >> _v;
-            if(!_ifs.good() || _ifs.eof()) break;
-            if(_v < 0) continue;
+            if(!_ifs.good() || _ifs.eof())
+            {
+                break;
+            }
+            if(_v < 0)
+            {
+                continue;
+            }
             _children.emplace(_v);
         }
     }
@@ -50,7 +56,10 @@ get_process_index(int _pid, int _ppid)
     auto _children = get_concurrent_processes(_ppid);
     for(auto itr = _children.begin(); itr != _children.end(); ++itr)
     {
-        if(*itr == _pid) return std::distance(_children.begin(), itr);
+        if(*itr == _pid)
+        {
+            return std::distance(_children.begin(), itr);
+        }
     }
     return -1;
 }
@@ -93,7 +102,10 @@ diagnose_status(pid_t _pid, int _status, [[maybe_unused]] int _verbose)
 
     if(!_normal_exit)
     {
-        if(_ec == 0) _ec = EXIT_FAILURE;
+        if(_ec == 0)
+        {
+            _ec = EXIT_FAILURE;
+        }
         LOG_ERROR("process {} terminated abnormally. exit code: {}", _pid, _ec);
     }
 

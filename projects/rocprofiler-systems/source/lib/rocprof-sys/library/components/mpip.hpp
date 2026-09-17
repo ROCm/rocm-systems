@@ -104,7 +104,10 @@ struct mpip_handle : base<mpip_handle<Toolset, Tag>, void>
         if(get_tool_instance().get())
         {
             get_tool_instance()->stop();
-            if(idx == 0) get_tool_instance().reset();
+            if(idx == 0)
+            {
+                get_tool_instance().reset();
+            }
         }
     }
 
@@ -742,7 +745,9 @@ rocprofsys::component::configure_mpip(const std::set<std::string>& permit,
                 TIMEMORY_SETTINGS_PREFIX "MPIP_REJECT_LIST", "");
             // add environment setting
             for(const auto& itr : rocprofsys::delimit(reject_list))
+            {
                 _reject.insert(itr);
+            }
             return _reject;
         };
 
@@ -754,7 +759,9 @@ rocprofsys::component::configure_mpip(const std::set<std::string>& permit,
                 TIMEMORY_SETTINGS_PREFIX "MPIP_PERMIT_LIST", "");
             // add environment setting
             for(const auto& itr : rocprofsys::delimit(permit_list))
+            {
                 _permit.insert(itr);
+            }
             return _permit;
         };
 

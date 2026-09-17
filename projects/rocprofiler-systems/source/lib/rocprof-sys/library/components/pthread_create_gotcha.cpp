@@ -64,7 +64,10 @@ template <typename... Args>
 inline void
 start_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
 {
-    if(!get_use_timemory() && !get_use_perfetto()) return;
+    if(!get_use_timemory() && !get_use_perfetto())
+    {
+        return;
+    }
     LOG_TRACE("Starting bundle '{}' in thread {}...", _bundle.key(), _tid);
     if constexpr(sizeof...(Args) > 0)
     {
@@ -86,13 +89,18 @@ template <typename... Args>
 inline void
 stop_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
 {
-    if(!get_use_timemory() && !get_use_perfetto()) return;
+    if(!get_use_timemory() && !get_use_perfetto())
+    {
+        return;
+    }
 
     auto _main_manager = tim::manager::master_instance();
     auto _this_manager = tim::manager::instance();
     if(!_main_manager || !_this_manager || _main_manager->is_finalized() ||
        _this_manager->is_finalized())
+    {
         return;
+    }
 
     LOG_TRACE("Stopping bundle '{}' in thread {}...", _bundle.key(), _tid);
     if(get_use_timemory())
@@ -159,12 +167,18 @@ pthread_create_gotcha::wrapper::operator()() const
        thread_info::get_initialized_thread() >= ROCPROFSYS_MAX_THREADS)
     {
         warn_thread_limit_once();
-        if(m_config.promise) m_config.promise->set_value();
+        if(m_config.promise)
+        {
+            m_config.promise->set_value();
+        }
         return m_routine(m_arg);
     }
     if(is_shutdown && *is_shutdown)
     {
-        if(m_config.promise) m_config.promise->set_value();
+        if(m_config.promise)
+        {
+            m_config.promise->set_value();
+        }
         // execute the original function
         return m_routine(m_arg);
     }
@@ -181,7 +195,10 @@ pthread_create_gotcha::wrapper::operator()() const
     const auto&  _info        = thread_info::init(m_config.offset);
     if(!_info)
     {
-        if(m_config.promise) m_config.promise->set_value();
+        if(m_config.promise)
+        {
+            m_config.promise->set_value();
+        }
         return m_routine(m_arg);
     }
     auto _dtor = [&]() {
@@ -205,13 +222,21 @@ pthread_create_gotcha::wrapper::operator()() const
             auto _active =
                 (state::process::get() == ::rocprofsys::state::process::Active &&
                  bundles != nullptr && bundles_mutex != nullptr);
-            if(!_active) return;
+            if(!_active)
+            {
+                return;
+            }
             thread_info::set_stop(comp::wall_clock::record());
             auto& _thr_bundle = thread_bundle_data_t::instance();
             if(_thr_bundle && _thr_bundle->get<comp::wall_clock>() &&
                _thr_bundle->get<comp::wall_clock>()->get_is_running())
+            {
                 _thr_bundle->stop();
-            if(_bundle) stop_bundle(*_bundle, _tid);
+            }
+            if(_bundle)
+            {
+                stop_bundle(*_bundle, _tid);
+            }
             pthread_create_gotcha::shutdown(_tid);
             LOG_DEBUG("[PID={}][rank={}] Thread {} (parent: {}) exited",
                       process::get_id(), dmp::rank(), _info->index_data->as_string(),
@@ -236,7 +261,10 @@ pthread_create_gotcha::wrapper::operator()() const
                   _parent_info->index_data->as_string());
         threading::set_thread_name(fmt::format("Thread {}", _tid).c_str());
         auto _manager = tim::manager::instance();
-        if(_manager) _manager->initialize();
+        if(_manager)
+        {
+            _manager->initialize();
+        }
         if(!thread_bundle_data_t::get()->at(_tid))
         {
             thread_data<thread_bundle_t>::construct(
@@ -250,14 +278,19 @@ pthread_create_gotcha::wrapper::operator()() const
             _bundle = bundles->emplace(_tid, std::make_shared<bundle_t>("start_thread"))
                           .first->second;
         }
-        if(_bundle) start_bundle(*_bundle, _tid);
+        if(_bundle)
+        {
+            start_bundle(*_bundle, _tid);
+        }
         get_cpu_cid_stack(_tid, m_config.parent_tid);
         if(m_config.enable_causal)
         {
             // children inherit the parent delay data
             if(_parent_info && _parent_info->index_data)
+            {
                 causal::delay::get_local(_tid) =
                     causal::delay::get_local(_parent_info->index_data->sequent_value);
+            }
             _is_sampling = true;
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
             _signals = causal::sampling::setup();
@@ -280,7 +313,10 @@ pthread_create_gotcha::wrapper::operator()() const
     }
 
     // notify the wrapper that all internal work is completed
-    if(m_config.promise) m_config.promise->set_value();
+    if(m_config.promise)
+    {
+        m_config.promise->set_value();
+    }
 
     // Internal -> Enabled
     state::thread::pop();
@@ -306,7 +342,10 @@ pthread_create_gotcha::wrapper::operator()() const
 void*
 pthread_create_gotcha::wrapper::wrap(void* _arg)
 {
-    if(_arg == nullptr) return nullptr;
+    if(_arg == nullptr)
+    {
+        return nullptr;
+    }
 
     auto _self = pthread_self();
 
@@ -320,7 +359,10 @@ pthread_create_gotcha::wrapper::wrap(void* _arg)
     }
 
     static thread_local auto _remover = scope::destructor{ []() {
-        if(state::process::get() >= rocprofsys::state::process::Finalized) return;
+        if(state::process::get() >= rocprofsys::state::process::Finalized)
+        {
+            return;
+        }
         // remove the handle even if original function aborts
         auto                 _lk      = locking::atomic_lock{ native_handles_mutex };
         native_handles.erase(pthread_self());
@@ -338,7 +380,10 @@ pthread_create_gotcha::wrapper::wrap(void* _arg)
     }
 
     // eliminate memory leak
-    if(_ret != _arg) delete _wrapper;
+    if(_ret != _arg)
+    {
+        delete _wrapper;
+    }
 
     return _ret;
 }
@@ -361,7 +406,10 @@ void
 pthread_create_gotcha::configure()
 {
     pthread_create_gotcha_t::get_initializer() = []() {
-        if(!tim::settings::enabled()) return;
+        if(!tim::settings::enabled())
+        {
+            return;
+        }
         pthread_create_gotcha_t::template configure<
             0, int, pthread_t*, const pthread_attr_t*, void* (*) (void*), void*>(
             "pthread_create");
@@ -375,17 +423,26 @@ pthread_create_gotcha::shutdown()
 {
     if(is_shutdown)
     {
-        if(*is_shutdown) return;
+        if(*is_shutdown)
+        {
+            return;
+        }
         *is_shutdown = true;
     }
 
-    if(!bundles_mutex || !bundles) return;
+    if(!bundles_mutex || !bundles)
+    {
+        return;
+    }
 
     unsigned long _ndangling = 0;
 
     for(const auto& itr : *bundles)
     {
-        if(itr.second) ++_ndangling;
+        if(itr.second)
+        {
+            ++_ndangling;
+        }
     }
 
     tracing::copy_timemory_hash_ids();
@@ -410,7 +467,10 @@ pthread_create_gotcha::shutdown()
         for(auto itr : native_handles)
         {
             // skip sending signals to internal threads
-            if(internal_native_handles.count(itr) != 0) continue;
+            if(internal_native_handles.contains(itr))
+            {
+                continue;
+            }
 
             bool                               has_bundle = false;
             const std::unique_lock<std::mutex> _bundle_lk{ *bundles_mutex };
@@ -490,17 +550,29 @@ pthread_create_gotcha::shutdown()
 void
 pthread_create_gotcha::shutdown(std::int64_t _tid)
 {
-    if(_tid == 0) shutdown();
+    if(_tid == 0)
+    {
+        shutdown();
+    }
 
-    if(is_shutdown && *is_shutdown) return;
+    if(is_shutdown && *is_shutdown)
+    {
+        return;
+    }
 
-    if(!bundles_mutex || !bundles) return;
+    if(!bundles_mutex || !bundles)
+    {
+        return;
+    }
 
     const std::unique_lock<std::mutex> _lk{ *bundles_mutex };
     auto                               itr = bundles->find(_tid);
     if(itr != bundles->end())
     {
-        if(itr->second) stop_bundle(*itr->second, itr->first);
+        if(itr->second)
+        {
+            stop_bundle(*itr->second, itr->first);
+        }
         itr->second.reset();
         bundles->erase(itr);
     }

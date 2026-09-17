@@ -83,7 +83,10 @@ static int         psize = -1;
 static Address
 heap_alignUp(Address addr, int align)
 {
-    if(addr % align == 0) return addr;
+    if(addr % align == 0)
+    {
+        return addr;
+    }
     return ((addr / align) + 1) * align;
 }
 
@@ -103,7 +106,9 @@ trymmap(size_t len, Address beg, Address end, size_t inc, int fd)
             /* Success doesn't necessarily mean it actually mapped at the hinted
              * address.  Return if it's in range, else unmap and try again. */
             if((Address) result >= beg && (Address) result + len <= end)
+            {
                 return (Address) result;
+            }
             unmap_region(result, len);
         }
     }
@@ -117,7 +122,10 @@ DYNINSTos_malloc(size_t nbytes, void* lo_addr, void* hi_addr)
     size_t      size = nbytes;
     heapList_t* node = NULL;
     /* initialize page size */
-    if(psize == -1) psize = getpagesize();
+    if(psize == -1)
+    {
+        psize = getpagesize();
+    }
 
     /* buffer size must be aligned */
     if(size % DYNINSTheap_align != 0)
@@ -162,7 +170,10 @@ DYNINSTos_malloc(size_t nbytes, void* lo_addr, void* hi_addr)
         Address lo = heap_alignUp((Address) lo_addr, psize);
         Address hi = (Address) hi_addr;
         heap       = (char*) trymmap(size + sizeof(struct heapList_t), lo, hi, psize, -1);
-        if(!heap) return NULL;
+        if(!heap)
+        {
+            return NULL;
+        }
         node = CAST_WITHOUT_ALIGNMENT_WARNING(heapList_t*, (heap + size));
 
         /* define new heap */
@@ -175,7 +186,10 @@ DYNINSTos_malloc(size_t nbytes, void* lo_addr, void* hi_addr)
     /* insert new heap into heap list */
     node->prev = NULL;
     node->next = Heaps;
-    if(Heaps) Heaps->prev = node;
+    if(Heaps)
+    {
+        Heaps->prev = node;
+    }
     Heaps = node;
 #ifdef DEBUG
     fprintf(stderr, "new heap at %lx, size %lx\n", node->heap.ret_addr, node->heap.len);
@@ -195,12 +209,24 @@ DYNINSTos_free(void* buf)
     {
         /* lookup heap by (returned) address */
         heap_t* heap = &t->heap;
-        if(heap->ret_addr != buf) continue;
+        if(heap->ret_addr != buf)
+        {
+            continue;
+        }
 
         /* remove heap from list */
-        if(t->next) t->next->prev = t->prev;
-        if(t->prev) t->prev->next = t->next;
-        if(Heaps == t) Heaps = t->next;
+        if(t->next)
+        {
+            t->next->prev = t->prev;
+        }
+        if(t->prev)
+        {
+            t->prev->next = t->next;
+        }
+        if(Heaps == t)
+        {
+            Heaps = t->next;
+        }
 
         /* deallocate heap */
         switch(heap->type)

@@ -125,7 +125,10 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
     }
 
     using return_type = decltype(std::invoke(std::forward<FuncT>(_func), _args...));
-    if constexpr(!std::is_void<return_type>::value) return return_type();
+    if constexpr(!std::is_void<return_type>::value)
+    {
+        return return_type();
+    }
 }
 }  // namespace
 }  // namespace common

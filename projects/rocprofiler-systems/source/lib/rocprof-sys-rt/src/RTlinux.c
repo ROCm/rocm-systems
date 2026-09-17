@@ -116,7 +116,10 @@ t_kill(int pid, int sig)
 void
 DYNINSTbreakPoint(void)
 {
-    if(DYNINSTstaticMode) return;
+    if(DYNINSTstaticMode)
+    {
+        return;
+    }
     // Call into a funtion that contains a
     // trap instruction.
     DYNINSTtrapFunction();
@@ -133,7 +136,10 @@ uncaught_breakpoint(int sig)
 void
 DYNINSTsafeBreakPoint(void)
 {
-    if(DYNINSTstaticMode) return;
+    if(DYNINSTstaticMode)
+    {
+        return;
+    }
 
     DYNINST_break_point_event = 2; /* Not the same as above */
     //    while (DYNINST_break_point_event)
@@ -295,7 +301,10 @@ dyn_lwp_self(void)
     static int gettid_not_valid = 0;
     int        result;
 
-    if(gettid_not_valid) return getpid();
+    if(gettid_not_valid)
+    {
+        return getpid();
+    }
 
     result = syscall((long int) SYS_gettid);
     if(result == -1 && errno == ENOSYS)
@@ -569,12 +578,17 @@ parse_link_map(struct link_map* l)
     unsigned int                i, new_pos;
 
     dynamic_ptr = (ElfX_Dyn*) l->l_ld;
-    if(!dynamic_ptr) return -1;
+    if(!dynamic_ptr)
+    {
+        return -1;
+    }
 
     assert(sizeof(dynamic_ptr->d_un.d_ptr) == sizeof(void*));
     for(; dynamic_ptr->d_tag != DT_NULL && dynamic_ptr->d_tag != DT_DYNINST;
         dynamic_ptr++)
+    {
         ;
+    }
     if(dynamic_ptr->d_tag == DT_NULL)
     {
         return NOT_REWRITTEN;
@@ -582,7 +596,10 @@ parse_link_map(struct link_map* l)
 
     header = (struct trap_mapping_header*) (dynamic_ptr->d_un.d_val + l->l_addr);
 
-    if(header->signature != TRAP_HEADER_SIG) return ERROR_INTERNAL;
+    if(header->signature != TRAP_HEADER_SIG)
+    {
+        return ERROR_INTERNAL;
+    }
     if(header->pos != -1)
     {
         set_bit(all_headers_current, header->pos, 1);
@@ -598,15 +615,22 @@ parse_link_map(struct link_map* l)
             (void*) (((unsigned long) header->traps[i].target) + l->l_addr);
         if(!header->low_entry ||
            header->low_entry > (unsigned long) header->traps[i].source)
+        {
             header->low_entry = (unsigned long) header->traps[i].source;
+        }
         if(!header->high_entry ||
            header->high_entry < (unsigned long) header->traps[i].source)
+        {
             header->high_entry = (unsigned long) header->traps[i].source;
+        }
     }
 
     new_pos = get_next_free_bitmask(all_headers_last, -1);
     assert(new_pos < NUM_LIBRARIES);
-    if(new_pos == NUM_LIBRARIES) return ERROR_FULL;
+    if(new_pos == NUM_LIBRARIES)
+    {
+        return ERROR_FULL;
+    }
 
     header->pos          = new_pos;
     all_headers[new_pos] = header;

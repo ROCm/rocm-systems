@@ -60,7 +60,10 @@ void
 output_file_registry::print_summary() const
 {
     const std::lock_guard<std::mutex> lock(m_mutex);
-    if(m_files.empty()) return;
+    if(m_files.empty())
+    {
+        return;
+    }
 
     constexpr std::string_view header =
         "\n"
@@ -82,7 +85,10 @@ output_file_registry::print_summary() const
                             "  {}   File: {}\n"
                             "  {}   View with: {}\n",
                             branch, it->label, cont, it->path, cont, it->viewer);
-        if(!is_last) _msg += "  │\n";
+        if(!is_last)
+        {
+            _msg += "  │\n";
+        }
         it = next;
     }
 

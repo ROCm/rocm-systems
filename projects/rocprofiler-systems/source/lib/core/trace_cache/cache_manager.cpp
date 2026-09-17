@@ -81,7 +81,9 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
             std::vector<int> source_pids;
             source_pids.reserve(processor_configs.size());
             for(const auto& cfg : processor_configs)
+            {
                 source_pids.push_back(static_cast<int>(cfg->_pid));
+            }
 
             try
             {

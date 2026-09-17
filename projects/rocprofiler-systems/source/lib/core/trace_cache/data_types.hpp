@@ -11,12 +11,12 @@
 
 namespace rocprofsys
 {
-class agent_manager;
+struct agent_manager;
 }
 
 namespace rocprofsys::trace_cache
 {
-class metadata_registry;
+struct metadata_registry;
 class rocpd_processor_t;
 class perfetto_processor_t;
 class unified_memory_processor_t;

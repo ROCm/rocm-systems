@@ -87,7 +87,10 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
                           const std::string& track_name, timing_interval _timing,
                           scope::config _scope) const
 {
-    if(!record.dispatch_data) return;
+    if(!record.dispatch_data)
+    {
+        return;
+    }
 
     const auto& _dispatch_info = record.dispatch_data->dispatch_info;
     const auto* _kern_sym_data =
@@ -124,20 +127,20 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
         trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
             static_cast<size_t>(
                 category_enum_id<category::rocm_counter_collection>::value),
-            track_name.c_str(), _timing.start, event_metadata.c_str(), stack_id,
-            parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(),
+            track_name, _timing.start, event_metadata, stack_id, parent_stack_id,
+            correlation_id, call_stack, line_info,
             static_cast<std::uint32_t>(agent.device_type_index),
-            static_cast<std::uint8_t>(agent.type), track_name.c_str(),
-            static_cast<double>(value), std::nullopt });
+            static_cast<std::uint8_t>(agent.type), track_name, static_cast<double>(value),
+            std::nullopt });
 
         trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
             static_cast<size_t>(
                 category_enum_id<category::rocm_counter_collection>::value),
-            track_name.c_str(), _timing.end, event_metadata.c_str(), stack_id,
-            parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(),
+            track_name, _timing.end, event_metadata, stack_id, parent_stack_id,
+            correlation_id, call_stack, line_info,
             static_cast<std::uint32_t>(agent.device_type_index),
-            static_cast<std::uint8_t>(agent.type), track_name.c_str(),
-            static_cast<double>(0), std::nullopt });
+            static_cast<std::uint8_t>(agent.type), track_name, static_cast<double>(0),
+            std::nullopt });
     }
 }
 
@@ -164,8 +167,10 @@ counter_storage::counter_storage(const client_data* _tool_data, std::uint64_t _d
                              [storage_ptr = storage.get(), metric_name = metric_name,
                               metric_description = metric_description]() {
                                  if(storage_ptr)
+                                 {
                                      counter_storage::write(storage_ptr, metric_name,
                                                             metric_description);
+                                 }
                              });
     }
     else
@@ -181,8 +186,7 @@ counter_storage::counter_storage(const client_data* _tool_data, std::uint64_t _d
             ::perfetto::StaticString(track_name.c_str()));
 
         metadata_initialize_counter_category();
-        metadata_initialize_counters_pmc(device_id, track_name.c_str(),
-                                         metric_description);
+        metadata_initialize_counters_pmc(device_id, track_name, metric_description);
         metadata_initialize_counter_track(track_name.c_str());
         track->set_is_incremental(false);
         track->set_unit(_unit);
@@ -201,7 +205,10 @@ counter_storage::operator()(const counter_event& _event, timing_interval _timing
 void
 counter_storage::write_zero(rocprofiler_timestamp_t timestamp) const
 {
-    if(!track || timestamp == 0) return;
+    if(!track || timestamp == 0)
+    {
+        return;
+    }
 
     // Write zero to Perfetto trace (for legacy Perfetto)
     TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value, *track,
@@ -210,9 +217,8 @@ counter_storage::write_zero(rocprofiler_timestamp_t timestamp) const
     // Write zero to cache (for rocpd database)
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
         static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value),
-        track_name.c_str(), timestamp, "{}", 0, 0, 0, "{}", "{}", device_type_index,
-        static_cast<std::uint8_t>(agent_type::gpu), track_name.c_str(), 0.0,
-        std::nullopt });
+        track_name, timestamp, "{}", 0, 0, 0, "{}", "{}", device_type_index,
+        static_cast<std::uint8_t>(agent_type::gpu), track_name, 0.0, std::nullopt });
 }
 
 void

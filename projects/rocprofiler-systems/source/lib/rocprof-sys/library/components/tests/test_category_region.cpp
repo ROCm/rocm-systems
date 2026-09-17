@@ -21,7 +21,6 @@
 
 namespace
 {
-using rocprofsys::argument_info;
 using rocprofsys::function_args_t;
 using rocprofsys::process_arguments_string;
 

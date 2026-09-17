@@ -163,7 +163,10 @@ destroy_static_objects()
         while(!_stack->empty())
         {
             auto& itr = _stack->top();
-            if(itr) itr();
+            if(itr)
+            {
+                itr();
+            }
             _stack->pop();
         }
 

@@ -72,7 +72,10 @@ void
 blocking_gotcha::configure()
 {
     blocking_gotcha_t::get_initializer() = []() {
-        if(!config::get_use_causal()) return;
+        if(!config::get_use_causal())
+        {
+            return;
+        }
 
         // postblock(true)
         //  - pthread_join

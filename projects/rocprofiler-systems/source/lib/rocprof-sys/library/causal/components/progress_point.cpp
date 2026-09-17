@@ -48,7 +48,10 @@ std::unordered_map<tim::hash_value_t, progress_point>
 progress_point::get_progress_points()
 {
     auto _data = std::unordered_map<tim::hash_value_t, progress_point>{};
-    if(!get_progress_map()) return _data;
+    if(!get_progress_map())
+    {
+        return _data;
+    }
     for(const auto& titr : *get_progress_map())
     {
         for(const auto& itr : titr)
@@ -148,7 +151,10 @@ progress_point::get_delta() const
 std::int64_t
 progress_point::get_arrival() const
 {
-    if(!is_latency_point()) return m_arrival;
+    if(!is_latency_point())
+    {
+        return m_arrival;
+    }
     // when it is a latency point, we want the difference to be greater than zero
     return (m_arrival >= m_departure) ? (m_arrival + 1) : m_arrival;
 }

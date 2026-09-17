@@ -176,7 +176,18 @@ template <typename ParserT>
 dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
 {
     std::string topic;
-    if(parser.exists("help")) topic = parser.template get<std::string>("help");
+    if(parser.exists("help"))
+    {
+        {
+            {
+                {
+                    {
+                        topic = parser.template get<std::string>("help");
+                    }
+                }
+            }
+        }
+    }
 
     if(topic.empty())
     {

@@ -141,7 +141,10 @@ static TLS_VAR short DYNINST_tls_tramp_guard = 1;
 DLLEXPORT int
 DYNINST_lock_tramp_guard(void)
 {
-    if(!DYNINST_tls_tramp_guard) return 0;
+    if(!DYNINST_tls_tramp_guard)
+    {
+        return 0;
+    }
     DYNINST_tls_tramp_guard = 0;
     return 1;
 }
@@ -570,8 +573,10 @@ DYNINST_boundsCheck(void** boundsArray_, void* arrayLen_, void* writeTarget_)
     while(lowIdx < highIdx)
     {
         if(idx > arrayLen || idx < 0)
+        {
             rtdebug_printf("ERROR: out of bounds idx=%d, arrayLen = %ld [%d]\n", idx,
                            arrayLen, __LINE__);
+        }
         rtdebug_printf("D_bc: low=%d high=%d arr[%d]=%lx [%d]\n", lowIdx, highIdx, idx,
                        boundsArray[idx], __LINE__);
         if(writeTarget < boundsArray[idx])
@@ -604,7 +609,10 @@ DYNINST_boundsCheck(void** boundsArray_, void* arrayLen_, void* writeTarget_)
 DLLEXPORT int
 DYNINSTasyncDynFuncCall(void* call_target, void* call_addr)
 {
-    if(DYNINSTstaticMode) return 0;
+    if(DYNINSTstaticMode)
+    {
+        return 0;
+    }
 
     tc_lock_lock(&DYNINST_trace_lock);
 
@@ -705,8 +713,14 @@ rtdebug_printf(const char* format, ...)
 {
     int     ret;
     va_list va;
-    if(!DYNINSTdebugRTlib) return 0;
-    if(NULL == format) return DYNINST_PRINTF_ERRVAL;
+    if(!DYNINSTdebugRTlib)
+    {
+        return 0;
+    }
+    if(NULL == format)
+    {
+        return DYNINST_PRINTF_ERRVAL;
+    }
 
     fprintf(stderr, "[RTLIB]");
     va_start(va, format);
@@ -778,9 +792,13 @@ dyninstTrapTranslate(void* source, volatile unsigned long* table_used,
                 prev = mid;
 
                 if((*trap_table)[mid].source < source)
+                {
                     min = mid;
+                }
                 else if((*trap_table)[mid].source > source)
+                {
                     max = mid;
+                }
                 else
                 {
                     target = (*trap_table)[mid].target;

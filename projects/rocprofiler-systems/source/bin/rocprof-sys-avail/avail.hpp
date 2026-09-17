@@ -79,16 +79,19 @@ public:
     //! Sets the name for the next node created with startNode
     void setNextName(const char* name)
     {
-        if(exclude_stream.count(name) > 0) return;
+        if(exclude_stream.contains(name))
+        {
+            return;
+        }
 
-        if((current_entry != nullptr) && value_keys.count(name) > 0)
+        if((current_entry != nullptr) && value_keys.contains(name))
         {
             current_entry->insert({ name, "" });
             current_value = &((*current_entry)[name]);
             return;
         }
 
-        if(value_keys.count(name) > 0)
+        if(value_keys.contains(name))
         {
             return;
         }
@@ -281,7 +284,10 @@ template <typename T>
 inline void
 TIMEMORY_CEREAL_SAVE_FUNCTION_NAME(SettingsTextArchive& ar, const T& t)
 {
-    if(std::is_same<T, std::string>::value) ar.setNextType("string");
+    if(std::is_same<T, std::string>::value)
+    {
+        ar.setNextType("string");
+    }
     ar.saveValue(t);
 }
 

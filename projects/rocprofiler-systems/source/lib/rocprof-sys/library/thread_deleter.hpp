@@ -25,7 +25,10 @@ struct thread_deleter
             (use_placement_new_when_generating_unique_ptr<Tp>::value == false);
 
         thread_deleter<void>{}();
-        if constexpr(delete_pointer) delete ptr;
+        if constexpr(delete_pointer)
+        {
+            delete ptr;
+        }
 
         (void) ptr;
     }

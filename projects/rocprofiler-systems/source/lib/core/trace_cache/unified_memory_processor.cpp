@@ -46,13 +46,21 @@ format_size(std::uint64_t bytes)
     oss << std::fixed << std::setprecision(4);
 
     if(bytes >= kGiB)
+    {
         oss << (static_cast<double>(bytes) / kGiB) << "GB";
+    }
     else if(bytes >= kMiB)
+    {
         oss << (static_cast<double>(bytes) / kMiB) << "MB";
+    }
     else if(bytes >= kKiB)
+    {
         oss << (static_cast<double>(bytes) / kKiB) << "KB";
+    }
     else
+    {
         oss << bytes << "B";
+    }
 
     return oss.str();
 }
@@ -79,13 +87,21 @@ format_time(std::uint64_t nanoseconds)
     oss << std::fixed << std::setprecision(4);
 
     if(nanoseconds >= kNsPerSec)
+    {
         oss << (static_cast<double>(nanoseconds) / kNsPerSec) << "s";
+    }
     else if(nanoseconds >= kNsPerMs)
+    {
         oss << (static_cast<double>(nanoseconds) / kNsPerMs) << "ms";
+    }
     else if(nanoseconds >= kNsPerUs)
+    {
         oss << (static_cast<double>(nanoseconds) / kNsPerUs) << "us";
+    }
     else
+    {
         oss << nanoseconds << "ns";
+    }
 
     return oss.str();
 }
@@ -98,7 +114,7 @@ unified_memory_processor_t::unified_memory_processor_t(
 , m_agent_manager(std::move(agent_mgr))
 , m_pid(pid)
 , m_output_dir(config::get_ump_absolute_path())
-, m_output_sink(std::move(output_sink))
+, m_output_sink(output_sink)
 {
     const char* xnack    = std::getenv("HSA_XNACK");
     m_data.xnack_enabled = (xnack && std::strcmp(xnack, "1") == 0);
@@ -192,9 +208,13 @@ void
 unified_memory_processor_t::handle(const kfd_sample& sample)
 {
     if(sample.category == "rocm_kfd_page_migrate")
+    {
         handle_page_migrate(sample);
+    }
     else if(sample.category == "rocm_kfd_page_fault")
+    {
         m_data.total_page_faults++;
+    }
 }
 
 void
@@ -214,7 +234,9 @@ unified_memory_processor_t::handle_page_migrate(const kfd_sample& sample)
     std::uint64_t size_bytes = 0;
     if(std::isfinite(sample.value) && sample.value > 0.0 &&
        sample.value < detail::kMaxSafeUint64)
+    {
         size_bytes = static_cast<std::uint64_t>(sample.value);
+    }
 
     // Guard against non-monotonic KFD timestamps to avoid unsigned wrap.
     const std::uint64_t duration_ns = (sample.end_timestamp >= sample.start_timestamp)
@@ -226,7 +248,9 @@ unified_memory_processor_t::handle_page_migrate(const kfd_sample& sample)
     {
         auto [it, inserted] = m_data.devices.try_emplace(*gpu_bucket_id);
         if(inserted)
+        {
             it->second.device_name = resolve_device_label(sample, src_label, dst_label);
+        }
 
         auto& device_summary = it->second;
 
@@ -291,7 +315,10 @@ unified_memory_processor_t::resolve_gpu_bucket_id(const std::string&  src_label,
                                                   migration_direction direction) const
 {
     auto ids = parse_node_id_pair(src_label, dst_label);
-    if(!ids.has_value()) return std::nullopt;
+    if(!ids.has_value())
+    {
+        return std::nullopt;
+    }
 
     const auto [src_node_id, dst_node_id] = *ids;
     const auto is_gpu_node                = [this](std::uint32_t node_id) {
@@ -302,11 +329,17 @@ unified_memory_processor_t::resolve_gpu_bucket_id(const std::string&  src_label,
     switch(direction)
     {
         case migration_direction::host_to_device:
-            if(is_gpu_node(dst_node_id)) return dst_node_id;
+            if(is_gpu_node(dst_node_id))
+            {
+                return dst_node_id;
+            }
             break;
         case migration_direction::device_to_host:
         case migration_direction::device_to_device:
-            if(is_gpu_node(src_node_id)) return src_node_id;
+            if(is_gpu_node(src_node_id))
+            {
+                return src_node_id;
+            }
             break;
         case migration_direction::unknown: break;
     }
@@ -339,13 +372,21 @@ unified_memory_processor_t::classify_direction(const std::string& src_label,
     const bool dst_is_cpu = (dst_it->second == agent_type::cpu);
 
     if(src_is_cpu && !dst_is_cpu)
+    {
         return migration_direction::host_to_device;
+    }
     else if(!src_is_cpu && dst_is_cpu)
+    {
         return migration_direction::device_to_host;
+    }
     else if(!src_is_cpu && !dst_is_cpu)
+    {
         return migration_direction::device_to_device;
+    }
     else
+    {
         return migration_direction::unknown;
+    }
 }
 
 std::optional<std::pair<std::string, std::string>>
@@ -359,9 +400,13 @@ unified_memory_processor_t::parse_agent_ids_from_args(std::string_view args_str)
         for(const auto& a : args)
         {
             if(a.arg_name == "src_agent")
+            {
                 src_agent = a.arg_value;
+            }
             else if(a.arg_name == "dst_agent")
+            {
                 dst_agent = a.arg_value;
+            }
         }
     } catch(const std::exception& e)
     {
@@ -369,7 +414,10 @@ unified_memory_processor_t::parse_agent_ids_from_args(std::string_view args_str)
         return std::nullopt;
     }
 
-    if(src_agent.empty() || dst_agent.empty()) return std::nullopt;
+    if(src_agent.empty() || dst_agent.empty())
+    {
+        return std::nullopt;
+    }
 
     return std::make_pair(std::move(src_agent), std::move(dst_agent));
 }
@@ -387,7 +435,10 @@ unified_memory_processor_t::resolve_device_label(const kfd_sample&  sample,
         {
             const auto& cpu_agent = m_agent_manager->get_agent_by_type_index(
                 sample.device_id, static_cast<agent_type>(sample.device_type));
-            if(!cpu_agent.name.empty()) cpu_name = cpu_agent.name;
+            if(!cpu_agent.name.empty())
+            {
+                cpu_name = cpu_agent.name;
+            }
         } catch(const std::exception& e)
         {
             LOG_TRACE("CPU agent lookup failed for device_id={}: {}", sample.device_id,
@@ -403,18 +454,25 @@ unified_memory_processor_t::extract_gpu_name(const std::string& src_label,
                                              const std::string& dst_label) const
 {
     auto ids = parse_node_id_pair(src_label, dst_label);
-    if(!ids.has_value()) return "GPU";
+    if(!ids.has_value())
+    {
+        return "GPU";
+    }
     const auto [src_node_id, dst_node_id] = *ids;
 
     auto src_it = m_gpu_name_cache.find(src_node_id);
     if(src_it != m_gpu_name_cache.end())
+    {
         return src_it->second.empty() ? fmt::format("GPU {}", src_node_id)
                                       : src_it->second;
+    }
 
     auto dst_it = m_gpu_name_cache.find(dst_node_id);
     if(dst_it != m_gpu_name_cache.end())
+    {
         return dst_it->second.empty() ? fmt::format("GPU {}", dst_node_id)
                                       : dst_it->second;
+    }
 
     return "GPU";
 }
@@ -462,8 +520,10 @@ unified_memory_processor_t::write_text_output(std::ostream& out) const
         {
             const auto count = m_data.triggers.*(row.member);
             if(count > 0)
+            {
                 out << fmt::format("   {:<16}{:>10}\n", std::string(row.text_label) + ":",
                                    count);
+            }
         }
     }
 }
@@ -510,7 +570,9 @@ unified_memory_processor_t::write_json_output(std::ostream& out) const
 
     nlohmann::json triggers;
     for(const auto& row : detail::kTriggerTable)
+    {
         triggers[row.json_key] = m_data.triggers.*(row.member);
+    }
     summary["migration_triggers"] = triggers;
 
     root["summary"] = summary;

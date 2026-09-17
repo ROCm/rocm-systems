@@ -112,11 +112,17 @@ perf_event&
 perf_event::operator=(perf_event&& rhs) noexcept
 {
     auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
-    if(&rhs == this) return *this;
+    if(&rhs == this)
+    {
+        return *this;
+    }
 
     // Release resources if the current perf_event is initialized and not equal to this
     // one
-    if(m_fd != -1 && m_fd != rhs.m_fd) ::close(m_fd);
+    if(m_fd != -1 && m_fd != rhs.m_fd)
+    {
+        ::close(m_fd);
+    }
     if(m_mapping != nullptr && m_mapping != rhs.m_mapping)
     {
         munmap(m_mapping, k_sizes.mmap);
@@ -564,47 +570,90 @@ perf_event::record::locate_field() const
     // type
 
     // ip
-    if constexpr(SampleT == sample::ip) return reinterpret_cast<Tp>(p);
+    if constexpr(SampleT == sample::ip)
+    {
+        return reinterpret_cast<Tp>(p);
+    }
     if(m_source != nullptr && m_source->is_sampling(sample::ip))
+    {
         p += sizeof(std::uint64_t);
+    }
 
     // pid, tid
-    if constexpr(SampleT == sample::pid_tid) return reinterpret_cast<Tp>(p);
+    if constexpr(SampleT == sample::pid_tid)
+    {
+        return reinterpret_cast<Tp>(p);
+    }
     if(m_source != nullptr && m_source->is_sampling(sample::pid_tid))
+    {
         p += sizeof(std::uint32_t) + sizeof(std::uint32_t);
+    }
 
     // time
-    if constexpr(SampleT == sample::time) return reinterpret_cast<Tp>(p);
+    if constexpr(SampleT == sample::time)
+    {
+        return reinterpret_cast<Tp>(p);
+    }
     if(m_source != nullptr && m_source->is_sampling(sample::time))
+    {
         p += sizeof(std::uint64_t);
+    }
 
     // addr
-    if constexpr(SampleT == sample::addr) return reinterpret_cast<Tp>(p);
+    if constexpr(SampleT == sample::addr)
+    {
+        return reinterpret_cast<Tp>(p);
+    }
     if(m_source != nullptr && m_source->is_sampling(sample::addr))
+    {
         p += sizeof(std::uint64_t);
+    }
 
     // id
-    if constexpr(SampleT == sample::id) return reinterpret_cast<Tp>(p);
+    if constexpr(SampleT == sample::id)
+    {
+        return reinterpret_cast<Tp>(p);
+    }
     if(m_source != nullptr && m_source->is_sampling(sample::id))
+    {
         p += sizeof(std::uint64_t);
+    }
 
     // stream_id
-    if constexpr(SampleT == sample::stream_id) return reinterpret_cast<Tp>(p);
+    if constexpr(SampleT == sample::stream_id)
+    {
+        return reinterpret_cast<Tp>(p);
+    }
     if(m_source != nullptr && m_source->is_sampling(sample::stream_id))
+    {
         p += sizeof(std::uint64_t);
+    }
 
     // cpu
-    if constexpr(SampleT == sample::cpu) return reinterpret_cast<Tp>(p);
+    if constexpr(SampleT == sample::cpu)
+    {
+        return reinterpret_cast<Tp>(p);
+    }
     if(m_source != nullptr && m_source->is_sampling(sample::cpu))
+    {
         p += sizeof(std::uint32_t) + sizeof(std::uint32_t);
+    }
 
     // period
-    if constexpr(SampleT == sample::period) return reinterpret_cast<Tp>(p);
+    if constexpr(SampleT == sample::period)
+    {
+        return reinterpret_cast<Tp>(p);
+    }
     if(m_source != nullptr && m_source->is_sampling(sample::period))
+    {
         p += sizeof(std::uint64_t);
+    }
 
     // value
-    if constexpr(SampleT == sample::read) return reinterpret_cast<Tp>(p);
+    if constexpr(SampleT == sample::read)
+    {
+        return reinterpret_cast<Tp>(p);
+    }
     if(m_source != nullptr && m_source->is_sampling(sample::read))
     {
         const std::uint64_t read_format = m_source->get_read_format();
@@ -615,7 +664,10 @@ perf_event::record::locate_field() const
             // The default size of each entry is a u64
             size_t sz = sizeof(std::uint64_t);
             // If requested, the id will be included with each value
-            if(read_format & PERF_FORMAT_ID) sz += sizeof(std::uint64_t);
+            if(read_format & PERF_FORMAT_ID)
+            {
+                sz += sizeof(std::uint64_t);
+            }
             // Skip over the entry count, and each entry
             p += sizeof(std::uint64_t) + nr * sz;
         }
@@ -624,17 +676,29 @@ perf_event::record::locate_field() const
             // Skip over the value
             p += sizeof(std::uint64_t);
             // Skip over the id, if included
-            if(read_format & PERF_FORMAT_ID) p += sizeof(std::uint64_t);
+            if(read_format & PERF_FORMAT_ID)
+            {
+                p += sizeof(std::uint64_t);
+            }
         }
 
         // Skip over the time_enabled field
-        if(read_format & PERF_FORMAT_TOTAL_TIME_ENABLED) p += sizeof(std::uint64_t);
+        if(read_format & PERF_FORMAT_TOTAL_TIME_ENABLED)
+        {
+            p += sizeof(std::uint64_t);
+        }
         // Skip over the time_running field
-        if(read_format & PERF_FORMAT_TOTAL_TIME_RUNNING) p += sizeof(std::uint64_t);
+        if(read_format & PERF_FORMAT_TOTAL_TIME_RUNNING)
+        {
+            p += sizeof(std::uint64_t);
+        }
     }
 
     // callchain
-    if constexpr(SampleT == sample::callchain) return reinterpret_cast<Tp>(p);
+    if constexpr(SampleT == sample::callchain)
+    {
+        return reinterpret_cast<Tp>(p);
+    }
     if(m_source != nullptr && m_source->is_sampling(sample::callchain))
     {
         const std::uint64_t nr = *reinterpret_cast<std::uint64_t*>(p);
@@ -642,7 +706,10 @@ perf_event::record::locate_field() const
     }
 
     // raw
-    if constexpr(SampleT == sample::raw) return reinterpret_cast<Tp>(p);
+    if constexpr(SampleT == sample::raw)
+    {
+        return reinterpret_cast<Tp>(p);
+    }
     if(m_source != nullptr && m_source->is_sampling(sample::raw))
     {
         const std::uint32_t raw_size = *reinterpret_cast<std::uint32_t*>(p);
@@ -650,14 +717,20 @@ perf_event::record::locate_field() const
     }
 
     // branch_stack
-    if constexpr(SampleT == sample::branch_stack) return reinterpret_cast<Tp>(p);
+    if constexpr(SampleT == sample::branch_stack)
+    {
+        return reinterpret_cast<Tp>(p);
+    }
     if(m_source != nullptr && m_source->is_sampling(sample::branch_stack))
     {
         LOG_CRITICAL("Branch stack sampling is not supported");
         std::abort();
     }
     // regs
-    if constexpr(SampleT == sample::regs) return reinterpret_cast<Tp>(p);
+    if constexpr(SampleT == sample::regs)
+    {
+        return reinterpret_cast<Tp>(p);
+    }
     if(m_source != nullptr && m_source->is_sampling(sample::regs))
     {
         LOG_CRITICAL("Register sampling is not supported");
@@ -665,7 +738,10 @@ perf_event::record::locate_field() const
     }
 
     // stack
-    if constexpr(SampleT == sample::stack) return reinterpret_cast<Tp>(p);
+    if constexpr(SampleT == sample::stack)
+    {
+        return reinterpret_cast<Tp>(p);
+    }
     if(m_source != nullptr && m_source->is_sampling(sample::stack))
     {
         LOG_CRITICAL("Stack sampling is not supported");
@@ -673,15 +749,22 @@ perf_event::record::locate_field() const
     }
 
     // end
-    if constexpr(SampleT == sample::last) return reinterpret_cast<Tp>(p);
+    if constexpr(SampleT == sample::last)
+    {
+        return reinterpret_cast<Tp>(p);
+    }
 
     LOG_CRITICAL("Unsupported sample field requested!");
     std::abort();
 
     if constexpr(std::is_pointer<Tp>::value)
+    {
         return nullptr;
+    }
     else
+    {
         return Tp{};
+    }
 }
 
 namespace

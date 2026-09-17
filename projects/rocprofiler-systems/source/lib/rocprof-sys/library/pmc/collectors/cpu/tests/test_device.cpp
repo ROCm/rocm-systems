@@ -15,7 +15,6 @@ using MockBackend     = rocprofsys::backends::procfs::testing::strict_mock_backe
 using cpu_jiffies     = rocprofsys::backends::procfs::cpu_jiffies;
 using rusage_snapshot = rocprofsys::backends::procfs::rusage_snapshot;
 
-using ::testing::_;
 using ::testing::Return;
 
 namespace rocprofsys::pmc::collectors::cpu::testing
@@ -57,7 +56,9 @@ protected:
     {
         std::map<size_t, float> result;
         for(size_t i = 0; i < 4; ++i)
+        {
             result[i] = mhz;
+        }
         return result;
     }
 
@@ -331,7 +332,10 @@ TEST_F(cpu_device_test, single_cpu_monitored)
     size_t cpu2_count = 0;
     for(const auto& cpu : result.cpu_data)
     {
-        if(cpu.cpu_id == 2) cpu2_count++;
+        if(cpu.cpu_id == 2)
+        {
+            cpu2_count++;
+        }
     }
     EXPECT_EQ(cpu2_count, 1u);
 }

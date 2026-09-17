@@ -12,7 +12,6 @@
 #include <stdexcept>
 
 using namespace rocprofsys::pmc::collectors::gpu;
-using ::testing::_;
 using ::testing::AnyNumber;
 using ::testing::AtLeast;
 using ::testing::Return;

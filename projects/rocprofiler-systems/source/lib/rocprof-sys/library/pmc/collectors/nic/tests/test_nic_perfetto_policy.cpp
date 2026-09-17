@@ -54,7 +54,9 @@ TEST_F(NicPerfettoPolicyTest, DefaultTracks_CoverEveryMetricBit)
 
     std::uint32_t combined = 0;
     for(const auto& [bit_value, description] : tracks)
+    {
         combined |= bit_value;
+    }
 
     EXPECT_EQ(combined, ALL_NIC_METRICS);
 }
@@ -102,8 +104,10 @@ TEST_F(NicPerfettoPolicyTest, DefaultTracks_LabelsAreUnique)
 {
     std::set<std::string> names{};
     for(const auto& [bit_value, description] : make_default_nic_tracks())
+    {
         EXPECT_TRUE(names.emplace(description.track_name).second)
             << "duplicate track name: " << description.track_name;
+    }
 }
 
 TEST_F(NicPerfettoPolicyTest, DefaultTracks_TableIsBuiltOnce)
@@ -288,16 +292,20 @@ TEST_F(NicPerfettoPolicyTest, SetupTracks_AssignsDistinctIndices)
 
     std::set<size_t> indices{};
     for(const auto& [bit_value, track_index] : device_tracks)
+    {
         EXPECT_TRUE(indices.emplace(track_index).second)
             << "duplicate track index: " << track_index;
+    }
 
     EXPECT_EQ(indices.size(), NIC_METRICS_COUNT);
     EXPECT_EQ(counter_track::size(SETUP_DISTINCT_IDX_DEVICE), before + NIC_METRICS_COUNT);
 
     // Every stored index must address a real counter track.
     for(auto idx : indices)
+    {
         EXPECT_TRUE(counter_track::exists(SETUP_DISTINCT_IDX_DEVICE,
                                           static_cast<std::int64_t>(idx)));
+    }
 }
 
 TEST_F(NicPerfettoPolicyTest, SetupTracks_KeepsDevicesSeparate)

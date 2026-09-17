@@ -202,9 +202,11 @@ void
 decode(std::uint32_t output[], const std::uint8_t input[], size_type len)
 {
     for(unsigned int i = 0, j = 0; j < len; i++, j += 4)
+    {
         output[i] = ((std::uint32_t) input[j]) | (((std::uint32_t) input[j + 1]) << 8) |
                     (((std::uint32_t) input[j + 2]) << 16) |
                     (((std::uint32_t) input[j + 3]) << 24);
+    }
 }
 
 // encodes input (std::uint32_t) into output (unsigned char). Assumes len is
@@ -326,7 +328,10 @@ md5sum::update(const unsigned char input[], size_type length)
     size_type index = count[0] / 8 % blocksize;
 
     // Update number of bits
-    if((count[0] += (length << 3)) < (length << 3)) count[1]++;
+    if((count[0] += (length << 3)) < (length << 3))
+    {
+        count[1]++;
+    }
     count[1] += (length >> 29);
 
     // number of bytes we need to fill in buffer
@@ -342,7 +347,9 @@ md5sum::update(const unsigned char input[], size_type length)
 
         // transform chunks of blocksize (64 bytes)
         for(i = firstpart; i + blocksize <= length; i += blocksize)
+        {
             transform(&input[i]);
+        }
 
         index = 0;
     }
@@ -402,11 +409,16 @@ md5sum::finalize()
 std::string
 md5sum::hexdigest() const
 {
-    if(!finalized) return std::string{};
+    if(!finalized)
+    {
+        return std::string{};
+    }
 
     char buf[33];
     for(int i = 0; i < 16; i++)
+    {
         snprintf(buf + i * 2, 3, "%02x", digest[i]);
+    }
     buf[32] = '\0';
 
     return std::string(buf);

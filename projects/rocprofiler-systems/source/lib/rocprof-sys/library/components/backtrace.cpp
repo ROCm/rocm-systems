@@ -57,7 +57,10 @@ std::vector<backtrace::entry_type>
 backtrace::get() const
 {
     std::vector<entry_type> _v = {};
-    if(size() == 0) return _v;
+    if(size() == 0)
+    {
+        return _v;
+    }
 
     {
         static auto       _cache = cache_type{ get_sampling_include_inlines() };
@@ -71,8 +74,10 @@ backtrace::get() const
     auto _known_excludes =
         std::set<std::string>{ "funlockfile", "killpg", "__restore_rt" };
     // remove some known functions which are by-products of interrupts
-    while(!_v.empty() && _known_excludes.find(_v.back().name) != _known_excludes.end())
+    while(!_v.empty() && _known_excludes.contains(_v.back().name))
+    {
         _v.pop_back();
+    }
 
     return _v;
 }
@@ -97,17 +102,50 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
         // debugging feature
         const bool _keep_internal = get_sampling_keep_internal();
         const auto _npos          = std::string::npos;
-        if(_keep_internal) return 1;
-        if(_lbl.find("rocprofsys_main") != _npos) return 0;
-        if(_lbl.find("rocprofsys::") != _npos) return 0;
-        if(_lbl.find("tim::openmp::") != _npos) return -1;
-        if(_lbl.find("tim::") != _npos) return 0;
-        if(_lbl.find("DYNINST_") != _npos) return 0;
-        if(_lbl.find("rocprofsys_") != _npos) return -1;
-        if(_lbl.find("rocprofiler_") != _npos) return -1;
-        if(_lbl.find("perfetto::") != _npos) return -1;
-        if(_lbl.find("protozero::") == 0) return -1;
-        if(_lbl.find("gotcha_") != _npos) return -1;
+        if(_keep_internal)
+        {
+            return 1;
+        }
+        if(_lbl.find("rocprofsys_main") != _npos)
+        {
+            return 0;
+        }
+        if(_lbl.find("rocprofsys::") != _npos)
+        {
+            return 0;
+        }
+        if(_lbl.find("tim::openmp::") != _npos)
+        {
+            return -1;
+        }
+        if(_lbl.find("tim::") != _npos)
+        {
+            return 0;
+        }
+        if(_lbl.find("DYNINST_") != _npos)
+        {
+            return 0;
+        }
+        if(_lbl.find("rocprofsys_") != _npos)
+        {
+            return -1;
+        }
+        if(_lbl.find("rocprofiler_") != _npos)
+        {
+            return -1;
+        }
+        if(_lbl.find("perfetto::") != _npos)
+        {
+            return -1;
+        }
+        if(_lbl.find("protozero::") == 0)
+        {
+            return -1;
+        }
+        if(_lbl.find("gotcha_") != _npos)
+        {
+            return -1;
+        }
         return 1;
     };
 
@@ -118,10 +156,16 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
     // "_dyninst", i.e. "main" will show up as "main_dyninst" in the backtrace.
     auto _patch_label = [](std::string_view _lbl) -> std::string {
         // debugging feature
-        if(_keep_suffix) return std::string{ _lbl };
+        if(_keep_suffix)
+        {
+            return std::string{ _lbl };
+        }
         const std::string _dyninst{ "_dyninst" };
         auto              _pos = _lbl.find(_dyninst);
-        if(_pos == std::string::npos) return std::string{ _lbl };
+        if(_pos == std::string::npos)
+        {
+            return std::string{ _lbl };
+        }
         return std::string{ _lbl }.replace(_pos, _dyninst.length(), "");
     };
 
@@ -131,8 +175,14 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
     {
         auto _name = rocprofsys::utility::demangle(_patch_label(itr.name));
         auto _use  = _use_label(_name);
-        if(_use == -1) break;
-        if(_use == 0) continue;
+        if(_use == -1)
+        {
+            break;
+        }
+        if(_use == 0)
+        {
+            continue;
+        }
         auto _v = itr;
         _v.name = _name;
         _ret.emplace_back(_v);
@@ -164,7 +214,10 @@ backtrace::size() const
 void
 backtrace::sample(int signo)
 {
-    if(signo == get_sampling_overflow_signal()) return;
+    if(signo == get_sampling_overflow_signal())
+    {
+        return;
+    }
 
     // on RedHat, the unw_step within get_unw_stack involves a mutex lock
     auto _thread_state_guard = state::thread::scoped(state::thread::Internal);

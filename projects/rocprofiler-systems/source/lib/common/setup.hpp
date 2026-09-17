@@ -59,7 +59,9 @@ setup_environ(int _verbose, const std::string& _search_paths = {},
     auto _data =
         get_environ(_verbose, _search_paths, std::move(_omnilib), std::move(_omnilib_dl));
     for(const auto& itr : _data)
+    {
         itr();
+    }
 }
 }  // namespace common
 }  // namespace rocprofsys

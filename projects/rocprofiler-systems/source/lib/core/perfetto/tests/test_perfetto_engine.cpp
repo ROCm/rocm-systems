@@ -683,7 +683,9 @@ TEST(perfetto_engine_cached, concurrent_collect_packet_bytes_no_loss_or_bleed)
     std::vector<int> pids;
     pids.reserve(pid_count);
     for(int i = 0; i < pid_count; ++i)
+    {
         pids.push_back(1000 + i);
+    }
     engine.preregister_pids(pids);
 
     // Per-pid payloads are tagged with (pid, index) so cross-pid bleed
@@ -723,7 +725,9 @@ TEST(perfetto_engine_cached, concurrent_collect_packet_bytes_no_loss_or_bleed)
     }
     go.store(true, std::memory_order_release);
     for(auto& t : threads)
+    {
         t.join();
+    }
 
     engine.stop();
 

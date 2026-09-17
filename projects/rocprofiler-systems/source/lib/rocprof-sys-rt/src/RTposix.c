@@ -90,7 +90,10 @@ libdyninstAPI_RT_init(void)
     rtdebug_printf("%s[%d]:  DYNINSTinit:  welcome to libdyninstAPI_RT_init()\n",
                    __FILE__, __LINE__);
 
-    if(initCalledOnce) return;
+    if(initCalledOnce)
+    {
+        return;
+    }
     initCalledOnce++;
 
     DYNINSTinit();
@@ -110,7 +113,10 @@ static char socket_path[255];
 int
 DYNINSTasyncConnect(int pid)
 {
-    if(DYNINSTstaticMode) return 0;
+    if(DYNINSTstaticMode)
+    {
+        return 0;
+    }
 #if defined(cap_async_events)
     int                sock_fd;
     struct sockaddr_un sadr;
@@ -202,7 +208,10 @@ DYNINSTasyncConnect(int pid)
 int
 DYNINSTasyncDisconnect(void)
 {
-    if(DYNINSTstaticMode) return 0;
+    if(DYNINSTstaticMode)
+    {
+        return 0;
+    }
     rtdebug_printf("%s[%d]:  welcome to DYNINSTasyncDisconnect\n", __FILE__, __LINE__);
     if(needToDisconnect)
     {
@@ -218,7 +227,10 @@ DYNINSTwriteEvent(void* ev, size_t sz)
 {
     ssize_t res;
 
-    if(DYNINSTstaticMode) return 0;
+    if(DYNINSTstaticMode)
+    {
+        return 0;
+    }
 
     rtdebug_printf("%s[%d]:  welcome to DYNINSTwriteEvent: %zu bytes\n", __FILE__,
                    __LINE__, sz);
@@ -234,7 +246,9 @@ try_again:
     if(-1 == res)
     {
         if(errno == EINTR || errno == EAGAIN)
+        {
             goto try_again;
+        }
         else
         {
             perror("write");
@@ -262,10 +276,16 @@ map_region(void* addr, int len, int fd)
     void* result;
     int   flags = DYNINSTheap_mmapFlags;
 #if defined(arch_x86_64)
-    if(addr == 0) flags |= MAP_32BIT;
+    if(addr == 0)
+    {
+        flags |= MAP_32BIT;
+    }
 #endif
     result = mmap(addr, len, PROT_READ | PROT_WRITE | PROT_EXEC, flags, fd, 0);
-    if(result == MAP_FAILED) return NULL;
+    if(result == MAP_FAILED)
+    {
+        return NULL;
+    }
     return result;
 }
 
@@ -274,7 +294,10 @@ unmap_region(void* addr, int len)
 {
     int result;
     result = munmap(addr, len);
-    if(result == -1) return 0;
+    if(result == -1)
+    {
+        return 0;
+    }
     return 1;
 }
 

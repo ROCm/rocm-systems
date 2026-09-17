@@ -42,7 +42,10 @@ struct c_array
     // Access an element by index with bounds check
     Tp& at(size_t i)
     {
-        if(i < m_size) return m_base[i];
+        if(i < m_size)
+        {
+            return m_base[i];
+        }
         throw ::rocprofsys::exception<std::out_of_range>(
             std::string{ typeid(*this).name() } + std::to_string(i) + " exceeds size " +
             std::to_string(m_size));
@@ -51,7 +54,10 @@ struct c_array
     // Access an element by index with bounds check
     const Tp& at(size_t i) const
     {
-        if(i < m_size) return m_base[i];
+        if(i < m_size)
+        {
+            return m_base[i];
+        }
         throw ::rocprofsys::exception<std::out_of_range>(
             std::string{ typeid(*this).name() } + std::to_string(i) + " exceeds size " +
             std::to_string(m_size));

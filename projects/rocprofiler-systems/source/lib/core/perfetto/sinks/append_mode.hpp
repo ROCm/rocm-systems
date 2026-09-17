@@ -28,10 +28,16 @@ struct append_mode_config
 append_seq_id_base_for_rank(
     std::uint32_t rank, std::uint32_t rank_stride = MERGED_SEQ_ID_RANK_STRIDE) noexcept
 {
-    if(rank_stride == 0) return std::nullopt;
+    if(rank_stride == 0)
+    {
+        return std::nullopt;
+    }
 
     const auto base = static_cast<std::uint64_t>(rank) * rank_stride;
-    if(base > std::numeric_limits<std::uint32_t>::max()) return std::nullopt;
+    if(base > std::numeric_limits<std::uint32_t>::max())
+    {
+        return std::nullopt;
+    }
 
     // set_append_mode starts the process slice at base+1, so a full rank window
     // is valid only when the last possible id (base + rank_stride) is still a

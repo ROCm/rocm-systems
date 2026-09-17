@@ -150,7 +150,10 @@ ucx_gotcha<UCXPolicy>::configure()
     for(size_t i = 0; i < ucx_gotcha_t::capacity(); ++i)
     {
         auto* itr = static_cast<gotcha_data_t*>(ucx_gotcha_t::at(i));
-        if(itr) itr->verbose = -1;
+        if(itr)
+        {
+            itr->verbose = -1;
+        }
     }
 
     ucx_gotcha_t::get_initializer() = []() {

@@ -86,7 +86,10 @@ inline void
 emit_nic_counter(size_t device_index, std::int64_t track_index, std::uint64_t ts,
                  std::uint64_t value)
 {
-    if(track_index < 0) return;
+    if(track_index < 0)
+    {
+        return;
+    }
     TRACE_COUNTER(trait::name<CategoryTp>::value,
                   perfetto_counter_track<metrics>::at(device_index,
                                                       static_cast<size_t>(track_index)),
@@ -99,9 +102,15 @@ inline std::int64_t
 resolve_nic_track(const enabled_metrics& effective_metrics, std::uint32_t bit_key,
                   const std::map<std::uint32_t, size_t>& device_tracks)
 {
-    if((effective_metrics.value & bit_key) == 0) return -1;
+    if((effective_metrics.value & bit_key) == 0)
+    {
+        return -1;
+    }
     auto it = device_tracks.find(bit_key);
-    if(it == device_tracks.end()) return -1;
+    if(it == device_tracks.end())
+    {
+        return -1;
+    }
     return static_cast<std::int64_t>(it->second);
 }
 
@@ -163,7 +172,10 @@ struct perfetto_policy
 
         for(const auto& [bit_value, description] : make_default_nic_tracks())
         {
-            if((enabled_metric_config.value & bit_value) == 0) continue;
+            if((enabled_metric_config.value & bit_value) == 0)
+            {
+                continue;
+            }
             device_tracks[bit_value] = counter_track::emplace(
                 device_index, addendum(description.track_name), description.units);
         }

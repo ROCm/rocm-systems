@@ -97,7 +97,10 @@ DYNINSTgetMemoryMap(unsigned* nump, dyninstmm_t** mapp)
     int     num_matches;
     procmaps          = fopen("/proc/self/maps", "r");
     dyninstmm_t* maps = *mapp;
-    if(procmaps == NULL) return -1;
+    if(procmaps == NULL)
+    {
+        return -1;
+    }
     *nump = 0;
     while(((num_matches = fscanf(procmaps, "%lx-%lx", &saddr, &eaddr)) != EOF) &&
           (*nump < 1024))
@@ -111,7 +114,10 @@ DYNINSTgetMemoryMap(unsigned* nump, dyninstmm_t** mapp)
             int ch;
             while((ch = fgetc(procmaps)) != '\n' && ch != EOF)
             {
-                if(ch == EOF) break;
+                if(ch == EOF)
+                {
+                    break;
+                }
             }
         }
         else

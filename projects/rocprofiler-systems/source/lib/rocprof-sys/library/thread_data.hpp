@@ -163,8 +163,10 @@ thread_data<Tp, Tag, MaxThreads>::construct(construct_on_thread&& _t, Args&&... 
     // construct outside of lambda to prevent data-race
     static auto& _instances = instances();
     if(!_instances.at(_t.index))
+    {
         _instances.at(_t.index) =
             utility::generate<value_type>{}(std::forward<Args>(_args)...);
+    }
 }
 
 template <typename Tp, typename Tag, size_t MaxThreads>
@@ -198,8 +200,10 @@ thread_data<Tp, Tag, MaxThreads>::instances(construct_on_init, Args&&... _args)
     static auto& _v = [&]() -> array_type& {
         auto& _internal = instances();
         for(size_t i = 0; i < MaxThreads; ++i)
+        {
             _internal.at(i) =
                 utility::generate<value_type>{}(std::forward<Args>(_args)...);
+        }
         private_instance()->m_init = [_args...]() {
             return utility::generate<value_type>{}(_args...);
         };
@@ -306,9 +310,14 @@ thread_data<std::optional<Tp>, Tag, MaxThreads>::instance(construct_on_init,
     static auto& _v = [&]() -> unique_ptr_t<this_type>& {
         auto& _ref = instance();
         if(!_ref)
+        {
             _ref = utility::generate<unique_ptr_t<this_type>>{}(
                 std::forward<Args>(_args)...);
-        if(_ref->size() < MaxThreads) _ref->resize(MaxThreads);
+        }
+        if(_ref->size() < MaxThreads)
+        {
+            _ref->resize(MaxThreads);
+        }
         return _ref;
     }();
     return _v;
@@ -326,7 +335,9 @@ thread_data<std::optional<Tp>, Tag, MaxThreads>::construct(construct_on_init,
         if(_ref)
         {
             for(auto& itr : *_ref)
+            {
                 itr = utility::generate<value_type>{}(std::forward<Args>(_args)...);
+            }
         }
         return (_ref != nullptr);
     }();
@@ -358,10 +369,12 @@ thread_data<std::optional<Tp>, Tag, MaxThreads>::construct(construct_on_thread&&
     }();
 
     if(!_constructed.at(_t.index))
+    {
         _constructed.at(_t.index) =
             (_instance->at(_t.index) =
                  utility::generate<value_type>{}(std::forward<Args>(_args)...),
              true);
+    }
 
     return _instance->at(_t.index);
 
@@ -448,7 +461,9 @@ struct thread_data<identity<Tp>, Tag, MaxThreads>
     void fill(value_type _v)
     {
         for(auto& itr : m_data)
+        {
             itr = _v;
+        }
     }
 
 private:
@@ -475,9 +490,14 @@ thread_data<identity<Tp>, Tag, MaxThreads>::instance(construct_on_init, Args&&..
     static auto& _v = [&]() -> unique_ptr_t<this_type>& {
         auto& _ref = instance();
         if(!_ref)
+        {
             _ref = utility::generate<unique_ptr_t<this_type>>{}(
                 std::forward<Args>(_args)...);
-        if(_ref->size() < MaxThreads) _ref->resize(MaxThreads);
+        }
+        if(_ref->size() < MaxThreads)
+        {
+            _ref->resize(MaxThreads);
+        }
         return _ref;
     }();
     return _v;
@@ -494,7 +514,9 @@ thread_data<identity<Tp>, Tag, MaxThreads>::construct(construct_on_init, Args&&.
         if(_ref)
         {
             for(auto& itr : *_ref)
+            {
                 itr = utility::generate<value_type>{}(std::forward<Args>(_args)...);
+            }
         }
         return (_ref != nullptr);
     }();
@@ -526,10 +548,12 @@ thread_data<identity<Tp>, Tag, MaxThreads>::construct(construct_on_thread&& _t,
     }();
 
     if(!_constructed.at(_t.index))
+    {
         _constructed.at(_t.index) =
             (_instance->at(_t.index) =
                  utility::generate<value_type>{}(std::forward<Args>(_args)...),
              true);
+    }
 
     return _instance->at(_t.index);
     (void) _grow;
@@ -624,12 +648,18 @@ struct component_bundle_cache_impl
         iterator itr = begin();
         if constexpr(std::is_same<IterT, reverse_iterator>::value)
         {
-            if(_v == rend()) return;
+            if(_v == rend())
+            {
+                return;
+            }
             std::advance(itr, std::distance(rbegin(), _v));
         }
         else
         {
-            if(_v == end()) return;
+            if(_v == end())
+            {
+                return;
+            }
             itr = _v;
         }
         m_allocator.destroy(*itr);

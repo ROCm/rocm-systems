@@ -105,7 +105,10 @@ struct perfetto_policy
     static void post_process(size_t socket_id, const std::set<size_t>& /*monitored_cpus*/,
                              const enabled_metrics& enabled)
     {
-        if(!detail::get_cpu_samples()) return;
+        if(!detail::get_cpu_samples())
+        {
+            return;
+        }
 
         auto& samples = *detail::get_cpu_samples();
 
@@ -114,14 +117,20 @@ struct perfetto_policy
             samples.size(), socket_id);
 
         const auto& thread_info = thread_info::get(0, InternalTID);
-        if(!thread_info) return;
+        if(!thread_info)
+        {
+            return;
+        }
 
         auto& tracks = detail::get_cpu_tracks();
 
         for(const auto& sample : samples)
         {
             const auto ts = sample.timestamp;
-            if(!thread_info->is_valid_time(ts)) continue;
+            if(!thread_info->is_valid_time(ts))
+            {
+                continue;
+            }
 
             for(const auto& cpu : sample.metric_values.cpu_data)
             {

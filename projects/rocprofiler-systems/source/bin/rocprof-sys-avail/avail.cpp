@@ -129,9 +129,12 @@ main(int argc, char** argv)
         auto _settings = tim::settings::shared_instance();
         for(const auto& setting : *_settings)
         {
-            if(exclude_setting(setting.second->get_env_name())) continue;
+            if(exclude_setting(setting.second->get_env_name()))
+            {
+                continue;
+            }
             auto _categories = setting.second->get_categories();
-            if(_categories.find("native") != _categories.end())
+            if(_categories.contains("native"))
             {
                 _categories.erase("native");
                 _categories.emplace("timemory");
@@ -187,8 +190,10 @@ main(int argc, char** argv)
     parser.set_help_width(40);
     auto _cols = std::get<0>(tim::utility::console::get_columns());
     if(_cols > parser.get_help_width() + 8)
+    {
         parser.set_description_width(
             std::min<int>(_cols - parser.get_help_width() - 8, 120));
+    }
 
     parser.enable_help();
     parser.enable_version("rocprof-sys-avail", ROCPROFSYS_ARGPARSE_VERSION_INFO);
@@ -250,7 +255,9 @@ main(int argc, char** argv)
             if(fmt_opts.all_info)
             {
                 for(auto& itr : options)
+                {
                     itr = true;
+                }
                 options[ENUM]       = false;
                 options[LANG]       = false;
                 include_components  = true;
@@ -274,7 +281,9 @@ main(int argc, char** argv)
         .action([_category_options](parser_t&) {
             std::cout << "Categories:\n";
             for(const auto& itr : _category_options)
+            {
                 std::cout << "    " << itr << "\n";
+            }
         });
     parser
         .add_argument({ "--list-domains" },
@@ -288,12 +297,16 @@ main(int argc, char** argv)
             {
                 if(auto _domain =
                        rocm_domain_from_setting_name(itr.second->get_env_name()))
+                {
                     _domains.insert(std::move(*_domain));
+                }
             }
 
             std::cout << "Available ROCm domains with operations:\n";
             for(const auto& _domain : _domains)
+            {
                 std::cout << "    " << _domain << "\n";
+            }
 
             std::cout << "\nUse '--list-operations <domain_name>' to see operations "
                          "for a specific domain.\n";
@@ -354,8 +367,14 @@ main(int argc, char** argv)
                 std::tuple<size_t, size_t, size_t> _w = { 0, 0, 0 };
                 for(const auto& itr : _keys)
                 {
-                    if(!is_selected(itr.key)) continue;
-                    if(_show && !is_selected(itr.value)) continue;
+                    if(!is_selected(itr.key))
+                    {
+                        continue;
+                    }
+                    if(_show && !is_selected(itr.value))
+                    {
+                        continue;
+                    }
                     std::get<0>(_w) = std::max(std::get<0>(_w), itr.key.length());
                     std::get<1>(_w) = std::max(std::get<1>(_w), itr.value.length());
                     std::get<2>(_w) = std::max(std::get<2>(_w), itr.description.length());
@@ -366,7 +385,10 @@ main(int argc, char** argv)
                 if(fmt_opts.markdown)
                 {
                     _msg << "| " << std::setw(std::get<0>(_w) + 2) << "String";
-                    if(_show) _msg << " | " << std::setw(std::get<1>(_w)) << "Value";
+                    if(_show)
+                    {
+                        _msg << " | " << std::setw(std::get<1>(_w)) << "Value";
+                    }
                     _msg << " | " << std::setw(std::get<2>(_w)) << "Encoding" << " |\n";
 
                     auto _dashes = [](std::int64_t _n) {
@@ -377,17 +399,28 @@ main(int argc, char** argv)
                     };
 
                     _msg << "|" << _dashes(std::get<0>(_w) + 2);
-                    if(_show) _msg << "|" << _dashes(std::get<1>(_w));
+                    if(_show)
+                    {
+                        _msg << "|" << _dashes(std::get<1>(_w));
+                    }
                     _msg << "|" << _dashes(std::get<2>(_w)) << "|\n";
 
                     for(const auto& itr : _keys)
                     {
-                        if(!is_selected(itr.key)) continue;
-                        if(_show && !is_selected(itr.value)) continue;
+                        if(!is_selected(itr.key))
+                        {
+                            continue;
+                        }
+                        if(_show && !is_selected(itr.value))
+                        {
+                            continue;
+                        }
                         _msg << "| " << std::setw(std::get<0>(_w) + 2)
                              << fmt::format("`{}`", itr.key);
                         if(_show)
+                        {
                             _msg << " | " << std::setw(std::get<1>(_w)) << itr.value;
+                        }
                         _msg << " | " << std::setw(std::get<2>(_w)) << itr.description
                              << " |\n";
                     }
@@ -397,17 +430,27 @@ main(int argc, char** argv)
                     _msg << "Output Keys:\n" << std::left;
                     for(const auto& itr : _keys)
                     {
-                        if(!is_selected(itr.key)) continue;
-                        if(_show && !is_selected(itr.value)) continue;
+                        if(!is_selected(itr.key))
+                        {
+                            continue;
+                        }
+                        if(_show && !is_selected(itr.value))
+                        {
+                            continue;
+                        }
                         if(_show)
+                        {
                             _msg << "    " << std::setw(std::get<0>(_w)) << itr.key
                                  << "  ::  " << std::setw(std::get<1>(_w)) << itr.value
                                  << "  ::  " << std::setw(std::get<2>(_w))
                                  << itr.description << "\n";
+                        }
                         else
+                        {
                             _msg << "    " << std::setw(std::get<0>(_w)) << itr.key
                                  << "  ::  " << std::setw(std::get<2>(_w))
                                  << itr.description << "\n";
+                        }
                     }
                 }
                 std::cout << _msg.str() << std::flush;
@@ -528,7 +571,9 @@ main(int argc, char** argv)
             auto _out =
                 (_p.exists("output")) ? _p.get<std::string>("output") : std::string{};
             if(_p.get_count("generate-config") == 0 && !_out.empty())
+            {
                 _config_file = _out;
+            }
             else
             {
                 _config_file = _p.get<std::string>("generate-config");
@@ -567,7 +612,10 @@ main(int argc, char** argv)
         .action([&fmt_opts](parser_t& p) {
             fmt_opts.csv = p.get<bool>("csv");
             csv          = fmt_opts.csv;
-            if(!p.exists("csv-separator")) fmt_opts.delim = ",";
+            if(!p.exists("csv-separator"))
+            {
+                fmt_opts.delim = ",";
+            }
         });
     parser
         .add_argument({ "--csv-separator" },
@@ -620,7 +668,10 @@ main(int argc, char** argv)
 
     auto _parser_set_if_exists = [&parser](auto& _var, const std::string& _opt) {
         using Tp = decay_t<decltype(_var)>;
-        if(parser.exists(_opt)) _var = parser.get<Tp>(_opt);
+        if(parser.exists(_opt))
+        {
+            _var = parser.get<Tp>(_opt);
+        }
     };
 
     _parser_set_if_exists(options[FNAME], "filename");
@@ -666,9 +717,13 @@ main(int argc, char** argv)
     if(parser.exists("generate-config"))
     {
         if(_config_file.empty())
+        {
             throw std::runtime_error("Error! No config output file specified!");
+        }
         if(_config_fmts.empty())
+        {
             throw std::runtime_error("Error! No config output formats specified!");
+        }
         try
         {
             generate_config(_config_file, _config_fmts, options, fmt_opts);
@@ -689,7 +744,9 @@ main(int argc, char** argv)
     if(parser.exists("list-categories") || parser.exists("list-keys") ||
        parser.exists("list-operations") || parser.exists("list-domains") ||
        parser.exists("max-threads"))
+    {
         return EXIT_SUCCESS;
+    }
 
     std::string _pos_regex{};
     if(parser.get_positional_count() > 0)
@@ -709,16 +766,25 @@ main(int argc, char** argv)
         category_regex_keys.emplace_back(_pos_regex);
     }
 
-    if(category_view.count("advanced") > 0 ||
-       category_view.count("settings::advanced") > 0)
+    if(category_view.contains("advanced") || category_view.contains("settings::advanced"))
+    {
         fmt_opts.print_advanced = true;
+    }
 
-    if(category_view.empty()) category_view = _category_options;
+    if(category_view.empty())
+    {
+        category_view = _category_options;
+    }
 
     if(!include_components && !include_settings && !include_hw_counters)
+    {
         include_settings = true;
+    }
 
-    if(fmt_opts.markdown || include_hw_counters) fmt_opts.padding = 6;
+    if(fmt_opts.markdown || include_hw_counters)
+    {
+        fmt_opts.padding = 6;
+    }
 
     std::ostream* os = nullptr;
     std::ofstream ofs;
@@ -739,7 +805,10 @@ main(int argc, char** argv)
     // signal(SIGSEGV, &dump_log_abort);
     // signal(SIGQUIT, &dump_log_abort);
 
-    if(!os) os = &std::cout;
+    if(!os)
+    {
+        os = &std::cout;
+    }
 
     if(include_components)
     {
@@ -787,9 +856,11 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
     std::vector<info_type> _info = get_component_info<TIMEMORY_COMPONENTS_END>();
 
     if(fmt_opts.available_only)
+    {
         _info.erase(std::remove_if(_info.begin(), _info.end(),
                                    [](const auto& itr) { return !itr.is_available(); }),
                     _info.end());
+    }
 
     _info.erase(std::remove_if(_info.begin(), _info.end(),
                                [](const auto& itr) {
@@ -800,14 +871,19 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
                                          "printer" })
                                    {
                                        if(itr.name().find(nitr) != std::string::npos)
+                                       {
                                            return true;
+                                       }
                                    }
                                    auto _categories =
                                        rocprofsys::delimit(itr.categories(), ", ");
                                    for(auto& _v : _categories)
                                    {
                                        _v = fmt::format("component::{}", _v);
-                                       if(category_view.count(_v) > 0) return false;
+                                       if(category_view.count(_v) > 0)
+                                       {
+                                           return false;
+                                       }
                                    }
                                    return true;
                                }),
@@ -821,7 +897,9 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
     width_bool _wusing           = width_bool{ true, _available_column };
     const std::int64_t pad       = fmt_opts.padding;
     for(size_t i = 0; i < options.size(); ++i)
+    {
         _wusing[i + 2] = options[i];
+    }
 
     {
         constexpr size_t idx = 0;
@@ -843,7 +921,10 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
     {
         constexpr size_t idx = 2;
         stringstream_t   ss;
-        if(!options[i]) continue;
+        if(!options[i])
+        {
+            continue;
+        }
         write_entry(ss, fields[i], _widths.at(i + 2), true, _mark.at(idx), fmt_opts);
         _widths.at(idx + i) =
             std::max<std::int64_t>(ss.str().length() + pad, _widths.at(idx + i));
@@ -873,7 +954,10 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
             write_entry(ss, std::get<1>(itr), _widths.at(1), true, false, fmt_opts);
             for(size_t i = 0; i < std::get<2>(itr).size(); ++i)
             {
-                if(!options[i]) continue;
+                if(!options[i])
+                {
+                    continue;
+                }
                 const bool center = (i > 0) ? false : true;
                 _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
                 write_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
@@ -881,10 +965,15 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
             }
 
             if(!category_regex_keys.empty())
+            {
                 _selected +=
                     (is_category_selected(std::get<2>(itr).at(CATEGORY))) ? 1 : 0;
+            }
 
-            if(_selected == 0) continue;
+            if(_selected == 0)
+            {
+                continue;
+            }
         }
 
         {
@@ -917,15 +1006,26 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
 
     _widths = compute_max_columns(_widths, _wusing, fmt_opts);
 
-    if(!fmt_opts.markdown && !fmt_opts.csv) os << banner(_widths, _wusing, fmt_opts, '-');
+    if(!fmt_opts.markdown && !fmt_opts.csv)
+    {
+        os << banner(_widths, _wusing, fmt_opts, '-');
+    }
 
-    if(!fmt_opts.csv) os << fmt_opts.delim;
+    if(!fmt_opts.csv)
+    {
+        os << fmt_opts.delim;
+    }
     write_entry(os, "COMPONENT", _widths.at(0), true, false, fmt_opts);
     if(_available_column)
+    {
         write_entry(os, "AVAILABLE", _widths.at(1), true, false, fmt_opts);
+    }
     for(size_t i = 0; i < fields.size(); ++i)
     {
-        if(!options[i]) continue;
+        if(!options[i])
+        {
+            continue;
+        }
         write_entry(os, fields[i], _widths.at(i + 2), true, false, fmt_opts);
     }
 
@@ -946,19 +1046,28 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
         }
         for(size_t i = 0; i < std::get<2>(itr).size(); ++i)
         {
-            if(!options[i]) continue;
+            if(!options[i])
+            {
+                continue;
+            }
             const bool center = (i > 0) ? false : true;
             _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
             if(fields.at(i) == "DESCRIPTION")
+            {
                 write_wrap_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
                                  _mark.at(i), i + 2, _widths, _wusing, fmt_opts);
+            }
             else
+            {
                 write_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
                             _mark.at(i), fmt_opts);
+            }
         }
 
         if(!category_regex_keys.empty())
+        {
             _selected += (is_category_selected(std::get<2>(itr).at(CATEGORY))) ? 1 : 0;
+        }
 
         if(_selected > 0)
         {
@@ -970,7 +1079,10 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
 
     dump_log();
 
-    if(!fmt_opts.markdown) os << banner(_widths, _wusing, fmt_opts, '-');
+    if(!fmt_opts.markdown)
+    {
+        os << banner(_widths, _wusing, fmt_opts, '-');
+    }
 }
 
 //======================================================================================//
@@ -1033,13 +1145,18 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
             bool _found = false;
             for(const auto& category : _categories)
             {
-                if(category_view.count(category) > 0) _found = true;
+                if(category_view.contains(category))
+                {
+                    _found = true;
+                }
             }
-            if(!fmt_opts.print_advanced && _categories.count("settings::advanced") > 0)
+            if(!fmt_opts.print_advanced && _categories.contains("settings::advanced"))
             {
                 if(!sitr->second->get_config_updated() &&
                    !sitr->second->get_environ_updated())
+                {
                     _not_in_category_view.emplace(_name);
+                }
             }
             if(!_found)
             {
@@ -1048,7 +1165,9 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
             }
             std::stringstream _ss{};
             for(const auto& citr : sitr->second->get_categories())
+            {
                 _ss << ", " << citr;
+            }
             if(!_ss.str().empty())
             {
                 itr["categories"] = _ss.str().substr(2);
@@ -1080,7 +1199,9 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
                            [&_settings](const auto& itr) {
                                auto iitr = _settings->find(itr.at("environ"));
                                if(iitr != _settings->end())
+                               {
                                    return (iitr->second->get_enabled() == false);
+                               }
                                return true;
                            }),
             _setting_output.end());
@@ -1109,10 +1230,14 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
     for(size_t i = 0; i < _widths.size(); ++i)
     {
         if(_wusing.at(i))
+        {
             _widths.at(i) = std::max<std::uint64_t>(_widths.at(i), _labels.at(i).size() +
                                                                        fmt_opts.padding);
+        }
         else
+        {
             _widths.at(i) = 0;
+        }
     }
 
     std::vector<array_t<string_t, size>> _results{};
@@ -1122,9 +1247,15 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
         for(size_t j = 0; j < _keys.size(); ++j)
         {
             auto eitr = itr.find(_keys.at(j));
-            if(eitr != itr.end()) _tmp.at(j) = eitr->second;
+            if(eitr != itr.end())
+            {
+                _tmp.at(j) = eitr->second;
+            }
         }
-        if(!_tmp.at(0).empty()) _results.push_back(_tmp);
+        if(!_tmp.at(0).empty())
+        {
+            _results.push_back(_tmp);
+        }
     }
 
     for(const auto& itr : _results)
@@ -1135,7 +1266,10 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
         int               _selected = 0;
         for(size_t i = 0; i < itr.size(); ++i)
         {
-            if(!_wusing.at(i)) continue;
+            if(!_wusing.at(i))
+            {
+                continue;
+            }
             _widths.at(i) = std::max<std::uint64_t>(_widths.at(i), itr.at(i).length() +
                                                                        fmt_opts.padding);
             _selected += (is_selected(itr.at(i))) ? 1 : 0;
@@ -1154,12 +1288,21 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
 
     _widths = compute_max_columns(_widths, _wusing, fmt_opts);
 
-    if(!fmt_opts.markdown) os << banner(_widths, _wusing, fmt_opts, '-');
+    if(!fmt_opts.markdown)
+    {
+        os << banner(_widths, _wusing, fmt_opts, '-');
+    }
 
-    if(!fmt_opts.csv) os << fmt_opts.delim;
+    if(!fmt_opts.csv)
+    {
+        os << fmt_opts.delim;
+    }
     for(size_t i = 0; i < _labels.size(); ++i)
     {
-        if(!_wusing.at(i)) continue;
+        if(!_wusing.at(i))
+        {
+            continue;
+        }
         write_entry(os, _labels.at(i), _widths.at(i), true, false, fmt_opts);
     }
     os << "\n" << banner(_widths, _wusing, fmt_opts, '-');
@@ -1170,19 +1313,29 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
         int               _selected = 0;
         for(size_t i = 0; i < itr.size(); ++i)
         {
-            if(!_wusing.at(i)) continue;
+            if(!_wusing.at(i))
+            {
+                continue;
+            }
             _selected += (is_selected(itr.at(i))) ? 1 : 0;
             if(_labels.at(i) == "DESCRIPTION")
+            {
                 write_wrap_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i),
                                  i, _widths, _wusing, fmt_opts);
+            }
             else
+            {
                 write_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i),
                             fmt_opts);
+            }
         }
 
         if(_selected > 0)
         {
-            if(!fmt_opts.csv) os << fmt_opts.delim;
+            if(!fmt_opts.csv)
+            {
+                os << fmt_opts.delim;
+            }
             os << hl_selected(ss.str());
             os << "\n";
         }
@@ -1190,7 +1343,10 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
 
     dump_log();
 
-    if(!fmt_opts.markdown) os << banner(_widths, _wusing, fmt_opts, '-');
+    if(!fmt_opts.markdown)
+    {
+        os << banner(_widths, _wusing, fmt_opts, '-');
+    }
 }
 
 //======================================================================================//
@@ -1241,7 +1397,9 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
 
     auto _process_counters = [](auto& _events_v, std::int32_t _offset_v) {
         for(auto& iitr : _events_v)
+        {
             iitr.offset() += _offset_v;
+        }
         return static_cast<std::int32_t>(_events_v.size());
     };
 
@@ -1259,17 +1417,24 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
     auto _valid_symbols = std::set<std::string>{};
     for(auto& fitr : fields)
     {
-        if(!category_view.empty() && category_view.count(fitr.first) == 0 &&
-           category_view.count(std::string{ "hw_counters::" } + fitr.first) == 0)
+        if(!category_view.empty() && !category_view.contains(fitr.first) &&
+           !category_view.contains(std::string{ "hw_counters::" } + fitr.first))
+        {
             fitr.second.clear();
+        }
 
         if(!is_category_selected(fitr.first) &&
            !is_category_selected(std::string{ "hw_counters::" } + fitr.first))
+        {
             fitr.second.clear();
+        }
 
         for(const auto& itr : fitr.second)
         {
-            if(fmt_opts.available_only && !itr.available()) continue;
+            if(fmt_opts.available_only && !itr.available())
+            {
+                continue;
+            }
             const std::stringstream ss;
             int                     _selected = 0;
             if(options[0])
@@ -1295,7 +1460,10 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
                 }
             }
 
-            if(_selected > 0) _valid_symbols.emplace(itr.symbol());
+            if(_selected > 0)
+            {
+                _valid_symbols.emplace(itr.symbol());
+            }
         }
     }
 
@@ -1317,7 +1485,10 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
     for(size_t i = 0; i < _widths.size(); ++i)
     {
         // don't account for AVAILABLE or "DEVICE"
-        if(i != 1 && i != 2) _widths.at(i) = _labels.at(i).length() + fmt_opts.padding;
+        if(i != 1 && i != 2)
+        {
+            _widths.at(i) = _labels.at(i).length() + fmt_opts.padding;
+        }
         _wusing.at(i) = options[i];
     }
 
@@ -1330,32 +1501,47 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
                                 (std::int64_t) itr.short_description().length(),
                                 (std::int64_t) itr.long_description().length() } };
             for(auto& witr : _w)
+            {
                 witr += fmt_opts.padding;
+            }
 
             for(size_t i = 0; i < N; ++i)
             {
                 if(_wusing.at(i))
+                {
                     _widths.at(i) = std::max<std::uint64_t>(_widths.at(i), _w.at(i));
+                }
             }
         }
     }
 
     _widths = compute_max_columns(_widths, _wusing, fmt_opts);
 
-    if(!fmt_opts.markdown) os << banner(_widths, _wusing, fmt_opts, '-');
-    if(!fmt_opts.csv) os << fmt_opts.delim;
+    if(!fmt_opts.markdown)
+    {
+        os << banner(_widths, _wusing, fmt_opts, '-');
+    }
+    if(!fmt_opts.csv)
+    {
+        os << fmt_opts.delim;
+    }
 
     for(size_t i = 0; i < _labels.size(); ++i)
     {
         if(options[i])
+        {
             write_entry(os, _labels.at(i), _widths.at(i), true, false, fmt_opts);
+        }
     }
     os << "\n" << banner(_widths, _wusing, fmt_opts, '-');
 
     for(const auto& fitr : fields)
     {
         // if has a label and is empty, continue
-        if(!fitr.first.empty() && fitr.second.empty()) continue;
+        if(!fitr.first.empty() && fitr.second.empty())
+        {
+            continue;
+        }
 
         for(const auto& itr : fitr.second)
         {
@@ -1388,7 +1574,10 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
                 }
             }
 
-            if(!fmt_opts.csv) os << fmt_opts.delim;
+            if(!fmt_opts.csv)
+            {
+                os << fmt_opts.delim;
+            }
             os << hl_selected(ss.str());
             os << "\n";
         }
@@ -1396,7 +1585,10 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
 
     dump_log();
 
-    if(!fmt_opts.markdown) os << banner(_widths, _wusing, fmt_opts, '-');
+    if(!fmt_opts.markdown)
+    {
+        os << banner(_widths, _wusing, fmt_opts, '-');
+    }
 }
 
 //======================================================================================//
@@ -1413,12 +1605,20 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
 {
     using value_type = typename IntArrayT::value_type;
 
-    if(fmt_opts.num_cols == 0) return _widths;
+    if(fmt_opts.num_cols == 0)
+    {
+        return _widths;
+    }
 
     auto _get_sum = [&]() {
         value_type _sumv = 0;
         for(size_t i = 0; i < _widths.size(); ++i)
-            if(_using.at(i)) _sumv += _widths.at(i);
+        {
+            if(_using.at(i))
+            {
+                _sumv += _widths.at(i);
+            }
+        }
         return _sumv;
     };
     auto _get_max = [&]() {
@@ -1442,7 +1642,10 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
     };
     auto _decrement_max = [&]() {
         auto _midx = _get_max().first;
-        if(_midx < _widths.size()) _widths.at(_midx) -= 1;
+        if(_midx < _widths.size())
+        {
+            _widths.at(_midx) -= 1;
+        }
     };
 
     const std::int32_t _max_width = fmt_opts.num_cols;
@@ -1454,24 +1657,34 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
         {
             std::stringstream _msg;
             for(size_t i = 0; i < _widths.size(); ++i)
+            {
                 _msg << ", " << ((_using.at(i)) ? _widths.at(i) : 0);
+            }
             std::cerr << "[ temp]> sum_width = " << _get_sum()
                       << ", max_width = " << _max_width
                       << ", widths = " << _msg.str().substr(2) << std::endl;
         }
 
-        if(_get_max().first == _widths.size() || _get_sum() <= _max_width) break;
+        if(_get_max().first == _widths.size() || _get_sum() <= _max_width)
+        {
+            break;
+        }
         _decrement_max();
     }
 
     const std::int32_t _maxw = _get_max().second;
-    if(fmt_opts.max_width == 0 || _maxw < fmt_opts.max_width) fmt_opts.max_width = _maxw;
+    if(fmt_opts.max_width == 0 || _maxw < fmt_opts.max_width)
+    {
+        fmt_opts.max_width = _maxw;
+    }
 
     if(debug_msg)
     {
         std::stringstream _msg;
         for(size_t i = 0; i < _widths.size(); ++i)
+        {
             _msg << ", " << ((_using.at(i)) ? _widths.at(i) : 0);
+        }
         std::cerr << "[final]> sum_width = " << _get_sum()
                   << ", max_width = " << _max_width
                   << ", widths = " << _msg.str().substr(2)
@@ -1488,20 +1701,29 @@ void
 write_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool center, bool mark,
             const format_options& fmt_opts)
 {
-    if(fmt_opts.max_width > 0 && _w > fmt_opts.max_width) _w = fmt_opts.max_width;
+    if(fmt_opts.max_width > 0 && _w > fmt_opts.max_width)
+    {
+        _w = fmt_opts.max_width;
+    }
 
     stringstream_t ssentry;
     stringstream_t ss;
     if(fmt_opts.csv)
+    {
         ssentry << std::boolalpha << _entry;
+    }
     else
+    {
         ssentry << ' ' << std::boolalpha << ((mark && fmt_opts.markdown) ? "`" : "")
                 << _entry;
+    }
     auto _sentry = remove(ssentry.str(), { "tim::", "component::" });
 
     auto _decr = (mark && fmt_opts.markdown) ? 6 : 5;
     if(!fmt_opts.csv && _w > 0 && _sentry.length() > static_cast<size_t>(_w - 2))
+    {
         _sentry = _sentry.substr(0, _w - _decr) + "...";
+    }
 
     if(mark && fmt_opts.markdown)
     {
@@ -1523,7 +1745,9 @@ write_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool center, bo
             }
         }
         if(_w > 0 && _sentry.length() > static_cast<size_t>(_w - 1))
+        {
             _sentry = _sentry.substr(_w - 1);
+        }
         ss << std::left << std::setw(_w - 1) << _sentry << fmt_opts.delim;
     }
     else
@@ -1531,17 +1755,25 @@ write_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool center, bo
         if(fmt_opts.csv)
         {
             if(_sentry.find(fmt_opts.delim) == std::string::npos)
+            {
                 ss << _sentry << fmt_opts.delim;
+            }
             else
             {
                 if(_sentry.find('"') != std::string::npos)
+                {
                     ss << "'" << _sentry << "'" << fmt_opts.delim;
+                }
                 else
+                {
                     ss << "\"" << _sentry << "\"" << fmt_opts.delim;
+                }
             }
         }
         else
+        {
             ss << std::left << std::setw(_w - 1) << _sentry << fmt_opts.delim;
+        }
     }
     os << ss.str();
 }
@@ -1561,7 +1793,10 @@ write_wrap_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool cente
     }
 
     auto _orig_w = _w;
-    if(fmt_opts.max_width > 0 && _w > fmt_opts.max_width) _w = fmt_opts.max_width;
+    if(fmt_opts.max_width > 0 && _w > fmt_opts.max_width)
+    {
+        _w = fmt_opts.max_width;
+    }
 
     auto           _remainder = std::string{};
     stringstream_t ssentry;
@@ -1575,7 +1810,9 @@ write_wrap_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool cente
         auto _decr   = (mark && fmt_opts.markdown) ? 4 : 3;
         auto _lspace = _sentry.substr(0, _w - _decr).find_last_of(" \t");
         if(_lspace == std::string::npos || _lspace < static_cast<std::uint64_t>(_w / 2))
+        {
             _lspace = _w - _decr;
+        }
         _remainder = std::string{ " " } + _sentry.substr(_lspace);
         _sentry    = _sentry.substr(0, _lspace);
     }
@@ -1600,7 +1837,9 @@ write_wrap_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool cente
             }
         }
         if(_w > 0 && _sentry.length() > static_cast<size_t>(_w - 1))
+        {
             _sentry = _sentry.substr(_w - 1);
+        }
         ss << std::left << std::setw(_w - 1) << _sentry << fmt_opts.delim;
     }
     else
@@ -1625,13 +1864,18 @@ string_t
 banner(IntArrayT _breaks, std::array<bool, N> _use, format_options& fmt_opts, char filler,
        char delim)
 {
-    if(fmt_opts.csv) return string_t{};
+    if(fmt_opts.csv)
+    {
+        return string_t{};
+    }
 
     if(debug_msg)
     {
         std::cerr << "[before]> Breaks: ";
         for(const auto& itr : _breaks)
+        {
             std::cerr << itr << " ";
+        }
         std::cerr << std::endl;
     }
 
@@ -1641,13 +1885,18 @@ banner(IntArrayT _breaks, std::array<bool, N> _use, format_options& fmt_opts, ch
     {
         std::cerr << "[after]>  Breaks: ";
         for(const auto& itr : _breaks)
+        {
             std::cerr << itr << " ";
+        }
         std::cerr << std::endl;
     }
 
     for(auto& itr : _breaks)
     {
-        if(fmt_opts.max_width > 0 && itr > fmt_opts.max_width) itr = fmt_opts.max_width;
+        if(fmt_opts.max_width > 0 && itr > fmt_opts.max_width)
+        {
+            itr = fmt_opts.max_width;
+        }
     }
 
     stringstream_t ss;
@@ -1655,13 +1904,19 @@ banner(IntArrayT _breaks, std::array<bool, N> _use, format_options& fmt_opts, ch
     std::int64_t _remain = 0;
     for(size_t i = 0; i < _breaks.size(); ++i)
     {
-        if(_use.at(i)) _remain += _breaks.at(i);
+        if(_use.at(i))
+        {
+            _remain += _breaks.at(i);
+        }
     }
     auto _total = _remain;
     ss << delim;
     for(size_t i = 0; i < _breaks.size(); ++i)
     {
-        if(!_use.at(i)) continue;
+        if(!_use.at(i))
+        {
+            continue;
+        }
         ss << std::setw(_breaks.at(i) - 1) << "" << delim;
         _remain -= _breaks.at(i);
     }
@@ -1681,13 +1936,19 @@ string_t
 wrap(size_t idx, IntArrayT _breaks, std::array<bool, N> _use, format_options& fmt_opts,
      char filler, char delim)
 {
-    if(fmt_opts.csv) return string_t{};
+    if(fmt_opts.csv)
+    {
+        return string_t{};
+    }
 
     _breaks = compute_max_columns(_breaks, _use, fmt_opts);
 
     for(auto& itr : _breaks)
     {
-        if(fmt_opts.max_width > 0 && itr > fmt_opts.max_width) itr = fmt_opts.max_width;
+        if(fmt_opts.max_width > 0 && itr > fmt_opts.max_width)
+        {
+            itr = fmt_opts.max_width;
+        }
     }
 
     stringstream_t ss;
@@ -1695,15 +1956,24 @@ wrap(size_t idx, IntArrayT _breaks, std::array<bool, N> _use, format_options& fm
     std::int64_t _remain = 0;
     for(size_t i = 0; i < _breaks.size(); ++i)
     {
-        if(_use.at(i)) _remain += _breaks.at(i);
+        if(_use.at(i))
+        {
+            _remain += _breaks.at(i);
+        }
     }
 
     for(size_t i = 1; i < _breaks.size(); ++i)
     {
         auto j = i + idx;
         auto k = j % _breaks.size();
-        if(k == 0) ss << "\n" << delim;
-        if(!_use.at(k)) continue;
+        if(k == 0)
+        {
+            ss << "\n" << delim;
+        }
+        if(!_use.at(k))
+        {
+            continue;
+        }
         ss << std::setw(_breaks.at(k) - 1) << "" << delim;
         _remain -= _breaks.at(k);
     }

@@ -279,7 +279,10 @@ struct category_region
     // Returns std::nullopt when the wire string is malformed
     static std::optional<std::uint32_t> next_arg_index(const std::string& args_str)
     {
-        if(args_str.empty()) return 0u;
+        if(args_str.empty())
+        {
+            return 0u;
+        }
 
         constexpr std::string_view delim = rocprofsys::ARG_DELIMITER;
 
@@ -290,13 +293,19 @@ struct category_region
         for(std::size_t i = 0; i < delims_to_last_record; ++i)
         {
             const std::size_t p = args_str.rfind(delim, search_end);
-            if(p == std::string::npos) break;
+            if(p == std::string::npos)
+            {
+                break;
+            }
             if(i == fields_per_record)
             {
                 record_start = p + delim.size();
                 break;
             }
-            if(p == 0) break;
+            if(p == 0)
+            {
+                break;
+            }
             search_end = p - 1;
         }
 
@@ -361,7 +370,10 @@ struct category_region
     void append_cache_args(const char* name, std::string_view category,
                            std::string args_str)
     {
-        if(args_str.empty()) return;
+        if(args_str.empty())
+        {
+            return;
+        }
 
         auto key = entry_key{ name, std::string{ category } };
         auto itr = map_name_to_args.find(key);
@@ -376,10 +388,13 @@ struct category_region
             {
                 const auto next_idx = next_arg_index(entry.args);
                 // Existing args are malformed: drop this batch
-                if(!next_idx) return;
+                if(!next_idx)
+                {
+                    return;
+                }
 
                 renumber_serialized_args(args_str, *next_idx);
-                entry.args += std::move(args_str);
+                entry.args += args_str;
             }
         }
     }
@@ -392,7 +407,10 @@ struct category_region
         {
             auto entry = std::move(x->second.back());
             x->second.pop_back();
-            if(x->second.empty()) map_name_to_args.erase(x);
+            if(x->second.empty())
+            {
+                map_name_to_args.erase(x);
+            }
 
             const auto          end_ts    = clock_.now();
             const std::uint64_t thread_id = thread_meta_.resolve_current_thread();
@@ -556,13 +574,25 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
                                        Args&&... args)
 {
     // skip if category is disabled
-    if(tracing::category_push_disabled<CategoryT>()) return;
+    if(tracing::category_push_disabled<CategoryT>())
+    {
+        return;
+    }
 
     // unconditionally return if thread is disabled or finalized
-    if(state::thread::get() == state::thread::Disabled) return;
-    if(state::process::get() >= state::process::Finalized) return;
+    if(state::thread::get() == state::thread::Disabled)
+    {
+        return;
+    }
+    if(state::process::get() >= state::process::Finalized)
+    {
+        return;
+    }
 
-    if(name.empty()) return;
+    if(name.empty())
+    {
+        return;
+    }
 
     auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
@@ -571,9 +601,14 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
     // tooling one time and as it exits set it to active and return true.
     if(state::process::get() != state::process::Active &&
        !rocprofsys_init_tooling_hidden())
+    {
         return;
+    }
 
-    if(get_thread_status() == state::thread::Disabled) return;
+    if(get_thread_status() == state::thread::Disabled)
+    {
+        return;
+    }
 
     // Gotcha starts pass the region name followed by ("arg-name", value) pairs.
     // Serialize those pairs into the trace-cache wire format
@@ -611,7 +646,10 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
     {
         if constexpr(!is_one_of<CategoryT, causal_throughput_categories_t>::value)
         {
-            if(get_use_causal()) causal::push_progress_point(name);
+            if(get_use_causal())
+            {
+                causal::push_progress_point(name);
+            }
         }
     }
 
@@ -653,7 +691,10 @@ void
 category_region<CategoryT>::append_cache_args(std::string_view name,
                                               std::string      serialized_args)
 {
-    if(name.empty() || serialized_args.empty()) return;
+    if(name.empty() || serialized_args.empty())
+    {
+        return;
+    }
 
     auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
@@ -669,9 +710,15 @@ void
 category_region<CategoryT>::stop(std::string_view name, Args&&... args)
 {
     // skip if category is disabled
-    if(tracing::category_pop_disabled<CategoryT>()) return;
+    if(tracing::category_pop_disabled<CategoryT>())
+    {
+        return;
+    }
 
-    if(state::thread::get() == state::thread::Disabled) return;
+    if(state::thread::get() == state::thread::Disabled)
+    {
+        return;
+    }
 
     auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
@@ -720,11 +767,17 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
         {
             if constexpr(is_one_of<CategoryT, causal_throughput_categories_t>::value)
             {
-                if(get_use_causal()) causal::mark_progress_point(name);
+                if(get_use_causal())
+                {
+                    causal::mark_progress_point(name);
+                }
             }
             else
             {
-                if(get_use_causal()) causal::pop_progress_point(name);
+                if(get_use_causal())
+                {
+                    causal::pop_progress_point(name);
+                }
             }
         }
 
@@ -745,20 +798,31 @@ category_region<CategoryT>::mark(std::string_view name, Args&&...)
     constexpr bool _ct_use_causal =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
 
-    if constexpr(!_ct_use_causal) return;
+    if constexpr(!_ct_use_causal)
+    {
+        return;
+    }
 
     // skip if category is disabled
-    if(tracing::category_mark_disabled<CategoryT>()) return;
+    if(tracing::category_mark_disabled<CategoryT>())
+    {
+        return;
+    }
 
     // the expectation here is that if the state is not active then the call
     // to rocprofsys_init_tooling_hidden will activate all the appropriate
     // tooling one time and as it exits set it to active and return true.
     if(state::process::get() != state::process::Active &&
        !rocprofsys_init_tooling_hidden())
+    {
         return;
+    }
 
     // unconditionally return if thread is disabled or finalized
-    if(state::thread::get() >= state::thread::Completed) return;
+    if(state::thread::get() >= state::thread::Completed)
+    {
+        return;
+    }
 
     auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
@@ -781,7 +845,7 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
                                   Args&&... _args)
 {
-    start<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
+    start<OptsT...>(_data.tool_id, [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
         {
             std::int64_t _n = 0;
@@ -794,7 +858,7 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
 
     if constexpr(sizeof...(Args) > 0)
     {
-        append_cache_args(_data.tool_id.c_str(),
+        append_cache_args(_data.tool_id,
                           region_cache::serialize_annotation_args(_args...));
     }
 }
@@ -807,15 +871,16 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::outgoing,
 {
     if constexpr(sizeof...(Args) > 0)
     {
-        append_cache_args(_data.tool_id.c_str(),
-                          region_cache::serialize_return_arg(_args...));
+        append_cache_args(_data.tool_id, region_cache::serialize_return_arg(_args...));
     }
 
-    stop<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
+    stop<OptsT...>(_data.tool_id, [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
+        {
             tracing::add_perfetto_annotation(
                 ctx, "return",
                 fmt::format("{}", fmt::join(std::forward_as_tuple(_args...), ", ")));
+        }
     });
 }
 
@@ -856,9 +921,11 @@ category_region<CategoryT>::audit(std::string_view _name, audit::outgoing,
 
     stop<OptsT...>(_name.data(), [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
+        {
             tracing::add_perfetto_annotation(
                 ctx, "return",
                 fmt::format("{}", fmt::join(std::forward_as_tuple(_args...), ", ")));
+        }
     });
 }
 
@@ -881,21 +948,30 @@ struct local_category_region : comp::base<local_category_region<CategoryT>, void
     template <typename... OptsT, typename... Args>
     auto start(Args&&... args)
     {
-        if(m_prefix.empty()) return;
+        if(m_prefix.empty())
+        {
+            return;
+        }
         return impl_type::template start<OptsT...>(m_prefix, std::forward<Args>(args)...);
     }
 
     template <typename... OptsT, typename... Args>
     auto stop(Args&&... args)
     {
-        if(m_prefix.empty()) return;
+        if(m_prefix.empty())
+        {
+            return;
+        }
         return impl_type::template stop<OptsT...>(m_prefix, std::forward<Args>(args)...);
     }
 
     template <typename... OptsT, typename... Args>
     auto mark(Args&&... args)
     {
-        if(m_prefix.empty()) return;
+        if(m_prefix.empty())
+        {
+            return;
+        }
         return impl_type::template mark<OptsT...>(m_prefix, std::forward<Args>(args)...);
     }
 
@@ -904,14 +980,20 @@ struct local_category_region : comp::base<local_category_region<CategoryT>, void
         -> decltype(impl_type::template audit<OptsT...>(std::declval<std::string_view>(),
                                                         std::forward<Args>(args)...))
     {
-        if(m_prefix.empty()) return;
+        if(m_prefix.empty())
+        {
+            return;
+        }
         return impl_type::template audit<OptsT...>(m_prefix, std::forward<Args>(args)...);
     }
 
     template <typename... OptsT, typename... Args>
     auto audit(quirk::config<OptsT...>, Args&&... args)
     {
-        if(m_prefix.empty()) return;
+        if(m_prefix.empty())
+        {
+            return;
+        }
         return impl_type::template audit<OptsT...>(quirk::config<OptsT...>{}, m_prefix,
                                                    std::forward<Args>(args)...);
     }

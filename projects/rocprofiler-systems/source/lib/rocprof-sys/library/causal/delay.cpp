@@ -55,7 +55,10 @@ compute_sleep_for_overhead()
         const std::int64_t _beg = tracing::now();
         std::this_thread::sleep_for(std::chrono::nanoseconds{ _val });
         const std::int64_t _end = tracing::now();
-        if(i < _nwarm) continue;
+        if(i < _nwarm)
+        {
+            continue;
+        }
         auto _diff = (_end - _beg);
         if(_diff < _val)
         {
@@ -94,7 +97,10 @@ delay::setup()
 void
 delay::process()
 {
-    if(!is_local_available()) return;
+    if(!is_local_available())
+    {
+        return;
+    }
 
     if(causal::experiment::is_active())
     {
@@ -121,7 +127,10 @@ delay::process()
 void
 delay::credit()
 {
-    if(!is_local_available()) return;
+    if(!is_local_available())
+    {
+        return;
+    }
 
     auto _diff = get_global() - get_local();
     if(_diff > 0)
@@ -133,7 +142,10 @@ delay::credit()
 void
 delay::preblock()
 {
-    if(!is_local_available()) return;
+    if(!is_local_available())
+    {
+        return;
+    }
 
     auto _diff = get_global() - get_local();
     if(_diff > 0)
@@ -145,7 +157,10 @@ delay::preblock()
 void
 delay::postblock(std::int64_t _preblock_global_delay_value)
 {
-    if(!is_local_available()) return;
+    if(!is_local_available())
+    {
+        return;
+    }
     get_local() += (get_global() - _preblock_global_delay_value);
 }
 
@@ -153,7 +168,10 @@ std::int64_t
 delay::sync()
 {
     auto _v = get_global().load(std::memory_order_seq_cst);
-    if(get_delay_data()) get_delay_data()->fill(_v);
+    if(get_delay_data())
+    {
+        get_delay_data()->fill(_v);
+    }
     return _v;
 }
 

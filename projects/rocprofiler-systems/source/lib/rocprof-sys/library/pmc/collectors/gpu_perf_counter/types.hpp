@@ -84,7 +84,7 @@ struct enabled_metrics
 
     [[nodiscard]] bool is_counter_enabled(const counter_definition& def) const
     {
-        return m_counters.count(def) > 0;
+        return m_counters.contains(def);
     }
 
 private:
@@ -124,7 +124,10 @@ namespace rocprofsys::pmc::collectors::gpu_perf_counter
 inline std::string
 make_qualified_name(const counter_metadata& meta)
 {
-    if(meta.dimensions.empty()) return meta.name;
+    if(meta.dimensions.empty())
+    {
+        return meta.name;
+    }
     return fmt::format("{}[{}]", meta.name, fmt::join(meta.dimensions, ","));
 }
 

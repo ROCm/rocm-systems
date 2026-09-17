@@ -204,7 +204,12 @@ inline const tool_agent*
 client_data::get_gpu_tool_agent(rocprofiler_agent_id_t id) const
 {
     for(const auto& itr : gpu_agents)
-        if(id.handle == itr.agent->handle) return &itr;
+    {
+        if(id.handle == itr.agent->handle)
+        {
+            return &itr;
+        }
+    }
     return nullptr;
 }
 
@@ -231,7 +236,10 @@ client_data::get_tool_counter_info(rocprofiler_agent_id_t   _agent_id,
 {
     for(const auto& itr : agent_counter_info.at(_agent_id))
     {
-        if(itr.id == _counter_id) return &itr;
+        if(itr.id == _counter_id)
+        {
+            return &itr;
+        }
     }
     return nullptr;
 }

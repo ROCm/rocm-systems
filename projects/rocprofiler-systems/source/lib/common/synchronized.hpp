@@ -156,7 +156,10 @@ synchronized<LockedType, ThreadStatePolicy, IsMappedTypeV>::ulock(ReadFuncT&&  r
 
     {
         auto lock = std::shared_lock{ m_mutex };
-        if(read(m_data, std::forward<Args>(args)...)) return true;
+        if(read(m_data, std::forward<Args>(args)...))
+        {
+            return true;
+        }
     }
 
     auto lock = std::unique_lock{ m_mutex };
