@@ -69,6 +69,18 @@ class ScheduleBcastTasksToPlan_Scene {
   std::unique_ptr<int[]> rankToIndex;
 };
 
+// Builds a g_ncclGetAlgoInfo hook reporting the given (protocol, nMaxChannels, nWarps) triple and succeeding.
+std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, int, int, ncclSimInfo_t*)>
+ScheduleBcastTasksToPlan_AlgoInfoHook(int protocol, int nMaxChannels, int nWarps) {
+  return [protocol, nMaxChannels, nWarps](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                          ncclSimInfo_t*) {
+    task->protocol = protocol;
+    task->nMaxChannels = nMaxChannels;
+    task->nWarps = nWarps;
+    return ncclSuccess;
+  };
+}
+
 // Walks plan->workQueue to inspect the ncclDevWorkBcast built for each accepted ring-depth slice.
 std::vector<ncclDevWorkBcast*> ScheduleBcastTasksToPlan_CollectWorkItems(struct ncclKernelPlan* plan) {
   std::vector<ncclDevWorkBcast*> items;
@@ -94,6 +106,35 @@ class MakeSymmetricTaskList_Scene {
   }
   std::unique_ptr<ncclComm> comm;
 };
+
+// Common setup for tests that need ncclMakeSymmetricTaskList to reach the tuning stage: good windows
+// (g_symRegType) and args-buffer room for 5 tasks (workArgsBytes). Caller may still edit the result further.
+ncclTaskColl MakeSymmetricTaskList_MakeTask(MakeSymmetricTaskList_Scene& scene, ncclFunc_t func = ncclFuncBroadcast,
+                                            ncclDataType_t datatype = ncclInt8) {
+  g_symRegType = ncclSymSendRegRecvReg;
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
+  ncclTaskColl task{};
+  task.func = func;
+  task.datatype = datatype;
+  return task;
+}
+
+// A g_tuningCompute hook that leaves *result untouched and reports success (no kernel found).
+std::function<ncclResult_t(struct ncclTuningInput_t*, struct ncclTuningResult_t*)>
+MakeSymmetricTaskList_TuningSucceeds() {
+  return [](struct ncclTuningInput_t*, struct ncclTuningResult_t*) { return ncclSuccess; };
+}
+
+// A g_tuningCompute hook reporting a found AllGather_LL kernel with the given channel/warp counts.
+std::function<ncclResult_t(struct ncclTuningInput_t*, struct ncclTuningResult_t*)>
+MakeSymmetricTaskList_TuningFindsKernel(int nChannels, int nWarps) {
+  return [nChannels, nWarps](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
+    result->symKernelId = ncclSymkKernelId_AllGather_LL;
+    result->nChannels = nChannels;
+    result->nWarps = nWarps;
+    return ncclSuccess;
+  };
+}
 
 // Unlike ncclMakeSymmetricTaskList (raw list + output param), this takes an already-populated queue directly.
 class SymmetricTaskScheduler_Scene {
@@ -470,13 +511,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_FuncIndexNotFound_ReturnsInv
   scene.peers[0].bcastQueue.head = &task;
   scene.comm->WarpSize = 64;
 
-  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
-                                             ncclSimInfo_t*) {
-    task->protocol = NCCL_PROTO_SIMPLE;
-    task->nMaxChannels = 0;
-    task->nWarps = 4;
-    return ncclSuccess;
-  });
+  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, ScheduleBcastTasksToPlan_AlgoInfoHook(NCCL_PROTO_SIMPLE, 0, 4));
   // ncclDevFuncNameToId is left empty: funcIndex is always -1 regardless of the (proto, algo) key.
 
   EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclInvalidUsage);
@@ -491,13 +526,8 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_FuncIndexFound_NotSpecialize
   scene.comm->collOpCount = 5;
   scene.plan->kernelSpecialized = false;
 
-  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
-                                             ncclSimInfo_t*) {
-    task->protocol = NCCL_PROTO_SIMPLE;
-    task->nMaxChannels = 0;  // makes nParts 0: safe to run this call to completion
-    task->nWarps = 1;
-    return ncclSuccess;
-  });
+  // nMaxChannels 0 makes nParts 0: safe to run this call to completion.
+  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, ScheduleBcastTasksToPlan_AlgoInfoHook(NCCL_PROTO_SIMPLE, 0, 1));
   ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_SIMPLE)] = 0;
   ScopedHook kernelHook(g_planSetDefaultKernel, [&](struct ncclComm*, struct ncclKernelPlan*) {});
 
@@ -513,13 +543,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_FuncIndexFound_AlreadySpecia
   scene.peers[0].bcastQueue.head = &task;
   scene.plan->kernelSpecialized = true;
 
-  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
-                                             ncclSimInfo_t*) {
-    task->protocol = NCCL_PROTO_SIMPLE;
-    task->nMaxChannels = 0;
-    task->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, ScheduleBcastTasksToPlan_AlgoInfoHook(NCCL_PROTO_SIMPLE, 0, 1));
   ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_SIMPLE)] = 0;
   ScopedHook kernelHook(g_planSetDefaultKernel, [&](struct ncclComm*, struct ncclKernelPlan*) {});
 
@@ -533,13 +557,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_ProtoLL_ReachesFuncIndexWith
   task.count = 100;
   scene.peers[0].bcastQueue.head = &task;
 
-  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
-                                             ncclSimInfo_t*) {
-    task->protocol = NCCL_PROTO_LL;
-    task->nMaxChannels = 0;
-    task->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, ScheduleBcastTasksToPlan_AlgoInfoHook(NCCL_PROTO_LL, 0, 1));
   ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_LL)] = 0;
 
   EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclSuccess);
@@ -554,13 +572,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_ProtoLL128_ReachesFuncIndexW
   scene.comm->ll128DataElems = 1;
   scene.comm->ll128LineElems = 1;
 
-  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
-                                             ncclSimInfo_t*) {
-    task->protocol = NCCL_PROTO_LL128;
-    task->nMaxChannels = 0;
-    task->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, ScheduleBcastTasksToPlan_AlgoInfoHook(NCCL_PROTO_LL128, 0, 1));
   ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_LL128)] = 0;
 
   EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclSuccess);
@@ -613,13 +625,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_FourRingDepths_BuildsWorkIte
   scene.peers[2].bcastQueue.head = &task2;
   scene.peers[3].bcastQueue.head = &task3;
 
-  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
-                                             ncclSimInfo_t*) {
-    task->protocol = NCCL_PROTO_SIMPLE;
-    task->nMaxChannels = 1;
-    task->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, ScheduleBcastTasksToPlan_AlgoInfoHook(NCCL_PROTO_SIMPLE, 1, 1));
   ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_SIMPLE)] = 0;
 
   struct WorkBatchCall {
@@ -702,13 +708,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_EmptySliceFromZeroCount_Skip
   scene.peers[0].bcastQueue.head = &task0;
   scene.peers[1].bcastQueue.head = &task1;
 
-  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
-                                             ncclSimInfo_t*) {
-    task->protocol = NCCL_PROTO_SIMPLE;
-    task->nMaxChannels = 1;
-    task->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, ScheduleBcastTasksToPlan_AlgoInfoHook(NCCL_PROTO_SIMPLE, 1, 1));
   ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_SIMPLE)] = 0;
   int workBatchCalls = 0;
   ScopedHook workBatchHook(g_addWorkBatchToPlan,
@@ -732,13 +732,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_AllSlicesEmpty_SkipsProxyOpE
   task.count = 0;
   scene.peers[0].bcastQueue.head = &task;
 
-  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
-                                             ncclSimInfo_t*) {
-    task->protocol = NCCL_PROTO_SIMPLE;
-    task->nMaxChannels = 1;
-    task->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, ScheduleBcastTasksToPlan_AlgoInfoHook(NCCL_PROTO_SIMPLE, 1, 1));
   ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_SIMPLE)] = 0;
   ScopedHook proxyOpHook(g_addProxyOpIfNeeded, [&](struct ncclComm*, struct ncclKernelPlan*, struct ncclProxyOp*) {
     return ncclSuccess;
@@ -762,13 +756,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_ProtoLL_HalvesChunkSizeBefor
   scene.peers[0].bcastQueue.head = &task0;
   scene.peers[1].bcastQueue.head = &task1;
 
-  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
-                                             ncclSimInfo_t*) {
-    task->protocol = NCCL_PROTO_LL;
-    task->nMaxChannels = 1;
-    task->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, ScheduleBcastTasksToPlan_AlgoInfoHook(NCCL_PROTO_LL, 1, 1));
   ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_LL)] = 0;
   struct ncclProxyOp recordedProxyOp {};
   ScopedHook proxyOpHook(g_addProxyOpIfNeeded,
@@ -802,13 +790,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_ProtoLL128_RoundsChunkSizeTo
   task.count = 50000;
   scene.peers[0].bcastQueue.head = &task;
 
-  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
-                                             ncclSimInfo_t*) {
-    task->protocol = NCCL_PROTO_LL128;
-    task->nMaxChannels = 1;
-    task->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, ScheduleBcastTasksToPlan_AlgoInfoHook(NCCL_PROTO_LL128, 1, 1));
   ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_LL128)] = 0;
 
   EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclSuccess);
@@ -834,13 +816,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_ThreeChannels_SplitsBytesPer
   scene.peers[0].bcastQueue.head = &task0;
   scene.peers[1].bcastQueue.head = &task1;
 
-  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
-                                             ncclSimInfo_t*) {
-    task->protocol = NCCL_PROTO_SIMPLE;
-    task->nMaxChannels = 3;  // 3 parts/channels
-    task->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, ScheduleBcastTasksToPlan_AlgoInfoHook(NCCL_PROTO_SIMPLE, 3, 1));
   ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_SIMPLE)] = 0;
   std::vector<int> workBatchChannelIds;
   ScopedHook workBatchHook(g_addWorkBatchToPlan,
@@ -877,13 +853,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_PartBytes_RoundsCountUpNotDo
   task.count = 513;  // divUp(513,2)=257, floor(513,2)=256: the two straddle the 256-byte alignUp boundary
   scene.peers[0].bcastQueue.head = &task;
 
-  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
-                                             ncclSimInfo_t*) {
-    task->protocol = NCCL_PROTO_SIMPLE;
-    task->nMaxChannels = 2;
-    task->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, ScheduleBcastTasksToPlan_AlgoInfoHook(NCCL_PROTO_SIMPLE, 2, 1));
   ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_SIMPLE)] = 0;
 
   EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclSuccess);
@@ -905,13 +875,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_AddProxyOpIfNeededFails_Prop
   task.count = 100;  // ringDepth 0 (rankToIndex[0] defaults to 0): sendSlices > 0, recvSlices stays 0
   scene.peers[0].bcastQueue.head = &task;
 
-  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
-                                             ncclSimInfo_t*) {
-    task->protocol = NCCL_PROTO_SIMPLE;
-    task->nMaxChannels = 1;
-    task->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, ScheduleBcastTasksToPlan_AlgoInfoHook(NCCL_PROTO_SIMPLE, 1, 1));
   ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_SIMPLE)] = 0;
   ScopedHook proxyOpHook(g_addProxyOpIfNeeded,
                          [](struct ncclComm*, struct ncclKernelPlan*, struct ncclProxyOp*) {
@@ -933,13 +897,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_WarpSpeedMultiplierAbove1_Ha
   task.recvbuff = reinterpret_cast<void*>(0x4000);
   scene.peers[0].bcastQueue.head = &task;
 
-  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
-                                             ncclSimInfo_t*) {
-    task->protocol = NCCL_PROTO_SIMPLE;
-    task->nMaxChannels = 4;  // agvChannelCount(comm, 4) with multiplier 2 must yield 2, not 4
-    task->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook algoInfoHook(g_ncclGetAlgoInfo, ScheduleBcastTasksToPlan_AlgoInfoHook(NCCL_PROTO_SIMPLE, 4, 1));
   ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_SIMPLE)] = 0;
   std::vector<int> workBatchChannelIds;
   ScopedHook workBatchHook(g_addWorkBatchToPlan,
@@ -1408,9 +1366,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ArgsSizeGuard_SufficientlyLarge
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   // Explicit success: the fallback-to-remainder needs this to succeed, but the canonical default now fails loudly.
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t*) {
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
   EXPECT_EQ(task.isSymLast, 1);  // single task in its bucket: task->next==nullptr disjunct
   EXPECT_EQ(remainTasksHead, &task);
@@ -1433,9 +1389,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_OuterCursorLoop_VisitsEveryDist
   task1.next = &task2;  // separate single-task buckets: no LIFO reordering to reason about
 
   // Explicit success for both buckets' tuning calls: the canonical g_tuningCompute default now fails loudly.
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t*) {
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   struct ncclTaskColl* remainTasksHead = nullptr;
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task1, nullptr, &remainTasksHead), ncclSuccess);
   EXPECT_EQ(task1.isSymLast, 1);  // only true if the cursor loop actually visited task1's bucket
@@ -1462,9 +1416,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ConfigBoundary_Fo
   task1.next = &task2;      // classification input order: task1 then task2 (LIFO reverses processing order)
 
   // Explicit success for both batches' tuning calls: the canonical g_tuningCompute default now fails loudly.
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t*) {
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   struct ncclTaskColl* remainTasksHead = nullptr;
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task1, nullptr, &remainTasksHead), ncclSuccess);
   EXPECT_EQ(task2.isSymLast, 1);  // ends its own singleton batch despite task2.next(=task1)!=nullptr and no budget
@@ -1491,9 +1443,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ConfigBoundary_Ne
   task1.next = &task2;
 
   // Explicit success for both batches' tuning calls: the canonical g_tuningCompute default now fails loudly.
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t*) {
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   struct ncclTaskColl* remainTasksHead = nullptr;
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task1, nullptr, &remainTasksHead), ncclSuccess);
   EXPECT_EQ(task2.isSymLast, 1);  // configBoundary via task->next->aggIsolate, the OR's short-circuited half
@@ -1525,9 +1475,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ArgsSizeBudgetExh
   taskThird.next = &taskSecond;
 
   // Explicit success for both batches' tuning calls: the canonical g_tuningCompute default now fails loudly.
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t*) {
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   struct ncclTaskColl* remainTasksHead = nullptr;
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &taskThird, nullptr, &remainTasksHead), ncclSuccess);
   EXPECT_EQ(taskFirst.isSymLast, 0);   // continues: room remains and neither next==nullptr nor configBoundary
@@ -1764,8 +1712,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_GetCollNetSupportFails_Propagat
     *out = 0;
     return ncclSuccess;
   });
-  ScopedHook tuningHook(g_tuningCompute,
-                        [](struct ncclTuningInput_t*, struct ncclTuningResult_t*) { return ncclSuccess; });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
@@ -1784,8 +1731,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_GetRegBuffFails_PropagatesError
 
   ScopedHook regBuffHook(g_getRegBuff,
                          [](struct ncclComm*, struct ncclTaskColl*, int*) { return ncclInternalError; });
-  ScopedHook tuningHook(g_tuningCompute,
-                        [](struct ncclTuningInput_t*, struct ncclTuningResult_t*) { return ncclSuccess; });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
@@ -1845,9 +1791,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_AllConditionsTr
   task.forceAlgSelection = 1;
   scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
   // Explicit success: the 5th condition needs kernelId==Count, but the canonical default now fails loudly.
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t*) {
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
@@ -1869,9 +1813,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_EffAlgMaskZero_
   // task.algMask left at 0 (default): effAlgMask == 0, so the hard-error branch's 2nd condition is false.
   scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
   // Explicit success: the canonical g_tuningCompute default now fails loudly instead of leaving kernelId==Count.
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t*) {
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
@@ -1893,9 +1835,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_HasGeneralBitsI
   task.forceAlgSelection = 1;
   scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
   // Explicit success: the canonical g_tuningCompute default now fails loudly instead of leaving kernelId==Count.
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t*) {
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
@@ -1914,9 +1854,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_ForceAlgSelecti
   // task.forceAlgSelection left at 0 (default): the 5th condition is false.
   scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
   // Explicit success: the canonical g_tuningCompute default now fails loudly instead of leaving kernelId==Count.
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t*) {
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
@@ -1933,12 +1871,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_HardErrorBranch_KernelIdFound_S
   task.algMask = NCCL_TUNING_MASK_SYM_KERNELS;  // every other condition true
   task.forceAlgSelection = 1;
   scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
-    result->symKernelId = ncclSymkKernelId_AllGather_LL;  // found: the 1st condition (kernelId==Count) is false
-    result->nChannels = 1;
-    result->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(1, 1));
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
@@ -1952,12 +1885,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_EffAlgMaskNon
   task.datatype = ncclInt8;
   task.algMask = NCCL_TUNING_MASK_SYM_KERNELS;
   scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
-    result->symKernelId = ncclSymkKernelId_AllGather_LL;
-    result->nChannels = 1;
-    result->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(1, 1));
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_TUNING);
@@ -1977,12 +1905,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_EffAlgMaskZer
   task.datatype = ncclInt8;
   // task.algMask left at 0: effAlgMask == 0, so the INFO condition's first operand is false.
   scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
-    result->symKernelId = ncclSymkKernelId_AllGather_LL;
-    result->nChannels = 1;
-    result->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(1, 1));
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_TUNING);
@@ -2004,9 +1927,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_KernelIdCount
   task.algMask = NCCL_TUNING_MASK_SYM_KERNELS;
   scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
   // Explicit success: kernelId must stay Count, but the canonical default now fails loudly instead.
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t*) {
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_TUNING);
@@ -2029,12 +1950,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_LLKernelInit_NeverCalled_Becaus
   task.datatype = ncclInt8;
   scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
   ScopedHook llMaskHook(g_symkLLKernelMask, []() { return ~0; });  // every bit set: isolates the regType operand
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
-    result->symKernelId = ncclSymkKernelId_AllGather_LL;
-    result->nChannels = 1;
-    result->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(1, 1));
   ScopedHook initOnceHook(g_symkInitOnce, [](struct ncclComm*) { return ncclSuccess; });
   struct ncclTaskColl* remainTasksHead = nullptr;
 
@@ -2049,12 +1965,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_SingleTask_
   task.func = ncclFuncBroadcast;
   task.datatype = ncclInt8;
   scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
-    result->symKernelId = ncclSymkKernelId_AllGather_LL;
-    result->nChannels = 3;
-    result->nWarps = 5;
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(3, 5));
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
@@ -2081,12 +1992,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_ConvertSymT
   task.opDev.op = ncclDevSum;
   task.opDev.scalarArg = kPoison;
   scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
-    result->symKernelId = ncclSymkKernelId_AllGather_LL;
-    result->nChannels = 1;
-    result->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(1, 1));
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
@@ -2108,12 +2014,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_MultiTaskBa
   secondTask.datatype = ncclInt8;
   secondTask.next = &headTask;
 
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
-    result->symKernelId = ncclSymkKernelId_AllGather_LL;
-    result->nChannels = 2;
-    result->nWarps = 4;
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(2, 4));
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &secondTask, nullptr, &remainTasksHead), ncclSuccess);
@@ -2145,12 +2046,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_OuterCursorLoop_MultipleBuckets
   task1.datatype = ncclInt8;
   task1.next = &task2;
 
-  ScopedHook tuningHook(g_tuningCompute, [](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
-    result->symKernelId = ncclSymkKernelId_AllGather_LL;
-    result->nChannels = 1;
-    result->nWarps = 1;
-    return ncclSuccess;
-  });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(1, 1));
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task1, nullptr, &remainTasksHead), ncclSuccess);
@@ -2458,10 +2354,15 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_ManySameDevFu
   SymmetricTaskScheduler_Scene scene;
   auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
                                                     ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/1);
+  int makeDevWorkCalls = 0;
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork,
+                             [&](struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*) {
+                               ++makeDevWorkCalls;
+                               return ncclSuccess;
+                             });
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
-  EXPECT_EQ(scene.plan->kernelArgsSize,
-            std::max(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, false),
-                     sizeof(ncclSymkDevWorkArgs4K)));
+  // workCount-specific: one ncclSymkMakeDevWork call per task, so all kSymSchedBigBatchTasks were counted as one batch.
+  EXPECT_EQ(makeDevWorkCalls, kSymSchedBigBatchTasks);
 }
 
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_StopsAtDevFuncIdMismatch_ExcludesTrailingTask) {

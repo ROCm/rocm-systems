@@ -55,8 +55,6 @@ set(RCCL_MICRO_TEST_SOURCES
   scheduler-test.cc                    # src/scheduler/*.cc (allgatherv + symmetric schedulers)
   fakes/dev_runtime_micro_fakes.cc     # dev_runtime's non-HIP externs (shadow pool, space, gin, rma)
   fakes/scheduler_fakes.cc             # scheduler.cc's own externals not faked elsewhere
-  fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc (ncclGetSymRegType)
-  fakes/collectives_fakes.cc           # src/collectives.cc name tables/helpers
   fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
   fakes/libc_fakes.cc                  # libc seams (sockets/stdio/exit) for libc-only units
   fakes/ras_param_fakes.cc             # src/ras/ras_param.cc timeout scaling
@@ -72,7 +70,7 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/collectives_fakes.cc           # src/collectives.cc name helpers
   fakes/dda_fakes.cc                   # src/algorithms/dda/* selection seams
   fakes/strongstream_stubs.cc          # src/misc/strongstream.cc capture seam
-  fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc query seams
+  fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc: query, kernel-table, and dev-work seams
   fakes/transport_stubs.cc             # transport/PXN/AINIC seams
   fakes/tuning_fakes.cc                # graph tuning/channel params
   fakes/wrap_fakes.cc                  # remaining uncategorized dependency seams
