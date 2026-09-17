@@ -230,14 +230,26 @@ ncclResult_t ncclRmaProxyDeregister(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECT
 // ---------------------------------------------------------------------------
 // devr internal helpers (defined elsewhere in the real build).
 // ---------------------------------------------------------------------------
-ncclResult_t ncclDevrPopulateSegmentSizes(struct ncclDevrMemory*, int) { return ncclSuccess; }
+ncclResult_t ncclDevrPopulateSegmentSizes(struct ncclDevrMemory* mem, int numSegments) {
+  if (mem != nullptr && mem->segmentSizes != nullptr && numSegments > 0) {
+    mem->segmentSizes[0] = mem->size;
+  }
+  return ncclSuccess;
+}
 ncclResult_t ncclDevrAllocAndPopulateSegmentWindows(struct ncclDevrState*, struct ncclDevrMemory*, hipStream_t,
                                                     struct ncclSegmentWindow** out) {
   if (out) *out = nullptr;
   return ncclSuccess;
 }
 ncclResult_t ncclDevrVerifySegmentLayouts(struct ncclDevrMemory*, struct ncclComm*) { return ncclSuccess; }
-ncclResult_t ncclDevrBuildGinSegmentInfos(struct ncclDevrMemory*) { return ncclSuccess; }
+ncclResult_t ncclDevrBuildGinSegmentInfos(struct ncclDevrMemory* mem) {
+  if (mem == nullptr) return ncclInternalError;
+  mem->numGinSegments = 1;
+  NCCLCHECK(ncclCalloc(&mem->ginSegmentInfos, 1));
+  mem->ginSegmentInfos[0].segmentSize = mem->size;
+  mem->ginSegmentInfos[0].memType = CU_MEM_LOCATION_TYPE_DEVICE;
+  return ncclSuccess;
+}
 
 // ---------------------------------------------------------------------------
 // CFT / LE helpers pulled in via #include of hipified dev_runtime.cc.
