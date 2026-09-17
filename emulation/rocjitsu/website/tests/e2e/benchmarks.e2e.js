@@ -188,8 +188,8 @@ test('benchmark explorer switches among single, grid, and aggregate modes', asyn
 
   await enableDetailsOnClick.click();
   await expect(page.getByRole('button', { name: 'Disable details on click' })).toHaveText('Click details · On');
-  await clickLastCompletedChartPoint(aggregateChart);
   const runDialog = page.getByRole('dialog');
+  await clickLastCompletedChartPoint(aggregateChart, () => runDialog.isVisible());
   await expect(runDialog.getByText('Run Details')).toBeVisible();
   await expect(runDialog.getByText('Commit 31369c4d · Auto')).toBeVisible();
   const commitLabel = await runDialog.getByText('RocJitsu commit', { exact: true }).boundingBox();
@@ -239,8 +239,8 @@ test('benchmark history bridges gaps and opens failed result details', async ({ 
   expect(gapPresentation.bridgeTypes.every((type) => type === 'dotted')).toBe(true);
   expect(gapPresentation.statuses).toContain('failed');
 
-  await clickLastStatusChartPoint(chart);
   const dialog = page.getByRole('dialog');
+  await clickLastStatusChartPoint(chart, () => dialog.isVisible());
   await expect(dialog.getByText('Failed', { exact: true })).toBeVisible();
   await expect(dialog.getByText('Simulation exited before producing a valid timing result')).toBeVisible();
   await dialog.getByRole('button', { name: 'Close details' }).click();
@@ -301,8 +301,8 @@ test('an incomplete recent run has clickable aggregate and failed-test markers',
     shadowBlur: 13,
   });
 
-  await clickAggregateIncompletePoint(aggregateChart, '19872076');
   const runDetails = page.getByRole('dialog', { name: 'Run Details' });
+  await clickAggregateIncompletePoint(aggregateChart, '19872076', () => runDetails.isVisible());
   await expect(runDetails.getByRole('heading', { name: 'Selected Scope' })).toBeVisible();
   await expect(runDetails.getByText('5/7 completed')).toBeVisible();
   await expect(runDetails.getByText('Incomplete Tests')).toBeVisible();
@@ -408,14 +408,14 @@ test('historical rows and completed chart points open shared provenance details'
   await expect(clearRuns).toHaveText('Clear selected runs (0)');
 
   await page.getByRole('button', { name: 'Enable details on click' }).click();
-  await clickLastCompletedChartPoint(chart);
+  await clickLastCompletedChartPoint(chart, () => dialog.isVisible());
   await expect(dialog.getByRole('link', { name: 'Commit 31369c4d' })).toBeVisible();
   await page.getByRole('button', { name: 'Close details' }).click();
   await expect(clearRuns).toHaveText('Clear selected runs (1)');
 
   // Keep enough horizontal distance from the selected latest point, because adjacent scatter hit
   // targets intentionally overlap.
-  await clickCompletedChartPoint(chart, 5);
+  await clickCompletedChartPoint(chart, 5, () => dialog.isVisible());
   await expect(dialog).toBeVisible();
   await page.getByRole('button', { name: 'Close details' }).click();
   await expect(clearRuns).toHaveText('Clear selected runs (2)');

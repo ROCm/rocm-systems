@@ -27,11 +27,12 @@ npm run test:e2e:install
 npm run verify
 ```
 
-`npm run verify` runs ESLint, a production build, Vitest unit tests, and Playwright
-desktop and mobile browser tests. A successful run exits with status 0. Playwright
-builds the current source with dummy fixtures into `.test-dist/`, starts its own
-preview server at `http://127.0.0.1:4174`, and stops it when done. Keep port 4174 free.
-Browser tests leave the data-free production build in `dist/` untouched.
+`npm run verify` runs ESLint, a production build, Vitest unit tests, Playwright
+desktop and mobile browser tests, and the chart interaction race test ten times
+sequentially. A successful run exits with status 0. Playwright builds the current
+source with dummy fixtures into `.test-dist/`, starts its own preview server at
+`http://127.0.0.1:4174`, and stops it when done. Keep port 4174 free. Browser tests
+leave the data-free production build in `dist/` untouched.
 
 If port 4174 is occupied, select a free port without stopping other servers:
 `PLAYWRIGHT_PORT=4176 npm run verify` (or use the same variable with `npm run test:e2e`).
@@ -44,6 +45,7 @@ Individual commands, all run from `website/`:
 | `npm run lint` | Check JavaScript and React source with ESLint |
 | `npm run test:unit` | Run data loader, selector, and utility tests without a browser |
 | `npm run test:e2e` | Run Chromium desktop behavior and mobile layout tests |
+| `npm run test:e2e:chart-race` | Run the chart interaction race test ten times sequentially |
 | `npm test` | Run both unit and browser tests |
 | `npm run verify` | Run lint, build, and both test suites |
 

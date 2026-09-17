@@ -2,7 +2,14 @@ import {
   Box,
   Button,
   Chip,
+  Divider,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   Typography,
   useMediaQuery,
   useTheme,
@@ -14,9 +21,20 @@ import RemoveRoundedIcon from '@mui/icons-material/RemoveRounded';
 import SwapVertRoundedIcon from '@mui/icons-material/SwapVertRounded';
 import RunSelector from '../compare/RunSelector';
 import Chart from '../shared/Chart';
+import DetailItem from '../shared/DetailItem';
+import { DetailGrid, DetailSectionHeading } from '../shared/DetailLayout';
 import SectionCard from '../shared/SectionCard';
+import StatusChip from '../shared/StatusChip';
 import { previousCompletedRunForFilters, selectRunComparison } from '../../data/selectors';
-import { escapeHtml, formatDuration, formatPercent, shortSha } from '../../utils/formatters';
+import { commitTimestampFor } from '../../data/runOrdering';
+import { provenanceDetails } from '../../data/provenance';
+import {
+  escapeHtml,
+  formatDuration,
+  formatFullDate,
+  formatPercent,
+  shortSha,
+} from '../../utils/formatters';
 import { changeTone, classifyDurationChange } from '../../utils/performance';
 import CommitComparison from '../shared/CommitComparison';
 
@@ -48,6 +66,147 @@ function AggregateChange({ value, candidate, baseline }) {
       </Stack>
       {Number.isFinite(value) && <CommitComparison candidate={candidate} baseline={baseline} sx={{ mt: 0.3, fontSize: 10 }} />}
     </Box>
+  );
+}
+
+function HighlightedValue({ different, children }) {
+  return (
+    <Box component="span" sx={different ? { color: 'warning.main', fontWeight: 750 } : undefined}>
+      {children}
+    </Box>
+  );
+}
+
+function RunInformation({ label, run, otherRun, filters, accentColor }) {
+  if (!run) return null;
+  const selectedTests = run.tests.filter((test) => (
+    filters.targets.includes(test.target) && filters.suites.includes(test.suite)
+  ));
+  const otherSelectedTests = (otherRun?.tests ?? []).filter((test) => (
+    filters.targets.includes(test.target) && filters.suites.includes(test.suite)
+  ));
+  const completed = selectedTests.filter((test) => (
+    test.status === 'completed' && Number.isFinite(test.durationSeconds)
+  )).length;
+  const otherCompleted = otherSelectedTests.filter((test) => (
+    test.status === 'completed' && Number.isFinite(test.durationSeconds)
+  )).length;
+  const complete = selectedTests.length > 0 && completed === selectedTests.length;
+  const environment = provenanceDetails(run.provenance);
+  const otherEnvironment = new Map(
+    provenanceDetails(otherRun?.provenance).map((detail) => [detail.key, detail.value]),
+  );
+  const coverage = `${completed}/${selectedTests.length} completed`;
+  const otherCoverage = `${otherCompleted}/${otherSelectedTests.length} completed`;
+
+  return (
+    <Box
+      data-testid={`${label.toLowerCase()}-run-information`}
+      sx={{
+        minWidth: 0,
+        p: { xs: 1.5, sm: 2 },
+        border: 1,
+        borderTop: 3,
+        borderColor: 'divider',
+        borderTopColor: accentColor,
+        borderRadius: 2,
+        bgcolor: 'background.paper',
+      }}
+    >
+      <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 1.5 }}>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="overline" color="text.secondary">{label} run</Typography>
+          <Typography component="div" sx={{ fontFamily: 'monospace', fontWeight: 780 }}>
+            {shortSha(run)}
+          </Typography>
+          {run.provenance?.commitMessage && (
+            <Typography variant="caption" color="text.secondary" noWrap title={run.provenance.commitMessage}>
+              {run.provenance.commitMessage}
+            </Typography>
+          )}
+        </Box>
+        <Chip
+          size="small"
+          color={complete ? 'success' : 'error'}
+          variant="outlined"
+          label={complete ? 'Completed' : 'Not completed'}
+        />
+      </Stack>
+      <DetailGrid>
+        <DetailItem label="Coverage">
+          <HighlightedValue different={coverage !== otherCoverage}>{coverage}</HighlightedValue>
+        </DetailItem>
+        <DetailItem label="Test catalog">
+          <HighlightedValue different={run.catalogId !== otherRun?.catalogId}>{run.catalogId}</HighlightedValue>
+        </DetailItem>
+        <DetailItem label="Commit time">{formatFullDate(commitTimestampFor(run))}</DetailItem>
+        <DetailItem label="Run time">{formatFullDate(run.timestamp)}</DetailItem>
+        <DetailItem label="Machine">
+          <HighlightedValue different={run.machineId !== otherRun?.machineId}>{run.machineId}</HighlightedValue>
+        </DetailItem>
+      </DetailGrid>
+      <Divider sx={{ my: 1.75 }} />
+      <DetailSectionHeading>Environment</DetailSectionHeading>
+      {environment.length > 0 ? (
+        <DetailGrid>
+          {environment.map((detail) => (
+            <DetailItem key={detail.key} label={detail.label}>
+              <HighlightedValue different={detail.value !== otherEnvironment.get(detail.key)}>
+                {detail.value}
+              </HighlightedValue>
+            </DetailItem>
+          ))}
+        </DetailGrid>
+      ) : (
+        <Typography variant="body2" color="text.secondary">No environment details provided.</Typography>
+      )}
+    </Box>
+  );
+}
+
+function TestAvailability({ test }) {
+  return test
+    ? <StatusChip status={test.status} />
+    : <Chip size="small" variant="outlined" label="Unavailable in catalog" />;
+}
+
+function ExcludedTestsTable({ comparisons }) {
+  if (comparisons.length === 0) {
+    return (
+      <Typography color="text.secondary" sx={{ py: 3, textAlign: 'center' }}>
+        Every selected benchmark has completed data in both runs.
+      </Typography>
+    );
+  }
+
+  return (
+    <TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 2 }}>
+      <Table size="small" sx={{ minWidth: 760 }}>
+        <TableHead>
+          <TableRow>
+            <TableCell>Benchmark</TableCell>
+            <TableCell>Target</TableCell>
+            <TableCell>Suite</TableCell>
+            <TableCell>Candidate</TableCell>
+            <TableCell>Baseline</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {comparisons.map((comparison) => {
+            const benchmark = comparison.candidateTest ?? comparison.baselineTest;
+            return (
+              <TableRow key={benchmark.testId}>
+                <TableCell sx={{ fontWeight: 700 }}>{benchmark.name}</TableCell>
+                <TableCell>{benchmark.target}</TableCell>
+                <TableCell>{benchmark.suite}</TableCell>
+                <TableCell><TestAvailability test={comparison.candidateTest} /></TableCell>
+                <TableCell><TestAvailability test={comparison.baselineTest} /></TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </TableContainer>
   );
 }
 
@@ -243,16 +402,6 @@ export default function CompareRunsView({
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
           Only benchmarks with valid completed durations in both runs are compared.
         </Typography>
-        {viewModel.notComparable.length > 0 && (
-          <Box sx={{ mt: 1, p: 1.25, borderRadius: 2, border: 1, borderColor: 'divider', bgcolor: 'action.hover' }}>
-            <Typography variant="caption" fontWeight={750} color="text.primary">Not included in this comparison: </Typography>
-            {viewModel.notComparable.map((item) => (
-              <Typography key={item.test.testId} variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.35 }}>
-                {item.test.target} · {item.test.name} — {item.notComparableReason}
-              </Typography>
-            ))}
-          </Box>
-        )}
         {viewModel.comparable.length > 0 ? (
           <Box sx={{ mx: { xs: -1.25, sm: -0.5 }, mt: 0.75 }}>
             <Chart option={option} height={chartHeight} ariaLabel="Performance change by benchmark comparison chart" />
@@ -260,6 +409,35 @@ export default function CompareRunsView({
         ) : (
           <Typography color="text.secondary" sx={{ py: 8, textAlign: 'center' }}>No completed benchmark results are comparable between these runs.</Typography>
         )}
+      </SectionCard>
+
+      <SectionCard
+        title="Compared Run Information"
+        subtitle="Completeness and catalog availability reflect the active target and suite filters"
+      >
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
+          <RunInformation
+            label="Candidate"
+            run={candidate}
+            otherRun={baseline}
+            filters={filters}
+            accentColor="primary.main"
+          />
+          <RunInformation
+            label="Baseline"
+            run={baseline}
+            otherRun={candidate}
+            filters={filters}
+            accentColor="secondary.main"
+          />
+        </Box>
+      </SectionCard>
+
+      <SectionCard
+        title="Tests Not Included in Comparison"
+        subtitle="Catalog availability and benchmark-result status for the active target and suite filters"
+      >
+        <ExcludedTestsTable comparisons={viewModel.notComparable} />
       </SectionCard>
     </Box>
   );

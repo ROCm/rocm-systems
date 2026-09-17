@@ -80,19 +80,16 @@ export function compareRuns(candidate, baseline, filters) {
   const baselineTests = resultMap(baseline);
   return candidate.tests.filter((test) => testMatches(test, filters)).map((test) => {
     const previous = baselineTests.get(test.testId);
-    let notComparableReason = null;
-    if (!previous) notComparableReason = 'Missing from baseline';
-    else if (test.status !== 'completed') notComparableReason = `Candidate ${test.status ?? 'incomplete'}`;
-    else if (previous.status !== 'completed') notComparableReason = `Baseline ${previous.status ?? 'incomplete'}`;
-    else if (!Number.isFinite(test.durationSeconds)) notComparableReason = 'Candidate duration unavailable';
-    else if (!Number.isFinite(previous.durationSeconds)) notComparableReason = 'Baseline duration unavailable';
-
-    const comparable = notComparableReason === null;
+    const comparable = test.status === 'completed'
+      && Number.isFinite(test.durationSeconds)
+      && previous?.status === 'completed'
+      && Number.isFinite(previous.durationSeconds);
     return {
       test,
       previous,
+      candidateTest: test,
+      baselineTest: previous ?? null,
       comparable,
-      notComparableReason,
       delta: comparable ? ((test.durationSeconds - previous.durationSeconds) / previous.durationSeconds) * 100 : null,
     };
   });
@@ -547,7 +544,21 @@ export function selectRunReliability(data, filters, limit = 20) {
 }
 
 export function selectRunComparison(candidate, baseline, filters, tolerance = 3) {
-  const comparisons = compareRuns(candidate, baseline, filters);
+  const candidateComparisons = compareRuns(candidate, baseline, filters);
+  const candidateTestIds = new Set(candidateComparisons.map((item) => item.test.testId));
+  const baselineOnlyComparisons = candidate && baseline
+    ? baseline.tests
+      .filter((test) => testMatches(test, filters) && !candidateTestIds.has(test.testId))
+      .map((test) => ({
+        test,
+        previous: test,
+        candidateTest: null,
+        baselineTest: test,
+        comparable: false,
+        delta: null,
+      }))
+    : [];
+  const comparisons = [...candidateComparisons, ...baselineOnlyComparisons];
   const comparable = comparisons.filter((item) => item.comparable);
   const notComparable = comparisons.filter((item) => !item.comparable);
   const baselineDuration = comparable.reduce((total, item) => total + item.previous.durationSeconds, 0);

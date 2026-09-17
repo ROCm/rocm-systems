@@ -250,10 +250,28 @@ test('target and suite filters use checkbox menus with check-all controls', asyn
   await expect(page.getByRole('option', { name: 'Triton' })).toBeVisible();
 });
 
-test('suite filter keeps labels visible until they approach the dropdown control', async ({ page }) => {
+test('global filters split the full width evenly and collapse excess labels into +N', async ({ page }) => {
   await page.goto('/');
 
+  const targets = page.getByTestId('targets-filter');
   const suites = page.getByTestId('suites-filter');
+  const filterLayout = await targets.evaluate((element) => {
+    const grid = element.parentElement.getBoundingClientRect();
+    const targetBounds = element.getBoundingClientRect();
+    const suiteBounds = element.parentElement.querySelector('[data-testid="suites-filter"]')
+      .getBoundingClientRect();
+    return {
+      gridLeft: grid.left,
+      gridRight: grid.right,
+      targetLeft: targetBounds.left,
+      targetWidth: targetBounds.width,
+      suiteRight: suiteBounds.right,
+      suiteWidth: suiteBounds.width,
+    };
+  });
+  expect(Math.abs(filterLayout.targetWidth - filterLayout.suiteWidth)).toBeLessThanOrEqual(1);
+  expect(Math.abs(filterLayout.targetLeft - filterLayout.gridLeft)).toBeLessThanOrEqual(1);
+  expect(Math.abs(filterLayout.suiteRight - filterLayout.gridRight)).toBeLessThanOrEqual(1);
   await expect(suites.locator('[data-responsive-tag]')).toHaveCount(3);
   await expect(suites.locator('[data-overflow-tag]')).toHaveCount(0);
 

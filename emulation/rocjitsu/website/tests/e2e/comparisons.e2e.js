@@ -174,7 +174,7 @@ test('comparison surfaces identify both compared commits', async ({ page }) => {
   const august28 = history.getByRole('row', { name: /Aug 28, 2026/ });
   await expect(august28.getByLabel('Candidate commit 87c0b32c versus baseline commit 0db03af1')).toBeVisible();
   await expect(history.getByRole('row', { name: /Aug 27, 2026/ })
-    .getByLabel('Candidate commit 0db03af1 versus baseline commit daaf4bae')).toBeVisible();
+    .getByLabel('Candidate commit 0db03af1 versus baseline commit 390ca630')).toBeVisible();
   await august28.getByRole('button', { name: /^Open result details/ }).click();
   await expect(page.getByRole('dialog').getByText('Baseline run', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Close details' }).click();
@@ -184,6 +184,20 @@ test('comparison surfaces identify both compared commits', async ({ page }) => {
   await expect(page.getByText('Aggregate change')).toBeVisible();
   await expect(page.getByText('Not comparable', { exact: true })).toBeVisible();
   await expect(page.getByText('Only benchmarks with valid completed durations in both runs are compared.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Compared Run Information' })).toBeVisible();
+  const candidateInformation = page.getByTestId('candidate-run-information');
+  const baselineInformation = page.getByTestId('baseline-run-information');
+  await expect(candidateInformation).toContainText('8418072e');
+  await expect(candidateInformation).toContainText('rocjitsu-core-v1');
+  await expect(candidateInformation).toContainText('5/5 completed');
+  await expect(candidateInformation).toContainText('ROCm SDK');
+  await expect(baselineInformation).toContainText('31369c4d');
+  await expect(baselineInformation).toContainText('rocjitsu-core-v2');
+  await expect(baselineInformation).toContainText('7/7 completed');
+  await expect(baselineInformation).toContainText('ROCm SDK');
+  await expect(page.getByRole('heading', { name: 'Tests Not Included in Comparison' })).toBeVisible();
+  await expect(page.getByRole('row', { name: /GEMM FP8 4096³.*Unavailable in catalog.*Completed/ })).toBeVisible();
+  await expect(page.getByRole('row', { name: /DeepSeek V3 FP8 decode.*Unavailable in catalog.*Completed/ })).toBeVisible();
   await expect(page.getByLabel('Candidate commit 8418072e versus baseline commit 31369c4d')).toHaveCount(2);
 });
 

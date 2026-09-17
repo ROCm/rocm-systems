@@ -173,11 +173,8 @@ export default function FiltersBar({ data, state, disabled = false }) {
       <Stack direction="row" sx={{ alignItems: 'center', gap: 1, mb: 1.5 }}>
         <TuneRoundedIcon color="primary" sx={{ fontSize: 18 }} />
         <Typography variant="overline" color="text.secondary">Global filters</Typography>
-        <Typography variant="caption" color="text.disabled" sx={{ ml: 'auto', display: { xs: 'none', md: 'block' } }}>
-          Applies to every dashboard view
-        </Typography>
       </Stack>
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'minmax(280px, 360px) minmax(360px, 460px)' }, gap: 1.25 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
         <MultiSelect label="Targets" options={data.targets} value={state.targets} onChange={state.setTargets} disabled={disabled} />
         <MultiSelect label="Suites" options={data.suites} value={state.suites} onChange={state.setSuites} disabled={disabled} />
       </Box>

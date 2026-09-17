@@ -13,7 +13,7 @@ test('loads the data-driven overview without browser errors', async ({ page }) =
   await expect(page.getByText('Demo', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'RocJitsu Performance Health' })).toBeVisible();
   await expect(page.getByText('Performance Trend')).toBeVisible();
-  await expect(page.getByText('Run coverage', { exact: false })).toBeVisible();
+  await expect(page.getByText('Run coverage', { exact: true })).toBeVisible();
   await expect(page.getByText('Recent Runs')).toBeVisible();
   await expect(page.getByText('RocJitsu Commit Activity')).toHaveCount(0);
   await expect(page.locator('canvas')).toHaveCount(1);
