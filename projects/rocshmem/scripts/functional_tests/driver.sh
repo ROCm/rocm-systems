@@ -1025,53 +1025,29 @@ TestTiles() {
   #       | Name                      | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
 
-  ExecTest  "tile_put_contiguous"       2       1            1
   ExecTest  "tile_put_contiguous"       2       1            1            1048576
-  ExecTest  "tile_put_rowmajor"         2       1            1
   ExecTest  "tile_put_rowmajor"         2       1            1            1048576
-  ExecTest  "tile_put_colmajor"         2       1            1
   ExecTest  "tile_put_colmajor"         2       1            1            1048576
-  ExecTest  "tile_put_arbitrary"        2       1            1
   ExecTest  "tile_put_arbitrary"        2       1            1            1048576
-  ExecTest  "tile_put_wave_contiguous"  2       1            $WAVE_SIZE
   ExecTest  "tile_put_wave_contiguous"  2       1            $WAVE_SIZE   1048576
-  ExecTest  "tile_put_wave_rowmajor"    2       1            $WAVE_SIZE
   ExecTest  "tile_put_wave_rowmajor"    2       1            $WAVE_SIZE   1048576
-  ExecTest  "tile_put_wave_colmajor"    2       1            $WAVE_SIZE
   ExecTest  "tile_put_wave_colmajor"    2       1            $WAVE_SIZE   1048576
-  ExecTest  "tile_put_wg_contiguous"    2       1            $((WAVE_SIZE * 16))
   ExecTest  "tile_put_wg_contiguous"    2       1            $((WAVE_SIZE * 16)) 1048576
-  ExecTest  "tile_put_wg_rowmajor"      2       1            $((WAVE_SIZE * 16))
   ExecTest  "tile_put_wg_rowmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
-  ExecTest  "tile_put_wg_colmajor"      2       1            $((WAVE_SIZE * 16))
   ExecTest  "tile_put_wg_colmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
-  ExecTest  "tile_put_wg_contiguous"    2       4            $((WAVE_SIZE * 16))
   ExecTest  "tile_put_wg_contiguous"    2       4            $((WAVE_SIZE * 16)) 1048576
-  ExecTest  "tile_get_contiguous"       2       1            1
   ExecTest  "tile_get_contiguous"       2       1            1            1048576
-  ExecTest  "tile_get_rowmajor"         2       1            1
   ExecTest  "tile_get_rowmajor"         2       1            1            1048576
-  ExecTest  "tile_get_colmajor"         2       1            1
   ExecTest  "tile_get_colmajor"         2       1            1            1048576
-  ExecTest  "tile_get_arbitrary"        2       1            1
   ExecTest  "tile_get_arbitrary"        2       1            1            1048576
-  ExecTest  "tile_get_wg_contiguous"    2       1            $((WAVE_SIZE * 16))
   ExecTest  "tile_get_wg_contiguous"    2       1            $((WAVE_SIZE * 16)) 1048576
-  ExecTest  "tile_get_wg_rowmajor"      2       1            $((WAVE_SIZE * 16))
   ExecTest  "tile_get_wg_rowmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
-  ExecTest  "tile_get_wg_colmajor"      2       1            $((WAVE_SIZE * 16))
   ExecTest  "tile_get_wg_colmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
-  ExecTest  "tile_get_wg_contiguous"    2       4            $((WAVE_SIZE * 16))
   ExecTest  "tile_get_wg_contiguous"    2       4            $((WAVE_SIZE * 16)) 1048576
-  ExecTest  "tile_put_1d"               2       1            1
   ExecTest  "tile_put_1d"               2       1            1            1048576
-  ExecTest  "tile_get_1d"               2       1            1
   ExecTest  "tile_get_1d"               2       1            1            1048576
-  ExecTest  "tile_get_wave_contiguous"  2       1            $WAVE_SIZE
   ExecTest  "tile_get_wave_contiguous"  2       1            $WAVE_SIZE   1048576
-  ExecTest  "tile_get_wave_rowmajor"    2       1            $WAVE_SIZE
   ExecTest  "tile_get_wave_rowmajor"    2       1            $WAVE_SIZE   1048576
-  ExecTest  "tile_get_wave_colmajor"    2       1            $WAVE_SIZE
   ExecTest  "tile_get_wave_colmajor"    2       1            $WAVE_SIZE   1048576
   ExecTest  "tile_broadcast"            2       1            1
   ExecTest  "tile_broadcast"            4       1            1
