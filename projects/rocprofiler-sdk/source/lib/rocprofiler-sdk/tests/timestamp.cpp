@@ -24,6 +24,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
 
 #include <gtest/gtest.h>
 
@@ -38,4 +39,38 @@ TEST(rocprofiler_lib, timestamp)
     EXPECT_GT(beg, 0);
     EXPECT_GT(mid, beg);
     EXPECT_GT(end, mid);
+}
+
+TEST(rocprofiler_lib, profiling_time_bounds)
+{
+    using rocprofiler::tracing::adjust_profiling_time;
+    using rocprofiler::tracing::profiling_time;
+
+    // Exercise clock-skew repair even in a strict-timestamps build.
+    rocprofiler::common::set_env("ROCPROFILER_CI_STRICT_TIMESTAMPS", "0", 1);
+    rocprofiler::common::set_env("ROCPROFILER_CI_FREQ_SCALE_TIMESTAMPS", "0", 1);
+
+    struct test_case
+    {
+        uint64_t start, end, expected_start, expected_end;
+    };
+    const test_case cases[] = {
+        {120, 180, 120, 180},  // Already within the CPU bounds.
+        {80, 140, 100, 160},   // Shift forward, preserving duration.
+        {160, 220, 140, 200},  // Shift backward, preserving duration.
+        {50, 250, 100, 200},   // Duration cannot fit: neither bound may be exceeded.
+        {0, 250, 100, 200},    // Correcting the end must not underflow the start.
+    };
+    for(const auto& entry : cases)
+    {
+        SCOPED_TRACE(::testing::Message() << "start=" << entry.start << ", end=" << entry.end);
+        auto result =
+            adjust_profiling_time("dispatch",
+                                  "test",
+                                  profiling_time{HSA_STATUS_SUCCESS, entry.start, entry.end},
+                                  profiling_time{HSA_STATUS_SUCCESS, 100, 200});
+        EXPECT_EQ(result.status, HSA_STATUS_SUCCESS);
+        EXPECT_EQ(result.start, entry.expected_start);
+        EXPECT_EQ(result.end, entry.expected_end);
+    }
 }
