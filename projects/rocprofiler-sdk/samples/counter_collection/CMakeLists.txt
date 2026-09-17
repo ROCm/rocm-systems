@@ -175,8 +175,6 @@ set(counter-collection-functional-counter-env "${PRELOAD_ENV}" "${LIBRARY_PATH_E
 add_test(NAME counter-collection-print-functional-counters
          COMMAND $<TARGET_FILE:counter-collection-print-functional-counters>)
 
-# Hardware profiling state is shared across processes. Keep this exhaustive counter sweep
-# from overlapping other counter and thread-trace tests.
 set_tests_properties(
     counter-collection-print-functional-counters
     PROPERTIES TIMEOUT
