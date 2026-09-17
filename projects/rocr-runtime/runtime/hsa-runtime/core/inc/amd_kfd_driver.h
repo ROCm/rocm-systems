@@ -206,6 +206,12 @@ public:
   /// mirrors what the thunk does with parent_pid, and for the same reason it
   /// avoids atfork - a handler cannot be uninstalled, and a process can fork
   /// without going through libc's fork().
+  ///
+  /// Each of DisableRuntime(), ReleaseTopologySnapshot() and Close() tests this
+  /// and gives up its own claim without calling the thunk, so each is correct
+  /// called directly or through ShutDown() and ShutDown() needs no special case
+  /// of its own. What an inherited claim would cost differs per stage; Close()
+  /// carries the worked example.
   bool InheritedAcrossFork() const;
 
   mutable bool topology_snapshot_acquired_ = false;

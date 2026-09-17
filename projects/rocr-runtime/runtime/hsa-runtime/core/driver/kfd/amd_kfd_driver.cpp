@@ -130,6 +130,12 @@ hsa_status_t KfdDriver::ReleaseTopologySnapshot() {
   if (!topology_snapshot_acquired_) return HSA_STATUS_SUCCESS;
 
   topology_snapshot_acquired_ = false;
+  // Inherited across a fork: give up the claim without calling the thunk. Only
+  // the DXG hsaKmtReleaseSystemProperties() refuses a child on its own, and
+  // only until the child reopens; the KFD one would go on to destroy process
+  // apertures and doorbells this process never built.
+  if (InheritedAcrossFork()) return HSA_STATUS_SUCCESS;
+
   return HSAKMT_CALL(hsaKmtReleaseSystemProperties()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
                                                                                : HSA_STATUS_ERROR;
 }
@@ -138,6 +144,12 @@ hsa_status_t KfdDriver::DisableRuntime() {
   if (!runtime_enabled_) return HSA_STATUS_SUCCESS;
 
   runtime_enabled_ = false;
+  // Inherited across a fork, as above. hsaKmtRuntimeDisable() has no fork
+  // check at all: it would issue AMDKFD_IOC_RUNTIME_ENABLE with the disable
+  // mask on a descriptor this process inherited rather than opened, against an
+  // enable the parent owns.
+  if (InheritedAcrossFork()) return HSA_STATUS_SUCCESS;
+
   const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
   return (ret == HSAKMT_STATUS_SUCCESS || ret == HSAKMT_STATUS_NOT_SUPPORTED) ? HSA_STATUS_SUCCESS
                                                                               : HSA_STATUS_ERROR;
@@ -184,17 +196,6 @@ hsa_status_t KfdDriver::Init() {
 }
 
 hsa_status_t KfdDriver::ShutDown() {
-  // A forked child inherited these claims but none of the references they
-  // describe: the thunk zeroes its own counters from child_fork_handler(). So
-  // drop the claims and call no thunk - Close() below has what calling one in
-  // a child would cost.
-  if (InheritedAcrossFork()) {
-    runtime_enabled_ = false;
-    topology_snapshot_acquired_ = false;
-    kfd_opened_ = false;
-    return HSA_STATUS_SUCCESS;
-  }
-
   // Name the stage that failed. The caller usually discards this status and
   // only the first error survives below, so without a diagnostic a failed
   // release is indistinguishable from a clean shutdown.
@@ -209,7 +210,9 @@ hsa_status_t KfdDriver::ShutDown() {
   // Every stage runs even if an earlier one fails: stopping at the first error
   // would strand the references the remaining stages give back. Each stage
   // drops its own ownership before calling the thunk, so a failed release is
-  // not retried into a double release later.
+  // not retried into a double release later. Each also tests
+  // InheritedAcrossFork() for itself, so a forked child runs the same three
+  // stages and this function needs no special case.
   record("disable runtime", DisableRuntime());
   record("release topology snapshot", ReleaseTopologySnapshot());
   record("close KFD", Close());
