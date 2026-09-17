@@ -39,11 +39,11 @@
 
 namespace rocprofiler
 {
-namespace thread_trace
+namespace kfd
 {
 class kfd_copy_queue_t;
 class kfd_memory_pool_t;
-}  // namespace thread_trace
+}  // namespace kfd
 
 namespace spm
 {
@@ -197,8 +197,8 @@ struct TraceMemoryPool
     decltype(hsa_amd_memory_pool_free)*     free_fn{};
     decltype(hsa_memory_copy)*              api_copy_fn{};
 
-    std::shared_ptr<thread_trace::kfd_memory_pool_t> kfd_memory{};
-    std::shared_ptr<thread_trace::kfd_copy_queue_t>  kfd_copy_queue{};
+    std::shared_ptr<kfd::kfd_memory_pool_t> kfd_memory{};
+    std::shared_ptr<kfd::kfd_copy_queue_t>  kfd_copy_queue{};
 
     aqlprofile_handle_t handle{};
     ~TraceMemoryPool() { aqlprofile_att_delete_packets(this->handle); };
@@ -293,6 +293,10 @@ public:
 
     hsa_ext_amd_aql_pm4_packet_t                query_status{};
     virtual std::optional<sqtt_buffer_status_t> query_buffer_status();
+    virtual hsa_status_t iterate_data(aqlprofile_att_data_callback_t callback, void* data)
+    {
+        return aqlprofile_att_iterate_data(handle, callback, data);
+    }
 
     void reset_current_buffer() { current_buffer = 0; };
 

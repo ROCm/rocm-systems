@@ -11,6 +11,7 @@
 #include "comm.h"
 #include "device.h"
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM default this stands in for
+#include "tuner.h"
 
 // Defaults to ncclSystemError, NOT success. Production wraps this in NCCLCHECK,
 // so the effect is that the FIRST eligible lookup aborts the caller with an
@@ -29,6 +30,13 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
                                  size_t nBytes, int numPipeOps, float* time) {
   ++g_topoGetAlgoTimeCalls;
   return g_topoGetAlgoTime(comm, coll, algorithm, protocol, nBytes, numPipeOps, time);
+}
+
+ncclResult_t ncclTuningFinalize(struct ncclComm* comm) {
+  if (comm->tuner == nullptr) return ncclSuccess;
+  ncclResult_t ret = comm->tuner->finalize(comm->tunerContext);
+  if (ret != ncclSuccess) return ret;
+  return ncclTunerPluginUnload(comm);
 }
 
 int64_t g_paramMinNchannels = 0;
