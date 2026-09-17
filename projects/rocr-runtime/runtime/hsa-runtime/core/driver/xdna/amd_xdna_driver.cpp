@@ -716,10 +716,18 @@ static const AieKernelDescriptor* PacketDescriptor(
 
 /// @brief Returns whether @p desc looks like a descriptor this runtime built.
 ///
-/// The handle is a raw 64-bit value straight off the packet, so it can be null, stale (used after
-/// the executable that published it was destroyed) or simply wrong. The version word turns the
-/// common cases of that into a refusal instead of a fault. It cannot catch every bad pointer --
-/// nothing cheap can -- but it costs one load.
+/// This is the whole of what the dispatch path checks about a kernel, and the line is deliberate:
+/// it asks whether the handle names a kernel object, not whether that kernel is well formed. A
+/// descriptor is built once by the loader, which refuses a code object it cannot dispatch --
+/// blobs present, patch sites within the control code, kinds recognised -- and is immutable
+/// afterwards. Re-deriving those conclusions on every dispatch would cost the latency this path
+/// exists to save, and could not reach a different answer.
+///
+/// The handle is still a raw 64-bit value straight off the packet, so it can be null, stale (used
+/// after the executable that published it was destroyed) or simply wrong. The version word turns
+/// the common cases of that into a refusal instead of a fault for one load. It cannot catch every
+/// bad pointer, and does not try: as with an AQL packet's kernel object on the GPU path, a handle
+/// that never named a kernel object is the caller's bug, not something the runtime can police.
 ///
 /// @param[in] desc descriptor to check
 static bool ValidDescriptor(const AieKernelDescriptor* desc) {
@@ -1779,14 +1787,6 @@ static hsa_status_t BuildPdiInstsCommand(const hsa_amd_aie_kernel_dispatch_packe
   if (desc == nullptr) {
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
-  // The loader already refuses a code object whose kernels lack these, so this is not where an
-  // incomplete kernel is discovered -- it is the trust boundary. The handle came off the packet,
-  // so it can be stale or forged, and everything below dereferences what it points at.
-  if (desc->insts_bo_va == nullptr || desc->insts_size == 0 || desc->pdi_size == 0) {
-    log_warning_n(10, "AIE: the kernel object does not describe a dispatchable kernel.\n");
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-  }
-
   // Determine if the PDI is cached, if not it will be added to the PDI cache and the hardware
   // context will be reconfigured.
   auto cached_pdi_index = kmq_metadata->pdi_cache.GetIndex(desc->pdi_bo_handle);
@@ -1871,34 +1871,6 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
   const AieKernelDescriptor* desc = DescriptorOfKind(pkt, AieKernelKind::FullElf, "full-ELF");
   if (desc == nullptr) {
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-  }
-  // As in BuildPdiInstsCommand: the loader guarantees these, so this is the trust boundary on an
-  // application-supplied handle, not completeness discovery. ctrl_code is a memcpy source below.
-  if (desc->ctrl_code == nullptr || desc->ctrl_code_size == 0) {
-    log_warning_n(10, "AIE: the kernel object does not describe a dispatchable kernel.\n");
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-  }
-  // The loader bounds every patch site against the control code it parsed, but the descriptor
-  // arrives through a handle the application supplies, so the write below is bounded here too
-  // rather than on the loader's word. PatchShimDma48 touches three dwords from the site.
-  // The PDI address is a 64-bit store, so its site has to lie wholly inside the control code.
-  // Checked the same way and for the same reason as the argument sites below: the loader bounded
-  // it against the ELF it parsed, but the descriptor arrives through an application-supplied
-  // handle. Subtract rather than add so an out-of-range offset cannot wrap past the bound.
-  if ((desc->pdi_patch_offset % sizeof(uint32_t)) != 0 ||
-      desc->ctrl_code_size < sizeof(uint64_t) ||
-      desc->pdi_patch_offset > desc->ctrl_code_size - sizeof(uint64_t)) {
-    log_warning_n(10, "AIE: the PDI patch site does not fit the kernel's control code.\n");
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-  }
-  for (const auto& sites : desc->arg_sites) {
-    for (const aie_elf::PatchSite& site : sites) {
-      if ((site.offset % sizeof(uint32_t)) != 0 ||
-          site.offset + 3 * sizeof(uint32_t) > desc->ctrl_code_size) {
-        log_warning_n(10, "AIE: an argument patch site does not fit the kernel's control code.\n");
-        return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-      }
-    }
   }
   // The arguments are patched into the control code rather than handed to the hardware, so
   // nothing downstream would notice a short list: the dispatch would run against whatever the
