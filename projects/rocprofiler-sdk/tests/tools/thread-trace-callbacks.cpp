@@ -103,8 +103,8 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
 void
 init()
 {
-    // const char* decoder_lib = std::getenv("ROCPROF_TRACE_DECODER_PATH");
-    DECODER_CALL(rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib"));
+    if(rocprofiler_thread_trace_decoder_create(&decoder, "") != ROCPROFILER_STATUS_SUCCESS)
+        DECODER_CALL(rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib"));
 }
 
 void
