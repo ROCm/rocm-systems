@@ -22,6 +22,15 @@
 
 namespace {
 constexpr int kBaselineChannels = 4;
+constexpr uint64_t kPoison = 0xDEADBEEFDEADBEEFull;
+
+// Recomputed independently of convertSymTaskDevOp's own union-pun, so a mutated divisor still gets caught.
+uint64_t ConvertSymTaskDevOp_ExpectedReciprocalScalar(int nRanks) {
+  union { float f32; uint64_t u64; } u;
+  u.u64 = 0;
+  u.f32 = float(1.0 / nRanks);
+  return u.u64;
+}
 }  // namespace
 
 TEST(SchedulerMicrotest, AgvChannelCount_MultiplierAtMost1_ReturnsTunedChannelsUnchanged) {
@@ -61,4 +70,163 @@ TEST(SchedulerMicrotest, SymkRedOp_NonAvg_ReturnsDevRedOpUnchanged) {
   EXPECT_EQ(symkRedOp(ncclSum, ncclDevSum), ncclDevSum);
   EXPECT_EQ(symkRedOp(ncclMax, ncclDevMinMax), ncclDevMinMax);
   EXPECT_EQ(symkRedOp(ncclProd, ncclDevProd), ncclDevProd);
+}
+
+TEST(SchedulerMicrotest, ConvertSymTaskDevOp_NonAvgPassthrough_LeavesScalarArgUntouched) {
+  std::unique_ptr<ncclComm> comm(new ncclComm{});
+  comm->nRanks = 4;
+  ncclTaskColl task{};
+  task.opHost = ncclSum;
+  task.opDev.op = ncclDevSum;
+  task.opDev.scalarArg = kPoison;
+  task.devFuncId = ncclSymkKernelId_AllReduce_AGxLL_R;
+  task.datatype = ncclFloat16;
+  convertSymTaskDevOp(comm.get(), &task);
+  EXPECT_EQ(task.opDev.op, ncclDevSum);
+  EXPECT_EQ(task.opDev.scalarArg, kPoison);
+}
+
+TEST(SchedulerMicrotest, ConvertSymTaskDevOp_ReduceScatterLdmc_ReturnsEarlyWithoutPackingScalar) {
+  std::unique_ptr<ncclComm> comm(new ncclComm{});
+  comm->nRanks = 4;
+  ncclTaskColl task{};
+  task.opHost = ncclAvg;
+  task.opDev.op = ncclDevSum;
+  task.opDev.scalarArg = kPoison;
+  task.devFuncId = ncclSymkKernelId_ReduceScatter_LDMC;
+  task.datatype = ncclFloat16;
+  convertSymTaskDevOp(comm.get(), &task);
+  EXPECT_EQ(task.opDev.op, ncclDevSumPostDiv);
+  EXPECT_EQ(task.opDev.scalarArg, kPoison);
+}
+
+TEST(SchedulerMicrotest, ConvertSymTaskDevOp_Float16_PacksReciprocalNRanksScalar) {
+  std::unique_ptr<ncclComm> comm(new ncclComm{});
+  comm->nRanks = 4;
+  ncclTaskColl task{};
+  task.opHost = ncclAvg;
+  task.opDev.op = ncclDevSum;
+  task.opDev.scalarArg = kPoison;
+  task.devFuncId = ncclSymkKernelId_AllReduce_AGxLL_R;
+  task.datatype = ncclFloat16;
+  convertSymTaskDevOp(comm.get(), &task);
+  EXPECT_EQ(task.opDev.op, ncclDevSumPostDiv);
+  EXPECT_EQ(task.opDev.scalarArg, ConvertSymTaskDevOp_ExpectedReciprocalScalar(4));
+}
+
+TEST(SchedulerMicrotest, ConvertSymTaskDevOp_Bfloat16_PacksReciprocalNRanksScalar) {
+  std::unique_ptr<ncclComm> comm(new ncclComm{});
+  comm->nRanks = 4;
+  ncclTaskColl task{};
+  task.opHost = ncclAvg;
+  task.opDev.op = ncclDevSum;
+  task.opDev.scalarArg = kPoison;
+  task.devFuncId = ncclSymkKernelId_AllReduce_AGxLL_R;
+  task.datatype = ncclBfloat16;
+  convertSymTaskDevOp(comm.get(), &task);
+  EXPECT_EQ(task.opDev.scalarArg, ConvertSymTaskDevOp_ExpectedReciprocalScalar(4));
+}
+
+TEST(SchedulerMicrotest, ConvertSymTaskDevOp_Float8e4m3_PacksReciprocalNRanksScalar) {
+  std::unique_ptr<ncclComm> comm(new ncclComm{});
+  comm->nRanks = 4;
+  ncclTaskColl task{};
+  task.opHost = ncclAvg;
+  task.opDev.op = ncclDevSum;
+  task.opDev.scalarArg = kPoison;
+  task.devFuncId = ncclSymkKernelId_AllReduce_AGxLL_R;
+  task.datatype = ncclFloat8e4m3;
+  convertSymTaskDevOp(comm.get(), &task);
+  EXPECT_EQ(task.opDev.scalarArg, ConvertSymTaskDevOp_ExpectedReciprocalScalar(4));
+}
+
+TEST(SchedulerMicrotest, ConvertSymTaskDevOp_Float8e5m2_PacksReciprocalNRanksScalar) {
+  std::unique_ptr<ncclComm> comm(new ncclComm{});
+  comm->nRanks = 4;
+  ncclTaskColl task{};
+  task.opHost = ncclAvg;
+  task.opDev.op = ncclDevSum;
+  task.opDev.scalarArg = kPoison;
+  task.devFuncId = ncclSymkKernelId_AllReduce_AGxLL_R;
+  task.datatype = ncclFloat8e5m2;
+  convertSymTaskDevOp(comm.get(), &task);
+  EXPECT_EQ(task.opDev.scalarArg, ConvertSymTaskDevOp_ExpectedReciprocalScalar(4));
+}
+
+TEST(SchedulerMicrotest, ConvertSymTaskDevOp_DefaultDatatype_LeavesScalarArgUntouched) {
+  std::unique_ptr<ncclComm> comm(new ncclComm{});
+  comm->nRanks = 4;
+  ncclTaskColl task{};
+  task.opHost = ncclAvg;
+  task.opDev.op = ncclDevSum;
+  task.opDev.scalarArg = kPoison;
+  task.devFuncId = ncclSymkKernelId_AllReduce_AGxLL_R;
+  task.datatype = ncclInt32;
+  convertSymTaskDevOp(comm.get(), &task);
+  EXPECT_EQ(task.opDev.op, ncclDevSumPostDiv);
+  EXPECT_EQ(task.opDev.scalarArg, kPoison);
+}
+
+TEST(SchedulerMicrotest, SymBatchAligned16B_SingleTaskNoWindowsAligned_ReturnsTrue) {
+  ncclTaskColl t{};
+  t.sendbuff = reinterpret_cast<void*>(0x1030);
+  t.recvbuff = reinterpret_cast<void*>(0x1020);
+  t.isSymLast = 1;
+  EXPECT_TRUE(symBatchAligned16B(&t));
+}
+
+TEST(SchedulerMicrotest, SymBatchAligned16B_SingleTaskNoWindowsMisaligned_ReturnsFalse) {
+  ncclTaskColl t{};
+  t.sendbuff = reinterpret_cast<void*>(0x1028);  // offset 8: a multiple of 8 but not of 16
+  t.recvbuff = reinterpret_cast<void*>(0x1020);
+  t.isSymLast = 1;
+  EXPECT_FALSE(symBatchAligned16B(&t));
+}
+
+TEST(SchedulerMicrotest, SymBatchAligned16B_FirstAlignedSecondMisaligned_TraversesAndReturnsFalse) {
+  ncclTaskColl second{};
+  second.sendbuff = reinterpret_cast<void*>(0x2031);
+  second.recvbuff = reinterpret_cast<void*>(0x2020);
+  second.isSymLast = 1;
+  ncclTaskColl first{};
+  first.sendbuff = reinterpret_cast<void*>(0x1030);
+  first.recvbuff = reinterpret_cast<void*>(0x1020);
+  first.isSymLast = 0;
+  first.next = &second;
+  EXPECT_FALSE(symBatchAligned16B(&first));
+}
+
+TEST(SchedulerMicrotest, SymBatchAligned16B_FirstMisalignedNotLast_ReturnsFalseWithoutTraversing) {
+  ncclTaskColl first{};
+  first.sendbuff = reinterpret_cast<void*>(0x1031);
+  first.recvbuff = reinterpret_cast<void*>(0x1020);
+  first.isSymLast = 0;
+  first.next = reinterpret_cast<ncclTaskColl*>(0x1);  // must never be dereferenced
+  EXPECT_FALSE(symBatchAligned16B(&first));
+}
+
+TEST(SchedulerMicrotest, SymBatchAligned16B_WindowOffsetsAligned_RawBuffersMisaligned_ReturnsTrue) {
+  ncclDevrWindow sendWin{};
+  sendWin.userPtr = reinterpret_cast<void*>(0x1003);
+  ncclDevrWindow recvWin{};
+  recvWin.userPtr = reinterpret_cast<void*>(0x2007);
+  ncclTaskColl t{};
+  t.sendWin = &sendWin;
+  t.recvWin = &recvWin;
+  t.sendbuff = reinterpret_cast<void*>(0x1013);  // inputOff (via window) = 16
+  t.recvbuff = reinterpret_cast<void*>(0x2007);  // outputOff (via window) = 0
+  t.isSymLast = 1;
+  EXPECT_TRUE(symBatchAligned16B(&t));
+}
+
+TEST(SchedulerMicrotest, SymBatchAligned16B_SendWindowOnly_UsesWindowOffsetForSend_ReturnsTrue) {
+  ncclDevrWindow sendWin{};
+  sendWin.userPtr = reinterpret_cast<void*>(0x1003);
+  ncclTaskColl t{};
+  t.sendWin = &sendWin;
+  t.recvWin = nullptr;
+  t.sendbuff = reinterpret_cast<void*>(0x1013);  // inputOff (via window) = 16
+  t.recvbuff = reinterpret_cast<void*>(0x2000);  // outputOff (raw, no window) = 0x2000
+  t.isSymLast = 1;
+  EXPECT_TRUE(symBatchAligned16B(&t));
 }
