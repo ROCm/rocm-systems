@@ -177,6 +177,10 @@ declare -A TEST_NUMBERS=(
   ["tile_put_wave_colmajor"]="164"
   ["tile_get_wave_rowmajor"]="165"
   ["tile_get_wave_colmajor"]="166"
+  ["tile_put_wg_rowmajor"]="167"
+  ["tile_put_wg_colmajor"]="168"
+  ["tile_get_wg_rowmajor"]="169"
+  ["tile_get_wg_colmajor"]="170"
 )
 
 # Detect which runtime to use
@@ -1063,6 +1067,10 @@ TestTiles() {
   ExecTest  "tile_put_wave_colmajor"    2       1            $WAVE_SIZE   1048576
   ExecTest  "tile_put_wg_contiguous"    2       1            $((WAVE_SIZE * 16))
   ExecTest  "tile_put_wg_contiguous"    2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_put_wg_rowmajor"      2       1            $((WAVE_SIZE * 16))
+  ExecTest  "tile_put_wg_rowmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_put_wg_colmajor"      2       1            $((WAVE_SIZE * 16))
+  ExecTest  "tile_put_wg_colmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
   ExecTest  "tile_put_wg_contiguous"    2       4            $((WAVE_SIZE * 16))
   ExecTest  "tile_put_wg_contiguous"    2       4            $((WAVE_SIZE * 16)) 1048576
   ExecTest  "tile_get_contiguous"       2       1            1
@@ -1075,6 +1083,10 @@ TestTiles() {
   ExecTest  "tile_get_arbitrary"        2       1            1            1048576
   ExecTest  "tile_get_wg_contiguous"    2       1            $((WAVE_SIZE * 16))
   ExecTest  "tile_get_wg_contiguous"    2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_get_wg_rowmajor"      2       1            $((WAVE_SIZE * 16))
+  ExecTest  "tile_get_wg_rowmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_get_wg_colmajor"      2       1            $((WAVE_SIZE * 16))
+  ExecTest  "tile_get_wg_colmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
   ExecTest  "tile_get_wg_contiguous"    2       4            $((WAVE_SIZE * 16))
   ExecTest  "tile_get_wg_contiguous"    2       4            $((WAVE_SIZE * 16)) 1048576
   ExecTest  "tile_put_1d"               2       1            1
