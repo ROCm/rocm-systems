@@ -44,8 +44,9 @@ struct GinAlltoAllMockComm
         comm.devrState.lsaSize = comm.nRanks;
         comm.devrState.lsaSelf = comm.rank;
 
-        sharedRes.ginState.ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA;
-        comm.sharedRes             = &sharedRes;
+        sharedRes.ginState.numActiveBackends   = 1;
+        sharedRes.ginState.backends[0].ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA;
+        comm.sharedRes                         = &sharedRes;
     }
 
     ncclComm* get() { return &comm; }
@@ -146,10 +147,10 @@ TEST_F(GinAlltoAllEligibilityTest, LsaTeamSmallerThanComm)
 // other backend must not be claimed.
 TEST_F(GinAlltoAllEligibilityTest, WrongGinBackend)
 {
-    mockComm_.sharedRes.ginState.ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA;
+    mockComm_.sharedRes.ginState.backends[0].ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA;
     EXPECT_FALSE(eligible(kCount));
 
-    mockComm_.sharedRes.ginState.ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_PROXY;
+    mockComm_.sharedRes.ginState.backends[0].ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_PROXY;
     EXPECT_FALSE(eligible(kCount));
 }
 
