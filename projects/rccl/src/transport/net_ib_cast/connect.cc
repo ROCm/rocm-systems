@@ -532,7 +532,10 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
     out->maxSendWorkRequest = NCCL_IB_MAX_SEND_WRS;
   } else {
     IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
-    out->maxSendWorkRequest = NET_IB_MAX_REQUESTS;
+    // Match IbCastReceiverQpsCreateToRts: CTS posts an unsignaled side-table WR
+    // before the CTS WR. Resiliency signals every CTS WR, so 1x times two WRs;
+    // otherwise 2x times two WRs. AINIC recovery rebuilds through this builder.
+    out->maxSendWorkRequest = NET_IB_MAX_REQUESTS * (base->resiliency ? 1 : 2) * 2;
   }
 }
 

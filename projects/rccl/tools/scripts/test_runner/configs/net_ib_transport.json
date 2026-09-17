@@ -562,13 +562,24 @@
         "RCCL_IB_P2P_DISABLE_CTS": "1",
         "NCCL_IB_QPS_PER_CONNECTION": "2",
         "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
-        "NCCL_GDR_FLUSH_DISABLE": "0"
+        "NCCL_GDR_FLUSH_DISABLE": "0",
+        "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0"
       },
       "tests": [
         {
           "name": "Cast_MultiSegment_All",
           "description": "CAST registration, asymmetric/cross-boundary transfer, multi-receive, flush, limits, and single-segment regressions",
           "test_filter": "NetIbMultiSegmentMPITest.*"
+        },
+        {
+          "name": "UBR_MultiSegment_Generic",
+          "description": "Out-of-place AllReduce on an 8-segment VMM buffer through the CAST netIbCast registration arm",
+          "test_filter": "UBR_MultiSegment.Generic",
+          "env_variables": {
+            "NCCL_LOCAL_REGISTER": "1",
+            "NCCL_DEBUG_SUBSYS": "REG",
+            "RCCL_MPI_LOG_ALL_RANKS": "1"
+          }
         }
       ]
     },

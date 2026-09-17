@@ -706,9 +706,41 @@ static bool IbCastHasOtherSegmentedSend(struct ncclIbSendComm* comm, int slot) {
   return false;
 }
 
+// CTS and the side table are separate RDMA writes. Bound the wait so a peer
+// that advertised MULTISEG but never posts the side table (CTS-offload
+// disagreement) cannot hang the sender forever.
+static ncclResult_t IbCastWaitSideTable(volatile struct ncclIbSegLayout* side, int nreqs, uint64_t idx) {
+  struct timespec start;
+  const uint64_t kTimeoutNs = 2ull * NSEC_PER_SEC;
+  if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
+    WARN("NET/IB: clock_gettime failed waiting for multi-segment CTS side table");
+    return ncclRemoteError;
+  }
+  for (;;) {
+    bool ready = true;
+    for (int r = 0; r < nreqs; r++) {
+      if (side[r].idx != idx) {
+        ready = false;
+        break;
+      }
+    }
+    if (ready) return ncclSuccess;
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+      WARN("NET/IB: clock_gettime failed waiting for multi-segment CTS side table");
+      return ncclRemoteError;
+    }
+    if ((TIMESPEC_TO_NSEC(&now) - TIMESPEC_TO_NSEC(&start)) >= kTimeoutNs) {
+      WARN("NET/IB: timed out waiting for multi-segment CTS side table idx %lu", (unsigned long)idx);
+      return ncclRemoteError;
+    }
+  }
+}
+
 ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle,
                          void** request) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
+  ncclResult_t isendRet = ncclSuccess;
   bool useWriteOp = (comm->useCtsOffload && (*request == (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION)) ? true : false;
   if (comm->base.ready == 0) {
     WARN("NET/IB: IbCastIsend() called when comm->base.ready == 0");
@@ -742,8 +774,7 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
     std::atomic_thread_fence(std::memory_order_seq_cst); // order the nreqsPtr load against tag/rkey/addr loads below
     if (comm->peerCaps & NCCL_IB_CAP_MULTISEG) {
       volatile struct ncclIbSegLayout* side = comm->segLayoutFifo[slot];
-      for (int r = 0; r < nreqs; r++)
-        while (side[r].idx != (uint64_t)idx);
+      NCCLCHECK(IbCastWaitSideTable(side, nreqs, (uint64_t)idx));
       std::atomic_thread_fence(std::memory_order_seq_cst);
     }
   }
@@ -769,7 +800,7 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
     bool segmented = !comm->useCtsOffload &&
                      ((mhandleWrapper != NULL && mhandleWrapper->nSegments > 1) ||
                       ibCastCtsRemoteMultiSeg(comm, slot, r));
-    if (IbCastHasOtherSegmentedSend(comm, slot)) {
+    if (segmented && IbCastHasOtherSegmentedSend(comm, slot)) {
       *request = NULL;
       return ncclSuccess;
     }
@@ -855,7 +886,7 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
     if (comm->sendReqsCnt[slot] < nreqs) return ncclSuccess;
 
     TIME_START(0);
-    NCCLCHECK(IbCastMultiSend(comm, slot, nqps, startQpIndex, wrrSched, useWriteOp));
+    NCCLCHECKGOTO(IbCastMultiSend(comm, slot, nqps, startQpIndex, wrrSched, useWriteOp), isendRet, isendFail);
 
     rcclTelemetryBytes(comm->base.vProps.devs[0], 1, (uint64_t)size);
 
@@ -866,6 +897,33 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
 
   *request = NULL;
   return ncclSuccess;
+
+isendFail:
+  IbCastStatsFatalError(&comm->base.stats);
+  bool anyEvents = false;
+  for (int j = 0; j < nreqs; j++) {
+    if (reqs[j] != NULL && IbCastRequestHasEvents(reqs[j])) {
+      reqs[j]->type = NCCL_NET_IB_REQ_FAILED;
+      anyEvents = true;
+    } else if (reqs[j] != NULL) {
+      if (*request == reqs[j]) *request = NULL;
+      IbCastFreeRequest(reqs[j]);
+      reqs[j] = NULL;
+    }
+  }
+  if (anyEvents) {
+    if (*request == NULL) {
+      for (int j = 0; j < nreqs; j++) {
+        if (reqs[j] != NULL) {
+          *request = reqs[j];
+          break;
+        }
+      }
+    }
+    return ncclSuccess;
+  }
+  *request = NULL;
+  return isendRet;
 }
 
 ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* req, int slot, int n) {
@@ -1152,7 +1210,6 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
 
     struct ncclIbSegLayout* sideElem = comm->remSegLayout.elems[slot];
     if ((comm->peerCaps & NCCL_IB_CAP_MULTISEG) && !comm->useCtsOffload) {
-      sideElem[i].idx = ctsIdx;
       if (mhandleWrapper->nSegments > 1) {
         sideElem[i].nSegments = mhandleWrapper->nSegments;
         for (int s = 0; s < mhandleWrapper->nSegments; s++) {
@@ -1169,6 +1226,7 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       } else {
         sideElem[i].nSegments = 0;
       }
+      sideElem[i].idx = ctsIdx; // last store; sender waits on idx
     } else {
       sideElem[i].nSegments = 0;
       sideElem[i].idx = 0;
@@ -1455,6 +1513,8 @@ static inline ncclResult_t IbCastRequestComplete(struct ncclIbRequest* r, int* d
       }
 #endif
     }
+  }
+  if (r->base->isSend && (r->type == NCCL_NET_IB_REQ_SEND || r->type == NCCL_NET_IB_REQ_FAILED)) {
     int slot = r->id % NET_IB_MAX_REQUESTS;
     struct ncclIbSendComm* sendComm = (struct ncclIbSendComm*)r->base;
     sendComm->sendReqsCnt[slot]--;
@@ -1547,7 +1607,7 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
 #endif
 
   if (commBase->isSend) {
-    if (req->type != NCCL_NET_IB_REQ_SEND) {
+    if (req->type != NCCL_NET_IB_REQ_SEND && req->type != NCCL_NET_IB_REQ_FAILED) {
       WARN("NET/IB: %s: Sender expected a 'send' request but got '%s' (req=%p, comm=%p, id=%ld, wc.wr_id=0x%lx, "
            "wc.opcode=%s(%d), wc.qp_num=%u)",
            __func__, IbCastReqTypeStr[req->type], req, commBase, req->id, wc->wr_id, ibvWcOpcodeStr(wc->opcode),
@@ -1577,7 +1637,7 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
     IbCastTelemetryWqeComplete(commBase, wc, devIndex, req->tel_post_ts);
   } else {
     if (wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM) {
-      if (req->type != NCCL_NET_IB_REQ_RECV && !commBase->resiliency) {
+      if (req->type != NCCL_NET_IB_REQ_RECV && req->type != NCCL_NET_IB_REQ_FAILED && !commBase->resiliency) {
         WARN("NET/IB: %s: Receiver expected a 'recv' request but got '%s' (req=%p, comm=%p, id=%ld, wc.wr_id=0x%lx, "
              "wc.status=%s(%d) wc.opcode=%s(%d), wc.qp_num=%u)",
              __func__, IbCastReqTypeStr[req->type], req, req->base, req->id, wc->wr_id, ibvWcStatusStr(wc->status),
@@ -1585,14 +1645,9 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
         return ncclInternalError;
       }
       if (req->nreqs == 1) {
-        if (commBase->recvMatchingScheme != BY_ID) {
-          // A segmented send publishes the full logical size before the
-          // immediate because wc->byte_len covers only its final slice.
-          if ((be32toh(wc->imm_data) & WR_IMM_SEGMENTED_FLAG) == 0)
-            req->recv.cmplsRecords->sizes[0] += wc->byte_len;
-        } else if (req->recv.cmplsRecords->sizes[0] == 0) {
-          req->recv.aggSize += wc->byte_len;
-        }
+        // BY_ORDER packs the request id in imm_data. Bit 22 of that id is not
+        // WR_IMM_SEGMENTED_FLAG (that flag is only set on the BY_INDEX path).
+        req->recv.cmplsRecords->sizes[0] += wc->byte_len;
       }
       TRACE(NCCL_NET, "NET/IB: %s: Got completion for a recv request (req=%p, comm=%p, id=%ld, devIndex=%d, qp_num=%u)",
             __func__, req, req->base, req->id, devIndex, wc->qp_num);
@@ -1650,7 +1705,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
 #endif
 
   if (commBase->isSend) {
-    if (req->type != NCCL_NET_IB_REQ_SEND) {
+    if (req->type != NCCL_NET_IB_REQ_SEND && req->type != NCCL_NET_IB_REQ_FAILED) {
       WARN("NET/IB: %s: Sender expected a 'send' request but got '%s' (req=%p, comm=%p, id=%ld, wc.wr_id=0x%lx, "
            "wc.opcode=%s(%d), wc.qp_num=%u)",
            __func__, IbCastReqTypeStr[req->type], req, commBase, req->id, wc->wr_id, ibvWcOpcodeStr(wc->opcode),
@@ -1690,7 +1745,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
              ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num);
         return ncclSuccess;
       }
-      if (req->type != NCCL_NET_IB_REQ_RECV && !commBase->resiliency) {
+      if (req->type != NCCL_NET_IB_REQ_RECV && req->type != NCCL_NET_IB_REQ_FAILED && !commBase->resiliency) {
         WARN("NET/IB: %s: Receiver expected a 'recv' request but got '%s' (req=%p, comm=%p, id=%ld, wc.wr_id=0x%lx, "
              "wc.status=%s(%d) wc.opcode=%s(%d), wc.qp_num=%u)",
              __func__, IbCastReqTypeStr[req->type], req, req->base, req->id, wc->wr_id, ibvWcStatusStr(wc->status),
@@ -1698,7 +1753,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
         return ncclInternalError;
       }
       if (req->nreqs == 1) {
-        if (commBase->recvMatchingScheme != BY_ID) {
+        if (commBase->recvMatchingScheme == BY_INDEX) {
           // A segmented send publishes the full logical size before the
           // immediate because wc->byte_len covers only its final slice.
           if ((be32toh(wc->imm_data) & WR_IMM_SEGMENTED_FLAG) == 0)
@@ -1797,9 +1852,13 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
     cqMaxPollEvent = NCCL_CQ_POLL_MAX_EVENT;
   }
   do {
-    NCCLCHECK(IbCastStatsCheckFatalCount(&r->base->stats, __func__));
+    if (r->type != NCCL_NET_IB_REQ_FAILED) {
+      NCCLCHECK(IbCastStatsCheckFatalCount(&r->base->stats, __func__));
+    }
     if (IbCastRequestIsComplete(r)) {
+      bool failed = (r->type == NCCL_NET_IB_REQ_FAILED);
       NCCLCHECK(IbCastRequestComplete(r, done, sizes));
+      if (failed) NCCLCHECK(IbCastStatsCheckFatalCount(&r->base->stats, __func__));
       return ncclSuccess;
     }
 

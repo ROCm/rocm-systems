@@ -405,15 +405,14 @@ struct alignas(32) ncclIbSendFifoCtsInline {
   char padding[8];
 } __attribute__((packed));
 
-// Receiver layout for nSegments>1. Same [slot][recv] indexing as CTS. idx must
-// equal the CTS slot's idx so a later single-segment reuse of the same CTS
-// index ignores a stale side slot.
+// Receiver layout for nSegments>1. Same [slot][recv] indexing as CTS. idx is the
+// last store so a sender waiting on idx cannot observe a half-written slot.
 struct alignas(64) ncclIbSegLayout {
-  uint64_t idx;
   uint32_t nSegments;
   uint32_t pad;
   uint64_t segStart[NCCL_IB_MAX_SEGMENTS];
   uint32_t segRkeys[NCCL_IB_MAX_SEGMENTS][NCCL_IB_MAX_DEVS_PER_NIC];
+  uint64_t idx; // last store; sender waits on this as the slot arrival flag
 };
 
 // Worst-case work requests posted for one multi-recv send on a single QP: each
@@ -673,8 +672,8 @@ struct ncclIbSendComm {
   // with each element of size 64B.
   struct ncclIbSendFifo ctsFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
   // Side table immediately after ctsFifo so one covering MR registers both.
-  // Receiver RDMA-writes this only when nSegments>1 and the peer advertised
-  // NCCL_IB_CAP_MULTISEG.
+  // The receiver RDMA-writes every CTS slot when the peer advertised
+  // NCCL_IB_CAP_MULTISEG (including nSegments==1) so the sender can wait on idx.
   struct ncclIbSegLayout segLayoutFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
   // A multi-segment send may split one request's per-QP chunk into up to one WR
   // per local+remote segment boundary crossing. Size the WR/SGE pools
