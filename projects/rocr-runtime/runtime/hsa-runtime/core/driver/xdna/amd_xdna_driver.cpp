@@ -714,6 +714,18 @@ static const AieKernelDescriptor* PacketDescriptor(
       Concat<uint64_t>(pkt->kernel_object_high, pkt->kernel_object_low));
 }
 
+/// @brief Returns whether @p desc looks like a descriptor this runtime built.
+///
+/// The handle is a raw 64-bit value straight off the packet, so it can be null, stale (used after
+/// the executable that published it was destroyed) or simply wrong. The version word turns the
+/// common cases of that into a refusal instead of a fault. It cannot catch every bad pointer --
+/// nothing cheap can -- but it costs one load.
+///
+/// @param[in] desc descriptor to check
+static bool ValidDescriptor(const AieKernelDescriptor* desc) {
+  return desc != nullptr && desc->version == kAieKernelDescriptorVersion;
+}
+
 /// @brief Returns the dispatch kind @p pkt is asking for, from its kernel descriptor.
 ///
 /// The two kinds need incompatible hardware contexts - PDI + instruction sequence needs CU
@@ -723,10 +735,10 @@ static const AieKernelDescriptor* PacketDescriptor(
 /// then.
 ///
 /// @param[in] pkt packet to classify
-/// @return the descriptor's kind, or @c Undecided when the handle is null
+/// @return the descriptor's kind, or @c Undecided when the handle does not name one
 static AieKernelKind PacketMode(const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
   const auto* desc = PacketDescriptor(pkt);
-  return desc ? desc->kind : AieKernelKind::Undecided;
+  return ValidDescriptor(desc) ? desc->kind : AieKernelKind::Undecided;
 }
 
 /// @brief A device buffer allocated for one dispatch, freed when the batch completes.
@@ -1750,7 +1762,7 @@ static hsa_status_t BuildPdiInstsCommand(const hsa_amd_aie_kernel_dispatch_packe
   const AieKernelDescriptor* desc = PacketDescriptor(pkt);
   // PacketMode already classified the batch from this handle, but nothing between there and here
   // re-reads it, so a null or mismatched descriptor must be refused rather than dereferenced.
-  if (desc == nullptr || desc->kind != AieKernelKind::PdiInsts) {
+  if (!ValidDescriptor(desc) || desc->kind != AieKernelKind::PdiInsts) {
     log_warning_n(10, "AIE: the packet does not name a PDI + instruction sequence kernel.\n");
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
@@ -1843,13 +1855,28 @@ static hsa_status_t BuildFullElfCommand(int fd, const hsa_amd_aie_kernel_dispatc
   const AieKernelDescriptor* desc = PacketDescriptor(pkt);
   // PacketMode already classified the batch from this handle, but nothing between there and here
   // re-reads it, so a null or mismatched descriptor must be refused rather than dereferenced.
-  if (desc == nullptr || desc->kind != AieKernelKind::FullElf) {
+  if (!ValidDescriptor(desc) || desc->kind != AieKernelKind::FullElf) {
     log_warning_n(10, "AIE: the packet does not name a full-ELF kernel.\n");
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
   if (desc->ctrl_code == nullptr || desc->ctrl_code_size == 0) {
     log_warning_n(10, "AIE: the full-ELF kernel has no control code to dispatch.\n");
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  }
+  // The loader bounds every patch site against the control code it parsed, but the descriptor
+  // arrives through a handle the application supplies, so the write below is bounded here too
+  // rather than on the loader's word. PatchShimDma48 touches three dwords from the site.
+  if (desc->arg_site_offset.size() != static_cast<size_t>(desc->num_args) + 1 ||
+      desc->arg_site_offset.back() != desc->arg_sites.size()) {
+    log_warning_n(10, "AIE: the kernel's argument patch table is inconsistent.\n");
+    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  }
+  for (const aie_elf::PatchSite& site : desc->arg_sites) {
+    if ((site.offset % sizeof(uint32_t)) != 0 ||
+        site.offset + 3 * sizeof(uint32_t) > desc->ctrl_code_size) {
+      log_warning_n(10, "AIE: an argument patch site does not fit the kernel's control code.\n");
+      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+    }
   }
   // The arguments are patched into the control code rather than handed to the hardware, so
   // nothing downstream would notice a short list: the dispatch would run against whatever the

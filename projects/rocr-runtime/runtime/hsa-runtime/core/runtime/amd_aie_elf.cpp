@@ -340,7 +340,19 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::map<std::stri
       for (auto& [arg_index, sites] : args_it->second) {
         auto& dst = k.arg_sites[arg_index];
         dst.reserve(sites.size());
-        for (const RelocSite& site : sites) dst.push_back(PatchSite{site.offset, site.addend});
+        for (const RelocSite& site : sites) {
+          // PatchShimDma48 reads and writes the two dwords following the site, so three dwords
+          // starting at the offset have to lie wholly inside the control code, and the offset has
+          // to be dword aligned. Checked here rather than where the relocation was read, because
+          // this is the first point at which the control code's size is known. Without it a
+          // malformed ELF makes the driver patch past the end of the buffer it sized from
+          // ctrl_code_size -- the same bound the PDI patch site is checked against above.
+          if ((site.offset % sizeof(uint32_t)) != 0 ||
+              site.offset + 3 * sizeof(uint32_t) > k.ctrl_code.size()) {
+            return fail("argument patch site does not fit the control code");
+          }
+          dst.push_back(PatchSite{site.offset, site.addend});
+        }
       }
     }
 

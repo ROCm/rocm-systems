@@ -2181,14 +2181,31 @@ void ExpectRejected(const aie_test::dispatch_error& err, hsa_queue_t* queue, hsa
 }
 
 TEST_F(FullElfDispatchTest, ControlCodeIsAlignedForDispatch) {
-  // The driver rejects a control code whose device address is not 16 KiB aligned, so a
-  // successful dispatch is the assertion: the runtime's own allocation satisfies it. The
-  // application has no say in the placement and so cannot get it wrong.
+  // The driver rejects a control code whose device address is not 16 KiB aligned, so a completed
+  // dispatch is the assertion: the runtime's own allocation satisfied it. A single dispatch would
+  // only show that one starting address happened to work, and the rounding is arithmetic on
+  // whatever base the allocator returned -- so walk a range of bases instead.
+  //
+  // Each round holds a device buffer of a different, deliberately unaligned size across the
+  // dispatch, so the next control-code allocation starts somewhere else in the heap. The sizes
+  // step by a dword so the offsets are not all congruent modulo the alignment, and one of them is
+  // a whole 16 KiB so an allocator that is already aligned is exercised too.
+  constexpr std::size_t kBiasSizes[] = {4, 1024, 4100, 16384, 16388, 32772};
+
   hsa_queue_t* queue = nullptr;
   ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
-  ASSERT_NO_FATAL_FAILURE(RunChain(queue, 1));
+
+  for (std::size_t bias : kBiasSizes) {
+    SCOPED_TRACE(bias);
+    pool_buffer spacer;
+    ASSERT_EQ(spacer.allocate(dev_pool, bias), HSA_STATUS_SUCCESS);
+    // Two packets per round, so the second control-code buffer starts from wherever the first
+    // left off rather than always from the same spacer boundary.
+    ASSERT_NO_FATAL_FAILURE(RunChain(queue, 2));
+  }
+
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
 }
 
