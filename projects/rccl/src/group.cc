@@ -802,7 +802,11 @@ static void ncclGroupSymmetricJobFree(void* _job) {
 static ncclResult_t ncclPrepareTasksAndCollPreconnect(
   struct ncclComm* comm, ncclSimInfo_t* simInfo,
   struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next>* asyncCollJobs) {
-  if (ncclParamSingleProcMemRegEnable()) {
+  // Symmetric task selection performs a bootstrap consensus in ncclPrepareTasks.
+  // Prepare grouped local ranks concurrently so the first rank cannot block
+  // before the other ranks in this process enter the same consensus.
+  bool const symmetricPrepareUsesBootstrap = comm->symmetricSupport && !comm->p2pCrossClique;
+  if (ncclParamSingleProcMemRegEnable() || symmetricPrepareUsesBootstrap) {
     struct ncclPrepareTasksAndCollPreconnectJob* job;
     NEW_NOTHROW(job, ncclPrepareTasksAndCollPreconnectJob);
     job->base.func = ncclPrepareTasksAndCollPreconnectFunc;
