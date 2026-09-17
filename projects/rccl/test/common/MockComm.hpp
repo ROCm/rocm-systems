@@ -41,7 +41,7 @@ inline void CreateMockComm(
 
     mockComm->pxnDisable      = RCCL_VALUE_UNSET;
     mockComm->p2pNetChunkSize = RCCL_VALUE_UNSET;
-    mockComm->p2pMaxPeers     = nRanks; // paths.cc default; 0 divides by zero there
+    mockComm->p2pMaxPeers     = nRanks; // matches what paths.cc resolves an unset maxP2pPeers to
 
     // Initialize topology
     memset(&mockTopo, 0, sizeof(mockTopo));

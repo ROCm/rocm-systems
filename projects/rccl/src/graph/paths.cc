@@ -1414,8 +1414,10 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
   // leave p2pnChannelsPerPeer > p2pnChannels (e.g. when the loop bottoms out
   // at 1 but divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) is large, or when
   // a later arch cap shrinks p2pnChannels). Covers the plain ncclP2pChannelToPart
-  // bound only; the shift branch (device.h) needs p2pnChannels >> p2pChannelShiftSize,
-  // which this does not enforce. That gap predates this change.
+  // bound only. The shift branch (device.h) needs p2pnChannels >> p2pChannelShiftSize,
+  // which this does not enforce. That gap predates this change, but a small maxP2pPeers
+  // widens what can reach it: divUp(2, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) is 1, so the loop
+  // above can now stop at p2pnChannels/2 where dividing by nRanks stopped at /4 or lower.
   comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
 
   // Same grow reconciliation as ncclTopoPostset, for p2p channels (the grow path

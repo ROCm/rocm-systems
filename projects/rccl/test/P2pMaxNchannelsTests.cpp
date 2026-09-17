@@ -95,7 +95,7 @@ struct P2pChannelsComm
         comm->nChannels                 = nChannels;
         comm->p2pnChannelsPerPeer       = seedP2pPerPeer;
         comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
-        // paths.cc default; 0 divides by zero there. Override after init for a smaller set.
+        // Matches what paths.cc resolves an unset maxP2pPeers to. Override for a smaller set.
         comm->p2pMaxPeers               = nRanks;
     }
 
@@ -450,6 +450,29 @@ TEST(P2pMaxNchannelsMultiNodeTests, Gfx950_2Node8Rank_HalfSub_MaxP2pPeers2_Keeps
             EXPECT_EQ(p2pnChannels, 16);
             // divUp(2 peers, 2) = 1; 32 halves twice before 8 < 16. nRanks would give 2.
             EXPECT_EQ(fixture.comm->p2pnChannelsPerPeer, 8);
+        });
+}
+
+// Both divisors compose: gfx1250 multi-node is saturate-on plus the halving loop, and is
+// where p2pnChannelsPerPeer reaches its new maximum. Saturate sets it to pool/maxP2pPeers,
+// then divUp(2, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) == 1 leaves the loop with nothing to do.
+TEST(P2pMaxNchannelsMultiNodeTests, Gfx1250_2Node_SaturateAndHalvingLoopCompose)
+{
+    RUN_ISOLATED_TEST(
+        "Gfx1250_2Node_SaturateAndHalvingLoopCompose",
+        []()
+        {
+            ::unsetenv("NCCL_MAX_P2P_NCHANNELS");
+            ::unsetenv("RCCL_SATURATE_P2P_NCHANNELS");  // on by default for gfx1250
+            P2pChannelsComm fixture;
+            fixture.initMultiNode("gfx1250", /*nNodes=*/2, /*nRanks=*/16, /*localGpus=*/8,
+                                  /*nChannels=*/64, /*seedP2pPerPeer=*/8);
+            fixture.comm->p2pMaxPeers = 2;
+            int p2pnChannels = -1;
+            ASSERT_EQ(fixture.computeP2pChannels(&p2pnChannels), ncclSuccess);
+            // Saturate gives pow2Down(pool / 2); the loop then finds ppp * 1 < pool.
+            EXPECT_EQ(fixture.comm->p2pnChannelsPerPeer, p2pnChannels / 2);
+            EXPECT_LE(fixture.comm->p2pnChannelsPerPeer, p2pnChannels);
         });
 }
 

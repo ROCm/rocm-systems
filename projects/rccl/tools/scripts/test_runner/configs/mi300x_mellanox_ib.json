@@ -487,6 +487,12 @@
           "timeout": 300
         },
         {
+          "name": "MaxP2pPeers_MultiNode_SaturateDividesByMaxP2pPeers",
+          "description": "With RCCL_SATURATE_P2P_NCHANNELS on, the per-peer count is pool/maxP2pPeers exactly; pins the divisor to an observable value",
+          "test_filter": "MaxP2pPeersMPITest.MultiNode_SaturateDividesByMaxP2pPeers",
+          "timeout": 180
+        },
+        {
           "name": "MaxP2pPeers_Functional_AlltoAll_WithMaxP2pPeers",
           "description": "A communicator built with maxP2pPeers set runs a correct AllToAll across all ranks",
           "test_filter": "MaxP2pPeersMPITest.Functional_AlltoAll_WithMaxP2pPeers",
@@ -928,6 +934,16 @@
           "name": "TimeoutTests",
           "description": "ncclTimeout host API unit tests: enum ordering, error string, async-error set/get/clear, argument validation",
           "test_filter": "TimeoutTests.*"
+        },
+        {
+          "name": "ChannelDefaults",
+          "description": "P2P channel pool and per-peer defaults, including the maxP2pPeers saturate divisor",
+          "test_filter": "ChannelDefaults.*"
+        },
+        {
+          "name": "P2pMaxNchannels",
+          "description": "NCCL_MAX_P2P_NCHANNELS resolution, p2pnChannels upper bound, and the multi-node maxP2pPeers per-peer reduction",
+          "test_filter": "P2pMaxNchannels*"
         }
       ]
     },
