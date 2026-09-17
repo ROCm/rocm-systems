@@ -641,7 +641,7 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
 
     if(enable_queue_intercept())
     {
-        if(*(get_attach_table()))
+        if(rocprofiler_attach_table_owns_hsa_interception(*(get_attach_table())))
         {
             // Attach table was previously registered, so we need to
             // - Load and instrument queues that the attach library captured

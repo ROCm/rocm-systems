@@ -304,6 +304,13 @@ get_attach_status()
     return _v;
 }
 
+RocAttachDispatchTable*&
+get_attach_api_table()
+{
+    static auto* value = static_cast<RocAttachDispatchTable*>(nullptr);
+    return value;
+}
+
 bool&
 get_initializing_attachment_client()
 {
@@ -1789,6 +1796,25 @@ rocprofiler_set_api_table(const char* name,
             rocprofiler::hsa::restore_table(hsa_api_table->pc_sampling_ext_, lib_instance);
 #endif
 
+        auto* attach_api = rocprofiler::registration::get_attach_api_table();
+        if(rocprofiler::registration::get_attach_status()->has_attachment_client.load(
+               std::memory_order_acquire) &&
+           attach_api != nullptr && !rocprofiler_attach_table_owns_hsa_interception(attach_api))
+        {
+            auto attach_status =
+                rocprofiler_attach_table_initialize_hsa_interception(attach_api, hsa_api_table);
+            if(attach_status == 0)
+            {
+                ROCP_INFO << "Transferred HSA queue and code-object interception ownership "
+                             "to rocattach";
+            }
+            else
+            {
+                ROCP_INFO << "Rocattach cannot initialize HSA interception through this "
+                             "dispatch-table version; retaining SDK ownership";
+            }
+        }
+
         // store a reference of the HsaApiTable implementations for invoking these functions
         // without going through tracing wrappers
         rocprofiler::hsa::copy_table(hsa_api_table->core_, lib_instance);
@@ -2256,6 +2282,7 @@ rocprofiler_set_api_table(const char* name,
             << num_tables;
 
         auto* rocattach_api = static_cast<RocAttachDispatchTable*>(tables[0]);
+        rocprofiler::registration::get_attach_api_table() = rocattach_api;
 
         if(rocprofiler::registration::get_attach_status()->has_attachment_client.load(
                std::memory_order_acquire))

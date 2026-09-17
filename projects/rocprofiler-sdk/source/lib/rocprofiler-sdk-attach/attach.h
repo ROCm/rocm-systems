@@ -26,7 +26,15 @@
 
 ROCPROFILER_EXTERN_C_INIT
 
+struct HsaApiTable;
+
 int
 rocprofiler_attach_get_version() ROCPROFILER_API;
+
+int
+rocprofiler_attach_is_hsa_interception_active() ROCPROFILER_API;
+
+int
+rocprofiler_attach_initialize_hsa_interception(struct HsaApiTable*) ROCPROFILER_API;
 
 ROCPROFILER_EXTERN_C_FINI
