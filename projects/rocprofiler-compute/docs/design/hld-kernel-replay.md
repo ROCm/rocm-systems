@@ -47,88 +47,240 @@ context with nothing that must stay running. Neither condition holds today.
 | The native tool owns PC sampling | Same as above. |
 | Counter collection moves to its own context | To allow fine-grained service start and stop. |
 
-
 ### SDK replay mechanism
 
-The SDK's kernel replay service provides the mechanism this design relies on.
-`rocprofiler-sdk/experimental/kernel_replay.h` is the authoritative API.
+The SDK owns dispatch repetition, memory restoration, and queue isolation. The tool chooses which
+dispatches to replay, how many passes to request, and which profiling services collect on each pass.
+`rocprofiler-sdk/experimental/kernel_replay.h` defines the experimental public API.
 
-| Domain / operation | SDK |
-| --- | --- |
-| `KERNEL_REPLAY` `CONFIG` enter | Once per dispatch reaching the replay gate |
-| `pass_count_cb` | Once per dispatch, before any pass |
-| `KERNEL_REPLAY` `PASS` enter / exit | Delimits each execution inside a replay window |
-| `KERNEL_REPLAY` `CONFIG` exit | After the last pass |
+The component diagram shows these responsibilities inside the profiled process. Replay uses the
+ordinary dispatch profiling path for every pass; it is independent of counter collection.
 
-| `pass_count_cb` returns | SDK behavior |
+```mermaid
+flowchart TD
+    App["Application and HIP/HSA runtime"]
+    Tool["Profiling tool<br/>Dispatch selection, pass policy,<br/>service control and results"]
+
+    subgraph SDK["rocprofiler-sdk · profiled process"]
+        Queue["Queue interception<br/>Eligibility and per-agent isolation"]
+        Replay["Replay callbacks and pass loop"]
+        Tracker["Allocation tracking<br/>HSA allocate/free interception"]
+        Modules["Loaded code objects<br/>Module-variable discovery"]
+        Snapshot["Snapshot manager<br/>Agent memory copied to host"]
+        Services["Dispatch profiling services<br/>and async completion handler"]
+        Queue --> Replay
+        Tracker --> Snapshot
+        Modules --> Snapshot
+        Replay -- "capture and restore" --> Snapshot
+        Replay -- "each pass" --> Services
+    end
+
+    GPU["GPU agent and queues"]
+    App -- "dispatch submission" --> Queue
+    App -- "allocation lifecycle" --> Tracker
+    Tool -- "configure and start replay context" --> Replay
+    Replay -- "CONFIG and PASS callbacks" --> Tool
+    Tool -- "pass count, continuation,<br/>local context overrides" --> Replay
+    Services -- "instrumented dispatch" --> GPU
+    GPU -- "completion" --> Services
+    Services -- "counter and trace records" --> Tool
+    Snapshot <-->|"device/host copies"| GPU
+```
+
+#### Registration and activation
+
+The tool configures `ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY` through
+`rocprofiler_configure_callback_tracing_service` during tool initialization. No separate replay
+counting service is required.
+
+| Condition | SDK behavior |
 | --- | --- |
-| `1` | Ordinary single-execution path. No replay window, no snapshot, no `PASS` callbacks. |
-| Greater than `1` | Opens a replay window with that many passes. |
+| Subscription includes `CONFIG`, or all operations | Starting that context activates the replay gate. A `PASS`-only subscription cannot initiate replay. |
+| Another context already configured replay | Configuration returns `ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED`, even if the first context is stopped. Ownership is process-wide. |
+| Replay service configured | Enables allocation tracking, including while its context is stopped, so later replay can capture live allocations. |
+| No active replay context | Dispatches follow the ordinary path without replay locks or snapshots. |
+
+#### Callback contract
+
+Both `CONFIG` and `PASS` deliver `PHASE_ENTER` and `PHASE_EXIT`. Here, `pass_count_cb` names the
+tool callback stored in `replay_pass_count`; `replay_continue_cb` names the callback stored in
+`replay_continue`, of type `rocprofiler_kernel_replay_continue_cb_t`.
+
+| Callback or phase | Owner | Contract |
+| --- | --- | --- |
+| `CONFIG` enter | SDK calls tool | Once per eligible dispatch. The tool sets the pass-count callback, optional continuation default, and sequence user data. |
+| `pass_count_cb` | Tool supplies; SDK calls | Called once if supplied, with dispatch information and sequence user data. Returns the requested pass count. |
+| `PASS` enter | SDK calls tool | Before each executed pass. Reports dispatch information, zero-based `current_pass`, and `total_passes`; supplies local context toggles. |
+| `PASS` exit | SDK calls tool | After GPU execution and the pass's profiling completion handler drain. The tool may replace the continuation callback for this pass. |
+| `replay_continue_cb` | Tool supplies; SDK calls | After `PASS` exit, if another pass is allowed. Receives dispatch information, current pass, total passes, and this pass's user data. Zero stops; nonzero continues. |
+| `CONFIG` exit | SDK calls tool | Closes the sequence after its last executed pass, or before ordinary execution on opt-out or snapshot decline. It does not report the completed-pass count or a snapshot status. |
+
+| Pass-count configuration | Continuation callback | SDK behavior |
+| --- | --- | --- |
+| Callback absent | Ignored | Execute once without snapshot or `PASS` callbacks. |
+| Returns `1` | Ignored | Execute once without snapshot or `PASS` callbacks. |
+| Returns *N* > 1 | Absent | Execute exactly *N* passes if replay succeeds. |
+| Returns *N* > 1 | Present | Execute up to *N* passes; continuation can stop early but cannot extend the limit. |
+| Returns `0` | Present | Indefinite replay until continuation returns zero; `total_passes` is `0`. |
+| Returns `0` | Absent | Warn and execute once without replay. |
+
+The fixed-count limit is checked before continuation. For *N* passes, `replay_continue_cb` is
+consulted only after passes 0 through *N*−2; `PASS` exit still runs after every pass.
+An indefinite loop consults continuation after every pass and has no overall SDK pass or time limit.
+If the tool never stops it, application completion remains withheld.
+
+| Payload field | `CONFIG` | `PASS` |
+| --- | --- | --- |
+| `dispatch_info` | SDK-populated dispatch, agent, queue, kernel, and launch information | Same logical dispatch information |
+| `current_pass`, `total_passes` | Zero; not a completion summary | Read-only pass index and configured count, or `0` total for indefinite replay |
+| `replay_pass_count` | Tool sets at enter | Null; the count cannot change during replay |
+| `replay_continue` | Tool sets the sequence default at enter | Null at enter; at exit, holds the current default and accepts an override for this pass only |
+| `replay_start_context`, `replay_stop_context` | Not available | SDK-populated at enter only |
+
+An override made at `PASS` exit applies to the following continuation decision. The next pass
+starts with the `CONFIG` default again. The API exposes no snapshot/restore callbacks or structured
+snapshot-failure field.
+
+#### Callback state and dispatch identity
+
+| State | Lifetime and meaning |
+| --- | --- |
+| Sequence user data | The value set through `user_data` at `CONFIG` enter reaches the pass-count callback, every pass, and `CONFIG` exit. |
+| Per-pass user data | Each pass receives its own copy. Writes reach that pass's exit and continuation callback, but not the next pass or `CONFIG` exit. |
+| Shared sequence state | Store behind `user_data.ptr` when updates must survive across passes. The tool owns its lifetime through `CONFIG` exit. |
+| Dispatch ID | Reserved before `CONFIG` and reused for every pass, including ordinary execution when replay is declined. The logical dispatch advances the ID sequence once. |
+| Thread, internal and ancestor correlation IDs | Preserved across the replay callbacks and executions of the logical dispatch. |
+| Pass timestamps | Each execution has its own start/end timestamps. A common dispatch ID does not imply a common duration. |
+
+Per-pass storage therefore needs both logical dispatch identity and pass index. Other profiling
+services do not automatically receive replay metadata; the tool must associate their records with
+the pass selected at `PASS` enter. Completion handlers may run on a different thread.
 
 #### Per-pass context control
 
 The SDK supplies `replay_start_context` and `replay_stop_context` on the `PASS` record. The tool
-calls them to toggle one of its own contexts for the remainder of the replay loop.
+calls them to set local overrides for its contexts. These overrides do not call the global
+context start/stop APIs.
 
-| Rule |
-| --- |
-| Callable only during `PASS` `PHASE_ENTER`. | 
-| Sticky across passes. | 
-| Loop-scoped. Pre-replay state is restored when the loop ends, and global context state is never modified. |
-| A local enable only undoes a prior local disable; it cannot promote a globally inactive context. |
-| Exactly one context may configure a `KERNEL_REPLAY` service. A second returns `ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED`. |
+| Rule or condition | Effect |
+| --- | --- |
+| Called during `PASS` enter for a context active at loop entry | Records the override for this loop; it remains sticky until changed. |
+| Local enable | Undoes a prior local disable; cannot promote a globally inactive context. |
+| Called outside `PASS` enter | Returns `ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR`. |
+| Context was not active when the loop began | Returns `ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED`. |
+| Loop ends | Discards the thread-local override map. Global context state was never changed. |
 
+#### Replay execution and isolation
+
+The sequence below includes SDK opt-out and fallback behavior. Compute's stricter treatment of
+incomplete replay is defined under [Failure behavior](#failure-behavior).
 
 ```mermaid
 sequenceDiagram
-    participant App as Application thread
-    participant SDK as SDK replay service
+    participant App as Application
+    participant SDK as SDK on submitting thread
     participant Tool as Profiling tool
     participant Agent as GPU agent and queues
+    participant Handler as HSA completion handler
     participant Snapshot as Host snapshot manager
 
     App->>SDK: Submit dispatch
-    SDK->>Tool: KERNEL_REPLAY CONFIG enter
-    Tool-->>SDK: Register pass_count_cb
-    SDK->>Tool: pass_count_cb for this dispatch
-    Tool-->>SDK: Return pass count N
-    alt N equals 1: opt out
-        SDK->>Tool: KERNEL_REPLAY CONFIG exit
+    alt Graph or multi-packet submission
+        SDK->>Agent: Execute once without CONFIG or PASS
+        Agent-->>App: Ordinary completion
+    else Eligible single-packet dispatch
+        SDK->>SDK: Reserve logical dispatch ID
+        SDK->>Tool: CONFIG enter
+        Tool-->>SDK: Set pass_count_cb and optional replay_continue_cb
+        opt Pass-count callback supplied
+            SDK->>Tool: pass_count_cb
+            Tool-->>SDK: Requested count
+        end
+    alt Opt-out or zero count without continuation
+        SDK->>Tool: CONFIG exit
         SDK->>Agent: Execute ordinary dispatch
-        Agent-->>App: One application-visible completion
-    else N is greater than 1
+        Agent-->>App: Ordinary completion
+    else Fixed or indefinite replay requested
         SDK->>SDK: Acquire per-agent writer lock
         Note over SDK,Agent: Hold the application completion signal
         SDK->>Agent: Drain prior submitting and sibling queue work
         SDK->>Snapshot: Snapshot supported agent state
-        loop Repeat N times
-            SDK->>Tool: KERNEL_REPLAY PASS enter
-            SDK->>Agent: Execute the same dispatch
-            Agent-->>SDK: Pass completes and handler drains
-            SDK->>Tool: KERNEL_REPLAY PASS exit
-            opt Another pass remains
-                SDK->>Snapshot: Restore captured agent state
+        alt Snapshot incomplete
+            SDK->>Tool: CONFIG exit with no PASS callbacks
+            SDK->>Agent: Execute once with original completion signal
+            Agent-->>App: Ordinary completion
+        else Snapshot complete
+            loop Each executed pass
+                SDK->>Tool: PASS enter
+                SDK->>Agent: Execute same dispatch through profiling services
+                Agent-->>Handler: GPU completion
+                Handler->>Tool: Deliver profiling records
+                Handler-->>SDK: Handler drained
+                SDK->>Tool: PASS exit
+                opt Not final fixed pass and continuation supplied
+                    SDK->>Tool: replay_continue_cb with this pass's user data
+                    Tool-->>SDK: Continue or stop
+                end
+                opt Another pass will execute
+                    SDK->>Snapshot: Restore captured agent state
+                end
             end
+            Note over SDK,Agent: Last pass leaves its device results in place
+            SDK->>Tool: CONFIG exit
+            SDK->>Agent: Submit one application completion barrier
+            Agent-->>App: One application-visible completion
+            SDK->>SDK: Discard local context overrides
         end
-        SDK->>Tool: KERNEL_REPLAY CONFIG exit
-        SDK-->>App: Signal one application-visible completion
+        SDK->>Snapshot: Release host snapshot
         SDK->>SDK: Release per-agent writer lock
+    end
     end
 ```
 
+Replay runs synchronously on the submitting thread; there is no replay worker. Waiting for the
+profiling handler before `PASS` exit prevents the next pass from reusing signals or buffers still
+in use. It also completes counter delivery before the continuation decision.
+
+| Isolation boundary | SDK behavior |
+| --- | --- |
+| Replayed dispatch | Holds the per-agent writer lock across draining, capture, execution, restoration, and completion submission. |
+| Ordinary dispatch while replay is active | Holds the same agent's reader lock across submission. Ordinary submissions can coexist, but cannot enter an active replay window. |
+| Already-submitted work | A submitting-queue barrier and agent-wide handler drain complete prior kernels before capture. Submission locks alone do not wait for GPU completion. |
+| Different agents | Use separate locks and agent-scoped snapshots; replay can proceed concurrently for independent device state. |
+| Queue or handler drain stalls | Bounded waits warn and then abort, rather than snapshotting or restoring while work is still active. |
+
+#### Memory capture and lifetime
+
+HSA allocation/free interception maintains the live allocation inventory and its owning agents.
+At capture time, the SDK also enumerates loaded executables for module-scope variables, which do
+not come from the allocation inventory.
+
+| Stage | SDK behavior |
+| --- | --- |
+| Capture | Copies the replaying agent's supported live allocations and discovered module variables to host buffers once. It does not restrict capture to the selected kernel's arguments. |
+| Restore | Copies captured bytes back only before another pass. Tracked allocation copies check liveness under the inventory lock, excluding concurrent frees during each copy. |
+| Allocation retired after inventory capture | Skips a region that is no longer live or is smaller than the captured size. Allocation/free operations are not globally frozen by replay. |
+| Capture failure | Host-memory exhaustion, a failed device-to-host copy, or incomplete module enumeration declines replay. The SDK closes `CONFIG` and executes once without `PASS` callbacks. |
+| Restore failure | A failed host-to-device copy aborts the process; partially restored state cannot safely drive another pass. |
+| Loop termination | Keeps the last executed pass's device results and releases the host snapshot. Early termination follows the same rule. |
+
 #### Replay coverage and limitations
 
-| State or feature | Replay guarantee |
+| State or feature | Coverage or limitation |
 | --- | --- |
-| Allocated device memory (`hipMalloc`) | Snapshotted and restored between passes. |
-| Module-scope `__device__` / `__constant__` state | Discovered and captured by the SDK. |
-| Unified, managed, `hipMallocAsync` allocations | Not restored. No equivalence guarantee. |
+| Tracked coarse-grained device allocations, including ordinary `hipMalloc` | Captured for the owning agent and restored between passes. |
+| Module-scope `__device__` / `__constant__` state | Captures variables discoverable through loaded executable symbols. Variables above the implementation's 1 GiB sanity cap are warned about and omitted; that omission does not decline replay. |
+| Unified, managed, `hipMallocAsync`, and other virtual-memory-mapped allocations | Not captured. Writes can accumulate across passes. |
+| Host, fine-grained, and kernel-argument memory | Not captured. Input equivalence is not guaranteed for kernels that modify it. |
+| Executable-flag allocations | Excluded to avoid restoring live runtime argument pools and profiler buffers. Direct-HSA application data using the same flag is also omitted without declining replay. |
 | Cache state | Not restored. Cache-sensitive counter values may vary between passes. |
-| HIP graph launches | Unsupported. |
-| Multi-packet or multi-dispatch submissions | Not replayed. Only single-packet, single-dispatch submissions are. |
-| Asynchronous SDMA or HSA copies | Not fenced by the replay window. |
-| Host memory | Required at least as much as the tracked device memory footprint. |
-| Multi-rank dispatches | Unsafe. |
+| HIP graphs or multi-packet/multi-dispatch submissions | Warn once per unsupported case and execute once without `CONFIG` or `PASS`. Only eligible single-packet, single-dispatch submissions reach configuration. |
+| Asynchronous SDMA or HSA copies | Bypass the replay gate and are not fenced by the replay window. |
+| Other processes, ranks, and cross-agent shared state | Not coordinated by the process-local per-agent locks. Collectives and external writes can make replay unsafe. |
+| Host-memory capacity | Requires the captured bytes plus metadata, including module variables. Concurrent replay on different agents can retain multiple snapshots. |
+
+Successful capture does not certify that every allocation a kernel can access was included.
+Repeatability requires supported memory and no external mutation during the replay window.
 
 ## Problem statement
 
@@ -211,7 +363,7 @@ flowchart TD
 | ID | Requirement |
 | --- | --- |
 | **FR-4** | Bucket membership matches application replay. `_ACCUM` pairing, TCC grouping, and same-bucket priority are unchanged, and every bucket still fits one hardware pass. |
-| **FR-5** | Pass count equals the bucket count, or the bucket count plus one when `--pc-sampling` is selected. |
+| **FR-5** | Pass count equals the bucket count, or the bucket count plus one when `--pc-sampling` is selected. The native tool requests a fixed count with no continuation callback. |
 | **FR-6** | The PC sampling pass runs with counter collection disabled, and alters neither bucket membership nor the ordering of the counter passes preceding it. It is realized by locally stopping the counter context and locally starting the PC sampling context at that pass. |
 
 #### Output and identity
@@ -219,7 +371,7 @@ flowchart TD
 | ID | Requirement |
 | --- | --- |
 | **FR-7** | One kernel-replay invocation produces one consolidated counter result using the existing naming and discovery convention. The contract the analysis path consumes is unchanged. |
-| **FR-8** | All passes of one logical dispatch resolve to one `Dispatch_ID` group holding the complete counter set. |
+| **FR-8** | All passes of one logical dispatch retain the SDK-provided dispatch ID and form one `Dispatch_ID` group holding the complete counter set. |
 | **FR-9** | Start and end timestamps follow the same cross-pass normalization semantics used for application-replay results. |
 | **FR-10** | Exactly one kernel dispatch record reaches the result per logical dispatch, from pass 0. |
 | **FR-11** | Marker region durations are corrected by subtracting the kernel replay overhead. |
@@ -238,7 +390,7 @@ flowchart TD
 | ID | Requirement |
 | --- | --- |
 | **FR-16** | An SDK below the supported version floor is a hard error stating the required version. |
-| **FR-17** | If the SDK declines a device-memory snapshot, abandon the profile without retry and recommend application replay in the diagnostic. |
+| **FR-17** | If the SDK declines a device-memory snapshot, abandon the profile without retry and recommend application replay in the diagnostic. Detect incomplete replay through requested and completed passes, independently of SDK warning text or subprocess status. |
 | **FR-18** | If the upstream replay mechanism aborts, report the failed run without attempting recovery. |
 | **FR-19** | If counters were requested but an agent has no usable counter profiles, do not silently degrade the dispatch to one pass. |
 | **FR-20** | A second `KERNEL_REPLAY` service configuration is a hard error naming `ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED`. |
@@ -247,7 +399,7 @@ flowchart TD
 
 | ID | Requirement |
 | --- | --- |
-| **NFR-1** | For deterministic workload and counters, each kernel-replay counter value matches the corresponding application-replay counter value for the same logical dispatch. |
+| **NFR-1** | For a deterministic workload using supported memory without external mutation, deterministic kernel-replay counter values match application replay for the same logical dispatch. Cache-sensitive counters remain subject to the SDK coverage limitations. |
 | **NFR-2** | Fail closed whenever a complete counter set cannot be delivered. Never collect partial counter data silently. |
 | **NFR-3** | Workflows that do not select kernel replay keep their current collection behavior, and kernel-replay output preserves the existing analysis input contract. |
 
@@ -281,7 +433,9 @@ sequenceDiagram
     participant Tool as Native tool
 
     SDK->>Tool: CONFIG enter
-    Tool-->>SDK: pass_count_cb returns N+1
+    Tool-->>SDK: Set pass_count_cb and leave replay_continue unset
+    SDK->>Tool: pass_count_cb
+    Tool-->>SDK: Return N+1
     SDK->>Tool: PASS 0 enter
     Tool->>SDK: stop PC sampling context
     Note over Tool,SDK: Counters and kernel tracing both collect
@@ -308,7 +462,7 @@ trace context is stopped, at pass 1.
   count from the per-agent counter profiles, adding one when PC sampling is selected.
 - **Consolidated results keep the existing naming convention.**
 - **Results have unified structure across modes.**
-- **No separate pass-count environment varibale.**
+- **No separate pass-count environment variable.**
 
 ```mermaid
 flowchart TD
@@ -334,7 +488,7 @@ flowchart TD
 
     subgraph ComputeResults["rocprof-compute · results"]
         direction TB
-        Normalize["Normalize cross-pass identity<br/>and timestamps"]
+        Normalize["Group by SDK dispatch ID<br/>and normalize timestamps"]
         Output["Consolidated PMC rows"]
         Analysis["Existing join and analysis path"]
         Normalize --> Output --> Analysis
@@ -358,6 +512,10 @@ Kernel and dispatch filters establish whether the dispatch is profiled before co
 availability is considered. An admitted zero-bucket request bypasses kernel replay and
 follows the existing path. For an admitted kernel, `pass_count_cb` determines the
 pass count exactly once before any replay pass.
+
+The native tool leaves `replay_continue` unset and requests a fixed count (FR-5). Early exit
+could omit a required bucket or the sampling pass; indefinite replay provides no benefit when
+the complete pass schedule is known before execution.
 
 ```mermaid
 flowchart TD
@@ -392,20 +550,26 @@ flowchart TD
 | Pass count returned | When | What the execution selects |
 | --- | --- | --- |
 | `1` — filtered | A confirmed filter miss — the kernel or dispatch is excluded. | Not profiled. |
-| `1` — admitted | The dispatch is admitted and its agent's profile vector contains exactly one bucket, no PC sampling. | SDK selects the sole profile and produces a complete one-bucket result. |
+| `1` — admitted | The dispatch is admitted and its agent's profile vector contains exactly one bucket, no PC sampling. | The native tool selects the sole profile through ordinary dispatch counting; no `PASS` callback occurs. |
 | *N*, where *N* > 1 | Admitted, no PC sampling. *N* is the size of the profile vector for this dispatch's agent. | Pass *i* selects entry *i* of that vector. |
 | *N*+1 | Admitted, PC sampling selected. *N* is the non-zero size of the profile vector. | Passes 0 through *N*−1 map one-to-one onto the vector. Pass *N* selects no counter profile and runs counter-disabled. |
 
 ### Output and dispatch ID
 
-A single dispatch produces one consolidated counter result. Before it is
-written, every pass for a logical dispatch must be collapsed.
+A single dispatch produces one consolidated counter result. The SDK already supplies the shared
+dispatch ID; compute preserves it instead of inferring identity from timestamps or dispatch order.
+Per-pass counter records remain distinct until completeness is checked.
 
 | Step | What happens |
 | --- | --- |
-| 1. Correlate | Group the pass rows by logical-dispatch ID. |
-| 2. Normalize timestamps | Give the group one canonical start/end pair using pass 0's logical duration. |
-| 3. Hand off | The existing contracts see a single counter set per dispatch. |
+| 1. Associate passes | The native tool records pass identity at `PASS` enter and carries it to counter-record delivery. Other service callbacks cannot assume replay metadata is present. |
+| 2. Consolidate | Within each process's results, group by the SDK dispatch ID and require every expected counter bucket exactly once. Do not renumber replay passes as separate dispatches. |
+| 3. Normalize timestamps | Give the group one canonical start/end pair using pass 0's logical duration. |
+| 4. Hand off | The existing contracts see a single counter set per dispatch (FR-7 through FR-10). |
+
+The pass association must survive delivery on the HSA completion thread; submission-thread local
+state alone is insufficient. An admitted one-bucket dispatch uses ordinary counting state because
+its `CONFIG` exit precedes execution and no `PASS` callbacks occur.
 
 ### Co-active service composition
 
@@ -428,11 +592,12 @@ dispatch records too with exactly one dispatch record per logical dispatch.
 A marker region is emitted once by the host but encloses every pass, so its duration subsumes the
 replay overhead. That overhead is subtracted rather than tolerated.
 
-- The native tool derives each logical dispatch's replay overhead from wall time between pass *1* and pass *N*.
+- The native tool measures the interval from pass 0's exit to the final pass's exit, covering
+  intervening restores and additional executions.
 - Post-processing subtracts that overhead from any marker region enclosing the dispatch, so reported
   region durations approximate an unreplayed run.
-- **Residual limitation.** Overhead that cannot be attributed to a specific enclosed dispatch is not
-  subtracted.
+- **Residual limitation.** Initial draining and snapshot capture precede pass 0 and have no separate
+  replay callbacks. Their overhead, and any other unattributable overhead, is not subtracted.
 
 ### Mode and option compatibility
 
@@ -450,8 +615,8 @@ flags kernel replay as experimental.
 
 ### Failure behavior
 
-Every failure below rejects partial replay data. None falls back to application replay, and none
-quietly turns a multi-bucket request into a single pass.
+Every failure below rejects partial replay data. Compute does not retry with application replay or
+accept the SDK's ordinary single execution as a successful multi-bucket profile.
 
 | Condition | Required behavior |
 | --- | --- |
@@ -461,19 +626,33 @@ quietly turns a multi-bucket request into a single pass.
 | Iteration multiplexing or live attach selected with kernel replay | Hard error before profiling starts. |
 | Missing or unexpectedly empty per-agent profile vector when counters were requested | Hard error describing the profile mismatch. |
 | SDK declines the device-memory snapshot | Abandon the entire profile without retry, reject incomplete output, and recommend application replay. |
-| Upstream drain timeout or process abort | Abort the failed run. |
+| Requested replay completes fewer passes than expected | Reject the profile with dispatch identity and requested/completed counts. |
+| Upstream restore failure, drain timeout, or process abort | Report the failed run without recovery. |
 
-One wrinkle: a declined snapshot currently leaves a successful process status behind, so the
-required outcome cannot lean on subprocess failure alone. Classifying an upstream warning string is
-the signal available today. A structured detection mechanism remains an open question.
+The native tool keeps completion state behind the sequence's `user_data.ptr`. It records the count
+returned by `pass_count_cb`, advances the completed count at each `PASS` exit, and checks it at
+`CONFIG` exit (FR-17, NFR-2).
+
+| Requested path | Observation at `CONFIG` exit | Compute action |
+| --- | --- | --- |
+| Filter opt-out or admitted one-bucket dispatch | No `PASS` callbacks, as specified | Accept the callback sequence. For an admitted dispatch, verify the ordinary counter result after execution. |
+| Fixed replay of more than one pass | No completed passes | Detect declined replay and fail the profile. In the current SDK, snapshot decline reaches `CONFIG` exit before the single-execution fallback. |
+| Fixed replay | Some, but fewer than the requested passes | Fail the profile; compute did not authorize early termination. |
+| Fixed replay | All requested passes completed | Continue to counter-bucket completeness checks before publishing results. |
+
+The native tool reports an incomplete-replay error at that boundary; a successful workload exit
+cannot override it. This rejects partial data without depending on SDK warning spelling. Detailed
+capture-failure reasons remain SDK diagnostics because the callback payload has no status field.
+Unsupported submissions that never reach `CONFIG` are covered by result completeness checks for
+any dispatch admitted for profiling, not by this callback count.
 
 ## Implementation phases
 
 | Phase | Delivers | Observable after this phase |
 | --- | --- | --- |
 | **1. Mode selection and validation** | The experimental `--replay-mode {application,kernel}` surface and rejections with their error diagnostics. Replay execution stays disabled. | Mode selection and correct rejection. Existing application-replay output does not change. |
-| **2. Native-tool kernel replay** | Coalesced counter groups delivered to the SDK invocation; the multi-group admission check extended to admit kernel replay; `pass_count_cb` implemented from the per-agent profile-vector size; both filters applied; and diagnosed failure on missing or unexpectedly empty counter profiles. | Replayed dispatches collect every bucket in one run, including valid one-bucket requests, while zero-bucket requests retain the existing bypass. Application replay keeps working throughout. |
-| **3. Consolidated output and dispatch ID** | Per-pass context positioning, one consolidated counter result using the existing naming convention, cross-pass timestamp and dispatch ID normalization, and marker duration correction. | Analysis consumes kernel-replay profiling output; Top Stats, dispatch information and marker regions report non-multiplied values. |
+| **2. Native-tool kernel replay** | Coalesced counter groups; fixed pass-count policy with continuation unset; kernel and dispatch filtering; ordinary one-bucket counting; and callback-based completion checks with profile-mismatch diagnostics (FR-2 through FR-6, FR-13, FR-14, FR-17 through FR-20). | Every required bucket is collected in one run or the profile fails. Zero-bucket requests retain the existing bypass. Application replay keeps working throughout. |
+| **3. Consolidated output and dispatch ID** | Per-pass context positioning, counter completeness checks, grouping by SDK dispatch identity, timestamp normalization, and marker duration correction (FR-7 through FR-11, NFR-2). | Analysis consumes one consolidated counter result with the existing naming convention; Top Stats, dispatch information and marker regions report non-multiplied values. |
 
 ## Validation, security and debuggability
 
@@ -482,15 +661,17 @@ the signal available today. A structured detection mechanism remains an open que
 | # | Check | Pass criterion |
 | --- | --- | --- |
 | 1 | **Counter accuracy** | For a deterministic workload requesting more than one bucket; for each logical dispatch, every kernel-replay counter value matches its corresponding application-replay counter value. Evaluate cache-sensitive counters separately, as a documented limitation. |
-| 2 | **Completeness and identity** | For each admitted dispatch, including an admitted one-bucket dispatch, the observed counter-pass count equals the application-replay count, every counter appears exactly once, and all passes collapse to one `Dispatch_ID`. Incomplete results fail before analysis. |
+| 2 | **Completeness and identity** | Integration and output checks verify the same SDK dispatch ID across replay callbacks and counter passes, every expected bucket exactly once, and one consolidated `Dispatch_ID` (FR-8, NFR-2). An admitted one-bucket dispatch completes ordinary counting without `PASS` callbacks. |
 | 3 | **Filtering** | Kernels excluded by the kernel or dispatch filter are not profiled and no errors are thrown. The same `--dispatch` range selects the same dispatches in both replay modes. |
 | 4 | **Application-replay comparison** | Profile the same deterministic workload and multi-bucket counter request in both modes. Compare corresponding buckets for each logical dispatch; bucket membership, counter values, and final analysis results agree, and existing application replay is unchanged. |
 | 5 | **Kernel tracing** | Exactly one kernel dispatch record per logical dispatch, from pass 0. |
 | 6 | **PC sampling** | Each admitted dispatch replays *N*+1 times. Every bucket appears exactly once across passes 0 through *N*−1, and pass *N* produces PC sampling output and no counter rows. |
 | 7 | **Compatibility** | Every accepted option behaves as expected — PC sampling, roofline selection, a kernel-replay-specific multi-rank diagnostic that names the collective kernel risk, and default-off — and every rejected combination is rejected: iteration multiplexing, live attach-detach. |
 | 8 | **Configuration rejection** | Each unmet condition on its own — no native tool, unsupported ROCm version, unresolvable library, fails before profiling starts, with a diagnostic naming that specific condition. |
-| 9 | **Failure paths** | An unsupported SDK, a missing or unexpectedly empty profile vector when counters were requested, a declined snapshot, and an upstream abort each fail, and each proves no one-pass fallback happened. A zero-bucket request follows the existing bypass and is not misclassified as a missing-profile failure. |
+| 9 | **Failure paths** | Fault-injection and integration checks reject an unsupported SDK, missing profiles, snapshot decline, short replay, and restore/drain aborts (FR-16 through FR-19). Snapshot decline fails even if the SDK fallback exits successfully or warning text changes. Zero-bucket bypass and deliberate opt-out are not failures. |
 | 10 | **Marker correction** | A marker region enclosing a replayed dispatch reports a duration close to the duration without kernel replay. |
+| 11 | **Replay callback contract** | SDK unit/sample coverage verifies fixed counts, early exit, terminating indefinite replay, zero without continuation, per-pass overrides, user-data copies, and local-toggle errors. Compute integration verifies fixed counts with continuation unset and completion state surviving through `CONFIG` exit (FR-5, FR-17). |
+| 12 | **Memory and queue isolation** | SDK snapshot and replay integration coverage checks supported allocations and module variables, unchanged inputs between passes, retained final outputs, sibling-queue draining, and independent agents. Unsupported memory and external mutation remain outside the equivalence guarantee (NFR-1). |
 
 ### Security
 
@@ -508,6 +689,7 @@ A diagnostic must name the specific unmet condition. It must identify:
 - Multi-rank detection under kernel replay
 - SDK capability and agent
 - Counter-to-pass mapping
+- Logical dispatch ID and requested/completed replay counts
 - Which failure occurred: option conflict, unavailable native collection, missing profile, snapshot
   decline, or upstream abort
 - That partial results are unusable
@@ -519,4 +701,3 @@ A diagnostic must name the specific unmet condition. It must identify:
 | --- | --- | --- |
 | 1 | Should kernel replay exclude collective kernels? | This will make multi-rank profiling with kernel replay possible, but the metrics won't reflect the statistics for all kernel invocations. |
 | 2 | Are cache-related metrics trustworthy at all under kernel replay? | Nothing restores cache state between passes, so cache-related counters do not represent the true cache behavior. |
-| 3 | How should `rocprof-compute` detect a declined snapshot? | Today the only signal is classifying an upstream warning string. |
