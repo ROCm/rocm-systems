@@ -1263,19 +1263,19 @@ write_rocpd(
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_info_process");
         auto json_cfg          = get_json_string([&cfg](auto& ar) { cfg.save(ar); });
 
-        static constexpr auto sensitive_env_keywords =
-            std::array<std::string_view, 12>{"api_key",
-                                             "auth",
-                                             "bearer",
-                                             "cert",
-                                             "credential",
-                                             "header",
-                                             "key",
-                                             "password",
-                                             "private",
-                                             "pwd",
-                                             "secret",
-                                             "token"};
+        static constexpr auto sensitive_env_keywords = std::array<std::string_view, 12>{
+            "api_key",
+            "auth",
+            "bearer",
+            "cert",
+            "credential",
+            "header",
+            "key",
+            "password",
+            "private",
+            "_pwd",  // keep 'print working directory' but flag any short forms of password
+            "secret",
+            "token"};
 
         auto contains_sensitive_keyword = [](std::string_view name) {
             auto lower_name = std::string{name};
