@@ -2442,12 +2442,10 @@ fail:
 // EINVAL.
 //
 // Guards: only the built-in IB plugin is supported, and segments must be
-// uniformly sized (interior segments equal; a smaller trailing segment is
-// allowed). This keeps every segment boundary at a multiple of the segment
-// size, so step-aligned transfers (stepSize <= segmentSize) never straddle a
-// boundary. When a guard fails the function returns an error and the caller
-// declines registration, so the collective falls back to staging buffers
-// instead of the fatal QP path.
+// uniformly sized (interior segments equal the max stride; the first and last
+// may be shorter when registration clips a physical allocation). Non-uniform
+// layouts decline so the collective falls back to staging instead of the
+// fatal QP path.
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
 static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* netComm, void* buffer, size_t totalSize,
                                        int numSegments, ncclTopoGdrMode useGdr, void** handle) {
@@ -2461,6 +2459,11 @@ static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* 
 
   if (proxyState->ncclNet != &ncclNetIb) {
     INFO(NCCL_NET | NCCL_REG, "Multi-segment (%d) NET registration only supported on the IB transport", numSegments);
+    return ncclInvalidUsage;
+  }
+  if (numSegments < 1 || numSegments > NCCL_IB_MAX_SEGMENTS) {
+    WARN("NET/IB: multi-segment registration with %d segments exceeds NCCL_IB_MAX_SEGMENTS=%d", numSegments,
+         NCCL_IB_MAX_SEGMENTS);
     return ncclInvalidUsage;
   }
   NCCLCHECKGOTO(ncclCalloc(&segAddrs, numSegments), ret, fail);
@@ -2503,8 +2506,8 @@ static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* 
     goto fail;
   }
 
-  // Uniform-segment guard: interior segments must be equal; the trailing segment
-  // may be smaller. Non-uniform layouts such as DeepEP [GPU][CPU] decline here
+  // Uniform-segment guard: interior segments equal the max stride; first/last
+  // may be shorter. Non-uniform layouts such as DeepEP [GPU][CPU] decline here
   // so the collective falls back to staging; GIN/RMA registers those windows.
   if (!ncclIbSegmentsUniform(nSeg, segLens)) {
     INFO(NCCL_NET | NCCL_REG,

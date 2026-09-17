@@ -95,7 +95,20 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
   int nreqs = slots[0].nreqs;
   if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
 
-  int nqps = ncclIbCommBaseGetNqpsPerRequest(&comm->base);
+  int nqps = 0;
+  NCCLCHECK(ncclIbCommBaseGetNqpsPerRequest(&comm->base, &nqps));
+  if (nqps > NCCL_IB_MAX_QPS) {
+    WARN("NET/IB: QP count %d exceeds maximum QP capacity %d", nqps, NCCL_IB_MAX_QPS);
+    return ncclInternalError;
+  }
+  ncclIbQp* qps[NCCL_IB_MAX_QPS];
+  int qpIndexes[NCCL_IB_MAX_QPS];
+  int qpsPerDev[NCCL_IB_MAX_DEVS_PER_NIC] = {};
+  for (int i = 0; i < nqps; i++) {
+    NCCLCHECK(ncclIbCommBaseGetQpForRequest(&comm->base, reqs[0]->id, i, &qps[i], &qpIndexes[i]));
+    qpsPerDev[comm->base.qps[qpIndexes[i]].devIndex]++;
+  }
+  uint8_t* weights = reqs[0]->send.weights;
   ncclResult_t ret;
 
   // Cumulative wr_id across requests; placed on the final signaled WR so
@@ -118,19 +131,23 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
   int qpIndex = -1;
   ncclIbQp* qp = NULL;
   for (int i = 0; i < nqps; i++) {
-    NCCLCHECK(ncclIbCommBaseGetQpForRequest(&comm->base, reqs[0]->id, i, &qp, &qpIndex));
+    qp = qps[i];
+    qpIndex = qpIndexes[i];
     int devIndex = qp->devIndex;
     int remDevIdx = qp->remDevIdx;
+    int origDevIndex = comm->base.qps[qpIndex].devIndex;
 
     // Per-request chunk length on this QP (computed independently of the
     // resiliency skip so skipped QPs still advance the offsets consistently).
     uint32_t chunkLen[NCCL_NET_IB_MAX_RECVS];
     for (int r = 0; r < nreqs; r++) {
-      int chunkSize;
+      uint32_t chunkSize;
       if (reqs[r]->send.size < splitDataThreshold) {
         chunkSize = (i == 0) ? reqs[r]->send.size : 0;
       } else {
-        chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), IB_WRITE_CHUNK_ALIGNMENT) * IB_WRITE_CHUNK_ALIGNMENT;
+        chunkSize = DIVUP(DIVUP((uint64_t)reqs[r]->send.size * weights[origDevIndex], 100 * qpsPerDev[origDevIndex]),
+                          IB_WRITE_CHUNK_ALIGNMENT) *
+                    IB_WRITE_CHUNK_ALIGNMENT;
       }
       chunkLen[r] = std::min<uint32_t>(reqs[r]->send.size - sendOffsets[r], chunkSize);
     }
@@ -169,14 +186,16 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
       }
       // Remote segment tables from the side table when the peer published a
       // matching multi-seg layout; otherwise a single-segment view of the CTS slot.
+      // Snapshot starts and rkeys once: the WR path must ship the same values
+      // ncclIbCtsRemoteLayoutValid checked, not a later volatile re-read.
       uint64_t rVA[NCCL_IB_MAX_SEGMENTS], rOff[NCCL_IB_MAX_SEGMENTS + 1];
+      uint32_t remoteRkeys[NCCL_IB_MAX_SEGMENTS];
       int nRemote;
       uint64_t remoteReqOff = 0;
       bool remoteMulti = ncclIbCtsRemoteMultiSeg(comm, slot, r);
       if (remoteMulti) {
         uint32_t remoteSegments = side[r].nSegments;
         uint64_t starts[NCCL_IB_MAX_SEGMENTS];
-        uint32_t rkeys[NCCL_IB_MAX_SEGMENTS];
         const uint32_t nCopy =
           (remoteSegments >= 1 && remoteSegments <= NCCL_IB_MAX_SEGMENTS && remDevIdx >= 0 &&
            remDevIdx < NCCL_IB_MAX_DEVS_PER_NIC)
@@ -184,10 +203,10 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
             : 0;
         for (uint32_t s = 0; s < nCopy; s++) {
           starts[s] = side[r].segStart[s];
-          rkeys[s] = side[r].segRkeys[s][remDevIdx];
+          remoteRkeys[s] = side[r].segRkeys[s][remDevIdx];
         }
         if (!ncclIbCtsRemoteLayoutValid(remoteSegments, remDevIdx, NCCL_IB_MAX_DEVS_PER_NIC, NCCL_IB_MAX_SEGMENTS,
-                                        nCopy ? starts : NULL, nCopy ? rkeys : NULL)) {
+                                        nCopy ? starts : NULL, nCopy ? remoteRkeys : NULL)) {
           WARN("NET/IB: received invalid segment layout (nSegments=%u remDevIdx=%d)", remoteSegments, remDevIdx);
           return ncclInternalError;
         }
@@ -196,8 +215,8 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
           rVA[s] = starts[s];
           rOff[s] = starts[s] - starts[0];
         }
-        if (remoteBase < side[r].segStart[0]) return ncclInternalError;
-        remoteReqOff = remoteBase - side[r].segStart[0];
+        if (remoteBase < starts[0]) return ncclInternalError;
+        remoteReqOff = remoteBase - starts[0];
         uint64_t remoteReqEnd = remoteReqOff + slots[r].size;
         if (remoteReqEnd < remoteReqOff) return ncclInternalError;
         while (nRemote > 1 && rOff[nRemote - 1] >= remoteReqEnd) nRemote--;
@@ -228,7 +247,7 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
           }
           int s = ncclIbSegmentIndexForZeroLength(nRemote, starts, lens, (uintptr_t)(remoteBase + sendOffsets[r]));
           if (s < 0) return ncclInternalError;
-          wr->wr.rdma.rkey = side[r].segRkeys[s][remDevIdx];
+          wr->wr.rdma.rkey = remoteRkeys[s];
         } else {
           wr->wr.rdma.rkey = slots[r].rkeys[remDevIdx];
         }
@@ -260,7 +279,7 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
           wr->send_flags = 0;
           wr->wr_id = wr_id;
           wr->wr.rdma.remote_addr = slices[k].remoteAddr;
-          wr->wr.rdma.rkey = remoteMulti ? side[r].segRkeys[slices[k].remoteSeg][remDevIdx] : slots[r].rkeys[remDevIdx];
+          wr->wr.rdma.rkey = remoteMulti ? remoteRkeys[slices[k].remoteSeg] : slots[r].rkeys[remDevIdx];
           sge->addr = slices[k].localAddr;
           sge->length = slices[k].len;
           sge->lkey =
@@ -916,7 +935,6 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
     // idx when the peer has the cap so the sender can wait for this slot.
     struct ncclIbSegLayout* sideElem = comm->remSegLayout.elems[slot];
     if (comm->peerCaps & NCCL_IB_CAP_MULTISEG) {
-      sideElem[i].idx = localElem[i].idx;
       if (mhandleWrapper->nSegments > 1) {
         sideElem[i].nSegments = mhandleWrapper->nSegments;
         for (int s = 0; s < mhandleWrapper->nSegments; s++) {
@@ -933,6 +951,7 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       } else {
         sideElem[i].nSegments = 0;
       }
+      sideElem[i].idx = localElem[i].idx; // last store; sender spins on idx
     } else {
       sideElem[i].nSegments = 0;
       sideElem[i].idx = 0;

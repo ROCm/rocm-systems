@@ -291,11 +291,11 @@ static_assert(sizeof(struct ncclIbSendFifo) == 64, "CTS slot is one cache line")
 // equal the CTS slot's idx so a later single-segment reuse of the same CTS
 // index ignores a stale side slot.
 struct alignas(64) ncclIbSegLayout {
-  uint64_t idx;
   uint32_t nSegments;
   uint32_t pad;
   uint64_t segStart[NCCL_IB_MAX_SEGMENTS];
   uint32_t segRkeys[NCCL_IB_MAX_SEGMENTS][NCCL_IB_MAX_DEVS_PER_NIC];
+  uint64_t idx; // last store; sender waits on this as the slot arrival flag
 };
 
 // Worst-case work requests posted for one multi-recv send on a single QP: each
