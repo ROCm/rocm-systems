@@ -64,12 +64,13 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           path: rocm-systems
+          persist-credentials: false
 
       - name: Checkout benchmark corpus
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ROCm/rocjitsu-test-corpus
-          ref: 29d257508afdbcdebdc1f85339b67692bfdae705
+          ref: 4b38b83fb8e0c3c524fc8943b7fff80076eebea9
           path: rocjitsu-test-corpus
           persist-credentials: false
 
@@ -93,20 +94,24 @@ jobs:
             --disable-pip-version-check \
             -r "${CORPUS_SOURCE_DIR}/benchmarks/requirements.txt"
 
+          "${ROCJITSU_VENV}/bin/python" -m pip install \
+            --disable-pip-version-check --index-url https://pypi.org/simple \
+            'pytest>=5.4.1' 'pytest-xdist>=1.32.0'
+
           ROCM_PATH="$("${ROCJITSU_VENV}/bin/rocm-sdk" path --root)"
           echo "ROCM_PATH=${ROCM_PATH}" >> "${GITHUB_ENV}"
           echo "LD_LIBRARY_PATH=${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
 
       - name: Test benchmark harness
         working-directory: ${{ env.CORPUS_SOURCE_DIR }}
-        run: '"${ROCJITSU_VENV}/bin/python" -m unittest discover -s benchmarks/tests -v'
+        run: '"${ROCJITSU_VENV}/bin/python" -m pytest -q tests/test_benchmark_*.py'
 
-      - name: Build rocjitsu and plugins
+      - name: Build rocjitsu
         shell: bash
         run: |
           cmake -S "${ROCJITSU_SOURCE_DIR}" -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_TESTING=ON \
+            -DBUILD_TESTING=OFF \
             -DLTO=OFF \
             -DRJ_ENABLE_ASAN=OFF \
             -DRJ_ENABLE_MSAN=OFF \
@@ -115,8 +120,7 @@ jobs:
             -DROCM_PATH="${ROCM_PATH}" \
             -DPython3_EXECUTABLE="${ROCJITSU_VENV}/bin/python"
           cmake --build "${ROCJITSU_BUILD_DIR}" \
-            --target rocjitsu_bin rocjitsu_shared \
-              rocjitsu_plugin_logging_so rocjitsu_plugin_race_so rocjitsu_plugin_throughput_so
+            --target rocjitsu_bin rocjitsu_shared
 
       - name: Run nightly suite
         timeout-minutes: 30
@@ -127,6 +131,9 @@ jobs:
           "${ROCJITSU_VENV}/bin/python" -m benchmarks.runner \
             --rocjitsu-source-dir "${ROCJITSU_SOURCE_DIR}" \
             --build-dir "${ROCJITSU_BUILD_DIR}" \
+            --target-config "gfx950=${ROCJITSU_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json" \
+            --target-config "gfx1250=${ROCJITSU_SOURCE_DIR}/configs/gfx1250_mi455x.json" \
+            --run-wrapper "\"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
             --manifest benchmarks/suites/nightly.toml \
             --output "${ROCJITSU_RESULT_DIR}"
 
@@ -213,7 +220,7 @@ jobs:
           for ATTEMPT in $(seq 1 "${MAX_ATTEMPTS}"); do
             # Reconstruct every attempt from the latest results branch instead
             # of rebasing a commit containing a stale generated index.
-            git reset --hard HEAD || true
+            git reset --hard HEAD
             git clean -ffd
 
             set +e
