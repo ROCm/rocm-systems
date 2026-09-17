@@ -165,13 +165,14 @@ static ncclResult_t ncclIbGetRealPort(char* pciPath, int* realPort, int devIdx) 
 // Typically 12 user-defined planes + 1 plane for undefined plane IDs
 #define NCCL_IB_PLANE_MAX_INDEX 14
 #define NCCL_IB_PLANE_VIRT_BIT (0x1 << NCCL_IB_PLANE_MAX_INDEX)
+static_assert(NCCL_IB_PLANE_MAX_INDEX < 15, "NCCL_IB_PLANE_MAX_INDEX must be < 15: plane IDs are stored in int16_t and bit 15 is the sign bit");
 
 static ncclResult_t ncclIbGetPlaneIndex(int devPlane, int16_t* count, int16_t* planes, int16_t* idx) {
   int16_t p = 0;
   while (p < *count && planes[p] != devPlane) p++;
   if (p == *count) {
     if (p == (NCCL_IB_PLANE_MAX_INDEX - 1)) {
-      WARN("NCCL cannot use more than %d plane IDs.", NCCL_IB_PLANE_MAX_INDEX);
+      WARN("NCCL cannot use more than %d user-defined plane IDs.", NCCL_IB_PLANE_MAX_INDEX - 2);
       return ncclInvalidUsage;
     }
     if (devPlane != NCCL_NET_ID_UNDEF && (devPlane & NCCL_IB_PLANE_VIRT_BIT)) {
@@ -294,6 +295,9 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   ncclIbMergedDev tmp;
   memset(&tmp, 0, sizeof(tmp));
   bool used[MAX_IB_DEVS] = {0};
+  tmp.railId = ncclIbDevs[props->devs[0]].railId;
+  // Set the virtual bit on to avoid collision with physical planes when multiple planes are merged.
+  tmp.planeId = (props->ndevs > 1) ? NCCL_IB_PLANE_VIRT_BIT : ncclIbDevs[props->devs[0]].planeId;
 
   for (int i = 0; i < props->ndevs; i++) {
     if (props->devs[i] < 0 || props->devs[i] >= ncclNIbDevs) {
@@ -305,6 +309,10 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
     if (tmp.vProps.ndevs == NCCL_IB_MAX_DEVS_PER_NIC) return ncclInvalidUsage;
     tmp.vProps.devs[tmp.vProps.ndevs++] = props->devs[i];
     tmp.speed += dev->speed;
+    // rail ID of a fused device with different rails is undefined.
+    if (dev->railId == NCCL_NET_ID_UNDEF || tmp.railId != dev->railId) tmp.railId = NCCL_NET_ID_UNDEF;
+    // Only set the bit if multiple devs are merged, otherwise keep the initial value
+    if (props->ndevs > 1) tmp.planeId |= (0x1 << dev->planeIdx);
     // Each successive time, copy the name '+' new name
     if (tmp.vProps.ndevs > 1) {
       size_t off = strlen(tmp.devName);
@@ -356,8 +364,8 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   }
   ncclIbMergedDevs[ncclNMergedIbDevs] = tmp;
   *d = ncclNMergedIbDevs++;
-  INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d", *d, tmp.devName, tmp.speed,
-       tmp.vProps.ndevs);
+  INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d rail=%d plane=%d", *d, tmp.devName,
+       tmp.speed, tmp.vProps.ndevs, tmp.railId, tmp.planeId);
   return ncclSuccess;
 }
 
@@ -512,6 +520,8 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
               int portSpeed = portAttr.active_speed_ex ? portAttr.active_speed_ex : portAttr.active_speed;
               ncclIbDevs[ncclNIbDevs].speed = ncclIbSpeed(portSpeed) * ncclIbWidth(portAttr.active_width);
             }
+            COMPILER_ATOMIC_STORE(&ncclIbDevs[ncclNIbDevs].currSpeed, (uint64_t)ncclIbDevs[ncclNIbDevs].speed,
+                                  std::memory_order_relaxed);
             ncclIbDevs[ncclNIbDevs].context = context;
             ncclIbDevs[ncclNIbDevs].pdRefs = 0;
             ncclIbDevs[ncclNIbDevs].pd = NULL;
@@ -542,6 +552,9 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             // But allow it to be overloaded by an env parameter
             ncclIbDevs[ncclNIbDevs].ar = (portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) ? 1 : 0;
             if (ncclParamIbAdaptiveRouting() != -2) ncclIbDevs[ncclNIbDevs].ar = ncclParamIbAdaptiveRouting();
+
+            NCCLCHECKGOTO(ncclIbGidInfoQuery(context, port_num, &portAttr, &ncclIbDevs[ncclNIbDevs].gidInfo), ret,
+                          fail);
 
             INFO(NCCL_NET, "NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d oooRqSize=%d", d,
                  devices[d]->name, devices[d]->dev_name, ncclIbDevs[ncclNIbDevs].portNum,
@@ -657,9 +670,6 @@ ncclResult_t ncclIbGetPhysProperties(int dev, ncclNetProperties_t* props) {
     props->ptrSupport |= NCCL_PTR_DMABUF; // GDR support via DMA-BUF
   }
   props->forceFlush = 0;
-  if (ibDev->capsProvider.mlx5.dataDirect) {
-    props->forceFlush = 1;
-  }
   props->latency = 0; // Not set
   props->port = ibDev->portNum + ibDev->realPort;
   props->maxComms = ibDev->maxQp;

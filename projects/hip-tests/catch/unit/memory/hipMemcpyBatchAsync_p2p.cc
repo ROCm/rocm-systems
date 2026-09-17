@@ -22,6 +22,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Swap) {
     HIP_SKIP_TEST("Skipping because fewer than 2 devices are available");
   }
 
+  skipMemcpyBatchAsyncIfAnyGfx1250();
+
   const int device_for_a = 0;
   const int device_for_b = 1;
   int can_access_peer_a_to_b = 0;

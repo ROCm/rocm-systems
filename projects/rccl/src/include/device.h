@@ -39,6 +39,12 @@ typedef __hip_bfloat16 hip_bfloat16;
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
 #endif
+#if SQTT_ENABLED
+#include <rocprof-trace-decoder/rocprof_trace_decoder/cxx/markers.hpp>
+#else
+#define sqtt_marker_enter(name) do {} while(0)
+#define sqtt_marker_exit(name) do {} while(0)
+#endif
 
 extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4];
 
@@ -48,6 +54,25 @@ extern const char* ncclProtoStr[NCCL_NUM_PROTOCOLS];
 
 #define NCCL_MAX_OPS 2048
 #define NCCL_STEPS 8
+
+// Build gate for the experimental TDM SIMPLE path, set to 1 by -DENABLE_TDM_SIMPLE=ON.
+// Always defined so every site can use `#if ENABLE_TDM_SIMPLE` rather than mixing ifdef and if.
+#ifndef ENABLE_TDM_SIMPLE
+#define ENABLE_TDM_SIMPLE 0
+#endif
+
+// Global-address alignment for TDM's direct L2->LDS path.
+#define RCCL_TDM_ALIGN 256
+
+// Per-warp TDM staging. 4KB is the mover's floor; 16KB measured best. In ncclShmemData, so
+// every kernel pays the LDS: 167KB of 320KB at 16KB/warp. The arch check cannot move to CMake:
+// it must be zero on every device pass that is not gfx1250, or those kernels reserve LDS they
+// can never use. Host and non-gfx1250 passes therefore see 0 and the member disappears.
+#if ENABLE_TDM_SIMPLE && defined(__gfx1250__)
+#define RCCL_TDM_STAGE_BYTES_PER_WARP 16384
+#else
+#define RCCL_TDM_STAGE_BYTES_PER_WARP 0
+#endif
 
 #ifdef __CUDA_ARCH__
 #define NCCL_CUDA_ARCH __CUDA_ARCH__
@@ -156,6 +181,7 @@ union ncclLLFifoLine {
 // global channelId for bit `x` in word `i` is `i*CHANNELS_PER_MASK_WORD + x`.
 #define CHANNELS_PER_MASK_WORD 64
 #define CHANNEL_LIMIT 16 // this is used to limit channels for pre MI3xx GPUs
+#define NCCL_MAX_CGA_CLUSTER_SIZE 8
 #define NCCL_MAX_LOCAL_RANKS 72
 #define NCCL_MIN_NTHREADS (4 * WARP_SIZE)
 #define NCCL_SIMPLE_MAX_NTHREADS NCCL_MAX_NTHREADS
@@ -605,6 +631,25 @@ struct ncclDevProfiler {
   } data[MAX_PROFILER_EVENTS_PER_CHANNEL];
 };
 
+// Phase boundary indices into ncclDevProfilerPhases::timestamps[]. Adjacent boundaries
+// form three sub-events: BEGIN->AFTER_OPEN (initial_sync), AFTER_OPEN->BEFORE_CLOSE
+// (compute), BEFORE_CLOSE->END (final_sync). BEGIN/END always bracket the true kernel
+// span. LL kernels fuse the peer sync into the first data exchange, so AFTER_OPEN lands
+// at the end of the first epoch (initial_sync absorbs it -- for a single-iteration
+// message it covers most of the kernel) and BEFORE_CLOSE ~= END (LL has no closing
+// barrier). That is expected for LL, not a measurement bug.
+#define NCCL_KERNEL_PHASE_BEGIN 0
+#define NCCL_KERNEL_PHASE_AFTER_OPEN 1
+#define NCCL_KERNEL_PHASE_BEFORE_CLOSE 2
+#define NCCL_KERNEL_PHASE_END 3
+#define MAX_PROFILER_PHASES 4
+struct ncclDevProfilerPhases {
+  struct {
+    uint64_t counter;
+    uint64_t timestamps[MAX_PROFILER_PHASES];
+  } data[MAX_PROFILER_EVENTS_PER_CHANNEL];
+};
+
 struct ncclKernelComm {
   int rank;
   int nRanks;
@@ -616,8 +661,14 @@ struct ncclKernelComm {
   int isAllNvlink;
   int p2pnChannelsPerPeer;
   int cheapPostSendFenceOff; // RCCL: true if cheap post-peer fence is disabled (comm-global)
+#if ENABLE_TDM_SIMPLE
+  int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
+#endif
+  int patSharedQps; // true if PAT ReduceScatter and AllGather share one connection set
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int* collNetDenseToUserRank;
+
+  int* denseToUserRank;
 
   // Flag to ask NCCL kernels to abort
   volatile uint32_t* abortFlag;
@@ -630,6 +681,7 @@ struct ncclKernelComm {
   // Profiler counters
   struct ncclDevProfiler* workStarted /*[MAXCHANNELS]*/;
   struct ncclDevProfiler* workCompleted /*[MAXCHANNELS]*/;
+  struct ncclDevProfilerPhases* workPhases /*[MAXCHANNELS]*/;
 
 #ifdef ENABLE_FAULT_INJECTION
   uint64_t faults;
@@ -655,6 +707,14 @@ struct channelMasks {
   uint64_t masks[MAXCHANNELS / CHANNELS_PER_MASK_WORD];
 };
 static_assert(MAXCHANNELS % CHANNELS_PER_MASK_WORD == 0, "MAXCHANNELS must be a multiple of CHANNELS_PER_MASK_WORD");
+
+// Overload of the bitops countOneBits() so code synced from upstream NCCL, which assumes a plain
+// uint64_t channel mask, keeps working with RCCL's wide multi-word mask.
+inline __host__ __device__ int countOneBits(struct channelMasks const& x) {
+  int n = 0;
+  for (int i = 0; i < (int)(MAXCHANNELS / CHANNELS_PER_MASK_WORD); i++) n += countOneBits(x.masks[i]);
+  return n;
+}
 
 struct alignas(16) ncclDevKernelArgs {
   struct ncclKernelComm* comm;
@@ -830,6 +890,12 @@ inline int ncclDevFuncLL128RegMode(bool regUsed, bool netRegUsed) {
 // NCCL_UNROLL_* enum. Generated in host_table.cpp by generate.py.
 extern bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS];
 
+// Arch each unroll factor's device functions were compiled for, or nullptr when
+// the unroll carries no arch restriction. Neither table implies the other, so both
+// have to be consulted: an entry names its arch even for an unroll this build left
+// out, and BUILD_ALL_UNROLLS clears every entry because it compiles them all.
+extern char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS];
+
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py
 // `reg` is the user-buffer registration mode (0=n/a, 1=registered, 2=non-registered)
 // and is only used to distinguish the LL128 reg-variant collectives.
@@ -849,8 +915,7 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
     // (0 = legacy LL, 1 = LL128). reg=0 preserves the historical coll-only key.
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
           ((uint64_t)(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
-  } else if (coll == ncclFuncAlltoAllPivot || coll == ncclFuncAlltoAllGda ||
-             coll == ncclFuncAlltoAllvGda) {
+  } else if (coll == ncclFuncAlltoAllPivot || coll == ncclFuncAlltoAllGda || coll == ncclFuncAlltoAllvGda) {
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT);
   } else {
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
@@ -876,7 +941,7 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
 }
 
 // Selects the SendRecv kernel variant: useLL128 -> the LL128 latency kernel (reg=1,
-// gfx942/gfx950 only), otherwise the legacy LL kernel (reg=0). Keep in sync with
+// activated on gfx942/gfx950 only), otherwise the legacy LL kernel (reg=0). Keep in sync with
 // reg_values_of("SendRecv") in the device codegen.
 inline int ncclDevFuncId_P2p(bool useLL128 = false) {
   static int ncclDevFuncIdP2pLL =

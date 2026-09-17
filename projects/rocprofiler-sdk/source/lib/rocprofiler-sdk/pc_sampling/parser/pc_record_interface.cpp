@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/pc_sampling/parser/pc_record_interface.hpp"
 
+#include "lib/common/defines.hpp"
 #include "lib/common/utility.hpp"
 
 template <>
@@ -84,8 +85,8 @@ PCSamplingParserContext::parse(const upcoming_samples_t& upcoming,
                                std::condition_variable&  midway_signal,
                                bool                      bRocrBufferFlip)
 {
-    auto gfxip_major = (gfx_target_version / 10000) % 100;
-    auto gfxip_minor = (gfx_target_version / 100) % 100;
+    auto gfxip_major = ROCPROFILER_GFXIP_MAJOR(gfx_target_version);
+    auto gfxip_minor = ROCPROFILER_GFXIP_MINOR(gfx_target_version);
     auto pcs_method  = (upcoming.which_sample_type == AMD_HOST_TRAP_V1)
                            ? ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP
                            : ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC;

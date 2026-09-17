@@ -71,9 +71,10 @@ struct Isa : amdgpu::RdnaIsaBase {
 
   static constexpr uint32_t WF_SIZE_MAX = 32; ///< gfx1250 is Wave32-only.
   static constexpr uint32_t MAX_WF_SLOTS = 64;
-  // gfx1250 uses the RDNA base decoder shape, but its MODE[27] enables VGPR
-  // high-bank indexing rather than RDNA4 DISABLE_PERF.
-  static constexpr bool MODE_HAS_GPR_IDX_EN = true;
+  static constexpr bool SRAM_ECC = true; ///< gfx1250 enables SRAM ECC.
+  // CDNA5 MODE[27] is DISABLE_PERF. High-bank VGPR selection is controlled
+  // independently by the documented VGPR-MSB fields.
+  static constexpr bool MODE_HAS_GPR_IDX_EN = false;
   static constexpr uint32_t MAX_ADDRESSABLE_VGPRS_PER_WF =
       isa_properties(ROCJITSU_CODE_ARCH_CDNA5).max_addressable_vgprs_per_wf;
 

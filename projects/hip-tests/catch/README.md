@@ -34,6 +34,7 @@ Running Subtest: ctest –R “...” (Regex to match the subtest name)
 ## New Features
 - Better CI integration via xunit compatible output
 - hip-tests can be built in SPIRV, where all kernels are compiled in SPIRV, enable with cmake flag `-DENABLE_SPIRV=ON`. By default it's `OFF`.
+- hip-tests can be built with `-Wall -Werror` so that compiler warnings are treated as errors, controlled by the cmake flag `-DHIP_TESTS_ENABLE_WERROR`. It defaults to `OFF` in all cases. 
 
 ## Testing Context
 HIP testing framework gives you a context for each test. This context will have useful information about the environment your test is running.

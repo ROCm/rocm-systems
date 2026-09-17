@@ -499,19 +499,6 @@ DecodeResult decodeFlatLoadD16U8Vflat(const MachineInst *opcode,
 }
 } // namespace detail
 
-void FlatLoadD16U8Vflat::implicit_uses(RegisterSet &uses) const {
-  Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void FlatLoadD16U8Vflat::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vflat::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
-
 FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadD16I8Vflat)),
@@ -543,19 +530,6 @@ DecodeResult decodeFlatLoadD16I8Vflat(const MachineInst *opcode,
   return std::make_unique<FlatLoadD16I8Vflat>(opcode);
 }
 } // namespace detail
-
-void FlatLoadD16I8Vflat::implicit_uses(RegisterSet &uses) const {
-  Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void FlatLoadD16I8Vflat::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vflat::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
 
 FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
@@ -589,19 +563,6 @@ DecodeResult decodeFlatLoadD16B16Vflat(const MachineInst *opcode,
 }
 } // namespace detail
 
-void FlatLoadD16B16Vflat::implicit_uses(RegisterSet &uses) const {
-  Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void FlatLoadD16B16Vflat::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vflat::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
-
 FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadD16HiU8Vflat)),
@@ -633,19 +594,6 @@ DecodeResult decodeFlatLoadD16HiU8Vflat(const MachineInst *opcode,
   return std::make_unique<FlatLoadD16HiU8Vflat>(opcode);
 }
 } // namespace detail
-
-void FlatLoadD16HiU8Vflat::implicit_uses(RegisterSet &uses) const {
-  Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void FlatLoadD16HiU8Vflat::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vflat::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
 
 FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
@@ -679,19 +627,6 @@ DecodeResult decodeFlatLoadD16HiI8Vflat(const MachineInst *opcode,
 }
 } // namespace detail
 
-void FlatLoadD16HiI8Vflat::implicit_uses(RegisterSet &uses) const {
-  Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void FlatLoadD16HiI8Vflat::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vflat::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
-
 FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadD16HiB16Vflat)),
@@ -723,19 +658,6 @@ DecodeResult decodeFlatLoadD16HiB16Vflat(const MachineInst *opcode,
   return std::make_unique<FlatLoadD16HiB16Vflat>(opcode);
 }
 } // namespace detail
-
-void FlatLoadD16HiB16Vflat::implicit_uses(RegisterSet &uses) const {
-  Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void FlatLoadD16HiB16Vflat::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vflat::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
 
 FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
     : Vflat("flat_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),

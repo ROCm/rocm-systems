@@ -22,6 +22,9 @@ public:
   Operand src0;
   Operand vsrc1;
   Operand vcc;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VDot2cF32F16Vop2 : public Vop2 {
@@ -31,6 +34,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VAddF32Vop2 : public Vop2 {
@@ -40,6 +46,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VSubF32Vop2 : public Vop2 {
@@ -49,6 +58,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VSubrevF32Vop2 : public Vop2 {
@@ -58,6 +70,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VFmacLegacyF32Vop2 : public Vop2 {
@@ -76,6 +91,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VMulF32Vop2 : public Vop2 {
@@ -85,6 +103,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VMulI32I24Vop2 : public Vop2 {
@@ -94,6 +115,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VMulHiI32I24Vop2 : public Vop2 {
@@ -103,6 +127,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VMulU32U24Vop2 : public Vop2 {
@@ -112,6 +139,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VMulHiU32U24Vop2 : public Vop2 {
@@ -121,6 +151,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VDot4cI32I8Vop2 : public Vop2 {
@@ -130,6 +163,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VMinF32Vop2 : public Vop2 {
@@ -139,6 +175,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VMaxF32Vop2 : public Vop2 {
@@ -148,6 +187,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VMinI32Vop2 : public Vop2 {
@@ -157,6 +199,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VMaxI32Vop2 : public Vop2 {
@@ -166,6 +211,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VMinU32Vop2 : public Vop2 {
@@ -175,6 +223,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VMaxU32Vop2 : public Vop2 {
@@ -184,6 +235,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VLshrrevB32Vop2 : public Vop2 {
@@ -193,6 +247,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VAshrrevI32Vop2 : public Vop2 {
@@ -202,6 +259,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VLshlrevB32Vop2 : public Vop2 {
@@ -211,6 +271,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VAndB32Vop2 : public Vop2 {
@@ -220,6 +283,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VOrB32Vop2 : public Vop2 {
@@ -229,6 +295,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VXorB32Vop2 : public Vop2 {
@@ -238,6 +307,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VXnorB32Vop2 : public Vop2 {
@@ -247,6 +319,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VAddNcU32Vop2 : public Vop2 {
@@ -256,6 +331,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VSubNcU32Vop2 : public Vop2 {
@@ -265,6 +343,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VSubrevNcU32Vop2 : public Vop2 {
@@ -274,6 +355,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VAddCoCiU32Vop2 : public Vop2 {
@@ -285,6 +369,9 @@ public:
   Operand src0;
   Operand vsrc1;
   Operand vcc_in;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VSubCoCiU32Vop2 : public Vop2 {
@@ -296,6 +383,9 @@ public:
   Operand src0;
   Operand vsrc1;
   Operand vcc_in;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VSubrevCoCiU32Vop2 : public Vop2 {
@@ -307,6 +397,9 @@ public:
   Operand src0;
   Operand vsrc1;
   Operand vcc_in;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VFmacF32Vop2 : public Vop2 {
@@ -316,6 +409,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VFmamkF32Vop2 : public Vop2 {
@@ -345,6 +441,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VAddF16Vop2 : public Vop2 {
@@ -355,6 +454,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VSubF16Vop2 : public Vop2 {
@@ -365,6 +467,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VSubrevF16Vop2 : public Vop2 {
@@ -375,6 +480,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VMulF16Vop2 : public Vop2 {
@@ -385,6 +493,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VFmacF16Vop2 : public Vop2 {
@@ -395,6 +506,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VFmamkF16Vop2 : public Vop2 {
@@ -427,6 +541,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VMinF16Vop2 : public Vop2 {
@@ -437,6 +554,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VLdexpF16Vop2 : public Vop2 {
@@ -447,6 +567,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VPkFmacF16Vop2 : public Vop2 {
@@ -456,6 +579,9 @@ public:
   Operand vdst;
   Operand src0;
   Operand vsrc1;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 } // namespace rdna2

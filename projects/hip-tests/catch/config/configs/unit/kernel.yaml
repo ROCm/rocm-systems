@@ -2,51 +2,51 @@
 kernel:
   Unit_hipMemFaultStackAllocation_Check:
     <<: *level_2
-    tags: [memory]
+    tags: [memory, P1]
   Unit_hipLaunchBounds_With_maxThreadsPerBlock_Check:
     <<: *level_2
-    tags: [attributes]
+    tags: [attributes, P1]
   Unit_hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU_Check:
     <<: *level_2
-    tags: [attributes]
+    tags: [attributes, P1]
   Unit_hipDynamicShared:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows, amd_wsl]
-    tags: [memory]
+    tags: [memory, P0]
   Unit_hipDynamicShared2:
     <<: *level_2
-    tags: [memory]
+    tags: [memory, P0]
   Unit_hipEmptyKernel:
     <<: *level_2
-    tags: [language, smoke]
+    tags: [language, smoke, P0]
   Unit_hipGridLaunch:
     <<: *level_2
-    tags: [launch, smoke]
+    tags: [launch, smoke, P0]
   Unit_hipLanguageExtensions:
     <<: *level_2
-    tags: [language]
+    tags: [language, P1]
   Unit_hipLaunchParm:
     <<: *level_2
-    tags: [launch]
+    tags: [launch, P1]
   Unit_hipLaunchParmFunctor:
     <<: *level_2
-    tags: [launch]
+    tags: [launch, P1]
   Unit_kernel_chkConstantViaKernel:
     <<: *level_2
-    tags: [memory]
+    tags: [memory, P0]
   Unit_kernel_chkGlobalArrAndGlobalVaribleViaKernelFn:
     <<: *level_2
-    tags: [memory]
+    tags: [memory, P0]
   Unit_kernel_MemoryOperationsViaKernels:
     <<: *level_2
-    tags: [memory]
+    tags: [memory, P0]
   Unit_kernel_LaunchBounds_Functional:
     <<: *level_2
-    tags: [attributes, smoke]
+    tags: [attributes, smoke, P0]
   Unit_kernel_Assign_threadIdx_to_auto:
     <<: *level_2
-    tags: [language]
+    tags: [language, P0]
   Unit_hipLaunchKernelExC_NegetiveTsts:
     <<: *level_2
     tags: [launch]
@@ -55,7 +55,7 @@ kernel:
     tags: [launch]
   Unit_hipLaunchKernelEx_Functional:
     <<: *level_2
-    tags: [launch]
+    tags: [launch, P0]
   Unit_hipLaunchKernelEx_With_Different_Kernels:
     <<: *level_2
     tags: [launch]
@@ -67,40 +67,41 @@ kernel:
     tags: [launch]
   Unit_kernel_ChkPrintf:
     <<: *level_2
-    tags: [language]
+    tags: [language, P0]
   Unit_hipExtLaunchKernelGGL:
     <<: *level_2
-    tags: [launch]
+    tags: [launch, P0]
   Unit_hipSetupArgument_Simple:
     <<: *level_2
-    tags: [launch]
+    tags: [launch, P1]
   Unit_hipSetupArgument_Execute_Kernel_And_Check_Result:
     <<: *level_2
-    tags: [launch]
+    tags: [launch, P0]
   Unit_ConfigureCall:
     <<: *level_2
-    tags: [launch]
+    tags: [launch, P1]
   Unit_ConfigureCall_CheckParams:
     <<: *level_2
-    tags: [launch]
+    tags: [launch, P1]
   Unit_hipGridLaunch_ExceedMaxGridDim_Negative:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [launch]
   Unit_hipExtDynDataPrefetch_NegativeTests:
     <<: *level_2
-    tags: [launch]
+    tags: [launch, P1]
   Unit_hipExtDynDataPrefetch_FunctionalDaxpy:
     <<: *level_2
-    tags: [launch]
+    tags: [launch, P1]
   Unit_hipExtDynDataPrefetch_SingleRegion:
     <<: *level_2
-    tags: [launch]
+    tags: [launch, P1]
   Unit_hipExtDynDataPrefetch_TemporalHints:
     <<: *level_2
-    tags: [launch]
+    tags: [launch, P1]
   Unit_KernelStackSize:
     <<: *level_2
+    tags: [P0]
     disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_Validate_User_Sgpr_Count:
     <<: *level_2

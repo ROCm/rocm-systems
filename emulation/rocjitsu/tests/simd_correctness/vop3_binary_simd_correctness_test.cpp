@@ -28,6 +28,7 @@
 #include "util/simd.h"
 
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
@@ -228,7 +229,7 @@ struct Fixture {
 
   std::array<uint32_t, WF_SIZE> run(Instruction *inst, Kind k, uint64_t exec) {
     seed_inputs(k, exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     uint32_t vb = wf->vgpr_alloc().base;
     std::array<uint32_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -315,6 +316,39 @@ TEST(Vop3BinarySimdCorrectness, F32_AllModifiers_PartialExec) {
   for (const auto &c : kCases)
     if (c.kind == Kind::F32)
       check_f32_all_mods(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+}
+
+TEST(Vop3BinarySimdCorrectness, F32OmodHonorsOutputDenormAndIeeeMode) {
+  ForceScalarGuard gate_guard;
+  struct ModeCase {
+    uint32_t mode;
+    float expected;
+  };
+  constexpr std::array<ModeCase, 3> kModes = {{
+      {0u, 5.0f},
+      {1u << 5, 2.5f},
+      {amdgpu::Wavefront::IEEE_BIT, 2.5f},
+  }};
+
+  for (bool force_scalar : {true, false}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    for (const auto &mode_case : kModes) {
+      Fixture fx;
+      ASSERT_NE(fx.cu, nullptr);
+      ASSERT_NE(fx.wf, nullptr);
+      fx.wf->set_mode_raw(mode_case.mode);
+      uint32_t words[2] = {};
+      vop3_encode(/*v_add_f32=*/257, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257,
+                  /*abs=*/0, /*neg=*/0, /*omod=*/1, /*clamp=*/0, words);
+      std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words));
+      ASSERT_NE(inst, nullptr);
+
+      const auto out = fx.run(inst.get(), Kind::F32, /*exec=*/~0ULL);
+
+      EXPECT_EQ(out[0], std::bit_cast<uint32_t>(mode_case.expected))
+          << "force_scalar=" << force_scalar << " mode=" << mode_case.mode;
+    }
+  }
 }
 
 TEST(Vop3BinarySimdCorrectness, Int_FullAndPartialExec) {

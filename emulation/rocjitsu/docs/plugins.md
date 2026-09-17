@@ -12,6 +12,7 @@ wavefront dispatches, memory instructions, register reads, barriers, etc.
 | `KernelLoggingPlugin` | `logging/` | Logs kernel dispatches and detects MMA instruction usage. |
 | `ThroughputPlugin` | `throughput/` | Reports per-dispatch and aggregate wave-instruction MIPS with an exclusive instruction-family breakdown. |
 | `InstructionMixPlugin` | `instruction_mix/` | Records which ISA mnemonics a run executed and how often, per dispatch and in aggregate, for instruction-mix and instruction-coverage reporting. |
+| `PerfsimPlugin` | `perfsim/` | Adapts gfx1250 execution observations to an external Perfsim FFM-v8 backend. Built only when explicitly enabled. See the [Perfsim adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md). |
 
 The race detector plugin contains both the core detection algorithm
 (`race_detector/core/`) and the rocjitsu adapter (`race_detector/plugin.h`).
@@ -78,8 +79,8 @@ schema: one `"record":"dispatch"` object per completed dispatch and one
 `"record":"summary"` object at shutdown. Each carries `wave_instructions`,
 `unique_mnemonics`, a per-family breakdown (`scalar`, `vector`, `matrix`,
 `lds`, `global`, `control`, `other` — the same exclusive families the
-throughput plugin uses), and a
-`mnemonics` object mapping each executed mnemonic to its execution count, the
+throughput plugin uses), and a `mnemonics` object mapping each executed
+mnemonic to its execution count, the
 encoding format id and opcode of its first sighting, its encoding size in
 bytes, its family, and the first dispatch that reached it. Mnemonics are
 emitted in sorted order so two runs of the same workload produce
@@ -142,6 +143,15 @@ The logging plugin records kernel dispatch metadata and detects MMA
 - **MMA detection**: reports the first MFMA or WMMA instruction seen in
   each dispatch.
 
+### Perfsim compatibility plugin
+
+The optional Linux-only Perfsim adapter loads a separately built Perfsim backend at
+runtime. RocJITsu does not build, link, vendor, or install Perfsim and does not
+write a persistent Perfsim trace; Perfsim continues to own its `GPUCSIM_*`
+configuration and reports. See the [Perfsim adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md)
+for the runtime-first setup, independent build boundary, compatibility
+requirements, limitations, and validation procedure.
+
 ## Enabling plugins
 
 Plugins are compiled into standalone shared objects named
@@ -165,9 +175,16 @@ plugin's configuration:
 }
 ```
 
-The bundled plugins are `race` (`RaceDetectorPlugin`), `logging`
+Plugin loading is best-effort by default: an unavailable or invalid entry is
+logged and skipped. Set the optional top-level `"require_all_plugins": true`
+when every configured plugin is required; startup then fails if any entry
+cannot be loaded. With strict loading, `plugins` must be an object when present,
+though omitting it is valid and creates an empty plugin group.
+
+The default bundled plugins are `race` (`RaceDetectorPlugin`), `logging`
 (`KernelLoggingPlugin`), `throughput` (`ThroughputPlugin`), and
-`instruction-mix` (`InstructionMixPlugin`).
+`instruction-mix` (`InstructionMixPlugin`). `perfsim` (`PerfsimPlugin`) is
+available only in builds configured with `ROCJITSU_ENABLE_PERFSIM_PLUGIN=ON`.
 
 ### Enabling plugins from the mirage CLI
 
@@ -249,8 +266,9 @@ sink-related environment variables.
 When `file` is in `types`, each plugin writes to
 `<dir>/<plugin_name>.log`. Plugin names are fixed:
 `race` for `RaceDetectorPlugin`, `logging` for `KernelLoggingPlugin`,
-`throughput` for `ThroughputPlugin`, and `instruction-mix` for
-`InstructionMixPlugin`.
+`throughput` for `ThroughputPlugin`, `instruction-mix` for
+`InstructionMixPlugin`, and `perfsim` for adapter diagnostics. Perfsim's
+own report remains controlled by its `GPUCSIM_*` configuration.
 
 ### Examples
 
@@ -313,6 +331,12 @@ public:
 The sink is assigned by the `ExecutionPluginGroup` when the plugin is
 added. If no group configures a sink, the default is stderr.
 
+`KernelDispatchInfo` reports the effective LDS allocation in
+`lds_size_bytes`, the descriptor-selected `wave_size`, the configured
+execution `code_target`, and the workgroup-cluster dimensions. The code target
+describes the simulator ISA selected for execution; it is not source-code-object
+or translation provenance.
+
 ## How it works
 
 The `ExecutionPlugin` interface (`execution_plugin.h`) defines hooks
@@ -330,7 +354,22 @@ additional architectural callbacks.
 Asynchronous memory operations are modeled separately. The race detector
 records their register dependencies when they are issued. A later completion
 updates storage without emitting the same instruction-level write again.
-Synchronization retires the corresponding outstanding operations.
+Synchronization retires the corresponding outstanding operations using the
+counter family captured at issue. This distinguishes legacy combined
+`vmcnt`/`lgkmcnt` waits from split `loadcnt`, `storecnt`, `dscnt`, and `kmcnt`
+waits on newer targets.
+
+### Scalar register identity
+
+`onAmdgpuReadScalarRegister` and `onAmdgpuWriteScalarRegister` carry a
+`RegisterRef` whose class and index identify the architectural register. This
+keeps plugins independent of encoded selector values and of the simulator's
+physical storage layout. In particular, ordinary SGPRs and wave-private TTMPs
+have distinct identities even though both can appear in scalar operand fields.
+
+The older `onAmdgpuReadSgpr` hook continues to expose physical SGPR indices for
+compatibility. New consumers that need architectural identity should use the
+typed scalar-register hooks. Scalar writes have only the typed callback.
 
 ### Dispatch threading
 
@@ -344,10 +383,11 @@ group divides hooks by frequency and synchronization cost:
   the default hot-hook policy, an infrequent callback can still overlap a
   high-frequency callback. Recursive acquisition lets a callback synchronously
   read registers and fire register-observation hooks without deadlocking.
-- Instruction before/after, memory-routing, and register-access callbacks are
-  high-frequency and run concurrently with both other high-frequency callbacks
-  and infrequent callbacks by default. Each callback is scoped to a wavefront
-  below the simulation's shader-engine partition granularity.
+- Instruction before/after, memory-routing, tensor-DMA memory, and
+  register-access callbacks are high-frequency and run concurrently with both
+  other high-frequency callbacks and infrequent callbacks by default. Each
+  callback is scoped to a wavefront below the simulation's shader-engine
+  partition granularity.
 
 A plugin whose high-frequency callbacks reach shared mutable state may override
 `requires_serial_hot_hooks()` to return `true`. The group samples that stable
@@ -355,6 +395,56 @@ policy once when the plugin is added and then takes the same group mutex around
 every high-frequency callback, serializing it with the infrequent callbacks
 without a per-instruction scan of the plugin list. Plugins that protect their
 own shared state should retain the parallel default.
+
+### Observing memory accesses
+
+There are two memory hooks, and they see different things.
+`onAmdgpuRouteMemoryInstruction` fires before routing decides anything: the
+instruction still carries the address space it decoded as and the addresses it
+computed. `onAmdgpuMemoryAccessRouted` fires once routing has settled and
+reports a `MemoryAccessObservation` describing the access the memory system is
+actually about to be asked for — the pipeline it was issued to, the wait
+counter it will post to, and the addresses it was issued with. The difference is
+not cosmetic: a FLAT access into the shared aperture decodes as global and is
+issued to the LDS pipeline with its addresses rewritten and its counter changed,
+so an observer using the earlier hook charges it against the wrong cache at an
+address the memory system never uses.
+
+`decoded_space` preserves the instruction's original address-space family
+independently of its effective `route`, so explicit SCRATCH remains distinct
+from a FLAT access that resolves to scratch or LDS. When routing changes an
+address, `pre_routing_addresses` contains the original per-lane span and
+`addresses` contains the effective span. The former is empty when no address
+changed; when present, both spans have `wavefront_size` entries and only lanes
+in `valid_lane_mask` are meaningful.
+
+Building the observation is real work on the per-instruction path, so it is
+skipped entirely unless a contained plugin asks for it. A plugin that overrides
+`onAmdgpuMemoryAccessRouted` must also override `observes_memory_routing()` to
+return `true`; the group samples this policy when each plugin is added, and its
+conservative default is `false`. Overriding the hook alone is silent — the
+plugin simply never sees an access.
+
+The observation's spans borrow execution-owned storage and are valid only for
+the duration of the callback. A plugin that keeps one must copy them.
+
+Tensor DMA transfers execute directly rather than through the ordinary memory
+routing path. `onAmdgpuTensorDmaMemoryAccess` reports them separately after the
+instruction and any descriptor-requested atomic-barrier arrival return normally.
+Its `addresses` member is a callback-lifetime `TensorDmaAddressView` over the
+in-bounds global element bases whose requests were attempted, in execution order
+with duplicates preserved. Empty and fully masked transfers produce no callback.
+Consumers must opt in through `observes_tensor_dma_memory_access()`. A consumer
+that retains addresses must use `size()` to budget and allocate the event, then
+call `copy_to()` during the callback; a failed copy means the observation is
+malformed and must be rejected.
+
+SGPR owner resolution is skipped when no contained plugin observes scalar
+register reads. Plugins that consume neither `onAmdgpuReadScalarRegister` nor
+`onAmdgpuReadSgpr` should override
+`observes_sgpr_reads()` to return `false`. The group samples this policy when
+each plugin is added. Its conservative default is `true`, so existing plugins
+continue receiving SGPR read callbacks unless they explicitly opt out.
 
 Pass the complete sink configuration to the group constructor and add plugins
 before publishing the group to simulation components. `add()` is not
@@ -375,5 +465,10 @@ concurrently.
    high-frequency and infrequent callbacks. Override
    `requires_serial_hot_hooks()` when that state cannot be protected within the
    plugin.
-6. Enable it by adding `"myname": { ... }` to the `plugins` section of
+6. Override `observes_sgpr_reads()` to return `false` when the plugin does not
+   consume `onAmdgpuReadSgpr`, and `observes_memory_routing()` to return `true`
+   when it does consume `onAmdgpuMemoryAccessRouted`. A consumer of
+   `onAmdgpuTensorDmaMemoryAccess` must likewise return `true` from
+   `observes_tensor_dma_memory_access()`.
+7. Enable it by adding `"myname": { ... }` to the `plugins` section of
    the config file.

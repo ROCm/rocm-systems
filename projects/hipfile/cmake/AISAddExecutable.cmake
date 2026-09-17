@@ -33,8 +33,8 @@ function(ais_add_executable)
     target_compile_features(${arg_NAME} PRIVATE cxx_std_${AIS_CXX_STANDARD})
     set_target_properties(${arg_NAME} PROPERTIES CXX_EXTENSIONS OFF)
 
-    # Turn sanitizers off for executables
-    target_compile_options(${arg_NAME} PRIVATE -fno-sanitize=all)
+    # Set position-independent code
+    set_target_properties(${arg_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
     get_target_property(linker_language ${arg_NAME} LINKER_LANGUAGE)
     if(linker_language STREQUAL "HIP")

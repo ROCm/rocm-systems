@@ -38,7 +38,8 @@ public:
 
   /// Allocate a workgroup-global event ID and record its metadata.
   EventId allocateEventId(WaveId, uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
-                          uint64_t execMask, uint8_t byteMask = 0xF, IntervalSet ldsIntervals = {});
+                          uint64_t execMask, uint8_t byteMask = 0xF, IntervalSet ldsIntervals = {},
+                          amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::VMCNT);
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);

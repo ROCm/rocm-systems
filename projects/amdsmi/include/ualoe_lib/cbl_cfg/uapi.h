@@ -23,13 +23,22 @@
 #ifndef IFOE_UAPI_H
 #define IFOE_UAPI_H
 
+#include <linux/const.h>
 #include <linux/if_ether.h>
 #include <linux/ioctl.h>
+#ifdef __KERNEL__
 #include <linux/time_types.h>
+#endif
 #include <linux/types.h>
 
 #define CFG_LABEL_SIZE 32
 #define CFG_PCI_ADDR_MAX_LEN 32
+
+#define CFG_STATION_LABEL_FMT "ifoe%u"
+#define CFG_NETPORT_LABEL_FMT "netport%u"
+
+#define CFG_NETPORT_LOGICAL_IDX(station_idx, nps, netport_rel_idx) \
+  ((station_idx) * (nps) + (netport_rel_idx))
 
 struct cfg_label {
   char text[CFG_LABEL_SIZE];
@@ -146,6 +155,7 @@ enum cfg_telemetry_category {
   CFG_TELEMETRY_CATEGORY_NETPORT,
   CFG_TELEMETRY_CATEGORY_DERIVED_IFOE,
   CFG_TELEMETRY_CATEGORY_DERIVED_NETPORT,
+  CFG_TELEMETRY_CATEGORY_DEBUG,
   CFG_TELEMETRY_CATEGORY_MAX
 };
 
@@ -192,6 +202,14 @@ struct cfg_set_telemetry {
 #define CFG_SET_TELEMETRY _IOW(CFG_IOC_MAGIC, 0xA, struct cfg_set_telemetry)
 
 #define CFG_FREE_TELEMETRY _IOW(CFG_IOC_MAGIC, 0xB, int)
+
+struct cfg_telem_snapshot_hdr {
+  __u64 gen_count;
+  __u32 const_offset;
+  __u32 const_size;
+  __u32 dyn_offset;
+  __u32 dyn_size;
+};
 
 #define CFG_L2PING_MAX_PINGS 255
 
@@ -247,16 +265,23 @@ struct cfg_l2ping_start {
 
 #define CFG_IFOE_L2PING_START _IOW(CFG_IOC_MAGIC, 0xE, struct cfg_l2ping_start)
 
+/* Set in cfg_l2ping_netport_result.flags when the netport result does not
+ * reflect a real test and must be ignored (e.g. netport not bonded).
+ */
+#define CFG_L2PING_NETPORT_INVALID_RESULT _BITUL(0)
+
 /**
  * struct cfg_l2ping_netport_result - L2 ping result for a netport
  * @req_failures: Count of ping failures on IFoE Request PFC channel
  * @resp_failures: Count of ping failures on IFoE Response PFC channel
  * @non_ifoe_failures: Count of ping failures on non-IFoE traffic PFC channel
+ * @flags: Result flags (see CFG_L2PING_NETPORT_*)
  */
 struct cfg_l2ping_netport_result {
   __u8 req_failures;
   __u8 resp_failures;
   __u8 non_ifoe_failures;
+  __u8 flags;
 };
 
 /**
@@ -349,14 +374,38 @@ struct cfg_connect_cmd {
  * userspace process that has joined the multicast group "ifoe-cfg-mcgrp".
  *
  * CFG_EVT_CMD_PHASE_EVENT:
+ * - CFG_EVT_ATTR_DEV_ID: Device identifier
  * - CFG_EVT_ATTR_TS: Timestamp of the event
  * - CFG_EVT_ATTR_PHASE_EVENT: New configuration phase
+ *
+ * CFG_EVT_CMD_IFOE_LINK_EVENT:
+ * - CFG_EVT_ATTR_DEV_ID: Device identifier
+ * - CFG_EVT_ATTR_TS: Timestamp of the event
+ * - CFG_EVT_ATTR_LABEL: Name of the IFoE link
+ * - CFG_EVT_ATTR_LOGICAL_IDX: Logical index of the link
+ * - CFG_EVT_ATTR_LINK_DOWN: Whether the link is down
+ * - CFG_EVT_ATTR_DX_ISOLATED: Whether the device is isolated
+ * - CFG_EVT_ATTR_NETPORT_COUNT: Number of netports attached to the link
+ * - CFG_EVT_ATTR_NETPORT0..3: Per-netport link information (nested)
+ *
+ * CFG_EVT_CMD_NETPORT_LINK_EVENT:
+ * - CFG_EVT_ATTR_DEV_ID: Device identifier
+ * - CFG_EVT_ATTR_TS: Timestamp of the event
+ * - CFG_EVT_ATTR_LABEL: Name of the netport
+ * - CFG_EVT_ATTR_LOGICAL_IDX: Logical index of the netport
+ * - CFG_EVT_ATTR_LINK_DOWN: Whether the netport link is down
+ *
+ * CFG_EVT_CMD_TELEMETRY_READY_EVENT:
+ * - CFG_EVT_ATTR_DEV_ID: Device identifier
+ * - CFG_EVT_ATTR_TS: Timestamp of the event
+ * - CFG_EVT_ATTR_GEN_COUNT: Telemetry generation count
  */
 
 enum {
   CFG_EVT_CMD_PHASE_EVENT = 1,
   CFG_EVT_CMD_IFOE_LINK_EVENT,
   CFG_EVT_CMD_NETPORT_LINK_EVENT,
+  CFG_EVT_CMD_TELEMETRY_READY_EVENT,
   __CFG_EVT_CMD_MAX
 };
 #define CFG_EVT_CMD_MAX (__CFG_EVT_CMD_MAX - 1)
@@ -374,6 +423,7 @@ enum {
   CFG_EVT_ATTR_NETPORT2,
   CFG_EVT_ATTR_NETPORT3,
   CFG_EVT_ATTR_DEV_ID,
+  CFG_EVT_ATTR_GEN_COUNT,
   __CFG_EVT_ATTR_MAX
 };
 #define CFG_EVT_ATTR_MAX (__CFG_EVT_ATTR_MAX - 1)
@@ -426,6 +476,21 @@ enum {
   CFG_CMD_IFOE_SET_RX_CRYPTO_KEY,
   CFG_CMD_NETPORT_CONFIG_LINK_AUTO,
   CFG_CMD_NETPORT_CONFIG_LINK_MANUAL,
+  CFG_CMD_NETPORT_GET_ACCELERATOR_ADDR_MAP,
+  CFG_CMD_IFCP_GET_NETPORT_STATE,
+  CFG_CMD_IFCP_GET_NETPORT_STATS,
+  CFG_CMD_DIAG_CONFIG_PMA_LANE,
+  CFG_CMD_DIAG_CONFIG_PRBS_TX,
+  CFG_CMD_DIAG_CONFIG_PRBS_RX,
+  CFG_CMD_DIAG_GET_PRBS_RESULTS,
+  CFG_CMD_GET_SCALEUP_FABRIC_CONFIG,
+  CFG_CMD_GET_SCALEUP_FABRIC_VPOD_CONFIG,
+  CFG_CMD_GET_SCALEUP_FABRIC_STATION_INFO,
+  CFG_CMD_GET_GPU_IDENTITY,
+  CFG_CMD_GET_TELEMETRY_CATEGORY_MASK,
+  CFG_CMD_SET_SCALEUP_FABRIC_CONFIG,
+  CFG_CMD_SET_SCALEUP_FABRIC_VPOD_CONFIG,
+  CFG_CMD_SET_SCALEUP_FABRIC_STATION_INFO,
   __CFG_CMD_MAX
 };
 #define CFG_CMD_MAX (__CFG_CMD_MAX - 1)
@@ -481,9 +546,63 @@ enum {
   CFG_ATTR_NETPORT3,
   CFG_ATTR_CATEGORY_MASK,
   CFG_ATTR_TELEMETRY_ENABLE,
+  /* IFCP per-netport state attributes (response of CFG_CMD_IFCP_GET_NETPORT_STATE) */
+  CFG_ATTR_IFCP_LOCAL_PORT_ID,
+  CFG_ATTR_IFCP_LOCAL_LINK_UP,
+  CFG_ATTR_IFCP_LOCAL_IN_ERROR,
+  CFG_ATTR_IFCP_LOCAL_LL_UP,
+  CFG_ATTR_IFCP_LOCAL_MAC_ADDR,
+  CFG_ATTR_IFCP_PEER_DEVICE_ID,
+  CFG_ATTR_IFCP_PEER_PORT_ID,
+  CFG_ATTR_IFCP_PEER_ENABLED,
+  CFG_ATTR_IFCP_PEER_IN_ERROR,
+  CFG_ATTR_IFCP_PEER_ENCRYPT_MODE,
+  CFG_ATTR_IFCP_PEER_MAC_ADDR,
+  CFG_ATTR_IFCP_PEER_MTU,
+  /* IFCP per-netport stats attributes (response of CFG_CMD_IFCP_GET_NETPORT_STATS) */
+  CFG_ATTR_IFCP_STATS_RX_COUNT,
+  CFG_ATTR_IFCP_STATS_TX_COUNT,
+  CFG_ATTR_IFCP_STATS_TX_ERRORS,
+  CFG_ATTR_IFCP_STATS_RX_DROPPED,
+  CFG_ATTR_LANE_IDX,
+  CFG_ATTR_ENABLE,
+  CFG_ATTR_PMA_RATE,
+  CFG_ATTR_TX_POLARITY,
+  CFG_ATTR_RX_POLARITY,
+  CFG_ATTR_PRBS_PATTERN,
+  CFG_ATTR_USER_PATTERN,
+  CFG_ATTR_RESYNC,
+  CFG_ATTR_PRBS_RESULTS,
+  /* Scale-up fabric config (response of CFG_CMD_GET_SCALEUP_FABRIC_CONFIG) */
+  CFG_ATTR_SCALEUP_PHYSICAL_POD_ID,
+  CFG_ATTR_SCALEUP_PHYSICAL_POD_SIZE,
+  CFG_ATTR_SCALEUP_LOCAL_ACCELERATORS,
+  /* Scale-up fabric vpod config (response of CFG_CMD_GET_SCALEUP_FABRIC_VPOD_CONFIG) */
+  CFG_ATTR_SCALEUP_VIRTUAL_POD_ID,
+  CFG_ATTR_SCALEUP_NPA_ADDRESS_MODE,
+  CFG_ATTR_NETPORT_TOTAL_COUNT,
+  /* Scale-up fabric station info (response of CFG_CMD_GET_SCALEUP_FABRIC_STATION_INFO) */
+  CFG_ATTR_SCALEUP_STATION_COUNT,
+  CFG_ATTR_SCALEUP_STATION_BANDWIDTH,
+  CFG_ATTR_GPU_PHYS_ID,
+  CFG_ATTR_GPU_NUM_GPUS,
+  CFG_ATTR_GPU_TRAY_TYPE,
+  CFG_ATTR_GPU_OAM_ID,
   __CFG_ATTR_MAX
 };
 #define CFG_ATTR_MAX (__CFG_ATTR_MAX - 1)
+
+enum {
+  CFG_ATTR_PRBS_RESULTS_VALID = 1,
+  CFG_ATTR_PRBS_RESULTS_RXEQ_SUCCESS,
+  CFG_ATTR_PRBS_RESULTS_CDR_LOCK,
+  CFG_ATTR_PRBS_RESULTS_PATTERN_LOCK,
+  CFG_ATTR_PRBS_RESULTS_OVERFLOW,
+  CFG_ATTR_PRBS_RESULTS_ELAPSED_US,
+  CFG_ATTR_PRBS_RESULTS_ERROR_COUNT,
+  __CFG_ATTR_PRBS_RESULTS_MAX
+};
+#define CFG_ATTR_PRBS_RESULTS_MAX (__CFG_ATTR_PRBS_RESULTS_MAX - 1)
 
 enum {
   CFG_ATTR_NETPORT_STATE_IDX = 1,

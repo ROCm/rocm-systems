@@ -10,6 +10,7 @@
 #include "MPIHelpers.hpp"
 #include "TestChecks.hpp"
 #include "ResourceGuards.hpp"
+#include "SymmetricMemPrereq.hpp"
 
 #include "nccl_device.h"
 #include "comm.h"
@@ -172,6 +173,498 @@ TEST_F(PatLazyInitMPITest, DefersConnectionUntilFirstCollective)
     ASSERT_MPI_TRUE(collective_log.find("Connected binomial trees") != std::string::npos);
 }
 
+// The environment every PAT test below needs, bundled so each test spends one line on it.
+// Hierarchical AllGather has to be off or it intercepts ncclAllGather before PAT sees it, which
+// would let a PAT test pass without ever running PAT.
+struct PatTestEnv
+{
+    MPIHelpers::MpiEnvGuard pat_enable{"NCCL_PAT_ENABLE", "1"};
+    MPIHelpers::MpiEnvGuard pat_lazy{"NCCL_PAT_LAZY_INIT", "1"};
+    MPIHelpers::MpiEnvGuard algorithm{"NCCL_ALGO", "PAT"};
+    MPIHelpers::MpiEnvGuard protocol{"NCCL_PROTO", "SIMPLE"};
+    MPIHelpers::MpiEnvGuard cumem{"NCCL_CUMEM_ENABLE", "0"};
+    MPIHelpers::MpiEnvGuard hag{"RCCL_HIERARCHICAL_ALLGATHER", "0"};
+};
+
+class PatSharedConnectionMPITest : public MPITestBase
+{
+protected:
+    // Returns the decision rather than skipping here, because GTEST_SKIP() in a helper does not
+    // stop the calling test.
+    bool oneRankPerNode()
+    {
+        MPI_Comm local_comm;
+        if(MPI_Comm_split_type(
+               MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &local_comm) != MPI_SUCCESS)
+        {
+            return false;
+        }
+        int local_size = 0;
+        MPI_Comm_size(local_comm, &local_size);
+        MPI_Comm_free(&local_comm);
+        return local_size == 1;
+    }
+
+    // Null means the topology can run PAT. Otherwise a skip reason for the caller to GTEST_SKIP().
+    const char* patSkipReason()
+    {
+        if(!validateTestPrerequisites(/*min_processes=*/4))
+        {
+            return "PAT sharing tests need at least 4 MPI ranks";
+        }
+        if(!oneRankPerNode())
+        {
+            return "PAT requires exactly one MPI rank per node";
+        }
+        return nullptr;
+    }
+};
+
+/**
+ * ReduceScatter and AllGather address the same binomial neighbors, so PAT builds one
+ * connection per neighbor and direction instead of a mirrored pair. Lazy init defers that
+ * work to the first PAT collective, which lets the test separate the PAT connections from
+ * the ring and tree connections already established during ncclCommInitRank.
+ *
+ * Below four ranks the mask set is closed under mask -> nranks-mask, so both connect passes
+ * target the same peers and there is nothing to distinguish.
+ *
+ * RCCL_PARAM caches into a process-lifetime static, so the first communicator built in this
+ * binary fixes RCCL_PAT_SHARED_QPS for every later one. This test therefore skips rather than
+ * fails when the kill switch was set before launch, and its counterpart below does the reverse.
+ */
+TEST_F(PatSharedConnectionMPITest, AllGatherReusesReduceScatterConnections)
+{
+    if(const char* why = patSkipReason())
+    {
+        GTEST_SKIP() << why;
+    }
+
+    PatTestEnv env;
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    if(!comm->patSharedQps)
+    {
+        GTEST_SKIP() << "RCCL_PAT_SHARED_QPS is disabled for this process, so PAT builds the "
+                        "mirrored connection set; run without it to exercise sharing";
+    }
+    ASSERT_MPI_FALSE(comm->initAlgoChannels[NCCL_ALGO_PAT]);
+
+    const int rank = comm->rank;
+    const int nranks = comm->nRanks;
+    const int nchannels = comm->nChannels;
+
+    std::vector<int> send_before(static_cast<size_t>(nchannels) * nranks, 0);
+    std::vector<int> recv_before(static_cast<size_t>(nchannels) * nranks, 0);
+    for(int channel = 0; channel < nchannels; ++channel)
+    {
+        for(int peer = 0; peer < nranks; ++peer)
+        {
+            const size_t index = static_cast<size_t>(channel) * nranks + peer;
+            send_before[index] = comm->channels[channel].peers[peer]->send[0].connected;
+            recv_before[index] = comm->channels[channel].peers[peer]->recv[0].connected;
+        }
+    }
+
+    void* send_buffer = nullptr;
+    void* recv_buffer = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&send_buffer, sizeof(uint8_t)));
+    auto send_guard = makeDeviceBufferAutoGuard(send_buffer);
+    ASSERT_MPI_EQ(hipSuccess,
+                  hipMalloc(&recv_buffer, sizeof(uint8_t) * MPIEnvironment::world_size));
+    auto recv_guard = makeDeviceBufferAutoGuard(recv_buffer);
+
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclAllGather(send_buffer,
+                                recv_buffer,
+                                1,
+                                ncclUint8,
+                                comm,
+                                getActiveStream()));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    ASSERT_MPI_TRUE(comm->initAlgoChannels[NCCL_ALGO_PAT]);
+
+    // The connections PAT is allowed to add, i.e. ReduceScatter's directions. The two-pass
+    // connect also built the mirror of every entry, which is what this test rules out.
+    std::vector<char> expect_recv(nranks, 0);
+    std::vector<char> expect_send(nranks, 0);
+    for(int mask = 1; mask < nranks; mask <<= 1)
+    {
+        expect_recv[(rank - mask + nranks) % nranks] = 1;
+        expect_send[(rank + mask) % nranks] = 1;
+    }
+
+    for(int channel = 0; channel < nchannels; ++channel)
+    {
+        for(int peer = 0; peer < nranks; ++peer)
+        {
+            const size_t index = static_cast<size_t>(channel) * nranks + peer;
+            const int recv_now = comm->channels[channel].peers[peer]->recv[0].connected;
+            const int send_now = comm->channels[channel].peers[peer]->send[0].connected;
+
+            if(expect_recv[peer])
+            {
+                ASSERT_MPI_TRUE(recv_now);
+            }
+            else
+            {
+                ASSERT_MPI_EQ(recv_before[index], recv_now);
+            }
+
+            if(expect_send[peer])
+            {
+                ASSERT_MPI_TRUE(send_now);
+            }
+            else
+            {
+                ASSERT_MPI_EQ(send_before[index], send_now);
+            }
+        }
+    }
+}
+
+/**
+ * RCCL_PAT_SHARED_QPS=0 restores the mirrored connection set AllGather used before sharing.
+ * Asserting the mirror is present keeps that fallback path from decaying unnoticed, and the
+ * AllGather payload check covers the device primitives and PatAGAlgorithm still agreeing with
+ * the proxy on peer direction when sharing is off.
+ *
+ * The MpiEnvGuard below only takes effect when this test builds the first communicator in the
+ * process, because RCCL_PARAM caches. Launch with RCCL_PAT_SHARED_QPS=0 already in the
+ * environment to run it alongside other communicator tests; otherwise it skips.
+ */
+TEST_F(PatSharedConnectionMPITest, SeparateConnectionsWhenSharingDisabled)
+{
+    if(const char* why = patSkipReason())
+    {
+        GTEST_SKIP() << why;
+    }
+
+    PatTestEnv              env;
+    MPIHelpers::MpiEnvGuard pat_shared("RCCL_PAT_SHARED_QPS", "0");
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    if(comm->patSharedQps)
+    {
+        GTEST_SKIP() << "RCCL_PAT_SHARED_QPS was already cached as enabled by an earlier "
+                        "communicator in this process; set it to 0 before launch to run this test";
+    }
+
+    const int rank = comm->rank;
+    const int nranks = comm->nRanks;
+    const int nchannels = comm->nChannels;
+
+    const uint8_t expected_byte = static_cast<uint8_t>(rank);
+    void* send_buffer = nullptr;
+    void* recv_buffer = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&send_buffer, sizeof(uint8_t)));
+    auto send_guard = makeDeviceBufferAutoGuard(send_buffer);
+    ASSERT_MPI_EQ(hipSuccess,
+                  hipMalloc(&recv_buffer, sizeof(uint8_t) * MPIEnvironment::world_size));
+    auto recv_guard = makeDeviceBufferAutoGuard(recv_buffer);
+    ASSERT_MPI_EQ(hipSuccess,
+                  hipMemcpy(send_buffer, &expected_byte, sizeof(uint8_t), hipMemcpyHostToDevice));
+
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclAllGather(send_buffer,
+                                recv_buffer,
+                                1,
+                                ncclUint8,
+                                comm,
+                                getActiveStream()));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    std::vector<uint8_t> gathered(static_cast<size_t>(nranks), 0);
+    ASSERT_MPI_EQ(hipSuccess,
+                  hipMemcpy(gathered.data(),
+                            recv_buffer,
+                            sizeof(uint8_t) * nranks,
+                            hipMemcpyDeviceToHost));
+    for(int peer = 0; peer < nranks; ++peer)
+    {
+        ASSERT_MPI_EQ(static_cast<uint8_t>(peer), gathered[static_cast<size_t>(peer)]);
+    }
+
+    // Without sharing, every mask connects both its own direction and the mirror.
+    for(int mask = 1; mask < nranks; mask <<= 1)
+    {
+        const int next_peer = (rank - mask + nranks) % nranks;
+        const int prev_peer = (rank + mask) % nranks;
+        for(int channel = 0; channel < nchannels; ++channel)
+        {
+            ASSERT_MPI_TRUE(comm->channels[channel].peers[next_peer]->recv[0].connected);
+            ASSERT_MPI_TRUE(comm->channels[channel].peers[next_peer]->send[0].connected);
+            ASSERT_MPI_TRUE(comm->channels[channel].peers[prev_peer]->recv[0].connected);
+            ASSERT_MPI_TRUE(comm->channels[channel].peers[prev_peer]->send[0].connected);
+        }
+    }
+}
+
+/**
+ * Sharing puts ReduceScatter and AllGather on the same connections, so they now also share that
+ * connection's ring buffer and its persistent step counter (ncclConnInfo::step). A disagreement
+ * between the two about how many steps an operation consumes cannot show up while only one of
+ * them runs; it shows up on whichever collective runs next, and small drift only after several
+ * rounds. Hence one communicator, both collectives, repeatedly.
+ *
+ * Lazy init makes the ordering meaningful: the first ReduceScatter builds the PAT connections and
+ * every AllGather afterwards has to be satisfied by what that single shared pass created.
+ *
+ * The two are chained, so the pair is an AllReduce: every rank must end each iteration holding
+ * nranks times its input. The intermediate ReduceScatter block and final AllGather vector are
+ * validated independently. Values are distinct across the whole vector, so a wrong data-block
+ * index surfaces as a permutation rather than as garbage, and they change every iteration, so a
+ * collective that silently did nothing surfaces as stale values.
+ *
+ * Runs in both modes. Under RCCL_PAT_SHARED_QPS=0 it validates the fallback path unchanged.
+ */
+TEST_F(PatSharedConnectionMPITest, AlternatingReduceScatterAndAllGatherOnOneCommunicator)
+{
+    if(const char* why = patSkipReason())
+    {
+        GTEST_SKIP() << why;
+    }
+
+    PatTestEnv env;
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    ASSERT_MPI_FALSE(comm->initAlgoChannels[NCCL_ALGO_PAT]);
+
+    // Doubles because the check below needs nranks * value to be exact, and the values have to
+    // stay distinct across a buffer far larger than float can index exactly.
+    constexpr int    kIterations   = 16;
+    constexpr size_t kCountPerRank = 65536;
+    const size_t     nranks        = static_cast<size_t>(comm->nRanks);
+    const size_t     total         = kCountPerRank * nranks;
+    const size_t     rank_offset   = static_cast<size_t>(comm->rank) * kCountPerRank;
+
+    void* whole = nullptr;
+    void* part  = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&whole, total * sizeof(double)));
+    auto whole_guard = makeDeviceBufferAutoGuard(whole);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&part, kCountPerRank * sizeof(double)));
+    auto part_guard = makeDeviceBufferAutoGuard(part);
+
+    std::vector<double> input(total);
+    std::vector<double> reduce_scatter_result(kCountPerRank);
+    std::vector<double> all_gather_result(total);
+
+    // Only prints under NCCL_DEBUG=INFO; it is how a log can confirm the shape actually run.
+    TEST_INFO("alternating RS+AG: %d iterations, %zu ranks, %zu KiB/collective",
+              kIterations,
+              nranks,
+              total * sizeof(double) / 1024);
+
+    for(int iter = 0; iter < kIterations; ++iter)
+    {
+        SCOPED_TRACE("iteration " + std::to_string(iter));
+
+        for(size_t i = 0; i < total; ++i)
+        {
+            input[i] = static_cast<double>(static_cast<size_t>(iter) * total + i + 1);
+        }
+        ASSERT_MPI_EQ(
+            hipSuccess,
+            hipMemcpy(whole, input.data(), total * sizeof(double), hipMemcpyHostToDevice));
+
+        ASSERT_MPI_EQ(ncclSuccess,
+                      ncclReduceScatter(whole,
+                                        part,
+                                        kCountPerRank,
+                                        ncclDouble,
+                                        ncclSum,
+                                        comm,
+                                        getActiveStream()));
+        if(iter == 0)
+        {
+            // Enqueue, not execution, does the lazy connect, so this holds without a sync and
+            // proves the AllGather below runs on connections ReduceScatter created.
+            ASSERT_MPI_TRUE(comm->initAlgoChannels[NCCL_ALGO_PAT]);
+        }
+        ASSERT_MPI_EQ(
+            ncclSuccess,
+            ncclAllGather(part, whole, kCountPerRank, ncclDouble, comm, getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+        ASSERT_MPI_EQ(
+            hipSuccess,
+            hipMemcpy(reduce_scatter_result.data(),
+                      part,
+                      kCountPerRank * sizeof(double),
+                      hipMemcpyDeviceToHost));
+        ASSERT_MPI_EQ(
+            hipSuccess,
+            hipMemcpy(all_gather_result.data(),
+                      whole,
+                      total * sizeof(double),
+                      hipMemcpyDeviceToHost));
+
+        // Counted rather than asserted per element: ASSERT_MPI_EQ costs an MPI_Allreduce.
+        size_t reduce_scatter_mismatches = 0;
+        for(size_t i = 0; i < kCountPerRank; ++i)
+        {
+            const double expected = input[rank_offset + i] * static_cast<double>(nranks);
+            if(reduce_scatter_result[i] != expected)
+            {
+                ++reduce_scatter_mismatches;
+            }
+        }
+        ASSERT_MPI_EQ(size_t{0}, reduce_scatter_mismatches);
+
+        size_t all_gather_mismatches = 0;
+        for(size_t i = 0; i < total; ++i)
+        {
+            if(all_gather_result[i] != input[i] * static_cast<double>(nranks))
+            {
+                ++all_gather_mismatches;
+            }
+        }
+        ASSERT_MPI_EQ(size_t{0}, all_gather_mismatches);
+    }
+}
+
+/**
+ * Alternating covers sequential launches. Sharing also lets ReduceScatter and AllGather
+ * queue proxy ops onto the same connection and step counter inside one ncclGroupStart/End,
+ * before either kernel runs. That is a different interleaving than back-to-back launches.
+ *
+ * The two collectives use independent buffers so a group launch cannot race a producer-consumer
+ * dependency. Values are distinct so a wrong data-block index still shows up as a permutation.
+ * Runs in both sharing modes.
+ */
+TEST_F(PatSharedConnectionMPITest, GroupedReduceScatterAndAllGatherOnOneCommunicator)
+{
+    if(const char* why = patSkipReason())
+    {
+        GTEST_SKIP() << why;
+    }
+
+    PatTestEnv env;
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    ASSERT_MPI_FALSE(comm->initAlgoChannels[NCCL_ALGO_PAT]);
+
+    constexpr int    kIterations   = 8;
+    constexpr size_t kCountPerRank = 1024;
+    const size_t     nranks        = static_cast<size_t>(comm->nRanks);
+    const size_t     total         = kCountPerRank * nranks;
+    const size_t     rank_offset   = static_cast<size_t>(comm->rank) * kCountPerRank;
+
+    void* rs_send = nullptr;
+    void* rs_recv = nullptr;
+    void* ag_send = nullptr;
+    void* ag_recv = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&rs_send, total * sizeof(double)));
+    auto rs_send_guard = makeDeviceBufferAutoGuard(rs_send);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&rs_recv, kCountPerRank * sizeof(double)));
+    auto rs_recv_guard = makeDeviceBufferAutoGuard(rs_recv);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&ag_send, kCountPerRank * sizeof(double)));
+    auto ag_send_guard = makeDeviceBufferAutoGuard(ag_send);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&ag_recv, total * sizeof(double)));
+    auto ag_recv_guard = makeDeviceBufferAutoGuard(ag_recv);
+
+    std::vector<double> rs_input(total);
+    std::vector<double> rs_result(kCountPerRank);
+    std::vector<double> ag_input(kCountPerRank);
+    std::vector<double> ag_result(total);
+
+    TEST_INFO("grouped RS+AG: %d iterations, %zu ranks, %zu KiB/collective",
+              kIterations,
+              nranks,
+              total * sizeof(double) / 1024);
+
+    for(int iter = 0; iter < kIterations; ++iter)
+    {
+        SCOPED_TRACE("iteration " + std::to_string(iter));
+
+        for(size_t i = 0; i < total; ++i)
+        {
+            rs_input[i] = static_cast<double>(static_cast<size_t>(iter) * total + i + 1);
+        }
+        for(size_t i = 0; i < kCountPerRank; ++i)
+        {
+            ag_input[i] = static_cast<double>(
+                (static_cast<size_t>(iter) + 1) * total + rank_offset + i + 1);
+        }
+        ASSERT_MPI_EQ(
+            hipSuccess,
+            hipMemcpy(rs_send, rs_input.data(), total * sizeof(double), hipMemcpyHostToDevice));
+        ASSERT_MPI_EQ(
+            hipSuccess,
+            hipMemcpy(ag_send, ag_input.data(), kCountPerRank * sizeof(double), hipMemcpyHostToDevice));
+
+        ASSERT_MPI_EQ(ncclSuccess, ncclGroupStart());
+        ASSERT_MPI_EQ(ncclSuccess,
+                      ncclReduceScatter(rs_send,
+                                        rs_recv,
+                                        kCountPerRank,
+                                        ncclDouble,
+                                        ncclSum,
+                                        comm,
+                                        getActiveStream()));
+        ASSERT_MPI_EQ(
+            ncclSuccess,
+            ncclAllGather(ag_send, ag_recv, kCountPerRank, ncclDouble, comm, getActiveStream()));
+        ASSERT_MPI_EQ(ncclSuccess, ncclGroupEnd());
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+        if(iter == 0)
+        {
+            ASSERT_MPI_TRUE(comm->initAlgoChannels[NCCL_ALGO_PAT]);
+        }
+
+        ASSERT_MPI_EQ(
+            hipSuccess,
+            hipMemcpy(rs_result.data(),
+                      rs_recv,
+                      kCountPerRank * sizeof(double),
+                      hipMemcpyDeviceToHost));
+        ASSERT_MPI_EQ(
+            hipSuccess,
+            hipMemcpy(ag_result.data(), ag_recv, total * sizeof(double), hipMemcpyDeviceToHost));
+
+        size_t rs_mismatches = 0;
+        for(size_t i = 0; i < kCountPerRank; ++i)
+        {
+            const double expected = rs_input[rank_offset + i] * static_cast<double>(nranks);
+            if(rs_result[i] != expected)
+            {
+                ++rs_mismatches;
+            }
+        }
+        ASSERT_MPI_EQ(size_t{0}, rs_mismatches);
+
+        size_t ag_mismatches = 0;
+        for(int peer = 0; peer < comm->nRanks; ++peer)
+        {
+            for(size_t i = 0; i < kCountPerRank; ++i)
+            {
+                const double expected = static_cast<double>(
+                    (static_cast<size_t>(iter) + 1) * total
+                    + static_cast<size_t>(peer) * kCountPerRank + i + 1);
+                if(ag_result[static_cast<size_t>(peer) * kCountPerRank + i] != expected)
+                {
+                    ++ag_mismatches;
+                }
+            }
+        }
+        ASSERT_MPI_EQ(size_t{0}, ag_mismatches);
+    }
+}
+
 /**
  * @class TrafficClassMPITest
  * @brief Test fixture for Traffic Class (QoS) configuration via ncclConfig_t.
@@ -209,6 +702,12 @@ TEST_F(TrafficClassMPITest, ConfiguredTrafficClass)
 
     constexpr int kTestTrafficClass = 46;
     configured_traffic_class_ = kTestTrafficClass;
+
+    // The needle below is an INFO(NCCL_ENV) line. Force INFO regardless of the
+    // outer NCCL_DEBUG (CI sets INFO; bundled WARN runs otherwise miss it).
+    MPIHelpers::MpiEnvGuard debug("NCCL_DEBUG", "INFO");
+    MPIHelpers::MpiEnvGuard debug_subsys("NCCL_DEBUG_SUBSYS", "ENV");
+    MPIHelpers::resetNcclDebugState();
 
     MPIHelpers::TestLogAssertionContext log_ctx(
         MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
@@ -289,7 +788,8 @@ protected:
         const char* gin_type = std::getenv("NCCL_GIN_TYPE");
         const char* cumem    = std::getenv("NCCL_CUMEM_ENABLE");
         return gin_type != nullptr && std::string(gin_type) == "2"
-            && cumem != nullptr && std::string(cumem) == "1";
+            && cumem != nullptr && std::string(cumem) == "1"
+            && ncclCuMemRuntimeSupported();
     }
 
     static std::array<int, 2> collectiveBoolSummary(bool value)
@@ -427,7 +927,7 @@ TEST_F(GinTrafficClassMPITest, DeviceHostPrecedence)
 {
     const auto proxy_prerequisites = collectiveBoolSummary(proxyPrerequisitesMet());
     if(proxy_prerequisites[0] == 0 && proxy_prerequisites[1] == 0)
-        GTEST_SKIP() << "Requires NCCL_GIN_TYPE=2 and NCCL_CUMEM_ENABLE=1";
+        GTEST_SKIP() << "Requires NCCL_GIN_TYPE=2 and runtime-supported cuMem";
     ASSERT_MPI_TRUE(proxy_prerequisites[0] == 1 && proxy_prerequisites[1] == 1);
 
     const bool local_ib_env_unset =
@@ -909,16 +1409,19 @@ TEST_F(GinRmaContextMPITest, RmaAndGinFinalizeWithSplitComm)
     ASSERT_MPI_TRUE(parent != nullptr);
     ASSERT_MPI_TRUE(parent->sharedRes != nullptr);
 
-    if(parent->sharedRes->ginState.ncclGin == nullptr || parent->rmaState.rmaProxyState.ncclRma == nullptr)
+    if(parent->sharedRes->ginState.numActiveBackends == 0 ||
+       parent->sharedRes->ginState.backends[0].ginInstance == nullptr ||
+       parent->rmaState.rmaProxyState.ncclRma == nullptr)
     {
         GTEST_SKIP() << "Requires both the GIN and RMA plugins enabled on this host";
     }
 
     // One internal backend serves both roles, so the contexts are distinct
     // only when RMA owns a separate field.
-    ASSERT_MPI_TRUE(parent->ginContext != nullptr);
+    void* ginInstance = parent->sharedRes->ginState.backends[0].ginInstance;
+    ASSERT_MPI_TRUE(ginInstance != nullptr);
     ASSERT_MPI_TRUE(parent->rmaContext != nullptr);
-    ASSERT_MPI_TRUE(parent->ginContext != parent->rmaContext);
+    ASSERT_MPI_TRUE(ginInstance != parent->rmaContext);
 
     // The parent shares its resources, so the child inherits both contexts
     // instead of initializing the plugins again.
@@ -928,13 +1431,259 @@ TEST_F(GinRmaContextMPITest, RmaAndGinFinalizeWithSplitComm)
 
     struct ncclComm* child = splitComm;
     ASSERT_MPI_TRUE(child->sharedRes == parent->sharedRes);
-    ASSERT_MPI_TRUE(child->ginContext == parent->ginContext);
+    ASSERT_MPI_TRUE(child->sharedRes->ginState.backends[0].ginInstance == ginInstance);
     ASSERT_MPI_TRUE(child->rmaContext == parent->rmaContext);
 
     // Destroy the parent first so the child holds the last reference and
     // finalizes both plugins against the contexts it inherited.
     ASSERT_MPI_EQ(ncclSuccess, cleanupTestCommunicator());
     ASSERT_MPI_EQ(ncclSuccess, ncclCommDestroy(splitComm));
+}
+
+/**
+ * @class GraphStreamOrderingConfigMPITest
+ * @brief Validates NCCL 2.30 graphStreamOrdering config parsing and compatibility
+ *        rules (see NCCL_GRAPH_STREAM_ORDERING in env.rst).
+ */
+class GraphStreamOrderingConfigMPITest : public ConfigCommMPITestBase
+{
+protected:
+    int configured_graph_stream_ordering_ = NCCL_CONFIG_UNDEF_INT;
+    int configured_graph_usage_mode_      = NCCL_CONFIG_UNDEF_INT;
+
+    void applyConfig(ncclConfig_t& config) override
+    {
+        config.graphStreamOrdering = configured_graph_stream_ordering_;
+        config.graphUsageMode      = configured_graph_usage_mode_;
+    }
+
+    std::string configLabel() const override
+    {
+        return "graphStreamOrdering=" + std::to_string(configured_graph_stream_ordering_)
+             + " graphUsageMode=" + std::to_string(configured_graph_usage_mode_);
+    }
+
+    static int graphStreamOrderingEnv()
+    {
+        return MPIHelpers::getEnvParam<int>("NCCL_GRAPH_STREAM_ORDERING",
+                                            NCCL_CONFIG_UNDEF_INT);
+    }
+
+    // envConfigOverride() lets NCCL_GRAPH_MIXING_SUPPORT 0/1 overwrite graphUsageMode (0->0,
+    // 1->2), so the value set by applyConfig() would not stick.
+    static bool mixingEnvOverridesUsageMode()
+    {
+        const int mixing = MPIHelpers::getEnvParam<int>("NCCL_GRAPH_MIXING_SUPPORT",
+                                                        NCCL_CONFIG_UNDEF_INT);
+        return mixing == 0 || mixing == 1;
+    }
+};
+
+/**
+ * @test GraphStreamOrderingConfigMPITest.ConfigOverrideAppliesGraphStreamOrdering
+ * @brief ncclConfig_t graphStreamOrdering is stored on comm->config when env is unset.
+ *
+ * NCCL 2.30.7 upstream applies NCCL_GRAPH_STREAM_ORDERING after ncclConfig_t in
+ * envConfigOverride(), so this test requires the env var to be absent.
+ */
+TEST_F(GraphStreamOrderingConfigMPITest, ConfigOverrideAppliesGraphStreamOrdering)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    if(graphStreamOrderingEnv() != NCCL_CONFIG_UNDEF_INT)
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_STREAM_ORDERING must not be set; upstream NCCL "
+                        "envConfigOverride() overrides explicit ncclConfig_t graphStreamOrdering.";
+    }
+    if(mixingEnvOverridesUsageMode())
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_MIXING_SUPPORT must not be set to 0 or 1; it overwrites "
+                        "the graphUsageMode this test configures.";
+    }
+
+    configured_graph_stream_ordering_ = 0;
+    configured_graph_usage_mode_      = 1;
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    ASSERT_MPI_EQ(comm->config.graphStreamOrdering, 0);
+    ASSERT_MPI_EQ(comm->config.graphUsageMode, 1);
+}
+
+/**
+ * @test GraphStreamOrderingConfigMPITest.IncompatibleMixingFallsBackToEnabledOrdering
+ * @brief graphStreamOrdering=0 with graphUsageMode=2 is unsupported and falls back to 1.
+ */
+TEST_F(GraphStreamOrderingConfigMPITest, IncompatibleMixingFallsBackToEnabledOrdering)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    const int graphStreamOrdering = graphStreamOrderingEnv();
+    if(graphStreamOrdering != NCCL_CONFIG_UNDEF_INT && graphStreamOrdering != 0)
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_STREAM_ORDERING must be unset or 0; value 1 sets "
+                        "graphStreamOrdering=1 before the incompatible-mixing fallback, which "
+                        "would then not be exercised.";
+    }
+    if(mixingEnvOverridesUsageMode())
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_MIXING_SUPPORT must not be set to 0 or 1; it overwrites "
+                        "the graphUsageMode this test configures.";
+    }
+
+    configured_graph_stream_ordering_ = 0;
+    configured_graph_usage_mode_      = 2;
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    ASSERT_MPI_EQ(comm->config.graphStreamOrdering, 1);
+    ASSERT_MPI_EQ(comm->config.graphUsageMode, 2);
+}
+
+/**
+ * @test GraphStreamOrderingConfigMPITest.EnvOverrideAppliesGraphStreamOrdering
+ * @brief NCCL_GRAPH_STREAM_ORDERING overrides ncclConfig_t graphStreamOrdering at init.
+ */
+TEST_F(GraphStreamOrderingConfigMPITest, EnvOverrideAppliesGraphStreamOrdering)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    const int expected = graphStreamOrderingEnv();
+    if(expected != 0 && expected != 1)
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_STREAM_ORDERING must be set to 0 or 1";
+    }
+    if(mixingEnvOverridesUsageMode())
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_MIXING_SUPPORT must not be set to 0 or 1; it overwrites "
+                        "the graphUsageMode this test configures.";
+    }
+
+    // Set config to the opposite value; upstream NCCL envConfigOverride() must win.
+    configured_graph_stream_ordering_ = (expected == 0) ? 1 : 0;
+    configured_graph_usage_mode_      = 1;
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    ASSERT_MPI_EQ(comm->config.graphStreamOrdering, expected);
+}
+
+/**
+ * @test GraphStreamOrderingConfigMPITest.DisabledOrderingGraphCaptureSmoke
+ * @brief graphStreamOrdering=0 with graphUsageMode=1 captures and replays AllReduce.
+ *
+ * Captures the same collective into two graphs and replays both, so the first/subsequent
+ * capture split of the origin-stream path is covered rather than just the single-capture
+ * case. Both graphs are launched on one stream with a host sync between them, so the
+ * cross-graph serialEvent dependency is not itself exercised.
+ *
+ * Requires effective ordering 0. Skips when NCCL_GRAPH_STREAM_ORDERING is set to 1,
+ * because upstream NCCL envConfigOverride() would override config graphStreamOrdering=0.
+ */
+TEST_F(GraphStreamOrderingConfigMPITest, DisabledOrderingGraphCaptureSmoke)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+
+    const int graphStreamOrdering = graphStreamOrderingEnv();
+    if(graphStreamOrdering != NCCL_CONFIG_UNDEF_INT && graphStreamOrdering != 0)
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_STREAM_ORDERING must be unset or 0; value 1 overrides config "
+                        "graphStreamOrdering=0 in upstream NCCL.";
+    }
+    if(mixingEnvOverridesUsageMode())
+    {
+        GTEST_SKIP() << "NCCL_GRAPH_MIXING_SUPPORT must not be set to 0 or 1; it overwrites "
+                        "the graphUsageMode this test configures.";
+    }
+
+    configured_graph_stream_ordering_ = 0;
+    configured_graph_usage_mode_      = 1;
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    ASSERT_MPI_EQ(comm->config.graphStreamOrdering, 0);
+
+    void* sendBuf = nullptr;
+    void* recvBuf = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, sizeof(float)));
+    auto sendGuard = makeDeviceBufferAutoGuard(sendBuf);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, sizeof(float)));
+    auto recvGuard = makeDeviceBufferAutoGuard(recvBuf);
+
+    const float sendVal = static_cast<float>(getTestMpiRank() + 1.0f);
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(sendBuf, &sendVal, sizeof(float), hipMemcpyHostToDevice));
+
+    constexpr int  kGraphs             = 2;
+    hipGraph_t     graphs[kGraphs]     = {};
+    hipGraphExec_t graphExecs[kGraphs] = {};
+
+    auto graphCleanup = makeScopeGuard([&]() {
+        for(int i = 0; i < kGraphs; ++i)
+        {
+            if(graphExecs[i]) (void)hipGraphExecDestroy(graphExecs[i]);
+            if(graphs[i]) (void)hipGraphDestroy(graphs[i]);
+        }
+    });
+
+    bool captureActive = false;
+    auto captureCleanup = makeScopeGuard([&]() {
+        if(captureActive)
+        {
+            hipGraph_t abandonedGraph = nullptr;
+            if(hipStreamEndCapture(getActiveStream(), &abandonedGraph) == hipSuccess &&
+               abandonedGraph)
+                (void)hipGraphDestroy(abandonedGraph);
+        }
+    });
+
+    // Capture twice so both halves of the origin-stream path run: the first capture bootstraps
+    // serialEvent on the live stream, the second must take the already-bootstrapped path.
+    for(int i = 0; i < kGraphs; ++i)
+    {
+        const hipError_t captureBeginStatus =
+            hipStreamBeginCapture(getActiveStream(), hipStreamCaptureModeThreadLocal);
+        captureActive = (captureBeginStatus == hipSuccess);
+        ASSERT_MPI_EQ(hipSuccess, captureBeginStatus);
+        ASSERT_MPI_EQ(ncclSuccess,
+                      ncclAllReduce(sendBuf, recvBuf, 1, ncclFloat, ncclSum, comm, getActiveStream()));
+        const hipError_t captureEndStatus = hipStreamEndCapture(getActiveStream(), &graphs[i]);
+        if(captureEndStatus == hipSuccess) captureActive = false;
+        ASSERT_MPI_EQ(hipSuccess, captureEndStatus);
+        ASSERT_MPI_NE(nullptr, graphs[i]);
+        ASSERT_MPI_EQ(hipSuccess, hipGraphInstantiate(&graphExecs[i], graphs[i], nullptr, nullptr, 0));
+    }
+
+#if ROCM_VERSION >= 60100
+    // graphStreamOrdering=0 must launch directly on the graph origin instead of acquiring
+    // deviceStream.captureStream. This assertion fails if the enqueue.cc feature is reverted.
+    ASSERT_MPI_TRUE(comm->sharedRes->deviceStream.captureHead == nullptr);
+#endif
+
+    const int   worldSize = MPIEnvironment::world_size;
+    const float expected  = static_cast<float>(worldSize * (worldSize + 1) / 2);
+
+    for(int i = 0; i < kGraphs; ++i)
+    {
+        ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, sizeof(float)));
+        ASSERT_MPI_EQ(hipSuccess, hipGraphLaunch(graphExecs[i], getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+        float result = 0.0f;
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&result, recvBuf, sizeof(float), hipMemcpyDeviceToHost));
+
+        // EXPECT_NEAR reports the values; the fatal check must be MPI-aware so one mismatching
+        // rank cannot leave the others waiting in the next iteration's collective asserts.
+        EXPECT_NEAR(result, expected, 1e-3f) << "graph " << i;
+        ASSERT_MPI_TRUE(result >= expected - 1e-3f && result <= expected + 1e-3f);
+    }
 }
 
 #endif // MPI_TESTS_ENABLED
