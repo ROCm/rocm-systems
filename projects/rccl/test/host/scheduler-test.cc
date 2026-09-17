@@ -2414,3 +2414,146 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_LogCount_Uses
   EXPECT_TRUE(RcclUnitTesting::LogHas(log, "1026 Bytes"));
 }
 
+// ncclSymmetricTaskScheduler args-buffer allocation (symmetric_sched.cc:354-364); packing's own fields unasserted.
+
+// calcArgsSize(2,1,false) is well below the 4096-byte floor, so max() must pick the floor here.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_FloorWins_BelowCalcArgsSize) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
+}
+
+// The big batch's raw calcArgsSize clears the 4096 floor; a crash here would mean calloc's size didn't match.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_CalcWins_AboveFloor) {
+  SymmetricTaskScheduler_Scene scene;
+  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
+                                                    ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/1);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->kernelArgsSize,
+            ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, false));
+  ASSERT_GT(scene.plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
+}
+
+// A big batch with profiling on: the profiler-counters region is large enough that dropping it would crash.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_IncludesProfilerCountersRegion_WhenEnabled) {
+  SymmetricTaskScheduler_Scene scene;
+  ScopedHook pluginHook(g_profilerPluginLoaded, []() { return true; });
+  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
+                                                    ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/1);
+  tasks[0].eActivationMask = ncclProfileKernelCh;
+  scene.plan->persistent = false;
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->kernelArgsSize,
+            ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, true));
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsBufNMaxChannels_SetFromLocal) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.nMaxChannels = 5;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  ASSERT_NE(argsBuf, nullptr);
+  EXPECT_EQ(argsBuf->nMaxChannels, 5);
+}
+
+// ncclSymkKernelMaxDynamicSmem[0] flows into argsBuf->maxDynamicSmem unconditionally, unlike plan->kernelDynSmem.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsBufMaxDynamicSmem_SetFromLocal) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclSymkKernelMaxDynamicSmem[0] = 777;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  ASSERT_NE(argsBuf, nullptr);
+  EXPECT_EQ(argsBuf->maxDynamicSmem, 777);
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsBufProfilerEnabled_SetOneWhenTrue) {
+  SymmetricTaskScheduler_Scene scene;
+  ScopedHook pluginHook(g_profilerPluginLoaded, []() { return true; });
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.eActivationMask = ncclProfileKernelCh;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  scene.plan->persistent = false;
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  ASSERT_NE(argsBuf, nullptr);
+  EXPECT_EQ(argsBuf->profilerEnabled, 1);
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsBufProfilerEnabled_SetZeroWhenFalse) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();  // eActivationMask left at 0: profiling never requested
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  ASSERT_NE(argsBuf, nullptr);
+  EXPECT_EQ(argsBuf->profilerEnabled, 0);
+}
+
+// profilerEnabled=true catches ordering bugs; nMaxChannels=5 (not 3) avoids the alignUp(n*4,16)==16 bucket tie.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkRangeAndWorks_PointAtIndependentlyComputedOffsets) {
+  SymmetricTaskScheduler_Scene scene;
+  ScopedHook pluginHook(g_profilerPluginLoaded, []() { return true; });
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.nMaxChannels = 5;
+  task.eActivationMask = ncclProfileKernelCh;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  scene.plan->persistent = false;
+  constexpr uint64_t kSentinel = 0x1234567890ABCDEFull;
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork,
+                             [&](struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork* out) {
+                               out->redOpArg = kSentinel;
+                               return ncclSuccess;
+                             });
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  ASSERT_NE(argsBuf, nullptr);
+  uint8_t* base = reinterpret_cast<uint8_t*>(argsBuf);
+  size_t workRangeOff =
+      alignUp(sizeof(struct ncclSymkDevWorkArgs), size_t(16)) + alignUp(size_t(5) * sizeof(uint64_t), size_t(16));
+  size_t worksOff = workRangeOff + alignUp(size_t(5) * sizeof(struct ncclSymkChannelWorkRange), size_t(16));
+  auto* expectedWorkRange = reinterpret_cast<struct ncclSymkChannelWorkRange*>(base + workRangeOff);
+  auto* expectedWorks = reinterpret_cast<struct ncclSymkDevWork*>(base + worksOff);
+  EXPECT_EQ(expectedWorkRange[0].fracHi, uint16_t(0xFFFF));
+  EXPECT_EQ(expectedWorks[0].redOpArg, kSentinel);
+}
+
+// 3 one-cell tasks, not 1: a byte-scale (missing cellCount division) remainCell still sets fracHi on 1 task.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_RemainCell_DerivedFromTotalCountNMaxChannelsCellCount) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task1 = SymmetricTaskScheduler_MakeTask();
+  task1.nMaxChannels = 3;
+  task1.isSymLast = 0;
+  ncclTaskColl task2 = SymmetricTaskScheduler_MakeTask();
+  task2.nMaxChannels = 3;
+  task2.isSymLast = 0;
+  ncclTaskColl task3 = SymmetricTaskScheduler_MakeTask();
+  task3.nMaxChannels = 3;
+  task3.isSymLast = 1;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task1);
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task2);
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task3);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->channelMask.masks[0], 0b111ull);
+}
+
+// A logCount-not-totalCount mutant overruns nMaxChannels=1; that goto fail skips ret, so kernelSymArgs signals it.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_RemainCell_UsesAlignedTotalCountNotRawLogCount) {
+  SymmetricTaskScheduler_Scene scene;
+  std::vector<ncclTaskColl> tasks(5);
+  for (int i = 0; i < 5; ++i) {
+    tasks[i] = SymmetricTaskScheduler_MakeTask();
+    tasks[i].nMaxChannels = 1;
+    tasks[i].count = 1;  // raw count tiny; alignUp(1,1024) still contributes a full 1024-byte cell
+    tasks[i].isSymLast = (i == 4) ? 1 : 0;
+    ncclIntruQueueEnqueue(&scene.symTaskQueue, &tasks[i]);
+  }
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_NE(scene.plan->kernelSymArgs, nullptr);
+}
+
