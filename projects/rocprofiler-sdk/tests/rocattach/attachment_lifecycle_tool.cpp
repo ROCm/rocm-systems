@@ -26,6 +26,7 @@
 
 #include "../common/defines.hpp"
 
+#include <array>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -42,6 +43,7 @@ auto initialize_count     = std::atomic<int>{0};
 auto attach_count         = std::atomic<int>{0};
 auto detach_count         = std::atomic<int>{0};
 auto callbackless_context = rocprofiler_context_id_t{};
+auto failure_contexts     = std::array<rocprofiler_context_id_t, 2>{};
 
 void
 check_count(const char* name, int actual, int expected)
@@ -75,6 +77,20 @@ tool_initialize(rocprofiler_client_finalize_t, void*)
         std::abort();
     }
 #endif
+    if(auto* value = std::getenv("ROCPROFILER_TEST_FAIL_ATTACH");
+       value != nullptr && std::atoi(value) != 0)
+    {
+        for(auto& context : failure_contexts)
+        {
+            if(rocprofiler_create_context(&context) != ROCPROFILER_STATUS_SUCCESS)
+            {
+                std::fprintf(stderr,
+                             "Attachment lifecycle test FAILED: failure context setup "
+                             "failed\n");
+                std::abort();
+            }
+        }
+    }
     return 0;
 }
 
@@ -140,9 +156,31 @@ tool_attach(rocprofiler_client_detach_t, rocprofiler_context_id_t*, uint64_t, vo
 
     auto count = ++attach_count;
     std::printf("Attachment lifecycle: attach %d\n", count);
-    if(auto* value = std::getenv("ROCPROFILER_TEST_FAIL_ATTACH");
-       value != nullptr && std::atoi(value) != 0)
-        return 1;
+    const auto fail_attach = []() {
+        auto* value = std::getenv("ROCPROFILER_TEST_FAIL_ATTACH");
+        return (value != nullptr && std::atoi(value) != 0);
+    }();
+    if(failure_contexts.front().handle != 0)
+    {
+        for(auto context : failure_contexts)
+        {
+            auto active = int{-1};
+            if(rocprofiler_context_is_active(context, &active) != ROCPROFILER_STATUS_SUCCESS ||
+               active != 0)
+            {
+                std::fprintf(stderr,
+                             "Attachment lifecycle test FAILED: failure context was not "
+                             "clean before attach\n");
+                std::abort();
+            }
+        }
+        if(rocprofiler_start_context(failure_contexts.front()) != ROCPROFILER_STATUS_SUCCESS)
+            std::abort();
+    }
+    if(fail_attach) return 1;
+    if(failure_contexts.front().handle != 0 &&
+       rocprofiler_start_context(failure_contexts.back()) != ROCPROFILER_STATUS_SUCCESS)
+        std::abort();
     return 0;
 #    endif
 }
@@ -156,6 +194,21 @@ tool_detach(void*)
 #    else
     auto count = ++detach_count;
     std::printf("Attachment lifecycle: detach %d\n", count);
+    if(failure_contexts.front().handle != 0)
+    {
+        for(auto context : failure_contexts)
+        {
+            auto active = int{-1};
+            if(rocprofiler_context_is_active(context, &active) != ROCPROFILER_STATUS_SUCCESS ||
+               active != 0)
+            {
+                std::fprintf(stderr,
+                             "Attachment lifecycle test FAILED: failure context remained "
+                             "active during detach\n");
+                std::abort();
+            }
+        }
+    }
 #    endif
 }
 #endif
