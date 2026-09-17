@@ -47,9 +47,9 @@ private:
 
     static constexpr std::uint64_t TRUSTED_SEQ_ID_MAX_EXCLUSIVE =
         static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
-    std::string                            m_output_filename_override{};
-    std::vector<char>                      m_buffer{};
-    std::unordered_map<int, std::uint32_t> m_source_seq_id_bases{};
+    std::string                            m_output_filename_override;
+    std::vector<char>                      m_buffer;
+    std::unordered_map<int, std::uint32_t> m_source_seq_id_bases;
     std::uint64_t                          m_next_source_base{ 1 };
     bool                                   m_append_mode{ false };
     std::uint32_t m_source_stride{ PER_SOURCE_SEQ_ID_BASE_STRIDE };
