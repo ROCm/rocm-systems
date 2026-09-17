@@ -2557,3 +2557,203 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_RemainCell_UsesAlignedTotalCou
   EXPECT_NE(scene.plan->kernelSymArgs, nullptr);
 }
 
+// Packing loop dequeue/boundary + single-task traversal (symmetric_sched.cc:367-444); cross-task carry is Block 14.
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_PackingLoop_ProcessesAllTasks_UntilQueueDrains) {
+  SymmetricTaskScheduler_Scene scene;
+  std::vector<ncclTaskColl> tasks(3);
+  for (int i = 0; i < 3; ++i) {
+    tasks[i] = SymmetricTaskScheduler_MakeTask();
+    tasks[i].nMaxChannels = 4;  // headroom above 3 tasks * 1 channel each: no exhaustion once the queue drains
+    tasks[i].isSymLast = 0;     // none is last: only the queue running out should stop the loop
+    ncclIntruQueueEnqueue(&scene.symTaskQueue, &tasks[i]);
+  }
+  int makeDevWorkCalls = 0;
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork,
+                             [&](struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*) {
+                               ++makeDevWorkCalls;
+                               return ncclSuccess;
+                             });
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(makeDevWorkCalls, 3);
+  EXPECT_NE(scene.plan->kernelSymArgs, nullptr);
+  // workHi is stamped with each task's own workIndex (0,1,2), distinct from calloc's zero default.
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  auto* workRange = argsBuf->getWorkRange();
+  EXPECT_EQ(workRange[0].workHi, 0u);
+  EXPECT_EQ(workRange[1].workHi, 1u);
+  EXPECT_EQ(workRange[2].workHi, 2u);
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_PackingLoop_StopsAtDevFuncIdMismatch_LeavesTrailingTaskQueued) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task1 = SymmetricTaskScheduler_MakeTask();
+  task1.isSymLast = 0;
+  ncclTaskColl task2 = SymmetricTaskScheduler_MakeTask();
+  task2.devFuncId = ncclSymkKernelId_AllGather_LLMC;  // different batch
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task1);
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task2);
+  int makeDevWorkCalls = 0;
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork,
+                             [&](struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*) {
+                               ++makeDevWorkCalls;
+                               return ncclSuccess;
+                             });
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(makeDevWorkCalls, 1);  // task2's mismatched devFuncId stops the loop before it is ever dequeued
+  EXPECT_EQ(ncclIntruQueueHead(&scene.symTaskQueue), &task2);
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_MakeDevWork_Fails_PropagatesErrorAndStopsProcessing) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task1 = SymmetricTaskScheduler_MakeTask();
+  task1.isSymLast = 0;
+  ncclTaskColl task2 = SymmetricTaskScheduler_MakeTask();
+  task2.isSymLast = 1;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task1);
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task2);
+  int makeDevWorkCalls = 0;
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork,
+                             [&](struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*) {
+                               ++makeDevWorkCalls;
+                               return ncclInternalError;
+                             });
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclInternalError);
+  EXPECT_EQ(makeDevWorkCalls, 1);  // task2 is never reached once task1's ncclSymkMakeDevWork call fails
+}
+
+// The first for-loop pass on a fresh channel always sets sChannelId/nChannels directly (not via fracHi).
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_FirstSegment_SetsSChannelIdAndNChannelsOnFreshChannel) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();  // 1 cell, nMaxChannels=2: exact single-channel fill
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  ASSERT_NE(argsBuf, nullptr);
+  auto* works = argsBuf->getWorks(2);
+  EXPECT_EQ(works[0].sChannelId, 0u);
+  EXPECT_EQ(works[0].nChannels, 1u);
+}
+
+// task1 exactly fills channel 0; task2 (last) then starts fresh on channel 1 and ends mid-channel via "<".
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_CellLeftLessThanRemainCell_EndsLastTaskMidChannel) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task1 = SymmetricTaskScheduler_MakeTask();
+  task1.nMaxChannels = 2;
+  task1.count = 2048;  // 2 cells: exactly fills channel 0's cellPerChannel==2 budget
+  task1.isSymLast = 0;
+  ncclTaskColl task2 = SymmetricTaskScheduler_MakeTask();
+  task2.nMaxChannels = 2;
+  task2.count = 1024;  // 1 cell: strictly less than channel 1's remainCell==2 budget
+  task2.isSymLast = 1;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task1);
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task2);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  ASSERT_NE(argsBuf, nullptr);
+  auto* workRange = argsBuf->getWorkRange();
+  EXPECT_EQ(workRange[0].fracHi, uint16_t(0xFFFF));  // task1's exact fill
+  EXPECT_EQ(workRange[1].fracHi, uint16_t(0xFFFF));  // task2's partial fill (fracHi is 0xFFFF either way)
+  auto* works = argsBuf->getWorks(2);
+  EXPECT_EQ(works[1].sChannelId, 1u);
+  EXPECT_EQ(works[1].nChannels, 1u);  // task2 never advanced past its own single (unfinished) channel
+}
+
+// Spans 2 channels with a 0-cell leftover (fuse true by size); a trailing queued task isolates that from queue-empty.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_TaskSpansExactlyTwoChannels_FuseHeuristicTrue) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.nMaxChannels = 2;
+  task.count = 2048;  // 2 cells; cellPerChannel==1: channel 0 overflows, channel 1 exactly finishes (fuses)
+  task.isSymLast = 1;  // stops the loop right after this task, so trailingTask below is never dequeued
+  ncclTaskColl trailingTask = SymmetricTaskScheduler_MakeTask();
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &trailingTask);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  ASSERT_NE(argsBuf, nullptr);
+  auto* works = argsBuf->getWorks(2);
+  EXPECT_EQ(works[0].sChannelId, 0u);
+  EXPECT_EQ(works[0].nChannels, 2u);  // fused: both channels counted on the one devWork entry
+}
+
+// Spans 4 channels (2 middle segments) with a >1-cell leftover and a trailing queued task: both OR arms false.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_TaskSpansFourChannels_MiddleSegments_FuseHeuristicFalse) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.nMaxChannels = 4;
+  task.count = 13312;  // 13 cells; cellPerChannel==4: channels 0,1,2 overflow, channel 3's leftover is 3 cells
+  task.isSymLast = 1;  // stops the loop right after this task, so trailingTask below is never dequeued
+  ncclTaskColl trailingTask = SymmetricTaskScheduler_MakeTask();
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &trailingTask);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  ASSERT_NE(argsBuf, nullptr);
+  auto* works = argsBuf->getWorks(4);
+  auto* workRange = argsBuf->getWorkRange();
+  EXPECT_EQ(works[0].sChannelId, 0u);
+  EXPECT_EQ(works[0].nChannels, 3u);  // not fused: channel 3's leftover is left out of the count
+  // Each of the 4 channels was actually visited (curChannel advanced), not just channel 0 written repeatedly.
+  EXPECT_EQ(workRange[0].fracHi, 20164);
+  EXPECT_EQ(workRange[1].fracHi, 40329);
+  EXPECT_EQ(workRange[2].fracHi, 60494);
+  EXPECT_EQ(workRange[3].fracHi, uint16_t(0xFFFF));
+}
+
+// Same leftover as FuseHeuristicFalse above, but no trailing task: queue-empty alone forces the fuse instead.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_TaskSpansFourChannels_FusesViaQueueEmptyDespiteLargeLeftover) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.nMaxChannels = 4;
+  task.count = 13312;  // same 3-cell leftover on the last segment as the sibling test above
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);  // no trailing task: queue is empty once this is dequeued
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  auto* argsBuf = static_cast<struct ncclSymkDevWorkArgs*>(scene.plan->kernelSymArgs);
+  ASSERT_NE(argsBuf, nullptr);
+  auto* works = argsBuf->getWorks(4);
+  EXPECT_EQ(works[0].nChannels, 4u);  // fused via queue-empty, despite the same large leftover as above
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_PostForLoop_WorkIndexAndCollTaskQueueAndGroupApiEventHandle) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  static int sentinelHandle = 0;
+  task.groupApiEventHandle = &sentinelHandle;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->groupApiEventHandle, &sentinelHandle);
+  ncclTaskColl* queued = ncclIntruQueueHead(&scene.plan->collTaskQueue);
+  ASSERT_NE(queued, nullptr);
+  EXPECT_EQ(queued, &task);
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_IsSymLastBreak_StopsPackingLoopWithMoreTasksQueued) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task1 = SymmetricTaskScheduler_MakeTask();
+  task1.isSymLast = 1;  // breaks here even though task2 below shares its devFuncId
+  ncclTaskColl task2 = SymmetricTaskScheduler_MakeTask();
+  task2.isSymLast = 0;
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task1);
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task2);
+  int makeDevWorkCalls = 0;
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork,
+                             [&](struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*) {
+                               ++makeDevWorkCalls;
+                               return ncclSuccess;
+                             });
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(makeDevWorkCalls, 1);
+}
+
+// This goto fail never sets ret (see Block 12's report), so kernelSymArgs staying null is the real signal here.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ChannelExhaustion_NotIsSymLast_SkipsTailCode) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  task.nMaxChannels = 1;
+  task.isSymLast = 0;  // not last: the exhaustion check below actually gets reached
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(scene.plan->kernelSymArgs, nullptr);
+}
+
