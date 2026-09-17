@@ -7,10 +7,14 @@ HIPCC = $(ROCM_PATH)/bin/hipcc
 # Locate it the same way toolchain-linux.cmake does (bin/ then llvm/bin/); a
 # missing probe compiler must fail loudly, not silently degrade a probe to "no"
 # and recompile the colliding UALoE compat types this build set out to avoid.
-PROBE_CXX ?= $(shell \
+# Use ifeq rather than ?= so an explicitly empty override (PROBE_CXX= make)
+# still triggers detection instead of being treated as already set.
+ifeq ($(strip $(PROBE_CXX)),)
+PROBE_CXX := $(shell \
   for c in $(ROCM_PATH)/bin/amdclang++ $(ROCM_PATH)/llvm/bin/amdclang++ $(ROCM_PATH)/llvm/bin/clang++; do \
     if [ -x "$$c" ]; then echo "$$c"; break; fi; \
   done)
+endif
 ifeq ($(strip $(PROBE_CXX)),)
 $(error Cannot find amdclang++/clang++ under $(ROCM_PATH)/bin or $(ROCM_PATH)/llvm/bin. Set PROBE_CXX explicitly.)
 endif
@@ -52,6 +56,9 @@ endif
 # real temp file (like CMake's check_cxx_source_compiles) with the plain
 # compiler PROBE_CXX rather than piping through hipcc's HIP driver.
 PROBE_TMP := $(shell mktemp --suffix=.cpp)
+ifeq ($(strip $(PROBE_TMP)),)
+$(error Failed to create a temp file for the feature probes. Check that TMPDIR is writable.)
+endif
 
 HAVE_HIP_FABRIC_API := $(shell printf '%s\n' \
   '#include <hip/hip_runtime_api.h>' \
