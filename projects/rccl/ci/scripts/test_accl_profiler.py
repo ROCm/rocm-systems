@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -66,6 +67,11 @@ RUBY_RCCL_ENV = {
     "NCCL_SOCKET_IFNAME": "fenic0",
     "HSA_NO_SCRATCH_RECLAIM": "1",
 }
+
+
+def _raise_keyboard_interrupt(signum, _frame) -> None:
+    """Turn runner termination into the cancellation path for the Slurm job."""
+    raise KeyboardInterrupt(f"received signal {signum}")
 
 
 @dataclass(frozen=True)
@@ -595,6 +601,9 @@ def main() -> int:
         help="Write the Slurm script after artifact discovery without submitting it",
     )
     args = parser.parse_args()
+
+    signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
+    signal.signal(signal.SIGINT, _raise_keyboard_interrupt)
 
     if args.nodes < 1 or args.gpus_per_node < 1:
         parser.error("--nodes and --gpus-per-node must be positive")
