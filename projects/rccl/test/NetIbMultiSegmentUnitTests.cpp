@@ -158,6 +158,11 @@ TEST(NetIbMultiSeg, TrailingSegmentMayBeSmaller) {
     EXPECT_TRUE(ncclIbSegmentsUniform(4, len.data()));
 }
 
+TEST(NetIbMultiSeg, ShortLeadingSegmentAccepted) {
+    std::vector<size_t> len = {kSeg / 2, kSeg, kSeg, kSeg};
+    EXPECT_TRUE(ncclIbSegmentsUniform(4, len.data()));
+}
+
 TEST(NetIbMultiSeg, TrailingSegmentMayNotBeLarger) {
     std::vector<size_t> len = {kSeg, kSeg, kSeg, kSeg * 2};
     EXPECT_FALSE(ncclIbSegmentsUniform(4, len.data()));

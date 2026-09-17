@@ -1359,8 +1359,11 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     qpCreateAttrs.cq = rCommDev->base.cq;
     qpCreateAttrs.pd = rCommDev->base.pd;
     qpCreateAttrs.maxRecvWorkRequest = 0;
-    // GIN flush posts one RDMA read per segment on top of NET_IB_MAX_REQUESTS.
-    qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_FLUSH_WRS;
+    // Classic iflush can post one RDMA_READ per recv per segment (up to
+    // NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS). GIN needs one extra per
+    // segment on top of NET_IB_MAX_REQUESTS.
+    qpCreateAttrs.maxSendWorkRequest =
+      NET_IB_MAX_REQUESTS + NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS;
     qpCreateAttrs.qpContext = &comm->base.stats;
     NCCLCHECK(ncclIbQpCreate(flushQp, &qpCreateAttrs));
     // Loopback flush QP: local and remote device indices are this recv device.
