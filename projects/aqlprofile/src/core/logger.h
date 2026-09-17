@@ -57,6 +57,10 @@ class Logger {
   Logger& operator<<(const T& m) {
     std::ostringstream oss;
     oss << m;
+    // streaming_ controls whether this fragment starts a new log message and
+    // is shared by every caller of the singleton. Keep the state transition
+    // under the same recursive lock used by Log(), Put(), and endl().
+    std::lock_guard<mutex_t> lck(mutex_);
     if (!streaming_)
       Log(oss.str());
     else
@@ -67,11 +71,15 @@ class Logger {
 
   typedef void (*manip_t)();
   Logger& operator<<(manip_t f) {
+    std::lock_guard<mutex_t> lck(mutex_);
     f();
     return *this;
   }
 
-  static void begm() { Instance().messaging_ = true; }
+  static void begm() {
+    std::lock_guard<mutex_t> lck(mutex_);
+    Instance().messaging_ = true;
+  }
   static void endl() { Instance().ResetStreaming(); }
 
   static const std::string& LastMessage() {
