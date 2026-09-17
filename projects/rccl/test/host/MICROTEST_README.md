@@ -280,6 +280,13 @@ Five things do NOT follow the TU-per-file rule, deliberately:
   that target to avoid fakes-versus-fakes duplicate definitions.
 - `rcclParamIntraGraphGen` stays in `fakes/init_fakes.cc` because its owner
   (`graph/rccl_graph_gen.cc:34`) has no fakes file at all.
+- `IsArchMatch` and the `allocTracker` data symbol stay in `p2p-test.cc`
+  itself rather than a fakes file, because neither has an owning production
+  TU to name a fakes file after: `IsArchMatch` is declared in the
+  header-only `archinfo.h`, and `allocTracker` is an `alloc.h` data symbol
+  that only `p2p.cc` references in this target. (The busId helpers alongside
+  them *do* have an owner — `src/misc/utils.cc` — so they live in
+  `fakes/utils_fakes.cc`, not here.)
 
 `<uut>_fakes.h` (e.g. `enqueue_fakes.h`) is an aggregation header: it includes
 the per-TU headers that unit's tests use and declares the `Reset<Uut>Fakes()`
@@ -300,8 +307,10 @@ them to a specific value (for instance, fake
 new-registration happy path can be tested), the recommended pattern
 is:
 
-1. In `fakes/p2p_fakes.cc`, add a `std::function`-typed hook with a
-   default that matches the current constant behaviour:
+1. In the fakes file that owns that module's seams (`fakes/nccl_fakes.cc`
+   for `nccl*` symbols, `fakes/hip_fakes.cc` for HIP runtime symbols), add
+   a `std::function`-typed hook with a default that matches the current
+   constant behaviour:
    ```cpp
    std::function<ncclResult_t(ncclComm*, ncclProxyConnector*, int,
                               void*, int, void*, int)>
@@ -313,8 +322,9 @@ is:
        return g_proxyCallBlocking(c, p, t, req, rs, resp, rsz);
    }
    ```
-2. Expose the hook from a small `fakes/p2p_fakes.h` so tests can
-   install per-test behaviour in a gtest fixture's `SetUp` / `TearDown`.
+2. Expose the hook from the matching header (`fakes/nccl_fakes.h`,
+   `fakes/hip_fakes.h`) so tests can install per-test behaviour in a
+   gtest fixture's `SetUp` / `TearDown`.
 3. Reset the hook to its default in `TearDown` so tests don't
    contaminate each other.
 
@@ -431,7 +441,18 @@ When the link fails with `undefined symbol: foo`, find `foo` and
 triage it into the right bucket:
 
 - **It's a global variable (`extern int foo;`)** → add a definition
-  to `fakes/p2p_fakes.cc`. Use a sensible default (usually zero).
+  to its owning TU's fakes file. If it has no owning TU (e.g. a data
+  symbol declared in a header-only file) and only one test TU
+  references it, define it in that test (the fifth exception above —
+  e.g. the `allocTracker` array in `p2p-test.cc`). Use a sensible
+  default (usually zero).
+- **It's a plain function the module references but doesn't define**
+  → add a definition returning a sensible default to its owning TU's
+  fakes file (e.g. `busIdToInt64` / `getBusId` go in
+  `fakes/utils_fakes.cc`, since `src/misc/utils.cc` owns them). Only
+  when the symbol has no owning TU does it belong in the test itself
+  (the fifth exception above — e.g. `IsArchMatch`, owned by the
+  header-only `archinfo.h`, in `p2p-test.cc`).
 - **It's a logging or env-param helper** → already covered by the
   no-op `ncclDebugLog` / `ncclLoadParam`. If a new logging primitive
   appears, follow the same pattern.
@@ -457,7 +478,7 @@ triage it into the right bucket:
   `cuPointerGetAttribute`, `cuMemCreate`, `cuMemExportToShareableHandle`,
   …) are never ordinary HIP host-runtime symbols, so under
   `rccl-UnitTestsMicro` they always need an explicit definition in
-  `fakes/p2p_fakes.cc`: use the signature the header declares and return a
+  `fakes/hip_fakes.cc`: use the signature the header declares and return a
   failure code (or a canned success) by default — another bucket-C seam
   that gets the function-pointer-hook treatment when a test needs to
   drive it.
@@ -526,7 +547,7 @@ RCCL's canonical build entry point is `./install.sh` (never `cmake`
 directly). The two-phase pattern for this directory is: one full
 `install.sh` to configure + build everything, then a tight
 `make`-only inner loop for every subsequent edit to `p2p-test.cc` or
-`fakes/p2p_fakes.cc`.
+the `fakes/*.cc` it links against.
 
 ### Initial (one-time) build
 

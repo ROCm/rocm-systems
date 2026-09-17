@@ -10,6 +10,9 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <optional>
@@ -17,7 +20,8 @@
 #include <vector>
 
 #include "ScopedHook.h"
-#include "fakes/p2p_fakes.h"
+#include "fakes/nccl_fakes.h"
+#include "fakes/hip_fakes.h"
 
 // Pull in alloc.h NOW so its macros (ncclCudaCallocAsync etc.) are visible
 // to be #undef'd. p2p.cc's transitive includes would otherwise be the first
@@ -30,9 +34,23 @@
 // would cache their default on first call). See param_redirect.h.
 #include "fakes/param_redirect.h"
 
+// Controllable seams for the two header-only alloc.h templates. Declared
+// here (defined below, after P2P_CC_PATH) because these hooks and the
+// honest-emulator machinery behind them are used only by this test file;
+// the generic, cross-module fakes live under fakes/.
+extern std::function<ncclResult_t(void** ptr, std::size_t nbytes, hipStream_t)>
+    g_fakeCudaCallocAsync;
+extern std::function<ncclResult_t(void* dst, void* src, std::size_t nbytes, hipStream_t)>
+    g_fakeCudaMemcpyAsync;
+
+// Restore every hook this file drives (plus, transitively, the nccl* and HIP
+// hooks) to its default. Called from the file-wide fixture's TearDown().
+// Defined below, after P2P_CC_PATH.
+static void ResetP2pFakes();
+
 // Macro shim: replace the header-only function templates ncclCudaCallocAsync
 // and ncclCudaMemcpyAsync from alloc.h with thin trampolines that route
-// through hookable fakes in fakes/p2p_fakes.cc. Without this, p2p.cc's call
+// through hookable fakes defined in this file. Without this, p2p.cc's call
 // sites bind directly to the templates, which hit real HIP runtime (no GPU
 // in this binary by design).
 //
@@ -86,10 +104,77 @@
 #include P2P_CC_PATH
 
 // ===========================================================================
+// p2p.cc link-satisfying stubs + this file's controllable alloc seams.
+//
+// Defined here (not in a shared fakes/ .cc) because they have no owning fakes
+// file: allocTracker is an alloc.h data symbol p2p.cc alone references. The
+// ncclCudaCallocAsync / ncclCudaMemcpyAsync emulators back the macro shims
+// above. They must land after #include P2P_CC_PATH so the production types
+// they mention (allocationTracker, the alloc.h templates, etc.) are already
+// in scope. busIdToInt64 / getBusId are owned by src/misc/utils.cc, so they
+// live in fakes/utils_fakes.cc, not here.
+// ---------------------------------------------------------------------------
+
+// allocTracker is an array of per-device counters in alloc.h; size it to the
+// same MAX_ALLOC_TRACK_NGPU the header uses. Zero-initialised.
+struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
+
+// Controllable seams: ncclCudaCallocAsync / ncclCudaMemcpyAsync. Substitutes
+// for the header-only function templates in alloc.h -- the shim macros above
+// route those call sites here, type-erased to (void*, nbytes), so the test
+// binary never reaches real HIP runtime.
+//
+// Defaults behave like an honest emulator: heap-allocate zeroed memory and
+// memcpy bytes between host pointers. ResetP2pFakes() frees any allocations
+// the default hook handed out so individual tests don't have to. Tests that
+// install their own hook also take responsibility for any memory they hand out.
+//
+// Scope: the shim macros above intercept every call site in the included
+// p2p.cc, not just ipcRegisterBuffer's fresh-registration arm.
+namespace {
+std::vector<void*> g_fakeAllocations;
+
+ncclResult_t DefaultFakeCudaCallocAsync(void** ptr, std::size_t nbytes,
+                                        hipStream_t /*stream*/)
+{
+    if (ptr == nullptr) return ncclInvalidArgument;
+    void* p = std::calloc(1, nbytes);
+    if (p == nullptr && nbytes > 0) return ncclSystemError;
+    g_fakeAllocations.push_back(p);
+    *ptr = p;
+    return ncclSuccess;
+}
+
+ncclResult_t DefaultFakeCudaMemcpyAsync(void* dst, void* src,
+                                        std::size_t nbytes,
+                                        hipStream_t /*stream*/)
+{
+    if (nbytes > 0 && (dst == nullptr || src == nullptr)) return ncclInvalidArgument;
+    if (nbytes > 0) std::memcpy(dst, src, nbytes);
+    return ncclSuccess;
+}
+}  // namespace
+
+std::function<ncclResult_t(void**, std::size_t, hipStream_t)>
+    g_fakeCudaCallocAsync = DefaultFakeCudaCallocAsync;
+std::function<ncclResult_t(void*, void*, std::size_t, hipStream_t)>
+    g_fakeCudaMemcpyAsync = DefaultFakeCudaMemcpyAsync;
+
+static void ResetP2pFakes()
+{
+    g_fakeCudaCallocAsync = DefaultFakeCudaCallocAsync;
+    g_fakeCudaMemcpyAsync = DefaultFakeCudaMemcpyAsync;
+    ResetNcclFakes();  // restore the nccl* hooks owned by nccl_fakes.cc
+    ResetHipFakes();   // restore the HIP hooks owned by hip_fakes.cc
+    for (void* p : g_fakeAllocations) std::free(p);
+    g_fakeAllocations.clear();
+}
+
+// ===========================================================================
 // Default fixture for every test in this file.
 //
 // Several tests install per-test hooks into the controllable seams declared
-// in fakes/p2p_fakes.h (e.g. g_strongStreamAcquire). ResetP2pFakes() puts
+// above (e.g. g_strongStreamAcquire). ResetP2pFakes() puts
 // every hook back to its default in TearDown so tests don't leak state into
 // each other. Tests that don't currently install hooks still use this
 // fixture -- it's the file-wide default so adding a hook to a test that
@@ -331,6 +416,36 @@ auto ForceLegacyIpcCapable()
         if (data && attribute == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE)
             *static_cast<int*>(data) = 1;
         return hipSuccess;
+    };
+}
+
+// CannedRmtRegAddr -- the ncclProxyCallBlocking lambda that every fresh-reg
+// happy path needs: writes a fixed rmtRegAddr into the response buffer so
+// the post-loop bookkeeping fires. It performs no request-struct assertions
+// -- tests that want to pin down the request contents keep their own inline
+// hook (e.g. FreshRegistrationLegacyIpcSucceedsFixture, the cuMem happy-path
+// tests). Install with `ScopedHook proxy(g_proxyCallBlocking,
+// CannedRmtRegAddr(kRmtRegAddr));`.
+inline auto CannedRmtRegAddr(uintptr_t rmtRegAddr)
+{
+    return [rmtRegAddr](struct ncclComm*, struct ncclProxyConnector*, int,
+                        void*, int, void* resp, int respSize) -> ncclResult_t {
+        EXPECT_GE(static_cast<std::size_t>(respSize), sizeof(void*));
+        if (resp && static_cast<std::size_t>(respSize) >= sizeof(void*))
+            std::memcpy(resp, &rmtRegAddr, sizeof(void*));
+        return ncclSuccess;
+    };
+}
+
+// MarkProxyConnInitialized -- the ncclProxyConnect lambda that just marks the
+// gproxyConn slot initialized and succeeds. The common happy-path connect
+// hook; tests that assert the connect arguments keep their own inline hook.
+inline auto MarkProxyConnInitialized()
+{
+    return [](struct ncclComm*, int, int, int,
+              struct ncclProxyConnector* pc) -> ncclResult_t {
+        pc->initialized = true;
+        return ncclSuccess;
     };
 }
 
@@ -899,12 +1014,7 @@ TEST_F(FreshRegistrationMicrotest, ProxyReturnsNullRmtAddrSkipsBookkeeping)
     InstallLegacyCudaRegisterHook();
     auto memGet = MakeDefaultMemGetHook();
     auto ipcGet = MakeDefaultIpcGetHook();
-    ScopedHook connect(g_proxyConnect,
-        [&](struct ncclComm*, int, int, int,
-            struct ncclProxyConnector* pc) -> ncclResult_t {
-            pc->initialized = true;
-            return ncclSuccess;
-        });
+    ScopedHook connect(g_proxyConnect, MarkProxyConnInitialized());
     // The key seam: success, but rmtRegAddr written back as NULL.
     ScopedHook proxy(g_proxyCallBlocking,
         [&](struct ncclComm*, struct ncclProxyConnector*, int,
@@ -970,12 +1080,7 @@ TEST_F(FreshRegistrationMicrotest, SkipsProxyConnectWhenAlreadyInitialized)
             return ncclSystemError;
         });
     ScopedHook proxy(g_proxyCallBlocking,
-        [&](struct ncclComm*, struct ncclProxyConnector*, int,
-            void*, int, void* resp, int respSize) -> ncclResult_t {
-            EXPECT_GE(static_cast<size_t>(respSize), sizeof(void*));
-            if (resp) std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
-            return ncclSuccess;
-        });
+        CannedRmtRegAddr(kRmtRegAddr));
 
     int peerRanks[] = {kPeerRank};
     IpcRegOutputs out;
@@ -1026,19 +1131,8 @@ TEST_F(FreshRegistrationMicrotest, FreesNewInfoOnPostLoopFailure)
     InstallLegacyCudaRegisterHook();
     auto memGet = MakeDefaultMemGetHook();
     auto ipcGet = MakeDefaultIpcGetHook();
-    ScopedHook connect(g_proxyConnect,
-        [&](struct ncclComm*, int, int, int,
-            struct ncclProxyConnector* pc) -> ncclResult_t {
-            pc->initialized = true;
-            return ncclSuccess;
-        });
-    ScopedHook proxy(g_proxyCallBlocking,
-        [&](struct ncclComm*, struct ncclProxyConnector*, int,
-            void*, int, void* resp, int respSize) -> ncclResult_t {
-            EXPECT_GE(static_cast<size_t>(respSize), sizeof(void*));
-            if (resp) std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
-            return ncclSuccess;
-        });
+    ScopedHook connect(g_proxyConnect, MarkProxyConnInitialized());
+    ScopedHook proxy(g_proxyCallBlocking, CannedRmtRegAddr(kRmtRegAddr));
     // Fail in the post-loop strong-stream block. By this point newInfo is
     // allocated and installed into regRecord->ipcInfos[kPeerLocalRank].
     ScopedHook acquire(g_strongStreamAcquire,
@@ -1118,19 +1212,8 @@ TEST_F(FreshRegistrationMicrotest, RegressionNcclIssue1859_SendrecvThenCollectiv
     InstallLegacyCudaRegisterHook();
     auto memGet = MakeDefaultMemGetHook();
     auto ipcGet = MakeDefaultIpcGetHook();
-    ScopedHook connect(g_proxyConnect,
-        [&](struct ncclComm*, int, int, int,
-            struct ncclProxyConnector* pc) -> ncclResult_t {
-            pc->initialized = true;
-            return ncclSuccess;
-        });
-    ScopedHook proxy(g_proxyCallBlocking,
-        [&](struct ncclComm*, struct ncclProxyConnector*, int,
-            void*, int, void* resp, int respSize) -> ncclResult_t {
-            EXPECT_GE(static_cast<size_t>(respSize), sizeof(void*));
-            if (resp) std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
-            return ncclSuccess;
-        });
+    ScopedHook connect(g_proxyConnect, MarkProxyConnInitialized());
+    ScopedHook proxy(g_proxyCallBlocking, CannedRmtRegAddr(kRmtRegAddr));
 
     // g_strongStreamAcquire / g_fakeCudaCallocAsync / g_fakeCudaMemcpyAsync
     // stay at their honest-emulator defaults so the copy block runs against
@@ -1658,13 +1741,7 @@ TEST_F(P2pMicrotest, IpcRegisterBuffer_MultiPeerMixedReuseAndFreshUpdatesDevTabl
             if (h) std::memset(h, 0x5A, sizeof(*h));
             return hipSuccess;
         });
-    ScopedHook proxy(g_proxyCallBlocking,
-        [&](struct ncclComm*, struct ncclProxyConnector*, int,
-            void*, int, void* resp, int respSize) -> ncclResult_t {
-            EXPECT_GE(static_cast<size_t>(respSize), sizeof(void*));
-            if (resp) std::memcpy(resp, &kRmt1Fresh, sizeof(void*));
-            return ncclSuccess;
-        });
+    ScopedHook proxy(g_proxyCallBlocking, CannedRmtRegAddr(kRmt1Fresh));
 
     int peerRanks[] = {kPeer0Rank, kPeer1Rank};
     IpcRegOutputs out;
@@ -1957,6 +2034,37 @@ bool HandleHasSentinel(const hipMemGenericAllocationHandle_t& h)
     return bits == kSentinelHandleBits;
 }
 
+// RetainSentinelHandle -- the hipMemRetainAllocationHandle hook that hands
+// back the sentinel handle and succeeds. The common cuMem-arm entry seam;
+// tests that want to pin the retain address keep their own inline hook (e.g.
+// CuMemSameProcessSucceeds, which also asserts EXPECT_EQ(addr, kBaseAddr)).
+inline auto RetainSentinelHandle()
+{
+    return [](hipMemGenericAllocationHandle_t* h, void*) -> hipError_t {
+        if (h) *h = MakeSentinelHandle();
+        return hipSuccess;
+    };
+}
+
+// FailRetainAllocationHandle -- the hipMemRetainAllocationHandle hook that
+// fails the cuMem-arm entry seam, driving the retry-as-legacy fallback.
+inline auto FailRetainAllocationHandle()
+{
+    return [](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
+        return hipErrorInvalidValue;
+    };
+}
+
+// ExpectReleaseSentinelHandle -- the hipMemRelease hook that asserts it is
+// handed the sentinel handle (the handle-leak guard contract) and succeeds.
+inline auto ExpectReleaseSentinelHandle()
+{
+    return [](hipMemGenericAllocationHandle_t h) -> hipError_t {
+        EXPECT_TRUE(HandleHasSentinel(h));
+        return hipSuccess;
+    };
+}
+
 }  // namespace
 
 // cuMem* arm, sameProcess=true: Retain -> memcpy handle into ipcInfo ->
@@ -1988,11 +2096,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemSameProcessSucceeds)
             ADD_FAILURE() << "sameProcess arm must not call hipMemExportToShareableHandle";
             return hipErrorInvalidValue;
         });
-    ScopedHook release(g_hipMemRelease,
-        [](hipMemGenericAllocationHandle_t h) -> hipError_t {
-            EXPECT_TRUE(HandleHasSentinel(h));
-            return hipSuccess;
-        });
+    ScopedHook release(g_hipMemRelease, ExpectReleaseSentinelHandle());
 
     ScopedHook proxy(g_proxyCallBlocking,
         [&](struct ncclComm*, struct ncclProxyConnector*, int type,
@@ -2069,11 +2173,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemPosixFdSucceeds)
             if (psize) *psize = kBaseSize;
             return hipSuccess;
         });
-    ScopedHook retain(g_hipMemRetainAllocationHandle,
-        [](hipMemGenericAllocationHandle_t* h, void*) -> hipError_t {
-            if (h) *h = MakeSentinelHandle();
-            return hipSuccess;
-        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle, RetainSentinelHandle());
 
     // Hand back a real fd so the subsequent SYSCHECKGOTO(close(expFd))
     // doesn't fail with EBADF. dup(STDERR_FILENO) is cheap and always
@@ -2104,11 +2204,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemPosixFdSucceeds)
             return ncclSuccess;
         });
 
-    ScopedHook release(g_hipMemRelease,
-        [](hipMemGenericAllocationHandle_t h) -> hipError_t {
-            EXPECT_TRUE(HandleHasSentinel(h));
-            return hipSuccess;
-        });
+    ScopedHook release(g_hipMemRelease, ExpectReleaseSentinelHandle());
 
     ScopedHook proxy(g_proxyCallBlocking,
         [&](struct ncclComm*, struct ncclProxyConnector*, int type,
@@ -2180,11 +2276,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemFabricExportFailureReleasesHandle)
             if (psize) *psize = kBaseSize;
             return hipSuccess;
         });
-    ScopedHook retain(g_hipMemRetainAllocationHandle,
-        [](hipMemGenericAllocationHandle_t* h, void*) -> hipError_t {
-            if (h) *h = MakeSentinelHandle();
-            return hipSuccess;
-        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle, RetainSentinelHandle());
     // Export fails on the fabric arm.
     ScopedHook xport(g_hipMemExportToShareableHandle,
         [](void*, hipMemGenericAllocationHandle_t,
@@ -2195,11 +2287,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemFabricExportFailureReleasesHandle)
         });
     // The contract under test: Release fires on the sentinel handle
     // before goto fail (the handle-leak guard).
-    ScopedHook release(g_hipMemRelease,
-        [](hipMemGenericAllocationHandle_t h) -> hipError_t {
-            EXPECT_TRUE(HandleHasSentinel(h));
-            return hipSuccess;
-        });
+    ScopedHook release(g_hipMemRelease, ExpectReleaseSentinelHandle());
     // Proxy register must never fire on this failure path.
     ScopedHook proxy(g_proxyCallBlocking,
         [](struct ncclComm*, struct ncclProxyConnector*, int,
@@ -2280,10 +2368,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureFallsBackToLegacyExport)
         });
 
     // Retain *fails* -- the key seam for this test.
-    ScopedHook retain(g_hipMemRetainAllocationHandle,
-        [](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
-            return hipErrorInvalidValue;
-        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle, FailRetainAllocationHandle());
     // Export and Release must NOT fire on the fallback arm.
     ScopedHook xport(g_hipMemExportToShareableHandle,
         [](void*, hipMemGenericAllocationHandle_t,
@@ -2378,10 +2463,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureDirectModeShortCircuits)
             if (psize) *psize = kBaseSize;
             return hipSuccess;
         });
-    ScopedHook retain(g_hipMemRetainAllocationHandle,
-        [](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
-            return hipErrorInvalidValue;
-        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle, FailRetainAllocationHandle());
     // Nothing else may fire: the guard short-circuits to goto fail
     // before any of these are touched.
     ScopedHook ipcGet(g_hipIpcGetMemHandle,
@@ -2500,13 +2582,7 @@ TEST_F(FreshRegistrationMicrotest, LegacyIpcNullIsLegacyIpcPointerIsSkipped)
     InstallLegacyCudaRegisterHook();
     auto memGet = MakeDefaultMemGetHook();
     auto ipcGet = MakeDefaultIpcGetHook();
-    ScopedHook proxy(g_proxyCallBlocking,
-        [&](struct ncclComm*, struct ncclProxyConnector*, int,
-            void*, int, void* resp, int respSize) -> ncclResult_t {
-            if (resp && static_cast<size_t>(respSize) >= sizeof(void*))
-                std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
-            return ncclSuccess;
-        });
+    ScopedHook proxy(g_proxyCallBlocking, CannedRmtRegAddr(kRmtRegAddr));
 
     int peerRanks[] = {kPeerRank};
     IpcRegOutputs out;
@@ -2539,20 +2615,9 @@ TEST_F(FreshRegistrationMicrotest, CuMemNullIsLegacyIpcPointerSuccessSkipped)
 
     ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
     auto memGet = MakeDefaultMemGetHook();
-    ScopedHook retain(g_hipMemRetainAllocationHandle,
-        [](hipMemGenericAllocationHandle_t* h, void*) -> hipError_t {
-            if (h) *h = MakeSentinelHandle();
-            return hipSuccess;
-        });
-    ScopedHook release(g_hipMemRelease,
-        [](hipMemGenericAllocationHandle_t) -> hipError_t { return hipSuccess; });
-    ScopedHook proxy(g_proxyCallBlocking,
-        [&](struct ncclComm*, struct ncclProxyConnector*, int,
-            void*, int, void* resp, int respSize) -> ncclResult_t {
-            if (resp && static_cast<size_t>(respSize) >= sizeof(void*))
-                std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
-            return ncclSuccess;
-        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle, RetainSentinelHandle());
+    ScopedHook release(g_hipMemRelease, ExpectReleaseSentinelHandle());
+    ScopedHook proxy(g_proxyCallBlocking, CannedRmtRegAddr(kRmtRegAddr));
 
     int peerRanks[] = {kPeerRank};
     IpcRegOutputs out;
@@ -2583,22 +2648,13 @@ TEST_F(FreshRegistrationMicrotest, CuMemNullIsLegacyIpcPointerRetryArmSkipped)
     ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
     InstallLegacyCudaRegisterHook();
     auto memGet = MakeDefaultMemGetHook();
-    ScopedHook retain(g_hipMemRetainAllocationHandle,
-        [](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
-            return hipErrorInvalidValue;
-        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle, FailRetainAllocationHandle());
     ScopedHook ipcGet(g_hipIpcGetMemHandle,
         [](hipIpcMemHandle_t* h, void*) -> hipError_t {
             if (h) std::memset(h, 0x5A, sizeof(*h));
             return hipSuccess;
         });
-    ScopedHook proxy(g_proxyCallBlocking,
-        [&](struct ncclComm*, struct ncclProxyConnector*, int,
-            void*, int, void* resp, int respSize) -> ncclResult_t {
-            if (resp && static_cast<size_t>(respSize) >= sizeof(void*))
-                std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
-            return ncclSuccess;
-        });
+    ScopedHook proxy(g_proxyCallBlocking, CannedRmtRegAddr(kRmtRegAddr));
 
     int peerRanks[] = {kPeerRank};
     IpcRegOutputs out;
@@ -2634,11 +2690,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemFabricExportSucceeds)
 
     ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
     auto memGet = MakeDefaultMemGetHook();
-    ScopedHook retain(g_hipMemRetainAllocationHandle,
-        [](hipMemGenericAllocationHandle_t* h, void*) -> hipError_t {
-            if (h) *h = MakeSentinelHandle();
-            return hipSuccess;
-        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle, RetainSentinelHandle());
     // Fabric export *succeeds* -- the seam under test.
     ScopedHook xport(g_hipMemExportToShareableHandle,
         [](void* shareableHandle, hipMemGenericAllocationHandle_t h,
@@ -2657,18 +2709,8 @@ TEST_F(FreshRegistrationMicrotest, CuMemFabricExportSucceeds)
             }
             return hipSuccess;
         });
-    ScopedHook release(g_hipMemRelease,
-        [](hipMemGenericAllocationHandle_t h) -> hipError_t {
-            EXPECT_TRUE(HandleHasSentinel(h));
-            return hipSuccess;
-        });
-    ScopedHook proxy(g_proxyCallBlocking,
-        [&](struct ncclComm*, struct ncclProxyConnector*, int,
-            void*, int, void* resp, int respSize) -> ncclResult_t {
-            if (resp && static_cast<size_t>(respSize) >= sizeof(void*))
-                std::memcpy(resp, &kRmtRegAddr, sizeof(void*));
-            return ncclSuccess;
-        });
+    ScopedHook release(g_hipMemRelease, ExpectReleaseSentinelHandle());
+    ScopedHook proxy(g_proxyCallBlocking, CannedRmtRegAddr(kRmtRegAddr));
 
     int peerRanks[] = {kPeerRank};
     IpcRegOutputs out;
@@ -2718,10 +2760,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemRetainFailureParamOffShortCircuits)
             if (psize) *psize = kBaseSize;
             return hipSuccess;
         });
-    ScopedHook retain(g_hipMemRetainAllocationHandle,
-        [](hipMemGenericAllocationHandle_t*, void*) -> hipError_t {
-            return hipErrorInvalidValue;
-        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle, FailRetainAllocationHandle());
     ScopedHook ipcGet(g_hipIpcGetMemHandle,
         [](hipIpcMemHandle_t*, void*) -> hipError_t {
             ADD_FAILURE() << "short-circuit must not reach hipIpcGetMemHandle";
