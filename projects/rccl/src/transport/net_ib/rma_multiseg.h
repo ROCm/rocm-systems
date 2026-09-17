@@ -236,4 +236,16 @@ ncclResult_t rcclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff
 ncclResult_t rcclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint32_t rank, void** request);
 ncclResult_t rcclRmaIbProxyTestFailed(struct ncclIbRequest* req, int* done);
 
+// Registration stores MRs/rkeys in recvComm device-slot order. Posts use a
+// peer QP whose remDevIdx/devIndex may name a different physical HCA.
+// Translate physical ibDevN to that registration slot. Unused slots are -1.
+static inline int ncclRmaDevSlotOf(const int* ibDevNs, int rank, int ibDevN, int maxDevsPerNic) {
+  if (ibDevNs == NULL || ibDevN < 0 || rank < 0 || maxDevsPerNic < 1) return -1;
+  const int* slots = ibDevNs + (size_t)rank * (size_t)maxDevsPerNic;
+  for (int d = 0; d < maxDevsPerNic; d++) {
+    if (slots[d] == ibDevN) return d;
+  }
+  return -1;
+}
+
 #endif
