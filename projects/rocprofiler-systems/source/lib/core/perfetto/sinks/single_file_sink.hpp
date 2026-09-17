@@ -45,7 +45,7 @@ public:
 private:
     static constexpr std::uint32_t PER_SOURCE_SEQ_ID_BASE_STRIDE = 1u << 16;
 
-    static constexpr std::uint64_t TRUSTED_SEQ_ID_MAX_EXCLUSIVE =
+    static constexpr std::uint64_t k_trusted_seq_id_max_exclusive =
         static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
     std::string                            m_output_filename_override;
     std::vector<char>                      m_buffer;
@@ -53,7 +53,7 @@ private:
     std::uint64_t                          m_next_source_base{ 1 };
     bool                                   m_append_mode{ false };
     std::uint32_t m_source_stride{ PER_SOURCE_SEQ_ID_BASE_STRIDE };
-    std::uint64_t m_seq_id_window_limit_exclusive{ TRUSTED_SEQ_ID_MAX_EXCLUSIVE };
+    std::uint64_t m_seq_id_window_limit_exclusive{ k_trusted_seq_id_max_exclusive };
     bool          m_output_disabled{ false };
 };
 }  // namespace core

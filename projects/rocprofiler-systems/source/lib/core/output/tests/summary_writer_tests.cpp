@@ -219,25 +219,25 @@ TEST(write_summary, relative_path_renders_as_absolute)
 
 TEST(write_summary, multi_process_tree_renders_parent_and_child)
 {
-    const pid_t           root  = getpid();
-    constexpr pid_t       child = 700;
+    const pid_t           root    = getpid();
+    constexpr pid_t       k_child = 700;
     std::vector<artifact> rows{
         artifact{ .path       = "/tmp/rocprofsys-test/root.proto",
                  .pid        = root,
                  .size_bytes = 0,
                  .format     = output_format::perfetto },
         artifact{ .path       = "/tmp/rocprofsys-test/child.proto",
-                 .pid        = child,
+                 .pid        = k_child,
                  .size_bytes = 0,
                  .format     = output_format::perfetto }
     };
     std::vector<process_metadata> processes{
         process_metadata{ .pid = root, .ppid = -1, .command = "root" },
-        process_metadata{ .pid = child, .ppid = root, .command = "child" }
+        process_metadata{ .pid = k_child, .ppid = root, .command = "child" }
     };
 
     const std::string out = render(rows, processes);
     EXPECT_NE(out.find(fmt::format("[{}]", root)), std::string::npos);
-    EXPECT_NE(out.find(fmt::format("[{}]", child)), std::string::npos);
+    EXPECT_NE(out.find(fmt::format("[{}]", k_child)), std::string::npos);
     EXPECT_NE(out.find("main"), std::string::npos);
 }

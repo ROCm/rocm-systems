@@ -2,13 +2,19 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/output/process_tree.hpp"
+#include "core/output/artifact.hpp"
+#include "core/output/process_metadata.hpp"
 
 #include <algorithm>
 #include <iterator>
 #include <ranges>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
+
+#include <sys/types.h>
 
 namespace rocprofsys::output
 {
@@ -183,7 +189,7 @@ build_children_index(std::span<const pid_t>                         sorted_pids,
     for(pid_t pid : sorted_pids)
     {
         const auto& meta = nodes.at(pid).meta;
-        if(meta.ppid != NO_PID && nodes.contains(meta.ppid))
+        if(meta.ppid != k_no_pid && nodes.contains(meta.ppid))
         {
             children_by_ppid[meta.ppid].push_back(pid);
         }
@@ -203,7 +209,7 @@ find_root_pids(std::span<const pid_t>                         sorted_pids,
     for(pid_t pid : sorted_pids)
     {
         const auto& meta = nodes.at(pid).meta;
-        if(meta.ppid == NO_PID || !nodes.contains(meta.ppid))
+        if(meta.ppid == k_no_pid || !nodes.contains(meta.ppid))
         {
             root_pids.push_back(pid);
         }
