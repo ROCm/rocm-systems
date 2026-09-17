@@ -4103,17 +4103,6 @@ static ncclResult_t rmaTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
   return ncclSuccess;
 }
 
-static inline bool rcclBuffersOverlap(const void* sendbuf, const void* recvbuf, size_t totalBytes) {
-  if (!sendbuf || !recvbuf || totalBytes == 0) return false;
-  uintptr_t sendStart = reinterpret_cast<uintptr_t>(sendbuf);
-  uintptr_t sendEnd   = sendStart + totalBytes;
-  uintptr_t recvStart = reinterpret_cast<uintptr_t>(recvbuf);
-  uintptr_t recvEnd   = recvStart + totalBytes;
-
-  // Interval intersection check
-  return (sendStart < recvEnd) && (recvStart < sendEnd);
-}
-
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
 RCCL_PARAM_DECLARE(CeAllReduce);
 RCCL_PARAM(ForceCe, "FORCE_CE", 1);
@@ -4296,15 +4285,6 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       ncclDevrFindWindow(comm, info->recvbuff, &recvWin);
 
       bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
-      size_t allToAllTotalBytes = comm->nRanks * info->count * ncclTypeSize(info->datatype);
-      // Check if sendbuff and recvbuff overlap
-      bool isOverlapping = rcclBuffersOverlap(info->sendbuff, info->recvbuff, allToAllTotalBytes);
-      if (isOverlapping && info->coll == ncclFuncAlltoAll) {
-        WARN("AllToAll: Overlapping/In-Place buffers detected [%p, %p) vs [%p, %p). "
-            "this may lead to data corruption.",
-            info->sendbuff, (const char*)(info->sendbuff) + allToAllTotalBytes,
-            info->recvbuff, (const char*)(info->recvbuff) + allToAllTotalBytes);
-      }
 
       // CE collectives are not graph-capture-safe (hipMemcpyBatchAsync and the
       // cross-rank memop barrier deadlock on graph replay), so skip CE entirely
