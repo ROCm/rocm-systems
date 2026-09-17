@@ -439,7 +439,7 @@ static __forceinline void cpu_relax() {
 }
 
 static __forceinline void store_fence() {
-#if __has_builtin(__builtin_ia32_sfence) || defined(__x86_64__) || defined(__i386__)
+#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
   __builtin_ia32_sfence();
 #elif defined(_MSC_VER) || defined(__powerpc64__) || defined(__PPC64__)
   _mm_sfence();
@@ -451,7 +451,7 @@ static __forceinline void store_fence() {
 }
 
 static __forceinline void memory_fence() {
-#if __has_builtin(__builtin_ia32_mfence) || defined(__x86_64__) || defined(__i386__)
+#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
   __builtin_ia32_mfence();
 #elif defined(_MSC_VER) || defined(__powerpc64__) || defined(__PPC64__)
   _mm_mfence();
@@ -463,7 +463,7 @@ static __forceinline void memory_fence() {
 }
 
 static __forceinline void cacheline_flush(const void* p) {
-#if __has_builtin(__builtin_ia32_clflush) || defined(__x86_64__) || defined(__i386__)
+#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__)
   __builtin_ia32_clflush(p);
 #elif defined(_MSC_VER) || defined(__powerpc64__) || defined(__PPC64__)
   _mm_clflush(p);
