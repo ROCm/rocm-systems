@@ -98,8 +98,11 @@ jobs:
             enable_expensive_checks: 0
             sanitizer_runtime: STATIC
             run_simulator_corpus: true
-            corpus_soft_timeout: 30
-            corpus_hard_timeout: 60
+            # Each simulator process can use many host threads. Bound Release
+            # fanout so long FPSAN cases do not starve under runner load.
+            corpus_worker_limit: 4
+            corpus_soft_timeout: 360
+            corpus_hard_timeout: 600
             corpus_rerun_timeout: 600
             corpus_sanitizer: none
           - name: asan-ubsan
@@ -121,6 +124,7 @@ jobs:
             sanitizer_runtime: SHARED
           - name: tsan-concurrency-surfaces
             run_simulator_corpus: true
+            corpus_worker_limit: 4
             corpus_soft_timeout: 240
             corpus_hard_timeout: 480
             corpus_rerun_timeout: 1200
@@ -146,6 +150,7 @@ jobs:
             enable_expensive_checks: 0
             sanitizer_runtime: SHARED
             run_simulator_corpus: false
+            corpus_worker_limit: 16
             corpus_soft_timeout: 0
             corpus_hard_timeout: 0
             corpus_rerun_timeout: 0
@@ -169,6 +174,7 @@ jobs:
             c_compiler: gcc
             cxx_compiler: g++
             run_simulator_corpus: true
+            corpus_worker_limit: 4
             corpus_soft_timeout: 240
             corpus_hard_timeout: 480
             corpus_rerun_timeout: 1200
@@ -286,6 +292,7 @@ jobs:
             "DaemonTest\.HipMemcpyRoundTripFloat"
             "DaemonTest\.HipMemcpyRoundTripInt"
             "DaemonTest\.HipMemcpyDeviceToDevice"
+            "DaemonTest\.HipMaskedStreamLdsReuse"
             "DaemonTest\.TwoIndependentClients"
             # This test has a five-second wall-clock assertion that becomes
             # load-sensitive at the TSan job's CI-level parallelism.
@@ -351,6 +358,7 @@ jobs:
             -DRJ_ENABLE_MSAN=${{ matrix.enable_msan }} \
             -DRJ_ENABLE_ASSERTIONS=${{ matrix.enable_assertions }} \
             -DRJ_ENABLE_EXPENSIVE_CHECKS=${{ matrix.enable_expensive_checks }} \
+            -DROCJITSU_ENABLE_PERFSIM_PLUGIN=ON \
             -DRJ_SANITIZER_RUNTIME=${{ matrix.sanitizer_runtime }}
 
           # Set a conservative number of workers to avoid OOM and excessive system load.
@@ -470,9 +478,10 @@ jobs:
 
           corpus_test_status=0
 
+          WORKER_LIMIT=${{ matrix.corpus_worker_limit }}
           WORKERS="$(nproc)"
-          if (( WORKERS > 16 )); then
-            WORKERS=16
+          if (( WORKERS > WORKER_LIMIT )); then
+            WORKERS="${WORKER_LIMIT}"
           fi
           corpus_test_flags=(
             --workers "${WORKERS}"

@@ -21,9 +21,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 namespace detail
@@ -349,7 +347,7 @@ unified_memory_processor_t::classify_direction(const std::string& src_label,
 }
 
 std::optional<std::pair<std::string, std::string>>
-unified_memory_processor_t::parse_agent_ids_from_args(const std::string& args_str) const
+unified_memory_processor_t::parse_agent_ids_from_args(std::string_view args_str) const
 {
     std::string src_agent;
     std::string dst_agent;
@@ -518,5 +516,4 @@ unified_memory_processor_t::write_json_output(std::ostream& out) const
     out << root.dump(2);
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

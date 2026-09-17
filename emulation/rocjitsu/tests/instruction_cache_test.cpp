@@ -14,6 +14,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -21,29 +22,100 @@
 namespace {
 
 using rocjitsu::amdgpu::GpuMemory;
+using rocjitsu::amdgpu::GpuVm;
 using rocjitsu::amdgpu::InstructionCache;
 namespace amdgpu = rocjitsu::amdgpu;
 
 constexpr uint64_t kCodeBase = 0x200000;
 
 /// @brief Fill @p bytes of code memory at kCodeBase with a per-byte pattern.
-std::vector<uint8_t> fill_code(GpuMemory &memory, size_t bytes, uint8_t salt, uint32_t vmid = 0) {
+std::vector<uint8_t> fill_code(GpuMemory &memory, size_t bytes, uint8_t salt) {
   std::vector<uint8_t> expected(bytes);
   for (size_t i = 0; i < bytes; ++i)
     expected[i] = static_cast<uint8_t>((i * 7) ^ salt);
-  memory.write_block(kCodeBase, std::span<const uint8_t>(expected), vmid);
+  memory.write_block(kCodeBase, std::span<const uint8_t>(expected));
   return expected;
 }
 
-std::array<uint8_t, InstructionCache::kFetchBytes>
-fetch_at(InstructionCache &icache, const GpuMemory &memory, uint64_t pc, uint32_t vmid = 0) {
+std::array<uint8_t, InstructionCache::kFetchBytes> fetch_at(InstructionCache &icache,
+                                                            const GpuMemory &memory, uint64_t pc) {
   std::array<uint8_t, InstructionCache::kFetchBytes> got{};
-  icache.fetch(memory, pc, vmid, got.data());
+  icache.fetch(memory, pc, got.data());
+  return got;
+}
+
+class ExecutableAddressSpace final : public amdgpu::AddressSpaceTranslator,
+                                     public amdgpu::PhysicalMemoryAccess {
+public:
+  explicit ExecutableAddressSpace(uint8_t value, size_t size = InstructionCache::kLineSize * 2)
+      : bytes_(size, static_cast<std::byte>(value)) {}
+
+  void fill(uint8_t value) { std::ranges::fill(bytes_, static_cast<std::byte>(value)); }
+
+  amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
+                                        amdgpu::VmAccessKind access) const override {
+    if (access != amdgpu::VmAccessKind::Read && access != amdgpu::VmAccessKind::Execute)
+      return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    if (address < kCodeBase || size == 0 || address - kCodeBase > bytes_.size() ||
+        size > bytes_.size() - (address - kCodeBase)) {
+      return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    }
+    return {
+        .outcome = amdgpu::VmAccessOutcome::Complete,
+        .translation = {.domain = amdgpu::VmMemoryDomain::System,
+                        .address = address - kCodeBase,
+                        .contiguous_bytes = bytes_.size() - (address - kCodeBase),
+                        .mtype = amdgpu::Mtype::RW,
+                        .permissions = {.readable = true, .writable = false, .executable = true}}};
+  }
+
+  amdgpu::VmAccessOutcome read(amdgpu::VmMemoryDomain domain, uint64_t address,
+                               std::span<std::byte> bytes) override {
+    if (domain != amdgpu::VmMemoryDomain::System || address > bytes_.size() ||
+        bytes.size() > bytes_.size() - address) {
+      return amdgpu::VmAccessOutcome::Faulted;
+    }
+    std::copy_n(bytes_.begin() + static_cast<ptrdiff_t>(address), bytes.size(), bytes.begin());
+    return amdgpu::VmAccessOutcome::Complete;
+  }
+
+  amdgpu::VmAccessOutcome write(amdgpu::VmMemoryDomain, uint64_t,
+                                std::span<const std::byte>) override {
+    return amdgpu::VmAccessOutcome::Faulted;
+  }
+
+private:
+  std::vector<std::byte> bytes_;
+};
+
+std::array<uint8_t, InstructionCache::kFetchBytes>
+fetch_at(InstructionCache &icache, const amdgpu::GpuVmAccess &access, uint64_t pc = kCodeBase) {
+  std::array<uint8_t, InstructionCache::kFetchBytes> got{};
+  EXPECT_EQ(icache.fetch(access, pc, got.data()), amdgpu::VmAccessOutcome::Complete);
   return got;
 }
 
 // Every four-byte-aligned PC in a two-line window, including the offsets whose
 // fetch window runs off the end of a line, must return the backing bytes.
+TEST(InstructionCacheTest, PeekOnlyReturnsPresentAlignedWordsForTheOwningVmid) {
+  GpuMemory memory("peek_memory");
+  InstructionCache cache;
+  constexpr uint64_t pc = 0x4000;
+  constexpr uint32_t value = 0x12345678;
+  uint32_t word = 0;
+  memory.write32(pc + 60, value);
+  EXPECT_FALSE(cache.peek_word(pc + 60, 0, word));
+  uint8_t fetched[InstructionCache::kFetchBytes];
+  cache.fetch(memory, pc, fetched);
+  ASSERT_TRUE(cache.peek_word(pc + 60, 0, word));
+  EXPECT_EQ(word, value);
+  EXPECT_FALSE(cache.peek_word(pc + 61, 0, word));
+  EXPECT_FALSE(cache.peek_word(pc + 60, 1, word));
+  EXPECT_FALSE(cache.peek_word(pc + InstructionCache::kCacheBytes + 60, 0, word));
+  cache.invalidate_all();
+  EXPECT_FALSE(cache.peek_word(pc + 60, 0, word));
+}
+
 TEST(InstructionCacheTest, FetchMatchesBackingMemoryAtEveryAlignedOffset) {
   GpuMemory memory("memory");
   InstructionCache icache;
@@ -95,34 +167,108 @@ TEST(InstructionCacheTest, CachedLineSurvivesABackingWriteUntilInvalidated) {
   EXPECT_TRUE(std::equal(after.begin(), after.end(), second.begin()));
 }
 
-// Lines are tagged by vmid, so the same address in two address spaces must not
-// alias even though it selects the same line. vmid 1 has no mapping and no
-// client process, so it reaches the same sparse backing as vmid 0 -- rewriting
-// that backing between the two fetches is what makes the miss observable at
-// all. Without it, dropping the vmid check from line_for() would still pass.
-TEST(InstructionCacheTest, LinesDoNotAliasAcrossVmids) {
+TEST(InstructionCacheTest, DeviceMaintenanceInvalidatesLazilyOnOwningThread) {
   GpuMemory memory("memory");
+  InstructionCache instruction_cache;
+  const std::vector<uint8_t> first = fill_code(memory, InstructionCache::kLineSize, 0x31);
+  const std::array<uint8_t, InstructionCache::kFetchBytes> before =
+      fetch_at(instruction_cache, memory, kCodeBase);
+  ASSERT_TRUE(std::equal(before.begin(), before.end(), first.begin()));
+
+  const uint64_t epoch_before = instruction_cache.coherence_domain()->current_instruction_epoch();
+  std::vector<uint8_t> second(InstructionCache::kLineSize, 0x72);
+  {
+    [[maybe_unused]] amdgpu::DeviceCacheMaintenanceLease maintenance =
+        instruction_cache.coherence_domain()->acquire_cache_maintenance(
+            amdgpu::DeviceCacheOperation::WritebackInvalidate);
+    EXPECT_EQ(instruction_cache.coherence_domain()->current_instruction_epoch(), epoch_before);
+    memory.write_block(kCodeBase, std::span<const uint8_t>(second));
+  }
+  EXPECT_GT(instruction_cache.coherence_domain()->current_instruction_epoch(), epoch_before);
+
+  const std::array<uint8_t, InstructionCache::kFetchBytes> after =
+      fetch_at(instruction_cache, memory, kCodeBase);
+  EXPECT_TRUE(std::equal(after.begin(), after.end(), second.begin()));
+}
+
+// Lines are tagged by address-space identity, so the same virtual address in
+// two address spaces must not alias even though it selects the same line.
+TEST(InstructionCacheTest, LinesDoNotAliasAcrossVmids) {
+  GpuVm gpu_vm;
   InstructionCache icache;
-  const std::vector<uint8_t> vm0 = fill_code(memory, InstructionCache::kLineSize, 0x01, 0);
+  auto vm0 = std::make_shared<ExecutableAddressSpace>(0x01);
+  auto vm1 = std::make_shared<ExecutableAddressSpace>(0x02);
+  const auto handle0 = gpu_vm.register_translated(0, vm0, vm0);
+  const auto handle1 = gpu_vm.register_translated(1, vm1, vm1);
+  ASSERT_TRUE(handle0);
+  ASSERT_TRUE(handle1);
+  const auto access0 = gpu_vm.snapshot(handle0);
+  const auto access1 = gpu_vm.snapshot(handle1);
+  ASSERT_TRUE(access0);
+  ASSERT_TRUE(access1);
 
-  const auto got0 = fetch_at(icache, memory, kCodeBase, 0);
-  EXPECT_TRUE(std::equal(got0.begin(), got0.end(), vm0.begin()));
+  const auto got0 = fetch_at(icache, *access0);
+  EXPECT_TRUE(std::ranges::all_of(got0, [](uint8_t byte) { return byte == 0x01; }));
+  uint32_t legacy_word = 0;
+  EXPECT_FALSE(icache.peek_word(kCodeBase, 0, legacy_word))
+      << "translated code must not satisfy legacy-address-space lookahead";
 
-  // A vmid 1 fetch of the same address must miss and refill, so it sees the
-  // rewritten bytes rather than the line vmid 0 just installed.
-  const std::vector<uint8_t> vm1 = fill_code(memory, InstructionCache::kLineSize, 0x02, 0);
-  ASSERT_NE(vm0, vm1);
-  const auto got1 = fetch_at(icache, memory, kCodeBase, 1);
-  EXPECT_TRUE(std::equal(got1.begin(), got1.end(), vm1.begin()))
+  const auto got1 = fetch_at(icache, *access1);
+  EXPECT_TRUE(std::ranges::all_of(got1, [](uint8_t byte) { return byte == 0x02; }))
       << "the vmid 1 lookup returned vmid 0's line";
 
-  // ...and it must have installed a line under its own tag, not bypassed the
-  // cache: a second rewrite is invisible to the vmid 1 fetch that follows it.
-  const std::vector<uint8_t> vm2 = fill_code(memory, InstructionCache::kLineSize, 0x03, 0);
-  ASSERT_NE(vm1, vm2);
-  const auto again1 = fetch_at(icache, memory, kCodeBase, 1);
-  EXPECT_TRUE(std::equal(again1.begin(), again1.end(), vm1.begin()))
-      << "the vmid 1 fetch did not cache its line";
+  const auto again1 = fetch_at(icache, *access1);
+  EXPECT_EQ(again1, got1) << "the vmid 1 fetch did not cache its line";
+}
+
+TEST(InstructionCacheTest, TranslatedLinesDoNotAliasAcrossRootReplacement) {
+  GpuVm gpu_vm;
+  InstructionCache icache;
+  auto first = std::make_shared<ExecutableAddressSpace>(0x11);
+  const amdgpu::AddressSpaceHandle handle = gpu_vm.register_translated(7, first, first);
+  ASSERT_TRUE(handle);
+  const std::optional<amdgpu::GpuVmAccess> first_access = gpu_vm.snapshot_pinned(handle);
+  ASSERT_TRUE(first_access);
+
+  const auto first_fetch = fetch_at(icache, *first_access);
+  EXPECT_TRUE(std::ranges::all_of(first_fetch, [](uint8_t byte) { return byte == 0x11; }));
+
+  auto replacement = std::make_shared<ExecutableAddressSpace>(0x22);
+  ASSERT_TRUE(gpu_vm.replace_translated(handle, replacement, replacement));
+  const std::optional<amdgpu::GpuVmAccess> replacement_access = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(replacement_access);
+  EXPECT_NE(first_access->cache_namespace(), replacement_access->cache_namespace());
+
+  const auto replacement_fetch = fetch_at(icache, *replacement_access);
+  EXPECT_TRUE(std::ranges::all_of(replacement_fetch, [](uint8_t byte) { return byte == 0x22; }));
+  const auto retained_old_fetch = fetch_at(icache, *first_access);
+  EXPECT_TRUE(std::ranges::all_of(retained_old_fetch, [](uint8_t byte) { return byte == 0x11; }));
+}
+
+TEST(InstructionCacheTest, FetchBypassesAnIncompleteCacheLine) {
+  GpuVm gpu_vm;
+  InstructionCache icache;
+  auto address_space =
+      std::make_shared<ExecutableAddressSpace>(0x11, InstructionCache::kFetchBytes);
+  const amdgpu::AddressSpaceHandle handle =
+      gpu_vm.register_translated(7, address_space, address_space);
+  ASSERT_TRUE(handle);
+  const std::optional<amdgpu::GpuVmAccess> access = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(access);
+
+  const auto first = fetch_at(icache, *access);
+  EXPECT_TRUE(std::ranges::all_of(first, [](uint8_t byte) { return byte == 0x11; }));
+
+  address_space->fill(0x22);
+  const auto second = fetch_at(icache, *access);
+  EXPECT_TRUE(std::ranges::all_of(second, [](uint8_t byte) { return byte == 0x22; }))
+      << "a partial executable extent must not leave a cached full line";
+
+  std::array<uint8_t, InstructionCache::kFetchBytes> invalid{};
+  std::ranges::fill(invalid, uint8_t{0xcc});
+  EXPECT_EQ(icache.fetch(*access, kCodeBase + sizeof(uint32_t), invalid.data()),
+            amdgpu::VmAccessOutcome::Faulted);
+  EXPECT_TRUE(std::ranges::all_of(invalid, [](uint8_t byte) { return byte == 0xcc; }));
 }
 
 // A working set larger than the cache must still read correctly once lines
@@ -187,7 +333,7 @@ public:
   /// @brief Bytes the CU's I$ currently returns for @p pc, without refilling.
   std::array<uint8_t, InstructionCache::kFetchBytes> peek(uint64_t pc = kCodeBase) {
     std::array<uint8_t, InstructionCache::kFetchBytes> got{};
-    cu_->instruction_cache().fetch(memory_, pc, 0, got.data());
+    cu_->instruction_cache().fetch(memory_, pc, got.data());
     return got;
   }
 

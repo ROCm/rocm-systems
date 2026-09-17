@@ -37,9 +37,7 @@
 #    define NUM_ROCPROFSYS_MPIP_WRAPPERS 500
 #endif
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 //
 //--------------------------------------------------------------------------------------//
@@ -59,6 +57,14 @@ activate_mpip();
 //
 template <typename Toolset, typename Tag>
 std::uint64_t deactivate_mpip(std::uint64_t);
+//
+//--------------------------------------------------------------------------------------//
+//
+void
+pause_mpip();
+
+void
+resume_mpip();
 //
 //--------------------------------------------------------------------------------------//
 //
@@ -131,8 +137,8 @@ private:
 //
 //======================================================================================//
 //
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component
+
 //
 //======================================================================================//
 //

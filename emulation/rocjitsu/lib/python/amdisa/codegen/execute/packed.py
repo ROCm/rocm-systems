@@ -548,10 +548,15 @@ def gen_pk_fmac_vop2(dst: list[str], src: list[str]) -> str:
             '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
             '    if (!(exec & (1ULL << lane))) continue;',
             f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);',
+            f'    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, {s0}.size_bits()))',
+            f'      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));',
+            f'    if (amdgpu::dot2_src_needs_half_replication(inst_.src0))',
+            f'      raw0 = (raw0 & 0xffffu) * 0x10001u;',
             f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);',
             f'    uint32_t rawd = amdgpu::RegisterAccess(wf).read_lane({d}, lane);',
-            '    uint32_t r0 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1), static_cast<uint16_t>(rawd), false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
-            '    uint32_t r1 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0 >> 16), static_cast<uint16_t>(raw1 >> 16), static_cast<uint16_t>(rawd >> 16), false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
+            '    const uint32_t omod = amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::PK_F16>(*this, wf);',
+            '    uint32_t r0 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1), static_cast<uint16_t>(rawd), false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
+            '    uint32_t r1 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0 >> 16), static_cast<uint16_t>(raw1 >> 16), static_cast<uint16_t>(rawd >> 16), false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, r0 | (r1 << 16));',
             '  }',
         ]
@@ -567,7 +572,15 @@ def gen_pk_fmac_vop3(dst: list[str], src: list[str]) -> str:
             '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
             '    if (!(exec & (1ULL << lane))) continue;',
             f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);',
+            f'    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, {s0}.size_bits()))',
+            f'      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));',
+            f'    if (amdgpu::dot2_src_needs_half_replication(inst_.src0))',
+            f'      raw0 = (raw0 & 0xffffu) * 0x10001u;',
             f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);',
+            f'    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, {s1}.size_bits()))',
+            f'      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));',
+            f'    if (amdgpu::dot2_src_needs_half_replication(inst_.src1))',
+            f'      raw1 = (raw1 & 0xffffu) * 0x10001u;',
             f'    uint32_t rawd = amdgpu::RegisterAccess(wf).read_lane({d}, lane);',
             '    uint32_t omod = amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), true, inst_.omod);',
             '    uint32_t r0 = amdgpu::fp_mode::fma_f16(static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1), static_cast<uint16_t>(rawd), inst_.abs & 1u, inst_.abs & 2u, false, inst_.neg & 1u, inst_.neg & 2u, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));',
@@ -683,6 +696,139 @@ def gen_pk_ternary_f32(
     )
     L.append('  }')
     return '\n'.join(L)
+
+
+def gen_pk_binop_u64(dst: list[str], src: list[str], op: str) -> str:
+    """Generate packed U64 add/sub with VOP3P source modifiers and clamp.
+
+    The packed pair contains two independent U64 elements.  ``neg`` applies
+    to the low element and ``neg_hi`` to the high element before the binary
+    operation.  A signed 128-bit intermediate preserves the mathematical
+    result until integer clamp has saturated it to the U64 range; without
+    clamp, conversion back to U64 provides the instruction's modulo-2^64
+    result.  Source negation is applied before the arithmetic, and clamp is
+    applied to the resulting mathematical value.
+    """
+    if op not in ('add', 'sub'):
+        raise ValueError(f'unsupported packed U64 binary operation: {op}')
+
+    d, s0, s1 = dst[0], src[0], src[1]
+    operator = '+' if op == 'add' else '-'
+    L = [
+        '  uint64_t exec = wf.exec();',
+        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+        '    if (!(exec & (1ULL << lane))) continue;',
+        f'    const auto lhs = read_pk_u64_pair({s0}, wf, lane);',
+        f'    const auto rhs = read_pk_u64_pair({s1}, wf, lane);',
+        '    const auto apply = [&](uint64_t lhs_value, uint64_t rhs_value,',
+        '                           bool negate_lhs, bool negate_rhs) -> uint64_t {',
+        '      using Wide = util::int128_t;',
+        '      Wide lhs_wide = static_cast<Wide>(lhs_value);',
+        '      Wide rhs_wide = static_cast<Wide>(rhs_value);',
+        '      if (negate_lhs) lhs_wide = -lhs_wide;',
+        '      if (negate_rhs) rhs_wide = -rhs_wide;',
+        f'      const Wide result = lhs_wide {operator} rhs_wide;',
+        '      if (inst_.clamp) {',
+        '        if (result < Wide{}) return 0;',
+        '        constexpr Wide kMax =',
+        '            static_cast<Wide>(std::numeric_limits<uint64_t>::max());',
+        '        if (result > kMax) return std::numeric_limits<uint64_t>::max();',
+        '      }',
+        '      return static_cast<uint64_t>(result);',
+        '    };',
+        '    const uint64_t result_lo =',
+        '        apply(lhs.lo, rhs.lo, (inst_.neg & 1u) != 0, (inst_.neg & 2u) != 0);',
+        '    const uint64_t result_hi = apply(lhs.hi, rhs.hi,',
+        '                                     (inst_.neg_hi & 1u) != 0,',
+        '                                     (inst_.neg_hi & 2u) != 0);',
+        f'    write_pk_u64_pair({d}, wf, lane, {{result_lo, result_hi}});',
+        '  }',
+    ]
+    return '\n'.join(L)
+
+
+def gen_pk_binop_f64(dst: list[str], src: list[str], op: str) -> str:
+    """Generate two-element packed F64 add/mul/minNum/maxNum execution."""
+    operations = {
+        'add': 'Add',
+        'mul': 'Multiply',
+        'max_num': 'MaximumNumber',
+        'min_num': 'MinimumNumber',
+    }
+    try:
+        operation = operations[op]
+    except KeyError as exc:
+        raise ValueError(f'unsupported packed F64 binary operation: {op}') from exc
+
+    d, s0, s1 = dst[0], src[0], src[1]
+    return '\n'.join(
+        [
+            '  uint64_t exec = wf.exec();',
+            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+            '    if (!(exec & (1ULL << lane))) continue;',
+            f'    const auto lhs = read_pk_u64_pair({s0}, wf, lane);',
+            f'    const auto rhs = read_pk_u64_pair({s1}, wf, lane);',
+            '    constexpr uint64_t kSignBit = 0x8000000000000000ULL;',
+            '    const auto apply = [&](uint64_t lhs_bits, uint64_t rhs_bits,',
+            '                           bool negate_lhs, bool negate_rhs) {',
+            '      if (negate_lhs) lhs_bits ^= kSignBit;',
+            '      if (negate_rhs) rhs_bits ^= kSignBit;',
+            '      uint64_t result = amdgpu::fp_mode::binary_f64(',
+            f'          lhs_bits, rhs_bits, amdgpu::fp_mode::BinaryF64Op::{operation},',
+            '          wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());',
+            '      return amdgpu::fp_mode::finish_f64(',
+            '          result, wf.fp_round_mode_f16_f64(), 0, inst_.clamp,',
+            '          amdgpu::floating_clamp_nan_to_zero(wf));',
+            '    };',
+            '    const uint64_t result_lo =',
+            '        apply(lhs.lo, rhs.lo, (inst_.neg & 1u) != 0, (inst_.neg & 2u) != 0);',
+            '    const uint64_t result_hi = apply(lhs.hi, rhs.hi,',
+            '                                     (inst_.neg_hi & 1u) != 0,',
+            '                                     (inst_.neg_hi & 2u) != 0);',
+            f'    write_pk_u64_pair({d}, wf, lane, {{result_lo, result_hi}});',
+            '  }',
+        ]
+    )
+
+
+def gen_pk_ternary_f64(dst: list[str], src: list[str], op: str) -> str:
+    """Generate two-element packed F64 fused multiply-add execution."""
+    if op != 'fma':
+        raise ValueError(f'unsupported packed F64 ternary operation: {op}')
+
+    d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
+    return '\n'.join(
+        [
+            '  uint64_t exec = wf.exec();',
+            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+            '    if (!(exec & (1ULL << lane))) continue;',
+            f'    const auto multiplicand = read_pk_u64_pair({s0}, wf, lane);',
+            f'    const auto multiplier = read_pk_u64_pair({s1}, wf, lane);',
+            f'    const auto addend = read_pk_u64_pair({s2}, wf, lane);',
+            '    constexpr uint64_t kSignBit = 0x8000000000000000ULL;',
+            '    const auto apply = [&](uint64_t multiplicand_bits, uint64_t multiplier_bits,',
+            '                           uint64_t addend_bits, bool negate_multiplicand,',
+            '                           bool negate_multiplier, bool negate_addend) {',
+            '      if (negate_multiplicand) multiplicand_bits ^= kSignBit;',
+            '      if (negate_multiplier) multiplier_bits ^= kSignBit;',
+            '      if (negate_addend) addend_bits ^= kSignBit;',
+            '      uint64_t result = amdgpu::fp_mode::fma_f64(',
+            '          multiplicand_bits, multiplier_bits, addend_bits,',
+            '          wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());',
+            '      return amdgpu::fp_mode::finish_f64(',
+            '          result, wf.fp_round_mode_f16_f64(), 0, inst_.clamp,',
+            '          amdgpu::floating_clamp_nan_to_zero(wf));',
+            '    };',
+            '    const uint64_t result_lo = apply(',
+            '        multiplicand.lo, multiplier.lo, addend.lo, (inst_.neg & 1u) != 0,',
+            '        (inst_.neg & 2u) != 0, (inst_.neg & 4u) != 0);',
+            '    const uint64_t result_hi = apply(',
+            '        multiplicand.hi, multiplier.hi, addend.hi, (inst_.neg_hi & 1u) != 0,',
+            '        (inst_.neg_hi & 2u) != 0, (inst_.neg_hi & 4u) != 0);',
+            f'    write_pk_u64_pair({d}, wf, lane, {{result_lo, result_hi}});',
+            '  }',
+        ]
+    )
 
 
 def gen_pk_lshl_add_u64(dst: list[str], src: list[str]) -> str:

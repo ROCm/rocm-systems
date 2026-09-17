@@ -39,7 +39,12 @@ FlatLoadUbyteFlat::FlatLoadUbyteFlat(const MachineInst *inst)
   }
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -81,7 +86,12 @@ FlatLoadSbyteFlat::FlatLoadSbyteFlat(const MachineInst *inst)
   }
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -123,7 +133,12 @@ FlatLoadUshortFlat::FlatLoadUshortFlat(const MachineInst *inst)
   }
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -165,7 +180,12 @@ FlatLoadSshortFlat::FlatLoadSshortFlat(const MachineInst *inst)
   }
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -207,7 +227,12 @@ FlatLoadDwordFlat::FlatLoadDwordFlat(const MachineInst *inst)
   }
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -249,7 +274,12 @@ FlatLoadDwordx2Flat::FlatLoadDwordx2Flat(const MachineInst *inst)
   }
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -291,7 +321,12 @@ FlatLoadDwordx4Flat::FlatLoadDwordx4Flat(const MachineInst *inst)
   }
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -333,7 +368,12 @@ FlatLoadDwordx3Flat::FlatLoadDwordx3Flat(const MachineInst *inst)
   }
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -375,7 +415,14 @@ FlatStoreByteFlat::FlatStoreByteFlat(const MachineInst *inst)
   }
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VSCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -417,7 +464,14 @@ FlatStoreByteD16HiFlat::FlatStoreByteD16HiFlat(const MachineInst *inst)
   }
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VSCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -459,7 +513,14 @@ FlatStoreShortFlat::FlatStoreShortFlat(const MachineInst *inst)
   }
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VSCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -501,7 +562,14 @@ FlatStoreShortD16HiFlat::FlatStoreShortD16HiFlat(const MachineInst *inst)
   }
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VSCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -543,7 +611,14 @@ FlatStoreDwordFlat::FlatStoreDwordFlat(const MachineInst *inst)
   }
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VSCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -585,7 +660,14 @@ FlatStoreDwordx2Flat::FlatStoreDwordx2Flat(const MachineInst *inst)
   }
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VSCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -627,7 +709,14 @@ FlatStoreDwordx4Flat::FlatStoreDwordx4Flat(const MachineInst *inst)
   }
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VSCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -669,7 +758,14 @@ FlatStoreDwordx3Flat::FlatStoreDwordx3Flat(const MachineInst *inst)
   }
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VSCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -711,7 +807,12 @@ FlatLoadUbyteD16Flat::FlatLoadUbyteD16Flat(const MachineInst *inst)
   }
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -760,7 +861,12 @@ FlatLoadUbyteD16HiFlat::FlatLoadUbyteD16HiFlat(const MachineInst *inst)
   }
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -809,7 +915,12 @@ FlatLoadSbyteD16Flat::FlatLoadSbyteD16Flat(const MachineInst *inst)
   }
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -858,7 +969,12 @@ FlatLoadSbyteD16HiFlat::FlatLoadSbyteD16HiFlat(const MachineInst *inst)
   }
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -907,7 +1023,12 @@ FlatLoadShortD16Flat::FlatLoadShortD16Flat(const MachineInst *inst)
   }
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -956,7 +1077,12 @@ FlatLoadShortD16HiFlat::FlatLoadShortD16HiFlat(const MachineInst *inst)
   }
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       amdgpu::MemoryCompletionClass::VMEM},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1010,7 +1136,16 @@ FlatAtomicSwapFlat::FlatAtomicSwapFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1057,7 +1192,16 @@ FlatAtomicCmpswapFlat::FlatAtomicCmpswapFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1104,7 +1248,16 @@ FlatAtomicAddFlat::FlatAtomicAddFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1151,7 +1304,16 @@ FlatAtomicSubFlat::FlatAtomicSubFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1198,7 +1360,16 @@ FlatAtomicSminFlat::FlatAtomicSminFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1245,7 +1416,16 @@ FlatAtomicUminFlat::FlatAtomicUminFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1292,7 +1472,16 @@ FlatAtomicSmaxFlat::FlatAtomicSmaxFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1339,7 +1528,16 @@ FlatAtomicUmaxFlat::FlatAtomicUmaxFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1386,7 +1584,16 @@ FlatAtomicAndFlat::FlatAtomicAndFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1433,7 +1640,16 @@ FlatAtomicOrFlat::FlatAtomicOrFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1480,7 +1696,16 @@ FlatAtomicXorFlat::FlatAtomicXorFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1527,7 +1752,16 @@ FlatAtomicIncFlat::FlatAtomicIncFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1574,7 +1808,16 @@ FlatAtomicDecFlat::FlatAtomicDecFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1621,7 +1864,16 @@ FlatAtomicFcmpswapFlat::FlatAtomicFcmpswapFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1668,7 +1920,16 @@ FlatAtomicFminFlat::FlatAtomicFminFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1715,7 +1976,16 @@ FlatAtomicFmaxFlat::FlatAtomicFmaxFlat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1762,7 +2032,16 @@ FlatAtomicSwapX2Flat::FlatAtomicSwapX2Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1809,7 +2088,16 @@ FlatAtomicCmpswapX2Flat::FlatAtomicCmpswapX2Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1856,7 +2144,16 @@ FlatAtomicAddX2Flat::FlatAtomicAddX2Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1903,7 +2200,16 @@ FlatAtomicSubX2Flat::FlatAtomicSubX2Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1950,7 +2256,16 @@ FlatAtomicSminX2Flat::FlatAtomicSminX2Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -1997,7 +2312,16 @@ FlatAtomicUminX2Flat::FlatAtomicUminX2Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2044,7 +2368,16 @@ FlatAtomicSmaxX2Flat::FlatAtomicSmaxX2Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2091,7 +2424,16 @@ FlatAtomicUmaxX2Flat::FlatAtomicUmaxX2Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2138,7 +2480,16 @@ FlatAtomicAndX2Flat::FlatAtomicAndX2Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2185,7 +2536,16 @@ FlatAtomicOrX2Flat::FlatAtomicOrX2Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2232,7 +2592,16 @@ FlatAtomicXorX2Flat::FlatAtomicXorX2Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2279,7 +2648,16 @@ FlatAtomicIncX2Flat::FlatAtomicIncX2Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2326,7 +2704,16 @@ FlatAtomicDecX2Flat::FlatAtomicDecX2Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2373,7 +2760,16 @@ FlatAtomicFcmpswapX2Flat::FlatAtomicFcmpswapX2Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2420,7 +2816,16 @@ FlatAtomicFminX2Flat::FlatAtomicFminX2Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -2467,7 +2872,16 @@ FlatAtomicFmaxX2Flat::FlatAtomicFmaxX2Flat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flat_scratch.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{
+           ((inst_.glc != 0) ? amdgpu::WaitCounterType::VMCNT : amdgpu::WaitCounterType::VSCNT),
+           ((inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM
+                             : amdgpu::MemoryCompletionClass::UNORDERED)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}
+                       : amdgpu::MemoryCounterObligation{}),
+       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 

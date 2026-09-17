@@ -10,8 +10,7 @@
 /// AQL queue) and selects the oldest ready WG from the least recently used queue
 /// for dispatch. All wavefronts of a workgroup land on the same CU.
 
-#ifndef ROCJITSU_VM_AMDGPU_SPI_H_
-#define ROCJITSU_VM_AMDGPU_SPI_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
@@ -112,11 +111,13 @@ public:
             wg.global_wg_id, wg.entry->kernel_entry_pc, wg.entry->sgprs_per_wf,
             WaveVgprAllocation{wg.entry->vgprs_per_wf, wg.entry->ordinary_vgprs_per_wf,
                                wg.entry->accvgprs_per_wf},
-            wg.entry->kernel_wave_size, wg.entry->dispatch_id);
+            wg.entry->kernel_wave_size, wg.entry->dispatch_id, wg.entry->scratch_wave_limit_per_se);
         assert(wf && "dispatch_wf failed after select_cu returned a CU");
         wf->set_lds_base(lds_base);
         wf->set_lds_size(util::align_up(wg.entry->group_segment_fixed_size, 256u));
         wf->set_lds(placement->lds);
+        wf->set_dispatch_id(wg.entry->dispatch_id);
+        wf->set_address_space(wg.entry->address_space);
         wf->set_process_id(wg.entry->process_id);
         wf->set_queue_id(wg.entry->queue_id);
         wf->set_exec(initial_exec_mask_for_wave(*wg.entry, wg.global_wg_id, w, wf->wf_size()));
@@ -194,12 +195,15 @@ public:
     for (size_t attempt = 0; attempt < cus_.size(); ++attempt) {
       size_t idx = (next_cu_ + attempt) % cus_.size();
       auto *cu = cus_[idx];
+      if (!entry.allows_cu(cu))
+        continue;
       const size_t wgp_index = cu_to_wgp_[idx];
       if (wgp_index != std::numeric_limits<size_t>::max() &&
           wgps_[wgp_index]->active_workgroups != 0)
         continue;
       if (!cu->can_accept_workgroup(entry.wfs_per_workgroup, entry.sgprs_per_wf, entry.vgprs_per_wf,
-                                    entry.kernel_wave_size, entry.group_segment_fixed_size))
+                                    entry.kernel_wave_size, entry.group_segment_fixed_size,
+                                    entry.scratch_wave_limit_per_se))
         continue;
       next_cu_ = (idx + 1) % cus_.size();
       return cu;
@@ -227,6 +231,9 @@ public:
       size_t wgp_index = (next_wgp_ + attempt) % wgps_.size();
       auto &wgp = *wgps_[wgp_index];
 
+      if (!entry.allows_cu(wgp.cu0) || !entry.allows_cu(wgp.cu1))
+        continue;
+
       // A WGP allocation cannot overlap CU-mode residents or cluster-pinned
       // CU-local LDS state. Existing WGP-mode workgroups may share the pool.
       if (wgp.active_workgroups == 0 &&
@@ -240,7 +247,8 @@ public:
       for (uint32_t half = 0; half < 2; ++half) {
         auto *candidate = ((next_wgp_half_ + half) & 1u) == 0 ? wgp.cu0 : wgp.cu1;
         if (candidate->can_accept_workgroup(entry.wfs_per_workgroup, entry.sgprs_per_wf,
-                                            entry.vgprs_per_wf, entry.kernel_wave_size, 0)) {
+                                            entry.vgprs_per_wf, entry.kernel_wave_size, 0,
+                                            entry.scratch_wave_limit_per_se)) {
           selected = candidate;
           next_wgp_half_ = (next_wgp_half_ + half + 1) & 1u;
           break;
@@ -250,7 +258,8 @@ public:
         continue;
 
       const uint32_t lds_base = wgp.next_lds_alloc;
-      wgp.lds.zero_range(lds_base, aligned);
+      // Like CU-local LDS, paired-WGP LDS retains its physical contents on reuse.
+      wgp.lds.materialize_range(lds_base, aligned);
       wgp.next_lds_alloc += aligned;
       ++wgp.active_workgroups;
       resident_wgp_workgroups_[wg_key(entry.dispatch_id, global_wg_id)] = WgpReservation{wgp_index};
@@ -315,5 +324,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_SPI_H_

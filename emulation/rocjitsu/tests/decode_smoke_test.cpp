@@ -1661,7 +1661,7 @@ TEST_P(RdnaVopdExecutionSmokeTest, RejectsWave64Execution) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
 
-  EXPECT_THROW(cu->execute_instruction(inst.get(), *wf), util::UnimplementedInst);
+  EXPECT_THROW((void)cu->execute_instruction(inst.get(), *wf), util::UnimplementedInst);
 }
 
 TEST_P(RdnaVopdExecutionSmokeTest, PreservesFpRoundingAndDx9ZeroSemantics) {
@@ -1717,7 +1717,7 @@ TEST_P(RdnaVopdExecutionSmokeTest, PreservesFpRoundingAndDx9ZeroSemantics) {
     cu->write_vgpr(vb + kDx9Dst, lane, 0xDEADBEEFu);
   }
 
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     EXPECT_EQ(cu->read_vgpr(vb + kFmaDst, lane), expected_fma) << tc.arch_name << " lane " << lane;
@@ -1771,7 +1771,7 @@ TEST_P(RdnaVopdExecutionSmokeTest, DualCndmaskConsumesVccLo) {
     cu->write_vgpr(vb + 8, lane, kYTrue | lane);
   }
 
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     const bool select_true = ((kVcc >> lane) & 1u) != 0;
@@ -1840,7 +1840,7 @@ TEST_P(RdnaVopdExecutionSmokeTest, DualCndmaskAfterScalarVccMerge) {
   const auto execute = [&](const std::array<uint32_t, 3> &inst_words) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, inst_words.data()));
     ASSERT_NE(inst, nullptr);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   };
 
   const uint32_t sb = wf->sgpr_alloc().base;

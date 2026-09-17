@@ -28,10 +28,9 @@
 
 import sys
 from pathlib import Path
-from typing import Optional, Tuple
 
-# Single source of truth for SPM CI driver gating. CMake parses this assignment;
-# TheRock CI runs this script from the installed tests tree.
+# Minimum driver version for SPM CI. TheRock rocprofiler-sdk-spm runs this script
+# from the installed tests tree before ctest -L spm (see using-spm.rst).
 SPM_MIN_AMDGPU_DRIVER_VERSION = "6.19.14.31400000"
 
 AMDGPU_VERSION_PATH = Path("/sys/module/amdgpu/version")

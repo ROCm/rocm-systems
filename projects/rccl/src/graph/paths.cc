@@ -36,6 +36,20 @@ static ncclResult_t getPath(struct ncclTopoSystem* system, struct ncclTopoNode* 
 
 NCCL_PARAM(NvbDisable, "NVB_DISABLE", 0);
 
+static ncclResult_t ncclTopoPathReserve(struct ncclTopoLinkList* path, int required) {
+  if (required <= path->capacity) return ncclSuccess;
+  if (required > NCCL_TOPO_MAX_HOPS) {
+    WARN("Path has %d hops, maximum is %d", required, NCCL_TOPO_MAX_HOPS);
+    return ncclInternalError;
+  }
+
+  int capacity = std::max(required + 2, path->capacity * 2);
+  capacity = std::min(capacity, NCCL_TOPO_MAX_HOPS);
+  NCCLCHECK(ncclReallocQuiet(&path->list, path->capacity, capacity));
+  path->capacity = capacity;
+  return ncclSuccess;
+}
+
 static ncclResult_t ncclTopoSetPaths(struct ncclTopoNode* baseNode, struct ncclTopoSystem* system) {
   if (baseNode->paths[baseNode->type] == NULL) {
     NCCLCHECK(ncclCalloc(baseNode->paths + baseNode->type, system->nodes[baseNode->type].count));
@@ -98,17 +112,20 @@ static ncclResult_t ncclTopoSetPaths(struct ncclTopoNode* baseNode, struct ncclT
         if (newType < remPath->type || (newType == remPath->type && remPath->bw < bw) ||
             (newType == remPath->type && remPath->bw == bw && remPath->count > (path->count + 1))) {
           // Find reverse link
+          struct ncclTopoLink* reverseLink = nullptr;
           for (int l = 0; l < remNode->nlinks; l++) {
             if (remNode->links[l].remNode == node && remNode->links[l].type == link->type) {
-              remPath->list[0] = remNode->links + l;
+              reverseLink = remNode->links + l;
               break;
             }
           }
-          if (remPath->list[0] == NULL) {
+          if (reverseLink == nullptr) {
             WARN("Failed to find reverse path from remNode %d/%lx nlinks %d to node %d/%lx", remNode->type, remNode->id,
                  remNode->nlinks, node->type, node->id);
             return ncclInternalError;
           }
+          NCCLCHECK(ncclTopoPathReserve(remPath, path->count + 1));
+          remPath->list[0] = reverseLink;
           // Copy the rest of the path
           for (int i = 0; i < path->count; i++) remPath->list[i + 1] = path->list[i];
           remPath->count = path->count + 1;
@@ -215,31 +232,35 @@ static int mergePathType(int type0, int type1) {
 static ncclResult_t addInterStep(struct ncclTopoSystem* system, int tx, int ix, int t1, int i1, int t2, int i2) {
   struct ncclTopoNode* cpuNode = system->nodes[tx].nodes + ix;
   struct ncclTopoNode* srcNode = system->nodes[t1].nodes + i1;
+  struct ncclTopoLinkList* path = srcNode->paths[t2] + i2;
+  int count = srcNode->paths[tx][ix].count + cpuNode->paths[t2][i2].count;
+  NCCLCHECK(ncclTopoPathReserve(path, count));
 
   int l = 0;
   // Node 1 -> CPU
-  for (int i = 0; i < srcNode->paths[tx][ix].count; i++)
-    srcNode->paths[t2][i2].list[l++] = srcNode->paths[tx][ix].list[i];
+  for (int i = 0; i < srcNode->paths[tx][ix].count; i++) path->list[l++] = srcNode->paths[tx][ix].list[i];
   // CPU -> Node 2
-  for (int i = 0; i < cpuNode->paths[t2][i2].count; i++)
-    srcNode->paths[t2][i2].list[l++] = cpuNode->paths[t2][i2].list[i];
+  for (int i = 0; i < cpuNode->paths[t2][i2].count; i++) path->list[l++] = cpuNode->paths[t2][i2].list[i];
 
   // Update path characteristics
-  srcNode->paths[t2][i2].count = l;
-  srcNode->paths[t2][i2].type = mergePathType(srcNode->paths[tx][ix].type, cpuNode->paths[t2][i2].type);
-  if (tx == GPU) srcNode->paths[t2][i2].type = PATH_PXN;
-  srcNode->paths[t2][i2].bw = std::min(srcNode->paths[tx][ix].bw, cpuNode->paths[t2][i2].bw);
+  path->count = l;
+  path->type = mergePathType(srcNode->paths[tx][ix].type, cpuNode->paths[t2][i2].type);
+  if (tx == GPU) path->type = PATH_PXN;
+  path->bw = std::min(srcNode->paths[tx][ix].bw, cpuNode->paths[t2][i2].bw);
   return ncclSuccess;
 }
 
 // Remove/free all paths
-static void ncclTopoRemovePaths(struct ncclTopoSystem* system) {
+void ncclTopoRemovePaths(struct ncclTopoSystem* system) {
   for (int t1 = 0; t1 < NCCL_TOPO_NODE_TYPES; t1++) {
     for (int n = 0; n < system->nodes[t1].count; n++) {
       struct ncclTopoNode* node = system->nodes[t1].nodes + n;
       for (int t2 = 0; t2 < NCCL_TOPO_NODE_TYPES; t2++) {
-        if (node->paths[t2]) free(node->paths[t2]);
-        node->paths[t2] = NULL;
+        if (node->paths[t2]) {
+          for (int p = 0; p < system->nodes[t2].count; p++) free(node->paths[t2][p].list);
+          free(node->paths[t2]);
+          node->paths[t2] = nullptr;
+        }
       }
     }
   }
@@ -298,9 +319,11 @@ ncclResult_t ncclGetUserP2pLevel(int* level) {
 
 // Tests two ranks for CUDA P2P connectivity.
 // *cudaP2p returns 1 if CUDA P2P between the ranks is supported.
-// *p2p returns 1 only if the distance between the ranks is no greater than NCCL_P2P_LEVEL.  The connection may go through an intermediate rank.
+// *p2p returns 1 only if the distance between the ranks is no greater than NCCL_P2P_LEVEL.
+// *isCrossClique returns 1 when P2P is classified using MNNVL fabric metadata.
+// The connection may go through an intermediate rank.
 ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* system, int rank1, int rank2, int* p2p,
-                              int* read, int* intermediateRank, int* cudaP2p) {
+                              int* read, int* intermediateRank, int* cudaP2p, int* isCrossClique) {
   int mnnvl = 0;
   struct ncclPeerInfo* info1 = NULL;
   struct ncclPeerInfo* info2 = NULL;
@@ -308,6 +331,7 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
   if (read) *read = 0;
   if (intermediateRank) *intermediateRank = -1;
   if (cudaP2p) *cudaP2p = 0;
+  if (isCrossClique) *isCrossClique = 0;
 
   // Rule out different nodes / isolated containers
   if (comm) {
@@ -319,13 +343,13 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
         TRACE(NCCL_GRAPH, "ncclTopoCheckP2p rank%d->rank%d: cross-node, MNNVL=%d mnnvl=%d", rank1, rank2, comm->MNNVL,
               mnnvl);
         if (mnnvl < 0) {
-          // Force enable CUDA P2P for cross-clique (NCCL_MNNVL_CROSS_CLIQUE=1)
-          if (p2p) {
-            *p2p = 1;
-          }
-          if (cudaP2p) {
-            *cudaP2p = 1;
-          }
+          // Cross-clique connectivity comes from communicator-wide fabric metadata because the peer is absent from
+          // this rank's topology.
+          int p2pLevel = PATH_NVL;
+          NCCLCHECK(ncclGetUserP2pLevel(&p2pLevel));
+          *p2p = p2pLevel >= PATH_NVL;
+          if (cudaP2p) *cudaP2p = 1;
+          if (isCrossClique) *isCrossClique = 1;
           return ncclSuccess;
         }
         if (!mnnvl) return ncclSuccess;
@@ -481,7 +505,7 @@ ncclResult_t ncclTopoCheckMNNVL(struct ncclComm* comm, struct ncclPeerInfo* info
       (comm->p2pCrossClique || fabricInfo1->cliqueId == fabricInfo2->cliqueId)) {
     TRACE(NCCL_NET, "MNNVL rank %d matching peer %d 0x%lx UUID %lx.%lx cliqueId 0x%x/0x%x crossClique %d", info1->rank,
           info2->rank, info2->busId, uuid0, uuid1, fabricInfo1->cliqueId, fabricInfo2->cliqueId, comm->p2pCrossClique);
-    // Return -1 for cross-clique (different clique but same UUID) to force CUDA P2P
+    // Return -1 to distinguish cross-clique peers (different clique but same UUID).
     *ret = (comm->p2pCrossClique && fabricInfo1->cliqueId != fabricInfo2->cliqueId) ? -1 : 1;
   }
   return ncclSuccess;
@@ -528,7 +552,17 @@ ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* system, int rank, int64_t n
   // Check that both the NIC and GPUs support it
   if (net->net.gdrSupport == 0) return ncclSuccess;
   if (gpu->gpu.gdrSupport == 0) return ncclSuccess;
-  if (gpu->gpu.mloPart != NCCL_TOPO_UNDEF && !ncclParamNetGdrMloPart()) return ncclSuccess;
+  // NVIDIA MLO partitions disable GDR unless NCCL_NET_GDR_MLOPART=1. HIP fillInfo
+  // also stamps mloPart=0 on every physical function-0 GPU as a topo overlay hint
+  // (not a real MLO partition); that must not suppress GDR or P2P NET UBR never
+  // sets NCCL_DIRECT_NIC (see init.cc hasMloPart carve-out).
+  if (gpu->gpu.mloPart != NCCL_TOPO_UNDEF && !ncclParamNetGdrMloPart()) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    int fn = (int)(NCCL_TOPO_ID_LOCAL_ID(gpu->id) & 0xf);
+    if (!(gpu->gpu.mloPart == 0 && fn == 0))
+#endif
+      return ncclSuccess;
+  }
 
   if (read) {
     // For reads (sends) only enable under certain conditions
@@ -642,7 +676,10 @@ ncclResult_t ncclTopoNeedFlush(struct ncclComm* comm, int64_t netId, int netDev,
   *flush = ncclTopoFlushAlways;
   ncclNetProperties_t props;
   NCCLCHECK(comm->ncclNet->getProperties(netDev, &props));
-  if (props.forceFlush == 1 || ncclParamNetForceFlush()) return ncclSuccess;
+  if (props.forceFlush == 1 || ncclParamNetForceFlush()) {
+    TRACE(NCCL_NET, "NET/%s/%d: flush type = Always (forced)", comm->ncclNet->name, netDev);
+    return ncclSuccess;
+  }
   int g;
   struct ncclTopoSystem* system = comm->topo;
   NCCLCHECK(ncclTopoRankToIndex(system, rank, &g, /*showWarn=*/true));
@@ -673,6 +710,7 @@ ncclResult_t ncclTopoCheckNet(struct ncclTopoSystem* system, int rank1, int rank
     *net = 0;
     return ncclSuccess;
   }
+  *net = 1;
   // First check the current GPU-to-GPU speed.
   int g1, g2;
   if (ncclTopoRankToIndex(system, rank1, &g1, /*showWarn=*/false) != ncclSuccess ||
@@ -680,7 +718,6 @@ ncclResult_t ncclTopoCheckNet(struct ncclTopoSystem* system, int rank1, int rank
     return ncclSuccess;
   }
 
-  *net = 1;
   struct ncclTopoNode* gpu1 = system->nodes[GPU].nodes + g1;
   struct ncclTopoNode* gpu2 = system->nodes[GPU].nodes + g2;
   float speed = gpu1->paths[GPU][g2].bw;
@@ -1084,6 +1121,9 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
     }
   }
 
+  // 2.31 refuses to remove nodes while paths are computed, so drop them here and
+  // rebuild them below for RCCL's XGMI/GDR detection.
+  ncclTopoRemovePaths(system);
   for (int i = 0; i < ngpus; i++) {
     if (domains[i] == myDomain) continue;
     struct ncclTopoNode* gpu = NULL;
@@ -1121,6 +1161,10 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
     } else break;
   } while (system->nodes[NET].count);
 
+  // The XGMI and GDR detection below reads gpu->paths[], so rebuild them over the
+  // trimmed node set.
+  NCCLCHECKGOTO(ncclTopoComputePaths(system, comm), ret, fail);
+
   // detect if all GPUs are connected by XGMI
   for (int i = 0; i < system->nodes[GPU].count && allXgmi; i++) {
     int cudaDev1 = system->nodes[GPU].nodes[i].gpu.dev;
@@ -1153,6 +1197,8 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
   }
 
   comm->localRanks = system->nodes[GPU].count;
+  // Drop paths again before the last round of node removal; the caller recomputes them.
+  ncclTopoRemovePaths(system);
   if (system->nodes[GPU].count == comm->nRanks && remove) {
     for (int n = system->nodes[NET].count - 1; n >= 0; n--)
       NCCLCHECKGOTO(ncclTopoRemoveNode(system, NET, n), ret, fail);
@@ -1271,9 +1317,10 @@ int ncclP2pChannelsUpperBound(struct ncclComm* comm, bool* userOptedHigherOut) {
 // (nNodes >= 16) to reduce P2P CU usage. Disabled by default.
 NCCL_PARAM(P2pCuReduceScaleEnable, "P2P_CU_REDUCE_SCALE_ENABLE", 0);
 // When set, pick p2pnChannelsPerPeer so that a P2P plan touches every channel
-// in the pool: ppp = pow2Down(p2pnChannels / nRanks). The pow2 step matters --
-// ncclP2pChannelForPart mods channel ids by the pool, so ppp*nRanks > pool
-// causes round bases to wrap and channels to collide.
+// in the pool: ppp = pow2Down(p2pnChannels / maxP2pPeers), where maxP2pPeers is
+// the configured peer limit and defaults to nRanks. The pow2 step keeps the
+// per-peer tile a divisor of the pool. Declaring fewer peers than a job actually
+// uses deliberately oversubscribes channels across rounds.
 // Unset defaults to on for gfx1250, off elsewhere.
 RCCL_PARAM(SaturateP2pNChannels, "SATURATE_P2P_NCHANNELS", RCCL_VALUE_UNSET);
 extern int64_t ncclParamWorkArgsBytes();
@@ -1388,28 +1435,43 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
   if (saturateP2p == RCCL_VALUE_UNSET) {
     saturateP2p = isGfx1250 ? 1 : 0;
   }
-  if (saturateP2p && comm->nRanks > 0) {
-    int target = std::max(1, comm->p2pnChannels / comm->nRanks);
+  // Divisor for both per-peer heuristics below, resolved from config.maxP2pPeers (or
+  // nRanks when unset) by ncclTopoComputeP2pChannelsPerPeer, which init.cc runs first.
+  const int maxP2pPeers = comm->p2pMaxPeers;
+  if (saturateP2p && maxP2pPeers > 0) {
+    int target = std::max(1, comm->p2pnChannels / maxP2pPeers);
     int newPpp = std::min(pow2Down(target), (int)MAXCHANNELS);
     INFO(NCCL_INIT | NCCL_TUNING,
-         "RCCL_SATURATE_P2P_NCHANNELS: p2pnChannelsPerPeer %d -> %d (p2pnChannels=%d, nRanks=%d)",
-         comm->p2pnChannelsPerPeer, newPpp, comm->p2pnChannels, comm->nRanks);
+         "RCCL_SATURATE_P2P_NCHANNELS: p2pnChannelsPerPeer %d -> %d (p2pnChannels=%d, maxP2pPeers=%d)",
+         comm->p2pnChannelsPerPeer, newPpp, comm->p2pnChannels, maxP2pPeers);
     comm->p2pnChannelsPerPeer = newPpp;
   }
   if (comm->nNodes > 1 && comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT) {
     // In the case of >1 NVLD (and the user didn't set nChannelsPerNetPeer), the network is the bottleneck.
     // Reduce the number of channels per host to avoid going above p2pnChannels to fit all the peers within a single round.
-    while (comm->p2pnChannelsPerPeer * divUp(comm->nRanks, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >= comm->p2pnChannels &&
+    INFO(NCCL_INIT, "Tuning P2P operations with maxP2pPeers = %d", maxP2pPeers);
+    while (comm->p2pnChannelsPerPeer * divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >= comm->p2pnChannels &&
            comm->p2pnChannelsPerPeer > 1)
       comm->p2pnChannelsPerPeer /= 2;
+    if (rcclUseAinic()) {
+      // A single AINIC NIC is only saturated by two net-p2p channels per peer.
+      // Restore the pre-2.29 count of max(netCountByBw, nChannelsMax) wherever the channel pool can hold it (was available up to 8 nodes).
+      bool atScale = comm->nNodes > 8 && 2 * comm->nRanks > comm->p2pnChannels;
+      int nChannelsMax = atScale ? 1 : 2;
+      comm->p2pnChannelsPerPeer = std::max(
+        comm->p2pnChannelsPerPeer, std::min(std::max(comm->minNetCount, nChannelsMax), comm->p2pnChannels));
+    }
   } else {
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
   }
   // Final safety: arch-specific caps above and the halving loop may still
   // leave p2pnChannelsPerPeer > p2pnChannels (e.g. when the loop bottoms out
-  // at 1 but divUp(nRanks, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) is large, or when
-  // a later arch cap shrinks p2pnChannels). Clamp to preserve the device-side
-  // invariant required by ncclP2pChannelToPart.
+  // at 1 but divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) is large, or when
+  // a later arch cap shrinks p2pnChannels). Covers the plain ncclP2pChannelToPart
+  // bound only. The shift branch (device.h) needs p2pnChannels >> p2pChannelShiftSize,
+  // which this does not enforce. That gap predates this change, but a small maxP2pPeers
+  // widens what can reach it: divUp(2, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) is 1, so the loop
+  // above can now stop at p2pnChannels/2 where dividing by nRanks stopped at /4 or lower.
   comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
 
   // Same grow reconciliation as ncclTopoPostset, for p2p channels (the grow path
@@ -1418,6 +1480,9 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     NCCLCHECK(ncclTopoReconcileGrowChannels(comm, &comm->p2pnChannels));
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
   }
+
+  INFO(NCCL_INIT | NCCL_TUNING, "P2P channels: p2pnChannels=%d p2pnChannelsPerPeer=%d maxP2pPeers=%d",
+       comm->p2pnChannels, comm->p2pnChannelsPerPeer, maxP2pPeers);
 
   // Init channels that weren't used so far
   for (int c = comm->nChannels; c < std::max(comm->nChannels, comm->p2pnChannels); c++) NCCLCHECK(initChannel(comm, c));
@@ -1466,6 +1531,35 @@ ncclResult_t ncclTopoGetGpuMaxPath(struct ncclTopoSystem* system, int type, int*
       maxPath = std::max(maxPath, paths[j].type);
     }
   }
+  *max = maxPath;
+  return ncclSuccess;
+}
+
+// RCCL: worst case over the GPUs of the best path each of them has to a NIC of its own. A PXN
+// relay counts as one, since it reaches the NIC through the GPU that owns it, and a single relay
+// raises the result for the whole system, so a search bounded by it still reaches the relays.
+ncclResult_t ncclTopoGetGpuMaxLocalNetPath(struct ncclTopoSystem* system, int* max) {
+  int maxPath = PATH_LOC;
+  bool hasPxnRelay = false;
+
+  for (int i = 0; i < system->nodes[GPU].count; i++) {
+    struct ncclTopoLinkList* paths = system->nodes[GPU].nodes[i].paths[NET];
+    if (paths == NULL) continue;
+
+    int nearest = PATH_DIS;
+    for (int n = 0; n < system->nodes[NET].count; n++) {
+      nearest = std::min(nearest, paths[n].type);
+      if (paths[n].type == PATH_PXN) hasPxnRelay = true;
+    }
+
+    // A GPU that reaches no NIC constrains nothing, and would otherwise force PATH_DIS.
+    if (nearest == PATH_DIS) continue;
+
+    maxPath = std::max(maxPath, nearest);
+  }
+
+  if (hasPxnRelay) maxPath = std::max(maxPath, PATH_PXN);
+
   *max = maxPath;
   return ncclSuccess;
 }

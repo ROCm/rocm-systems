@@ -54,6 +54,23 @@ DEFINE_NCCL_PARAM(testParamCached, int32_t, NCCL_TEST_PARAM_CACHED, 0,
 DEFINE_NCCL_PARAM(testParamPrivate, int32_t, NCCL_TEST_PARAM_PRIVATE, 0, NCCL_PARAM_FLAG_NONE,
                   NCCL_PARAM_DEFAULT, "test-only private i32 param");
 
+// Params covering the flag combinations ncclParamCheckFlag branches on. PUBLISHED alone and no
+// flags at all are already covered by testParamI32 and testParamPrivate above.
+DEFINE_NCCL_PARAM(testParamUnused, int32_t, NCCL_TEST_PARAM_UNUSED, 0, NCCL_PARAM_FLAG_UNUSED,
+                  NCCL_PARAM_DEFAULT, "test-only unused i32 param");
+DEFINE_NCCL_PARAM(testParamUnusedPub, int32_t, NCCL_TEST_PARAM_UNUSED_PUB, 0,
+                  NCCL_PARAM_FLAG_UNUSED | NCCL_PARAM_FLAG_PUBLISHED, NCCL_PARAM_DEFAULT,
+                  "test-only unused published i32 param");
+DEFINE_NCCL_PARAM(testParamDeprecated, int32_t, NCCL_TEST_PARAM_DEPRECATED, 0,
+                  NCCL_PARAM_FLAG_DEPRECATED, NCCL_PARAM_DEFAULT,
+                  "test-only deprecated i32 param");
+DEFINE_NCCL_PARAM(testParamDeprecatedPub, int32_t, NCCL_TEST_PARAM_DEPRECATED_PUB, 0,
+                  NCCL_PARAM_FLAG_DEPRECATED | NCCL_PARAM_FLAG_PUBLISHED, NCCL_PARAM_DEFAULT,
+                  "test-only deprecated published i32 param");
+DEFINE_NCCL_PARAM(testParamUnusedDep, int32_t, NCCL_TEST_PARAM_UNUSED_DEP, 0,
+                  NCCL_PARAM_FLAG_UNUSED | NCCL_PARAM_FLAG_DEPRECATED, NCCL_PARAM_DEFAULT,
+                  "test-only unused deprecated i32 param");
+
 namespace {
 
 // Keys used across tests.
@@ -64,6 +81,11 @@ constexpr const char* kCachedKey = "NCCL_TEST_PARAM_CACHED";
 constexpr const char* kPrivateKey = "NCCL_TEST_PARAM_PRIVATE";
 constexpr const char* kDumpAllKey = "NCCL_PARAM_DUMP_ALL";
 constexpr const char* kNoCacheKey = "NCCL_NO_CACHE";
+constexpr const char* kUnusedKey = "NCCL_TEST_PARAM_UNUSED";
+constexpr const char* kUnusedPubKey = "NCCL_TEST_PARAM_UNUSED_PUB";
+constexpr const char* kDeprecatedKey = "NCCL_TEST_PARAM_DEPRECATED";
+constexpr const char* kDeprecatedPubKey = "NCCL_TEST_PARAM_DEPRECATED_PUB";
+constexpr const char* kUnusedDepKey = "NCCL_TEST_PARAM_UNUSED_DEP";
 
 // Returns true if `table` (length `len`) contains `key`.
 bool tableContains(const char** table, int len, const char* key) {
@@ -114,87 +136,253 @@ TEST(ParameterApiTests, Bind_NullArgs) {
   });
 }
 
-// ===========================================================================
-// Typed integer accessors
-// ===========================================================================
+TEST(ParameterApiTests, Bind_KnownKey_ReturnsSameHandleOnRebind) {
+  RUN_ISOLATED_TEST("Bind_KnownKey_ReturnsSameHandleOnRebind", []() {
+    ncclParamHandle_t first = nullptr;
+    ncclParamHandle_t second = nullptr;
+    ASSERT_EQ(ncclParamBind(&first, kI32Key), ncclSuccess);
+    ASSERT_EQ(ncclParamBind(&second, kI32Key), ncclSuccess);
+    ASSERT_EQ(first, second) << "bind must resolve to the one registry entry for the key";
+  });
+}
 
-TEST(ParameterApiTests, GetI32_MatchingType_ReturnsValue) {
+// ncclParamBind succeeds for every flag combination ncclParamCheckFlag branches on, and PUBLISHED
+// decides enumeration: only published params appear in ncclParamGetAllParameterKeys, whatever their
+// other flags.
+// clearVariable, not plain RUN_ISOLATED_TEST: NCCL_PARAM_DUMP_ALL drops the PUBLISHED filter in
+// ncclParamGetAllParameterKeys, and an exported one would flip every published == false row.
+TEST(ParameterApiTests, Bind_AllFlagCombinations_Succeed) {
+  RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig(
+                         "Bind_AllFlagCombinations_Succeed",
+                         []() {
+                           struct FlagCase {
+                             const char* key;
+                             bool published;
+                           };
+                           constexpr FlagCase kCases[] = {
+                               {kI32Key, true}, // PUBLISHED
+                               {kPrivateKey, false}, // no flags
+                               {kUnusedKey, false}, // UNUSED
+                               {kUnusedPubKey, true}, // UNUSED | PUBLISHED
+                               {kDeprecatedKey, false}, // DEPRECATED
+                               {kDeprecatedPubKey, true}, // DEPRECATED | PUBLISHED
+                               {kUnusedDepKey, false}, // UNUSED | DEPRECATED
+                           };
+                           for (const FlagCase& c : kCases) {
+                             ncclParamHandle_t h = nullptr;
+                             EXPECT_EQ(ncclParamBind(&h, c.key), ncclSuccess) << "key: " << c.key;
+                             EXPECT_NE(h, nullptr) << "key: " << c.key;
+                           }
+
+                           const char** table = nullptr;
+                           int len = 0;
+                           ASSERT_EQ(ncclParamGetAllParameterKeys(&table, &len), ncclSuccess);
+                           for (const FlagCase& c : kCases) {
+                             EXPECT_EQ(tableContains(table, len, c.key), c.published)
+                                 << "key: " << c.key << " should " << (c.published ? "" : "not ")
+                                 << "be enumerated";
+                           }
+                         })
+                         .clearVariable(kDumpAllKey));
+}
+
+// Withholding NCCL_PARAM_FLAG_PUBLISHED only hides a param from ncclParamGetAllParameterKeys and
+// ncclParamDumpAll. A caller that knows the name can still bind it and read its value.
+TEST(ParameterApiTests, Bind_PrivateKey_HandleReadsValue) {
   RUN_ISOLATED_TEST_WITH_ENV(
-      "GetI32_MatchingType",
+      "Bind_PrivateKey_HandleReadsValue",
       []() {
         ncclParamHandle_t h = nullptr;
-        ASSERT_EQ(ncclParamBind(&h, kI32Key), ncclSuccess);
+        ASSERT_EQ(ncclParamBind(&h, kPrivateKey), ncclSuccess);
         int32_t v = 0;
         ASSERT_EQ(ncclParamGetI32(h, &v), ncclSuccess);
-        ASSERT_EQ(v, 42);
+        ASSERT_EQ(v, 13) << "private param must resolve from the environment like any other";
       },
-      {{"NCCL_TEST_PARAM_I32", "42"}});
+      {{"NCCL_TEST_PARAM_PRIVATE", "13"}});
 }
 
-TEST(ParameterApiTests, GetI32_Unset_ReturnsDefault) {
-  RUN_ISOLATED_TEST("GetI32_Unset_ReturnsDefault", []() {
+// ===========================================================================
+// Typed integer accessors
+//
+// ncclParamGetI8..GetU64 are all generated from one NCCL_PARAM_DEFINE_TYPED_GETTER macro in
+// src/param/c_api.cc, so these tests are parameterized over the same eight widths.
+// ===========================================================================
+
+namespace {
+
+// One row per width for the typed-getter suite. Omitting a row for a type listed in ParamIntTypes
+// is a compile error, so a width cannot silently drop out of the suite.
+template <typename T>
+struct TypedParamTraits;
+
+// kSample values are distinct per width and mid-range on purpose: an all-ones or max-value sample
+// would also satisfy the wrap/overflow tests below, hiding a getter hardwired to those bits.
+template <>
+struct TypedParamTraits<int8_t> {
+  static constexpr const char* kName = "I8";
+  static constexpr const char* kKey = "NCCL_TEST_PARAM_I8";
+  static constexpr const char* kCrossKey = "NCCL_TEST_PARAM_I16";
+  static constexpr const char* kSampleText = "97";
+  static constexpr int8_t kSample = 97;
+  static ncclResult_t Get(ncclParamHandle_t h, int8_t* out) { return ncclParamGetI8(h, out); }
+};
+
+template <>
+struct TypedParamTraits<int16_t> {
+  static constexpr const char* kName = "I16";
+  static constexpr const char* kKey = "NCCL_TEST_PARAM_I16";
+  static constexpr const char* kCrossKey = "NCCL_TEST_PARAM_I32";
+  static constexpr const char* kSampleText = "12345";
+  static constexpr int16_t kSample = 12345;
+  static ncclResult_t Get(ncclParamHandle_t h, int16_t* out) { return ncclParamGetI16(h, out); }
+};
+
+template <>
+struct TypedParamTraits<int32_t> {
+  static constexpr const char* kName = "I32";
+  static constexpr const char* kKey = "NCCL_TEST_PARAM_I32";
+  static constexpr const char* kCrossKey = "NCCL_TEST_PARAM_I8";
+  static constexpr const char* kSampleText = "1234567";
+  static constexpr int32_t kSample = 1234567;
+  static ncclResult_t Get(ncclParamHandle_t h, int32_t* out) { return ncclParamGetI32(h, out); }
+};
+
+template <>
+struct TypedParamTraits<int64_t> {
+  static constexpr const char* kName = "I64";
+  static constexpr const char* kKey = "NCCL_TEST_PARAM_I64";
+  static constexpr const char* kCrossKey = "NCCL_TEST_PARAM_I32";
+  static constexpr const char* kSampleText = "9000000000";
+  static constexpr int64_t kSample = 9000000000LL;
+  static ncclResult_t Get(ncclParamHandle_t h, int64_t* out) { return ncclParamGetI64(h, out); }
+};
+
+template <>
+struct TypedParamTraits<uint8_t> {
+  static constexpr const char* kName = "U8";
+  static constexpr const char* kKey = "NCCL_TEST_PARAM_U8";
+  static constexpr const char* kCrossKey = "NCCL_TEST_PARAM_U16";
+  static constexpr const char* kSampleText = "200";
+  static constexpr uint8_t kSample = 200;
+  static ncclResult_t Get(ncclParamHandle_t h, uint8_t* out) { return ncclParamGetU8(h, out); }
+};
+
+template <>
+struct TypedParamTraits<uint16_t> {
+  static constexpr const char* kName = "U16";
+  static constexpr const char* kKey = "NCCL_TEST_PARAM_U16";
+  static constexpr const char* kCrossKey = "NCCL_TEST_PARAM_U32";
+  static constexpr const char* kSampleText = "40000";
+  static constexpr uint16_t kSample = 40000;
+  static ncclResult_t Get(ncclParamHandle_t h, uint16_t* out) { return ncclParamGetU16(h, out); }
+};
+
+template <>
+struct TypedParamTraits<uint32_t> {
+  static constexpr const char* kName = "U32";
+  static constexpr const char* kKey = "NCCL_TEST_PARAM_U32";
+  static constexpr const char* kCrossKey = "NCCL_TEST_PARAM_U8";
+  static constexpr const char* kSampleText = "4000000000";
+  static constexpr uint32_t kSample = 4000000000u;
+  static ncclResult_t Get(ncclParamHandle_t h, uint32_t* out) { return ncclParamGetU32(h, out); }
+};
+
+template <>
+struct TypedParamTraits<uint64_t> {
+  static constexpr const char* kName = "U64";
+  static constexpr const char* kKey = "NCCL_TEST_PARAM_U64";
+  static constexpr const char* kCrossKey = "NCCL_TEST_PARAM_U32";
+  static constexpr const char* kSampleText = "12297829382473034410";
+  static constexpr uint64_t kSample = 12297829382473034410ULL;
+  static ncclResult_t Get(ncclParamHandle_t h, uint64_t* out) { return ncclParamGetU64(h, out); }
+};
+
+} // namespace
+
+template <typename T>
+class ParameterApiTypedTests : public ::testing::Test {};
+
+using ParamIntTypes =
+    ::testing::Types<int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t>;
+TYPED_TEST_SUITE(ParameterApiTypedTests, ParamIntTypes);
+
+TYPED_TEST(ParameterApiTypedTests, MatchingType_ReturnsValue) {
+  using Traits = TypedParamTraits<TypeParam>;
+  RUN_ISOLATED_TEST_WITH_ENV(
+      std::string("GetTyped_MatchingType_") + Traits::kName,
+      []() {
+        ncclParamHandle_t h = nullptr;
+        ASSERT_EQ(ncclParamBind(&h, Traits::kKey), ncclSuccess);
+        TypeParam v = 0;
+        ASSERT_EQ(Traits::Get(h, &v), ncclSuccess);
+        ASSERT_EQ(v, Traits::kSample);
+      },
+      {{Traits::kKey, Traits::kSampleText}});
+}
+
+// clearVariable, not plain RUN_ISOLATED_TEST: the child inherits the parent environment, so an
+// exported key would otherwise turn "unset" into whatever the developer happened to have set.
+TYPED_TEST(ParameterApiTypedTests, Unset_ReturnsDefault) {
+  using Traits = TypedParamTraits<TypeParam>;
+  RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig(
+                         std::string("GetTyped_Unset_") + Traits::kName,
+                         []() {
+                           ncclParamHandle_t h = nullptr;
+                           ASSERT_EQ(ncclParamBind(&h, Traits::kKey), ncclSuccess);
+                           TypeParam v = 0;
+                           ASSERT_EQ(Traits::Get(h, &v), ncclSuccess);
+                           ASSERT_EQ(v, static_cast<TypeParam>(7))
+                               << "default value from DEFINE_NCCL_PARAM";
+                         })
+                         .clearVariable(Traits::kKey));
+}
+
+TYPED_TEST(ParameterApiTypedTests, NullArgs) {
+  using Traits = TypedParamTraits<TypeParam>;
+  RUN_ISOLATED_TEST(std::string("GetTyped_NullArgs_") + Traits::kName, []() {
     ncclParamHandle_t h = nullptr;
-    ASSERT_EQ(ncclParamBind(&h, kI32Key), ncclSuccess);
-    int32_t v = 0;
-    ASSERT_EQ(ncclParamGetI32(h, &v), ncclSuccess);
-    ASSERT_EQ(v, 7) << "default value from DEFINE_NCCL_PARAM";
+    ASSERT_EQ(ncclParamBind(&h, Traits::kKey), ncclSuccess);
+    TypeParam v = 0;
+    ASSERT_EQ(Traits::Get(nullptr, &v), ncclInvalidArgument);
+    ASSERT_EQ(Traits::Get(h, nullptr), ncclInvalidArgument);
   });
 }
 
-// A handle bound to a bool param cannot be read as I32 (typeId guard).
-TEST(ParameterApiTests, GetI32_TypeMismatch_ReturnsInvalidArg) {
-  RUN_ISOLATED_TEST("GetI32_TypeMismatch", []() {
+// A handle bound to a bool param cannot be read through any integer getter (typeId guard).
+TYPED_TEST(ParameterApiTypedTests, TypeMismatch_ReturnsInvalidArg) {
+  using Traits = TypedParamTraits<TypeParam>;
+  RUN_ISOLATED_TEST(std::string("GetTyped_TypeMismatch_") + Traits::kName, []() {
     ncclParamHandle_t h = nullptr;
     ASSERT_EQ(ncclParamBind(&h, kDumpAllKey), ncclSuccess); // bool param
-    int32_t v = 0;
-    ASSERT_EQ(ncclParamGetI32(h, &v), ncclInvalidArgument);
+    TypeParam v = 0;
+    ASSERT_EQ(Traits::Get(h, &v), ncclInvalidArgument);
   });
 }
 
-// Reading an I8 param through the I32 accessor is a typeId mismatch.
-TEST(ParameterApiTests, GetI32_CrossWidth_ReturnsInvalidArg) {
-  RUN_ISOLATED_TEST("GetI32_CrossWidth", []() {
+// Reading a param of a different width through this getter is a typeId mismatch.
+TYPED_TEST(ParameterApiTypedTests, CrossWidth_ReturnsInvalidArg) {
+  using Traits = TypedParamTraits<TypeParam>;
+  RUN_ISOLATED_TEST(std::string("GetTyped_CrossWidth_") + Traits::kName, []() {
     ncclParamHandle_t h = nullptr;
-    ASSERT_EQ(ncclParamBind(&h, kI8Key), ncclSuccess);
-    int32_t v = 0;
-    ASSERT_EQ(ncclParamGetI32(h, &v), ncclInvalidArgument);
+    ASSERT_EQ(ncclParamBind(&h, Traits::kCrossKey), ncclSuccess);
+    TypeParam v = 0;
+    ASSERT_EQ(Traits::Get(h, &v), ncclInvalidArgument);
   });
 }
 
-TEST(ParameterApiTests, GetI32_NullArgs) {
-  RUN_ISOLATED_TEST("GetI32_NullArgs", []() {
-    ncclParamHandle_t h = nullptr;
-    ASSERT_EQ(ncclParamBind(&h, kI32Key), ncclSuccess);
-    int32_t v = 0;
-    ASSERT_EQ(ncclParamGetI32(nullptr, &v), ncclInvalidArgument);
-    ASSERT_EQ(ncclParamGetI32(h, nullptr), ncclInvalidArgument);
-  });
-}
-
-TEST(ParameterApiTests, GetU32_MatchingType_ReturnsValue) {
+// Kept standalone: the typed MatchingType case deliberately uses a mid-range U64 sample, so the
+// ULLONG_MAX round-trip would otherwise no longer be pinned anywhere.
+TEST(ParameterApiTests, GetU64_Max_RoundTripsExactly) {
   RUN_ISOLATED_TEST_WITH_ENV(
-      "GetU32_MatchingType",
+      "GetU64_Max",
       []() {
         ncclParamHandle_t h = nullptr;
-        ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_U32"), ncclSuccess);
-        uint32_t v = 0;
-        ASSERT_EQ(ncclParamGetU32(h, &v), ncclSuccess);
-        ASSERT_EQ(v, 4000000000u);
+        ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_U64"), ncclSuccess);
+        uint64_t v = 0;
+        ASSERT_EQ(ncclParamGetU64(h, &v), ncclSuccess);
+        ASSERT_EQ(v, 18446744073709551615ULL) << "ULLONG_MAX must round-trip exactly";
       },
-      {{"NCCL_TEST_PARAM_U32", "4000000000"}});
-}
-
-TEST(ParameterApiTests, GetI64_MatchingType_ReturnsValue) {
-  RUN_ISOLATED_TEST_WITH_ENV(
-      "GetI64_MatchingType",
-      []() {
-        ncclParamHandle_t h = nullptr;
-        ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_I64"), ncclSuccess);
-        int64_t v = 0;
-        ASSERT_EQ(ncclParamGetI64(h, &v), ncclSuccess);
-        ASSERT_EQ(v, static_cast<int64_t>(9000000000LL));
-      },
-      {{"NCCL_TEST_PARAM_I64", "9000000000"}});
+      {{"NCCL_TEST_PARAM_U64", "18446744073709551615"}});
 }
 
 // ===========================================================================
@@ -218,6 +406,48 @@ TEST(ParameterApiTests, GetI64_WordOverflow_FallsBackToDefault) {
         ASSERT_EQ(v, 7) << "ERANGE overflow -> default";
       },
       {{"NCCL_TEST_PARAM_I64", "99999999999999999999"}});
+}
+
+TEST(ParameterApiTests, GetU64_WordOverflow_FallsBackToDefault) {
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "GetU64_WordOverflow",
+      []() {
+        ncclParamHandle_t h = nullptr;
+        ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_U64"), ncclSuccess);
+        uint64_t v = 0;
+        ASSERT_EQ(ncclParamGetU64(h, &v), ncclSuccess);
+        ASSERT_EQ(v, 7u) << "ERANGE overflow -> default";
+      },
+      {{"NCCL_TEST_PARAM_U64", "99999999999999999999999999"}});
+}
+
+// "32768" fits in long long, then truncates to int16_t(-32768); validate() sees the already
+// wrapped value and passes, so the wrapped result is returned.
+TEST(ParameterApiTests, GetI16_SubWordOverflow_Wraps) {
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "GetI16_SubWordOverflow",
+      []() {
+        ncclParamHandle_t h = nullptr;
+        ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_I16"), ncclSuccess);
+        int16_t v = 0;
+        ASSERT_EQ(ncclParamGetI16(h, &v), ncclSuccess);
+        ASSERT_EQ(v, static_cast<int16_t>(-32768)) << "32768 wraps to -32768 for int16_t";
+      },
+      {{"NCCL_TEST_PARAM_I16", "32768"}});
+}
+
+TEST(ParameterApiTests, GetU16_Negative_Wraps) {
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "GetU16_Negative",
+      []() {
+        ncclParamHandle_t h = nullptr;
+        ASSERT_EQ(ncclParamBind(&h, "NCCL_TEST_PARAM_U16"), ncclSuccess);
+        uint16_t v = 0;
+        // strtoull("-1") wraps to ULLONG_MAX (no ERANGE), truncates to 0xFFFF.
+        ASSERT_EQ(ncclParamGetU16(h, &v), ncclSuccess);
+        ASSERT_EQ(v, static_cast<uint16_t>(0xFFFF));
+      },
+      {{"NCCL_TEST_PARAM_U16", "-1"}});
 }
 
 TEST(ParameterApiTests, GetI8_InRange_ReturnsValue) {

@@ -28,6 +28,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <barrier>
@@ -36,6 +37,7 @@ RJ_DIAGNOSTIC_POP
 #include <climits>
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <fstream>
@@ -43,6 +45,7 @@ RJ_DIAGNOSTIC_POP
 #include <string>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
@@ -50,6 +53,7 @@ RJ_DIAGNOSTIC_POP
 #include <thread>
 #include <time.h>
 #include <unistd.h>
+#include <vector>
 
 extern char **environ;
 
@@ -72,7 +76,152 @@ void noop_signal_handler(int) {}
 namespace {
 int open_drm_render();
 int make_sized_memfd(size_t size);
+
+class RestoreLimit {
+public:
+  explicit RestoreLimit(struct rlimit value) : value_(value) {}
+  ~RestoreLimit() { EXPECT_EQ(setrlimit(RLIMIT_NOFILE, &value_), 0); }
+  RestoreLimit(const RestoreLimit &) = delete;
+  RestoreLimit &operator=(const RestoreLimit &) = delete;
+
+private:
+  struct rlimit value_;
+};
+
+enum class HiddenBacking { Events, Allocation, Doorbell };
+
+void check_hidden_backing_after_dup(HiddenBacking kind, bool use_dup3) {
+  constexpr rlim_t kTestNofileLimit = 8192;
+  constexpr int kOrdinaryFdLimit = 4096;
+  struct rlimit limit {};
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &limit), 0);
+  if (limit.rlim_max < kTestNofileLimit)
+    GTEST_SKIP() << "the driver backing descriptor range is unavailable";
+  RestoreLimit restore{limit};
+  limit.rlim_cur = std::max(limit.rlim_cur, kTestNofileLimit);
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limit), 0);
+
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  uint32_t gpu_id = 0;
+  {
+    std::ifstream gpu_id_file("/sys/class/kfd/kfd/topology/nodes/1/gpu_id");
+    ASSERT_TRUE(gpu_id_file >> gpu_id);
+  }
+  int source = open("/dev/zero", O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(source, 0);
+  // Leave an ordinary low slot free before creating the hidden backing. Keeping
+  // the fresh memfd in that slot makes the later dup overwrite driver state.
+  int target = dup(source);
+  ASSERT_GE(target, 0);
+  ASSERT_LT(target, kOrdinaryFdLimit);
+  ASSERT_EQ(close(target), 0);
+
+  constexpr size_t kBytes = 4096;
+  uint64_t offset = uint64_t{2} << 62;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  if (kind == HiddenBacking::Allocation) {
+    allocation.size = kBytes;
+    allocation.gpu_id = gpu_id;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    offset = allocation.mmap_offset;
+  } else if (kind == HiddenBacking::Doorbell) {
+    offset = (uint64_t{3} << 62) | (static_cast<uint64_t>(gpu_id) << 46);
+  }
+  void *mapping =
+      mmap(nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED, kfd, static_cast<off_t>(offset));
+  ASSERT_NE(mapping, MAP_FAILED);
+  constexpr uint64_t kMarker = 0x12345678;
+  static_cast<uint64_t *>(mapping)[8] = kMarker;
+
+  ASSERT_EQ(use_dup3 ? dup3(source, target, O_CLOEXEC) : dup2(source, target), target);
+  void *remapped =
+      mmap(nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED, kfd, static_cast<off_t>(offset));
+  ASSERT_NE(remapped, MAP_FAILED) << "dup replaced the hidden backing";
+  EXPECT_EQ(static_cast<uint64_t *>(remapped)[8], kMarker);
+  ASSERT_EQ(close(target), 0);
+  errno = 0;
+  EXPECT_EQ(syscall(SYS_fcntl, target, F_GETFD), -1);
+  EXPECT_EQ(errno, EBADF) << "driver ownership swallowed the replacement's close";
+
+  ASSERT_EQ(use_dup3 ? dup3(source, target, O_CLOEXEC) : dup2(source, target), target);
+  // Doorbell views remain live until KFD teardown stops the poller.
+  if (kind != HiddenBacking::Doorbell) {
+    EXPECT_EQ(munmap(remapped, kBytes), 0);
+    EXPECT_EQ(munmap(mapping, kBytes), 0);
+  }
+  if (kind == HiddenBacking::Allocation) {
+    kfd_ioctl_free_memory_of_gpu_args free_args{};
+    free_args.handle = allocation.handle;
+    EXPECT_EQ(ioctl(kfd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  }
+  EXPECT_EQ(close(kfd), 0);
+  EXPECT_GE(syscall(SYS_fcntl, target, F_GETFD), 0)
+      << "driver cleanup closed the application's replacement";
+  EXPECT_EQ(close(target), 0);
+  EXPECT_EQ(close(source), 0);
+}
 } // namespace
+
+TEST(InterposerDupTest, ConstructorPreservesDescriptorLimit) {
+  struct rlimit original {};
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &original), 0);
+  constexpr char kExpectedLimitEnv[] = "RJ_TEST_INITIAL_NOFILE";
+  if (const char *expected = getenv(kExpectedLimitEnv)) {
+    EXPECT_EQ(original.rlim_cur, std::strtoul(expected, nullptr, 10));
+    return;
+  }
+  RestoreLimit restore{original};
+  // Exec resets the descriptor table and reloads the interposer. Check the
+  // application-visible soft limit before opening KFD can raise it itself.
+  for (rlim_t limit : {64, 1024, 4096, 65536}) {
+    if (limit > original.rlim_max)
+      continue;
+    struct rlimit limited = original;
+    limited.rlim_cur = limit;
+    ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limited), 0);
+    std::string expected = std::string(kExpectedLimitEnv) + "=" + std::to_string(limit);
+    std::vector<char *> environment;
+    for (char **entry = environ; *entry; ++entry)
+      environment.push_back(*entry);
+    environment.push_back(expected.data());
+    environment.push_back(nullptr);
+    char executable[] = "/proc/self/exe";
+    char filter[] = "--gtest_filter=InterposerDupTest.ConstructorPreservesDescriptorLimit";
+    char *arguments[] = {executable, filter, nullptr};
+    pid_t child = -1;
+    ASSERT_EQ(posix_spawn(&child, executable, nullptr, nullptr, arguments, environment.data()), 0);
+    int status = 0;
+    ASSERT_EQ(waitpid(child, &status, 0), child);
+    ASSERT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(WEXITSTATUS(status), 0) << "initial descriptor limit " << limit;
+  }
+}
+
+TEST(InterposerDupTest, Dup2PreservesHiddenEventBacking) {
+  check_hidden_backing_after_dup(HiddenBacking::Events, false);
+}
+
+TEST(InterposerDupTest, Dup3PreservesHiddenEventBacking) {
+  check_hidden_backing_after_dup(HiddenBacking::Events, true);
+}
+
+TEST(InterposerDupTest, Dup2PreservesHiddenAllocationBacking) {
+  check_hidden_backing_after_dup(HiddenBacking::Allocation, false);
+}
+
+TEST(InterposerDupTest, Dup3PreservesHiddenAllocationBacking) {
+  check_hidden_backing_after_dup(HiddenBacking::Allocation, true);
+}
+
+TEST(InterposerDupTest, Dup2PreservesHiddenDoorbellBacking) {
+  check_hidden_backing_after_dup(HiddenBacking::Doorbell, false);
+}
+
+TEST(InterposerDupTest, Dup3PreservesHiddenDoorbellBacking) {
+  check_hidden_backing_after_dup(HiddenBacking::Doorbell, true);
+}
 
 // A plain dup() of the KFD fd must keep routing KFD ioctls to the driver, and
 // closing the original primary fd must not tear the process down while the dup
@@ -574,6 +723,34 @@ TEST(InterposerDrmTest, DeviceInfoReportsActiveCuCount) {
   EXPECT_EQ(device.cu_active_number, 256u);
 
   EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDrmTest, OpensWithinCurrentDescriptorLimit) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+
+  struct rlimit original {};
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &original), 0);
+  RestoreLimit restore{original};
+  constexpr rlim_t kSoftNofileLimit = 256;
+  struct rlimit limited = original;
+  limited.rlim_cur = std::min(original.rlim_cur, kSoftNofileLimit);
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limited), 0);
+
+  // A render open should use an available descriptor, even when 512 is outside
+  // the process limit. Its duplicate must retain routing after the original closes.
+  int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  EXPECT_LT(static_cast<rlim_t>(drm), limited.rlim_cur);
+  EXPECT_EQ(fcntl(drm, F_GETFD), FD_CLOEXEC);
+  int duplicate = fcntl(drm, F_DUPFD_CLOEXEC, 0);
+  ASSERT_GE(duplicate, 0);
+  EXPECT_EQ(close(drm), 0);
+  drm_amdgpu_info_device device{};
+  EXPECT_TRUE(query_drm_device_info(duplicate, &device));
+  EXPECT_EQ(close(duplicate), 0);
   EXPECT_EQ(close(kfd), 0);
 }
 
@@ -1157,11 +1334,78 @@ TEST(InterposerSyncobjTest, TimelineWaitReturnsEintrForSignal) {
   EXPECT_EQ(close(kfd), 0);
 }
 
-// rocJITsu local mode supports fork-then-exec only: its simulator state lives in
+namespace {
+
+void check_fresh_fork_backends(bool concurrent_mappings) {
+  std::jthread mappings;
+  if (concurrent_mappings) {
+    mappings = std::jthread([](std::stop_token stop) {
+      while (!stop.stop_requested()) {
+        void *page =
+            mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (page != MAP_FAILED)
+          munmap(page, 4096);
+      }
+    });
+  }
+  for (int iteration = 0; iteration < 4; ++iteration) {
+    const pid_t child = fork();
+    ASSERT_GE(child, 0);
+    if (child == 0) {
+      alarm(10);
+      const pid_t grandchild = fork();
+      if (grandchild < 0)
+        _exit(10);
+      if (grandchild > 0) {
+        int status = 0;
+        if (waitpid(grandchild, &status, 0) != grandchild || !WIFEXITED(status) ||
+            WEXITSTATUS(status) != 0)
+          _exit(11);
+      }
+      const int kfd = open_kfd();
+      if (kfd < 0 || !kfd_version_ok(kfd))
+        _exit(12);
+      struct stat info {};
+      if (syscall(SYS_fstat, kfd, &info) != 0 || S_ISCHR(info.st_mode))
+        _exit(13); // The child must use a simulator descriptor, never host KFD.
+      if (close(kfd) != 0)
+        _exit(14);
+      _exit(0);
+    }
+    int status = 0;
+    ASSERT_EQ(waitpid(child, &status, 0), child);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+  }
+  if (mappings.joinable()) {
+    mappings.request_stop();
+    mappings.join();
+  }
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  EXPECT_TRUE(kfd_version_ok(kfd));
+  EXPECT_EQ(close(kfd), 0);
+}
+
+} // namespace
+
+// Run in a fresh executable so the parent has not used a GPU backend. Keep the
+// parent single-threaded here so TSan can instrument the new child backend threads.
+TEST(InterposerFreshForkTest, ChildAndGrandchildInitializeIndependentBackends) {
+  check_fresh_fork_backends(/*concurrent_mappings=*/false);
+}
+
+// This separately exercises integration under mapping traffic. HostMappingLockTest
+// guarantees that a vanished thread holds the inherited lock when it is reset.
+TEST(InterposerFreshForkTest, ConcurrentMappingsPreserveIndependentChildBackends) {
+  check_fresh_fork_backends(/*concurrent_mappings=*/true);
+}
+
+// After GPU initialization, local mode supports fork-then-exec only: state lives in
 // this address space, and a driver call holds private driver locks for its whole
 // duration -- sometimes across a blocking wait -- so no atfork prepare handler could
-// drain them without risking hanging fork() itself. Same contract as CUDA, HSA/ROCr
-// and ThreadSanitizer. Enforcement is an immutable owner PID checked at the top of
+// drain them without risking hanging fork() itself. Children of a parent that
+// used a backend are rejected by an immutable owner PID checked at the top of
 // every interposed entry point, before any inherited lock, container or pointer.
 //
 // These cover the contract from a MULTITHREADED parent, which is the case that
@@ -1586,7 +1830,7 @@ TEST(InterposerForkTest, ChildRefusesMmap64OnInheritedGpuFd) {
 // open flags and used fdopen, which silently lost the 0666 creation mode for "w"/"a"
 // (files came out mode 0000) and the "x" exclusive modifier (truncating instead of
 // failing EEXIST).
-TEST(InterposerForkTest, ChildFopenPreservesLibcModeSemantics) {
+void check_child_fopen_modes() {
   rocjitsu::test::ScopedTempDirectory tmp("rj_fopen_");
   const std::string target = tmp.path() + "/created";
 
@@ -1643,6 +1887,15 @@ TEST(InterposerForkTest, ChildFopenPreservesLibcModeSemantics) {
       << "80/81=fopen(\"w\") failed, 82=creation mode was not 0666 under umask(0), "
       << "83=seeding failed, 84=\"wx\" opened an existing file, 85=wrong errno, "
       << "86/87=\"wx\" truncated the file before failing";
+}
+
+TEST(InterposerFreshForkTest, ChildFopenPreservesLibcModeSemantics) { check_child_fopen_modes(); }
+
+TEST(InterposerForkTest, ChildFopenPreservesLibcModeSemantics) {
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  check_child_fopen_modes();
+  EXPECT_EQ(close(kfd), 0);
 }
 
 // Names lie; device identity does not. A symlink can point at the real KFD under any
@@ -1821,8 +2074,8 @@ TEST(InterposerForkTest, PosixSpawnFromAMultithreadedParent) {
   EXPECT_EQ(close(kfd), 0);
 }
 
-// RETIRED: this exercised fork-WITHOUT-exec in local mode -- the child re-opened
-// KFD/DRM and ran GEM + syncobj work with no intervening exec. That contradicts the
+// RETIRED: this exercised fork-WITHOUT-exec after the parent started a local GPU
+// backend. The child re-opened KFD/DRM and ran GEM + syncobj work. That contradicts the
 // contract local mode can actually honour (see InterposerForkTest above): the
 // simulator lives in this address space and its driver locks cannot be drained by an
 // atfork handler. The capability is only supportable where the state is NOT in the

@@ -62,7 +62,9 @@ enum kind_buffer_tracing
     BUFFER_TRACING_KFD_PAGE_MIGRATE         = 29,
     BUFFER_TRACING_KFD_PAGE_FAULT           = 30,
     BUFFER_TRACING_KFD_QUEUE                = 31,
-    BUFFER_TRACING_PAGE_MIGRATION           = 50,
+    BUFFER_TRACING_KFD_EVENT_PAGE_FAULT   = 32,  // NOLINT(readability-identifier-naming)
+    BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE = 33,  // NOLINT(readability-identifier-naming)
+    BUFFER_TRACING_PAGE_MIGRATION         = 50,
 };
 
 using callback_tracing_kind = kind_callback_tracing;
@@ -643,8 +645,8 @@ struct name_info
 {
     using value_type   = name_info_impl<EnumT, ValueT>;
     using enum_type    = EnumT;
-    using support_type = typename value_type::support_type;
-    using return_type  = typename value_type::return_type;
+    using support_type = value_type::support_type;
+    using return_type  = value_type::return_type;
     using item_type    = const value_type*;
     using item_array_t = std::vector<item_type>;
 
@@ -1121,6 +1123,12 @@ struct wrapper
         buffer_tracing_kind::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU;
     static constexpr buffer_tracing_kind BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS =
         buffer_tracing_kind::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS;
+    static constexpr buffer_tracing_kind
+        BUFFER_TRACING_KFD_EVENT_PAGE_FAULT =  // NOLINT(readability-identifier-naming)
+        buffer_tracing_kind::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT;
+    static constexpr buffer_tracing_kind
+        BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE =  // NOLINT(readability-identifier-naming)
+        buffer_tracing_kind::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE;
 
     // ─── Counter flag constants ───────────────────────────────────────────────
     static constexpr counter_flag_t COUNTER_FLAG_NONE = 0;

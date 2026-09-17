@@ -22,6 +22,7 @@
 #include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
 
 #include "embedded_schema.h"
 #include "launch_preload.h"
@@ -402,6 +403,9 @@ void print_usage() {
          "                    means -object\n"
          "                    memory-backend-memfd,id=mem,size=<N>,share=on together\n"
          "                    with -machine memory-backend=mem.\n"
+         "  --thread-budget-table\n"
+         "                    Print engine / dispatch allocations without running a VM\n"
+         "  --check-vfio-user Report whether this binary includes VFIO-user support\n"
          "  --version, -v     Print version and exit\n"
          "  --help, -h        Print this help and exit\n";
 }
@@ -413,6 +417,8 @@ int main(int argc, char *argv[]) {
 
   const char *config_path = nullptr;
   const char *vfio_socket = nullptr;
+  bool thread_budget_table = false;
+  int vfio_ready_fd = -1;
   bool daemon_mode = false;
   bool attach_mode = false;
   int separator_idx = -1;
@@ -427,10 +433,28 @@ int main(int argc, char *argv[]) {
       config_path = argv[++i];
     } else if (arg == "--vfio-socket" && i + 1 < argc) {
       vfio_socket = argv[++i];
+    } else if (arg == "--thread-budget-table") {
+      thread_budget_table = true;
+    } else if (arg == "--vfio-ready-fd" && i + 1 < argc) {
+      std::string_view value(argv[++i]);
+      auto [ptr, error] = std::from_chars(value.data(), value.data() + value.size(), vfio_ready_fd);
+      if (error != std::errc{} || ptr != value.data() + value.size() || vfio_ready_fd < 0) {
+        std::cerr << "rocjitsu: --vfio-ready-fd requires a nonnegative descriptor\n";
+        return 1;
+      }
     } else if (arg == "--daemon") {
       daemon_mode = true;
     } else if (arg == "--attach") {
       attach_mode = true;
+    } else if (arg == "--check-vfio-user") {
+#if defined(RJ_ENABLE_VFIO_USER)
+      std::cout << "vfio-user support enabled\n";
+      return 0;
+#else
+      std::cerr << "rocjitsu: this build has no vfio-user support; reconfigure with "
+                   "-DROCJITSU_ENABLE_VFIO=ON\n";
+      return 1;
+#endif
     } else if (arg == "--help" || arg == "-h") {
       print_usage();
       return 0;
@@ -456,8 +480,45 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  // Serving a VMM needs the device's identity, not a simulated machine, so this
-  // is dispatched before the parse that builds one.
+  if (thread_budget_table) {
+    if (vfio_socket || vfio_ready_fd >= 0 || daemon_mode || attach_mode || separator_idx >= 0) {
+      std::cerr << "rocjitsu: --thread-budget-table cannot be combined with a launch mode\n";
+      return 1;
+    }
+    try {
+      auto settings =
+          rocjitsu::config::load_execution_thread_settings(abs_config, rocjitsu::kEmbeddedSchema);
+      const uint32_t host = rocjitsu::amdgpu::available_host_threads();
+      std::cout
+          << "Budget | num_threads | cpu_dispatch_threads per GPU | async_helper_threads | Total\n";
+      auto print = [&](const std::string &label) {
+        const auto plan = settings.resolve(host);
+        uint64_t total = uint64_t{plan.engines} + plan.helpers;
+        std::string dispatch;
+        for (uint32_t width : plan.dispatch) {
+          if (!dispatch.empty())
+            dispatch += ",";
+          dispatch += std::to_string(width);
+          total += width - 1;
+        }
+        std::cout << std::format("{} | {} | {} | {} | {}\n", label, plan.engines, dispatch,
+                                 plan.helpers, total);
+      };
+      print("Configured");
+      for (uint32_t budget : {1u, 2u, 4u, 8u, 12u, 16u, 24u, 32u, 34u, 36u, 40u, 48u, 64u}) {
+        settings.request.budget = budget;
+        print(std::to_string(budget));
+      }
+      return 0;
+    } catch (const std::exception &e) {
+      std::cerr << std::format("rocjitsu: thread allocation failed: {}\n", e.what());
+      return 1;
+    }
+  }
+
+  // Serving a VMM builds its own machine, with the PCI function inside it, so
+  // this is dispatched before the parse that builds one here -- not because no
+  // machine is needed, but because the one it needs is assembled differently.
   if (vfio_socket != nullptr) {
     if (daemon_mode || attach_mode || (separator_idx >= 0 && separator_idx + 1 < argc)) {
       std::cerr << "rocjitsu: --vfio-socket serves a VMM and cannot be combined with "
@@ -465,12 +526,17 @@ int main(int argc, char *argv[]) {
       return 1;
     }
 #if defined(RJ_ENABLE_VFIO_USER)
-    return rocjitsu::run_vfio_server(abs_config, vfio_socket);
+    return rocjitsu::run_vfio_server(abs_config, vfio_socket, vfio_ready_fd);
 #else
     std::cerr << "rocjitsu: this build has no vfio-user support; reconfigure with "
                  "-DROCJITSU_ENABLE_VFIO=ON\n";
     return 1;
 #endif
+  }
+
+  if (vfio_ready_fd >= 0) {
+    std::cerr << "rocjitsu: --vfio-ready-fd requires --vfio-socket\n";
+    return 1;
   }
 
   rocjitsu::config::DbtGuestConfig dbt_guest_config;

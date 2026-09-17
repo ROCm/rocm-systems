@@ -39,11 +39,10 @@ using Gfx950RaceTest = rocjitsu::test::RaceTestBase;
 __global__ void vgpr_no_race_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   float val;
-  asm volatile(
-      "global_load_dword %0, %1, off\n"
-      "s_waitcnt vmcnt(0)\n"
-      : "=v"(val) : "v"(&src[tid])
-  );
+  asm volatile("global_load_dword %0, %1, off\n"
+               "s_waitcnt vmcnt(0)\n"
+               : "=v"(val)
+               : "v"(&src[tid]));
   dst[tid] = val;
 }
 
@@ -60,12 +59,11 @@ static constexpr RaceExpectation kVgprWaitcntRaceExpectation{
 __global__ void vgpr_race_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   float val;
-  asm volatile(
-      "global_load_dword %0, %1, off\n"
-      // BUG: missing s_waitcnt vmcnt(0).
-      "s_nop 0\n"
-      : "=v"(val) : "v"(&src[tid])
-  );
+  asm volatile("global_load_dword %0, %1, off\n"
+               // BUG: missing s_waitcnt vmcnt(0).
+               "s_nop 0\n"
+               : "=v"(val)
+               : "v"(&src[tid]));
   dst[tid] = val;
 }
 
@@ -87,12 +85,11 @@ TEST_F(Gfx950RaceTest, vgpr_waitcnt_race) {
 
 __global__ void sgpr_no_race_kernel(const int *src, int *dst) {
   int val;
-  asm volatile(
-      "s_load_dword %0, %1, 0x0\n"
-      "s_waitcnt lgkmcnt(0)\n"
-      "s_add_u32 %0, %0, 1\n"
-      : "=s"(val) : "s"(src)
-  );
+  asm volatile("s_load_dword %0, %1, 0x0\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               "s_add_u32 %0, %0, 1\n"
+               : "=s"(val)
+               : "s"(src));
   dst[threadIdx.x] = val;
 }
 
@@ -105,12 +102,11 @@ static constexpr RaceExpectation kSgprWaitcntRaceExpectation{
 
 __global__ void sgpr_race_kernel(const int *src, int *dst) {
   int val;
-  asm volatile(
-      "s_load_dword %0, %1, 0x0\n"
-      // BUG: missing s_waitcnt lgkmcnt(0).
-      "s_add_u32 %0, %0, 1\n"
-      : "=s"(val) : "s"(src)
-  );
+  asm volatile("s_load_dword %0, %1, 0x0\n"
+               // BUG: missing s_waitcnt lgkmcnt(0).
+               "s_add_u32 %0, %0, 1\n"
+               : "=s"(val)
+               : "s"(src));
   dst[threadIdx.x] = val;
 }
 
@@ -132,12 +128,12 @@ TEST_F(Gfx950RaceTest, sgpr_waitcnt_race) {
 
 __global__ void sgpr_waw_load_then_mov_kernel(const int *src, int *dst) {
   int val;
-  asm volatile(
-      "s_load_dword %0, %1, 0x0\n"
-      "s_waitcnt lgkmcnt(0)\n"
-      "s_mov_b32 %0, 7\n"
-      : "=&s"(val) : "s"(src) : "memory"
-  );
+  asm volatile("s_load_dword %0, %1, 0x0\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               "s_mov_b32 %0, 7\n"
+               : "=&s"(val)
+               : "s"(src)
+               : "memory");
   dst[threadIdx.x] = val;
 }
 
@@ -152,12 +148,11 @@ static constexpr RaceExpectation kSgprWawLoadThenMovExpectation{
 
 __global__ void sgpr_waw_load_then_mov_race_kernel(const int *src, int *dst) {
   int val;
-  asm volatile(
-      "s_load_dword %0, %1, 0x0\n"
-      // BUG: no wait before a scalar instruction overwrites the load destination.
-      "s_mov_b32 %0, 7\n"
-      : "=&s"(val) : "s"(src)
-  );
+  asm volatile("s_load_dword %0, %1, 0x0\n"
+               // BUG: no wait before a scalar instruction overwrites the load destination.
+               "s_mov_b32 %0, 7\n"
+               : "=&s"(val)
+               : "s"(src));
   asm volatile("s_waitcnt lgkmcnt(0)\n" ::: "memory");
   dst[threadIdx.x] = val;
 }
@@ -173,24 +168,23 @@ static constexpr RaceExpectation kSgprWawLoadThenLoadExpectation{
 
 __global__ void sgpr_waw_load_then_load_kernel(const int *src0, const int *src1, int *dst) {
   int val;
-  asm volatile(
-      "s_load_dword %0, %1, 0x0\n"
-      "s_waitcnt lgkmcnt(0)\n"
-      "s_load_dword %0, %2, 0x0\n"
-      : "=&s"(val) : "s"(src0), "s"(src1) : "memory"
-  );
+  asm volatile("s_load_dword %0, %1, 0x0\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               "s_load_dword %0, %2, 0x0\n"
+               : "=&s"(val)
+               : "s"(src0), "s"(src1)
+               : "memory");
   asm volatile("s_waitcnt lgkmcnt(0)\n" ::: "memory");
   dst[threadIdx.x] = val;
 }
 
 __global__ void sgpr_waw_load_then_load_race_kernel(const int *src0, const int *src1, int *dst) {
   int val;
-  asm volatile(
-      "s_load_dword %0, %1, 0x0\n"
-      // BUG: scalar-memory reads can return out of order.
-      "s_load_dword %0, %2, 0x0\n"
-      : "=&s"(val) : "s"(src0), "s"(src1)
-  );
+  asm volatile("s_load_dword %0, %1, 0x0\n"
+               // BUG: scalar-memory reads can return out of order.
+               "s_load_dword %0, %2, 0x0\n"
+               : "=&s"(val)
+               : "s"(src0), "s"(src1));
   asm volatile("s_waitcnt lgkmcnt(0)\n" ::: "memory");
   dst[threadIdx.x] = val;
 }
@@ -227,8 +221,8 @@ TEST_F(Gfx950RaceTest, sgpr_waw_load_then_load_race) {
 
 // --- LDS cross-wave ---
 
-__attribute__((amdgpu_flat_work_group_size(128, 128)))
-__global__ void lds_cross_wave_safe_kernel(int *out) {
+__attribute__((amdgpu_flat_work_group_size(128, 128))) __global__ void
+lds_cross_wave_safe_kernel(int *out) {
   __shared__ int lds[128];
   int tid = threadIdx.x;
   lds[tid] = tid + 100;
@@ -244,8 +238,8 @@ static constexpr RaceExpectation kLdsCrossWaveRaceExpectation{
     .consumer = "ds_read_b32",
 };
 
-__attribute__((amdgpu_flat_work_group_size(128, 128)))
-__global__ void lds_cross_wave_race_kernel(int *out) {
+__attribute__((amdgpu_flat_work_group_size(128, 128))) __global__ void
+lds_cross_wave_race_kernel(int *out) {
   __shared__ int lds[128];
   int tid = threadIdx.x;
   int gid = blockIdx.x * blockDim.x + tid;
@@ -271,25 +265,23 @@ TEST_F(Gfx950RaceTest, lds_cross_wave_race) {
 
 // --- LDS same-wave instruction ordering ---
 
-__attribute__((amdgpu_flat_work_group_size(64, 64)))
-__global__ void lds_same_wave_write_read_order_kernel(uint32_t *out) {
+__attribute__((amdgpu_flat_work_group_size(64, 64))) __global__ void
+lds_same_wave_write_read_order_kernel(uint32_t *out) {
   uint32_t lane = threadIdx.x;
   uint32_t read_lane = (lane + 1) & 63;
   uint32_t value = lane + 1;
   uint32_t observed;
-  asm volatile(
-      "ds_write_b8 %1, %2\n"
-      "ds_read_u8 %0, %3\n"
-      "s_waitcnt lgkmcnt(0)\n"
-      : "=&v"(observed)
-      : "v"(lane), "v"(value), "v"(read_lane)
-      : "memory"
-  );
+  asm volatile("ds_write_b8 %1, %2\n"
+               "ds_read_u8 %0, %3\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               : "=&v"(observed)
+               : "v"(lane), "v"(value), "v"(read_lane)
+               : "memory");
   out[lane] = observed;
 }
 
-__attribute__((amdgpu_flat_work_group_size(64, 64)))
-__global__ void lds_same_wave_read_write_order_kernel(uint32_t *out) {
+__attribute__((amdgpu_flat_work_group_size(64, 64))) __global__ void
+lds_same_wave_read_write_order_kernel(uint32_t *out) {
   uint32_t lane = threadIdx.x;
   uint32_t read_lane = (lane + 1) & 63;
   uint32_t old_value = lane + 1;
@@ -299,28 +291,22 @@ __global__ void lds_same_wave_read_write_order_kernel(uint32_t *out) {
 
   // Establish the old value, then test that the following same-wave DS read
   // completes logically before the later DS write to the overlapping bytes.
-  asm volatile(
-      "ds_write_b8 %0, %1\n"
-      "s_waitcnt lgkmcnt(0)\n"
-      :
-      : "v"(lane), "v"(old_value)
-      : "memory"
-  );
-  asm volatile(
-      "ds_read_u8 %0, %2\n"
-      "ds_write_b8 %1, %3\n"
-      "s_waitcnt lgkmcnt(0)\n"
-      : "=&v"(observed_old)
-      : "v"(lane), "v"(read_lane), "v"(new_value)
-      : "memory"
-  );
-  asm volatile(
-      "ds_read_u8 %0, %1\n"
-      "s_waitcnt lgkmcnt(0)\n"
-      : "=v"(observed_new)
-      : "v"(lane)
-      : "memory"
-  );
+  asm volatile("ds_write_b8 %0, %1\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               :
+               : "v"(lane), "v"(old_value)
+               : "memory");
+  asm volatile("ds_read_u8 %0, %2\n"
+               "ds_write_b8 %1, %3\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               : "=&v"(observed_old)
+               : "v"(lane), "v"(read_lane), "v"(new_value)
+               : "memory");
+  asm volatile("ds_read_u8 %0, %1\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               : "=v"(observed_new)
+               : "v"(lane)
+               : "memory");
 
   out[2 * lane] = observed_old;
   out[2 * lane + 1] = observed_new;
@@ -332,8 +318,8 @@ TEST_F(Gfx950RaceTest, lds_same_wave_order) {
   sync();
 
   std::vector<uint32_t> write_read_host(64);
-  (void)hipMemcpy(write_read_host.data(), write_read_out,
-                  write_read_host.size() * sizeof(uint32_t), hipMemcpyDeviceToHost);
+  (void)hipMemcpy(write_read_host.data(), write_read_out, write_read_host.size() * sizeof(uint32_t),
+                  hipMemcpyDeviceToHost);
   for (uint32_t lane = 0; lane < write_read_host.size(); ++lane)
     EXPECT_EQ(write_read_host[lane], ((lane + 1) & 63) + 1);
 
@@ -342,8 +328,8 @@ TEST_F(Gfx950RaceTest, lds_same_wave_order) {
   sync();
 
   std::vector<uint32_t> read_write_host(128);
-  (void)hipMemcpy(read_write_host.data(), read_write_out,
-                  read_write_host.size() * sizeof(uint32_t), hipMemcpyDeviceToHost);
+  (void)hipMemcpy(read_write_host.data(), read_write_out, read_write_host.size() * sizeof(uint32_t),
+                  hipMemcpyDeviceToHost);
   for (uint32_t lane = 0; lane < 64; ++lane) {
     EXPECT_EQ(read_write_host[2 * lane], ((lane + 1) & 63) + 1);
     EXPECT_EQ(read_write_host[2 * lane + 1], (lane + 1) ^ 0xff);
@@ -357,8 +343,8 @@ TEST_F(Gfx950RaceTest, lds_same_wave_order) {
 // workgroups (2 waves of 64). Each wave sets M0 to its LDS region offset and
 // uses soffset for its global byte offset within the workgroup's buffer slice.
 
-__attribute__((amdgpu_flat_work_group_size(128, 128)))
-__global__ void buffer_load_lds_kernel(const int *src, int *out) {
+__attribute__((amdgpu_flat_work_group_size(128, 128))) __global__ void
+buffer_load_lds_kernel(const int *src, int *out) {
   __shared__ int lds[128];
   int tid = threadIdx.x;
   int lane = tid % 64;
@@ -373,21 +359,18 @@ __global__ void buffer_load_lds_kernel(const int *src, int *out) {
   unsigned w2 = 128 * sizeof(int);
   unsigned w3 = (4u) | (7u << 12) | (4u << 15);
 
-  unsigned wave_byte_offset =
-      __builtin_amdgcn_readfirstlane(wave * 64 * sizeof(int));
-  asm volatile(
-      "s_mov_b32 s12, %0\n"
-      "s_mov_b32 s13, %1\n"
-      "s_mov_b32 s14, %2\n"
-      "s_mov_b32 s15, %3\n"
-      "s_mov_b32 m0, %5\n"
-      "buffer_load_dword %4, s[12:15], %6 offen lds\n"
-      "s_waitcnt vmcnt(0)\n"
-      :
-      : "s"(w0), "s"(w1), "s"(w2), "s"(w3),
-        "v"(lane * 4), "s"(wave_byte_offset), "s"(wave_byte_offset)
-      : "s12", "s13", "s14", "s15", "memory"
-  );
+  unsigned wave_byte_offset = __builtin_amdgcn_readfirstlane(wave * 64 * sizeof(int));
+  asm volatile("s_mov_b32 s12, %0\n"
+               "s_mov_b32 s13, %1\n"
+               "s_mov_b32 s14, %2\n"
+               "s_mov_b32 s15, %3\n"
+               "s_mov_b32 m0, %5\n"
+               "buffer_load_dword %4, s[12:15], %6 offen lds\n"
+               "s_waitcnt vmcnt(0)\n"
+               :
+               : "s"(w0), "s"(w1), "s"(w2), "s"(w3), "v"(lane * 4), "s"(wave_byte_offset),
+                 "s"(wave_byte_offset)
+               : "s12", "s13", "s14", "s15", "memory");
 
   __syncthreads();
   int gid = blockIdx.x * blockDim.x + tid;
@@ -404,8 +387,8 @@ static constexpr RaceExpectation kGlobalToLdsBufferRaceExpectation{
     .consumer = "ds_read_b32",
 };
 
-__attribute__((amdgpu_flat_work_group_size(128, 128)))
-__global__ void buffer_load_lds_race_kernel(const int *src, int *out) {
+__attribute__((amdgpu_flat_work_group_size(128, 128))) __global__ void
+buffer_load_lds_race_kernel(const int *src, int *out) {
   __shared__ int lds[128];
   int tid = threadIdx.x;
   int lane = tid % 64;
@@ -418,31 +401,27 @@ __global__ void buffer_load_lds_race_kernel(const int *src, int *out) {
   unsigned w2 = 128 * sizeof(int);
   unsigned w3 = (4u) | (7u << 12) | (4u << 15);
 
-  unsigned wave_byte_offset =
-      __builtin_amdgcn_readfirstlane(wave * 64 * sizeof(int));
-  asm volatile(
-      "s_mov_b32 s12, %0\n"
-      "s_mov_b32 s13, %1\n"
-      "s_mov_b32 s14, %2\n"
-      "s_mov_b32 s15, %3\n"
-      "s_mov_b32 m0, %5\n"
-      "buffer_load_dword %4, s[12:15], %6 offen lds\n"
-      "s_waitcnt vmcnt(3)\n"
-      "s_waitcnt vmcnt(2)\n"
-      "s_waitcnt vmcnt(1)\n"
-      // BUG: missing s_waitcnt vmcnt(0).
-      :
-      : "s"(w0), "s"(w1), "s"(w2), "s"(w3),
-        "v"(lane * 4), "s"(wave_byte_offset), "s"(wave_byte_offset)
-      : "s12", "s13", "s14", "s15", "memory"
-  );
+  unsigned wave_byte_offset = __builtin_amdgcn_readfirstlane(wave * 64 * sizeof(int));
+  asm volatile("s_mov_b32 s12, %0\n"
+               "s_mov_b32 s13, %1\n"
+               "s_mov_b32 s14, %2\n"
+               "s_mov_b32 s15, %3\n"
+               "s_mov_b32 m0, %5\n"
+               "buffer_load_dword %4, s[12:15], %6 offen lds\n"
+               "s_waitcnt vmcnt(3)\n"
+               "s_waitcnt vmcnt(2)\n"
+               "s_waitcnt vmcnt(1)\n"
+               // BUG: missing s_waitcnt vmcnt(0).
+               :
+               : "s"(w0), "s"(w1), "s"(w2), "s"(w3), "v"(lane * 4), "s"(wave_byte_offset),
+                 "s"(wave_byte_offset)
+               : "s12", "s13", "s14", "s15", "memory");
 
   int val;
-  asm volatile(
-      "ds_read_b32 %0, %1\n"
-      "s_waitcnt lgkmcnt(0)\n"
-      : "=v"(val) : "v"(tid * 4)
-  );
+  asm volatile("ds_read_b32 %0, %1\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               : "=v"(val)
+               : "v"(tid * 4));
   int gid = blockIdx.x * blockDim.x + tid;
   out[gid] = val;
 }
@@ -454,13 +433,13 @@ TEST_F(Gfx950RaceTest, global_to_lds_buffer) {
   sync();
 
   std::vector<int> h_src(N), h_out(N);
-  for (int i = 0; i < N; ++i) h_src[i] = i;
+  for (int i = 0; i < N; ++i)
+    h_src[i] = i;
   (void)hipMemcpy(h_out.data(), out, N * sizeof(int), hipMemcpyDeviceToHost);
   int errors = 0;
   for (int i = 0; i < N; ++i)
     if (h_out[i] != h_src[i] && errors++ < 5)
-      fprintf(stderr, "MISMATCH [%d]: got %d, expected %d\n",
-              i, h_out[i], h_src[i]);
+      fprintf(stderr, "MISMATCH [%d]: got %d, expected %d\n", i, h_out[i], h_src[i]);
   EXPECT_EQ(errors, 0) << errors << "/" << N << " mismatches";
 }
 
@@ -482,24 +461,20 @@ static constexpr RaceExpectation kPartialVmcntRaceExpectation{
     .consumer = "v_add_f32",
 };
 
-__global__ void partial_vmcnt_kernel(const float *src_a, const float *src_b,
-                                     float *dst) {
+__global__ void partial_vmcnt_kernel(const float *src_a, const float *src_b, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   float a, b;
-  asm volatile(
-      "global_load_dword %0, %2, off\n"   // oldest (vmcnt event 0)
-      "global_load_dword %1, %3, off\n"   // newest (vmcnt event 1)
-      "s_waitcnt vmcnt(1)\n"              // drain oldest only
-      : "=v"(a), "=v"(b)
-      : "v"(&src_a[tid]), "v"(&src_b[tid])
-  );
+  asm volatile("global_load_dword %0, %2, off\n" // oldest (vmcnt event 0)
+               "global_load_dword %1, %3, off\n" // newest (vmcnt event 1)
+               "s_waitcnt vmcnt(1)\n"            // drain oldest only
+               : "=v"(a), "=v"(b)
+               : "v"(&src_a[tid]), "v"(&src_b[tid]));
   // Reading b races (still pending). Reading a is safe.
   dst[tid] = a + b;
 }
 
 TEST_F(Gfx950RaceTest, partial_vmcnt_race) {
-  partial_vmcnt_kernel<<<1, 64>>>(alloc<float>(64), alloc<float>(64),
-                                   alloc<float>(64));
+  partial_vmcnt_kernel<<<1, 64>>>(alloc<float>(64), alloc<float>(64), alloc<float>(64));
   sync();
   ExpectRace(kPartialVmcntRaceExpectation);
 }
@@ -513,23 +488,19 @@ static constexpr RaceExpectation kMultipleRaceExpectation{
     .consumer = "v_add_f32",
 };
 
-__global__ void two_races_kernel(const float *src_a, const float *src_b,
-                                 float *dst) {
+__global__ void two_races_kernel(const float *src_a, const float *src_b, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   float a, b;
-  asm volatile(
-      "global_load_dword %0, %2, off\n"
-      "global_load_dword %1, %3, off\n"
-      // No waitcnt at all.
-      : "=v"(a), "=v"(b)
-      : "v"(&src_a[tid]), "v"(&src_b[tid])
-  );
+  asm volatile("global_load_dword %0, %2, off\n"
+               "global_load_dword %1, %3, off\n"
+               // No waitcnt at all.
+               : "=v"(a), "=v"(b)
+               : "v"(&src_a[tid]), "v"(&src_b[tid]));
   dst[tid] = a + b;
 }
 
 TEST_F(Gfx950RaceTest, multiple_race) {
-  two_races_kernel<<<1, 64>>>(alloc<float>(64), alloc<float>(64),
-                               alloc<float>(64));
+  two_races_kernel<<<1, 64>>>(alloc<float>(64), alloc<float>(64), alloc<float>(64));
   sync();
   // Both loads race against v_add_f32, but dedup by PC collapses them to 1.
   ExpectRace(kMultipleRaceExpectation);
@@ -558,11 +529,10 @@ static constexpr RaceExpectation kMultiKernelRaceExpectation{
 __global__ void racy_kernel(const float *src, float *dst) {
   int tid = threadIdx.x;
   float val;
-  asm volatile(
-      "global_load_dword %0, %1, off\n"
-      // No waitcnt.
-      : "=v"(val) : "v"(&src[tid])
-  );
+  asm volatile("global_load_dword %0, %1, off\n"
+               // No waitcnt.
+               : "=v"(val)
+               : "v"(&src[tid]));
   dst[tid] = val;
 }
 
@@ -591,11 +561,10 @@ TEST_F(Gfx950RaceTest, multi_kernel_race) {
 __global__ void multi_wg_clean_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   float val;
-  asm volatile(
-      "global_load_dword %0, %1, off\n"
-      "s_waitcnt vmcnt(0)\n"
-      : "=v"(val) : "v"(&src[tid])
-  );
+  asm volatile("global_load_dword %0, %1, off\n"
+               "s_waitcnt vmcnt(0)\n"
+               : "=v"(val)
+               : "v"(&src[tid]));
   dst[tid] = val;
 }
 
@@ -611,11 +580,10 @@ static constexpr RaceExpectation kMultiWorkgroupRaceExpectation{
 __global__ void multi_wg_race_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   float val;
-  asm volatile(
-      "global_load_dword %0, %1, off\n"
-      // No waitcnt.
-      : "=v"(val) : "v"(&src[tid])
-  );
+  asm volatile("global_load_dword %0, %1, off\n"
+               // No waitcnt.
+               : "=v"(val)
+               : "v"(&src[tid]));
   dst[tid] = val;
 }
 
@@ -644,25 +612,21 @@ static constexpr RaceExpectation kMixedCountersRaceExpectation{
     .consumer = "v_cvt_f32_i32",
 };
 
-__global__ void mixed_counters_kernel(const float *vsrc, const int *ssrc,
-                                      float *dst) {
+__global__ void mixed_counters_kernel(const float *vsrc, const int *ssrc, float *dst) {
   int tid = threadIdx.x;
   float vval;
   int sval;
-  asm volatile(
-      "global_load_dword %0, %2, off\n"
-      "s_load_dword %1, %3, 0x0\n"
-      "s_waitcnt vmcnt(0)\n"   // drains global_load only
-      // lgkmcnt not drained.
-      : "=v"(vval), "=s"(sval)
-      : "v"(&vsrc[tid]), "s"(ssrc)
-  );
+  asm volatile("global_load_dword %0, %2, off\n"
+               "s_load_dword %1, %3, 0x0\n"
+               "s_waitcnt vmcnt(0)\n" // drains global_load only
+               // lgkmcnt not drained.
+               : "=v"(vval), "=s"(sval)
+               : "v"(&vsrc[tid]), "s"(ssrc));
   dst[tid] = vval + static_cast<float>(sval);
 }
 
 TEST_F(Gfx950RaceTest, mixed_counters_race) {
-  mixed_counters_kernel<<<1, 64>>>(alloc<float>(64), alloc<int>(64),
-                                    alloc<float>(64));
+  mixed_counters_kernel<<<1, 64>>>(alloc<float>(64), alloc<int>(64), alloc<float>(64));
   sync();
   ExpectRace(kMixedCountersRaceExpectation);
 }
@@ -691,11 +655,10 @@ static constexpr RaceExpectation kStressWavefrontReuseRaceExpectation{
 __global__ void stress_racy(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   float val;
-  asm volatile(
-      "global_load_dword %0, %1, off\n"
-      // No waitcnt.
-      : "=v"(val) : "v"(&src[tid])
-  );
+  asm volatile("global_load_dword %0, %1, off\n"
+               // No waitcnt.
+               : "=v"(val)
+               : "v"(&src[tid]));
   dst[tid] = val;
 }
 
@@ -719,8 +682,8 @@ TEST_F(Gfx950RaceTest, stress_wavefront_reuse_race) {
 // 128 threads (2 waves). Only first 60 lanes per wave write to LDS.
 // Wave 1 reads from wave 0's LDS region. With barrier = safe; without = race.
 
-__attribute__((amdgpu_flat_work_group_size(128, 128)))
-__global__ void exec_mask_safe_kernel(int *out) {
+__attribute__((amdgpu_flat_work_group_size(128, 128))) __global__ void
+exec_mask_safe_kernel(int *out) {
   __shared__ int lds[128];
   int tid = threadIdx.x;
   if (tid % 64 < 60)
@@ -739,8 +702,8 @@ static constexpr RaceExpectation kExecMaskRaceExpectation{
     .consumer = "ds_read_b32",
 };
 
-__attribute__((amdgpu_flat_work_group_size(128, 128)))
-__global__ void exec_mask_race_kernel(int *out) {
+__attribute__((amdgpu_flat_work_group_size(128, 128))) __global__ void
+exec_mask_race_kernel(int *out) {
   __shared__ int lds[128];
   int tid = threadIdx.x;
   if (tid % 64 < 60)
@@ -787,8 +750,8 @@ TEST_F(Gfx950RaceTest, exec_mask_race) {
 //   s_barrier (__syncthreads) — synchronizes all waves in the workgroup.
 //       Required for cross-wave dependencies.
 
-__attribute__((amdgpu_flat_work_group_size(256, 256)))
-__global__ void exec_mask_same_wave_kernel(int *out) {
+__attribute__((amdgpu_flat_work_group_size(256, 256))) __global__ void
+exec_mask_same_wave_kernel(int *out) {
   __shared__ int lds[256];
   int tid = threadIdx.x;
   lds[tid] = tid;
@@ -809,8 +772,8 @@ static constexpr RaceExpectation kExecMaskCrossWaveRaceExpectation{
     .consumer = "ds_read_b32",
 };
 
-__attribute__((amdgpu_flat_work_group_size(256, 256)))
-__global__ void exec_mask_cross_wave_race_kernel(int *out) {
+__attribute__((amdgpu_flat_work_group_size(256, 256))) __global__ void
+exec_mask_cross_wave_race_kernel(int *out) {
   __shared__ int lds[256];
   int tid = threadIdx.x;
   lds[tid] = tid;
@@ -823,8 +786,8 @@ __global__ void exec_mask_cross_wave_race_kernel(int *out) {
   out[tid] = lds[tid];
 }
 
-__attribute__((amdgpu_flat_work_group_size(256, 256)))
-__global__ void exec_mask_cross_wave_barrier_kernel(int *out) {
+__attribute__((amdgpu_flat_work_group_size(256, 256))) __global__ void
+exec_mask_cross_wave_barrier_kernel(int *out) {
   __shared__ int lds[256];
   int tid = threadIdx.x;
   lds[tid] = tid;
@@ -840,7 +803,8 @@ __global__ void exec_mask_cross_wave_barrier_kernel(int *out) {
 // Host-side simulation of the LDS state for numerical validation.
 static std::vector<int> simulate_exec_mask_lds(int n, int lo, int hi) {
   std::vector<int> lds(n);
-  for (int i = 0; i < n; ++i) lds[i] = i;
+  for (int i = 0; i < n; ++i)
+    lds[i] = i;
   for (int i = 0; i < n; ++i) {
     int lane = i % 64;
     if (lane >= lo && lane < hi && i + 32 < n)
@@ -861,8 +825,7 @@ TEST_F(Gfx950RaceTest, exec_mask_same_wave) {
   int errors = 0;
   for (int i = 0; i < 256; ++i)
     if (h_out[i] != expected[i] && errors++ < 5)
-      fprintf(stderr, "MISMATCH [%d]: got %d, expected %d\n",
-              i, h_out[i], expected[i]);
+      fprintf(stderr, "MISMATCH [%d]: got %d, expected %d\n", i, h_out[i], expected[i]);
   EXPECT_EQ(errors, 0) << errors << "/256 mismatches";
 }
 
@@ -885,8 +848,7 @@ TEST_F(Gfx950RaceTest, exec_mask_cross_wave) {
   for (int i = 0; i < 256; ++i) {
     if (h_out[i] != expected[i]) {
       if (errors++ < 10)
-        fprintf(stderr, "MISMATCH [%d]: got %d, expected %d\n",
-                i, h_out[i], expected[i]);
+        fprintf(stderr, "MISMATCH [%d]: got %d, expected %d\n", i, h_out[i], expected[i]);
     }
   }
   EXPECT_EQ(errors, 0) << errors << "/256 mismatches";
@@ -903,23 +865,21 @@ TEST_F(Gfx950RaceTest, exec_mask_cross_wave) {
 // synchronize with the other wave. Only s_barrier guarantees that both
 // waves have completed their writes before either wave reads.
 
-__attribute__((amdgpu_flat_work_group_size(128, 128)))
-__global__ void lds_transpose_safe_kernel(int *out) {
+__attribute__((amdgpu_flat_work_group_size(128, 128))) __global__ void
+lds_transpose_safe_kernel(int *out) {
   __shared__ int lds[128];
   int tid = threadIdx.x;
   int base = static_cast<int>(reinterpret_cast<uintptr_t>(lds) & 0xFFFF);
   int write_addr = base + tid * 4;
   int read_addr = base + ((tid + 64) % 128) * 4;
   int val;
-  asm volatile(
-      "ds_write_b32 %1, %2\n"
-      "s_waitcnt lgkmcnt(0)\n"
-      "s_barrier\n"
-      "ds_read_b32 %0, %3\n"
-      "s_waitcnt lgkmcnt(0)\n"
-      : "=v"(val)
-      : "v"(write_addr), "v"(tid), "v"(read_addr)
-  );
+  asm volatile("ds_write_b32 %1, %2\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               "s_barrier\n"
+               "ds_read_b32 %0, %3\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               : "=v"(val)
+               : "v"(write_addr), "v"(tid), "v"(read_addr));
   out[tid] = val;
 }
 
@@ -930,23 +890,21 @@ static constexpr RaceExpectation kLdsTransposeRaceExpectation{
     .consumer = "ds_read_b32",
 };
 
-__attribute__((amdgpu_flat_work_group_size(128, 128)))
-__global__ void lds_transpose_race_kernel(int *out) {
+__attribute__((amdgpu_flat_work_group_size(128, 128))) __global__ void
+lds_transpose_race_kernel(int *out) {
   __shared__ int lds[128];
   int tid = threadIdx.x;
   int base = static_cast<int>(reinterpret_cast<uintptr_t>(lds) & 0xFFFF);
   int write_addr = base + tid * 4;
   int read_addr = base + ((tid + 64) % 128) * 4;
   int val;
-  asm volatile(
-      "ds_write_b32 %1, %2\n"
-      "s_waitcnt lgkmcnt(0)\n"
-      // BUG: missing s_barrier — wave 0 reads wave 1's region before it's written.
-      "ds_read_b32 %0, %3\n"
-      "s_waitcnt lgkmcnt(0)\n"
-      : "=v"(val)
-      : "v"(write_addr), "v"(tid), "v"(read_addr)
-  );
+  asm volatile("ds_write_b32 %1, %2\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               // BUG: missing s_barrier — wave 0 reads wave 1's region before it's written.
+               "ds_read_b32 %0, %3\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               : "=v"(val)
+               : "v"(write_addr), "v"(tid), "v"(read_addr));
   out[tid] = val;
 }
 
@@ -961,8 +919,7 @@ TEST_F(Gfx950RaceTest, lds_transpose) {
   int errors = 0;
   for (int i = 0; i < 128; ++i)
     if (h_out[i] != (i + 64) % 128 && errors++ < 5)
-      fprintf(stderr, "MISMATCH [%d]: got %d, expected %d\n",
-              i, h_out[i], (i + 64) % 128);
+      fprintf(stderr, "MISMATCH [%d]: got %d, expected %d\n", i, h_out[i], (i + 64) % 128);
   EXPECT_EQ(errors, 0) << errors << "/128 mismatches";
 }
 
@@ -976,23 +933,22 @@ TEST_F(Gfx950RaceTest, lds_transpose_race) {
 // ds_write2_b32 writes two dwords per lane to LDS at two offsets.
 // Cross-wave read without barrier = race; with barrier = safe.
 
-__attribute__((amdgpu_flat_work_group_size(128, 128)))
-__global__ void dual_offset_lds_safe_kernel(int *out) {
+__attribute__((amdgpu_flat_work_group_size(128, 128))) __global__ void
+dual_offset_lds_safe_kernel(int *out) {
   __shared__ int lds[256];
   int tid = threadIdx.x;
-  asm volatile(
-      "ds_write2_b32 %0, %1, %2 offset0:0 offset1:1\n"
-      "s_waitcnt lgkmcnt(0)\n"
-      : : "v"(tid * 8), "v"(tid), "v"(tid + 100) : "memory"
-  );
+  asm volatile("ds_write2_b32 %0, %1, %2 offset0:0 offset1:1\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               :
+               : "v"(tid * 8), "v"(tid), "v"(tid + 100)
+               : "memory");
   __syncthreads();
   if (tid >= 64) {
     int val;
-    asm volatile(
-        "ds_read_b32 %0, %1\n"
-        "s_waitcnt lgkmcnt(0)\n"
-        : "=v"(val) : "v"((tid - 64) * 8)
-    );
+    asm volatile("ds_read_b32 %0, %1\n"
+                 "s_waitcnt lgkmcnt(0)\n"
+                 : "=v"(val)
+                 : "v"((tid - 64) * 8));
     out[tid] = val;
   }
 }
@@ -1007,23 +963,22 @@ static constexpr RaceExpectation kDualOffsetLdsRaceExpectation{
     .consumer = "ds_read_b32",
 };
 
-__attribute__((amdgpu_flat_work_group_size(128, 128)))
-__global__ void dual_offset_lds_race_kernel(int *out) {
+__attribute__((amdgpu_flat_work_group_size(128, 128))) __global__ void
+dual_offset_lds_race_kernel(int *out) {
   __shared__ int lds[256];
   int tid = threadIdx.x;
-  asm volatile(
-      "ds_write2_b32 %0, %1, %2 offset0:0 offset1:1\n"
-      "s_waitcnt lgkmcnt(0)\n"
-      : : "v"(tid * 8), "v"(tid), "v"(tid + 100) : "memory"
-  );
+  asm volatile("ds_write2_b32 %0, %1, %2 offset0:0 offset1:1\n"
+               "s_waitcnt lgkmcnt(0)\n"
+               :
+               : "v"(tid * 8), "v"(tid), "v"(tid + 100)
+               : "memory");
   // BUG: no barrier before cross-wave read.
   if (tid >= 64) {
     int val;
-    asm volatile(
-        "ds_read_b32 %0, %1\n"
-        "s_waitcnt lgkmcnt(0)\n"
-        : "=v"(val) : "v"((tid - 64) * 8)
-    );
+    asm volatile("ds_read_b32 %0, %1\n"
+                 "s_waitcnt lgkmcnt(0)\n"
+                 : "=v"(val)
+                 : "v"((tid - 64) * 8));
     out[tid] = val;
   }
 }
@@ -1047,22 +1002,21 @@ TEST_F(Gfx950RaceTest, dual_offset_lds_race) {
 
 __global__ void scratch_vmcnt_safe_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  // Inline assembly does not tell the compiler to allocate private memory.
-  // Reserve the two bytes used below, and finish this setup before measuring
-  // the global-load/scratch-store vmcnt ordering in the assembly block.
-  volatile uint8_t scratch_space[2];
-  scratch_space[tid & 1] = 0;
+  // Inline scratch instructions do not contribute to the compiler's private
+  // frame size. Materialize a small dynamic private access so the kernel
+  // descriptor requests real scratch backing, then drain that setup access
+  // before establishing the vmcnt sequence this test measures.
+  volatile unsigned char scratch_anchor[4];
+  scratch_anchor[tid & 3] = static_cast<unsigned char>(tid);
   asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
   float val;
   float tmp1 = 1.0f, tmp2 = 2.0f;
-  asm volatile(
-      "global_load_dword %0, %3, off\n"       // vmcnt event 0 (oldest)
-      "scratch_store_byte %4, %1, off\n"       // vmcnt event 1
-      "scratch_store_byte %4, %2, off offset:1\n" // vmcnt event 2 (newest)
-      "s_waitcnt vmcnt(2)\n"                   // drain oldest → load complete
-      : "=v"(val)
-      : "v"(tmp1), "v"(tmp2), "v"(&src[tid]), "v"(0)
-  );
+  asm volatile("global_load_dword %0, %3, off\n"           // vmcnt event 0 (oldest)
+               "scratch_store_byte %4, %1, off\n"          // vmcnt event 1
+               "scratch_store_byte %4, %2, off offset:1\n" // vmcnt event 2 (newest)
+               "s_waitcnt vmcnt(2)\n"                      // drain oldest → load complete
+               : "=v"(val)
+               : "v"(tmp1), "v"(tmp2), "v"(&src[tid]), "v"(0));
   dst[tid] = val;
 }
 
@@ -1074,21 +1028,18 @@ static constexpr RaceExpectation kScratchVmcntRaceExpectation{
 
 __global__ void scratch_vmcnt_race_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  // Inline assembly does not tell the compiler to allocate private memory.
-  // Reserve the two bytes used below, and finish this setup before measuring
-  // the global-load/scratch-store vmcnt ordering in the assembly block.
-  volatile uint8_t scratch_space[2];
-  scratch_space[tid & 1] = 0;
+  // Keep this kernel's scratch provisioning identical to the safe case so the
+  // only difference observed by the race detector is the wait threshold below.
+  volatile unsigned char scratch_anchor[4];
+  scratch_anchor[tid & 3] = static_cast<unsigned char>(tid);
   asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
   float val;
   float tmp1 = 1.0f;
-  asm volatile(
-      "global_load_dword %0, %2, off\n"    // vmcnt event 0 (oldest)
-      "scratch_store_byte %3, %1, off\n"   // vmcnt event 1 (newest)
-      "s_waitcnt vmcnt(2)\n"               // BUG: 2 outstanding, need vmcnt(1)
-      : "=v"(val)
-      : "v"(tmp1), "v"(&src[tid]), "v"(0)
-  );
+  asm volatile("global_load_dword %0, %2, off\n"  // vmcnt event 0 (oldest)
+               "scratch_store_byte %3, %1, off\n" // vmcnt event 1 (newest)
+               "s_waitcnt vmcnt(2)\n"             // BUG: 2 outstanding, need vmcnt(1)
+               : "=v"(val)
+               : "v"(tmp1), "v"(&src[tid]), "v"(0));
   dst[tid] = val;
 }
 
@@ -1125,13 +1076,12 @@ __global__ void waw_global_load_then_alu_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   float val;
   float tmp = static_cast<float>(tid);
-  asm volatile(
-      "global_load_dword %0, %1, off\n"
-      // BUG: no s_waitcnt before ALU write to the same register.
-      // Use a separate source so this isolates WAW rather than RAW.
-      "v_add_f32 %0, %2, %2\n"
-      : "=&v"(val) : "v"(&src[tid]), "v"(tmp)
-  );
+  asm volatile("global_load_dword %0, %1, off\n"
+               // BUG: no s_waitcnt before ALU write to the same register.
+               // Use a separate source so this isolates WAW rather than RAW.
+               "v_add_f32 %0, %2, %2\n"
+               : "=&v"(val)
+               : "v"(&src[tid]), "v"(tmp));
   // Keep the racy load and overwrite in one asm block. This separate wait only
   // orders the later store and is not part of the race being exercised.
   asm volatile("s_waitcnt vmcnt(0)\n" ::: "memory");
@@ -1142,12 +1092,11 @@ __global__ void waw_global_load_then_alu_safe_kernel(const float *src, float *ds
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   float val;
   float tmp = static_cast<float>(tid);
-  asm volatile(
-      "global_load_dword %0, %1, off\n"
-      "s_waitcnt vmcnt(0)\n"
-      "v_add_f32 %0, %2, %2\n"
-      : "=&v"(val) : "v"(&src[tid]), "v"(tmp)
-  );
+  asm volatile("global_load_dword %0, %1, off\n"
+               "s_waitcnt vmcnt(0)\n"
+               "v_add_f32 %0, %2, %2\n"
+               : "=&v"(val)
+               : "v"(&src[tid]), "v"(tmp));
   dst[tid] = val;
 }
 
@@ -1161,15 +1110,13 @@ static constexpr RaceExpectation kWawGlobalLoadThenMfmaExpectation{
 
 __global__ void waw_global_load_then_mfma_kernel(const int *src, int *out) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  asm volatile(
-      "global_load_dwordx4 v[0:3], %0, off\n"
-      // BUG: no s_waitcnt before MFMA writes the same VGPR region.
-      "v_mfma_f32_4x4x1_16b_f32 v[0:3], v4, v5, 0\n"
-      "s_waitcnt vmcnt(0)\n"
-      :
-      : "v"(&src[tid * 4])
-      : "v0", "v1", "v2", "v3", "v4", "v5", "memory"
-  );
+  asm volatile("global_load_dwordx4 v[0:3], %0, off\n"
+               // BUG: no s_waitcnt before MFMA writes the same VGPR region.
+               "v_mfma_f32_4x4x1_16b_f32 v[0:3], v4, v5, 0\n"
+               "s_waitcnt vmcnt(0)\n"
+               :
+               : "v"(&src[tid * 4])
+               : "v0", "v1", "v2", "v3", "v4", "v5", "memory");
   out[tid] = tid;
 }
 
@@ -1208,12 +1155,11 @@ static constexpr RaceExpectation kF64VgprRaceExpectation{
 __global__ void f64_vgpr_race_kernel(const double *src, double *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   double val, result;
-  asm volatile(
-      "global_load_dwordx2 %0, %2, off\n"
-      "s_nop 0\n"
-      "v_fma_f64 %1, %0, 1.0, 1.0\n"
-      : "=&v"(val), "=v"(result) : "v"(&src[tid])
-  );
+  asm volatile("global_load_dwordx2 %0, %2, off\n"
+               "s_nop 0\n"
+               "v_fma_f64 %1, %0, 1.0, 1.0\n"
+               : "=&v"(val), "=v"(result)
+               : "v"(&src[tid]));
   dst[tid] = result;
 }
 
@@ -1228,12 +1174,11 @@ TEST_F(Gfx950RaceTest, f64_vgpr_race) {
 __global__ void f64_vgpr_safe_kernel(const double *src, double *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   double val, result;
-  asm volatile(
-      "global_load_dwordx2 %0, %2, off\n"
-      "s_waitcnt vmcnt(0)\n"
-      "v_fma_f64 %1, %0, 1.0, 1.0\n"
-      : "=&v"(val), "=v"(result) : "v"(&src[tid])
-  );
+  asm volatile("global_load_dwordx2 %0, %2, off\n"
+               "s_waitcnt vmcnt(0)\n"
+               "v_fma_f64 %1, %0, 1.0, 1.0\n"
+               : "=&v"(val), "=v"(result)
+               : "v"(&src[tid]));
   dst[tid] = result;
 }
 
@@ -1257,13 +1202,12 @@ __global__ void f64_vgpr_waw_kernel(const double *src, double *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   double val;
   double tmp = static_cast<double>(tid) + 1.0;
-  asm volatile(
-      "global_load_dwordx2 %0, %1, off\n"
-      // BUG: no s_waitcnt before a 64-bit ALU write to the same VGPR pair.
-      "v_fma_f64 %0, %2, 1.0, 1.0\n"
-      "s_waitcnt vmcnt(0)\n"
-      : "=&v"(val) : "v"(&src[tid]), "v"(tmp)
-  );
+  asm volatile("global_load_dwordx2 %0, %1, off\n"
+               // BUG: no s_waitcnt before a 64-bit ALU write to the same VGPR pair.
+               "v_fma_f64 %0, %2, 1.0, 1.0\n"
+               "s_waitcnt vmcnt(0)\n"
+               : "=&v"(val)
+               : "v"(&src[tid]), "v"(tmp));
   dst[tid] = val;
 }
 

@@ -50,6 +50,7 @@ struct backend
     using counter_id_t                 = Wrapper::counter_id;
     using counter_config_id_t          = Wrapper::counter_config_id;
     using counter_record_t             = Wrapper::counter_record;
+    using counter_metadata_t           = counter_metadata;
     using counter_instance_id_t        = Wrapper::counter_instance_id_t;
     using counter_flag_t               = Wrapper::counter_flag_t;
     using user_data_t                  = Wrapper::user_data_t;
@@ -59,6 +60,8 @@ struct backend
     using buffer_policy_t              = Wrapper::buffer_policy_t;
     using buffer_tracing_cb_t          = Wrapper::buffer_tracing_cb_t;
     using callback_tracing_cb_t        = Wrapper::callback_tracing_cb_t;
+    using on_records_cb_t              = buffer_tracing_cb_t;
+    using on_record_cb_t               = callback_tracing_cb_t;
     using callback_tracing_kind_t      = Wrapper::callback_tracing_kind;
     using buffer_tracing_kind_t        = Wrapper::buffer_tracing_kind;
     using tracing_operation_t          = Wrapper::tracing_operation;
@@ -70,6 +73,7 @@ struct backend
         Wrapper::external_correlation_id_request_cb_t;
     using internal_thread_library_cb_t = Wrapper::internal_thread_library_cb_t;
     using callback_tracing_record_t    = Wrapper::callback_tracing_record;
+    using callback_phase_t             = Wrapper::callback_phase_t;
     using callback_tracing_operation_args_cb_t =
         Wrapper::callback_tracing_operation_args_cb_t;
     using available_dimensions_cb_t      = Wrapper::available_dimensions_cb_t;
@@ -79,6 +83,8 @@ struct backend
     using dispatch_counting_record_cb_t  = Wrapper::dispatch_counting_record_cb;
     using callback_name_info_t           = Wrapper::callback_name_info_t;
     using buffer_name_info_t             = Wrapper::buffer_name_info_t;
+    using record_header_t                = Wrapper::record_header_t;
+    using correlation_id_t               = Wrapper::correlation_id_t;
 
     static constexpr auto           compile_time_version = Wrapper::compile_time_version;
     static constexpr counter_flag_t flag_none            = Wrapper::COUNTER_FLAG_NONE;
@@ -86,6 +92,19 @@ struct backend
     static constexpr status_t       status_error         = Wrapper::STATUS_ERROR;
     static constexpr status_t       status_hsa_not_loaded =
         Wrapper::STATUS_ERROR_HSA_NOT_LOADED;
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr buffer_policy_t BUFFER_POLICY_LOSSLESS =
+        Wrapper::BUFFER_POLICY_LOSSLESS;
+
+    // ─── Callback phase constants ────────────────────────────────────────────────
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_phase_t CALLBACK_PHASE_ENTER =
+        Wrapper::CALLBACK_PHASE_ENTER;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_phase_t CALLBACK_PHASE_EXIT = Wrapper::CALLBACK_PHASE_EXIT;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_phase_t CALLBACK_PHASE_NONE = Wrapper::CALLBACK_PHASE_NONE;
 
     // ─── Callback tracing kind constants ─────────────────────────────────────────
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_HSA_CORE_API =
@@ -174,21 +193,39 @@ struct backend
         Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU;
     static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS =
         Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE =
+        Wrapper::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_EVENT_PAGE_FAULT =
+        Wrapper::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT;
+
+    using kfd_page_fault_record         = Wrapper::kfd_page_fault_record;
+    using kfd_page_migrate_record       = Wrapper::kfd_page_migrate_record;
+    using kfd_queue_record              = Wrapper::kfd_queue_record;
+    using kfd_event_queue_record        = Wrapper::kfd_event_queue_record;
+    using kfd_event_unmap_record        = Wrapper::kfd_event_unmap_record;
+    using kfd_event_dropped_record      = Wrapper::kfd_event_dropped_record;
+    using kfd_event_page_migrate_record = Wrapper::kfd_event_page_migrate_record;
+    using kfd_event_page_fault_record   = Wrapper::kfd_event_page_fault_record;
 #endif
 
     static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
 
-    static status_t create_context(context_id_t* ctx)
+    static void create_context(context_id_t* ctx)
     {
-        return Wrapper::create_context(ctx);
+        sdk_check<Wrapper>(Wrapper::create_context(ctx));
     }
 
-    static status_t start_context(context_id_t ctx)
+    static void start_context(context_id_t ctx)
     {
-        return Wrapper::start_context(ctx);
+        sdk_check<Wrapper>(Wrapper::start_context(ctx));
     }
 
-    static status_t stop_context(context_id_t ctx) { return Wrapper::stop_context(ctx); }
+    static void stop_context(context_id_t ctx)
+    {
+        sdk_check<Wrapper>(Wrapper::stop_context(ctx));
+    }
 
     static status_t sample_device_counting_service(context_id_t      ctx,
                                                    user_data_t       user_data,
@@ -411,8 +448,16 @@ public:
         callback_tracing_record_t rec, callback_tracing_operation_args_cb_t cb,
         std::int32_t max_deref, void* user_data)
     {
-        sdk_check<Wrapper>(Wrapper::iterate_callback_tracing_kind_operation_args(
-            rec, cb, max_deref, user_data));
+        // Some callback-tracing kinds (e.g. ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API)
+        // declare a kind but do not implement argument iteration for it. Argument
+        // iteration only supplies best-effort debug-annotation data, so treat
+        // "not implemented" as "no args available" instead of a fatal error.
+        const auto status = Wrapper::iterate_callback_tracing_kind_operation_args(
+            rec, cb, max_deref, user_data);
+        if(status != Wrapper::STATUS_ERROR_NOT_IMPLEMENTED)
+        {
+            sdk_check<Wrapper>(status);
+        }
     }
 
     static void iterate_counter_dimensions(counter_id_t id, available_dimensions_cb_t cb,
@@ -490,6 +535,18 @@ public:
     static const char* get_status_string(status_t status) noexcept
     {
         return Wrapper::get_status_string(status);
+    }
+
+    static std::uint64_t get_parent_stack_id(const correlation_id_t& correlation_id)
+    {
+        if constexpr(requires { correlation_id.ancestor; })
+        {
+            return correlation_id.ancestor;
+        }
+        else
+        {
+            return 0;
+        }
     }
 };
 

@@ -163,6 +163,19 @@ if(RJ_BUILD_FUZZERS)
     add_link_options(-fsanitize=fuzzer-no-link)
 endif()
 option(
+    ROCJITSU_ENABLE_PERFSIM_PLUGIN
+    "Build the optional RocJITsu adapter for an external Perfsim observer plugin"
+    OFF
+)
+if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(
+            FATAL_ERROR
+            "ROCJITSU_ENABLE_PERFSIM_PLUGIN is supported only on Linux"
+        )
+    endif()
+endif()
+option(
     ROCJITSU_ENABLE_VFIO
     "Build the vfio-user front end that serves rocjitsu as a PCIe device to a VMM"
     OFF
@@ -596,6 +609,7 @@ target_link_libraries(
         rocjitsu_vm_risc_v
         rocjitsu_config
         rocjitsu_dbt_config
+        rocjitsu_ip_discovery
         rocjitsu_drm_headers
         util
         flatbuffers

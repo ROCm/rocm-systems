@@ -22,6 +22,8 @@ public:
   ~KernelLoggingPlugin() override;
 
   bool observes_sgpr_reads() const override { return false; }
+  bool supports_async_instructions() const override { return true; }
+  void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &inst, Wavefront &wf) override;
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
   void onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) override;
@@ -37,6 +39,7 @@ private:
     uint32_t completed_workgroups = 0;
   };
 
+  void record_mma(const Instruction &inst, uint32_t dispatch_id);
   std::mutex mutex_;
   uint32_t dispatch_count_ = 0;
   std::unordered_map<uint32_t, DispatchProgress> dispatch_progress_;

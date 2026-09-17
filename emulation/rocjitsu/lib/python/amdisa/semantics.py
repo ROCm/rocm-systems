@@ -20,6 +20,10 @@ if TYPE_CHECKING:
     from amdisa.isa_profile import IsaProfile
 
 
+# Floating-source conversions that accept VOP3 ABS/NEG before integer conversion.
+F32_TO_INTEGER_DTYPES = frozenset({'i32_f32', 'u32_f32', 'rpi_i32_f32', 'flr_i32_f32'})
+
+
 @dataclass
 class InstructionSemantics:
     """Semantic metadata for a single instruction.
@@ -1603,6 +1607,28 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'pk_binop_f32', operation='add', data_type='f32'
         )
+    packed_f64_binary = {
+        'V_PK_ADD_F64': 'add',
+        'V_PK_MUL_F64': 'mul',
+        'V_PK_MAX_NUM_F64': 'max_num',
+        'V_PK_MIN_NUM_F64': 'min_num',
+    }
+    if name in packed_f64_binary:
+        return InstructionSemantics(
+            name,
+            'pk_binop_f64',
+            operation=packed_f64_binary[name],
+            data_type='f64',
+        )
+    if name == 'V_PK_FMA_F64':
+        return InstructionSemantics(
+            name, 'pk_ternary_f64', operation='fma', data_type='f64'
+        )
+    if name in ('V_PK_ADD_NC_U64', 'V_PK_SUB_NC_U64'):
+        operation = 'add' if name == 'V_PK_ADD_NC_U64' else 'sub'
+        return InstructionSemantics(
+            name, 'pk_binop_u64', operation=operation, data_type='u64'
+        )
     if name == 'V_PK_LSHL_ADD_U64':
         return InstructionSemantics(
             name, 'pk_lshl_add_u64', operation='lshl_add', data_type='u64'
@@ -1685,8 +1711,8 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
     import re
 
     m = re.match(
-        r'V_(?:S?WMMA[C]?)_(F32|F16|BF16|BF16F32|I32|FP8|BF8)_'
-        r'(\d+)X(\d+)X(\d+)_?(F32|F16|BF16|IU8|IU4|FP8|BF8'
+        r'V_(?:S?WMMA[C]?)_(F32|F64|F16|BF16|BF16F32|I32|FP8|BF8)_'
+        r'(\d+)X(\d+)X(\d+)_?(F32|F64|F16|BF16|IU8|IU4|FP8|BF8'
         r'|FP8_FP8|FP8_BF8|BF8_FP8|BF8_BF8'
         r'|F16_FP8|F16_BF8|BF16_FP8|BF16_BF8|F8F6F4|F4)?$',
         name,

@@ -59,6 +59,14 @@ RJ_DIAGNOSTIC_POP
 using namespace rocjitsu;
 using namespace rocjitsu::dbi_test;
 
+// ROCR's async-event pool is protected by an uninstrumented HybridMutex, so
+// TSan can report its allocator reuse as a race during HSA initialization.
+// Suppress only accesses originating in that external runtime.
+extern "C" RJ_API_EXPORT const char *__tsan_default_suppressions() {
+  return "called_from_lib:libhsa-runtime64.so\n"
+         "thread:rocr::os::os_thread\n";
+}
+
 namespace {
 
 using test::kernel_hsaco_path;
@@ -135,7 +143,8 @@ protected:
     std::string err;
     const auto resolved = resolve_probe_symbol(*probe_co, "rj_nop_probe", &err);
     ASSERT_TRUE(resolved.has_value()) << "resolve_probe_symbol(rj_nop_probe) failed: " << err;
-    const auto callable = build_probe_callable(*probe_co, *resolved, params_.arch, &err);
+    const auto callable =
+        build_probe_callable(*probe_co, *resolved, params_.arch, /*num_arg_dwords=*/0, &err);
     ASSERT_TRUE(callable.has_value()) << "build_probe_callable failed: " << err;
     probe_body_words_ = callable->body_words;
     ASSERT_FALSE(probe_body_words_.empty());

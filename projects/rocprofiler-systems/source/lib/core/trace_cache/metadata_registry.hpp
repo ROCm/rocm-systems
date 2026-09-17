@@ -23,14 +23,13 @@
 #include <set>
 #include <string.h>
 #include <string>
+#include <string_view>
 #include <sys/types.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 namespace info
 {
@@ -114,6 +113,21 @@ format_track_name(std::optional<int> first_section  = std::nullopt,
     return fmt::format("{}{}{}", tim::trait::name<Category>::value,
                        first_section ? fmt::format("_{}", *first_section) : "",
                        second_section ? fmt::format("_{}", *second_section) : "");
+}
+
+/// PMC and track names for per-link metrics must be identical in the metadata
+/// registration and in the sample insertion paths, otherwise the rocpd writer rejects
+/// the event because no matching PMC info was registered.
+inline std::string
+format_link_pmc_name(std::string_view base_name, size_t link)
+{
+    return fmt::format("{}_link{}", base_name, link);
+}
+
+inline std::string
+format_link_track_name(std::string_view base_name, size_t link)
+{
+    return fmt::format("{} [Link {}]", base_name, link);
 }
 
 template <typename Category>
@@ -273,5 +287,4 @@ private:
             rename_table);
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache
