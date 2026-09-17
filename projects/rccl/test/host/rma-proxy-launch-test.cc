@@ -40,6 +40,13 @@ static int g_rmaProxyCpuAllocCallIndex = 0;
 static std::vector<RmaProxyCpuAllocCall> g_rmaProxyCpuAllocCalls;
 static std::vector<RmaProxyCpuFreeCall> g_rmaProxyCpuFreeCalls;
 
+static void ResetRmaProxyCpuAllocFake() {
+  g_rmaProxyCpuAllocFailAt = -1;
+  g_rmaProxyCpuAllocCallIndex = 0;
+  g_rmaProxyCpuAllocCalls.clear();
+  g_rmaProxyCpuFreeCalls.clear();
+}
+
 template <typename T>
 static ncclResult_t RmaProxyAllocMemCPUAccessible(T** ptr, T** devPtr, size_t nelem,
                                                   int, void** gdrHandle,
@@ -180,10 +187,7 @@ protected:
   std::vector<uint64_t> doneSeqsDev_;
 
   void SetUp() override {
-    g_rmaProxyCpuAllocFailAt = -1;
-    g_rmaProxyCpuAllocCallIndex = 0;
-    g_rmaProxyCpuAllocCalls.clear();
-    g_rmaProxyCpuFreeCalls.clear();
+    ResetRmaProxyCpuAllocFake();
     comm_ = std::make_unique<ncclComm>();
     comm_->nRanks = kNRanks;
     comm_->rank = kRank;
@@ -532,6 +536,7 @@ protected:
 
   void SetUp() override {
     ResetHipFakes();
+    ResetRmaProxyCpuAllocFake();
     comm_ = std::make_unique<ncclComm>();
     comm_->rank = 1;
     comm_->nRanks = kNRanks;
@@ -558,8 +563,15 @@ protected:
           ASSERT_EQ(ncclSuccess, ncclRmaProxyDestroyDescUut(comm_.get(), &desc));
         }
       }
+      for (auto& queue : storage.persistent) {
+        while (!ncclIntruQueueEmpty(&queue)) {
+          ncclRmaProxyDesc* desc = ncclIntruQueueDequeue(&queue);
+          ASSERT_EQ(ncclSuccess, ncclRmaProxyDestroyDescUut(comm_.get(), &desc));
+        }
+      }
     }
     ResetHipFakes();
+    ResetRmaProxyCpuAllocFake();
   }
 
   ncclTaskRma* PushPut(int context, int peer, size_t count,
@@ -681,6 +693,27 @@ TEST_F(RmaProxyLaunchTest, PutLaunch_TasksFromDifferentContextsAreEnqueuedAndSub
   EXPECT_EQ(tasks_[1].get(), reinterpret_cast<ncclTaskRma*>(comm_->memPool_ncclTaskRma.head));
 }
 
+TEST_F(RmaProxyLaunchTest, PutLaunch_PersistentTaskQueuesAReplayableDescriptor) {
+  plan_->persistent = true;
+  PushPut(1, 2, 256, NCCL_SIGNAL);
+  std::vector<BatchCall> calls;
+  auto batch = RecordBatches(&calls);
+
+  ASSERT_EQ(ncclSuccess, ncclRmaProxyPutLaunchUut(comm_.get(), plan_.get(), nullptr));
+
+  ASSERT_EQ(1u, calls.size());
+  EXPECT_EQ(1, batch.calls);
+  ASSERT_EQ(3u, calls[0].params.size());
+  EXPECT_EQ(hipStreamMemOpWriteValue64, calls[0].params[0].writeValue.operation);
+  EXPECT_EQ(hipStreamMemOpWaitValue64, calls[0].params[1].waitValue.operation);
+  EXPECT_EQ(hipStreamMemOpWriteValue64, calls[0].params[2].writeValue.operation);
+  ncclRmaProxyDesc* desc = ncclIntruQueueHead(&contexts_[1].persistent[2]);
+  ASSERT_NE(nullptr, desc);
+  EXPECT_EQ(plan_.get(), desc->persistPlan);
+  EXPECT_TRUE(desc->persistDescValid);
+  EXPECT_EQ(1u, desc->opSeq);
+}
+
 TEST_F(RmaProxyLaunchTest, WaitLaunch_NonWaitTaskIsRejectedAndReturnedToThePool) {
   ncclTaskRma* task = PushWait(ncclFuncPutSignal, NCCL_SIGNAL_NONE);
 
@@ -740,6 +773,30 @@ TEST_F(RmaProxyLaunchTest, WaitLaunch_SignalTaskSubmitsAccumulatedPeerWaits) {
   EXPECT_EQ(nullptr, task->nsignals);
   EXPECT_EQ(nullptr, task->signalIdxs);
   EXPECT_EQ(task, reinterpret_cast<ncclTaskRma*>(comm_->memPool_ncclTaskRma.head));
+}
+
+TEST_F(RmaProxyLaunchTest, WaitLaunch_PersistentTaskQueuesAReplayableDescriptor) {
+  plan_->persistent = true;
+  ncclTaskRma* task = PushWait(ncclFuncWaitSignal, NCCL_SIGNAL, {2}, {5}, {1});
+  std::vector<BatchCall> calls;
+  auto batch = RecordBatches(&calls);
+
+  ASSERT_EQ(ncclSuccess, ncclRmaProxyWaitLaunchUut(comm_.get(), plan_.get(), nullptr));
+
+  ASSERT_EQ(1u, calls.size());
+  EXPECT_EQ(1, batch.calls);
+  ASSERT_EQ(3u, calls[0].params.size());
+  EXPECT_EQ(hipStreamMemOpWriteValue64, calls[0].params[0].writeValue.operation);
+  EXPECT_EQ(hipStreamMemOpWaitValue64, calls[0].params[1].waitValue.operation);
+  EXPECT_EQ(hipStreamMemOpWriteValue64, calls[0].params[2].writeValue.operation);
+  ncclRmaProxyDesc* desc = ncclIntruQueueHead(&contexts_[0].persistent[comm_->rank]);
+  ASSERT_NE(nullptr, desc);
+  EXPECT_EQ(plan_.get(), desc->persistPlan);
+  EXPECT_TRUE(desc->persistDescValid);
+  EXPECT_TRUE(desc->waitSignal.needFlush);
+  EXPECT_EQ(nullptr, task->peers);
+  EXPECT_EQ(nullptr, task->nsignals);
+  EXPECT_EQ(nullptr, task->signalIdxs);
 }
 
 // ---------------------------------------------------------------------------
