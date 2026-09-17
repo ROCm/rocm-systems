@@ -12,7 +12,6 @@ from utils.logger import console_debug
 from utils.utils_common import (
     METRIC_ID_RE,
     convert_metric_id_to_panel_info,
-    is_tcc_channel_counter,
 )
 from utils.utils_counter_defs import extract_counters_and_variables
 
@@ -59,28 +58,16 @@ def _counter_to_bucket_index(
     return mapping
 
 
-def _needs_accum_reserve(name: str, counters: set[str]) -> bool:
-    if name.endswith("_ACCUM"):
-        return True
-    return any(
-        ctr.endswith("_ACCUM") and not is_tcc_channel_counter(ctr) for ctr in counters
-    )
-
-
 def rebuild_counter_file(
     name: str,
     perfmon_config: dict[str, int],
     counters: set[str],
 ) -> CounterFile | None:
+    """Rebuild a bucket from its PMC set (one slot per counter, including *_ACCUM)."""
     counter_file = CounterFile(name, perfmon_config)
     for ctr in sorted(counters):
         if not counter_file.add(ctr):
             return None
-    if _needs_accum_reserve(name, counters):
-        for ctr in flat_counters_in_perfmon_file(counter_file):
-            if ctr.endswith("_ACCUM") and not is_tcc_channel_counter(ctr):
-                if not counter_file.reserve(ctr, 1):
-                    return None
     return counter_file
 
 

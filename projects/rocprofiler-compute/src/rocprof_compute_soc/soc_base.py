@@ -370,6 +370,14 @@ class OmniSoC_Base:
         policy_arch = canonical_config_arch(arch)
         return _load_same_bucket_priority_policy_map().get(policy_arch, ())
 
+    def parse_counters(self, config_text: str) -> set[str]:
+        """Hardware PMC names in YAML metric config text (inspector / CP-SAT)."""
+        counters, _variables = extract_counters_and_variables(
+            config_text,
+            self._mspec.gpu_series,
+        )
+        return counters
+
     def _expanded_hw_counters_for_metric_ids(
         self, metric_ids: tuple[str, ...]
     ) -> set[str]:
@@ -727,7 +735,11 @@ class OmniSoC_Base:
 
         Returns (output_files, file_count, accu_file_count).
 
-        Accumulator counters (ending with _ACCUM) get dedicated files first.
+        Named ``*_ACCUM`` counters from rocprofiler-sdk
+        (``accumulate(LEVEL, HIGH_RES)`` in ``sdk_config.yaml``) pack like ordinary
+        PMCs—one slot each. Legacy ``SQ_ACCUM_PREV_HIRES`` pairing / dedicated
+        accum buckets / extra ``reserve`` slots are not used.
+
         If the arch has priority metrics in profiling_counter_grouping_policy.yaml,
         a metric-aware greedy pass runs before the final per-counter first-fit.
 
@@ -738,23 +750,12 @@ class OmniSoC_Base:
         falls back to the heuristic above.
         """
         output_files: list[CounterFile] = []
+        # Kept for call-site compatibility; dedicated accum files are gone.
         accu_file_count = 0
-        work = sorted(list(counters))
-        for counter in work.copy():
-            if counter.endswith("_ACCUM") and not is_tcc_channel_counter(counter):
-                work.remove(counter)
-                output_files.append(CounterFile(counter, self.__perfmon_config))
-                output_files[-1].add(counter)
-                # Paired level-event slot: hardware programs the level counter
-                # alongside its accumulator, so hold one extra slot in the
-                # same block.
-                output_files[-1].reserve(counter, 1)
-                accu_file_count += 1
-
+        work_set = set(counters)
         file_count = 0
         tcc_channel_counter_file_map: dict[str, CounterFile] = {}
 
-        work_set = set(work)
         cp_sat_files = self._try_cp_sat_pmc_perf_buckets(work_set, file_count)
         if cp_sat_files is not None:
             output_files.extend(cp_sat_files)

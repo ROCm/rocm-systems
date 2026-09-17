@@ -403,7 +403,9 @@ def test_rebuild_tcc_channel_file_map(perfmon_config):
 # =============================================================================
 
 
-def test_allocate_level_counters_get_dedicated_files(perfmon_config):
+def test_allocate_accum_counters_pack_like_ordinary_pmcs(perfmon_config):
+    """Named *_ACCUM counters (sdk accumulate()) use one SQ slot each—no
+    dedicated ACCUM files and no SQ_ACCUM_PREV_HIRES pairing reserve."""
     soc = _make_soc(perfmon_config)
     counters = {
         "SQ_LEVEL_WAVES_ACCUM",
@@ -414,32 +416,14 @@ def test_allocate_level_counters_get_dedicated_files(perfmon_config):
     with patch.object(soc, "_same_bucket_priority_metric_ids", return_value=()):
         files, file_count, accu_count = soc._allocate_perfmon_counter_files(counters)
 
-    accum_files = [f for f in files if f.name.endswith("_ACCUM")]
-    assert accu_count == 2
-    assert len(accum_files) == 2
-    assert {f.name for f in accum_files} == {
-        "SQ_LEVEL_WAVES_ACCUM",
-        "SQC_DCACHE_INFLIGHT_LEVEL_ACCUM",
-    }
-
-    for af in accum_files:
-        assert af.name in set(flat_counters_in_perfmon_file(af))
-
-    # Both accumulators land in the SQ block (SQC routes via BLOCK_REMAP). Each
-    # file loses 2 SQ slots: 1 for add() + 1 for reserve(counter, 1) (the
-    # paired level event the hardware programs alongside the accumulator).
-    sq_waves_accum = next(f for f in accum_files if f.name == "SQ_LEVEL_WAVES_ACCUM")
-    assert sq_waves_accum.blocks["SQ"].avail == perfmon_config["SQ"] - 2
-    sqc_dcache_accum = next(
-        f for f in accum_files if f.name == "SQC_DCACHE_INFLIGHT_LEVEL_ACCUM"
-    )
-    assert sqc_dcache_accum.blocks["SQ"].avail == perfmon_config["SQ"] - 2
-
-    # TA_ADDR placed somewhere (first-fit into a LEVEL file or its own)
-    all_ctrs = set()
-    for f in files:
-        all_ctrs.update(flat_counters_in_perfmon_file(f))
-    assert "TA_ADDR" in all_ctrs
+    assert accu_count == 0
+    # Both ACCUMs plus TA should first-fit into one bucket (SQ capacity 8).
+    assert len(files) == 1
+    assert file_count == 1
+    flat = set(flat_counters_in_perfmon_file(files[0]))
+    assert flat == counters
+    # One slot per ACCUM (and TA uses TA block)—no extra reserve debit.
+    assert files[0].blocks["SQ"].avail == perfmon_config["SQ"] - 2
 
 
 def test_allocate_first_fit_packing(perfmon_config):
@@ -482,23 +466,23 @@ def test_allocate_tcc_channel_coalescing(perfmon_config):
 # =============================================================================
 
 
-def test_metric_aware_coalesce_packs_regular_counters_into_accum_bucket(
+def test_metric_aware_coalesce_packs_regular_counters_into_bucket_with_accum(
     gfx1250_soc, gfx1250_perfmon_config
 ):
-    """Regular PMCs may fill spare capacity in a dedicated accumulator bucket."""
-    accum = CounterFile("SQ_INST_LEVEL_LDS_ACCUM", gfx1250_perfmon_config)
-    accum.add("SQ_INST_LEVEL_LDS_ACCUM")
-    accum.reserve("SQ_INST_LEVEL_LDS_ACCUM", 1)
+    """Regular PMCs may fill spare capacity in a bucket that already holds ACCUM."""
+    bucket = CounterFile("0", gfx1250_perfmon_config)
+    bucket.add("SQ_INST_LEVEL_LDS_ACCUM")
 
     work = {"GRBM_CP_BUSY_sum", "GRBM_GUI_ACTIVE_sum"}
 
     with ExitStack() as patch_stack:
         apply_cp_util_priority_patches(gfx1250_soc, patch_stack)
-        remaining, files, _ = gfx1250_soc._metric_aware_coalesce_pass(work, [accum], 0)
+        remaining, files, _ = gfx1250_soc._metric_aware_coalesce_pass(work, [bucket], 0)
 
     assert remaining == set()
     flat = set(flat_counters_in_perfmon_file(files[0]))
     assert {"GRBM_CP_BUSY_sum", "GRBM_GUI_ACTIVE_sum"}.issubset(flat)
+    assert "SQ_INST_LEVEL_LDS_ACCUM" in flat
 
 
 def test_metric_aware_coalesce_groups_on_formula_counters_only(
@@ -543,9 +527,9 @@ def test_allocate_priority_ratio_partners_share_bucket_despite_global_denom(
     assert bucket_for("GRBM_CP_BUSY_sum") == bucket_for("GRBM_GUI_ACTIVE_sum")
 
 
-def test_allocate_keeps_one_accum_counter_per_bucket(gfx1250_soc):
-    """Every *_ACCUM counter aliases the single SQ_ACCUM_PREV_HIRES register,
-    so no perfmon pass may hold two of them."""
+def test_allocate_allows_multiple_accum_counters_per_bucket(gfx1250_soc):
+    """Named *_ACCUM counters do not alias SQ_ACCUM_PREV_HIRES; several may share
+    a pass when block capacity allows."""
     counters = {
         "SQ_INST_LEVEL_LDS_ACCUM",
         "SQ_IFETCH_LEVEL_ACCUM",
@@ -560,14 +544,22 @@ def test_allocate_keeps_one_accum_counter_per_bucket(gfx1250_soc):
             counters
         )
 
-    assert accu_file_count == 2
+    assert accu_file_count == 0
+    all_flat: set[str] = set()
     for counter_file in files:
-        accum_counters = [
-            ctr
+        all_flat.update(flat_counters_in_perfmon_file(counter_file))
+    assert counters <= all_flat
+    # Both ACCUMs should be able to share capacity with other SQ PMCs (not
+    # forced into one-ACCUM-per-file isolation).
+    accum_bucket_counts = [
+        sum(
+            1
             for ctr in flat_counters_in_perfmon_file(counter_file)
             if ctr.endswith("_ACCUM")
-        ]
-        assert len(accum_counters) <= 1
+        )
+        for counter_file in files
+    ]
+    assert max(accum_bucket_counts) >= 1
 
 
 @pytest.mark.parametrize("gpu_arch", ["gfx1151", "gfx1152", "gfx1153"])
