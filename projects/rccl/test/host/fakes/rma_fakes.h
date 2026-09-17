@@ -4,25 +4,15 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Controllable seams for the non-static externals that the #included RMA units
-// reach but do not define themselves. Two units use this file:
-//
-//   rma_proxy_progress.cc  (rma-proxy-progress-test.cc)
-//     - ncclRmaProxyCircularBufEmpty(ctx, peer)   from rma_proxy_launch.cc
-//     - ncclRmaProxyDestroyDesc(comm, &desc)      from rma_proxy_launch.cc
-//   rma.cc                 (rma-test.cc)
-//     - ncclRmaProxyPutLaunch / ncclRmaProxyWaitLaunch   from rma_proxy_launch.cc
-//     - ncclRmaCePutLaunch   / ncclRmaCeWaitLaunch       from rma_ce.cc
+// Controllable seams for the non-static externals owned by rma_proxy_launch.cc
+// and rma_ce.cc.
 //
 // The rma_ce.cc pair lives here rather than in a separate ce fakes file because
 // rma.cc dispatches to both pairs from the same branch, and a test asserting the
 // dispatch needs to install all four together.
 //
-// Everything else those TUs touch is either file-static (reached via the
-// #include), header-inline (ncclIntruQueue*, COMPILER_ATOMIC_* macros), or
-// already covered by nccl_fakes.cc's no-op ncclDebugLog. The network itself is
-// not faked here -- it is a plain ncclRma_t function-pointer vtable that the
-// test populates directly (see FakeNet in rma-proxy-progress-test.cc).
+// The network is not faked here -- it is a plain ncclRma_t function-pointer
+// vtable that a test populates directly.
 //
 // Tests install per-test behaviour by overwriting a hook in a fixture's SetUp()
 // and ResetRmaFakes() (called from TearDown()) restores the defaults so tests
