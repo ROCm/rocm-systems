@@ -1182,98 +1182,30 @@ protected:
         ASSERT_EQ(numGpuBytes % kDeepEpAlignment, 0u);
         ASSERT_EQ(numCpuBytes % kDeepEpAlignment, 0u);
 
-        hipMemAllocationProp gpuProp = {};
-        gpuProp.type                            = hipMemAllocationTypePinned;
-        gpuProp.location.type                   = hipMemLocationTypeDevice;
-        gpuProp.location.id                     = dev;
-        gpuProp.requestedHandleType             = hipMemHandleTypePosixFileDescriptor;
-        gpuProp.allocFlags.gpuDirectRDMACapable = 1;
-
-        hipMemAllocationProp cpuProp = {};
-        cpuProp.type                = hipMemAllocationTypePinned;
-        cpuProp.location.type       = hipMemLocationTypeHost;
-        cpuProp.location.id         = 0;
-        cpuProp.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
-
-        size_t gpuGran = 0, cpuGran = 0;
-        if (hipMemGetAllocationGranularity(&gpuGran, &gpuProp, hipMemAllocationGranularityMinimum) != hipSuccess ||
-            hipMemGetAllocationGranularity(&cpuGran, &cpuProp, hipMemAllocationGranularityMinimum) != hipSuccess ||
-            gpuGran == 0 || cpuGran == 0 ||
-            kDeepEpAlignment % gpuGran != 0 || kDeepEpAlignment % cpuGran != 0) {
+        RCCLHybridVmmTests::DeepEpElasticRange range;
+        if (!RCCLHybridVmmTests::AllocDeepEpElasticRange(dev, numGpuBytes, numCpuBytes, &range))
             return;
-        }
-
-        const size_t totalSize = numGpuBytes + numCpuBytes;
-        hipDeviceptr_t vaBase = 0;
-        if (hipMemAddressReserve(&vaBase, totalSize, kDeepEpAlignment, 0, 0) != hipSuccess) {
-            return;
-        }
-
-        std::vector<hipMemGenericAllocationHandle_t> handles(2, 0);
-        int mapped = 0;
-        auto cleanup = [&]() {
-            if (mapped > 0) HIP_EXPECT(hipMemUnmap(vaBase, numGpuBytes));
-            if (mapped > 1) {
-                HIP_EXPECT(hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(
-                                          reinterpret_cast<uintptr_t>(vaBase) + numGpuBytes),
-                                      numCpuBytes));
-            }
-            for (auto h : handles) if (h != 0) HIP_EXPECT(hipMemRelease(h));
-            HIP_EXPECT(hipMemAddressFree(vaBase, totalSize));
-        };
-
-        if (hipMemCreate(&handles[0], numGpuBytes, &gpuProp, 0) != hipSuccess ||
-            hipMemMap(vaBase, numGpuBytes, 0, handles[0], 0) != hipSuccess) {
-            cleanup();
-            return;
-        }
-        mapped = 1;
-
-        hipDeviceptr_t cpuVa = reinterpret_cast<hipDeviceptr_t>(
-            reinterpret_cast<uintptr_t>(vaBase) + numGpuBytes);
-        if (hipMemCreate(&handles[1], numCpuBytes, &cpuProp, 0) != hipSuccess ||
-            hipMemMap(cpuVa, numCpuBytes, 0, handles[1], 0) != hipSuccess) {
-            cleanup();
-            return;
-        }
-        mapped = 2;
-
-        hipMemAccessDesc accessDesc = {};
-        accessDesc.location.type    = hipMemLocationTypeDevice;
-        accessDesc.location.id      = dev;
-        accessDesc.flags            = hipMemAccessFlagsProtReadWrite;
-        hipMemAccessDesc hostAccess = {};
-        hostAccess.location.type    = hipMemLocationTypeHost;
-        hostAccess.location.id      = 0;
-        hostAccess.flags            = hipMemAccessFlagsProtReadWrite;
-        // Device RW on both segments (GPU kernels / GIN). Host RW on the CPU
-        // segment matches DeepEP CPU-storage access; skip host access only if
-        // the runtime rejects hipMemLocationTypeHost.
-        if (hipMemSetAccess(vaBase, numGpuBytes, &accessDesc, 1) != hipSuccess ||
-            hipMemSetAccess(cpuVa, numCpuBytes, &accessDesc, 1) != hipSuccess ||
-            hipMemSetAccess(cpuVa, numCpuBytes, &hostAccess, 1) != hipSuccess) {
-            cleanup();
-            return;
-        }
-
-        buf.vaBase      = vaBase;
+        buf.vaBase      = range.base;
         buf.segmentSize = 0; // segments intentionally have different sizes
-        buf.totalSize   = totalSize;
-        buf.handles     = std::move(handles);
+        buf.totalSize   = range.totalSize;
+        buf.handles     = std::move(range.handles);
     }
 
     bool createHybridVmmBuffer(size_t gpuBytes, size_t localCpuBytes,
                                RCCLHybridVmmTests::HybridVmmBuffer& buf,
-                               std::string& reason)
+                               std::string& reason,
+                               int expectedLocalRanks = 4)
     {
         int dev = 0;
         bool supported = hipGetDevice(&dev) == hipSuccess &&
             RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(dev, &reason);
-        if (!supported)
+        if (!MPIHelpers::allRanksTrue(supported)) {
+            if (reason.empty())
+                reason = "hybrid VMM runtime support is unavailable on another rank";
             return false;
-        bool allocated =
-            RCCLHybridVmmTests::AllocHybridVmm(
-                dev, gpuBytes, localCpuBytes, &buf, &reason);
+        }
+        bool allocated = RCCLHybridVmmTests::AllocHybridForLocalRanks(
+            dev, gpuBytes, localCpuBytes, expectedLocalRanks, &buf, &reason);
         if (!MPIHelpers::allRanksTrue(allocated)) {
             RCCLHybridVmmTests::FreeHybridVmm(buf);
             if (reason.empty())
@@ -1399,9 +1331,8 @@ TEST_F(UBR_MultiSegment, Generic_Reuse_BeforeCePlanBypassesRegistrationCache)
     if (forceCeAllReduce == nullptr || std::atoi(forceCeAllReduce) != 1) {
         GTEST_SKIP() << "BEFORE control requires RCCL_FORCE_CE_ALLREDUCE=1";
     }
-    const char* ctaPolicy = std::getenv("NCCL_CTA_POLICY");
-    if (ctaPolicy == nullptr || std::atoi(ctaPolicy) != 2) {
-        GTEST_SKIP() << "BEFORE control requires NCCL_CTA_POLICY=2 (ZERO)";
+    if (!envCtaPolicyIsZero()) {
+        GTEST_SKIP() << "BEFORE control requires NCCL_CTA_POLICY=2 or ZERO";
     }
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -1418,8 +1349,10 @@ TEST_F(UBR_MultiSegment, Generic_Reuse_BeforeCePlanBypassesRegistrationCache)
     constexpr int kNumSegments = 4;
     MultiSegmentBuffer buf;
     ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kRequestedSegmentSize, kNumSegments, buf));
-    if (buf.totalSize == 0) {
-        GTEST_SKIP() << "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime";
+    {
+        const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
+            "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime");
+        if (!why.empty()) GTEST_SKIP() << why;
     }
     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
 
@@ -1457,6 +1390,11 @@ TEST_F(UBR_MultiSegment, Generic_Reuse_BeforeCePlanBypassesRegistrationCache)
     REGLogChecker checker = getLogChecker();
     TEST_INFO("RegisterReuse_BEFORE_CePlan: %s (log size: %zu bytes)",
               checker.getSummary().c_str(), checker.getContentLength());
+    struct ncclReg* reg = nullptr;
+    ncclRegFind(reinterpret_cast<struct ncclComm*>(getActiveCommunicator()), buf.vaBase, buf.totalSize, &reg);
+    ASSERT_NE(reg, nullptr) << "ncclCommRegister did not publish a cache entry";
+    EXPECT_EQ(reg->state & (NET_REG_COMPLETE | IPC_REG_COMPLETE), 0)
+        << "Forced CE unexpectedly completed IPC/NET transport registration";
     EXPECT_FALSE(checker.hasIPCRegistration() || checker.hasNETRegistration())
         << "Forced CE unexpectedly entered the transport registration cache";
     EXPECT_FALSE(checker.hasIPCReuse() || checker.hasNETReuse())
@@ -2089,8 +2027,10 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_Lsa)
      MultiSegmentBuffer buf;
      ASSERT_NO_FATAL_FAILURE(
          createMixedMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, kNumHostSegments, buf));
-     if (!MPIHelpers::allRanksTrue(buf.totalSize != 0)) {
-         GTEST_SKIP() << "Host VMM (hipMemCreate with hipMemLocationTypeHost) not supported on this runtime";
+     {
+         const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
+             "Host VMM (hipMemCreate with hipMemLocationTypeHost) not supported on this runtime");
+         if (!why.empty()) GTEST_SKIP() << why;
      }
      auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
  
@@ -2106,10 +2046,6 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_Lsa)
      ncclWindow_t win = nullptr;
      ncclResult_t result = ncclCommWindowRegister(
          getActiveCommunicator(), buf.vaBase, buf.totalSize, &win, NCCL_WIN_COLL_SYMMETRIC);
-     if (MPIHelpers::allRanksTrue(
-             result == ncclUnhandledCudaError || result == ncclSystemError)) {
-         GTEST_SKIP() << "Host-backed window registration is unsupported on this runtime";
-     }
      ASSERT_MPI_EQ(ncclSuccess, result);
      auto winCleanup = makeScopeGuard([&]() {
          if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
@@ -2164,8 +2100,10 @@ TEST_F(UBR_MultiSegment, DeepEP_ElasticWindowRegistration)
 
     MultiSegmentBuffer buf;
     ASSERT_NO_FATAL_FAILURE(createDeepEpElasticBuffer(dev, kGpuBytes, kCpuBytes, buf));
-    if (!MPIHelpers::allRanksTrue(buf.totalSize != 0)) {
-        GTEST_SKIP() << "DeepEP-style GPU+CPU VMM allocation unavailable on this runtime";
+    {
+        const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
+            "DeepEP-style GPU+CPU VMM allocation unavailable on this runtime");
+        if (!why.empty()) GTEST_SKIP() << why;
     }
     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
 
@@ -2173,10 +2111,6 @@ TEST_F(UBR_MultiSegment, DeepEP_ElasticWindowRegistration)
     ncclResult_t result = ncclCommWindowRegister(
         getActiveCommunicator(), buf.vaBase, buf.totalSize, &win,
         NCCL_WIN_STRICT_ORDERING);
-    if (MPIHelpers::allRanksTrue(
-            result == ncclUnhandledCudaError || result == ncclSystemError)) {
-        GTEST_SKIP() << "Host-backed window registration is unsupported on this runtime";
-    }
     ASSERT_MPI_EQ(ncclSuccess, result);
     auto winCleanup = makeScopeGuard([&]() {
         if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
@@ -2229,6 +2163,7 @@ TEST_F(UBR_MultiSegment, DeepEP_HybridWindowRegistrationAndHandleReuse)
     ASSERT_TRUE(isWinEnabled()) << "NCCL_WIN_ENABLE must not be set to 0";
     ASSERT_TRUE(isElasticBufferRegisterEnabled())
         << "NCCL_ELASTIC_BUFFER_REGISTER must not be 0";
+    ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
 
     RCCLHybridVmmTests::HybridVmmBuffer hybrid;
     std::string reason;
@@ -2247,10 +2182,6 @@ TEST_F(UBR_MultiSegment, DeepEP_HybridWindowRegistrationAndHandleReuse)
     ncclResult_t result = ncclCommWindowRegister(
         getActiveCommunicator(), hybrid.ptr, hybrid.totalSize, &win,
         NCCL_WIN_STRICT_ORDERING);
-    if (MPIHelpers::allRanksTrue(
-            result == ncclUnhandledCudaError || result == ncclSystemError)) {
-        GTEST_SKIP() << "Host-backed window registration is unsupported on this runtime";
-    }
     ASSERT_MPI_EQ(ncclSuccess, result);
     auto winCleanup = makeScopeGuard([&]() {
         if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
@@ -2346,8 +2277,10 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_Gating)
      MultiSegmentBuffer buf;
      ASSERT_NO_FATAL_FAILURE(
          createMixedMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, kNumHostSegments, buf));
-     if (!MPIHelpers::allRanksTrue(buf.totalSize != 0)) {
-         GTEST_SKIP() << "Host VMM (hipMemCreate with hipMemLocationTypeHost) not supported on this runtime";
+     {
+         const std::string why = skipUnlessAllRanksAllocated(buf.totalSize != 0,
+             "Host VMM (hipMemCreate with hipMemLocationTypeHost) not supported on this runtime");
+         if (!why.empty()) GTEST_SKIP() << why;
      }
      auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
  

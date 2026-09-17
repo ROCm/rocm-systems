@@ -2854,7 +2854,7 @@
       "test_dir": "test/nccl4py",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": "auto",
+      "num_gpus": 0,
       "timeout": 600,
       "tests": [
         {
@@ -2895,6 +2895,7 @@
       "tests": [
         {
           "name": "MultiSegment_HostBoundaryMath_All",
+          "description": "Host-only segment selection and split arithmetic",
           "test_filter": "NetIbMultiSeg.*:NetIbSplit.*"
         }
       ]
@@ -2919,10 +2920,12 @@
       "tests": [
         {
           "name": "UBR_MultiSegment_All_Core",
-          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Generic_Reuse_BeforeCePlanBypassesRegistrationCache:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*:UBR_MultiSegment.NetProxyPartialFinalSegment"
+          "description": "Single-node UBR multi-segment tests except jobs that need a dedicated env or two nodes",
+          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic:UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Generic_Reuse_BeforeCePlanBypassesRegistrationCache:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*:UBR_MultiSegment.NetProxyPartialFinalSegment"
         },
         {
           "name": "UBR_MultiSegment_Generic_Reuse",
+          "description": "Register once, AllReduce twice - multi-segment registration reuse (IPC or NET)",
           "test_filter": "UBR_MultiSegment.Generic_Reuse",
           "env_variables": {
             "RCCL_CE_ALLREDUCE": "0",
@@ -2932,6 +2935,7 @@
         },
         {
           "name": "UBR_MultiSegment_Symmetric_Lsa_AFTER",
+          "description": "Symmetric-window LSA after CE AllReduce with CTA policy ZERO",
           "test_filter": "UBR_MultiSegment.Symmetric_Lsa",
           "env_variables": {
             "RCCL_CE_ALLREDUCE": "1",
@@ -2940,6 +2944,7 @@
         },
         {
           "name": "UBR_MultiSegment_Symmetric_Lsa_BEFORE",
+          "description": "CE receive-offset BEFORE control for symmetric LSA",
           "test_filter": "UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult",
           "env_variables": {
             "RCCL_CE_ALLREDUCE": "1",
@@ -2948,6 +2953,7 @@
         },
         {
           "name": "UBR_MultiSegment_Elastic_Gating",
+          "description": "Host-backed symmetric window rejected when NCCL_ELASTIC_BUFFER_REGISTER=0",
           "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Gating",
           "env_variables": {
             "NCCL_ELASTIC_BUFFER_REGISTER": "0"
@@ -2978,6 +2984,7 @@
       "tests": [
         {
           "name": "UBR_MultiSegment_Generic_Reuse_BEFORE",
+          "description": "Forced-CE BEFORE control that must not complete IPC/NET registration",
           "test_filter": "UBR_MultiSegment.Generic_Reuse_BeforeCePlanBypassesRegistrationCache"
         }
       ]
@@ -3008,18 +3015,22 @@
       "tests": [
         {
           "name": "UBR_MultiSegment_Symmetric_LsaGin",
+          "description": "Cross-node ReduceScatter over multi-segment windows (LSA + GIN)",
           "test_filter": "UBR_MultiSegment.Symmetric_LsaGin"
         },
         {
           "name": "DeepEP_Hybrid_Window_Registration",
+          "description": "DeepEP hybrid [GPU][CPU per local rank] window with SYM_REUSE handle reuse",
           "test_filter": "UBR_MultiSegment.DeepEP_HybridWindowRegistrationAndHandleReuse"
         },
         {
           "name": "DeepEP_Hybrid_Rma_Positive_And_Stress",
+          "description": "Hybrid imported-CPU RMA IGet positive, multi-node stress, and OOR reject",
           "test_filter": "RmaMultiSegmentMPITest.DeepEP_HybridImportedCpuSegmentIGet:RmaMultiSegmentMPITest.DeepEP_HybridMultiNodeIGetStress:RmaMultiSegmentMPITest.DeepEP_HybridOutOfRangeIGetRejected"
         },
         {
           "name": "DeepEP_Hybrid_Elastic_Gating",
+          "description": "Hybrid imported-handle layout rejected when elastic registration is disabled",
           "test_filter": "UBR_MultiSegment.DeepEP_HybridElasticRegistrationDisabled",
           "env_variables": {
             "NCCL_ELASTIC_BUFFER_REGISTER": "0"
@@ -3027,7 +3038,11 @@
         },
         {
           "name": "DeepEP_Elastic_Window_Registration",
-          "test_filter": "UBR_MultiSegment.DeepEP_ElasticWindowRegistration"
+          "description": "DeepEP [GPU][CPU] elastic window without SYM_REUSE (private CPU segments)",
+          "test_filter": "UBR_MultiSegment.DeepEP_ElasticWindowRegistration",
+          "env_variables": {
+            "NCCL_SYM_REUSE_SYSMEM_HANDLES": "0"
+          }
         }
       ]
     },
@@ -3048,15 +3063,23 @@
         "NCCL_DEBUG_SUBSYS": "REG",
         "RCCL_MPI_LOG_ALL_RANKS": "1",
         "NCCL_GIN_ENABLE": "1",
-        "NCCL_GIN_TYPE": "2"
+        "NCCL_GIN_TYPE": "2",
+        "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0"
       },
       "tests": [
         {
           "name": "MultiSegment_Transport_All_MultiNode",
+          "description": "Classic NET/IB and GIN multi-segment P2P/RMA tests (non-hybrid)",
           "test_filter": "NetIbMultiSegmentMPITest.*:RmaMultiSegmentMPITest.*-RmaMultiSegmentMPITest.DeepEP_Hybrid*"
         },
         {
+          "name": "UBR_MultiSegment_Generic",
+          "description": "Out-of-place AllReduce on an 8-segment VMM buffer; asserts NET cache netNSegments",
+          "test_filter": "UBR_MultiSegment.Generic"
+        },
+        {
           "name": "UBR_MultiSegment_NET_Proxy_Partial_Final_Segment",
+          "description": "NET proxy registration clips the final physical segment",
           "test_filter": "UBR_MultiSegment.NetProxyPartialFinalSegment",
           "env_variables": {
             "NCCL_GIN_ENABLE": "0"
@@ -3080,26 +3103,31 @@
     },
     {
       "name": "Multi-Segment - Host Boundary Math",
+      "description": "Host-only segment selection and split arithmetic",
       "config": "multisegment_host_boundary_math",
       "enabled": true
     },
     {
       "name": "Multi-Segment - Registration and LSA",
+      "description": "All single-node UBR, symmetric-window, elastic, and DeepEP registration tests",
       "config": "ubr_multisegment_comprehensive",
       "enabled": true
     },
     {
       "name": "Multi-Segment - CE BEFORE registration cache",
+      "description": "CE-forced process for Generic_Reuse_BeforeCePlanBypassesRegistrationCache",
       "config": "ubr_multisegment_ce_before",
       "enabled": true
     },
     {
       "name": "Multi-Segment - Classic NET/IB and GIN (Multi-Node)",
+      "description": "All classic and GIN transport tests, including DeepEP and boundary stress",
       "config": "multisegment_transport_multinode",
       "enabled": true
     },
     {
       "name": "Multi-Segment - LSA plus GIN (Multi-Node)",
+      "description": "Eight-rank combined intra-node LSA and inter-node GIN coverage (4 ranks per node)",
       "config": "ubr_multisegment_lsagin_multinode",
       "enabled": true
     },

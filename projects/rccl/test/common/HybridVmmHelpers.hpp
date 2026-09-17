@@ -18,9 +18,11 @@
 
 #include <hip/hip_runtime.h>
 #include <mpi.h>
+#include "rocmwrap.h"
 
-// hipMemLocationTypeHost is missing before ROCm 7.0.1 (CUDA HOST == 2).
-#if !defined(ROCM_VERSION) || ROCM_VERSION < 70100
+// hipMemLocationTypeHost is absent outside NCCL_CUMEM_HOST_VERSION_SUPPORTED
+// (ROCm 7.12 or the 7.0.2.x backport). CUDA HOST == 2.
+#if !NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
 #ifndef hipMemLocationTypeHost
 #define hipMemLocationTypeHost (static_cast<hipMemLocationType>(2))
 #endif
@@ -454,7 +456,159 @@ inline bool AllocHybridVmm(int dev, size_t gpuBytes, size_t localCpuBytes,
     return true;
 }
 
+inline bool AllocHybridForLocalRanks(int dev, size_t gpuBytes, size_t localCpuBytes,
+                                     int expectedLocalRanks, HybridVmmBuffer* out,
+                                     std::string* reason = nullptr)
+{
+    if (!AllocHybridVmm(dev, gpuBytes, localCpuBytes, out, reason))
+        return false;
+    if (out->localSize != expectedLocalRanks)
+    {
+        if (reason)
+            *reason = "need " + std::to_string(expectedLocalRanks) +
+                      " ranks per node, got " + std::to_string(out->localSize);
+        FreeHybridVmm(*out);
+        return false;
+    }
+    return true;
+}
+
+// DeepEP ElasticSymmetricMemory geometry: one GPU segment then one independently
+// sized CPU segment in a 2 MiB-aligned VA. Shared by UBR and RMA tests.
+struct DeepEpElasticRange
+{
+    hipDeviceptr_t                               base      = 0;
+    size_t                                       totalSize = 0;
+    size_t                                       gpuBytes  = 0;
+    size_t                                       cpuBytes  = 0;
+    std::vector<hipMemGenericAllocationHandle_t> handles;
+    std::vector<size_t>                          segSizes;
+};
+
+inline bool AllocDeepEpElasticRange(int dev, size_t gpuBytes, size_t cpuBytes,
+                                    DeepEpElasticRange* out)
+{
+    constexpr size_t kDeepEpAlignment = 2u * 1024 * 1024;
+    if (out == nullptr || gpuBytes == 0 || cpuBytes == 0 ||
+        gpuBytes % kDeepEpAlignment != 0 || cpuBytes % kDeepEpAlignment != 0)
+        return false;
+    *out = DeepEpElasticRange{};
+
+    hipMemAllocationProp gpuProp = {};
+    gpuProp.type                            = hipMemAllocationTypePinned;
+    gpuProp.location.type                   = hipMemLocationTypeDevice;
+    gpuProp.location.id                     = dev;
+    gpuProp.requestedHandleType             = hipMemHandleTypePosixFileDescriptor;
+    gpuProp.allocFlags.gpuDirectRDMACapable = 1;
+
+    hipMemAllocationProp cpuProp = {};
+    cpuProp.type                = hipMemAllocationTypePinned;
+    cpuProp.location.type       = hipMemLocationTypeHost;
+    cpuProp.location.id         = 0;
+    cpuProp.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+
+    size_t gpuGran = 0, cpuGran = 0;
+    if (hipMemGetAllocationGranularity(&gpuGran, &gpuProp, hipMemAllocationGranularityMinimum) != hipSuccess ||
+        hipMemGetAllocationGranularity(&cpuGran, &cpuProp, hipMemAllocationGranularityMinimum) != hipSuccess ||
+        gpuGran == 0 || cpuGran == 0 ||
+        kDeepEpAlignment % gpuGran != 0 || kDeepEpAlignment % cpuGran != 0)
+        return false;
+
+    const size_t totalSize = gpuBytes + cpuBytes;
+    hipDeviceptr_t vaBase = 0;
+    if (hipMemAddressReserve(&vaBase, totalSize, kDeepEpAlignment, 0, 0) != hipSuccess)
+        return false;
+
+    std::vector<hipMemGenericAllocationHandle_t> handles(2, 0);
+    std::vector<size_t> segSizes = {gpuBytes, cpuBytes};
+    int mapped = 0;
+    auto cleanup = [&]() {
+        if (mapped > 0)
+            (void)hipMemUnmap(vaBase, gpuBytes);
+        if (mapped > 1)
+        {
+            hipDeviceptr_t cpuVa = reinterpret_cast<hipDeviceptr_t>(
+                reinterpret_cast<uintptr_t>(vaBase) + gpuBytes);
+            (void)hipMemUnmap(cpuVa, cpuBytes);
+        }
+        for (auto h : handles)
+        {
+            if (h != 0) (void)hipMemRelease(h);
+        }
+        (void)hipMemAddressFree(vaBase, totalSize);
+    };
+
+    if (hipMemCreate(&handles[0], gpuBytes, &gpuProp, 0) != hipSuccess ||
+        hipMemMap(vaBase, gpuBytes, 0, handles[0], 0) != hipSuccess)
+    {
+        cleanup();
+        return false;
+    }
+    mapped = 1;
+
+    hipDeviceptr_t cpuVa = reinterpret_cast<hipDeviceptr_t>(
+        reinterpret_cast<uintptr_t>(vaBase) + gpuBytes);
+    if (hipMemCreate(&handles[1], cpuBytes, &cpuProp, 0) != hipSuccess ||
+        hipMemMap(cpuVa, cpuBytes, 0, handles[1], 0) != hipSuccess)
+    {
+        cleanup();
+        return false;
+    }
+    mapped = 2;
+
+    hipMemAccessDesc accessDesc = {};
+    accessDesc.location.type    = hipMemLocationTypeDevice;
+    accessDesc.location.id      = dev;
+    accessDesc.flags            = hipMemAccessFlagsProtReadWrite;
+    hipMemAccessDesc hostAccess = {};
+    hostAccess.location.type    = hipMemLocationTypeHost;
+    hostAccess.location.id      = 0;
+    hostAccess.flags            = hipMemAccessFlagsProtReadWrite;
+    // Device RW on both segments (GPU kernels / GIN). Host RW on the CPU
+    // segment matches DeepEP CPU-storage access.
+    if (hipMemSetAccess(vaBase, gpuBytes, &accessDesc, 1) != hipSuccess ||
+        hipMemSetAccess(cpuVa, cpuBytes, &accessDesc, 1) != hipSuccess ||
+        hipMemSetAccess(cpuVa, cpuBytes, &hostAccess, 1) != hipSuccess)
+    {
+        cleanup();
+        return false;
+    }
+
+    out->base      = vaBase;
+    out->totalSize = totalSize;
+    out->gpuBytes  = gpuBytes;
+    out->cpuBytes  = cpuBytes;
+    out->handles   = std::move(handles);
+    out->segSizes  = std::move(segSizes);
+    return true;
+}
+
 } // namespace RCCLHybridVmmTests
+
+#ifdef RCCL_HAS_RMA_IB_PROXY
+namespace RCCLRmaTests
+{
+
+inline bool AllocDeepEpElasticVmm(int dev, size_t gpuBytes, size_t cpuBytes,
+                                  MultiSegmentVmmBuffer* out)
+{
+    if (out == nullptr) return false;
+    RCCLHybridVmmTests::DeepEpElasticRange range;
+    if (!RCCLHybridVmmTests::AllocDeepEpElasticRange(dev, gpuBytes, cpuBytes, &range))
+        return false;
+    *out = MultiSegmentVmmBuffer{};
+    out->ptr       = reinterpret_cast<void*>(range.base);
+    out->base      = range.base;
+    out->totalSize = range.totalSize;
+    out->segSize   = 0; // non-uniform by design
+    out->nSegments = 2;
+    out->handles   = std::move(range.handles);
+    out->segSizes  = std::move(range.segSizes);
+    return true;
+}
+
+} // namespace RCCLRmaTests
+#endif // RCCL_HAS_RMA_IB_PROXY
 
 #endif // MPI_TESTS_ENABLED
 
