@@ -276,7 +276,7 @@ ROCm Systems Profiler supports several output formats, each suited to a differen
      - Detailed trace and counter data stored as a SQLite3 database; queryable with SQL or convertible to other formats via ``rocpd convert``
      - `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/>`_
    * - Perfetto (pftrace)
-     - ``.proto``
+     - ``.pftrace``
      - Detailed trace stored as a protocol buffer for interactive timeline visualization
      - `ui.perfetto.dev <https://ui.perfetto.dev>`_
    * - Text
