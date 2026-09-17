@@ -223,6 +223,14 @@ ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* p
 
 ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
 
+// True when [recvbuff, recvbuff + totalBytes) lies inside win. Pointer-in-window
+// is not enough: Phase 3 writes the full receive range through peer LSA mappings.
+int ncclCeRecvRangeContainedInWindow(struct ncclDevrWindow const* win, void const* recvbuff, size_t totalBytes);
+
+// Bytes allocated for ceARTmpBuf: alignUp(NCCL_CE_NUM_SLOTS * nRanks * maxChunkBytes, 16).
+// The !fastPath AllGather + memcpy of totalBytes must not exceed this.
+size_t ncclCeAllReduceStagingBufBytes(int nRanks);
+
 // CE AllReduce: scatter → local-reduce → allgather (→ optional copy-to-user-recvbuff).
 // Requires comm->ceColl.ceARTmpBuf != NULL (i.e. ncclCeInit has run).
 ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
