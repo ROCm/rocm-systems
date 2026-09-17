@@ -885,15 +885,11 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
       static_cast<HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE>(type);
 
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {};
-  // Require both thunks up front: importing without destroy would leak the
-  // handle. Missing either -> NOT_SUPPORTED, not a null call.
-  auto* thunk_loader = core::Runtime::runtime_singleton_->thunkLoader();
-  const bool loaded =
-      thunk_loader->HSAKMT_PFN(hsaKmtImportExternalSemaphore) != nullptr &&
-      thunk_loader->HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) != nullptr;
+  // Importing without a destroy half would leak the handle. ThunkLoader binds
+  // the two as a pair, so a thunk missing either reports NOT_SUPPORTED here
+  // instead of handing over a semaphore nothing could give back.
   HSAKMT_STATUS s =
-      loaded ? HSAKMT_CALL(hsaKmtImportExternalSemaphore(node_id, nt_handle, kmt_type, &kmt_handle))
-             : HSAKMT_STATUS_NOT_SUPPORTED;
+      HSAKMT_CALL(hsaKmtImportExternalSemaphore(node_id, nt_handle, kmt_type, &kmt_handle));
 
   // libhsakmt distinguishes invalid input (null handle, unknown type)
   // from "no node for this agent" and from generic KMD failures.
@@ -918,12 +914,13 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
 
 hsa_status_t KfdDriver::DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const {
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
-  // No export -> not this driver's handle. INVALID_AGENT (base-class
-  // contract) lets handle_close keep polling other drivers.
-  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) == nullptr)
-    return HSA_STATUS_ERROR_INVALID_AGENT;
-  if (HSAKMT_CALL(hsaKmtDestroyExternalSemaphore(kmt_handle)) != HSAKMT_STATUS_SUCCESS)
-    return HSA_STATUS_ERROR;
+  // NOT_SUPPORTED covers both no export (ThunkLoader's stub) and an export
+  // this platform does not implement, and neither can be holding the handle.
+  // INVALID_AGENT (base-class contract) lets handle_close keep polling other
+  // drivers instead of stopping at this one.
+  const HSAKMT_STATUS s = HSAKMT_CALL(hsaKmtDestroyExternalSemaphore(kmt_handle));
+  if (s == HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR_INVALID_AGENT;
+  if (s != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -950,9 +947,6 @@ hsa_status_t KfdDriver::SignalExternalSemaphore(uint64_t queue_id,
                                                 hsa_amd_external_semaphore_t sem,
                                                 uint64_t value) const {
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
-  // Optional thunk: missing export maps to NOT_SUPPORTED, not a null call.
-  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) == nullptr)
-    return MapQueueExtSemStatus(HSAKMT_STATUS_NOT_SUPPORTED);
   return MapQueueExtSemStatus(
       HSAKMT_CALL(hsaKmtQueueSignalExternalSemaphore(queue_id, kmt_handle, value)));
 }
@@ -961,9 +955,6 @@ hsa_status_t KfdDriver::WaitExternalSemaphore(uint64_t queue_id,
                                               hsa_amd_external_semaphore_t sem,
                                               uint64_t value) const {
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
-  // Optional thunk: missing export maps to NOT_SUPPORTED, not a null call.
-  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) == nullptr)
-    return MapQueueExtSemStatus(HSAKMT_STATUS_NOT_SUPPORTED);
   return MapQueueExtSemStatus(
       HSAKMT_CALL(hsaKmtQueueWaitExternalSemaphore(queue_id, kmt_handle, value)));
 }
@@ -1007,14 +998,15 @@ hsa_status_t KfdDriver::SetTrapHandler(uint32_t node_id, const void* base, uint6
 }
 
 hsa_status_t KfdDriver::SetSigbusDelay(uint32_t node_id, uint32_t delay_ms) const {
-  // Optional thunk: the loader binds this one without failing the table load,
-  // so it stays null against a libhsakmt that does not export the RAS-poison
-  // opt-in. Missing export maps to NOT_SUPPORTED, not a null call.
-  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtSetSigbusDelay) == nullptr)
+  // Optional thunk: against a libhsakmt that does not export the RAS-poison
+  // opt-in ThunkLoader binds a stub, so the missing export arrives here as
+  // NOT_SUPPORTED - the same status a libhsakmt that exports it without
+  // supporting it returns, and the same one the caller used to get from a null
+  // check. Anything else is a real failure of a supported call.
+  const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtSetSigbusDelay(node_id, delay_ms));
+  if (ret == HSAKMT_STATUS_NOT_SUPPORTED)
     return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
-
-  if (HSAKMT_CALL(hsaKmtSetSigbusDelay(node_id, delay_ms)) != HSAKMT_STATUS_SUCCESS)
-    return HSA_STATUS_ERROR;
+  if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
 }
