@@ -49,7 +49,7 @@ endfunction()
 
 function(rocprofiler_featuretests_profiler_add_executable _TARGET)
     add_executable(${_TARGET} ${ARGN})
-    target_link_libraries(${_TARGET} PRIVATE hip::device)
+    target_link_libraries(${_TARGET} PRIVATE hip::host)
     rocprofiler_featuretests_profiler_add_test(${_TARGET})
 endfunction()
 
@@ -338,7 +338,7 @@ set(runFeatureTests_SOURCES
 
 set_source_files_properties(apps/hip_kernels.cpp PROPERTIES LANGUAGE HIP)
 add_executable(runFeatureTests ${runFeatureTests_SOURCES})
-target_link_libraries(runFeatureTests PRIVATE hip::device)
+target_link_libraries(runFeatureTests PRIVATE hip::host)
 
 # link MPI and OpenMP to runFeatureTests for visibility
 if(USE_MPI)
