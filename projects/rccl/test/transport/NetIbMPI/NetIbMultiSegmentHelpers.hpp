@@ -100,7 +100,7 @@ inline void FreeMultiSegmentVmm(MultiSegmentVmmBuffer& b) {
 // MR via the classic NET/IB plugin entry point. Returns the registration result;
 // on ncclSuccess *mhandle holds the composite handle. Returns ncclInvalidUsage
 // (without touching *mhandle) if the dma-buf export API is unavailable at build
-// time (older HIP), so callers can SKIP.
+// time (older HIP). Callers must not treat that as a successful cap reject.
 inline ncclResult_t RegisterMultiSegmentMr(void* comm, const MultiSegmentVmmBuffer& b, void** mhandle) {
 #if NCCL_CUMEM_DMABUF_EXPORT_GATE
     std::vector<void*>    segAddrs(b.nSegments);

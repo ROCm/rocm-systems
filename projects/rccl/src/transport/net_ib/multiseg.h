@@ -93,11 +93,17 @@ static inline int ncclIbSegmentIndexForZeroLength(int nSegments, const uintptr_t
 // non-uniform layouts and falls back to staging buffers.
 static inline bool ncclIbSegmentsUniform(int nSegments, const size_t* segLen) {
   if (nSegments <= 1) return true;
-  for (int s = 1; s < nSegments; s++) {
-    bool last = (s == nSegments - 1);
-    if ((!last && segLen[s] != segLen[0]) || (last && segLen[s] > segLen[0])) return false;
+  // Stride is the largest segment. Interior segments must equal it; the first
+  // and last may be shorter when registration clips a physical allocation.
+  size_t stride = 0;
+  for (int s = 0; s < nSegments; s++) {
+    if (segLen[s] > stride) stride = segLen[s];
   }
-  return true;
+  if (stride == 0) return false;
+  for (int s = 1; s < nSegments - 1; s++) {
+    if (segLen[s] != stride) return false;
+  }
+  return segLen[0] <= stride && segLen[nSegments - 1] <= stride;
 }
 
 // Peer CTS side table is usable iff nSegments is in [1, maxSegments], remDevIdx

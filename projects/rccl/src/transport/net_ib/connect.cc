@@ -1399,10 +1399,10 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     qpCreateAttrs.cq = rCommDev->base.cq;
     qpCreateAttrs.pd = rCommDev->base.pd;
     qpCreateAttrs.maxRecvWorkRequest = 0;
-    // Extra flush WRs only while multi-segment RMA is on. Off keeps the scratchpad depth.
+    // Classic iflush posts one RDMA read per recv per segment. Off keeps the scratchpad depth.
     qpCreateAttrs.maxSendWorkRequest = rcclRmaMultiSegEnabled()
-      ? 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_FLUSH_WRS
-      : 2 * NET_IB_MAX_REQUESTS;
+                                         ? 2 * NET_IB_MAX_REQUESTS + NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS
+                                         : 2 * NET_IB_MAX_REQUESTS;
     qpCreateAttrs.qpContext = &comm->base.stats;
     NCCLCHECK(ncclIbQpCreate(flushQp, &qpCreateAttrs));
     // Loopback flush QP: local and remote device indices are this recv device.
