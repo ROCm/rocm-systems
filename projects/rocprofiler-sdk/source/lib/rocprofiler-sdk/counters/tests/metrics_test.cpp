@@ -415,5 +415,5 @@ TEST(metrics, counter_info_v1_size_field)
         }
     }
 
-    if(checked_counters == 0) GTEST_SKIP() << "No supported GPU counters available for size checks";
+    ASSERT_GT(checked_counters, 0) << "No supported GPU counters available for size checks";
 }

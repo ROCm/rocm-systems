@@ -278,16 +278,14 @@ def test_common_counters_constant_across_passes(json_data, common_counter):
     sdk = _sdk(json_data)
     table = _records_by_dispatch(sdk)
     counter = common_counter
-    if counter == "SQ_INSTS_VALU" and all(
+    if counter.startswith("SQ_INSTS_") and all(
         batch.get(counter) == 0
         for entry in table.values()
         for batch in entry["passes"].values()
     ):
         first_gpu = next((agent for agent in sdk["agents"] if agent["type"] == 2), None)
         if first_gpu is not None and gpu_uses_auto_perf_level(first_gpu):
-            pytest.skip(
-                "SQ_INSTS_VALU is zero on gfx11/gfx12 with AUTO performance level"
-            )
+            pytest.skip(f"{counter} is zero on gfx11/gfx12 with AUTO performance level")
 
     for dispatch_id, entry in table.items():
         passes = entry["passes"]
