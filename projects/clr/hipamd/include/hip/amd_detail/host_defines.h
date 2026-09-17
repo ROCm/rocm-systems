@@ -325,7 +325,7 @@ constexpr index_sequence<Ints...> make_index_sequence_value(index_sequence<Ints.
 }
 
 // Allows to calculate the max() and lowest() of each type. Uses __hip_internal::numeric_limits()
-// most of the time, but gets specialized for __half
+// most of the time, but gets specialized for some floating point types
 template <typename T>
 struct ExclusiveScanIdentity {
   static constexpr T maximum() { return (__hip_internal::numeric_limits<T>::max)(); }
