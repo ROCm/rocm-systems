@@ -67,9 +67,9 @@ TEST_F(RegistryTest, start_new_session_filters_prior_rows_from_view)
                                        output_format::perfetto);
     const auto rows_v2 = registry::instance().rows();
     EXPECT_EQ(rows_v2.size(), 2u);
-    for(const auto& r : rows_v2)
+    for(const auto& row : rows_v2)
     {
-        EXPECT_FALSE(r.path.empty());
+        EXPECT_FALSE(row.path.empty());
     }
 }
 
@@ -97,12 +97,12 @@ TEST_F(RegistryTest, start_new_session_is_race_safe_with_concurrent_register)
 
     std::atomic<bool> stop{ false };
     std::thread       writer([&]() {
-        int i = 0;
+        int write_index = 0;
         while(!stop.load(std::memory_order_relaxed))
         {
-            registry::instance().register_file("/tmp/rocprofsys-test/stress-" +
-                                                         std::to_string(i++) + ".proto",
-                                                     output_format::perfetto);
+            registry::instance().register_file(
+                "/tmp/rocprofsys-test/stress-" + std::to_string(write_index++) + ".proto",
+                output_format::perfetto);
         }
     });
 
@@ -119,9 +119,9 @@ TEST_F(RegistryTest, start_new_session_is_race_safe_with_concurrent_register)
     writer.join();
 
     const auto rows = registry::instance().rows();
-    for(const auto& r : rows)
+    for(const auto& row : rows)
     {
-        EXPECT_FALSE(r.path.empty());
+        EXPECT_FALSE(row.path.empty());
     }
 }
 
@@ -165,21 +165,21 @@ TEST_F(RegistryTest, concurrent_register_is_thread_safe)
 
     std::vector<std::thread> threads;
     threads.reserve(THREAD_COUNT);
-    for(int t = 0; t < THREAD_COUNT; ++t)
+    for(int thread_index = 0; thread_index < THREAD_COUNT; ++thread_index)
     {
-        threads.emplace_back([t]() {
+        threads.emplace_back([thread_index]() {
             for(int i = 0; i < PER_THREAD; ++i)
             {
-                registry::instance().register_file("/tmp/rocprofsys-test/concurrent-" +
-                                                       std::to_string(t) + "-" +
-                                                       std::to_string(i) + ".proto",
-                                                   output_format::perfetto);
+                registry::instance().register_file(
+                    "/tmp/rocprofsys-test/concurrent-" + std::to_string(thread_index) +
+                        "-" + std::to_string(i) + ".proto",
+                    output_format::perfetto);
             }
         });
     }
-    for(auto& th : threads)
+    for(auto& thread : threads)
     {
-        th.join();
+        thread.join();
     }
 
     EXPECT_EQ(registry::instance().rows().size(),
@@ -226,6 +226,6 @@ TEST_F(RegistryTest, record_process_non_empty_fields_win_on_upsert)
 
     const auto procs = registry::instance().processes();
     ASSERT_EQ(procs.size(), 1u);
-    EXPECT_EQ(procs.front().ppid, 7);
+    EXPECT_EQ(procs.front().ppid, RESOLVED_PPID);
     EXPECT_EQ(procs.front().command, "main-resolved");
 }

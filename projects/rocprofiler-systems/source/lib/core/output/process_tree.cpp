@@ -18,8 +18,8 @@ namespace
 void
 sort_rows_desc_by_size(process_node& node)
 {
-    std::ranges::sort(node.rows, [](const artifact& a, const artifact& b) {
-        return a.size_bytes > b.size_bytes;
+    std::ranges::sort(node.rows, [](const artifact& lhs, const artifact& rhs) {
+        return lhs.size_bytes > rhs.size_bytes;
     });
 }
 
@@ -54,15 +54,15 @@ collect_subtree_order(
         const pid_t pid = stack.back();
         stack.pop_back();
         walk.order.push_back(pid);
-        auto it = children_by_ppid.find(pid);
-        if(it == children_by_ppid.end())
+        auto children_it = children_by_ppid.find(pid);
+        if(children_it == children_by_ppid.end())
         {
             continue;
         }
-        for(pid_t cp : it->second)
+        for(pid_t child_pid : children_it->second)
         {
-            walk.parent_of[cp] = pid;
-            stack.push_back(cp);
+            walk.parent_of[child_pid] = pid;
+            stack.push_back(child_pid);
         }
     }
     return walk;
@@ -110,9 +110,9 @@ build_metadata_index(std::span<const process_metadata> processes)
 {
     std::unordered_map<pid_t, process_metadata> meta_by_pid;
     meta_by_pid.reserve(processes.size());
-    for(const auto& p : processes)
+    for(const auto& process : processes)
     {
-        meta_by_pid.emplace(p.pid, p);
+        meta_by_pid.emplace(process.pid, process);
     }
     return meta_by_pid;
 }
@@ -121,9 +121,9 @@ build_metadata_index(std::span<const process_metadata> processes)
 build_rows_index(std::span<const artifact> rows)
 {
     std::unordered_map<pid_t, std::vector<artifact>> rows_by_pid;
-    for(const auto& r : rows)
+    for(const auto& row : rows)
     {
-        rows_by_pid[r.pid].push_back(r);
+        rows_by_pid[row.pid].push_back(row);
     }
     return rows_by_pid;
 }
@@ -135,9 +135,9 @@ build_all_nodes(std::span<const artifact>                          rows,
                 process_tree_diagnostics&                          diagnostics)
 {
     std::unordered_set<pid_t> pids_in_rows;
-    for(const auto& r : rows)
+    for(const auto& row : rows)
     {
-        pids_in_rows.insert(r.pid);
+        pids_in_rows.insert(row.pid);
     }
 
     std::unordered_map<pid_t, process_node> nodes;
@@ -188,7 +188,7 @@ build_children_index(std::span<const pid_t>                         sorted_pids,
             children_by_ppid[meta.ppid].push_back(pid);
         }
     }
-    for(auto& [_, vec] : children_by_ppid)
+    for(auto& [ppid, vec] : children_by_ppid)
     {
         std::ranges::sort(vec);
     }
