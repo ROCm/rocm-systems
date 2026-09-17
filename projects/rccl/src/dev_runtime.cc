@@ -711,7 +711,7 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
   }
   return ret;
 fail:
-  for (int i = 0; i < numSegmentsRegistered; i++) {
+  for (int i = 0; mem->ginSegmentInfos != nullptr && i <= numSegmentsRegistered && i < mem->numGinSegments; i++) {
     (void)ncclGinDeregister(comm, mem->ginSegmentInfos[i].ginHostWins);
   }
   free(mem->ginSegmentInfos);
@@ -754,8 +754,8 @@ static void symMemoryUnmapLsaTeam(struct ncclComm* comm, struct ncclDevrMemory* 
     uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
     uintptr_t addr = base + r * devr->bigSize + mem->bigOffset;
     for (int idx = 0; idx < mem->lsaNumSegments[r]; idx++) {
-      CUdeviceptr tmpBase;
-      size_t tmpBaseSize;
+      CUdeviceptr tmpBase = nullptr;
+      size_t tmpBaseSize = 0;
       CUCHECKIGNORE(cuMemGetAddressRange(&tmpBase, &tmpBaseSize, reinterpret_cast<CUdeviceptr>(addr)));
       CUCHECKIGNORE(cuMemUnmap(reinterpret_cast<CUdeviceptr>(addr), tmpBaseSize));
       addr = addr + tmpBaseSize;
