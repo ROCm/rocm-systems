@@ -1251,13 +1251,9 @@ class AMDSMILogger:
             rocm_version = str(output["version_info"]["rocm version"][1]).ljust(8)
         driver_info = output["version_info"]["driver info"]
         if driver_info == "N/A":
-            driver_kernel_version = "N/A"
-            driver_version = "N/A"
-            driver_build_version = "N/A"
+            amdgpu_version = "N/A"
         else:
-            driver_kernel_version = str(driver_info["driver_kernel_version"])
-            driver_version = str(driver_info["driver_version"])
-            driver_build_version = str(driver_info["driver_build_version"])
+            amdgpu_version = str(driver_info["driver_full_version"])
         fw_pldm_version = str(output["version_info"]["fw pldm version"])
         vbios_version = str(output["version_info"]["vbios version"])
         kernel_version = str(output["version_info"]["kernel version"])
@@ -1269,9 +1265,7 @@ class AMDSMILogger:
 
         amd_smi_version = _trunc(amd_smi_version)
         rocm_version = _trunc(rocm_version)
-        driver_kernel_version = _trunc(driver_kernel_version)
-        driver_version = _trunc(driver_version)
-        driver_build_version = _trunc(driver_build_version)
+        amdgpu_version = _trunc(amdgpu_version)
         fw_pldm_version = _trunc(fw_pldm_version)
         vbios_version = _trunc(vbios_version)
         kernel_version = _trunc(kernel_version)
@@ -1286,16 +1280,10 @@ class AMDSMILogger:
         print(default_line_1)
         print("| AMD-SMI            {0:<{w}s} |".format(amd_smi_version, w=_COL_WIDTH))
 
-        if driver_kernel_version != "N/A":
-            print("| Kernel Version:    {0:<{w}s} |".format(driver_kernel_version, w=_COL_WIDTH))
+        if amdgpu_version != "N/A":
+            print("| AMDGPU Version:    {0:<{w}s} |".format(amdgpu_version, w=_COL_WIDTH))
         elif kernel_version != "N/A":
             print("| OS kernel Version: {0:<{w}s} |".format(kernel_version, w=_COL_WIDTH))
-
-        if driver_version != "N/A":
-            print("| Driver Version:    {0:<{w}s} |".format(driver_version, w=_COL_WIDTH))
-
-        if driver_build_version != "N/A":
-            print("| Build Version:     {0:<{w}s} |".format(driver_build_version, w=_COL_WIDTH))
 
         if rocm_version != "N/A":
             print("| ROCm Version:      {0:<{w}s} |".format(rocm_version, w=_COL_WIDTH))
