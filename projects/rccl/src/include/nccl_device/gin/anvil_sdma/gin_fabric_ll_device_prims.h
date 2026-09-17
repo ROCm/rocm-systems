@@ -93,7 +93,7 @@ __device__ __forceinline__ uint32_t ddaGetLLEpochInc(const uint32_t* __restrict_
 // epochDev[flatBlockId] before any thread here overwrites cell flatBlockId, so
 // no thread can observe the next call's flag while still polling this one's.
 // The caller must also keep one LL operation per epoch buffer in flight unless
-// a device busy-lock serializes launches (ginFabricLlBusyTryAcquire on
+// a device busy-lock serializes launches (ginFabricLlBusyAcquire on
 // gpuCtx->fabricA2ALlBusy). A second overlapping launch must fail rather than
 // mix LL with gin.put. These epoch loads and stores are otherwise a data
 // race. Host DDA uses comm->ddaLLEpochDev and the GIN device API uses

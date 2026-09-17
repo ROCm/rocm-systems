@@ -17,31 +17,38 @@
 namespace dda {
 namespace common {
 
-// One GIN fabric-LL AllToAll at a time per Anvil GPU context. Each CTA CAS-es
-// launchId into fabricA2ALlBusy: prev==0 or prev==launchId means this launch
-// owns the epoch/scratch. A foreign id is a second overlapping launch and must
-// fail (not gin.put). No spin-until-nonzero: extra covering-grid CTAs and a
-// late read after release would otherwise wait on 0 forever.
-__device__ __forceinline__ bool ginFabricLlBusyTryAcquire(ncclGinAnvilSdmaGPUContext* ctx, uint32_t launchId) {
-  if (ctx == nullptr || launchId == 0u) return false;
+// One GIN fabric-LL AllToAll at a time per Anvil GPU context. Thread 0 stakes
+// the in-flight reference before testing the lane, so no sibling CTA can drive
+// fabricA2ALlInflight to 0 and release fabricA2ALlBusy while this block sits
+// between acquiring and entering; a block that loses the CAS rolls its own
+// reference back. prev==0 or prev==launchId means this launch owns the
+// epoch/scratch. A foreign id is a second overlapping launch: the caller must
+// fail the launch, never fall back to gin.put, because LL versus put has to be
+// the same choice on every rank. There is no spin-until-nonzero, so extra
+// covering-grid CTAs and a late read after release cannot wait on 0 forever.
+__device__ __forceinline__ bool ginFabricLlBusyAcquire(ncclGinAnvilSdmaGPUContext* ctx, uint32_t launchId) {
   __shared__ uint32_t shOwn;
   if (threadIdx.x == 0) {
-    uint32_t prev = atomicCAS(&ctx->fabricA2ALlBusy, 0u, launchId);
-    shOwn = (prev == 0u || prev == launchId) ? 1u : 0u;
+    uint32_t own = 0u;
+    if (ctx != nullptr && launchId != 0u) {
+      (void)atomicAdd(&ctx->fabricA2ALlInflight, 1u);
+      const uint32_t prev = atomicCAS(&ctx->fabricA2ALlBusy, 0u, launchId);
+      if (prev == 0u || prev == launchId) {
+        own = 1u;
+      } else {
+        (void)atomicSub(&ctx->fabricA2ALlInflight, 1u);
+      }
+    }
+    shOwn = own;
   }
   __syncthreads();
   return shOwn != 0u;
 }
 
-__device__ __forceinline__ void ginFabricLlBusyEnter(ncclGinAnvilSdmaGPUContext* ctx) {
-  if (threadIdx.x == 0) (void)atomicAdd(&ctx->fabricA2ALlInflight, 1u);
-  __syncthreads();
-}
-
 __device__ __forceinline__ void ginFabricLlBusyRelease(ncclGinAnvilSdmaGPUContext* ctx, uint32_t launchId) {
   __syncthreads();
   if (threadIdx.x == 0) {
-    uint32_t left = atomicSub(&ctx->fabricA2ALlInflight, 1u);
+    const uint32_t left = atomicSub(&ctx->fabricA2ALlInflight, 1u);
     if (left == 1u) (void)atomicCAS(&ctx->fabricA2ALlBusy, launchId, 0u);
   }
 }

@@ -423,13 +423,12 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
       // Covering grid is max(nRanks, deviceCtaCount) x max(LL bpp, LSA chunks).
       // Extra CTAs must not wait on the busy lock or fall through to gin.put.
       if ((int)blockIdx.x >= devComm.nRanks || (int)blockIdx.y >= bpp) return;
-      const bool ownLl = dda::common::ginFabricLlBusyTryAcquire(ctx, llLaunchId);
+      const bool ownLl = dda::common::ginFabricLlBusyAcquire(ctx, llLaunchId);
       if (!ownLl) {
         // Overlapping GIN LL on this context is illegal: mixed LL/put hangs.
         if (threadIdx.x == 0) __builtin_trap();
         return;
       }
-      dda::common::ginFabricLlBusyEnter(ctx);
       T* sendPtr = static_cast<T*>(ncclGetLsaPointer(sendwin, sendoffset, devComm.lsaRank));
       T* recvPtr = static_cast<T*>(ncclGetLsaPointer(recvwin, recvoffset, devComm.lsaRank));
       dda::common::ddaAllToAllFabricLLBody<T, NRANKS_CT>(
