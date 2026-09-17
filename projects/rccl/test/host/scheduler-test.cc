@@ -20,8 +20,9 @@
 #include "fakes/scheduler_fakes.h"
 #include "fakes/sym_kernels_fakes.h"
 
-// Local to this TU only: struct ncclComm is never shared across a TU boundary here, so no ABI mismatch.
-#define ENABLE_WARP_SPEED
+// ENABLE_WARP_SPEED is a binary-wide compile definition (test/host/CMakeLists.txt), not defined here: this TU
+// shares struct ncclComm with dev-runtime-test.cc's real dev_runtime.cc, and a per-TU #define would be an ODR
+// violation the moment cross-TU code (like ncclDevrInitOnce) touches a WarpSpeed-conditional field.
 
 // Hipify renames the allgatherv one to *_tmp.cc: src/enqueue/task_sched/allgatherv_sched.cc has the basename.
 #include ALLGATHERV_SCHED_CC_PATH
@@ -891,15 +892,29 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_TailLoop_PeerWithTwoQueuedTa
   EXPECT_EQ(scene.peers[0].bcastQueue.head, &task1);  // task1 remains queued for a later call
 }
 
-// ncclDevrInitOnce is real dev_runtime.cc code, not a stub, but this TU's local ENABLE_WARP_SPEED shifts
-// ncclComm's layout vs dev-runtime-test.cc's TU past warpSpeedChannelMultiplier, so symmetricSupport/devrState
-// are unreadable/unwritable from here (confirmed): the guard's kept-vs-dropped distinction is thus unobservable.
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TaskIsNull_ReturnsSuccessWithoutTouchingRemainder) {
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TaskIsNull_SkipsDevrInitOnceAndReturnsSuccess) {
   MakeSymmetricTaskList_Scene scene;
+  // Canary: if ncclDevrInitOnce were wrongly invoked despite task==nullptr, this config makes it fail loudly.
+  scene.comm->symmetricSupport = true;
+  scene.comm->peerInfo = nullptr;
   struct ncclTaskColl* remainTasksHead = reinterpret_cast<struct ncclTaskColl*>(0x1);
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), nullptr, nullptr, &remainTasksHead), ncclSuccess);
   EXPECT_EQ(remainTasksHead, nullptr);
+}
+
+// ncclDevrInitOnce is real dev_runtime.cc code (dev-runtime-test.cc compiles the real dev_runtime.cc into this
+// same binary), not a stub -- promoting it would be wrong. Real cross-TU calls into it are safe now that
+// ENABLE_WARP_SPEED is a binary-wide compile definition (test/host/CMakeLists.txt), not a per-TU #define.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TaskNotNull_CallsRealDevrInitOnceAndPropagatesItsError) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->symmetricSupport = true;
+  scene.comm->peerInfo = nullptr;  // same canary as the task==nullptr test, but now task!=nullptr
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_SymkAvailable_ReceivesTaskFieldsAndCorrectedSymkOp) {

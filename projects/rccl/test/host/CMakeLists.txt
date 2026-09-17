@@ -122,6 +122,9 @@ if(BUILD_TESTS)
     ${PROJECT_BINARY_DIR}/hipify/src/devcomm   # devcomm_v22902.h, included unqualified
     ${RCCL_COMMON_INCLUDE_DIRS})
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
+  # Binary-wide, not a per-TU #define: dev-runtime-test.cc compiles real dev_runtime.cc into this same
+  # binary, so every TU must agree on struct ncclComm's layout or it's an ODR violation across TUs.
+  target_compile_definitions(rccl-UnitTestsMicro PRIVATE ENABLE_WARP_SPEED)
 
   # Mirrors the opt-out in test/CMakeLists.txt, whose loop does not reach this target.
   # Inheriting ENABLE_ROCSHMEM_GIN defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1, which pulls
@@ -841,6 +844,9 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   __HIP_PLATFORM_AMD__
   NCCL_OS_LINUX
   ROCM_VERSION=70000
+  # Binary-wide, not a per-TU #define: dev-runtime-test.cc compiles real dev_runtime.cc into this same
+  # binary, so every TU must agree on struct ncclComm's layout or it's an ODR violation across TUs.
+  ENABLE_WARP_SPEED
   P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
   RAS_CLIENT_CC_PATH="${RCCL_HIPIFY_DIR}/src/ras/client.cc"
   RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
