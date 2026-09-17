@@ -74,8 +74,9 @@ THE SOFTWARE.
 #else
 #define RocVideoDecCriticalLog(msg) \
     do { \
-        static LARGE_INTEGER _freq_ = {}; \
-        if (_freq_.QuadPart == 0) QueryPerformanceFrequency(&_freq_); \
+        /* function-local static: the runtime initializes it exactly once, even when \
+           several decode threads reach their first log at the same time */ \
+        static const LARGE_INTEGER _freq_ = [] { LARGE_INTEGER _f_ = {}; QueryPerformanceFrequency(&_f_); return _f_; }(); \
         LARGE_INTEGER _cnt_; QueryPerformanceCounter(&_cnt_); \
         /* split the division to keep the counter from overflowing when scaled to us */ \
         uint64_t _us_ = static_cast<uint64_t>(_cnt_.QuadPart / _freq_.QuadPart) * 1000000ULL \
