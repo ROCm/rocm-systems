@@ -613,7 +613,7 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
     }
 
     if (eventStream->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
-      return hipErrorStreamCaptureInvalidated;
+      return hipErrorInvalidValue;
     }
 
     if (waitStream->GetCaptureStatus() == hipStreamCaptureStatusNone) {

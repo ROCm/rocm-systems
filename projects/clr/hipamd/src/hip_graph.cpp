@@ -1393,9 +1393,8 @@ hipError_t hipGraphDestroy(hipGraph_t graph) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   hip::Graph* g = reinterpret_cast<hip::Graph*>(graph);
-  // if graph is not valid its destroyed already
   if (!hip::Graph::isGraphValid(g)) {
-    HIP_RETURN(hipErrorIllegalState);
+    HIP_RETURN(hipErrorInvalidValue);
   }
   delete g;
   HIP_RETURN(hipSuccess);

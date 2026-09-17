@@ -696,6 +696,9 @@ graph:
   Unit_hipStreamBeginCapture_Positive_DestroyForkedStreamDuringCapture:
     <<: *level_2
     tags: [capture]
+  Unit_hipStreamBeginCapture_Positive_DestroyOriginStreamDuringCapture:
+    <<: *level_2
+    tags: [capture]
   Unit_hipStreamBeginCapture_Negative_SelfWaitOnInvalidatedForkedStream:
     <<: *level_2
     tags: [capture]
@@ -922,6 +925,9 @@ graph:
     <<: *level_2
     tags: [capture]
   Unit_hipStreamBeginCaptureToGraph_EndingWhileCaptureInProgress:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipStreamBeginCaptureToGraph_Positive_CaptureTeardownDestroysGraph:
     <<: *level_2
     tags: [capture]
   Unit_hipStreamBeginCaptureToGraph_MultipleFlags:
