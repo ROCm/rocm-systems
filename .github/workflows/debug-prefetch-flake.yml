@@ -51,6 +51,13 @@ jobs:
       HIP_TESTS_REGEX: "Unit_hipMemPrefetchAsync_Basic_AllDevices|Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation"
       SHARD_INDEX: "1"
       TOTAL_SHARDS: "1"
+      # HIP/ROCclr runtime logging
+      # AMD_LOG_LEVEL: 0=off 1=error 2=warning 3=info 4=debug
+      AMD_LOG_LEVEL: "3"
+      # AMD_LOG_MASK selects subsystems (OR of flags):
+      #   LOG_API=0x1  LOG_CMD=0x2  LOG_COPY=0x100  LOG_SIG=0x20  LOG_INIT=0x800
+      # Enable API + CMD + COPY + SIG to trace prefetch dispatch and signal lifecycle
+      AMD_LOG_MASK: "0x123"
 
     steps:
       - name: Fetch build_tools from TheRock
