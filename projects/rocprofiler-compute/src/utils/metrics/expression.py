@@ -70,6 +70,10 @@ _WEIGHTED_AVG_CALL_RE = re.compile(
     r"^WEIGHTED_AVG\s*\(\s*([^)]+)\s*\)$",
     re.IGNORECASE,
 )
+_COLLECT_SUM_CALL_RE = re.compile(
+    r"^COLLECT_SUM\s*\(\s*([^)]+)\s*\)$",
+    re.IGNORECASE,
+)
 
 
 def parse_weighted_avg_submetrics(formula: str) -> list[str] | None:
@@ -80,6 +84,26 @@ def parse_weighted_avg_submetrics(formula: str) -> list[str] | None:
     if not match:
         return None
     return [part.strip() for part in match.group(1).split(",") if part.strip()]
+
+
+def parse_collect_sum_submetrics(formula: str) -> list[str] | None:
+    """Return collectable refs from COLLECT_SUM(a, b, ...) or None."""
+    if not formula or not isinstance(formula, str):
+        return None
+    match = _COLLECT_SUM_CALL_RE.match(formula.strip())
+    if not match:
+        return None
+    return [part.strip() for part in match.group(1).split(",") if part.strip()]
+
+
+def is_composite_avg_formula(formula: str) -> bool:
+    if not formula or not isinstance(formula, str):
+        return False
+    text = formula.strip()
+    return (
+        parse_weighted_avg_submetrics(text) is not None
+        or parse_collect_sum_submetrics(text) is not None
+    )
 
 
 SUPPORTED_CALL: dict[str, str] = {
@@ -228,7 +252,7 @@ def build_eval_string(equation: str) -> str:
         return ""
 
     equation_string = str(equation)
-    if parse_weighted_avg_submetrics(equation_string) is not None:
+    if is_composite_avg_formula(equation_string):
         return ""
 
     # build-in variable starts with '$', python can not handle it.

@@ -209,3 +209,32 @@ def merge_dispatch_weighted_avg(
     if not dispatch_values:
         return np.nan
     return float(to_avg(pd.Series(dispatch_values)))
+
+
+def merge_dispatch_collect_sum(ratio_series_list: list[pd.Series]) -> float:
+    """Per dispatch sum submetric ratios, then run-level avg (M = h + i)."""
+    if not ratio_series_list:
+        return np.nan
+
+    index_sets = [set(series.index) for series in ratio_series_list]
+    common_idx = set.intersection(*index_sets) if index_sets else set()
+    if not common_idx:
+        return np.nan
+
+    dispatch_values: list[float] = []
+    for dispatch_id in sorted(common_idx, key=lambda x: (str(type(x)), x)):
+        total = 0.0
+        skip_dispatch = False
+        for ratio_series in ratio_series_list:
+            ratio = ratio_series.loc[dispatch_id]
+            if pd.isna(ratio):
+                skip_dispatch = True
+                break
+            total += float(ratio)
+        if skip_dispatch:
+            continue
+        dispatch_values.append(total)
+
+    if not dispatch_values:
+        return np.nan
+    return float(to_avg(pd.Series(dispatch_values)))
