@@ -27,6 +27,12 @@
 
 namespace rocshmem {
 
+/*
+ * @brief Stub class for rocSHMEM header compatability.
+ *
+ * QueuePairIONIC fetching AMOs need a real (non-stub) implementation;
+ * RCCL GIN GDA currently uses only non-fetching AMOs.
+ */
 template <typename TYPE>
 class FreeList {
 public:
