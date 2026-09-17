@@ -452,7 +452,7 @@ SPI Utilization:
   SPI Utilization:
     rst: Percentage of GPU-busy cycles the SPI is dispatching workgroups.
     unit: Percent
-SPI Wave Dispatch:
+SPI Wavefront Dispatch:
   Dispatched Workgroups:
     rst: Workgroups launched via successful SPI resource allocation (SPI_RA_REQ_ALLOC_sum). SPI_CSN_NUM_THREADGROUPS_sum is CS-pipe scoped and reads zero for gfx1250 compute dispatches.
     unit: Workgroups
@@ -483,21 +483,9 @@ SPI Wave Dispatch:
   Context Restore Rate:
     rst: Percentage of SPI-busy cycles the GPU is restoring wavefront contexts.
     unit: Percent
-  Wave Dispatch FIFO Full Rate:
-    rst: Percentage of SPI-busy cycles the wave dispatch FIFO is full.
+  Wavefront Dispatch FIFO Full Rate:
+    rst: Percentage of SPI-busy cycles the wavefront dispatch FIFO is full.
     unit: Percent
-  Dispatched Waves:
-    rst: Total wavefronts dispatched (SPI_ALL_WAVE_sum; SPI_CSN_WAVE_sum is CS-pipe scoped and reads zero for gfx1250 compute dispatches).
-    unit: Count
-  Wave Dispatch Rate:
-    rst: Average wavefronts launched per busy cycle.
-    unit: Waves per Cycle
-  Per-SE Wave Occupancy:
-    rst: Average wavefronts in-flight per Shader Engine.
-    unit: Waves
-  Per-SE Wave Life:
-    rst: Average wavefront lifetime in cycles per Shader Engine.
-    unit: Cycles
 SPI Resource Allocation:
   Resource No-Allocation Rate:
     rst: Percentage of SPI-busy cycles SPI failed to allocate resources for a workgroup.
@@ -574,24 +562,18 @@ WGP Wavefront Launch Stats:
   Scratch Allocation:
     rst: Bytes of scratch (private) memory allocated per work-item.
     unit: Bytes per Work-item
-WGP Wave Dispatch:
+WGP Wavefront Dispatch:
   Dispatched Wavefronts:
     rst: Total wavefronts dispatched.
     unit: Wavefronts
   Dispatched Threads:
     rst: Total work-items dispatched.
     unit: Threads
-  Dispatched Waves:
-    rst: Total wavefronts dispatched.
-    unit: Waves
-WGP Wave Life:
+WGP Wavefront Life:
   Wavefront Life:
     rst: Average wavefront lifetime in cycles.
     unit: Cycles
-  Wave Life:
-    rst: Average wavefront lifetime in cycles.
-    unit: Cycles
-WGP Wave Instruction Mix:
+WGP Wavefront Instruction Mix:
   Total Instructions:
     rst: Total instructions issued.
     unit: Instructions per Normalization Unit
@@ -999,13 +981,13 @@ Cache Requests:
     unit: Cycles
   Total Requests - Sectors:
     rst: Total cache sectors involved in GL0 requests.
-    unit: Requests per Normalization Unit
+    unit: Sectors per Normalization Unit
   Total Requests - Sector Reads:
     rst: Number of GL0 cache sectors read.
-    unit: Requests per Normalization Unit
+    unit: Sectors per Normalization Unit
   Total Requests - Sector Writes:
     rst: Number of GL0 cache sectors written.
-    unit: Requests per Normalization Unit
+    unit: Sectors per Normalization Unit
 Cache Lookup:
   Cache Lookup Hit Rate:
     rst: GL0 cache lookup hit rate.
@@ -1736,6 +1718,33 @@ GRBM Metrics:
   CH Utilization:
     rst: Percentage of GPU-active cycles the Central Hub is handling traffic between shader engines and GL2.
     unit: Percent
+  Total Instructions:
+    rst: Total instructions issued.
+    unit: Instructions per Normalization Unit
+  Instructions - Internal:
+    rst: Number of internal (non-user-visible) instructions issued.
+    unit: Instructions per Normalization Unit
+  Instructions - VALU:
+    rst: Number of VALU instructions issued.
+    unit: Instructions per Normalization Unit
+  Instructions - SALU:
+    rst: Number of SALU instructions issued.
+    unit: Instructions per Normalization Unit
+  Instructions - SMEM:
+    rst: Number of scalar memory instructions issued.
+    unit: Instructions per Normalization Unit
+  Instructions - Transcendental:
+    rst: Number of transcendental VALU instructions issued.
+    unit: Instructions per Normalization Unit
+  Instructions - Double Precision:
+    rst: Number of double-precision VALU instructions issued.
+    unit: Instructions per Normalization Unit
+  Instructions - VMEM:
+    rst: Number of VMEM instructions issued.
+    unit: Instructions per Normalization Unit
+  Instructions - LDS:
+    rst: Number of LDS instructions issued.
+    unit: Instructions per Normalization Unit
 Wavefront Launch Stats:
   Grid Size:
     rst: Total number of work-items in the dispatch grid.
