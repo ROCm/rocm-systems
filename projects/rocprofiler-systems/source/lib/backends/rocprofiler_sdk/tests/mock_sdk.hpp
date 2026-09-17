@@ -79,6 +79,11 @@ struct timestamp
     std::uint64_t value{};
     bool          operator==(const timestamp&) const = default;
 };
+struct correlation_id
+{
+    std::uint64_t ancestor{};
+    bool          operator==(const correlation_id&) const = default;
+};
 
 using counter_flag_t   = std::uint32_t;
 using runtime_library  = std::uint32_t;
@@ -372,6 +377,7 @@ struct mock_sdk
     using counter_flag_t                       = testing::counter_flag_t;
     using user_data_t                          = testing::user_data;
     using timestamp_t                          = testing::timestamp;
+    using correlation_id_t                     = testing::correlation_id;
     using available_counters_cb_t              = testing::available_counters_cb_t;
     using device_counting_agent_cb_t           = testing::device_counting_agent_cb_t;
     using device_counting_service_cb_t         = testing::device_counting_svc_cb_t;

@@ -84,6 +84,7 @@ struct backend
     using callback_name_info_t           = Wrapper::callback_name_info_t;
     using buffer_name_info_t             = Wrapper::buffer_name_info_t;
     using record_header_t                = Wrapper::record_header_t;
+    using correlation_id_t               = Wrapper::correlation_id_t;
 
     static constexpr auto           compile_time_version = Wrapper::compile_time_version;
     static constexpr counter_flag_t flag_none            = Wrapper::COUNTER_FLAG_NONE;
@@ -523,6 +524,18 @@ public:
     static const char* get_status_string(status_t status) noexcept
     {
         return Wrapper::get_status_string(status);
+    }
+
+    static std::uint64_t get_parent_stack_id(const correlation_id_t& correlation_id)
+    {
+        if constexpr(requires { correlation_id.ancestor; })
+        {
+            return correlation_id.ancestor;
+        }
+        else
+        {
+            return 0;
+        }
     }
 };
 

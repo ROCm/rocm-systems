@@ -55,10 +55,18 @@ struct user_data_t
 
 using callback_phase_t = int;
 
+struct correlation_id_t
+{
+    std::uint64_t internal = 0;
+};
+
 struct callback_tracing_record_t
 {
-    std::uint64_t    kind  = 0;
-    callback_phase_t phase = 0;
+    std::uint64_t    kind      = 0;
+    callback_phase_t phase     = 0;
+    std::uint32_t    operation = 0;
+    std::uint64_t    thread_id = 0;
+    correlation_id_t correlation_id{};
 };
 
 using tracing_operation_t     = std::size_t;
@@ -243,6 +251,8 @@ struct mock_sdk
     using on_record_cb_t            = test_support::on_record_cb_t;
     using tracing_names_t           = test_support::tracing_names_t;
     using agent_id_t                = test_support::agent_id_t;
+    using timestamp_t               = std::uint64_t;
+    using correlation_id_t          = test_support::correlation_id_t;
 
     // NOLINTBEGIN(readability-identifier-naming)
     static constexpr std::size_t      compile_time_version                    = 90909;
@@ -331,6 +341,19 @@ struct mock_sdk
 
     static tracing_names_t get_buffer_tracing_names() { return g_buffer_table; }
     static tracing_names_t get_callback_tracing_names() { return g_callback_table; }
+
+    static timestamp_t get_timestamp() { return 0; }
+
+    static std::uint64_t get_parent_stack_id(const correlation_id_t& /*correlation_id*/)
+    {
+        return 0;
+    }
+
+    template <typename ArgCallbackT>
+    static void iterate_callback_tracing_kind_operation_args(
+        const callback_tracing_record_t& /*record*/, ArgCallbackT /*callback*/,
+        std::int32_t /*max_deref*/, void* /*data*/)
+    {}
 };
 
 // Stand-in for the agent/trace_cache::info shapes every on_kfd_*<...> touches through
@@ -521,6 +544,62 @@ struct externals
         g_externals_mock->add_pmc_info(info);
     }
     static void buffer_storage_store(kfd_sample_t&& /*sample*/) {}
+
+    // ─── Members required by domains::callback::hip::{runtime,compiler}_api ────────
+    struct rocm_hip_api_category
+    {};
+
+    static constexpr std::string_view rocm_hip_api_category_name = "rocm_hip_api";
+
+    struct region_sample
+    {
+        std::uint64_t thread_id       = 0;
+        const char*   name            = nullptr;
+        std::uint64_t correlation_id  = 0;
+        std::uint64_t parent_stack_id = 0;
+        std::uint64_t start_timestamp = 0;
+        std::uint64_t end_timestamp   = 0;
+        const char*   call_stack      = nullptr;
+        const char*   args_str        = nullptr;
+        const char*   category        = nullptr;
+    };
+
+    struct backtrace_json_t
+    {
+        [[nodiscard]] std::string dump() const { return {}; }
+    };
+
+    static bool is_active() { return true; }
+    static bool get_use_timemory() { return false; }
+
+    template <typename CategoryT>
+    static void tracing_push_timemory(CategoryT, std::string_view /*name*/)
+    {}
+
+    template <typename CategoryT>
+    static void tracing_pop_timemory(CategoryT, std::string_view /*name*/)
+    {}
+
+    static void metadata_add_string(std::string_view /*value*/) {}
+    static void metadata_add_thread_info(const thread_info_t& /*info*/) {}
+
+    static void buffer_storage_store(region_sample&& /*sample*/) {}
+
+    static bool check_backtrace_operations(std::uint64_t /*kind*/,
+                                           std::uint32_t /*operation*/)
+    {
+        return false;
+    }
+
+    static std::optional<int> get_backtrace_data(bool /*are_operations_available*/)
+    {
+        return std::nullopt;
+    }
+
+    static backtrace_json_t get_backtrace_json(const std::optional<int>& /*bt_data*/)
+    {
+        return {};
+    }
 
     static std::int32_t get_pid() { return 0; }
     static std::int32_t get_ppid() { return 0; }
