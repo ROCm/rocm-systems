@@ -806,6 +806,12 @@ rj_add_test(
 # unit tests that exercise its behavior.
 add_executable(waitcheck_c_header_test analysis/waitcheck_c_header_test.c)
 target_link_libraries(waitcheck_c_header_test PRIVATE rocjitsu_shared)
+# The SDK may bundle its own librocjitsu.so. This ABI test must load the
+# library it was linked against, before CMake's inferred SDK search paths.
+set_property(
+    TARGET waitcheck_c_header_test
+    PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:rocjitsu_shared>"
+)
 rj_configure_target(waitcheck_c_header_test PRIVATE_INCLUDES WARNINGS)
 rj_add_test(NAME RjWaitcheck.CHeader COMMAND waitcheck_c_header_test LABELS waitcheck)
 
