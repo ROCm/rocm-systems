@@ -83,7 +83,7 @@ Panel Config:
           min: 100 * MIN(SPI_ALL_WAVE_RESTORED_sum / SPI_BUSY_sum)
           max: 100 * MAX(SPI_ALL_WAVE_RESTORED_sum / SPI_BUSY_sum)
           unit: Percent
-        Wave Dispatch FIFO Full Rate:
+        Wavefront Dispatch FIFO Full Rate:
           avg: 100 * SUM(SPI_RA_WR_CTL_FULL_sum) / SUM(SPI_BUSY_sum)
           min: 100 * MIN(SPI_RA_WR_CTL_FULL_sum / SPI_BUSY_sum)
           max: 100 * MAX(SPI_RA_WR_CTL_FULL_sum / SPI_BUSY_sum)
@@ -218,8 +218,8 @@ Panel Config:
     Context Restore Rate: >-
       Percentage of SPI-busy cycles the GPU is restoring wavefront contexts.
 
-    Wave Dispatch FIFO Full Rate: >-
-      Percentage of SPI-busy cycles the wave dispatch FIFO is full.
+    Wavefront Dispatch FIFO Full Rate: >-
+      Percentage of SPI-busy cycles the wavefront dispatch FIFO is full.
 
     Resource No-Allocation Rate: >-
       Percentage of SPI-busy cycles SPI failed to allocate resources for a workgroup.
