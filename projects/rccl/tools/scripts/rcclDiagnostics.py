@@ -205,7 +205,7 @@ def get_HIP_version():
 			summary = f"{major}.{minor}.{patch}" + (f"-{githash}" if githash else "")
 	except OSError:
 		pass
-	result = run_cli_command(f"echo '{summary}'")
+	result = CommandResult(stdout=summary, stderr="")
 	return summary, result
 
 
