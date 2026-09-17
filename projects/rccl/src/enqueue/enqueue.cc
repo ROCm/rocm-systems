@@ -1268,6 +1268,13 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
                                  int p2pRound, int sendRank, void* sendAddr, ssize_t sendBytes, int recvRank,
                                  void* recvAddr, ssize_t recvBytes, uint64_t sendOpCount, uint64_t recvOpCount,
                                  const int planTotalTasks[], struct ncclTaskP2p** p2pTasks) {
+  // Two-channel full-mesh traffic has high variance on gfx110x. Keep the
+  // workaround specific to AllToAll so Gather, Scatter, and SendRecv retain
+  // their higher-throughput multi-channel paths.
+  bool isAllToAll = (p2pTasks[0] && p2pTasks[0]->collAPI == ncclFuncAlltoAll) ||
+                    (p2pTasks[1] && p2pTasks[1]->collAPI == ncclFuncAlltoAll);
+  if (isAllToAll && IsArchMatch(comm->archName, "gfx110")) nChannelsMin = nChannelsMax = 1;
+
   ncclResult_t ret = ncclSuccess;
   int connIndex[2] = {1, 1};
   bool selfSend = (sendRank == comm->rank);
