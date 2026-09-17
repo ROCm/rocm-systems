@@ -23,15 +23,16 @@ struct ObjectFacts {
 };
 
 /// Effective ConSan options and report geometry for one code object.
-struct ObjectModePlan {
+struct ObjectPlan {
   OwnerSource owner_source = OwnerSource::Automatic;
   bool track_atomics = false;
-  ObjectModeSemantics semantics;
+  ReportBufferLayout report_layout;
+  uint32_t reserved_atomic_patch_count = 0;
   /// Empty when planning needs no user-visible warning; otherwise a static message.
   std::string_view warning;
 };
 
-static_assert(sizeof(ObjectModePlan) <= 96);
+static_assert(sizeof(ObjectPlan) <= 96);
 
 /// Operational sites that survived semantic admission and resource planning.
 /// ConSan derives persistent-state requirements from these consumers.
@@ -51,10 +52,9 @@ struct PersistentStateDemand {
   bool scalar_state_required_for_private_or_overflow = false;
 };
 
-/// Mode-owned permission to retry an otherwise unplaceable site by spilling a
-/// scratch window that overlaps short-lived guest operands. Common placement
-/// executes the retry; the selected mode owns whether its emission ordering
-/// can recover the operands and which guest result must remain disjoint.
+/// Permission to retry placement with scratch overlapping short-lived guest
+/// operands. Emission must recover those operands and keep any protected
+/// guest result disjoint from the spill window.
 struct OperandOverlapSpillPolicy {
   bool supported = false;
   std::optional<uint16_t> protected_vgpr;
@@ -68,8 +68,8 @@ struct OperandOverlapSpillContext {
   ResourceSiteKind site_kind = ResourceSiteKind::Access;
 };
 
-/// Mode-owned request for a smaller spill-backed transaction after ordinary
-/// access placement. Common placement retries with the returned scratch size.
+/// Facts used to choose a smaller spill-backed access transaction when
+/// ordinary placement fails or overlaps guest operands.
 struct AccessSpillFallbackContext {
   const Request &request;
   const AccessResourceFacts &resource_facts;
@@ -77,16 +77,10 @@ struct AccessSpillFallbackContext {
   bool initial_spill_overlaps_guest = false;
 };
 
-/// Normalized facts used by a mode to declare its dispatch-identity demand.
-/// Target-family inspection and site traversal remain common solver work.
+/// Target and consumer facts used to determine dispatch-identity demand.
 struct DispatchIdentityFacts {
   bool access_reports_need_explicit_identity = true;
   bool has_access_or_atomic_consumer = false;
-};
-
-/// Complete scalar preservation ABI selected for ConSan.
-struct ScalarAbiPlan {
-  std::optional<detail::SpecialStateSgprs> special_state;
 };
 
 /// Caller and target bounds used to plan ConSan evidence capacity.
@@ -114,12 +108,12 @@ project_barrier_scratch_facts(const OperatingPoint &point) {
 [[nodiscard]] EvidenceRequirements
 plan_evidence_requirements(const EvidencePlanningContext &context);
 
-ObjectModePlan plan_object_mode(const Request &, const BoundRuntimeResources &,
-                                const TransformPolicy &, const ObjectFacts &);
+ObjectPlan plan_object(const Request &, const BoundRuntimeResources &, const TransformPolicy &,
+                       const ObjectFacts &);
 
-void apply_mode_patches(std::span<const uint8_t>, const Options &, OperatingPoint &, rj_code_arch_t,
-                        ResourcePlanningState &, std::span<const Candidate>,
-                        const ObjectModeSemantics &, TransformArtifacts &);
+void apply_probe_patches(std::span<const uint8_t>, const Options &, OperatingPoint &,
+                         rj_code_arch_t, ResourcePlanningState &, std::span<const Candidate>,
+                         const ObjectPlan &, TransformArtifacts &);
 
 uint16_t barrier_scratch_vgpr_count(const BarrierScratchFacts &);
 
@@ -132,11 +126,8 @@ std::optional<uint16_t> access_spill_fallback(const AccessSpillFallbackContext &
 
 bool requires_dispatch_identity(const Request &, const DispatchIdentityFacts &);
 
-ScalarAbiPlan plan_scalar_abi(const ScalarPreservationState &);
+std::optional<SpecialStateSgprs> plan_special_state(const ScalarPreservationState &);
 
-bool plan_report_layout(const AutoReportInventory &, AutoReportPlan &, uint64_t &cursor);
-
-std::optional<AutoReportInventory> reconstruct_report_inventory(const ReportBufferLayout &);
 inline constexpr uint16_t kDynamicStackFrameSaveSgprOffset = 8u;
 
 } // namespace rocjitsu::consan::detail

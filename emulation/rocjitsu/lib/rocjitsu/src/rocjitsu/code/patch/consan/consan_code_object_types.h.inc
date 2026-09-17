@@ -470,7 +470,7 @@ struct PatchAbiEffects {
   std::optional<uint16_t> scratch_vgpr;
   /// SuperCollider-only preservation of a borrowed live scalar VCC-save
   /// range. One optional owns the scalar source, vector reservoir, and exact
-  /// preservation strategy; other engines leave it absent.
+  /// preservation strategy; ordinary ConSan leaves it absent.
   std::optional<ScalarVccSpill> scalar_vcc_spill;
   /// Complete vector-register state initialized or consumed by this patch.
   /// The typed lifetime distinguishes persistent state from transient

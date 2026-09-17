@@ -347,7 +347,7 @@ struct AtomicPreludeState {
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
   if (address_plan.requires_materialization()) {
-    const auto special = plan.scalar_abi.special_state;
+    const auto special = plan.special_state;
     if (!special)
       return false;
     const auto materialize = build_atomic_address_materialization(
@@ -516,7 +516,7 @@ struct AtomicPreludeState {
   const auto contention_label = sequence.make_label();
   const auto collision_label = sequence.make_label();
   const auto restore_label = sequence.make_label();
-  if (!append_save_special_state(words, plan.scalar_abi.special_state, arch)) {
+  if (!append_save_special_state(words, plan.special_state, arch)) {
     errors.emplace_back("ConSan barrier failed at special-state save");
     return std::nullopt;
   }
@@ -660,7 +660,7 @@ struct AtomicPreludeState {
 
   sequence.bind_label(restore_label)
       .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch))
-      .require(append_restore_special_state(words, plan.scalar_abi.special_state, arch));
+      .require(append_restore_special_state(words, plan.special_state, arch));
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->restore_words.begin(),
                  scalar_spill->restore_words.end());
@@ -784,7 +784,7 @@ struct AtomicPreludeState {
   RecordEmitter record(words, base, value, arch);
   const auto collision_label = sequence.make_label();
   const auto restore_label = sequence.make_label();
-  sequence.require(append_save_special_state(words, plan.scalar_abi.special_state, arch))
+  sequence.require(append_save_special_state(words, plan.special_state, arch))
       .append(instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, arch))
       .require(detail::append_indexed_address(words,
                                               {.table_address = first_window_address,
@@ -946,7 +946,7 @@ struct AtomicPreludeState {
           words, report_base + offsetof(ReportHeader, dropped_window_count), value, base, arch))
       .bind_label(restore_label)
       .append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch))
-      .require(append_restore_special_state(words, plan.scalar_abi.special_state, arch));
+      .require(append_restore_special_state(words, plan.special_state, arch));
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->restore_words.begin(),
                  scalar_spill->restore_words.end());

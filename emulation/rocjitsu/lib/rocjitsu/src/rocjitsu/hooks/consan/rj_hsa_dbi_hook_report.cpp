@@ -16,7 +16,6 @@
 #include <cstring>
 #include <limits>
 #include <mutex>
-#include <variant>
 #include <vector>
 
 namespace rocjitsu::consan::hook {

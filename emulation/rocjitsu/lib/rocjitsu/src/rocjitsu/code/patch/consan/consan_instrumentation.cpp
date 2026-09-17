@@ -122,21 +122,21 @@ TransformArtifacts try_patch(TransformArtifacts result, const Options &options,
       result.observation_plan().atomic_site_decisions, [](const AtomicSiteDecision &decision) {
         return decision.kind == SiteDecisionKind::Admitted;
       });
-  detail::ObjectModePlan mode_plan =
-      plan_object_mode(effective_options, effective_options, effective_options, object_facts);
-  effective_options.owner_source = mode_plan.owner_source;
-  effective_options.track_atomics = mode_plan.track_atomics;
-  if (!mode_plan.warning.empty())
-    result.warnings.emplace_back(mode_plan.warning);
+  detail::ObjectPlan object_plan =
+      plan_object(effective_options, effective_options, effective_options, object_facts);
+  effective_options.owner_source = object_plan.owner_source;
+  effective_options.track_atomics = object_plan.track_atomics;
+  if (!object_plan.warning.empty())
+    result.warnings.emplace_back(object_plan.warning);
   if (!result.errors.empty())
     return result;
   // Register selection iterates as automatic persistent and transient state is
   // chosen. The code bytes, decoded CFG, ownership scopes, and liveness facts
   // do not change during those iterations; retain one analysis state instead
   // of rebuilding the full instruction graph for every option refinement.
-  const ResourceProblem resource_problem(
-      code_object_bytes, arch, effective_options, effective_options, result.program_inventory,
-      result.observation_plan(), candidates, mode_plan.semantics);
+  const ResourceProblem resource_problem(code_object_bytes, arch, effective_options,
+                                         effective_options, result.program_inventory,
+                                         result.observation_plan(), candidates);
   detail::ResourcePlanningStatePtr resource_planning_state_owner =
       detail::make_resource_planning_state(resource_problem, effective_point,
                                            result.resource_plans);
@@ -276,8 +276,8 @@ TransformArtifacts try_patch(TransformArtifacts result, const Options &options,
         "ConSan report buffer exceeds the 32-bit dynamic record-offset window");
   }
   if (result.errors.empty())
-    apply_mode_patches(code_object_bytes, effective_options, effective_point, arch,
-                       resource_planning_state, candidates, mode_plan.semantics, result);
+    apply_probe_patches(code_object_bytes, effective_options, effective_point, arch,
+                        resource_planning_state, candidates, object_plan, result);
   if (result.errors.empty() && result.modified())
     detail::try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options,
                                                  effective_options, effective_point,

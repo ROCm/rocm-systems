@@ -460,8 +460,7 @@ struct Request {
   bool probe_lds_check_trap = false;
   /// SuperCollider observes group-FLAT sites when this domain is enabled.
   bool probe_flat_check_trap = false;
-  /// Capture persistent owner/epoch state at kernel entry for ConSan engines that
-  /// require it.
+  /// Capture persistent owner/epoch state at kernel entry for ConSan probes.
   bool init_owner_epoch = false;
   /// Include supported barrier semantics in the ConSan observation request.
   bool track_barriers = false;

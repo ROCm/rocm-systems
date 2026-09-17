@@ -62,7 +62,7 @@ plan_sync_emission(const Request &request, const BoundRuntimeResources &bound_re
       .automatic_private_epoch = point.automatic_private_epoch,
       .workitem_owner = request.owner_source == OwnerSource::WorkitemId,
       .persistent_sgprs = point.persistent_sgprs,
-      .scalar_abi = plan_scalar_abi(scalar_preservation_state(point)),
+      .special_state = plan_special_state(scalar_preservation_state(point)),
       .dispatch_id = detail::bound_dispatch_id_sources({point, bound_resources}),
       .workgroup_sources = *workgroup_sources,
       .owner_epoch_vgprs = owner_epoch_vgprs,
@@ -198,7 +198,7 @@ plan_sync_emission(const Request &request, const BoundRuntimeResources &bound_re
     words.push_back(
         build_v_mov_b32_e32(*plan.owner_epoch_vgprs.epoch, *plan.persistent_sgprs.epoch(), arch));
   }
-  require_emission(append_save_special_state(words, plan.scalar_abi.special_state, arch),
+  require_emission(append_save_special_state(words, plan.special_state, arch),
                    "ConSan barrier failed at special-state save");
   require_emission.append("ConSan barrier failed at EXEC snapshot",
                           instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, arch));
@@ -423,7 +423,7 @@ plan_sync_emission(const Request &request, const BoundRuntimeResources &bound_re
                                 *plan.owner_epoch_vgprs.epoch, private_layout->epoch_offset, arch),
                             instrumentation::build_s_wait_private_store0(arch));
   }
-  require_emission(append_restore_special_state(words, plan.scalar_abi.special_state, arch),
+  require_emission(append_restore_special_state(words, plan.special_state, arch),
                    "ConSan barrier failed at special-state restore");
   sequence.bind_label(fast_return_label);
   if (scalar_spill)
@@ -447,8 +447,7 @@ void try_apply_barrier_sync_patch(std::span<const uint8_t> bytes, const Options 
                                   const OperatingPoint &operating_point, rj_code_arch_t arch,
                                   ResourcePlanningState &resource_state,
                                   std::span<const Candidate> admitted,
-                                  const ObjectModeSemantics &mode_semantics,
-                                  TransformArtifacts &result) {
+                                  const ObjectPlan &object_plan, TransformArtifacts &result) {
   if (!options.track_barriers)
     return;
   const TargetProfile *target_profile = consan::target_profile(arch);
@@ -456,7 +455,7 @@ void try_apply_barrier_sync_patch(std::span<const uint8_t> bytes, const Options 
     result.warnings.emplace_back("ConSan barrier sync requires a supported report-buffer target");
     return;
   }
-  const ReportBufferLayout &layout = mode_semantics.report_layout;
+  const ReportBufferLayout &layout = object_plan.report_layout;
   const StaticAccessMappings runtime_mapping = runtime_mapping_including_staged(result);
   std::vector<const StaticAccessMapping *> selected_windows;
   selected_windows.reserve(runtime_mapping.size());
@@ -842,8 +841,7 @@ void try_apply_barrier_sync_patch(std::span<const uint8_t> bytes, const Options 
 void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &options,
                                  const OperatingPoint &operating_point, rj_code_arch_t arch,
                                  ResourcePlanningState &resource_state,
-                                 const ObjectModeSemantics &mode_semantics,
-                                 TransformArtifacts &result) {
+                                 const ObjectPlan &object_plan, TransformArtifacts &result) {
   if (!options.track_atomics)
     return;
   const TargetProfile *target_profile = consan::target_profile(arch);
@@ -851,7 +849,7 @@ void try_apply_atomic_sync_patch(std::span<const uint8_t> bytes, const Options &
     result.warnings.emplace_back("ConSan atomic sync requires a supported report-buffer target");
     return;
   }
-  const ReportBufferLayout &layout = mode_semantics.report_layout;
+  const ReportBufferLayout &layout = object_plan.report_layout;
   StaticAccessMappings runtime_mapping = runtime_mapping_including_staged(result);
   const uint32_t selected_window_count = static_cast<uint32_t>(runtime_mapping.size());
   if (selected_window_count == 0 || options.max_patches == 0 ||

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file consan_cdna3_cdna4_target_ops.cpp
-/// @brief CDNA3/CDNA4 recipes shared by ConSan engines.
+/// @brief CDNA3/CDNA4 recipes for ConSan instrumentation.
 
 #include "rocjitsu/code/patch/consan/targets/consan_target_ops.h"
 

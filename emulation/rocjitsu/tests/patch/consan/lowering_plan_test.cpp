@@ -12,14 +12,14 @@ using detail::append_materialize_direct_to_lds_address;
 using detail::ObjectFacts;
 using detail::operand_overlap_spill;
 using detail::PersistentStateFacts;
-using detail::plan_object_mode;
+using detail::plan_object;
 using detail::plan_persistent_state_demand;
-using detail::plan_scalar_abi;
+using detail::plan_special_state;
 using detail::requires_dispatch_identity;
 using detail::resolve_access_resource_facts;
 using detail::scalar_preservation_state;
 
-TEST(ConSanModePlanning, AccessResourceFactsNormalizePointAndTargetBeforeModePolicy) {
+TEST(ConSanLoweringPlan, AccessResourceFactsNormalizePointAndTargetBeforeModePolicy) {
   OperatingPoint point;
   point.exec_save_sgpr = 10u;
   point.initialize_owner_epoch = true;
@@ -76,7 +76,7 @@ TEST(ConSanModePlanning, AccessResourceFactsNormalizePointAndTargetBeforeModePol
   EXPECT_FALSE(private_epoch.has_complete_persistent_sgprs);
 }
 
-TEST(ConSanModePlanning, DirectToLdsAddressMaterializationUsesNormalizedForm) {
+TEST(ConSanLoweringPlan, DirectToLdsAddressMaterializationUsesNormalizedForm) {
   ProgramSite candidate_site;
   candidate_site.lowering.form.emplace();
   candidate_site.lowering.form->kind = AccessLoweringFormKind::DirectToLdsExplicitAddress;
@@ -100,7 +100,7 @@ TEST(ConSanModePlanning, DirectToLdsAddressMaterializationUsesNormalizedForm) {
                                                         ROCJITSU_CODE_ARCH_CDNA4));
 }
 
-TEST(ConSanModePlanning, ScalarPreservationStateExcludesUnrelatedPlacement) {
+TEST(ConSanLoweringPlan, ScalarPreservationStateExcludesUnrelatedPlacement) {
   OperatingPoint point;
   point.exec_save_sgpr = 20u;
   point.automatic_scalar_spill_layout = ScalarSpillLayout::Compact;
@@ -123,36 +123,34 @@ TEST(ConSanModePlanning, ScalarPreservationStateExcludesUnrelatedPlacement) {
   EXPECT_EQ(scalar_preservation_state(point), preservation_state);
 }
 
-TEST(ConSanModePlanning, RequiresAnAccessConsumerForAtomicMetadata) {
+TEST(ConSanLoweringPlan, RequiresAnAccessConsumerForAtomicMetadata) {
   Request request;
   const BoundRuntimeResources resources;
   const TransformPolicy policy;
   request.track_atomics = true;
 
-  const auto no_access =
-      plan_object_mode(request, resources, policy, {.admitted_atomic_count = 1u});
+  const auto no_access = plan_object(request, resources, policy, {.admitted_atomic_count = 1u});
   EXPECT_FALSE(no_access.track_atomics);
   EXPECT_FALSE(no_access.warning.empty());
 
-  const auto access = plan_object_mode(request, resources, policy,
-                                       {.has_access_candidate = true, .admitted_atomic_count = 1u});
+  const auto access = plan_object(request, resources, policy,
+                                  {.has_access_candidate = true, .admitted_atomic_count = 1u});
   EXPECT_TRUE(access.track_atomics);
   EXPECT_TRUE(access.warning.empty());
 }
 
-TEST(ConSanModePlanning, OwnerDefaultAndOverride) {
+TEST(ConSanLoweringPlan, OwnerDefaultAndOverride) {
   Request request;
   const BoundRuntimeResources resources;
   const TransformPolicy policy;
   const ObjectFacts facts{.has_access_candidate = true};
 
-  EXPECT_EQ(plan_object_mode(request, resources, policy, facts).owner_source,
-            OwnerSource::WorkitemId);
+  EXPECT_EQ(plan_object(request, resources, policy, facts).owner_source, OwnerSource::WorkitemId);
   request.owner_source = OwnerSource::HwId;
-  EXPECT_EQ(plan_object_mode(request, resources, policy, facts).owner_source, OwnerSource::HwId);
+  EXPECT_EQ(plan_object(request, resources, policy, facts).owner_source, OwnerSource::HwId);
 }
 
-TEST(ConSanModePlanning, ReportLayoutAndReservedAtomicBudget) {
+TEST(ConSanLoweringPlan, ReportLayoutAndReservedAtomicBudget) {
   Request request;
   BoundRuntimeResources resources;
   TransformPolicy policy;
@@ -165,19 +163,19 @@ TEST(ConSanModePlanning, ReportLayoutAndReservedAtomicBudget) {
 
   request.track_barriers = true;
   request.track_atomics = true;
-  const auto sampled = plan_object_mode(request, resources, policy, facts);
-  EXPECT_EQ(sampled.semantics.report_layout,
+  const auto sampled = plan_object(request, resources, policy, facts);
+  EXPECT_EQ(sampled.report_layout,
             direct_report_buffer_layout_for_bytes(resources.report_buffer_size));
-  EXPECT_EQ(sampled.semantics.reserved_atomic_patch_count, 2u);
+  EXPECT_EQ(sampled.reserved_atomic_patch_count, 2u);
 }
 
-TEST(ConSanModePlanning, DynamicStackSpillsRequireSupportedTarget) {
+TEST(ConSanLoweringPlan, DynamicStackSpillsRequireSupportedTarget) {
   EXPECT_TRUE(is_capability_arch(ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_TRUE(is_capability_arch(ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(is_capability_arch(ROCJITSU_CODE_ARCH_INVALID));
 }
 
-TEST(ConSanModePlanning, AtomicOperandOverlapSpill) {
+TEST(ConSanLoweringPlan, AtomicOperandOverlapSpill) {
   Request request;
   const OperatingPoint point;
   const ProgramSite candidate_site;
@@ -192,7 +190,7 @@ TEST(ConSanModePlanning, AtomicOperandOverlapSpill) {
   EXPECT_TRUE(plan(ResourceSiteKind::Atomic, ROCJITSU_CODE_ARCH_CDNA5, false, nullptr).supported);
 }
 
-TEST(ConSanModePlanning, DispatchIdentityDemand) {
+TEST(ConSanLoweringPlan, DispatchIdentityDemand) {
   Request request;
 
   request.runtime_sample_stride = 8u;
@@ -206,7 +204,7 @@ TEST(ConSanModePlanning, DispatchIdentityDemand) {
                                                     .has_access_or_atomic_consumer = false}));
 }
 
-TEST(ConSanModePlanning, ScalarAbiPreservesGuestState) {
+TEST(ConSanLoweringPlan, ScalarAbiPreservesGuestState) {
   OperatingPoint point;
   point.exec_save_sgpr = 20u;
 
@@ -214,15 +212,15 @@ TEST(ConSanModePlanning, ScalarAbiPreservesGuestState) {
   point.scalar_spill_setup = ScalarSpillSetup{
       .temporaries = ScalarSpillTemporaries{40u, 42u},
   };
-  auto plan = plan_scalar_abi(scalar_preservation_state(point));
-  EXPECT_EQ(plan.special_state, (detail::SpecialStateSgprs{22u, 42u}));
+  auto plan = plan_special_state(scalar_preservation_state(point));
+  EXPECT_EQ(plan, (detail::SpecialStateSgprs{22u, 42u}));
 
-  ASSERT_TRUE(plan.special_state);
-  EXPECT_EQ(plan.special_state->vcc_save_sgpr, 22u);
-  EXPECT_EQ(plan.special_state->scc_save_sgpr, 42u);
+  ASSERT_TRUE(plan);
+  EXPECT_EQ(plan->vcc_save_sgpr, 22u);
+  EXPECT_EQ(plan->scc_save_sgpr, 42u);
 }
 
-TEST(ConSanModePlanning, PersistentStateFollowsConsumers) {
+TEST(ConSanLoweringPlan, PersistentStateFollowsConsumers) {
   Request request;
   OperatingPoint point;
   point.initialize_owner_epoch = false;

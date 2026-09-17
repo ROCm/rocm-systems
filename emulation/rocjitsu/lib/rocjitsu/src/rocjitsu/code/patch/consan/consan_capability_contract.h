@@ -246,7 +246,7 @@ struct NativeLdsCapability {
   bool operator==(const NativeLdsCapability &) const = default;
 };
 
-/// Target-wide access-lowering mechanisms shared by the ConSan engines.
+/// Target-wide access-lowering mechanisms for ConSan instrumentation.
 ///
 /// These are deliberately implementation capabilities rather than product
 /// families. They state which recovery mechanisms the common access planner
@@ -275,8 +275,8 @@ struct SynchronizationCapability {
 /// `LivenessOnly` has neither a partitioned scalar ABI nor an entry-backed
 /// spill mechanism. `SpillBacked` may preserve borrowed scalar state at entry
 /// and use private storage across full-pressure probes. The model deliberately
-/// captures the solver-relevant behavior shared by ConSan engines instead of
-/// reproducing architecture families inside each mode's placement code.
+/// captures solver-relevant behavior without reproducing architecture families
+/// inside placement code.
 enum class ScalarPlacementModel : uint8_t {
   Unsupported,
   DescriptorPartitioned,

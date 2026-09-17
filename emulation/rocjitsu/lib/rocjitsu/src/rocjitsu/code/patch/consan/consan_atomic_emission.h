@@ -67,7 +67,7 @@ struct SyncEmissionPlan {
   bool automatic_private_epoch = false;
   bool workitem_owner = false;
   PersistentSgprState persistent_sgprs;
-  ScalarAbiPlan scalar_abi;
+  std::optional<SpecialStateSgprs> special_state;
   detail::ReportDispatchIdSource dispatch_id;
   WorkgroupSources workgroup_sources;
   OwnerEpochVgprSources owner_epoch_vgprs;

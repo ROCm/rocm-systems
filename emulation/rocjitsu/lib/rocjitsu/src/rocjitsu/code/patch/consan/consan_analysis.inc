@@ -1437,7 +1437,7 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   // Some generated decoder profiles model a returning atomic's encoded VDST
   // only as an in/out source operand. The raw target-native field is still the
   // authoritative destination selector, so normalize it for downstream atomic
-  // engines without inventing a destination for non-returning forms.
+  // lowering without inventing a destination for non-returning forms.
   if (!site.destination_vgpr && site.returns_old_value.value_or(false) && site.raw_vdst &&
       *site.raw_vdst <= std::numeric_limits<uint16_t>::max()) {
     site.destination_vgpr = static_cast<uint16_t>(*site.raw_vdst);

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file consan_access_apply.h
-/// @brief Shared byte-application transaction for ConSan access engines.
+/// @brief Byte-application transaction for ConSan access probes.
 
 #pragma once
 
@@ -32,15 +32,11 @@ namespace rocjitsu::consan::detail {
 using detail::append_word_bytes;
 using detail::append_words_bytes;
 
-/// Bind common original-program attribution to one mode-owned runtime map.
-///
-/// Shared access application owns the intent/semantic-site join. Each mode
-/// supplies the expected access intent and creates its typed runtime evidence
-/// representation from the common attribution. Physical patch geometry stays
-/// in the lowering product and does not enter this semantic projection.
+/// Bind access intents to original-program attribution for report decoding.
+/// Physical patch geometry stays in the lowering product and does not enter
+/// this semantic projection.
 [[nodiscard]] std::optional<StaticAccessAttribution>
-make_access_attribution(const ObservationPlan &observation, const Candidate &candidate,
-                        ProbeIntentKind expected_intent);
+make_access_attribution(const ObservationPlan &observation, const Candidate &candidate);
 
 /// Complete target-state and composition contract for one relocated ConSan
 /// access body.

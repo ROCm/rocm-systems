@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file rj_hsa_dbi_report_registry_lifecycle.h
-/// @brief Shared bounded-lifetime mechanics for mode-owned report registries.
+/// @brief Shared allocation and lifetime mechanics for reports and SuperCollider markers.
 
 #pragma once
 

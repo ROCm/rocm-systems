@@ -9,8 +9,7 @@
 void try_apply_direct_watchpoint_patch(std::span<const uint8_t> bytes, const Options &options,
                                        const OperatingPoint &operating_point, rj_code_arch_t arch,
                                        std::span<const Candidate> admitted,
-                                       const ObjectModeSemantics &mode_semantics,
-                                       TransformArtifacts &result) {
+                                       const ObjectPlan &object_plan, TransformArtifacts &result) {
   if (!options.report_buffer_address)
     return;
   const TargetProfile *target = target_profile(arch);
@@ -25,8 +24,8 @@ void try_apply_direct_watchpoint_patch(std::span<const uint8_t> bytes, const Opt
       result.warnings.emplace_back(warning);
   };
 
-  const ReportBufferLayout &layout = mode_semantics.report_layout;
-  const uint32_t reserved_atomic_patches = mode_semantics.reserved_atomic_patch_count;
+  const ReportBufferLayout &layout = object_plan.report_layout;
+  const uint32_t reserved_atomic_patches = object_plan.reserved_atomic_patch_count;
   const uint32_t max_access_record_slots = layout.watchpoint_capacity - reserved_atomic_patches;
   if (max_access_record_slots == 0) {
     if (layout.watchpoint_capacity == 0) {
@@ -416,8 +415,7 @@ void try_apply_direct_watchpoint_patch(std::span<const uint8_t> bytes, const Opt
     patch.anchor_offset = candidate.anchor();
     patch.original_size = candidate.size();
     note_probe_patch_info(patch, planned_patch);
-    auto access =
-        make_access_attribution(result.observation_plan(), candidate, ProbeIntentKind::Access);
+    auto access = make_access_attribution(result.observation_plan(), candidate);
     if (!access) {
       result.errors.emplace_back("ConSan probe produced an invalid intent-bound lowering");
       return;

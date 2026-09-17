@@ -146,7 +146,7 @@ source map. The persistent 64-bit value is presently a fingerprint, not an
 injective encoding of the full pair; see [VALIDATION.md](validation/VALIDATION.md) for the
 residual collision and queue-lifetime limitation.
 
-ConSan's mode-owned literal fallback remains available when the hardware
+ConSan's literal fallback remains available when the hardware
 identity pair overlaps guest scalar state. It is not queue-aware, so a clean
 run at that operating point does not establish exact multi-launch separation.
 This limitation belongs to ConSan's evidence semantics and is not repaired or

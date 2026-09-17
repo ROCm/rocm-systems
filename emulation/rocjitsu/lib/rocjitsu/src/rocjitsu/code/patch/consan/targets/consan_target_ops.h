@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file consan_target_ops.h
-/// @brief Target-operation contracts shared by ConSan engines.
+/// @brief Target-operation contracts for ConSan instrumentation.
 
 #pragma once
 

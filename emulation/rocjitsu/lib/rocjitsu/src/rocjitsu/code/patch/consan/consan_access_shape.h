@@ -32,10 +32,9 @@ enum class LdsAccessKind : uint8_t {
 
 /// Target operation that may consume one normalized access form.
 ///
-/// These names describe mechanisms rather than ConSan engines. All ConSan
-/// engines replay the guest access, while SuperCollider compares the value
+/// ConSan replays the guest access, while SuperCollider compares the value
 /// observed by a redundant access. Keeping those operations distinct lets one
-/// target classifier publish both exact contracts without introducing an
+/// target classifier publish both exact contracts without introducing a
 /// mode-by-target matrix.
 enum class AccessLoweringOperation : uint8_t {
   ReplayGuestAccess,

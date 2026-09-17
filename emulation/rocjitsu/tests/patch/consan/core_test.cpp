@@ -299,9 +299,8 @@ TEST(ConSan, ResourceProblemBindsImmutableSolverInputs) {
   ObservationPlan observation_plan;
   const ProgramSite site;
   const std::array<Candidate, 1> candidates{Candidate(site)};
-  const detail::ObjectModeSemantics mode_semantics{};
   const ResourceProblem problem(image, ROCJITSU_CODE_ARCH_CDNA5, request, resources, inventory,
-                                observation_plan, candidates, mode_semantics);
+                                observation_plan, candidates);
   EXPECT_EQ(problem.image().data(), image.data());
   EXPECT_EQ(problem.image().size(), image.size());
   EXPECT_EQ(problem.arch(), ROCJITSU_CODE_ARCH_CDNA5);
@@ -311,7 +310,6 @@ TEST(ConSan, ResourceProblemBindsImmutableSolverInputs) {
   EXPECT_EQ(&problem.observation_plan(), &observation_plan);
   EXPECT_EQ(problem.candidates().data(), candidates.data());
   EXPECT_EQ(problem.candidates().size(), candidates.size());
-  EXPECT_EQ(problem.mode_semantics(), mode_semantics);
 }
 
 TEST(ConSan, ExecSaveRequirementOwnsTargetAndFallbackSizing) {

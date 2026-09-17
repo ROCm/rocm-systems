@@ -282,14 +282,15 @@ PrivateStateLayoutCache::resolve(std::optional<uint64_t> descriptor,
       return std::nullopt;
     }
     const bool spill_backed_scalar_window = point.has_scalar_spill();
-    const ScalarAbiPlan scalar_abi = plan_scalar_abi(scalar_preservation_state(point));
-    if (!scalar_abi.special_state || (spill_backed_scalar_window && !point.scalar_spill_setup)) {
+    const std::optional<SpecialStateSgprs> special_state =
+        plan_special_state(scalar_preservation_state(point));
+    if (!special_state || (spill_backed_scalar_window && !point.scalar_spill_setup)) {
       warnings.emplace_back("ConSan dynamic-stack spill has no SCC-save register");
       return std::nullopt;
     }
     const uint16_t saved_scc_sgpr = spill_backed_scalar_window
                                         ? point.scalar_spill_setup->temporaries.scc_save_sgpr
-                                        : scalar_abi.special_state->scc_save_sgpr;
+                                        : special_state->scc_save_sgpr;
     constexpr uint16_t saved_frame_offset = kDynamicStackFrameSaveSgprOffset;
     if (!spill_backed_scalar_window &&
         (saved_frame_offset >=

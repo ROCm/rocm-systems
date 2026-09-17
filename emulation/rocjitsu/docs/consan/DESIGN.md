@@ -251,6 +251,12 @@ The hook owns evidence decoding, conflict analysis, and rendering in
 integrity separately from conflict analysis. SuperCollider uses its own
 mismatch marker rather than a causal-evidence report.
 
+Static access mappings are a vector of intent-bound access records, not a
+mode-tagged container. Report decoding borrows optional access metadata through
+a nullable pointer, and the pipeline directly invokes conflict analysis.
+Object planning holds the report geometry and atomic patch reservation needed
+by emission; resource solving does not carry a separate mode-semantics object.
+
 ## Execution models
 
 ### SuperCollider
@@ -373,8 +379,8 @@ Retirement runs:
 
 ```text
 generation-consistent snapshot
-  -> mode decoder
-  -> mode analyzer
+  -> validated header and evidence decoding
+  -> conflict analysis
   -> independent trust assessment
   -> bounded renderer
 ```
@@ -430,7 +436,7 @@ process teardown handles remaining quiescent reports.
 | Semantic policy and coverage | `code/patch/consan/consan_*_policy.cpp`, `consan_observation_plan.h.inc` |
 | Target profiles/providers | `code/patch/consan/targets/` |
 | ConSan planning/common lowering | `consan_lowering_plan.h`, `consan_resource_planning.cpp`, `consan_shared_lowering.cpp` |
-| Mode-local transforms | `code/patch/consan/consan_probe_lowering.cpp`, `code/patch/consan/supercollider/` |
+| Probe and SuperCollider lowering | `code/patch/consan/consan_probe_lowering.cpp`, `code/patch/consan/supercollider/` |
 | Resources and placement | `consan_resource.*`, `consan_probe_planning.cpp`, `consan_register_allocation.cpp`, `consan_placement.cpp` |
 | Descriptor/text transaction | `consan_descriptor_growth.cpp`, `consan_text_relocation.cpp` |
 | Final validation | `consan_final_validation.cpp`, `consan_validation_inventory.cpp`, `targets/consan_validation_*` |

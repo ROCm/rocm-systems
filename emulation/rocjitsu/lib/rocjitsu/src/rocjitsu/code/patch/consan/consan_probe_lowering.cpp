@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // ConSan access selection and synchronization metadata lowering share one
-// mode-private translation unit. The sequencing between these phases is an
+// translation unit. The sequencing between these phases is an
 // explicit orchestration concern; their representation and route machinery
 // remain private to the ConSan component.
 
@@ -155,13 +155,13 @@ runtime_mapping_including_staged(const TransformArtifacts &result) {
   return mapping;
 }
 
-ObjectModePlan plan_object_mode(const Request &request, const BoundRuntimeResources &resources,
-                                const TransformPolicy &policy, const ObjectFacts &facts) {
-  ObjectModePlan plan;
+ObjectPlan plan_object(const Request &request, const BoundRuntimeResources &resources,
+                       const TransformPolicy &policy, const ObjectFacts &facts) {
+  ObjectPlan plan;
   plan.owner_source = request.owner_source == OwnerSource::Automatic ? OwnerSource::WorkitemId
                                                                      : request.owner_source;
   plan.track_atomics = request.track_atomics;
-  plan.semantics.report_layout = resolve_report_layout(
+  plan.report_layout = resolve_report_layout(
       resources, direct_report_buffer_layout_for_bytes(resources.report_buffer_size));
   if (plan.track_atomics && !facts.has_access_candidate) {
     // ConSan atomics publish ordering only into a selected LDS watchpoint's
@@ -174,27 +174,27 @@ ObjectModePlan plan_object_mode(const Request &request, const BoundRuntimeResour
     const uint32_t patch_budget = policy.max_patches_is_expert_limit
                                       ? policy.max_patches
                                       : std::numeric_limits<uint32_t>::max();
-    plan.semantics.reserved_atomic_patch_count = static_cast<uint32_t>(
-        std::min({static_cast<size_t>(patch_budget),
-                  static_cast<size_t>(plan.semantics.report_layout.watchpoint_capacity),
-                  facts.admitted_atomic_count}));
+    plan.reserved_atomic_patch_count =
+        static_cast<uint32_t>(std::min({static_cast<size_t>(patch_budget),
+                                        static_cast<size_t>(plan.report_layout.watchpoint_capacity),
+                                        facts.admitted_atomic_count}));
   }
   return plan;
 }
 
-void apply_mode_patches(std::span<const uint8_t> bytes, const Options &options,
-                        OperatingPoint &operating_point, rj_code_arch_t arch,
-                        ResourcePlanningState &resource_state,
-                        std::span<const Candidate> candidates,
-                        const ObjectModeSemantics &mode_semantics, TransformArtifacts &result) {
-  try_apply_direct_watchpoint_patch(bytes, options, operating_point, arch, candidates,
-                                    mode_semantics, result);
+void apply_probe_patches(std::span<const uint8_t> bytes, const Options &options,
+                         OperatingPoint &operating_point, rj_code_arch_t arch,
+                         ResourcePlanningState &resource_state,
+                         std::span<const Candidate> candidates, const ObjectPlan &object_plan,
+                         TransformArtifacts &result) {
+  try_apply_direct_watchpoint_patch(bytes, options, operating_point, arch, candidates, object_plan,
+                                    result);
   if (result.errors.empty())
-    try_apply_atomic_sync_patch(bytes, options, operating_point, arch, resource_state,
-                                mode_semantics, result);
+    try_apply_atomic_sync_patch(bytes, options, operating_point, arch, resource_state, object_plan,
+                                result);
   if (result.errors.empty())
     try_apply_barrier_sync_patch(bytes, options, operating_point, arch, resource_state, candidates,
-                                 mode_semantics, result);
+                                 object_plan, result);
 }
 
 uint16_t barrier_scratch_vgpr_count(const BarrierScratchFacts &facts) {
@@ -261,7 +261,8 @@ bool requires_dispatch_identity(const Request &request, const DispatchIdentityFa
          (request.runtime_sample_stride > 1u || facts.has_access_or_atomic_consumer);
 }
 
-ScalarAbiPlan plan_scalar_abi(const ScalarPreservationState &preservation_state) {
+std::optional<SpecialStateSgprs>
+plan_special_state(const ScalarPreservationState &preservation_state) {
   const auto publication = publication_state_sgprs(preservation_state.exec_save_sgpr);
   const std::optional<detail::SpecialStateSgprs> special_state =
       publication
@@ -273,7 +274,7 @@ ScalarAbiPlan plan_scalar_abi(const ScalarPreservationState &preservation_state)
                         : publication->publication_exec_save_sgpr,
             }}
           : std::nullopt;
-  return {.special_state = special_state};
+  return special_state;
 }
 
 #include "rocjitsu/code/patch/consan/consan_access.inc"

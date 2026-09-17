@@ -52,7 +52,7 @@ enum class SyncScope : uint8_t {
 };
 
 /// Translate the common synchronization scope into ConSan's stable report
-/// ABI. This is the sole mode-owned mapping; emitters do not reinterpret
+/// ABI. This is the report layout mapping; emitters do not reinterpret
 /// target-native scope codes.
 [[nodiscard]] constexpr std::optional<SyncScope> sync_scope(MemoryScope scope) {
   switch (scope) {

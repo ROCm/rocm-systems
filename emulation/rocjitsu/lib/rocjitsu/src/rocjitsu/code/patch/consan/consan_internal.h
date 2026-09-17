@@ -114,18 +114,6 @@ private:
   bool succeeded_ = false;
 };
 
-/// Immutable mode semantics and ABI facts that affect common resource solving
-/// and emission. These decisions are selected once by the mode owner from
-/// normalized object and runtime-binding facts. They are not solver choices
-/// and therefore must not be copied into or rediscovered from the mutable
-/// operating point.
-struct ObjectModeSemantics {
-  ReportBufferLayout report_layout;
-  uint32_t reserved_atomic_patch_count = 0;
-
-  bool operator==(const ObjectModeSemantics &) const = default;
-};
-
 } // namespace rocjitsu::consan::detail
 
 namespace rocjitsu::consan {
@@ -141,11 +129,9 @@ class ResourceProblem {
 public:
   ResourceProblem(std::span<const uint8_t> image, rj_code_arch_t arch, const Request &request,
                   const BoundRuntimeResources &resources, const ProgramInventory &inventory,
-                  const ObservationPlan &observation_plan, std::span<const Candidate> candidates,
-                  detail::ObjectModeSemantics mode_semantics)
+                  const ObservationPlan &observation_plan, std::span<const Candidate> candidates)
       : image_(image), arch_(arch), request_(&request), resources_(&resources),
-        inventory_(&inventory), observation_plan_(&observation_plan), candidates_(candidates),
-        mode_semantics_(mode_semantics) {}
+        inventory_(&inventory), observation_plan_(&observation_plan), candidates_(candidates) {}
 
   [[nodiscard]] std::span<const uint8_t> image() const { return image_; }
   [[nodiscard]] rj_code_arch_t arch() const { return arch_; }
@@ -154,9 +140,6 @@ public:
   [[nodiscard]] const ProgramInventory &inventory() const { return *inventory_; }
   [[nodiscard]] const ObservationPlan &observation_plan() const { return *observation_plan_; }
   [[nodiscard]] std::span<const Candidate> candidates() const { return candidates_; }
-  [[nodiscard]] const detail::ObjectModeSemantics &mode_semantics() const {
-    return mode_semantics_;
-  }
 
 private:
   std::span<const uint8_t> image_;
@@ -166,7 +149,6 @@ private:
   const ProgramInventory *inventory_ = nullptr;
   const ObservationPlan *observation_plan_ = nullptr;
   std::span<const Candidate> candidates_;
-  detail::ObjectModeSemantics mode_semantics_;
 };
 
 /// Immutable facts that determine the size of ConSan's transient scalar-save ABI.
@@ -568,7 +550,7 @@ struct AtomicCounterIncrementRequest {
 
 /// Resolved source and wave geometry used to derive a workitem-based owner.
 ///
-/// Several ConSan engines identify an owner by shifting the workitem-x identity
+/// ConSan identifies an owner by shifting the workitem-x identity
 /// by `wave_size_shift`, yielding the wave's index within its workgroup. When
 /// `entry_workitem_x_private_offset` is absent, lowering reads the live ABI
 /// workitem-x VGPR. When present, lowering reloads the value captured by the

@@ -21,8 +21,7 @@ namespace rocjitsu::consan::detail {
 using detail::append_word_bytes;
 
 [[nodiscard]] std::optional<StaticAccessAttribution>
-make_access_attribution(const ObservationPlan &observation, const Candidate &candidate,
-                        ProbeIntentKind expected_intent) {
+make_access_attribution(const ObservationPlan &observation, const Candidate &candidate) {
   if (candidate.size() == 0u)
     return std::nullopt;
   StaticAccessAttribution access{
@@ -42,7 +41,7 @@ make_access_attribution(const ObservationPlan &observation, const Candidate &can
       access.execution_owner_kernel_ids.end());
   for (ProbeIntentId id : candidate.intent_ids) {
     const ProbeIntent *intent = observation.intent(id);
-    if (intent == nullptr || intent->kind != expected_intent)
+    if (intent == nullptr || intent->kind != ProbeIntentKind::Access)
       return std::nullopt;
     for (const SemanticSiteId &site : intent->covered_semantic_sites) {
       if (std::ranges::find(access.original_semantic_sites, site) ==

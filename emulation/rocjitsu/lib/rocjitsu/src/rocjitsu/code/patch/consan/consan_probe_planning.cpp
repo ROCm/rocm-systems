@@ -11,7 +11,7 @@
 
 namespace rocjitsu::consan::detail {
 
-/// Build the guest-state preservation plan shared by ConSan probe engines.
+/// Build the guest-state preservation plan for ConSan probes.
 ///
 /// The caller has already selected scratch registers and, when needed, a
 /// private epoch/owner layout. This function allocates the compatible VGPR

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file consan_report_planning.h
-/// @brief Shared report-layout mechanics composed by mode-owned ABI planners.
+/// @brief ConSan report sizing and evidence-layout planning.
 
 #pragma once
 

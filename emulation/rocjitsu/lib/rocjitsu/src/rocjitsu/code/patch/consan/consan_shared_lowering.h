@@ -28,7 +28,7 @@ resolve_private_workitem_owner(std::span<const uint8_t> image, const ResolvedScr
 common_record_owner_descriptor(std::span<const uint8_t> image, const ResolvedScratchPlan &resources,
                                rj_code_arch_t arch, std::vector<std::string> &warnings);
 
-/// Mode-owned persistent values required in one private entry-state layout.
+/// Persistent values required in one private entry-state layout.
 struct PrivateStateDemand {
   bool owner = false;
   bool exact_workgroup = false;

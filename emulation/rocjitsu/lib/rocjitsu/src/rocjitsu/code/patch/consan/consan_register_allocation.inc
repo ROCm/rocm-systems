@@ -912,7 +912,7 @@ struct ResourcePlanningState {
                         std::span<const CandidateResourcePlan> site_plans, const Request &request,
                         const BoundRuntimeResources &resources, const OperatingPoint &point)
       : ResourcePlanningState(ResourceProblem(input, arch, request, resources, program_inventory,
-                                              observation_plan, {}, {}),
+                                              observation_plan, {}),
                               point, site_plans) {}
 };
 
