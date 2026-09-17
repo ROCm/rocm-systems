@@ -489,6 +489,20 @@ std::function<hipError_t(hipEvent_t, hipStream_t)> g_hipEventRecord = DefaultHip
 std::function<hipError_t(hipStream_t, hipEvent_t, unsigned int)> g_hipStreamWaitEvent =
     DefaultHipStreamWaitEvent;
 
+// Fail-loud: the batch memops a unit puts on a stream are the thing its tests
+// observe, so reaching this undriven means the call would vanish silently.
+static ncclResult_t DefaultCuStreamBatchMemOp(hipStream_t, unsigned int,
+                                              hipStreamBatchMemOpParams*) {
+    FailLoudUnfaked("hip_fakes", "ncclCuStreamBatchMemOp");
+}
+std::function<ncclResult_t(hipStream_t, unsigned int, hipStreamBatchMemOpParams*)>
+    g_cuStreamBatchMemOp = DefaultCuStreamBatchMemOp;
+
+ncclResult_t ncclCuStreamBatchMemOp(hipStream_t stream, unsigned int numOps,
+                                    hipStreamBatchMemOpParams* batchParams) {
+    return g_cuStreamBatchMemOp(stream, numOps, batchParams);
+}
+
 // Restore every HIP hook to its default.
 void ResetHipFakes()
 {
@@ -545,6 +559,7 @@ void ResetHipFakes()
     g_hipGetLastError               = DefaultHipGetLastError;
     g_hipEventRecord                = DefaultHipEventRecord;
     g_hipStreamWaitEvent            = DefaultHipStreamWaitEvent;
+    g_cuStreamBatchMemOp            = DefaultCuStreamBatchMemOp;
 }
 
 // ===========================================================================
