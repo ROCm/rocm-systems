@@ -3209,6 +3209,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_is_gpu_apu = _libraries['libamd_smi.so'].amdsmi_is_gpu_apu
+    amdsmi_is_gpu_apu.restype = amdsmi_status_t
+    amdsmi_is_gpu_apu.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_bool)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_processor_info = _libraries['libamd_smi.so'].amdsmi_get_processor_info
     amdsmi_get_processor_info.restype = amdsmi_status_t
     amdsmi_get_processor_info.argtypes = [amdsmi_processor_handle, size_t, ctypes.POINTER(ctypes.c_char)]
@@ -5492,10 +5498,11 @@ __all__ = \
     'amdsmi_hsmp_metrics_table_t', 'amdsmi_init',
     'amdsmi_init_flags_t', 'amdsmi_init_gpu_event_notification',
     'amdsmi_io_bw_encoding_t', 'amdsmi_is_P2P_accessible',
-    'amdsmi_is_gpu_power_management_enabled', 'amdsmi_kfd_info_t',
-    'amdsmi_link_id_bw_type_t', 'amdsmi_link_metrics_t',
-    'amdsmi_link_status_t', 'amdsmi_link_type_t',
-    'amdsmi_memory_page_status_t', 'amdsmi_memory_partition_config_t',
+    'amdsmi_is_gpu_apu', 'amdsmi_is_gpu_power_management_enabled',
+    'amdsmi_kfd_info_t', 'amdsmi_link_id_bw_type_t',
+    'amdsmi_link_metrics_t', 'amdsmi_link_status_t',
+    'amdsmi_link_type_t', 'amdsmi_memory_page_status_t',
+    'amdsmi_memory_partition_config_t',
     'amdsmi_memory_partition_type_t', 'amdsmi_memory_type_t',
     'amdsmi_mm_ip_t', 'amdsmi_name_value_t', 'amdsmi_nic_asic_info_t',
     'amdsmi_nic_bus_info_t', 'amdsmi_nic_driver_info_t',

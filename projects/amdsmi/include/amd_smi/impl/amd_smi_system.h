@@ -67,7 +67,7 @@ class AMDSmiSystem {
   amdsmi_status_t populate_brcm_switch_devices();
   uint64_t init_flag_;
   AMDSmiDrm drm_;
-  smi_nic_ctx_t ainic_ctx_;
+  smi_nic_ctx_t ainic_ctx_ = nullptr;
   std::vector<AMDSmiAINICDevice::AINICInfo> ai_nic_info_;
 #ifdef BRCM_NIC
   AMDSmiNoDrmNIC no_drm_nic_;

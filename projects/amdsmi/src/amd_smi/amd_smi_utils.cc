@@ -22,6 +22,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <regex>
@@ -1436,6 +1437,12 @@ const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type) 
     default:
       return nullptr;
   }
+}
+
+amdsmi_status_t smi_amdgpu_is_apu(uint64_t ids_flags, bool* is_apu) {
+  if (is_apu == nullptr) return AMDSMI_STATUS_INVAL;
+  *is_apu = (ids_flags & AMDGPU_IDS_FLAGS_FUSION) != 0;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 void init_asic_info_defaults(amdsmi_asic_info_t* info) {
