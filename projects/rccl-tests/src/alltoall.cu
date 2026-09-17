@@ -420,21 +420,23 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
     if (slotPkts != 0 && nPk <= slotPkts) {
       int bpp = ginFabricLlAlltoAllBlocksPerPeer(perChunkBytes);
       if (llMaxBpp > 0 && bpp > llMaxBpp) bpp = llMaxBpp;
+      // Covering grid is max(nRanks, deviceCtaCount) x max(LL bpp, LSA chunks).
+      // Extra CTAs must not wait on the busy lock or fall through to gin.put.
+      if ((int)blockIdx.x >= devComm.nRanks || (int)blockIdx.y >= bpp) return;
       const bool ownLl = dda::common::ginFabricLlBusyTryAcquire(ctx, llLaunchId);
       if (!ownLl) {
-        // Another GIN LL launch holds the epoch/scratch. Do not alias it.
-      } else if ((int)blockIdx.x >= devComm.nRanks || (int)blockIdx.y >= bpp) {
-        return;
-      } else {
-        dda::common::ginFabricLlBusyEnter(ctx);
-        T* sendPtr = static_cast<T*>(ncclGetLsaPointer(sendwin, sendoffset, devComm.lsaRank));
-        T* recvPtr = static_cast<T*>(ncclGetLsaPointer(recvwin, recvoffset, devComm.lsaRank));
-        dda::common::ddaAllToAllFabricLLBody<T, NRANKS_CT>(
-            reinterpret_cast<T**>(ctx->fabricA2APeerScratch), recvPtr, sendPtr, perChunkBytes, devComm.rank,
-            devComm.nRanks, ctx->fabricA2ALlEpoch, ctx->fabricA2ALlEpochLen, bpp, slotPkts);
-        dda::common::ginFabricLlBusyRelease(ctx, llLaunchId);
+        // Overlapping GIN LL on this context is illegal: mixed LL/put hangs.
+        if (threadIdx.x == 0) __builtin_trap();
         return;
       }
+      dda::common::ginFabricLlBusyEnter(ctx);
+      T* sendPtr = static_cast<T*>(ncclGetLsaPointer(sendwin, sendoffset, devComm.lsaRank));
+      T* recvPtr = static_cast<T*>(ncclGetLsaPointer(recvwin, recvoffset, devComm.lsaRank));
+      dda::common::ddaAllToAllFabricLLBody<T, NRANKS_CT>(
+          reinterpret_cast<T**>(ctx->fabricA2APeerScratch), recvPtr, sendPtr, perChunkBytes, devComm.rank,
+          devComm.nRanks, ctx->fabricA2ALlEpoch, ctx->fabricA2ALlEpochLen, bpp, slotPkts);
+      dda::common::ginFabricLlBusyRelease(ctx, llLaunchId);
+      return;
     }
   }
 

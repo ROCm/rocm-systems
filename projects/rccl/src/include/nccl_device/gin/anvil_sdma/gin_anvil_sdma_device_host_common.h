@@ -64,6 +64,7 @@ struct ncclGinAnvilSdmaGPUContext {
 
   // Device mutex for one in-flight fabric-LL AllToAll on this GIN context.
   // 0 = free; otherwise the owning kernel's launchId. Inflight counts LL CTAs.
+  // A second overlapping launch must fail, not fall back to gin.put.
   uint32_t fabricA2ALlBusy;
   uint32_t fabricA2ALlInflight;
 };

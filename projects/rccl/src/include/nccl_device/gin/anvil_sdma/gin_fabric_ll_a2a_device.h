@@ -17,20 +17,20 @@
 namespace dda {
 namespace common {
 
-// One GIN fabric-LL AllToAll at a time per Anvil GPU context. Leader CTA 0
-// CAS-es launchId into fabricA2ALlBusy; other CTAs wait until busy != 0, then
-// proceed only if they own it. A concurrent launch sees a foreign id and must
-// not touch the LL epoch/scratch (it should fall back to gin.put).
+// One GIN fabric-LL AllToAll at a time per Anvil GPU context. Each CTA CAS-es
+// launchId into fabricA2ALlBusy: prev==0 or prev==launchId means this launch
+// owns the epoch/scratch. A foreign id is a second overlapping launch and must
+// fail (not gin.put). No spin-until-nonzero: extra covering-grid CTAs and a
+// late read after release would otherwise wait on 0 forever.
 __device__ __forceinline__ bool ginFabricLlBusyTryAcquire(ncclGinAnvilSdmaGPUContext* ctx, uint32_t launchId) {
   if (ctx == nullptr || launchId == 0u) return false;
-  if (threadIdx.x == 0 && blockIdx.x == 0 && blockIdx.y == 0) {
-    (void)atomicCAS(&ctx->fabricA2ALlBusy, 0u, launchId);
+  __shared__ uint32_t shOwn;
+  if (threadIdx.x == 0) {
+    uint32_t prev = atomicCAS(&ctx->fabricA2ALlBusy, 0u, launchId);
+    shOwn = (prev == 0u || prev == launchId) ? 1u : 0u;
   }
-  uint32_t owner = 0;
-  do {
-    owner = atomicAdd(&ctx->fabricA2ALlBusy, 0u);
-  } while (owner == 0u);
-  return owner == launchId;
+  __syncthreads();
+  return shOwn != 0u;
 }
 
 __device__ __forceinline__ void ginFabricLlBusyEnter(ncclGinAnvilSdmaGPUContext* ctx) {
