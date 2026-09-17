@@ -4,6 +4,11 @@ name = "rocprof_compute"
 # enforced at runtime in src/rocprof-compute.
 requires-python = ">=3.8"
 
+[project.optional-dependencies]
+optimizer = [
+    "ortools>=9.10",
+]
+
 [tool.ruff]
 line-length = 88
 
