@@ -389,11 +389,8 @@ static inline uint32_t IbCastRmaRemoteRkey(const struct IbCastRmaProxyMrHandle* 
 }
 
 static int IbCastRmaDevSlot(const struct IbCastRmaProxyMrHandle* h, int rank, int ibDevN) {
-  if (h == NULL || h->ibDevNs == NULL || ibDevN < 0) return -1;
-  const int* slots = h->ibDevNs + (size_t)rank * NCCL_IB_MAX_DEVS_PER_NIC;
-  for (int d = 0; d < NCCL_IB_MAX_DEVS_PER_NIC; d++)
-    if (slots[d] == ibDevN) return d;
-  return -1;
+  if (h == NULL) return -1;
+  return ncclRmaDevSlotOf(h->ibDevNs, rank, ibDevN, NCCL_IB_MAX_DEVS_PER_NIC);
 }
 
 static inline int IbCastRmaSegOf(const struct IbCastRmaProxyMrHandle* h, uint64_t off) {
