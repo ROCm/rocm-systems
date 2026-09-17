@@ -28,6 +28,11 @@ background, and nothing outlives the process you typed it into.
 Global flags may appear before or after the subcommand, e.g. both
 `rocjitsu --json profile list` and `rocjitsu profile list --json`.
 
+One exception, for the CLI this replaces: `rocjitsu -v` with nothing else
+on the line prints the version, because that is what `-v` meant upstream
+and a version probe is the first thing a script asks. `-vv`, and `-v` in
+front of a command, are verbosity as above.
+
 ## Command summary
 
 | Command            | Purpose                                                        |
@@ -982,7 +987,7 @@ For compatibility with the upstream `rocjitsu` CLI, a bare invocation with a
 
 ```sh
 rocjitsu --config cfg.json -- ./app           # == rocjitsu run --config cfg.json -- ./app
-rocjitsu --attach --config cfg.json -- ./app  # --attach maps to --daemon
+rocjitsu --daemon --config cfg.json           # a session with no workload, held until stopped
 ```
 
 Invocations that name a subcommand, or that have no `--` separator (so
@@ -990,22 +995,29 @@ Invocations that name a subcommand, or that have no `--` separator (so
 lists the shape too, under a **Drop-in mode** heading: clap can only
 list subcommands, and this is the one invocation that has none.
 
-### `--attach` works on `rocjitsu run` as well
+### `--attach` is accepted and then refused, on purpose
 
-`--attach` is the rocjitsu-only spelling of `--daemon`, and rocjitsu
-translates it away before parsing wherever it appears — in the bare
-drop-in form *and* after an explicit `run`:
+This is a breaking change from the upstream CLI, and the only one in the
+drop-in surface.
+
+Upstream `--attach` joined a daemon that something else had already
+started, at a well-known socket. There is no such daemon here: every one
+rocjitsu starts belongs to the run that started it and is torn down with
+it, so there is nothing to join. It is not an alias for `--daemon`
+either — that starts a *new* session, which is a different thing from
+joining an existing one, and quietly substituting it would give a script
+written against upstream the opposite of what it asked for.
+
+So `rocjitsu run --attach` parses, and then fails with an error naming
+the replacement:
 
 ```sh
-rocjitsu run --attach --config cfg.json -- ./app   # same as --daemon
+rocjitsu exec --session <id> -- <command>    # what --attach was for
 ```
 
-It used to be translated only on the rewriting path, so `rocjitsu run
---attach -- ./app` handed `--attach` to the workload and exited 127. A
-flag the reference calls accepted has to be accepted by both spellings
-of the same command. It stays out of `rocjitsu run --help`, which lists
-`--daemon`: the alias exists for scripts written against `rocjitsu`, not
-as a second name to choose between.
+The flag stays declared for exactly that reason. Dropping it would make
+the same command line fail with clap's "unexpected argument", which says
+nothing about where the capability went.
 
 ### A mistyped flag before `--` is refused, not run
 
