@@ -22,10 +22,13 @@ struct ncclDevrWindow;
 extern bool g_ceImplemented;
 extern bool g_ceAvailableValue;
 extern bool g_ceScratchAvailableValue;
-extern bool g_hierCeAvailable;
+extern bool g_hierCeAvailableValue;
 extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                           struct ncclDevrWindow*, struct ncclDevrWindow*)>
     g_ceAvailable;
+extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+                          struct ncclDevrWindow*, struct ncclDevrWindow*)>
+    g_hierCeAvailable;
 extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t)>
     g_ceScratchAvailable;
 extern std::function<int(ncclDataType_t, size_t)> g_ceLocalReduceBlocks;

@@ -14,6 +14,7 @@
 #include "sym_kernels.h"  // ncclSymRegType_t
 
 ASSERT_HOOK_MATCHES_PROD(g_ceAvailable, ncclCeAvailable);
+ASSERT_HOOK_MATCHES_PROD(g_hierCeAvailable, ncclHierCeAvailable);
 ASSERT_HOOK_MATCHES_PROD(g_ceScratchAvailable, ncclCeScratchAvailable);
 ASSERT_HOOK_MATCHES_PROD(g_ceLocalReduceBlocks, ncclCeLocalReduceBlocks);
 #undef ASSERT_HOOK_MATCHES_PROD
@@ -21,7 +22,7 @@ ASSERT_HOOK_MATCHES_PROD(g_ceLocalReduceBlocks, ncclCeLocalReduceBlocks);
 bool g_ceImplemented = false;
 bool g_ceAvailableValue = false;
 bool g_ceScratchAvailableValue = false;
-bool g_hierCeAvailable = false;
+bool g_hierCeAvailableValue = false;
 
 static bool DefaultCeAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                                struct ncclDevrWindow*, struct ncclDevrWindow*) {
@@ -40,6 +41,14 @@ std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymReg
 static int DefaultCeLocalReduceBlocks(ncclDataType_t, size_t) { return 1; }
 std::function<int(ncclDataType_t, size_t)> g_ceLocalReduceBlocks = DefaultCeLocalReduceBlocks;
 
+static bool DefaultHierCeAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+                                   struct ncclDevrWindow*, struct ncclDevrWindow*) {
+  return g_hierCeAvailableValue;
+}
+std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+                   struct ncclDevrWindow*, struct ncclDevrWindow*)>
+    g_hierCeAvailable = DefaultHierCeAvailable;
+
 bool ncclCeImplemented(ncclFunc_t, int, ncclDataType_t) { return g_ceImplemented; }
 bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t func, int op, ncclDataType_t type,
                      ncclSymRegType_t regType, struct ncclDevrWindow* sendWin,
@@ -51,17 +60,19 @@ bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t func, int op, nccl
   return g_ceScratchAvailable(comm, func, op, type, regType);
 }
 int ncclCeLocalReduceBlocks(ncclDataType_t type, size_t count) { return g_ceLocalReduceBlocks(type, count); }
-bool ncclHierCeAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
-                         struct ncclDevrWindow*, struct ncclDevrWindow*) {
-  return g_hierCeAvailable;
+bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t func, int op, ncclDataType_t type,
+                         ncclSymRegType_t regType, struct ncclDevrWindow* sendWin,
+                         struct ncclDevrWindow* recvWin) {
+  return g_hierCeAvailable(comm, func, op, type, regType, sendWin, recvWin);
 }
 
 void ResetCeFakes() {
   g_ceImplemented = false;
   g_ceAvailableValue = false;
   g_ceScratchAvailableValue = false;
-  g_hierCeAvailable = false;
+  g_hierCeAvailableValue = false;
   g_ceAvailable = DefaultCeAvailable;
   g_ceScratchAvailable = DefaultCeScratchAvailable;
   g_ceLocalReduceBlocks = DefaultCeLocalReduceBlocks;
+  g_hierCeAvailable = DefaultHierCeAvailable;
 }

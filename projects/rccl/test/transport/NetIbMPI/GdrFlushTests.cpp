@@ -217,23 +217,6 @@ TEST_F(GdrFlushTest, RepeatedFlush_NoFaultBurst) {
         EXPECT_EQ(flush, ncclSuccess) << "no flush in the burst may raise a QP async-fatal";
 }
 
-#if defined(ENABLE_FAULT_INJECTION)
-// The flush helper no longer takes a forceWrite knob (the scratchpad RDMA_WRITE
-// path was removed). Keep this compile-only so ENABLE_FAULT_INJECTION builds
-// against the 3-argument RunRecvFlushBurst signature.
-TEST_F(GdrFlushTest, ForcedScratchpadWrite_ReproducesFault) {
-    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit);
-    if (!cuMemEnabledEnv()) GTEST_SKIP() << "Requires NCCL_CUMEM_ENABLE=1 (dma-buf scratchpad target)";
-    if (!scratchpadFlushEnabled())
-        GTEST_SKIP() << "Requires the scratchpad flush enabled (RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=1)";
-    AssertInitAndGetDevices(nullptr);
-    if (!gdrPtrSupport()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
-
-    GTEST_SKIP() << "RunRecvFlushBurst no longer injects a scratchpad RDMA_WRITE";
-}
-#endif  // ENABLE_FAULT_INJECTION
-
 }  // namespace
 
 #endif  // MPI_TESTS_ENABLED
