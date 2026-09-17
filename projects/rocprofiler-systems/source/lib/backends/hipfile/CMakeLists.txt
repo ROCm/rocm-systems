@@ -11,9 +11,8 @@ add_library(
     ALIAS rocprofiler-systems-hipfile-backend
 )
 
-# Link libhipfile directly via its imported target (hip::hipfile), which carries
-# both the public headers and the shared library. This matches how the profiler
-# consumes amd_smi and other ROCm libraries.
+# Take hipFile's headers but NOT its library: wrapper.hpp resolves the two entry
+# points with dlsym at first sample.
 target_link_libraries(
     rocprofiler-systems-hipfile-backend
     INTERFACE
@@ -21,7 +20,13 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-compile-definitions
         rocprofiler-systems::rocprofiler-systems-rocm
         rocprofiler-systems-logger
-        hip::hipfile
+        ${CMAKE_DL_LIBS}
+)
+
+target_include_directories(
+    rocprofiler-systems-hipfile-backend
+    SYSTEM
+    INTERFACE $<TARGET_PROPERTY:hip::hipfile,INTERFACE_INCLUDE_DIRECTORIES>
 )
 
 # The wrapper re-checks the minimum version at compile time (against hipfile.h) and at
@@ -34,11 +39,12 @@ list(GET _hipfile_min_version 2 _hipfile_min_version_patch)
 
 # ROCPROFSYS_BUILD_HIPFILE is also exported globally on
 # rocprofiler-systems-compile-definitions (cmake/Packages.cmake) so core can
-# guard setting registration. Kept here as well for the backend's own headers.
+# guard setting registration.
 target_compile_definitions(
     rocprofiler-systems-hipfile-backend
     INTERFACE
         ROCPROFSYS_BUILD_HIPFILE=1
+        ROCPROFSYS_HIPFILE_SONAME="libhipfile.so.${_hipfile_min_version_major}"
         ROCPROFSYS_HIPFILE_MIN_VERSION_MAJOR=${_hipfile_min_version_major}
         ROCPROFSYS_HIPFILE_MIN_VERSION_MINOR=${_hipfile_min_version_minor}
         ROCPROFSYS_HIPFILE_MIN_VERSION_PATCH=${_hipfile_min_version_patch}
