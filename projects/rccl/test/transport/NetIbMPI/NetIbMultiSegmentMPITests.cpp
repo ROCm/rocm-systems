@@ -32,6 +32,18 @@ constexpr size_t kSegBytes    = 2u * 1024 * 1024; // rounded up to VMM granulari
 #define ASSERT_SETUP_CONNECTION(dev, pair, guard) \
     ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard((dev), (pair), (guard)))
 
+// Register an nSeg window and honor skip/fail from the bool helper. Also sets
+// sendMh_/recvMh_ so flush tests share the same preamble as transfer tests.
+#define SETUP_REGISTERED_OR_SKIP(nSeg, pair, guard, mh, comm) \
+    SETUP_REGISTERED_OR_SKIP_MIN_NODES(nSeg, pair, guard, mh, comm, kMinGpusPerNode)
+
+#define SETUP_REGISTERED_OR_SKIP_MIN_NODES(nSeg, pair, guard, mh, comm, minNodes) \
+    do {                                                                          \
+        if (!SetupRegistered((nSeg), (pair), (guard), &(mh), &(comm), (minNodes))) \
+            GTEST_SKIP_OR_RETURN(skipReason_);                                    \
+        sendMh_ = recvMh_ = (mh);                                                 \
+    } while (0)
+
 class NetIbMultiSegmentMPITest : public NetIbMPITest {
 protected:
     std::vector<MultiSegmentVmmBuffer*> owned_;
@@ -207,9 +219,8 @@ protected:
 // POSITIVE: register a 4-segment window and move each segment end to end.
 TEST_F(NetIbMultiSegmentMPITest, PerSegmentRegistrationAndTransfer) {
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
-    if (!SetupRegistered(kNumSegments, pair, guard, &mh, &comm)) GTEST_SKIP_OR_RETURN(skipReason_);
+    SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh, comm);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
-    sendMh_ = recvMh_ = mh;
     for (int s = 0; s < kNumSegments; s++)
         SendRecvChunk(pair, lastBuf_->ptr, lastBuf_->ptr, (size_t)s * lastBuf_->segSize, lastBuf_->segSize,
                       /*tag=*/100 + s, /*seed=*/static_cast<uint8_t>(0xA0 + s));
@@ -218,9 +229,8 @@ TEST_F(NetIbMultiSegmentMPITest, PerSegmentRegistrationAndTransfer) {
 // SELECTION: transfers anchored at different offsets inside each segment.
 TEST_F(NetIbMultiSegmentMPITest, IntraSegmentOffsetSelection) {
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
-    if (!SetupRegistered(kNumSegments, pair, guard, &mh, &comm)) GTEST_SKIP_OR_RETURN(skipReason_);
+    SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh, comm);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
-    sendMh_ = recvMh_ = mh;
     const size_t chunk = 65536;
     int tag = 200;
     for (int s = 0; s < kNumSegments; s++) {
@@ -237,9 +247,8 @@ TEST_F(NetIbMultiSegmentMPITest, IntraSegmentOffsetSelection) {
 // shared registration-relative cursor would select the wrong lkey or rkey.
 TEST_F(NetIbMultiSegmentMPITest, DeepEP_AsymmetricOffsetTransfer) {
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
-    if (!SetupRegistered(kNumSegments, pair, guard, &mh, &comm)) GTEST_SKIP_OR_RETURN(skipReason_);
+    SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh, comm);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
-    sendMh_ = recvMh_ = mh;
 
     const size_t srcOff = lastBuf_->segSize + 4096; // sender segment 1
     const size_t dstOff = 64 * 1024;                // receiver segment 0
@@ -253,9 +262,8 @@ TEST_F(NetIbMultiSegmentMPITest, DeepEP_AsymmetricOffsetTransfer) {
 // the per-segment rkeys published in the CTS FIFO. Data must arrive intact.
 TEST_F(NetIbMultiSegmentMPITest, CrossBoundaryTransferSucceeds) {
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
-    if (!SetupRegistered(kNumSegments, pair, guard, &mh, &comm)) GTEST_SKIP_OR_RETURN(skipReason_);
+    SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh, comm);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
-    sendMh_ = recvMh_ = mh;
     // 64 KiB before + 64 KiB after the seg0/seg1 boundary.
     const size_t off  = lastBuf_->segSize - 65536;
     const size_t size = 131072;
@@ -271,10 +279,8 @@ TEST_F(NetIbMultiSegmentMPITest, DeepEP_MultiNodeAsymmetricCrossBoundaryStress) 
     constexpr int kIterations   = 32;
 
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
-    if (!SetupRegistered(kWideSegments, pair, guard, &mh, &comm, /*minNodes=*/2))
-        GTEST_SKIP_OR_RETURN(skipReason_);
+    SETUP_REGISTERED_OR_SKIP_MIN_NODES(kWideSegments, pair, guard, mh, comm, /*minNodes=*/2);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
-    sendMh_ = recvMh_ = mh;
 
     const size_t seg = lastBuf_->segSize;
     const size_t total = lastBuf_->totalSize;
@@ -301,9 +307,8 @@ TEST_F(NetIbMultiSegmentMPITest, DeepEP_MultiNodeAsymmetricCrossBoundaryStress) 
 // and exercises the full splitting builder.
 TEST_F(NetIbMultiSegmentMPITest, WholeBufferSingleTransfer) {
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
-    if (!SetupRegistered(kNumSegments, pair, guard, &mh, &comm)) GTEST_SKIP_OR_RETURN(skipReason_);
+    SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh, comm);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
-    sendMh_ = recvMh_ = mh;
     SendRecvChunk(pair, lastBuf_->ptr, lastBuf_->ptr, 0, lastBuf_->totalSize, /*tag=*/500, /*seed=*/0x5E);
 }
 
@@ -341,9 +346,8 @@ TEST_F(NetIbMultiSegmentMPITest, ExceedsMaxSegmentsRejected) {
 // leaves ncclIbMultiSend on its original, unmodified code path).
 TEST_F(NetIbMultiSegmentMPITest, SingleSegmentThroughMultiSegPath) {
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
-    if (!SetupRegistered(1, pair, guard, &mh, &comm)) GTEST_SKIP_OR_RETURN(skipReason_);
+    SETUP_REGISTERED_OR_SKIP(1, pair, guard, mh, comm);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
-    sendMh_ = recvMh_ = mh;
     SendRecvChunk(pair, lastBuf_->ptr, lastBuf_->ptr, 0, 65536, /*tag=*/300, /*seed=*/0x77);
 }
 
@@ -358,7 +362,7 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushSelectsSegmentMr) {
         GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 "
                         "(per-segment iflush chain; RCCL_PARAM caches per process)";
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
-    if (!SetupRegistered(kNumSegments, pair, guard, &mh, &comm)) GTEST_SKIP_OR_RETURN(skipReason_);
+    SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh, comm);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
 
     const int    seg   = 2;                              // a non-zero segment
@@ -405,7 +409,7 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushTouchesEverySegment) {
         GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 "
                         "(per-segment iflush chain; RCCL_PARAM caches per process)";
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
-    if (!SetupRegistered(kNumSegments, pair, guard, &mh, &comm)) GTEST_SKIP_OR_RETURN(skipReason_);
+    SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh, comm);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
 
     const size_t total = lastBuf_->totalSize;
@@ -450,7 +454,7 @@ TEST_F(NetIbMultiSegmentMPITest, MultiRecvFlushTouchesEveryHandle) {
         GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 "
                         "(per-segment iflush chain; RCCL_PARAM caches per process)";
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh0 = nullptr; void* comm = nullptr;
-    if (!SetupRegistered(kNumSegments, pair, guard, &mh0, &comm)) GTEST_SKIP_OR_RETURN(skipReason_);
+    SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh0, comm);
     NetMHandleGuard mhGuard0(mh0, NetMHandleDeleter(net_, comm));
 
     MultiSegmentVmmBuffer* buf0 = lastBuf_;

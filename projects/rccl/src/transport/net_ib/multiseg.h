@@ -164,8 +164,8 @@ struct ncclIbSegSlice {
   uint64_t localAddr;   // sender VA for this slice
   uint64_t remoteAddr;  // receiver VA for this slice
   uint32_t len;         // slice byte count
-  int localSeg;    // sender segment index
-  int remoteSeg;   // receiver segment index
+  int localSeg;         // sender segment index
+  int remoteSeg;        // receiver segment index
 };
 
 // Return the segment index whose [segOff[s], segOff[s+1]) contains `off`, or -1.

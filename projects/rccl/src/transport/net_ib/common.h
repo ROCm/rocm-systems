@@ -395,9 +395,9 @@ struct alignas(8) ncclIbSendCommDev {
 // with the single-segment fast path.
 struct ncclIbMrHandle {
   ibv_mr* mrs[NCCL_IB_MAX_DEVS_PER_NIC];
-  int nSegments;                                             // 1 = legacy single MR
-  uintptr_t segStart[NCCL_IB_MAX_SEGMENTS];                  // VA start of each segment
-  size_t segLen[NCCL_IB_MAX_SEGMENTS];                    // bytes per segment
+  int nSegments;                             // 1 = legacy single MR
+  uintptr_t segStart[NCCL_IB_MAX_SEGMENTS];  // VA start of each segment
+  size_t segLen[NCCL_IB_MAX_SEGMENTS];       // bytes per segment
   ibv_mr* segMrs[NCCL_IB_MAX_SEGMENTS][NCCL_IB_MAX_DEVS_PER_NIC];
 };
 
