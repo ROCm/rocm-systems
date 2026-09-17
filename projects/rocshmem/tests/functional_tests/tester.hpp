@@ -204,7 +204,11 @@
   X(QpPutNbi,                  159)  \
   X(SdmaPingPong,              160)  \
   X(SdmaPutNbi,                161)  \
-  X(BufferRegisterSymmetric,   162)
+  X(BufferRegisterSymmetric,   162)  \
+  X(TilePutWaveRowMajor,       163)  \
+  X(TilePutWaveColumnMajor,    164)  \
+  X(TileGetWaveRowMajor,       165)  \
+  X(TileGetWaveColumnMajor,    166)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {

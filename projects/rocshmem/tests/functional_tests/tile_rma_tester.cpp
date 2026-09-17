@@ -140,7 +140,11 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
   // For collective operations, all threads in the collective share the same tile
   // For thread-level operations, each thread has its own tile
   if constexpr (Type == TilePutWaveContiguousTestType ||
-                Type == TileGetWaveContiguousTestType) {
+                Type == TileGetWaveContiguousTestType ||
+                Type == TilePutWaveRowMajorTestType   ||
+                Type == TilePutWaveColumnMajorTestType ||
+                Type == TileGetWaveRowMajorTestType   ||
+                Type == TileGetWaveColumnMajorTestType) {
     // Wave-collective: all threads in wave use same offset (wave ID)
     offset = matrix_size * (get_flat_id() / wf_size);
   } else if constexpr (Type == TilePutWGContiguousTestType ||
@@ -222,6 +226,30 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
         // Wave-collective get with contiguous layout
         Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
         Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
+        Tuple2D start(0, 0);
+        Tuple2D boundary(tile_extent_0, tile_extent_1);
+        rocshmem_ctx_tile_get_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+      } else if constexpr (Type == TilePutWaveRowMajorTestType) {
+        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+        Tuple2D start(0, 0);
+        Tuple2D boundary(tile_extent_0, tile_extent_1);
+        rocshmem_ctx_tile_put_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+      } else if constexpr (Type == TilePutWaveColumnMajorTestType) {
+        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+        Tuple2D start(0, 0);
+        Tuple2D boundary(tile_extent_0, tile_extent_1);
+        rocshmem_ctx_tile_put_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+      } else if constexpr (Type == TileGetWaveRowMajorTestType) {
+        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+        Tuple2D start(0, 0);
+        Tuple2D boundary(tile_extent_0, tile_extent_1);
+        rocshmem_ctx_tile_get_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+      } else if constexpr (Type == TileGetWaveColumnMajorTestType) {
+        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
         Tuple2D start(0, 0);
         Tuple2D boundary(tile_extent_0, tile_extent_1);
         rocshmem_ctx_tile_get_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
@@ -332,11 +360,15 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
   switch (_type) {
     case TilePutRowMajorTestType:
     case TileGetRowMajorTestType:
+    case TilePutWaveRowMajorTestType:
+    case TileGetWaveRowMajorTestType:
       // row_stride = 2 * tile_extent_1
       buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * (2 * tile_extent_1);
       break;
     case TilePutColumnMajorTestType:
     case TileGetColumnMajorTestType:
+    case TilePutWaveColumnMajorTestType:
+    case TileGetWaveColumnMajorTestType:
       // col_stride = tile_extent_0; contiguous in col direction
       buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * tile_extent_1;
       break;
@@ -376,6 +408,8 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
     case TilePutWaveContiguousTestType:
     case TilePutWGContiguousTestType:
     case TilePut1DTestType:
+    case TilePutWaveRowMajorTestType:
+    case TilePutWaveColumnMajorTestType:
       source = local;
       dest = remote;
       break;
@@ -386,6 +420,8 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
     case TileGetWGContiguousTestType:
     case TileGetWaveContiguousTestType:
     case TileGet1DTestType:
+    case TileGetWaveRowMajorTestType:
+    case TileGetWaveColumnMajorTestType:
     default:
       dest = local;
       source = remote;
@@ -478,12 +514,16 @@ void TileRMATester::resetBuffers(uint64_t size) {
   switch (_type) {
     case TilePutRowMajorTestType:
     case TileGetRowMajorTestType:
+    case TilePutWaveRowMajorTestType:
+    case TileGetWaveRowMajorTestType:
       src_row_stride = 2 * t1;
       src_col_stride = 1;
       src_elements_per_slot = static_cast<size_t>(tile_extent_0) * (2 * t1);
       break;
     case TilePutColumnMajorTestType:
     case TileGetColumnMajorTestType:
+    case TilePutWaveColumnMajorTestType:
+    case TileGetWaveColumnMajorTestType:
       src_row_stride = 1;
       src_col_stride = tile_extent_0;
       src_elements_per_slot = static_cast<size_t>(tile_extent_0) * t1;
@@ -584,6 +624,18 @@ void TileRMATester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
     case TileGet1DTestType:
       LAUNCH_TILE_RMA_TEST(TileGet1DTestType);
       break;
+    case TilePutWaveRowMajorTestType:
+      LAUNCH_TILE_RMA_TEST(TilePutWaveRowMajorTestType);
+      break;
+    case TilePutWaveColumnMajorTestType:
+      LAUNCH_TILE_RMA_TEST(TilePutWaveColumnMajorTestType);
+      break;
+    case TileGetWaveRowMajorTestType:
+      LAUNCH_TILE_RMA_TEST(TileGetWaveRowMajorTestType);
+      break;
+    case TileGetWaveColumnMajorTestType:
+      LAUNCH_TILE_RMA_TEST(TileGetWaveColumnMajorTestType);
+      break;
     default:
       std::cerr << "Invalid Test: unhandled TestType " << _type
                 << " in TileRMATester::launchKernel" << std::endl;
@@ -598,6 +650,10 @@ void TileRMATester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
   switch (_type) {
     case TilePutWaveContiguousTestType:
     case TileGetWaveContiguousTestType:
+    case TilePutWaveRowMajorTestType:
+    case TilePutWaveColumnMajorTestType:
+    case TileGetWaveRowMajorTestType:
+    case TileGetWaveColumnMajorTestType:
       tiles_per_loop = gridSize.x * num_warps;
       break;
     case TilePutWGContiguousTestType:
@@ -623,6 +679,8 @@ void TileRMATester::verifyResults(uint64_t size) {
     case TileGetWGContiguousTestType:
     case TileGetWaveContiguousTestType:
     case TileGet1DTestType:
+    case TileGetWaveRowMajorTestType:
+    case TileGetWaveColumnMajorTestType:
       check_id = 0;
       break;
     default:
@@ -650,11 +708,15 @@ void TileRMATester::verifyResults(uint64_t size) {
     switch (_type) {
       case TilePutRowMajorTestType:
       case TileGetRowMajorTestType:
+      case TilePutWaveRowMajorTestType:
+      case TileGetWaveRowMajorTestType:
         row_stride = 2 * t1;
         col_stride = 1;
         break;
       case TilePutColumnMajorTestType:
       case TileGetColumnMajorTestType:
+      case TilePutWaveColumnMajorTestType:
+      case TileGetWaveColumnMajorTestType:
         row_stride = 1;
         col_stride = t0;
         break;
@@ -673,6 +735,10 @@ void TileRMATester::verifyResults(uint64_t size) {
     switch (_type) {
       case TilePutWaveContiguousTestType:
       case TileGetWaveContiguousTestType:
+      case TilePutWaveRowMajorTestType:
+      case TilePutWaveColumnMajorTestType:
+      case TileGetWaveRowMajorTestType:
+      case TileGetWaveColumnMajorTestType:
         num_tiles_transferred = (args.num_wgs * args.num_threads) / wf_size;
         break;
       case TilePutWGContiguousTestType:
@@ -693,6 +759,8 @@ void TileRMATester::verifyResults(uint64_t size) {
     switch (_type) {
       case TilePutRowMajorTestType:
       case TileGetRowMajorTestType:
+      case TilePutWaveRowMajorTestType:
+      case TileGetWaveRowMajorTestType:
         buffer_elements_per_thread = static_cast<size_t>(t0) * (2 * t1);
         break;
       case TilePutArbitraryTestType:
