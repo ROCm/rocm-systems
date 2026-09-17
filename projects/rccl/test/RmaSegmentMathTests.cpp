@@ -28,19 +28,18 @@ TEST(RmaSegmentMathTest, SplitsAtVerbsLengthLimitWithoutLargeAllocation)
 TEST(RmaSegmentMathTest, FixedDataWrBudgetRejectsUnrepresentableChain)
 {
     ASSERT_GT(SIZE_MAX, static_cast<size_t>(UINT32_MAX));
-    size_t remaining =
+    const size_t oversize =
         static_cast<size_t>(UINT32_MAX) * (NCCL_RMA_MAX_DATA_WRS + 1ULL);
-    int slices = 0;
-    while (remaining != 0 && slices < NCCL_RMA_MAX_DATA_WRS)
-    {
-        const size_t chunk =
-            ncclRmaSegmentSliceBytes(remaining, remaining, remaining);
-        remaining -= chunk;
-        ++slices;
-    }
+    const size_t exact =
+        static_cast<size_t>(UINT32_MAX) * NCCL_RMA_MAX_DATA_WRS;
 
-    EXPECT_EQ(slices, NCCL_RMA_MAX_DATA_WRS);
-    EXPECT_NE(remaining, size_t{0});
+    EXPECT_FALSE(ncclRmaDataWrBudgetFull(0, NCCL_RMA_MAX_DATA_WRS));
+    EXPECT_TRUE(ncclRmaDataWrBudgetFull(NCCL_RMA_MAX_DATA_WRS, NCCL_RMA_MAX_DATA_WRS));
+    EXPECT_EQ(ncclRmaCountPairedDataWrs(0, NCCL_RMA_MAX_DATA_WRS), 0);
+    EXPECT_EQ(ncclRmaCountPairedDataWrs(1, NCCL_RMA_MAX_DATA_WRS), 1);
+    EXPECT_EQ(ncclRmaCountPairedDataWrs(exact, NCCL_RMA_MAX_DATA_WRS), NCCL_RMA_MAX_DATA_WRS);
+    EXPECT_EQ(ncclRmaCountPairedDataWrs(oversize, NCCL_RMA_MAX_DATA_WRS),
+              NCCL_RMA_MAX_DATA_WRS + 1);
 }
 
 TEST(RmaSegmentMathTest, OnlyFinalWrIsSignaled)
@@ -56,14 +55,6 @@ TEST(RmaSegmentMathTest, SignalAtomicMustBeAlignedWithinSegment)
     EXPECT_TRUE(ncclRmaSignalOffsetValid(/*signalOff=*/8, /*segmentEnd=*/16));
     EXPECT_FALSE(ncclRmaSignalOffsetValid(/*signalOff=*/4, /*segmentEnd=*/16));
     EXPECT_FALSE(ncclRmaSignalOffsetValid(/*signalOff=*/8, /*segmentEnd=*/12));
-}
-
-TEST(RmaSegmentMathTest, HandleReportsSegmentCount)
-{
-    EXPECT_EQ(ncclRmaHandleNSegments(nullptr), 0);
-    ncclRmaIbProxyMrHandle handle{};
-    handle.nSegments = 4;
-    EXPECT_EQ(ncclRmaHandleNSegments(&handle), 4);
 }
 
 namespace {
@@ -105,6 +96,10 @@ TEST(RmaSegmentMathTest, PrefixPostKeepsRequestOnlyWhenSomethingPosted)
     EXPECT_EQ(ncclRmaPostedRequestStatus(ncclSystemError, /*posted=*/0), ncclSystemError);
     EXPECT_EQ(ncclRmaPostedRequestStatus(ncclSuccess, /*posted=*/0), ncclSuccess);
     EXPECT_EQ(ncclRmaPostedRequestStatus(ncclSuccess, /*posted=*/2), ncclSuccess);
+    EXPECT_TRUE(ncclRmaPrefixPostLostSignaledTail(/*posted=*/1, /*nWr=*/3));
+    EXPECT_FALSE(ncclRmaPrefixPostLostSignaledTail(/*posted=*/3, /*nWr=*/3));
+    EXPECT_FALSE(ncclRmaPrefixPostLostSignaledTail(/*posted=*/0, /*nWr=*/3));
+    EXPECT_FALSE(ncclRmaPrefixPostLostSignaledTail(/*posted=*/0, /*nWr=*/0));
 }
 
 // A failed handle calloc must still reach the status AllGather. memcpy of

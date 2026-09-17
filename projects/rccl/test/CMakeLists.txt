@@ -457,7 +457,8 @@ if(BUILD_TESTS)
         "${ROCSHMEM_SOURCE_DIR}/include")
     endif()
     if(ROCSHMEM_BUILD_DIR)
-      target_include_directories(rccl-UnitTestsFixtures PRIVATE ${ROCSHMEM_BUILD_DIR})
+      target_include_directories(rccl-UnitTestsFixtures PRIVATE
+        ${ROCSHMEM_BUILD_DIR}/include ${ROCSHMEM_BUILD_DIR}/include/rocshmem)
     endif()
   endif()
 
