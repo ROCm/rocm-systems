@@ -535,15 +535,15 @@ def pytest_collection_modifyitems(config, items) -> None:
             system_version = rocprof_config.rocm_version
             if system_version is None:
                 item.add_marker(pytest.mark.skip(reason="ROCm version not found"))
-            # Parse min_version and compare
-            min_parts = req_version.split(".")
-            min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:3])
-            if system_version < min_tuple:
-                item.add_marker(
-                    pytest.mark.skip(
-                        reason=f"ROCm {'.'.join(map(str, system_version))} < required {req_version}"
+            else:
+                min_parts = req_version.split(".")
+                min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:3])
+                if system_version < min_tuple:
+                    item.add_marker(
+                        pytest.mark.skip(
+                            reason=f"ROCm {'.'.join(map(str, system_version))} < required {req_version}"
+                        )
                     )
-                )
         if "oshrun_min_version" in item.keywords:
             req_version = item.get_closest_marker("oshrun_min_version").args[0]
             system_version = rocprof_config.capabilities.oshrun_version
