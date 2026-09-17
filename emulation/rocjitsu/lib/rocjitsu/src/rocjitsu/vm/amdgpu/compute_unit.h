@@ -454,7 +454,9 @@ public:
   uint32_t allocate_lds(uint32_t size_bytes) {
     uint32_t base = next_lds_alloc_;
     uint32_t aligned = util::align_up(size_bytes, 256u);
-    lds_.zero_range(base, aligned);
+    // Reusing a physical LDS region does not initialize its contents. Keep the
+    // bytes written by prior workgroups until another instruction overwrites them.
+    lds_.materialize_range(base, aligned);
     next_lds_alloc_ += aligned;
     return base;
   }
@@ -1047,6 +1049,7 @@ protected:
   L1ScalarCache l1_scalar_;
   L1VectorCache l1_vector_;
   InstructionCache inst_cache_;
+  GpuMemory::FetchabilityCache fetchability_cache_;
   /// @brief Debug attach/detach transitions seen by set_debug_active().
   std::atomic<uint64_t> inst_cache_debug_epoch_{0};
   /// @brief The epoch this CU's thread has already invalidated the I$ for.
