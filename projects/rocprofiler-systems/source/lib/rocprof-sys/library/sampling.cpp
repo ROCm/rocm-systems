@@ -78,23 +78,7 @@
 #include <pthread.h>
 #include <signal.h>
 
-namespace tim
-{
-namespace math
-{
-template <typename Tp, typename Up>
-TIMEMORY_INLINE Tp
-plus(Tp&& _lhs, const Up& _rhs)
-{
-    Tp _v = _lhs;
-    plus(_v, _rhs);
-    return _v;
-}
-}  // namespace math
-}  // namespace tim
-namespace rocprofsys
-{
-namespace sampling
+namespace rocprofsys::sampling
 {
 using ::tim::sampling::dynamic;
 using ::tim::sampling::overflow;
@@ -128,15 +112,14 @@ using component::sampling_gpu_temp;
 using component::sampling_gpu_vcn;
 using component::sampling_percent;
 using component::sampling_wall_clock;
-}  // namespace sampling
-}  // namespace rocprofsys
+}  // namespace rocprofsys::sampling
 
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(prevent_reentry, sampling::sampler_t, std::true_type)
 
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(provide_backtrace, sampling::sampler_t, std::false_type)
 
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(buffer_size, sampling::sampler_t,
-                                 TIMEMORY_ESC(std::integral_constant<size_t, 2048>))
+                                 std::integral_constant<size_t, 2048>)
 
 using namespace std::chrono_literals;
 
