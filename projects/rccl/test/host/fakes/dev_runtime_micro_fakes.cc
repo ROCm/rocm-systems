@@ -149,6 +149,12 @@ int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int
   return deftVal;
 }
 
+// Emitted by init.cc, which this binary does not link, so the redirected
+// NCCL_PARAM in dev_runtime.cc does not cover it. Routed through g_loadParam
+// like the params dev_runtime.cc owns, so a test can drive the NCCL_WIN_ENABLE=0
+// opt-out in ncclCommWindowRegister_impl.
+int64_t ncclParamWinEnable() { return g_loadParam("WIN_ENABLE", 1); }
+
 // ---------------------------------------------------------------------------
 // Proxy.
 // ---------------------------------------------------------------------------
