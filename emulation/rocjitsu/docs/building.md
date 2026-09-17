@@ -29,10 +29,6 @@ cmake --build build
 | `RJ_CLANG_TIDY` | `OFF` | Enable clang-tidy static analysis |
 | `LTO` | `OFF` | Enable link-time optimization for Release/RelWithDebInfo |
 
-Benchmark workloads and their dependencies live in
-[rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus).
-See [benchmark-suite.md](benchmark-suite.md) for setup and execution.
-
 ### Sanitizer builds
 
 ```bash
