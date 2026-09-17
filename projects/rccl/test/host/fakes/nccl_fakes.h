@@ -79,15 +79,6 @@ extern std::function<ncclResult_t(struct ncclComm*,
                                   int /*numSegments*/)>
     g_proxyClientBatchQueryFdBlocking;
 
-// ncclProxyClientGetFdBlocking: the cuMem*-import POSIX_FD arm of
-// ncclP2pImportShareableBuffer ships the remote cuMem handle to the peer
-// proxy for conversion into a local fd. Default returns ncclSystemError so
-// unexpected calls fail loudly; the POSIX_FD import test installs a hook
-// that succeeds and writes a canned local fd.
-extern std::function<ncclResult_t(struct ncclComm*, int /*rank*/,
-                                  void* /*handle*/, int* /*convertedFd*/)>
-    g_proxyClientGetFdBlocking;
-
 // ncclDynMemMarkExportToPeer / ncclMemTrackImportFromPeer: the memory-manager
 // bookkeeping the cuMem arms of ncclP2pAllocateShareableBuffer /
 // ncclP2pImportShareableBuffer drive. Neither leaves observable public state

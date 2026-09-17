@@ -72,8 +72,6 @@ std::function<hipError_t(hipDeviceptr_t*, std::size_t*, hipDeviceptr_t)>
     g_hipMemGetAddressRange = DefaultHipMemGetAddressRange;
 std::function<hipError_t(hipIpcMemHandle_t*, void*)>
     g_hipIpcGetMemHandle = DefaultHipIpcGetMemHandle;
-static hipError_t DefaultHipIpcCloseMemHandle(void*) { return hipErrorInvalidValue; }
-std::function<hipError_t(void*)> g_hipIpcCloseMemHandle = DefaultHipIpcCloseMemHandle;
 
 // --- hipMemRetainAllocationHandle / hipMemExportToShareableHandle /
 //     hipMemRelease (the cuMem*-export arm) ------------------------------
@@ -116,68 +114,6 @@ static hipError_t DefaultHipPointerGetAttribute(void* data,
 
 std::function<hipError_t(void*, hipPointer_attribute, hipDeviceptr_t)>
     g_hipPointerGetAttribute = DefaultHipPointerGetAttribute;
-
-// --- cuMem*-import + legacy-IPC-import primitives -----------------------
-// Defaults return hipErrorInvalidValue so any call a test hasn't opted into
-// surfaces as an unexpected call. The granularity default is the exception:
-// it succeeds with a non-zero granularity so the ALIGN_SIZE division in
-// ncclP2pImportShareableBuffer does not divide by zero on the happy path a
-// test drives via the other hooks.
-static hipError_t DefaultHipMemGetAllocationGranularity(
-    std::size_t* granularity, const hipMemAllocationProp*,
-    hipMemAllocationGranularity_flags)
-{
-    if (granularity) *granularity = 4096;
-    return hipSuccess;
-}
-static hipError_t DefaultHipMemImportFromShareableHandle(
-    hipMemGenericAllocationHandle_t* handle, void*, hipMemAllocationHandleType)
-{
-    if (handle) *handle = nullptr;
-    return hipErrorInvalidValue;
-}
-static hipError_t DefaultHipMemAddressReserve(void** ptr, std::size_t,
-                                              std::size_t, void*,
-                                              unsigned long long)
-{
-    if (ptr) *ptr = nullptr;
-    return hipErrorInvalidValue;
-}
-static hipError_t DefaultHipMemMap(void*, std::size_t, std::size_t,
-                                   hipMemGenericAllocationHandle_t,
-                                   unsigned long long)
-{
-    return hipErrorInvalidValue;
-}
-static hipError_t DefaultHipMemSetAccess(void*, std::size_t,
-                                         const hipMemAccessDesc*, std::size_t)
-{
-    return hipErrorInvalidValue;
-}
-static hipError_t DefaultHipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t,
-                                             unsigned int)
-{
-    if (devPtr) *devPtr = nullptr;
-    return hipErrorInvalidValue;
-}
-
-std::function<hipError_t(std::size_t*, const hipMemAllocationProp*,
-                         hipMemAllocationGranularity_flags)>
-    g_hipMemGetAllocationGranularity = DefaultHipMemGetAllocationGranularity;
-std::function<hipError_t(hipMemGenericAllocationHandle_t*, void*,
-                         hipMemAllocationHandleType)>
-    g_hipMemImportFromShareableHandle = DefaultHipMemImportFromShareableHandle;
-std::function<hipError_t(void**, std::size_t, std::size_t, void*,
-                         unsigned long long)>
-    g_hipMemAddressReserve = DefaultHipMemAddressReserve;
-std::function<hipError_t(void*, std::size_t, std::size_t,
-                         hipMemGenericAllocationHandle_t, unsigned long long)>
-    g_hipMemMap = DefaultHipMemMap;
-std::function<hipError_t(void*, std::size_t, const hipMemAccessDesc*,
-                         std::size_t)>
-    g_hipMemSetAccess = DefaultHipMemSetAccess;
-std::function<hipError_t(void**, hipIpcMemHandle_t, unsigned int)>
-    g_hipIpcOpenMemHandle = DefaultHipIpcOpenMemHandle;
 
 // --- device model: runtime version + device properties ------------------
 static hipError_t DefaultHipRuntimeGetVersion(int* version)
@@ -565,17 +501,10 @@ void ResetHipFakes()
 {
     g_hipMemGetAddressRange         = DefaultHipMemGetAddressRange;
     g_hipIpcGetMemHandle            = DefaultHipIpcGetMemHandle;
-    g_hipIpcCloseMemHandle          = DefaultHipIpcCloseMemHandle;
     g_hipMemRetainAllocationHandle  = DefaultHipMemRetainAllocationHandle;
     g_hipMemExportToShareableHandle = DefaultHipMemExportToShareableHandle;
     g_hipMemRelease                 = DefaultHipMemRelease;
     g_hipPointerGetAttribute        = DefaultHipPointerGetAttribute;
-    g_hipMemGetAllocationGranularity  = DefaultHipMemGetAllocationGranularity;
-    g_hipMemImportFromShareableHandle = DefaultHipMemImportFromShareableHandle;
-    g_hipMemAddressReserve          = DefaultHipMemAddressReserve;
-    g_hipMemMap                     = DefaultHipMemMap;
-    g_hipMemSetAccess               = DefaultHipMemSetAccess;
-    g_hipIpcOpenMemHandle           = DefaultHipIpcOpenMemHandle;
     // init.cc device-model seams
     g_hipRuntimeGetVersion          = DefaultHipRuntimeGetVersion;
     g_hipGetDeviceProperties        = DefaultHipGetDeviceProperties;
@@ -768,14 +697,6 @@ hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle, unsigned
 hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* devPtr)
 {
     return g_hipIpcGetMemHandle(handle, devPtr);
-}
-
-hipError_t hipMemAddressFree(void*, size_t) { return hipErrorInvalidValue; }
-
-hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment,
-                                void* addr, unsigned long long flags)
-{
-    return g_hipMemAddressReserve(ptr, size, alignment, addr, flags);
 }
 
 hipError_t hipMemAddressFree(void* ptr, size_t size)
