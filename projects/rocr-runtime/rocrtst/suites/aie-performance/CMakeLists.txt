@@ -114,6 +114,13 @@ else()
   message(STATUS "NPU target: ${NPU_TARGET}")
 endif()
 
+# Full-ELF dispatch is aie2p only -- the design's npu_load_pdi has no aie2 equivalent -- so there
+# is nothing to build for an npu1 target even with a complete toolchain.
+if(AIE_FULL_ELF_SUPPORTED AND NOT NPU_TARGET STREQUAL "npu2")
+  set(AIE_FULL_ELF_SUPPORTED FALSE)
+  message(STATUS "Full-ELF kernel will not be built: it needs an npu2 target.")
+endif()
+
 # ---------------------------------------------------------------------------
 # Peano (llvm-aie) detection
 #
@@ -280,6 +287,44 @@ target_link_libraries(vector-scalar-add-hsa PRIVATE
 add_dependencies(vector-scalar-add-hsa aie_kernel_artifacts)
 
 # ---------------------------------------------------------------------------
+# HSA full-ELF benchmark
+# ---------------------------------------------------------------------------
+
+if(AIE_FULL_ELF_SUPPORTED)
+  # The application dispatches by kernel object now, so it needs an hsaco rather than a bare ELF.
+  # Packaged by the same converter the aie suite uses; DEPENDS names the target, not its outputs,
+  # so the generator cannot run aiecc twice concurrently in one directory.
+  # The converter names sections by architecture, which is what the loader matches against the
+  # agent; NPU_TARGET is the aiecc spelling of the same thing.
+  if(NPU_TARGET STREQUAL "npu2")
+    set(AIE_ARCH "aie2p")
+  else()
+    set(AIE_ARCH "aie2")
+  endif()
+  set(ELF_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsadd_elf.hsaco")
+  add_custom_command(
+    OUTPUT ${ELF_HSACO}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../aie/aie_hsaco.py
+            --hsaco ${ELF_HSACO} --arch ${AIE_ARCH}
+            --kernel elf:${FULL_ELF}:0:1
+    DEPENDS aie_full_elf ${CMAKE_CURRENT_SOURCE_DIR}/../aie/aie_hsaco.py
+    COMMENT "Packaging the full ELF into an hsaco for the benchmark")
+  add_custom_target(vsadd_elf_hsaco_bench DEPENDS ${ELF_HSACO})
+
+  add_executable(vector-scalar-add-hsa-elf vector_scalar_add_hsa_elf.cpp)
+  target_compile_features(vector-scalar-add-hsa-elf PRIVATE cxx_std_20)
+  target_compile_definitions(vector-scalar-add-hsa-elf PRIVATE
+    DEFAULT_ELF_HSACO_PATH=${ELF_HSACO}
+    DEFAULT_ELF_KERNEL_NAME="main:sequence"
+  )
+  target_link_libraries(vector-scalar-add-hsa-elf PRIVATE
+    benchmark::benchmark_main
+    hsa-runtime64::hsa-runtime64
+  )
+  add_dependencies(vector-scalar-add-hsa-elf vsadd_elf_hsaco_bench)
+endif()
+
+# ---------------------------------------------------------------------------
 # HSA vmem alloc/release microbenchmark
 # ---------------------------------------------------------------------------
 
@@ -289,3 +334,30 @@ target_link_libraries(vmem-alloc-hsa PRIVATE
   benchmark::benchmark_main
   hsa-runtime64::hsa-runtime64
 )
+
+# ---------------------------------------------------------------------------
+# HSA vmem size-sweep microbenchmark
+# ---------------------------------------------------------------------------
+
+add_executable(vmem-size-hsa vmem_size_hsa.cpp)
+target_compile_features(vmem-size-hsa PRIVATE cxx_std_20)
+target_link_libraries(vmem-size-hsa PRIVATE
+  benchmark::benchmark_main
+  hsa-runtime64::hsa-runtime64
+)
+
+# ---------------------------------------------------------------------------
+# XRT bo size-sweep microbenchmark
+# ---------------------------------------------------------------------------
+
+add_executable(vmem-size-xrt vmem_size_xrt.cpp)
+target_compile_features(vmem-size-xrt PRIVATE cxx_std_20)
+target_include_directories(vmem-size-xrt PRIVATE "${XRT_INC_DIR}")
+target_compile_definitions(vmem-size-xrt PRIVATE
+  DEFAULT_XCLBIN_PATH=${FINAL_XCLBIN}
+)
+target_link_directories(vmem-size-xrt PRIVATE "${XRT_LIB_DIR}")
+target_link_libraries(vmem-size-xrt PRIVATE
+  benchmark::benchmark_main
+  xrt_coreutil)
+add_dependencies(vmem-size-xrt aie_kernel_artifacts)
