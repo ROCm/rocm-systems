@@ -2542,17 +2542,6 @@ def main(argv=None):
                     "Each --pmc must specify at least one counter."
                 )
 
-    # Validate incompatible options
-    if cli_multipass and cmd_args.pid:
-        fatal_error(
-            "Multi-pass counter collection (multiple --pmc flags) is not compatible with attach mode (--pid)"
-        )
-
-    if cli_multipass and cmd_args.collection_period:
-        fatal_error(
-            "Multi-pass counter collection (multiple --pmc flags) is not compatible with --collection-period"
-        )
-
     def validate_selected_regions_conflicts(_args):
         if getattr(_args, "selected_regions", False) and getattr(
             _args, "att_no_intercept", False
@@ -2609,6 +2598,48 @@ def main(argv=None):
     if replay_enabled and cli_has_pmc:
         cmd_args.pmc = [g if isinstance(g, list) else [g] for g in cmd_args.pmc]
         cli_multipass = False
+
+    def multipass_source(cmd_args, inp_args):
+        """Return why the arguments request application-replay counter multi-pass."""
+        cli_pmc = getattr(cmd_args, "pmc", None)
+        input_pmc_jobs = [itr for itr in inp_args if has_set_attr(itr, "pmc")]
+
+        if (
+            cli_pmc is not None
+            and len(cli_pmc) > 1
+            and getattr(cmd_args, "replay_mode", None) != "kernel"
+        ):
+            return "multiple --pmc flags"
+        if len(input_pmc_jobs) > 1:
+            return "multiple input-file jobs"
+        if cli_pmc is not None and input_pmc_jobs:
+            return "--pmc combined with input-file pmc"
+        return None
+
+    def multipass_incompatible_message(cmd_args, inp_args):
+        """Return an error for options incompatible with counter multi-pass."""
+        source = multipass_source(cmd_args, inp_args)
+        if source is None:
+            return None
+        if has_set_attr(cmd_args, "pid") or any(
+            has_set_attr(itr, "pid") for itr in inp_args
+        ):
+            return (
+                f"Multi-pass counter collection ({source}) is not compatible "
+                "with attach mode (--pid)"
+            )
+        if has_set_attr(cmd_args, "collection_period") or any(
+            has_set_attr(itr, "collection_period") for itr in inp_args
+        ):
+            return (
+                f"Multi-pass counter collection ({source}) is not compatible "
+                "with --collection-period"
+            )
+        return None
+
+    incompatible = multipass_incompatible_message(cmd_args, inp_args)
+    if incompatible is not None:
+        fatal_error(incompatible)
 
     use_multipass = cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
 

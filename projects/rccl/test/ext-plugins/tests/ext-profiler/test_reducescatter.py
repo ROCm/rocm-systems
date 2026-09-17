@@ -29,6 +29,8 @@ def test_profiler_initialization(paths):
         "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
         "LD_LIBRARY_PATH": f"{paths.RCCL_INSTALL_DIR}:{paths.OMPI_INSTALL_DIR}/lib:{paths.PROFILER_DIR}:{env.get('LD_LIBRARY_PATH', '')}",
         "HSA_NO_SCRATCH_RECLAIM": "1",
+        # DDA claims ReduceScatter on 8 ranks and is not profiler-traced.
+        "RCCL_DDA_ENABLE": "0",
         "NCCL_PROFILER_PLUGIN": paths.PROFILER_SO,
         "NCCL_PROFILE_EVENT_MASK": "3",  # Group (1) + Coll (2) = 3
         "NCCL_PROFILE_DUMP_FILE": dump_file_base,
@@ -104,6 +106,8 @@ def test_invalid_mask_value(paths):
         "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
         "LD_LIBRARY_PATH": f"{paths.RCCL_INSTALL_DIR}:{paths.OMPI_INSTALL_DIR}/lib:{paths.PROFILER_DIR}:{env.get('LD_LIBRARY_PATH', '')}",
         "HSA_NO_SCRATCH_RECLAIM": "1",
+        # DDA claims ReduceScatter on 8 ranks and is not profiler-traced.
+        "RCCL_DDA_ENABLE": "0",
         "NCCL_PROFILER_PLUGIN": paths.PROFILER_SO,
         "NCCL_PROFILE_EVENT_MASK": "0",  # Invalid: no events enabled
         "NCCL_PROFILE_DUMP_FILE": dump_file_base,
@@ -179,6 +183,8 @@ def test_single_node_detailed_profiling(paths):
         "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
         "LD_LIBRARY_PATH": f"{paths.RCCL_INSTALL_DIR}:{paths.OMPI_INSTALL_DIR}/lib:{paths.PROFILER_DIR}:{env.get('LD_LIBRARY_PATH', '')}",
         "HSA_NO_SCRATCH_RECLAIM": "1",
+        # DDA claims ReduceScatter on 8 ranks and is not profiler-traced.
+        "RCCL_DDA_ENABLE": "0",
         "NCCL_PROFILER_PLUGIN": paths.PROFILER_SO,
         "NCCL_PROFILE_EVENT_MASK": "255",  # All events: Group (1) + Coll (2) + P2P (4) + ProxyOp (8) + ProxyStep (16) + ProxyCtrl (32) + KernelCh (64) + NetPlugin (128) = 255
         "NCCL_PROFILE_DUMP_FILE": dump_file_base,
@@ -313,6 +319,8 @@ def test_multinode_detailed_profiling(paths):
         "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
         "LD_LIBRARY_PATH": f"{paths.RCCL_INSTALL_DIR}:{paths.OMPI_INSTALL_DIR}/lib:{paths.PROFILER_DIR}:{env.get('LD_LIBRARY_PATH', '')}",
         "HSA_NO_SCRATCH_RECLAIM": "1",
+        # DDA claims ReduceScatter on 8 ranks and is not profiler-traced.
+        "RCCL_DDA_ENABLE": "0",
         "NCCL_IGNORE_CPU_AFFINITY": "1",
         "NCCL_PROFILER_PLUGIN": paths.PROFILER_SO,
         "NCCL_PROFILE_EVENT_MASK": "255",  # All events: Group (1) + Coll (2) + P2P (4) + ProxyOp (8) + ProxyStep (16) + ProxyCtrl (32) + KernelCh (64) + NetPlugin (128) = 255

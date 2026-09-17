@@ -216,7 +216,7 @@ void
 update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _env_val,
            bool _append, std::string_view _join_delim)
 {
-    auto _mode = _append ? update_mode::APPEND : update_mode::REPLACE;
+    auto _mode = _append ? update_mode::append : update_mode::replace;
     rocprofsys::common::update_env(_environ, _env_var, std::forward<Tp>(_env_val), _mode,
                                    _join_delim, updated_envs, original_envs);
 }
@@ -229,13 +229,13 @@ add_default_env(std::vector<std::string>& _environ, std::string_view _env_var,
     auto       _key = fmt::format("{}=", _env_var);
     const auto exists =
         std::any_of(_environ.begin(), _environ.end(), [&_key](const std::string& entry) {
-            return std::string_view{ entry }.find(_key) == 0;
+            return std::string_view{ entry }.starts_with(_key);
         });
 
     if(exists) return;
 
     rocprofsys::common::update_env(_environ, _env_var, std::forward<Tp>(_env_val),
-                                   update_mode::REPLACE, ":", updated_envs,
+                                   update_mode::replace, ":", updated_envs,
                                    original_envs);
 }
 
@@ -728,8 +728,9 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
     if(_generate_configs)
     {
         auto _is_omni_cfg = [](std::string_view itr) {
-            return (itr.find("ROCPROFSYS") == 0 && itr.find(env_vars::MODE) != 0 &&
-                    itr.find("ROCPROFSYS_DEBUG_") != 0 && itr.find('=') < itr.length());
+            return (itr.starts_with("ROCPROFSYS") && !itr.starts_with(env_vars::MODE) &&
+                    !itr.starts_with("ROCPROFSYS_DEBUG_") &&
+                    itr.find('=') < itr.length());
             // rocprof-sys has miscellaneous env options starting with ROCPROFSYS_DEBUG_
             // that are not official options
         };

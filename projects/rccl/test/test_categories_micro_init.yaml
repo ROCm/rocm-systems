@@ -1,4 +1,4 @@
-# rccl-UnitTestsMicroInit(+-uncached) — shared/ctest schema.
+# rccl-UnitTestsMicroInit(+-uncached,-faultinj) — shared/ctest schema; matched by suite name, so every variant reuses it.
 # Host-only micro-tests for src/init.cc (no GPU, no librccl/HIP runtime); build in Release and Debug.
 # RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
 #
