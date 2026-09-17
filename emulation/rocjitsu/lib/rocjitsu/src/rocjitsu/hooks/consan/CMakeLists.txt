@@ -60,7 +60,6 @@ add_library(
     rocjitsu_consan_report_renderer
     STATIC
         rj_hsa_dbi_report_renderer.cpp
-        rj_hsa_dbi_conflict_rendering.cpp
 )
 set_target_properties(
     rocjitsu_consan_report_renderer

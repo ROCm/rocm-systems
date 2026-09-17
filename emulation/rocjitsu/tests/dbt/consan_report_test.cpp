@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "patch/consan/consan_model_test_support.h"
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_conflict_rendering.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_report_renderer.h"
 
 #include <gtest/gtest.h>
 
@@ -59,10 +59,25 @@ Evidence access(uint32_t index, uint32_t owner, uint32_t byte, ShadowAccessKind 
   return result;
 }
 
-std::string conflict_line(const ConflictRendering &rendered) {
+std::vector<ReportDiagnostic> render_evidence(const ReportPipelineInput &input,
+                                              const DecodedEvidence &records,
+                                              const ConflictAnalysis &analysis) {
+  DecodedReport report;
+  report.records = records;
+  accumulate_analysis(report.summary, analysis);
+  return render_report({input, report, report.summary, &analysis});
+}
+
+std::string summary_line(const std::vector<ReportDiagnostic> &rendered) {
+  const auto found =
+      std::ranges::find(rendered, ReportDiagnosticKind::Summary, &ReportDiagnostic::kind);
+  return found == rendered.end() ? std::string{} : found->text;
+}
+
+std::string conflict_line(const std::vector<ReportDiagnostic> &rendered) {
   const auto found = std::ranges::find_if(
-      rendered.details, [](const auto &line) { return line.text.starts_with("ConSan conflict "); });
-  return found == rendered.details.end() ? std::string{} : found->text;
+      rendered, [](const auto &line) { return line.text.starts_with("ConSan conflict "); });
+  return found == rendered.end() ? std::string{} : found->text;
 }
 
 TEST(ConSanReportTest, MaskIsAcceptedOnlyWithItsCommittedCurrentWindow) {
@@ -181,7 +196,7 @@ TEST(ConSanReportTest, CrossWaveMasksAreIndependentAndMissingIsExplicit) {
     mode.evidence[1].exact_lane_mask = read_mask;
     const auto analysis = analyze_conflicts(mode.evidence, false);
     ASSERT_EQ(analysis.conflict_count, 1u);
-    const auto line = conflict_line(render_conflicts({}, {}, {}, mode, analysis));
+    const auto line = conflict_line(render_evidence({}, mode, analysis));
     EXPECT_NE(line.find("first_lanes=0x0000000000000001"), std::string::npos);
     EXPECT_NE(line.find(read_mask ? "second_lanes=0x00000000000000f0" : "second_lanes=unavailable"),
               std::string::npos);
@@ -208,12 +223,12 @@ TEST(ConSanReportTest, ConflictSitesRemainVisibleBeyondDetailLimit) {
   ReportPipelineInput input;
   input.reader = 101;
   input.input_fingerprint = "object-a";
-  const auto rendered = render_conflicts(input, {}, {}, mode, analysis);
+  const auto rendered = render_evidence(input, mode, analysis);
   const auto line = conflict_line(rendered);
   EXPECT_NE(line.find("first_instruction=0x120 second_instruction=0x240"), std::string::npos);
   EXPECT_NE(line.find("code_object=object-a"), std::string::npos);
   EXPECT_NE(line.find("dispatch=0xb workgroup=(2,3,4)"), std::string::npos);
-  EXPECT_TRUE(std::ranges::any_of(rendered.details, [](const auto &entry) {
+  EXPECT_TRUE(std::ranges::any_of(rendered, [](const auto &entry) {
     return entry.text.find("omitted=6 after log limit=64") != std::string::npos;
   }));
 }
@@ -233,7 +248,7 @@ TEST(ConSanReportTest, MissingMappingIsNotInstructionZeroAndObjectsRemainDistinc
   for (const char *object : {"object-a", "object-b"}) {
     ReportPipelineInput input;
     input.input_fingerprint = object;
-    const auto line = conflict_line(render_conflicts(input, {}, {}, mode, analysis));
+    const auto line = conflict_line(render_evidence(input, mode, analysis));
     EXPECT_NE(line.find("first_instruction=unavailable second_instruction=0x0"), std::string::npos);
     EXPECT_NE(line.find(std::string("code_object=") + object), std::string::npos);
   }
@@ -258,17 +273,17 @@ TEST(ConSanReportTest, OverlappingMappingsDoNotInventUniqueInstructionAttributio
   AccessStaticMetadata runtime_metadata = metadata;
   ReportPipelineInput input;
   input.static_metadata = &runtime_metadata;
-  const auto line = conflict_line(render_conflicts(input, {}, {}, mode, analysis));
+  const auto line = conflict_line(render_evidence(input, mode, analysis));
   EXPECT_NE(line.find("first_instruction=ambiguous second_instruction=ambiguous"),
             std::string::npos);
   // Multiple aliases of the same original instruction still give a unique PC.
   runtime_metadata.mappings[1].instruction_offset = 0x120;
-  const auto aliases = conflict_line(render_conflicts(input, {}, {}, mode, analysis));
+  const auto aliases = conflict_line(render_evidence(input, mode, analysis));
   EXPECT_NE(aliases.find("first_instruction=0x120 second_instruction=0x120"), std::string::npos);
   // A supplied mapping table is authoritative even if an entry still has an
   // older mapping pointer. Do not invent attribution for a slot it omits.
   runtime_metadata.mappings.clear();
-  const auto missing = conflict_line(render_conflicts(input, {}, {}, mode, analysis));
+  const auto missing = conflict_line(render_evidence(input, mode, analysis));
   EXPECT_NE(missing.find("first_instruction=unavailable second_instruction=unavailable"),
             std::string::npos);
 }
@@ -290,13 +305,13 @@ TEST(ConSanReportTest, ExamplesAreBoundedAndDeduplicatedWithoutChangingPairCount
     EXPECT_EQ(analysis.examples.size(), std::min(limit, 3u));
     ReportPipelineInput input;
     input.input_fingerprint = "bounded";
-    const auto rendered = render_conflicts(input, {}, {}, mode, analysis);
-    EXPECT_EQ(std::ranges::count_if(
-                  rendered.details,
-                  [](const auto &line) { return line.text.starts_with("ConSan conflict "); }),
-              analysis.examples.size());
-    EXPECT_NE(rendered.summary_fields.find("conflict_pairs_without_example=" +
-                                           std::to_string(5u - std::min(limit, 3u))),
+    const auto rendered = render_evidence(input, mode, analysis);
+    EXPECT_EQ(
+        std::ranges::count_if(
+            rendered, [](const auto &line) { return line.text.starts_with("ConSan conflict "); }),
+        analysis.examples.size());
+    EXPECT_NE(summary_line(rendered).find("conflict_pairs_without_example=" +
+                                          std::to_string(5u - std::min(limit, 3u))),
               std::string::npos);
     if (limit) {
       EXPECT_EQ(analysis.examples.front().first.index, 0u);

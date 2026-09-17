@@ -3624,12 +3624,16 @@ TEST(HsaHooksUnitTest, AutoReportRendererConsumesOnlyTypedResultsAndPreservesDia
       .index = 3,
       .words = {0x11, 0x22, 4},
   });
+  evidence.evidence.emplace_back();
   decoded.records = std::move(evidence);
   rocjitsu::consan::hook::ConflictAnalysis conflict_analysis =
       rocjitsu::consan::hook::ConflictAnalysis{};
   const auto rendered =
       rocjitsu::consan::hook::render_report({input, decoded, decoded.summary, &conflict_analysis});
-  ASSERT_GE(rendered.size(), 2u);
+  ASSERT_EQ(rendered.size(), 3u);
+  EXPECT_EQ(rendered[0].kind, ReportDiagnosticKind::Evidence);
+  EXPECT_EQ(rendered[1].kind, ReportDiagnosticKind::Summary);
+  EXPECT_EQ(rendered[2].kind, ReportDiagnosticKind::Detail);
   EXPECT_TRUE(std::ranges::any_of(rendered, [](const auto &diagnostic) {
     return diagnostic.kind == rocjitsu::consan::hook::ReportDiagnosticKind::Evidence &&
            diagnostic.text == "ConSan malformed packed watchpoint index=3 low=0x00000011 "
@@ -3656,10 +3660,19 @@ TEST(HsaHooksUnitTest, AutoReportRendererEmitsSummary) {
 }
 
 TEST(HsaHooksUnitTest, AutoReportDetailLoggingIsBoundedIndependentlyOfTraceSize) {
-  EXPECT_EQ(rocjitsu::consan::hook::report_detail_count(0), 0u);
-  EXPECT_EQ(rocjitsu::consan::hook::report_detail_count(3), 3u);
-  EXPECT_EQ(rocjitsu::consan::hook::report_detail_count(4), 4u);
-  EXPECT_EQ(rocjitsu::consan::hook::report_detail_count(19'064), 4u);
+  ReportPipelineInput input;
+  input.reader = 17;
+  DecodedReport decoded;
+  decoded.records.evidence.resize(65);
+  ConflictAnalysis analysis;
+  const auto rendered = render_report({input, decoded, decoded.summary, &analysis});
+  ASSERT_EQ(rendered.size(), 66u); // Summary, 64 access details, and omission notice.
+  EXPECT_EQ(rendered.front().kind, ReportDiagnosticKind::Summary);
+  for (size_t index = 1; index <= 64; ++index) {
+    EXPECT_EQ(rendered[index].kind, ReportDiagnosticKind::Detail);
+    EXPECT_TRUE(rendered[index].text.starts_with("ConSan access reader=17 index="));
+  }
+  EXPECT_EQ(rendered.back().text, "ConSan access reader=17 omitted=1 after log limit=64");
 }
 
 TEST(HsaHooksUnitTest, ConSanRejectsInvalidMode) {
