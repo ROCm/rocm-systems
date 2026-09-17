@@ -35,9 +35,9 @@ int RasTestClose(int);
 int RasTestAtexit(void (*)(void));
 uint64_t RasTestClockNano();
 
-// Redirect the three process-wide APIs used by ras.cc before including that
-// file, then restore their real names immediately afterward. Every header that
-// uses poll, close, or atexit must stay above this guard-less macro block.
+// Redirect the process-wide APIs used by ras.cc before including that file,
+// then restore their real names immediately afterward. Every header that uses
+// the symbols below must stay above this guard-less macro block.
 #define poll RasTestPoll
 #define close RasTestClose
 #define atexit RasTestAtexit
