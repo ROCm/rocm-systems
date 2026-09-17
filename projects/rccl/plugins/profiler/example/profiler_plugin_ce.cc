@@ -55,6 +55,7 @@ extern double getProfilerStartTime(void);
 // ctx->ceEvents.mutex, never the reverse.
 static struct {
   pthread_t pollerThread;
+  bool pollerStarted;   // poller thread exists, so CE global state is live
   bool pollerRunning;
   pthread_mutex_t mutex;
   struct context** contextRegistry;
@@ -64,6 +65,7 @@ static struct {
   int pollerIntervalUs;
 } ceProfilerCtxt = {
   .pollerThread = 0,
+  .pollerStarted = false,
   .pollerRunning = false,
   .mutex = PTHREAD_MUTEX_INITIALIZER,
   .contextRegistry = NULL,
@@ -121,6 +123,9 @@ static void pollCeCollEvents(struct context* ctx) {
 
       event->pollerLinked = false;
       *ceCollPtr = event->pollerNext;
+      // Release only after unlinking, so the slot cannot be recycled while still
+      // reachable from ceCollHead.
+      __atomic_sub_fetch(&event->base.refCount, 1, __ATOMIC_ACQ_REL);
       continue;
     }
 
@@ -175,6 +180,7 @@ static void pollCeSyncEvents(struct context* ctx) {
 
       event->pollerLinked = false;
       *ceSyncPtr = event->pollerNext;
+      __atomic_sub_fetch(&event->base.refCount, 1, __ATOMIC_ACQ_REL);
       continue;
     }
 
@@ -229,6 +235,7 @@ static void pollCeBatchEvents(struct context* ctx) {
 
       event->pollerLinked = false;
       *ceBatchPtr = event->pollerNext;
+      __atomic_sub_fetch(&event->base.refCount, 1, __ATOMIC_ACQ_REL);
       continue;
     }
 
@@ -287,6 +294,7 @@ ncclResult_t ceProfilerInitGlobal(void) {
     = (struct context**)calloc(ceProfilerCtxt.contextCapacity,
                                sizeof(struct context*));
   if (!ceProfilerCtxt.contextRegistry) {
+    ceProfilerCtxt.contextCapacity = 0;
     return ncclSystemError;
   }
 
@@ -296,21 +304,28 @@ ncclResult_t ceProfilerInitGlobal(void) {
     // them rather than leaving a freed pointer and a "running" poller behind.
     free(ceProfilerCtxt.contextRegistry);
     ceProfilerCtxt.contextRegistry = NULL;
+    ceProfilerCtxt.contextCapacity = 0;
     ceProfilerCtxt.pollerRunning = false;
     return ncclSystemError;
   }
 
+  ceProfilerCtxt.pollerStarted = true;
   return ncclSuccess;
 }
 
 // Finalize CE profiler global state
 ncclResult_t ceProfilerFinalizeGlobal(FILE* fh) {
-  if (ceProfilerCtxt.contextRegistry) {
-    __atomic_store_n(&ceProfilerCtxt.pollerRunning, false, __ATOMIC_RELAXED);
-    pthread_join(ceProfilerCtxt.pollerThread, NULL);
-    free(ceProfilerCtxt.contextRegistry);
-    ceProfilerCtxt.contextRegistry = NULL;
-  }
+  // With CE events disabled the poller was never created, and pthread_join(0) segfaults.
+  if (!ceProfilerCtxt.pollerStarted) return ncclSuccess;
+
+  __atomic_store_n(&ceProfilerCtxt.pollerRunning, false, __ATOMIC_RELAXED);
+  pthread_join(ceProfilerCtxt.pollerThread, NULL);
+  ceProfilerCtxt.pollerStarted = false;
+
+  free(ceProfilerCtxt.contextRegistry);
+  ceProfilerCtxt.contextRegistry = NULL;
+  ceProfilerCtxt.contextCount = 0;
+  ceProfilerCtxt.contextCapacity = 0;
   return ncclSuccess;
 }
 
@@ -324,10 +339,12 @@ void ceProfilerRegisterContext(struct context* ctx) {
   ctx->ceEvents.ceSyncHead = NULL;
   ctx->ceEvents.ceBatchHead = NULL;
 
-  if (pthread_mutex_lock(&ceProfilerCtxt.mutex) != 0) {
-    pthread_mutex_destroy(&ctx->ceEvents.mutex);
-    return;
-  }
+  // Nothing polls this context, and growing from zero capacity would leave a
+  // registry that makes teardown think CE is live.
+  if (!ceProfilerCtxt.pollerStarted) return;
+
+  // Must not be skipped: an unregistered context is never polled.
+  pthread_mutex_lock(&ceProfilerCtxt.mutex);
 
   // Non-CE activation masks do not initialize the global poller. Keep the
   // per-context mutex valid for unconditional cleanup, but do not register
@@ -367,9 +384,10 @@ void ceProfilerRegisterContext(struct context* ctx) {
 
 // Deregister context from CE poller
 void ceProfilerDeregisterContext(struct context* ctx) {
-  if (pthread_mutex_lock(&ceProfilerCtxt.mutex) != 0) {
-    return;
-  }
+  if (!ceProfilerCtxt.pollerStarted) return;
+
+  // Must not be skipped: the poller would walk this context after it is freed.
+  pthread_mutex_lock(&ceProfilerCtxt.mutex);
 
   for (int i = 0; i < ceProfilerCtxt.contextCount; i++) {
     if (ceProfilerCtxt.contextRegistry[i] &&
@@ -384,9 +402,8 @@ void ceProfilerDeregisterContext(struct context* ctx) {
 }
 
 void ceProfilerCleanupPendingEvents(struct context* ctx) {
-  if (pthread_mutex_lock(&ctx->ceEvents.mutex) != 0) {
-    return;
-  }
+  // Must not be skipped: it would leak this context's CUDA events.
+  pthread_mutex_lock(&ctx->ceEvents.mutex);
 
   struct ceColl* ceColl = ctx->ceEvents.ceCollHead;
   while (ceColl) {
@@ -427,6 +444,11 @@ CeTimingMode_t ceProfilerGetTimingMode(void) {
 
 // Start CE Coll event
 ncclResult_t ceProfilerStartCeCollEvent(struct context* ctx, void** eHandle, ncclProfilerEventDescr_v6_t* eDescr, double startTime) {
+  // Core reads the handle back to decide whether to stop this event and what to
+  // parent CeSync/CeBatch to, so a path that creates no event must leave it NULL.
+  *eHandle = NULL;
+  if (ctx->ceCollPoolSize <= 0) return ncclSuccess;
+
   struct ceColl* event;
   int ceCollId = __atomic_fetch_add(&ctx->ceCollPoolIndex, 1, __ATOMIC_RELAXED);
   if ((ceCollId - __atomic_load_n(&ctx->ceCollPoolBase, __ATOMIC_RELAXED)) < ctx->ceCollPoolSize) {
@@ -479,6 +501,8 @@ ncclResult_t ceProfilerStartCeCollEvent(struct context* ctx, void** eHandle, ncc
     // Record start event to stream
     cudaEventRecord(event->startEvent, event->stream);
 
+    // Must not be skipped: an unlinked event is never polled, so its slot would
+    // never retire.
     pthread_mutex_lock(&ctx->ceEvents.mutex);
     if (event->parent) {
       taskEventQueueEnqueue(event->parent, &event->base);
@@ -509,6 +533,10 @@ ncclResult_t ceProfilerStopCeCollEvent(void* eHandle) {
 
 // Start CE Sync event
 ncclResult_t ceProfilerStartCeSyncEvent(struct context* ctx, void** eHandle, ncclProfilerEventDescr_v6_t* eDescr, double startTime) {
+  *eHandle = NULL;
+  if (ctx->ceSyncPoolSize <= 0) return ncclSuccess;
+  if (eDescr->parentObj == NULL) return ncclSuccess;
+
   struct ceSync* event;
   int ceSyncId = __atomic_fetch_add(&ctx->ceSyncPoolIndex, 1, __ATOMIC_RELAXED);
   if ((ceSyncId - __atomic_load_n(&ctx->ceSyncPoolBase, __ATOMIC_RELAXED)) < ctx->ceSyncPoolSize) {
@@ -587,6 +615,10 @@ ncclResult_t ceProfilerStopCeSyncEvent(void* eHandle) {
 
 // Start CE Batch event
 ncclResult_t ceProfilerStartCeBatchEvent(struct context* ctx, void** eHandle, ncclProfilerEventDescr_v6_t* eDescr, double startTime) {
+  *eHandle = NULL;
+  if (ctx->ceBatchPoolSize <= 0) return ncclSuccess;
+  if (eDescr->parentObj == NULL) return ncclSuccess;
+
   struct ceBatch* event;
   int ceBatchId = __atomic_fetch_add(&ctx->ceBatchPoolIndex, 1, __ATOMIC_RELAXED);
   if ((ceBatchId - __atomic_load_n(&ctx->ceBatchPoolBase, __ATOMIC_RELAXED)) < ctx->ceBatchPoolSize) {
