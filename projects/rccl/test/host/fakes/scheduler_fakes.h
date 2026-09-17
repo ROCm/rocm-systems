@@ -14,7 +14,6 @@
 
 #include "nccl.h"
 #include "nccl_common.h"  // ncclFunc_t: an internal type, not part of the public nccl.h API surface
-#include "sym_kernels.h"  // ncclSymkKernelId, ncclSymkDevWork
 
 struct ncclComm;
 struct ncclTaskColl;
@@ -43,30 +42,15 @@ extern std::function<void(struct ncclComm*, struct ncclKernelPlan*, int, enum nc
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, struct ncclProxyOp*)>
     g_addProxyOpIfNeeded;
 
-// ncclSymkAvailable/ncclTuningCompute seams now live in sym_kernels_fakes.h/tuning_fakes.h, not here.
+// ncclSymkAvailable/ncclTuningCompute/ncclSymk{LLKernelMask,DynamicSmemKernelMask,GetKernelIndex,
+// KernelIdToString,MakeDevWork} seams live in sym_kernels_fakes.h/tuning_fakes.h, not here.
 
 // enqueue.cc's ncclGetCollNetSupport/ncclGetRegBuff: default reports neither is available.
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getCollNetSupport;
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getRegBuff;
 
-// sym_kernels.cc's ncclSymkLLKernelMask: default has no bits set (Block 10's LL-kernel-init check never fires).
-extern std::function<int()> g_symkLLKernelMask;
-
 // plugin/profiler.cc's ncclProfilerPluginLoaded: default matches nccl_stubs.cc (no plugin loaded).
 extern std::function<bool()> g_profilerPluginLoaded;
-
-// sym_kernels.cc's ncclSymkGetKernelIndex: default always selects index 0 (the 1-element kernel tables).
-extern std::function<int(ncclSymkKernelId, int, ncclDataType_t)> g_symkGetKernelIndex;
-
-// sym_kernels.cc's ncclSymkKernelIdToString: default returns a fixed, recognizable name.
-extern std::function<const char*(int)> g_symkKernelIdToString;
-
-// sym_kernels.cc's ncclSymkDynamicSmemKernelMask: default has no bits set (kernelDynSmem stays 0).
-extern std::function<int()> g_symkDynamicSmemKernelMask;
-
-// sym_kernels.cc's ncclSymkMakeDevWork: trivial success; designing its devWork output is Block 12's job.
-extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*)>
-    g_symkMakeDevWork;
 
 void ResetSchedulerFakes();
 

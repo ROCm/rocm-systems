@@ -2893,6 +2893,7 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ChannelExhaustion_NotIsSymLast
   task.nMaxChannels = 1;
   task.isSymLast = 0;  // not last: the exhaustion check below actually gets reached
   ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  // ncclSuccess here is a production bug: the goto fail at symmetric_sched.cc:442 never sets ret first.
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
   EXPECT_EQ(scene.plan->kernelSymArgs, nullptr);
 }
