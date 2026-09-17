@@ -426,7 +426,7 @@ emplace_client(Tp&                                 data,
     {
         if(itr && *itr == _client_v)
         {
-            ROCP_WARNING << fmt::format(
+            ROCP_INFO << fmt::format(
                 "found matching client library for '{}' :: {}", _name, itr->get_name());
             return itr;
         }
@@ -760,12 +760,12 @@ invoke_client_configure(std::optional<client_library>& itr)
             }
         }
 
-        ROCP_WARNING << fmt::format("initialized tool configure for {} :: {} :: {} :: {} :: {}",
-                                    itr->get_name(),
-                                    sdk::utility::as_hex(itr->configure_func),
-                                    sdk::utility::as_hex(itr->configure_result),
-                                    sdk::utility::as_hex(itr->configure_result->initialize),
-                                    sdk::utility::as_hex(itr->configure_result->finalize));
+        ROCP_INFO << fmt::format("initialized tool configure for {} :: {} :: {} :: {} :: {}",
+                                 itr->get_name(),
+                                 sdk::utility::as_hex(itr->configure_func),
+                                 sdk::utility::as_hex(itr->configure_result),
+                                 sdk::utility::as_hex(itr->configure_result->initialize),
+                                 sdk::utility::as_hex(itr->configure_result->finalize));
     }
     else
     {
@@ -810,12 +810,12 @@ invoke_client_initializer(std::optional<client_library>& itr)
                 invoke_client_finalizer(_id);
         };
 
-        ROCP_WARNING << fmt::format("invoking tool initialize for {} :: {} :: {} :: {} :: {}",
-                                    itr->get_name(),
-                                    sdk::utility::as_hex(itr->configure_func),
-                                    sdk::utility::as_hex(itr->configure_result),
-                                    sdk::utility::as_hex(itr->configure_result->initialize),
-                                    sdk::utility::as_hex(itr->configure_result->finalize));
+        ROCP_INFO << fmt::format("invoking tool initialize for {} :: {} :: {} :: {} :: {}",
+                                 itr->get_name(),
+                                 sdk::utility::as_hex(itr->configure_func),
+                                 sdk::utility::as_hex(itr->configure_result),
+                                 sdk::utility::as_hex(itr->configure_result->initialize),
+                                 sdk::utility::as_hex(itr->configure_result->finalize));
         context::push_client(itr->internal_client_id.handle);
         itr->configure_result->initialize(client_fini_func, itr->configure_result->tool_data);
         context::pop_client(itr->internal_client_id.handle);
@@ -970,12 +970,12 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
             context::stop_client_contexts(itr->internal_client_id);
             if(itr->configure_result && itr->configure_result->finalize)
             {
-                ROCP_WARNING << fmt::format("invoking tool finalize for {} :: {} :: {} :: {} :: {}",
-                                            itr->get_name(),
-                                            sdk::utility::as_hex(itr->configure_func),
-                                            sdk::utility::as_hex(itr->configure_result),
-                                            sdk::utility::as_hex(itr->configure_result->initialize),
-                                            sdk::utility::as_hex(itr->configure_result->finalize));
+                ROCP_INFO << fmt::format("invoking tool finalize for {} :: {} :: {} :: {} :: {}",
+                                         itr->get_name(),
+                                         sdk::utility::as_hex(itr->configure_func),
+                                         sdk::utility::as_hex(itr->configure_result),
+                                         sdk::utility::as_hex(itr->configure_result->initialize),
+                                         sdk::utility::as_hex(itr->configure_result->finalize));
 
                 // set to nullptr so finalize only gets called once
                 rocprofiler_tool_finalize_t _finalize_func = nullptr;
