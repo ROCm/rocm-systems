@@ -80,7 +80,7 @@ struct thread_trace_parameter_pack
     size_t num_buffers = 1;
 
     rocprofiler_thread_trace_resource_mode_t resource_mode =
-        ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA;
+        ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT;
 
     bool bSerialize = false;
 

@@ -99,7 +99,7 @@ Resource initialization modes
 
 ``ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE`` applies to both device and dispatch thread trace services. The following modes are currently supported:
 
-- ``ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT``: Currently equivalent to ``ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA``. Omitting the parameter has the same behavior.
+- ``ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT``: Currently equivalent to ``ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT``. Omitting the parameter has the same behavior.
 
 - ``ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA``: Allocates resources during HSA initialization for configured GPUs visible to ROCr, respecting ``ROCR_VISIBLE_DEVICES``.
 

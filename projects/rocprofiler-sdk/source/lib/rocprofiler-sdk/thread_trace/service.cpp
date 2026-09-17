@@ -94,10 +94,10 @@ build_pack_from_array(parameter_pack&                             pack,
             {
                 switch(param.value)
                 {
-                    case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT:
                     case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA:
                         pack.resource_mode = ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA;
                         break;
+                    case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT:
                     case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT:
                         pack.resource_mode =
                             ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT;

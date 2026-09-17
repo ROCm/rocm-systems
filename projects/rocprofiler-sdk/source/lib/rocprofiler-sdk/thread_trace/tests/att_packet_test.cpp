@@ -43,6 +43,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -158,7 +159,8 @@ TEST(thread_trace, resource_mode_configure)
     ASSERT_FALSE(agents.empty());
     const auto agent_id = agents.begin()->second.get_rocp_agent()->id;
 
-    const std::vector<std::pair<uint64_t, rocprofiler_status_t>> modes = {
+    const std::vector<std::pair<std::optional<uint64_t>, rocprofiler_status_t>> modes = {
+        {std::nullopt, ROCPROFILER_STATUS_SUCCESS},
         {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT, ROCPROFILER_STATUS_SUCCESS},
         {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA, ROCPROFILER_STATUS_SUCCESS},
         {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT, ROCPROFILER_STATUS_SUCCESS},
@@ -182,21 +184,24 @@ TEST(thread_trace, resource_mode_configure)
 
         for(const auto& [mode, expected] : modes)
         {
-            SCOPED_TRACE(::testing::Message() << "device=" << device_mode << ", mode=" << mode);
+            SCOPED_TRACE(::testing::Message() << "device=" << device_mode << ", mode="
+                                              << (mode ? std::to_string(*mode) : "omitted"));
             rocprofiler_thread_trace_parameter_t params[] = {
-                {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE, {mode}},
-                {ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {0x1000000}}};
+                {ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {0x1000000}},
+                {ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE,
+                 {mode.value_or(ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT)}}};
+            const size_t num_parameters = mode ? 2 : 1;
             auto shader_cb = [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {};
 
             if(device_mode)
                 status = rocprofiler_configure_device_thread_trace_service(
-                    ctx, agent_id, params, 2, shader_cb, {});
+                    ctx, agent_id, params, num_parameters, shader_cb, {});
             else
                 status = rocprofiler_configure_dispatch_thread_trace_service(
                     ctx,
                     agent_id,
                     params,
-                    2,
+                    num_parameters,
                     [](rocprofiler_agent_id_t,
                        rocprofiler_queue_id_t,
                        rocprofiler_async_correlation_id_t,
@@ -215,7 +220,8 @@ TEST(thread_trace, resource_mode_configure)
                 ASSERT_EQ(tracer.get_agents().count(agent_id), 1);
                 const auto& agent_tracer = *tracer.get_agents().at(agent_id);
                 const bool  deferred =
-                    mode == ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT;
+                    mode.value_or(ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT) !=
+                    ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA;
                 EXPECT_EQ(agent_tracer.factory == nullptr, deferred);
                 EXPECT_EQ(agent_tracer.params.resource_mode,
                           deferred ? ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT
@@ -234,8 +240,7 @@ TEST(thread_trace, resource_mode_configure)
 TEST(thread_trace, resource_mode_without_code_objects)
 {
     auto params = thread_trace::thread_trace_parameter_pack{};
-    EXPECT_EQ(params.resource_mode, ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA);
-    params.resource_mode = ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT;
+    EXPECT_EQ(params.resource_mode, ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT);
 
     // An unmapped agent is intentional: none of these operations should touch GPU resources.
     thread_trace::ThreadTracerAgent tracer(params, rocprofiler_agent_id_t{0});
@@ -510,6 +515,8 @@ TEST(thread_trace, perfcounters_aql_options_test)
     auto new_tracer          = std::make_unique<thread_trace::ThreadTracerAgent>(
         _params, begin(agents)->second.get_rocp_agent()->id);
 
+    new_tracer->load_codeobj(1, 0x1000, 0x1000);
+    ASSERT_NE(new_tracer->factory, nullptr);
     ASSERT_EQ(new_tracer->factory->aql_params.size(),
               sqtt_default_num_options + perf_counters.size());
     context::pop_client(1);
