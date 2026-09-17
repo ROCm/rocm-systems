@@ -83,6 +83,27 @@ Hip::hipHostFree(void *ptr) const
 }
 
 void *
+Hip::hipExtMallocWithFlags(size_t size, unsigned int flags) const
+{
+    void *ptr;
+    (void)throwOnHipError<Hip::RuntimeError>(::hipExtMallocWithFlags(&ptr, size, flags));
+    return ptr;
+}
+
+void
+Hip::hipFree(void *ptr) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipFree(ptr));
+}
+
+void
+Hip::hipStreamWaitValue64(hipStream_t stream, void *ptr, uint64_t value, unsigned int flags,
+                          uint64_t mask) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipStreamWaitValue64(stream, ptr, value, flags, mask));
+}
+
+void *
 Hip::hipHostGetDevicePointer(void *hstPtr, unsigned int flags) const
 {
     void *dev_ptr;

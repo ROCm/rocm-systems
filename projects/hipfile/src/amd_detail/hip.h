@@ -60,6 +60,10 @@ struct Hip {
     virtual void     hipStreamSynchronize(hipStream_t stream) const;
     virtual void    *hipHostMalloc(size_t size, unsigned int flags) const;
     virtual void     hipHostFree(void *ptr) const;
+    virtual void    *hipExtMallocWithFlags(size_t size, unsigned int flags) const;
+    virtual void     hipFree(void *ptr) const;
+    virtual void     hipStreamWaitValue64(hipStream_t stream, void *ptr, uint64_t value, unsigned int flags,
+                                          uint64_t mask) const;
     virtual void    *hipHostGetDevicePointer(void *hstPtr, unsigned int flags) const;
     virtual int      hipRuntimeGetVersion() const;
     virtual void    *hipGetProcAddress(const char *symbol, int hipVersion, uint64_t flags,
