@@ -7,6 +7,7 @@
 #include "thread-pool.h"
 
 #include <algorithm>
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <exception>
@@ -33,7 +34,8 @@ namespace {
         void run(std::function<void()> task) override
         {
             uint64_t task_generation = 0;
-            auto     task_state      = state;
+            auto     task_state     = state;
+            auto     task_published = std::make_shared<std::atomic<bool>>(false);
 
             {
                 std::lock_guard<std::mutex> lock{task_state->mutex};
@@ -43,7 +45,11 @@ namespace {
             }
 
             try {
-                executor->silent_async([task_state, task_generation, work = std::move(task)]() mutable {
+                executor->silent_async([task_state,
+                                        task_published,
+                                        task_generation,
+                                        work = std::move(task)]() mutable {
+                    task_published->wait(false, std::memory_order_acquire);
                     Completion            completion{task_state};
                     std::function<void()> local_work;
                     local_work.swap(work);
@@ -57,6 +63,8 @@ namespace {
 
                     local_work();
                 });
+                task_published->store(true, std::memory_order_release);
+                task_published->notify_one();
             }
             catch (...) {
                 finish(task_state);
