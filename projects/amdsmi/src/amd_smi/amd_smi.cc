@@ -3337,7 +3337,7 @@ amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handl
   topology_info->link_type = link_type;
   topology_info->num_hops = hops > 255 ? 255 : static_cast<uint8_t>(hops);  // clamp to uint8_t
   topology_info->weight = weight;
-  // Derived, not read from hardware: a concrete type is ENABLED, UNKNOWN is DISABLED.
+  // Host API parity, not live link health or the topology CLI's P2P accessibility status.
   topology_info->link_status = (link_type == AMDSMI_LINK_TYPE_UNKNOWN) ? AMDSMI_LINK_STATUS_DISABLED
                                                                        : AMDSMI_LINK_STATUS_ENABLED;
   topology_info->fb_sharing = fb_sharing;

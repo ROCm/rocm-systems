@@ -5554,10 +5554,14 @@ Output:  Dictionary with fields:
 Field | Description
 ---|---
 `weight` | The link weight
-`link_status` | Link status as an int, derived from the resolved link type rather than live hardware state. Every successful baremetal query resolves xGMI or PCIe, so a successful call always returns `AMDSMI_LINK_STATUS_ENABLED` (0); `AMDSMI_LINK_STATUS_DISABLED` (1) is only the initialized default returned with a failure status. The enum also defines `AMDSMI_LINK_STATUS_INACTIVE` (2) and `AMDSMI_LINK_STATUS_ERROR` (3), which are host-only.
+`link_status` | Status as an int, retained for host API parity. On baremetal, self pairs directly report `AMDSMI_LINK_STATUS_ENABLED` (0); distinct pairs derive it from the resolved type (`UNKNOWN` maps to `AMDSMI_LINK_STATUS_DISABLED` (1), recognized types to `ENABLED`). It is not live link health or P2P accessibility. `INACTIVE` (2) and `ERROR` (3) are not produced by this backend.
 `link_type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
 `num_hops` | Number of hops
 `fb_sharing` | 1 if P2P framebuffer access is available between the two GPUs, 0 otherwise. Best-effort: 0 is also reported when the P2P query cannot be completed, which is indistinguishable from a genuine "not shared" result.
+
+On baremetal, a self pair returns `INTERNAL`, `ENABLED`, zero weight and hops, and `fb_sharing=1` without querying an inter-device link. For distinct GPUs, the current backend resolves PCIe or xGMI; IFoE reporting on MI4XX is not yet implemented.
+
+The topology CLI's `link_status` field uses `amdsmi_is_P2P_accessible` instead. A reachable pair can report `ENABLED` here but `DISABLED` in the topology CLI if P2P access is unavailable.
 
 Exceptions that can be thrown by `amdsmi_get_link_topology` function:
 

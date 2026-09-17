@@ -1282,7 +1282,7 @@ typedef enum {
  */
 typedef struct {
   uint64_t weight;                   //!< link weight
-  amdsmi_link_status_t link_status;  //!< link status, derived from link type (not live HW status)
+  amdsmi_link_status_t link_status;  //!< link status; synthesized on baremetal (not live HW status)
   amdsmi_link_type_t link_type;      //!< type of the link
   uint8_t num_hops;                  //!< number of hops
   uint8_t fb_sharing;                //!< 1 if P2P framebuffer access is available, 0 otherwise
@@ -6893,12 +6893,18 @@ amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_hand
  *  @note @p num_hops is the abstracted topology step count from
  *  ::amdsmi_topo_get_link_type, not the number of physical xGMI links.
  *
- *  @note On @platform{gpu_bm_linux}, @p link_status is derived from the resolved
- *  link type, not live hardware state. Every successful query resolves either
- *  xGMI or PCIe, so a successful call always reports ::AMDSMI_LINK_STATUS_ENABLED.
- *  ::AMDSMI_LINK_STATUS_DISABLED is only the initialized default returned with a
- *  failure status; ::AMDSMI_LINK_STATUS_INACTIVE and ::AMDSMI_LINK_STATUS_ERROR
- *  are host-only and never produced on baremetal.
+ *  @note On @platform{gpu_bm_linux}, a self pair returns ::AMDSMI_LINK_TYPE_INTERNAL
+ *  and ::AMDSMI_LINK_STATUS_ENABLED directly, with weight and num_hops both 0
+ *  and fb_sharing 1; it does not query an inter-device link.
+ *
+ *  @note For distinct GPUs, the current baremetal backend resolves PCIe or xGMI.
+ *  It maps a recognized link type to ::AMDSMI_LINK_STATUS_ENABLED and UNKNOWN to
+ *  ::AMDSMI_LINK_STATUS_DISABLED; INACTIVE and ERROR are not produced by this backend.
+ *  IFoE reporting on MI4XX is not yet implemented.
+ *
+ *  @note On baremetal, link_status is retained for host API parity, not live link
+ *  health or P2P accessibility. The topology CLI's link_status field instead uses
+ *  ::amdsmi_is_P2P_accessible, so the two status values can differ.
  *
  *  @note @p fb_sharing is best-effort: a P2P query that cannot complete is
  *  reported as 0, indistinguishable from a genuine "not shared" result.
