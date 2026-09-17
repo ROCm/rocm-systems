@@ -179,12 +179,18 @@ int ncclIsCuMemSupported() {
 
 // Runtime cuMem capability without the gfx1250 auto-enable gate. Used when
 // NCCL_CUMEM_ENABLE=1 forces the VMM path on non-gfx1250 platforms.
+// rccl-tests device-API / symmetric paths call this by name; keep it exported
+// even when librccl is built with -fvisibility=hidden (hipify can drop a
+// trailing attribute on the declaration).
 #if defined(__GNUC__)
-__attribute__((visibility("default")))
+#pragma GCC visibility push(default)
 #endif
 int ncclCuMemRuntimeSupported() {
   return ncclCuMemCapabilityCheck(/*requireGfx1250ForAutoEnable=*/0);
 }
+#if defined(__GNUC__)
+#pragma GCC visibility pop
+#endif
 
 int ncclCuMemEnable() {
 #if NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)

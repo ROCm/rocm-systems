@@ -45,11 +45,14 @@ error:
 }
 
 #if defined(__GNUC__)
-__attribute__((visibility("default")))
+#pragma GCC visibility push(default)
 #endif
 int ncclCuMemRuntimeSupported() {
   return ncclIsCuMemSupported();
 }
+#if defined(__GNUC__)
+#pragma GCC visibility pop
+#endif
 
 int ncclCuMemEnable() {
   // NCCL_CUMEM_ENABLE=-2 means auto-detect CUMEM support
