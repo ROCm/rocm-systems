@@ -60,13 +60,21 @@ keep all XCDs on one engine partition.
 
 The host-thread width used to execute accepted CU work in functional mode. A
 nonzero value is applied per SoC and shared by all command processors in that
-SoC. The default, `1`, keeps dispatch serial. Setting the field explicitly to
-`0` creates one automatic host-wide budget from the available hardware threads,
-caps it at 32, and divides it as evenly as possible across the SoCs. After
-either selection, each SoC's effective width is capped at the largest number of
-CUs owned by any one command processor in that SoC. This control does not
-change XCD partitioning, queue ownership, or XCD fan-out. Clocked mode always
-uses an effective value of `1`.
+SoC. Omission or `0` selects a preferred allocation from `thread_allocations`;
+`1` forces serial dispatch. The effective width is capped by per-CP CU capacity.
+Clocked mode always uses a width of one.
+
+### Execution budget and preferred allocations
+
+`cpu_thread_budget` is a ceiling for engines plus retained dispatch workers:
+E + sum(D - 1). Its default is process affinity capped at 32.
+A positive value overrides the ceiling. The selector picks the largest fitting
+entry in `thread_allocations`; it leaves unused budget between granules.
+Explicit E/D knobs take priority and may exceed the automatic budget. A config
+without a table uses serial defaults for unspecified knobs.
+
+Use `rocjitsu --config <path> --thread-budget-table` to show expected allocations
+without starting a VM. Mirage carries the same table from its agent config.
 
 ### `exec_mode`
 

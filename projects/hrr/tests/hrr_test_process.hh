@@ -41,8 +41,14 @@ namespace hrr::test {
 // and non-capturing paths use the same normalization.
 class SpawnProc {
  public:
-  explicit SpawnProc(std::string exe, bool capture_stdout = false)
-      : exe_(std::move(exe)), capture_stdout_(capture_stdout) {}
+  // capture_stderr merges the child's stderr into the same captured stream as
+  // its stdout, so a test asserting on diagnostics written to stderr sees them
+  // in getOutput(). It has no effect unless capture_stdout is also set.
+  explicit SpawnProc(std::string exe, bool capture_stdout = false,
+                     bool capture_stderr = false)
+      : exe_(std::move(exe)),
+        capture_stdout_(capture_stdout),
+        capture_stderr_(capture_stderr) {}
 
   void setEnv(const std::string& key, const std::string& value) {
     env_.push_back({key, value});
@@ -114,6 +120,7 @@ class SpawnProc {
       if (capture_stdout_) {
         ::close(pipefd[0]);
         ::dup2(pipefd[1], STDOUT_FILENO);
+        if (capture_stderr_) ::dup2(pipefd[1], STDERR_FILENO);
         ::close(pipefd[1]);
       }
       ::execvp(exe_.c_str(), argv.data());
@@ -182,7 +189,7 @@ class SpawnProc {
     if (capture_stdout_) {
       si.dwFlags |= STARTF_USESTDHANDLES;
       si.hStdOutput = write_h;
-      si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+      si.hStdError = capture_stderr_ ? write_h : GetStdHandle(STD_ERROR_HANDLE);
       si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     }
 
@@ -267,6 +274,7 @@ class SpawnProc {
 
   std::string exe_;
   bool capture_stdout_ = false;
+  bool capture_stderr_ = false;
   std::string output_;
   std::vector<std::pair<std::string, std::string>> env_;
 };

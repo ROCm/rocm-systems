@@ -636,7 +636,7 @@
         {
           "name": "ParameterApiTests",
           "description": "Public ncclParam C API tests",
-          "test_filter": "ParameterApiTests.*"
+          "test_filter": "ParameterApiTests.*:ParameterApiTypedTests*"
         },
         {
           "name": "ArgCheck",
