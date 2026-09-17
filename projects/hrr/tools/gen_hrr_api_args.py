@@ -2332,6 +2332,18 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
     Runs after the real call, alongside the other fills: the arguments a HIP
     API reads are still valid there, and an output argument has been written
     by then.
+
+    A pointee too large for its fixed-size field is clipped. The warning alone
+    is not enough: AMD_LOG_LEVEL defaults to 0, so nothing durable would record
+    that the payload is partial and replay would treat it as faithful. Each
+    truncation therefore also calls note_unreplayable(), which lists the API
+    under manifest.unreplayable_apis where replay can see it.
+
+    note_unreplayable(), not mark_incomplete(): the event is written and the
+    archive stays well-formed — only the clipped argument makes the call
+    impossible to reproduce exactly. mark_incomplete() means an event was
+    dropped or torn and suppresses the clean-shutdown trailer, which is a
+    different and stronger claim. See hip_capture_writer.h.
     """
     for d in deref_specs(entry.name):
         if d.string:
@@ -2344,6 +2356,9 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
             lines.append(f"          LogPrintfWarning(")
             lines.append(f"              \"[HRR] {entry.name}: {d.param} is %zu characters; \"")
             lines.append(f"              \"recording the first {d.max_count - 1} only\", _n);")
+            lines.append(f"          hrr_cap::writer::note_unreplayable(\"{entry.name}\",")
+            lines.append(f"              \"{d.param} was truncated to {d.max_count - 1} characters at capture \"")
+            lines.append(f"              \"time; replay would pass a shortened string\");")
             lines.append(f"        }}")
             lines.append(f"        _n = {d.max_count - 1}u;")
             lines.append(f"      }}")
@@ -2362,6 +2377,9 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
             lines.append(f"              \"[HRR] {entry.name}: recording only the first {d.max_count} \"")
             lines.append(f"              \"of %u {d.param} entries; replay of this call will be \"")
             lines.append(f"              \"incomplete\", _n);")
+            lines.append(f"          hrr_cap::writer::note_unreplayable(\"{entry.name}\",")
+            lines.append(f"              \"only the first {d.max_count} {d.param} entries were recorded at \"")
+            lines.append(f"              \"capture time; replay would pass a partial array\");")
             lines.append(f"        }}")
             lines.append(f"        _n = {d.max_count}u;")
             lines.append(f"      }}")
