@@ -9,11 +9,16 @@
  
 #include "ce_coll.h"
 #include "collectives.h"
+#include "dev_runtime.h"
+#include "bitops.h"
 #include "gtest/gtest.h"
 #include "nccl.h"
 #include "rccl_common.h"
 #include "graph.h"
+#include "rccl_decision.h"
 
+#include <chrono>
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 
@@ -196,6 +201,39 @@ TEST_F(CeAllReduceEligibilityTest, ChunkLayout_LargeMessagePipelined)
     EXPECT_EQ((chunksPerShard - 1) * chunkBytes + lastChunkElems * sizeof(float), shardBytes);
 }
 
+TEST_F(CeAllReduceEligibilityTest, RecvRangeContainedInWindow_PointerInWindowIsNotEnough)
+{
+    ncclDevrWindow win{};
+    alignas(16) uint8_t storage[128];
+    win.userPtr = storage;
+    win.size = sizeof(storage);
+    win.winFlags = NCCL_WIN_COLL_SYMMETRIC;
+
+    EXPECT_NE(ncclCeRecvRangeContainedInWindow(&win, storage, sizeof(storage)), 0);
+    EXPECT_NE(ncclCeRecvRangeContainedInWindow(&win, storage + 32, 32), 0);
+    // Degenerate size/2 == size-totalBytes still contained; the MPI tests use a
+    // non-degenerate offset so reverting to pointer-only fails those, not this.
+    EXPECT_NE(ncclCeRecvRangeContainedInWindow(&win, storage + 64, 64), 0);
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage + 64, 80), 0);
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, storage + 128, 1), 0);
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(nullptr, storage, 8), 0);
+    EXPECT_EQ(ncclCeRecvRangeContainedInWindow(&win, nullptr, 8), 0);
+}
+
+TEST_F(CeAllReduceEligibilityTest, StagingBufBytesMatchesInitFormula)
+{
+    for (int nRanks : {2, 3, 4, 5, 6, 7, 8, 12, 16, 24}) {
+        SCOPED_TRACE("nRanks=" + std::to_string(nRanks));
+        const size_t expected = alignUp(
+            static_cast<size_t>(NCCL_CE_NUM_SLOTS) * static_cast<size_t>(nRanks) *
+                ncclCeAllReduceMaxChunkBytes(nRanks),
+            static_cast<size_t>(16));
+        EXPECT_EQ(ncclCeAllReduceStagingBufBytes(nRanks), expected);
+    }
+    EXPECT_EQ(ncclCeAllReduceStagingBufBytes(0), 0u);
+    EXPECT_EQ(ncclCeAllReduceStagingBufBytes(-1), 0u);
+}
+
 TEST_F(CeAllReduceEligibilityTest, MaxStagingBytesPerRank)
 {
     // The whole message has to fit the per-rank staging capacity ncclCeInit uses.
@@ -282,6 +320,44 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
     EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
 }
 
+// query=true so the mock never probes a stream. ncclProd skips ncclSymkInitOnce
+// (symEligible requires Sum). Empty winSorted is a safe FindWindow miss.
+TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredSelectsCe_Isolated)
+{
+    ProcessIsolatedTestRunner::registerTest(
+        ProcessIsolatedTestRunner::TestConfig(
+            "ForceUnregisteredSelectsCe_Isolated",
+            []()
+            {
+                CeAllReduceMockComm mock;
+                mock.comm.nRanks = 4;
+                mock.comm.nNodes = 1;
+                mock.comm.symmetricSupport = true;
+                mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+                mock.comm.ceColl.ceARTmpBuf = nullptr;
+
+                alignas(16) float send[1024];
+                alignas(16) float recv[1024];
+                rcclCollDecision decision{};
+                ncclResult_t res = rcclSelectAllReduce(
+                    mock.get(), send, recv, 1024, ncclFloat32, ncclProd,
+                    /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                    &decision);
+                EXPECT_EQ(res, ncclSuccess);
+                EXPECT_EQ(decision.algo, RCCL_CE_REGISTERED)
+                    << "ceStagedUnregistered must select CE for FORCE + unregistered buffers";
+            })
+            .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"},
+                              {"RCCL_FORCE_CE_ALLREDUCE", "1"},
+                              {"RCCL_DDA_ENABLE", "0"}})
+            .withTimeout(std::chrono::seconds(30))
+            .withNumGpus(0));
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging = true;
+    EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
+}
 
 // ---------------------------------------------------------------------------
 // rcclCeAr2ShotMax / ncclCeInit staging-buffer growth.

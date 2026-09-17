@@ -10,11 +10,13 @@
 #include <algorithm>
 #include <atomic>
 #include <cuda.h>
+#include <vector>
 #include "rocmwrap.h"
 #include "ce_coll.h"
 #include "alltoallv_meta.h"
 #include "group.h"
 #include "alloc.h"
+#include "bootstrap.h"
 #include "ce_fault_inject.h"
 #include "tuning.h"
 
@@ -2158,6 +2160,18 @@ fail:
   return ret;
 }
 
+int ncclCeRecvRangeContainedInWindow(struct ncclDevrWindow const* win, void const* recvbuff, size_t totalBytes) {
+  if (win == nullptr || recvbuff == nullptr) return 0;
+  const uintptr_t winStart = (uintptr_t)win->userPtr;
+  const uintptr_t recvStart = (uintptr_t)recvbuff;
+  return recvStart >= winStart && totalBytes <= win->size && recvStart - winStart <= win->size - totalBytes;
+}
+
+size_t ncclCeAllReduceStagingBufBytes(int nRanks) {
+  if (nRanks <= 0) return 0;
+  return alignUp((size_t)NCCL_CE_NUM_SLOTS * (size_t)nRanks * ncclCeAllReduceMaxChunkBytes(nRanks), (size_t)16);
+}
+
 ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                              ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
                              struct ncclDevrWindow* recvWin, struct ncclCeCollArgs* profilerArgs) {
@@ -2247,15 +2261,33 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     NCCLCHECKGOTO(ncclDevrFindWindow(comm, recvbuff, &recvWin), ret, fail);
   }
   if (recvWin != nullptr && (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
-    const uintptr_t winStart = (uintptr_t)recvWin->userPtr;
-    const uintptr_t recvStart = (uintptr_t)recvbuff;
     // A pointer-only window lookup is insufficient: Phase 3 writes the complete
     // receive range through peer mappings. Fall back to the temporary CE window
     // unless [recvbuff, recvbuff + totalBytes) is contained in recvWin.
-    fastPath =
-      recvStart >= winStart && totalBytes <= recvWin->size && recvStart - winStart <= recvWin->size - totalBytes;
+    fastPath = ncclCeRecvRangeContainedInWindow(recvWin, recvbuff, totalBytes) != 0;
+  }
+  // Ranks that disagree on fastPath issue different ncclMemOpSync counts (one on
+  // the LSA path, two inside ncclCeAllGather) and hang on ceSeqNum. AND the flag
+  // the same way isSymmetricKernelRequested agrees window eligibility.
+  if (comm->nRanks >= 2 && comm->bootstrap != nullptr) {
+    std::vector<uint8_t> flags((size_t)comm->nRanks, 0);
+    flags[(size_t)comm->rank] = fastPath ? 1 : 0;
+    NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, flags.data(), sizeof(uint8_t)), ret, fail);
+    for (int r = 0; r < comm->nRanks; r++) {
+      if (flags[(size_t)r] == 0) {
+        fastPath = false;
+        break;
+      }
+    }
   }
   collArgs.recvWin = recvWin;
+
+  if (!fastPath && totalBytes > ncclCeAllReduceStagingBufBytes(comm->nRanks)) {
+    WARN("CE AllReduce: recv range is not contained in the user window and totalBytes %zu exceeds staging %zu",
+         totalBytes, ncclCeAllReduceStagingBufBytes(comm->nRanks));
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
 
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
 
