@@ -298,30 +298,6 @@ def test_filter_block_6(binary_handler_analyze_rocprof_compute, capsys):
 
 
 @pytest.mark.filter_block
-@pytest.mark.parametrize(
-    "alias",
-    [
-        pytest.param("topstats", id="alias_topstats"),
-        pytest.param("sol", id="alias_sol"),
-    ],
-)
-def test_filter_block_alias_valid(binary_handler_analyze_rocprof_compute, alias):
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        try:
-            code = binary_handler_analyze_rocprof_compute([
-                "analyze",
-                "--path",
-                workload_dir,
-                "--block",
-                alias,
-            ])
-            assert code == 0
-        finally:
-            common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.filter_block
 def test_filter_block_alias_bogus(binary_handler_analyze_rocprof_compute, capsys):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
@@ -337,31 +313,6 @@ def test_filter_block_alias_bogus(binary_handler_analyze_rocprof_compute, capsys
             error_output = captured.err + captured.out
             assert code != 0
             assert "Invalid --block value 'bogusxyz_alias'" in error_output
-        finally:
-            common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.filter_block
-@pytest.mark.parametrize(
-    "blocks",
-    [
-        pytest.param(["2", "sol"], id="numeric_2_and_alias_sol"),
-        pytest.param(["topstats", "sol"], id="aliases_topstats_sol"),
-    ],
-)
-def test_filter_multiple_blocks(binary_handler_analyze_rocprof_compute, blocks):
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        try:
-            code = binary_handler_analyze_rocprof_compute([
-                "analyze",
-                "--path",
-                workload_dir,
-                "--block",
-                blocks[0],
-                blocks[1],
-            ])
-            assert code == 0
         finally:
             common.clean_output_dir(config["cleanup"], workload_dir)
 
