@@ -681,9 +681,10 @@ $ rocjitsu --config cfg.json -- ./app --flag
 ```
 
 A bare invocation with `--` and no recognized subcommand is routed to
-`rocjitsu run`. `--attach` maps to `--daemon` (rocjitsu manages the daemon's
-lifetime, so "attach to a daemon" and "use a daemon" collapse to the same
-opt-in). No script changes required.
+`rocjitsu run`. One exception: `--attach` joined a daemon started by something
+else, and every daemon now belongs to the run that started it, so it is refused
+with a pointer to `rocjitsu exec --session <id>`. Scripts that used it need that
+one change; nothing else does.
 
 ---
 

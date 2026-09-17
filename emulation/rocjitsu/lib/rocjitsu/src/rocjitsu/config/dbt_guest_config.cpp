@@ -187,15 +187,21 @@ bool write_dbt_runtime_config_handoff(const std::string &runtime_dir,
   if (host_gpu_id != 0)
     output << host_gpu_id << '\n';
   output.close();
+  // The scratch file is cleaned up with the `error_code` overload, as every
+  // other filesystem call here already is. The throwing one would raise on a
+  // failure this function has no answer to -- the write already failed, and the
+  // leftover is reported by returning false either way -- and it would raise it
+  // through rj_dbt_write_handoff's C caller.
+  std::error_code cleanup_error;
   if (!output.good()) {
-    std::filesystem::remove(temp_file);
+    std::filesystem::remove(temp_file, cleanup_error);
     return false;
   }
 
   std::error_code rename_error;
   std::filesystem::rename(temp_file, handoff_file, rename_error);
   if (rename_error)
-    std::filesystem::remove(temp_file);
+    std::filesystem::remove(temp_file, cleanup_error);
   return !rename_error;
 }
 
@@ -279,7 +285,16 @@ extern "C" rj_status_t rj_dbt_write_handoff(const char *runtime_dir, const char 
   if (runtime_dir == nullptr || *runtime_dir == '\0' || config_path == nullptr ||
       *config_path == '\0')
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  return rocjitsu::config::write_dbt_runtime_config_handoff(runtime_dir, config_path, host_gpu_id)
-             ? ROCJITSU_STATUS_SUCCESS
-             : ROCJITSU_STATUS_ERROR;
+  // The caller across this frame is the Rust launcher, which declares the
+  // symbol on a non-unwind ABI: an exception here terminates its process
+  // instead of becoming the status this function documents. The writer builds
+  // two std::strings from the arguments and touches the filesystem, so there is
+  // something to convert. Same shape as rj_vm_create.
+  try {
+    return rocjitsu::config::write_dbt_runtime_config_handoff(runtime_dir, config_path, host_gpu_id)
+               ? ROCJITSU_STATUS_SUCCESS
+               : ROCJITSU_STATUS_ERROR;
+  } catch (...) {
+    return ROCJITSU_STATUS_ERROR;
+  }
 }

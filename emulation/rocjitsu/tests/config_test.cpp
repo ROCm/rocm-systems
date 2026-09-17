@@ -13,6 +13,7 @@
 #include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/config/pci_device_config.h"
 #include "rocjitsu/config/rj_dbt.h"
+#include "rocjitsu/config/rj_threads.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
@@ -1154,6 +1155,34 @@ TEST(ConfigLoaderTest, PublicHandoffEntryPointRejectsMissingArguments) {
   EXPECT_EQ(ROCJITSU_STATUS_INVALID_ARGUMENT,
             rj_dbt_write_handoff(runtime.path().c_str(), nullptr, 0));
   EXPECT_EQ(ROCJITSU_STATUS_INVALID_ARGUMENT, rj_dbt_write_handoff(runtime.path().c_str(), "", 0));
+}
+
+TEST(ConfigLoaderTest, PublicHandoffEntryPointReportsARenameFailureAndLeavesNoScratchFile) {
+  // The write lands in a temporary beside the destination and is renamed into
+  // place. Here the destination is a directory, so the rename cannot happen and
+  // the temporary has to be cleaned up -- with the `error_code` overload, not
+  // the throwing one. This entry point is called from Rust across a non-unwind
+  // ABI, so a `filesystem_error` raised while tidying up after a failure it has
+  // already decided to report would take the process with it instead.
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-public-rename-");
+  const std::filesystem::path handoff = std::filesystem::path(runtime.path()) / "config_path";
+  std::filesystem::create_directories(handoff / "occupied");
+
+  EXPECT_EQ(ROCJITSU_STATUS_ERROR,
+            rj_dbt_write_handoff(runtime.path().c_str(), "/tmp/config.json", 28851));
+  EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(runtime.path()) / "config_path.tmp"))
+      << "the scratch file outlived the write it belonged to";
+}
+
+TEST(ConfigLoaderTest, AvailableHostThreadsReportsAWidthOrRefusesTheArgument) {
+  // The other half of the pair the thread-budget table is built from, and the
+  // one with no other coverage. Never zero: a host whose affinity cannot be
+  // read reports one, because every later division is by this.
+  uint32_t host_threads = 0;
+  ASSERT_EQ(ROCJITSU_STATUS_SUCCESS, rj_config_available_host_threads(&host_threads));
+  EXPECT_GE(host_threads, 1u);
+
+  EXPECT_EQ(ROCJITSU_STATUS_INVALID_ARGUMENT, rj_config_available_host_threads(nullptr));
 }
 
 TEST(ConfigLoaderTest, PublicHandoffEntryPointReportsDirectoryCreationFailure) {

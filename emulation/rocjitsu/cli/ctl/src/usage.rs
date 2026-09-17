@@ -312,6 +312,37 @@ pub fn misplaced_flag<'a>(
     None
 }
 
+/// The first token in `span` that is an operand rather than a flag or a
+/// flag's value.
+///
+/// The question this answers is "is there anything here to run?", asked
+/// of an invocation with no `--` to mark where the workload starts. A
+/// scan that only looked for tokens not shaped like flags would answer
+/// it wrongly for every valued option: `--config ../configs/mi355x.json`
+/// is two tokens for one option, and the second is a path, so it reads
+/// exactly like the workload it is not.
+///
+/// That is not hypothetical. It made `rocjitsu --daemon --config <path>`
+/// — upstream's daemon-only form, and the one the documentation shows —
+/// fail with "unexpected argument '--daemon'" whenever the config path
+/// contained a separator or named a file that existed, while the same
+/// invocation with a bare `c.json` worked.
+///
+/// Shares [`AcceptedFlags::consumes_next`] with [`misplaced_flag`] so
+/// there is one answer to which options take a value, rather than a
+/// second one here that can drift from the parser.
+#[must_use]
+pub fn first_operand<'a>(span: &'a [String], known: &AcceptedFlags) -> Option<&'a str> {
+    let mut i = 0;
+    while let Some(token) = span.get(i) {
+        if !is_flag_token(token) {
+            return Some(token.as_str());
+        }
+        i += if known.consumes_next(token) { 2 } else { 1 };
+    }
+    None
+}
+
 /// The message for a flag-shaped token before `--` that rocjitsu does not
 /// accept.
 ///

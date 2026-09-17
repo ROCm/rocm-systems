@@ -321,10 +321,13 @@ Drop-in mode:
       rocjitsu --config cfg.json -- ./my-rocm-app
       rocjitsu --profile cdna4 --num-nodes 2 -- python train.py
 
-  Everything `rocjitsu run` accepts may appear before the `--`, plus the
-  rocjitsu-only spelling `--attach` (an alias for `--daemon`). Anything
+  Everything `rocjitsu run` accepts may appear before the `--`. Anything
   else there is a mistyped flag rather than part of the workload, and is
-  refused. See 'rocjitsu run --help' for the full list.";
+  refused. See 'rocjitsu run --help' for the full list.
+
+  `--attach` is taken but no longer honoured: it joined a daemon started
+  by something else, and every daemon now belongs to the run that
+  started it. Use 'rocjitsu exec --session <id>' to join one.";
 
 /// Print version, copyright, and the embedded third-party manifest for
 /// `rocjitsu about`.
@@ -385,11 +388,13 @@ fn is_global_flag(arg: &str) -> bool {
 
 /// The subcommand a drop-in invocation is routed to.
 ///
-/// Also the only one that accepts `--attach`, the `rocjitsu` spelling of
-/// `--daemon`. It used to be translated here, against an `ATTACH`
-/// constant this comment outlived; `run` declares it as a clap alias
-/// now, so an explicit `rocjitsu run --attach` needs nothing from the
-/// rewriter and neither does a drop-in one.
+/// Also the only one that takes `--attach`, which it declares in order to
+/// refuse it: upstream's `--attach` joined a daemon started by something
+/// else, and there is none to join now. Declared rather than dropped so
+/// the spelling reaches an error that says where the capability went,
+/// instead of clap's "unexpected argument". It is not translated to
+/// `--daemon` — that starts a new session, which is the opposite of
+/// joining one. See `check_run_args`.
 const RUN: &str = "run";
 
 /// The one-line shape shown by every usage error [`dropin_argv`] raises.
@@ -417,6 +422,25 @@ const THREAD_BUDGET_TABLE: &str = "thread-budget-table";
 /// "did you mean" is the better answer, and this must not displace it.
 fn looks_like_a_program(arg: &str) -> bool {
     arg.contains(std::path::MAIN_SEPARATOR) || std::path::Path::new(arg).is_file()
+}
+
+/// Whether `opts` names something to run, as opposed to only describing a
+/// machine to bring up.
+///
+/// Asked of the daemon-only form, which has no `--` to mark where a
+/// workload would start, so the only way to tell is to walk the flags and
+/// see what is left over.
+///
+/// Walking is the point. `looks_like_a_program` applied to every token
+/// answers for the *values* of options too, and the value of `--config`
+/// is a path — so `rocjitsu --daemon --config ../configs/mi355x.json`
+/// was read as naming a workload, and the `run` this form needs was
+/// never spliced in. It failed with "unexpected argument '--daemon'",
+/// while the same command with a bare `c.json` worked, which is why the
+/// case that covered this did not catch it.
+fn names_a_workload(opts: &[String]) -> bool {
+    let known = rj_ctl::usage::AcceptedFlags::of(cli(), RUN);
+    rj_ctl::usage::first_operand(opts, &known).is_some_and(looks_like_a_program)
 }
 
 /// Whether the subcommand `name` names ends in a workload, and so has a
@@ -535,6 +559,18 @@ fn check_flags(args: &[String], from: usize, sep: Option<usize>, sub: &str) -> R
 /// that is shaped like a flag and is not one rocjitsu takes is a mistake
 /// the user wants to hear about before anything boots.
 fn dropin_argv(args: Vec<String>) -> Result<Vec<String>, String> {
+    // `rocjitsu -v`, and nothing else on the line. Upstream documented and
+    // implemented `-v` as version; here it is the first step of verbosity,
+    // so on its own it parsed as "verbosity 1, no subcommand" and exited 2
+    // — a version probe that fails is a poor greeting for a drop-in.
+    //
+    // Only in isolation. `-vv`, `-v run …` and `-v` before a workload all
+    // mean verbosity, because there the user has said what to do and `-v`
+    // is modifying it. A lone `-v` asks for nothing, which is the one
+    // reading under which "print the version" is the useful answer.
+    if args.len() == 2 && args[1] == "-v" {
+        return Ok(vec![args[0].clone(), "--version".to_string()]);
+    }
     let sep = args.iter().position(|a| a == "--");
     // Where a subcommand could still appear: everything up to the app
     // separator, or the whole command line when there is none.
@@ -552,9 +588,10 @@ fn dropin_argv(args: Vec<String>) -> Result<Vec<String>, String> {
         break;
     }
     // A recognised subcommand means this is a normal rocjitsu call, so it
-    // is not rewritten. That includes `run --attach`: `--attach` is a
-    // clap alias of `--daemon` on `run` itself now, so there is nothing
-    // here to translate.
+    // is not rewritten. That includes `run --attach`: `run` declares that
+    // flag itself, in order to refuse it with an explanation, so there is
+    // nothing here to translate — and translating it to `--daemon` would
+    // start a session rather than join one, which is not what it asked.
     //
     // It still gets the flag guard, though, and that is the point of
     // doing it here. `rocjitsu run --nodes 2 -- ./app` is the same mistake
@@ -627,7 +664,7 @@ fn dropin_argv(args: Vec<String>) -> Result<Vec<String>, String> {
         // command line missing its `--` — would be rewritten into a
         // session that holds itself open and never runs `./app`, which
         // is a worse answer than the error it gets today.
-        if asks_for_a_daemon(&args[1..]) && !args[1..].iter().any(|a| looks_like_a_program(a)) {
+        if asks_for_a_daemon(&args[1..]) && !names_a_workload(&args[1..]) {
             check_flags(&args, 1, None, RUN)?;
             let mut out = Vec::with_capacity(args.len() + 1);
             out.push(args[0].clone());
@@ -1009,6 +1046,93 @@ mod tests {
         assert_eq!(rewrite(bare), v_args(bare));
     }
 
+    /// Upstream spelled version `-v`, and a bare one has to keep meaning
+    /// that.
+    ///
+    /// It is the cheapest thing a script does — check what it is talking
+    /// to — and here it became "verbosity 1 and no subcommand", which
+    /// exits 2. Only in isolation, though: everything else keeps `-v` as
+    /// the first step of verbosity.
+    #[test]
+    fn a_bare_dash_v_still_asks_for_the_version() {
+        assert_eq!(
+            rewrite(&["rocjitsu", "-v"]),
+            v_args(&["rocjitsu", "--version"])
+        );
+
+        // Not when it is modifying something. In each of these the user
+        // has said what to do, so `-v` is how loudly, not what.
+        for argv in [
+            &["rocjitsu", "-vv"][..],
+            &["rocjitsu", "-v", "emulators"][..],
+            &["rocjitsu", "-v", "run", "--", "./app"][..],
+        ] {
+            assert_ne!(
+                rewrite(argv),
+                v_args(&["rocjitsu", "--version"]),
+                "{argv:?} is verbosity, not a version probe"
+            );
+        }
+    }
+
+    /// And with the config paths people actually type.
+    ///
+    /// `c.json` above has no separator and does not exist, which is the
+    /// one shape that survived reading option *values* as workloads. A
+    /// documented invocation — `--config ../configs/gfx950_mi355x.json` —
+    /// did not: the value was mistaken for the workload, the `run` splice
+    /// was skipped, and the user got "unexpected argument '--daemon'".
+    #[test]
+    fn a_config_path_is_not_mistaken_for_the_workload() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let existing = dir.path().join("cdna4.json");
+        std::fs::write(&existing, "{}").expect("a config file that exists");
+        let absolute = existing.to_string_lossy().into_owned();
+
+        for path in [
+            // Relative, with a separator. The documented spelling.
+            "../configs/gfx950_mi355x_kmd.json",
+            // Absolute.
+            &absolute,
+            // Separator-free, but naming a file that is really there —
+            // the other half of the old test, and the reason "does it
+            // exist" is no better a question than "does it look like a
+            // path".
+            existing
+                .file_name()
+                .expect("a file name")
+                .to_str()
+                .expect("utf-8"),
+        ] {
+            let argv = ["rocjitsu", "--daemon", "--config", path];
+            let expected = ["rocjitsu", "run", "--daemon", "--config", path];
+            assert_eq!(rewrite(&argv), v_args(&expected), "--config {path}");
+        }
+
+        // The joined spelling is the same request and carries its value
+        // with it, so there is no following token to misread either.
+        assert_eq!(
+            rewrite(&["rocjitsu", "--daemon", "--config=../configs/x.json"]),
+            v_args(&["rocjitsu", "run", "--daemon", "--config=../configs/x.json"])
+        );
+    }
+
+    /// The guard the fix above must not have removed.
+    ///
+    /// A path that is the *workload* still stops the splice: rewriting
+    /// `rocjitsu --daemon ./app` into a session that holds itself open
+    /// and never runs `./app` is a worse answer than refusing it.
+    #[test]
+    fn a_workload_without_a_separator_still_refuses_the_daemon_only_form() {
+        for argv in [
+            &["rocjitsu", "--daemon", "./app"][..],
+            &["rocjitsu", "--daemon", "--config", "c.json", "./app"][..],
+            &["rocjitsu", "--daemon", "/usr/bin/env"][..],
+        ] {
+            assert_eq!(rewrite(argv), v_args(argv), "{argv:?} must be left alone");
+        }
+    }
+
     #[test]
     fn rocjitsu_config_and_daemon_route_to_run() {
         assert_eq!(
@@ -1040,10 +1164,16 @@ mod tests {
         }
     }
 
-    /// And the parser really does accept it, which is the half the
-    /// rewriter relies on: if `run` ever stopped declaring `--attach`,
-    /// the test above would still pass while the spelling this CLI is a
-    /// drop-in for turned into "unexpected argument".
+    /// And the parser really does take it, which is what lets it be
+    /// refused with an explanation rather than by clap.
+    ///
+    /// `--attach` is a breaking change, not an alias: the refusal in
+    /// `check_run_args` is the contract, and it can only be reached if
+    /// the flag parses. If `run` ever stopped declaring it, the test
+    /// above would still pass while the spelling this CLI is a drop-in
+    /// for started failing with "unexpected argument" — which tells a
+    /// script written against upstream nothing about where the
+    /// capability went.
     #[test]
     fn run_accepts_the_attach_spelling() {
         use clap::Parser as _;

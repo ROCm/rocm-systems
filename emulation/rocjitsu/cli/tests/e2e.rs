@@ -33,6 +33,34 @@ use nix::sys::signal::Signal;
 /// open" one, and both tests are about what happens in the second state.
 const BORROWER_WAIT: &str = "borrower(s) are still using session";
 
+/// The legacy spelling of the version probe, run as a process.
+///
+/// Upstream documented and implemented `-v` as version. Here `-v` is the
+/// first step of verbosity, and on its own that parsed as "verbosity 1
+/// with no subcommand" and exited 2 — so the cheapest question a script
+/// asks of a drop-in, "what are you", failed against it.
+///
+/// Through the binary rather than the rewriter, because the rewriter is
+/// only half of it: the argv it produces still has to reach clap's
+/// version path and exit 0.
+#[test]
+fn a_bare_dash_v_prints_the_version_like_the_cli_it_replaces() {
+    let env = Env::new();
+    assert_eq!(
+        env.ok(&["-v"]),
+        env.ok(&["--version"]),
+        "`-v` alone is the older spelling of `--version`"
+    );
+
+    // And it is still verbosity when it is modifying a command: this one
+    // succeeds and prints emulators, not a version.
+    let listed = env.ok(&["-v", "emulators"]);
+    assert!(
+        !listed.starts_with("rocjitsu cli "),
+        "`-v <command>` is verbosity, not a version probe: {listed}"
+    );
+}
+
 #[test]
 fn version_identifies_the_source_revision() {
     let version = Env::new().ok(&["--version"]);

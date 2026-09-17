@@ -1070,8 +1070,16 @@ LoadedConfig load_config_from_string(const std::string &json, const std::string 
 extern "C" rj_status_t rj_config_available_host_threads(uint32_t *out_host_threads) {
   if (out_host_threads == nullptr)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  *out_host_threads = rocjitsu::amdgpu::available_host_threads();
-  return ROCJITSU_STATUS_SUCCESS;
+  // Nothing on this path is expected to throw -- it reads an affinity mask --
+  // but the caller across the frame is Rust, on a non-unwind ABI, and "expected
+  // not to" is not a guarantee the ABI makes. Cheaper to close than to argue
+  // about, and it keeps the three config entry points the same shape.
+  try {
+    *out_host_threads = rocjitsu::amdgpu::available_host_threads();
+    return ROCJITSU_STATUS_SUCCESS;
+  } catch (...) {
+    return ROCJITSU_STATUS_ERROR;
+  }
 }
 
 extern "C" rj_status_t rj_config_resolve_execution_threads(const char *config_path, uint32_t budget,
@@ -1103,5 +1111,8 @@ extern "C" rj_status_t rj_config_resolve_execution_threads(const char *config_pa
     return ROCJITSU_STATUS_SUCCESS;
   } catch (const std::exception &) {
     return ROCJITSU_STATUS_INVALID_FILE;
+  } catch (...) {
+    // Not every throw is a std::exception, and this frame's caller is Rust.
+    return ROCJITSU_STATUS_ERROR;
   }
 }
