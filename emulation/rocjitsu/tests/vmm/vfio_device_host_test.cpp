@@ -65,14 +65,17 @@ constexpr simdojo::PciId kTestId = {.vendor = 0x1002,
 ///
 /// @details Serving happens on its own thread, as it does in the product, so
 /// the tests exercise the same threading the transport ships with. Two
-/// separate rules govern state shared with those callbacks. First, lifetime:
-/// any local a callback captures by reference must be declared BEFORE this
-/// fixture, because the destructor joins the serving thread and a local
-/// destroyed earlier can be touched by a callback that is still pending.
-/// Second, synchronization: reading what a callback wrote requires a
-/// happens-before with the callback. `stop_serving()` provides one, but so do
-/// the futures some tests wait on, and a test that knows serving has already
-/// stopped may read without either -- the tests below use whichever fits.
+/// underlying conditions govern state shared with those callbacks. Lifetime:
+/// state captured by work that may still run during teardown must outlive
+/// this fixture, because the destructor joins the serving thread only after
+/// such work has had every chance to run. Work submitted to the serving
+/// thread after `stop_serving()` has joined it never runs, so it cannot
+/// touch anything -- `DiscardsAskedWorkWhenServingHasStopped` relies on this
+/// and declares its flag after the fixture. Synchronization: reading
+/// non-atomic state a callback wrote still needs a happens-before with the
+/// callback. `stop_serving()` supplies one through the join, as can a future
+/// or another explicit synchronization; merely knowing that the thread has
+/// stopped does not itself provide that ordering.
 class ServedDevice {
 public:
   ServedDevice()
