@@ -210,5 +210,5 @@ therefore cannot be mistaken for a clean instrumented execution.
   construction.
 - `hooks/consan/` owns symbol binding and dispatch-packet adjustment.
 
-See [DESIGN.md](DESIGN.md) for the complete component graph and [USAGE.md](USAGE.md)
-for the expert resource overrides.
+See [DESIGN.md](DESIGN.md) for the complete component graph and
+[expert resource overrides](EXPERT_CONTROLS.md#resource-overrides) for manual controls.

@@ -74,7 +74,9 @@ for exact settings, overrides, and bounded-retention limitations.
 - [MODES.md](MODES.md): conceptual, phase-by-phase comparison of what the
   two modes do on the device, defer for later, and do on the host.
 - [TUTORIAL.md](TUTORIAL.md): getting started on your own program.
-- [USAGE.md](USAGE.md): public controls, defaults, coverage, and diagnostics.
+- [USAGE.md](USAGE.md): everyday commands, presets, allowlists, and reading results.
+- [EXPERT_CONTROLS.md](EXPERT_CONTROLS.md): detailed controls, resource limits,
+  and validation interfaces.
 - [DESIGN.md](DESIGN.md): architecture, implemented behavior, and semantic
   boundaries.
 - [CAPABILITIES.md](CAPABILITIES.md): normative target-by-mode access,
