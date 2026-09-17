@@ -12,7 +12,7 @@ import unittest
 from unittest import mock
 
 import consan_benchmark as benchmark
-from consan_validation_catalog import PROFILE_IDS
+from consan_benchmark import PROFILE_IDS
 from consan_validation_test_support import coverage, log, verdict
 
 
@@ -449,6 +449,25 @@ class ConSanBenchmarkTest(unittest.TestCase):
         self.assertEqual(manually_selected["RJ_CONSAN_EPOCH_ANALYSIS"], "manual")
         self.assertNotIn("RJ_CONSAN_EPOCH_ANALYSIS", supercollider)
 
+    def test_high_variant_uses_default_mode_and_explicit_preset(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {"RJ_CONSAN_PRESET": "max", "RJ_CONSAN_CELL_SAMPLE_STRIDE": "1"},
+            clear=True,
+        ):
+            default = benchmark._clean_environment(
+                "gfx950", Path("/hook"), "default", True
+            )
+            high = benchmark._clean_environment(
+                "gfx950", Path("/hook"), "default-high", True, epoch_analysis="manual"
+            )
+        self.assertEqual(default["RJ_CONSAN_PRESET"], "default")
+        self.assertEqual(high["RJ_CONSAN_MODE"], "default")
+        self.assertEqual(high["RJ_CONSAN_PRESET"], "high")
+        self.assertEqual(high["RJ_CONSAN_EPOCH_ANALYSIS"], "manual")
+        self.assertNotIn("RJ_CONSAN_CELL_SAMPLE_STRIDE", high)
+        self.assertEqual(PROFILE_IDS, ("default", "default-high", "supercollider"))
+
     def test_payload_parser_requires_one_successful_machine_record(self) -> None:
         text = (
             "noise\n"
@@ -576,7 +595,7 @@ class ConSanBenchmarkTest(unittest.TestCase):
         self.assertEqual(benchmark._runtime_ms(run, 0), 2.0)
         self.assertEqual(benchmark._runtime_ms(run, 1), 3.0)
 
-    def test_status_primary_table_has_both_modes(self) -> None:
+    def test_status_primary_table_has_all_benchmark_variants(self) -> None:
         workload = benchmark.Workload("id", "description", "latency_ms", {})
         modes = {
             mode: _run(
@@ -614,9 +633,18 @@ class ConSanBenchmarkTest(unittest.TestCase):
         text = benchmark._render_status(summary)
         for label in benchmark.MODE_LABELS.values():
             self.assertIn(label, text)
+        self.assertLess(
+            text.index("Default Mode Startup"),
+            text.index("Default Mode (high) Startup"),
+        )
+        self.assertLess(
+            text.index("Default Mode (high) Startup"),
+            text.index("SuperCollider Startup"),
+        )
+        self.assertNotIn("ConSan Startup", text)
         self.assertIn(
             "| description | 0.005 s | 0.005 s (1×) | 1.5 s | 1 s (200×) | "
-            "1.5 s | 1 s (200×) |",
+            "1.5 s | 1 s (200×) | 1.5 s | 1 s (200×) |",
             text,
         )
         self.assertNotIn("Absolute latency", text)
