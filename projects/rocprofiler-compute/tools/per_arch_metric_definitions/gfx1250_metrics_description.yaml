@@ -156,10 +156,6 @@ Memory chart - Instruction Cache:
     plain: Instruction Cache hit rate.
     rst: Instruction Cache hit rate.
     unit: Percent
-  ICache Latency:
-    plain: Average Instruction Cache request latency.
-    rst: Average Instruction Cache request latency.
-    unit: Cycles
   ICache Request Stall Rate:
     plain: Percentage of shader-busy cycles the instruction fetch unit is stalled.
     rst: Percentage of shader-busy cycles the instruction fetch unit is stalled.
@@ -168,10 +164,6 @@ Memory chart - Instruction Cache:
     plain: Instruction Cache miss fill bandwidth from GL1.
     rst: Instruction Cache miss fill bandwidth from GL1.
     unit: GB/s
-  ICache-GL1 Request Latency:
-    plain: Average latency of Instruction Cache requests sent to GL1.
-    rst: Average latency of Instruction Cache requests sent to GL1.
-    unit: Cycles
 Memory chart - Scalar Data Cache:
   Dcache Requests:
     plain: Total Scalar Data Cache requests.
@@ -185,10 +177,6 @@ Memory chart - Scalar Data Cache:
     plain: Scalar Data Cache hit rate.
     rst: Scalar Data Cache hit rate.
     unit: Percent
-  Dcache Latency:
-    plain: Average Scalar Data Cache request latency.
-    rst: Average Scalar Data Cache request latency.
-    unit: Cycles
   Dcache Request Stall Rate:
     plain: Percentage of WGP cycles the SQC scalar cache is stalled.
     rst: Percentage of WGP cycles the SQC scalar cache is stalled.
@@ -201,11 +189,11 @@ Memory chart - Scalar Data Cache:
     plain: Scalar Data Cache miss fill bandwidth from GL1.
     rst: Scalar Data Cache miss fill bandwidth from GL1.
     unit: GB/s
-  Dcache-GL1 Request Latency:
-    plain: Average latency of Scalar Data Cache requests sent to GL1.
-    rst: Average latency of Scalar Data Cache requests sent to GL1.
-    unit: Cycles
 Memory chart - GL0 Cache (Vector L0):
+  GL0 Total Requests:
+    plain: Total GL0 cache requests.
+    rst: Total GL0 cache requests.
+    unit: Requests per Normalization Unit
   GL0 Read Requests:
     plain: Number of GL0 read requests.
     rst: Number of GL0 read requests.
@@ -226,10 +214,6 @@ Memory chart - GL0 Cache (Vector L0):
     plain: GL0 cache hit rate.
     rst: GL0 cache hit rate.
     unit: Percent
-  GL0 Total Requests:
-    plain: Total GL0 cache requests.
-    rst: Total GL0 cache requests.
-    unit: Requests per Normalization Unit
   GL0 Request Latency:
     plain: Average GL0 cache request latency.
     rst: Average GL0 cache request latency.
@@ -259,9 +243,21 @@ Memory chart - LDS (Local Data Share):
     plain: Percentage of VMW-busy cycles the LDS is executing any operation.
     rst: Percentage of VMW-busy cycles the LDS is executing any operation.
     unit: Percent
+  LDS Utilization - Load:
+    plain: Percentage of VMW-busy cycles the LDS is executing a load.
+    rst: Percentage of VMW-busy cycles the LDS is executing a load.
+    unit: Percent
+  LDS Utilization - Store:
+    plain: Percentage of VMW-busy cycles the LDS is executing a store.
+    rst: Percentage of VMW-busy cycles the LDS is executing a store.
+    unit: Percent
   LDS Bank Conflict Stall Rate:
     plain: Percentage of VMW-busy cycles LDS is stalled due to bank conflict.
     rst: Percentage of VMW-busy cycles LDS is stalled due to bank conflict.
+    unit: Percent
+  LDS Address Conflict Stall Rate:
+    plain: Percentage of VMW-busy cycles LDS is stalled due to address conflict.
+    rst: Percentage of VMW-busy cycles LDS is stalled due to address conflict.
     unit: Percent
   LDS Load Bandwidth:
     plain: Total LDS load bandwidth.
@@ -299,19 +295,15 @@ Memory chart - LDS (Local Data Share):
     plain: Total TDM store requests.
     rst: Total TDM store requests.
     unit: Requests per Normalization Unit
-  LDS Utilization - Load:
-    plain: Percentage of VMW-busy cycles the LDS is executing a load.
-    rst: Percentage of VMW-busy cycles the LDS is executing a load.
-    unit: Percent
-  LDS Utilization - Store:
-    plain: Percentage of VMW-busy cycles the LDS is executing a store.
-    rst: Percentage of VMW-busy cycles the LDS is executing a store.
-    unit: Percent
-  LDS Address Conflict Stall Rate:
-    plain: Percentage of VMW-busy cycles LDS is stalled due to address conflict.
-    rst: Percentage of VMW-busy cycles LDS is stalled due to address conflict.
-    unit: Percent
 Memory chart - GL0-GL1 Interface:
+  GL0-GL1 Read Requests:
+    plain: Number of GL0-GL1 read requests.
+    rst: Number of GL0-GL1 read requests.
+    unit: Requests per Normalization Unit
+  GL0-GL1 Write Requests:
+    plain: Number of GL0-GL1 write requests.
+    rst: Number of GL0-GL1 write requests.
+    unit: Requests per Normalization Unit
   GL0-GL1 Read Bandwidth:
     plain: Total GL0-GL1 read bandwidth.
     rst: Total GL0-GL1 read bandwidth.
@@ -324,26 +316,6 @@ Memory chart - GL0-GL1 Interface:
     plain: Total GL0-GL1 atomic bandwidth.
     rst: Total GL0-GL1 atomic bandwidth.
     unit: GB/s
-  GL1A Utilization:
-    plain: Percentage of cycles GL1 Arbiter is processing requests from GL0.
-    rst: Percentage of cycles GL1 Arbiter is processing requests from GL0.
-    unit: Percent
-  GL1C Utilization:
-    plain: Percentage of cycles the GL1 is processing requests.
-    rst: Percentage of cycles the GL1 is processing requests.
-    unit: Percent
-  GL1C Buffer Full Stall:
-    plain: Percentage of GL1-busy cycles GL1 is stalled due to no available buffer entries.
-    rst: Percentage of GL1-busy cycles GL1 is stalled due to no available buffer entries.
-    unit: Percent
-  GL0-GL1 Read Requests:
-    plain: Number of GL0-GL1 read requests.
-    rst: Number of GL0-GL1 read requests.
-    unit: Requests per Normalization Unit
-  GL0-GL1 Write Requests:
-    plain: Number of GL0-GL1 write requests.
-    rst: Number of GL0-GL1 write requests.
-    unit: Requests per Normalization Unit
   GL0-GL1 Read Latency:
     plain: Average GL0-GL1 read latency.
     rst: Average GL0-GL1 read latency.
@@ -356,11 +328,35 @@ Memory chart - GL0-GL1 Interface:
     plain: Percentage of VMW-busy cycles GL0 is stalled sending requests to GL1.
     rst: Percentage of VMW-busy cycles GL0 is stalled sending requests to GL1.
     unit: Percent
+  GL1A Utilization:
+    plain: Percentage of cycles GL1 Arbiter is processing requests from GL0.
+    rst: Percentage of cycles GL1 Arbiter is processing requests from GL0.
+    unit: Percent
+  GL1C Utilization:
+    plain: Percentage of cycles the GL1 is processing requests.
+    rst: Percentage of cycles the GL1 is processing requests.
+    unit: Percent
+  GL1C Buffer Full Stall:
+    plain: Percentage of GL1-busy cycles GL1 is stalled due to no available buffer entries.
+    rst: Percentage of GL1-busy cycles GL1 is stalled due to no available buffer entries.
+    unit: Percent
 Memory chart - GLARB (GL1-GL2 Arbiter):
   GLARBA Utilization:
     plain: Percentage of cycles the Graphic Level Arbiter is processing requests.
     rst: Percentage of cycles the Graphic Level Arbiter is processing requests.
     unit: Percent
+  GLARBA Request Path Utilization:
+    plain: Percentage of cycles the GL1 to Graphic Level Arbiter request path is busy.
+    rst: Percentage of cycles the GL1 to Graphic Level Arbiter request path is busy.
+    unit: Percent
+  GLARBA Return Path Utilization:
+    plain: Percentage of cycles the GL2 to GL1 return path is busy.
+    rst: Percentage of cycles the GL2 to GL1 return path is busy.
+    unit: Percent
+  GLARBA Request Latency:
+    plain: Average latency of requests sent to the Graphics Level Arbiter.
+    rst: Average latency of requests sent to the Graphics Level Arbiter.
+    unit: Cycles
   GLARBC Utilization:
     plain: Percentage of cycles the Graphic Level Arbiter staging buffer is forwarding requests.
     rst: Percentage of cycles the Graphic Level Arbiter staging buffer is forwarding requests.
@@ -389,18 +385,6 @@ Memory chart - GLARB (GL1-GL2 Arbiter):
     plain: Total Graphic Level Arbiter to GL2 atomic bandwidth.
     rst: Total Graphic Level Arbiter to GL2 atomic bandwidth.
     unit: GB/s
-  GLARBA Request Path Utilization:
-    plain: Percentage of cycles the GL1 to Graphic Level Arbiter request path is busy.
-    rst: Percentage of cycles the GL1 to Graphic Level Arbiter request path is busy.
-    unit: Percent
-  GLARBA Return Path Utilization:
-    plain: Percentage of cycles the GL2 to GL1 return path is busy.
-    rst: Percentage of cycles the GL2 to GL1 return path is busy.
-    unit: Percent
-  GLARBA Request Latency:
-    plain: Average latency of requests sent to the Graphics Level Arbiter.
-    rst: Average latency of requests sent to the Graphics Level Arbiter.
-    unit: Cycles
 Memory chart - GL2 Cache (L2):
   GL2A Utilization:
     plain: Percentage of cycles the GL2 Arbiter is distributing requests across GL2 Cache partitions.
@@ -2263,42 +2247,6 @@ GRBM Metrics:
     plain: Percentage of GPU-active cycles the Central Hub is handling traffic between shader engines and GL2.
     rst: Percentage of GPU-active cycles the Central Hub is handling traffic between shader engines and GL2.
     unit: Percent
-  Total Instructions:
-    plain: Total instructions issued.
-    rst: Total instructions issued.
-    unit: Instructions per Normalization Unit
-  Instructions - Internal:
-    plain: Number of internal (non-user-visible) instructions issued.
-    rst: Number of internal (non-user-visible) instructions issued.
-    unit: Instructions per Normalization Unit
-  Instructions - VALU:
-    plain: Number of VALU instructions issued.
-    rst: Number of VALU instructions issued.
-    unit: Instructions per Normalization Unit
-  Instructions - SALU:
-    plain: Number of SALU instructions issued.
-    rst: Number of SALU instructions issued.
-    unit: Instructions per Normalization Unit
-  Instructions - SMEM:
-    plain: Number of scalar memory instructions issued.
-    rst: Number of scalar memory instructions issued.
-    unit: Instructions per Normalization Unit
-  Instructions - Transcendental:
-    plain: Number of transcendental VALU instructions issued.
-    rst: Number of transcendental VALU instructions issued.
-    unit: Instructions per Normalization Unit
-  Instructions - Double Precision:
-    plain: Number of double-precision VALU instructions issued.
-    rst: Number of double-precision VALU instructions issued.
-    unit: Instructions per Normalization Unit
-  Instructions - VMEM:
-    plain: Number of VMEM instructions issued.
-    rst: Number of VMEM instructions issued.
-    unit: Instructions per Normalization Unit
-  Instructions - LDS:
-    plain: Number of LDS instructions issued.
-    rst: Number of LDS instructions issued.
-    unit: Instructions per Normalization Unit
 Wavefront Launch Stats:
   Grid Size:
     plain: Total number of work-items in the dispatch grid.
