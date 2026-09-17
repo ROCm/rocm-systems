@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -45,13 +45,13 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <cstdlib>
+#include <utility>
 
+#include "core/inc/amd_aie_agent.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/util/os.h"
-
-#include <cstdlib>
-#include <utility>
 #include "core/inc/hsa_internal.h"
 #include "core/util/utils.h"
 #include "inc/hsa_ext_amd.h"
@@ -279,15 +279,41 @@ private:
 };
 
 const core::MemoryRegion* RegionMemory::AgentLocal(hsa_agent_t agent, bool is_code) {
-  AMD::GpuAgent *amd_agent = (AMD::GpuAgent*)core::Agent::Convert(agent);
-  assert(amd_agent->device_type() == core::Agent::kAmdGpuDevice && "Invalid agent type.");
-  auto agent_local_region =
-      std::find_if(amd_agent->regions().begin(), amd_agent->regions().end(),
-                   [&](const std::shared_ptr<const core::MemoryRegion>& region) {
-                     const AMD::MemoryRegion* amd_region = (const AMD::MemoryRegion*)region.get();
-                     return amd_region->IsLocalMemory() && (!amd_region->fine_grain());
-                   });
-  return agent_local_region == amd_agent->regions().end() ? nullptr : agent_local_region->get();
+  core::Agent* base_agent = core::Agent::Convert(agent);
+
+  switch (base_agent->device_type()) {
+    case core::Agent::kAmdGpuDevice: {
+      // GPU agent: find local, coarse-grain memory region
+      auto gpu_agent = static_cast<AMD::GpuAgent*>(base_agent);
+      auto region_it =
+          std::find_if(gpu_agent->regions().begin(), gpu_agent->regions().end(),
+                       [&](const std::shared_ptr<const core::MemoryRegion>& region) {
+                         auto amd_region = static_cast<const AMD::MemoryRegion*>(region.get());
+                         return amd_region->IsLocalMemory() && (!amd_region->fine_grain());
+                       });
+      return region_it == gpu_agent->regions().end() ? nullptr : region_it->get();
+    }
+    case core::Agent::kAmdAieDevice: {
+      // AIE agent: find SHMEM region (first system region for non-code, device SVM for code)
+      auto aie_agent = static_cast<AMD::AieAgent*>(base_agent);
+      auto region_it = std::find_if(aie_agent->regions().begin(), aie_agent->regions().end(),
+                                    [&](const std::shared_ptr<const core::MemoryRegion>& region) {
+                                      auto amd_region =
+                                          static_cast<const AMD::MemoryRegion*>(region.get());
+                                      if (is_code) {
+                                        // For code segments, use the device SVM region (dev heap)
+                                        return amd_region->IsDeviceSVM();
+                                      } else {
+                                        // For data segments, use regular system memory
+                                        return amd_region->IsSystem() && !amd_region->IsDeviceSVM();
+                                      }
+                                    });
+      return region_it == aie_agent->regions().end() ? nullptr : region_it->get();
+    }
+    default:
+      assert(false && "Unsupported agent type");
+      return nullptr;
+  }
 }
 
 const core::MemoryRegion* RegionMemory::System(bool is_code) {
@@ -306,6 +332,12 @@ bool RegionMemory::Allocate(size_t size, size_t align, bool zero) {
   if (HSA_STATUS_SUCCESS !=
       core::Runtime::runtime_singleton_->AllocateMemory(region_, size, flags, &ptr_)) {
     ptr_ = nullptr;
+    return false;
+  }
+  // A successful allocation must yield a usable VA: Freeze() and Copy() dereference
+  // ptr_ directly. Fail loudly instead of returning a null ptr_ that segfaults later
+  // (the alignment assert below is compiled out in release builds).
+  if (ptr_ == nullptr) {
     return false;
   }
   assert(0 == ((uintptr_t)ptr_) % align);

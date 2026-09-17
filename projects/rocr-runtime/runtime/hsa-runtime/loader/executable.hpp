@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -61,6 +61,7 @@
 #include "inc/hsa_ext_image.h"
 #include "core/inc/amd_hsa_loader.hpp"
 #include "core/inc/amd_hsa_code.hpp"
+#include "core/inc/amd_aie_section.h"
 #include "inc/amd_hsa_kernel_code.h"
 #include "amd_hsa_locks.hpp"
 
@@ -303,6 +304,43 @@ private:
 };
 
 //===----------------------------------------------------------------------===//
+// AieKernelSymbol.                                                           //
+//===----------------------------------------------------------------------===//
+
+/// @brief Kernel symbol for AIE code objects.
+///
+/// The kernel_object handle exposed via HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT
+/// is a pointer to a host-owned AieKernelDescriptor (see amd_aie_section.h).
+class AieKernelSymbol final : public SymbolImpl {
+ public:
+  /// @brief Constructs a kernel symbol.
+  /// @param _symbol_name Kernel name.
+  /// @param _descriptor_ptr Host pointer to the kernel's AieKernelDescriptor.
+  /// @param _kernarg_size Kernel argument buffer size in bytes.
+  AieKernelSymbol(const std::string& _symbol_name, uint64_t _descriptor_ptr, uint32_t _kernarg_size)
+      : SymbolImpl(true,  // is_loaded
+                   HSA_SYMBOL_KIND_KERNEL,
+                   "",  // module_name
+                   _symbol_name, HSA_SYMBOL_LINKAGE_PROGRAM,
+                   true,  // is_definition
+                   _descriptor_ptr),
+        descriptor_ptr(_descriptor_ptr),
+        kernarg_size(_kernarg_size) {}
+
+  bool GetInfo(hsa_symbol_info32_t symbol_info, void* value) override;
+
+  /// @brief Marks the kernel_object handle as visible (called at executable freeze).
+  void SetFrozen() { frozen = true; }
+
+  /// @brief Host pointer to the kernel's AieKernelDescriptor.
+  uint64_t descriptor_ptr;
+  /// @brief Kernel argument buffer size in bytes.
+  uint32_t kernarg_size;
+  /// @brief KERNEL_OBJECT returns 0 until set at freeze (GPU-parity contract).
+  bool frozen = false;
+};
+
+//===----------------------------------------------------------------------===//
 // Logger.                                                                    //
 //===----------------------------------------------------------------------===//
 
@@ -402,6 +440,51 @@ public:
   std::string getUri() const override;
 
   link_map r_debug_info;
+};
+
+//===----------------------------------------------------------------------===//
+// AieLoadedCodeObjectImpl.                                                   //
+//===----------------------------------------------------------------------===//
+
+class AieLoadedCodeObjectImpl : public LoadedCodeObject, public ExecutableObject {
+  friend class AmdHsaCodeLoader;
+
+ private:
+  AieLoadedCodeObjectImpl(const AieLoadedCodeObjectImpl&);
+  AieLoadedCodeObjectImpl& operator=(const AieLoadedCodeObjectImpl&);
+
+  const void* elf_data;
+  size_t elf_size;
+
+ public:
+  AieLoadedCodeObjectImpl(ExecutableImpl* owner_, hsa_agent_t agent_, const void* elf_data_,
+                          size_t elf_size_)
+      : ExecutableObject(owner_, agent_), elf_data(elf_data_), elf_size(elf_size_) {}
+
+  /// @brief Host-owned kernel descriptors; the kernel_object handles point at these.
+  std::vector<std::unique_ptr<AMD::AieKernelDescriptor>> descriptors;
+  /// @brief Device buffers backing the blobs: (host ptr from SegmentAlloc, size).
+  std::vector<std::pair<void*, size_t>> device_buffers;
+
+  bool GetInfo(amd_loaded_code_object_info_t attribute, void* value) override;
+
+  hsa_status_t IterateLoadedSegments(hsa_status_t (*callback)(amd_loaded_segment_t loaded_segment,
+                                                              void* data),
+                                     void* data) override;
+
+  void Print(std::ostream& out) override;
+
+  void Destroy() override;
+
+  hsa_agent_t getAgent() const override;
+  hsa_executable_t getExecutable() const override;
+  uint64_t getElfData() const override;
+  uint64_t getElfSize() const override;
+  uint64_t getStorageOffset() const override;
+  uint64_t getLoadBase() const override;
+  uint64_t getLoadSize() const override;
+  int64_t getDelta() const override;
+  std::string getUri() const override;
 };
 
 class Segment : public LoadedSegment, public ExecutableObject {
@@ -596,7 +679,20 @@ public:
   Context* context() { return context_; }
   size_t id() { return id_; }
 
-private:
+ private:
+  /// @brief Loads an AIE code object. Defined only on Linux (SRC_XDNA); the sole
+  /// caller is likewise gated, so this is never referenced on other platforms.
+  ///
+  /// @param agent AIE agent to load the code object for.
+  /// @param data Pointer to the code object data.
+  /// @param size Size of the code object data.
+  /// @param uri URI of the code object for debugging.
+  /// @param loaded_code_object Output loaded code object handle.
+  /// @return HSA_STATUS_SUCCESS on success, error code otherwise.
+  hsa_status_t LoadAieCodeObject(hsa_agent_t agent, const void* data, size_t size,
+                                 const std::string& uri,
+                                 hsa_loaded_code_object_t* loaded_code_object);
+
   ExecutableImpl(const ExecutableImpl &e);
   ExecutableImpl& operator=(const ExecutableImpl &e);
 
@@ -662,6 +758,8 @@ private:
   bool trampoline_enabled_gfx125x_ = false;
   std::vector<KdFixup> kd_fixups_;
   std::vector<std::shared_ptr<Segment>> trampoline_segments_;
+  // AIE kernel symbols, so Freeze() can make their kernel_object handles visible.
+  std::vector<std::shared_ptr<AieKernelSymbol>> aie_kernel_symbols_;
 };
 
 class AmdHsaCodeLoader : public Loader {

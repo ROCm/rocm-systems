@@ -56,8 +56,14 @@
 #include <iostream>
 #include <atomic>
 #include <fstream>
+#include <map>
 #include "inc/amd_hsa_elf.h"
 #include "inc/amd_hsa_kernel_code.h"
+#include "core/inc/amd_aie_code.hpp"
+#include "core/inc/amd_aie_agent.h"
+#include "core/inc/amd_aie_section.h"
+#include "core/inc/runtime.h"
+#include "core/inc/amd_elf_image.hpp"
 #include "core/inc/amd_hsa_code.hpp"
 #include "amd_hsa_code_util.hpp"
 #include "amd_options.hpp"
@@ -714,6 +720,37 @@ bool VariableSymbol::GetInfo(hsa_symbol_info32_t symbol_info, void *value) {
   return true;
 }
 
+//===----------------------------------------------------------------------===//
+// AieKernelSymbol.                                                            //
+//===----------------------------------------------------------------------===//
+
+bool AieKernelSymbol::GetInfo(hsa_symbol_info32_t symbol_info, void* value) {
+  switch (symbol_info) {
+    case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT:
+      // Handle is only valid once the executable is frozen; 0 before, matching GPU.
+      *static_cast<uint64_t*>(value) = frozen ? descriptor_ptr : 0;
+      return true;
+    case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE:
+      *static_cast<uint32_t*>(value) = kernarg_size;
+      return true;
+    case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT:
+      *static_cast<uint32_t*>(value) = 64;  // Default alignment
+      return true;
+    case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE:
+      *static_cast<uint32_t*>(value) = 0;  // NPU doesn't use group segment
+      return true;
+    case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE:
+      *static_cast<uint32_t*>(value) = 0;  // NPU doesn't use private segment
+      return true;
+    default:
+      return SymbolImpl::GetInfo(symbol_info, value);
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// LoadedCodeObjectImpl.                                                            //
+//===----------------------------------------------------------------------===//
+
 bool LoadedCodeObjectImpl::GetInfo(amd_loaded_code_object_info_t attribute, void *value)
 {
   assert(value);
@@ -755,6 +792,74 @@ void LoadedCodeObjectImpl::Print(std::ostream& out)
 {
   out << "Code Object" << std::endl;
 }
+
+//===----------------------------------------------------------------------===//
+// AieLoadedCodeObjectImpl.                                                   //
+//===----------------------------------------------------------------------===//
+
+bool AieLoadedCodeObjectImpl::GetInfo(amd_loaded_code_object_info_t attribute, void* value) {
+  switch (attribute) {
+    case AMD_LOADED_CODE_OBJECT_INFO_ELF_IMAGE:
+      *static_cast<uint64_t*>(value) = reinterpret_cast<uint64_t>(elf_data);
+      return true;
+    case AMD_LOADED_CODE_OBJECT_INFO_ELF_IMAGE_SIZE:
+      *static_cast<uint64_t*>(value) = elf_size;
+      return true;
+    default:
+      return false;
+  }
+}
+
+hsa_status_t AieLoadedCodeObjectImpl::IterateLoadedSegments(
+    hsa_status_t (*callback)(amd_loaded_segment_t loaded_segment, void* data), void* data) {
+  // AIE code objects don't have traditional segments.
+  return HSA_STATUS_SUCCESS;
+}
+
+void AieLoadedCodeObjectImpl::Print(std::ostream& out) {
+  out << "AIE Loaded Code Object:" << std::endl;
+  out << "  ELF Size: " << elf_size << std::endl;
+  out << "  Kernels: " << descriptors.size() << std::endl;
+  out << "  Device Buffers: " << device_buffers.size() << std::endl;
+}
+
+void AieLoadedCodeObjectImpl::Destroy() {
+  for (auto& b : device_buffers) {
+    owner->context()->SegmentFree(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, b.first, b.second);
+  }
+  device_buffers.clear();
+  descriptors.clear();
+}
+
+hsa_agent_t AieLoadedCodeObjectImpl::getAgent() const { return agent; }
+
+hsa_executable_t AieLoadedCodeObjectImpl::getExecutable() const {
+  return Executable::Handle(owner);
+}
+
+uint64_t AieLoadedCodeObjectImpl::getElfData() const {
+  return reinterpret_cast<uint64_t>(elf_data);
+}
+
+uint64_t AieLoadedCodeObjectImpl::getElfSize() const { return elf_size; }
+
+uint64_t AieLoadedCodeObjectImpl::getStorageOffset() const { return 0; }
+
+// Unlike the GPU path (one contiguous load segment), an AIE object is placed as
+// N independent XDNA BOs (per-kernel insts/PDI), so there is no single load
+// base/size/delta to report. Keep these 0; per-kernel device addresses live in
+// each AieKernelDescriptor if a consumer ever needs them.
+uint64_t AieLoadedCodeObjectImpl::getLoadBase() const { return 0; }
+
+uint64_t AieLoadedCodeObjectImpl::getLoadSize() const { return 0; }
+
+int64_t AieLoadedCodeObjectImpl::getDelta() const { return 0; }
+
+std::string AieLoadedCodeObjectImpl::getUri() const { return ""; }
+
+//===----------------------------------------------------------------------===//
+// Segment.                                                                   //
+//===----------------------------------------------------------------------===//
 
 bool Segment::GetInfo(amd_loaded_segment_info_t attribute, void *value)
 {
@@ -1297,6 +1402,16 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     }
   }
 
+  // AIE code objects take a separate loading path. The AIE loader (AMD::AieCode,
+  // amd_aie_code.cpp) is Linux-only (SRC_XDNA), so gate the sniff+dispatch to match.
+#if defined(__linux__)
+  if (AMD::AieCode::IsAieCodeObject(reinterpret_cast<const void*>(code_object.handle),
+                                    code_object_size)) {
+    return LoadAieCodeObject(agent, reinterpret_cast<const void*>(code_object.handle),
+                             code_object_size, uri, loaded_code_object);
+  }
+#endif
+
   LoaderOptions loaderOptions;
   if (options && !loaderOptions.ParseOptions(options)) {
     return HSA_STATUS_ERROR;
@@ -1467,6 +1582,171 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   if (nullptr != loaded_code_object) { *loaded_code_object = LoadedCodeObject::Handle(loaded_code_objects.back().get()); }
   return HSA_STATUS_SUCCESS;
 }
+
+// Linux-only: see the gated call site in LoadCodeObject.
+#if defined(__linux__)
+hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* data, size_t size,
+                                               const std::string& uri,
+                                               hsa_loaded_code_object_t* loaded_code_object) {
+  auto aie_code = AMD::AieCode::Create(data, size);
+  if (!aie_code) {
+    logger_ << "LoaderError: failed to parse AIE code object\n";
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+
+  // The AIE path is selected from ELF content alone, so guard the downcast: an
+  // AIE code object targeted at a non-AIE agent is a caller error, not UB.
+  core::Agent* core_agent = core::Agent::Convert(agent);
+  if (!core_agent || core_agent->device_type() != core::Agent::DeviceType::kAmdAieDevice) {
+    logger_ << "LoaderError: AIE code object loaded onto a non-AIE agent\n";
+    return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+  }
+  auto* aie_agent = static_cast<AMD::AieAgent*>(core_agent);
+
+  // Arch-vs-agent validation: the AIE section name IS the arch name, and the agent is the sole
+  // authority on which arch it accepts (arch_name from node_props.AMDName). The parser identifies
+  // the section structurally (by header magic) and carries no arch allowlist of its own.
+  if (aie_code->GetArchSectionName() != aie_agent->arch_name()) {
+    logger_ << "LoaderError: code object arch does not match agent\n";
+    return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+  }
+
+  auto loaded_obj = std::make_shared<AieLoadedCodeObjectImpl>(this, agent, data, size);
+
+  // Copy each unique blob to memory once, keyed on (host source, size).
+  std::map<std::pair<const uint8_t*, uint64_t>, void*> blob_addr;
+  auto place_blob = [&](const uint8_t* src, uint64_t len, void** out_ptr) -> hsa_status_t {
+    if (len == 0) {
+      *out_ptr = nullptr;
+      return HSA_STATUS_SUCCESS;
+    }
+    auto key = std::make_pair(src, len);
+    auto it = blob_addr.find(key);
+    if (it != blob_addr.end()) {
+      *out_ptr = it->second;
+      return HSA_STATUS_SUCCESS;
+    }
+    void* buf = context_->SegmentAlloc(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, len, 64, false);
+    if (!buf) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    if (!context_->SegmentCopy(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, buf, 0, src, len)) {
+      context_->SegmentFree(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, buf, len);
+      return HSA_STATUS_ERROR;
+    }
+    context_->SegmentFreeze(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, buf, len);
+    void* dev = context_->SegmentAddress(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, buf, 0);
+    // The blob is immutable after load; flush it from the CPU cache once here so
+    // the NPU sees the freshly copied bytes. Per-dispatch flushing in the driver
+    // is unnecessary for these buffers (only kernargs change per dispatch).
+    rocr::FlushCpuCache(dev, 0, len);
+    loaded_obj->device_buffers.emplace_back(buf, len);
+    blob_addr[key] = dev;
+    *out_ptr = dev;
+    return HSA_STATUS_SUCCESS;
+  };
+
+  const auto kernel_names = aie_code->GetKernelNames();
+
+  // Reject duplicate (name, agent) before allocating anything.
+  for (const auto& kernel_name : kernel_names) {
+    if (agent_symbols_.count(std::make_pair(kernel_name, agent))) {
+      logger_ << "LoaderError: kernel already defined: " << kernel_name << "\n";
+      return HSA_STATUS_ERROR_VARIABLE_ALREADY_DEFINED;
+    }
+  }
+
+  // Stage symbols locally; only publish into agent_symbols_ once every blob has
+  // been placed, so a mid-loop failure leaves no dangling handles behind. Device
+  // buffers already recorded on loaded_obj are freed via Destroy() on failure.
+  std::vector<std::shared_ptr<AieKernelSymbol>> staged_symbols;
+  staged_symbols.reserve(kernel_names.size());
+  for (const auto& kernel_name : kernel_names) {
+    const auto* ki = aie_code->GetKernel(kernel_name);
+    if (ki->kind >= AMD::AieKernelKind::Count) {
+      log_warning_n(10, "AIE: code object declares an unsupported payload kind.\n");
+      loaded_obj->Destroy();
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
+    if (ki->kind != AMD::AieKernelKind::PdiInsts) {
+      // FullElf arrives in Task 5.
+      log_warning_n(10, "AIE: full-ELF payloads are not supported by this build.\n");
+      loaded_obj->Destroy();
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
+
+    void* insts_dev = nullptr;
+    void* pdi_dev = nullptr;
+    if (auto s = place_blob(ki->insts_data, ki->insts_size, &insts_dev); s != HSA_STATUS_SUCCESS) {
+      loaded_obj->Destroy();
+      return s;
+    }
+    if (auto s = place_blob(ki->pdi_data, ki->pdi_size, &pdi_dev); s != HSA_STATUS_SUCCESS) {
+      loaded_obj->Destroy();
+      return s;
+    }
+
+    // The insts/PDI blobs are immutable after load, so their XDNA BO handles are
+    // stable for the object's lifetime. Resolve once here instead of on every
+    // dispatch. Kernarg BOs are per-dispatch and still resolve at submit.
+    auto resolve_handle = [&](void* va, uint32_t* out_handle) -> hsa_status_t {
+      void* base = nullptr;
+      core::DriverMemoryHandle handle{};
+      if (core::Runtime::runtime_singleton_->FindDriverMemoryHandle(va, core_agent, &base,
+                                                                    &handle) != HSA_STATUS_SUCCESS) {
+        return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+      }
+      *out_handle = static_cast<uint32_t>(handle.handle);
+      return HSA_STATUS_SUCCESS;
+    };
+
+    auto desc = std::make_unique<AMD::AieKernelDescriptor>();
+    desc->version = AMD::kAieKernelDescriptorVersion;
+    desc->kind = ki->kind;
+    desc->reserved0 = 0;
+    desc->insts_bo_va = insts_dev;
+    desc->insts_size = ki->insts_size;
+    if (auto s = resolve_handle(insts_dev, &desc->insts_bo_handle); s != HSA_STATUS_SUCCESS) {
+      loaded_obj->Destroy();
+      return s;
+    }
+    desc->pdi_bo_handle = 0;
+    if (pdi_dev != nullptr) {
+      if (auto s = resolve_handle(pdi_dev, &desc->pdi_bo_handle); s != HSA_STATUS_SUCCESS) {
+        loaded_obj->Destroy();
+        return s;
+      }
+    }
+    desc->pdi_size = ki->pdi_size;
+    desc->kernarg_size = ki->kernarg_size;
+    desc->num_cols = ki->num_cols;
+    uint64_t desc_ptr = reinterpret_cast<uint64_t>(desc.get());
+    loaded_obj->descriptors.push_back(std::move(desc));
+
+    auto kernel_sym =
+        std::make_shared<AieKernelSymbol>(kernel_name, desc_ptr, ki->kernarg_size);
+    kernel_sym->agent = agent;
+    staged_symbols.push_back(std::move(kernel_sym));
+  }
+
+  // All allocations succeeded: publish symbols and take ownership of loaded_obj.
+  for (size_t i = 0; i < kernel_names.size(); ++i) {
+    agent_symbols_[std::make_pair(kernel_names[i], agent)] = staged_symbols[i];
+    aie_kernel_symbols_.push_back(std::move(staged_symbols[i]));
+  }
+
+  // Tracked in objects (for Destroy/teardown) but intentionally NOT in
+  // loaded_code_objects: that vector holds LoadedCodeObjectImpl (the GPU segment
+  // model), which AieLoadedCodeObjectImpl is not.
+  // AIE objects are not enumerated by hsa_ven_amd_loader_executable_iterate_loaded_code_objects
+  // and have no r_debug link-map entry.
+  // Revisit if we need to discover AIE code objects generically.
+  auto loaded_obj_ptr = loaded_obj.get();
+  objects.push_back(std::move(loaded_obj));
+  if (loaded_code_object) {
+    *loaded_code_object = LoadedCodeObject::Handle(loaded_obj_ptr);
+  }
+  return HSA_STATUS_SUCCESS;
+}
+#endif  // defined(__linux__)
 
 hsa_status_t ExecutableImpl::LoadSegments(hsa_agent_t agent,
                                           const code::AmdHsaCode *c,
@@ -2260,6 +2540,11 @@ hsa_status_t ExecutableImpl::Freeze(const char *options) {
   // DMA and code-cache invalidation happen alongside the code segments.
   for (auto& ts : trampoline_segments_) {
     ts->Freeze();
+  }
+
+  // AIE kernel handles become visible only once frozen.
+  for (auto& aie_sym : aie_kernel_symbols_) {
+    aie_sym->SetFrozen();
   }
 
   state_ = HSA_EXECUTABLE_STATE_FROZEN;

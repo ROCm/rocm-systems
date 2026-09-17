@@ -1523,6 +1523,88 @@ void DispatchMulAndVerify(hsa_queue_t* queue, const kernel_artifacts& artifacts,
   VerifyMul(inout, aie_vector_scalar_mul_kernel::element_count, 0);
 }
 
+// ---------------------------------------------------------------------------
+// Unified hsaco loader
+//
+// The suite's CMake packages the vsadd PDI+insts artifacts above into a single
+// AIE hsaco (kind = PdiInsts) via aie_hsaco.py, so this test can exercise
+// hsa_executable_load_agent_code_object end to end. Full-ELF hsacos (kind =
+// FullElf) are not supported by the loader yet; that lands in Task 5.
+// ---------------------------------------------------------------------------
+const std::filesystem::path kHsacoPath = STRINGIFY(DEFAULT_HSACO_PATH);
+constexpr const char* kHsacoKernelName = DEFAULT_HSACO_KERNEL_NAME;
+
+// The build skips packaging the hsaco when the toolchain cannot produce the PDI/insts it is
+// built from; mirrors the GTEST_SKIP idiom used by the full-ELF tests below.
+bool hsaco_available() { return std::filesystem::exists(kHsacoPath); }
+
+// Reads the whole hsaco file into memory. Returns an empty vector on failure; callers are
+// expected to have already checked hsaco_available().
+std::vector<std::uint8_t> hsaco_bytes() {
+  std::size_t size = 0;
+  auto f = open_binary(kHsacoPath, &size);
+  if (!f) return {};
+  std::vector<std::uint8_t> buf(size);
+  if (!read_exact(f, buf.data(), size)) return {};
+  return buf;
+}
+
+std::size_t hsaco_size() {
+  std::size_t size = 0;
+  open_binary(kHsacoPath, &size);
+  return size;
+}
+
+const char* kernel_name() { return kHsacoKernelName; }
+
+TEST_F(DispatchTest, HsacoKernelObjectIsPublished) {
+  if (!hsaco_available()) {
+    GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+  }
+
+  const auto hsaco = hsaco_bytes();
+  ASSERT_EQ(hsaco.size(), hsaco_size());
+  ASSERT_FALSE(hsaco.empty()) << "failed to read " << kHsacoPath;
+
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(hsa_code_object_reader_create_from_memory(hsaco.data(), hsaco.size(), &reader),
+            HSA_STATUS_SUCCESS);
+
+  hsa_executable_t executable{};
+  ASSERT_EQ(hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
+                                      nullptr, &executable),
+            HSA_STATUS_SUCCESS);
+
+  ASSERT_EQ(
+      hsa_executable_load_agent_code_object(executable, aie_agents.front(), reader, nullptr, nullptr),
+      HSA_STATUS_SUCCESS);
+
+  // The kernel object handle is zero until the executable is frozen, matching the GPU contract.
+  hsa_executable_symbol_t symbol{};
+  ASSERT_EQ(hsa_executable_get_symbol_by_name(executable, kernel_name(), &aie_agents.front(),
+                                              &symbol),
+            HSA_STATUS_SUCCESS);
+  std::uint64_t kernel_object = 1;
+  ASSERT_EQ(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
+                                           &kernel_object),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(kernel_object, 0u) << "kernel object must be zero before freeze";
+
+  ASSERT_EQ(hsa_executable_freeze(executable, nullptr), HSA_STATUS_SUCCESS);
+
+  ASSERT_EQ(hsa_executable_get_symbol_by_name(executable, kernel_name(), &aie_agents.front(),
+                                              &symbol),
+            HSA_STATUS_SUCCESS);
+  kernel_object = 0;
+  ASSERT_EQ(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
+                                           &kernel_object),
+            HSA_STATUS_SUCCESS);
+  EXPECT_NE(kernel_object, 0u) << "kernel object must be published after freeze";
+
+  EXPECT_EQ(hsa_executable_destroy(executable), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_code_object_reader_destroy(reader), HSA_STATUS_SUCCESS);
+}
+
 // The full-ELF build of the same vector-scalar-add kernel used above.
 struct aie_full_elf_kernel {
   static const std::filesystem::path elfPath;

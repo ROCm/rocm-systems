@@ -43,8 +43,9 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_AIE_AGENT_H_
 #define HSA_RUNTIME_CORE_INC_AMD_AIE_AGENT_H_
 
+#include <string_view>
+
 #include "core/inc/agent.h"
-#include "core/inc/runtime.h"
 
 namespace rocr {
 namespace AMD {
@@ -100,6 +101,9 @@ public:
  /// @brief Getter for the AIE node properties.
  const HsaNodeProperties& properties() const { return node_props_; }
 
+ /// @brief Architecture name accepted in AIE hsaco section names.
+ std::string_view arch_name() const { return arch_name_; }
+
 private:
   /// @brief Query the driver to get the region list owned by this agent.
   void InitRegionList();
@@ -112,7 +116,6 @@ private:
                        core::MemoryRegion::AllocateFlags flags)>
       system_allocator_;
 
-
   std::function<void(void*)> system_deallocator_;
 
   const hsa_profile_t profile_ = HSA_PROFILE_BASE;
@@ -121,6 +124,8 @@ private:
   const uint32_t max_queues_ = 1;
 
   const HsaNodeProperties node_props_;
+  /// @brief node_props_.AMDName for use as the agent's hsaco arch name.
+  std::string_view arch_name_;
 };
 
 } // namespace AMD

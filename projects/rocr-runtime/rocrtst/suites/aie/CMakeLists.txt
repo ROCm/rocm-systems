@@ -281,6 +281,40 @@ set(VSMUL_SCALE 3)
 add_aie_kernel(vsmul "${CMAKE_CURRENT_SOURCE_DIR}/vector_scalar_mul.py" "--scale=${VSMUL_SCALE}")
 
 # ---------------------------------------------------------------------------
+# Unified hsaco packaging
+#
+# Packages the vsadd PDI+insts artifacts into a single AIE hsaco via
+# aie_hsaco.py, so the loader test in dispatch.cc can exercise
+# hsa_executable_load_agent_code_object on a PdiInsts hsaco.
+#
+# aie_hsaco.py's --arch uses "aie2"/"aie2p", while NPU_TARGET (detected above)
+# uses "npu"/"npu2" -- map the latter onto the former.
+# ---------------------------------------------------------------------------
+if(NPU_TARGET STREQUAL "npu2")
+  set(AIE_HSACO_ARCH "aie2p")
+else()
+  set(AIE_HSACO_ARCH "aie2")
+endif()
+
+set(VSADD_HSACO_KERNEL_NAME "vsadd")
+set(vsadd_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsadd.hsaco")
+add_custom_command(
+  OUTPUT "${vsadd_HSACO}"
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/aie_hsaco.py"
+          --hsaco "${vsadd_HSACO}"
+          --arch "${AIE_HSACO_ARCH}"
+          # vsadd's kernarg buffer is 2 pointers + 2 sizes (see aie_vector_scalar_kernel::kernarg_bytes
+          # in dispatch.cc); the design uses a single NPU column (NPU1Col1/NPU2Col1).
+          --kernel "${VSADD_HSACO_KERNEL_NAME}:${vsadd_INSTS_BIN}:${vsadd_DESIGN_PDI}:32:1"
+  # Depend on the target, not its output files: two custom commands racing aiecc in the same
+  # build directory produce concurrent runs that clobber each other's intermediates.
+  DEPENDS vsadd_kernel_artifacts
+  COMMENT "Packaging vsadd PDI+insts artifacts into a unified AIE hsaco"
+  VERBATIM
+)
+add_custom_target(vsadd_hsaco_artifact DEPENDS "${vsadd_HSACO}")
+
+# ---------------------------------------------------------------------------
 # dispatch test executable
 # ---------------------------------------------------------------------------
 add_executable(dispatch dispatch.cc)
@@ -312,13 +346,15 @@ target_compile_definitions(dispatch
     MUL_INSTS_PATH=${vsmul_INSTS_BIN}
     MUL_ELF_PATH=${vsmul_FULL_ELF}
     MUL_SCALE=${VSMUL_SCALE}
+    DEFAULT_HSACO_PATH=${vsadd_HSACO}
+    DEFAULT_HSACO_KERNEL_NAME="${VSADD_HSACO_KERNEL_NAME}"
 )
 target_link_libraries(dispatch
   PRIVATE
     hsa-runtime64::hsa-runtime64
     GTest::gtest_main
 )
-add_dependencies(dispatch vsadd_kernel_artifacts vsmul_kernel_artifacts)
+add_dependencies(dispatch vsadd_kernel_artifacts vsmul_kernel_artifacts vsadd_hsaco_artifact)
 # Both are empty when the toolchain cannot build full ELFs. The guard is needed because
 # add_dependencies() rejects a call with no dependencies, but it tests the variables themselves
 # rather than AIE_FULL_ELF_SUPPORTED, so adding a kernel here cannot name a target that the
