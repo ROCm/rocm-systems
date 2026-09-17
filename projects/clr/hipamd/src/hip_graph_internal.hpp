@@ -6,8 +6,12 @@
 
 #pragma once
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <deque>
+#include <limits>
 #include <queue>
+#include <set>
 #include <stack>
 #include <iostream>
 #include <unordered_map>
@@ -191,6 +195,22 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
   // If kernel arg pool is full allocate new chunck and alloc kern args from new pool.
   address AllocKernArg(size_t size, size_t alignment, int devId) override;
 
+  //! Preserve bytes about to be overwritten by the idle direct-reuse path.
+  void SnapshotKernarg(address addr, size_t size) override;
+
+  //! Start tracking allocations made while recapturing one node.
+  void BeginCapture(const void* owner);
+
+  //! Commit the staged slot cache or recycle allocations from a failed capture.
+  void EndCapture(const void* owner, std::vector<amd::GraphKernargSlot>* new_slots,
+                  const std::vector<amd::GraphKernargSlot>& old_slots, bool success);
+
+  //! Register a graph launch before any of its captured packets are queued.
+  uint64_t RegisterLaunch();
+
+  //! Mark a launch complete and reclaim slots that it could have referenced.
+  void CompleteLaunch(uint64_t launch_id);
+
   // Do HDP flush/When HDP flush register is invalid fallback to Readback
   void ReadBackOrFlush();
 
@@ -202,9 +222,48 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
     size_t kernarg_pool_size_;    //! Size of the pool
     size_t kernarg_pool_offset_;  //! Current offset in the kernel arg alloc
   };
+
+  struct KernelArgAllocation {
+    KernelArgAllocation(address addr, size_t size, amd::Device* device)
+        : kernarg_addr_(addr), size_(size), device_(device) {}
+    address kernarg_addr_;
+    size_t size_;
+    amd::Device* device_;
+    uint64_t first_launch_id_ = 0;
+  };
+
+  struct DeferredAllocation {
+    DeferredAllocation(const KernelArgAllocation& allocation, uint64_t last_launch_id)
+        : allocation_(allocation), last_launch_id_(last_launch_id) {}
+    KernelArgAllocation allocation_;
+    uint64_t last_launch_id_;
+  };
+
+  struct KernargSnapshot {
+    address kernarg_addr_ = nullptr;
+    std::vector<uint8_t> data_;
+  };
+
+  static bool FreeBlockFits(const KernelArgAllocation& block, size_t size, size_t alignment,
+                            address* aligned_addr, size_t* usable_size);
+  address AllocKernArgFromFreeList(size_t size, size_t alignment, amd::Device* device);
+  address AllocKernArgFromCurrentPool(size_t size, size_t alignment, amd::Device* device);
+  address TakeFreeBlock(size_t index, address aligned_addr, size_t usable_size);
+  void RetireAllocation(const KernelArgAllocation& allocation, uint64_t last_launch_id);
+  void ReclaimDeferredAllocations();
+
   bool device_kernarg_pool_ = false;  //! Indicate if kernel pool in device mem
   std::unordered_map<amd::Device*, std::vector<KernelArgPoolGraph>>
       kernarg_graph_;  //! Vector of allocated kernarg pool per device
+  std::vector<KernelArgAllocation> free_allocations_;
+  std::vector<KernelArgAllocation> capture_allocations_;
+  std::vector<KernargSnapshot> capture_snapshots_;
+  size_t capture_snapshot_count_ = 0;
+  std::deque<DeferredAllocation> deferred_allocations_;
+  std::set<uint64_t> active_launch_ids_;
+  const void* capture_owner_ = nullptr;
+  uint64_t next_launch_id_ = 1;
+  std::mutex allocation_lock_;
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };
 
@@ -314,25 +373,86 @@ class GraphNode : public hipGraphNodeDOTAttribute {
       return status;
     }
 
+    const std::vector<uint8_t*> oldGpuPackets = gpuPackets_;
+    const std::vector<uint8_t*> oldGpuMetadataPackets = gpuMetadataPackets_;
+    std::vector<std::array<uint8_t, amd::kGraphAqlPacketSize>> oldGpuPacketData(
+        oldGpuPackets.size());
+    std::vector<std::array<uint8_t, amd::kGraphMetadataPacketSize>> oldGpuMetadataPacketData(
+        oldGpuMetadataPackets.size());
+    for (size_t i = 0; i < oldGpuPackets.size(); ++i) {
+      if (oldGpuPackets[i] != nullptr) {
+        std::memcpy(oldGpuPacketData[i].data(), oldGpuPackets[i],
+                    oldGpuPacketData[i].size());
+      }
+    }
+    for (size_t i = 0; i < oldGpuMetadataPackets.size(); ++i) {
+      if (oldGpuMetadataPackets[i] != nullptr) {
+        std::memcpy(oldGpuMetadataPacketData[i].data(), oldGpuMetadataPackets[i],
+                    oldGpuMetadataPacketData[i].size());
+      }
+    }
+
     gpuPacketScratch_.clear();
     gpuMetadataPacketScratch_.clear();
+    kernargSlotScratch_ = kernargSlots_;
     kernargSlotIndex_ = 0;
+    const std::string* capturedKernelNameScratch = capturedKernelName_;
     captureCtx_.gpuPackets = &gpuPacketScratch_;
     captureCtx_.gpuMetadataPackets = &gpuMetadataPacketScratch_;
     captureCtx_.reusableGpuPackets = &gpuPackets_;
     captureCtx_.reusableGpuMetadataPackets = &gpuMetadataPackets_;
-    captureCtx_.kernargSlots = &kernargSlots_;
+    captureCtx_.kernargSlots = &kernargSlotScratch_;
     captureCtx_.kernargSlotIndex = &kernargSlotIndex_;
     captureCtx_.reuseKernargSlots = reuseKernargSlots;
     captureCtx_.kernArgMgr = kernArgMgr;
-    captureCtx_.capturedKernelName = &capturedKernelName_;
+    captureCtx_.capturedKernelName = &capturedKernelNameScratch;
 
+    kernArgMgr->BeginCapture(this);
+    hipError_t captureStatus = hipSuccess;
     for (auto& command : commands_) {
-      command->setPktCapturingState(true, &captureCtx_);
-      // Enqueue command to capture GPU Packet. The packet is not submitted to the device.
-      // The packet is stored in gpuPacket_ and submitted during graph launch.
-      command->submit(*(command->queue())->vdev());
+      if (captureStatus == hipSuccess) {
+        command->setPktCapturingState(true, &captureCtx_);
+        // Submit captures the GPU packet without queueing it to the device.
+        command->submit(*(command->queue())->vdev());
+        if (command->status() == CL_OUT_OF_RESOURCES) {
+          captureStatus = hipErrorOutOfMemory;
+        } else if (command->status() == CL_INVALID_OPERATION) {
+          captureStatus = hipErrorIllegalState;
+        }
+      }
       command->release();
+    }
+    commands_.clear();
+
+    if (captureStatus == hipSuccess && gpuPacketScratch_.empty()) {
+      captureStatus = hipErrorIllegalState;
+    }
+
+    if (captureStatus != hipSuccess) {
+      for (size_t i = 0; i < gpuPacketScratch_.size(); ++i) {
+        uint8_t* packet = gpuPacketScratch_[i];
+        if (i < oldGpuPackets.size() && packet == oldGpuPackets[i]) {
+          std::memcpy(packet, oldGpuPacketData[i].data(), oldGpuPacketData[i].size());
+        } else {
+          delete[] packet;
+        }
+      }
+      for (size_t i = 0; i < gpuMetadataPacketScratch_.size(); ++i) {
+        uint8_t* packet = gpuMetadataPacketScratch_[i];
+        if (i < oldGpuMetadataPackets.size() && packet == oldGpuMetadataPackets[i]) {
+          std::memcpy(packet, oldGpuMetadataPacketData[i].data(),
+                      oldGpuMetadataPacketData[i].size());
+        } else {
+          delete[] packet;
+        }
+      }
+      gpuPackets_ = oldGpuPackets;
+      gpuMetadataPackets_ = oldGpuMetadataPackets;
+      gpuPacketScratch_.clear();
+      gpuMetadataPacketScratch_.clear();
+      kernArgMgr->EndCapture(this, &kernargSlotScratch_, kernargSlots_, false);
+      kernargSlotScratch_.clear();
+      return captureStatus;
     }
 
     // The metadata capture path appends one metadata packet per AQL packet, but
@@ -345,12 +465,17 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     gpuMetadataPackets_.clear();
     gpuPackets_.swap(gpuPacketScratch_);
     gpuMetadataPackets_.swap(gpuMetadataPacketScratch_);
+    capturedKernelName_ = capturedKernelNameScratch;
 
     if (gpuMetadataPackets_.empty()) {
       gpuMetadataPackets_.resize(gpuPackets_.size(), nullptr);
     }
     gpuPacketScratch_.reserve(gpuPackets_.size());
     gpuMetadataPacketScratch_.reserve(gpuMetadataPackets_.size());
+
+    kernargSlotScratch_.resize(kernargSlotIndex_);
+    kernArgMgr->EndCapture(this, &kernargSlotScratch_, kernargSlots_, true);
+    kernargSlots_ = std::move(kernargSlotScratch_);
 
     // Accumulate packets directly into the batch (only if batch vectors are provided)
     if (batchPackets != nullptr && batchKernelNames != nullptr) {
@@ -364,10 +489,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
       }
     }
 
-    // Commands are captured and released. Clear them from the object.
-    commands_.clear();
-
-    return status;
+    return hipSuccess;
   }
   hip::Stream* GetQueue() const { return stream_; }
 
@@ -585,6 +707,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   std::vector<uint8_t*> gpuPacketScratch_;
   std::vector<uint8_t*> gpuMetadataPacketScratch_;
   std::vector<amd::GraphKernargSlot> kernargSlots_;
+  std::vector<amd::GraphKernargSlot> kernargSlotScratch_;
   size_t kernargSlotIndex_ = 0;
   amd::GraphPacketCaptureContext captureCtx_;  //!< Installed on commands during packet capture
   const std::string* capturedKernelName_ = nullptr;
@@ -1302,9 +1425,9 @@ class GraphExecSegmented : public GraphExecBase {
   // PacketBatch structure
   struct PacketBatch {
     // Size of one AQL packet
-    static constexpr size_t kAqlPktSize = 64;
+    static constexpr size_t kAqlPktSize = amd::kGraphAqlPacketSize;
     // Size of one metadata prefetch packet (256 bytes per AQL slot)
-    static constexpr size_t kMetadataPktSize = 256;
+    static constexpr size_t kMetadataPktSize = amd::kGraphMetadataPacketSize;
 
     // Main dispatch vectors - always ready for batch dispatch
     std::vector<uint8_t*> dispatchPackets;
@@ -1418,6 +1541,8 @@ class GraphExecSegmented : public GraphExecBase {
 
   void BuildSyncPlan();
   void RebuildAQLPacketBatch(PacketBatch& packetBatch);
+  void DrainGraphStreams(hip::Stream* launch_stream,
+                         const std::vector<hip::Stream*>& streams) const;
 };
 
 
