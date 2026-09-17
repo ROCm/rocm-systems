@@ -119,10 +119,10 @@ get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data
             const auto* _loc   = (_linfo && !_linfo.location.empty())
                                      ? &_linfo.location
                                      : ((itr.location.empty()) ? &_unk : &itr.location);
-            auto        _line = (_linfo && _linfo.line > 0)
-                                    ? fmt::format("{}", _linfo.line)
-                                    : ((itr.lineno == 0) ? std::string{ "?" }
-                                                         : fmt::format("{}", itr.lineno));
+            auto        _line  = (_linfo && _linfo.line > 0)
+                                     ? fmt::format("{}", _linfo.line)
+                                     : ((itr.lineno == 0) ? std::string{ "?" }
+                                                          : fmt::format("{}", itr.lineno));
             auto _entry = fmt::format("{} @ {}:{}", rocprofsys::utility::demangle(*_func),
                                       path::filename(*_loc), _line);
             backtrace[fmt::format("frame#{}", _bt_cnt++)] = _entry;
@@ -235,6 +235,28 @@ struct external_dependencies
 
     static constexpr std::string_view rocm_hsa_api_category_name =
         trait::name<category::rocm_hsa_api>::value;
+
+    // ─── Members required by domains::callback::{rocjpeg,rocdecode,rocshmem,
+    // hipfile}_api ──────────────────────────────────────────────────────────────
+    using rocm_rocjpeg_api_category = category::rocm_rocjpeg_api;
+
+    static constexpr std::string_view rocm_rocjpeg_api_category_name =
+        trait::name<category::rocm_rocjpeg_api>::value;
+
+    using rocm_rocdecode_api_category = category::rocm_rocdecode_api;
+
+    static constexpr std::string_view rocm_rocdecode_api_category_name =
+        trait::name<category::rocm_rocdecode_api>::value;
+
+    using rocm_rocshmem_api_category = category::rocm_rocshmem_api;
+
+    static constexpr std::string_view rocm_rocshmem_api_category_name =
+        trait::name<category::rocm_rocshmem_api>::value;
+
+    using rocm_hipfile_api_category = category::rocm_hipfile_api;
+
+    static constexpr std::string_view rocm_hipfile_api_category_name =
+        trait::name<category::rocm_hipfile_api>::value;
 
     static bool is_active()
     {
@@ -391,7 +413,7 @@ thread_postcreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
     state::thread::pop();
 }
 
-#if (ROCPROFILER_VERSION < 700)
+#if(ROCPROFILER_VERSION < 700)
 /**
  * @brief Stream ID.
  */
@@ -402,7 +424,7 @@ typedef struct rocprofiler_stream_id_t
 
 #endif
 
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
 
 struct rocprofsys_ompt_data_storage_t
 {
@@ -640,7 +662,7 @@ template <typename CorrelationIdType>
 std::uint64_t
 get_parent_stack_id([[maybe_unused]] const CorrelationIdType& correlation_id)
 {
-#if (ROCPROFILER_VERSION >= 700)
+#if(ROCPROFILER_VERSION >= 700)
     if constexpr(std::is_same_v<rocprofiler_correlation_id_t, CorrelationIdType>)
     {
         return correlation_id.ancestor;
@@ -709,7 +731,7 @@ using kernel_rename_stack_t = std::stack<std::uint64_t>;
 thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
 thread_local auto thread_dispatch_rename_dtor = scope_destructor{ []() {
     delete thread_dispatch_rename;
-    thread_dispatch_rename = nullptr;
+    thread_dispatch_rename                    = nullptr;
 } };
 
 template <typename Category>
@@ -736,7 +758,7 @@ size_t
 get_mem_copy_dst_address(
     [[maybe_unused]] const rocprofiler_buffer_tracing_memory_copy_record_t& record)
 {
-#if (ROCPROFILER_VERSION >= 700)
+#if(ROCPROFILER_VERSION >= 700)
     return record.dst_address.value;
 #else
     return 0;
@@ -747,19 +769,19 @@ size_t
 get_mem_copy_src_address(
     [[maybe_unused]] const rocprofiler_buffer_tracing_memory_copy_record_t& record)
 {
-#if (ROCPROFILER_VERSION >= 700)
+#if(ROCPROFILER_VERSION >= 700)
     return record.src_address.value;
 #else
     return 0;
 #endif
 }
 
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
 size_t
 get_mem_alloc_address(
     [[maybe_unused]] const rocprofiler_buffer_tracing_memory_allocation_record_t& record)
 {
-#    if (ROCPROFILER_VERSION >= 700)
+#    if(ROCPROFILER_VERSION >= 700)
     return record.address.value;
 #    else
     return static_cast<size_t>(record.address.handle);
@@ -860,7 +882,7 @@ cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record,
         stream_handle });
 }
 
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
 void
 cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* record,
                         std::uint64_t stream_handle)
@@ -1042,7 +1064,7 @@ get_kernel_dispatch_timestamps()
     return _v;
 }
 
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
 
 /**
  * @brief rocprofiler_iterate_callback_tracing_kind_operation_args wrapper for OMPT
@@ -1514,7 +1536,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         }
     };
 
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     // Skip implicit_task associated with an "initial-task-begin" occurrence as
     // well as the thread_begin associated with an "initial-thread-begin" occurrence
     // as they are generated by our tool.
@@ -1576,60 +1598,65 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         user_data->value = ts;
         switch(record.kind)
         {
-            case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
-            {
-                tool_tracing_callback_start(category::rocm_hsa_api{}, record, user_data,
-                                            ts);
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
-            case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
-            {
-                tool_tracing_callback_start(category::rocm_hip_api{}, record, user_data,
-                                            ts);
-                break;
-            }
-#if (ROCPROFILER_VERSION >= 600)
+            // case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
+            // case ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API:
+            // case ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API:
+            // case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
+            // {
+            //     tool_tracing_callback_start(category::rocm_hsa_api{}, record,
+            //     user_data,
+            //                                 ts);
+            //     break;
+            // }
+            // case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
+            // case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
+            // {
+            //     tool_tracing_callback_start(category::rocm_hip_api{}, record,
+            //     user_data,
+            //                                 ts);
+            //     break;
+            // }
+#if(ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
                 ompt_tracing_callback_start(record, user_data, ts);
                 ompt_push_standard_callback(record, ts);
                 break;
             }
-            case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
-            {
-                tool_tracing_callback_start(category::rocm_rocdecode_api{}, record,
-                                            user_data, ts);
-                break;
-            }
+            // case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
+            // {
+            //     tool_tracing_callback_start(category::rocm_rocdecode_api{}, record,
+            //                                 user_data, ts);
+            //     break;
+            // }
 #endif
-#if (ROCPROFILER_VERSION >= 700)
-            case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
-            {
-                tool_tracing_callback_start(category::rocm_rocjpeg_api{}, record,
-                                            user_data, ts);
-                break;
-            }
-#endif
-#if (ROCPROFILER_VERSION >= 10304)
-            case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
-            {
-                tool_tracing_callback_start(category::rocm_rocshmem_api{}, record,
-                                            user_data, ts);
-                break;
-            }
-#endif
-#if (ROCPROFILER_VERSION >= 10305)
-            case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
-            {
-                tool_tracing_callback_start(category::rocm_hipfile_api{}, record,
-                                            user_data, ts);
-                break;
-            }
-#endif
+                // #if (ROCPROFILER_VERSION >= 700)
+                //             case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
+                //             {
+                //                 tool_tracing_callback_start(category::rocm_rocjpeg_api{},
+                //                 record,
+                //                                             user_data, ts);
+                //                 break;
+                //             }
+                // #endif
+                // #if (ROCPROFILER_VERSION >= 10304)
+                //             case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
+                //             {
+                //                 tool_tracing_callback_start(category::rocm_rocshmem_api{},
+                //                 record,
+                //                                             user_data, ts);
+                //                 break;
+                //             }
+                // #endif
+                // #if (ROCPROFILER_VERSION >= 10305)
+                //             case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
+                //             {
+                //                 tool_tracing_callback_start(category::rocm_hipfile_api{},
+                //                 record,
+                //                                             user_data, ts);
+                //                 break;
+                //             }
+                // #endif
             case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
             {
                 tool_tracing_callback_start(category::rocm_rccl_api{}, record, user_data,
@@ -1646,11 +1673,11 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
             case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
             case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
 #endif
-#if (ROCPROFILER_VERSION >= 700)
+#if(ROCPROFILER_VERSION >= 700)
             case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
@@ -1681,60 +1708,63 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
         switch(record.kind)
         {
-            case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
-            {
-                tool_tracing_callback_stop(category::rocm_hsa_api{}, record, user_data,
-                                           ts, _bt_data);
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
-            case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
-            {
-                tool_tracing_callback_stop(category::rocm_hip_api{}, record, user_data,
-                                           ts, _bt_data);
-                break;
-            }
-#if (ROCPROFILER_VERSION >= 600)
+            // case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
+            // case ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API:
+            // case ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API:
+            // case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
+            // {
+            //     tool_tracing_callback_stop(category::rocm_hsa_api{}, record, user_data,
+            //                                ts, _bt_data);
+            //     break;
+            // }
+            // case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
+            // case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
+            // {
+            //     tool_tracing_callback_stop(category::rocm_hip_api{}, record, user_data,
+            //                                ts, _bt_data);
+            //     break;
+            // }
+#if(ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
                 ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
                 ompt_pop_standard_callback(record, ts, _bt_data);
                 break;
             }
-            case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
-            {
-                tool_tracing_callback_stop(category::rocm_rocdecode_api{}, record,
-                                           user_data, ts, _bt_data);
-                break;
-            }
+            // case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
+            // {
+            //     tool_tracing_callback_stop(category::rocm_rocdecode_api{}, record,
+            //                                user_data, ts, _bt_data);
+            //     break;
+            // }
 #endif
-#if (ROCPROFILER_VERSION >= 700)
-            case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
-            {
-                tool_tracing_callback_stop(category::rocm_rocjpeg_api{}, record,
-                                           user_data, ts, _bt_data);
-                break;
-            }
-#endif
-#if (ROCPROFILER_VERSION >= 10304)
-            case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
-            {
-                tool_tracing_callback_stop(category::rocm_rocshmem_api{}, record,
-                                           user_data, ts, _bt_data);
-                break;
-            }
-#endif
-#if (ROCPROFILER_VERSION >= 10305)
-            case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
-            {
-                tool_tracing_callback_stop(category::rocm_hipfile_api{}, record,
-                                           user_data, ts, _bt_data);
-                break;
-            }
-#endif
+                // #if (ROCPROFILER_VERSION >= 700)
+                //             case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
+                //             {
+                //                 tool_tracing_callback_stop(category::rocm_rocjpeg_api{},
+                //                 record,
+                //                                            user_data, ts, _bt_data);
+                //                 break;
+                //             }
+                // #endif
+                // #if (ROCPROFILER_VERSION >= 10304)
+                //             case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
+                //             {
+                //                 tool_tracing_callback_stop(category::rocm_rocshmem_api{},
+                //                 record,
+                //                                            user_data, ts, _bt_data);
+                //                 break;
+                //             }
+                // #endif
+                // #if (ROCPROFILER_VERSION >= 10305)
+                //             case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
+                //             {
+                //                 tool_tracing_callback_stop(category::rocm_hipfile_api{},
+                //                 record,
+                //                                            user_data, ts, _bt_data);
+                //                 break;
+                //             }
+                // #endif
             case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
             {
                 auto* rccl_payload =
@@ -1755,11 +1785,11 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
             case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
             case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
 #endif
-#if (ROCPROFILER_VERSION >= 700)
+#if(ROCPROFILER_VERSION >= 700)
             case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
@@ -1803,7 +1833,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 }
             }
             break;
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
                 // Callbacks that are received but that we do not process
@@ -2172,8 +2202,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 auto        _src_agent_id = record->src_agent_id;
                 const auto* dst_agent     = g_tool_data->get_agent(_dst_agent_id);
                 const auto* src_agent     = g_tool_data->get_agent(_src_agent_id);
-                auto name = g_tool_data->buffered_tracing_info.at(record->kind,
-                                                                  record->operation);
+                auto        name = g_tool_data->buffered_tracing_info.at(record->kind,
+                                                                         record->operation);
 
                 std::uint64_t _stream_id = get_stream_id(record).handle;
                 if(_stream_id == 0)
@@ -2264,7 +2294,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     }
                 }
             }
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)
             {
                 auto* record =
@@ -2563,7 +2593,7 @@ set_kernel_rename_and_stream_correlation_id(
     return 0;
 }
 
-#if (ROCPROFILER_VERSION >= 700)
+#if(ROCPROFILER_VERSION >= 700)
 void
 tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
                          rocprofiler_user_data_t* /* user_data */, void* /* data */)
@@ -2671,7 +2701,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         std::array<rocprofiler_external_correlation_id_request_kind_t, 3>{
             ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
             ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
             ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION
 #endif
         };
@@ -2684,25 +2714,17 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     // MARKER_CORE_API is handled by roctx_client on control_ctx
     for(auto itr : {
-            // HSA_CORE_API/HSA_AMD_EXT_API/HSA_IMAGE_EXT_API/HSA_FINALIZE_EXT_API and
-            // HIP_RUNTIME_API/HIP_COMPILER_API are configured via domain_service
+            // HSA_CORE_API/HSA_AMD_EXT_API/HSA_IMAGE_EXT_API/HSA_FINALIZE_EXT_API,
+            // HIP_RUNTIME_API/HIP_COMPILER_API, and ROCDECODE_API/ROCJPEG_API/
+            // ROCSHMEM_API/HIPFILE_API are configured via domain_service
             // (domains::callback::hsa::k_core_api/k_amd_ext_api/k_image_ext_api/
-            // k_finalize_ext_api, domains::callback::hip::k_runtime_api/k_compiler_api)
-            // below, on their own context, to avoid double-registering these kinds on
-            // primary_ctx.
+            // k_finalize_ext_api, domains::callback::hip::k_runtime_api/k_compiler_api,
+            // domains::callback::k_rocdecode_api/k_rocjpeg_api/k_rocshmem_api/
+            // k_hipfile_api) below, on their own context, to avoid double-registering
+            // these kinds on primary_ctx.
             ROCPROFILER_CALLBACK_TRACING_RCCL_API,
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
             ROCPROFILER_CALLBACK_TRACING_OMPT,
-            ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,
-#endif
-#if (ROCPROFILER_VERSION >= 700)
-            ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,
-#endif
-#if (ROCPROFILER_VERSION >= 10304)
-            ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,
-#endif
-#if (ROCPROFILER_VERSION >= 10305)
-            ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,
 #endif
         })
     {
@@ -2725,7 +2747,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         external_corr_id_request_kinds.size(),
         set_kernel_rename_and_stream_correlation_id, _data));
 
-#if (ROCPROFILER_VERSION >= 700)
+#if(ROCPROFILER_VERSION >= 700)
     if((_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) > 0) ||
        (_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) > 0))
     {
@@ -2776,7 +2798,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             _data->scratch_memory_buffer));
     }
 
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION) > 0)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
@@ -2802,7 +2824,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     std::vector<domain_selection> domain_selection_list;
 
-#if (ROCPROFILER_VERSION >= 10202)
+#if(ROCPROFILER_VERSION >= 10202)
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT))
     {
         domain_selection selection;
@@ -2982,6 +3004,70 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         domain_selection_list.push_back(selection);
     }
 
+#if(ROCPROFILER_VERSION >= 600)
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API));
+
+        domain_selection selection;
+        selection.name = "rocdecode_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API);
+        domain_selection_list.push_back(selection);
+    }
+#endif
+
+#if(ROCPROFILER_VERSION >= 700)
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API));
+
+        domain_selection selection;
+        selection.name = "rocjpeg_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API);
+        domain_selection_list.push_back(selection);
+    }
+#endif
+
+#if(ROCPROFILER_VERSION >= 10304)
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API));
+
+        domain_selection selection;
+        selection.name = "rocshmem_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API);
+        domain_selection_list.push_back(selection);
+    }
+#endif
+
+#if(ROCPROFILER_VERSION >= 10305)
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_HIPFILE_API));
+
+        domain_selection selection;
+        selection.name = "hipfile_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API);
+        domain_selection_list.push_back(selection);
+    }
+#endif
+
     try
     {
         g_domain_service->configure(domain_selection_list);
@@ -3072,7 +3158,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 void
 finalize_sdk_common()
 {
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     ompt_finalize_orphan_events();
 #endif
 

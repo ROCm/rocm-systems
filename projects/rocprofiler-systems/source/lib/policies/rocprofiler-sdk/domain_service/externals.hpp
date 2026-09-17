@@ -33,6 +33,10 @@ concept externals =
         typename Externals::region_sample;
         typename Externals::rocm_hip_api_category;
         typename Externals::rocm_hsa_api_category;
+        typename Externals::rocm_rocjpeg_api_category;
+        typename Externals::rocm_rocdecode_api_category;
+        typename Externals::rocm_rocshmem_api_category;
+        typename Externals::rocm_hipfile_api_category;
         requires agent_manager_policy<typename Externals::agent_manager_t,
                                       typename Externals::agent_t,
                                       typename Externals::agent_type_t>;
@@ -94,6 +98,18 @@ concept externals =
         } -> std::convertible_to<std::string_view>;
         {
             Externals::rocm_hsa_api_category_name
+        } -> std::convertible_to<std::string_view>;
+        {
+            Externals::rocm_rocjpeg_api_category_name
+        } -> std::convertible_to<std::string_view>;
+        {
+            Externals::rocm_rocdecode_api_category_name
+        } -> std::convertible_to<std::string_view>;
+        {
+            Externals::rocm_rocshmem_api_category_name
+        } -> std::convertible_to<std::string_view>;
+        {
+            Externals::rocm_hipfile_api_category_name
         } -> std::convertible_to<std::string_view>;
         {
             typename Externals::pmc_info_t{
