@@ -11,13 +11,30 @@
 test_categories:
   quick: &micro_quick
     description: "Smoke — host-only micro-tests, sub-second."
+    # A trailing '.*' anchors the end of the suite name. Dropping the dot widens instead
+    # ("Devcomm*" matches all five Devcomm suites).
     test_patterns:
       - "P2pMicrotest.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
+      - "RasClientMicrotest.*"
       - "RmaProxyProgressTest.*"
       - "GroupEndInternalTest.*"
-      - "Devcomm*"
+      - "WrapMicrotest.*"
+      - "WrapMicrotestIsolated.*"
+      # src/dev_runtime.cc (folded in from test_categories_micro_devruntime.yaml).
+      # Prefix globs rather than named suites, so adding a suite to an existing
+      # family does not silently fall out of CI gating. "Dev*" subsumes the
+      # "Devcomm*" entry these replaced.
+      - "Alloc*"
+      - "Comm*"
+      - "Compute*"
+      - "DeepCopy*"
+      - "Dev*"
+      - "Gin*"
+      - "Nccl*"
+      - "Sym*"
+      - "Win*"
     exclude_windows:
       - "*"
     labels:
