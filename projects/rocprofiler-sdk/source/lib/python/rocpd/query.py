@@ -548,7 +548,7 @@ def main(argv=None):
     out_cfg_args = process_out_config_args(input, args)
     generic_out_cfg_args = process_generic_args(input, args)
     query_args = process_query_args(input, args)
-    process_time_window_args(input, args)
+    time_window.process_args_or_exit(process_time_window_args, input, args)
 
     all_args = {
         **query_args,
