@@ -75,6 +75,21 @@ in the following table.
       - | Positive integer (values ``<= 0`` are ignored).
         | Default: unset (uses the RCCL default).
 
+    * - | ``NCCL_ENV_PLUGIN``
+        | Loads an external environment plugin that intercepts all RCCL parameter
+          lookups. See :ref:`using-rccl-env-plugin` for full details.
+      - | Path to a plugin ``.so`` file, a bare name expanded to
+          ``librccl-env-<name>.so``, or ``none`` to disable.
+        | Default: unset (tries ``librccl-env.so``, then reads from the process
+          environment).
+
+    * - | ``NCCL_ENV_JSON_FILE``
+        | Path to a JSON configuration file used by ``librccl-env-json.so``.
+          Has no effect unless ``NCCL_ENV_PLUGIN`` points to that plugin.
+      - | Path to a flat JSON file mapping variable names to string values.
+          Relative paths are resolved from the application's working directory.
+        | Default: unset (falls back to ``getenv()`` for all lookups).
+
     * - | ``NCCL_ALLGATHERV_ENABLE``
         | Fuses grouped multi-root ``ncclBroadcast`` calls into a single AllGatherV
           ring kernel when two or more distinct roots appear in a group.
@@ -456,7 +471,7 @@ application adds explicit synchronization between streams.
 Inspector profiling
 ===================
 
-The NCCL Inspector is a profiler plugin that emits per-communicator,
+The RCCL Inspector is a profiler plugin that emits per-communicator,
 per-operation performance data (collectives and point-to-point) as JSON or
 Prometheus textfile metrics. For a full walkthrough, see
 :doc:`../how-to/using-rccl-inspector-plugin`. The Inspector environment
@@ -488,6 +503,13 @@ variables are collected in the following table.
       - | ``0``: JSON output (default).
         | ``1``: Prometheus textfile output.
 
+    * - | ``NCCL_INSPECTOR_CLUSTER``
+        | Overrides the Prometheus ``cluster`` label. When unset, the Inspector
+        | uses ``SLURM_CLUSTER_NAME``. Set this when that name is missing.
+      - | String.
+        | Default: unset (falls back to ``SLURM_CLUSTER_NAME``, else
+        | ``unknown``).
+
     * - | ``NCCL_INSPECTOR_DUMP_THREAD_ENABLE``
         | Enables the internal dump thread. When disabled, output is only
         | written at communicator teardown, regardless of the configured
@@ -507,7 +529,8 @@ variables are collected in the following table.
         | Output directory for Inspector logs/metrics. For Prometheus mode,
         | point this at the node-exporter textfile collector directory.
       - | String path.
-        | Default: ``nccl-inspector-<slurm_job_id>`` or
+        | Default: ``nccl-inspector-<jobid>`` from ``SLURM_JOB_ID``,
+        | ``SLURM_JOBID``, ``PBS_JOBID``, or ``LSB_JOBID``, else
         | ``nccl-inspector-unknown-jobid``.
 
     * - | ``NCCL_INSPECTOR_DUMP_VERBOSE``

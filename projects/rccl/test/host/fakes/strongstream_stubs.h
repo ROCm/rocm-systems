@@ -10,7 +10,12 @@
 #ifndef RCCL_TEST_HOST_STRONGSTREAM_STUBS_H_
 #define RCCL_TEST_HOST_STRONGSTREAM_STUBS_H_
 
+#include <functional>
+
 #include "nccl.h"
+#include "strongstream.h"
+
+extern std::function<ncclResult_t(struct ncclCudaGraph*, hipStream_t, int)> g_cudaGetCapturingGraph;
 
 extern ncclResult_t g_ncclStrongStreamResult;
 
