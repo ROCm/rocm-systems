@@ -430,21 +430,6 @@ test_transient_sgpr_assignment(const TransformArtifacts &result, uint64_t descri
   return container == nullptr ? std::string_view{} : std::string_view(container->name);
 }
 
-/// Add the gfx1250 execution-mode fact that current lowerers derive directly
-/// from pristine code bytes immediately before emission.
-[[nodiscard]] std::optional<uint16_t>
-test_selectable_vgpr_bank_mode(std::span<const uint8_t> bytes, const ProgramInventory &inventory,
-                               const ProgramSite &access) {
-  const uint64_t anchor = access.physical_id.original_text_offset;
-  const ProgramContainer *container = inventory.container(access.container);
-  if (container == nullptr || anchor < container->entry_text_offset ||
-      access.decoded_file_offset() < anchor)
-    return std::nullopt;
-  return selectable_vgpr_bank_mode_at(ROCJITSU_CODE_ARCH_CDNA5, bytes,
-                                      access.decoded_file_offset() - anchor,
-                                      container->entry_text_offset, access.decoded_file_offset());
-}
-
 [[nodiscard]] constexpr bool is_access_intent(ProbeIntentKind kind) {
   return kind == ProbeIntentKind::RedundantAccessObservation || kind == ProbeIntentKind::Access;
 }
@@ -518,46 +503,19 @@ committed_lowering_for_intent_kind(const TransformArtifacts &result, ProbeIntent
   return commit == commits.end() ? nullptr : &*commit;
 }
 
-template <typename Identity, typename Project>
-[[nodiscard]] std::vector<Identity> committed_intent_identities(const TransformArtifacts &result,
-                                                                const CommittedLowering &commit,
-                                                                Project project) {
-  std::vector<Identity> identities;
+[[nodiscard]] std::vector<SemanticSiteId>
+committed_semantic_sites(const TransformArtifacts &result, const CommittedLowering &commit) {
+  std::vector<SemanticSiteId> identities;
   for (ProbeIntentId id : commit.intent_ids) {
     const ProbeIntent *intent = result.observation_plan().intent(id);
     if (intent == nullptr)
       continue;
-    for (const Identity &identity : project(*intent)) {
+    for (const SemanticSiteId &identity : intent->covered_semantic_sites) {
       if (std::ranges::find(identities, identity) == identities.end())
         identities.push_back(identity);
     }
   }
   return identities;
-}
-
-[[nodiscard]] std::vector<PhysicalSiteId>
-committed_physical_sites(const TransformArtifacts &result, const CommittedLowering &commit) {
-  return committed_intent_identities<PhysicalSiteId>(
-      result, commit, [](const ProbeIntent &intent) { return std::array{intent.physical_site}; });
-}
-
-[[nodiscard]] std::vector<SemanticSiteId>
-committed_semantic_sites(const TransformArtifacts &result, const CommittedLowering &commit) {
-  return committed_intent_identities<SemanticSiteId>(
-      result, commit, [](const ProbeIntent &intent) { return intent.covered_semantic_sites; });
-}
-
-[[nodiscard]] size_t committed_semantic_site_count_at(const TransformArtifacts &result,
-                                                      ProbeIntentKind kind,
-                                                      uint64_t emitted_text_offset) {
-  const auto commits = result.coverage_ledger.lowering_commits();
-  const auto commit = std::ranges::find_if(commits, [&](const CommittedLowering &candidate) {
-    return committed_lowering_has_intent_kind(result, candidate, kind) &&
-           std::ranges::any_of(candidate.locations, [&](const auto &location) {
-             return location.emitted_text_offset == emitted_text_offset;
-           });
-  });
-  return commit == commits.end() ? 0u : committed_semantic_sites(result, *commit).size();
 }
 
 [[nodiscard]] size_t committed_semantic_site_count_for_source_offset(
@@ -1005,45 +963,6 @@ std::vector<uint32_t> expected_vgpr_spill_words(uint16_t base, uint16_t count, b
   return words;
 }
 
-std::vector<uint32_t> make_expected_vgpr_store_words(uint64_t address, uint16_t value_vgpr,
-                                                     uint16_t scratch_vgpr) {
-  std::vector<uint32_t> words;
-  const auto mov_address_lo = build_v_mov_b32_e64_literal(
-      scratch_vgpr, static_cast<uint32_t>(address), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto mov_address_hi =
-      build_v_mov_b32_e64_literal(static_cast<uint16_t>(scratch_vgpr + 1u),
-                                  static_cast<uint32_t>(address >> 32u), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto store =
-      build_flat_store_b32_vaddr_vsrc(scratch_vgpr, value_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
-  if (!mov_address_lo || !mov_address_hi || !store)
-    return words;
-  words.insert(words.end(), mov_address_lo->begin(), mov_address_lo->end());
-  words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
-  words.insert(words.end(), store->begin(), store->end());
-  return words;
-}
-
-std::vector<uint32_t> make_expected_literal_store_words(uint64_t address, uint32_t value,
-                                                        uint16_t scratch_vgpr) {
-  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + 2u);
-  std::vector<uint32_t> words;
-  const auto mov_address_lo = build_v_mov_b32_e64_literal(
-      scratch_vgpr, static_cast<uint32_t>(address), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto mov_address_hi =
-      build_v_mov_b32_e64_literal(static_cast<uint16_t>(scratch_vgpr + 1u),
-                                  static_cast<uint32_t>(address >> 32u), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto mov_value = build_v_mov_b32_e64_literal(value_vgpr, value, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto store =
-      build_flat_store_b32_vaddr_vsrc(scratch_vgpr, value_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
-  if (!mov_address_lo || !mov_address_hi || !mov_value || !store)
-    return words;
-  words.insert(words.end(), mov_address_lo->begin(), mov_address_lo->end());
-  words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
-  words.insert(words.end(), mov_value->begin(), mov_value->end());
-  words.insert(words.end(), store->begin(), store->end());
-  return words;
-}
-
 std::vector<uint32_t>
 make_expected_offset_store_words(uint32_t byte_offset, uint16_t value_vgpr, uint16_t address_vgpr,
                                  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
@@ -1062,59 +981,6 @@ make_expected_literal_offset_store_words(uint32_t byte_offset, uint32_t value,
   const std::vector<uint32_t> store =
       make_expected_offset_store_words(byte_offset, value_vgpr, address_vgpr, arch);
   words.insert(words.end(), store.begin(), store.end());
-  return words;
-}
-
-std::vector<uint32_t> make_expected_offset_load_words(uint32_t byte_offset, uint16_t value_vgpr,
-                                                      uint16_t address_vgpr) {
-  const auto load = build_flat_load_b32_vaddr_vdst(address_vgpr, value_vgpr,
-                                                   ROCJITSU_CODE_ARCH_RDNA4, byte_offset);
-  if (!load)
-    return {};
-  std::vector<uint32_t> words(load->begin(), load->end());
-  const auto wait = instrumentation::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA4);
-  if (!wait)
-    return {};
-  words.push_back(*wait);
-  return words;
-}
-
-std::vector<uint32_t> make_expected_scalar_store_words(uint64_t address, uint16_t scalar_src,
-                                                       uint16_t scratch_vgpr,
-                                                       bool shift_right_16 = false,
-                                                       bool mask_low_16 = false) {
-  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + 2u);
-  std::vector<uint32_t> words;
-  words.push_back(build_v_mov_b32_e32(value_vgpr, scalar_src, ROCJITSU_CODE_ARCH_RDNA4));
-  if (mask_low_16) {
-    const auto shift_left = build_v_lshlrev_b32_e32(value_vgpr, scalar_positive_inline_u32(16),
-                                                    value_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
-    const auto shift_right = build_v_lshrrev_b32_e32(value_vgpr, scalar_positive_inline_u32(16),
-                                                     value_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
-    if (!shift_left || !shift_right)
-      return words;
-    words.push_back(*shift_left);
-    words.push_back(*shift_right);
-  }
-  if (shift_right_16) {
-    const auto shift = build_v_lshrrev_b32_e32(value_vgpr, scalar_positive_inline_u32(16),
-                                               value_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
-    if (!shift)
-      return words;
-    words.push_back(*shift);
-  }
-  const auto mov_address_lo = build_v_mov_b32_e64_literal(
-      scratch_vgpr, static_cast<uint32_t>(address), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto mov_address_hi =
-      build_v_mov_b32_e64_literal(static_cast<uint16_t>(scratch_vgpr + 1u),
-                                  static_cast<uint32_t>(address >> 32u), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto store =
-      build_flat_store_b32_vaddr_vsrc(scratch_vgpr, value_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
-  if (!mov_address_lo || !mov_address_hi || !store)
-    return words;
-  words.insert(words.end(), mov_address_lo->begin(), mov_address_lo->end());
-  words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
-  words.insert(words.end(), store->begin(), store->end());
   return words;
 }
 
@@ -1302,156 +1168,6 @@ std::vector<uint8_t> make_rdna3_lds_code_object(
       workgroup_id_dimension_mask, group_segment_fixed_size);
   mutate_elf_header(image,
                     [](Elf64_Ehdr &header) { header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1100; });
-  return image;
-}
-
-std::vector<uint8_t> make_rdna4_many_kernel_lds_code_object(uint32_t kernel_count,
-                                                            uint32_t accesses_per_kernel) {
-  if (kernel_count == 0u || accesses_per_kernel == 0u) {
-    ADD_FAILURE() << "many-kernel fixture requires nonzero kernels and accesses";
-    return {};
-  }
-
-  constexpr uint64_t text_offset = 0x100u;
-  constexpr uint64_t text_vaddr = 0x1100u;
-  constexpr uint64_t descriptor_size = sizeof(KD);
-  const uint64_t words_per_kernel = 2u * accesses_per_kernel + 1u;
-  const uint64_t text_words_count = static_cast<uint64_t>(kernel_count) * words_per_kernel;
-  if (text_words_count > std::numeric_limits<size_t>::max()) {
-    ADD_FAILURE() << "many-kernel fixture text exceeds host size";
-    return {};
-  }
-
-  std::vector<uint32_t> text_words(static_cast<size_t>(text_words_count));
-  std::vector<uint64_t> kernel_entries;
-  kernel_entries.reserve(kernel_count);
-  for (uint32_t kernel_index = 0; kernel_index < kernel_count; ++kernel_index) {
-    const size_t begin = static_cast<size_t>(kernel_index * words_per_kernel);
-    kernel_entries.push_back(begin * sizeof(uint32_t));
-    for (uint32_t access_index = 0; access_index < accesses_per_kernel; ++access_index) {
-      text_words[begin + 2u * access_index] = 0xD8340000u | (access_index * sizeof(uint32_t));
-      text_words[begin + 2u * access_index + 1u] = 0x00000000u;
-    }
-    text_words[begin + words_per_kernel - 1u] = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
-  }
-  const uint64_t text_size = text_words.size() * sizeof(uint32_t);
-  const uint64_t rodata_vaddr = align_up(text_vaddr + text_size, 0x1000u);
-
-  std::vector<uint8_t> shstrtab{'\0'};
-  const uint32_t text_name = add_elf_name(shstrtab, ".text");
-  const uint32_t rodata_name = add_elf_name(shstrtab, ".rodata");
-  const uint32_t symtab_name = add_elf_name(shstrtab, ".symtab");
-  const uint32_t strtab_name = add_elf_name(shstrtab, ".strtab");
-  const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
-
-  std::vector<uint8_t> strtab{'\0'};
-  std::vector<uint32_t> kernel_symbol_names;
-  std::vector<uint32_t> descriptor_symbol_names;
-  kernel_symbol_names.reserve(kernel_count);
-  descriptor_symbol_names.reserve(kernel_count);
-  for (uint32_t kernel_index = 0; kernel_index < kernel_count; ++kernel_index) {
-    const std::string name = "many_lds_" + std::to_string(kernel_index);
-    kernel_symbol_names.push_back(add_elf_name(strtab, name));
-    descriptor_symbol_names.push_back(add_elf_name(strtab, name + ".kd"));
-  }
-
-  const uint64_t rodata_offset = text_offset + text_size;
-  const uint64_t rodata_size = static_cast<uint64_t>(kernel_count) * descriptor_size;
-  const uint64_t strtab_offset = rodata_offset + rodata_size;
-  const uint64_t symtab_offset = align_up(strtab_offset + strtab.size(), 8u);
-  const size_t symbol_count = 1u + 2u * static_cast<size_t>(kernel_count);
-  const uint64_t shstrtab_offset = symtab_offset + symbol_count * sizeof(Elf64_Sym);
-  const uint64_t shoff = align_up(shstrtab_offset + shstrtab.size(), 8u);
-  constexpr uint16_t section_count = 6u;
-  std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0u);
-
-  Elf64_Ehdr ehdr{};
-  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
-  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
-  ehdr.e_ident[EI_DATA] = 1;
-  ehdr.e_ident[EI_VERSION] = 1;
-  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
-  ehdr.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
-  ehdr.e_type = ET_DYN;
-  ehdr.e_machine = EM_AMDGPU;
-  ehdr.e_version = 1;
-  ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1201;
-  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
-  ehdr.e_shentsize = sizeof(Elf64_Shdr);
-  ehdr.e_shnum = section_count;
-  ehdr.e_shstrndx = 5u;
-  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
-  if (text_size != 0)
-    std::memcpy(image.data() + text_offset, text_words.data(), text_size);
-
-  std::vector<Elf64_Sym> symbols(symbol_count);
-  for (uint32_t kernel_index = 0; kernel_index < kernel_count; ++kernel_index) {
-    const uint64_t entry = kernel_entries[kernel_index];
-    const uint64_t descriptor_offset =
-        rodata_offset + static_cast<uint64_t>(kernel_index) * descriptor_size;
-    const uint64_t descriptor_vaddr =
-        rodata_vaddr + static_cast<uint64_t>(kernel_index) * descriptor_size;
-    KD descriptor{};
-    descriptor.kernel_code_entry_byte_offset =
-        static_cast<int64_t>(text_vaddr + entry) - static_cast<int64_t>(descriptor_vaddr);
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
-                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                    kRdna4Wave64AllVgprsGranulated);
-    std::memcpy(image.data() + descriptor_offset, &descriptor, sizeof(descriptor));
-
-    Elf64_Sym &kernel_symbol = symbols[1u + kernel_index];
-    kernel_symbol.st_name = kernel_symbol_names[kernel_index];
-    kernel_symbol.st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
-    kernel_symbol.st_shndx = 1u;
-    kernel_symbol.st_value = text_vaddr + entry;
-    kernel_symbol.st_size = words_per_kernel * sizeof(uint32_t);
-
-    Elf64_Sym &descriptor_symbol = symbols[1u + kernel_count + kernel_index];
-    descriptor_symbol.st_name = descriptor_symbol_names[kernel_index];
-    descriptor_symbol.st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
-    descriptor_symbol.st_shndx = 2u;
-    descriptor_symbol.st_value = descriptor_vaddr;
-    descriptor_symbol.st_size = descriptor_size;
-  }
-  std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
-  std::memcpy(image.data() + symtab_offset, symbols.data(), symbols.size() * sizeof(Elf64_Sym));
-  std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
-
-  std::array<Elf64_Shdr, section_count> sections{};
-  sections[1].sh_name = text_name;
-  sections[1].sh_type = SHT_PROGBITS;
-  sections[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
-  sections[1].sh_addr = text_vaddr;
-  sections[1].sh_offset = text_offset;
-  sections[1].sh_size = text_size;
-  sections[1].sh_addralign = sizeof(uint32_t);
-  sections[2].sh_name = rodata_name;
-  sections[2].sh_type = SHT_PROGBITS;
-  sections[2].sh_flags = SHF_ALLOC;
-  sections[2].sh_addr = rodata_vaddr;
-  sections[2].sh_offset = rodata_offset;
-  sections[2].sh_size = rodata_size;
-  sections[2].sh_addralign = descriptor_size;
-  sections[3].sh_name = symtab_name;
-  sections[3].sh_type = SHT_SYMTAB;
-  sections[3].sh_offset = symtab_offset;
-  sections[3].sh_size = symbols.size() * sizeof(Elf64_Sym);
-  sections[3].sh_link = 4u;
-  sections[3].sh_info = 1u;
-  sections[3].sh_addralign = 8u;
-  sections[3].sh_entsize = sizeof(Elf64_Sym);
-  sections[4].sh_name = strtab_name;
-  sections[4].sh_type = SHT_STRTAB;
-  sections[4].sh_offset = strtab_offset;
-  sections[4].sh_size = strtab.size();
-  sections[4].sh_addralign = 1u;
-  sections[5].sh_name = shstrtab_name;
-  sections[5].sh_type = SHT_STRTAB;
-  sections[5].sh_offset = shstrtab_offset;
-  sections[5].sh_size = shstrtab.size();
-  sections[5].sh_addralign = 1u;
-  std::memcpy(image.data() + shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
   return image;
 }
 
@@ -2701,40 +2417,6 @@ std::vector<uint8_t> make_rdna4_lds_store_and_release_wait_no_return_bitwise_cod
   return make_rdna4_lds_code_object(text_words, "lds_store_and_release_and");
 }
 
-std::vector<uint8_t> make_rdna4_ordered_global_cas_code_object(bool return_old_value = true,
-                                                               bool vector_only_address = false) {
-  const auto wait_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
-  if (!wait_store)
-    return {};
-  // global_atomic_cmpswap_b32 v0, v2, v[4:5], s[4:5] (or v[2:3] with
-  // saddr=off), th:return/no-return, scope:device.
-  const uint32_t first =
-      0xEE0D0000u | (vector_only_address ? static_cast<uint32_t>(rdna4::OPR_SREG_NULL) : 4u);
-  const uint32_t second = return_old_value ? 0x02180000u : 0x02080000u;
-  const std::array<uint32_t, 12> text_words = {
-      0xEE0B0000u, 0x00000000u, 0x00000000u, // global_wb
-      *wait_store, first,       second,      0x00000002u,
-      *wait_store, 0xEE0AC000u, 0x00000000u, 0x00000000u, // global_inv
-      0xBFB00000u,                                        // s_endpgm
-  };
-  return make_rdna4_lds_code_object(text_words);
-}
-
-std::vector<uint8_t> make_rdna4_ordered_global_cas_b64_code_object() {
-  const auto wait_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
-  if (!wait_store)
-    return {};
-  // global_atomic_cmpswap_b64 v[32:33], v11, v[26:29], s[2:3]
-  // th:return, scope:system. The compare operand is v[28:29].
-  const std::array<uint32_t, 12> text_words = {
-      0xEE0B0000u, 0x00000000u, 0x00000000u, // global_wb
-      *wait_store, 0xEE108002u, 0x0D1C0020u, 0x0000180Bu,
-      *wait_store, 0xEE0AC000u, 0x000C0000u, 0x00000000u, // global_inv scope:system
-      0xBFB00000u,                                        // s_endpgm
-  };
-  return make_rdna4_lds_code_object(text_words, "ordered_global_cas_b64_probe");
-}
-
 std::vector<uint8_t> make_rdna4_buffer_atomic_code_object() {
   // buffer_atomic_add_u32 v1, v2, s[4:7], 0 th:return scope:device
   const std::array<uint32_t, 4> text_words = {
@@ -2876,47 +2558,6 @@ std::vector<uint8_t> make_rdna4_flat_atomic_release_acquire_code_object() {
   return make_rdna4_lds_code_object(text_words);
 }
 
-std::vector<uint8_t> make_rdna4_ordered_flat_atomic_code_object(bool return_old_value = false) {
-  const auto atomic = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
-      /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, return_old_value, /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
-  if (!atomic)
-    return {};
-  const std::array<uint32_t, 7> text_words = {
-      0xEE0B0000u,  0x00000000u,  0x00000000u, // global_wb
-      (*atomic)[0], (*atomic)[1], (*atomic)[2],
-      0xBFB00000u, // s_endpgm
-  };
-  return make_rdna4_lds_code_object(text_words);
-}
-
-std::vector<uint8_t>
-make_rdna4_atomic_fence_sequence_code_object(std::span<const uint16_t> trailing_live_sgprs = {}) {
-  const auto atomic = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
-      /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
-      ROCJITSU_CODE_ARCH_RDNA4);
-  const auto wait_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
-  if (!atomic || !wait_store)
-    return {};
-  std::vector<uint32_t> text_words = {
-      0xEE0B0000u, 0x00000000u,  0x00000000u, // global_wb
-      *wait_store, (*atomic)[0], (*atomic)[1], (*atomic)[2],
-      *wait_store, 0xEE0AC000u,  0x00000000u,  0x00000000u, // global_inv
-      0xBFB00000u,                                          // s_endpgm
-  };
-  if (!trailing_live_sgprs.empty()) {
-    text_words.pop_back();
-    for (const uint16_t sgpr : trailing_live_sgprs) {
-      const auto use =
-          build_s_cmp_eq_u32(sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
-      if (!use)
-        return {};
-      text_words.push_back(*use);
-    }
-    text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
-  }
-  return make_rdna4_lds_code_object(text_words);
-}
-
 std::vector<uint8_t> make_rdna4_ordered_flat_cas_code_object(bool return_old_value = true) {
   const auto atomic = build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(
       /*vaddr=*/4, /*vsrc=*/1, /*vdst=*/0, return_old_value, /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
@@ -2975,35 +2616,6 @@ std::vector<uint8_t> make_rdna4_ordered_flat_atomic_release_acquire_code_object(
   return make_rdna4_lds_code_object(text_words);
 }
 
-std::vector<uint8_t> make_rdna4_ordered_flat_atomic_high_sgpr_pressure_code_object() {
-  const auto release = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
-      /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
-      ROCJITSU_CODE_ARCH_RDNA4);
-  const auto acquire = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
-      /*vaddr=*/4, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/true, /*scope=*/2,
-      ROCJITSU_CODE_ARCH_RDNA4);
-  if (!release || !acquire)
-    return {};
-  std::vector<uint32_t> text_words = {
-      0xEE0B0000u,   0x00000000u,   0x00000000u, // global_wb
-      (*release)[0], (*release)[1], (*release)[2], (*acquire)[0], (*acquire)[1],
-      (*acquire)[2], 0xEE0AC000u,   0x00000000u,   0x00000000u, // global_inv
-  };
-  // Keep every lower scalar register live across both atomic sites. Dispatch
-  // identity must therefore occupy s82:s83 and the atomic-only 20-SGPR probe
-  // window must fit in s84:s103; an unnecessary 24-SGPR request has
-  // no legal fresh or liveness-dead placement.
-  for (uint16_t sgpr = 0; sgpr <= 81u; ++sgpr) {
-    const auto use =
-        build_s_cmp_eq_u32(sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
-    if (!use)
-      return {};
-    text_words.push_back(*use);
-  }
-  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
-  return make_rdna4_lds_code_object(text_words, "atomic_high_sgpr_pressure");
-}
-
 std::vector<uint8_t> make_rdna4_lds_and_ordered_flat_atomic_handoff_code_object() {
   const auto release = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
       /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/2,
@@ -3039,20 +2651,6 @@ make_rdna4_ordered_global_atomic_release_acquire_code_object(bool include_lds = 
   if (include_lds)
     text_words.insert(text_words.begin(), {0xD8340000u, 0x00000000u}); // ds_store_b32
   return make_rdna4_lds_code_object(text_words, "global_release_acquire");
-}
-
-std::vector<uint8_t> make_rdna4_displaced_vglobal_atomic_release_acquire_code_object() {
-  const std::array<uint32_t, 11> text_words = {
-      0xBFC90000u, // s_wait_storecnt_dscnt 0
-      0xEE0F0006u, 0x00880000u,
-      0x00000000u, // global_atomic_and_b32 v0, v1, s[6:7], no-return, device
-      0xEE0EC07Cu, 0x05080000u,
-      0x00001408u, // global_atomic_max_u32 v[8:9], v10, off offset:20, device
-      0xEE0AC000u, 0x00000000u,
-      0x00000000u, // global_inv scope:device
-      0xBFB00000u, // s_endpgm
-  };
-  return make_rdna4_lds_code_object(text_words, "displaced_vglobal_release_acquire");
 }
 
 std::vector<uint8_t> make_rdna4_ordinary_acquire_code_object(uint32_t scope = 2u,
@@ -3226,18 +2824,6 @@ test_supercollider_perturbation_anchor(const TransformArtifacts &result,
 test_supercollider_perturbation_identity(const TransformArtifacts &result,
                                          const SuperColliderPerturbationCandidate &candidate) {
   return supercollider_perturbation_candidate_identity(result.program_inventory, candidate);
-}
-
-std::vector<uint32_t> make_padded_flat_first_light_function_words() {
-  std::vector<uint32_t> function_words = {
-      0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
-      0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
-      0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
-      0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
-  };
-  function_words.resize(330, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
-  function_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
-  return function_words;
 }
 
 } // namespace

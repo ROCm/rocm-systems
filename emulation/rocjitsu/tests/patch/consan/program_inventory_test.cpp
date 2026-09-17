@@ -4,26 +4,11 @@
 #include "consan_test_support.h"
 
 #include <concepts>
-#include <set>
 #include <tuple>
 #include <type_traits>
 
 namespace rocjitsu::consan {
 namespace {
-
-template <typename Values, typename Enum, typename NameFunction>
-void expect_complete_enum_contract(const Values &values, Enum count, NameFunction name,
-                                   std::string_view invalid_name) {
-  EXPECT_EQ(values.size(), static_cast<size_t>(count));
-  std::set<std::string_view> names;
-  for (size_t ordinal = 0; ordinal < values.size(); ++ordinal) {
-    EXPECT_EQ(static_cast<size_t>(values[ordinal]), ordinal);
-    EXPECT_NE(name(values[ordinal]), invalid_name);
-    EXPECT_TRUE(names.insert(name(values[ordinal])).second);
-  }
-  EXPECT_EQ(name(count), invalid_name);
-  EXPECT_EQ(name(static_cast<Enum>(255)), invalid_name);
-}
 
 ProgramSite make_inventory_lds_site(std::string mnemonic, uint64_t text_offset = 16,
                                     uint64_t file_offset = 0, uint32_t width_bits = 32) {
