@@ -54,6 +54,10 @@ rcclTestsGetProtocolName_t rcclTestsGetProtocolName = NULL;
 rcclTestsGetAlgoName_t rcclTestsGetAlgoName= NULL;
 rcclTestsGetSymkInfo_t rcclTestsGetSymkInfo = NULL;
 rcclTestsGetCollImplInfo_t rcclTestsGetCollImplInfo = NULL;
+// AMD-only helper exported by post-2.31 RCCL. Pre-sync librccl lacks it (or hides
+// it), so resolve at runtime rather than a hard extern that fails the link.
+typedef int (*ncclCuMemRuntimeSupported_t)();
+static ncclCuMemRuntimeSupported_t ncclCuMemRuntimeSupportedFn = NULL;
 
 static void loadRcclSyms() {
   // Resolve optional RCCL symbols from the already-loaded librccl.so.1 (via DT_NEEDED).
@@ -64,6 +68,8 @@ static void loadRcclSyms() {
   rcclTestsGetSymkInfo      = (rcclTestsGetSymkInfo_t)     dlsym(RTLD_DEFAULT, "rcclSymKGetInfo");
   // Optional (newer librccl). Left NULL on older libs -> reporting falls back.
   rcclTestsGetCollImplInfo  = (rcclTestsGetCollImplInfo_t) dlsym(RTLD_DEFAULT, "rcclGetCollImplInfo");
+  ncclCuMemRuntimeSupportedFn =
+      (ncclCuMemRuntimeSupported_t)dlsym(RTLD_DEFAULT, "ncclCuMemRuntimeSupported");
 }
 
 // RCCL_FLOAT8 support
@@ -2598,8 +2604,10 @@ testResult_t run() {
     TESTCHECK(initComms(comms, nGpus*nThreads, ncclProc*nThreads*nGpus, ncclProcs*nThreads*nGpus, gpus.data(), ncclId));
 
     {
-      extern int ncclCuMemRuntimeSupported();
-      if ((local_register == SYMMETRIC_REGISTER || deviceImpl > 0) && !ncclCuMemRuntimeSupported()) {
+      // Missing symbol: pre-sync librccl; keep previous "just run" behavior.
+      const bool cuMemOk =
+          (ncclCuMemRuntimeSupportedFn == nullptr) || ncclCuMemRuntimeSupportedFn();
+      if ((local_register == SYMMETRIC_REGISTER || deviceImpl > 0) && !cuMemOk) {
         if (ncclProc == 0) {
           printf("# SKIP: symmetric memory / device API not supported (cuMem runtime disabled)\n");
         }
