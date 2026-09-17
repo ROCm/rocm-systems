@@ -16,11 +16,27 @@ The reconfigure option can be disabled by the user if needed. The input file is 
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir video_decode_multi_files_sample && cd video_decode_multi_files_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir video_decode_multi_files_sample && cd video_decode_multi_files_sample
+cmake .. -DROCM_PATH=<path-to-TheRock-build> -DFFMPEG_ROOT=<path-to-ffmpeg>
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> Before running, add the rocDecode and FFmpeg DLL directories to your PATH:
+> ```bat
+> set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
+> ```
 
 ## Run
 
