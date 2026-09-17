@@ -56,6 +56,10 @@ dispatch_table_init()
     table->rocprofiler_attach_remove_queue_cb       = &rocprofiler_attach_remove_queue_cb;
     table->rocprofiler_attach_lookup_memory_codeobj_data =
         &rocprofiler_attach_lookup_memory_codeobj_data;
+    table->rocprofiler_attach_is_hsa_interception_active =
+        &rocprofiler_attach_is_hsa_interception_active;
+    table->rocprofiler_attach_initialize_hsa_interception =
+        &rocprofiler_attach_initialize_hsa_interception;
 }
 }  // namespace attach
 }  // namespace rocprofiler

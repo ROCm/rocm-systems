@@ -180,7 +180,7 @@ initialize(HsaApiTable* table)
     (void) table;
     auto& core_table = *table->core_;
 
-    if(*(get_attach_table()))
+    if(rocprofiler_attach_table_owns_hsa_interception(*(get_attach_table())))
     {
         // If attach table is available, use it to iterate existing code objects
         // and register for new ones instead of hooking freeze/destroy

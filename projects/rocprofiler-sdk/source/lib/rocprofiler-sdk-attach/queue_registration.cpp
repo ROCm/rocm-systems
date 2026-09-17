@@ -66,6 +66,7 @@ struct queue_registration_t
     decltype(AmdExtTable::hsa_amd_queue_create_fn) hsa_amd_queue_create_fn = nullptr;
 #endif
     decltype(CoreApiTable::hsa_status_string_fn) hsa_status_string_fn = nullptr;
+    decltype(CoreApiTable::hsa_queue_destroy_fn) hsa_queue_destroy_fn = nullptr;
 };
 
 queue_registration_t*
@@ -305,27 +306,27 @@ destroy_queue(hsa_queue_t* hsa_queue)
             }
             else
             {
-                ROCP_WARNING << "Destroy queue was called for a handle that was not in queues: "
-                             << hsa_queue;
+                // Late ownership transfer can observe destroy for a queue the SDK
+                // tracked before rocattach installed its create hook.
+                ROCP_INFO << "retiring queue " << hsa_queue
+                          << " created before rocattach assumed HSA ownership";
+                snapshot = std::vector<queue_cb_entry_t>{registration->cb_list};
             }
         }
-        if(!node.empty())
+        for(auto& cb_entry : snapshot)
         {
-            for(auto& cb_entry : snapshot)
+            if(cb_entry.cb)
             {
-                if(cb_entry.cb)
-                {
-                    cb_entry.cb(hsa_queue,
-                                node.mapped().agent,
-                                ROCPROFILER_ATTACH_QUEUE_DESTROYED,
-                                cb_entry.data);
-                }
+                cb_entry.cb(hsa_queue,
+                            !node.empty() ? node.mapped().agent : hsa_agent_t{},
+                            ROCPROFILER_ATTACH_QUEUE_DESTROYED,
+                            cb_entry.data);
             }
         }
         // node goes out of scope here: queue_entry_t is destroyed after callbacks (and
         // any sync() called within them) have completed
     }
-    return HSA_STATUS_SUCCESS;
+    return CHECK_NOTNULL(registration->hsa_queue_destroy_fn)(hsa_queue);
 }
 
 int
@@ -368,7 +369,12 @@ add_queue_cb(rocprofiler_attach_queue_cb_t cb, void* data)
     auto* registration = CHECK_NOTNULL(get_queue_registration());
     auto  snapshot     = std::vector<std::pair<hsa_queue_t*, hsa_agent_t>>{};
     {
-        auto lg = std::lock_guard{registration->mutex};
+        auto lg        = std::lock_guard{registration->mutex};
+        auto duplicate = std::find_if(
+            registration->cb_list.begin(),
+            registration->cb_list.end(),
+            [cb, data](const auto& entry) { return entry.cb == cb && entry.data == data; });
+        if(duplicate != registration->cb_list.end()) return ROCPROFILER_STATUS_SUCCESS;
         registration->cb_list.push_back({cb, data});
         for(const auto& qr_pair : registration->queues)
         {
@@ -413,8 +419,9 @@ queue_registration_init(HsaApiTable* table)
 
     CoreApiTable& core_table = *table->core_;
 
-    core_table.hsa_queue_create_fn  = create_queue;
-    core_table.hsa_queue_destroy_fn = destroy_queue;
+    registration->hsa_queue_destroy_fn = core_table.hsa_queue_destroy_fn;
+    core_table.hsa_queue_create_fn     = create_queue;
+    core_table.hsa_queue_destroy_fn    = destroy_queue;
 
 #if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
     // Save the real hsa_amd_queue_create before overwriting it, so non-compute queue requests can

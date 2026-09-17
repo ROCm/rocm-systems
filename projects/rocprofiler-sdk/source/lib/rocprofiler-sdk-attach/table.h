@@ -26,6 +26,8 @@
 #include "code_object_registration.h"
 #include "queue_registration.h"
 
+#include <stddef.h>
+
 #define ROCATTACH_API_TABLE_VERSION_MAJOR 1
 
 ROCPROFILER_EXTERN_C_INIT
@@ -42,19 +44,47 @@ typedef int (*rocprofiler_attach_remove_queue_cb_t)(rocprofiler_attach_queue_cb_
 typedef int (*rocprofiler_attach_lookup_memory_codeobj_data_t)(hsa_loaded_code_object_t,
                                                                const void**,
                                                                uint64_t*);
+typedef int (*rocprofiler_attach_is_hsa_interception_active_t)();
+typedef int (*rocprofiler_attach_initialize_hsa_interception_t)(struct HsaApiTable*);
 
 struct RocAttachDispatchTable
 {
-    uint64_t                                        size;
-    rocprofiler_attach_get_version_t                rocprofiler_attach_get_version;
-    rocprofiler_attach_iterate_all_queues_t         rocprofiler_attach_iterate_all_queues;
-    rocprofiler_attach_set_write_interceptor_t      rocprofiler_attach_set_write_interceptor;
-    rocprofiler_attach_iterate_all_code_objects_t   rocprofiler_attach_iterate_all_code_objects;
-    rocprofiler_attach_add_code_object_cb_t         rocprofiler_attach_add_code_object_cb;
-    rocprofiler_attach_remove_code_object_cb_t      rocprofiler_attach_remove_code_object_cb;
-    rocprofiler_attach_add_queue_cb_t               rocprofiler_attach_add_queue_cb;
-    rocprofiler_attach_remove_queue_cb_t            rocprofiler_attach_remove_queue_cb;
-    rocprofiler_attach_lookup_memory_codeobj_data_t rocprofiler_attach_lookup_memory_codeobj_data;
+    uint64_t                                         size;
+    rocprofiler_attach_get_version_t                 rocprofiler_attach_get_version;
+    rocprofiler_attach_iterate_all_queues_t          rocprofiler_attach_iterate_all_queues;
+    rocprofiler_attach_set_write_interceptor_t       rocprofiler_attach_set_write_interceptor;
+    rocprofiler_attach_iterate_all_code_objects_t    rocprofiler_attach_iterate_all_code_objects;
+    rocprofiler_attach_add_code_object_cb_t          rocprofiler_attach_add_code_object_cb;
+    rocprofiler_attach_remove_code_object_cb_t       rocprofiler_attach_remove_code_object_cb;
+    rocprofiler_attach_add_queue_cb_t                rocprofiler_attach_add_queue_cb;
+    rocprofiler_attach_remove_queue_cb_t             rocprofiler_attach_remove_queue_cb;
+    rocprofiler_attach_lookup_memory_codeobj_data_t  rocprofiler_attach_lookup_memory_codeobj_data;
+    rocprofiler_attach_is_hsa_interception_active_t  rocprofiler_attach_is_hsa_interception_active;
+    rocprofiler_attach_initialize_hsa_interception_t rocprofiler_attach_initialize_hsa_interception;
 };
+
+static inline int
+rocprofiler_attach_table_owns_hsa_interception(const struct RocAttachDispatchTable* table)
+{
+    const size_t required_size =
+        offsetof(struct RocAttachDispatchTable, rocprofiler_attach_is_hsa_interception_active) +
+        sizeof(table->rocprofiler_attach_is_hsa_interception_active);
+    return (table != NULL && table->size >= required_size &&
+            table->rocprofiler_attach_is_hsa_interception_active != NULL &&
+            table->rocprofiler_attach_is_hsa_interception_active() != 0);
+}
+
+static inline int
+rocprofiler_attach_table_initialize_hsa_interception(const struct RocAttachDispatchTable* table,
+                                                     struct HsaApiTable* hsa_api_table)
+{
+    const size_t required_size =
+        offsetof(struct RocAttachDispatchTable, rocprofiler_attach_initialize_hsa_interception) +
+        sizeof(table->rocprofiler_attach_initialize_hsa_interception);
+    if(table == NULL || table->size < required_size ||
+       table->rocprofiler_attach_initialize_hsa_interception == NULL)
+        return -1;
+    return table->rocprofiler_attach_initialize_hsa_interception(hsa_api_table);
+}
 
 ROCPROFILER_EXTERN_C_FINI

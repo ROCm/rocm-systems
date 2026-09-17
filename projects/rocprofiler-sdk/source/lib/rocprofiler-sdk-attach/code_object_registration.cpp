@@ -182,7 +182,12 @@ executable_destroy(hsa_executable_t executable)
             registration->code_objects.begin(), registration->code_objects.end(), pred);
         if(itr == registration->code_objects.end())
         {
-            ROCP_WARNING << "remove code_object could not find " << executable.handle;
+            // Late ownership transfer can observe destroy for an executable that the SDK
+            // tracked before rocattach installed its freeze hook. Notify subscribers so
+            // their pre-existing object is retired even though it is absent here.
+            ROCP_INFO << "retiring code_object " << executable.handle
+                      << " created before rocattach assumed HSA ownership";
+            snapshot = std::vector<code_object_cb_entry_t>{registration->cb_list};
         }
         else
         {
@@ -246,7 +251,12 @@ add_code_object_cb(rocprofiler_attach_code_object_cb_t cb, void* data)
     auto* registration = CHECK_NOTNULL(get_code_object_registration());
     auto  snapshot     = code_object_collection_t{};
     {
-        auto lg = std::lock_guard{registration->mutex};
+        auto lg        = std::lock_guard{registration->mutex};
+        auto duplicate = std::find_if(
+            registration->cb_list.begin(),
+            registration->cb_list.end(),
+            [cb, data](const auto& entry) { return entry.cb == cb && entry.data == data; });
+        if(duplicate != registration->cb_list.end()) return ROCPROFILER_STATUS_SUCCESS;
         registration->cb_list.push_back({cb, data});
         snapshot = code_object_collection_t{registration->code_objects};
     }

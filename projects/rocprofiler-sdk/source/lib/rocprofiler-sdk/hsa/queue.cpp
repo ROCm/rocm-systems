@@ -1369,10 +1369,10 @@ Queue::Queue(
     signal_pool_init();  // ensure the signal pool is constructed
     // Since this is an active queue, the write interceptor may be called immediately, so this needs
     // to appear after signal construction.
-    if(!queue_interposition::supports_queue_interposition())
-    {
-        set_write_interceptor(WriteInterceptor, this);
-    }
+    // Queues adopted from rocattach are already ROCr InterceptQueues. Their packet
+    // stream is reachable only through rocattach's shim, even when inline queue
+    // interposition is otherwise available for SDK-created queues.
+    set_write_interceptor(WriteInterceptor, this);
 }
 
 void
