@@ -162,20 +162,15 @@ TEST(ConSanBarrierPolicy, AllModesExpressTheirBarrierContract) {
             BarrierPolicyReason::ModeMutationOnly);
   EXPECT_TRUE(supercollider.plan.probe_intents.empty());
 
-  constexpr std::array expected = {
-      std::pair{Mode::Default, ProbeIntentKind::BarrierEpoch},
-  };
-  for (const auto &[mode, intent_kind] : expected) {
-    SCOPED_TRACE(mode_label(mode));
-    const BarrierPolicyResult policy = plan_barrier_observation(inventory, barrier_request(mode));
-    ASSERT_TRUE(policy.valid());
-    ASSERT_EQ(policy.plan.barrier_site_decisions.size(), 1u);
-    ASSERT_EQ(policy.plan.probe_intents.size(), 1u);
-    EXPECT_EQ(policy.plan.barrier_site_decisions.front().kind, SiteDecisionKind::Admitted);
-    EXPECT_EQ(policy.plan.barrier_site_decisions.front().reason, BarrierPolicyReason::None);
-    EXPECT_EQ(policy.plan.probe_intents.front().kind, intent_kind);
-    EXPECT_EQ(policy.plan.probe_intents.front().position, ProbePosition::After);
-  }
+  const BarrierPolicyResult policy =
+      plan_barrier_observation(inventory, barrier_request(Mode::Default));
+  ASSERT_TRUE(policy.valid());
+  ASSERT_EQ(policy.plan.barrier_site_decisions.size(), 1u);
+  ASSERT_EQ(policy.plan.probe_intents.size(), 1u);
+  EXPECT_EQ(policy.plan.barrier_site_decisions.front().kind, SiteDecisionKind::Admitted);
+  EXPECT_EQ(policy.plan.barrier_site_decisions.front().reason, BarrierPolicyReason::None);
+  EXPECT_EQ(policy.plan.probe_intents.front().kind, ProbeIntentKind::BarrierEpoch);
+  EXPECT_EQ(policy.plan.probe_intents.front().position, ProbePosition::After);
 }
 
 TEST(ConSanBarrierPolicy, PairedSequenceHasOneEpochIntent) {
@@ -186,15 +181,13 @@ TEST(ConSanBarrierPolicy, PairedSequenceHasOneEpochIntent) {
   std::vector sequences{make_barrier_sequence(events)};
   const ProgramInventory inventory = build_barrier_inventory(events, sequences);
 
-  for (Mode mode : {Mode::Default}) {
-    SCOPED_TRACE(mode_label(mode));
-    const BarrierPolicyResult epoch = plan_barrier_observation(inventory, barrier_request(mode));
-    ASSERT_TRUE(epoch.valid());
-    ASSERT_EQ(epoch.plan.barrier_site_decisions.size(), 2u);
-    ASSERT_EQ(epoch.plan.probe_intents.size(), 1u);
-    EXPECT_EQ(epoch.plan.probe_intents.front().physical_site.original_text_offset, 48u);
-    EXPECT_EQ(epoch.plan.probe_intents.front().covered_semantic_sites.size(), 2u);
-  }
+  const BarrierPolicyResult epoch =
+      plan_barrier_observation(inventory, barrier_request(Mode::Default));
+  ASSERT_TRUE(epoch.valid());
+  ASSERT_EQ(epoch.plan.barrier_site_decisions.size(), 2u);
+  ASSERT_EQ(epoch.plan.probe_intents.size(), 1u);
+  EXPECT_EQ(epoch.plan.probe_intents.front().physical_site.original_text_offset, 48u);
+  EXPECT_EQ(epoch.plan.probe_intents.front().covered_semantic_sites.size(), 2u);
 }
 
 TEST(ConSanBarrierPolicy, SignalWithoutACompletionIsUnsupported) {

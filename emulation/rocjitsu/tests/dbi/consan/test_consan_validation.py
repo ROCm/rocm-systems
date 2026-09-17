@@ -2076,11 +2076,10 @@ class ConSanValidationTest(unittest.TestCase):
         self,
     ) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-scatter-reduce"]
-        for profile in ("default", "default"):
-            environment = validation._clean_environment(
-                profile, workload, Path("/hook.so"), None, Path("/workspace")
-            )
-            self.assertEqual(environment["RJ_CONSAN_REQUIRE_RECORDS"], "0")
+        environment = validation._clean_environment(
+            "default", workload, Path("/hook.so"), None, Path("/workspace")
+        )
+        self.assertEqual(environment["RJ_CONSAN_REQUIRE_RECORDS"], "0")
 
     def test_qwen_relies_on_the_standard_runtime_operating_point(self) -> None:
         qwen = validation.WORKLOAD_BY_ID["qwen-prefill"]
@@ -4258,22 +4257,9 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertNotIn("CTEST_PARALLEL_LEVEL", settings)
         for forbidden in validation.ORDINARY_FORBIDDEN_ENVIRONMENT:
             self.assertNotIn(forbidden, settings)
-        sampled = next(
-            profile for profile in workload["profiles"] if profile["id"] == "default"
-        )
         profile = next(
             profile for profile in workload["profiles"] if profile["id"] == "default"
         )
-        self.assertEqual(
-            {item["name"] for item in sampled["implicit_runtime_defaults"]},
-            {
-                "RJ_CONSAN_TRACK_BARRIERS",
-                "RJ_CONSAN_TRACK_ATOMICS",
-                "RJ_CONSAN_RUNTIME_SAMPLE_OFFSET",
-                "RJ_CONSAN_RUNTIME_SAMPLE_STRIDE",
-            },
-        )
-        self.assertEqual(sampled["usability_exceptions"], [])
         self.assertEqual(
             {item["name"] for item in profile["implicit_runtime_defaults"]},
             {
@@ -4283,6 +4269,7 @@ class ConSanValidationTest(unittest.TestCase):
                 "RJ_CONSAN_RUNTIME_SAMPLE_STRIDE",
             },
         )
+        self.assertEqual(profile["usability_exceptions"], [])
         self.assertEqual(
             audit["usability_audit"]["coverage_limiting_controls_present"], []
         )
@@ -4370,11 +4357,11 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(supercollider["detector"], "detected")
         self.assertEqual(supercollider["oracle"], "pass")
         self.assertEqual(trials, [{}])
-        sampled, trials = validation._fault_trials(fault, "default")
-        self.assertEqual(sampled["detector"], "detected")
-        self.assertEqual(sampled["oracle"], "pass")
+        result, trials = validation._fault_trials(fault, "default")
+        self.assertEqual(result["detector"], "detected")
+        self.assertEqual(result["oracle"], "pass")
         self.assertEqual(
-            sampled["environment"]["RJ_CONSAN_REQUIRE_DIAGNOSTICS"], "1"
+            result["environment"]["RJ_CONSAN_REQUIRE_DIAGNOSTICS"], "1"
         )
         self.assertEqual(trials, [{}])
 
@@ -4608,13 +4595,13 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertIn("shared LoadKeys", fault["reach_witness"]["evidence"])
         self.assertIn("shared union", fault["reach_witness"]["evidence"])
 
-        sampled, trials = validation._fault_trials(fault, "default")
-        self.assertEqual(sampled["detector"], "not_detected")
-        self.assertEqual(sampled["oracle"], "pass")
+        result, trials = validation._fault_trials(fault, "default")
+        self.assertEqual(result["detector"], "not_detected")
+        self.assertEqual(result["oracle"], "pass")
         self.assertEqual(
-            sampled["environment"]["RJ_CONSAN_RUNTIME_SAMPLE_STRIDE"], "1"
+            result["environment"]["RJ_CONSAN_RUNTIME_SAMPLE_STRIDE"], "1"
         )
-        self.assertEqual(sampled["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel)
+        self.assertEqual(result["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"], kernel)
         self.assertEqual(trials, [{}])
 
     def test_gfx1250_jakub_barrier_drop_policy_uses_numeric_oracle(self) -> None:

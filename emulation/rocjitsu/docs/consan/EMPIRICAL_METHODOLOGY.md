@@ -136,7 +136,7 @@ mode, record:
 - analysis, target-specific emission, relocation, register, spill, and
   descriptor paths;
 - persistent and per-dispatch ABI state plus memory bounds;
-- report, replay, sampled-window, or shadow models;
+- causal-window and synchronization models, or SuperCollider mismatch evidence;
 - overflow, incompleteness, containment, and cleanup states;
 - supported semantic families and typed exclusions; and
 - target-porting and regression-test obligations.

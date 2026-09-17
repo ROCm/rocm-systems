@@ -256,6 +256,9 @@ mode-tagged container. Report decoding borrows optional access metadata through
 a nullable pointer, and the pipeline directly invokes conflict analysis.
 Object planning holds the report geometry and atomic patch reservation needed
 by emission; resource solving does not carry a separate mode-semantics object.
+The report ABI, sizing, and host-model contracts are exposed through
+`consan_report.h`. One renderer produces evidence, the summary, and bounded
+details in that order; it has no separate mode-rendering adapter.
 
 ## Execution models
 

@@ -29,13 +29,13 @@ the built-in race detector inside the rocJITsu emulator instead---see
 ConSan instruments **LDS read and write operations** (`ds_load_*`,
 `ds_store_*`, and admitted flat/VFLAT accesses whose address provenance
 reaches the LDS aperture). For each instrumented site it uses VGPR
-temporaries to hold intermediate state such as duplicate-load results,
-shadow metadata, or sampled watchpoint entries.
+temporaries to publish selected access and synchronization evidence.
+SuperCollider instead uses temporaries for redundant observations and comparisons.
 
 ConSan does **not** detect global-memory races. Selected atomics and
 fences provide ordering evidence for LDS communication, but they are not
 general global-memory race instrumentation. For details on ConSan's
-scope and the four instrumentation profiles, see
+scope and the two detection modes, see
 [ConSan GPU LDS sanitizer reference](../reference/consan.md).
 
 ## Write a kernel with a missing barrier
@@ -90,10 +90,20 @@ hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx1201
 
 ## Run under ConSan
 
-Load the hook through the `HSA_TOOLS_LIB` environment variable and
-select a ConSan mode. SuperCollider is the simplest profile---it
-repeats or reads back each supported LDS access and sets an automatic
-marker on mismatch:
+Load the hook through `HSA_TOOLS_LIB`. For this small testcase, select the
+`max` preset to remove workgroup and cell sampling filters:
+
+``` bash
+env HSA_TOOLS_LIB="$CONSAN_HOOK" \
+  RJ_CONSAN_PRESET=max \
+  RJ_CONSAN_LOG=1 \
+  /tmp/race_example
+```
+
+Loading the hook selects the default ConSan detector. `RJ_CONSAN_LOG=1`
+enables compact diagnostic output. For complementary value-instability
+evidence, SuperCollider repeats or reads back supported LDS accesses and
+sets an automatic marker on mismatch:
 
 ``` bash
 env HSA_TOOLS_LIB="$CONSAN_HOOK" \
@@ -102,19 +112,7 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" \
   /tmp/race_example
 ```
 
-`RJ_CONSAN_LOG=1` enables compact diagnostic output. You can also run
-ConSan for attributed race detection. For this small testcase, use the
-`max` preset to remove workgroup and cell sampling filters:
-
-``` bash
-env HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_MODE=default \
-  RJ_CONSAN_PRESET=max \
-  RJ_CONSAN_LOG=1 \
-  /tmp/race_example
-```
-
-None of these profiles require you to choose a register number,
+Neither detector requires you to choose a register number,
 report-buffer size, patch limit, or sampling stride. Ordinary defaults
 instrument all admitted supported sites and manage resources
 automatically.

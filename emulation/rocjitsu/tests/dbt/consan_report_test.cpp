@@ -188,15 +188,15 @@ TEST(ConSanReportTest, ExactGroupDoesNotInventReadAtomicOrSingleLaneRaces) {
 }
 
 TEST(ConSanReportTest, CrossWaveMasksAreIndependentAndMissingIsExplicit) {
-  DecodedEvidence mode;
-  mode.evidence = {access(0, 0, 0, ShadowAccessKind::Write),
-                   access(1, 1, 0, ShadowAccessKind::Read)};
-  mode.evidence[0].exact_lane_mask = 1;
+  DecodedEvidence records;
+  records.evidence = {access(0, 0, 0, ShadowAccessKind::Write),
+                      access(1, 1, 0, ShadowAccessKind::Read)};
+  records.evidence[0].exact_lane_mask = 1;
   for (uint64_t read_mask : {0u, 0xf0u}) {
-    mode.evidence[1].exact_lane_mask = read_mask;
-    const auto analysis = analyze_conflicts(mode.evidence, false);
+    records.evidence[1].exact_lane_mask = read_mask;
+    const auto analysis = analyze_conflicts(records.evidence, false);
     ASSERT_EQ(analysis.conflict_count, 1u);
-    const auto line = conflict_line(render_evidence({}, mode, analysis));
+    const auto line = conflict_line(render_evidence({}, records, analysis));
     EXPECT_NE(line.find("first_lanes=0x0000000000000001"), std::string::npos);
     EXPECT_NE(line.find(read_mask ? "second_lanes=0x00000000000000f0" : "second_lanes=unavailable"),
               std::string::npos);
@@ -204,11 +204,11 @@ TEST(ConSanReportTest, CrossWaveMasksAreIndependentAndMissingIsExplicit) {
 }
 
 TEST(ConSanReportTest, ConflictSitesRemainVisibleBeyondDetailLimit) {
-  DecodedEvidence mode;
+  DecodedEvidence records;
   for (uint32_t index = 0; index < 68; ++index)
-    mode.evidence.push_back(access(index, 0, 1024 + 4 * index, ShadowAccessKind::Read));
-  mode.evidence.push_back(access(68, 1, 16, ShadowAccessKind::Write));
-  mode.evidence.push_back(access(69, 2, 16, ShadowAccessKind::Read));
+    records.evidence.push_back(access(index, 0, 1024 + 4 * index, ShadowAccessKind::Read));
+  records.evidence.push_back(access(68, 1, 16, ShadowAccessKind::Write));
+  records.evidence.push_back(access(69, 2, 16, ShadowAccessKind::Read));
   std::array<AccessStaticMapping, 2> mappings{};
   mappings[0].instruction_offset = 0x120;
   mappings[1].instruction_offset = 0x240;
@@ -216,14 +216,14 @@ TEST(ConSanReportTest, ConflictSitesRemainVisibleBeyondDetailLimit) {
     mappings[i].first_slot = 68 + i;
     mappings[i].range_count = 1;
     mappings[i].bank_count = 1;
-    mode.evidence[68 + i].static_mapping = &mappings[i];
+    records.evidence[68 + i].static_mapping = &mappings[i];
   }
-  const auto analysis = analyze_conflicts(mode.evidence, false);
+  const auto analysis = analyze_conflicts(records.evidence, false);
   ASSERT_EQ(analysis.conflict_count, 1u);
   ReportPipelineInput input;
   input.reader = 101;
   input.input_fingerprint = "object-a";
-  const auto rendered = render_evidence(input, mode, analysis);
+  const auto rendered = render_evidence(input, records, analysis);
   const auto line = conflict_line(rendered);
   EXPECT_NE(line.find("first_instruction=0x120 second_instruction=0x240"), std::string::npos);
   EXPECT_NE(line.find("code_object=object-a"), std::string::npos);
@@ -234,30 +234,30 @@ TEST(ConSanReportTest, ConflictSitesRemainVisibleBeyondDetailLimit) {
 }
 
 TEST(ConSanReportTest, MissingMappingIsNotInstructionZeroAndObjectsRemainDistinct) {
-  DecodedEvidence mode;
-  mode.evidence = {access(0, 1, 16, ShadowAccessKind::Write),
-                   access(1, 2, 16, ShadowAccessKind::Read)};
+  DecodedEvidence records;
+  records.evidence = {access(0, 1, 16, ShadowAccessKind::Write),
+                      access(1, 2, 16, ShadowAccessKind::Read)};
   AccessStaticMapping mapping;
   mapping.first_slot = 1;
   mapping.range_count = 1;
   mapping.bank_count = 1;
   mapping.instruction_offset = 0;
-  mode.evidence[1].static_mapping = &mapping;
-  const auto analysis = analyze_conflicts(mode.evidence, false);
+  records.evidence[1].static_mapping = &mapping;
+  const auto analysis = analyze_conflicts(records.evidence, false);
   ASSERT_EQ(analysis.conflict_count, 1u);
   for (const char *object : {"object-a", "object-b"}) {
     ReportPipelineInput input;
     input.input_fingerprint = object;
-    const auto line = conflict_line(render_evidence(input, mode, analysis));
+    const auto line = conflict_line(render_evidence(input, records, analysis));
     EXPECT_NE(line.find("first_instruction=unavailable second_instruction=0x0"), std::string::npos);
     EXPECT_NE(line.find(std::string("code_object=") + object), std::string::npos);
   }
 }
 
 TEST(ConSanReportTest, OverlappingMappingsDoNotInventUniqueInstructionAttribution) {
-  DecodedEvidence mode;
-  mode.evidence = {access(0, 1, 16, ShadowAccessKind::Write),
-                   access(1, 2, 16, ShadowAccessKind::Read)};
+  DecodedEvidence records;
+  records.evidence = {access(0, 1, 16, ShadowAccessKind::Write),
+                      access(1, 2, 16, ShadowAccessKind::Read)};
   AccessStaticMetadata metadata;
   for (uint64_t pc : {0x120u, 0x240u}) {
     AccessStaticMapping mapping;
@@ -266,46 +266,46 @@ TEST(ConSanReportTest, OverlappingMappingsDoNotInventUniqueInstructionAttributio
     mapping.instruction_offset = pc;
     metadata.mappings.push_back(mapping);
   }
-  for (auto &entry : mode.evidence)
+  for (auto &entry : records.evidence)
     entry.static_mapping = &metadata.mappings.front();
-  const auto analysis = analyze_conflicts(mode.evidence, false);
+  const auto analysis = analyze_conflicts(records.evidence, false);
   ASSERT_EQ(analysis.conflict_count, 1u);
   AccessStaticMetadata runtime_metadata = metadata;
   ReportPipelineInput input;
   input.static_metadata = &runtime_metadata;
-  const auto line = conflict_line(render_evidence(input, mode, analysis));
+  const auto line = conflict_line(render_evidence(input, records, analysis));
   EXPECT_NE(line.find("first_instruction=ambiguous second_instruction=ambiguous"),
             std::string::npos);
   // Multiple aliases of the same original instruction still give a unique PC.
   runtime_metadata.mappings[1].instruction_offset = 0x120;
-  const auto aliases = conflict_line(render_evidence(input, mode, analysis));
+  const auto aliases = conflict_line(render_evidence(input, records, analysis));
   EXPECT_NE(aliases.find("first_instruction=0x120 second_instruction=0x120"), std::string::npos);
   // A supplied mapping table is authoritative even if an entry still has an
   // older mapping pointer. Do not invent attribution for a slot it omits.
   runtime_metadata.mappings.clear();
-  const auto missing = conflict_line(render_evidence(input, mode, analysis));
+  const auto missing = conflict_line(render_evidence(input, records, analysis));
   EXPECT_NE(missing.find("first_instruction=unavailable second_instruction=unavailable"),
             std::string::npos);
 }
 
 TEST(ConSanReportTest, ExamplesAreBoundedAndDeduplicatedWithoutChangingPairCount) {
-  DecodedEvidence mode;
+  DecodedEvidence records;
   AccessStaticMapping mapping;
   mapping.instruction_offset = 0x100;
   mapping.bank_count = 1;
   for (uint32_t i = 0; i < 3; ++i) {
-    mode.evidence.push_back(access(i, i + 1, 16, ShadowAccessKind::Write));
-    mode.evidence.back().static_mapping = &mapping;
+    records.evidence.push_back(access(i, i + 1, 16, ShadowAccessKind::Write));
+    records.evidence.back().static_mapping = &mapping;
   }
-  mode.evidence.push_back(mode.evidence.front());
-  mode.evidence.back().index = 3;
+  records.evidence.push_back(records.evidence.front());
+  records.evidence.back().index = 3;
   for (uint32_t limit : {0u, 1u, 2u, 8u}) {
-    const auto analysis = analyze_conflicts(mode.evidence, false, limit);
+    const auto analysis = analyze_conflicts(records.evidence, false, limit);
     EXPECT_EQ(analysis.conflict_count, 5u);
     EXPECT_EQ(analysis.examples.size(), std::min(limit, 3u));
     ReportPipelineInput input;
     input.input_fingerprint = "bounded";
-    const auto rendered = render_evidence(input, mode, analysis);
+    const auto rendered = render_evidence(input, records, analysis);
     EXPECT_EQ(
         std::ranges::count_if(
             rendered, [](const auto &line) { return line.text.starts_with("ConSan conflict "); }),

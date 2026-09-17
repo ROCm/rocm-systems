@@ -141,7 +141,7 @@ detection. Select the complementary analysis with
 test where incomplete instrumentation must fail, add
 `RJ_CONSAN_POLICY=strict`; race diagnostics themselves remain non-fatal.
 
-For default modes, diagnostics, coverage, and expert controls, continue with
+For presets, diagnostics, coverage, and expert controls, continue with
 the [ConSan tutorial](consan/TUTORIAL.md) or [ConSan usage reference](consan/USAGE.md).
 
 ## Run waitcheck on a saved object

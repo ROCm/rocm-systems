@@ -163,10 +163,10 @@ TEST(ConSanLoweringPlan, ReportLayoutAndReservedAtomicBudget) {
 
   request.track_barriers = true;
   request.track_atomics = true;
-  const auto sampled = plan_object(request, resources, policy, facts);
-  EXPECT_EQ(sampled.report_layout,
+  const auto plan = plan_object(request, resources, policy, facts);
+  EXPECT_EQ(plan.report_layout,
             direct_report_buffer_layout_for_bytes(resources.report_buffer_size));
-  EXPECT_EQ(sampled.reserved_atomic_patch_count, 2u);
+  EXPECT_EQ(plan.reserved_atomic_patch_count, 2u);
 }
 
 TEST(ConSanLoweringPlan, DynamicStackSpillsRequireSupportedTarget) {

@@ -364,33 +364,27 @@ TEST(ConSanAtomicFencePolicy, AllModesExpressTheirAtomicObservationContract) {
             AtomicPolicyReason::ModeMutationOnly);
   EXPECT_TRUE(supercollider.plan.probe_intents.empty());
 
-  constexpr std::array expected = {
-      std::pair{Mode::Default, ProbeIntentKind::AtomicOrdering},
-  };
-  for (const auto &[mode, evidence_kind] : expected) {
-    SCOPED_TRACE(mode_label(mode));
-    const AtomicFencePolicyResult policy =
-        plan_atomic_fence_observation(inventory, atomic_request(mode));
-    ASSERT_TRUE(policy.valid());
-    ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
-    ASSERT_EQ(policy.plan.probe_intents.size(), 2u);
-    const AtomicSiteDecision &decision = policy.plan.atomic_site_decisions.front();
-    EXPECT_EQ(decision.kind, SiteDecisionKind::Admitted);
-    EXPECT_EQ(decision.reason, AtomicPolicyReason::None);
-    ASSERT_TRUE(policy.plan.probe_intents[0].synchronization_association.has_value());
-    ASSERT_TRUE(policy.plan.probe_intents[0].atomic_lowering_form.has_value());
-    EXPECT_EQ(policy.plan.probe_intents[0].atomic_lowering_form->kind,
-              AtomicLoweringFormKind::GlobalScalarVectorAddress);
-    EXPECT_EQ(policy.plan.probe_intents[0].kind, ProbeIntentKind::AtomicAddressCapture);
-    EXPECT_EQ(policy.plan.probe_intents[0].position, ProbePosition::Before);
-    EXPECT_EQ(policy.plan.probe_intents[0].dynamic_result, DynamicResultRequirement::None);
-    EXPECT_EQ(policy.plan.probe_intents[1].kind, evidence_kind);
-    EXPECT_EQ(policy.plan.probe_intents[1].position, ProbePosition::After);
-    EXPECT_EQ(policy.plan.probe_intents[1].dynamic_result,
-              DynamicResultRequirement::ReturnedOldValue);
-    EXPECT_EQ(policy.plan.probe_intents[0].synchronization_association,
-              policy.plan.probe_intents[1].synchronization_association);
-  }
+  const AtomicFencePolicyResult policy =
+      plan_atomic_fence_observation(inventory, atomic_request(Mode::Default));
+  ASSERT_TRUE(policy.valid());
+  ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
+  ASSERT_EQ(policy.plan.probe_intents.size(), 2u);
+  const AtomicSiteDecision &decision = policy.plan.atomic_site_decisions.front();
+  EXPECT_EQ(decision.kind, SiteDecisionKind::Admitted);
+  EXPECT_EQ(decision.reason, AtomicPolicyReason::None);
+  ASSERT_TRUE(policy.plan.probe_intents[0].synchronization_association.has_value());
+  ASSERT_TRUE(policy.plan.probe_intents[0].atomic_lowering_form.has_value());
+  EXPECT_EQ(policy.plan.probe_intents[0].atomic_lowering_form->kind,
+            AtomicLoweringFormKind::GlobalScalarVectorAddress);
+  EXPECT_EQ(policy.plan.probe_intents[0].kind, ProbeIntentKind::AtomicAddressCapture);
+  EXPECT_EQ(policy.plan.probe_intents[0].position, ProbePosition::Before);
+  EXPECT_EQ(policy.plan.probe_intents[0].dynamic_result, DynamicResultRequirement::None);
+  EXPECT_EQ(policy.plan.probe_intents[1].kind, ProbeIntentKind::AtomicOrdering);
+  EXPECT_EQ(policy.plan.probe_intents[1].position, ProbePosition::After);
+  EXPECT_EQ(policy.plan.probe_intents[1].dynamic_result,
+            DynamicResultRequirement::ReturnedOldValue);
+  EXPECT_EQ(policy.plan.probe_intents[0].synchronization_association,
+            policy.plan.probe_intents[1].synchronization_association);
 }
 
 TEST(ConSanAtomicFencePolicy, DynamicAtomicOutcomesBecomeExplicitAfterIntentRequirements) {
@@ -674,27 +668,26 @@ TEST(ConSanAtomicFencePolicy, Gfx1250AdmitsExactBufferOrdinaryFenceCommunication
     return build_atomic_inventory({communication, fence}, {sequence}, {}, {std::move(site)},
                                   {candidate}, gfx1250);
   };
-  for (const Mode mode : {Mode::Default}) {
-    const AtomicFencePolicyResult supported = plan_atomic_fence_observation(
-        make_inventory(make_cdna5_buffer_load_site()), atomic_request(mode));
-    ASSERT_TRUE(supported.valid());
-    ASSERT_EQ(supported.plan.atomic_site_decisions.size(), 1u);
-    ASSERT_EQ(supported.plan.fence_site_decisions.size(), 1u);
-    EXPECT_EQ(supported.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Admitted);
-    EXPECT_EQ(supported.plan.fence_site_decisions.front().kind, SiteDecisionKind::Admitted);
 
-    OrdinaryMemorySite malformed = make_cdna5_buffer_load_site();
-    malformed.raw_rsrc.reset();
-    const AtomicFencePolicyResult rejected =
-        plan_atomic_fence_observation(make_inventory(std::move(malformed)), atomic_request(mode));
-    ASSERT_TRUE(rejected.valid());
-    EXPECT_EQ(rejected.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Unsupported);
-    EXPECT_EQ(rejected.plan.atomic_site_decisions.front().reason,
-              AtomicPolicyReason::UnsupportedEncoding);
-    EXPECT_EQ(rejected.plan.fence_site_decisions.front().kind, SiteDecisionKind::Unsupported);
-    EXPECT_EQ(rejected.plan.fence_site_decisions.front().reason,
-              FencePolicyReason::MissingCommunicationEvent);
-  }
+  const AtomicFencePolicyResult supported = plan_atomic_fence_observation(
+      make_inventory(make_cdna5_buffer_load_site()), atomic_request(Mode::Default));
+  ASSERT_TRUE(supported.valid());
+  ASSERT_EQ(supported.plan.atomic_site_decisions.size(), 1u);
+  ASSERT_EQ(supported.plan.fence_site_decisions.size(), 1u);
+  EXPECT_EQ(supported.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Admitted);
+  EXPECT_EQ(supported.plan.fence_site_decisions.front().kind, SiteDecisionKind::Admitted);
+
+  OrdinaryMemorySite malformed = make_cdna5_buffer_load_site();
+  malformed.raw_rsrc.reset();
+  const AtomicFencePolicyResult rejected = plan_atomic_fence_observation(
+      make_inventory(std::move(malformed)), atomic_request(Mode::Default));
+  ASSERT_TRUE(rejected.valid());
+  EXPECT_EQ(rejected.plan.atomic_site_decisions.front().kind, SiteDecisionKind::Unsupported);
+  EXPECT_EQ(rejected.plan.atomic_site_decisions.front().reason,
+            AtomicPolicyReason::UnsupportedEncoding);
+  EXPECT_EQ(rejected.plan.fence_site_decisions.front().kind, SiteDecisionKind::Unsupported);
+  EXPECT_EQ(rejected.plan.fence_site_decisions.front().reason,
+            FencePolicyReason::MissingCommunicationEvent);
 }
 
 TEST(ConSanAtomicFencePolicy, EverySemanticQualificationFailureHasADistinctTypedReason) {
@@ -851,26 +844,24 @@ TEST(ConSanAtomicFencePolicy, AppendAndCoverageLedgerOwnDecisionsAndRebaseIntent
 
 TEST(ConSanAtomicFencePolicy, OrdinaryFenceAssociationDefinesEachModeEvidenceContract) {
   const ProgramInventory inventory = ordinary_fence_inventory();
-  for (Mode mode : {Mode::Default}) {
-    SCOPED_TRACE(mode_label(mode));
-    const AtomicFencePolicyResult policy =
-        plan_atomic_fence_observation(inventory, atomic_request(mode));
-    ASSERT_TRUE(policy.valid());
-    ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
-    ASSERT_EQ(policy.plan.fence_site_decisions.size(), 1u);
-    const AtomicSiteDecision &atomic = policy.plan.atomic_site_decisions.front();
-    const FenceSiteDecision &fence = policy.plan.fence_site_decisions.front();
-    EXPECT_EQ(atomic.kind, SiteDecisionKind::Admitted);
-    EXPECT_EQ(fence.kind, SiteDecisionKind::Admitted);
-    EXPECT_EQ(policy.plan.probe_intents[0].synchronization_association,
-              policy.plan.probe_intents[1].synchronization_association);
-    ASSERT_TRUE(policy.plan.probe_intents.front().atomic_lowering_form.has_value());
-    EXPECT_EQ(fence.inventory_association, FenceAssociation::Qualified);
-    EXPECT_EQ(fence.capability, CapabilityDisposition::AssociatedOnly);
-    ASSERT_EQ(policy.plan.probe_intents.size(), 2u);
-    EXPECT_EQ(policy.plan.probe_intents[0].kind, ProbeIntentKind::AtomicAddressCapture);
-    EXPECT_EQ(policy.plan.probe_intents[1].kind, ProbeIntentKind::AtomicOrdering);
-  }
+
+  const AtomicFencePolicyResult policy =
+      plan_atomic_fence_observation(inventory, atomic_request(Mode::Default));
+  ASSERT_TRUE(policy.valid());
+  ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
+  ASSERT_EQ(policy.plan.fence_site_decisions.size(), 1u);
+  const AtomicSiteDecision &atomic = policy.plan.atomic_site_decisions.front();
+  const FenceSiteDecision &fence = policy.plan.fence_site_decisions.front();
+  EXPECT_EQ(atomic.kind, SiteDecisionKind::Admitted);
+  EXPECT_EQ(fence.kind, SiteDecisionKind::Admitted);
+  EXPECT_EQ(policy.plan.probe_intents[0].synchronization_association,
+            policy.plan.probe_intents[1].synchronization_association);
+  ASSERT_TRUE(policy.plan.probe_intents.front().atomic_lowering_form.has_value());
+  EXPECT_EQ(fence.inventory_association, FenceAssociation::Qualified);
+  EXPECT_EQ(fence.capability, CapabilityDisposition::AssociatedOnly);
+  ASSERT_EQ(policy.plan.probe_intents.size(), 2u);
+  EXPECT_EQ(policy.plan.probe_intents[0].kind, ProbeIntentKind::AtomicAddressCapture);
+  EXPECT_EQ(policy.plan.probe_intents[1].kind, ProbeIntentKind::AtomicOrdering);
 }
 
 TEST(ConSanAtomicFencePolicy, EveryFenceAssociationRejectionRemainsTypedInventoryEvidence) {

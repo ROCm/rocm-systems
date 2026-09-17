@@ -21,9 +21,9 @@ env HSA_TOOLS_LIB="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjit
   ./application
 ```
 
-### Instrumentation profiles
+### Detection modes
 
-ConSan exposes ConSan and SuperCollider.
+ConSan provides causal race diagnostics by default and value-instability detection with SuperCollider.
 
 | Selection | Behavior |
 | --- | --- |
@@ -34,7 +34,7 @@ ConSan exposes ConSan and SuperCollider.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `RJ_CONSAN_MODE` | `sampled` | Select `sampled` or `supercollider`. |
+| `RJ_CONSAN_MODE` | `default` | Select `default` or `supercollider`. |
 | `RJ_CONSAN_LOG` | disabled | Enable compact logs at `1`; larger values add inventory detail. |
 | `RJ_CONSAN_FAIL_CLOSED` | `0` | Reject unsupported or invalid transformation outcomes instead of loading the original code object. |
 | `RJ_CONSAN_REQUIRE_PATCH` | `0` | Reject an applicable code object when no real access, barrier, atomic, or fence instrumentation patch is emitted. |

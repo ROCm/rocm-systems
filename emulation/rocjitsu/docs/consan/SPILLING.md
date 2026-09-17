@@ -25,7 +25,7 @@ The planner considers these alternatives:
 
 The ordinary architectural VGPR namespace has 256 registers. ConSan does not
 provide a general compiler-style SGPR or AccVGPR spill stack. It does provide
-mode-specific bounded preservation of selected scalar windows by moving scalar
+bounded preservation of selected scalar windows by moving scalar
 values through spill-managed VGPRs and private memory. Indirect-router PC,
 key, call-return, EXEC, VCC, and SCC roles that must remain live outside that
 window still require a proved dead or fresh assignment.
@@ -203,7 +203,7 @@ therefore cannot be mistaken for a clean instrumented execution.
   typed outcomes.
 - `consan_probe_planning.cpp`, `consan_register_allocation.cpp`, and
   `consan_lowering_plan.h` join common mechanics with mode policy.
-- `code/patch/consan/consan_probe_lowering.cpp`, `code/patch/consan/supercollider/` owns mode-local scratch, persistent-state,
+- `code/patch/consan/consan_probe_lowering.cpp`, `code/patch/consan/supercollider/` own scratch, persistent-state,
   scalar-ABI, and fallback choices.
 - `code/patch/consan/targets/` owns target profiles and special native state.
 - `code/patch/spill_manager.*` owns reusable spill layouts and save/restore
