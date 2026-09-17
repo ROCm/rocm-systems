@@ -18,6 +18,8 @@
 #include "config/algorithm_registry.h"
 
 #include "scheduler_fakes.h"
+#include "sym_kernels_fakes.h"  // g_symkAvailable's canonical home
+#include "tuning_fakes.h"       // g_tuningCompute's canonical home
 
 // Generous default: a deny-everything default would make even a single small task look over budget.
 static bool DefaultTestBudget(struct ncclKernelPlanBudget*, int, ssize_t) { return true; }
@@ -36,7 +38,7 @@ static ncclResult_t DefaultGetAlgoInfo(struct ncclComm*, struct ncclTaskColl* ta
   task->nWarps = 1;
   return ncclSuccess;
 }
-std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, int, int, ncclSimInfo_t*)> g_getAlgoInfo =
+std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, int, int, ncclSimInfo_t*)> g_ncclGetAlgoInfo =
     DefaultGetAlgoInfo;
 
 // No-op default: this binary has no real kernel table to select into.
@@ -57,10 +59,6 @@ static ncclResult_t DefaultAddProxyOpIfNeeded(struct ncclComm*, struct ncclKerne
 std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, struct ncclProxyOp*)> g_addProxyOpIfNeeded =
     DefaultAddProxyOpIfNeeded;
 
-// Generous default: lets an uninterested caller reach the symmetric-eligible branch.
-static bool DefaultSymkAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; }
-std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t)> g_symkAvailable = DefaultSymkAvailable;
-
 // Generous default: no real collnet/registration to report, matching a plain host-only comm.
 static ncclResult_t DefaultGetCollNetSupport(struct ncclComm*, struct ncclTaskColl*, int* out) {
   if (out) *out = 0;
@@ -73,13 +71,6 @@ static ncclResult_t DefaultGetRegBuff(struct ncclComm*, struct ncclTaskColl*, in
   return ncclSuccess;
 }
 std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getRegBuff = DefaultGetRegBuff;
-
-// Deliberately trivial: leaves *result untouched, so the caller's NCCL_TUNING_RESULT_INIT default stands as "no kernel found".
-static ncclResult_t DefaultTuningCompute(struct ncclTuningInput_t*, struct ncclTuningResult_t*) {
-  return ncclSuccess;
-}
-std::function<ncclResult_t(struct ncclTuningInput_t*, struct ncclTuningResult_t*)> g_tuningCompute =
-    DefaultTuningCompute;
 
 // No bits set by default, so the LL-kernel-init-once check never fires regardless of which kernelId g_tuningCompute reports.
 static int DefaultSymkLLKernelMask() { return 0; }
@@ -109,14 +100,12 @@ std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, struct ncclSy
 void ResetSchedulerFakes() {
   g_testBudget = DefaultTestBudget;
   g_testBudgetCalls = 0;
-  g_getAlgoInfo = DefaultGetAlgoInfo;
+  g_ncclGetAlgoInfo = DefaultGetAlgoInfo;
   g_planSetDefaultKernel = DefaultPlanSetDefaultKernel;
   g_addWorkBatchToPlan = DefaultAddWorkBatchToPlan;
   g_addProxyOpIfNeeded = DefaultAddProxyOpIfNeeded;
-  g_symkAvailable = DefaultSymkAvailable;
   g_getCollNetSupport = DefaultGetCollNetSupport;
   g_getRegBuff = DefaultGetRegBuff;
-  g_tuningCompute = DefaultTuningCompute;
   g_symkLLKernelMask = DefaultSymkLLKernelMask;
   g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
   g_symkGetKernelIndex = DefaultSymkGetKernelIndex;
@@ -132,7 +121,7 @@ void ResetSchedulerFakes() {
 // src/enqueue/enqueue.cc
 ncclResult_t ncclGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* task, int collNetSupport, int nvlsSupport,
                              int nTasksPerChannel, ncclSimInfo_t* simInfo) {
-  return g_getAlgoInfo(comm, task, collNetSupport, nvlsSupport, nTasksPerChannel, simInfo);
+  return g_ncclGetAlgoInfo(comm, task, collNetSupport, nvlsSupport, nTasksPerChannel, simInfo);
 }
 void ncclAddWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId,
                             enum ncclDevWorkType workType, int devFuncId, uint32_t workOffset, int p2pEpoch,
@@ -155,10 +144,7 @@ ncclResult_t ncclGetRegBuff(struct ncclComm* comm, struct ncclTaskColl* task, in
 // Generated device-function table; empty default matches nccl_stubs.cc's own (a miss returns -1 with a WARN).
 std::unordered_map<uint64_t, int> ncclDevFuncNameToId;
 
-// src/sym_kernels.cc
-bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int red, ncclDataType_t ty, size_t count) {
-  return g_symkAvailable(comm, coll, red, ty, count);
-}
+// src/sym_kernels.cc (ncclSymkAvailable itself is defined in sym_kernels_fakes.cc)
 int ncclSymkLLKernelMask() { return g_symkLLKernelMask(); }
 int ncclSymkDynamicSmemKernelMask() { return g_symkDynamicSmemKernelMask(); }
 int ncclSymkGetKernelIndex(ncclSymkKernelId kernelId, int red, ncclDataType_t ty) {
@@ -177,10 +163,7 @@ int ncclSymkKernelMaxDynamicSmem[1] = {0};
 // src/config/algorithm_registry.cc: a fixed name is fine since INFO()'s macro guard only evaluates this when logging is on.
 const char* ncclAlgNameForSymk(int) { return "sym-kernel"; }
 
-// src/tuning/tuning.cc
-ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* input, struct ncclTuningResult_t* result) {
-  return g_tuningCompute(input, result);
-}
+// src/tuning/tuning.cc's ncclTuningCompute is defined in tuning_fakes.cc.
 
 // src/plugin/profiler.cc
 bool ncclProfilerPluginLoaded(void) { return g_profilerPluginLoaded(); }

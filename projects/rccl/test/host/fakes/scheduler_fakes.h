@@ -21,8 +21,6 @@ struct ncclTaskColl;
 struct ncclKernelPlan;
 struct ncclKernelPlanBudget;
 struct ncclProxyOp;
-struct ncclTuningInput_t;
-struct ncclTuningResult_t;
 enum ncclDevWorkType : uint8_t;
 
 // enqueue.cc's ncclTestBudget (real seam: tests drive the batch-size stopping condition directly).
@@ -31,7 +29,7 @@ extern int g_testBudgetCalls;  // UNDRIVEN
 
 // enqueue.cc's ncclGetAlgoInfo: default fills in tcoll's protocol/channel/warp fields with usable values.
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, int, int, ncclSimInfo_t*)>
-    g_getAlgoInfo;
+    g_ncclGetAlgoInfo;
 
 // enqueue.cc's ncclPlanSetDefaultKernel: default is a no-op (no real kernel table exists in this binary).
 extern std::function<void(struct ncclComm*, struct ncclKernelPlan*)> g_planSetDefaultKernel;
@@ -45,15 +43,11 @@ extern std::function<void(struct ncclComm*, struct ncclKernelPlan*, int, enum nc
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, struct ncclProxyOp*)>
     g_addProxyOpIfNeeded;
 
-// sym_kernels.cc's ncclSymkAvailable: default reports every (func, redOp, dtype, count) as symmetric-eligible.
-extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t)> g_symkAvailable;
+// ncclSymkAvailable/ncclTuningCompute seams now live in sym_kernels_fakes.h/tuning_fakes.h, not here.
 
 // enqueue.cc's ncclGetCollNetSupport/ncclGetRegBuff: default reports neither is available.
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getCollNetSupport;
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getRegBuff;
-
-// tuning.cc's ncclTuningCompute: default leaves *result untouched (caller's ncclSymkKernelId_Count init stands).
-extern std::function<ncclResult_t(struct ncclTuningInput_t*, struct ncclTuningResult_t*)> g_tuningCompute;
 
 // sym_kernels.cc's ncclSymkLLKernelMask: default has no bits set (Block 10's LL-kernel-init check never fires).
 extern std::function<int()> g_symkLLKernelMask;
