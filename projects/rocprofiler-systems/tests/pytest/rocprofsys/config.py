@@ -146,6 +146,14 @@ class RocprofsysConfig:
         if existing:
             paths.append(existing)
 
+        # Add ROCm main lib directory so that HIP and other ROCm runtime
+        # libraries (e.g. libamdhip64.so) are found without requiring the
+        # caller to set LD_LIBRARY_PATH manually.
+        if self.rocm_path:
+            rocm_lib = self.rocm_path / "lib"
+            if rocm_lib.is_dir():
+                paths.append(str(rocm_lib))
+
         # Add ROCm LLVM lib as fallback
         for llvm_path in self.llvm_lib_paths:
             paths.append(str(llvm_path))
