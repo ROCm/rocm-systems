@@ -61,9 +61,8 @@ bool ncclHierCeAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, nccl
   return g_hierCeAvailable;
 }
 
-// Allocates the op arrays, as src/ce_coll.cc does. A unit that builds a batch
-// writes straight into params->srcs[numOps] and friends, so a fake that leaves
-// them null faults at the first op rather than reporting anything useful.
+// Allocates the op arrays as src/ce_coll.cc does: callers write straight into
+// params->srcs[numOps], so leaving them null would fault rather than report.
 static ncclResult_t DefaultCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int capacity) {
   if (params == nullptr) return ncclInvalidArgument;
   *params = {};
@@ -72,11 +71,15 @@ static ncclResult_t DefaultCeInitBatchOpsParams(struct ncclCeBatchOpsParams* par
   params->dsts = static_cast<void**>(calloc(n, sizeof(void*)));
   params->sizes = static_cast<size_t*>(calloc(n, sizeof(size_t)));
   if (!params->srcs || !params->dsts || !params->sizes) return ncclSystemError;
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+  params->attrs = static_cast<hipMemcpyAttributes*>(calloc(n, sizeof(*params->attrs)));
+  params->attrIdxs = static_cast<size_t*>(calloc(n, sizeof(size_t)));
+  if (!params->attrs || !params->attrIdxs) return ncclSystemError;
+#endif
   return ncclSuccess;
 }
-// Fail-loud: submitting a batch is the observable act of these units, so a
-// fixture that reaches this without having said what happens to the batch is
-// not testing anything -- silently succeeding would hide the call entirely.
+// Fail-loud: what a unit submits is the thing tests observe, so an undriven
+// call must not silently succeed.
 static ncclResult_t DefaultCeLaunchBatchOps(struct ncclComm*, struct ncclCeBatchOpsParams*,
                                             hipStream_t, struct ncclCeCollArgs*) {
   FailLoudUnfaked("ce_fakes", "ncclCeLaunchBatchOps");
@@ -95,7 +98,7 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
                                   hipStream_t stream, struct ncclCeCollArgs* profilerArgs) {
   return g_ceLaunchBatchOps(comm, params, stream, profilerArgs);
 }
-// Paired with Init above; nothing asserts on the free, so no seam.
+// Paired with Init above. No seam: nothing asserts on the free.
 void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
   if (params == nullptr) return;
   free(params->srcs);
@@ -104,6 +107,12 @@ void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
   params->srcs = nullptr;
   params->dsts = nullptr;
   params->sizes = nullptr;
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+  free(params->attrs);
+  free(params->attrIdxs);
+  params->attrs = nullptr;
+  params->attrIdxs = nullptr;
+#endif
   params->numOps = 0;
 }
 

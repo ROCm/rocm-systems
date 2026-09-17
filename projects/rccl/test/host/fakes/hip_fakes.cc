@@ -489,8 +489,7 @@ std::function<hipError_t(hipEvent_t, hipStream_t)> g_hipEventRecord = DefaultHip
 std::function<hipError_t(hipStream_t, hipEvent_t, unsigned int)> g_hipStreamWaitEvent =
     DefaultHipStreamWaitEvent;
 
-// Fail-loud: the batch memops a unit puts on a stream are the thing its tests
-// observe, so reaching this undriven means the call would vanish silently.
+// Fail-loud: the memops a unit puts on a stream are what its tests observe.
 static ncclResult_t DefaultCuStreamBatchMemOp(hipStream_t, unsigned int,
                                               hipStreamBatchMemOpParams*) {
     FailLoudUnfaked("hip_fakes", "ncclCuStreamBatchMemOp");

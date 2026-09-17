@@ -48,9 +48,10 @@ ncclResult_t ncclCeInit(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclLaunchCeColl(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
 
 // rma/rma.h, rma/rma_ce.h
-// ncclLaunchRma and ncclRmaCeInit are absent on purpose: rma-test.cc compiles the
-// real rma.cc in and rma-ce-test.cc the real rma_ce.cc,
-// so a stub here would be a duplicate symbol.
+// ncclLaunchRma and ncclRmaCeInit are absent on purpose: rma.cc and rma_ce.cc
+// are compiled into this binary, so a stub here would be a duplicate symbol.
+// group.cc and dev_runtime.cc call them and used to bind the ::abort() floor;
+// no suite reaches either today, but one that does now runs the real thing.
 
 // dev_runtime.h
 // ncclDevrCommCreateInternal, ncclDevrWindowRegisterInGroup and
