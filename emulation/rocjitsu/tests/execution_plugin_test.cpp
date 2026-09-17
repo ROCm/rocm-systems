@@ -1686,7 +1686,7 @@ TEST(ExecutionPluginTest, ValuSimdReadObservationUsesActiveExecMask) {
                          0u};
     Instruction *inst = decode_valid(*decoder, words);
     ASSERT_NE(inst, nullptr);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     delete inst;
 
     expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {0, 1}, kPartialExecMask);
@@ -1718,7 +1718,7 @@ TEST(ExecutionPluginTest, ValuSimdWriteObservationUsesActiveExecMask) {
                          0u};
     Instruction *inst = decode_valid(*decoder, words);
     ASSERT_NE(inst, nullptr);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     delete inst;
 
     expect_vgpr_read_set(vgpr_write_events(*plugin), vb, {2}, kPartialExecMask);
@@ -1771,7 +1771,7 @@ TEST(ExecutionPluginTest, DppObservationReportsExactSourceAndDestinationLanes) {
       Instruction *inst = decode_valid(*decoder, words);
       ASSERT_NE(inst, nullptr);
       plugin->events.clear();
-      cu->execute_instruction(inst, *wf);
+      EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
       delete inst;
 
       for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -1822,7 +1822,7 @@ TEST(ExecutionPluginTest, DppOutOfBoundsObservationHonorsBoundCtrl) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     plugin->events.clear();
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   };
 
   // Lane 0 has no source for row_shr:1. BOUND_CTRL=0 suppresses the
@@ -1869,7 +1869,7 @@ TEST(ExecutionPluginTest, DppSourceDestinationAliasStagesBeforeWriting) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   plugin->events.clear();
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr_storage(vb + kReg, 0), kValues[1]);
   EXPECT_EQ(cu->read_vgpr_storage(vb + kReg, 1), kValues[0]);
@@ -1914,7 +1914,7 @@ TEST(ExecutionPluginTest, Dpp8FetchInactiveControlsSourceObservation) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     plugin->events.clear();
-    f.cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(f.cu->execute_instruction(inst.get(), *wf).succeeded());
   };
 
   run(amdgpu::SRC_DPP8_FI_0);
@@ -1973,7 +1973,7 @@ TEST(ExecutionPluginTest, True16InstructionsReportSelectedSourceAndDestinationHa
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, &test_case.word));
     ASSERT_NE(inst, nullptr);
     plugin->events.clear();
-    f.cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(f.cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(f.cu->read_vgpr_storage(vb + 1, 0), test_case.expected_destination);
     EXPECT_EQ(f.cu->read_vgpr_storage(vb + 129, 0), 0xDEADBEEFu);
@@ -2018,7 +2018,7 @@ TEST(ExecutionPluginTest, Gfx1250Simd64BitWriteReportsBothDestinationRegisters) 
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, &word));
     ASSERT_NE(inst, nullptr);
     plugin->events.clear();
-    f.cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(f.cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(f.cu->read_vgpr_storage(vb + kDst, 0), 0x11223344u);
     EXPECT_EQ(f.cu->read_vgpr_storage(vb + kDst + 1, 0), 0x55667788u);
@@ -2306,7 +2306,7 @@ TEST(ExecutionPluginTest, SdwaFloatingModifiersUseSemanticSourceWidth) {
     ASSERT_NE(f32_inst, nullptr);
     cu->write_vgpr(vb + kSrc0, 0, std::bit_cast<uint32_t>(-2.0f));
     cu->write_vgpr(vb + kSrc1, 0, std::bit_cast<uint32_t>(0.5f));
-    cu->execute_instruction(f32_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(f32_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), std::bit_cast<uint32_t>(2.5f));
 
     cdna4::Vop1VopSdwaMachineInst cvt_bf16{};
@@ -2325,7 +2325,7 @@ TEST(ExecutionPluginTest, SdwaFloatingModifiersUseSemanticSourceWidth) {
     ASSERT_NE(bf16_inst, nullptr);
     ASSERT_EQ(std::string_view(bf16_inst->mnemonic()), "v_cvt_f32_bf16_sdwa");
     cu->write_vgpr(vb + kSrc0, 0, 0xCAFE'C000u);
-    cu->execute_instruction(bf16_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(bf16_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), std::bit_cast<uint32_t>(2.0f));
 
     for (uint32_t selection : {amdgpu::sdwa::WORD_0, amdgpu::sdwa::WORD_1}) {
@@ -2351,7 +2351,7 @@ TEST(ExecutionPluginTest, SdwaFloatingModifiersUseSemanticSourceWidth) {
                      (0xCAFE'BEEFu & ~selected_word_mask) | (uint32_t{0xC000} << shift));
       cu->write_vgpr(vb + kSrc1, 0,
                      (0x1234'5678u & ~selected_word_mask) | (uint32_t{0x3800} << shift));
-      cu->execute_instruction(f16_inst.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(f16_inst.get(), *wf).succeeded());
       EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), util::f32_to_f16(2.5f));
     }
   }
@@ -2390,7 +2390,7 @@ TEST(ExecutionPluginTest, SdwaVop2Src1SelectorReportsExactBytes) {
       decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
   ASSERT_NE(inst, nullptr);
   plugin->events.clear();
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0xFFFFFF8Au);
 
@@ -2445,7 +2445,7 @@ TEST(ExecutionPluginTest, SdwaVop2ScalarSelectorsUseSgprs) {
         decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
     ASSERT_NE(inst, nullptr);
     plugin->events.clear();
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, kActiveLane), 0xFFFFFF8Au);
     expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {kVectorSrc}, kActiveMask);
@@ -2479,7 +2479,7 @@ TEST(ExecutionPluginTest, SgprWriteObservationUsesExplicitWavePhysicalBlock) {
   ASSERT_NE(inst, nullptr);
 
   plugin->events.clear();
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   std::vector<HookEvent> writes;
   for (const HookEvent &event : plugin->events)
@@ -2558,7 +2558,7 @@ TEST(ExecutionPluginTest, SdwaObservationReportsExactSourceAndDestinationBytes) 
       Instruction *inst = decode_valid(*decoder, words);
       ASSERT_NE(inst, nullptr);
       plugin->events.clear();
-      cu->execute_instruction(inst, *wf);
+      EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
       delete inst;
 
       for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -2614,7 +2614,7 @@ TEST(ExecutionPluginTest, SdwaClampIsAppliedInsideArchitecturalDestinationWrite)
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   plugin->events.clear();
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), std::bit_cast<uint32_t>(1.0f));
   const auto reads = vgpr_read_events(*plugin);
@@ -2664,7 +2664,7 @@ TEST(ExecutionPluginTest, SdwaClampHonorsDx10ClampMode) {
     wf->set_mode_raw(test_case.mode);
     cu->write_vgpr(vb + kSrc, 0, kQuietNan);
     cu->write_vgpr(vb + kDst, 0, 0xDEADBEEFu);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), test_case.expected);
   }
 }
@@ -2695,7 +2695,7 @@ TEST(ExecutionPluginTest, SdwaPartialPreserveClampReportsFullDwordWrite) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   plugin->events.clear();
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), std::bit_cast<uint32_t>(1.0f));
   const auto reads = vgpr_read_events(*plugin);
@@ -2738,6 +2738,98 @@ TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite
 
   EXPECT_TRUE(vgpr_write_events(*plugin).empty());
   EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst, 0), kLoadedValue);
+}
+
+TEST(ExecutionPluginTest, MemoryPipelineWideDwordCompletionWritesSparseLanesDirectly) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint64_t kLaneMask = (uint64_t{1} << 1) | (uint64_t{1} << 5);
+  constexpr uint64_t kLane1Address = 0x9000;
+  constexpr uint64_t kLane5Address = 0xA000;
+  constexpr uint32_t kDst = 7;
+  constexpr uint32_t kSentinel = 0xA5A5A5A5u;
+  constexpr uint32_t kInactiveLane = 2;
+  constexpr std::array<uint32_t, 4> kLane1Values = {0x11111111u, 0x22222222u, 0x33333333u,
+                                                    0x44444444u};
+  constexpr std::array<uint32_t, 4> kLane5Values = {0x55555555u, 0x66666666u, 0x77777777u,
+                                                    0x88888888u};
+  f.mem->load_image(reinterpret_cast<const uint8_t *>(kLane1Values.data()), sizeof(kLane1Values),
+                    kLane1Address);
+  f.mem->load_image(reinterpret_cast<const uint8_t *>(kLane5Values.data()), sizeof(kLane5Values),
+                    kLane5Address);
+  for (uint32_t reg = 0; reg < 4; ++reg) {
+    cu->write_vgpr(wf->vgpr_alloc().base + kDst + reg, 0, kSentinel);
+    cu->write_vgpr(wf->vgpr_alloc().base + kDst + reg, kInactiveLane, kSentinel);
+  }
+
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->elem_size = sizeof(uint32_t);
+  state->num_elems = 4;
+  state->is_load = true;
+  state->wf_size = wf->wf_size();
+  state->exec_mask = kLaneMask;
+  state->lane_mask = kLaneMask;
+  state->dst_reg_base = wf->vgpr_alloc().base + kDst;
+  state->per_lane_addr[1] = kLane1Address;
+  state->per_lane_addr[5] = kLane5Address;
+
+  plugin->events.clear();
+  GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+  pipeline.issue(new TestMemoryInstruction(std::move(state)), *wf);
+
+  EXPECT_TRUE(vgpr_write_events(*plugin).empty());
+  for (uint32_t reg = 0; reg < 4; ++reg) {
+    EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst + reg, 0), kSentinel);
+    EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst + reg, 1), kLane1Values[reg]);
+    EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst + reg, kInactiveLane), kSentinel);
+    EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst + reg, 5), kLane5Values[reg]);
+  }
+}
+
+TEST(ExecutionPluginTest, FlatStoreDwordx4ReportsEverySourceRegisterAndActiveLane) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint64_t kLaneMask = (uint64_t{1} << 1) | (uint64_t{1} << 5);
+  constexpr uint32_t kAddress = 0;
+  constexpr uint32_t kData = 4;
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  wf->set_exec(kLaneMask);
+  for (uint32_t lane : {1u, 5u}) {
+    cu->write_vgpr(vgpr_base + kAddress, lane, 0x1000u + lane * 16);
+    cu->write_vgpr(vgpr_base + kAddress + 1, lane, 0);
+    for (uint32_t reg = 0; reg < 4; ++reg)
+      cu->write_vgpr(vgpr_base + kData + reg, lane, lane * 0x100u + reg);
+  }
+
+  const auto words =
+      cdna4::build_flat(cdna4::kFlatStoreDwordx4Flat, {.addr = kAddress, .data = kData});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
+  ASSERT_NE(store, nullptr);
+
+  plugin->events.clear();
+  EXPECT_TRUE(cu->execute_instruction(store.get(), *wf).succeeded());
+
+  expect_vgpr_read_set(vgpr_read_events(*plugin), vgpr_base, {0, 1, 4, 5, 6, 7}, kLaneMask);
+  const auto *state = store->data_as<VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  for (uint32_t lane : {1u, 5u}) {
+    for (uint32_t reg = 0; reg < 4; ++reg) {
+      uint32_t stored = 0;
+      std::memcpy(&stored, state->store_data.data() + (lane * 4 + reg) * sizeof(uint32_t),
+                  sizeof(stored));
+      EXPECT_EQ(stored, lane * 0x100u + reg);
+    }
+  }
 }
 
 TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotCrossWaveVgprBlock) {
@@ -2874,7 +2966,7 @@ TEST(ExecutionPluginTest, Gfx1250ScalarMemoryRoutesSpecialSelectorsAtNonzeroSgpr
     EXPECT_NE(load, nullptr);
     if (!load)
       return;
-    cu->execute_instruction(load.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
     EXPECT_NE(load->data(), nullptr);
     if (!load->data())
       return;
@@ -2939,7 +3031,7 @@ TEST(ExecutionPluginTest, ScalarMemoryRejectsDestinationThatCrossesTtmpFile) {
   std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
   ASSERT_NE(load, nullptr);
 
-  cu->execute_instruction(load.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
 
   EXPECT_EQ(load->data(), nullptr);
   EXPECT_EQ(cu->read_sgpr_storage(adjacent->sgpr_alloc().base + kAdjacentOffset), kSentinel);
@@ -3090,7 +3182,7 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsReadBeforeWait) {
 
   cu->write_sgpr(wf->sgpr_alloc().base, 0x1000u);
   cu->write_sgpr(wf->sgpr_alloc().base + 1, 0u);
-  cu->execute_instruction(load.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
   ASSERT_NE(load->data(), nullptr);
   f.plugin_group_->onAmdgpuRouteMemoryInstruction(*load, *wf);
 
@@ -3264,7 +3356,7 @@ TEST(ExecutionPluginTest, F64SourceReadObservationReportsBothHalves) {
                          0u};
     Instruction *inst = decode_valid(*decoder, words);
     ASSERT_NE(inst, nullptr);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     delete inst;
 
     expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {0, 1, 2, 3, 4, 5}, kPartialExecMask);
@@ -3296,7 +3388,7 @@ TEST(ExecutionPluginTest, Vop3FmacSimdReadObservationReportsAccumulator) {
     vop3_encode(/*opcode=*/315, /*vdst=*/4, /*src0=*/256, /*src1=*/257, words);
     Instruction *inst = decode_valid(*decoder, words);
     ASSERT_NE(inst, nullptr);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     delete inst;
 
     expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {0, 1, 4}, kPartialExecMask);
@@ -3410,7 +3502,7 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaScaleReadsUseSelectedByteMask) {
                                                    vgpr_src(kScaleB), byte, byte);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     const uint8_t expected_mask = static_cast<uint8_t>(1u << byte);
     bool saw_scale_a = false;
@@ -3469,7 +3561,7 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaInlineScalesDoNotReadVgprs) {
                                                  /*1/(2*pi)=*/248);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   std::set<uint32_t> actual_regs;
   for (const auto &event : vgpr_read_events(*plugin))

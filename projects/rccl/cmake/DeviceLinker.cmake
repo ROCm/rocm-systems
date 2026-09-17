@@ -590,6 +590,29 @@ endif()
 # Like collectives.cc, it cannot be built with --offload-host-only on the
 # main rccl target or __hip_fatbin_* stays undefined in librccl.so.
 # ===========================================================================
+# diagnostics/device/p2p.cu.cpp: NCCL 2.31's P2P startup diagnostics kernels.
+# Same reason as the dda objects below - it must be a fat object.
+set(DIAG_P2P_FAT_OBJ "${DEVICE_BUILD_DIR}/diagnostics_p2p.o")
+
+add_custom_command(
+  OUTPUT  ${DIAG_P2P_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
+    -std=c++17
+    -fPIC
+    -c -o ${DIAG_P2P_FAT_OBJ}
+    ${HIPIFY_DIR}/src/diagnostics/device/p2p.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/diagnostics/device/p2p.cu.cpp
+  COMMENT "DL compile: diagnostics/device/p2p.cu.cpp (has device kernels)"
+  VERBATIM
+)
+
 set(DDA_ALL_REDUCE_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_ipc.o")
 set(DDA_REDUCE_SCATTER_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_reduce_scatter_ipc.o")
 set(DDA_ALL_GATHER_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_gather_ipc.o")
@@ -736,61 +759,6 @@ if(ENABLE_ROCSHMEM_GIN)
     VERBATIM
   )
 endif()
-# ===========================================================================
-# rccl_ep_capi.hip: the expert-parallel C ABI and its kernels, when
-# ENABLE_RCCL_EP_IN_LIBRCCL is set. Off by default: the standalone
-# librccl_ep.so is the normal artifact and librccl's ABI is unchanged.
-#
-# Read from the source tree, not ${HIPIFY_DIR}: rccl_ep is not in SRC_FILES and
-# is already HIP-native, so it is never hipify-staged. gfx9 only, because the
-# kernels are wave64 throughout and would compile without a diagnostic, and run
-# wrong, on a wave32 target. ROCM_VERSION explicitly, because <nccl_device.h>
-# silently degrades ncclCoopTile::sync() to __syncthreads() without it.
-# ===========================================================================
-set(_rccl_ep_dir "${PROJECT_SOURCE_DIR}/src/algorithms/rccl_ep")
-set(_rccl_ep_arch_flags "")
-if(ENABLE_RCCL_EP_IN_LIBRCCL)
-  foreach(_gpu ${DL_GPU_TARGETS})
-    if(_gpu MATCHES "^gfx9")
-      list(APPEND _rccl_ep_arch_flags "--offload-arch=${_gpu}")
-    endif()
-  endforeach()
-  if(NOT _rccl_ep_arch_flags)
-    message(FATAL_ERROR
-      "ENABLE_RCCL_EP_IN_LIBRCCL needs a gfx9 target in GPU_TARGETS; this build "
-      "has none (${DL_GPU_TARGETS}). The kernels are wave64 and have no wave32 "
-      "equivalent -- leave the option off to get the standalone librccl_ep.so.")
-  endif()
-endif()
-
-set(RCCL_EP_FAT_OBJ "")
-if(_rccl_ep_arch_flags)
-  set(RCCL_EP_FAT_OBJ "${DEVICE_BUILD_DIR}/rccl_ep_capi.o")
-  add_custom_command(
-    OUTPUT  ${RCCL_EP_FAT_OBJ}
-    COMMAND ${DL_CLANG}
-      -x hip ${_rccl_ep_arch_flags}
-      ${DL_HIP_COMPILER_FLAGS}
-      -DRCCL_DEVICE_LINKER
-      -DROCM_VERSION=${ROCM_VERSION}
-      ${_link_def_flags}
-      ${_host_inc_flags}
-      -I${_rccl_ep_dir}
-      ${DL_OPT_FLAGS}
-      ${DL_INHERITED_FLAGS}
-      -std=c++17
-      -fPIC
-      -c -o ${RCCL_EP_FAT_OBJ}
-      ${_rccl_ep_dir}/python/rccl_ep_capi.hip
-    DEPENDS ${_rccl_ep_dir}/python/rccl_ep_capi.hip
-    COMMENT "DL compile: rccl_ep_capi.hip (expert-parallel kernels)"
-    VERBATIM
-  )
-  message(STATUS "Device Linker: rccl_ep in librccl for ${_rccl_ep_arch_flags}")
-else()
-  message(STATUS "Device Linker: rccl_ep not in librccl; build it standalone from src/algorithms/rccl_ep")
-endif()
-
 # ===========================================================================
 # dda_all_reduce_fabric.cu.cpp: fabric/VMM counterpart of the IPC file above.
 # ===========================================================================
@@ -1198,7 +1166,7 @@ endif()
 # Top-level target
 # ===========================================================================
 add_custom_target(device_linker_build ALL
-	DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} ${CE_REDUCE_FAT_OBJS} ${SYM_FAT_OBJS} ${GIN_ALLTOALL_SDMA_FAT_OBJ} ${GIN_ALLREDUCE_SDMA_FAT_OBJ} ${RCCL_EP_FAT_OBJ}
+  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DIAG_P2P_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} ${CE_REDUCE_FAT_OBJS} ${SYM_FAT_OBJS} ${GIN_ALLTOALL_SDMA_FAT_OBJ} ${GIN_ALLREDUCE_SDMA_FAT_OBJ} ${RCCL_EP_FAT_OBJ} ${DEVICE_ELF_SYMLINKS}
 )
 add_dependencies(device_linker_build hipify_all copy_nccl_device_headers)
 if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
@@ -1215,6 +1183,7 @@ set(DEVICE_LINKER_OBJECTS
   ${ONERANK_FAT_OBJ}
   ${COLLECTIVES_FAT_OBJ}
   ${CE_REDUCE_FAT_OBJS}
+  ${DIAG_P2P_FAT_OBJ}
   ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
   ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
   ${DDA_ALL_GATHER_IPC_FAT_OBJ}
@@ -1234,7 +1203,6 @@ set(DEVICE_LINKER_OBJECTS
   ${SYM_FAT_OBJS}
   ${GIN_ALLTOALL_SDMA_FAT_OBJ}
   ${GIN_ALLREDUCE_SDMA_FAT_OBJ}
-  ${RCCL_EP_FAT_OBJ}
 )
 
 # ===========================================================================

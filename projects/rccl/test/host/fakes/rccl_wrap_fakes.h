@@ -60,9 +60,13 @@ extern bool g_rcclCeAllReduceGraphLatchTickLastCapturing;  // UNDRIVEN
 // WARP_SPEED seams (rccl_wrap.cc:1448+). enqueue.cc calls these from five sites
 // inside `#ifdef ENABLE_WARP_SPEED` (:318, :2221, :2615, :2736, :2738), two of
 // which are in functions this suite covers (finishPlan and topoGetAlgoInfo).
+// init.cc's willEnableWarpSpeed (:1463, called unconditionally from
+// initTransportsRank at :1955 once ENABLE_WARP_SPEED is on) is a sixth site,
+// reached by every InitMicrotest that calls initTransportsRank -- not just one
+// named test, since the call isn't gated by anything the test controls.
 //
 // ENABLE_WARP_SPEED defaults OFF and is forced OFF unless GPU_TARGETS is gfx950
-// (CMakeLists.txt:582-592), so on most configurations those five lines are
+// (CMakeLists.txt:671-680), so on most configurations those lines are
 // preprocessed away and these symbols are never referenced. A gfx950 build with
 // the option ON compiles them, and without these fakes the target fails to LINK.
 //
@@ -79,6 +83,20 @@ extern int g_rcclSetWarpSpeedCUsCalls;  // UNDRIVEN
 // default; production may shrink the count.
 extern std::function<int(struct ncclComm*, struct ncclTaskColl*, int)>
     g_rcclWarpSpeedAdjustChannels;  // UNDRIVEN
+// RCCL_PARAM(WarpSpeedForceEnable, "WARP_SPEED_FORCE_ENABLE", 0) -- 0 matches
+// the env var unset, so willEnableWarpSpeed falls through to the auto check below.
+extern int64_t g_rcclParamWarpSpeedForceEnable;
+extern int g_rcclParamWarpSpeedForceEnableCalls;
+// false matches an ENABLE_WARP_SPEED=OFF build, where willEnableWarpSpeed's
+// auto-mode arm can never fire.
+extern bool g_rcclCanUseWarpSpeedAutoResult;
+extern int g_rcclCanUseWarpSpeedAutoCalls;
+
+// checkHsaEnvSetting's HSA_* scratch validation (rccl_wrap.cc). g_lastHsaScratchEnv records the
+// hsaScratchEnv argument, which is the only proof the check read the environment at all.
+extern bool g_validHsaScratch;
+extern const char* g_lastHsaScratchEnv;
+extern int g_firmwareVersion;
 
 void ResetRcclWrapFakes();
 
