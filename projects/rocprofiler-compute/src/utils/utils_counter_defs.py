@@ -90,6 +90,13 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
         },
     }
 
+    if gpu_series == "GFX1250_SERIES":
+        # gfx1250 exposes GUI-active cycles summed across XCD dimensions. Divide
+        # the explicit sum by the visible num_xcd to preserve per-XCD semantics.
+        build_in_vars["cdna"]["GRBM_GUI_ACTIVE_PER_XCD"] = (
+            "GRBM_GUI_ACTIVE_sum / $num_xcd"
+        )
+
     if gpu_series == "GFX1250_SERIES" or gpu_series.startswith("MI"):
         return build_in_vars["cdna"]
     elif gpu_series.startswith("RDNA"):

@@ -660,6 +660,28 @@ def test_calc_builtin_vars_with_dataframe_expressions():
     assert sys_info["SCALED_TOTAL"] == 120
 
 
+def test_calc_builtin_vars_uses_gfx1250_gui_active_sum():
+    """gfx1250 computes per-dispatch GUI-active cycles from the XCD sum."""
+    pmc_df = pd.DataFrame({"GRBM_GUI_ACTIVE_sum": [800, 1600]})
+    sys_info = {"num_xcd": 8, "gpu_arch": "gfx1250"}
+
+    with patch(
+        "rocprof_compute_analyze.analysis_db.mi_gpu_specs.get_gpu_series",
+        return_value="GFX1250_SERIES",
+    ):
+        db_analysis.calc_builtin_vars(
+            pmc_df,
+            sys_info,
+            ["$GRBM_GUI_ACTIVE_PER_XCD"],
+        )
+
+    pd.testing.assert_series_equal(
+        sys_info["GRBM_GUI_ACTIVE_PER_XCD"],
+        pd.Series([100.0, 200.0]),
+        check_names=False,
+    )
+
+
 # =============================================================================
 # db_analysis.calc_dataframe_expressions() tests
 # =============================================================================
