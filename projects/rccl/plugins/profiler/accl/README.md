@@ -111,6 +111,11 @@ python3 accl_report.py single --input /path/to/output/
 python3 accl_report.py compare --baseline /path/to/baseline/ --candidate /path/to/candidate/
 ```
 
+`--warmup N` removes the first `N` records independently for each input
+file/rank, collective, and message size. This matches rccl-tests, which runs
+warmups again at every size in a sweep while keeping one communicator-wide
+sequence number.
+
 The report classifies bottlenecks per message size (evaluated in this order):
 - **unknown** — zero wall time (degenerate record)
 - **gpu-compute (no proxy)** — kernel-only collective with no proxy ops
