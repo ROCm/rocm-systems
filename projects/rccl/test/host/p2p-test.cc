@@ -107,8 +107,7 @@ static void ResetP2pFakes();
 // p2p.cc link-satisfying stubs + this file's controllable alloc seams.
 //
 // Defined here (not in a shared fakes/ .cc) because they have no owning fakes
-// file: IsArchMatch is owned by archinfo.h (header-only, no TU to fake) and
-// allocTracker is an alloc.h data symbol p2p.cc alone references. The
+// file: allocTracker is an alloc.h data symbol p2p.cc alone references. The
 // ncclCudaCallocAsync / ncclCudaMemcpyAsync emulators back the macro shims
 // above. They must land after #include P2P_CC_PATH so the production types
 // they mention (allocationTracker, the alloc.h templates, etc.) are already
@@ -119,12 +118,6 @@ static void ResetP2pFakes();
 // allocTracker is an array of per-device counters in alloc.h; size it to the
 // same MAX_ALLOC_TRACK_NGPU the header uses. Zero-initialised.
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
-
-// Arch helper p2p.cc references but doesn't define here.
-bool IsArchMatch(char const* /*arch*/, char const* /*target*/)
-{
-    return false;
-}
 
 // Controllable seams: ncclCudaCallocAsync / ncclCudaMemcpyAsync. Substitutes
 // for the header-only function templates in alloc.h -- the shim macros above
