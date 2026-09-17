@@ -1,12 +1,62 @@
 cmake_minimum_required(VERSION 3.16)
 
+# Configure-time drift checks for fake parameter defaults whose production
+# values exist only as RCCL_PARAM/NCCL_PARAM macro arguments. The original
+# sources are guaranteed to be available here, unlike at installed-test run
+# time, so a changed default becomes an immediate configuration error.
+function(rccl_assert_source_line _file _expected _what)
+  if(NOT EXISTS "${_file}")
+    message(FATAL_ERROR "wrap-test drift guard: ${_file} not found at configure time")
+  endif()
+  file(STRINGS "${_file}" _lines)
+  set(_found FALSE)
+  foreach(_line IN LISTS _lines)
+    string(STRIP "${_line}" _line)
+    string(FIND "${_line}" "${_expected}" _pos)
+    if(NOT _pos EQUAL -1)
+      set(_found TRUE)
+      break()
+    endif()
+  endforeach()
+  if(NOT _found)
+    message(FATAL_ERROR
+      "wrap-test drift guard: ${_file} no longer contains\n"
+      "    ${_expected}\n"
+      "Update ${_what}, then update this check.")
+  endif()
+endfunction()
+
+# Checked against the original sources because hipify output does not exist yet
+# at configure time. Paths are relative to this file, so the same checks cover
+# the in-build and standalone contexts.
+set(_rccl_src_root "${CMAKE_CURRENT_LIST_DIR}/../../src")
+rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
+  "NCCL_PARAM(MinNchannels, \"MIN_NCHANNELS\", -2)" "fakes/tuning_fakes.cc: ncclParamMinNchannels()")
+rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
+  "NCCL_PARAM(MaxNchannels, \"MAX_NCHANNELS\", -2)" "fakes/tuning_fakes.cc: ncclParamMaxNchannels()")
+rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
+  "RCCL_PARAM(ForceCe, \"FORCE_CE\", 1)" "fakes/wrap_fakes.cc: rcclParamForceCe()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
+  "int64_t g_paramMinNchannels = -2;" "the MinNchannels fake default")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
+  "int64_t g_paramMaxNchannels = -2;" "the MaxNchannels fake default")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
+  "static int64_t DefaultParamForceCe() { return 1; }" "the ForceCe fake default")
+unset(_rccl_src_root)
+
 set(RCCL_MICRO_TEST_SOURCES
   p2p-test.cc
   rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
+  ras-client-test.cc                   # src/ras/client.cc: libc-only seams, no HIP/nccl deps
   group-test.cc
   devcomm-test.cc
+  wrap-test.cc                         # rccl_wrap.cc microtests (AICOMRCCL-2195)
+  dev-runtime-test.cc                  # src/dev_runtime.cc (symmetric memory, windows, devcomm)
+  fakes/dev_runtime_micro_fakes.cc     # dev_runtime's non-HIP externs (shadow pool, space, gin, rma)
   fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
   fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
+  fakes/libc_fakes.cc                  # libc seams (sockets/stdio/exit) for libc-only units
+  fakes/ras_param_fakes.cc             # src/ras/ras_param.cc timeout scaling
   fakes/rma_fakes.cc                   # rma_proxy_progress externals (circular-buf / destroy)
   fakes/comm_fakes.cc                  # comm-lifecycle seams (real in init.cc; faked here)
   fakes/recorder_fakes.cc              # src/recorder.cc
@@ -14,9 +64,25 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/collective_stubs.cc            # fail-loud collective launch + transport floor
   fakes/devcomm_fakes.cc
   fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
+  fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
+  fakes/ce_fakes.cc                    # src/ce_coll.cc availability seams
+  fakes/collectives_fakes.cc           # src/collectives.cc name helpers
+  fakes/dda_fakes.cc                   # src/algorithms/dda/* selection seams
+  fakes/strongstream_stubs.cc          # src/misc/strongstream.cc capture seam
+  fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc query seams
+  fakes/transport_stubs.cc             # transport/PXN/AINIC seams
+  fakes/tuning_fakes.cc                # graph tuning/channel params
+  fakes/wrap_fakes.cc                  # remaining uncategorized dependency seams
   ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
   ../common/ProcessIsolatedTestRunner.cpp
 )
+# archinfo.cc (real IsArchMatch, for wrap-test.cc) is NOT in the list above:
+# its path is build-directory-relative, and this file is evaluated before
+# either the in-build or standalone project() context resolves that
+# directory -- PROJECT_BINARY_DIR is empty here in the standalone path
+# (project() hasn't run yet) and RCCL_HIPIFY_DIR doesn't exist yet either.
+# Added via target_sources() in each block below instead, once the right
+# path variable for that context is actually in scope.
 
 # =====================================================================
 # In-RCCL-build integration.
@@ -41,6 +107,11 @@ if(BUILD_TESTS)
   # so any un-shimmed HIP call surfaces as a link error rather than binding
   # libamdhip64.so (HIP compile requirements are applied below without linking).
   add_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
+  target_sources(rccl-UnitTestsMicro PRIVATE
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc)  # real IsArchMatch, for wrap-test.cc
+  set_source_files_properties(
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc
+    PROPERTIES GENERATED TRUE)
 
   target_include_directories(rccl-UnitTestsMicro PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -77,10 +148,15 @@ if(BUILD_TESTS)
   # the build directory layout.
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE
     P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p_tmp.cc"
+    RAS_CLIENT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/ras/client.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rma/rma_proxy_progress.cc"
     GROUP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/group.cc"
     DEVCOMM_V22902_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/devcomm/devcomm_v22902.cc"
     DEVCOMM_V22907_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/devcomm/devcomm_v22907.cc"
+    WRAP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rccl_wrap.cc"
+    RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
+    DEV_RUNTIME_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime.cc"
+    DEV_RUNTIME_SEGMENTS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime_segments.cc"
   )
 
   # Make sure the hipify step has run before trying to compile the test.
@@ -95,8 +171,13 @@ if(BUILD_TESTS)
   # not exist on device, making amdgcn-link fail. --offload-host-only removes the
   # device pass entirely, which is robust across clang toolchains that ignore the
   # older -Xarch_device coverage split.
-  target_compile_options(rccl-UnitTestsMicro PRIVATE --offload-host-only)
-  target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt)
+  # -ffunction-sections/--gc-sections (added for wrap-test.cc): rccl_wrap.cc's
+  # dependency-floor stub surface (fakes/wrap_fakes.cc) is large and mostly
+  # unreached by these tests; this drops the unreferenced deep
+  # deps rather than pulling in the world, matching rccl-UnitTestsMicroInit's
+  # rationale for the same flags.
+  target_compile_options(rccl-UnitTestsMicro PRIVATE --offload-host-only -ffunction-sections)
+  target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -Wl,--gc-sections)
 
   target_compile_options(rccl-UnitTestsMicro PRIVATE
     -fprofile-instr-generate -fcoverage-mapping)
@@ -161,6 +242,7 @@ if(BUILD_TESTS)
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
     fakes/amdsmi_fakes.cc                # src/misc/amdsmi_wrap.cc
     fakes/api_trace_fakes.cc             # src/misc/api_trace.cc NCCL_API dispatch
+    fakes/dev_runtime_fakes.cc            # src/dev_runtime.cc window seams
     fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
     fakes/env_plugin_fakes.cc            # src/plugin/env.cc
     fakes/gin_fakes.cc                   # src/plugin/gin.cc + src/gin/gin_host.cc
@@ -174,6 +256,7 @@ if(BUILD_TESTS)
     fakes/recorder_fakes.cc              # src/recorder.cc
     fakes/rocmwrap_fakes.cc              # src/misc/rocmwrap.cc
     fakes/strongstream_stubs.cc          # src/misc/strongstream.cc
+    fakes/sym_kernels_fakes.cc            # src/sym_kernels.cc
     fakes/tuning_fakes.cc                # src/graph/tuning.cc
     ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
     ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc  # real IsArchMatch/GcnArchNameFormat
@@ -353,15 +436,16 @@ if(BUILD_TESTS)
     ${RCCL_COMMON_INCLUDE_DIRS}
     ${PROJECT_BINARY_DIR}/hipify/src/device          # device/common.h (neutered)
     ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device)
-  # src/enqueue.cc is basename-unique in the tree, so hipify keeps its name --
-  # no _tmp suffix (contrast transport/p2p.cc -> p2p_tmp.cc).
+  # Hipify preserves the src/enqueue/ directory, so the staged file is
+  # hipify/src/enqueue/enqueue.cc (not hipify/src/enqueue.cc). Contrast
+  # transport/p2p.cc -> p2p_tmp.cc, which is a basename collision.
   target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE
     ${RCCL_COMMON_COMPILE_DEFS}
     # Per-symbol omissions from the shared nccl_stubs.cc; enqueue.cc itself
     # supplies both, so neither needs a replacement definition.
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
-    ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc")
+    ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue/enqueue.cc")
 
   # Mirrors the opt-out in test/CMakeLists.txt, whose loop does not reach this target.
   # Inheriting ENABLE_ROCSHMEM_GIN defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1, which pulls
@@ -543,17 +627,34 @@ message(STATUS "Hipified sources: ${RCCL_HIPIFY_DIR}")
 # Compile-only (STATIC_LIBRARY) avoids link failures from amdsmi symbols.
 include(CheckCXXSourceCompiles)
 unset(AMDSMI_FABRIC_API CACHE)
+unset(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY CACHE)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 check_cxx_source_compiles("
   #include <amd_smi/amdsmi.h>
   int main() {
+    amdsmi_fabric_telemetry_category_t cat = AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN;
+    (void)cat;
+    return 0;
+  }
+" AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+check_cxx_source_compiles("
+  #include <amd_smi/amdsmi.h>
+  #if !defined(AMDSMI_FABRIC_MAX_LOCAL_GPUS)
+  #error amdsmi.h has no UALoE fabric types
+  #endif
+  int main() {
     amdsmi_fabric_info_t info{};
+    amdsmi_fabric_info_v1_t v1{};
     (void)info;
+    (void)v1;
     return 0;
   }
 " AMDSMI_FABRIC_API)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
-if(AMDSMI_FABRIC_API)
+if(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY AND NOT AMDSMI_FABRIC_API)
+  set(AMDSMI_FABRIC_API TRUE)
+  message(STATUS "amdsmi fabric telemetry types found - enabling AMDSMI_FABRIC_DIRECT")
+elseif(AMDSMI_FABRIC_API)
   message(STATUS "amdsmi fabric API found - enabling AMDSMI_FABRIC_DIRECT")
 else()
   message(STATUS "amdsmi fabric API not found (AMDSMI_FABRIC_DIRECT disabled)")
@@ -639,6 +740,7 @@ target_compile_definitions(rccl-source-wrappers PRIVATE
   NCCL_OS_LINUX
   ROCM_VERSION=70000
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 target_link_libraries(rccl-source-wrappers PRIVATE
@@ -685,6 +787,7 @@ target_compile_definitions(rccl-HostUnitTests PRIVATE
   RCCL_EXPOSE_STATIC
   ARSMI_TEST_BUILD
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
@@ -707,15 +810,21 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
 # --- Standalone micro-test binary ---------------------------------------
 # rccl-UnitTestsMicro: same host-only model as rccl-HostUnitTests (hipcc
 # --offload-host-only, -no-hip-rt), built from the hipified snapshot. It
-# #includes each unit-under-test production .cc directly (via P2P_CC_PATH,
-# RMA_PROXY_PROGRESS_CC_PATH, GROUP_CC_PATH, DEVCOMM_V22902_CC_PATH,
-# DEVCOMM_V22907_CC_PATH) and
-# satisfies every HIP/nccl symbol from fakes/ rather than librccl.so or the
-# HIP runtime.
+# #includes each unit-under-test production .cc directly (via the *_CC_PATH
+# definitions below) and satisfies every HIP/nccl symbol from fakes/ rather
+# than librccl.so or the HIP runtime.
 add_test_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
+target_sources(rccl-UnitTestsMicro PRIVATE
+  ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc)  # real IsArchMatch, for wrap-test.cc
+# Produced by the hipify step, so it does not exist at configure time. Source-file
+# properties are DIRECTORY-scoped, so setting this here rather than relying on
+# another block having done so keeps this target standing alone.
+set_source_files_properties(
+  ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
+  PROPERTIES GENERATED TRUE)
 
 target_compile_options(rccl-UnitTestsMicro PRIVATE
-  -Wno-unused-parameter -Wno-unused-variable)
+  -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
 
 target_include_directories(rccl-UnitTestsMicro PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
@@ -728,21 +837,31 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   NCCL_OS_LINUX
   ROCM_VERSION=70000
   P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
+  RAS_CLIENT_CC_PATH="${RCCL_HIPIFY_DIR}/src/ras/client.cc"
   RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
   GROUP_CC_PATH="${RCCL_HIPIFY_DIR}/src/group.cc"
   DEVCOMM_V22902_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
   DEVCOMM_V22907_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
+  WRAP_CC_PATH="${RCCL_HIPIFY_DIR}/src/rccl_wrap.cc"
+  RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
+  DEV_RUNTIME_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime.cc"
+  DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime_segments.cc"
   # Same fallback-vs-runtime conflicts the host target guards against: without
   # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
   # enumerators on ROCm 7.14+, and the standalone build fails.
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
 # -no-pie for the same reason as rccl-HostUnitTests: the RCCL-vendored
 # libgtest.a used by this standalone path is built without -fPIC, so a PIE
 # link fails with "relocation R_X86_64_32 cannot be used against local symbol".
-target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -no-pie)
+# --gc-sections (added for wrap-test.cc): rccl_wrap.cc's dependency-floor stub
+# surface (fakes/wrap_fakes.cc) is large and mostly unreached by
+# these tests; this drops the unreferenced deep deps, matching
+# rccl-UnitTestsMicroInit's rationale for the same flag.
+target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -no-pie -Wl,--gc-sections)
 target_link_libraries(rccl-UnitTestsMicro PRIVATE
   GTest::GTest
   Threads::Threads
@@ -765,6 +884,7 @@ set(TEST_MICRO_INIT_SOURCE_FILES
   fakes/hip_fakes.cc
   fakes/amdsmi_fakes.cc
   fakes/api_trace_fakes.cc
+  fakes/dev_runtime_fakes.cc
   fakes/env_fakes.cc
   fakes/env_plugin_fakes.cc
   fakes/gin_fakes.cc
@@ -778,6 +898,7 @@ set(TEST_MICRO_INIT_SOURCE_FILES
   fakes/recorder_fakes.cc
   fakes/rocmwrap_fakes.cc
   fakes/strongstream_stubs.cc
+  fakes/sym_kernels_fakes.cc
   fakes/tuning_fakes.cc
   ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc
   ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
@@ -816,6 +937,7 @@ foreach(_variant "" "-uncached" "-faultinj")
     # this from RCCL_COMMON_COMPILE_DEFS instead.
     USE_AMDSMI
     $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+    $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
     $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
     INIT_CC_PATH="${RCCL_HIPIFY_DIR}/src/init.cc"
   )
@@ -901,7 +1023,7 @@ foreach(_enq_variant "" "-devlinker")
     $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
-    ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue.cc"
+    ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue/enqueue.cc"
   )
   if(_enq_variant STREQUAL "-devlinker")
     target_compile_definitions(${_enq_tgt} PRIVATE RCCL_DEVICE_LINKER)
@@ -946,10 +1068,7 @@ if(HOST_TEST_COVERAGE)
 endif()
 
 # NOTE: the standalone project intentionally does not register these binaries
-# with CTest (matching test/host from #9320); run them directly, e.g.
-#   ./build/rccl-UnitTestsMicro   or   ./build/rccl-HostUnitTests
-#   ./build/rccl-UnitTestsMicroInit   ./build/rccl-UnitTestsMicroInit-uncached
-#   ./build/rccl-UnitTestsMicroInit-faultinj
-#   ./build/rccl-UnitTestsMicroEnqueue  ./build/rccl-UnitTestsMicroEnqueue-devlinker
-# The in-RCCL-build path registers the micro/init/enqueue binaries via CTest
-# categories.
+# with CTest (matching test/host from #9320); run them directly out of the build
+# directory. The binaries are the add_test_executable() calls above rather than a
+# list repeated here, so the two cannot drift. The in-RCCL-build path registers
+# them via CTest categories.

@@ -1290,15 +1290,6 @@ TEST_F(DdaFabricEligibilityTest, ReduceScatter_InvalidDatatypeDispatch)
 // AllGather LL128
 // ---------------------------------------------------------------------------
 
-// Mirrors ddaLL128AGMaxPerRankBytes in dda_all_gather_fabric_ll128.cu. The scratch
-// holds 2 banks of nRanks slots, so this is the payload of one rank's slot.
-static size_t ddaLL128AGPerRankCapBytesForLL128Suite(int nRanks, size_t scratchBytes)
-{
-    const size_t slices =
-        scratchBytes / ((size_t)2 * (size_t)nRanks * (size_t)dda::common::kDdaLL128WireBytesPerSlice);
-    return slices * (size_t)dda::common::kDdaLL128DataBytesPerSlice;
-}
-
 TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_EligibleFloat32)
 {
     EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
@@ -1412,7 +1403,7 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_UnalignedRecvbuff)
 TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PerRankSlotWithSmallScratch)
 {
     mockComm_.comm.ddaScratchBytes = 1 * 1024 * 1024;  // 32 slices at 8 ranks
-    ASSERT_GT(ddaLL128AGPerRankCapBytesForLL128Suite(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes),
+    ASSERT_GT(ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes),
               4u * sizeof(float));
     EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
@@ -1424,7 +1415,7 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PerRankSlotOverflow)
 {
     mockComm_.comm.ddaScratchBytes = 1 * 1024 * 1024;
     const size_t capBytes =
-        ddaLL128AGPerRankCapBytesForLL128Suite(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes);
+        ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes);
     EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, (capBytes + 16) / sizeof(float), ncclFloat32));
 }
@@ -1434,7 +1425,7 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PerRankSlotOverflow)
 TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_ScratchTooSmallForOneSlice)
 {
     mockComm_.comm.ddaScratchBytes = 16 * 1024;
-    ASSERT_EQ(ddaLL128AGPerRankCapBytesForLL128Suite(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes), 0u);
+    ASSERT_EQ(ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes), 0u);
     EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }
