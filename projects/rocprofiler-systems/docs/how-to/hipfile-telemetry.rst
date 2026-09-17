@@ -116,18 +116,6 @@ API does not exist to build against. ``ON`` does not demote; CMake stops and
 names the version it found (if any), the version required, and how to point it
 at a different prefix.
 
-When the feature is compiled in, the profiler links ``libhipfile`` the same way it
-links AMD SMI: ``libhipfile.so.0`` must be present when the profiler starts, even if
-``ROCPROFSYS_USE_HIPFILE`` is off. Official ROCm 10.1 and later packages ship a
-matching hipFile with the profiler. Source builds must run against the same ROCm
-prefix they were configured with. A missing ``libhipfile``, or an older hipFile that
-still uses SONAME ``libhipfile.so.0`` but does not export the stats API (for example
-0.4), can prevent the profiler from loading at all. Configure with
-``-D ROCPROFSYS_USE_HIPFILE=OFF`` if that dependency is not acceptable.
-
-If a new enough ``libhipfile`` does load, the version is re-checked at run time.
-When it is too old, the profiler logs a warning and emits no hipFile tracks.
-
 To point CMake at a specific hipFile installation, pass
 ``-Dhipfile_DIR=<prefix>/lib/cmake/hipfile`` or add the installation prefix to
 ``CMAKE_PREFIX_PATH``. The configure output reports which way it resolved, either

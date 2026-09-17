@@ -68,9 +68,10 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-binary
 )
 
-# The PMC objects (which reference hipFileGetStatsL3) are consumed via
-# $<TARGET_OBJECTS>, so link libhipfile onto the final libraries explicitly to
-# make it a DT_NEEDED dependency.
+# The PMC objects are consumed via $<TARGET_OBJECTS>, so the backend target has to be
+# attached to the final libraries as well to carry hipFile's headers and compile
+# definitions. It contributes no link-time dependency on libhipfile; the wrapper
+# dlopen's it at first sample.
 if(ROCPROFSYS_HIPFILE_SUPPORT)
     target_link_libraries(
         rocprofiler-systems-static-library

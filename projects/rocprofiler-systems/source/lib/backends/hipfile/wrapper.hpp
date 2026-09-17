@@ -10,12 +10,11 @@
 // above this layer works against backends::hipfile::stats_snapshot, so the collector
 // and its tests build on machines with no hipFile package installed.
 //
-// The backend links libhipfile directly via the hip::hipfile imported target, matching
-// how the profiler consumes amd_smi and other ROCm libraries. hipFile's stats query
-// reads the calling process' own shared stats region, so this must run inside the
-// profiled process; the dynamic linker guarantees a single libhipfile instance per
-// process, so the profiler and the target application observe the same stats.
+// The header is included for its types and constants only; the two entry points are
+// resolved with dlsym (see get_api).
 #include <hipfile.h>
+
+#include <dlfcn.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -29,6 +28,10 @@
     !defined(ROCPROFSYS_HIPFILE_MIN_VERSION_PATCH)
 #    error                                                                               \
         "ROCPROFSYS_HIPFILE_MIN_VERSION_{MAJOR,MINOR,PATCH} must be defined by the build"
+#endif
+
+#if !defined(ROCPROFSYS_HIPFILE_SONAME)
+#    error "ROCPROFSYS_HIPFILE_SONAME must be defined by the build"
 #endif
 
 namespace rocprofsys::backends::hipfile
@@ -70,18 +73,63 @@ struct wrapper
 
     static constexpr std::size_t MAX_GPU_SLOTS = HIPFILE_MAX_GPUS;
 
+private:
+    /// @brief hipFile entry points, or nulls when libhipfile could not be loaded.
+    struct api
+    {
+        hipFileError_t (*get_version)(unsigned*, unsigned*, unsigned*) = nullptr;
+        hipFileError_t (*get_stats_l3)(stats_l3_t*)                    = nullptr;
+    };
+
+    /**
+     * @brief Load libhipfile on first use and resolve the two entry points.
+     */
+    static const api& get_api() noexcept
+    {
+        static const api _api = []() noexcept {
+            auto _value = api{};
+
+            // SOVERSION is hipFile's major version, still 0 for every release (see
+            // runtime_version_supported below, which re-checks the real version).
+            void* _handle = dlopen(ROCPROFSYS_HIPFILE_SONAME, RTLD_LAZY | RTLD_LOCAL);
+            if(_handle == nullptr)
+            {
+                LOG_WARNING("hipFile telemetry unavailable: {} could not be loaded",
+                            ROCPROFSYS_HIPFILE_SONAME);
+                return _value;
+            }
+
+            _value.get_version = reinterpret_cast<decltype(api::get_version)>(
+                dlsym(_handle, "hipFileGetVersion"));
+            _value.get_stats_l3 = reinterpret_cast<decltype(api::get_stats_l3)>(
+                dlsym(_handle, "hipFileGetStatsL3"));
+
+            if(_value.get_version == nullptr || _value.get_stats_l3 == nullptr)
+            {
+                LOG_WARNING("hipFile telemetry unavailable: {} does not export the "
+                            "per-GPU stats API",
+                            ROCPROFSYS_HIPFILE_SONAME);
+                return api{};
+            }
+
+            return _value;
+        }();
+        return _api;
+    }
+
+public:
     /**
      * @brief Whether the libhipfile loaded into this process is new enough to query.
-     *
-     * The headers are pinned at build time, but hipFile's SOVERSION is its major version,
-     * which is 0 for every release so far: libhipfile.so.0 satisfies the link for 0.4 and
-     * 0.5 alike. Running on a host with an older hipFile than the build machine would
-     * therefore load a library with no stats API in it. Resolved once and cached, so the
-     * per-sample cost is a load of a bool.
      */
     static bool runtime_version_supported() noexcept
     {
         static const bool _supported = []() {
+            const auto& _api = get_api();
+            if(_api.get_version == nullptr)
+            {
+                return false;
+            }
+
             // NOLINTBEGIN(misc-const-correctness) -- hipFileGetVersion writes through
             // unsigned*; these cannot be const
             unsigned major = 0;
@@ -89,7 +137,7 @@ struct wrapper
             unsigned patch = 0;
             // NOLINTEND(misc-const-correctness)
 
-            if(hipFileGetVersion(&major, &minor, &patch).err != hipFileSuccess)
+            if(_api.get_version(&major, &minor, &patch).err != hipFileSuccess)
             {
                 LOG_WARNING("hipFile telemetry unavailable: the hipFile runtime version "
                             "could not be queried");
@@ -123,7 +171,12 @@ struct wrapper
      */
     static bool get_stats_l3(stats_l3_t* out) noexcept
     {
-        return hipFileGetStatsL3(out).err == hipFileSuccess;
+        const auto& _api = get_api();
+        if(_api.get_stats_l3 == nullptr)
+        {
+            return false;
+        }
+        return _api.get_stats_l3(out).err == hipFileSuccess;
     }
 };
 
