@@ -310,33 +310,13 @@ endif()
 
 # hipFile telemetry is requested with ROCPROFSYS_USE_HIPFILE (ON / OFF / AUTO).
 # The derived ROCPROFSYS_HIPFILE_SUPPORT cache (INTERNAL FORCE) is what every
-#downstream if(), compile definition, and add_subdirectory consults.
-#The user-facing cache is never overwritten:
+# downstream if(), compile definition, and add_subdirectory consults.
+# The user-facing cache is never overwritten:
 #
 #   AUTO + package missing  -> SUPPORT OFF, STATUS (default; a box without hipFile still builds)
 #   ON   + package missing  -> FATAL_ERROR naming the version found, the version required,
 #                              and how to point CMake at a different prefix
 #   OFF                     -> never search
-#
-# As with ROCPROFSYS_USE_AINIC, the same name is also a run-time setting: here it
-# decides whether hipFile support is compiled in, and at run time whether a given
-# run collects. A build must opt in at both points.
-#
-# When SUPPORT is ON, the backend links libhipfile through the hip::hipfile imported
-# target (a DT_NEEDED dependency), matching how the profiler consumes amd_smi and other
-# ROCm libraries. The collector's unit tests do not participate in that: they drive a
-# mock wrapper with test-local fake structs, so they build and run with SUPPORT OFF.
-#
-# The per-GPU stats API this collector is built on (hipFileGetStatsL3) first ships in
-# hipFile 0.5.0; older packages do not declare the symbol at all, so this is a hard
-# requirement rather than a preference. Declared once here because the backend's runtime
-# guard checks the same number against the libhipfile actually loaded into the process.
-#
-# Overridable so a pre-release hipFile that carries the stats API without having bumped
-# its version yet can still be built against, e.g.
-# -DROCPROFSYS_HIPFILE_MIN_VERSION=0.4.0. Lowering it below 0.5.0 only makes sense when
-# the package is known to export hipFileGetStatsL3; if it does not, the build fails at
-# the wrapper instead.
 set(ROCPROFSYS_HIPFILE_MIN_VERSION
     "0.5.0"
     CACHE STRING
