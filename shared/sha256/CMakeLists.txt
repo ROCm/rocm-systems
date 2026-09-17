@@ -8,10 +8,10 @@
 cmake_minimum_required(VERSION 3.16)
 project(rocm-sha256 VERSION 1.0.0 LANGUAGES CXX)
 
-# OBJECT, not STATIC: an archive does not absorb its static dependencies, so a
-# STATIC rocm-sha256 would leave the SHA-256 symbols undefined in every archive
-# linking it and force a second public .a to be installed alongside.
-add_library(rocm-sha256 OBJECT src/sha256.cc)
+# Keep this as a STATIC library so consumers can link the SHA-256 implementation
+# transitively. Static archives do not absorb one another, so targets that use
+# rocm-sha256 must propagate it to their final link step.
+add_library(rocm-sha256 STATIC src/sha256.cc)
 add_library(rocm::sha256 ALIAS rocm-sha256)
 
 target_include_directories(
