@@ -1260,6 +1260,25 @@ static bool rcclP2pBatchEligible(struct ncclComm* comm, ssize_t sendBytes, ssize
                               rcclParamP2pBatchThreshold());
 }
 
+static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task) {
+  struct Policy {
+    const char* arch;
+    ncclFunc_t collAPI;
+    int nChannels;
+  };
+  if (task == nullptr) return -1;
+  constexpr Policy policies[] = {
+    // Two-channel full-mesh traffic has high variance on gfx110x. Keep the
+    // workaround specific to AllToAll so Gather, Scatter, and SendRecv retain
+    // their higher-throughput multi-channel paths.
+    {"gfx110", ncclFuncAlltoAll, 1},
+  };
+  for (const auto& policy : policies) {
+    if (task->collAPI == policy.collAPI && IsArchMatch(comm->archName, policy.arch)) return policy.nChannels;
+  }
+  return -1;
+}
+
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget
 // and sizeof(ncclDevWorkP2p) in work budget. "sendRank" and "recvRank" must
 // match the corresponding values for this round of the p2p schedule (no -1's).
@@ -1268,13 +1287,6 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
                                  int p2pRound, int sendRank, void* sendAddr, ssize_t sendBytes, int recvRank,
                                  void* recvAddr, ssize_t recvBytes, uint64_t sendOpCount, uint64_t recvOpCount,
                                  const int planTotalTasks[], struct ncclTaskP2p** p2pTasks) {
-  // Two-channel full-mesh traffic has high variance on gfx110x. Keep the
-  // workaround specific to AllToAll so Gather, Scatter, and SendRecv retain
-  // their higher-throughput multi-channel paths.
-  bool isAllToAll = (p2pTasks[0] && p2pTasks[0]->collAPI == ncclFuncAlltoAll) ||
-                    (p2pTasks[1] && p2pTasks[1]->collAPI == ncclFuncAlltoAll);
-  if (isAllToAll && IsArchMatch(comm->archName, "gfx110")) nChannelsMin = nChannelsMax = 1;
-
   ncclResult_t ret = ncclSuccess;
   int connIndex[2] = {1, 1};
   bool selfSend = (sendRank == comm->rank);
@@ -1288,6 +1300,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   bool proxySameProcess[2] = {true, true};
   void** handles[2] = {NULL, NULL};
   uint64_t p2pDirChannelMask[2] = {0, 0}; // per-direction channels (idx 0 recv, 1 send)
+  // Keep policy direction-local so a different task paired in the same planner
+  // round cannot change the channel count selected by this task's peer.
+  int kChannels[2] = {rcclP2pPolicyChannels(comm, p2pTasks[0]), rcclP2pPolicyChannels(comm, p2pTasks[1])};
   bool batchP2P = rcclP2pBatchEligible(comm, sendBytes, recvBytes);
   // Keep work-fusion size-gated (batchP2P) but select the channel map from the
   // communicator flag. Keying the map to eligibility collapsed large AllToAll
@@ -1377,10 +1392,12 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       // sides of a P2P pair agree on nChStart — planTotalTasks varies per rank.
       bool asymmetric =
         p2pTasks[dir] && (p2pTasks[dir]->collAPI == ncclFuncGather || p2pTasks[dir]->collAPI == ncclFuncScatter);
-      int nChStart = (comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin;
+      int nChMax = kChannels[dir] > 0 ? std::min(kChannels[dir], nChannelsMax) : nChannelsMax;
+      int nChStart =
+        kChannels[dir] > 0 ? nChMax : ((comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin);
       nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
-      while (partSize > maxPartSize && nChannels[dir] <= nChannelsMax / 2) {
+      while (partSize > maxPartSize && nChannels[dir] <= nChMax / 2) {
         nChannels[dir] *= 2;
         partSize = divUp(bytes[dir], nChannels[dir]);
       }
@@ -1481,10 +1498,12 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       // sides of a P2P pair agree on nChStart — planTotalTasks varies per rank.
       bool asymmetric =
         p2pTasks[dir] && (p2pTasks[dir]->collAPI == ncclFuncGather || p2pTasks[dir]->collAPI == ncclFuncScatter);
-      int nChStart = (comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin;
+      int nChMax = kChannels[dir] > 0 ? std::min(kChannels[dir], nChannelsMax) : nChannelsMax;
+      int nChStart =
+        kChannels[dir] > 0 ? nChMax : ((comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin);
       nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
-      while (partSize > maxPartSize && nChannels[dir] <= nChannelsMax / 2) {
+      while (partSize > maxPartSize && nChannels[dir] <= nChMax / 2) {
         nChannels[dir] *= 2;
         partSize = divUp(bytes[dir], nChannels[dir]);
       }

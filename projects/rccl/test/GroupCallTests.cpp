@@ -132,6 +132,69 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
+  // Mix explicit P2P with AllToAll so a planner round can pair directions
+  // originating from different APIs. The test intentionally checks completion
+  // and data only; channel-count policy may change without weakening this
+  // endpoint-agreement regression.
+  TEST(GroupCall, MixedAllToAllAndP2pDirections)
+  {
+    TestBed testBed;
+    if (testBed.ev.maxGpus < 4)
+      GTEST_SKIP() << "Skipping... GroupCall.MixedAllToAllAndP2pDirections requires at least 4 GPUs";
+
+    constexpr size_t p2pElements = 2 * 1024 * 1024; // 8 MiB: large enough to scale beyond one channel.
+    constexpr size_t allToAllElementsPerPeer = 1024;
+    constexpr int numCollPerGroup = 3;
+    bool const inPlace = false;
+    bool const useManagedMem = false;
+    bool const useBlocking = false; // Let TestBed's timeout abort a channel-agreement regression instead of hanging.
+    bool isCorrect = true;
+
+    for (int totalRanks : testBed.ev.GetNumGpusList())
+    for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+    {
+      if (totalRanks < 4) continue;
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder),
+                        numCollPerGroup, 1, 1, useBlocking);
+
+      auto setP2p = [&](int rank, int collId, ncclFunc_t func, int peer) {
+        OptionalColArgs options;
+        options.root = peer;
+        testBed.SetCollectiveArgs(func, ncclFloat32, p2pElements, p2pElements, options, collId, 0, rank);
+      };
+
+      // Before AllToAll, queue 0->1, 1->2, and 0->2. For P2P round d=1,
+      // rank 0 pairs an AllToAll recv with its explicit send to rank 1,
+      // rank 1 pairs explicit recv/send, and rank 2 pairs its explicit recv
+      // with an AllToAll send. Remaining ranks use self P2P to fill both slots
+      // without changing the inter-rank peer queues.
+      setP2p(0, 0, ncclCollSend, 1);
+      setP2p(0, 1, ncclCollSend, 2);
+      setP2p(1, 0, ncclCollRecv, 0);
+      setP2p(1, 1, ncclCollSend, 2);
+      setP2p(2, 0, ncclCollRecv, 1);
+      setP2p(2, 1, ncclCollRecv, 0);
+      for (int rank = 3; rank < totalRanks; ++rank) {
+        setP2p(rank, 0, ncclCollSend, rank);
+        setP2p(rank, 1, ncclCollRecv, rank);
+      }
+
+      size_t const allToAllElements = allToAllElementsPerPeer * totalRanks;
+      testBed.SetCollectiveArgs(ncclCollAlltoAll, ncclFloat32, allToAllElements, allToAllElements,
+                                OptionalColArgs(), 2);
+
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData();
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+      testBed.DestroyComms();
+    }
+    testBed.Finalize();
+  }
+
   // Test identical collectives with different data type
   TEST(GroupCall, MixedDataType)
   {
