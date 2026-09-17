@@ -1626,6 +1626,8 @@ struct GraphLaunchCleanup {
   GraphExecBase* exec;
   amd::Device* device;
   std::vector<void*> signal_set;
+  GraphKernelArgManager* kernarg_manager = nullptr;
+  uint64_t kernarg_launch_id = 0;
 };
 
 // ================================================================================================
@@ -2506,7 +2508,8 @@ void GraphExecSegmented::PacketBatch::appendPacketToFlatBuffer(const uint8_t* pk
 // live at offsets {0, 64, 128, 192} within the 256-byte AqlMetadataPrefetchPacket layout, and
 // the low byte of each is the packet type.
 void GraphExecSegmented::PacketBatch::invalidateMetadataSlot(uint8_t* slot) {
-  static constexpr size_t kHdrOff[4] = {0, 64, 128, 192};
+  static constexpr size_t kHdrOff[4] = {
+      0, kAqlPktSize, 2 * kAqlPktSize, 3 * kAqlPktSize};
   static constexpr uint32_t kInvalidMetadataHeader = 1;  // HSA_PACKET_TYPE_INVALID
   for (size_t h = 0; h < 4; ++h) {
     std::memcpy(slot + kHdrOff[h], &kInvalidMetadataHeader, sizeof(kInvalidMetadataHeader));
@@ -2583,8 +2586,25 @@ void GraphExecBase::OnLaunchComplete(cl_event event, cl_int command_exec_status,
   // Re-arm and recycle the launch's signals while the GraphExecBase (and thus its
   // signal pool) is still alive, then drop the launch's reference.
   execBase->RecycleLaunchSignals(cleanup->device, cleanup->signal_set);
+  if (cleanup->kernarg_manager != nullptr && cleanup->kernarg_launch_id != 0) {
+    cleanup->kernarg_manager->CompleteLaunch(cleanup->kernarg_launch_id);
+  }
   delete cleanup;
   execBase->release();
+}
+
+void GraphExecSegmented::DrainGraphStreams(
+    hip::Stream* launch_stream, const std::vector<hip::Stream*>& streams) const {
+  std::unordered_set<hip::Stream*> streams_to_drain(streams.begin(), streams.end());
+  streams_to_drain.insert(launch_stream);
+  for (const auto& entry : parallel_streams_) {
+    streams_to_drain.insert(entry.second.begin(), entry.second.end());
+  }
+  for (auto* stream : streams_to_drain) {
+    if (stream != nullptr) {
+      stream->finish();
+    }
+  }
 }
 
 // ================================================================================================
@@ -2695,6 +2715,9 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
       status = EnqueueSegment(segment, current_stream, graph_accumulate);
 
       if (status != hipSuccess) {
+        // Earlier segments can still reference profiling state owned by the
+        // accumulate command. Drain them before releasing that state.
+        DrainGraphStreams(launch_stream, streams);
         graph_accumulate->release();
         if (out_status != nullptr) {
           *out_status = status;
@@ -3263,6 +3286,11 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
     graph_launch_stream->vdev()->HiddenHeapInit();
   }
 
+  // Register before any captured packet is queued. Updates can replace the
+  // packet set while this asynchronous launch still references the old slots.
+  const uint64_t kernarg_launch_id =
+      (kernArgManager_ != nullptr) ? kernArgManager_->RegisterLaunch() : 0;
+
   amd::Command* last_cmd = nullptr;
   if (!cross_device_launch) {
     if (max_streams_dev_.size() == 1) {
@@ -3299,16 +3327,13 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
       // The launch stream queue owns this marker now. Keep last_cmd as the
       // capture-device completion command that drives graph resource cleanup.
       launch_done->release();
-    } else if (status != hipSuccess) {
-      // Error path only: EnqueueSegmentedGraph may have queued partial work
-      // before failing. Drain the capture-device streams before the common
-      // cleanup path can recycle launch signals or drop this exec reference.
-      for (auto* stream : streams_) {
-        if (stream != nullptr) {
-          stream->finish();
-        }
-      }
     }
+  }
+
+  if (status != hipSuccess) {
+    // A later segment can fail after earlier segments were queued. Drain every
+    // graph stream before the completion callback recycles signals and slots.
+    DrainGraphStreams(launch_stream, streams_);
   }
 
   // Drive OnLaunchComplete off this command's completion (its leaf-sync deps
@@ -3340,6 +3365,8 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
   cleanup->exec = this;
   cleanup->device = g_devices[captureDeviceId_]->devices()[0];
   cleanup->signal_set = std::move(launch_signal_set);
+  cleanup->kernarg_manager = kernArgManager_;
+  cleanup->kernarg_launch_id = kernarg_launch_id;
   if (!event.setCallback(CL_COMPLETE, GraphExecBase::OnLaunchComplete, cleanup, kBlocking)) {
     // setCallback essentially never fails, but if it does the launch's GPU work
     // is already queued (the accumulate is enqueued and was told not to destroy
@@ -3473,38 +3500,260 @@ bool GraphKernelArgManager::AllocGraphKernargPool(size_t pool_size, amd::Device*
   return true;
 }
 
-address GraphKernelArgManager::AllocKernArg(size_t size, size_t alignment, int devId) {
-  if (size == 0) {
-    return nullptr;
+void GraphKernelArgManager::BeginCapture(const void* owner) {
+  assert(owner != nullptr);
+  std::lock_guard<std::mutex> lock(allocation_lock_);
+  assert(capture_owner_ == nullptr && "Graph kernarg captures must not overlap");
+  capture_owner_ = owner;
+  capture_allocations_.clear();
+  capture_snapshot_count_ = 0;
+}
+
+void GraphKernelArgManager::SnapshotKernarg(address addr, size_t size) {
+  if (addr == nullptr || size == 0) {
+    return;
   }
 
-  amd::Device* device = g_devices[devId]->devices()[0];
-  assert(alignment != 0 && "Alignment must be non-zero");
+  std::lock_guard<std::mutex> lock(allocation_lock_);
+  assert(capture_owner_ != nullptr && "Kernarg reuse must occur inside a graph capture");
+  for (size_t i = 0; i < capture_snapshot_count_; ++i) {
+    if (capture_snapshots_[i].kernarg_addr_ == addr) {
+      return;
+    }
+  }
 
-  // Check if we have any pools allocated for this device
+  if (capture_snapshot_count_ == capture_snapshots_.size()) {
+    capture_snapshots_.emplace_back();
+  }
+  auto& snapshot = capture_snapshots_[capture_snapshot_count_++];
+  snapshot.kernarg_addr_ = addr;
+  snapshot.data_.resize(size);
+  std::memcpy(snapshot.data_.data(), addr, size);
+}
+
+void GraphKernelArgManager::EndCapture(
+    const void* owner, std::vector<amd::GraphKernargSlot>* new_slots,
+    const std::vector<amd::GraphKernargSlot>& old_slots, bool success) {
+  std::lock_guard<std::mutex> lock(allocation_lock_);
+  assert(capture_owner_ == owner && "Mismatched graph kernarg capture owner");
+
+  if (!success) {
+    for (size_t i = 0; i < capture_snapshot_count_; ++i) {
+      const auto& snapshot = capture_snapshots_[i];
+      std::memcpy(snapshot.kernarg_addr_, snapshot.data_.data(), snapshot.data_.size());
+    }
+    free_allocations_.insert(free_allocations_.end(), capture_allocations_.begin(),
+                             capture_allocations_.end());
+    capture_allocations_.clear();
+    capture_snapshot_count_ = 0;
+    capture_owner_ = nullptr;
+    return;
+  }
+
+  assert(new_slots != nullptr);
+  std::vector<bool> installed(capture_allocations_.size(), false);
+  for (auto& slot : *new_slots) {
+    for (size_t i = 0; i < capture_allocations_.size(); ++i) {
+      const auto& allocation = capture_allocations_[i];
+      if (slot.addr == allocation.kernarg_addr_ &&
+          g_devices[slot.devId]->devices()[0] == allocation.device_) {
+        // A reused free block can be larger than this capture requested. Preserve
+        // its usable capacity so a later capture does not lose the tail.
+        slot.size = allocation.size_;
+        slot.first_launch_id_ = next_launch_id_;
+        installed[i] = true;
+        break;
+      }
+    }
+  }
+
+  // Be defensive if a backend allocated a kernarg that was not installed into
+  // the final slot vector.
+  for (size_t i = 0; i < capture_allocations_.size(); ++i) {
+    if (!installed[i]) {
+      free_allocations_.push_back(capture_allocations_[i]);
+    }
+  }
+
+  const uint64_t last_launch_id = next_launch_id_ - 1;
+  for (const auto& old_slot : old_slots) {
+    bool retained = false;
+    for (const auto& new_slot : *new_slots) {
+      if (old_slot.addr == new_slot.addr) {
+        retained = true;
+        break;
+      }
+    }
+    if (!retained && old_slot.addr != nullptr) {
+      assert(old_slot.first_launch_id_ != 0 && "Live kernarg slot has no launch generation");
+      KernelArgAllocation allocation(old_slot.addr, old_slot.size,
+                                     g_devices[old_slot.devId]->devices()[0]);
+      allocation.first_launch_id_ = old_slot.first_launch_id_;
+      RetireAllocation(allocation, last_launch_id);
+    }
+  }
+
+  capture_allocations_.clear();
+  capture_snapshot_count_ = 0;
+  capture_owner_ = nullptr;
+}
+
+uint64_t GraphKernelArgManager::RegisterLaunch() {
+  std::lock_guard<std::mutex> lock(allocation_lock_);
+  const uint64_t launch_id = next_launch_id_++;
+  active_launch_ids_.insert(launch_id);
+  return launch_id;
+}
+
+void GraphKernelArgManager::CompleteLaunch(uint64_t launch_id) {
+  std::lock_guard<std::mutex> lock(allocation_lock_);
+  if (active_launch_ids_.erase(launch_id) != 0) {
+    ReclaimDeferredAllocations();
+  }
+}
+
+void GraphKernelArgManager::RetireAllocation(const KernelArgAllocation& allocation,
+                                             uint64_t last_launch_id) {
+  auto active = active_launch_ids_.lower_bound(allocation.first_launch_id_);
+  if (active == active_launch_ids_.end() || *active > last_launch_id) {
+    free_allocations_.push_back(allocation);
+  } else {
+    deferred_allocations_.emplace_back(allocation, last_launch_id);
+  }
+}
+
+void GraphKernelArgManager::ReclaimDeferredAllocations() {
+  for (auto deferred = deferred_allocations_.begin(); deferred != deferred_allocations_.end();) {
+    auto active = active_launch_ids_.lower_bound(deferred->allocation_.first_launch_id_);
+    if (active == active_launch_ids_.end() || *active > deferred->last_launch_id_) {
+      free_allocations_.push_back(deferred->allocation_);
+      deferred = deferred_allocations_.erase(deferred);
+    } else {
+      ++deferred;
+    }
+  }
+}
+
+bool GraphKernelArgManager::FreeBlockFits(const KernelArgAllocation& block, size_t size,
+                                          size_t alignment, address* aligned_addr,
+                                          size_t* usable_size) {
+  assert(alignment != 0 && "Alignment must be non-zero");
+  const address aligned = amd::alignUp(block.kernarg_addr_, alignment);
+  const size_t leading_space = static_cast<size_t>(aligned - block.kernarg_addr_);
+  if (leading_space > block.size_ || size > block.size_ - leading_space) {
+    return false;
+  }
+  *aligned_addr = aligned;
+  *usable_size = block.size_ - leading_space;
+  return true;
+}
+
+address GraphKernelArgManager::TakeFreeBlock(size_t index, address aligned_addr,
+                                             size_t usable_size) {
+  assert(capture_owner_ != nullptr);
+  const KernelArgAllocation& block = free_allocations_[index];
+  capture_allocations_.emplace_back(aligned_addr, usable_size, block.device_);
+  free_allocations_.erase(free_allocations_.begin() + index);
+  return aligned_addr;
+}
+
+address GraphKernelArgManager::AllocKernArgFromFreeList(size_t size, size_t alignment,
+                                                        amd::Device* device) {
+  if (!free_allocations_.empty()) {
+    const auto& newest = free_allocations_.back();
+    address aligned_addr = nullptr;
+    size_t usable_size = 0;
+    if (newest.device_ == device &&
+        FreeBlockFits(newest, size, alignment, &aligned_addr, &usable_size)) {
+      return TakeFreeBlock(free_allocations_.size() - 1, aligned_addr, usable_size);
+    }
+  }
+
+  size_t best_index = free_allocations_.size();
+  size_t best_size = std::numeric_limits<size_t>::max();
+  address best_addr = nullptr;
+  size_t best_usable_size = 0;
+  for (size_t i = 0; i < free_allocations_.size(); ++i) {
+    const auto& block = free_allocations_[i];
+    if (block.device_ != device) {
+      continue;
+    }
+    address aligned_addr = nullptr;
+    size_t usable_size = 0;
+    if (FreeBlockFits(block, size, alignment, &aligned_addr, &usable_size) &&
+        usable_size < best_size) {
+      best_index = i;
+      best_size = usable_size;
+      best_addr = aligned_addr;
+      best_usable_size = usable_size;
+    }
+  }
+  if (best_index != free_allocations_.size()) {
+    return TakeFreeBlock(best_index, best_addr, best_usable_size);
+  }
+  return nullptr;
+}
+
+address GraphKernelArgManager::AllocKernArgFromCurrentPool(size_t size, size_t alignment,
+                                                           amd::Device* device) {
   auto& device_pools = kernarg_graph_[device];
   if (device_pools.empty()) {
     return nullptr;
   }
 
   auto& current_pool = device_pools.back();
-  // Calculate aligned address for the allocation
-  address aligned_addr = amd::alignUp(current_pool.kernarg_pool_addr_ + current_pool.kernarg_pool_offset_, alignment);
-  const size_t new_pool_usage = (aligned_addr + size) - current_pool.kernarg_pool_addr_;
-
-  // Check if allocation fits in current pool
-  if (new_pool_usage <= current_pool.kernarg_pool_size_) {
-    current_pool.kernarg_pool_offset_ = new_pool_usage;
-    return aligned_addr;
-  }
-
-  // Current pool is full - allocate a new pool with the same size
-  if (!AllocGraphKernargPool(current_pool.kernarg_pool_size_, device)) {
+  const address aligned_addr =
+      amd::alignUp(current_pool.kernarg_pool_addr_ + current_pool.kernarg_pool_offset_, alignment);
+  const size_t leading_space =
+      static_cast<size_t>(aligned_addr - current_pool.kernarg_pool_addr_);
+  if (leading_space > current_pool.kernarg_pool_size_ ||
+      size > current_pool.kernarg_pool_size_ - leading_space) {
     return nullptr;
   }
 
-  // Recursively allocate from the new pool
-  return AllocKernArg(size, alignment, devId);
+  current_pool.kernarg_pool_offset_ = leading_space + size;
+  if (capture_owner_ != nullptr) {
+    capture_allocations_.emplace_back(aligned_addr, size, device);
+  }
+  return aligned_addr;
+}
+
+address GraphKernelArgManager::AllocKernArg(size_t size, size_t alignment, int devId) {
+  if (size == 0) {
+    return nullptr;
+  }
+
+  assert(alignment != 0 && "Alignment must be non-zero");
+  amd::Device* device = g_devices[devId]->devices()[0];
+  std::lock_guard<std::mutex> lock(allocation_lock_);
+
+  if (capture_owner_ != nullptr) {
+    address allocation = AllocKernArgFromFreeList(size, alignment, device);
+    if (allocation != nullptr) {
+      return allocation;
+    }
+  }
+
+  auto& device_pools = kernarg_graph_[device];
+  if (device_pools.empty()) {
+    return nullptr;
+  }
+
+  address allocation = AllocKernArgFromCurrentPool(size, alignment, device);
+  if (allocation != nullptr) {
+    return allocation;
+  }
+
+  const size_t alignment_padding = alignment - 1;
+  if (size > std::numeric_limits<size_t>::max() - alignment_padding) {
+    return nullptr;
+  }
+  const size_t new_pool_size =
+      std::max(device_pools.back().kernarg_pool_size_, size + alignment_padding);
+  if (!AllocGraphKernargPool(new_pool_size, device)) {
+    return nullptr;
+  }
+  return AllocKernArgFromCurrentPool(size, alignment, device);
 }
 
 void GraphKernelArgManager::ReadBackOrFlush() {

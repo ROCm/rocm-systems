@@ -306,12 +306,18 @@ union CopyMetadata {
 class GraphKernelArgManager {
  public:
   virtual address AllocKernArg(size_t size, size_t alignment, int devId) = 0;
+  virtual void SnapshotKernarg(address addr, size_t size) = 0;
 };
 
+constexpr size_t kGraphAqlPacketSize = 64;
+constexpr size_t kGraphMetadataPacketSize = 4 * kGraphAqlPacketSize;
+
 struct GraphKernargSlot {
-  address addr;
-  size_t size;
-  int devId;
+  address addr = nullptr;
+  size_t size = 0;
+  int devId = -1;
+  //! First launch ID that could reference a packet using this slot generation.
+  uint64_t first_launch_id_ = 0;
 };
 
 struct GraphPacketCaptureContext {
@@ -414,7 +420,7 @@ class Command : public Event {
       (*reusablePackets)[packetIndex] = nullptr;
     }
     if (packet == nullptr) {
-      packet = new uint8_t[64];
+      packet = new uint8_t[kGraphAqlPacketSize];
     }
     gpuPackets.push_back(packet);
     return packet;
@@ -436,10 +442,11 @@ class Command : public Event {
       (*reusablePackets)[packetIndex] = nullptr;
     }
     if (packet == nullptr) {
-      packet = new uint8_t[256];
+      packet = new uint8_t[kGraphMetadataPacketSize];
     }
-    memset(packet, 0, 256);
-    static constexpr size_t kHdrOff[4] = {0, 64, 128, 192};
+    memset(packet, 0, kGraphMetadataPacketSize);
+    static constexpr size_t kHdrOff[4] = {
+        0, kGraphAqlPacketSize, 2 * kGraphAqlPacketSize, 3 * kGraphAqlPacketSize};
     static constexpr uint32_t kInvalidMetadataHeader = 1;  // HSA_PACKET_TYPE_INVALID
     for (size_t h = 0; h < 4; ++h) {
       memcpy(packet + kHdrOff[h], &kInvalidMetadataHeader, sizeof(kInvalidMetadataHeader));
@@ -460,6 +467,7 @@ class Command : public Event {
       GraphKernargSlot& slot = (*kernargSlots)[slotIndex];
       if (slot.addr != nullptr && slot.devId == devId && slot.size >= static_cast<size_t>(size) &&
           reinterpret_cast<uintptr_t>(slot.addr) % alignment == 0) {
+        graphCapture_->kernArgMgr->SnapshotKernarg(slot.addr, static_cast<size_t>(size));
         return slot.addr;
       }
     }
