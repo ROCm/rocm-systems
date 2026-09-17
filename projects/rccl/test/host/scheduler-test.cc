@@ -23,9 +23,7 @@
 #include "fakes/scheduler_fakes.h"
 #include "fakes/sym_kernels_fakes.h"
 
-// ENABLE_WARP_SPEED is a binary-wide compile definition (test/host/CMakeLists.txt), not defined here: this TU
-// shares struct ncclComm with dev-runtime-test.cc's real dev_runtime.cc, and a per-TU #define would be an ODR
-// violation the moment cross-TU code (like ncclDevrInitOnce) touches a WarpSpeed-conditional field.
+// ENABLE_WARP_SPEED is binary-wide (CMakeLists.txt), not per-TU -- a per-TU #define would ODR-violate ncclComm with dev-runtime-test.cc.
 
 // Hipify renames the allgatherv one to *_tmp.cc: src/enqueue/task_sched/allgatherv_sched.cc has the basename.
 #include ALLGATHERV_SCHED_CC_PATH
@@ -953,9 +951,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TaskIsNull_SkipsDevrInitOnceAnd
   EXPECT_EQ(remainTasksHead, nullptr);
 }
 
-// ncclDevrInitOnce is real dev_runtime.cc code (dev-runtime-test.cc compiles the real dev_runtime.cc into this
-// same binary), not a stub -- promoting it would be wrong. Real cross-TU calls into it are safe now that
-// ENABLE_WARP_SPEED is a binary-wide compile definition (test/host/CMakeLists.txt), not a per-TU #define.
+// ncclDevrInitOnce is real dev_runtime.cc code (linked in via dev-runtime-test.cc), safe to call now that ENABLE_WARP_SPEED is binary-wide.
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TaskNotNull_CallsRealDevrInitOnceAndPropagatesItsError) {
   MakeSymmetricTaskList_Scene scene;
   scene.comm->symmetricSupport = true;
@@ -1880,8 +1876,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_KernelIdCount
   EXPECT_EQ(scene.comm->planner.nTasksColl, 5);
 }
 
-// Block 7's wantSym gate is the only writer of task->winRegType, so it's always ncclSymSendRegRecvReg here,
-// never ncclSymSendNonregRecvNonreg: the LL-kernel-init check's whole && is provably always false.
+// task->winRegType is always ncclSymSendRegRecvReg here (Block 7's wantSym gate is its only writer), so this && is provably always false.
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_LLKernelInit_NeverCalled_BecauseWinRegTypeIsAlwaysRegRecvReg) {
   MakeSymmetricTaskList_Scene scene;
   g_symRegType = ncclSymSendRegRecvReg;

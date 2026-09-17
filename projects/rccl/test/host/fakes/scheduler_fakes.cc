@@ -74,17 +74,14 @@ static ncclResult_t DefaultGetRegBuff(struct ncclComm*, struct ncclTaskColl*, in
 }
 std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getRegBuff = DefaultGetRegBuff;
 
-// Minimal, deliberately trivial default (block 9's job to make this a rich, scenario-driven seam): leaves
-// *result untouched, so the caller's own NCCL_TUNING_RESULT_INIT (symKernelId=ncclSymkKernelId_Count) stands,
-// i.e. "no symmetric kernel found" -- the one outcome reachable without also faking the kernel-table lookups.
+// Deliberately trivial: leaves *result untouched, so the caller's NCCL_TUNING_RESULT_INIT default stands as "no kernel found".
 static ncclResult_t DefaultTuningCompute(struct ncclTuningInput_t*, struct ncclTuningResult_t*) {
   return ncclSuccess;
 }
 std::function<ncclResult_t(struct ncclTuningInput_t*, struct ncclTuningResult_t*)> g_tuningCompute =
     DefaultTuningCompute;
 
-// No bits set: a "kernel found" test never touches the LL-kernel-init-once check (Block 10's territory, not
-// designed here) regardless of which kernelId g_tuningCompute reports.
+// No bits set by default, so the LL-kernel-init-once check never fires regardless of which kernelId g_tuningCompute reports.
 static int DefaultSymkLLKernelMask() { return 0; }
 std::function<int()> g_symkLLKernelMask = DefaultSymkLLKernelMask;
 
@@ -177,9 +174,7 @@ void* ncclSymkKernelList[1] = {nullptr};
 void* ncclSymkKernelListProfile[1] = {nullptr};
 int ncclSymkKernelMaxDynamicSmem[1] = {0};
 
-// src/config/algorithm_registry.cc
-// INFO()'s macro guard only evaluates this when logging is actually enabled, so it's reachable from a test
-// that turns on NCCL_LOG_INFO to verify the INFO call fires; a fixed name is all that call site ever needs.
+// src/config/algorithm_registry.cc: a fixed name is fine since INFO()'s macro guard only evaluates this when logging is on.
 const char* ncclAlgNameForSymk(int) { return "sym-kernel"; }
 
 // src/tuning/tuning.cc
