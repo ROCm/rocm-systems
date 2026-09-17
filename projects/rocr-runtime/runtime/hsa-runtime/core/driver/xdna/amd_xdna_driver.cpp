@@ -2159,9 +2159,18 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
   // chains have been submitted and waited on, and on every early return in between. A PDI +
   // instruction sequence batch allocates none.
   std::vector<DeviceBuffer> ctrl_buffers;
+  // One per full-ELF packet, so the final size is known here. A PDI + instruction sequence batch
+  // allocates none, hence the condition. The guard below holds the vector, not its elements, so
+  // growth would be safe either way -- this is to avoid the reallocations, not to make it correct.
+  if (mode == AieKernelKind::FullElf) {
+    ctrl_buffers.reserve(num_pkts);
+  }
   MAKE_SCOPE_GUARD([&] { FreeDeviceBuffers(&ctrl_buffers); });
 
-  // Instruction and arguments BOs (performance hint: up to 3 argument BOs per packet).
+  // BO handles listed per packet: the instruction sequence (PDI + insts) or the control code and
+  // the PDI (full ELF), plus one per kernarg. So 2 + num_kernargs is the per-packet worst case,
+  // and this covers it for the two-argument designs in hand. A kernel with more arguments than
+  // that reallocates -- a hint, not a bound, since a batch's packets need not agree on it.
   std::vector<uint32_t> bo_handles;
   bo_handles.reserve(num_pkts * 4);
 
