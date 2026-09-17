@@ -62,6 +62,28 @@ std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, struct nccl
 static bool DefaultSymkAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; }
 std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t)> g_symkAvailable = DefaultSymkAvailable;
 
+// Generous default: no real collnet/registration to report, matching a plain host-only comm.
+static ncclResult_t DefaultGetCollNetSupport(struct ncclComm*, struct ncclTaskColl*, int* out) {
+  if (out) *out = 0;
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getCollNetSupport =
+    DefaultGetCollNetSupport;
+static ncclResult_t DefaultGetRegBuff(struct ncclComm*, struct ncclTaskColl*, int* out) {
+  if (out) *out = 0;
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getRegBuff = DefaultGetRegBuff;
+
+// Minimal, deliberately trivial default (block 9's job to make this a rich, scenario-driven seam): leaves
+// *result untouched, so the caller's own NCCL_TUNING_RESULT_INIT (symKernelId=ncclSymkKernelId_Count) stands,
+// i.e. "no symmetric kernel found" -- the one outcome reachable without also faking the kernel-table lookups.
+static ncclResult_t DefaultTuningCompute(struct ncclTuningInput_t*, struct ncclTuningResult_t*) {
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclTuningInput_t*, struct ncclTuningResult_t*)> g_tuningCompute =
+    DefaultTuningCompute;
+
 void ResetSchedulerFakes() {
   g_testBudget = DefaultTestBudget;
   g_testBudgetCalls = 0;
@@ -70,6 +92,9 @@ void ResetSchedulerFakes() {
   g_addWorkBatchToPlan = DefaultAddWorkBatchToPlan;
   g_addProxyOpIfNeeded = DefaultAddProxyOpIfNeeded;
   g_symkAvailable = DefaultSymkAvailable;
+  g_getCollNetSupport = DefaultGetCollNetSupport;
+  g_getRegBuff = DefaultGetRegBuff;
+  g_tuningCompute = DefaultTuningCompute;
   ncclDevFuncNameToId.clear();
 }
 
@@ -89,11 +114,11 @@ void ncclPlanSetDefaultKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
 ncclResult_t ncclAddProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelPlan* plan, struct ncclProxyOp* op) {
   return g_addProxyOpIfNeeded(comm, plan, op);
 }
-ncclResult_t ncclGetCollNetSupport(struct ncclComm*, struct ncclTaskColl*, int*) {
-  FailLoudUnfaked("scheduler_fakes", "ncclGetCollNetSupport");
+ncclResult_t ncclGetCollNetSupport(struct ncclComm* comm, struct ncclTaskColl* task, int* out) {
+  return g_getCollNetSupport(comm, task, out);
 }
-ncclResult_t ncclGetRegBuff(struct ncclComm*, struct ncclTaskColl*, int*) {
-  FailLoudUnfaked("scheduler_fakes", "ncclGetRegBuff");
+ncclResult_t ncclGetRegBuff(struct ncclComm* comm, struct ncclTaskColl* task, int* out) {
+  return g_getRegBuff(comm, task, out);
 }
 
 // Generated device-function table; empty default matches nccl_stubs.cc's own (a miss returns -1 with a WARN).
@@ -122,8 +147,8 @@ int ncclSymkKernelMaxDynamicSmem[1] = {0};
 const char* ncclAlgNameForSymk(int) { FailLoudUnfaked("scheduler_fakes", "ncclAlgNameForSymk"); }
 
 // src/tuning/tuning.cc
-ncclResult_t ncclTuningCompute(struct ncclTuningInput_t*, struct ncclTuningResult_t*) {
-  FailLoudUnfaked("scheduler_fakes", "ncclTuningCompute");
+ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* input, struct ncclTuningResult_t* result) {
+  return g_tuningCompute(input, result);
 }
 
 // src/plugin/profiler.cc; not fail-loud since "no plugin loaded" is simply true here (matches nccl_stubs.cc).

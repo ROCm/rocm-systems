@@ -1254,3 +1254,146 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ConsensusOneDisagrees_WantSymFl
   EXPECT_EQ(task.next, nullptr);
 }
 
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ArgsSizeGuard_TooSmall_ReturnsInternalErrorWithWarnLog) {
+  MakeSymmetricTaskList_Scene scene;
+  g_symRegType = ncclSymSendRegRecvReg;
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+  task.datatype = ncclInt8;
+  scene.comm->workArgsBytes = 0;  // deliberately below calcArgsSize(MAXCHANNELS, 1, false)'s minimum
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+  ncclResult_t result = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { result = ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead); });
+
+  EXPECT_EQ(result, ncclInternalError);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "Symmetric kernel args size"));
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ArgsSizeGuard_SufficientlyLarge_ProceedsPastGuardAndCompletes) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->planner.nTasksColl = 5;
+  g_symRegType = ncclSymSendRegRecvReg;
+  ncclTaskColl task{};
+  task.func = ncclFuncBroadcast;
+  task.datatype = ncclInt8;
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 1, false));
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  // g_tuningCompute's default reports "no kernel found", so this batch safely falls back to the remainder.
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(task.isSymLast, 1);  // single task in its bucket: task->next==nullptr disjunct
+  EXPECT_EQ(remainTasksHead, &task);
+  EXPECT_EQ(task.next, nullptr);
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 5);  // classification--'d then fallback++'d: round-trips to original
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_OuterCursorLoop_VisitsEveryDistinctBucket) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->planner.nTasksColl = 5;
+  g_symRegType = ncclSymSendRegRecvReg;
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 1, false));
+
+  ncclTaskColl task2{};
+  task2.func = ncclFuncAllGather;  // distinct bucket from task1 (different func)
+  task2.datatype = ncclInt8;
+  ncclTaskColl task1{};
+  task1.func = ncclFuncBroadcast;
+  task1.datatype = ncclInt8;
+  task1.next = &task2;  // separate single-task buckets: no LIFO reordering to reason about
+
+  struct ncclTaskColl* remainTasksHead = nullptr;
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task1, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(task1.isSymLast, 1);  // only true if the cursor loop actually visited task1's bucket
+  EXPECT_EQ(task2.isSymLast, 1);  // ...and task2's bucket too, proving both cursor iterations ran
+  EXPECT_EQ(remainTasksHead, &task1);  // cursor order follows first-time bucket creation order
+  EXPECT_EQ(task1.next, &task2);
+  EXPECT_EQ(task2.next, nullptr);
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 5);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ConfigBoundary_ForcesEarlyIsSymLastDespiteRoom) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->planner.nTasksColl = 5;
+  g_symRegType = ncclSymSendRegRecvReg;
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
+
+  ncclTaskColl task1{};  // classified first -> becomes the bucket's tail (processed second by Block 8)
+  task1.func = ncclFuncBroadcast;
+  task1.datatype = ncclInt8;
+  ncclTaskColl task2{};  // classified second -> becomes the bucket's head (processed first by Block 8)
+  task2.func = ncclFuncBroadcast;
+  task2.datatype = ncclInt8;
+  task2.aggIsolate = true;  // configBoundary fires via THIS (current, first-processed) task's own flag
+  task1.next = &task2;      // classification input order: task1 then task2 (LIFO reverses processing order)
+
+  struct ncclTaskColl* remainTasksHead = nullptr;
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task1, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(task2.isSymLast, 1);  // ends its own singleton batch despite task2.next(=task1)!=nullptr and no budget
+  EXPECT_EQ(task1.isSymLast, 1);  // separate, later batch: ends naturally (task1.next==nullptr)
+  EXPECT_EQ(remainTasksHead, &task2);  // task2's batch is processed (and falls back) before task1's
+  EXPECT_EQ(task2.next, &task1);
+  EXPECT_EQ(task1.next, nullptr);
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 5);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ConfigBoundary_NextTaskIsolated_AlsoEndsBatch) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->planner.nTasksColl = 5;
+  g_symRegType = ncclSymSendRegRecvReg;
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
+
+  ncclTaskColl task1{};  // classified first -> tail (processed second): its OWN aggIsolate isolates it too
+  task1.func = ncclFuncBroadcast;
+  task1.datatype = ncclInt8;
+  task1.aggIsolate = true;
+  ncclTaskColl task2{};  // classified second -> head (processed first): ends here only because task1 (its
+  task2.func = ncclFuncBroadcast;  // Block-8-processing-order .next) is isolated -- task2 itself is not.
+  task2.datatype = ncclInt8;
+  task1.next = &task2;
+
+  struct ncclTaskColl* remainTasksHead = nullptr;
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task1, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(task2.isSymLast, 1);  // configBoundary via task->next->aggIsolate, the OR's short-circuited half
+  EXPECT_EQ(task1.isSymLast, 1);  // task1's own aggIsolate then isolates its own (separate) singleton batch
+  EXPECT_EQ(remainTasksHead, &task2);
+  EXPECT_EQ(task2.next, &task1);
+  EXPECT_EQ(task1.next, nullptr);
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 5);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ArgsSizeBudgetExhausted_SplitsIntoTwoBatches) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->planner.nTasksColl = 5;
+  g_symRegType = ncclSymSendRegRecvReg;
+  // Room for exactly 2 works per batch, not 3: forces a break after the 2nd task of a 3-task bucket.
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 2, false));
+
+  // Bucket is LIFO (last classified = head = first processed), so classify taskThird, taskSecond, taskFirst.
+  ncclTaskColl taskFirst{};
+  taskFirst.func = ncclFuncBroadcast;
+  taskFirst.datatype = ncclInt8;
+  ncclTaskColl taskSecond{};
+  taskSecond.func = ncclFuncBroadcast;
+  taskSecond.datatype = ncclInt8;
+  taskSecond.next = &taskFirst;
+  ncclTaskColl taskThird{};
+  taskThird.func = ncclFuncBroadcast;
+  taskThird.datatype = ncclInt8;
+  taskThird.next = &taskSecond;
+
+  struct ncclTaskColl* remainTasksHead = nullptr;
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &taskThird, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(taskFirst.isSymLast, 0);   // continues: room remains and neither next==nullptr nor configBoundary
+  EXPECT_EQ(taskSecond.isSymLast, 1);  // budget for a 3rd work would exceed workArgsBytes: batch ends here
+  EXPECT_EQ(taskThird.isSymLast, 1);   // new batch (outer while(task!=NULL) re-enters): ends naturally
+  // Remainder order matches Block 8's own processing order: {taskFirst, taskSecond} first, {taskThird} second.
+  EXPECT_EQ(remainTasksHead, &taskFirst);
+  EXPECT_EQ(taskFirst.next, &taskSecond);
+  EXPECT_EQ(taskSecond.next, &taskThird);
+  EXPECT_EQ(taskThird.next, nullptr);
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 5);  // 3 classification-- + 3 fallback++ round-trips to original
+}
+

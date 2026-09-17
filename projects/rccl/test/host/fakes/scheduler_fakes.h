@@ -20,6 +20,8 @@ struct ncclTaskColl;
 struct ncclKernelPlan;
 struct ncclKernelPlanBudget;
 struct ncclProxyOp;
+struct ncclTuningInput_t;
+struct ncclTuningResult_t;
 enum ncclDevWorkType : uint8_t;
 
 // enqueue.cc's ncclTestBudget (real seam: tests drive the batch-size stopping condition directly).
@@ -44,6 +46,13 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, stru
 
 // sym_kernels.cc's ncclSymkAvailable: default reports every (func, redOp, dtype, count) as symmetric-eligible.
 extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t)> g_symkAvailable;
+
+// enqueue.cc's ncclGetCollNetSupport/ncclGetRegBuff: default reports neither is available.
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getCollNetSupport;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getRegBuff;
+
+// tuning.cc's ncclTuningCompute: default leaves *result untouched (caller's ncclSymkKernelId_Count init stands).
+extern std::function<ncclResult_t(struct ncclTuningInput_t*, struct ncclTuningResult_t*)> g_tuningCompute;
 
 void ResetSchedulerFakes();
 
