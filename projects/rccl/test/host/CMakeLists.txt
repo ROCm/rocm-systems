@@ -52,9 +52,7 @@ set(RCCL_MICRO_TEST_SOURCES
   devcomm-test.cc
   wrap-test.cc                         # rccl_wrap.cc microtests (AICOMRCCL-2195)
   dev-runtime-test.cc                  # src/dev_runtime.cc (symmetric memory, windows, devcomm)
-  scheduler-test.cc                    # src/scheduler/*.cc (allgatherv + symmetric schedulers)
   fakes/dev_runtime_micro_fakes.cc     # dev_runtime's non-HIP externs (shadow pool, space, gin, rma)
-  fakes/scheduler_fakes.cc             # scheduler.cc's own externals not faked elsewhere
   fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
   fakes/libc_fakes.cc                  # libc seams (sockets/stdio/exit) for libc-only units
   fakes/ras_param_fakes.cc             # src/ras/ras_param.cc timeout scaling
@@ -119,9 +117,6 @@ if(BUILD_TESTS)
     ${PROJECT_BINARY_DIR}/hipify/src/devcomm   # devcomm_v22902.h, included unqualified
     ${RCCL_COMMON_INCLUDE_DIRS})
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
-  # Binary-wide, not a per-TU #define: dev-runtime-test.cc compiles real dev_runtime.cc into this same
-  # binary, so every TU must agree on struct ncclComm's layout or it's an ODR violation across TUs.
-  target_compile_definitions(rccl-UnitTestsMicro PRIVATE ENABLE_WARP_SPEED)
 
   # Mirrors the opt-out in test/CMakeLists.txt, whose loop does not reach this target.
   # Inheriting ENABLE_ROCSHMEM_GIN defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1, which pulls
@@ -161,9 +156,6 @@ if(BUILD_TESTS)
     RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
     DEV_RUNTIME_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime.cc"
     DEV_RUNTIME_SEGMENTS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime_segments.cc"
-    # Hipify renames this to *_tmp.cc: src/enqueue/task_sched/allgatherv_sched.cc keeps the basename instead.
-    ALLGATHERV_SCHED_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/scheduler/allgatherv_sched_tmp.cc"
-    SYMMETRIC_SCHED_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/scheduler/symmetric_sched.cc"
   )
 
   # Make sure the hipify step has run before trying to compile the test.
@@ -224,6 +216,128 @@ if(BUILD_TESTS)
       )
     else()
       message(WARNING "Skipping test categories for rccl-UnitTestsMicro: missing ${_micro_categories_yaml}")
+    endif()
+  endif()
+
+  # ---------------------------------------------------------------------------
+  # rccl-UnitTestsMicroScheduler -- host-only microtests for src/scheduler/*.cc
+  # (allgatherv + symmetric schedulers). Its own binary, not shared with
+  # rccl-UnitTestsMicro: scheduler-test.cc's MAXCHANNELS-sized test scenarios
+  # need ENABLE_WARP_SPEED, which must be binary-wide (every TU that touches
+  # struct ncclComm has to agree on its layout). Giving it a dedicated binary
+  # means that requirement no longer reaches the other ~8 unrelated TUs that
+  # used to share rccl-UnitTestsMicro with it.
+  #
+  # ncclDevrInitOnce/ncclDevrFindWindow are faked here (fakes/dev_runtime_fakes.cc
+  # + the g_devrInitOnce seam added there) rather than compiling the real
+  # dev_runtime.cc in, as dev-runtime-test.cc does. Investigated compiling the
+  # real file instead (option (a) in the design discussion): it would have kept
+  # ENABLE_WARP_SPEED needed here too, just scoped to two TUs instead of ten.
+  # Rejected because the value it preserved was marginal: ncclDevrFindWindow
+  # can only ever return ncclSuccess against a fresh comm (dead code path for
+  # its own error arm), and ncclDevrInitOnce's real error path (symmetricSupport
+  # set, peerInfo null) is already covered directly and thoroughly by
+  # dev-runtime-test.cc's own suite; scheduler-test.cc's two tests were only
+  # ever proving ncclMakeSymmetricTaskList's own NCCLCHECK propagates whatever
+  # ncclDevrInitOnce returns, which a fake proves just as well and more
+  # directly. Not needing the real file also means this binary needs none of
+  # dev_runtime.cc's own dependency floor (fakes/dev_runtime_micro_fakes.cc),
+  # matching the bootstrap_stubs.cc + dev_runtime_fakes.cc pairing every other
+  # target that does not compile dev_runtime.cc for real already uses.
+  # ---------------------------------------------------------------------------
+  set(TEST_MICRO_SCHEDULER_SOURCE_FILES
+    scheduler-test.cc
+    fakes/scheduler_fakes.cc             # allgatherv_sched.cc/symmetric_sched.cc's own externals
+    fakes/bootstrap_stubs.cc
+    fakes/topo_stubs.cc
+    fakes/transport_stubs.cc
+    fakes/nccl_stubs.cc
+    fakes/nccl_fakes.cc
+    fakes/hip_fakes.cc
+    # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
+    fakes/ce_fakes.cc                    # src/ce_coll.cc
+    fakes/collectives_fakes.cc           # src/collectives.cc name tables/helpers
+    fakes/comm_fakes.cc                  # src/init.cc comm lifecycle
+    fakes/dev_runtime_fakes.cc           # src/dev_runtime.cc (window seams + g_devrInitOnce)
+    fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
+    fakes/os_fakes.cc                    # src/os/linux.cc aligned alloc
+    fakes/proxy_fakes.cc                 # src/proxy.cc
+    fakes/rccl_wrap_fakes.cc             # src/rccl_wrap.cc
+    fakes/recorder_fakes.cc              # src/recorder.cc
+    fakes/register_stubs.cc              # src/register/*.cc
+    fakes/strongstream_stubs.cc          # src/misc/strongstream.cc
+    fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc
+    fakes/tuning_fakes.cc                # src/graph/tuning.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc  # real IsArchMatch
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc     # real busId/hash helpers
+    ../common/main_altrsmi.cpp
+  )
+  set_source_files_properties(
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc
+    PROPERTIES GENERATED TRUE)
+
+  add_executable(rccl-UnitTestsMicroScheduler ${TEST_MICRO_SCHEDULER_SOURCE_FILES})
+  target_include_directories(rccl-UnitTestsMicroScheduler PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${RCCL_COMMON_INCLUDE_DIRS})
+  target_compile_definitions(rccl-UnitTestsMicroScheduler PRIVATE
+    ${RCCL_COMMON_COMPILE_DEFS}
+    ENABLE_WARP_SPEED
+    # scheduler_fakes.cc owns controllable versions of both instead of nccl_stubs.cc's fixed floor.
+    RCCL_STUBS_OMIT_ncclProfilerPluginLoaded
+    RCCL_STUBS_OMIT_ncclDevFuncNameToId
+    # Hipify renames this to *_tmp.cc: src/enqueue/task_sched/allgatherv_sched.cc keeps the basename instead.
+    ALLGATHERV_SCHED_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/scheduler/allgatherv_sched_tmp.cc"
+    SYMMETRIC_SCHED_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/scheduler/symmetric_sched.cc")
+
+  if(ENABLE_ROCSHMEM_GIN)
+    target_compile_definitions(rccl-UnitTestsMicroScheduler PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
+  endif()
+
+  # HIP compile requirements without linking the runtime (see rccl-UnitTestsMicro).
+  foreach(_hip_tgt hip::host hip::device)
+    if(TARGET ${_hip_tgt})
+      target_include_directories(rccl-UnitTestsMicroScheduler PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+      target_compile_definitions(rccl-UnitTestsMicroScheduler PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
+      target_compile_options(rccl-UnitTestsMicroScheduler PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
+    endif()
+  endforeach()
+  target_link_libraries(rccl-UnitTestsMicroScheduler PRIVATE ${MICRO_TEST_LINK_LIBS})
+  add_dependencies(rccl-UnitTestsMicroScheduler hipify_all copy_nccl_device_headers)
+  target_compile_options(rccl-UnitTestsMicroScheduler PRIVATE
+    --offload-host-only -ffunction-sections
+    -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(rccl-UnitTestsMicroScheduler PRIVATE
+    -no-hip-rt
+    -fprofile-instr-generate -fcoverage-mapping
+    -Wl,--gc-sections)
+  if(BUILD_ADDRESS_SANITIZER)
+    target_compile_options(rccl-UnitTestsMicroScheduler PRIVATE -fsanitize=address)
+    target_link_options(rccl-UnitTestsMicroScheduler PRIVATE -fsanitize=address -shared-libasan)
+    if(DEFINED ASAN_RUNTIME_DIR)
+      target_link_options(rccl-UnitTestsMicroScheduler PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+    endif()
+  endif()
+  rocm_install(TARGETS rccl-UnitTestsMicroScheduler COMPONENT tests)
+  if(COMMAND apply_test_category_labels)
+    set(_scheduler_categories_yaml
+        "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_scheduler.yaml")
+    if(EXISTS "${_scheduler_categories_yaml}")
+      message(STATUS "Applying test categories for rccl-UnitTestsMicroScheduler")
+      apply_test_category_labels(
+        rccl-UnitTestsMicroScheduler
+        "${_scheduler_categories_yaml}"
+        "${PROJECT_BINARY_DIR}"
+        "${INSTALL_TEST_FILE}"
+      )
+    else()
+      message(WARNING "Skipping test categories for rccl-UnitTestsMicroScheduler: missing ${_scheduler_categories_yaml}")
     endif()
   endif()
 
@@ -841,9 +955,6 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   __HIP_PLATFORM_AMD__
   NCCL_OS_LINUX
   ROCM_VERSION=70000
-  # Binary-wide, not a per-TU #define: dev-runtime-test.cc compiles real dev_runtime.cc into this same
-  # binary, so every TU must agree on struct ncclComm's layout or it's an ODR violation across TUs.
-  ENABLE_WARP_SPEED
   P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
   RAS_CLIENT_CC_PATH="${RCCL_HIPIFY_DIR}/src/ras/client.cc"
   RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
@@ -854,8 +965,6 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
   DEV_RUNTIME_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime.cc"
   DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime_segments.cc"
-  ALLGATHERV_SCHED_CC_PATH="${RCCL_HIPIFY_DIR}/src/scheduler/allgatherv_sched_tmp.cc"
-  SYMMETRIC_SCHED_CC_PATH="${RCCL_HIPIFY_DIR}/src/scheduler/symmetric_sched.cc"
   # Same fallback-vs-runtime conflicts the host target guards against: without
   # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
   # enumerators on ROCm 7.14+, and the standalone build fails.
@@ -873,6 +982,65 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
 # rccl-UnitTestsMicroInit's rationale for the same flag.
 target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -no-pie -Wl,--gc-sections)
 target_link_libraries(rccl-UnitTestsMicro PRIVATE
+  GTest::GTest
+  Threads::Threads
+  fmt::fmt-header-only
+)
+
+# --- Standalone scheduler micro-test binary -----------------------------
+# rccl-UnitTestsMicroScheduler -- see the in-build block for the rationale
+# behind the separate binary, ENABLE_WARP_SPEED, and the dev_runtime.cc fakes
+# vs real-compile decision.
+set(TEST_MICRO_SCHEDULER_SOURCE_FILES
+  ${CMAKE_CURRENT_SOURCE_DIR}/scheduler-test.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/scheduler_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/transport_stubs.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_stubs.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/hip_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/ce_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/collectives_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/comm_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/dev_runtime_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/env_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/os_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/proxy_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/rccl_wrap_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/recorder_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/register_stubs.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/strongstream_stubs.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/sym_kernels_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/tuning_fakes.cc
+  ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc
+  ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
+  ${RCCL_HIPIFY_DIR}/src/misc/utils.cc
+  ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
+)
+
+add_test_executable(rccl-UnitTestsMicroScheduler ${TEST_MICRO_SCHEDULER_SOURCE_FILES})
+target_compile_options(rccl-UnitTestsMicroScheduler PRIVATE
+  -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
+target_include_directories(rccl-UnitTestsMicroScheduler PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${RCCL_INCLUDE_DIRS}
+)
+target_compile_definitions(rccl-UnitTestsMicroScheduler PRIVATE
+  __HIP_PLATFORM_AMD__
+  NCCL_OS_LINUX
+  ROCM_VERSION=70000
+  ENABLE_WARP_SPEED
+  RCCL_STUBS_OMIT_ncclProfilerPluginLoaded
+  RCCL_STUBS_OMIT_ncclDevFuncNameToId
+  ALLGATHERV_SCHED_CC_PATH="${RCCL_HIPIFY_DIR}/src/scheduler/allgatherv_sched_tmp.cc"
+  SYMMETRIC_SCHED_CC_PATH="${RCCL_HIPIFY_DIR}/src/scheduler/symmetric_sched.cc"
+  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
+  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
+)
+target_link_options(rccl-UnitTestsMicroScheduler PRIVATE -no-hip-rt -Wl,--gc-sections)
+target_link_libraries(rccl-UnitTestsMicroScheduler PRIVATE
   GTest::GTest
   Threads::Threads
   fmt::fmt-header-only

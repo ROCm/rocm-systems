@@ -29,13 +29,10 @@
 // rcclGetCollImplInfo, and rcclSymkQuery/rcclSymKGetInfo's deep post-guard
 // path.
 //
-// Documented residual: the WarpSpeed branches under #ifdef ENABLE_WARP_SPEED
-// ARE compiled into this binary (the flag is forced binary-wide across the
-// whole rccl-UnitTestsMicro target for ODR reasons unrelated to this file;
-// see test/host/CMakeLists.txt), but no seam here drives any of the several
-// task.useWarpSpeed / warpSpeedEnabled branches they add to rcclGetAlgoInfo,
-// rcclGetCollImplInfo, or the standalone rcclSetWarpSpeedCUs, so those
-// branches stay untested rather than out of scope by build configuration.
+// One deliberate, permanent exclusion: the WarpSpeed helpers under
+// #ifdef ENABLE_WARP_SPEED are not compiled into this binary at all (the
+// flag is off) -- no seam makes uncompiled code reachable, so this is out
+// of scope for this binary's build configuration, not a gap.
 //
 // Mutation-tested directly against this file; residuals and equivalent
 // mutants found along the way are documented at their own test below
@@ -1097,7 +1094,6 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx950ReduceScatterSmallSiz
         ncclTaskColl info{};
         info.func = ncclFuncReduceScatter;
         info.protocol = NCCL_PROTO_SIMPLE;
-        // ENABLE_WARP_SPEED is binary-wide here (CMakeLists.txt), so only the 131072 arm below is reachable.
 #if defined(ENABLE_WARP_SPEED)
         constexpr size_t kThreshold = 131072;
 #else
@@ -6025,11 +6021,9 @@ TEST(WrapMicrotest, OverrideChannels_UndefinedThresholdBreaksLoop) {
 // configurations under different ScopedDebugLogging contexts, close every
 // in-scope INFO call site's remaining arms. Direct-disabled and CTA-policy
 // configurations use separate isolated children because the disable parameter
-// is cached on first use. (rcclSetWarpSpeedCUs's two INFO call sites are
-// compiled in but unreached, since nothing here drives that function; see
-// this file's header comment for that broader WarpSpeed residual.
-// rcclUseAllGatherDirect's AINIC INFO call site at rccl_wrap.cc:724 is
-// reachable -- g_useAinic is a seam, driven by
+// is cached on first use. (ENABLE_WARP_SPEED's own INFO call sites are out of scope,
+// same as the rest of that cluster; rcclUseAllGatherDirect's AINIC INFO call
+// site at rccl_wrap.cc:724 is reachable -- g_useAinic is a seam, driven by
 // UseAllGatherDirect_AinicDisablesDirect -- but is not replayed by this
 // sweep, so its remaining logging arms stay a documented residual.)
 // ===========================================================================

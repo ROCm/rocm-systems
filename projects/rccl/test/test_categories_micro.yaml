@@ -22,7 +22,6 @@ test_categories:
       - "GroupEndInternalTest.*"
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
-      - "SchedulerMicrotest.*"
       # src/dev_runtime.cc (folded in from test_categories_micro_devruntime.yaml).
       # Prefix globs rather than named suites, so adding a suite to an existing
       # family does not silently fall out of CI gating. "Dev*" subsumes the

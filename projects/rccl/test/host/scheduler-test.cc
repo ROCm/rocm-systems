@@ -19,12 +19,13 @@
 
 #include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
-#include "fakes/dev_runtime_micro_fakes.h"
+#include "fakes/bootstrap_stubs.h"
+#include "fakes/dev_runtime_fakes.h"
 #include "fakes/scheduler_fakes.h"
 #include "fakes/sym_kernels_fakes.h"
 #include "fakes/tuning_fakes.h"
 
-// ENABLE_WARP_SPEED is binary-wide (CMakeLists.txt): per-TU would ODR-violate ncclComm vs dev-runtime-test.cc.
+// ENABLE_WARP_SPEED is this binary's own compile definition (CMakeLists.txt), not shared with any other TU.
 
 // Hipify renames the allgatherv one to *_tmp.cc: src/enqueue/task_sched/allgatherv_sched.cc has the basename.
 #include ALLGATHERV_SCHED_CC_PATH
@@ -200,7 +201,8 @@ class SchedulerMicrotest : public ::testing::Test {
   void TearDown() override {
     ResetSchedulerFakes();        // this file's own scheduler_fakes.{h,cc} seams
     ResetSymKernelsFakes();      // g_symRegType is a plain global, not a ScopedHook-restorable std::function
-    ResetDevRuntimeMicroFakes();  // covers g_devrBootstrapAllGather, reused here for real bootstrapAllGather
+    ResetBootstrapStubs();       // covers g_bootstrapAllGather
+    ResetDevRuntimeFakes();      // covers g_devrFindWindow/g_devrInitOnce/g_devrWindowHasSysmemSegment
     ResetTuningFakes();          // g_tuningCompute's canonical reset (its default is ncclSystemError, not success)
   }
 };
@@ -972,25 +974,23 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_TailLoop_PeerWithTwoQueuedTa
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TaskIsNull_SkipsDevrInitOnceAndReturnsSuccess) {
   MakeSymmetricTaskList_Scene scene;
-  // Canary: if ncclDevrInitOnce were wrongly invoked despite task==nullptr, this config makes it fail loudly.
-  scene.comm->symmetricSupport = true;
-  scene.comm->peerInfo = nullptr;
+  ScopedHook devrInitOnceHook(g_devrInitOnce, [](struct ncclComm*) { return ncclSuccess; });
   struct ncclTaskColl* remainTasksHead = reinterpret_cast<struct ncclTaskColl*>(0x1);
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), nullptr, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(devrInitOnceHook.calls, 0);  // task==nullptr: the guard must skip the call entirely
   EXPECT_EQ(remainTasksHead, nullptr);
 }
 
-// ncclDevrInitOnce is real dev_runtime.cc code (via dev-runtime-test.cc): safe now ENABLE_WARP_SPEED is shared.
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TaskNotNull_CallsRealDevrInitOnceAndPropagatesItsError) {
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TaskNotNull_CallsDevrInitOnceAndPropagatesItsError) {
   MakeSymmetricTaskList_Scene scene;
-  scene.comm->symmetricSupport = true;
-  scene.comm->peerInfo = nullptr;  // same canary as the task==nullptr test, but now task!=nullptr
+  ScopedHook devrInitOnceHook(g_devrInitOnce, [](struct ncclComm*) { return ncclInternalError; });
   ncclTaskColl task{};
   task.func = ncclFuncBroadcast;
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
+  EXPECT_EQ(devrInitOnceHook.calls, 1);
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_SymkAvailable_ReceivesTaskFieldsAndCorrectedSymkOp) {
@@ -1257,13 +1257,11 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TwoTasksSameOpAndDatatypeDiffer
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_NRanksTwoBootstrapNull_SkipsConsensusBlock) {
   MakeSymmetricTaskList_Scene scene;
   scene.comm->nRanks = 2;
-  std::vector<int> rankToNode(2, 0);  // computeLsaSize (via ncclDevrInitOnce) reads this whenever nRanks>=2
-  scene.comm->rankToNode = rankToNode.data();
   scene.comm->bootstrap = nullptr;  // half of the guard: consensus block must not run without this
   ncclTaskColl task{};
   task.func = ncclFuncBroadcast;
   ScopedHook symkHook(g_symkAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return false; });
-  ScopedHook bootstrapHook(g_devrBootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
+  ScopedHook bootstrapHook(g_bootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
@@ -1277,7 +1275,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_NRanksOneBootstrapNonNull_Skips
   ncclTaskColl task{};
   task.func = ncclFuncBroadcast;
   ScopedHook symkHook(g_symkAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return false; });
-  ScopedHook bootstrapHook(g_devrBootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
+  ScopedHook bootstrapHook(g_bootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
@@ -1288,8 +1286,6 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_NRanksOneBootstrapNonNull_Skips
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ConsensusAllAgree_WantSymStaysTrue_GoesToSymmetricBucket) {
   MakeSymmetricTaskList_Scene scene;
   scene.comm->nRanks = 3;
-  std::vector<int> rankToNode(3, 0);  // computeLsaSize (via ncclDevrInitOnce) reads this whenever nRanks>=2
-  scene.comm->rankToNode = rankToNode.data();
   scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
   scene.comm->planner.nTasksColl = 5;
   g_symRegType = ncclSymSendRegRecvReg;
@@ -1297,7 +1293,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ConsensusAllAgree_WantSymStaysT
   task.func = ncclFuncBroadcast;
 
   uint8_t preGatherOwnFlag = 0xFF;
-  ScopedHook bootstrapHook(g_devrBootstrapAllGather, [&](void*, void* allData, int) {
+  ScopedHook bootstrapHook(g_bootstrapAllGather, [&](void*, void* allData, int) {
     uint8_t* buf = reinterpret_cast<uint8_t*>(allData);
     preGatherOwnFlag = buf[0];  // this rank's own wantSym flag, written before the call
     buf[0] = 1;
@@ -1318,14 +1314,12 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ConsensusAllAgree_WantSymStaysT
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ConsensusOneDisagrees_WantSymFlipsFalse_GoesToRemainder) {
   MakeSymmetricTaskList_Scene scene;
   scene.comm->nRanks = 3;
-  std::vector<int> rankToNode(3, 0);  // computeLsaSize (via ncclDevrInitOnce) reads this whenever nRanks>=2
-  scene.comm->rankToNode = rankToNode.data();
   scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
   g_symRegType = ncclSymSendRegRecvReg;
   ncclTaskColl task{};
   task.func = ncclFuncBroadcast;
 
-  ScopedHook bootstrapHook(g_devrBootstrapAllGather, [&](void*, void* allData, int) {
+  ScopedHook bootstrapHook(g_bootstrapAllGather, [&](void*, void* allData, int) {
     uint8_t* buf = reinterpret_cast<uint8_t*>(allData);
     buf[0] = 1;
     buf[1] = 0;  // rank 1 disagrees
@@ -1985,8 +1979,6 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_SingleTask_
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_ConvertSymTaskDevOpWiring) {
   MakeSymmetricTaskList_Scene scene;
   scene.comm->nRanks = 4;
-  std::vector<int> rankToNode(4, 0);  // computeLsaSize (via ncclDevrInitOnce) reads this whenever nRanks>=2
-  scene.comm->rankToNode = rankToNode.data();
   g_symRegType = ncclSymSendRegRecvReg;
   ncclTaskColl task{};
   task.func = ncclFuncBroadcast;

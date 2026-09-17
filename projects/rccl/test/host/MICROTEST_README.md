@@ -63,12 +63,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     it is a duplicate-symbol error against that TU. `p2p_fakes.cc`'s
     former hardcoded-false stub was removed for exactly this reason.
     Every function is now covered; see `wrap-test.cc`'s header comment for
-    the per-function breakdown. Documented residual: the `#ifdef
-    ENABLE_WARP_SPEED` branches ARE compiled into this binary (the flag is
-    forced binary-wide across the whole `rccl-UnitTestsMicro` target so
-    `dev-runtime-test.cc`'s real `dev_runtime.cc` agrees on `struct
-    ncclComm`'s layout with every other TU), but no seam here drives any of
-    those branches, so they stay untested rather than out of scope.
+    the per-function breakdown. One deliberate, permanent exclusion: the
+    `#ifdef ENABLE_WARP_SPEED` cluster (~10 functions) is compiled out of
+    this binary entirely, so no seam can reach it without changing the
+    binary's own build configuration.
   - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
     `RasClientMicrotest.*`. With
     `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
@@ -98,6 +96,21 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   binaries cover both arms of both without a 2x2 cross product. init.cc compiles the *real* `argcheck.cc`/`archinfo.cc`/`utils.cc` ("oracle"
   TUs) from the hipify tree rather than stubbing them; `--gc-sections` drops the
   deep-path symbols the tests never reach. See `test_categories_micro_init.yaml`.
+- **`rccl-UnitTestsMicroScheduler`** — `allgatherv_sched.cc` +
+  `symmetric_sched.cc` (via `ALLGATHERV_SCHED_CC_PATH`/`SYMMETRIC_SCHED_CC_PATH`,
+  both from `scheduler-test.cc`); suite `SchedulerMicrotest.*`. Its own binary,
+  not sharing `rccl-UnitTestsMicro`: some of its test scenarios need
+  `ENABLE_WARP_SPEED`, which must be binary-wide (every TU compiled in has to
+  agree on `struct ncclComm`'s layout), and giving the macro its own small,
+  dedicated binary keeps it from silently reaching the ~8 unrelated TUs that
+  used to share a binary with it. `ncclDevrInitOnce`/`ncclDevrFindWindow` are
+  faked here (`fakes/dev_runtime_fakes.cc`) rather than compiling the real
+  `dev_runtime.cc` in, unlike `dev-runtime-test.cc`: `ncclDevrFindWindow` can
+  only ever return success against a fresh comm, and `ncclDevrInitOnce`'s real
+  error path is already covered directly by `dev-runtime-test.cc`'s own suite,
+  so a fake tests this binary's own error-propagation logic just as well
+  without pulling in that file's dependency floor. See
+  `test_categories_micro_scheduler.yaml`.
 
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
@@ -242,7 +255,8 @@ symbol.
 | `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
 | `src/register/*.cc` | `fakes/register_stubs.cc` |
-| `src/scheduler/*.cc` and the deep launch paths | `fakes/sched_stubs.cc` |
+| `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
+| `src/scheduler/*.cc`'s dependencies (`rccl-UnitTestsMicroScheduler`, which compiles the real files and tests them directly) | `fakes/scheduler_fakes.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`) | `fakes/libc_interposers.cc` |
@@ -584,7 +598,8 @@ make -j $(nproc) rccl-UnitTestsMicro
 `test/host/CMakeLists.txt` is dual-mode. Alongside the in-RCCL-build target
 above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
-`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroInit[-uncached|-faultinj]` and
+`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroScheduler`,
+`rccl-UnitTestsMicroInit[-uncached|-faultinj]` and
 `rccl-UnitTestsMicroEnqueue[-devlinker]` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
