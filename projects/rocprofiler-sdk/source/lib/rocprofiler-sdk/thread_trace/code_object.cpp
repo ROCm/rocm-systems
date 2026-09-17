@@ -210,9 +210,8 @@ initialize(HsaApiTable* table)
 void
 initialize(RocAttachDispatchTable* attach_table)
 {
-    ROCP_ERROR_IF(get_freeze_function())
-        << "Thread trace code object module was initialized before attach table was provided. "
-           "Future HSA code objects may not be instrumented correctly.";
+    ROCP_INFO_IF(get_freeze_function())
+        << "Adding attachment support to initialized thread trace code object tracking";
     *(get_attach_table()) = attach_table;
 }
 

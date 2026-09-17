@@ -114,12 +114,7 @@ get_background_thread()
 ROCPROFILER_EXTERN_C_INIT
 
 int
-rocprofiler_attach_set_api_table(const char* name,
-                                 uint64_t /*lib_version*/,
-                                 uint64_t /*lib_instance*/,
-                                 void**                                        tables,
-                                 uint64_t                                      num_tables,
-                                 rocprofiler_register_library_api_table_func_t register_functor)
+rocprofiler_attach_initialize(rocprofiler_register_library_api_table_func_t register_functor)
     ROCPROFILER_PUBLIC_API;
 
 int
@@ -129,10 +124,46 @@ rocprofiler_attach_set_api_table(const char* name,
                                  void**                                        tables,
                                  uint64_t                                      num_tables,
                                  rocprofiler_register_library_api_table_func_t register_functor)
+    ROCPROFILER_PUBLIC_API;
+
+int
+rocprofiler_attach_initialize(rocprofiler_register_library_api_table_func_t register_functor)
 {
     rocprofiler::common::init_logging("ROCPROFILER_ATTACH");
 
-    get_background_thread()->start();
+    static auto init_once   = std::once_flag{};
+    static auto init_status = int{0};
+    std::call_once(init_once, [register_functor]() {
+        rocprofiler::attach::dispatch_table_init();
+
+        if(register_functor)
+        {
+            auto library_id    = rocprofiler_register_library_indentifier_t{};
+            auto attach_tables = std::array<void*, 1>{rocprofiler::attach::get_dispatch_table()};
+            init_status        = register_functor("rocattach",
+                                           nullptr,
+                                           ROCPROFILER_ATTACH_VERSION,
+                                           attach_tables.data(),
+                                           attach_tables.size(),
+                                           &library_id);
+        }
+
+        if(init_status == 0) get_background_thread()->start();
+    });
+
+    return init_status;
+}
+
+int
+rocprofiler_attach_set_api_table(const char* name,
+                                 uint64_t /*lib_version*/,
+                                 uint64_t /*lib_instance*/,
+                                 void**                                        tables,
+                                 uint64_t                                      num_tables,
+                                 rocprofiler_register_library_api_table_func_t register_functor)
+{
+    auto status = rocprofiler_attach_initialize(register_functor);
+    if(status != 0) return status;
 
     ROCP_TRACE << "rocprofiler_attach_set_api_table called for api " << name;
 
@@ -145,25 +176,14 @@ rocprofiler_attach_set_api_table(const char* name,
     ROCP_ERROR_IF(num_tables > 1) << "rocprofiler expected HSA library to pass 1 API table, not "
                                   << num_tables;
 
-    auto* hsa_api_table = static_cast<HsaApiTable*>(tables[0]);
+    static auto hsa_init_once = std::once_flag{};
+    std::call_once(hsa_init_once, [tables]() {
+        auto* hsa_api_table = static_cast<HsaApiTable*>(tables[0]);
 
-    rocprofiler::attach::dispatch_table_init();
-
-    if(register_functor)
-    {
-        auto library_id    = rocprofiler_register_library_indentifier_t{};
-        auto attach_tables = std::array<void*, 1>{rocprofiler::attach::get_dispatch_table()};
-        register_functor("rocattach",
-                         nullptr,
-                         ROCPROFILER_ATTACH_VERSION,
-                         attach_tables.data(),
-                         attach_tables.size(),
-                         &library_id);
-    }
-
-    // Initialize all registration services in attach
-    rocprofiler::attach::queue_registration_init(hsa_api_table);
-    rocprofiler::attach::code_object_registration_init(hsa_api_table);
+        // Initialize all HSA-dependent registration services in attach.
+        rocprofiler::attach::queue_registration_init(hsa_api_table);
+        rocprofiler::attach::code_object_registration_init(hsa_api_table);
+    });
 
     return ROCPROFILER_STATUS_SUCCESS;
 }

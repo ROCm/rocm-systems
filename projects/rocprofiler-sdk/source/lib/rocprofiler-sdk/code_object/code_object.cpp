@@ -1476,12 +1476,10 @@ iterate_loaded_code_objects(code_object_iterator_t&& func)
 void
 initialize(RocAttachDispatchTable* attach_table)
 {
-    // We need to save the attach table for later, when the code object module receives the HSA
-    // table and is initialized. We must get the attach table before HSA for correct behavior. This
-    // is guaranteed by rocprofiler-register.
-    ROCP_ERROR_IF(get_freeze_function())
-        << "Code object module was initialized before attach table was provided. Future HSA code "
-           "objects may not be instrumented correctly.";
+    // With anytime attachment this can arrive after HSA. Existing objects are already
+    // tracked by the initialized SDK; the attach table supplies helper data when needed.
+    ROCP_INFO_IF(get_freeze_function())
+        << "Adding attachment support to an initialized code object module";
     *(get_attach_table()) = attach_table;
 }
 

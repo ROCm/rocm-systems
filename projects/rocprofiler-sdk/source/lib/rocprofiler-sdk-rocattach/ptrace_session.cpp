@@ -149,8 +149,10 @@ PTraceSession::attach()
     // SEIZE attaches without stopping the process
     PTRACE_CALL(PTRACE_SEIZE, 0UL, 0UL);
     ROCP_INFO << "[rocprofiler-sdk-rocattach] Successfully attached to pid " << m_pid;
-    ROCATTACH_CALL(start_signal_handler());
+    // Record ownership immediately after PTRACE_SEIZE so a failure while starting the
+    // signal handler can still be rolled back by detach() or the destructor.
     m_state = PTRACE_SESSION_STATE_RUNNING;
+    ROCATTACH_CALL(start_signal_handler());
     return ROCATTACH_STATUS_SUCCESS;
 }
 

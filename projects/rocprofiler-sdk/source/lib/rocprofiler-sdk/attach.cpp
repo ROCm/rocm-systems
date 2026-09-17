@@ -27,24 +27,40 @@
 
 ROCPROFILER_EXTERN_C_INIT
 
+int
+rocprofiler_is_current_client_attachment(void) ROCPROFILER_API;
+
+rocprofiler_status_t
+rocprofiler_load_attachment_tool(const char*) ROCPROFILER_API;
+
 rocprofiler_status_t
 rocprofiler_attach(void) ROCPROFILER_API;
 
 rocprofiler_status_t
 rocprofiler_detach(void) ROCPROFILER_API;
 
+int
+rocprofiler_is_current_client_attachment(void)
+{
+    return rocprofiler::registration::is_initializing_attachment_client() ? 1 : 0;
+}
+
+rocprofiler_status_t
+rocprofiler_load_attachment_tool(const char* tool_path)
+{
+    return rocprofiler::registration::load_attachment_tool(tool_path);
+}
+
 rocprofiler_status_t
 rocprofiler_attach(void)
 {
-    rocprofiler::registration::attach();
-    return ROCPROFILER_STATUS_SUCCESS;
+    return rocprofiler::registration::attach();
 }
 
 rocprofiler_status_t
 rocprofiler_detach(void)
 {
-    rocprofiler::registration::detach();
-    return ROCPROFILER_STATUS_SUCCESS;
+    return rocprofiler::registration::detach();
 }
 
 ROCPROFILER_EXTERN_C_FINI

@@ -915,14 +915,12 @@ queue_controller_fini()
 void
 queue_controller_init(RocAttachDispatchTable* attach_table)
 {
-    // We need to save the attach table for later, when the queue controller receives the HSA table
-    // and is initialized. We must get the attach table before HSA for correct behavior. This is
-    // guaranteed by rocprofiler-register.
+    // Save the attach table. With anytime attachment this can arrive after HSA when an
+    // already-initialized SDK adds its attachment client.
     if(get_queue_controller())
     {
-        ROCP_ERROR_IF(get_queue_controller()->get_core_table().version.major_id != 0)
-            << "Queue controller was initialized before attach table was provided. Future queues "
-               "may not be instrumented correctly.";
+        ROCP_INFO_IF(get_queue_controller()->get_core_table().version.major_id != 0)
+            << "Adding attachment support to an initialized queue controller";
     }
     *(get_attach_table()) = attach_table;
 
