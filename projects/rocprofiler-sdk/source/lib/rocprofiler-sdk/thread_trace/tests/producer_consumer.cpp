@@ -111,10 +111,10 @@ public:
     {
         return clock_fn ? clock_fn() : aqlprofile_att_gpu_clock_t{};
     }
-    query_status_t                           query_fn;
-    query_clock_t                            clock_fn;
-    drain_t                                  drain_fn{};
-    hsa_status_t iterate_data(aqlprofile_att_data_callback_t callback, void* data) override
+    query_status_t query_fn;
+    query_clock_t  clock_fn;
+    drain_t        drain_fn{};
+    hsa_status_t   iterate_data(aqlprofile_att_data_callback_t callback, void* data) override
     {
         return drain_fn ? drain_fn(callback, data)
                         : SQTTBufferingPackets::iterate_data(callback, data);
