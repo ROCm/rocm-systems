@@ -62,7 +62,7 @@ endfunction()
 
 function(rocprofiler_sample_add_executable _TARGET)
     add_executable(${_TARGET} ${ARGN})
-    target_link_libraries(${_TARGET} PRIVATE hip::device)
+    target_link_libraries(${_TARGET} PRIVATE hip::host)
     rocprofiler_sample_add_test(${_TARGET} "")
 endfunction()
 
