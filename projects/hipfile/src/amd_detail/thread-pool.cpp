@@ -26,7 +26,7 @@ namespace {
     class TaskflowTaskGroup final : public ITaskGroup {
     public:
         explicit TaskflowTaskGroup(std::shared_ptr<tf::Executor> _executor)
-            : executor{std::move(_executor)}, state{std::make_shared<State>()}
+            : executor{std::move(_executor)}
         {
         }
 
@@ -39,7 +39,7 @@ namespace {
         void run(std::function<void()> task) override
         {
             uint64_t task_generation = 0;
-            auto task_state       = state;
+            auto task_state       = &state;
             auto publication_lock = std::unique_lock<std::mutex>{taskPublicationMutex()};
 
             {
@@ -77,16 +77,16 @@ namespace {
 
         void cancel() override
         {
-            std::lock_guard<std::mutex> lock{state->mutex};
+            std::lock_guard<std::mutex> lock{state.mutex};
 
-            state->generation++;
+            state.generation++;
         }
 
         void wait() override
         {
-            std::unique_lock<std::mutex> lock{state->mutex};
+            std::unique_lock<std::mutex> lock{state.mutex};
 
-            state->cv.wait(lock, [this]() { return state->outstanding == 0; });
+            state.cv.wait(lock, [this]() { return state.outstanding == 0; });
         }
 
     private:
@@ -99,7 +99,7 @@ namespace {
 
         class Completion {
         public:
-            explicit Completion(std::shared_ptr<State> _state) : state{std::move(_state)}
+            explicit Completion(State *_state) : state{_state}
             {
             }
 
@@ -115,10 +115,10 @@ namespace {
             Completion &operator=(Completion &&) = delete;
 
         private:
-            std::shared_ptr<State> state;
+            State *state;
         };
 
-        static void finish(const std::shared_ptr<State> &state)
+        static void finish(State *state)
         {
             {
                 std::lock_guard<std::mutex> lock{state->mutex};
@@ -129,7 +129,7 @@ namespace {
         }
 
         std::shared_ptr<tf::Executor> executor;
-        std::shared_ptr<State>        state;
+        State                         state;
     };
 
 }
