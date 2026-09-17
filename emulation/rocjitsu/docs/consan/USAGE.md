@@ -48,8 +48,9 @@ more. The preset does not change the analysis mode.
 | --- | ---: | ---: | --- |
 | `low` | 1024 | 1024 | Large workloads where you want to try lower overhead and accept more misses. |
 | `default` | 256 | 256 | Ordinary runs. Unset, empty, and `default` have the same behavior. |
-| `high` | 1 | 4 | Small or minimized repros: select every workgroup and one in four LDS cells. |
-| `max` | 1 | 1 | Investigating an issue missed by `high`: remove workgroup and cell filtering. |
+| `high` | 16 | 16 | Increased sampling between the default and focused-repro settings. |
+| `higher` | 1 | 4 | Small or minimized repros: select every workgroup and one in four LDS cells. |
+| `max` | 1 | 1 | Investigating an issue missed by `higher`: remove workgroup and cell filtering. |
 
 For a small repro:
 
@@ -59,7 +60,7 @@ env HSA_TOOLS_LIB="$CONSAN_HOOK" \
   ./repro 2>consan.log
 ```
 
-If it misses an expected race, try `max`. Even `max` retains bounded evidence
+If it misses an expected race, try `higher`, then `max`. Even `max` retains bounded evidence
 and has analysis limitations; a clean run does not prove race freedom.
 
 Preset names are case-insensitive. Other settings keep their standard defaults.
@@ -142,7 +143,7 @@ ConSan conflict ... first_instruction=... second_instruction=...
   evidence is missing. Inspect the accompanying reason before trusting a clean
   result.
 - **No conflicts** is inconclusive: sampling, bounded retention, and unsupported
-  access patterns can hide races. Try `high` or `max` on a focused repro.
+  access patterns can hide races. Try `high`, `higher`, or `max` on a focused repro.
 - **A crash, timeout, wrong application result, or GPU reset** is not itself a
   ConSan detection. Keep checking the application's own results.
 
@@ -172,7 +173,7 @@ non-trapping mismatch marker; no expert controls are needed to start.
 | --- | --- |
 | Startup is expensive or transformation uses too much memory | Generate an allowlist to avoid transforming unrelated code. |
 | Recording overhead is too high | Try `low` in the default mode, accepting reduced coverage. |
-| A small known-racy repro gives no diagnostic | Confirm instrumentation and dispatch, then try `high` followed by `max`. |
+| A small known-racy repro gives no diagnostic | Confirm instrumentation and dispatch, then try `high`, `higher`, and `max`. |
 | Coverage is incomplete or report allocation fails | Read the reported reason; consult [capabilities](CAPABILITIES.md) or [report controls](EXPERT_CONTROLS.md#consan-report-buffers). |
 | A focused validation run must reject ineffective instrumentation | Use `RJ_CONSAN_POLICY=strict`. It can reject helper code objects and terminate with exit code 92; it does not make race diagnostics fatal. |
 

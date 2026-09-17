@@ -827,6 +827,9 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       workgroup_default = cell_default = 1024;
     } else if (ascii_iequals(preset, "high")) {
       config.preset = "high";
+      workgroup_default = cell_default = 16;
+    } else if (ascii_iequals(preset, "higher")) {
+      config.preset = "higher";
       workgroup_default = 1;
       cell_default = 4;
     } else if (ascii_iequals(preset, "max")) {
@@ -835,7 +838,7 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     } else {
       std::fprintf(stderr,
                    "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_PRESET='%s'; "
-                   "expected low|default|high|max\n",
+                   "expected low|default|high|higher|max\n",
                    preset);
       return std::nullopt;
     }
