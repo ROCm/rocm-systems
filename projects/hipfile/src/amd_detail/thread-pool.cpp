@@ -7,7 +7,6 @@
 #include "thread-pool.h"
 
 #include <algorithm>
-#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <exception>
@@ -17,6 +16,12 @@
 namespace hipFile {
 
 namespace {
+
+    std::mutex &taskPublicationMutex()
+    {
+        static std::mutex mutex;
+        return mutex;
+    }
 
     class TaskflowTaskGroup final : public ITaskGroup {
     public:
@@ -34,8 +39,8 @@ namespace {
         void run(std::function<void()> task) override
         {
             uint64_t task_generation = 0;
-            auto     task_state     = state;
-            auto     task_published = std::make_shared<std::atomic<bool>>(false);
+            auto task_state       = state;
+            auto publication_lock = std::unique_lock<std::mutex>{taskPublicationMutex()};
 
             {
                 std::lock_guard<std::mutex> lock{task_state->mutex};
@@ -45,11 +50,10 @@ namespace {
             }
 
             try {
-                executor->silent_async([task_state,
-                                        task_published,
-                                        task_generation,
-                                        work = std::move(task)]() mutable {
-                    task_published->wait(false, std::memory_order_acquire);
+                executor->silent_async([task_state, task_generation, work = std::move(task)]() mutable {
+                    {
+                        std::lock_guard<std::mutex> lock{taskPublicationMutex()};
+                    }
                     Completion            completion{task_state};
                     std::function<void()> local_work;
                     local_work.swap(work);
@@ -63,8 +67,7 @@ namespace {
 
                     local_work();
                 });
-                task_published->store(true, std::memory_order_release);
-                task_published->notify_one();
+                publication_lock.unlock();
             }
             catch (...) {
                 finish(task_state);
