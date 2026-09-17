@@ -93,7 +93,7 @@ hipError_t IPCEventEmulated::synchronize() {
 // ================================================================================================
 hipError_t IPCEventEmulated::streamWait(hip::Stream* stream, uint flags) {
   std::scoped_lock lock(lock_);
-  const int offset = ipc_evt_.ipc_shmem_->read_index;
+  const int offset = (ipc_evt_.ipc_shmem_->read_index % IPC_SIGNALS_PER_EVENT);
   return ihipStreamOperation(
       reinterpret_cast<hipStream_t>(stream),
       ROCCLR_COMMAND_STREAM_WAIT_VALUE,
