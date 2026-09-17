@@ -312,7 +312,7 @@ struct TextFragment {
   uint64_t id = 0;
   TextFragmentKind kind = TextFragmentKind::Replacement;
   std::vector<ProbeIntentId> intent_ids;
-  /// Mode-owned runtime interpretation retained until final placement is known.
+  /// Static access attribution retained until final placement is known.
   StaticAccessMappings runtime_mapping;
   std::vector<uint32_t> before_words;
   std::vector<uint32_t> replacement_words;

@@ -13,7 +13,7 @@ namespace rocjitsu::consan::detail {
 
 /// Project policy-admitted access intents into immutable lowering candidates.
 /// This boundary copies normalized inventory facts and never reclassifies a
-/// site or selects an mode policy.
+/// site or selects a mode policy.
 [[nodiscard]] std::vector<Candidate> build_candidates(const ProgramInventory &inventory,
                                                       const ObservationPlan &plan,
                                                       std::vector<std::string> &errors);

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rocjitsu/code/patch/consan/consan_report_common_contract.h"
+#include "rocjitsu/code/patch/consan/consan_report.h"
 
 #include <cstddef>
 #include <cstdint>

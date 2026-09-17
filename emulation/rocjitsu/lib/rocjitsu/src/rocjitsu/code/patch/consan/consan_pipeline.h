@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "rocjitsu/code/patch/consan/consan_report_contract.h"
+#include "rocjitsu/code/patch/consan/consan_report.h"
 
 #include <algorithm>
 #include <cstdint>

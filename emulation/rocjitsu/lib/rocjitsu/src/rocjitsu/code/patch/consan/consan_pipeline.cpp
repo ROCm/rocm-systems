@@ -145,8 +145,8 @@ runtime_requirements(const EvidenceRequirements &requirements) {
             return ContractIssue::InvalidResourceAddress;
           // An automatic allocation carries the exact address-free layout
           // that sized it and remains live for the executable. A caller-bound
-          // raw buffer intentionally has no such layout: legacy fixed-record
-          // lowering validates its exact mode-specific geometry, while the
+          // raw buffer intentionally has no such layout: direct-buffer
+          // lowering validates its exact geometry, while the
           // pipeline only requires the common header and a code-object or
           // executable lifetime. Treating that raw buffer as the automatic
           // multi-bank layout rejects valid small explicit buffers after

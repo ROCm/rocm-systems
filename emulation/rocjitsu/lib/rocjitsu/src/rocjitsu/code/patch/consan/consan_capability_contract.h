@@ -94,7 +94,7 @@ enum class AccumulatorModel : uint8_t {
 /// `PreloadedSgprPair` requires the descriptor/prologue path to make a pair of
 /// scalar registers available. `CodeObjectLiteral` means the instrumenter can
 /// materialize the identity from immutable code-object data instead. This enum
-/// records availability, not policy: an mode may choose not to consume the
+/// records availability, not policy: a mode may choose not to consume the
 /// facility even when the target provides it.
 enum class DispatchIdentitySource : uint8_t {
   PreloadedSgprPair,
@@ -160,11 +160,11 @@ enum class CodeTransportModel : uint8_t {
 /// Describes the target HWREG field that uniquely identifies one resident
 /// wave for the lifetime of that residency.
 ///
-/// ConSan uses this field as an owner identity when an mode does not need a
+/// ConSan uses this field as an owner identity when a mode does not need a
 /// dispatch-global identity. `hwreg_id` is the architectural register number
 /// encoded by `s_getreg_b32`; `bit_offset` and `bit_width` select the identity
 /// field within that register. This is a target fact, not an emitted
-/// instruction or an mode policy: the target operation that consumes it is
+/// instruction or a mode policy: the target operation that consumes it is
 /// responsible for validating registers and constructing the instruction
 /// sequence, while the mode decides whether a resident-wave owner is the
 /// right semantic identity for a particular observation.
@@ -304,7 +304,7 @@ struct PlacementCapability {
 /// Describes the strength of the stable contract for one
 /// target/mode/capability-form combination.
 ///
-/// `Supported` means causal evidence for an ConSan mode or redundant access
+/// `Supported` means causal evidence for ConSan or redundant access
 /// observation for SuperCollider. `MutationOnly` means the form can participate
 /// in fault injection but is not observed as evidence. `AccessOnly` means the
 /// access aspect is covered without claiming synchronization semantics.

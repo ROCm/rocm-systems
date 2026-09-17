@@ -229,7 +229,7 @@ struct SuperColliderEvidenceRequirements {
 /// and a SuperCollider marker have compatible bytes.
 using EvidenceRequirements = std::variant<ReportRequirements, SuperColliderEvidenceRequirements>;
 
-/// Return whether an mode-specific evidence requirement is internally
+/// Return whether a mode-specific evidence requirement is internally
 /// consistent and can safely cross the runtime-coordination boundary.
 [[nodiscard]] bool evidence_requirements_well_formed(const EvidenceRequirements &requirements);
 

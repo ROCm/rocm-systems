@@ -2179,7 +2179,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
     return std::ranges::any_of(block->instructions(), [arch](const Instruction &inst) {
       const auto name = inst.mnemonic();
       // A MODE write may enable indexed VGPR addressing on CDNA. Refuse the
-      // entire object, including later blocks, rather than model that state.
+      // entire object, including later blocks, rather tha model that state.
       if (arch == ROCJITSU_CODE_ARCH_CDNA5 && name.starts_with("s_setreg") && inst.raw_encoding()) {
         const auto slice = amdgpu::decode_vgpr_msb_hwreg(inst.raw_encoding()[0] & 0xffffu);
         // gfx1250 compiler prologues write unrelated WAVE_MODE fields. Plain

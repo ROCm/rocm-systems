@@ -4,15 +4,15 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan_instrumentation.h"
-#include "rocjitsu/code/patch/consan/consan_report_contract.h"
+#include "rocjitsu/code/patch/consan/consan_report.h"
 
 namespace rocjitsu::consan::detail {
 
 [[nodiscard]] inline ReportBufferLayout
-resolve_report_layout(const BoundRuntimeResources &resources, ReportBufferLayout legacy_layout) {
+resolve_report_layout(const BoundRuntimeResources &resources, ReportBufferLayout fallback_layout) {
   return resources.report_layout
              ? revalidate_report_layout(*resources.report_layout, resources.report_buffer_size)
-             : legacy_layout;
+             : fallback_layout;
 }
 
 [[nodiscard]] bool has_exact_entry_workgroup_capture(

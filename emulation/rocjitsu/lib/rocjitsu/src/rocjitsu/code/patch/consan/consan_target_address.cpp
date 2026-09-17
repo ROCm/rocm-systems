@@ -5,7 +5,7 @@
 /// @brief Target-aware planning and emission of normalized ConSan atomic addresses.
 
 #include "rocjitsu/code/patch/consan/consan_instrumentation.h"
-#include "rocjitsu/code/patch/consan/consan_report_common_contract.h"
+#include "rocjitsu/code/patch/consan/consan_report.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"

@@ -3,7 +3,7 @@
 
 #include "rocjitsu/checked_byte_budget.h"
 #include "rocjitsu/code/patch/consan/consan_lowering_plan.h"
-#include "rocjitsu/code/patch/consan/consan_report_contract.h"
+#include "rocjitsu/code/patch/consan/consan_report.h"
 #include "rocjitsu/code/patch/consan/consan_report_planning.h"
 #include "util/bit.h"
 

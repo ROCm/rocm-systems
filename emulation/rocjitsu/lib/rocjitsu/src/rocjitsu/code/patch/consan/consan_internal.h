@@ -637,7 +637,7 @@ struct AtomicEvidenceSitePlan {
 };
 
 /// Immutable handoff from barrier evidence policy to common ConSan resource
-/// planning and an mode's barrier emitter.
+/// planning and a mode's barrier emitter.
 ///
 /// Barrier policy may coalesce a signal/wait pair or a longer lifecycle into
 /// one intent placed at its completing instruction. This plan names exactly

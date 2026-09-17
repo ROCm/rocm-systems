@@ -100,11 +100,10 @@ build_atomic_address_materialization(const AtomicAddressPlan &plan, uint16_t vcc
                                      uint16_t scc_save_sgpr, rj_code_arch_t arch);
 
 /// Per-buffer safety bound for automatic ConSan reports.
-/// Each mode publishes its selected ceiling through the ConSan mode registry.
 inline constexpr uint64_t kOrdinaryAutoReportBufferCeilingBytes = 128u * 1024u * 1024u;
-/// G6B3 owns aggregate reservation against this process-wide ceiling. Four
-/// maximum-sized ConSan reports permit ordinary multi-library workloads
-/// while retaining a deterministic process bound.
+/// The hook reserves automatic report allocations against this process-wide
+/// ceiling under its registry lock. It bounds aggregate storage independently
+/// of the per-buffer limit.
 inline constexpr uint64_t kAutoReportProcessCeilingBytes = 4ull * 1024u * 1024u * 1024u;
 struct AutoReportProcessBudget {
   uint64_t current_live_bytes = 0;

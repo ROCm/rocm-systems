@@ -8,7 +8,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_register_allocation.h"
-#include "rocjitsu/code/patch/consan/consan_report_contract.h"
+#include "rocjitsu/code/patch/consan/consan_report.h"
 
 #include <cstddef>
 #include <span>

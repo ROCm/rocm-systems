@@ -130,7 +130,7 @@ descriptor_ordinary_vgpr_allocation_count(const rocr::llvm::amdhsa::kernel_descr
 /// A descriptor encodes one unified allocation, while ConSan consumers can
 /// have narrower addressing limits and CDNA descriptors can divide that
 /// allocation between ordinary VGPRs and AccVGPRs. Keeping all three facts in
-/// one value prevents an mode from silently treating an accumulator bank as
+/// one value prevents a mode from silently treating an accumulator bank as
 /// ordinary scratch or growing beyond the register form it can emit.
 struct DescriptorVgprGrowthRequest {
   /// One past the highest ordinary VGPR that the transformed kernel must be

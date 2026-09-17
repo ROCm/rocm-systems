@@ -551,7 +551,7 @@ struct ObservationPlan {
   /// Transactionally append a valid same-mode policy fragment.
   ///
   /// Plan-local intent identifiers in the fragment are rebased and every
-  /// decision reference is rewritten. On invalid input or an mode mismatch,
+  /// decision reference is rewritten. On invalid input or a mode mismatch,
   /// this plan is unchanged and the function returns false.
   [[nodiscard]] bool append(const ObservationPlan &fragment);
 
@@ -638,7 +638,7 @@ struct BarrierPolicyResult {
 ///
 /// `tracking_enabled` selects the atomic-ordering feature as a whole.
 /// `directional_access_windows` is a generic coupling between ordered
-/// communication and admitted access evidence. An mode vocabulary may
+/// communication and admitted access evidence. A mode vocabulary may
 /// require an owner-local read window for acquire or write window for release.
 /// The request contains no report address, register assignment, capacity, or
 /// mutable result state.

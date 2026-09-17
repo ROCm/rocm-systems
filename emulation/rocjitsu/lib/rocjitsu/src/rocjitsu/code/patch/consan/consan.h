@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 /// @file consan.h
-/// @brief Shared ConSan contracts and prototype mechanism data.
+/// @brief ConSan semantic, runtime, resource, and transformation data.
 ///
 /// Production transformation enters through `consan_pipeline.h`. No library
-/// header exposes the mutable compatibility result entry used by explicitly
-/// mechanism-level tests while the lowerer is decomposed.
+/// header exposes the mutable lowering entry reserved for focused tests.
 
 #pragma once
 

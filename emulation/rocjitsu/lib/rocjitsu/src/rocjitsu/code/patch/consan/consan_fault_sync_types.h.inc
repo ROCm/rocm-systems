@@ -357,7 +357,7 @@ struct SyncSequence : SyncSemantics {
 /// Analysis outcome for associating one cache/fence instruction with an
 /// address-bearing synchronization sequence.
 ///
-/// This is an inventory fact, not an mode decision. `Qualified` means that
+/// This is an inventory fact, not a mode decision. `Qualified` means that
 /// shared analysis proved one sequence, one communication event, a compatible
 /// memory role, address source, and scope. Every other value preserves the
 /// first failed invariant. Policy can therefore make a typed disposition

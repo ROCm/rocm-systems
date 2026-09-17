@@ -4,7 +4,7 @@
 /// Normalized address-space fact relevant to ConSan access policy.
 ///
 /// The inventory distinguishes group memory, definitely non-group memory, and
-/// unresolved provenance without prematurely applying an mode's strict or
+/// unresolved provenance without prematurely applying a mode's strict or
 /// likely admission policy.
 enum class AccessAddressSpace : uint8_t {
   /// The access targets workgroup/cluster-visible LDS.
@@ -41,7 +41,7 @@ enum class AccessProvenance : uint8_t {
 /// Typed reason why part of a decoded access cannot participate in a complete
 /// normalized semantic inventory.
 ///
-/// These are analysis facts, not mode rejections. An mode-specific
+/// These are analysis facts, not mode rejections. A mode-specific
 /// unsupported mnemonic, sampling decision, or resource failure belongs to a
 /// later policy or lowering result rather than this enum.
 enum class InventoryExclusionReason : uint8_t {
@@ -724,7 +724,7 @@ struct ProgramInventoryStorage {
   CodeObjectId code_object_id;
   /// Ownership and occupied-byte facts inherited from an earlier stage of a
   /// composed transform. They are properties of this exact input image, not
-  /// options that an mode may mutate while lowering it.
+  /// options that a mode may mutate while lowering it.
   PreappliedMutationLayout preapplied_mutation;
   /// True only after the pristine bytes have passed structural AMDGPU code
   /// object parsing. This is an immutable input fact, independent of whether

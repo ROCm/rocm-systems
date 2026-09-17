@@ -1796,7 +1796,7 @@ void forbid_persistent_vgprs(RegisterSet &forbidden, const OperatingPoint &point
   RegisterRequest request;
   request.reg_class = RegClass::VGPR;
   request.count = allocation_count;
-  // Every ConSan mode uses the first two scratch registers as a FLAT
+  // ConSan probes use the first two scratch registers as a FLAT
   // address pair. The target placement contract owns its tuple alignment.
   request.alignment = target ? target->placement.scratch_vgpr_alignment : 1u;
   request.current_allocation_count = std::min(plan.current_vgpr_count, plan.ordinary_vgpr_limit);
