@@ -11,11 +11,23 @@
 
 #include <functional>
 
+#include "nccl.h"
+
+struct ncclComm;
+struct ncclTaskColl;
+struct ncclKernelPlan;
 struct ncclKernelPlanBudget;
 
 // enqueue.cc's ncclTestBudget (real seam: tests drive the batch-size stopping condition directly).
 extern std::function<bool(struct ncclKernelPlanBudget*, int, ssize_t)> g_testBudget;
 extern int g_testBudgetCalls;  // UNDRIVEN
+
+// enqueue.cc's ncclGetAlgoInfo: default fills in tcoll's protocol/channel/warp fields with usable values.
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, int, int, ncclSimInfo_t*)>
+    g_getAlgoInfo;
+
+// enqueue.cc's ncclPlanSetDefaultKernel: default is a no-op (no real kernel table exists in this binary).
+extern std::function<void(struct ncclComm*, struct ncclKernelPlan*)> g_planSetDefaultKernel;
 
 void ResetSchedulerFakes();
 

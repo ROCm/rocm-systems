@@ -29,21 +29,39 @@ bool ncclTestBudget(struct ncclKernelPlanBudget* budget, int nWorkBatches, ssize
   return g_testBudget(budget, nWorkBatches, nWorkBytes);
 }
 
+// Generous default: a usable (proto, channel, warp) triple lets an uninterested caller proceed.
+static ncclResult_t DefaultGetAlgoInfo(struct ncclComm*, struct ncclTaskColl* task, int, int, int, ncclSimInfo_t*) {
+  task->protocol = NCCL_PROTO_SIMPLE;
+  task->nMaxChannels = 1;
+  task->nWarps = 1;
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, int, int, ncclSimInfo_t*)> g_getAlgoInfo =
+    DefaultGetAlgoInfo;
+
+// No-op default: this binary has no real kernel table to select into.
+static void DefaultPlanSetDefaultKernel(struct ncclComm*, struct ncclKernelPlan*) {}
+std::function<void(struct ncclComm*, struct ncclKernelPlan*)> g_planSetDefaultKernel = DefaultPlanSetDefaultKernel;
+
 void ResetSchedulerFakes() {
   g_testBudget = DefaultTestBudget;
   g_testBudgetCalls = 0;
+  g_getAlgoInfo = DefaultGetAlgoInfo;
+  g_planSetDefaultKernel = DefaultPlanSetDefaultKernel;
+  ncclDevFuncNameToId.clear();
 }
 
 // src/enqueue/enqueue.cc
-ncclResult_t ncclGetAlgoInfo(struct ncclComm*, struct ncclTaskColl*, int, int, int, ncclSimInfo_t*) {
-  FailLoudUnfaked("scheduler_fakes", "ncclGetAlgoInfo");
+ncclResult_t ncclGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* task, int collNetSupport, int nvlsSupport,
+                             int nTasksPerChannel, ncclSimInfo_t* simInfo) {
+  return g_getAlgoInfo(comm, task, collNetSupport, nvlsSupport, nTasksPerChannel, simInfo);
 }
 void ncclAddWorkBatchToPlan(struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int, uint32_t, int,
                             int, bool) {
   FailLoudUnfaked("scheduler_fakes", "ncclAddWorkBatchToPlan");
 }
-void ncclPlanSetDefaultKernel(struct ncclComm*, struct ncclKernelPlan*) {
-  FailLoudUnfaked("scheduler_fakes", "ncclPlanSetDefaultKernel");
+void ncclPlanSetDefaultKernel(struct ncclComm* comm, struct ncclKernelPlan* plan) {
+  g_planSetDefaultKernel(comm, plan);
 }
 ncclResult_t ncclAddProxyOpIfNeeded(struct ncclComm*, struct ncclKernelPlan*, struct ncclProxyOp*) {
   FailLoudUnfaked("scheduler_fakes", "ncclAddProxyOpIfNeeded");

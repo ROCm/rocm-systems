@@ -51,6 +51,13 @@ class ScheduleBcastTasksToPlan_Scene {
   std::unique_ptr<ncclKernelPlan> plan;
   std::unique_ptr<ncclKernelPlanner::Peer[]> peers;
 };
+
+// Mirrors ncclDevFuncId's general-collective key (device.h); AllGatherV never takes the special-cased branches.
+uint64_t ScheduleBcastTasksToPlan_DevFuncKey(int proto) {
+  return (uint64_t(ncclFuncAllGatherV & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
+         (uint64_t(NCCL_ALGO_RING & RCCL_FUNC_ID_MASK) << RCCL_ALGO_SHIFT) |
+         (uint64_t(proto & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT);
+}
 }  // namespace
 
 class SchedulerMicrotest : public ::testing::Test {
@@ -305,8 +312,8 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_TwoPeersAccumulate_ProceedsP
   scene.peers[0].bcastQueue.head = &task0;
   scene.peers[1].bcastQueue.head = &task1;
 
-  EXPECT_EXIT(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr),
-              ::testing::KilledBySignal(SIGABRT), "unfaked call: ncclGetAlgoInfo");
+  // ncclDevFuncNameToId is empty by default, so this proceeds past batchTasks==0, unlike Block 3.
+  EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclInvalidUsage);
 }
 
 TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_SkipThenAccumulate_ContinuesLoopPastNullPeer) {
@@ -318,8 +325,146 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_SkipThenAccumulate_Continues
   scene.peers[1].bcastQueue.head = &task1;
   scene.peers[2].bcastQueue.head = &task2;
 
-  EXPECT_EXIT(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr),
-              ::testing::KilledBySignal(SIGABRT), "unfaked call: ncclGetAlgoInfo");
+  EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclInvalidUsage);
+}
+
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_AlgoInfoFails_PropagatesErrorAndWiresTcollFromMaxBcastBytes) {
+  ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/3);
+  ncclTaskBcast task0{};
+  task0.count = 50;
+  ncclTaskBcast task1{};
+  task1.count = 200;
+  ncclTaskBcast task2{};
+  task2.count = 30;
+  scene.peers[0].bcastQueue.head = &task0;
+  scene.peers[1].bcastQueue.head = &task1;
+  scene.peers[2].bcastQueue.head = &task2;
+
+  ncclFunc_t recordedFunc = ncclFuncSend;
+  size_t recordedCount = 0;
+  ncclDataType_t recordedDatatype = ncclFloat32;
+  int recordedAlgorithm = -1;
+  int recordedProtocol = -1;
+  ScopedHook algoInfoHook(g_getAlgoInfo,
+                          [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int, ncclSimInfo_t*) {
+                            recordedFunc = task->func;
+                            recordedCount = task->count;
+                            recordedDatatype = task->datatype;
+                            recordedAlgorithm = task->algorithm;
+                            recordedProtocol = task->protocol;
+                            return ncclInternalError;
+                          });
+
+  EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclInternalError);
+  EXPECT_EQ(algoInfoHook.calls, 1);
+  EXPECT_EQ(recordedFunc, ncclFuncAllGather);
+  EXPECT_EQ(recordedCount, 200u);  // maxBcastBytes: the middle peer's count, not the first or the last
+  EXPECT_EQ(recordedDatatype, ncclInt8);
+  EXPECT_EQ(recordedAlgorithm, NCCL_ALGO_RING);
+  EXPECT_EQ(recordedProtocol, NCCL_PROTO_UNDEF);
+}
+
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_FuncIndexNotFound_ReturnsInvalidUsageAfterSettingThreadPerBlock) {
+  ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/1);
+  ncclTaskBcast task{};
+  task.count = 100;
+  scene.peers[0].bcastQueue.head = &task;
+  scene.comm->WarpSize = 64;
+
+  ScopedHook algoInfoHook(g_getAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                             ncclSimInfo_t*) {
+    task->protocol = NCCL_PROTO_SIMPLE;
+    task->nMaxChannels = 0;
+    task->nWarps = 4;
+    return ncclSuccess;
+  });
+  // ncclDevFuncNameToId is left empty: funcIndex is always -1 regardless of the (proto, algo) key.
+
+  EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclInvalidUsage);
+  EXPECT_EQ(scene.plan->threadPerBlock, 4 * 64);  // set before the funcIndex check, even on this failing path
+}
+
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_FuncIndexFound_NotSpecialized_CallsPlanSetDefaultKernel) {
+  ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/1);
+  ncclTaskBcast task{};
+  task.count = 100;
+  scene.peers[0].bcastQueue.head = &task;
+  scene.comm->collOpCount = 5;
+  scene.plan->kernelSpecialized = false;
+
+  ScopedHook algoInfoHook(g_getAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                             ncclSimInfo_t*) {
+    task->protocol = NCCL_PROTO_SIMPLE;
+    task->nMaxChannels = 0;  // makes nParts 0: safe to run this call to completion
+    task->nWarps = 1;
+    return ncclSuccess;
+  });
+  ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_SIMPLE)] = 0;
+  ScopedHook kernelHook(g_planSetDefaultKernel, [&](struct ncclComm*, struct ncclKernelPlan*) {});
+
+  EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclSuccess);
+  EXPECT_EQ(kernelHook.calls, 1);
+  EXPECT_EQ(scene.comm->collOpCount, 6u);
+}
+
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_FuncIndexFound_AlreadySpecialized_SkipsPlanSetDefaultKernel) {
+  ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/1);
+  ncclTaskBcast task{};
+  task.count = 100;
+  scene.peers[0].bcastQueue.head = &task;
+  scene.plan->kernelSpecialized = true;
+
+  ScopedHook algoInfoHook(g_getAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                             ncclSimInfo_t*) {
+    task->protocol = NCCL_PROTO_SIMPLE;
+    task->nMaxChannels = 0;
+    task->nWarps = 1;
+    return ncclSuccess;
+  });
+  ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_SIMPLE)] = 0;
+  ScopedHook kernelHook(g_planSetDefaultKernel, [&](struct ncclComm*, struct ncclKernelPlan*) {});
+
+  EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclSuccess);
+  EXPECT_EQ(kernelHook.calls, 0);
+}
+
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_ProtoLL_ReachesFuncIndexWithoutCrashing) {
+  ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/1);
+  ncclTaskBcast task{};
+  task.count = 100;
+  scene.peers[0].bcastQueue.head = &task;
+
+  ScopedHook algoInfoHook(g_getAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                             ncclSimInfo_t*) {
+    task->protocol = NCCL_PROTO_LL;
+    task->nMaxChannels = 0;
+    task->nWarps = 1;
+    return ncclSuccess;
+  });
+  ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_LL)] = 0;
+
+  EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclSuccess);
+}
+
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_ProtoLL128_ReachesFuncIndexWithoutCrashing) {
+  ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/1);
+  ncclTaskBcast task{};
+  task.count = 100;
+  scene.peers[0].bcastQueue.head = &task;
+  scene.comm->WarpSize = 64;
+  scene.comm->ll128DataElems = 1;
+  scene.comm->ll128LineElems = 1;
+
+  ScopedHook algoInfoHook(g_getAlgoInfo, [&](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                             ncclSimInfo_t*) {
+    task->protocol = NCCL_PROTO_LL128;
+    task->nMaxChannels = 0;
+    task->nWarps = 1;
+    return ncclSuccess;
+  });
+  ncclDevFuncNameToId[ScheduleBcastTasksToPlan_DevFuncKey(NCCL_PROTO_LL128)] = 0;
+
+  EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclSuccess);
 }
 
 TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_MaxItemBoundary_StopsWithoutBudgetDenial) {
@@ -341,6 +486,5 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_MaxItemBoundary_StopsWithout
     return true;
   });
 
-  EXPECT_EXIT(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr),
-              ::testing::KilledBySignal(SIGABRT), "unfaked call: ncclGetAlgoInfo");
+  EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclInvalidUsage);
 }
