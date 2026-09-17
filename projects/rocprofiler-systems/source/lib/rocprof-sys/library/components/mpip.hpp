@@ -62,6 +62,14 @@ std::uint64_t deactivate_mpip(std::uint64_t);
 //
 //--------------------------------------------------------------------------------------//
 //
+void
+pause_mpip();
+
+void
+resume_mpip();
+//
+//--------------------------------------------------------------------------------------//
+//
 template <typename Toolset, typename Tag>
 struct mpip_handle : base<mpip_handle<Toolset, Tag>, void>
 {
