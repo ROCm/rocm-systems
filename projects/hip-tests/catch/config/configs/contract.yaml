@@ -1803,6 +1803,27 @@ contract:
   Contract_Library_HipLibraryGetGlobal_Default_MatchesModuleGetGlobal:
     <<: *level_0
     tags: [library, P0]
+  Contract_Library_HipLibraryGetModule_Default_ReturnsNonNullModule:
+    <<: *level_0
+    tags: [library, P0]
+  Contract_Library_HipLibraryGetModule_Default_RepeatedQueryIsStable:
+    <<: *level_0
+    tags: [library, P0]
+  Contract_Library_HipLibraryGetModule_Default_ModuleResolvesAndLaunchesKernel:
+    <<: *level_0
+    tags: [library, P0]
+  Contract_Library_HipLibraryGetModule_Default_ModuleGlobalMatchesLibraryGlobal:
+    <<: *level_0
+    tags: [library, P0]
+  Contract_Library_HipLibraryGetModule_NullModuleOut_IsRejected:
+    <<: *level_0
+    tags: [library, P0]
+  Contract_Library_HipLibraryGetModule_NullLibrary_IsRejected:
+    <<: *level_0
+    tags: [library, P0]
+  Contract_Library_HipLibraryGetModule_ModuleUnload_IsRejected:
+    <<: *level_0
+    tags: [library, P0]
   Contract_Library_HipKernelGetLibrary_Default_RoundTrips:
     <<: *level_0
     tags: [library, P0]

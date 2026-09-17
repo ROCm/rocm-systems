@@ -13,22 +13,22 @@ contract tier intentionally pins only small, portable semantic guarantees.
 ## Snapshot
 
 <!-- contract-coverage-snapshot
-contract_tests: 608
+contract_tests: 615
 contract_domains: 118
-declared_apis: 497
-covered_apis: 486
+declared_apis: 500
+covered_apis: 487
 uncovered_allowlisted: 11
-coverage_pct: 97.8
+coverage_pct: 97.4
 -->
 
-- Snapshot date: 2026-08-26
-- Snapshot commit: `920418c484`
-- Contract tests: 608
+- Snapshot date: 2026-09-17
+- Snapshot commit: `e3a0204870a`
+- Contract tests: 615
 - Contract domains: 118
-- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 497
-- Declared HIP runtime APIs directly exercised by contract tests: 486
+- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 500
+- Declared HIP runtime APIs directly exercised by contract tests: 487
 - Intentionally uncovered, allowlisted APIs: 11
-- Approximate declared API-name coverage: 97.8%
+- Approximate declared API-name coverage: 97.4%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`,
   `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`,
@@ -161,7 +161,7 @@ binaries instead of exposing portable state to assert.
 | `kernel_launch` | 7 |
 | `kernel_name_ref` | 3 |
 | `kernel_object_attributes` | 3 |
-| `library` | 14 |
+| `library` | 21 |
 | `library_file` | 3 |
 | `logging` | 3 |
 | `managed_memory` | 5 |

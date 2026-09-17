@@ -3977,6 +3977,10 @@ inline static hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes,
       cudaLibraryGetManaged(dptr, bytes, reinterpret_cast<cudaLibrary_t>(library), name));
 }
 
+inline static hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library) {
+  return hipCUResultTohipError(cuLibraryGetModule(pMod, library));
+}
+
 inline static hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library) {
   return hipCUResultTohipError(cuLibraryGetKernelCount(count, library));
 }
