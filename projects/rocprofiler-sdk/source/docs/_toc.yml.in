@@ -6,6 +6,9 @@ defaults:
 
 root: index
 subtrees:
+  - entries:
+    - file: what-is-rocprofiler-sdk
+      title: What is ROCprofiler-SDK?
   - caption: Install
     entries:
     - file: install/install
