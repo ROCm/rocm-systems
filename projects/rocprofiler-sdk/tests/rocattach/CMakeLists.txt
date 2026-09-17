@@ -10,6 +10,7 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 find_package(rocprofiler-sdk-rocattach REQUIRED)
+find_package(rocprofiler-register QUIET)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -52,6 +53,41 @@ target_link_libraries(
     PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
             rocprofiler-sdk::tests-common-library
             rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library)
+
+add_library(rocattach-attachment-lifecycle-tool SHARED)
+target_sources(rocattach-attachment-lifecycle-tool PRIVATE attachment_lifecycle_tool.cpp)
+target_link_libraries(
+    rocattach-attachment-lifecycle-tool PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
+                                                rocprofiler-sdk::tests-build-flags)
+
+add_library(rocattach-startup-lifecycle-tool SHARED)
+target_sources(rocattach-startup-lifecycle-tool PRIVATE attachment_lifecycle_tool.cpp)
+target_compile_definitions(rocattach-startup-lifecycle-tool
+                           PRIVATE ROCPROFILER_TEST_STARTUP_CLIENT=1)
+target_link_libraries(
+    rocattach-startup-lifecycle-tool PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
+                                             rocprofiler-sdk::tests-build-flags)
+
+add_library(rocattach-callbackless-lifecycle-tool SHARED)
+target_sources(rocattach-callbackless-lifecycle-tool
+               PRIVATE attachment_lifecycle_tool.cpp)
+target_compile_definitions(rocattach-callbackless-lifecycle-tool
+                           PRIVATE ROCPROFILER_TEST_CALLBACKLESS_CLIENT=1)
+target_link_libraries(
+    rocattach-callbackless-lifecycle-tool
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
+            rocprofiler-sdk::tests-build-flags)
+
+if(rocprofiler-register_FOUND)
+    add_executable(rocattach-direct-attachment-lifecycle-test)
+    target_sources(rocattach-direct-attachment-lifecycle-test
+                   PRIVATE direct_attachment_lifecycle.cpp)
+    target_link_libraries(
+        rocattach-direct-attachment-lifecycle-test
+        PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
+                rocprofiler-sdk::tests-build-flags
+                rocprofiler-register::rocprofiler-register ${CMAKE_DL_LIBS})
+endif()
 
 add_executable(rocattach-tool-path-validation-test)
 target_sources(rocattach-tool-path-validation-test PRIVATE tool_path_validation.cpp)
@@ -170,6 +206,185 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     PASS_REGULAR_EXPRESSION "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+rocprofiler_add_integration_execute_test(
+    rocattach-attachment-lifecycle-test-execute
+    COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
+            $<TARGET_FILE:rocattach-attachment-lifecycle-tool>
+    DEPENDS rocattach-parallel-attach-test rocattach-attachment-lifecycle-tool
+    TIMEOUT 45
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}" "ROCPROFILER_TEST_EXPECT_ATTACH_COUNT=1"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION "Attachment lifecycle test PASSED: 1 session"
+    FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Attachment lifecycle test FAILED")
+
+rocprofiler_add_integration_execute_test(
+    rocattach-attachment-force-load-zero-lifecycle-test-execute
+    COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
+            $<TARGET_FILE:rocattach-attachment-lifecycle-tool>
+    DEPENDS rocattach-parallel-attach-test rocattach-attachment-lifecycle-tool
+    TIMEOUT 45
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}" "ROCPROFILER_REGISTER_FORCE_LOAD=0"
+                "ROCPROFILER_TEST_EXPECT_ATTACH_COUNT=1"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION "Attachment lifecycle test PASSED: 1 session"
+    FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Attachment lifecycle test FAILED")
+
+rocprofiler_add_integration_execute_test(
+    rocattach-attachment-reattach-lifecycle-test-execute
+    COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
+            $<TARGET_FILE:rocattach-attachment-lifecycle-tool> --reattach
+    DEPENDS rocattach-parallel-attach-test rocattach-attachment-lifecycle-tool
+    TIMEOUT 45
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}" "ROCPROFILER_TEST_EXPECT_ATTACH_COUNT=2"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION "Attachment lifecycle test PASSED: 2 session"
+    FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Attachment lifecycle test FAILED")
+
+rocprofiler_add_integration_execute_test(
+    rocattach-attachment-failure-retry-test-execute
+    COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
+            $<TARGET_FILE:rocattach-attachment-lifecycle-tool> --retry-failed-attach
+    DEPENDS rocattach-parallel-attach-test rocattach-attachment-lifecycle-tool
+    TIMEOUT 45
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION "Attachment lifecycle test PASSED: 2 session"
+    FAIL_REGULAR_EXPRESSION
+        "Attachment lifecycle test FAILED|initial attachment unexpectedly succeeded|Segmentation fault|Subprocess aborted"
+    )
+
+rocprofiler_add_integration_execute_test(
+    rocattach-startup-client-coexistence-test-execute
+    COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
+            $<TARGET_FILE:rocattach-attachment-lifecycle-tool>
+    DEPENDS rocattach-parallel-attach-test rocattach-attachment-lifecycle-tool
+            rocattach-startup-lifecycle-tool
+    TIMEOUT 45
+    LABELS "attachment"
+    ENVIRONMENT
+        "${rocattach-test-env}" "ROCPROFILER_TEST_EXPECT_ATTACH_COUNT=1"
+        "ROCPROFILER_TEST_EXPECT_CLIENT_PRIORITY=1"
+        "ROCP_TOOL_LIBRARIES=$<TARGET_FILE:rocattach-startup-lifecycle-tool>"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION "Attachment lifecycle test PASSED: 1 session"
+    FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Attachment lifecycle test FAILED")
+
+# Verify a framework-owned rocprofiler_configure client can initialize normally while the
+# attachment listener remains available. Standalone SDK builds skip this cross-component
+# test when using an older rocprofiler-register package.
+if(rocprofiler-register_FOUND AND rocprofiler-register_HAS_ANYTIME_ATTACHMENT)
+    rocprofiler_add_integration_execute_test(
+        rocattach-direct-attachment-lifecycle-test-execute
+        TARGET rocattach-direct-attachment-lifecycle-test
+        ARGS $<TARGET_FILE:rocattach-attachment-lifecycle-tool>
+        DEPENDS rocattach-direct-attachment-lifecycle-test
+                rocattach-attachment-lifecycle-tool
+        TIMEOUT 15
+        LABELS "attachment"
+        ENVIRONMENT "${rocattach-test-env}"
+        PASS_REGULAR_EXPRESSION "Attachment lifecycle test PASSED: 1 session"
+        FAIL_REGULAR_EXPRESSION
+            "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Direct attachment lifecycle test FAILED|Attachment lifecycle test FAILED"
+        )
+
+    rocprofiler_add_integration_execute_test(
+        rocattach-direct-anytime-client-coexistence-test-execute
+        TARGET rocattach-direct-attachment-lifecycle-test
+        ARGS $<TARGET_FILE:rocattach-startup-lifecycle-tool>
+             $<TARGET_FILE:rocattach-attachment-lifecycle-tool>
+        DEPENDS rocattach-direct-attachment-lifecycle-test
+                rocattach-startup-lifecycle-tool rocattach-attachment-lifecycle-tool
+        TIMEOUT 15
+        LABELS "attachment"
+        ENVIRONMENT "${rocattach-test-env}"
+        PASS_REGULAR_EXPRESSION "Attachment lifecycle test PASSED: 1 session"
+        FAIL_REGULAR_EXPRESSION
+            "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Direct attachment lifecycle test FAILED|Attachment lifecycle test FAILED"
+        )
+
+    rocprofiler_add_integration_execute_test(
+        rocattach-direct-callbackless-lifecycle-test-execute
+        TARGET rocattach-direct-attachment-lifecycle-test
+        ARGS $<TARGET_FILE:rocattach-callbackless-lifecycle-tool>
+        DEPENDS rocattach-direct-attachment-lifecycle-test
+                rocattach-callbackless-lifecycle-tool
+        TIMEOUT 15
+        LABELS "attachment"
+        ENVIRONMENT "${rocattach-test-env}"
+        PASS_REGULAR_EXPRESSION "Callback-less attachment lifecycle test PASSED"
+        FAIL_REGULAR_EXPRESSION
+            "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Direct attachment lifecycle test FAILED|Attachment lifecycle test FAILED"
+        )
+
+    rocprofiler_add_integration_execute_test(
+        rocattach-implicit-configure-test-execute
+        COMMAND
+            $<TARGET_FILE:rocattach-parallel-attach-test>
+            $<TARGET_FILE:attachment-test-implicit-configure>
+            $<TARGET_FILE:rocprofiler-sdk-c-tool>
+        DEPENDS rocattach-parallel-attach-test
+        TIMEOUT 45
+        LABELS "attachment"
+        ENVIRONMENT "${rocattach-test-env}"
+        DISABLED ${IS_DISABLED}
+        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+        PASS_REGULAR_EXPRESSION "Test C tool \\(priority=1\\) is using rocprofiler-sdk v"
+        FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+    # Runtime attachment explicitly loads the SDK and is independent of startup FORCE_LOAD
+    # policy.
+    rocprofiler_add_integration_execute_test(
+        rocattach-implicit-configure-force-load-zero-test-execute
+        COMMAND
+            $<TARGET_FILE:rocattach-parallel-attach-test>
+            $<TARGET_FILE:attachment-test-implicit-configure>
+            $<TARGET_FILE:rocprofiler-sdk-c-tool>
+        DEPENDS rocattach-parallel-attach-test
+        TIMEOUT 45
+        LABELS "attachment"
+        ENVIRONMENT "${rocattach-test-env}" "ROCPROFILER_REGISTER_FORCE_LOAD=0"
+        DISABLED ${IS_DISABLED}
+        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+        PASS_REGULAR_EXPRESSION "Test C tool \\(priority=1\\) is using rocprofiler-sdk v"
+        FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+    rocprofiler_add_integration_execute_test(
+        rocattach-implicit-configure-lifecycle-test-execute
+        COMMAND
+            $<TARGET_FILE:rocattach-parallel-attach-test>
+            $<TARGET_FILE:attachment-test-implicit-configure>
+            $<TARGET_FILE:rocattach-attachment-lifecycle-tool>
+        DEPENDS rocattach-parallel-attach-test rocattach-attachment-lifecycle-tool
+        TIMEOUT 45
+        LABELS "attachment"
+        ENVIRONMENT "${rocattach-test-env}" "ROCPROFILER_TEST_EXPECT_ATTACH_COUNT=1"
+                    "ROCPROFILER_TEST_EXPECT_CLIENT_PRIORITY=1"
+        DISABLED ${IS_DISABLED}
+        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+        PASS_REGULAR_EXPRESSION "Attachment lifecycle test PASSED: 1 session"
+        FAIL_REGULAR_EXPRESSION
+            "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Attachment lifecycle test FAILED")
+
+else()
+    message(
+        STATUS
+            "Skipping rocattach-implicit-configure-test: rocprofiler-register lacks anytime attachment support"
+        )
+endif()
 
 rocprofiler_add_integration_execute_test(
     rocattach-stale-register-library-test-execute
