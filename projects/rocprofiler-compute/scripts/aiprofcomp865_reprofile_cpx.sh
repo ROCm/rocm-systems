@@ -113,7 +113,7 @@ MAT_EXP_BIN="${MAT_EXP_BIN:-$WORKDIR/HPCTrainingExamples/HPCTrainingExamples/Man
 if [[ -x "$MAT_EXP_BIN" ]]; then
   run_workload mat_exp \
     'rm -rf workloads/mat_exp' \
-    "rocprof profile -n mat_exp -VV --overwrite -- $MAT_EXP_BIN"
+    "rocprof profile -n mat_exp -VV -- $MAT_EXP_BIN"
 else
   echo "SKIP mat_exp: set MAT_EXP_BIN to streams_sync mat_exp binary"
 fi
