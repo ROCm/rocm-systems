@@ -13,9 +13,8 @@
 // Initialization Tests
 
 TEST_F(NetIbMPITest, InitializePlugin) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     ncclResult_t result = InitNetIb();
     ASSERT_EQ(result, ncclSuccess) << "Failed to initialize NET IB plugin";
@@ -23,9 +22,8 @@ TEST_F(NetIbMPITest, InitializePlugin) {
 }
 
 TEST_F(NetIbMPITest, GetDeviceCount) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
@@ -41,9 +39,8 @@ TEST_F(NetIbMPITest, GetDeviceCount) {
 // Device Properties Tests
 
 TEST_F(NetIbMPITest, GetDeviceProperties) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -67,9 +64,8 @@ TEST_F(NetIbMPITest, GetDeviceProperties) {
 }
 
 TEST_F(NetIbMPITest, GetDevicePropertiesInvalidDevice) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -84,9 +80,8 @@ TEST_F(NetIbMPITest, GetDevicePropertiesInvalidDevice) {
 // Connection Setup Tests
 
 TEST_F(NetIbMPITest, ListenAndConnect) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -105,9 +100,8 @@ TEST_F(NetIbMPITest, ListenAndConnect) {
 }
 
 TEST_F(NetIbMPITest, ConnectWithInvalidHandle) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
-                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
-        << "Test requirements not met";
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -124,9 +118,8 @@ TEST_F(NetIbMPITest, ConnectWithInvalidHandle) {
 // Memory Registration Tests
 
 TEST_F(NetIbMPITest, RegisterHostMemory) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -152,9 +145,8 @@ TEST_F(NetIbMPITest, RegisterHostMemory) {
 }
 
 TEST_F(NetIbMPITest, RegisterGpuMemory) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -180,9 +172,8 @@ TEST_F(NetIbMPITest, RegisterGpuMemory) {
 }
 
 TEST_F(NetIbMPITest, RegisterMemoryNullPointer) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -201,9 +192,8 @@ TEST_F(NetIbMPITest, RegisterMemoryNullPointer) {
 }
 
 TEST_F(NetIbMPITest, DeregisterNullHandle) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -226,9 +216,8 @@ TEST_F(NetIbMPITest, DeregisterNullHandle) {
 // harness performs MPI setup and failure handshakes on the main thread, then
 // releases the workers together so their data paths overlap deterministically.
 TEST_F(NetIbMPITest, SimpleSendRecv) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -358,9 +347,8 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
 // same size ladder on an independent connection, so registrations of many
 // different sizes hit the shared per-device MR cache at once.
 TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -444,9 +432,8 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
 }
 
 TEST_F(NetIbMPITest, SendRecvZeroSize) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -491,9 +478,8 @@ TEST_F(NetIbMPITest, SendRecvZeroSize) {
 }
 
 TEST_F(NetIbMPITest, FlushAfterRecv) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
@@ -605,9 +591,8 @@ TEST_F(NetIbMPITest, FlushAfterRecv) {
 // threaded path leaves rank synchronization to the main-thread harness after
 // every worker has completed.
 TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -781,9 +766,8 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
 // several large registrations in the per-device MR cache simultaneously and
 // keep the NIC saturated while every worker verifies its own payload.
 TEST_F(NetIbMPITest, LargeTransfer) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -851,9 +835,8 @@ TEST_F(NetIbMPITest, LargeTransfer) {
 }
 
 TEST_F(NetIbMPITest, CloseWithoutWaitingForCompletion) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int ndev = 0;
     AssertInitAndGetDevices(&ndev);
@@ -864,9 +847,8 @@ TEST_F(NetIbMPITest, CloseWithoutWaitingForCompletion) {
 }
 
 TEST_F(NetIbMPITest, ListenCloseListen) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -944,9 +926,8 @@ TEST_F(NetIbMPITest, ListenCloseListen) {
 }
 
 TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1131,9 +1112,8 @@ TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
 }
 
 TEST_F(NetIbMPITest, MultipleSequentialConnections) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
@@ -1169,9 +1149,8 @@ TEST_F(NetIbMPITest, MultipleSequentialConnections) {
 }
 
 TEST_F(NetIbMPITest, RapidConnectDisconnect) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1347,9 +1326,8 @@ TEST_F(NetIbMPITest, RapidConnectDisconnect) {
 }
 
 TEST_F(NetIbMPITest, MultiRecv) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1493,9 +1471,8 @@ TEST_F(NetIbMPITest, MultiRecv) {
 }
 
 TEST_F(NetIbMPITest, MultiRecvShuffled) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1669,9 +1646,8 @@ TEST_F(NetIbMPITest, MultiRecvShuffled) {
 // With RCCL_IB_P2P_DISABLE_CTS=0 the AINIC CTS table overflows ~256 entries
 // and the drain times out; with =1 it passes. Requires exactly 2 ranks.
 TEST_F(NetIbMPITest, CtsDepthStress) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " MPI processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     net_ = &netIbCast;
     ASSERT_EQ(InitNetIb(), ncclSuccess);

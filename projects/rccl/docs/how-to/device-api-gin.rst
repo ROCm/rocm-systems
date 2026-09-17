@@ -10,9 +10,13 @@ Use the RCCL device API and GIN
 The experimental RCCL device API lets GPU kernels communicate through a
 device communicator (``ncclDevComm``). GPU-initiated networking (GIN) extends
 that API with one-sided puts, signals, counters, and barriers across nodes.
-RCCL 2.30.4 incorporates Device API and GIN enhancements from upstream
-NCCL 2.30.3. This page describes those APIs and the limits of the AMD
+RCCL 2.31 incorporates Device API and GIN enhancements from upstream
+NCCL 2.31.2. This page describes those APIs and the limits of the AMD
 host-proxy backend.
+
+``NCCL_GIN_TYPE`` values for AMD backends are **not compatible with 2.30.7**:
+rocSHMEM GDA moved from 5 to 6 and Anvil SDMA from 6 to 7 because NCCL 2.31
+placed EFA GDA at 5. The IB proxy remains ``NCCL_GIN_TYPE=2``.
 
 Requirements
 ============
