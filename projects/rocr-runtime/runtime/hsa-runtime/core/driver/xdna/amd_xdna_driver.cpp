@@ -2205,14 +2205,6 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     if (static_cast<hsa_amd_aie_packet_opcode_t>(pkt->opcode) != HSA_AMD_AIE_PACKET_OPCODE_KMQ) {
       return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
     }
-    // reserved4/5/6 are documented "must be 0" in hsa_ext_amd_aie.h. They used to be insts_size,
-    // pdi_addr and pdi_patch_offset (the old PDI-patch flow); an application still assigning them
-    // dispatches correctly today, but would silently divert onto a stale code path the day these
-    // words are reclaimed. Reject that now rather than let it surface later.
-    if (pkt->reserved4 != 0 || pkt->reserved5 != nullptr || pkt->reserved6 != 0) {
-      log_warning_n(10, "AIE: packet reserved fields must be zero.\n");
-      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-    }
     if (PacketMode(pkt) != mode) {
       log_warning_n(10,
                     "AIE batch cannot mix full-ELF and PDI dispatches; submit each mode as its "
