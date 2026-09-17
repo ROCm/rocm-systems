@@ -124,8 +124,8 @@ namespace {
                 std::lock_guard<std::mutex> lock{state->mutex};
 
                 state->outstanding--;
+                state->cv.notify_all();
             }
-            state->cv.notify_all();
         }
 
         std::shared_ptr<tf::Executor> executor;
