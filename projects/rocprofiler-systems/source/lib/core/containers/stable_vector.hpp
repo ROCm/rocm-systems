@@ -15,6 +15,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -224,6 +225,11 @@ private:
     chunk_type& last_chunk();
 
     storage_type m_chunks;
+    // Guards the full last_chunk()-selection-then-write sequence in emplace_back()/
+    // push_back() against concurrent callers on the same instance; deliberately
+    // excluded from copy/move/swap since it protects only this instance's own
+    // m_chunks, not a value to transfer.
+    std::mutex m_growth_mutex;
 };
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
@@ -231,6 +237,7 @@ template <typename... Args>
 decltype(auto)
 stable_vector<Tp, ChunkSizeV, AlignN>::emplace_back(Args&&... args)
 {
+    std::lock_guard<std::mutex> lock{ m_growth_mutex };
     return last_chunk().emplace_back(std::forward<Args>(args)...);
 }
 
@@ -307,6 +314,9 @@ template <typename Tp, size_t ChunkSizeV, size_t AlignN>
 stable_vector<Tp, ChunkSizeV, AlignN>::chunk_type&
 stable_vector<Tp, ChunkSizeV, AlignN>::last_chunk()
 {
+    // Caller must hold m_growth_mutex for the full selection-and-write sequence: this
+    // check-then-act (query size(), conditionally add_chunk()) is not itself atomic,
+    // and the chunk it returns is about to be written to.
     if(m_chunks.empty() || m_chunks.back()->size() == ChunkSizeV) [[unlikely]]
     {
         add_chunk();
@@ -330,6 +340,7 @@ template <typename Tp, size_t ChunkSizeV, size_t AlignN>
 void
 stable_vector<Tp, ChunkSizeV, AlignN>::push_back(const Tp& value)
 {
+    std::lock_guard<std::mutex> lock{ m_growth_mutex };
     last_chunk().push_back(value);
 }
 
@@ -337,6 +348,7 @@ template <typename Tp, size_t ChunkSizeV, size_t AlignN>
 void
 stable_vector<Tp, ChunkSizeV, AlignN>::push_back(Tp&& value)
 {
+    std::lock_guard<std::mutex> lock{ m_growth_mutex };
     last_chunk().push_back(std::move(value));
 }
 
