@@ -327,11 +327,11 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
 
     if (record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
     {
-        if (tool->pc_sampling.enabled())
+        if (tool->pc_sampling->enabled())
         {
             assert(record.payload);
             const auto* obj_data = static_cast<code_object_load_data_t*>(record.payload);
-            tool->pc_sampling.on_code_object_load(*obj_data);
+            tool->pc_sampling->on_code_object_load(*obj_data);
         }
     }
     else if (record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
