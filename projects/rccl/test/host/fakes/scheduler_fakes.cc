@@ -128,7 +128,7 @@ ncclResult_t ncclGetRegBuff(struct ncclComm* comm, struct ncclTaskColl* task, in
 // Generated device-function table; empty default matches nccl_stubs.cc's own (a miss returns -1 with a WARN).
 std::unordered_map<uint64_t, int> ncclDevFuncNameToId;
 
-// src/config/algorithm_registry.cc: a fixed name is fine since INFO()'s macro guard only evaluates this when logging is on.
+// src/config/algorithm_registry.cc: a fixed name is fine, INFO()'s macro guard only evaluates this when logging is on.
 const char* ncclAlgNameForSymk(int) { return "sym-kernel"; }
 
 // src/tuning/tuning.cc's ncclTuningCompute is defined in tuning_fakes.cc.

@@ -24,7 +24,7 @@
 #include "fakes/sym_kernels_fakes.h"
 #include "fakes/tuning_fakes.h"
 
-// ENABLE_WARP_SPEED is binary-wide (CMakeLists.txt), not per-TU -- a per-TU #define would ODR-violate ncclComm with dev-runtime-test.cc.
+// ENABLE_WARP_SPEED is binary-wide (CMakeLists.txt): per-TU would ODR-violate ncclComm vs dev-runtime-test.cc.
 
 // Hipify renames the allgatherv one to *_tmp.cc: src/enqueue/task_sched/allgatherv_sched.cc has the basename.
 #include ALLGATHERV_SCHED_CC_PATH
@@ -198,7 +198,7 @@ class SchedulerMicrotest : public ::testing::Test {
     g_symkAvailable = [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; };
   }
   void TearDown() override {
-    ResetSchedulerFakes();
+    ResetSchedulerFakes();        // this file's own scheduler_fakes.{h,cc} seams
     ResetSymKernelsFakes();      // g_symRegType is a plain global, not a ScopedHook-restorable std::function
     ResetDevRuntimeMicroFakes();  // covers g_devrBootstrapAllGather, reused here for real bootstrapAllGather
     ResetTuningFakes();          // g_tuningCompute's canonical reset (its default is ncclSystemError, not success)
@@ -452,7 +452,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_TwoPeersAccumulate_ProceedsP
   scene.peers[0].bcastQueue.head = &task0;
   scene.peers[1].bcastQueue.head = &task1;
 
-  // ncclDevFuncNameToId is empty by default, so this proceeds past batchTasks==0, unlike Block 3.
+  // Unlike ScheduleBcastTasksToPlan_AllPeersEmpty_SkipsEachAndReturnsSuccess, batchTasks!=0 here reaches funcIndex.
   EXPECT_EQ(ncclScheduleBcastTasksToPlan(scene.comm.get(), scene.plan.get(), nullptr), ncclInvalidUsage);
 }
 
@@ -800,7 +800,10 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_ProtoLL128_RoundsChunkSizeTo
   EXPECT_EQ(items[0]->chunkSize, 28672);  // would be 32768 if the LL128 rounding were dropped
 }
 
-TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_ThreeChannels_SplitsBytesPerPartAndResetsRingTasks) {
+// Named for what it actually shows (the per-part byte split); it does not independently exercise the
+// per-channel ringTasks reset, since all 3 channels here share one rankToIndex and see identical tasks,
+// so a broken reset would just be overwritten with the same values and stay unobservable.
+TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_ThreeChannels_SplitsBytesPerPart) {
   ScheduleBcastTasksToPlan_Scene scene(/*numPeers=*/2);
   scene.rankToIndex[0] = 0;  // ringDepth 0
   scene.rankToIndex[1] = 1;  // ringDepth = nRanks(2) - 1 = 1, empty (count 0): keeps this test to one task
@@ -922,7 +925,7 @@ TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_TailLoop_DrainsSkippedPeerAn
   scene.comm->planner.nTasksBcast = 10;  // distinct from batchTasks(2), so a wrong-subtrahend mutant is observable
 
   ncclTaskBcast task0{};
-  task0.count = 0;  // count=0 keeps this test's focus on the tail loop, not Block 5's per-channel slicing
+  task0.count = 0;  // count=0 keeps this test's focus on the tail loop, not the per-channel byte-splitting logic
   ncclTaskBcast task2{};
   task2.count = 0;
   scene.peers[0].bcastQueue.head = &task0;
@@ -978,7 +981,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TaskIsNull_SkipsDevrInitOnceAnd
   EXPECT_EQ(remainTasksHead, nullptr);
 }
 
-// ncclDevrInitOnce is real dev_runtime.cc code (linked in via dev-runtime-test.cc), safe to call now that ENABLE_WARP_SPEED is binary-wide.
+// ncclDevrInitOnce is real dev_runtime.cc code (via dev-runtime-test.cc): safe now ENABLE_WARP_SPEED is shared.
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TaskNotNull_CallsRealDevrInitOnceAndPropagatesItsError) {
   MakeSymmetricTaskList_Scene scene;
   scene.comm->symmetricSupport = true;
@@ -1092,7 +1095,7 @@ TEST_F(SchedulerMicrotest,
   g_symRegType = ncclSymSendRegRecvReg;
   struct ncclTaskColl* remainTasksHead = nullptr;
 
-  // foundSymm==true reaches Block 8's args-size guard next; workArgsBytes defaults to 0, so it always rejects.
+  // foundSymm==true reaches the args-size guard next (symmetric_sched.cc:169); workArgsBytes defaults 0, so it rejects.
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
   EXPECT_EQ(remainTasksHead, nullptr);
   EXPECT_EQ(task.next, nullptr);
@@ -1406,10 +1409,10 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ConfigBoundary_Fo
   g_symRegType = ncclSymSendRegRecvReg;
   scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
 
-  ncclTaskColl task1{};  // classified first -> becomes the bucket's tail (processed second by Block 8)
+  ncclTaskColl task1{};  // classified first -> becomes the bucket's tail (processed 2nd by the cursor loop)
   task1.func = ncclFuncBroadcast;
   task1.datatype = ncclInt8;
-  ncclTaskColl task2{};  // classified second -> becomes the bucket's head (processed first by Block 8)
+  ncclTaskColl task2{};  // classified second -> becomes the bucket's head (processed 1st by the cursor loop)
   task2.func = ncclFuncBroadcast;
   task2.datatype = ncclInt8;
   task2.aggIsolate = true;  // configBoundary fires via THIS (current, first-processed) task's own flag
@@ -1481,7 +1484,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ArgsSizeBudgetExh
   EXPECT_EQ(taskFirst.isSymLast, 0);   // continues: room remains and neither next==nullptr nor configBoundary
   EXPECT_EQ(taskSecond.isSymLast, 1);  // budget for a 3rd work would exceed workArgsBytes: batch ends here
   EXPECT_EQ(taskThird.isSymLast, 1);   // new batch (outer while(task!=NULL) re-enters): ends naturally
-  // Remainder order matches Block 8's own processing order: {taskFirst, taskSecond} first, {taskThird} second.
+  // Remainder order matches the cursor loop's own processing order: {taskFirst, taskSecond} first, {taskThird} second.
   EXPECT_EQ(remainTasksHead, &taskFirst);
   EXPECT_EQ(taskFirst.next, &taskSecond);
   EXPECT_EQ(taskSecond.next, &taskThird);
@@ -1603,7 +1606,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_TuningMaskOverridde
   EXPECT_EQ(capturedMask, kOneSymBit);  // overridden to symkMask, distinct from the SYM_KERNELS default
 }
 
-// No "effAlgMask != 0 but symkMask == 0" test: Block 7's wantSym gate already proved that's unreachable here.
+// No "effAlgMask != 0 but symkMask == 0" test: the classification loop's wantSym gate proves it unreachable here.
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_NvlsSupport_ViaNcclNvlsSupported) {
   MakeSymmetricTaskList_Scene scene;
@@ -1941,7 +1944,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_KernelIdCount
   EXPECT_EQ(scene.comm->planner.nTasksColl, 5);
 }
 
-// task->winRegType is always ncclSymSendRegRecvReg here (Block 7's wantSym gate is its only writer), so this && is provably always false.
+// task->winRegType is always ncclSymSendRegRecvReg here (the classification loop's wantSym gate is its only writer).
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_LLKernelInit_NeverCalled_BecauseWinRegTypeIsAlwaysRegRecvReg) {
   MakeSymmetricTaskList_Scene scene;
   g_symRegType = ncclSymSendRegRecvReg;
@@ -2027,7 +2030,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_MultiTaskBa
   EXPECT_EQ(secondTask.nWarps, 4);
   ncclTaskColl* first = ncclIntruQueueHead(&scene.comm->planner.collSymTaskQueue);
   ASSERT_NE(first, nullptr);
-  EXPECT_EQ(first, &headTask);       // enqueued in Block 8/9's processing order, not classification order
+  EXPECT_EQ(first, &headTask);       // enqueued head-to-tail by final assignment, not LIFO classification order
   ASSERT_NE(first->next, nullptr);
   EXPECT_EQ(first->next, &secondTask);
   EXPECT_EQ(first->next->next, nullptr);  // loop stopped exactly at isSymLast, not beyond
@@ -2097,7 +2100,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_MixedBuckets_OneKernelFoundOneN
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_StopsAtIsSymLast_NotIntoTheNextBatch) {
   MakeSymmetricTaskList_Scene scene;
   g_symRegType = ncclSymSendRegRecvReg;
-  // Room for exactly 2 works per batch, not 3: same split as Block 8's ArgsSizeBudgetExhausted test.
+  // Room for exactly 2 works per batch, not 3: same split as ...ArgsSizeBudgetExhausted_SplitsIntoTwoBatches.
   scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 2, false));
 
   // Bucket is LIFO (last classified = head = first processed): classify taskThird, taskSecond, taskFirst.
@@ -2160,7 +2163,7 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_HasProxyOps_SetFalse) {
   EXPECT_FALSE(scene.plan->hasProxyOps);
 }
 
-// Block 6 __HIPCC__ discipline: assert a value only the HIP/AMD arm (comm->WarpSize) produces, not WARP_SIZE.
+// Targets the __HIPCC__ arm at symmetric_sched.cc:322-323 (comm->WarpSize), not the #else's WARP_SIZE.
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ThreadPerBlock_UsesCommWarpSizeField_HipArmCompiles) {
   SymmetricTaskScheduler_Scene scene;
   scene.comm->WarpSize = 77;
@@ -2598,7 +2601,8 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_RemainCell_UsesAlignedTotalCou
   EXPECT_NE(scene.plan->kernelSymArgs, nullptr);
 }
 
-// Packing loop dequeue/boundary + single-task traversal (symmetric_sched.cc:367-444); cross-task carry is Block 14.
+// Packing loop dequeue/boundary + single-task traversal (symmetric_sched.cc:367-444); cross-task carry is covered
+// by the SymmetricTaskScheduler_ContinuingTask_* tests further down.
 
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_PackingLoop_ProcessesAllTasks_UntilQueueDrains) {
   SymmetricTaskScheduler_Scene scene;
@@ -2787,7 +2791,6 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_IsSymLastBreak_StopsPackingLoo
   EXPECT_EQ(makeDevWorkCalls, 1);
 }
 
-// This goto fail never sets ret (see Block 12's report), so kernelSymArgs staying null is the real signal here.
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ChannelExhaustion_NotIsSymLast_SkipsTailCode) {
   SymmetricTaskScheduler_Scene scene;
   ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
