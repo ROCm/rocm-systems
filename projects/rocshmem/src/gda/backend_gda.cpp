@@ -1713,8 +1713,9 @@ void GDABackend::setup_gpu_qps() {
 
   CHECK_HIP(hipMalloc(&gpu_qps, qp_objs_mem_size));
 
-  QueuePair *host_gpu_qps = static_cast<QueuePair*>(malloc(qp_objs_mem_size));
-  CHECK_NNULL(host_gpu_qps, "malloc (host_gpu_qps)");
+  QueuePair *host_gpu_qps =
+      static_cast<QueuePair*>(aligned_alloc(alignof(QueuePair), qp_objs_mem_size));
+  CHECK_NNULL(host_gpu_qps, "aligned_alloc (host_gpu_qps)");
 
   host_qps.reserve(num_qps);
 
