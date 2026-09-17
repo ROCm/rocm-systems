@@ -970,12 +970,18 @@ void run_streaming_transfer_test(uint64_t iova_base, std::size_t window_count, u
   EXPECT_EQ(read_back, second) << "the streaming read lost or misplaced data";
 
   // The pattern encodes the page index, so adjacent pages differ; this makes
-  // a cursor that reuses one page for every region fail the checks above.
-  for (uint64_t p = 0; p + 1 < window_count; ++p) {
-    ASSERT_NE(std::vector<std::byte>(source.begin() + p * page_size,
-                                     source.begin() + (p + 1) * page_size),
-              std::vector<std::byte>(source.begin() + (p + 1) * page_size,
-                                     source.begin() + (p + 2) * page_size))
+  // a cursor that reuses one page for every region fail the checks above. In
+  // the partial-span case the last comparison covers the shortened final
+  // chunk, and stays within the transferred bytes.
+  const uint64_t pages_touched = (offset + span + page_size - 1) / page_size;
+  for (uint64_t p = offset / page_size; p + 1 < pages_touched; ++p) {
+    const uint64_t lo = std::max(p * page_size, offset);
+    const uint64_t hi = std::min((p + 2) * page_size, offset + span);
+    ASSERT_GT(hi, lo) << "comparison " << p << " is empty";
+    ASSERT_NE(std::vector<std::byte>(source.begin() + (lo - offset),
+                                     source.begin() + (p + 1) * page_size - offset),
+              std::vector<std::byte>(source.begin() + (p + 1) * page_size - offset,
+                                     source.begin() + (hi - offset)))
         << "pages " << p << " and " << p + 1 << " hold the same bytes";
   }
 }
