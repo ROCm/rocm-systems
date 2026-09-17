@@ -30,13 +30,11 @@ permissions:
   contents: read
 
 env:
-  # No CMake is pinned. Both hosted images ship CMake 3.31.6 at /usr/local/bin,
-  # ahead of /usr/bin on PATH, and neither lane installs apt cmake - so a pin
-  # would replace a newer CMake with an older one. Each lane echoes
-  # `cmake --version` so the log records what actually satisfied the 3.25 floor.
+  # No CMake is pinned: both images ship one ahead of apt's on PATH, so a pin
+  # would downgrade it.
   #
-  # Floors from profilers/profiler-hub/cmake/*.cmake, mirrored here for the
-  # from-source prefix the fetch-disabled lane builds. Keep the two in step.
+  # Floors mirrored from profilers/profiler-hub/cmake/*.cmake for the prefix the
+  # fetch-disabled lane builds from source. Keep the two in step.
   FMT_VERSION: "11.1.3"
   SPDLOG_VERSION: "1.15.3"
   NLOHMANN_JSON_VERSION: "3.11.3"
@@ -141,15 +139,10 @@ jobs:
           path: profilers/profiler-hub/build/test-results.xml
           if-no-files-found: warn
 
-  # Lane 2 of 2: the same matrix as lane 1, and in every cell the configure runs
-  # with no network reachable. Only the steps named "(network)" may reach out;
-  # the configure proves the default build acquires nothing.
-  #
-  # What the extra cells buy: the gate's *logic* does not vary by compiler or
-  # build type, so these do not test acquisition policy more thoroughly than one
-  # cell did. What they test is that profiler-hub compiles and links against a
-  # provided prefix under each toolchain - a different claim, and one lane 1
-  # cannot make, since there every dependency is fetched and built in-tree.
+  # Lane 2 of 2: same matrix, configure with no network reachable. Only steps
+  # named "(network)" may reach out - a convention nothing enforces.
+  # The extra cells prove linkage under each toolchain, not stricter acquisition
+  # policy.
   build-test-no-fetch:
     name: fetch=OFF / ${{ matrix.os }} / ${{ matrix.compiler.name }} / ${{ matrix.build-type }} / isolated configure
     runs-on: ${{ matrix.os }}
@@ -178,13 +171,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ${{ matrix.compiler.pkg }} util-linux curl
 
-      # The key names the OS and the compiler because the prefix is built with
-      # that cell's compiler, and names every floor because those are what it
-      # contains. It deliberately does NOT name the build type: the prefix is
-      # always Release, so the Debug and Release cells of one OS+compiler share
-      # a single entry - four keys across eight cells. No restore-keys: a
-      # partial prefix restored from a near-miss would configure and then fail
-      # to link, which reads as our change breaking rather than a stale cache.
+      # Build type is deliberately not in the key: the prefix is always Release,
+      # so the Debug and Release cells share one entry. No restore-keys - a
+      # partial prefix would configure and then fail to link.
       - name: Restore dependency prefix
         id: deps-cache
         uses: actions/cache@v6
