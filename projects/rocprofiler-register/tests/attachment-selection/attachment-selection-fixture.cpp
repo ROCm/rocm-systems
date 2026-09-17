@@ -22,73 +22,80 @@
 
 #include "common/defines.hpp"
 
+#include <cstdint>
+#include <iostream>
+#include <string_view>
+
 #include <rocprofiler-register/rocprofiler-register.h>
 
-#include <cstdint>
-#include <cstdio>
+using register_api_table_func_t = decltype(::rocprofiler_register_library_api_table)*;
 
-#if defined(ROCPROFILER_REGISTER_TEST_SDK_FIXTURE)
-
-extern "C" {
-int
-rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t)
-    ROCPROFILER_REGISTER_TEST_PUBLIC_API;
-
-int
-rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t)
+namespace
 {
-    std::puts("runtime SONAME SDK fixture loaded");
-    return 0;
-}
+bool attachment_initialized = false;
 }
 
-#elif defined(ROCPROFILER_REGISTER_TEST_ATTACH_FIXTURE)
+extern "C" int
+rocprofiler_test_attachment_initialized() ROCPROFILER_REGISTER_TEST_PUBLIC_API;
 
-using register_api_table_func_t = decltype(&rocprofiler_register_library_api_table);
+extern "C" int
+rocprofiler_test_attachment_initialized()
+{
+    return attachment_initialized ? 1 : 0;
+}
 
-extern "C" {
-int rocprofiler_attach_initialize(register_api_table_func_t)
+extern "C" int
+rocprofiler_attach_initialize(register_api_table_func_t register_functor)
     ROCPROFILER_REGISTER_TEST_PUBLIC_API;
 
-int
+extern "C" int
 rocprofiler_attach_initialize(register_api_table_func_t register_functor)
 {
-    if(register_functor == nullptr) return 1;
-
-    static auto initialized = false;
-    if(initialized) return 0;
+    if(register_functor == nullptr)
+    {
+        std::cerr << "Test FAILED: invalid registration functor\n";
+        return 1;
+    }
+    if(attachment_initialized) return 0;
 
     auto        library_id      = rocprofiler_register_library_indentifier_t{};
     static auto attach_table    = uint64_t{};
     void*       attach_tables[] = { &attach_table };
-    auto        status =
-        register_functor("rocattach", nullptr, 1, attach_tables, 1, &library_id);
-    initialized = (status == ROCP_REG_SUCCESS);
-    return status;
-}
+    if(register_functor("rocattach", nullptr, 1, attach_tables, 1, &library_id) !=
+       ROCP_REG_SUCCESS)
+    {
+        std::cerr << "Test FAILED: mock attachment library could not register itself\n";
+        return 1;
+    }
 
-int
-rocprofiler_attach_set_api_table(const char*,
-                                 uint64_t,
-                                 uint64_t,
-                                 void**,
-                                 uint64_t,
-                                 register_api_table_func_t)
-    ROCPROFILER_REGISTER_TEST_PUBLIC_API;
-
-int
-rocprofiler_attach_set_api_table(const char*,
-                                 uint64_t,
-                                 uint64_t,
-                                 void**,
-                                 uint64_t,
-                                 register_api_table_func_t)
-{
-    std::puts("runtime SONAME attach fixture loaded");
+    attachment_initialized = true;
+    std::cout << "Test fixture: attachment capability initialized\n";
     return 0;
 }
-}
 
-#else
-#    error "A runtime SONAME fixture type must be selected"
-#endif
+extern "C" int
+rocprofiler_attach_set_api_table(const char* name,
+                                 uint64_t,
+                                 uint64_t,
+                                 void**,
+                                 uint64_t,
+                                 register_api_table_func_t register_functor)
+    ROCPROFILER_REGISTER_TEST_PUBLIC_API;
+
+extern "C" int
+rocprofiler_attach_set_api_table(const char* name,
+                                 uint64_t,
+                                 uint64_t,
+                                 void**,
+                                 uint64_t,
+                                 register_api_table_func_t register_functor)
+{
+    if(std::string_view{ name } != "hsa" || !attachment_initialized ||
+       register_functor == nullptr)
+    {
+        std::cerr << "Test FAILED: invalid API table passed to mock attachment library\n";
+        return 1;
+    }
+
+    return 0;
+}

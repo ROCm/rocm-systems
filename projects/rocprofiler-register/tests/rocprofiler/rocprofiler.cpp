@@ -30,6 +30,8 @@
 #include <rocshmem/rocshmem.hpp>
 #include <roctx/roctx.hpp>
 
+#include "common/defines.hpp"
+
 #include <dlfcn.h>
 #include <pthread.h>
 #include <sstream>
@@ -129,6 +131,46 @@ check_registration_info(const char*          name,
 }  // namespace rocprofiler
 
 extern "C" {
+int
+rocprofiler_load_attachment_tool(const char* tool_path)
+    ROCPROFILER_REGISTER_TEST_PUBLIC_API;
+
+int
+rocprofiler_load_attachment_tool(const char* tool_path)
+{
+    auto* handle = dlopen(tool_path, RTLD_LOCAL | RTLD_LAZY);
+    if(handle == nullptr)
+        throw std::runtime_error{ std::string{ "error opening attachment tool " } +
+                                  tool_path };
+    if(dlsym(handle, "rocprofiler_configure") == nullptr)
+        throw std::runtime_error{ std::string{ "attachment tool " } + tool_path +
+                                  " did not contain rocprofiler_configure" };
+
+    printf(
+        "[%s] rocprofiler_load_attachment_tool :: %s\n", ROCP_REG_FILE_NAME, tool_path);
+    return 0;
+}
+
+int
+rocprofiler_attach() ROCPROFILER_REGISTER_TEST_PUBLIC_API;
+
+int
+rocprofiler_attach()
+{
+    printf("[%s] rocprofiler_attach\n", ROCP_REG_FILE_NAME);
+    return 0;
+}
+
+int
+rocprofiler_detach() ROCPROFILER_REGISTER_TEST_PUBLIC_API;
+
+int
+rocprofiler_detach()
+{
+    printf("[%s] rocprofiler_detach\n", ROCP_REG_FILE_NAME);
+    return 0;
+}
+
 int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t)
     __attribute__((visibility("default")));
