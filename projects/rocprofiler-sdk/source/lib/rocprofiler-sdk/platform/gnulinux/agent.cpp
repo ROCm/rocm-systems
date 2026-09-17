@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/platform/gnulinux/agent.hpp"
 
+#include "lib/common/defines.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -632,9 +633,9 @@ enumerate()
                         agent_info.node_id,
                         agent_info.gfx_target_version);
 
-                    auto major = (agent_info.gfx_target_version / 10000) % 100;
-                    auto minor = (agent_info.gfx_target_version / 100) % 100;
-                    auto step  = (agent_info.gfx_target_version % 100);
+                    auto major = ROCPROFILER_GFXIP_MAJOR(agent_info.gfx_target_version);
+                    auto minor = ROCPROFILER_GFXIP_MINOR(agent_info.gfx_target_version);
+                    auto step  = ROCPROFILER_GFXIP_STEPPING(agent_info.gfx_target_version);
                     agent_info.name =
                         common::get_string_entry(fmt::format("gfx{}{}{:x}", major, minor, step))
                             ->c_str();
@@ -675,9 +676,9 @@ enumerate()
                         major_version,
                         minor_version);
 
-                    auto major = (agent_info.gfx_target_version / 10000) % 100;
-                    auto minor = (agent_info.gfx_target_version / 100) % 100;
-                    auto step  = (agent_info.gfx_target_version % 100);
+                    auto major = ROCPROFILER_GFXIP_MAJOR(agent_info.gfx_target_version);
+                    auto minor = ROCPROFILER_GFXIP_MINOR(agent_info.gfx_target_version);
+                    auto step  = ROCPROFILER_GFXIP_STEPPING(agent_info.gfx_target_version);
 
                     agent_info.name =
                         common::get_string_entry(fmt::format("gfx{}{}{:x}", major, minor, step))

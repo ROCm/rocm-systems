@@ -325,9 +325,9 @@ public:
         return reinterpret_cast<Type*>(trace_control_buf.get());
     }
 
-    void CopyMemory(void* dst, const void* src, size_t size)
+    hsa_status_t CopyMemory(void* dst, const void* src, size_t size)
     {
-        this->copy_fn(dst, src, size, this->userdata);
+        return size == 0 ? HSA_STATUS_SUCCESS : this->copy_fn(dst, src, size, this->userdata);
     }
 
     int  GetSimdMask() const { return simd_mask; }
