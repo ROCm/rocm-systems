@@ -30,7 +30,6 @@ test('Overview uses the newest attempt of the newest commit even when it is inco
       ...result,
       durationSeconds: null,
       status: 'failed',
-      exitCode: 1,
       error: 'Synthetic incomplete latest attempt',
     } : { ...result })),
   });

@@ -9,7 +9,7 @@ test('compares controlled plugins for every target without a target picker', asy
   await expect(view.getByRole('heading', { name: 'Plugin Comparison' })).toBeVisible();
   await expect(view.getByRole('combobox', { name: 'Baseline plugin' })).toHaveText('Vanilla');
   await expect(page.getByLabel('Targets')).toBeVisible();
-  await expect(view.getByText('Same commit, catalog, machine, environment, and test definitions.')).toBeVisible();
+  await expect(view.getByText('Same commit, catalog, and test definitions. Branch, machine, and environment may differ.')).toBeVisible();
 
   const gfx1250 = view.getByTestId('plugin-target-gfx1250');
   const gfx950 = view.getByTestId('plugin-target-gfx950');
@@ -24,12 +24,16 @@ test('compares controlled plugins for every target without a target picker', asy
   await expect(gfx1250.getByTestId('plugin-summary-gfx1250-tsan')).toContainText('6/7');
   await expect(gfx1250.getByTestId('plugin-summary-gfx1250-tsan')).toContainText(/\+\d+\.\d%\*/);
   await expect(gfx1250.getByTestId('plugin-summary-gfx1250-tsan')).toContainText('Estimated for all 7 tests from 6 passed pairs');
+  await expect(gfx1250.getByTestId('plugin-summary-gfx1250-tsan')).not.toContainText('0 timed out');
+  await expect(gfx950.getByTestId('plugin-summary-gfx950-tsan')).not.toContainText('0 failed');
   await expect(gfx1250.getByText(/geometric-mean overhead measured from passed plugin\/baseline pairs is assumed/)).toBeVisible();
-  await expect(gfx1250.getByTestId('plugin-summary-gfx1250-ubsan')).toContainText('7/7');
+  await expect(gfx1250.getByTestId('plugin-summary-gfx1250-ubsan')).toContainText('6/7');
+  await expect(gfx1250.getByTestId('plugin-summary-gfx1250-ubsan')).toContainText('1 failed');
+  await expect(gfx950.getByTestId('plugin-summary-gfx950-ubsan')).toContainText('1 timed out');
   const gfx1250Chart = gfx1250.getByRole('img', { name: 'Plugin runtime overhead for gfx1250' });
   await expect(gfx1250Chart).toBeVisible();
   await expect(gfx950.getByRole('img', { name: 'Plugin runtime overhead for gfx950' })).toBeVisible();
-  await expect(gfx1250.getByText('Concurrent access to scheduler state')).toBeVisible();
+  await expect(gfx1250.getByText('Data race detected in scheduler state')).toBeVisible();
 
   const seriesColors = () => readChart(gfx1250Chart, (instance) => Object.fromEntries(
     instance.getOption().series.map((series) => [series.name, series.itemStyle.color]),
@@ -138,7 +142,7 @@ test('every performance-change surface identifies both compared commits', async 
   const latestPair = 'Candidate commit 31369c4d versus baseline commit 9f774d29';
   const metric = page.getByText('Perf change', { exact: true }).first().locator('..');
   await expect(metric.getByLabel(latestPair)).toBeVisible();
-  await expect(page.getByTestId('performance-trend').getByLabel('Candidate commit 255eabe3 versus baseline commit 68c7dece')).toBeVisible();
+  await expect(page.getByTestId('performance-trend').getByLabel('Candidate commit 255eabe3 versus baseline commit 86b362ea')).toBeVisible();
   await expect(page.getByTestId('largest-changes').getByLabel(latestPair)).toHaveCount(6);
   await expect(page.getByTestId('latest-results').getByLabel(latestPair)).toHaveCount(7);
 
@@ -181,7 +185,7 @@ test('every performance-change surface identifies both compared commits', async 
   await expect(page.getByText('Aggregate change')).toBeVisible();
   await expect(page.getByText('Not comparable', { exact: true })).toBeVisible();
   await expect(page.getByText('Only benchmarks with valid completed durations in both runs are compared.')).toBeVisible();
-  await expect(page.getByLabel(latestPair)).toHaveCount(2);
+  await expect(page.getByLabel('Candidate commit 8418072e versus baseline commit 31369c4d')).toHaveCount(2);
 });
 
 test('run comparison search reaches a historical rerun through a bounded option list', async ({ page }) => {

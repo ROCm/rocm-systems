@@ -18,7 +18,7 @@ export default [
     rules: { 'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }] },
   },
   {
-    files: ['**/*.config.js', '**/tests/**/*.js'],
+    files: ['**/*.config.js', '**/tests/**/*.js', '**/scripts/**/*.{js,mjs}'],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
 ];

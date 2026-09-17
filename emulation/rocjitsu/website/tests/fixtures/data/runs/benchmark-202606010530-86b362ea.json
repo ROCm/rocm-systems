@@ -21,7 +21,7 @@
     {
       "key": "rocmSdkVersion",
       "label": "ROCm SDK",
-      "value": "7.2.0.dev202606"
+      "value": "7.2.0.dev202608"
     },
     {
       "key": "pythonVersion",
@@ -52,35 +52,30 @@
           "testId": "triton-gemm-f16-1024",
           "durationSeconds": 2.24,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "triton-gemm-bf16-4096",
           "durationSeconds": 11.859,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "triton-softmax-f32-4096",
           "durationSeconds": 3.447,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "triton-layernorm-bf16-8192",
           "durationSeconds": 4.21,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "tensile-gemm-f16-8192",
           "durationSeconds": 15.856,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         }
       ]
@@ -92,35 +87,30 @@
           "testId": "triton-gemm-f16-1024",
           "durationSeconds": 1.945,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "triton-gemm-bf16-4096",
           "durationSeconds": 10.382,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "triton-softmax-f32-4096",
           "durationSeconds": 3.027,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "triton-layernorm-bf16-8192",
           "durationSeconds": 3.724,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "tensile-gemm-f16-8192",
           "durationSeconds": 13.843,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         }
       ]

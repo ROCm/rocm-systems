@@ -21,7 +21,7 @@
     {
       "key": "rocmSdkVersion",
       "label": "ROCm SDK",
-      "value": "7.2.0.dev202606"
+      "value": "7.2.0.dev202608"
     },
     {
       "key": "pythonVersion",
@@ -52,35 +52,30 @@
           "testId": "triton-gemm-f16-1024",
           "durationSeconds": null,
           "status": "failed",
-          "exitCode": 1,
           "error": "Benchmark process exited before producing a measurement"
         },
         {
           "testId": "triton-gemm-bf16-4096",
           "durationSeconds": 11.869,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "triton-softmax-f32-4096",
           "durationSeconds": 3.445,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "triton-layernorm-bf16-8192",
           "durationSeconds": 4.202,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "tensile-gemm-f16-8192",
           "durationSeconds": 15.81,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         }
       ]
@@ -92,35 +87,30 @@
           "testId": "triton-gemm-f16-1024",
           "durationSeconds": 1.933,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "triton-gemm-bf16-4096",
           "durationSeconds": 10.369,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "triton-softmax-f32-4096",
           "durationSeconds": 3.02,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "triton-layernorm-bf16-8192",
           "durationSeconds": 3.713,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "tensile-gemm-f16-8192",
           "durationSeconds": 13.808,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         }
       ]

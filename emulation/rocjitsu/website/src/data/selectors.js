@@ -5,7 +5,6 @@ import {
   compareCommitPosition,
   compareRunsByCommit,
   isRunCompleted,
-  sameComparisonScope,
   sortRunsByCommit,
 } from './runOrdering';
 
@@ -37,7 +36,6 @@ export function previousCompletedRun(runs, candidate) {
   if (!candidate) return null;
   return runs.filter((run) => (
     isRunCompleted(run)
-    && sameComparisonScope(run, candidate)
     && compareCommitPosition(run, candidate) < 0
   )).sort(compareRunsByCommit).at(-1) ?? null;
 }
@@ -50,7 +48,7 @@ export function previousCompletedRunForFilters(runs, candidate, filters) {
   if (selectedTestIds.length === 0) return null;
 
   return runs.filter((run) => {
-    if (!sameComparisonScope(run, candidate) || compareCommitPosition(run, candidate) >= 0) return false;
+    if (compareCommitPosition(run, candidate) >= 0) return false;
     const tests = resultMap(run);
     return selectedTestIds.every((testId) => {
       const test = tests.get(testId);
@@ -62,8 +60,7 @@ export function previousCompletedRunForFilters(runs, candidate, filters) {
 export function previousCompletedTestResult(runs, candidate, testId) {
   if (!candidate || !testId) return null;
   const earlierRuns = runs.filter((run) => (
-    sameComparisonScope(run, candidate)
-    && compareCommitPosition(run, candidate) < 0
+    compareCommitPosition(run, candidate) < 0
   )).sort(compareRunsByCommit).reverse();
 
   for (const run of earlierRuns) {
@@ -191,7 +188,7 @@ function intradayHistorySlots(runs, anchorDay) {
 export function selectOverview(data, filters, range = 'ALL') {
   const completedRuns = data.runs.filter(isRunCompleted);
   const candidate = data.latestCommitRun ?? sortRunsByCommit(data.runs).at(-1) ?? data.latestRun;
-  const officialRuns = completedRuns.filter((run) => sameComparisonScope(run, candidate));
+  const officialRuns = completedRuns;
   const trendRuns = officialRuns.filter((run) => !data.backfillRunIds.has(run.runId));
   const baseline = previousCompletedRun(data.runs, candidate);
   const comparisons = compareRuns(candidate, baseline, filters);

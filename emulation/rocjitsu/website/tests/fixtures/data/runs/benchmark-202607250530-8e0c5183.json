@@ -21,7 +21,7 @@
     {
       "key": "rocmSdkVersion",
       "label": "ROCm SDK",
-      "value": "7.2.0.dev202607"
+      "value": "7.2.0.dev202608"
     },
     {
       "key": "pythonVersion",
@@ -52,49 +52,42 @@
           "testId": "triton-gemm-f16-1024",
           "durationSeconds": 2.266,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "triton-gemm-bf16-4096",
           "durationSeconds": 11.875,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "triton-softmax-f32-4096",
           "durationSeconds": 3.431,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "triton-layernorm-bf16-8192",
           "durationSeconds": 4.195,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "tensile-gemm-f16-8192",
           "durationSeconds": 15.913,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "tensile-gemm-fp8-4096",
           "durationSeconds": 8.605,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "deepseek-v3-decode-fp8",
           "durationSeconds": 27.868,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         }
       ]
@@ -106,49 +99,42 @@
           "testId": "triton-gemm-f16-1024",
           "durationSeconds": 1.929,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "triton-gemm-bf16-4096",
           "durationSeconds": 10.331,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "triton-softmax-f32-4096",
           "durationSeconds": 3.025,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "triton-layernorm-bf16-8192",
           "durationSeconds": 3.756,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "tensile-gemm-f16-8192",
           "durationSeconds": 14.107,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "tensile-gemm-fp8-4096",
           "durationSeconds": 7.496,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         },
         {
           "testId": "deepseek-v3-decode-fp8",
           "durationSeconds": 24.25,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         }
       ]

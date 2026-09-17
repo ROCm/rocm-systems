@@ -115,7 +115,7 @@ test('offers a working Retry after a fatal data failure', async ({ page }) => {
   await page.getByRole('tab', { name: 'Plugin Comparison' }).click();
   await expect(page.getByTestId('plugin-comparison-empty')).toContainText('No vanilla baseline or sanitizer comparison runs are available');
   await expect(page.getByText('Per-Test Runtime Overhead')).toBeVisible();
-  await expect(page.getByText('Plugin Findings')).toBeVisible();
+  await expect(page.getByText('Plugin Errors')).toBeVisible();
   await page.getByRole('tab', { name: 'Failures' }).click();
   await expect(page.getByText('Run Reliability')).toBeVisible();
   await expect(page.getByText('Failed and Timed-Out Cases')).toBeVisible();

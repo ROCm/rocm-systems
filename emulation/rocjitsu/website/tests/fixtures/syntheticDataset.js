@@ -32,6 +32,7 @@ function syntheticRun(index) {
         testId,
         status: 'completed',
         durationSeconds: Number((1 + testIndex + index / 1000).toFixed(3)),
+        error: null,
       })),
     })),
   };

@@ -42,7 +42,10 @@ async function clickChartPosition(chart, extract, argument = null) {
 export async function clickCompletedChartPoint(chart, completedOffset = 0) {
   await clickChartPosition(chart, (instance, offset) => {
     const option = instance.getOption();
-    const points = option.series[0].data;
+    const seriesIndex = option.series.findIndex((series) => (
+      series.type === 'line' && !series.name.includes('missed-data bridge')
+    ));
+    const points = option.series[seriesIndex].data;
     let index = points.length - 1;
     let remaining = offset;
     while (index >= 0) {
@@ -51,7 +54,7 @@ export async function clickCompletedChartPoint(chart, completedOffset = 0) {
       index -= 1;
     }
     return instance.convertToPixel(
-      { seriesIndex: 0 },
+      { seriesIndex },
       [option.xAxis[0].data[index], points[index].value],
     );
   }, completedOffset);

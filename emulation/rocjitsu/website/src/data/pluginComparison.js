@@ -98,11 +98,9 @@ export function selectPluginComparison(group, target, suites, baselinePluginId =
     };
   });
 
-  const findings = pluginRuns.flatMap((run) => selectedTests(run, target, suites).flatMap((test) => (
-    (test.findings?.length ? test.findings : test.status !== 'completed' && test.error
-      ? [{ type: test.status, summary: test.error }]
-      : []).map((finding) => ({ run, test, finding }))
-  )));
+  const errors = pluginRuns.flatMap((run) => selectedTests(run, target, suites)
+    .filter((test) => test.status !== 'completed' && test.error)
+    .map((test) => ({ run, test, error: test.error })));
 
-  return { baselineRun, pluginRuns, rows, summaries, findings };
+  return { baselineRun, pluginRuns, rows, summaries, errors };
 }

@@ -64,9 +64,16 @@ function comparisonPluginNames(group) {
   return plugins.length > 0 ? plugins.join(', ') : 'Vanilla';
 }
 
+function pluginErrorSummary(error, pluginName) {
+  const prefix = `${pluginName}:`;
+  const summary = error.toLowerCase().startsWith(prefix.toLowerCase())
+    ? error.slice(prefix.length).trim()
+    : error;
+  return summary ? `${summary[0].toUpperCase()}${summary.slice(1)}` : error;
+}
+
 function SummaryCard({ summary, baseline, target }) {
   const { run } = summary;
-  const complete = summary.total > 0 && summary.completed === summary.total;
   const color = pluginColor(run.plugin.id);
   return (
     <Paper
@@ -121,34 +128,38 @@ function SummaryCard({ summary, baseline, target }) {
           {summary.counts.faster} lower · {summary.counts.neutral} within ±{PLUGIN_NOISE_TOLERANCE}% · {summary.counts.slower} overhead
         </Typography>
       )}
-      {!complete && (
+      {(summary.failed > 0 || summary.timeout > 0) && (
         <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.65, mt: 0.75 }}>
-          <Chip
-            size="small"
-            variant="outlined"
-            color="error"
-            icon={<ErrorRoundedIcon />}
-            label={`${summary.failed} failed`}
-            sx={(theme) => ({
-              height: 23,
-              bgcolor: alpha(theme.palette.error.main, 0.07),
-              '& .MuiChip-label': { px: 0.8, fontSize: '0.68rem', fontWeight: 720 },
-              '& .MuiChip-icon': { ml: 0.65, fontSize: 14 },
-            })}
-          />
-          <Chip
-            size="small"
-            variant="outlined"
-            color="warning"
-            icon={<TimerOffRoundedIcon />}
-            label={`${summary.timeout} timed out`}
-            sx={(theme) => ({
-              height: 23,
-              bgcolor: alpha(theme.palette.warning.main, 0.07),
-              '& .MuiChip-label': { px: 0.8, fontSize: '0.68rem', fontWeight: 720 },
-              '& .MuiChip-icon': { ml: 0.65, fontSize: 14 },
-            })}
-          />
+          {summary.failed > 0 && (
+            <Chip
+              size="small"
+              variant="outlined"
+              color="error"
+              icon={<ErrorRoundedIcon />}
+              label={`${summary.failed} failed`}
+              sx={(theme) => ({
+                height: 23,
+                bgcolor: alpha(theme.palette.error.main, 0.07),
+                '& .MuiChip-label': { px: 0.8, fontSize: '0.68rem', fontWeight: 720 },
+                '& .MuiChip-icon': { ml: 0.65, fontSize: 14 },
+              })}
+            />
+          )}
+          {summary.timeout > 0 && (
+            <Chip
+              size="small"
+              variant="outlined"
+              color="warning"
+              icon={<TimerOffRoundedIcon />}
+              label={`${summary.timeout} timed out`}
+              sx={(theme) => ({
+                height: 23,
+                bgcolor: alpha(theme.palette.warning.main, 0.07),
+                '& .MuiChip-label': { px: 0.8, fontSize: '0.68rem', fontWeight: 720 },
+                '& .MuiChip-icon': { ml: 0.65, fontSize: 14 },
+              })}
+            />
+          )}
         </Stack>
       )}
     </Paper>
@@ -425,26 +436,46 @@ function TargetComparison({ group, target, suites, baselinePluginId, onOpen }) {
           </SectionCard>
 
           <SectionCard
-            title="Plugin Findings"
-            subtitle="Sanitizer diagnostics and incomplete executions for this target"
-            action={<Chip size="small" icon={<BugReportRoundedIcon />} label={viewModel.findings.length} color={viewModel.findings.length ? 'warning' : 'default'} sx={{ alignSelf: 'flex-start' }} />}
+            title="Plugin Errors"
+            subtitle="Failure and timeout diagnostics for this target"
+            action={<Chip size="small" icon={<BugReportRoundedIcon />} label={viewModel.errors.length} color={viewModel.errors.length ? 'warning' : 'default'} sx={{ alignSelf: 'flex-start' }} />}
           >
-            {viewModel.findings.length === 0 ? (
-              <Alert severity="success">No plugin findings, failures, or timeouts were reported.</Alert>
+            {viewModel.errors.length === 0 ? (
+              <Alert severity="success">No plugin failures or timeouts were reported.</Alert>
             ) : (
               <Stack spacing={1}>
-                {viewModel.findings.map(({ run, test, finding }, index) => (
-                  <Paper key={`${run.runId}:${test.testId}:${finding.type}:${index}`} variant="outlined" sx={{ p: 1.5, bgcolor: 'action.hover' }}>
+                {viewModel.errors.map(({ run, test, error }, index) => (
+                  <Box
+                    key={`${run.runId}:${test.testId}:${index}`}
+                    sx={{
+                      p: 1.5,
+                      border: 1,
+                      borderColor: 'divider',
+                      borderRadius: 2,
+                      bgcolor: 'action.hover',
+                    }}
+                  >
                     <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ justifyContent: 'space-between', gap: 1 }}>
                       <Box>
-                        <Typography variant="body2" fontWeight={750}>{finding.summary}</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {run.plugin.name} · {test.name}{finding.location ? ` · ${finding.location}` : ''}
-                        </Typography>
+                        <Typography variant="body2" fontWeight={750}>{pluginErrorSummary(error, run.plugin.name)}</Typography>
+                        <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75, mt: 0.65 }}>
+                          <Chip
+                            size="small"
+                            variant="outlined"
+                            label={run.plugin.name}
+                            sx={{
+                              height: 22,
+                              color: pluginColor(run.plugin.id),
+                              borderColor: pluginColor(run.plugin.id),
+                              bgcolor: alpha(pluginColor(run.plugin.id), 0.06),
+                            }}
+                          />
+                          <Typography variant="caption" color="text.secondary">{test.name}</Typography>
+                        </Stack>
                       </Box>
                       <StatusChip status={test.status} />
                     </Stack>
-                  </Paper>
+                  </Box>
                 ))}
               </Stack>
             )}
@@ -540,8 +571,8 @@ function EmptyPluginComparison() {
       </SectionCard>
 
       <SectionCard
-        title="Plugin Findings"
-        subtitle="Sanitizer diagnostics and incomplete executions for this target"
+        title="Plugin Errors"
+        subtitle="Failure and timeout diagnostics for this target"
         action={<Chip size="small" icon={<BugReportRoundedIcon />} label="—" />}
       >
         <Typography color="text.secondary">—</Typography>
@@ -612,7 +643,7 @@ export default function PluginComparisonView({ data, filters }) {
           </TextField>
         </Box>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.2 }}>
-          Same commit, catalog, machine, environment, and test definitions. Only the RocJitsu plugin changes.
+          Same commit, catalog, and test definitions. Branch, machine, and environment may differ.
         </Typography>
       </SectionCard>
 

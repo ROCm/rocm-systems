@@ -101,7 +101,7 @@ A catalog is a complete immutable snapshot, not a diff from an earlier catalog.
 
 ### Catalog fields
 
-- `id`: required stable, unique catalog identifier.
+- `id`: required stable, unique catalog identifier matching `<catalog-id>` in the catalog filename.
 - `tests`: required array of benchmark definitions.
 - `targets`: required object mapping each target to the exact test IDs applicable to it.
 
@@ -167,7 +167,6 @@ A run represents one RocJitsu plugin execution on one source revision and machin
           "testId": "gemm-fp16-1024",
           "durationSeconds": 3.12,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         }
       ]
@@ -179,7 +178,6 @@ A run represents one RocJitsu plugin execution on one source revision and machin
           "testId": "gemm-fp16-1024",
           "durationSeconds": 2.82,
           "status": "completed",
-          "exitCode": 0,
           "error": null
         }
       ]
@@ -190,7 +188,7 @@ A run represents one RocJitsu plugin execution on one source revision and machin
 
 ### Run and comparison identity
 
-- `id`: required unique plugin-execution ID.
+- `id`: required unique plugin-execution ID matching `<run-id>` in the run filename.
 - `comparisonId`: required controlled-experiment ID shared by Vanilla, ASan, TSan, UBSan, or other plugin runs.
 - `testCatalog`: required path matching `test-catalogs/<filename>.json`.
 
@@ -229,7 +227,7 @@ Historical reruns preserve the source commit's original `committedAt`.
 
 - `completedAt`: required ISO-8601 timestamp for the completed plugin execution.
 - `trigger`: required; exactly `auto` or `manual`.
-- `machine`: required stable runner name shared by every target in the run.
+- `machine`: required stable runner name shared by every target in the run. Publication validation requires the same machine across all runs.
 
 Target identity is intentionally absent from `execution`; targets are grouped under `targets`.
 
@@ -243,6 +241,8 @@ Target identity is intentionally absent from `execution`; targets are grouped un
 
 Array order and labels do not affect compatibility; normalized key/value pairs do. Two empty environments are compatible. An empty and populated environment are not.
 
+Publication validation requires the same normalized environment across all runs.
+
 ### `targets` and results
 
 `targets` must contain exactly one group for every target defined by the referenced catalog. Each group contains:
@@ -255,13 +255,9 @@ The result identity is `(run id, target id, testId)`. Plugin comparison identity
 Every result contains:
 
 - `testId`: required catalog test ID.
-- `durationSeconds`: numeric seconds for a completed result; `null` for failed or timed-out results.
+- `durationSeconds`: positive numeric seconds for a completed result; `null` for failed or timed-out results.
 - `status`: required; `completed`, `failed`, or `timeout`.
-- `exitCode`: process exit code or `null`.
 - `error`: failure description or `null`.
-- `findings`: optional array of structured sanitizer findings.
-
-A finding contains required `type` and `summary` strings and an optional `location`.
 
 Failed and timed-out tests must remain in `results`. Omitting a catalog result invalidates the run instead of silently changing its denominator.
 
@@ -282,8 +278,9 @@ The overall runtime overhead is the geometric mean of per-test duration ratios. 
 2. Run Vanilla and each instrumented plugin against the catalog's complete target/test matrix.
 3. Give each plugin execution a unique `id` and the same controlled `comparisonId`.
 4. Include exactly one completed, failed, or timed-out result for every catalog test applicable to every target.
-5. Upload each `data/runs/<run-id>.json`.
-6. Add the run filenames to `data/index.json`, update `generatedAt`, and publish the index last.
+5. Validate the complete staged data directory with `npm run validate:data -- <data-directory>`.
+6. Upload each `data/runs/<run-id>.json`.
+7. Add the run filenames to `data/index.json`, update `generatedAt`, and publish the index last.
 
 No React or Vite build is required for a data-only GitHub Pages update.
 

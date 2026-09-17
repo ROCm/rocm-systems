@@ -1,4 +1,4 @@
-import { loadPublishedDashboardData } from '../../src/data/dashboardData.js';
+import { validatePublishedDashboardData } from '../../src/data/dashboardValidation.js';
 import { createDashboardFixture } from './dashboardFixture.js';
 
 export const {
@@ -9,7 +9,7 @@ export const {
 } = createDashboardFixture();
 export const publishedRunErrors = publishedRuns.map(() => null);
 
-export const publishedResult = loadPublishedDashboardData({
+export const publishedResult = validatePublishedDashboardData({
   metadata: dataMetadata,
   index: dataIndex,
   runs: publishedRuns,

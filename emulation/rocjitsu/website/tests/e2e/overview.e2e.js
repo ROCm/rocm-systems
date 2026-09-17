@@ -274,7 +274,7 @@ test('keeps timeframe controls local to the duration history', async ({ page }) 
   await expect(page.getByRole('button', { name: 'All available history' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText(/\d+ UTC commit dates? shown/)).toBeVisible();
   await expect(page.getByTestId('performance-range-change')).toHaveAttribute('data-change-state', 'faster');
-  await expect(page.getByTestId('performance-range-change')).toContainText('1.3%');
+  await expect(page.getByTestId('performance-range-change')).toContainText('6.9%');
   await expect(page.getByText('Latest vs first shown in ALL')).toBeVisible();
 
   await page.getByRole('button', { name: 'Trailing 7 days' }).click();

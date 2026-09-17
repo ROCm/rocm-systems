@@ -12,6 +12,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint .",
+    "validate:data": "node scripts/validate-dashboard-data.mjs",
     "test:unit": "vitest run",
     "test:e2e:install": "playwright install --with-deps chromium",
     "test:e2e": "playwright test",

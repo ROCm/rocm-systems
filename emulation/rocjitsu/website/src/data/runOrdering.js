@@ -1,5 +1,3 @@
-const COMPARISON_SCOPE_FIELDS = ['branch', 'environmentId'];
-
 function parsedTime(value) {
   const time = Date.parse(value);
   return Number.isFinite(time) ? time : Number.NEGATIVE_INFINITY;
@@ -17,10 +15,6 @@ export function commitShaFor(run) {
 
 export function commitTimestampFor(run) {
   return run?.commitTimestamp ?? run?.timestamp;
-}
-
-export function sameComparisonScope(left, right) {
-  return COMPARISON_SCOPE_FIELDS.every((field) => left?.[field] === right?.[field]);
 }
 
 export function compareRunExecution(left, right) {
