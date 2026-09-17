@@ -1,4 +1,4 @@
-# Rocjitsu Dashboard Data Contract
+# Rocjitsu Simulation Performance Data Contract
 
 Schema version 1 uses plain JSON, immutable test catalogs, and one run file per Rocjitsu plugin execution. A run file contains every target measured by that execution; target groups contain result records that reference the shared catalog.
 

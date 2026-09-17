@@ -137,13 +137,13 @@ function EmptyDataState({ error, onRetry }) {
 function DashboardHero({ data = null }) {
   return (
     <Stack direction={{ xs: 'column', md: 'row' }} sx={{ justifyContent: 'space-between', alignItems: { xs: 'flex-start', md: 'flex-end' }, gap: 2, mb: 2.5 }}>
-      <Box>
-        <Typography component="h1" variant="h1">Rocjitsu Performance Health</Typography>
-        <Typography sx={{ color: 'text.secondary', mt: 0.7, maxWidth: 760 }}>
-          Track benchmark performance, regressions, and run coverage across selected GFX targets.
+      <Box sx={{ minWidth: 0, flex: '1 1 auto' }}>
+        <Typography component="h1" variant="h1">Rocjitsu Simulation Performance</Typography>
+        <Typography sx={{ color: 'text.secondary', mt: 0.7 }}>
+          Track workload duration under Rocjitsu simulation, regressions, and run coverage across selected GFX targets.
         </Typography>
       </Box>
-      <Paper data-testid="latest-commit-run" variant="outlined" sx={{ minWidth: 245, py: 1.1, px: 1.5, borderRadius: 2.5, bgcolor: 'action.hover' }}>
+      <Paper data-testid="latest-commit-run" variant="outlined" sx={{ minWidth: 245, flexShrink: 0, py: 1.1, px: 1.5, borderRadius: 2.5, bgcolor: 'action.hover' }}>
         <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
           <AccessTimeRoundedIcon color="primary" sx={{ fontSize: 18 }} />
           <Box sx={{ flex: 1 }}>

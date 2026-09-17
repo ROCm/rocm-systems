@@ -1,6 +1,6 @@
 # Website build and test
 
-The performance dashboard lives in `emulation/rocjitsu/website`. It is a standalone
+The Rocjitsu simulation-performance dashboard lives in `emulation/rocjitsu/website`. It is a standalone
 React + Vite source package. Real benchmark data belongs on the deployment branch;
 dummy data is retained only as test fixtures. Building and
 testing the website requires no Rocjitsu native build, ROCm installation, GPU, or

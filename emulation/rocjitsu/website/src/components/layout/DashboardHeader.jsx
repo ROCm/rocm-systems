@@ -23,7 +23,7 @@ export default function DashboardHeader({ data, downloadData, loading = false, m
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = 'rocjitsu-benchmark-data.json';
+    anchor.download = 'rocjitsu-simulation-benchmark-data.json';
     anchor.click();
     URL.revokeObjectURL(url);
   };
@@ -53,7 +53,7 @@ export default function DashboardHeader({ data, downloadData, loading = false, m
             <Stack direction="row" sx={{ alignItems: 'center', gap: 0.8, flexWrap: 'wrap' }}>
               <Typography sx={{ fontSize: { xs: 16, sm: 19 }, fontWeight: 780, letterSpacing: '-.025em', lineHeight: 1.15 }}>
                 Rocjitsu <Box component="span" sx={{ color: 'text.disabled', fontWeight: 400, mx: 0.45 }}>/</Box>{' '}
-                <Box component="span" sx={{ color: 'text.secondary', fontWeight: 580 }}>Performance Dashboard</Box>
+                <Box component="span" sx={{ color: 'text.secondary', fontWeight: 580 }}>Simulation Performance Dashboard</Box>
               </Typography>
               {data?.isBeta && (
                 <Chip size="small" label="Beta" color="warning" sx={{ height: 19, fontSize: 9, fontWeight: 800, textTransform: 'uppercase' }} />
