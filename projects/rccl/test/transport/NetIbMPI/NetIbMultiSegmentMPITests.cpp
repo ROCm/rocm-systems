@@ -14,6 +14,8 @@
 #include "NetIbMultiSegmentHelpers.hpp"
 #include "MPIHelpers.hpp"
 
+#include "../../../src/transport/net_ib/multiseg.h"
+
 #include <cstring>
 #include <vector>
 
@@ -24,7 +26,6 @@ using namespace RCCLNetIbTests;
 namespace {
 constexpr int    kNumSegments = 4;
 constexpr size_t kSegBytes    = 2u * 1024 * 1024; // rounded up to VMM granularity
-constexpr int    kMaxSegments = 16;               // mirrors NCCL_IB_MAX_SEGMENTS
 } // namespace
 
 // SetupConnectionWithGuard uses ASSERT_EQ, which only returns from that helper.
@@ -316,7 +317,7 @@ TEST_F(NetIbMultiSegmentMPITest, ExceedsMaxSegmentsRejected) {
     if (SyncSkip(!PtrSupported(NCCL_PTR_DMABUF))) GTEST_SKIP() << "DMA-BUF registration not supported";
 
     const int rank = MPIEnvironment::world_rank;
-    MultiSegmentVmmBuffer* big = AllocSym(kMaxSegments + 1);
+    MultiSegmentVmmBuffer* big = AllocSym(NCCL_IB_MAX_SEGMENTS + 1);
     if (SyncSkip(big == nullptr)) GTEST_SKIP() << "could not allocate over-cap VMM window";
 
     ConnectionPair pair; NetConnectionGuard guard(net_);
