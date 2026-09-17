@@ -327,7 +327,9 @@ push_root_tasks(std::vector<render_task>& stack, const process_tree& tree)
 {
     for(auto it = tree.roots().rbegin(); it != tree.roots().rend(); ++it)
     {
-        stack.push_back({ &*it, std::string{}, std::string{ GLYPH_ROOT_INDENT } });
+        stack.push_back({ .node         = &*it,
+                         .connector    = std::string{},
+                         .child_prefix = std::string{ GLYPH_ROOT_INDENT } });
     }
 }
 
@@ -368,11 +370,13 @@ push_child_tasks(std::vector<render_task>& stack, const render_task& task,
         std::string next_prefix =
             task.child_prefix +
             std::string{ last_child ? GLYPH_CHILD_INDENT_LAST : GLYPH_CHILD_INDENT_MID };
-        stack.push_back(
-            { &node.children[ri], std::move(child_conn), std::move(next_prefix) });
+        stack.push_back({ .node         = &node.children[ri],
+                         .connector    = std::move(child_conn),
+                         .child_prefix = std::move(next_prefix) });
         if(ri > 0)
         {
-            stack.push_back({ nullptr, {}, task.child_prefix });
+            stack.push_back(
+                { .node = nullptr, .connector = {}, .child_prefix = task.child_prefix });
         }
     }
 }

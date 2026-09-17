@@ -49,7 +49,7 @@ registry::register_file(std::string path, output_format format, std::optional<pi
     entry.format     = format;
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_files.push_back({ m_session_id, std::move(entry) });
+    m_files.push_back({ .session_id = m_session_id, .value = std::move(entry) });
 }
 
 void
@@ -64,8 +64,8 @@ registry::record_process(process_metadata meta)
         // still read correctly after the move) is a fragile guarantee that
         // only holds because pid_t is trivially copyable.
         const pid_t pid = meta.pid;
-        m_processes[pid] =
-            session_entry<process_metadata>{ m_session_id, std::move(meta) };
+        m_processes[pid] = session_entry<process_metadata>{ .session_id = m_session_id,
+                                                            .value = std::move(meta) };
         return;
     }
 
