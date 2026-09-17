@@ -16,8 +16,11 @@ namespace rocprofsys::domains::callback::hip
 namespace
 {
 
+using test_support::expect_domain_uses_category;
 using test_support::externals;
+using test_support::externals_with_tracing;
 using test_support::mock_sdk;
+using test_support::mock_sdk_with_tracing;
 
 }  // namespace
 
@@ -48,6 +51,16 @@ TEST(compiler_api_test, on_record_dispatches_by_phase_without_crashing)
     auto none_record  = mock_sdk::callback_tracing_record_t{};
     none_record.phase = mock_sdk::CALLBACK_PHASE_NONE;
     k_domain.on_record(none_record, &user_data, nullptr);
+}
+
+// Regression guard: hip::compiler_api must push/pop timemory and stamp buffer-storage
+// records with "rocm_hip_api", not "rocm_hsa_api" or any other domain's category.
+TEST(compiler_api_test, uses_rocm_hip_api_category)
+{
+    constexpr const auto& k_domain =
+        k_compiler_api<mock_sdk_with_tracing, externals_with_tracing>;
+
+    expect_domain_uses_category(k_domain, "rocm_hip_api");
 }
 
 }  // namespace rocprofsys::domains::callback::hip
