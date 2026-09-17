@@ -1320,7 +1320,7 @@ template <bool EnableAsync>
         active->set_trap_saved_status(saved_status);
         active->set_trap_saved_exec(active->exec());
         active->set_trap_interrupt_sent(false);
-        active->clear_trap_queue_exception_status();
+        active->clear_trap_exception_status();
         // A fresh handler entry owns the halt state from here on; a marker left
         // over from a previous stop would attribute this entry's HALT to an
         // s_sendmsghalt that has already been resumed past.

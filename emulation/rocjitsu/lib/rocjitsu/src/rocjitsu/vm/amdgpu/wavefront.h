@@ -726,7 +726,7 @@ public:
   void add_trap_runtime_exception_status(uint64_t status) {
     trap_runtime_exception_status_ |= status;
   }
-  void clear_trap_queue_exception_status() {
+  void clear_trap_exception_status() {
     trap_queue_exception_status_ = 0;
     trap_runtime_exception_status_ = 0;
   }
@@ -976,7 +976,7 @@ public:
     sleep_cycles_ = 0;
     in_trap_handler_ = false;
     trap_interrupt_sent_ = false;
-    clear_trap_queue_exception_status();
+    clear_trap_exception_status();
     self_halted_ = false;
     trap_saved_status_ = 0;
     trap_saved_exec_ = 0;

@@ -1710,7 +1710,9 @@ void KfdIoctlCdna5Test::expect_runtime_exception_timeout(
 
   auto *cp = soc_->xcd(0)->command_processor();
   ASSERT_NE(cp, nullptr);
-  cp->set_runtime_exception_ack_timeout_for_testing(std::chrono::milliseconds(10));
+  soc_->for_each_cp([](rocjitsu::amdgpu::CommandProcessor *processor) {
+    processor->set_runtime_exception_ack_timeout_for_testing(std::chrono::milliseconds(10));
+  });
   ASSERT_FALSE(cp->compute_units().empty());
   auto *cu = cp->compute_units().front();
   // An absent ROCr handler leaves the published status unchanged.
