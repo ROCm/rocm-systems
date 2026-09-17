@@ -129,10 +129,11 @@ The initial attachment process roughly follows this sequence:
 11. [Program ends]
 12. tool_library::tool_fini(...)
 
-Reattachment sequence
-----------------------
+Current retained-client reattachment sequence
+----------------------------------------------
 
-For reattachment to a previously attached process:
+The current implementation retains the first attachment client and uses this
+sequence when reattaching to a previously attached process:
 
 1. rocattach_attach(pid) ← Your tool calls this again
 2. ptrace calls rocprofiler_register_attach(env_buffer)
@@ -166,10 +167,13 @@ client using anytime initialization. Detach and reattach affect only that
 attachment client.
 
 ``ROCPROFILER_REGISTER_FORCE_LOAD`` continues to control startup SDK loading;
-it does not enable or disable the attachment listener. Reattachment reuses the
-tool configured by the first attachment. Attaching a different tool, or
-attaching a tool DSO that is already active as a non-attachment client, is not
-currently supported.
+it does not enable or disable the attachment listener. The current
+implementation reuses the tool configured by the first attachment. This is a
+temporary implementation detail, not a client-lifecycle guarantee. Attaching a
+different tool, changing the enabled service set, or attaching a tool DSO that
+is already active as a non-attachment client is not currently supported. A
+request that changes the enabled service set fails the attachment request
+without terminating the target process.
 
 Use ``rocprofiler-register``, ``rocprofiler-sdk``, and
 ``rocprofiler-sdk-attach`` packages from the same ROCm release. Attachment uses
