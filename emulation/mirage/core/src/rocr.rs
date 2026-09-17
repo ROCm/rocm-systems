@@ -120,6 +120,13 @@ impl UnsupportedTarget {
     /// reason this exists is that the visible behaviour — a session that
     /// starts, a command that runs, an exit status of 0 — looks like
     /// success.
+    ///
+    /// It says "this session" rather than "this profile" because those
+    /// are not always the same answer: a drop-in `--config` names a
+    /// device of its own, and the ISA reported here is read from the
+    /// configuration the session was actually brought up on. Naming the
+    /// profile would send a user to edit the one input that is not
+    /// deciding this.
     #[must_use]
     pub fn explain(&self) -> String {
         let version = self
@@ -128,11 +135,11 @@ impl UnsupportedTarget {
             .map_or_else(String::new, |v| format!(" (ROCm {v})"));
         format!(
             "the ROCm runtime this workload will load does not support {target}, which is \
-             the GPU this profile emulates. {runtime}{version} contains references to \
+             the GPU this session emulates. {runtime}{version} contains references to \
              {references} GPU targets but none to {target}, so it will skip the emulated device: the \
              workload will see no GPU at all and is likely to still exit 0. Run it under \
              a ROCm that knows {target} — `--image <a newer ROCm image>` is the usual \
-             way — or use a profile whose target this ROCm supports.",
+             way — or emulate a GPU this ROCm supports.",
             target = self.target,
             runtime = self.runtime.display(),
             references = self.references,
@@ -328,6 +335,17 @@ fn direct_runpath_runtime(
             if !directory.is_absolute() {
                 return None;
             }
+            // A `RUNPATH` entry that is not there is not ambiguous: the
+            // loader finds nothing in it and moves on to the next entry,
+            // and so does this. Anything else about it — unreadable,
+            // untrusted — is a directory the loader *will* search and
+            // this cannot vouch for, which is a verdict declined rather
+            // than an entry skipped.
+            match std::fs::symlink_metadata(&directory) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(_) => return None,
+                Ok(_) => {}
+            }
             if require_trusted_paths {
                 directory = trusted_system_directory(&directory)?;
             }
@@ -403,7 +421,14 @@ fn expand_origin(directory: &str, origin: &str) -> String {
 /// and which stay a documented false verdict rather than an unbounded
 /// walk.
 fn alternative_runtime_exists(directory: &Path, require_trusted_paths: bool) -> Option<bool> {
-    for entry in std::fs::read_dir(directory).ok()? {
+    let listing = match std::fs::read_dir(directory) {
+        Ok(listing) => listing,
+        // Gone between the check above and here: nothing in a directory
+        // that is not there, and the caller moves on as the loader does.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(false),
+        Err(_) => return None,
+    };
+    for entry in listing {
         let path = entry.ok()?.path();
         if !path.is_dir() {
             continue;
@@ -429,7 +454,13 @@ fn hwcap_runtime_exists(hwcaps: &Path, require_trusted_paths: bool) -> Option<bo
     if require_trusted_paths {
         hwcaps = trusted_system_directory(&hwcaps)?;
     }
-    for entry in std::fs::read_dir(hwcaps).ok()? {
+    let listing = match std::fs::read_dir(hwcaps) {
+        Ok(listing) => listing,
+        // The same race, and the same answer: no alternative here.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(false),
+        Err(_) => return None,
+    };
+    for entry in listing {
         let entry = entry.ok()?;
         let mut path = entry.path();
         if !path.is_dir() {
@@ -767,6 +798,11 @@ mod tests {
         assert!(message.contains("exit 0"), "{message}");
         // And a way out.
         assert!(message.contains("--image"), "{message}");
+        // The target is the session's, which for a drop-in `--config` is
+        // not the profile's: naming the profile would point a user at
+        // the input that is not deciding this.
+        assert!(message.contains("this session emulates"), "{message}");
+        assert!(!message.contains("profile"), "{message}");
     }
 
     /// A runtime with no version file beside it still gets a report,
@@ -1065,6 +1101,49 @@ mod tests {
             direct_runpath_runtime(&workload, &workload_image, false),
             Some(runtime.canonicalize().unwrap()),
             "and the verdict comes back once the alternative is gone"
+        );
+
+        // A `RUNPATH` entry that does not exist is not a reason to stop
+        // looking. The loader finds nothing there and tries the next
+        // entry; treating it as ambiguous would let one stale directory
+        // silence the diagnostic for the whole list.
+        let stale = tmp.path().join("gone");
+        let multi_entry = tmp.path().join("workload-multi");
+        let built = Command::new("cc")
+            .arg(&workload_source)
+            .arg("-L")
+            .arg(tmp.path())
+            .arg(format!("-l:{ROCR_SONAME}"))
+            .arg("-Wl,--enable-new-dtags")
+            .arg(format!("-Wl,-rpath,{}:$ORIGIN", stale.display()))
+            .arg("-o")
+            .arg(&multi_entry)
+            .status()
+            .unwrap();
+        assert!(
+            built.success(),
+            "linking a workload with a stale first entry"
+        );
+        assert!(!stale.exists());
+        let multi_image = std::fs::read(&multi_entry).unwrap();
+        // Proven rather than assumed: a linker that dropped the missing
+        // entry would leave this test passing on a single-entry RUNPATH,
+        // which is not the case it exists for.
+        let Object::Elf(elf) = Object::parse(&multi_image).unwrap() else {
+            panic!("the linker produced an ELF");
+        };
+        assert!(
+            elf.runpaths.iter().any(|entry| {
+                let mut entries = entry.split(':');
+                entries.next() == Some(stale.to_str().unwrap()) && entries.next().is_some()
+            }),
+            "the fixture needs the missing directory first and another entry after it: {:?}",
+            elf.runpaths
+        );
+        assert_eq!(
+            direct_runpath_runtime(&multi_entry, &multi_image, false),
+            Some(runtime.canonicalize().unwrap()),
+            "a missing RUNPATH entry must be skipped, not treated as ambiguous"
         );
 
         for tag in ["--audit", "--depaudit"] {
