@@ -250,6 +250,15 @@ collected in the following table.
       - | Protocol name string
         | Used to override automatic protocol selection
 
+    * - | ``RCCL_DIRECT_ALLGATHER_DISABLE``
+        | Controls the direct AllGather algorithm. Because the algorithm builds a full
+          point-to-point mesh, its queue-pair footprint grows with the square
+          of the job size.
+      - | ``-1``: Automatic (default). Disabled on AINIC above 8 nodes,
+          enabled otherwise.
+        | ``0``: Enabled, including on AINIC above 8 nodes.
+        | ``1``: Disabled.
+
 Network and topology
 ====================
 
