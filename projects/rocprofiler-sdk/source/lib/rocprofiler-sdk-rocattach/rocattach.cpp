@@ -26,6 +26,7 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 
 #include <rocprofiler-sdk-rocattach/defines.h>
@@ -178,12 +179,16 @@ build_environment_buffer()
             // only take envvars starting with ROCP
             continue;
         }
-        constexpr auto register_library_env = "ROCPROFILER_REGISTER_LIBRARY=";
-        if(std::string_view{var}.find(register_library_env) == 0)
+        constexpr auto register_library_env  = "ROCPROFILER_REGISTER_LIBRARY=";
+        constexpr auto tool_libraries_env    = "ROCP_TOOL_LIBRARIES=";
+        constexpr auto attachment_marker_env = "ROCPROFILER_REGISTER_TOOL_ATTACHED=";
+        if(std::string_view{var}.find(register_library_env) == 0 ||
+           std::string_view{var}.find(tool_libraries_env) == 0 ||
+           std::string_view{var}.find(attachment_marker_env) == 0)
         {
-            // ROCPROFILER_REGISTER_LIBRARY is set by the attaching process's SDK and may
-            // contain a host-only, fully versioned path. Do not propagate it to the target;
-            // let rocprofiler-register resolve the SDK in the target environment.
+            // These variables describe startup libraries in the attaching process. They
+            // may contain host-only paths and must not replace the target's startup
+            // configuration. The attachment tool path is passed explicitly.
             continue;
         }
 
@@ -381,6 +386,24 @@ setup(int pid)
         session = &(sessions->at(pid).session);
     }
 
+    auto environment_buffer_addr = static_cast<void*>(nullptr);
+    auto environment_buffer_size = size_t{0};
+    auto tool_lib_path_addr      = static_cast<void*>(nullptr);
+    auto tool_lib_path_len       = size_t{0};
+    auto setup_complete          = false;
+    auto rollback                = common::scope_destructor{[&]() {
+        if(setup_complete) return;
+
+        if(environment_buffer_addr != nullptr && environment_buffer_size > 0)
+            session->simple_munmap(environment_buffer_addr, environment_buffer_size);
+        if(tool_lib_path_addr != nullptr && tool_lib_path_len > 0)
+            session->simple_munmap(tool_lib_path_addr, tool_lib_path_len);
+
+        session->detach();
+        auto lg = get_sessions_lock_guard();
+        sessions->erase(pid);
+    }};
+
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attempting attachment to pid " << pid;
     status = session->attach();
     if(status != ROCATTACH_STATUS_SUCCESS)
@@ -392,9 +415,9 @@ setup(int pid)
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attachment success to pid " << pid;
 
     // Build and write environment buffer to target process
-    auto  environment_buffer      = build_environment_buffer();
-    void* environment_buffer_addr = nullptr;
-    status                        = write_data_to_target(
+    auto environment_buffer = build_environment_buffer();
+    environment_buffer_size = environment_buffer.size();
+    status                  = write_data_to_target(
         *session, "environment buffer", environment_buffer, environment_buffer_addr);
     if(status != ROCATTACH_STATUS_SUCCESS)
     {
@@ -402,10 +425,9 @@ setup(int pid)
     }
 
     // Build and write tool library path to target process.
-    size_t               tool_lib_path_len = strlen(tool_lib_path) + 1;
+    tool_lib_path_len = strlen(tool_lib_path) + 1;
     std::vector<uint8_t> tool_lib_buffer(tool_lib_path, tool_lib_path + tool_lib_path_len);
 
-    void* tool_lib_path_addr = nullptr;
     status =
         write_data_to_target(*session, "tool library path", tool_lib_buffer, tool_lib_path_addr);
     if(status != ROCATTACH_STATUS_SUCCESS)
@@ -461,6 +483,7 @@ setup(int pid)
     ROCP_TRACE
         << "[rocprofiler-sdk-rocattach] Cleaned up tool library path memory in target process "
         << pid;
+    setup_complete = true;
     return ROCATTACH_STATUS_SUCCESS;
 }
 

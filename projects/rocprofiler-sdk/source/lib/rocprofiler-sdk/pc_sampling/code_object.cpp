@@ -203,12 +203,10 @@ initialize(HsaApiTable* table)
 void
 initialize(RocAttachDispatchTable* attach_table)
 {
-    // We need to save the attach table for later, when the code object module receives the HSA
-    // table and is initialized. We must get the attach table before HSA for correct behavior. This
-    // is guaranteed by rocprofiler-register.
-    ROCP_ERROR_IF(get_freeze_function())
-        << "PC sampling code object module was initialized before attach table was provided. "
-           "Future HSA code objects may not be instrumented correctly.";
+    // With anytime attachment this can arrive after HSA. Existing objects are already
+    // tracked by the initialized SDK.
+    ROCP_INFO_IF(get_freeze_function())
+        << "Adding attachment support to initialized PC sampling code object tracking";
     *(get_attach_table()) = attach_table;
 }
 
