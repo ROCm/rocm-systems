@@ -344,6 +344,23 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests;rocpd"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
 
+# Validate time-window handling against the rocprofv3-generated database
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocpd-time-window
+    TEST_PATHS
+    COPY conftest.py validate.py
+    CONFIG pytest.ini
+    BUNDLE_TESTS
+    ARGS validate.py::test_time_window_rejects_disjoint_range
+         validate.py::test_time_window_clamps_start_before_trace
+         --db-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    TIMEOUT 60
+    LABELS "integration-tests;rocpd;time-window"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    LIBRARY_PATH "${rocprofiler-sdk_LIB_DIR}"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
+
 # Validate kernel name format tests (truncated, mangled)
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-rocpd-kernel-name-validation
