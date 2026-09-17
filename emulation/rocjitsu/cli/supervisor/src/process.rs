@@ -1161,7 +1161,7 @@ pub fn signal_process_group_only(pid: u32, sig: Signal) -> bool {
     nix::sys::signal::kill(Pid::from_raw(-pid), sig).is_ok()
 }
 
-/// Whether a pid is still alive.
+/// Whether a pid is still running.
 ///
 /// Used only by tests and diagnostics: the supervisor learns that a
 /// process exited by waiting on it, not by polling.
@@ -1170,15 +1170,46 @@ pub fn signal_process_group_only(pid: u32, sig: Signal) -> bool {
 /// addresses *the caller's own process group*, so probing it would report
 /// "alive" for what is really "no such process" — and the same aliasing
 /// makes a stray `0` genuinely dangerous in [`signal_group`].
+///
+/// A zombie answers `kill(pid, 0)` exactly as a running process does, and
+/// is not running: it has exited and is waiting to be reaped. Which
+/// matters because the processes asked about here are typically the ones
+/// whose parent has just been killed, so they are reparented to pid 1 and
+/// it is pid 1 that owes them a `wait`. An init does that immediately. A
+/// container's pid 1 is whatever the job was started as — `tail -f
+/// /dev/null` in the images this is tested in — and reaps nothing it
+/// inherits, so the entry stays for the life of the container and a
+/// caller that equates it with "running" waits for something that has
+/// already happened.
 #[must_use]
 pub fn process_alive(pid: u32) -> bool {
-    let Ok(pid) = i32::try_from(pid) else {
+    let Ok(raw) = i32::try_from(pid) else {
         return false;
     };
-    if pid <= 0 {
+    if raw <= 0 {
         return false;
     }
-    nix::sys::signal::kill(Pid::from_raw(pid), None).is_ok()
+    if nix::sys::signal::kill(Pid::from_raw(raw), None).is_err() {
+        return false;
+    }
+    !is_zombie(pid)
+}
+
+/// Whether `pid` has exited and is waiting for its parent to reap it.
+///
+/// `false` when the state cannot be read: the caller has already
+/// established that the process exists, and an unreadable `/proc` entry
+/// is no evidence that it has exited.
+#[must_use]
+fn is_zombie(pid: u32) -> bool {
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return false;
+    };
+    // `comm` is arbitrary and may hold spaces and parentheses, so the
+    // state is the field after the *last* ')'.
+    stat.rfind(')')
+        .and_then(|rest| stat[rest + 1..].split_whitespace().next())
+        .is_some_and(|state| state == "Z")
 }
 
 /// Wait for a pid to disappear from the process table, up to `timeout`.
@@ -1702,5 +1733,39 @@ mod tests {
         // every process the user owns.
         signal_group(0, Signal::SIGKILL);
         assert!(!process_alive(0));
+    }
+
+    #[tokio::test]
+    async fn a_zombie_is_not_alive() {
+        // `kill(pid, 0)` cannot tell the two apart, and the teardown
+        // assertions above are all about processes whose parent has just
+        // been killed — so they are reparented to pid 1, and under a pid 1
+        // that does not reap what it inherits the entry never goes away.
+        // `wait_gone` then waited out its timeout against a process that
+        // had been dead the whole time.
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", "exec sleep 300"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        assert!(process_alive(pid), "a running process is alive");
+
+        child.kill().unwrap();
+        // Deliberately not reaped yet: `wait` is what releases the pid,
+        // and the window before that is the whole subject here.
+        assert!(
+            wait_gone(pid, Duration::from_secs(10)).await,
+            "a killed process must not be called alive merely because \
+             nobody has reaped it"
+        );
+        assert!(
+            std::path::Path::new(&format!("/proc/{pid}")).exists(),
+            "the entry kill(pid, 0) answers for is still there, which is the point"
+        );
+
+        child.wait().unwrap();
     }
 }
