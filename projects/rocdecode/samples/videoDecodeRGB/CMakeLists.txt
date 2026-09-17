@@ -161,6 +161,12 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
             ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/resize_kernels.cpp)
     else()
         # HIP kernel files must be compiled with hipcc on Windows (VS generator does not support HIP language)
+        # The per-config kernel objects below need a generator expression in
+        # add_custom_command(OUTPUT), which CMake only evaluates from 3.20 on. The
+        # Linux path uses no custom commands, so the file keeps its lower floor.
+        if(CMAKE_VERSION VERSION_LESS 3.20)
+            message(FATAL_ERROR "Building videoDecodeRGB on Windows requires CMake 3.20 or newer (found ${CMAKE_VERSION}).")
+        endif()
         set(HIPCC ${ROCM_PATH}/bin/hipcc.exe)
         set(KERNEL_SOURCES
             ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/colorspace_kernels.cpp
@@ -174,9 +180,16 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
         endforeach()
         foreach(KSRC ${KERNEL_SOURCES})
             get_filename_component(KNAME ${KSRC} NAME_WE)
-            set(KOBJ ${CMAKE_CURRENT_BINARY_DIR}/${KNAME}.obj)
+            # Visual Studio is a multi-config generator, and the CRT and optimization
+            # flags below vary by configuration. The objects must therefore live in
+            # per-config directories: with a shared path, objects left by a Debug
+            # build look up to date to a later Release build, which would then link
+            # kernels built against the debug CRT.
+            set(KOBJ_DIR ${CMAKE_CURRENT_BINARY_DIR}/hip_kernels/$<CONFIG>)
+            set(KOBJ ${KOBJ_DIR}/${KNAME}.obj)
             add_custom_command(
                 OUTPUT ${KOBJ}
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${KOBJ_DIR}
                 COMMAND ${HIPCC} -c ${KSRC} -o ${KOBJ}
                     ${HIPCC_OFFLOAD_ARCH_FLAGS}
                     --rocm-path=${ROCM_PATH}
